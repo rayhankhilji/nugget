@@ -1,0 +1,10 @@
+model: qwen3-4b-q4km
+runner: GitHub Actions 1000011404 (Linux X64)
+commit: e7299584da9ca18c83793107da6d97ceec7c8f37
+date: 2026-10-30T20:24:12Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 7763 64-Core Processor
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          10           0           4          14
+Swap:              2           0           2

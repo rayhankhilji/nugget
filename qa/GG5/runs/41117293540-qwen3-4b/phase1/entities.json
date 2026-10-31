@@ -1,0 +1,5606 @@
+{
+ "list": [
+  {
+   "claims": 9,
+   "id": "ent_ujsdikmborlp5xwz",
+   "kind": "event",
+   "mentions": 1,
+   "name": "1:1 Mara / Bob",
+   "updated_at": "2026-10-30T20:29:33.832230743Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_r6nnqc7qozs2erro",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Albers Counselling, 3 Quay Lane, Halden Bay",
+   "updated_at": "2026-10-30T20:40:04.499466669Z"
+  },
+  {
+   "claims": 4,
+   "id": "ent_vdl572b3apgpsznf",
+   "kind": "organization",
+   "mentions": 12,
+   "name": "Brightwell Analytics",
+   "updated_at": "2026-10-30T20:49:59.23533411Z"
+  },
+  {
+   "claims": 2,
+   "id": "ent_ztyt2fptg7anwylg",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Brightwell HQ, Bob's office",
+   "updated_at": "2026-10-30T20:29:33.832230743Z"
+  },
+  {
+   "claims": 2,
+   "id": "ent_jhu4xxnxvya7ascw",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Brightwell HQ, Room Fathom",
+   "updated_at": "2026-10-30T20:49:59.23533411Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_nznqcj5erl47x4n7",
+   "kind": "preference",
+   "mentions": 1,
+   "name": "cardamom buns",
+   "updated_at": "2026-10-30T20:48:13.759344978Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_osqhzrbg6d5wjado",
+   "kind": "commitment",
+   "mentions": 1,
+   "name": "check the lineage panel makes sense from a data point of view",
+   "updated_at": "2026-10-30T20:43:12.124261445Z"
+  },
+  {
+   "claims": 4,
+   "id": "ent_7e7bzggrdddjtfnd",
+   "kind": "event",
+   "mentions": 1,
+   "name": "Climbing with Sam",
+   "updated_at": "2026-10-30T20:28:11.083688404Z"
+  },
+  {
+   "claims": 4,
+   "id": "ent_s2wzg56dtozq3vax",
+   "kind": "event",
+   "mentions": 1,
+   "name": "Counselling session",
+   "updated_at": "2026-10-30T20:40:04.499466669Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_haoh3cw4b6lhpsmm",
+   "kind": "project",
+   "mentions": 1,
+   "name": "daily Harbor stand-up",
+   "updated_at": "2026-10-30T20:46:22.714566597Z"
+  },
+  {
+   "claims": 3,
+   "id": "ent_l5vtzzbd6w2wxobm",
+   "kind": "person",
+   "mentions": 3,
+   "name": "Dana Whitfield",
+   "updated_at": "2026-10-30T20:43:12.125329879Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_27o2ngpaqsh5mjuv",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Dr. Lena Brandt",
+   "updated_at": "2026-10-30T20:38:04.479575336Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_hkwtshb5tpflsnk4",
+   "kind": "place",
+   "mentions": 1,
+   "name": "end of July",
+   "updated_at": "2026-10-30T20:45:53.314719843Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_roitrnzpkspnhnxw",
+   "kind": "topic",
+   "mentions": 2,
+   "name": "finance",
+   "updated_at": "2026-10-30T20:36:02.967764791Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_hcv7sag2inhti2rx",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Gross salary (monthly",
+   "updated_at": "2026-10-30T20:30:41.232999552Z"
+  },
+  {
+   "claims": 2,
+   "id": "ent_h5b473rqrz3q7dzp",
+   "kind": "person",
+   "mentions": 4,
+   "name": "Gus Ferreira",
+   "updated_at": "2026-10-30T20:45:53.315729587Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_z3rv3ovliwqtzp3s",
+   "kind": "place",
+   "mentions": 2,
+   "name": "Halden Bay",
+   "updated_at": "2026-10-30T20:48:13.759344978Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_bismwmtehs5myyff",
+   "kind": "place",
+   "mentions": 2,
+   "name": "Halden Bay Bouldering",
+   "updated_at": "2026-10-30T20:44:34.802242762Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_za5exkthvwbmzo4d",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Halden Bay branch",
+   "updated_at": "2026-10-30T20:31:59.911020613Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_wz32trob3nyczncr",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Halden Bay station",
+   "updated_at": "2026-10-30T20:47:06.785077112Z"
+  },
+  {
+   "claims": 3,
+   "id": "ent_gpf764afvl73ni4l",
+   "kind": "project",
+   "mentions": 3,
+   "name": "Harbor",
+   "updated_at": "2026-10-30T20:46:22.714566597Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_w7w7tj2x3cpnbznc",
+   "kind": "project",
+   "mentions": 1,
+   "name": "Harbor backfill pipeline",
+   "updated_at": "2026-10-30T20:43:52.534517644Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_hsqfnyflj5drz7w3",
+   "kind": "project",
+   "mentions": 1,
+   "name": "Harbor sheet",
+   "updated_at": "2026-10-30T20:43:52.534517644Z"
+  },
+  {
+   "claims": 9,
+   "id": "ent_o2rtnj2bpff3eadu",
+   "kind": "event",
+   "mentions": 1,
+   "name": "Harbor stand-up",
+   "updated_at": "2026-10-30T20:49:59.23533411Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_sxtcgh466nmasowp",
+   "kind": "topic",
+   "mentions": 1,
+   "name": "health",
+   "updated_at": "2026-10-30T20:38:04.479575336Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_i7levttxksrznzul",
+   "kind": "person",
+   "mentions": 2,
+   "name": "Ife Okafor",
+   "updated_at": "2026-10-30T20:47:06.785932678Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_elvf37bnwsjokuq2",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Income tax",
+   "updated_at": "2026-10-30T20:30:41.232999552Z"
+  },
+  {
+   "claims": 2,
+   "id": "ent_5l5iwwrgrsbpwryp",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Jonas Albers",
+   "updated_at": "2026-10-30T20:40:04.499466669Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_7kd2m7k7ctfj7im7",
+   "kind": "topic",
+   "mentions": 1,
+   "name": "journal",
+   "updated_at": "2026-10-30T20:48:13.759344978Z"
+  },
+  {
+   "claims": 18,
+   "id": "ent_i2deiay7hesngmev",
+   "kind": "person",
+   "mentions": 0,
+   "name": "Mara Okafor",
+   "updated_at": "2026-10-30T20:49:59.23533411Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_i4zvobcodl23z6py",
+   "kind": "organization",
+   "mentions": 1,
+   "name": "Mara Okafor",
+   "updated_at": "2026-10-30T20:28:11.083688404Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_qq7pbbz66dh7unu4",
+   "kind": "topic",
+   "mentions": 1,
+   "name": "mortgage",
+   "updated_at": "2026-10-30T20:36:02.967764791Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_y7vafvqjuuo7c4wn",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Mum",
+   "updated_at": "2026-10-30T20:45:15.408166039Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_dbe732n7g4t3buor",
+   "kind": "person",
+   "mentions": 1,
+   "name": "National Insurance",
+   "updated_at": "2026-10-30T20:30:41.232999552Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_xg6ydalkbfvic6mw",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Net pay",
+   "updated_at": "2026-10-30T20:30:41.232999552Z"
+  },
+  {
+   "claims": 2,
+   "id": "ent_4lydodhcpxmdlcj3",
+   "kind": "organization",
+   "mentions": 1,
+   "name": "Northshore Credit Union",
+   "updated_at": "2026-10-30T20:31:59.911020613Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_waoe66c53xxdn2nh",
+   "kind": "topic",
+   "mentions": 1,
+   "name": "payslip",
+   "updated_at": "2026-10-30T20:30:41.232999552Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_ewkldxkn6wkyr2j2",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Port Ellery",
+   "updated_at": "2026-10-30T20:45:15.408166039Z"
+  },
+  {
+   "claims": 4,
+   "id": "ent_dh5s6wcqepsx62ow",
+   "kind": "person",
+   "mentions": 6,
+   "name": "R. Chen",
+   "updated_at": "2026-10-30T20:46:22.715616205Z"
+  },
+  {
+   "claims": 4,
+   "id": "ent_aj45dskmnbf4sed2",
+   "kind": "commitment",
+   "mentions": 1,
+   "name": "replacement Northshore Credit Union debit card",
+   "updated_at": "2026-10-30T20:31:59.911020613Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_gpcasfn7ohb7nn5h",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Rob Chen",
+   "updated_at": "2026-10-30T20:43:52.534517644Z"
+  },
+  {
+   "claims": 2,
+   "id": "ent_2u44xob4baycrfwj",
+   "kind": "person",
+   "mentions": 2,
+   "name": "Sam",
+   "updated_at": "2026-10-30T20:44:34.802242762Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_qija2xi4fpbggzu3",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Sam",
+   "updated_at": "2026-10-30T20:47:06.785077112Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_mmhcfvkmcdvxnwvy",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Sam (Patel",
+   "updated_at": "2026-10-30T20:48:13.759344978Z"
+  },
+  {
+   "claims": 5,
+   "id": "ent_bk6js3d2ovu7562z",
+   "kind": "person",
+   "mentions": 6,
+   "name": "Sam Patel",
+   "updated_at": "2026-10-30T20:49:59.23533411Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_zld72r2uifygdmma",
+   "kind": "commitment",
+   "mentions": 1,
+   "name": "storage cost numbers",
+   "updated_at": "2026-10-30T20:43:52.534517644Z"
+  },
+  {
+   "claims": 3,
+   "id": "ent_he327sieabdugfcv",
+   "kind": "organization",
+   "mentions": 5,
+   "name": "Tessellate Systems",
+   "updated_at": "2026-10-30T20:45:53.315729587Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_jwboeh57462azojv",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Theo",
+   "updated_at": "2026-10-30T20:45:15.408166039Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_r62kjwr4d5cvszoh",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Theo",
+   "updated_at": "2026-10-30T20:48:13.759344978Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_irr7kxezuokdtvwl",
+   "kind": "person",
+   "mentions": 2,
+   "name": "Theo Lindqvist",
+   "updated_at": "2026-10-30T20:47:14.566639778Z"
+  }
+ ],
+ "details": {
+  "ent_ujsdikmborlp5xwz": {
+   "aliases": [],
+   "attributes": {
+    "all_day": false,
+    "end": "2026-06-03T13:30:00Z",
+    "location": "Brightwell HQ, Bob's office",
+    "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=WE",
+    "start": "2026-06-03T13:00:00Z",
+    "timezone": "UTC"
+   },
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 9,
+     "object": {
+      "entity": {
+       "id": "ent_ztyt2fptg7anwylg",
+       "name": "Brightwell HQ, Bob's office"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_ujsdikmborlp5xwz",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 10,
+     "object": {
+      "entity": {
+       "id": "ent_ujsdikmborlp5xwz",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_dh5s6wcqepsx62ow",
+      "name": "R. Chen"
+     },
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 11,
+     "object": {
+      "entity": {
+       "id": "ent_ujsdikmborlp5xwz",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_dh5s6wcqepsx62ow",
+      "name": "R. Chen"
+     },
+     "text": "R. Chen attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 12,
+     "object": {
+      "entity": {
+       "id": "ent_ujsdikmborlp5xwz",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Start: 2026-06-03 13:00 (UTC)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 13,
+     "object": {
+      "entity": null,
+      "literal": "2026-06-03 13:00 (UTC"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_ujsdikmborlp5xwz",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob has title 2026-06-03 13:00 (UTC.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "End: 2026-06-03 13:30 (UTC)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 14,
+     "object": {
+      "entity": null,
+      "literal": "2026-06-03 13:30 (UTC"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_ujsdikmborlp5xwz",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob has title 2026-06-03 13:30 (UTC.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 15,
+     "object": {
+      "entity": {
+       "id": "ent_ztyt2fptg7anwylg",
+       "name": "Brightwell HQ, Bob's office"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_ujsdikmborlp5xwz",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob has title Brightwell HQ, Bob's office.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      },
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 16,
+     "object": {
+      "entity": null,
+      "literal": "R. Chen"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_ujsdikmborlp5xwz",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob has title R. Chen.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 17,
+     "object": {
+      "entity": null,
+      "literal": "Mara Okafor"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_ujsdikmborlp5xwz",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob has title Mara Okafor.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    }
+   ],
+   "id": "ent_ujsdikmborlp5xwz",
+   "identifiers": [
+    [
+     "ical_uid",
+     "one-on-one-mara-20260603@brightwell.example"
+    ]
+   ],
+   "kind": "event",
+   "mentions": [
+    {
+     "chunk_id": 3,
+     "item": {
+      "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+      "source": "files-1"
+     },
+     "surface": "1:1 Mara / Bob",
+     "title": "1:1 Mara / Bob",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+    }
+   ],
+   "name": "1:1 Mara / Bob",
+   "vault_path": "Event/1-1 Mara - Bob (ent_ujsdikmborlp5xwz).md"
+  },
+  "ent_r6nnqc7qozs2erro": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Location: Albers Counselling, 3 Quay Lane, Halden Bay",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ],
+     "id": 27,
+     "object": {
+      "entity": {
+       "id": "ent_r6nnqc7qozs2erro",
+       "name": "Albers Counselling, 3 Quay Lane, Halden Bay"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_s2wzg56dtozq3vax",
+      "name": "Counselling session"
+     },
+     "text": "Counselling session takes place at Albers Counselling, 3 Quay Lane, Halden Bay.",
+     "updated_at": "2026-10-30T20:40:04.499466669Z"
+    }
+   ],
+   "id": "ent_r6nnqc7qozs2erro",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 8,
+     "item": {
+      "key": "0:Health/2026-06-17-counselling.ics",
+      "source": "files-1"
+     },
+     "surface": "Albers Counselling, 3 Quay Lane, Halden Bay",
+     "title": "Counselling session",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+    }
+   ],
+   "name": "Albers Counselling, 3 Quay Lane, Halden Bay",
+   "vault_path": "Place/Albers Counselling, 3 Quay Lane, Halden Bay (ent_r6nnqc7qozs2erro).md"
+  },
+  "ent_vdl572b3apgpsznf": {
+   "aliases": [
+    "Brightwell Analytics",
+    "Brightwell"
+   ],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.9375,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "From: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "Cc: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "Cc: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-05T09:00:00Z",
+       "quote": "To: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Re: Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+      }
+     ],
+     "id": 31,
+     "object": {
+      "entity": {
+       "id": "ent_vdl572b3apgpsznf",
+       "name": "Brightwell Analytics"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_dh5s6wcqepsx62ow",
+      "name": "R. Chen"
+     },
+     "text": "Robert Chen works at Brightwell (has a brightwell.example address).",
+     "updated_at": "2026-10-30T20:46:22.715616205Z"
+    },
+    {
+     "confidence": 0.9375,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "From: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-05T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Re: Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+      }
+     ],
+     "id": 32,
+     "object": {
+      "entity": {
+       "id": "ent_vdl572b3apgpsznf",
+       "name": "Brightwell Analytics"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_bk6js3d2ovu7562z",
+      "name": "Sam Patel"
+     },
+     "text": "Sam Patel works at Brightwell (has a brightwell.example address).",
+     "updated_at": "2026-10-30T20:46:22.715616205Z"
+    },
+    {
+     "confidence": 0.75,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Cc: Dana Whitfield <dana.whitfield@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "From: Dana Whitfield <dana.whitfield@brightwell.example>",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      },
+      {
+       "chunk_id": 11,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "Design Lead, Brightwell Analytics",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      }
+     ],
+     "id": 33,
+     "object": {
+      "entity": {
+       "id": "ent_vdl572b3apgpsznf",
+       "name": "Brightwell Analytics"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_l5vtzzbd6w2wxobm",
+      "name": "Dana Whitfield"
+     },
+     "text": "Dana Whitfield works at Brightwell (has a brightwell.example address).",
+     "updated_at": "2026-10-30T20:43:12.125329879Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 15,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "by the end of July",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      }
+     ],
+     "id": 50,
+     "object": {
+      "entity": {
+       "id": "ent_hkwtshb5tpflsnk4",
+       "name": "end of July"
+      },
+      "literal": null
+     },
+     "predicate": "due_on",
+     "status": "active",
+     "subject": {
+      "id": "ent_vdl572b3apgpsznf",
+      "name": "Brightwell Analytics"
+     },
+     "text": "Brightwell due on end of July.",
+     "updated_at": "2026-10-30T20:45:53.314719843Z"
+    }
+   ],
+   "id": "ent_vdl572b3apgpsznf",
+   "identifiers": [
+    [
+     "domain",
+     "brightwell.example"
+    ]
+   ],
+   "kind": "organization",
+   "mentions": [
+    {
+     "chunk_id": 3,
+     "item": {
+      "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+      "source": "files-1"
+     },
+     "surface": "Brightwell",
+     "title": "1:1 Mara / Bob",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+    },
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "Brightwell Analytics",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "brightwell.example",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": 9,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Brightwell Analytics",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": 10,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+      "source": "files-1"
+     },
+     "surface": "Brightwell",
+     "title": "Introduction: your Tessellate Systems account team",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+      "source": "files-1"
+     },
+     "surface": "brightwell.example",
+     "title": "Harbor dashboards: first design review",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+    },
+    {
+     "chunk_id": 11,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+      "source": "files-1"
+     },
+     "surface": "Brightwell Analytics",
+     "title": "Harbor dashboards: first design review",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+      "source": "files-1"
+     },
+     "surface": "brightwell.example",
+     "title": "Harbor: backfill pipeline is green",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+      "source": "files-1"
+     },
+     "surface": "brightwell.example",
+     "title": "Harbor storage: renewal quote",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+    },
+    {
+     "chunk_id": 15,
+     "item": {
+      "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+      "source": "files-1"
+     },
+     "surface": "Brightwell",
+     "title": "Harbor storage: renewal quote",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "brightwell.example",
+     "title": "Re: Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": 1,
+     "item": {
+      "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+      "source": "files-1"
+     },
+     "surface": "Brightwell",
+     "title": "Harbor stand-up",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+    }
+   ],
+   "name": "Brightwell Analytics",
+   "vault_path": "Organization/Brightwell Analytics (ent_vdl572b3apgpsznf).md"
+  },
+  "ent_ztyt2fptg7anwylg": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 9,
+     "object": {
+      "entity": {
+       "id": "ent_ztyt2fptg7anwylg",
+       "name": "Brightwell HQ, Bob's office"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_ujsdikmborlp5xwz",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 15,
+     "object": {
+      "entity": {
+       "id": "ent_ztyt2fptg7anwylg",
+       "name": "Brightwell HQ, Bob's office"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_ujsdikmborlp5xwz",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob has title Brightwell HQ, Bob's office.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    }
+   ],
+   "id": "ent_ztyt2fptg7anwylg",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 3,
+     "item": {
+      "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+      "source": "files-1"
+     },
+     "surface": "Brightwell HQ, Bob's office",
+     "title": "1:1 Mara / Bob",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+    }
+   ],
+   "name": "Brightwell HQ, Bob's office",
+   "vault_path": "Place/Brightwell HQ, Bob's office (ent_ztyt2fptg7anwylg).md"
+  },
+  "ent_jhu4xxnxvya7ascw": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 1,
+     "object": {
+      "entity": {
+       "id": "ent_jhu4xxnxvya7ascw",
+       "name": "Brightwell HQ, Room Fathom"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_o2rtnj2bpff3eadu",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 59,
+     "object": {
+      "entity": {
+       "id": "ent_jhu4xxnxvya7ascw",
+       "name": "Brightwell HQ, Room Fathom"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_o2rtnj2bpff3eadu",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up has title Brightwell HQ, Room Fathom.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    }
+   ],
+   "id": "ent_jhu4xxnxvya7ascw",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 1,
+     "item": {
+      "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+      "source": "files-1"
+     },
+     "surface": "Brightwell HQ, Room Fathom",
+     "title": "Harbor stand-up",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+    }
+   ],
+   "name": "Brightwell HQ, Room Fathom",
+   "vault_path": "Place/Brightwell HQ, Room Fathom (ent_jhu4xxnxvya7ascw).md"
+  },
+  "ent_nznqcj5erl47x4n7": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 19,
+       "item": {
+        "key": "0:Notes/Journal/2026-03-15.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-15T09:00:00Z",
+       "quote": "He made the cardamom buns his gran used to make and we ate them in bed reading the papers",
+       "title": "2026-03-15",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+      }
+     ],
+     "id": 53,
+     "object": {
+      "entity": {
+       "id": "ent_nznqcj5erl47x4n7",
+       "name": "cardamom buns"
+      },
+      "literal": null
+     },
+     "predicate": "prefers",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user prefers cardamom buns.",
+     "updated_at": "2026-10-30T20:48:13.759344978Z"
+    }
+   ],
+   "id": "ent_nznqcj5erl47x4n7",
+   "identifiers": [],
+   "kind": "preference",
+   "mentions": [
+    {
+     "chunk_id": 19,
+     "item": {
+      "key": "0:Notes/Journal/2026-03-15.md",
+      "source": "files-1"
+     },
+     "surface": "cardamom buns",
+     "title": "2026-03-15",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+    }
+   ],
+   "name": "cardamom buns",
+   "vault_path": "Preference/cardamom buns (ent_nznqcj5erl47x4n7).md"
+  },
+  "ent_osqhzrbg6d5wjado": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 11,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "I'd like to review it properly next Wednesday",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      }
+     ],
+     "id": 44,
+     "object": {
+      "entity": null,
+      "literal": "next Wednesday"
+     },
+     "predicate": "due_on",
+     "status": "active",
+     "subject": {
+      "id": "ent_osqhzrbg6d5wjado",
+      "name": "check the lineage panel makes sense from a data point of view"
+     },
+     "text": "check the lineage panel makes sense from a data point of view due on next Wednesday.",
+     "updated_at": "2026-10-30T20:43:12.124261445Z"
+    }
+   ],
+   "id": "ent_osqhzrbg6d5wjado",
+   "identifiers": [],
+   "kind": "commitment",
+   "mentions": [
+    {
+     "chunk_id": 11,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+      "source": "files-1"
+     },
+     "surface": "check the lineage panel makes sense from a data point of view",
+     "title": "Harbor dashboards: first design review",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+    }
+   ],
+   "name": "check the lineage panel makes sense from a data point of view",
+   "vault_path": "Commitment/check the lineage panel makes sense from a data point of view (ent_osqhzrbg6d5wjado).md"
+  },
+  "ent_7e7bzggrdddjtfnd": {
+   "aliases": [],
+   "attributes": {
+    "all_day": false,
+    "end": "2026-04-16T20:00:00Z",
+    "location": "Halden Bay Bouldering",
+    "rrule": "FREQ=WEEKLY;BYDAY=TH",
+    "start": "2026-04-16T17:30:00Z",
+    "timezone": "UTC"
+   },
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 5,
+     "object": {
+      "entity": {
+       "id": "ent_bismwmtehs5myyff",
+       "name": "Halden Bay Bouldering"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_7e7bzggrdddjtfnd",
+      "name": "Climbing with Sam"
+     },
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "updated_at": "2026-10-30T20:28:11.083688404Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 6,
+     "object": {
+      "entity": {
+       "id": "ent_7e7bzggrdddjtfnd",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:28:11.083688404Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 7,
+     "object": {
+      "entity": {
+       "id": "ent_7e7bzggrdddjtfnd",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:28:11.083688404Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 8,
+     "object": {
+      "entity": {
+       "id": "ent_7e7bzggrdddjtfnd",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_2u44xob4baycrfwj",
+      "name": "Sam"
+     },
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:28:11.083688404Z"
+    }
+   ],
+   "id": "ent_7e7bzggrdddjtfnd",
+   "identifiers": [
+    [
+     "ical_uid",
+     "climbing-thursdays-20260416@mailbox.example"
+    ]
+   ],
+   "kind": "event",
+   "mentions": [
+    {
+     "chunk_id": 2,
+     "item": {
+      "key": "0:Calendar/2026-04-16-climbing.ics",
+      "source": "files-1"
+     },
+     "surface": "Climbing with Sam",
+     "title": "Climbing with Sam",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+    }
+   ],
+   "name": "Climbing with Sam",
+   "vault_path": "Event/Climbing with Sam (ent_7e7bzggrdddjtfnd).md"
+  },
+  "ent_s2wzg56dtozq3vax": {
+   "aliases": [],
+   "attributes": {
+    "all_day": false,
+    "end": "2026-06-17T17:50:00Z",
+    "location": "Albers Counselling, 3 Quay Lane, Halden Bay",
+    "rrule": "FREQ=WEEKLY;COUNT=8",
+    "start": "2026-06-17T17:00:00Z",
+    "timezone": "UTC"
+   },
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Location: Albers Counselling, 3 Quay Lane, Halden Bay",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ],
+     "id": 27,
+     "object": {
+      "entity": {
+       "id": "ent_r6nnqc7qozs2erro",
+       "name": "Albers Counselling, 3 Quay Lane, Halden Bay"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_s2wzg56dtozq3vax",
+      "name": "Counselling session"
+     },
+     "text": "Counselling session takes place at Albers Counselling, 3 Quay Lane, Halden Bay.",
+     "updated_at": "2026-10-30T20:40:04.499466669Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ],
+     "id": 28,
+     "object": {
+      "entity": {
+       "id": "ent_s2wzg56dtozq3vax",
+       "name": "Counselling session"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_5l5iwwrgrsbpwryp",
+      "name": "Jonas Albers"
+     },
+     "text": "Jonas Albers organized Counselling session on 2026-06-17T17:00:00Z.",
+     "updated_at": "2026-10-30T20:40:04.499466669Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ],
+     "id": 29,
+     "object": {
+      "entity": {
+       "id": "ent_s2wzg56dtozq3vax",
+       "name": "Counselling session"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_5l5iwwrgrsbpwryp",
+      "name": "Jonas Albers"
+     },
+     "text": "Jonas Albers attended Counselling session on 2026-06-17T17:00:00Z.",
+     "updated_at": "2026-10-30T20:40:04.499466669Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.okafor@mailbox.example> (accepted)",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ],
+     "id": 30,
+     "object": {
+      "entity": {
+       "id": "ent_s2wzg56dtozq3vax",
+       "name": "Counselling session"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Counselling session on 2026-06-17T17:00:00Z.",
+     "updated_at": "2026-10-30T20:40:04.499466669Z"
+    }
+   ],
+   "id": "ent_s2wzg56dtozq3vax",
+   "identifiers": [
+    [
+     "ical_uid",
+     "counselling-20260617@albers-counselling.example"
+    ]
+   ],
+   "kind": "event",
+   "mentions": [
+    {
+     "chunk_id": 8,
+     "item": {
+      "key": "0:Health/2026-06-17-counselling.ics",
+      "source": "files-1"
+     },
+     "surface": "Counselling session",
+     "title": "Counselling session",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+    }
+   ],
+   "name": "Counselling session",
+   "vault_path": "Event/Counselling session (ent_s2wzg56dtozq3vax).md"
+  },
+  "ent_haoh3cw4b6lhpsmm": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_haoh3cw4b6lhpsmm",
+   "identifiers": [],
+   "kind": "project",
+   "mentions": [
+    {
+     "chunk_id": 16,
+     "item": {
+      "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "daily Harbor stand-up",
+     "title": "Re: Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+    }
+   ],
+   "name": "daily Harbor stand-up",
+   "vault_path": "Project/daily Harbor stand-up (ent_haoh3cw4b6lhpsmm).md"
+  },
+  "ent_l5vtzzbd6w2wxobm": {
+   "aliases": [
+    "Dana"
+   ],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.75,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Cc: Dana Whitfield <dana.whitfield@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "From: Dana Whitfield <dana.whitfield@brightwell.example>",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      },
+      {
+       "chunk_id": 11,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "Design Lead, Brightwell Analytics",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      }
+     ],
+     "id": 33,
+     "object": {
+      "entity": {
+       "id": "ent_vdl572b3apgpsznf",
+       "name": "Brightwell Analytics"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_l5vtzzbd6w2wxobm",
+      "name": "Dana Whitfield"
+     },
+     "text": "Dana Whitfield works at Brightwell (has a brightwell.example address).",
+     "updated_at": "2026-10-30T20:43:12.125329879Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Cc: Dana Whitfield <dana.whitfield@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "From: Dana Whitfield <dana.whitfield@brightwell.example>",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      }
+     ],
+     "id": 36,
+     "object": {
+      "entity": {
+       "id": "ent_l5vtzzbd6w2wxobm",
+       "name": "Dana Whitfield"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Dana Whitfield by email.",
+     "updated_at": "2026-10-30T20:43:12.125329879Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 11,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "I went with three entry points (finance, ops, product) rather than one giant explorer",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      }
+     ],
+     "id": 43,
+     "object": {
+      "entity": null,
+      "literal": "three entry points (finance, ops, product"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_l5vtzzbd6w2wxobm",
+      "name": "Dana Whitfield"
+     },
+     "text": "Dana Whitfield has title three entry points (finance, ops, product.",
+     "updated_at": "2026-10-30T20:43:12.124261445Z"
+    }
+   ],
+   "id": "ent_l5vtzzbd6w2wxobm",
+   "identifiers": [
+    [
+     "email",
+     "dana.whitfield@brightwell.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Dana Whitfield",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+      "source": "files-1"
+     },
+     "surface": "Dana Whitfield",
+     "title": "Harbor dashboards: first design review",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+    },
+    {
+     "chunk_id": 11,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+      "source": "files-1"
+     },
+     "surface": "Dana Whitfield",
+     "title": "Harbor dashboards: first design review",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+    }
+   ],
+   "name": "Dana Whitfield",
+   "vault_path": "Person/Dana Whitfield (ent_l5vtzzbd6w2wxobm).md"
+  },
+  "ent_27o2ngpaqsh5mjuv": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_27o2ngpaqsh5mjuv",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Health/2026-05-12-gp-visit.md",
+      "source": "files-1"
+     },
+     "surface": "Dr. Lena Brandt",
+     "title": "2026-05-12-gp-visit",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-05-12-gp-visit.md"
+    }
+   ],
+   "name": "Dr. Lena Brandt",
+   "vault_path": "Person/Dr. Lena Brandt (ent_27o2ngpaqsh5mjuv).md"
+  },
+  "ent_hkwtshb5tpflsnk4": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 15,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "by the end of July",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      }
+     ],
+     "id": 50,
+     "object": {
+      "entity": {
+       "id": "ent_hkwtshb5tpflsnk4",
+       "name": "end of July"
+      },
+      "literal": null
+     },
+     "predicate": "due_on",
+     "status": "active",
+     "subject": {
+      "id": "ent_vdl572b3apgpsznf",
+      "name": "Brightwell Analytics"
+     },
+     "text": "Brightwell due on end of July.",
+     "updated_at": "2026-10-30T20:45:53.314719843Z"
+    }
+   ],
+   "id": "ent_hkwtshb5tpflsnk4",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 15,
+     "item": {
+      "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+      "source": "files-1"
+     },
+     "surface": "end of July",
+     "title": "Harbor storage: renewal quote",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+    }
+   ],
+   "name": "end of July",
+   "vault_path": "Place/end of July (ent_hkwtshb5tpflsnk4).md"
+  },
+  "ent_roitrnzpkspnhnxw": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_roitrnzpkspnhnxw",
+   "identifiers": [
+    [
+     "tag",
+     "finance"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "#finance",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    },
+    {
+     "chunk_id": 6,
+     "item": {
+      "key": "0:Finance/2026-07-01-mortgage-statement.md",
+      "source": "files-1"
+     },
+     "surface": "#finance",
+     "title": "2026-07-01-mortgage-statement",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-07-01-mortgage-statement.md"
+    }
+   ],
+   "name": "finance",
+   "vault_path": "Topic/finance (ent_roitrnzpkspnhnxw).md"
+  },
+  "ent_hcv7sag2inhti2rx": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "Gross salary (monthly)",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 18,
+     "object": {
+      "entity": null,
+      "literal": "£7,450.00"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_hcv7sag2inhti2rx",
+      "name": "Gross salary (monthly"
+     },
+     "text": "Gross salary (monthly has title £7,450.00.",
+     "updated_at": "2026-10-30T20:30:41.232999552Z"
+    }
+   ],
+   "id": "ent_hcv7sag2inhti2rx",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "Gross salary (monthly",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    }
+   ],
+   "name": "Gross salary (monthly",
+   "vault_path": "Person/Gross salary (monthly (ent_hcv7sag2inhti2rx).md"
+  },
+  "ent_h5b473rqrz3q7dzp": {
+   "aliases": [
+    "Gus"
+   ],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.75,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-12T09:00:00Z",
+       "quote": "From: Gus Ferreira <gus.ferreira@tessellate.example>",
+       "title": "Introduction: your Tessellate Systems account team",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "From: Gus Ferreira <gus.ferreira@tessellate.example>",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      },
+      {
+       "chunk_id": 15,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "Account Manager, Tessellate Systems",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      }
+     ],
+     "id": 40,
+     "object": {
+      "entity": {
+       "id": "ent_he327sieabdugfcv",
+       "name": "Tessellate Systems"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_h5b473rqrz3q7dzp",
+      "name": "Gus Ferreira"
+     },
+     "text": "Gus Ferreira works at Tessellate (has a tessellate.example address).",
+     "updated_at": "2026-10-30T20:45:53.315729587Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-12T09:00:00Z",
+       "quote": "From: Gus Ferreira <gus.ferreira@tessellate.example>",
+       "title": "Introduction: your Tessellate Systems account team",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "From: Gus Ferreira <gus.ferreira@tessellate.example>",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      }
+     ],
+     "id": 41,
+     "object": {
+      "entity": {
+       "id": "ent_h5b473rqrz3q7dzp",
+       "name": "Gus Ferreira"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Gus Ferreira by email.",
+     "updated_at": "2026-10-30T20:45:53.315729587Z"
+    }
+   ],
+   "id": "ent_h5b473rqrz3q7dzp",
+   "identifiers": [
+    [
+     "email",
+     "gus.ferreira@tessellate.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+      "source": "files-1"
+     },
+     "surface": "Gus Ferreira",
+     "title": "Introduction: your Tessellate Systems account team",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+    },
+    {
+     "chunk_id": 10,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+      "source": "files-1"
+     },
+     "surface": "Gus Ferreira",
+     "title": "Introduction: your Tessellate Systems account team",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+      "source": "files-1"
+     },
+     "surface": "Gus Ferreira",
+     "title": "Harbor storage: renewal quote",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+    },
+    {
+     "chunk_id": 15,
+     "item": {
+      "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+      "source": "files-1"
+     },
+     "surface": "Gus Ferreira",
+     "title": "Harbor storage: renewal quote",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+    }
+   ],
+   "name": "Gus Ferreira",
+   "vault_path": "Person/Gus Ferreira (ent_h5b473rqrz3q7dzp).md"
+  },
+  "ent_z3rv3ovliwqtzp3s": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 19,
+       "item": {
+        "key": "0:Notes/Journal/2026-03-15.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-15T09:00:00Z",
+       "quote": "Still love living in Halden Bay: the sea at the end of the road never gets old",
+       "title": "2026-03-15",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+      }
+     ],
+     "id": 54,
+     "object": {
+      "entity": {
+       "id": "ent_z3rv3ovliwqtzp3s",
+       "name": "Halden Bay"
+      },
+      "literal": null
+     },
+     "predicate": "prefers",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user prefers Halden Bay.",
+     "updated_at": "2026-10-30T20:48:13.759344978Z"
+    }
+   ],
+   "id": "ent_z3rv3ovliwqtzp3s",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 13,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-09-thursday-climbing.eml",
+      "source": "files-1"
+     },
+     "surface": "Halden Bay",
+     "title": "Thursday?",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-09-thursday-climbing.eml"
+    },
+    {
+     "chunk_id": 19,
+     "item": {
+      "key": "0:Notes/Journal/2026-03-15.md",
+      "source": "files-1"
+     },
+     "surface": "Halden Bay",
+     "title": "2026-03-15",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+    }
+   ],
+   "name": "Halden Bay",
+   "vault_path": "Place/Halden Bay (ent_z3rv3ovliwqtzp3s).md"
+  },
+  "ent_bismwmtehs5myyff": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 5,
+     "object": {
+      "entity": {
+       "id": "ent_bismwmtehs5myyff",
+       "name": "Halden Bay Bouldering"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_7e7bzggrdddjtfnd",
+      "name": "Climbing with Sam"
+     },
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "updated_at": "2026-10-30T20:28:11.083688404Z"
+    }
+   ],
+   "id": "ent_bismwmtehs5myyff",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 2,
+     "item": {
+      "key": "0:Calendar/2026-04-16-climbing.ics",
+      "source": "files-1"
+     },
+     "surface": "Halden Bay Bouldering",
+     "title": "Climbing with Sam",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+    },
+    {
+     "chunk_id": 13,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-09-thursday-climbing.eml",
+      "source": "files-1"
+     },
+     "surface": "Halden Bay Bouldering",
+     "title": "Thursday?",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-09-thursday-climbing.eml"
+    }
+   ],
+   "name": "Halden Bay Bouldering",
+   "vault_path": "Place/Halden Bay Bouldering (ent_bismwmtehs5myyff).md"
+  },
+  "ent_za5exkthvwbmzo4d": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 5,
+       "item": {
+        "key": "0:Finance/2026-05-21-new-debit-card.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-05-21T09:00:00Z",
+       "quote": "Northshore Credit Union, Halden Bay branch",
+       "title": "Your replacement debit card has been dispatched",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+      }
+     ],
+     "id": 23,
+     "object": {
+      "entity": {
+       "id": "ent_za5exkthvwbmzo4d",
+       "name": "Halden Bay branch"
+      },
+      "literal": null
+     },
+     "predicate": "located_in",
+     "status": "active",
+     "subject": {
+      "id": "ent_4lydodhcpxmdlcj3",
+      "name": "Northshore Credit Union"
+     },
+     "text": "Northshore Credit Union located in Halden Bay branch.",
+     "updated_at": "2026-10-30T20:31:59.911020613Z"
+    }
+   ],
+   "id": "ent_za5exkthvwbmzo4d",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 5,
+     "item": {
+      "key": "0:Finance/2026-05-21-new-debit-card.eml",
+      "source": "files-1"
+     },
+     "surface": "Halden Bay branch",
+     "title": "Your replacement debit card has been dispatched",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+    }
+   ],
+   "name": "Halden Bay branch",
+   "vault_path": "Place/Halden Bay branch (ent_za5exkthvwbmzo4d).md"
+  },
+  "ent_wz32trob3nyczncr": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_wz32trob3nyczncr",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 17,
+     "item": {
+      "key": "0:Mail/Sent/2026-04-19-re-may-visit.eml",
+      "source": "files-1"
+     },
+     "surface": "Halden Bay station",
+     "title": "Re: May bank holiday",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-04-19-re-may-visit.eml"
+    }
+   ],
+   "name": "Halden Bay station",
+   "vault_path": "Place/Halden Bay station (ent_wz32trob3nyczncr).md"
+  },
+  "ent_gpf764afvl73ni4l": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 9,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "you will lead Harbor",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      }
+     ],
+     "id": 37,
+     "object": {
+      "entity": {
+       "id": "ent_gpf764afvl73ni4l",
+       "name": "Harbor"
+      },
+      "literal": null
+     },
+     "predicate": "leads",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user leads Harbor.",
+     "updated_at": "2026-10-30T20:41:45.352348132Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 9,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "data engineer on Harbor",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      }
+     ],
+     "id": 38,
+     "object": {
+      "entity": {
+       "id": "ent_bk6js3d2ovu7562z",
+       "name": "Sam Patel"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_gpf764afvl73ni4l",
+      "name": "Harbor"
+     },
+     "text": "Harbor has title Sam Patel.",
+     "updated_at": "2026-10-30T20:41:45.352348132Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 9,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Storage will come from Tessellate Systems",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      }
+     ],
+     "id": 39,
+     "object": {
+      "entity": {
+       "id": "ent_he327sieabdugfcv",
+       "name": "Tessellate Systems"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_gpf764afvl73ni4l",
+      "name": "Harbor"
+     },
+     "text": "Harbor has title Tessellate Systems.",
+     "updated_at": "2026-10-30T20:41:45.352348132Z"
+    }
+   ],
+   "id": "ent_gpf764afvl73ni4l",
+   "identifiers": [],
+   "kind": "project",
+   "mentions": [
+    {
+     "chunk_id": 9,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Harbor",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": 10,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+      "source": "files-1"
+     },
+     "surface": "Harbor",
+     "title": "Introduction: your Tessellate Systems account team",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+    },
+    {
+     "chunk_id": 16,
+     "item": {
+      "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Harbor",
+     "title": "Re: Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+    }
+   ],
+   "name": "Harbor",
+   "vault_path": "Project/Harbor (ent_gpf764afvl73ni4l).md"
+  },
+  "ent_w7w7tj2x3cpnbznc": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 12,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "14 months of events replayed with zero row mismatches",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      }
+     ],
+     "id": 45,
+     "object": {
+      "entity": null,
+      "literal": "14 months of events replayed with zero row mismatches"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_w7w7tj2x3cpnbznc",
+      "name": "Harbor backfill pipeline"
+     },
+     "text": "Harbor backfill pipeline has title 14 months of events replayed with zero row mismatches.",
+     "updated_at": "2026-10-30T20:43:52.534517644Z"
+    }
+   ],
+   "id": "ent_w7w7tj2x3cpnbznc",
+   "identifiers": [],
+   "kind": "project",
+   "mentions": [
+    {
+     "chunk_id": 12,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+      "source": "files-1"
+     },
+     "surface": "Harbor backfill pipeline",
+     "title": "Harbor: backfill pipeline is green",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+    }
+   ],
+   "name": "Harbor backfill pipeline",
+   "vault_path": "Project/Harbor backfill pipeline (ent_w7w7tj2x3cpnbznc).md"
+  },
+  "ent_hsqfnyflj5drz7w3": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_hsqfnyflj5drz7w3",
+   "identifiers": [],
+   "kind": "project",
+   "mentions": [
+    {
+     "chunk_id": 12,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+      "source": "files-1"
+     },
+     "surface": "Harbor sheet",
+     "title": "Harbor: backfill pipeline is green",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+    }
+   ],
+   "name": "Harbor sheet",
+   "vault_path": "Project/Harbor sheet (ent_hsqfnyflj5drz7w3).md"
+  },
+  "ent_o2rtnj2bpff3eadu": {
+   "aliases": [],
+   "attributes": {
+    "all_day": false,
+    "end": "2026-03-10T09:45:00Z",
+    "location": "Brightwell HQ, Room Fathom",
+    "rrule": "FREQ=WEEKLY;BYDAY=TU,WE,TH",
+    "start": "2026-03-10T09:30:00Z",
+    "timezone": "UTC"
+   },
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 1,
+     "object": {
+      "entity": {
+       "id": "ent_jhu4xxnxvya7ascw",
+       "name": "Brightwell HQ, Room Fathom"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_o2rtnj2bpff3eadu",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 2,
+     "object": {
+      "entity": {
+       "id": "ent_o2rtnj2bpff3eadu",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 3,
+     "object": {
+      "entity": {
+       "id": "ent_o2rtnj2bpff3eadu",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 4,
+     "object": {
+      "entity": {
+       "id": "ent_o2rtnj2bpff3eadu",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_bk6js3d2ovu7562z",
+      "name": "Sam Patel"
+     },
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Start: 2026-03-10 09:30 (UTC)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 56,
+     "object": {
+      "entity": null,
+      "literal": "2026-03-10 09:30 (UTC"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_o2rtnj2bpff3eadu",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up has title 2026-03-10 09:30 (UTC.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "End: 2026-03-10 09:45 (UTC)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 57,
+     "object": {
+      "entity": null,
+      "literal": "2026-03-10 09:45 (UTC"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_o2rtnj2bpff3eadu",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up has title 2026-03-10 09:45 (UTC.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Repeats: FREQ=WEEKLY;BYDAY=TU,WE,TH",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 58,
+     "object": {
+      "entity": null,
+      "literal": "FREQ=WEEKLY;BYDAY=TU,WE,TH"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_o2rtnj2bpff3eadu",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up has title FREQ=WEEKLY;BYDAY=TU,WE,TH.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 59,
+     "object": {
+      "entity": {
+       "id": "ent_jhu4xxnxvya7ascw",
+       "name": "Brightwell HQ, Room Fathom"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_o2rtnj2bpff3eadu",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up has title Brightwell HQ, Room Fathom.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 60,
+     "object": {
+      "entity": null,
+      "literal": "Mara Okafor"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_o2rtnj2bpff3eadu",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up has title Mara Okafor.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    }
+   ],
+   "id": "ent_o2rtnj2bpff3eadu",
+   "identifiers": [
+    [
+     "ical_uid",
+     "harbor-standup-20260310@brightwell.example"
+    ]
+   ],
+   "kind": "event",
+   "mentions": [
+    {
+     "chunk_id": 1,
+     "item": {
+      "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+      "source": "files-1"
+     },
+     "surface": "Harbor stand-up",
+     "title": "Harbor stand-up",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+    }
+   ],
+   "name": "Harbor stand-up",
+   "vault_path": "Event/Harbor stand-up (ent_o2rtnj2bpff3eadu).md"
+  },
+  "ent_sxtcgh466nmasowp": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_sxtcgh466nmasowp",
+   "identifiers": [
+    [
+     "tag",
+     "health"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": 7,
+     "item": {
+      "key": "0:Health/2026-05-12-gp-visit.md",
+      "source": "files-1"
+     },
+     "surface": "#health",
+     "title": "2026-05-12-gp-visit",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-05-12-gp-visit.md"
+    }
+   ],
+   "name": "health",
+   "vault_path": "Topic/health (ent_sxtcgh466nmasowp).md"
+  },
+  "ent_i7levttxksrznzul": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-18-ife-may-visit.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-18T09:00:00Z",
+       "quote": "From: Ife Okafor <ife.okafor@mailbox.example>",
+       "title": "May bank holiday",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-18-ife-may-visit.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-04-19-re-may-visit.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-19T09:00:00Z",
+       "quote": "To: Ife Okafor <ife.okafor@mailbox.example>",
+       "title": "Re: May bank holiday",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-04-19-re-may-visit.eml"
+      }
+     ],
+     "id": 48,
+     "object": {
+      "entity": {
+       "id": "ent_i7levttxksrznzul",
+       "name": "Ife Okafor"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Ife Okafor by email.",
+     "updated_at": "2026-10-30T20:47:06.785932678Z"
+    }
+   ],
+   "id": "ent_i7levttxksrznzul",
+   "identifiers": [
+    [
+     "email",
+     "ife.okafor@mailbox.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-18-ife-may-visit.eml",
+      "source": "files-1"
+     },
+     "surface": "Ife Okafor",
+     "title": "May bank holiday",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-18-ife-may-visit.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Sent/2026-04-19-re-may-visit.eml",
+      "source": "files-1"
+     },
+     "surface": "Ife Okafor",
+     "title": "Re: May bank holiday",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-04-19-re-may-visit.eml"
+    }
+   ],
+   "name": "Ife Okafor",
+   "vault_path": "Person/Ife Okafor (ent_i7levttxksrznzul).md"
+  },
+  "ent_elvf37bnwsjokuq2": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "Income tax",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 19,
+     "object": {
+      "entity": null,
+      "literal": "£1,852.13"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_elvf37bnwsjokuq2",
+      "name": "Income tax"
+     },
+     "text": "Income tax has title £1,852.13.",
+     "updated_at": "2026-10-30T20:30:41.232999552Z"
+    }
+   ],
+   "id": "ent_elvf37bnwsjokuq2",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "Income tax",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    }
+   ],
+   "name": "Income tax",
+   "vault_path": "Person/Income tax (ent_elvf37bnwsjokuq2).md"
+  },
+  "ent_5l5iwwrgrsbpwryp": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ],
+     "id": 28,
+     "object": {
+      "entity": {
+       "id": "ent_s2wzg56dtozq3vax",
+       "name": "Counselling session"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_5l5iwwrgrsbpwryp",
+      "name": "Jonas Albers"
+     },
+     "text": "Jonas Albers organized Counselling session on 2026-06-17T17:00:00Z.",
+     "updated_at": "2026-10-30T20:40:04.499466669Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ],
+     "id": 29,
+     "object": {
+      "entity": {
+       "id": "ent_s2wzg56dtozq3vax",
+       "name": "Counselling session"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_5l5iwwrgrsbpwryp",
+      "name": "Jonas Albers"
+     },
+     "text": "Jonas Albers attended Counselling session on 2026-06-17T17:00:00Z.",
+     "updated_at": "2026-10-30T20:40:04.499466669Z"
+    }
+   ],
+   "id": "ent_5l5iwwrgrsbpwryp",
+   "identifiers": [
+    [
+     "email",
+     "jonas@albers-counselling.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 8,
+     "item": {
+      "key": "0:Health/2026-06-17-counselling.ics",
+      "source": "files-1"
+     },
+     "surface": "Jonas Albers",
+     "title": "Counselling session",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+    }
+   ],
+   "name": "Jonas Albers",
+   "vault_path": "Person/Jonas Albers (ent_5l5iwwrgrsbpwryp).md"
+  },
+  "ent_7kd2m7k7ctfj7im7": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_7kd2m7k7ctfj7im7",
+   "identifiers": [
+    [
+     "tag",
+     "journal"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": 19,
+     "item": {
+      "key": "0:Notes/Journal/2026-03-15.md",
+      "source": "files-1"
+     },
+     "surface": "#journal",
+     "title": "2026-03-15",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+    }
+   ],
+   "name": "journal",
+   "vault_path": "Topic/journal (ent_7kd2m7k7ctfj7im7).md"
+  },
+  "ent_i2deiay7hesngmev": {
+   "aliases": [],
+   "attributes": {
+    "is_me": true
+   },
+   "claims": [
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 2,
+     "object": {
+      "entity": {
+       "id": "ent_o2rtnj2bpff3eadu",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 3,
+     "object": {
+      "entity": {
+       "id": "ent_o2rtnj2bpff3eadu",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 6,
+     "object": {
+      "entity": {
+       "id": "ent_7e7bzggrdddjtfnd",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:28:11.083688404Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 7,
+     "object": {
+      "entity": {
+       "id": "ent_7e7bzggrdddjtfnd",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:28:11.083688404Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 12,
+     "object": {
+      "entity": {
+       "id": "ent_ujsdikmborlp5xwz",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "Employee: Mara Okafor, Staff Engineer",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 21,
+     "object": {
+      "entity": null,
+      "literal": "Staff Engineer"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user has title Staff Engineer.",
+     "updated_at": "2026-10-30T20:30:41.232999552Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.okafor@mailbox.example> (accepted)",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ],
+     "id": 30,
+     "object": {
+      "entity": {
+       "id": "ent_s2wzg56dtozq3vax",
+       "name": "Counselling session"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Counselling session on 2026-06-17T17:00:00Z.",
+     "updated_at": "2026-10-30T20:40:04.499466669Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "From: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "Cc: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "Cc: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-05T09:00:00Z",
+       "quote": "To: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Re: Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+      }
+     ],
+     "id": 34,
+     "object": {
+      "entity": {
+       "id": "ent_dh5s6wcqepsx62ow",
+       "name": "R. Chen"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Robert Chen by email.",
+     "updated_at": "2026-10-30T20:46:22.714566597Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "From: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-05T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Re: Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+      }
+     ],
+     "id": 35,
+     "object": {
+      "entity": {
+       "id": "ent_bk6js3d2ovu7562z",
+       "name": "Sam Patel"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Sam Patel by email.",
+     "updated_at": "2026-10-30T20:46:22.714566597Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Cc: Dana Whitfield <dana.whitfield@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "From: Dana Whitfield <dana.whitfield@brightwell.example>",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      }
+     ],
+     "id": 36,
+     "object": {
+      "entity": {
+       "id": "ent_l5vtzzbd6w2wxobm",
+       "name": "Dana Whitfield"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Dana Whitfield by email.",
+     "updated_at": "2026-10-30T20:43:12.125329879Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 9,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "you will lead Harbor",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      }
+     ],
+     "id": 37,
+     "object": {
+      "entity": {
+       "id": "ent_gpf764afvl73ni4l",
+       "name": "Harbor"
+      },
+      "literal": null
+     },
+     "predicate": "leads",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user leads Harbor.",
+     "updated_at": "2026-10-30T20:41:45.352348132Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-12T09:00:00Z",
+       "quote": "From: Gus Ferreira <gus.ferreira@tessellate.example>",
+       "title": "Introduction: your Tessellate Systems account team",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "From: Gus Ferreira <gus.ferreira@tessellate.example>",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      }
+     ],
+     "id": 41,
+     "object": {
+      "entity": {
+       "id": "ent_h5b473rqrz3q7dzp",
+       "name": "Gus Ferreira"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Gus Ferreira by email.",
+     "updated_at": "2026-10-30T20:45:53.315729587Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 10,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-12T09:00:00Z",
+       "quote": "your account manager at Tessellate Systems",
+       "title": "Introduction: your Tessellate Systems account team",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+      }
+     ],
+     "id": 42,
+     "object": {
+      "entity": {
+       "id": "ent_he327sieabdugfcv",
+       "name": "Tessellate Systems"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user works at Tessellate Systems.",
+     "updated_at": "2026-10-30T20:42:25.735618542Z"
+    },
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-09-thursday-climbing.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-09T09:00:00Z",
+       "quote": "From: Sam Okonkwo <sokonkwo@mailbox.example>",
+       "title": "Thursday?",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-09-thursday-climbing.eml"
+      }
+     ],
+     "id": 47,
+     "object": {
+      "entity": {
+       "id": "ent_2u44xob4baycrfwj",
+       "name": "Sam"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Sam Okonkwo by email.",
+     "updated_at": "2026-10-30T20:44:34.802242762Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-18-ife-may-visit.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-18T09:00:00Z",
+       "quote": "From: Ife Okafor <ife.okafor@mailbox.example>",
+       "title": "May bank holiday",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-18-ife-may-visit.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-04-19-re-may-visit.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-19T09:00:00Z",
+       "quote": "To: Ife Okafor <ife.okafor@mailbox.example>",
+       "title": "Re: May bank holiday",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-04-19-re-may-visit.eml"
+      }
+     ],
+     "id": 48,
+     "object": {
+      "entity": {
+       "id": "ent_i7levttxksrznzul",
+       "name": "Ife Okafor"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Ife Okafor by email.",
+     "updated_at": "2026-10-30T20:47:06.785932678Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-04-19-re-may-visit.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-19T09:00:00Z",
+       "quote": "Cc: Theo Lindqvist <theo.lindqvist@mailbox.example>",
+       "title": "Re: May bank holiday",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-04-19-re-may-visit.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-06-24-dinner-tonight.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-24T09:00:00Z",
+       "quote": "To: Theo Lindqvist <theo.lindqvist@mailbox.example>",
+       "title": "tonight",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-06-24-dinner-tonight.eml"
+      }
+     ],
+     "id": 51,
+     "object": {
+      "entity": {
+       "id": "ent_irr7kxezuokdtvwl",
+       "name": "Theo Lindqvist"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Theo Lindqvist by email.",
+     "updated_at": "2026-10-30T20:47:14.566639778Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 19,
+       "item": {
+        "key": "0:Notes/Journal/2026-03-15.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-15T09:00:00Z",
+       "quote": "Theo and I have been together three years this month",
+       "title": "2026-03-15",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+      }
+     ],
+     "id": 52,
+     "object": {
+      "entity": null,
+      "literal": "three years"
+     },
+     "predicate": "has_title",
+     "status": "superseded",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user has title three years.",
+     "updated_at": "2026-10-30T20:48:13.759344978Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 19,
+       "item": {
+        "key": "0:Notes/Journal/2026-03-15.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-15T09:00:00Z",
+       "quote": "He made the cardamom buns his gran used to make and we ate them in bed reading the papers",
+       "title": "2026-03-15",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+      }
+     ],
+     "id": 53,
+     "object": {
+      "entity": {
+       "id": "ent_nznqcj5erl47x4n7",
+       "name": "cardamom buns"
+      },
+      "literal": null
+     },
+     "predicate": "prefers",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user prefers cardamom buns.",
+     "updated_at": "2026-10-30T20:48:13.759344978Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 19,
+       "item": {
+        "key": "0:Notes/Journal/2026-03-15.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-15T09:00:00Z",
+       "quote": "Still love living in Halden Bay: the sea at the end of the road never gets old",
+       "title": "2026-03-15",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+      }
+     ],
+     "id": 54,
+     "object": {
+      "entity": {
+       "id": "ent_z3rv3ovliwqtzp3s",
+       "name": "Halden Bay"
+      },
+      "literal": null
+     },
+     "predicate": "prefers",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user prefers Halden Bay.",
+     "updated_at": "2026-10-30T20:48:13.759344978Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 19,
+       "item": {
+        "key": "0:Notes/Journal/2026-03-15.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-15T09:00:00Z",
+       "quote": "My forearms still haven't recovered from last week",
+       "title": "2026-03-15",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+      }
+     ],
+     "id": 55,
+     "object": {
+      "entity": null,
+      "literal": "forearms"
+     },
+     "predicate": "has_title",
+     "status": "superseded",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user has title forearms.",
+     "updated_at": "2026-10-30T20:48:13.759344978Z"
+    }
+   ],
+   "id": "ent_i2deiay7hesngmev",
+   "identifiers": [
+    [
+     "email",
+     "mara.okafor@brightwell.example"
+    ],
+    [
+     "email",
+     "mara.okafor@mailbox.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [],
+   "name": "Mara Okafor",
+   "vault_path": "Person/Mara Okafor (ent_i2deiay7hesngmev).md"
+  },
+  "ent_i4zvobcodl23z6py": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_i4zvobcodl23z6py",
+   "identifiers": [],
+   "kind": "organization",
+   "mentions": [
+    {
+     "chunk_id": 2,
+     "item": {
+      "key": "0:Calendar/2026-04-16-climbing.ics",
+      "source": "files-1"
+     },
+     "surface": "Mara Okafor",
+     "title": "Climbing with Sam",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+    }
+   ],
+   "name": "Mara Okafor",
+   "vault_path": "Organization/Mara Okafor (ent_i4zvobcodl23z6py).md"
+  },
+  "ent_qq7pbbz66dh7unu4": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_qq7pbbz66dh7unu4",
+   "identifiers": [
+    [
+     "tag",
+     "mortgage"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Finance/2026-07-01-mortgage-statement.md",
+      "source": "files-1"
+     },
+     "surface": "#mortgage",
+     "title": "2026-07-01-mortgage-statement",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-07-01-mortgage-statement.md"
+    }
+   ],
+   "name": "mortgage",
+   "vault_path": "Topic/mortgage (ent_qq7pbbz66dh7unu4).md"
+  },
+  "ent_y7vafvqjuuo7c4wn": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 14,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-18-ife-may-visit.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-18T09:00:00Z",
+       "quote": "jollof pot",
+       "title": "May bank holiday",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-18-ife-may-visit.eml"
+      }
+     ],
+     "id": 49,
+     "object": {
+      "entity": null,
+      "literal": "jollof pot"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_y7vafvqjuuo7c4wn",
+      "name": "Mum"
+     },
+     "text": "Mum has title jollof pot.",
+     "updated_at": "2026-10-30T20:45:15.408166039Z"
+    }
+   ],
+   "id": "ent_y7vafvqjuuo7c4wn",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 14,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-18-ife-may-visit.eml",
+      "source": "files-1"
+     },
+     "surface": "Mum",
+     "title": "May bank holiday",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-18-ife-may-visit.eml"
+    }
+   ],
+   "name": "Mum",
+   "vault_path": "Person/Mum (ent_y7vafvqjuuo7c4wn).md"
+  },
+  "ent_dbe732n7g4t3buor": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "National Insurance",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 20,
+     "object": {
+      "entity": null,
+      "literal": "£388.40"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_dbe732n7g4t3buor",
+      "name": "National Insurance"
+     },
+     "text": "National Insurance has title £388.40.",
+     "updated_at": "2026-10-30T20:30:41.232999552Z"
+    }
+   ],
+   "id": "ent_dbe732n7g4t3buor",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "National Insurance",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    }
+   ],
+   "name": "National Insurance",
+   "vault_path": "Person/National Insurance (ent_dbe732n7g4t3buor).md"
+  },
+  "ent_xg6ydalkbfvic6mw": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_xg6ydalkbfvic6mw",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "Net pay",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    }
+   ],
+   "name": "Net pay",
+   "vault_path": "Person/Net pay (ent_xg6ydalkbfvic6mw).md"
+  },
+  "ent_4lydodhcpxmdlcj3": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 5,
+       "item": {
+        "key": "0:Finance/2026-05-21-new-debit-card.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-05-21T09:00:00Z",
+       "quote": "Northshore Credit Union, Halden Bay branch",
+       "title": "Your replacement debit card has been dispatched",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+      }
+     ],
+     "id": 23,
+     "object": {
+      "entity": {
+       "id": "ent_za5exkthvwbmzo4d",
+       "name": "Halden Bay branch"
+      },
+      "literal": null
+     },
+     "predicate": "located_in",
+     "status": "active",
+     "subject": {
+      "id": "ent_4lydodhcpxmdlcj3",
+      "name": "Northshore Credit Union"
+     },
+     "text": "Northshore Credit Union located in Halden Bay branch.",
+     "updated_at": "2026-10-30T20:31:59.911020613Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 5,
+       "item": {
+        "key": "0:Finance/2026-05-21-new-debit-card.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-05-21T09:00:00Z",
+       "quote": "Northshore Credit Union",
+       "title": "Your replacement debit card has been dispatched",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+      }
+     ],
+     "id": 26,
+     "object": {
+      "entity": {
+       "id": "ent_4lydodhcpxmdlcj3",
+       "name": "Northshore Credit Union"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_aj45dskmnbf4sed2",
+      "name": "replacement Northshore Credit Union debit card"
+     },
+     "text": "replacement Northshore Credit Union debit card has title Northshore Credit Union.",
+     "updated_at": "2026-10-30T20:31:59.911020613Z"
+    }
+   ],
+   "id": "ent_4lydodhcpxmdlcj3",
+   "identifiers": [],
+   "kind": "organization",
+   "mentions": [
+    {
+     "chunk_id": 5,
+     "item": {
+      "key": "0:Finance/2026-05-21-new-debit-card.eml",
+      "source": "files-1"
+     },
+     "surface": "Northshore Credit Union",
+     "title": "Your replacement debit card has been dispatched",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+    }
+   ],
+   "name": "Northshore Credit Union",
+   "vault_path": "Organization/Northshore Credit Union (ent_4lydodhcpxmdlcj3).md"
+  },
+  "ent_waoe66c53xxdn2nh": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_waoe66c53xxdn2nh",
+   "identifiers": [
+    [
+     "tag",
+     "payslip"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "#payslip",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    }
+   ],
+   "name": "payslip",
+   "vault_path": "Topic/payslip (ent_waoe66c53xxdn2nh).md"
+  },
+  "ent_ewkldxkn6wkyr2j2": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_ewkldxkn6wkyr2j2",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 14,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-18-ife-may-visit.eml",
+      "source": "files-1"
+     },
+     "surface": "Port Ellery",
+     "title": "May bank holiday",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-18-ife-may-visit.eml"
+    }
+   ],
+   "name": "Port Ellery",
+   "vault_path": "Place/Port Ellery (ent_ewkldxkn6wkyr2j2).md"
+  },
+  "ent_dh5s6wcqepsx62ow": {
+   "aliases": [
+    "robert.chen@brightwell.example",
+    "Robert Chen"
+   ],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 10,
+     "object": {
+      "entity": {
+       "id": "ent_ujsdikmborlp5xwz",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_dh5s6wcqepsx62ow",
+      "name": "R. Chen"
+     },
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 11,
+     "object": {
+      "entity": {
+       "id": "ent_ujsdikmborlp5xwz",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_dh5s6wcqepsx62ow",
+      "name": "R. Chen"
+     },
+     "text": "R. Chen attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:29:33.832230743Z"
+    },
+    {
+     "confidence": 0.9375,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "From: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "Cc: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "Cc: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-05T09:00:00Z",
+       "quote": "To: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Re: Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+      }
+     ],
+     "id": 31,
+     "object": {
+      "entity": {
+       "id": "ent_vdl572b3apgpsznf",
+       "name": "Brightwell Analytics"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_dh5s6wcqepsx62ow",
+      "name": "R. Chen"
+     },
+     "text": "Robert Chen works at Brightwell (has a brightwell.example address).",
+     "updated_at": "2026-10-30T20:46:22.715616205Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "From: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "Cc: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "Cc: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-05T09:00:00Z",
+       "quote": "To: Robert Chen <robert.chen@brightwell.example>",
+       "title": "Re: Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+      }
+     ],
+     "id": 34,
+     "object": {
+      "entity": {
+       "id": "ent_dh5s6wcqepsx62ow",
+       "name": "R. Chen"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Robert Chen by email.",
+     "updated_at": "2026-10-30T20:46:22.714566597Z"
+    }
+   ],
+   "id": "ent_dh5s6wcqepsx62ow",
+   "identifiers": [
+    [
+     "email",
+     "robert.chen@brightwell.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 3,
+     "item": {
+      "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+      "source": "files-1"
+     },
+     "surface": "R. Chen",
+     "title": "1:1 Mara / Bob",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Robert Chen",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": 9,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Robert Chen",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+      "source": "files-1"
+     },
+     "surface": "Robert Chen",
+     "title": "Harbor: backfill pipeline is green",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+      "source": "files-1"
+     },
+     "surface": "Robert Chen",
+     "title": "Harbor storage: renewal quote",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Robert Chen",
+     "title": "Re: Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+    }
+   ],
+   "name": "R. Chen",
+   "vault_path": "Person/R. Chen (ent_dh5s6wcqepsx62ow).md"
+  },
+  "ent_aj45dskmnbf4sed2": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 5,
+       "item": {
+        "key": "0:Finance/2026-05-21-new-debit-card.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-05-21T09:00:00Z",
+       "quote": "should arrive within five working days",
+       "title": "Your replacement debit card has been dispatched",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+      }
+     ],
+     "id": 22,
+     "object": {
+      "entity": null,
+      "literal": "five working days"
+     },
+     "predicate": "due_on",
+     "status": "active",
+     "subject": {
+      "id": "ent_aj45dskmnbf4sed2",
+      "name": "replacement Northshore Credit Union debit card"
+     },
+     "text": "replacement Northshore Credit Union debit card due on five working days.",
+     "updated_at": "2026-10-30T20:31:59.911020613Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 5,
+       "item": {
+        "key": "0:Finance/2026-05-21-new-debit-card.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-05-21T09:00:00Z",
+       "quote": "Card number: 4000 0566 5566 5556",
+       "title": "Your replacement debit card has been dispatched",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+      }
+     ],
+     "id": 24,
+     "object": {
+      "entity": null,
+      "literal": "4000 0566 5566 5556"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_aj45dskmnbf4sed2",
+      "name": "replacement Northshore Credit Union debit card"
+     },
+     "text": "replacement Northshore Credit Union debit card has title 4000 0566 5566 5556.",
+     "updated_at": "2026-10-30T20:31:59.911020613Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 5,
+       "item": {
+        "key": "0:Finance/2026-05-21-new-debit-card.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-05-21T09:00:00Z",
+       "quote": "Expiry: 05/30",
+       "title": "Your replacement debit card has been dispatched",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+      }
+     ],
+     "id": 25,
+     "object": {
+      "entity": null,
+      "literal": "05/30"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_aj45dskmnbf4sed2",
+      "name": "replacement Northshore Credit Union debit card"
+     },
+     "text": "replacement Northshore Credit Union debit card has title 05/30.",
+     "updated_at": "2026-10-30T20:31:59.911020613Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 5,
+       "item": {
+        "key": "0:Finance/2026-05-21-new-debit-card.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-05-21T09:00:00Z",
+       "quote": "Northshore Credit Union",
+       "title": "Your replacement debit card has been dispatched",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+      }
+     ],
+     "id": 26,
+     "object": {
+      "entity": {
+       "id": "ent_4lydodhcpxmdlcj3",
+       "name": "Northshore Credit Union"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_aj45dskmnbf4sed2",
+      "name": "replacement Northshore Credit Union debit card"
+     },
+     "text": "replacement Northshore Credit Union debit card has title Northshore Credit Union.",
+     "updated_at": "2026-10-30T20:31:59.911020613Z"
+    }
+   ],
+   "id": "ent_aj45dskmnbf4sed2",
+   "identifiers": [],
+   "kind": "commitment",
+   "mentions": [
+    {
+     "chunk_id": 5,
+     "item": {
+      "key": "0:Finance/2026-05-21-new-debit-card.eml",
+      "source": "files-1"
+     },
+     "surface": "replacement Northshore Credit Union debit card",
+     "title": "Your replacement debit card has been dispatched",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+    }
+   ],
+   "name": "replacement Northshore Credit Union debit card",
+   "vault_path": "Commitment/replacement Northshore Credit Union debit card (ent_aj45dskmnbf4sed2).md"
+  },
+  "ent_gpcasfn7ohb7nn5h": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_gpcasfn7ohb7nn5h",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 12,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+      "source": "files-1"
+     },
+     "surface": "Rob Chen",
+     "title": "Harbor: backfill pipeline is green",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+    }
+   ],
+   "name": "Rob Chen",
+   "vault_path": "Person/Rob Chen (ent_gpcasfn7ohb7nn5h).md"
+  },
+  "ent_2u44xob4baycrfwj": {
+   "aliases": [
+    "Sam Okonkwo"
+   ],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 8,
+     "object": {
+      "entity": {
+       "id": "ent_7e7bzggrdddjtfnd",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_2u44xob4baycrfwj",
+      "name": "Sam"
+     },
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:28:11.083688404Z"
+    },
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-09-thursday-climbing.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-09T09:00:00Z",
+       "quote": "From: Sam Okonkwo <sokonkwo@mailbox.example>",
+       "title": "Thursday?",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-09-thursday-climbing.eml"
+      }
+     ],
+     "id": 47,
+     "object": {
+      "entity": {
+       "id": "ent_2u44xob4baycrfwj",
+       "name": "Sam"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Sam Okonkwo by email.",
+     "updated_at": "2026-10-30T20:44:34.802242762Z"
+    }
+   ],
+   "id": "ent_2u44xob4baycrfwj",
+   "identifiers": [
+    [
+     "email",
+     "sokonkwo@mailbox.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 2,
+     "item": {
+      "key": "0:Calendar/2026-04-16-climbing.ics",
+      "source": "files-1"
+     },
+     "surface": "Sam",
+     "title": "Climbing with Sam",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-09-thursday-climbing.eml",
+      "source": "files-1"
+     },
+     "surface": "Sam Okonkwo",
+     "title": "Thursday?",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-09-thursday-climbing.eml"
+    }
+   ],
+   "name": "Sam",
+   "vault_path": "Person/Sam (ent_2u44xob4baycrfwj).md"
+  },
+  "ent_qija2xi4fpbggzu3": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_qija2xi4fpbggzu3",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 17,
+     "item": {
+      "key": "0:Mail/Sent/2026-04-19-re-may-visit.eml",
+      "source": "files-1"
+     },
+     "surface": "Sam",
+     "title": "Re: May bank holiday",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-04-19-re-may-visit.eml"
+    }
+   ],
+   "name": "Sam",
+   "vault_path": "Person/Sam (ent_qija2xi4fpbggzu3).md"
+  },
+  "ent_mmhcfvkmcdvxnwvy": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_mmhcfvkmcdvxnwvy",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 19,
+     "item": {
+      "key": "0:Notes/Journal/2026-03-15.md",
+      "source": "files-1"
+     },
+     "surface": "Sam (Patel",
+     "title": "2026-03-15",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+    }
+   ],
+   "name": "Sam (Patel",
+   "vault_path": "Person/Sam (Patel (ent_mmhcfvkmcdvxnwvy).md"
+  },
+  "ent_bk6js3d2ovu7562z": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 4,
+     "object": {
+      "entity": {
+       "id": "ent_o2rtnj2bpff3eadu",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_bk6js3d2ovu7562z",
+      "name": "Sam Patel"
+     },
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    },
+    {
+     "confidence": 0.9375,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "From: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-05T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Re: Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+      }
+     ],
+     "id": 32,
+     "object": {
+      "entity": {
+       "id": "ent_vdl572b3apgpsznf",
+       "name": "Brightwell Analytics"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_bk6js3d2ovu7562z",
+      "name": "Sam Patel"
+     },
+     "text": "Sam Patel works at Brightwell (has a brightwell.example address).",
+     "updated_at": "2026-10-30T20:46:22.715616205Z"
+    },
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-20T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor dashboards: first design review",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "From: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-05T09:00:00Z",
+       "quote": "Cc: Sam Patel <sam.patel@brightwell.example>",
+       "title": "Re: Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+      }
+     ],
+     "id": 35,
+     "object": {
+      "entity": {
+       "id": "ent_bk6js3d2ovu7562z",
+       "name": "Sam Patel"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Sam Patel by email.",
+     "updated_at": "2026-10-30T20:46:22.714566597Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 9,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "data engineer on Harbor",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      }
+     ],
+     "id": 38,
+     "object": {
+      "entity": {
+       "id": "ent_bk6js3d2ovu7562z",
+       "name": "Sam Patel"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_gpf764afvl73ni4l",
+      "name": "Harbor"
+     },
+     "text": "Harbor has title Sam Patel.",
+     "updated_at": "2026-10-30T20:41:45.352348132Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 61,
+     "object": {
+      "entity": null,
+      "literal": "Mara Okafor"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_bk6js3d2ovu7562z",
+      "name": "Sam Patel"
+     },
+     "text": "Sam Patel has title Mara Okafor.",
+     "updated_at": "2026-10-30T20:49:59.23533411Z"
+    }
+   ],
+   "id": "ent_bk6js3d2ovu7562z",
+   "identifiers": [
+    [
+     "email",
+     "sam.patel@brightwell.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Sam Patel",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": 9,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Sam Patel",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+      "source": "files-1"
+     },
+     "surface": "Sam Patel",
+     "title": "Harbor dashboards: first design review",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-20-dashboard-design-review.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+      "source": "files-1"
+     },
+     "surface": "Sam Patel",
+     "title": "Harbor: backfill pipeline is green",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Sam Patel",
+     "title": "Re: Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-03-05-re-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": 1,
+     "item": {
+      "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+      "source": "files-1"
+     },
+     "surface": "Sam Patel",
+     "title": "Harbor stand-up",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+    }
+   ],
+   "name": "Sam Patel",
+   "vault_path": "Person/Sam Patel (ent_bk6js3d2ovu7562z).md"
+  },
+  "ent_zld72r2uifygdmma": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 12,
+       "item": {
+        "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-02T09:00:00Z",
+       "quote": "by Monday",
+       "title": "Harbor: backfill pipeline is green",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+      }
+     ],
+     "id": 46,
+     "object": {
+      "entity": null,
+      "literal": "Monday"
+     },
+     "predicate": "due_on",
+     "status": "active",
+     "subject": {
+      "id": "ent_zld72r2uifygdmma",
+      "name": "storage cost numbers"
+     },
+     "text": "storage cost numbers due on Monday.",
+     "updated_at": "2026-10-30T20:43:52.534517644Z"
+    }
+   ],
+   "id": "ent_zld72r2uifygdmma",
+   "identifiers": [],
+   "kind": "commitment",
+   "mentions": [
+    {
+     "chunk_id": 12,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-02-pipeline-green.eml",
+      "source": "files-1"
+     },
+     "surface": "storage cost numbers",
+     "title": "Harbor: backfill pipeline is green",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-02-pipeline-green.eml"
+    }
+   ],
+   "name": "storage cost numbers",
+   "vault_path": "Commitment/storage cost numbers (ent_zld72r2uifygdmma).md"
+  },
+  "ent_he327sieabdugfcv": {
+   "aliases": [
+    "Tessellate"
+   ],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 9,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-04T09:00:00Z",
+       "quote": "Storage will come from Tessellate Systems",
+       "title": "Harbor: you're leading it",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+      }
+     ],
+     "id": 39,
+     "object": {
+      "entity": {
+       "id": "ent_he327sieabdugfcv",
+       "name": "Tessellate Systems"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_gpf764afvl73ni4l",
+      "name": "Harbor"
+     },
+     "text": "Harbor has title Tessellate Systems.",
+     "updated_at": "2026-10-30T20:41:45.352348132Z"
+    },
+    {
+     "confidence": 0.75,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-12T09:00:00Z",
+       "quote": "From: Gus Ferreira <gus.ferreira@tessellate.example>",
+       "title": "Introduction: your Tessellate Systems account team",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "From: Gus Ferreira <gus.ferreira@tessellate.example>",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      },
+      {
+       "chunk_id": 15,
+       "item": {
+        "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-10T09:00:00Z",
+       "quote": "Account Manager, Tessellate Systems",
+       "title": "Harbor storage: renewal quote",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+      }
+     ],
+     "id": 40,
+     "object": {
+      "entity": {
+       "id": "ent_he327sieabdugfcv",
+       "name": "Tessellate Systems"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_h5b473rqrz3q7dzp",
+      "name": "Gus Ferreira"
+     },
+     "text": "Gus Ferreira works at Tessellate (has a tessellate.example address).",
+     "updated_at": "2026-10-30T20:45:53.315729587Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 10,
+       "item": {
+        "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-12T09:00:00Z",
+       "quote": "your account manager at Tessellate Systems",
+       "title": "Introduction: your Tessellate Systems account team",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+      }
+     ],
+     "id": 42,
+     "object": {
+      "entity": {
+       "id": "ent_he327sieabdugfcv",
+       "name": "Tessellate Systems"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "The user works at Tessellate Systems.",
+     "updated_at": "2026-10-30T20:42:25.735618542Z"
+    }
+   ],
+   "id": "ent_he327sieabdugfcv",
+   "identifiers": [
+    [
+     "domain",
+     "tessellate.example"
+    ]
+   ],
+   "kind": "organization",
+   "mentions": [
+    {
+     "chunk_id": 9,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+      "source": "files-1"
+     },
+     "surface": "Tessellate Systems",
+     "title": "Harbor: you're leading it",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-04-harbor-kickoff.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+      "source": "files-1"
+     },
+     "surface": "tessellate.example",
+     "title": "Introduction: your Tessellate Systems account team",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+    },
+    {
+     "chunk_id": 10,
+     "item": {
+      "key": "0:Mail/Inbox/2026-03-12-tessellate-intro.eml",
+      "source": "files-1"
+     },
+     "surface": "Tessellate Systems",
+     "title": "Introduction: your Tessellate Systems account team",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-03-12-tessellate-intro.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+      "source": "files-1"
+     },
+     "surface": "tessellate.example",
+     "title": "Harbor storage: renewal quote",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+    },
+    {
+     "chunk_id": 15,
+     "item": {
+      "key": "0:Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+      "source": "files-1"
+     },
+     "surface": "Tessellate Systems",
+     "title": "Harbor storage: renewal quote",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-06-10-tessellate-renewal.eml"
+    }
+   ],
+   "name": "Tessellate Systems",
+   "vault_path": "Organization/Tessellate Systems (ent_he327sieabdugfcv).md"
+  },
+  "ent_jwboeh57462azojv": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_jwboeh57462azojv",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 14,
+     "item": {
+      "key": "0:Mail/Inbox/2026-04-18-ife-may-visit.eml",
+      "source": "files-1"
+     },
+     "surface": "Theo",
+     "title": "May bank holiday",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Inbox/2026-04-18-ife-may-visit.eml"
+    }
+   ],
+   "name": "Theo",
+   "vault_path": "Person/Theo (ent_jwboeh57462azojv).md"
+  },
+  "ent_r62kjwr4d5cvszoh": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_r62kjwr4d5cvszoh",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 19,
+     "item": {
+      "key": "0:Notes/Journal/2026-03-15.md",
+      "source": "files-1"
+     },
+     "surface": "Theo",
+     "title": "2026-03-15",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Journal/2026-03-15.md"
+    }
+   ],
+   "name": "Theo",
+   "vault_path": "Person/Theo (ent_r62kjwr4d5cvszoh).md"
+  },
+  "ent_irr7kxezuokdtvwl": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.9900000095367432,
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-04-19-re-may-visit.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-19T09:00:00Z",
+       "quote": "Cc: Theo Lindqvist <theo.lindqvist@mailbox.example>",
+       "title": "Re: May bank holiday",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-04-19-re-may-visit.eml"
+      },
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Mail/Sent/2026-06-24-dinner-tonight.eml",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-24T09:00:00Z",
+       "quote": "To: Theo Lindqvist <theo.lindqvist@mailbox.example>",
+       "title": "tonight",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-06-24-dinner-tonight.eml"
+      }
+     ],
+     "id": 51,
+     "object": {
+      "entity": {
+       "id": "ent_irr7kxezuokdtvwl",
+       "name": "Theo Lindqvist"
+      },
+      "literal": null
+     },
+     "predicate": "corresponded_with",
+     "status": "active",
+     "subject": {
+      "id": "ent_i2deiay7hesngmev",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor corresponded with Theo Lindqvist by email.",
+     "updated_at": "2026-10-30T20:47:14.566639778Z"
+    }
+   ],
+   "id": "ent_irr7kxezuokdtvwl",
+   "identifiers": [
+    [
+     "email",
+     "theo.lindqvist@mailbox.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Sent/2026-04-19-re-may-visit.eml",
+      "source": "files-1"
+     },
+     "surface": "Theo Lindqvist",
+     "title": "Re: May bank holiday",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-04-19-re-may-visit.eml"
+    },
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Mail/Sent/2026-06-24-dinner-tonight.eml",
+      "source": "files-1"
+     },
+     "surface": "Theo Lindqvist",
+     "title": "tonight",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Mail/Sent/2026-06-24-dinner-tonight.eml"
+    }
+   ],
+   "name": "Theo Lindqvist",
+   "vault_path": "Person/Theo Lindqvist (ent_irr7kxezuokdtvwl).md"
+  }
+ }
+}

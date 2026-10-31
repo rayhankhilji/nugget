@@ -1,0 +1,118 @@
+{
+ "knowledge": {
+  "claims": 87,
+  "entities": 63,
+  "extractor_provider": "local-chat",
+  "last_run": "2026-10-30T20:44:03.306011937Z",
+  "mentions": 160,
+  "pending_items": 0,
+  "vault": {
+   "conflicts": [
+    "Person/R. Chen (ent_jkeesmk7ore5gxk4).md"
+   ],
+   "invalid": [],
+   "last_render": "2026-10-30T20:44:48.112045679Z",
+   "pages": 60,
+   "path": "/home/runner/work/nugget/nugget/qa-home/data/vault"
+  }
+ },
+ "ingest": {
+  "embedding_provider": "local-embedding",
+  "freshness_p50_ms": 216522,
+  "freshness_p95_ms": 506952,
+  "queue_depth": 0,
+  "sources": [
+   {
+    "chunks": 42,
+    "enabled": true,
+    "id": "files-1",
+    "items": 42,
+    "kind": "files",
+    "last_error": null,
+    "last_sync": "2026-10-30T20:34:12.41108627Z",
+    "name": "Mara's files",
+    "settings": {
+     "roots": [
+      "/home/runner/work/nugget/nugget/qa-home/corpus"
+     ]
+    },
+    "state": "watching"
+   }
+  ],
+  "triage_provider": "local-chat"
+ },
+ "runtime": [
+  {
+   "error": null,
+   "model_id": "qwen3-4b-q4km",
+   "provider": "local-chat",
+   "role": "chat",
+   "state": "ready"
+  },
+  {
+   "error": null,
+   "model_id": "nomic-embed-text-v1.5-q8",
+   "provider": "local-embedding",
+   "role": "embedding",
+   "state": "ready"
+  }
+ ],
+ "providers": [
+  {
+   "capabilities": {
+    "context_tokens": 8192,
+    "embeddings": false,
+    "json_schema": true,
+    "streaming": true,
+    "tools": false,
+    "vision": false
+   },
+   "error": null,
+   "id": "local-chat",
+   "kind": "openai_compatible",
+   "locality": "on_device",
+   "model": "qwen3-4b-q4km",
+   "tiers": [
+    "triage",
+    "light",
+    "synthesis"
+   ]
+  },
+  {
+   "capabilities": {
+    "context_tokens": null,
+    "embeddings": true,
+    "json_schema": false,
+    "streaming": false,
+    "tools": false,
+    "vision": false
+   },
+   "error": null,
+   "id": "local-embedding",
+   "kind": "openai_compatible",
+   "locality": "on_device",
+   "model": "nomic-embed-text-v1.5-q8",
+   "tiers": [
+    "embedding"
+   ]
+  }
+ ],
+ "sources": [
+  {
+   "chunks": 42,
+   "enabled": true,
+   "id": "files-1",
+   "items": 42,
+   "kind": "files",
+   "last_error": null,
+   "last_sync": "2026-10-30T20:34:12.41108627Z",
+   "name": "Mara's files",
+   "settings": {
+    "roots": [
+     "/home/runner/work/nugget/nugget/qa-home/corpus"
+    ]
+   },
+   "state": "watching"
+  }
+ ]
+}

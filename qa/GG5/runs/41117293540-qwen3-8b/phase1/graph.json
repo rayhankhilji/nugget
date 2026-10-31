@@ -1,0 +1,411 @@
+{
+ "overview": {
+  "edges": [
+   {
+    "claim": 1,
+    "from": "ent_3l554u5fbbdgbtti",
+    "predicate": "located_at",
+    "to": "ent_mndkobw5fo5ge774"
+   },
+   {
+    "claim": 2,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "organized",
+    "to": "ent_3l554u5fbbdgbtti"
+   },
+   {
+    "claim": 3,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_3l554u5fbbdgbtti"
+   },
+   {
+    "claim": 4,
+    "from": "ent_vtsf2khvna7dsozv",
+    "predicate": "attended",
+    "to": "ent_3l554u5fbbdgbtti"
+   },
+   {
+    "claim": 5,
+    "from": "ent_2dzrtthmyumov3vk",
+    "predicate": "located_at",
+    "to": "ent_cj3ljhk4ehdz5koi"
+   },
+   {
+    "claim": 6,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "organized",
+    "to": "ent_2dzrtthmyumov3vk"
+   },
+   {
+    "claim": 7,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_2dzrtthmyumov3vk"
+   },
+   {
+    "claim": 8,
+    "from": "ent_pngkpc2h5tar2jjq",
+    "predicate": "attended",
+    "to": "ent_2dzrtthmyumov3vk"
+   },
+   {
+    "claim": 9,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "located_in",
+    "to": "ent_cj3ljhk4ehdz5koi"
+   },
+   {
+    "claim": 11,
+    "from": "ent_t3y322htimt6lixu",
+    "predicate": "located_at",
+    "to": "ent_4mlxnp3ylpxguoro"
+   },
+   {
+    "claim": 12,
+    "from": "ent_frqdxjn76szsk3l3",
+    "predicate": "organized",
+    "to": "ent_t3y322htimt6lixu"
+   },
+   {
+    "claim": 13,
+    "from": "ent_frqdxjn76szsk3l3",
+    "predicate": "attended",
+    "to": "ent_t3y322htimt6lixu"
+   },
+   {
+    "claim": 14,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_t3y322htimt6lixu"
+   },
+   {
+    "claim": 15,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "works_at",
+    "to": "ent_r4jw42uwirndqzn2"
+   },
+   {
+    "claim": 17,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "part_of",
+    "to": "ent_sttsnwekxxjsg56f"
+   }
+  ],
+  "nodes": [
+   {
+    "depth": 0,
+    "id": "ent_znvqtdxiwjph7abo",
+    "kind": "person",
+    "name": "Mara Okafor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_t3y322htimt6lixu",
+    "kind": "event",
+    "name": "1:1 Mara / Bob"
+   },
+   {
+    "depth": 0,
+    "id": "ent_2dzrtthmyumov3vk",
+    "kind": "event",
+    "name": "Climbing with Sam"
+   },
+   {
+    "depth": 0,
+    "id": "ent_3l554u5fbbdgbtti",
+    "kind": "event",
+    "name": "Harbor stand-up"
+   },
+   {
+    "depth": 0,
+    "id": "ent_cj3ljhk4ehdz5koi",
+    "kind": "place",
+    "name": "Halden Bay Bouldering"
+   },
+   {
+    "depth": 0,
+    "id": "ent_frqdxjn76szsk3l3",
+    "kind": "person",
+    "name": "R. Chen"
+   },
+   {
+    "depth": 0,
+    "id": "ent_sttsnwekxxjsg56f",
+    "kind": "organization",
+    "name": "Northshore Credit Union"
+   },
+   {
+    "depth": 0,
+    "id": "ent_vtsf2khvna7dsozv",
+    "kind": "person",
+    "name": "Sam Patel"
+   },
+   {
+    "depth": 0,
+    "id": "ent_r4jw42uwirndqzn2",
+    "kind": "organization",
+    "name": "Brightwell Analytics"
+   },
+   {
+    "depth": 0,
+    "id": "ent_4mlxnp3ylpxguoro",
+    "kind": "place",
+    "name": "Brightwell HQ, Bob's office"
+   },
+   {
+    "depth": 0,
+    "id": "ent_mndkobw5fo5ge774",
+    "kind": "place",
+    "name": "Brightwell HQ, Room Fathom"
+   },
+   {
+    "depth": 0,
+    "id": "ent_pngkpc2h5tar2jjq",
+    "kind": "person",
+    "name": "Sam"
+   },
+   {
+    "depth": 0,
+    "id": "ent_orzbbzpin25qbm72",
+    "kind": "topic",
+    "name": "finance"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ntcu6jf67muc6fui",
+    "kind": "place",
+    "name": "12 Saltmarsh Row, Halden Bay"
+   },
+   {
+    "depth": 0,
+    "id": "ent_dtrbfgiuoduvbh47",
+    "kind": "person",
+    "name": "Dr. Lena Brandt"
+   },
+   {
+    "depth": 0,
+    "id": "ent_62sdfmmoqnyzcwyl",
+    "kind": "place",
+    "name": "Halden Bay"
+   },
+   {
+    "depth": 0,
+    "id": "ent_xtgtxudikpl35kkv",
+    "kind": "place",
+    "name": "Saltmarsh Row"
+   },
+   {
+    "depth": 0,
+    "id": "ent_jrur7ojvncr3r2nm",
+    "kind": "topic",
+    "name": "health"
+   },
+   {
+    "depth": 0,
+    "id": "ent_dly4x22ykr5ud3nq",
+    "kind": "topic",
+    "name": "mortgage"
+   },
+   {
+    "depth": 0,
+    "id": "ent_oirvh36odywmg3ez",
+    "kind": "topic",
+    "name": "payslip"
+   }
+  ],
+  "truncated": false
+ },
+ "centered": {
+  "ent_dtrbfgiuoduvbh47": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_dtrbfgiuoduvbh47",
+     "kind": "person",
+     "name": "Dr. Lena Brandt"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_znvqtdxiwjph7abo": {
+   "edges": [
+    {
+     "claim": 2,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "organized",
+     "to": "ent_3l554u5fbbdgbtti"
+    },
+    {
+     "claim": 3,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_3l554u5fbbdgbtti"
+    },
+    {
+     "claim": 6,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "organized",
+     "to": "ent_2dzrtthmyumov3vk"
+    },
+    {
+     "claim": 7,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_2dzrtthmyumov3vk"
+    },
+    {
+     "claim": 9,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "located_in",
+     "to": "ent_cj3ljhk4ehdz5koi"
+    },
+    {
+     "claim": 14,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_t3y322htimt6lixu"
+    },
+    {
+     "claim": 15,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "works_at",
+     "to": "ent_r4jw42uwirndqzn2"
+    },
+    {
+     "claim": 17,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "part_of",
+     "to": "ent_sttsnwekxxjsg56f"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3l554u5fbbdgbtti",
+     "kind": "event",
+     "name": "Harbor stand-up"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2dzrtthmyumov3vk",
+     "kind": "event",
+     "name": "Climbing with Sam"
+    },
+    {
+     "depth": 1,
+     "id": "ent_cj3ljhk4ehdz5koi",
+     "kind": "place",
+     "name": "Halden Bay Bouldering"
+    },
+    {
+     "depth": 1,
+     "id": "ent_t3y322htimt6lixu",
+     "kind": "event",
+     "name": "1:1 Mara / Bob"
+    },
+    {
+     "depth": 1,
+     "id": "ent_r4jw42uwirndqzn2",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    },
+    {
+     "depth": 1,
+     "id": "ent_sttsnwekxxjsg56f",
+     "kind": "organization",
+     "name": "Northshore Credit Union"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_frqdxjn76szsk3l3": {
+   "edges": [
+    {
+     "claim": 12,
+     "from": "ent_frqdxjn76szsk3l3",
+     "predicate": "organized",
+     "to": "ent_t3y322htimt6lixu"
+    },
+    {
+     "claim": 13,
+     "from": "ent_frqdxjn76szsk3l3",
+     "predicate": "attended",
+     "to": "ent_t3y322htimt6lixu"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_frqdxjn76szsk3l3",
+     "kind": "person",
+     "name": "R. Chen"
+    },
+    {
+     "depth": 1,
+     "id": "ent_t3y322htimt6lixu",
+     "kind": "event",
+     "name": "1:1 Mara / Bob"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_pngkpc2h5tar2jjq": {
+   "edges": [
+    {
+     "claim": 8,
+     "from": "ent_pngkpc2h5tar2jjq",
+     "predicate": "attended",
+     "to": "ent_2dzrtthmyumov3vk"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_pngkpc2h5tar2jjq",
+     "kind": "person",
+     "name": "Sam"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2dzrtthmyumov3vk",
+     "kind": "event",
+     "name": "Climbing with Sam"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_vtsf2khvna7dsozv": {
+   "edges": [
+    {
+     "claim": 4,
+     "from": "ent_vtsf2khvna7dsozv",
+     "predicate": "attended",
+     "to": "ent_3l554u5fbbdgbtti"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_vtsf2khvna7dsozv",
+     "kind": "person",
+     "name": "Sam Patel"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3l554u5fbbdgbtti",
+     "kind": "event",
+     "name": "Harbor stand-up"
+    }
+   ],
+   "truncated": false
+  }
+ }
+}

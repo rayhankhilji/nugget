@@ -1,0 +1,879 @@
+{
+ "overview": {
+  "edges": [
+   {
+    "claim": 1,
+    "from": "ent_ieq6n5n5nbqxyn77",
+    "predicate": "located_at",
+    "to": "ent_ates55gwknibvknc"
+   },
+   {
+    "claim": 2,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "organized",
+    "to": "ent_ieq6n5n5nbqxyn77"
+   },
+   {
+    "claim": 3,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "attended",
+    "to": "ent_ieq6n5n5nbqxyn77"
+   },
+   {
+    "claim": 4,
+    "from": "ent_mgg7aqthv4kgcfao",
+    "predicate": "attended",
+    "to": "ent_ieq6n5n5nbqxyn77"
+   },
+   {
+    "claim": 11,
+    "from": "ent_rdiqedvbc2eguf2i",
+    "predicate": "located_at",
+    "to": "ent_x5uvpk2zztiwptor"
+   },
+   {
+    "claim": 12,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "organized",
+    "to": "ent_rdiqedvbc2eguf2i"
+   },
+   {
+    "claim": 13,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "attended",
+    "to": "ent_rdiqedvbc2eguf2i"
+   },
+   {
+    "claim": 14,
+    "from": "ent_hbfrjaabuesbh72j",
+    "predicate": "attended",
+    "to": "ent_rdiqedvbc2eguf2i"
+   },
+   {
+    "claim": 17,
+    "from": "ent_rdiqedvbc2eguf2i",
+    "predicate": "has_title",
+    "to": "ent_x5uvpk2zztiwptor"
+   },
+   {
+    "claim": 19,
+    "from": "ent_j2oqpfragcmidri5",
+    "predicate": "located_at",
+    "to": "ent_ruo44gozovfbdzx6"
+   },
+   {
+    "claim": 20,
+    "from": "ent_jkeesmk7ore5gxk4",
+    "predicate": "organized",
+    "to": "ent_j2oqpfragcmidri5"
+   },
+   {
+    "claim": 21,
+    "from": "ent_jkeesmk7ore5gxk4",
+    "predicate": "attended",
+    "to": "ent_j2oqpfragcmidri5"
+   },
+   {
+    "claim": 22,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "attended",
+    "to": "ent_j2oqpfragcmidri5"
+   },
+   {
+    "claim": 40,
+    "from": "ent_o4skdrgiqw4ls3sb",
+    "predicate": "dislikes",
+    "to": "ent_njafvk7gxuiw7wx3"
+   },
+   {
+    "claim": 46,
+    "from": "ent_hvizqzzrusfm4ktg",
+    "predicate": "has_title",
+    "to": "ent_xiwlvx46swbt7jsp"
+   },
+   {
+    "claim": 48,
+    "from": "ent_yg2ircowe7n56ldf",
+    "predicate": "located_at",
+    "to": "ent_yv3xtzzul4cfwzwo"
+   },
+   {
+    "claim": 49,
+    "from": "ent_3wsd7q7m6jkwvn3i",
+    "predicate": "organized",
+    "to": "ent_yg2ircowe7n56ldf"
+   },
+   {
+    "claim": 50,
+    "from": "ent_3wsd7q7m6jkwvn3i",
+    "predicate": "attended",
+    "to": "ent_yg2ircowe7n56ldf"
+   },
+   {
+    "claim": 51,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "attended",
+    "to": "ent_yg2ircowe7n56ldf"
+   },
+   {
+    "claim": 53,
+    "from": "ent_jkeesmk7ore5gxk4",
+    "predicate": "works_at",
+    "to": "ent_vusrcdbg7c2xo7ld"
+   },
+   {
+    "claim": 54,
+    "from": "ent_mgg7aqthv4kgcfao",
+    "predicate": "works_at",
+    "to": "ent_vusrcdbg7c2xo7ld"
+   },
+   {
+    "claim": 55,
+    "from": "ent_ri4us226anjvsmgb",
+    "predicate": "works_at",
+    "to": "ent_vusrcdbg7c2xo7ld"
+   },
+   {
+    "claim": 56,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "corresponded_with",
+    "to": "ent_jkeesmk7ore5gxk4"
+   },
+   {
+    "claim": 57,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "corresponded_with",
+    "to": "ent_mgg7aqthv4kgcfao"
+   },
+   {
+    "claim": 58,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "corresponded_with",
+    "to": "ent_ri4us226anjvsmgb"
+   },
+   {
+    "claim": 59,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "leads",
+    "to": "ent_hdyzodwqjarjicvo"
+   },
+   {
+    "claim": 61,
+    "from": "ent_3dvtt7547loq7rdw",
+    "predicate": "works_at",
+    "to": "ent_eeqndcsakhy55t2g"
+   },
+   {
+    "claim": 62,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "corresponded_with",
+    "to": "ent_3dvtt7547loq7rdw"
+   },
+   {
+    "claim": 63,
+    "from": "ent_3gpe5x6fbbayitlx",
+    "predicate": "works_at",
+    "to": "ent_eeqndcsakhy55t2g"
+   }
+  ],
+  "nodes": [
+   {
+    "depth": 0,
+    "id": "ent_3gpe5x6fbbayitlx",
+    "kind": "person",
+    "name": "Mara Okafor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_j2oqpfragcmidri5",
+    "kind": "event",
+    "name": "1:1 Mara / Bob"
+   },
+   {
+    "depth": 0,
+    "id": "ent_rdiqedvbc2eguf2i",
+    "kind": "event",
+    "name": "Climbing with Sam"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ieq6n5n5nbqxyn77",
+    "kind": "event",
+    "name": "Harbor stand-up"
+   },
+   {
+    "depth": 0,
+    "id": "ent_jkeesmk7ore5gxk4",
+    "kind": "person",
+    "name": "R. Chen"
+   },
+   {
+    "depth": 0,
+    "id": "ent_yg2ircowe7n56ldf",
+    "kind": "event",
+    "name": "Counselling session"
+   },
+   {
+    "depth": 0,
+    "id": "ent_vusrcdbg7c2xo7ld",
+    "kind": "organization",
+    "name": "Brightwell Analytics"
+   },
+   {
+    "depth": 0,
+    "id": "ent_mgg7aqthv4kgcfao",
+    "kind": "person",
+    "name": "Sam Patel"
+   },
+   {
+    "depth": 0,
+    "id": "ent_3wsd7q7m6jkwvn3i",
+    "kind": "person",
+    "name": "Jonas Albers"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ri4us226anjvsmgb",
+    "kind": "person",
+    "name": "Dana Whitfield"
+   },
+   {
+    "depth": 0,
+    "id": "ent_eeqndcsakhy55t2g",
+    "kind": "organization",
+    "name": "Tessellate Systems"
+   },
+   {
+    "depth": 0,
+    "id": "ent_3dvtt7547loq7rdw",
+    "kind": "person",
+    "name": "Gus Ferreira"
+   },
+   {
+    "depth": 0,
+    "id": "ent_hdyzodwqjarjicvo",
+    "kind": "project",
+    "name": "Harbor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_b25pubt4vlc4z47u",
+    "kind": "organization",
+    "name": "Northshore Credit Union"
+   },
+   {
+    "depth": 0,
+    "id": "ent_x5uvpk2zztiwptor",
+    "kind": "place",
+    "name": "Halden Bay Bouldering"
+   },
+   {
+    "depth": 0,
+    "id": "ent_xiwlvx46swbt7jsp",
+    "kind": "person",
+    "name": "Theo"
+   },
+   {
+    "depth": 0,
+    "id": "ent_o4skdrgiqw4ls3sb",
+    "kind": "person",
+    "name": "Dr. Lena Brandt"
+   },
+   {
+    "depth": 0,
+    "id": "ent_rzrp34wr5acfakfw",
+    "kind": "commitment",
+    "name": "05/30"
+   },
+   {
+    "depth": 0,
+    "id": "ent_yv3xtzzul4cfwzwo",
+    "kind": "place",
+    "name": "Albers Counselling, 3 Quay Lane, Halden Bay"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ruo44gozovfbdzx6",
+    "kind": "place",
+    "name": "Brightwell HQ, Bob's office"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ates55gwknibvknc",
+    "kind": "place",
+    "name": "Brightwell HQ, Room Fathom"
+   },
+   {
+    "depth": 0,
+    "id": "ent_h2vvm4krklzsd4ei",
+    "kind": "person",
+    "name": "National Insurance"
+   },
+   {
+    "depth": 0,
+    "id": "ent_podchrlnqsahn6qz",
+    "kind": "person",
+    "name": "Prescription"
+   },
+   {
+    "depth": 0,
+    "id": "ent_hbfrjaabuesbh72j",
+    "kind": "person",
+    "name": "Sam"
+   },
+   {
+    "depth": 0,
+    "id": "ent_hvizqzzrusfm4ktg",
+    "kind": "person",
+    "name": "Told"
+   },
+   {
+    "depth": 0,
+    "id": "ent_njafvk7gxuiw7wx3",
+    "kind": "preference",
+    "name": "iron-deficiency anaemia"
+   },
+   {
+    "depth": 0,
+    "id": "ent_uxzgn5o6anyh6huk",
+    "kind": "commitment",
+    "name": "review it properly"
+   },
+   {
+    "depth": 0,
+    "id": "ent_irxnqj6pr7xv5qve",
+    "kind": "organization",
+    "name": "Mara Okafor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_tqbh2xy66x55agpi",
+    "kind": "topic",
+    "name": "finance"
+   },
+   {
+    "depth": 0,
+    "id": "ent_2fffpcfpiux5jvwq",
+    "kind": "place",
+    "name": "12 Saltmarsh Row, Halden Bay"
+   },
+   {
+    "depth": 0,
+    "id": "ent_kgv46x57yp2l7itv",
+    "kind": "event",
+    "name": "FREQ=WEEKLY;COUNT=8"
+   },
+   {
+    "depth": 0,
+    "id": "ent_vpcrkmna3ah36zsb",
+    "kind": "event",
+    "name": "GP visit"
+   },
+   {
+    "depth": 0,
+    "id": "ent_7giyygjdr6xmb3ec",
+    "kind": "organization",
+    "name": "Halden Bay Medical Practice"
+   },
+   {
+    "depth": 0,
+    "id": "ent_6lzaklm37d57rofp",
+    "kind": "topic",
+    "name": "health"
+   },
+   {
+    "depth": 0,
+    "id": "ent_z7cclpy4c7naen4k",
+    "kind": "topic",
+    "name": "mortgage"
+   },
+   {
+    "depth": 0,
+    "id": "ent_t6iiximilkl2y4uu",
+    "kind": "topic",
+    "name": "payslip"
+   }
+  ],
+  "truncated": false
+ },
+ "centered": {
+  "ent_ri4us226anjvsmgb": {
+   "edges": [
+    {
+     "claim": 55,
+     "from": "ent_ri4us226anjvsmgb",
+     "predicate": "works_at",
+     "to": "ent_vusrcdbg7c2xo7ld"
+    },
+    {
+     "claim": 58,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "corresponded_with",
+     "to": "ent_ri4us226anjvsmgb"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_ri4us226anjvsmgb",
+     "kind": "person",
+     "name": "Dana Whitfield"
+    },
+    {
+     "depth": 1,
+     "id": "ent_vusrcdbg7c2xo7ld",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3gpe5x6fbbayitlx",
+     "kind": "person",
+     "name": "Mara Okafor"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_o4skdrgiqw4ls3sb": {
+   "edges": [
+    {
+     "claim": 40,
+     "from": "ent_o4skdrgiqw4ls3sb",
+     "predicate": "dislikes",
+     "to": "ent_njafvk7gxuiw7wx3"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_o4skdrgiqw4ls3sb",
+     "kind": "person",
+     "name": "Dr. Lena Brandt"
+    },
+    {
+     "depth": 1,
+     "id": "ent_njafvk7gxuiw7wx3",
+     "kind": "preference",
+     "name": "iron-deficiency anaemia"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_3dvtt7547loq7rdw": {
+   "edges": [
+    {
+     "claim": 61,
+     "from": "ent_3dvtt7547loq7rdw",
+     "predicate": "works_at",
+     "to": "ent_eeqndcsakhy55t2g"
+    },
+    {
+     "claim": 62,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "corresponded_with",
+     "to": "ent_3dvtt7547loq7rdw"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_3dvtt7547loq7rdw",
+     "kind": "person",
+     "name": "Gus Ferreira"
+    },
+    {
+     "depth": 1,
+     "id": "ent_eeqndcsakhy55t2g",
+     "kind": "organization",
+     "name": "Tessellate Systems"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3gpe5x6fbbayitlx",
+     "kind": "person",
+     "name": "Mara Okafor"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_3wsd7q7m6jkwvn3i": {
+   "edges": [
+    {
+     "claim": 49,
+     "from": "ent_3wsd7q7m6jkwvn3i",
+     "predicate": "organized",
+     "to": "ent_yg2ircowe7n56ldf"
+    },
+    {
+     "claim": 50,
+     "from": "ent_3wsd7q7m6jkwvn3i",
+     "predicate": "attended",
+     "to": "ent_yg2ircowe7n56ldf"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_3wsd7q7m6jkwvn3i",
+     "kind": "person",
+     "name": "Jonas Albers"
+    },
+    {
+     "depth": 1,
+     "id": "ent_yg2ircowe7n56ldf",
+     "kind": "event",
+     "name": "Counselling session"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_3gpe5x6fbbayitlx": {
+   "edges": [
+    {
+     "claim": 2,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "organized",
+     "to": "ent_ieq6n5n5nbqxyn77"
+    },
+    {
+     "claim": 3,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "attended",
+     "to": "ent_ieq6n5n5nbqxyn77"
+    },
+    {
+     "claim": 12,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "organized",
+     "to": "ent_rdiqedvbc2eguf2i"
+    },
+    {
+     "claim": 13,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "attended",
+     "to": "ent_rdiqedvbc2eguf2i"
+    },
+    {
+     "claim": 22,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "attended",
+     "to": "ent_j2oqpfragcmidri5"
+    },
+    {
+     "claim": 51,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "attended",
+     "to": "ent_yg2ircowe7n56ldf"
+    },
+    {
+     "claim": 56,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "corresponded_with",
+     "to": "ent_jkeesmk7ore5gxk4"
+    },
+    {
+     "claim": 57,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "corresponded_with",
+     "to": "ent_mgg7aqthv4kgcfao"
+    },
+    {
+     "claim": 58,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "corresponded_with",
+     "to": "ent_ri4us226anjvsmgb"
+    },
+    {
+     "claim": 59,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "leads",
+     "to": "ent_hdyzodwqjarjicvo"
+    },
+    {
+     "claim": 62,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "corresponded_with",
+     "to": "ent_3dvtt7547loq7rdw"
+    },
+    {
+     "claim": 63,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "works_at",
+     "to": "ent_eeqndcsakhy55t2g"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_3gpe5x6fbbayitlx",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_ieq6n5n5nbqxyn77",
+     "kind": "event",
+     "name": "Harbor stand-up"
+    },
+    {
+     "depth": 1,
+     "id": "ent_rdiqedvbc2eguf2i",
+     "kind": "event",
+     "name": "Climbing with Sam"
+    },
+    {
+     "depth": 1,
+     "id": "ent_j2oqpfragcmidri5",
+     "kind": "event",
+     "name": "1:1 Mara / Bob"
+    },
+    {
+     "depth": 1,
+     "id": "ent_yg2ircowe7n56ldf",
+     "kind": "event",
+     "name": "Counselling session"
+    },
+    {
+     "depth": 1,
+     "id": "ent_jkeesmk7ore5gxk4",
+     "kind": "person",
+     "name": "R. Chen"
+    },
+    {
+     "depth": 1,
+     "id": "ent_mgg7aqthv4kgcfao",
+     "kind": "person",
+     "name": "Sam Patel"
+    },
+    {
+     "depth": 1,
+     "id": "ent_ri4us226anjvsmgb",
+     "kind": "person",
+     "name": "Dana Whitfield"
+    },
+    {
+     "depth": 1,
+     "id": "ent_hdyzodwqjarjicvo",
+     "kind": "project",
+     "name": "Harbor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3dvtt7547loq7rdw",
+     "kind": "person",
+     "name": "Gus Ferreira"
+    },
+    {
+     "depth": 1,
+     "id": "ent_eeqndcsakhy55t2g",
+     "kind": "organization",
+     "name": "Tessellate Systems"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_h2vvm4krklzsd4ei": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_h2vvm4krklzsd4ei",
+     "kind": "person",
+     "name": "National Insurance"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_podchrlnqsahn6qz": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_podchrlnqsahn6qz",
+     "kind": "person",
+     "name": "Prescription"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_jkeesmk7ore5gxk4": {
+   "edges": [
+    {
+     "claim": 20,
+     "from": "ent_jkeesmk7ore5gxk4",
+     "predicate": "organized",
+     "to": "ent_j2oqpfragcmidri5"
+    },
+    {
+     "claim": 21,
+     "from": "ent_jkeesmk7ore5gxk4",
+     "predicate": "attended",
+     "to": "ent_j2oqpfragcmidri5"
+    },
+    {
+     "claim": 53,
+     "from": "ent_jkeesmk7ore5gxk4",
+     "predicate": "works_at",
+     "to": "ent_vusrcdbg7c2xo7ld"
+    },
+    {
+     "claim": 56,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "corresponded_with",
+     "to": "ent_jkeesmk7ore5gxk4"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_jkeesmk7ore5gxk4",
+     "kind": "person",
+     "name": "R. Chen"
+    },
+    {
+     "depth": 1,
+     "id": "ent_j2oqpfragcmidri5",
+     "kind": "event",
+     "name": "1:1 Mara / Bob"
+    },
+    {
+     "depth": 1,
+     "id": "ent_vusrcdbg7c2xo7ld",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3gpe5x6fbbayitlx",
+     "kind": "person",
+     "name": "Mara Okafor"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_hbfrjaabuesbh72j": {
+   "edges": [
+    {
+     "claim": 14,
+     "from": "ent_hbfrjaabuesbh72j",
+     "predicate": "attended",
+     "to": "ent_rdiqedvbc2eguf2i"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_hbfrjaabuesbh72j",
+     "kind": "person",
+     "name": "Sam"
+    },
+    {
+     "depth": 1,
+     "id": "ent_rdiqedvbc2eguf2i",
+     "kind": "event",
+     "name": "Climbing with Sam"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_mgg7aqthv4kgcfao": {
+   "edges": [
+    {
+     "claim": 4,
+     "from": "ent_mgg7aqthv4kgcfao",
+     "predicate": "attended",
+     "to": "ent_ieq6n5n5nbqxyn77"
+    },
+    {
+     "claim": 54,
+     "from": "ent_mgg7aqthv4kgcfao",
+     "predicate": "works_at",
+     "to": "ent_vusrcdbg7c2xo7ld"
+    },
+    {
+     "claim": 57,
+     "from": "ent_3gpe5x6fbbayitlx",
+     "predicate": "corresponded_with",
+     "to": "ent_mgg7aqthv4kgcfao"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_mgg7aqthv4kgcfao",
+     "kind": "person",
+     "name": "Sam Patel"
+    },
+    {
+     "depth": 1,
+     "id": "ent_ieq6n5n5nbqxyn77",
+     "kind": "event",
+     "name": "Harbor stand-up"
+    },
+    {
+     "depth": 1,
+     "id": "ent_vusrcdbg7c2xo7ld",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3gpe5x6fbbayitlx",
+     "kind": "person",
+     "name": "Mara Okafor"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_xiwlvx46swbt7jsp": {
+   "edges": [
+    {
+     "claim": 46,
+     "from": "ent_hvizqzzrusfm4ktg",
+     "predicate": "has_title",
+     "to": "ent_xiwlvx46swbt7jsp"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_xiwlvx46swbt7jsp",
+     "kind": "person",
+     "name": "Theo"
+    },
+    {
+     "depth": 1,
+     "id": "ent_hvizqzzrusfm4ktg",
+     "kind": "person",
+     "name": "Told"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_hvizqzzrusfm4ktg": {
+   "edges": [
+    {
+     "claim": 46,
+     "from": "ent_hvizqzzrusfm4ktg",
+     "predicate": "has_title",
+     "to": "ent_xiwlvx46swbt7jsp"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_hvizqzzrusfm4ktg",
+     "kind": "person",
+     "name": "Told"
+    },
+    {
+     "depth": 1,
+     "id": "ent_xiwlvx46swbt7jsp",
+     "kind": "person",
+     "name": "Theo"
+    }
+   ],
+   "truncated": false
+  }
+ }
+}

@@ -1,0 +1,117 @@
+{
+ "knowledge": {
+  "claims": 36,
+  "entities": 40,
+  "extractor_provider": "local-chat",
+  "last_run": "2026-10-30T20:51:30.734481111Z",
+  "mentions": 81,
+  "pending_items": 0,
+  "vault": {
+   "conflicts": [],
+   "invalid": [],
+   "last_render": "2026-10-30T20:51:30.745028595Z",
+   "pages": 40,
+   "path": "/home/runner/work/nugget/nugget/qa-home/data/vault"
+  }
+ },
+ "ingest": {
+  "embedding_provider": "local-embedding",
+  "freshness_p50_ms": 330024,
+  "freshness_p95_ms": 628846,
+  "queue_depth": 0,
+  "sources": [
+   {
+    "chunks": 43,
+    "enabled": true,
+    "id": "files-1",
+    "items": 42,
+    "kind": "files",
+    "last_error": null,
+    "last_sync": "2026-10-30T20:34:16.625473246Z",
+    "name": "Mara's files",
+    "settings": {
+     "roots": [
+      "/home/runner/work/nugget/nugget/qa-home/corpus"
+     ]
+    },
+    "state": "watching"
+   }
+  ],
+  "triage_provider": "local-chat"
+ },
+ "runtime": [
+  {
+   "error": null,
+   "model_id": "qwen3-8b-q4km",
+   "provider": "local-chat",
+   "role": "chat",
+   "state": "ready"
+  },
+  {
+   "error": null,
+   "model_id": "nomic-embed-text-v1.5-q8",
+   "provider": "local-embedding",
+   "role": "embedding",
+   "state": "ready"
+  }
+ ],
+ "providers": [
+  {
+   "capabilities": {
+    "context_tokens": 8192,
+    "embeddings": false,
+    "json_schema": true,
+    "streaming": true,
+    "tools": false,
+    "vision": false
+   },
+   "error": null,
+   "id": "local-chat",
+   "kind": "openai_compatible",
+   "locality": "on_device",
+   "model": "qwen3-8b-q4km",
+   "tiers": [
+    "triage",
+    "light",
+    "synthesis",
+    "agentic"
+   ]
+  },
+  {
+   "capabilities": {
+    "context_tokens": null,
+    "embeddings": true,
+    "json_schema": false,
+    "streaming": false,
+    "tools": false,
+    "vision": false
+   },
+   "error": null,
+   "id": "local-embedding",
+   "kind": "openai_compatible",
+   "locality": "on_device",
+   "model": "nomic-embed-text-v1.5-q8",
+   "tiers": [
+    "embedding"
+   ]
+  }
+ ],
+ "sources": [
+  {
+   "chunks": 43,
+   "enabled": true,
+   "id": "files-1",
+   "items": 42,
+   "kind": "files",
+   "last_error": null,
+   "last_sync": "2026-10-30T20:34:16.625473246Z",
+   "name": "Mara's files",
+   "settings": {
+    "roots": [
+     "/home/runner/work/nugget/nugget/qa-home/corpus"
+    ]
+   },
+   "state": "watching"
+  }
+ ]
+}
