@@ -1,0 +1,4 @@
+{"from": "203.0.113.66", "qname": "api.anthropic.com", "qtype": "A", "answers": ["203.0.113.74"], "t": 1793389897.231516}
+{"from": "203.0.113.66", "qname": "api.anthropic.com", "qtype": "AAAA", "answers": [], "t": 1793389897.231885}
+{"from": "203.0.113.66", "qname": "api.anthropic.com", "qtype": "A", "answers": ["203.0.113.74"], "t": 1793389898.710076}
+{"from": "203.0.113.66", "qname": "api.anthropic.com", "qtype": "AAAA", "answers": [], "t": 1793389898.710336}

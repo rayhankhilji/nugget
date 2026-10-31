@@ -1,0 +1,13 @@
+runner: GitHub Actions 1000010424 (Linux X64)
+commit: c361fb7580634f8f51cd3bd999112056d2a64298
+before_ref: 40e1994
+scale: quick
+date: 2026-10-30T09:15:42Z
+CPU(s):                                  4
+Model name:                              Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      125%
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           3           0          11          14
+Swap:              2           0           2

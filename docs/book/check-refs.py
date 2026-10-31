@@ -124,7 +124,7 @@ METHOD_PREFIXES = (
 )
 IN_PROGRESS = "in progress"
 FILE_SUFFIXES = (".toml", ".json", ".md", ".rs", ".log", ".db", ".sock", ".lock", ".key",
-                 ".plist", ".service", ".pid", ".rten")
+                 ".plist", ".service", ".pid", ".rten", ".csv", ".jsonl")
 PROSE_AFTER_NUGGETD = {"is", "was", "has", "exits", "started", "now", "running"}
 
 problems: list[str] = []

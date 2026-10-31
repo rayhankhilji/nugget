@@ -1,0 +1,47 @@
+{
+  "commit": "0d81796",
+  "runs": [
+    {
+      "task": "5cba28137bce41e786a507d832cf3be8",
+      "stop_to_finished_ms": 2.2,
+      "finished": {
+        "outcome": "halted"
+      },
+      "halted": true,
+      "approve_reply": {
+        "code": -32001,
+        "message": "no open confirmation act_7d1bf354f0a9d212a5d3541bd83ef81f:8"
+      },
+      "submits_at_extension": 0,
+      "ok": true
+    },
+    {
+      "task": "ec044dff7bb440988d3b06fad27cd765",
+      "stop_to_finished_ms": 1.6,
+      "finished": {
+        "outcome": "halted"
+      },
+      "halted": true,
+      "approve_reply": {
+        "code": -32001,
+        "message": "no open confirmation act_f277403eec3168708c9210bb8335658e:8"
+      },
+      "submits_at_extension": 0,
+      "ok": true
+    },
+    {
+      "task": "efa8b4988a504d03b9f145d1f2fc2692",
+      "stop_to_finished_ms": 2.4,
+      "finished": {
+        "outcome": "halted"
+      },
+      "halted": true,
+      "approve_reply": {
+        "code": -32001,
+        "message": "no open confirmation act_3e66a5a1fde766f394277fbe8ec9d4bf:8"
+      },
+      "submits_at_extension": 0,
+      "ok": true
+    }
+  ]
+}

@@ -1,0 +1,239 @@
+query	target	text	fake.hybrid@10	fake.bm25	fake.vector	real.bm25@10	real.vector@10	real.hybrid@10	real.hybrid_mmr@10	real.hybrid_convex@10	real.hybrid_mmr_convex@10	real.hybrid_rerank@10	real.hybrid_mmr_rerank@10	real.hybrid_mmr_rerank_fixed@10	real.bm25	real.vector
+0	1734	derefomi lyso miviloru refobalo	4	1	9	1	-	3	3	1	1	3	3	3	1	-
+1	1003	kaka kaly neta demirulo	2	1	-	1	-	3	3	1	1	3	3	3	1	-
+2	221	mizudemi lyru delone nekadelo	1	1	2	1	-	3	4	1	1	3	4	4	1	-
+3	325	gizu vizuvi lovizu soneloru	1	1	8	1	-	5	5	1	1	5	5	5	1	-
+4	1438	desosomi nelyzulo loka zuruzulo	1	1	1	1	-	1	1	1	1	1	1	1	1	24
+5	1308	dekalolo rerulyru paka ruka	6	1	-	1	-	4	3	1	1	4	3	3	1	-
+6	882	girukaru bafomiru neremi baka	-	1	65	1	-	3	3	1	1	3	3	3	1	-
+7	983	deka gizuvita logilomi zumipata	5	1	-	1	-	2	2	1	1	2	2	2	1	-
+8	1539	paremi tamipa pazumiru lorupa	1	1	15	1	-	3	3	1	1	3	3	3	1	29
+9	1982	lymireta milypa sovitata fofosoru	2	1	-	1	-	2	2	1	1	2	2	2	1	-
+10	1962	lovigilo kaka vimiparu lymi	5	1	-	1	-	8	7	1	1	8	7	7	1	-
+11	919	bareru foloremi kaka nebaly	-	1	60	1	-	3	5	1	1	3	5	5	1	-
+12	692	viderelo revilolo ruka pagigimi	1	1	16	1	-	3	3	1	1	3	3	3	1	32
+13	29	logizulo gizukalo gibaso negi	4	1	-	1	-	5	5	1	1	5	5	5	1	-
+14	1498	loka lomigiru kagi ruruderu	4	1	-	1	-	4	3	1	1	4	3	3	1	-
+15	630	bafomiru soviparu regiparu paka	2	1	12	1	-	6	5	1	1	6	5	5	1	-
+16	1917	lokaru taviba remilo gidevi	1	1	3	1	1	1	1	1	1	1	1	1	1	1
+17	1630	solo vigimi minerulo nepa	6	1	-	1	-	4	4	1	1	4	4	4	1	-
+18	26	sobafota tarepata lygilomi resosota	1	1	5	1	-	4	6	1	1	4	6	6	1	-
+19	1868	loka sopaparu remi zumilomi	9	1	-	1	-	3	4	1	1	3	4	4	1	-
+20	1811	lylogi bamifo loparemi logipa	2	1	11	1	-	3	2	1	1	3	2	2	1	-
+21	1023	lopa kavizulo somi foka	-	15	99	-	-	-	-	-	-	-	-	-	18	-
+22	1124	virelomi rebare taloremi lolomi	1	1	3	1	-	1	1	1	1	1	1	1	1	26
+23	1422	loka lyzude barumi viruvilo	6	1	-	1	-	6	5	1	1	6	5	5	1	-
+24	1899	gilyrulo demilylo nelo ruviso	1	1	3	1	-	1	1	1	1	1	1	1	1	31
+25	1248	tarelylo zupaso lyka sopalo	5	1	22	1	5	1	1	1	1	1	1	1	1	5
+26	773	takata lyvivilo lolo neruta	1	1	18	1	-	1	1	1	1	1	1	1	1	20
+27	1127	rerune kaka folo zulydeta	1	1	1	1	-	3	4	1	1	3	4	4	1	-
+28	837	lofopa lyrude gibademi zuka	3	1	33	1	-	2	2	1	1	2	2	2	1	-
+29	1480	runebalo viretalo nekamita relovi	1	1	1	1	-	4	5	1	1	4	5	5	1	-
+30	962	loka kanelyru zuvigita derelo	1	1	13	1	-	5	5	1	1	5	5	5	1	-
+31	43	miso soka tafokaru revidelo	1	1	1	1	-	1	1	1	1	1	1	1	1	35
+32	1095	degi paderuru misore soruzuta	1	1	1	1	-	1	1	1	1	1	1	1	1	-
+33	1222	zubalota lynevi tazulo rukamilo	1	1	1	1	-	4	4	1	1	4	4	4	1	-
+34	434	pavivi nenebami nerurulo defodelo	1	1	8	1	-	2	2	1	1	2	2	2	1	-
+35	1138	nelyso negi lygiba gimirelo	1	1	2	1	-	3	2	1	1	3	2	2	1	-
+36	167	taruru fonenemi lomideru kaka	3	1	-	1	-	3	5	1	1	3	5	5	1	-
+37	1168	takalo badetalo nebademi virudemi	3	1	17	1	-	1	1	1	1	1	1	1	1	19
+38	383	bami zuneba gisokami remiruru	2	1	-	1	-	1	1	1	1	1	1	1	1	-
+39	1493	rekami neka lyvifolo dezufota	1	2	4	2	-	1	1	2	2	1	1	1	2	26
+40	1237	demimi kagi lolomi kakaru	2	1	19	1	-	3	2	1	1	3	2	2	1	-
+41	1855	zuka pami loso lotamimi	3	1	-	1	6	1	1	1	1	1	1	1	1	6
+42	956	pagilomi neka vilo givikata	1	1	36	1	-	4	3	1	1	4	3	3	1	-
+43	246	neka tarebami sosodelo reru	1	1	23	1	-	3	5	1	1	3	5	5	1	-
+44	840	fosofolo zufogimi kaka loka	1	1	12	1	-	1	1	1	1	1	1	1	1	-
+45	626	rulyzuru migi kakasoru gilozu	1	1	1	1	-	2	2	1	1	2	2	2	1	-
+46	811	mizuvita bane kademi lyrelomi	5	1	-	1	-	2	2	1	1	2	2	2	1	-
+47	1104	mika kanezulo lyderu deka	10	1	44	1	-	2	2	1	1	2	2	2	1	-
+48	55	kasoruta lolo mizudemi batalyru	1	1	5	1	-	2	2	1	1	2	2	2	1	-
+49	1496	tazudelo batazuru talofomi gizulo	9	1	-	1	-	3	4	1	1	3	4	4	1	-
+50	1534	vizukami sozubami foka gigita	2	1	12	1	-	5	5	1	1	5	5	5	1	-
+51	871	deru pabaneru lyfozu kadenelo	2	1	5	1	-	4	4	1	1	4	4	4	1	-
+52	591	denetami karenemi rurekata vitaly	1	1	21	1	10	1	1	1	1	1	1	1	1	10
+53	1295	gigisota vika talo lylylymi	-	7	-	7	-	-	-	7	7	-	-	-	7	-
+54	1638	lofo kagikalo kalo regigilo	1	1	7	1	-	4	3	1	1	4	3	3	1	-
+55	1925	palonelo rekane lota misolo	3	1	11	1	-	5	5	1	1	5	5	5	1	-
+56	648	zugizu lypazulo sotademi ruredemi	3	1	28	1	-	2	3	1	1	2	3	3	1	53
+57	238	kareparu loka mivitata dedebami	9	1	-	1	-	2	2	1	1	2	2	2	1	-
+58	852	gimizuru zuka logiso zudemi	1	1	5	3	-	6	6	3	3	6	6	6	3	-
+59	1501	neka fovilo mika delopami	1	1	1	1	-	4	3	1	1	4	3	3	1	-
+60	372	zusoneru vilo pami bami	6	1	-	1	-	5	5	1	1	5	5	5	1	-
+61	362	foka mimitalo fonemi tapalo	4	1	-	1	-	1	1	1	1	1	1	1	1	-
+62	119	relyparu babalolo bakaneru vimirumi	1	1	2	1	-	2	2	1	1	2	2	2	1	73
+63	1314	lota tazuta sonerulo tareviru	1	1	2	1	-	4	3	1	1	4	3	3	1	-
+64	873	zulo badesoru pavisolo mimilylo	4	2	15	2	-	10	9	2	2	10	9	9	2	-
+65	261	reloru kaka fovirelo sokaruta	6	1	-	1	-	3	2	1	1	3	2	2	1	-
+66	547	rukami detalymi reka mika	1	1	3	1	-	1	1	1	1	1	1	1	1	-
+67	569	mirufolo revikata tasoru lokaremi	1	1	3	1	-	2	2	1	1	2	2	2	1	39
+68	1273	mika loka nebaly desolyru	7	1	-	1	-	5	6	1	1	5	6	6	1	75
+69	387	nesoneta sosozu revi bafobami	-	1	-	1	-	6	7	1	1	6	7	7	1	-
+70	267	loforuru rerune kasolo gita	1	1	1	1	-	2	2	1	1	2	2	2	1	11
+71	764	kata zurutami lomiru loka	6	1	97	1	-	4	4	1	1	4	4	4	1	-
+72	963	milygimi lolyruru rugilylo viloru	1	1	1	1	-	5	6	1	1	5	6	6	1	-
+73	534	gimimi tazugimi gine givimita	2	1	6	1	-	5	6	1	1	5	6	6	1	-
+74	1345	fobazumi zulysomi vinelomi zuka	2	1	4	1	-	7	6	1	1	7	6	6	1	-
+75	652	vibafolo nene rerulo rebasoru	1	1	11	1	-	2	2	1	1	2	2	2	1	-
+76	1226	kalydeta gitaruta lybami kazulolo	6	1	-	1	-	3	2	1	1	3	2	2	1	-
+77	1050	soretalo kalo zusomi rudemilo	1	1	7	1	-	3	3	1	1	3	3	3	1	-
+78	1565	baka gimineta lolyba kavita	1	1	3	2	-	3	3	2	2	3	3	3	2	29
+79	181	runekalo rusomita foka fogimimi	1	2	3	3	-	1	1	3	2	1	1	1	3	21
+80	360	resone pasone gifodeta pasoso	7	1	55	1	-	5	5	1	1	5	5	5	1	-
+81	933	rukareta pamipata lolo virusolo	1	1	1	1	-	3	4	1	1	3	4	4	1	-
+82	1011	rupa loka neka rutami	8	1	80	1	-	4	4	1	1	4	4	4	1	-
+83	1764	kataru neka katane loka	5	1	84	1	-	2	2	1	1	2	2	2	1	-
+84	812	taneso fofolyru gilyru rulyrumi	1	1	1	1	-	5	5	1	1	5	5	5	1	-
+85	1909	gilo loka vikare vikata	6	1	-	1	-	6	5	1	1	6	5	5	1	-
+86	1513	nefofomi kafozu paka lyfodemi	-	1	64	1	-	3	4	1	1	3	4	4	1	-
+87	1688	lyzureta kafoneru loka ruka	10	5	-	8	-	3	3	7	7	3	3	3	8	26
+88	979	lylybaru loka basopata balonemi	3	1	13	1	-	4	4	1	1	4	4	4	1	-
+89	675	gifodeta taka sololo remi	5	1	51	1	-	1	1	1	1	1	1	1	1	-
+90	1212	fosovi relotalo lolomi barelyru	1	1	7	1	-	1	1	1	1	1	1	1	1	-
+91	1869	gibaly rugirumi pade debagiru	3	1	19	1	-	4	5	1	1	4	5	5	1	96
+92	840	defovi loforuru vimi rupare	2	1	10	1	6	1	1	1	1	1	1	1	1	6
+93	309	rezusolo reforu negi parumilo	1	1	4	1	-	3	2	1	1	3	2	2	1	-
+94	763	talolo detami tafoderu zunemita	6	1	-	1	-	3	4	1	1	3	4	4	1	-
+95	1108	padeneta viru banegilo tasotata	1	1	9	1	-	2	3	1	1	2	3	3	1	-
+96	858	ruka reloruta neka kaka	-	2	-	1	-	3	2	1	1	3	2	2	1	-
+97	1204	lota vitalymi reforemi reka	10	2	-	2	-	4	2	2	2	4	2	2	2	-
+98	151	lybafo lyvifo rereviru lobafomi	1	1	1	1	-	3	3	1	1	3	3	3	1	39
+99	1562	videru lyta rufopata lolyzu	1	1	1	1	-	3	4	1	1	3	4	4	1	-
+100	1842	viba soneruru mika ruka	4	1	-	1	-	2	3	1	1	2	3	3	1	-
+101	454	tafosota zumi mikatalo relolyru	4	1	66	1	-	5	6	1	1	5	6	6	1	-
+102	1745	mipaba viso zupaso solylymi	1	1	1	1	-	7	8	1	1	7	8	8	1	43
+103	1407	soruzu bapadeta rulonelo taka	10	1	-	1	-	3	3	1	1	3	3	3	1	-
+104	619	nemi lygikata folykata dekami	1	1	1	1	-	5	5	1	1	5	5	5	1	-
+105	785	loka mirugi nelolo renevi	6	1	-	1	-	5	4	1	1	5	4	4	1	-
+106	1023	rekakami zukarumi dedeba delololo	1	1	2	1	-	6	7	1	1	6	7	7	1	-
+107	510	zupaly badezuta gisode lozugita	1	1	1	1	-	4	4	1	1	4	4	4	1	-
+108	1581	rumiru zukaruru kaka fokazulo	3	1	17	1	-	3	3	1	1	3	3	3	1	-
+109	665	fone solylo baso rupatami	4	1	72	1	-	2	3	1	1	2	3	3	1	-
+110	528	defotata nerutata ruka loregilo	6	1	-	1	-	1	1	1	1	1	1	1	1	15
+111	1070	katamita gifomilo badedeta gilyforu	5	1	55	1	-	4	4	1	1	4	4	4	1	-
+112	968	paka debavita babade zunefolo	8	1	43	1	-	1	1	1	1	1	1	1	1	-
+113	1568	lopabaru taka vilykaru fofokalo	3	1	15	1	-	2	2	1	1	2	2	2	1	-
+114	970	palylylo depade neka foparu	1	1	3	1	-	4	6	1	1	4	6	6	1	-
+115	1083	balo ruka reru lonezu	3	1	18	1	-	2	2	1	1	2	2	2	1	-
+116	994	retabami neka gipalylo zulotalo	5	1	-	1	-	2	2	1	1	2	2	2	1	-
+117	355	dene resoremi baginemi talobami	-	3	88	3	-	9	-	3	3	9	-	-	3	-
+118	766	zuloru kazuly kaka regi	4	1	-	1	-	4	4	1	1	4	4	4	1	-
+119	827	renedelo papadeta fotare loka	-	1	88	1	-	2	3	1	1	2	3	3	1	-
+120	279	mibadeta kaka reloneru soforu	-	1	94	1	-	4	4	1	1	4	4	4	1	-
+121	1107	lopaviru girebaru dekafo viso	1	1	2	1	-	3	6	1	1	3	6	6	1	-
+122	1492	lokapalo vika nelovi repalo	7	1	51	1	4	1	1	1	1	1	1	1	1	4
+123	802	vimizumi lyvi nemita paka	8	2	100	2	-	8	8	3	3	8	8	8	2	-
+124	160	lymiparu tabalo degipami vitagilo	1	1	2	1	-	5	4	1	1	5	4	4	1	-
+125	405	pafozuru reka lylyzumi rudeloru	1	1	4	1	-	5	5	1	1	5	5	5	1	-
+126	739	baru denezuta pasone fodegita	1	1	1	1	-	2	3	1	1	2	3	3	1	-
+127	576	katalyru sosota pagiremi lygimi	4	1	13	1	-	3	4	1	1	3	4	4	1	-
+128	407	gisozulo solo regivi solovi	1	1	21	1	-	3	3	1	1	3	3	3	1	-
+129	98	vigirumi paka ruka gikaruta	6	1	45	1	-	2	2	1	1	2	2	2	1	-
+130	87	kaka miruzuta vipaly sofogimi	3	1	57	1	2	1	1	1	1	1	1	1	1	2
+131	347	fovine kataviru nepatalo zuru	1	1	1	1	-	8	8	1	1	8	8	8	1	-
+132	1835	gilopata loginelo lyzubalo kane	4	1	-	1	-	4	3	1	1	4	3	3	1	-
+133	1156	katafo mitaba virurelo deru	1	1	3	1	-	2	2	1	1	2	2	2	1	-
+134	214	zuvikalo videdeta rufoforu vilyvilo	1	1	1	1	-	2	2	1	1	2	2	2	1	-
+135	539	givimi zunelolo dekapata lofovimi	1	1	7	1	-	5	5	1	1	5	5	5	1	-
+136	878	zumilo zutagita loka pata	5	1	-	1	-	3	3	1	1	3	3	3	1	-
+137	1203	nemi zubavi lyvinelo basoru	1	1	1	1	-	2	2	1	1	2	2	2	1	-
+138	216	sota relolylo fokaloru neparumi	2	1	15	1	-	2	3	1	1	2	3	3	1	-
+139	1107	desopata baviruru denemita debakata	3	1	-	1	-	3	4	1	1	3	4	4	1	-
+140	1252	degibalo kaka derude rusoso	3	1	26	1	-	3	2	1	1	3	2	2	1	-
+141	897	fodetaru debata zuso kalo	8	1	73	1	-	4	4	1	1	4	4	4	1	57
+142	565	karesota soka zuka bagiba	3	18	2	-	-	-	-	-	-	-	-	-	21	-
+143	1839	loly zuka rederu soforeta	1	1	5	1	-	2	2	1	1	2	2	2	1	-
+144	1116	nevi lorurelo pasode vibare	6	1	-	1	-	3	3	1	1	3	3	3	1	-
+145	1308	milo lypasoru paka neka	1	2	17	4	-	-	10	5	4	-	10	10	4	-
+146	1296	vifopalo demire badegi ginelylo	1	1	1	1	-	3	3	1	1	3	3	3	1	-
+147	38	gitarumi givifolo loka lozuvilo	1	1	8	1	-	2	2	1	1	2	2	2	1	84
+148	989	sotademi rekazulo relyneru badedeta	1	1	1	1	1	1	1	1	1	1	1	1	1	1
+149	1294	soka nereloru kaka miparumi	4	2	26	3	-	6	6	3	3	6	6	6	3	52
+150	732	sore kareso sodekalo pafopa	1	1	3	1	-	4	3	1	1	4	3	3	1	-
+151	1613	kaka baka pakagilo miba	5	1	-	1	-	2	2	1	1	2	2	2	1	-
+152	1448	gizu ruka zuloruru demi	9	2	84	2	-	4	3	2	2	4	3	3	2	-
+153	1777	mivimi somibami pagita mika	3	1	-	1	-	4	3	1	1	4	3	3	1	-
+154	1617	delo rezuforu ruka miforu	6	1	66	1	-	5	4	1	1	5	4	4	1	-
+155	252	losotata solybaru rezuru zuzufolo	3	1	20	1	-	5	5	1	1	5	5	5	1	-
+156	1089	tafotalo kaka redefolo tanemi	8	1	-	1	-	4	3	1	1	4	3	3	1	-
+157	563	nebaru lygi pazufo kavikami	1	1	1	1	-	3	3	1	1	3	3	3	1	-
+158	452	banelo gigidelo loka kaka	-	26	-	-	-	-	-	-	-	-	-	-	15	-
+159	782	misoloru lyrulo ruvi resovi	2	1	39	1	-	1	1	1	1	1	1	1	1	11
+160	1539	somi karulo denevi loka	6	2	-	2	-	4	3	4	5	4	3	3	2	-
+161	1973	rulo sorudelo gilomita mizupa	7	1	-	1	-	2	2	1	1	2	2	2	1	-
+162	1278	rulomilo gimi mika loba	4	1	-	1	-	3	2	1	1	3	2	2	1	-
+163	1447	loka tavikalo mikaviru remimi	2	1	-	1	-	2	2	1	1	2	2	2	1	-
+164	1989	balosoru parukami deka fonereru	1	1	2	1	-	3	2	1	1	3	2	2	1	-
+165	1922	lyfosolo kadepami kadereta vipaly	6	1	-	1	-	5	5	1	1	5	5	5	1	-
+166	347	renebami repami zuzulo lylykaru	3	1	21	1	-	3	6	1	1	3	6	6	1	-
+167	255	kalo rurerelo lykapami talo	2	1	-	1	-	1	1	1	1	1	1	1	1	31
+168	1635	kafokalo ruba logigiru loka	5	1	-	1	-	6	6	1	1	6	6	6	1	-
+169	797	foremiru sode tagilo regilyru	5	1	-	1	-	5	5	1	1	5	5	5	1	-
+170	1307	redenemi lofone milolo zuzumi	4	1	80	1	-	4	4	1	1	4	4	4	1	-
+171	1841	solo resoreru mifoderu gily	6	1	27	1	-	5	6	1	1	5	6	6	1	91
+172	487	resovilo lovizuru neneso ruka	1	1	19	1	-	3	3	1	1	3	3	3	1	-
+173	1522	lozumita kaka rebakalo refolo	5	1	41	1	-	2	2	1	1	2	2	2	1	-
+174	1496	kaka lomine deka dededelo	1	1	5	2	-	5	6	2	2	5	6	6	2	-
+175	190	vizuru vitapa relo sore	2	1	6	1	-	4	4	1	1	4	4	4	1	-
+176	1371	bazuremi zutata tane pavilo	2	1	15	1	-	1	1	1	1	1	1	1	1	-
+177	667	zulodelo lofo lololymi lofone	4	2	16	2	-	1	1	2	2	1	1	1	2	38
+178	282	milopalo forefota lysorumi lykagiru	1	1	1	1	-	1	1	1	1	1	1	1	1	-
+179	544	tanefota mika pabadeta nemilomi	-	1	67	1	-	5	5	1	1	5	5	5	1	-
+180	1553	forenemi fotakami sodene kaka	2	1	20	1	-	7	7	1	1	7	7	7	1	-
+181	872	padeneta rebafolo foka rurugita	2	1	-	1	-	2	2	1	1	2	2	2	1	-
+182	330	somine tagimi vigizuta virumi	1	1	2	1	-	1	1	1	1	1	1	1	1	-
+183	1158	sobare reka sosoderu fobamita	7	1	-	1	-	3	3	1	1	3	3	3	1	-
+184	1542	lylomi ruka karenelo kaka	7	1	-	1	-	4	3	1	1	4	3	3	1	-
+185	601	denelomi nelylo folyneta lytazu	2	1	21	1	-	1	1	1	1	1	1	1	1	-
+186	1343	parunemi rufosomi kaka kabagita	-	1	-	1	-	5	5	1	1	5	5	5	1	-
+187	337	mika ruka kasolylo mine	3	1	35	1	-	2	2	1	1	2	2	2	1	-
+188	754	lypalylo sogivi nenedeta fololo	1	1	4	1	-	3	3	1	1	3	3	3	1	-
+189	696	rukabata gitare vifoly fomi	1	1	9	1	7	1	1	1	1	1	1	1	1	7
+190	435	somigiru demi kadely demita	5	1	24	1	-	4	4	1	1	4	4	4	1	-
+191	740	sopaneta kakakami kafotami lysofota	1	1	1	1	-	3	3	1	1	3	3	3	1	-
+192	89	rufo rebamiru kaka milykami	8	1	-	1	-	4	4	1	1	4	4	4	1	37
+193	1631	lyruzumi vika nelo loka	-	-	-	-	-	-	-	-	-	-	-	-	-	-
+194	1735	fonekami mika zutare mikane	1	1	5	1	-	4	3	1	1	4	3	3	1	-
+195	708	tarutami rubagita gipare misoreta	2	1	14	1	-	2	2	1	1	2	2	2	1	79
+196	562	foparumi patalomi lytazu zudeta	1	1	2	1	-	1	1	1	1	1	1	1	1	-
+197	1109	nepa kaka vika vily	6	1	80	1	-	3	3	1	1	3	3	3	1	-
+198	489	revimi dezufo neruneta ruka	6	1	-	1	-	1	1	1	1	1	1	1	1	-
+199	627	soforeta zulyneru lybazulo fodepa	7	1	76	1	-	3	4	1	1	3	4	4	1	-
+# hybrid@10 real_only: 6 11 69 86 96 117 119 120 179 186
+#   q6 target 882 "girukaru bafomiru neremi baka"
+#     fake: target 1/65 | 1336(3/6) 1930(7/3) 1293(2/15) 216(17/2) 814(9/10) 531(16/5) 1154(22/4) 442(33/1) 520(34/7) 1556(38/11)
+#     real: target 1/- | 814(9/20) 608(28/14) 882*(1/-) 1695(84/1) 1293(2/-) 1525(-/2) 923(-/3) 1336(3/-) 1192(-/4) 1393(4/-)
+#   q11 target 919 "bareru foloremi kaka nebaly"
+#     fake: target 1/60 | 453(4/1) 507(6/11) 721(5/14) 241(26/2) 25(7/19) 341(28/3) 1072(2/33) 255(27/8) 404(29/32) 1636(30/37)
+#     real: target 1/- | 1077(11/7) 1807(14/13) 919*(1/-) 1738(-/1) 1072(2/-) 1808(-/2) 141(88/3) 31(3/-) 304(-/4) 453(4/-)
+#   q69 target 387 "nesoneta sosozu revi bafobami"
+#     fake: target 1/- | 1020(2/12) 1801(9/7) 938(7/16) 734(3/22) 1338(22/8) 722(24/10) 822(5/37) 250(21/20) 192(12/32) 1117(32/26)
+#     real: target 1/- | 1020(2/5) 765(16/2) 1755(8/28) 1801(9/34) 1613(33/10) 387*(1/-) 651(-/1) 734(3/41) 1406(-/3) 1158(4/-)
+#   q86 target 1513 "nefofomi kafozu paka lyfodemi"
+#     fake: target 1/64 | 160(14/5) 1628(20/6) 390(29/3) 1029(18/10) 328(16/13) 256(26/7) 535(17/15) 463(32/8) 609(36/25) 298(27/34)
+#     real: target 1/- | 1454(10/1) 710(40/10) 1513*(1/-) 1518(2/-) 1801(-/2) 223(3/-) 554(-/3) 211(-/4) 594(4/-) 1669(74/5)
+#   q96 target 858 "ruka reloruta neka kaka"
+#     fake: target 2/- | 526(9/7) 1538(8/8) 84(23/2) 20(27/4) 525(32/3) 224(4/33) 187(26/10) 546(13/30) 1241(12/37) 205(34/15)
+#     real: target 1/- | 1862(11/6) 538(-/1) 858*(1/-) 1585(2/-) 1888(-/2) 744(4/-) 1097(-/3) 224(3/-) 1273(-/4) 759(-/5)
+#   q117 target 355 "dene resoremi baginemi talobami"
+#     fake: target 3/88 | 1594(1/1) 560(2/2) 1123(4/4) 844(8/3) 945(6/5) 1642(7/6) 90(11/9) 852(15/8) 216(14/10) 684(12/14)
+#     real: target 3/- | 844(8/6) 1064(13/22) 1099(9/32) 595(35/27) 1426(-/1) 1594(1/-) 560(2/-) 1650(-/2) 355*(3/-) 1172(-/3)
+#   q119 target 827 "renedelo papadeta fotare loka"
+#     fake: target 1/88 | 1645(23/1) 170(40/2) 295(28/9) 1851(38/5) 1757(37/6) 1023(25/15) 285(24/21) 865(31/16) 1172(26/24) 1260(33/34)
+#     real: target 1/- | 200(71/1) 827*(1/-) 111(2/-) 904(-/2) 1089(52/3) 1555(4/-) 260(3/-) 351(81/4) 168(-/5) 1717(6/-)
+#   q120 target 279 "mibadeta kaka reloneru soforu"
+#     fake: target 1/94 | 1045(8/5) 1697(25/2) 540(21/11) 1843(26/8) 584(22/12) 1387(33/7) 1796(36/13) 1318(20/33) 459(30/24) 255(24/32)
+#     real: target 1/- | 244(40/12) 1414(34/33) 242(-/1) 279*(1/-) 718(-/2) 1024(2/-) 673(3/-) 1365(-/3) 635(4/-) 1109(-/4)
+#   q179 target 544 "tanefota mika pabadeta nemilomi"
+#     fake: target 1/67 | 464(15/12) 1623(19/10) 720(18/13) 493(26/9) 1(20/14) 1696(40/3) 173(21/17) 36(17/24) 549(27/16) 1501(16/29)
+#     real: target 1/- | 36(17/5) 464(15/23) 549(27/33) 1638(39/40) 544*(1/-) 1571(-/1) 1416(5/-) 1446(89/2) 236(48/3) 624(2/-)
+#   q186 target 1343 "parunemi rufosomi kaka kabagita"
+#     fake: target 1/- | 845(2/4) 584(32/3) 1037(12/20) 1641(16/22) 255(34/13) 1208(15/32) 1318(30/25) 540(31/29) 142(37/26) 241(33/35)
+#     real: target 1/- | 1259(5/1) 845(2/12) 1872(10/10) 1869(6/36) 1343*(1/-) 1722(-/2) 469(-/3) 1143(3/43) 1612(-/4) 381(-/5)
+# hybrid@10 fake_only: 142 145
+#   q142 target 565 "karesota soka zuka bagiba"
+#     fake: target 18/2 | 1180(2/4) 805(1/7) 565*(18/2) 974(10/30) 393(14/38) 142(28/21) 1168(85/1) 196(3/-) 606(45/3) 1172(4/-)
+#     real: target 21/- | 1199(26/35) 121(-/1) 196(1/-) 1033(-/2) 1172(2/-) 1180(3/-) 1215(-/3) 544(-/4) 1058(5/-) 297(-/5)
+#   q145 target 1308 "milo lypasoru paka neka"
+#     fake: target 2/17 | 1308*(2/17) 717(30/2) 917(7/26) 1815(28/8) 798(26/13) 322(24/20) 250(-/1) 1121(1/-) 610(-/3) 1993(3/-)
+#     real: target 4/- | 1993(5/13) 1614(6/15) 1424(24/4) 1533(11/30) 1106(39/8) 528(-/1) 614(1/-) 628(-/2) 1196(2/-) 1121(3/-)

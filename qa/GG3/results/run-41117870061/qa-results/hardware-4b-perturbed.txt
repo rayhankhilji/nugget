@@ -1,0 +1,10 @@
+job: 4b-perturbed
+runner: GitHub Actions 1000011419 (Linux X64)
+commit: 81802f1dc1b8cc3d0bfb18b0e9c2d68804e1e25d
+date: 2026-10-30T20:19:51Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 7763 64-Core Processor
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              15           0           9           0           5          14
+Swap:              2           0           2

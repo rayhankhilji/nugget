@@ -44,7 +44,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nugget_core::capability::{Capabilities, Locality, Tier};
-use nugget_core::ids::EntityId;
+use nugget_core::ids::{EntityId, ProviderId};
 use nugget_core::{Error, Result};
 use nugget_graph::{EntityKind, EntityQuery, Evidence, GraphStore, normalize_name};
 use nugget_infer::{ChatRequest, ChatResponse, Message, Provider, Router, StopReason};
@@ -234,7 +234,7 @@ pub(crate) fn json_caps() -> Capabilities {
 }
 
 /// Run a JSON-schema chat on the first provider that answers, trying the given (already
-/// privacy-checked) providers in order. Returns the parsed JSON.
+/// privacy-checked) providers in order. Returns the parsed JSON and the provider that answered.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn chat_json(
     router: &Router,
@@ -245,7 +245,7 @@ pub(crate) async fn chat_json(
     max_tokens: u32,
     timeout: Duration,
     item: Option<&nugget_core::ids::ItemRef>,
-) -> Result<Value> {
+) -> Result<(Value, ProviderId)> {
     let mut last = Error::NotFound("no allowed provider".into());
     for p in providers {
         let mut req = ChatRequest::new(vec![Message::user_text(prompt.clone())])
@@ -272,7 +272,7 @@ pub(crate) async fn chat_json(
                 match parse_json(&resp.text()) {
                     Ok(v) => {
                         router.report_success(p.id());
-                        return Ok(v);
+                        return Ok((v, p.id().clone()));
                     }
                     Err(e) => last = e,
                 }
@@ -2114,6 +2114,8 @@ pub(crate) struct LlmRun {
     pub failed_requests: usize,
     /// Batches not sent because the run's request budget ran out.
     pub deferred: bool,
+    /// The provider that answered the last successful request.
+    pub provider: Option<ProviderId>,
 }
 
 /// Extract with the given (privacy-checked) providers, spending at most `budget` requests.
@@ -2166,7 +2168,8 @@ pub(crate) async fn extract(
         )
         .await;
         match reply {
-            Ok(v) => {
+            Ok((v, provider)) => {
+                run.provider = Some(provider);
                 let (ex, gate) = validate(&v, item, &batch, cfg, me_name, sender_is_me, &lim);
                 run.extraction.absorb(ex);
                 run.gate.claims_accepted += gate.claims_accepted;

@@ -1,0 +1,6 @@
+{"timestamp":"2026-10-31T11:59:45.074110Z","level":"INFO","fields":{"message":"proactive cards configured","enabled":true,"judge":"Off","brief_time":"8:00:00.0","utc_offset":"-04:00:00"},"target":"nuggetd::features::proactive"}
+{"timestamp":"2026-10-31T12:00:00.102732Z","level":"INFO","fields":{"message":"morning brief ready","date":"2026-10-31","cards":5},"target":"nuggetd::features::proactive"}
+{"timestamp":"2026-11-01T00:00:32.243890Z","level":"INFO","fields":{"message":"proactive cards configured","enabled":true,"judge":"Off","brief_time":"8:00:00.0","utc_offset":"-04:00:00"},"target":"nuggetd::features::proactive"}
+{"timestamp":"2026-11-01T06:05:29.716872Z","level":"INFO","fields":{"message":"the local UTC offset changed","utc_offset":"-05:00:00"},"target":"nuggetd::features::proactive"}
+{"timestamp":"2026-11-01T13:00:16.610601Z","level":"INFO","fields":{"message":"morning brief ready","date":"2026-11-01","cards":5},"target":"nuggetd::features::proactive"}
+{"timestamp":"2026-11-02T13:00:21.122053Z","level":"INFO","fields":{"message":"morning brief ready","date":"2026-11-02","cards":5},"target":"nuggetd::features::proactive"}

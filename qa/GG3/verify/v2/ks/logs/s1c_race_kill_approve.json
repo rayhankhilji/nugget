@@ -1,0 +1,275 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "runs": [
+        {
+          "order": "kill_first",
+          "task": "d58cba60027e45c29af7acdec0c6122a",
+          "approve_reply": "error: confirmation act_e0dd52785b7e5f3a782c56e407631311:8 is no longer open",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "model_replied",
+            "action_proposed",
+            "confirmation_needed",
+            "finished"
+          ],
+          "submits_at_extension": 0,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "executed(browser_type):ran",
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-26.1ms",
+            "act:type@-12.7ms"
+          ],
+          "extension_left_halted": false
+        },
+        {
+          "order": "approve_first",
+          "task": "9e6fc7875ba14d328b273d54f5c75613",
+          "approve_reply": "error: confirmation act_3781c7c76f384fa4b8a749c1987b8313:8 is no longer open",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "model_replied",
+            "action_proposed",
+            "confirmation_needed",
+            "finished"
+          ],
+          "submits_at_extension": 0,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "executed(browser_type):ran",
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-26.9ms",
+            "act:type@-13.3ms"
+          ],
+          "extension_left_halted": false
+        },
+        {
+          "order": "approve_first_gap5ms",
+          "task": "09521cbf11814718a3d053de2d5dba6a",
+          "approve_reply": "accepted (null)",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "confirmation_resolved:approved",
+            "action_done",
+            "verification",
+            "finished"
+          ],
+          "submits_at_extension": 1,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):approved",
+            "executed(browser_submit):ran",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-32.3ms",
+            "act:type@-17.3ms",
+            "act:submit@-0.6ms"
+          ],
+          "extension_left_halted": false
+        }
+      ],
+      "ok": true
+    },
+    {
+      "runs": [
+        {
+          "order": "kill_first",
+          "task": "d701b940a84a4ceb84d5d15593adc858",
+          "approve_reply": "accepted (null)",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "action_proposed",
+            "confirmation_needed",
+            "confirmation_resolved:approved",
+            "finished"
+          ],
+          "submits_at_extension": 0,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-33.9ms",
+            "act:type@-20.6ms"
+          ],
+          "extension_left_halted": false
+        },
+        {
+          "order": "approve_first",
+          "task": "b2e6a8e291f9489a847b569de1fbe1be",
+          "approve_reply": "accepted (null)",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "action_proposed",
+            "confirmation_needed",
+            "confirmation_resolved:approved",
+            "finished"
+          ],
+          "submits_at_extension": 0,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-25.6ms",
+            "act:type@-12.7ms"
+          ],
+          "extension_left_halted": false
+        },
+        {
+          "order": "approve_first_gap5ms",
+          "task": "781bdaf1e77b4e8abcd5404cc5244fff",
+          "approve_reply": "accepted (null)",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "confirmation_resolved:approved",
+            "action_done",
+            "verification",
+            "finished"
+          ],
+          "submits_at_extension": 1,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):approved",
+            "executed(browser_submit):ran",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-30.3ms",
+            "act:type@-17.1ms",
+            "act:submit@-1.2ms"
+          ],
+          "extension_left_halted": false
+        }
+      ],
+      "ok": true
+    },
+    {
+      "runs": [
+        {
+          "order": "kill_first",
+          "task": "ed285d2fc42a402a9b45ffa4531c337b",
+          "approve_reply": "accepted (null)",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "action_proposed",
+            "confirmation_needed",
+            "confirmation_resolved:approved",
+            "finished"
+          ],
+          "submits_at_extension": 0,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-25.9ms",
+            "act:type@-13.0ms"
+          ],
+          "extension_left_halted": false
+        },
+        {
+          "order": "approve_first",
+          "task": "80b5b84fd30845e3b1d24f86efa57900",
+          "approve_reply": "accepted (null)",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "action_proposed",
+            "confirmation_needed",
+            "confirmation_resolved:approved",
+            "finished"
+          ],
+          "submits_at_extension": 0,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-26.2ms",
+            "act:type@-13.2ms"
+          ],
+          "extension_left_halted": false
+        },
+        {
+          "order": "approve_first_gap5ms",
+          "task": "d7a0ea1d53db40cdba1f2f723fdc03f9",
+          "approve_reply": "accepted (null)",
+          "finished": {
+            "outcome": "halted"
+          },
+          "events": [
+            "confirmation_resolved:approved",
+            "action_done",
+            "verification",
+            "finished"
+          ],
+          "submits_at_extension": 1,
+          "submit_after_kill_reply": 0,
+          "submit_after_kill_sent": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):approved",
+            "executed(browser_submit):ran",
+            "finished:halted"
+          ],
+          "ext_requests": [
+            "snapshot@-37.0ms",
+            "act:type@-19.2ms",
+            "act:submit@-2.4ms"
+          ],
+          "extension_left_halted": false
+        }
+      ],
+      "ok": true
+    }
+  ]
+}

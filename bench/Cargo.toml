@@ -59,6 +59,8 @@ nugget-proactive.workspace = true
 # `--local-models`: the signed manifest, model store and llama-server supervisor the app uses.
 nugget-models.workspace = true
 nugget-runtime.workspace = true
+# `ask`: the daemon's answer prompt and streaming post-check (`nuggetd::ask`), not a copy.
+nuggetd = { path = "../crates/nuggetd" }
 
 [dev-dependencies]
 # `draft` against a mocked OpenAI-compatible provider.

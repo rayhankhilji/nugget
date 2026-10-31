@@ -1,0 +1,162 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "accepted_after_kill": "8/10",
+      "submits_total": 0,
+      "tries": [
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.03,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "approved",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.09,
+          "approve_reply": "error: confirmation act_cb569bd2e97e09c50703863fda74a418:8 is no longer open",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.03,
+          "approve_reply": "error: confirmation act_1cb18e47c884800b6edd646b7bcbc79c:8 is no longer open",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.01,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        }
+      ],
+      "ok": false
+    }
+  ]
+}

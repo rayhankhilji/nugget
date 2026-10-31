@@ -30,7 +30,8 @@ export function t(key) {
 /** A RegExp matching the English message `key` exactly, with `{args}` and plurals as wildcards. */
 export function tPattern(key) {
   let out = "";
-  const s = t(key);
+  // Text content never holds the markup some messages carry (`<code>{path}</code>`).
+  const s = t(key).replace(/<\/?[a-zA-Z][^>]*>/g, "");
   for (let i = 0; i < s.length; ) {
     if (s[i] === "{") {
       // Skip the whole (possibly nested) placeholder.

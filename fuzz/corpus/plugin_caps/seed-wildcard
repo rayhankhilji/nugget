@@ -1,0 +1,5 @@
+*.cdn.example.com
+https://img.cdn.example.com/a.png
+*.cdn.example.com
+HTTPS://Feeds.Example.com:443
+$token

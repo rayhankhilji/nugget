@@ -6,25 +6,40 @@
 //!   `AXFocusedUIElement`, which must belong to that window.
 //! - Secure fields (`AXSecureTextField`) are detected from the subrole before any value is
 //!   requested, and their value is never asked for.
+//! - Chromium browsers and Electron apps build their web accessibility tree only for a client
+//!   that sets `AXManualAccessibility` on the app (not `AXEnhancedUserInterface`, which breaks
+//!   window animations). It is set once per pid before the focus is read; a placeholder focus
+//!   (window, group, web area) right after that is read once more after a short wait.
+//! - Rich web editors that expose no `AXValue`/`AXSelectedTextRange` are read through text
+//!   markers (`AXTextMarkerRangeForUIElement`, `AXStringForTextMarkerRange`,
+//!   `AXSelectedTextMarkerRange`), bounded and best effort.
 //! - Insertion sets `AXSelectedTextRange` to the selection and then `AXSelectedText`, which
 //!   replaces the selection like typing. Offsets are converted between characters and the
-//!   UTF-16 units AX uses.
+//!   UTF-16 units AX uses. Text with line breaks for a multi-line web editor is refused, so the
+//!   engine pastes it: Chromium and WebKit insert it as one `insertText`, which rich editor
+//!   frameworks handle inconsistently.
 //! - Computer use (M4) is in `computer`: apps and windows, element actions, key input, launch.
 
 mod ax;
 mod computer;
 mod pasteboard;
 
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::AXUIElement;
-use objc2_core_foundation::{CFBoolean, CFRetained, CFString, CFType, CFURL};
+use objc2_core_foundation::{CFArray, CFBoolean, CFRetained, CFString, CFType, CFURL};
 use objc2_core_graphics::{CGEvent, CGEventFlags, CGEventTapLocation};
 
 use crate::clipboard::Clipboard;
 use crate::computer::{AppEntry, KeyInput, UiAction, UiActionKind};
 use crate::engine::{FieldRead, Platform, PlatformWindow, Target};
+use crate::platform::hints;
+use crate::platform::text_map::{self, TextMap, chars_to_utf16, utf16_to_chars};
 use crate::role::{Role, role_from_ax};
 use crate::sanitize;
 use crate::tree::{Element, Node, States};
@@ -69,21 +84,117 @@ fn cf_string_list(t: &CFType) -> Option<String> {
     (!out.is_empty()).then(|| out.join(" "))
 }
 
-fn utf16_to_chars(s: &str, units: usize) -> u32 {
-    let mut seen = 0usize;
-    let mut chars = 0u32;
-    for c in s.chars() {
-        if seen >= units {
-            break;
-        }
-        seen += c.len_utf16();
-        chars += 1;
-    }
-    chars
+/// How long after `AXManualAccessibility` was set a placeholder focus is read again.
+const MANUAL_AX_FRESH: Duration = Duration::from_secs(2);
+/// The wait before reading the focus again.
+const FOCUS_RETRY_WAIT: Duration = Duration::from_millis(250);
+/// Ancestors climbed to find the element's window.
+const WINDOW_DEPTH: usize = 64;
+/// Ancestors climbed to find a web area.
+const WEB_AREA_DEPTH: usize = 40;
+/// Cap on text read through text markers (bytes).
+const MARKER_MAX_BYTES: usize = 1 << 20;
+
+/// Attempts at setting `AXManualAccessibility` on one pid, spaced by a doubling back-off.
+const MANUAL_AX_ATTEMPTS: u32 = 4;
+const MANUAL_AX_BACKOFF: Duration = Duration::from_millis(500);
+
+/// What was done about one pid's web accessibility.
+struct ManualAx {
+    /// The app embeds Chromium (or is a Gecko browser): its web tree must be switched on.
+    chromium: bool,
+    /// A Gecko browser: `AXEnhancedUserInterface` is what switches its tree on.
+    gecko: bool,
+    /// When `AXManualAccessibility` was set successfully.
+    enabled_at: Option<Instant>,
+    attempts: u32,
+    last_attempt: Option<Instant>,
+    /// The one placeholder-focus retry for this pid was used.
+    retried: bool,
 }
 
-fn chars_to_utf16(s: &str, chars: u32) -> usize {
-    s.chars().take(chars as usize).map(char::len_utf16).sum()
+static MANUAL_AX: Mutex<BTreeMap<i32, ManualAx>> = Mutex::new(BTreeMap::new());
+
+/// Turn on a Chromium/Electron app's web accessibility. Classified once per pid; the attribute
+/// is set until it succeeds (a few attempts with back-off). Returns whether it was enabled
+/// recently enough that its tree may still be building and the one retry is still unused.
+fn ensure_web_accessibility(app: &AxEl, pid: i32, running: Option<&NSRunningApplication>) -> bool {
+    let mut seen = MANUAL_AX.lock().unwrap_or_else(|p| p.into_inner());
+    if !seen.contains_key(&pid) {
+        let id = running
+            .and_then(|r| r.bundleIdentifier())
+            .map(|s| s.to_string());
+        let gecko = id.as_deref().is_some_and(hints::macos_is_gecko);
+        let chromium = gecko
+            || id
+                .as_deref()
+                .is_some_and(hints::macos_needs_manual_accessibility)
+            || running
+                .and_then(|r| r.bundleURL())
+                .and_then(|u| u.path())
+                .is_some_and(|p| {
+                    let root = std::path::PathBuf::from(p.to_string());
+                    hints::macos_bundle_embeds_chromium(|rel| root.join(rel).exists())
+                });
+        // Pids are reused; forget old entries rather than grow without bound.
+        if seen.len() >= 512 {
+            seen.clear();
+        }
+        seen.insert(
+            pid,
+            ManualAx {
+                chromium,
+                gecko,
+                enabled_at: None,
+                attempts: 0,
+                last_attempt: None,
+                retried: false,
+            },
+        );
+    }
+    let Some(st) = seen.get_mut(&pid) else {
+        return false;
+    };
+    if !st.chromium {
+        return false;
+    }
+    let due = st
+        .last_attempt
+        .is_none_or(|t| t.elapsed() >= MANUAL_AX_BACKOFF * 2u32.pow(st.attempts.saturating_sub(1)));
+    if st.enabled_at.is_none() && st.attempts < MANUAL_AX_ATTEMPTS && due {
+        st.attempts += 1;
+        st.last_attempt = Some(Instant::now());
+        let manual = ax::set_attr(&app.0, "AXManualAccessibility", CFBoolean::new(true));
+        // Gecko: `AXEnhancedUserInterface` (what VoiceOver sets); Gecko browsers only, as it
+        // slows window animations elsewhere.
+        let r = if st.gecko {
+            ax::set_attr(&app.0, "AXEnhancedUserInterface", CFBoolean::new(true)).or(manual)
+        } else {
+            manual
+        };
+        tracing::debug!(
+            pid,
+            ok = r.is_ok(),
+            gecko = st.gecko,
+            attempt = st.attempts,
+            "switched on web accessibility"
+        );
+        if r.is_ok() {
+            st.enabled_at = Some(Instant::now());
+        }
+    }
+    !st.retried && st.enabled_at.is_some_and(|t| t.elapsed() < MANUAL_AX_FRESH)
+}
+
+/// Use up the one placeholder-focus retry of `pid`.
+fn take_focus_retry(pid: i32) {
+    if let Some(st) = MANUAL_AX
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get_mut(&pid)
+    {
+        st.retried = true;
+    }
 }
 
 const BASE_ATTRS: &[&str] = &[
@@ -101,6 +212,10 @@ const BASE_ATTRS: &[&str] = &[
     "AXExpanded",
     "AXDisclosing",
     "AXTitleUIElement",
+    // Set on the elements inside a contenteditable (WebKit, Chromium): text runs and
+    // paragraphs are part of the editor, so the engine can climb to its root.
+    "AXEditableAncestor",
+    "AXHighestEditableAncestor",
 ];
 
 /// How deep [`AxEl::label_text`] looks for a label's text.
@@ -210,6 +325,14 @@ impl AxEl {
         if let Some(id) = get("AXIdentifier").and_then(cf_string) {
             node.attrs.insert("identifier".into(), id);
         }
+        // Inside a contenteditable: the element has an editable ancestor (itself for the root).
+        if !node.states.editable
+            && !secure
+            && enabled
+            && (get("AXEditableAncestor").is_some() || get("AXHighestEditableAncestor").is_some())
+        {
+            node.states.editable = true;
+        }
         // Rich editors (Mail's compose web view, contenteditable regions) are editable web
         // areas or groups; AX says so by making the value settable.
         if !node.states.editable
@@ -246,6 +369,121 @@ impl AxEl {
             .filter_map(|c| c.label_text(depth - 1))
             .collect();
         (!parts.is_empty()).then(|| parts.join(" "))
+    }
+
+    fn raw_role(&self) -> String {
+        self.get("AXRole")
+            .and_then(|t| cf_string(&t))
+            .unwrap_or_default()
+    }
+
+    /// The focus a Chromium app reports before its web tree is ready.
+    fn is_placeholder_focus(&self) -> bool {
+        hints::macos_focus_is_placeholder(
+            &self.raw_role(),
+            ax::is_settable(&self.0, "AXSelectedText"),
+        )
+    }
+
+    /// Whether this element is, or is inside, a web area (bounded walk up).
+    fn in_web_area(&self) -> bool {
+        let mut cur = Some(self.clone());
+        for _ in 0..WEB_AREA_DEPTH {
+            let Some(el) = cur else { return false };
+            match el.raw_role().as_str() {
+                "AXWebArea" => return true,
+                "AXWindow" | "AXApplication" => return false,
+                _ => {}
+            }
+            cur = el.parent();
+        }
+        false
+    }
+
+    /// Whether this element belongs to `window`: its `AXWindow` or `AXTopLevelUIElement` is
+    /// that window, or (when those are missing or name another object, as web content in some
+    /// browsers does) the window is one of its ancestors (bounded walk). An element that names
+    /// no window at all is taken as in it.
+    fn in_window(&self, window: &AxEl) -> bool {
+        let named: Vec<AxEl> = ["AXWindow", "AXTopLevelUIElement"]
+            .iter()
+            .filter_map(|a| self.get(a).and_then(AxEl::element))
+            .collect();
+        if named.iter().any(|w| w.same(window)) {
+            return true;
+        }
+        let mut cur = self.parent();
+        for _ in 0..WINDOW_DEPTH {
+            let Some(p) = cur else { break };
+            if p.same(window) {
+                return true;
+            }
+            match p.raw_role().as_str() {
+                // Another window (a panel, a sheet's parent): not this one.
+                "AXWindow" => return false,
+                "AXApplication" => break,
+                _ => {}
+            }
+            cur = p.parent();
+        }
+        named.is_empty()
+    }
+
+    fn marker_param(&self, name: &str, param: &CFType) -> Option<CFRetained<CFType>> {
+        ax::param_attr(&self.0, name, param)
+    }
+
+    fn marker_string(&self, range: &CFType) -> Option<String> {
+        let v = self.marker_param("AXStringForTextMarkerRange", range)?;
+        let s = cf_string(&v)?;
+        (s.len() <= MARKER_MAX_BYTES).then_some(s)
+    }
+
+    /// The text between two markers, in either order.
+    fn string_between(&self, a: &CFType, b: &CFType) -> Option<String> {
+        let pair = CFArray::<CFType>::from_objects(&[a, b]);
+        let range = self.marker_param("AXTextMarkerRangeForUnorderedTextMarkers", &pair)?;
+        self.marker_string(&range)
+    }
+
+    /// Text and selection (character offsets into that text) through text markers, for rich
+    /// web editors without `AXValue`/`AXSelectedTextRange`. Best effort: `None` when the
+    /// element has no marker range; the selection is `None` when it cannot be placed in the
+    /// element's text.
+    fn marker_state(&self) -> Option<(String, Option<(u32, u32)>)> {
+        let el_range = self.marker_param("AXTextMarkerRangeForUIElement", &self.0)?;
+        let text = self.marker_string(&el_range)?;
+        let selection = (|| {
+            let sel = self.get("AXSelectedTextMarkerRange")?;
+            let sel_start = self.marker_param("AXStartTextMarkerForTextMarkerRange", &sel)?;
+            // The text from the element's start marker to the selection start (WebKit and
+            // Chromium both answer `AXStartTextMarkerForTextMarkerRange`).
+            let el_start = self.marker_param("AXStartTextMarkerForTextMarkerRange", &el_range)?;
+            let prefix = self.string_between(&el_start, &sel_start)?;
+            // The selection must lie in this element: its prefix is a prefix of the text.
+            if !text.starts_with(&prefix) {
+                return None;
+            }
+            let start = prefix.chars().count() as u32;
+            let selected = self.marker_string(&sel).unwrap_or_default();
+            let total = text.chars().count() as u32;
+            let end = (start + selected.chars().count() as u32).min(total);
+            Some((start, end))
+        })();
+        Some((text, selection))
+    }
+
+    /// Bounds of the selected text marker range (rich web editors).
+    fn marker_selection_bounds(&self) -> Option<Rect> {
+        let sel = self.get("AXSelectedTextMarkerRange")?;
+        let v = self.marker_param("AXBoundsForTextMarkerRange", &sel)?;
+        let r = ax::as_rect(&v)?;
+        (r.size.height > 0.0).then_some(Rect {
+            x: r.origin.x,
+            y: r.origin.y,
+            width: r.size.width.max(1.0),
+            height: r.size.height,
+        })
     }
 
     fn selection_utf16(&self) -> Option<(usize, usize)> {
@@ -318,21 +556,40 @@ impl Platform for AxPlatform {
         computer::require_trust()?;
         let sys = ax::system_wide();
         let Some(app) = ax::attr(&sys, "AXFocusedApplication").and_then(AxEl::element) else {
+            tracing::debug!("focus: no AXFocusedApplication");
             return Ok(None);
         };
-        let Some(el) = app.get("AXFocusedUIElement").and_then(AxEl::element) else {
+        let pid = ax::pid(&app.0);
+        let running = pid.and_then(NSRunningApplication::runningApplicationWithProcessIdentifier);
+        // Chromium and Electron expose web content only once asked; before the focus is read.
+        let fresh = pid.is_some_and(|p| ensure_web_accessibility(&app, p, running.as_deref()));
+        let mut focused = app.get("AXFocusedUIElement").and_then(AxEl::element);
+        if fresh
+            && let Some(p) = pid
+            && focused.as_ref().is_none_or(AxEl::is_placeholder_focus)
+        {
+            take_focus_retry(p);
+            std::thread::sleep(FOCUS_RETRY_WAIT);
+            if let Some(again) = app.get("AXFocusedUIElement").and_then(AxEl::element) {
+                focused = Some(again);
+            }
+        }
+        let Some(el) = focused else {
+            tracing::debug!(?pid, fresh, "focus: the app reports no AXFocusedUIElement");
             return Ok(None);
         };
         let window = app.get("AXFocusedWindow").and_then(AxEl::element);
         // Only the focused window: an element in another window (or a floating panel) is not
         // the user's target.
-        if let (Some(w), Some(ew)) = (&window, el.get("AXWindow").and_then(AxEl::element))
-            && !w.same(&ew)
+        if let Some(w) = &window
+            && !el.in_window(w)
         {
+            tracing::debug!(
+                ?pid,
+                "focus: the focused element is outside the focused window"
+            );
             return Ok(None);
         }
-        let pid = ax::pid(&app.0);
-        let running = pid.and_then(NSRunningApplication::runningApplicationWithProcessIdentifier);
         let name = running
             .as_ref()
             .and_then(|r| r.localizedName())
@@ -378,11 +635,31 @@ impl Platform for AxPlatform {
             FieldState::default()
         } else {
             let raw = node.value.clone().unwrap_or_default();
-            let value = sanitize::clean_value(&raw, max_value_bytes);
-            let truncated = value.len() < raw.len();
-            let selection = el
-                .selection_utf16()
-                .map(|(s, e)| (utf16_to_chars(&raw, s), utf16_to_chars(&raw, e)));
+            let mut norm = text_map::normalize_newlines(&raw);
+            let mut selection = el.selection_utf16().map(|(s, e)| {
+                (
+                    norm.to_text(utf16_to_chars(&raw, s)),
+                    norm.to_text(utf16_to_chars(&raw, e)),
+                )
+            });
+            // Rich web editors (contenteditable, Mail compose) may expose neither: read the
+            // text markers instead.
+            if (raw.is_empty() || selection.is_none())
+                && node.states.editable
+                && el.in_web_area()
+                && let Some((text, sel)) = el.marker_state()
+            {
+                let marked = text_map::normalize_newlines(&text);
+                let map_sel = |m: &TextMap| sel.map(|(s, e)| (m.to_text(s), m.to_text(e)));
+                if raw.is_empty() {
+                    selection = map_sel(&marked);
+                    norm = marked;
+                } else if selection.is_none() && marked.text == norm.text {
+                    selection = map_sel(&marked);
+                }
+            }
+            let value = sanitize::clean_value(&norm.text, max_value_bytes);
+            let truncated = value.len() < norm.text.len();
             FieldState {
                 value,
                 selection,
@@ -393,17 +670,29 @@ impl Platform for AxPlatform {
     }
 
     fn caret_bounds(&self, el: &AxEl, state: &FieldState) -> Option<Rect> {
+        if el.selection_utf16().is_none()
+            && let Some(r) = el.marker_selection_bounds()
+        {
+            return Some(r);
+        }
+        // Ranges are in the live `AXValue`'s UTF-16 units; the read value had its line endings
+        // normalised, so offsets from it are mapped back through the live value.
+        let live = el
+            .get("AXValue")
+            .and_then(|t| cf_string(&t))
+            .unwrap_or_else(|| state.value.clone());
+        let map = text_map::normalize_newlines(&live);
         let (s, e) = el.selection_utf16().or_else(|| {
             let (s, e) = state.selection?;
             Some((
-                chars_to_utf16(&state.value, s),
-                chars_to_utf16(&state.value, e),
+                chars_to_utf16(&live, map.to_source(s)),
+                chars_to_utf16(&live, map.to_source(e)),
             ))
         })?;
         if e > s {
             return el.bounds_for_range(s, e - s);
         }
-        let len: usize = state.value.encode_utf16().count();
+        let len: usize = live.encode_utf16().count();
         if s < len
             && let Some(r) = el.bounds_for_range(s, 1)
         {
@@ -425,12 +714,29 @@ impl Platform for AxPlatform {
         if !ax::is_settable(&el.0, "AXSelectedText") {
             return Err(Error::Unsupported("AXSelectedText is not settable".into()));
         }
-        if let Some((s, e)) = before.selection {
+        if text.contains('\n')
+            && hints::macos_web_multiline_editor(&el.raw_role(), el.in_web_area())
+        {
+            return Err(Error::Unsupported(
+                "line breaks into a web editor are pasted".into(),
+            ));
+        }
+        // Best effort: keeps the insertion where the user left the caret. Offsets are placed in
+        // the live `AXValue` (the read value had its line endings normalised); fields read
+        // through text markers keep their own selection.
+        let raw = el
+            .get("AXValue")
+            .and_then(|t| cf_string(&t))
+            .unwrap_or_default();
+        let map = text_map::normalize_newlines(&raw);
+        if let Some((s, e)) = before.selection
+            && !raw.is_empty()
+            && map.len() as usize == before.value.chars().count()
+        {
             let (s, e) = (s.min(e), s.max(e));
-            let s16 = chars_to_utf16(&before.value, s);
-            let e16 = chars_to_utf16(&before.value, e);
-            if let Some(range) = ax::range_value(s16, e16 - s16) {
-                // Best effort: keeps the insertion where the user left the caret.
+            let s16 = chars_to_utf16(&raw, map.to_source(s));
+            let e16 = chars_to_utf16(&raw, map.to_source(e));
+            if let Some(range) = ax::range_value(s16, e16.saturating_sub(s16)) {
                 let _ = ax::set_attr(&el.0, "AXSelectedTextRange", &range);
             }
         }
@@ -469,21 +775,5 @@ impl Platform for AxPlatform {
 
     fn open_app(&self, name: &str) -> Result<()> {
         computer::open_app(name)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn utf16_offsets() {
-        let s = "a😀b";
-        assert_eq!(utf16_to_chars(s, 0), 0);
-        assert_eq!(utf16_to_chars(s, 1), 1);
-        assert_eq!(utf16_to_chars(s, 3), 2);
-        assert_eq!(utf16_to_chars(s, 4), 3);
-        assert_eq!(chars_to_utf16(s, 2), 3);
-        assert_eq!(chars_to_utf16(s, 3), 4);
     }
 }

@@ -1,0 +1,694 @@
+{
+ "note": "Modelled on Chromium on macOS (AX) for the FF3 Gmail-like compose: a contenteditable body (AXTextArea) under a To field with a recipient chip and a Subject input, next to an inbox table of other conversations with previews (a decoy, not a thread) and a password field.",
+ "app": {
+  "id": "com.google.Chrome",
+  "name": "Google Chrome",
+  "window_title": "Nugget fixture: Mail compose"
+ },
+ "field_value": "Draft: ",
+ "root": {
+  "role": "window",
+  "raw_role": "AXWindow",
+  "name": "Nugget fixture: Mail compose",
+  "bounds": [
+   0,
+   0,
+   1280,
+   860
+  ],
+  "children": [
+   {
+    "role": "group",
+    "raw_role": "AXGroup",
+    "bounds": [
+     0,
+     80,
+     1280,
+     780
+    ],
+    "children": [
+     {
+      "role": "web_area",
+      "raw_role": "AXWebArea",
+      "name": "Nugget fixture: Mail compose",
+      "bounds": [
+       0,
+       80,
+       1280,
+       780
+      ],
+      "attrs": {
+       "url": "http://127.0.0.1:41873/index.html?editor=mail-compose"
+      },
+      "children": [
+       {
+        "role": "group",
+        "raw_role": "AXGroup/AXLandmarkNavigation",
+        "name": "Main menu",
+        "bounds": [
+         0,
+         80,
+         280,
+         780
+        ],
+        "children": [
+         {
+          "role": "link",
+          "raw_role": "AXLink",
+          "name": "Inbox 4"
+         },
+         {
+          "role": "link",
+          "raw_role": "AXLink",
+          "name": "Starred"
+         },
+         {
+          "role": "link",
+          "raw_role": "AXLink",
+          "name": "Sent"
+         },
+         {
+          "role": "link",
+          "raw_role": "AXLink",
+          "name": "Drafts 1"
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "AXGroup/AXLandmarkMain",
+        "bounds": [
+         280,
+         80,
+         1000,
+         780
+        ],
+        "children": [
+         {
+          "role": "table",
+          "raw_role": "AXTable",
+          "name": "Inbox",
+          "bounds": [
+           300,
+           140,
+           960,
+           160
+          ],
+          "children": [
+           {
+            "role": "row",
+            "raw_role": "AXRow",
+            "bounds": [
+             300,
+             140,
+             960,
+             40
+            ],
+            "children": [
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               300,
+               140,
+               200,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Jordan Lee",
+                "bounds": [
+                 310,
+                 150,
+                 180,
+                 18
+                ]
+               }
+              ]
+             },
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               500,
+               140,
+               640,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Q3 offsite venue",
+                "bounds": [
+                 510,
+                 150,
+                 200,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": " - Can we move the offsite to Thursday instead?",
+                "bounds": [
+                 710,
+                 150,
+                 420,
+                 18
+                ]
+               }
+              ]
+             },
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               1140,
+               140,
+               120,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "9:41 AM",
+                "bounds": [
+                 1150,
+                 150,
+                 100,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "row",
+            "raw_role": "AXRow",
+            "bounds": [
+             300,
+             180,
+             960,
+             40
+            ],
+            "children": [
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               300,
+               180,
+               200,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Priya Patel",
+                "bounds": [
+                 310,
+                 190,
+                 180,
+                 18
+                ]
+               }
+              ]
+             },
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               500,
+               180,
+               640,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Lunch plans",
+                "bounds": [
+                 510,
+                 190,
+                 200,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": " - Are we still on for lunch tomorrow at noon?",
+                "bounds": [
+                 710,
+                 190,
+                 420,
+                 18
+                ]
+               }
+              ]
+             },
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               1140,
+               180,
+               120,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Yesterday",
+                "bounds": [
+                 1150,
+                 190,
+                 100,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "row",
+            "raw_role": "AXRow",
+            "bounds": [
+             300,
+             220,
+             960,
+             40
+            ],
+            "children": [
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               300,
+               220,
+               200,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Design team",
+                "bounds": [
+                 310,
+                 230,
+                 180,
+                 18
+                ]
+               }
+              ]
+             },
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               500,
+               220,
+               640,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Sprint review",
+                "bounds": [
+                 510,
+                 230,
+                 200,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": " - Slides are in the shared folder, take a look.",
+                "bounds": [
+                 710,
+                 230,
+                 420,
+                 18
+                ]
+               }
+              ]
+             },
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               1140,
+               220,
+               120,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Mon",
+                "bounds": [
+                 1150,
+                 230,
+                 100,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "row",
+            "raw_role": "AXRow",
+            "bounds": [
+             300,
+             260,
+             960,
+             40
+            ],
+            "children": [
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               300,
+               260,
+               200,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Alex Kim",
+                "bounds": [
+                 310,
+                 270,
+                 180,
+                 18
+                ]
+               }
+              ]
+             },
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               500,
+               260,
+               640,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Invoice #2041",
+                "bounds": [
+                 510,
+                 270,
+                 200,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": " - Thanks for the quick turnaround on this one!",
+                "bounds": [
+                 710,
+                 270,
+                 420,
+                 18
+                ]
+               }
+              ]
+             },
+             {
+              "role": "cell",
+              "raw_role": "AXCell",
+              "bounds": [
+               1140,
+               260,
+               120,
+               40
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Oct 24",
+                "bounds": [
+                 1150,
+                 270,
+                 100,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "role": "group",
+          "raw_role": "AXGroup",
+          "name": "New Message",
+          "bounds": [
+           700,
+           300,
+           560,
+           540
+          ],
+          "children": [
+           {
+            "role": "heading",
+            "raw_role": "AXHeading",
+            "name": "New Message",
+            "bounds": [
+             710,
+             304,
+             200,
+             24
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "To",
+            "bounds": [
+             712,
+             340,
+             24,
+             20
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+             740,
+             336,
+             500,
+             28
+            ],
+            "children": [
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "name": "Jordan Lee",
+              "bounds": [
+               742,
+               338,
+               110,
+               24
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Jordan Lee",
+                "bounds": [
+                 750,
+                 340,
+                 80,
+                 18
+                ]
+               },
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Remove Jordan Lee",
+                "bounds": [
+                 832,
+                 340,
+                 16,
+                 16
+                ]
+               }
+              ]
+             },
+             {
+              "role": "combo_box",
+              "raw_role": "AXComboBox",
+              "name": "To recipients",
+              "value": "",
+              "states": {
+               "editable": true,
+               "multiline": false
+              },
+              "bounds": [
+               860,
+               338,
+               380,
+               24
+              ]
+             }
+            ]
+           },
+           {
+            "role": "text_field",
+            "raw_role": "AXTextField",
+            "name": "Subject",
+            "value": "Q3 offsite venue",
+            "placeholder": "Subject",
+            "states": {
+             "editable": true,
+             "multiline": false
+            },
+            "bounds": [
+             712,
+             372,
+             528,
+             28
+            ]
+           },
+           {
+            "role": "text_area",
+            "raw_role": "AXTextArea",
+            "name": "Message Body",
+            "value": "Draft: ",
+            "states": {
+             "focused": true,
+             "editable": true,
+             "multiline": true
+            },
+            "bounds": [
+             712,
+             408,
+             528,
+             360
+            ],
+            "attrs": {
+             "dom_classes": "Am Al editable LW-avf tS-tW"
+            },
+            "children": [
+             {
+              "role": "static_text",
+              "raw_role": "AXStaticText",
+              "value": "Draft: ",
+              "bounds": [
+               714,
+               410,
+               520,
+               18
+              ]
+             }
+            ]
+           },
+           {
+            "role": "toolbar",
+            "raw_role": "AXToolbar",
+            "name": "Formatting options",
+            "bounds": [
+             712,
+             772,
+             400,
+             24
+            ],
+            "children": [
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "Bold"
+             },
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "Italic"
+             }
+            ]
+           },
+           {
+            "role": "button",
+            "raw_role": "AXButton",
+            "name": "Send",
+            "bounds": [
+             712,
+             800,
+             80,
+             32
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "AXGroup",
+        "name": "Account",
+        "bounds": [
+         0,
+         820,
+         280,
+         40
+        ],
+        "children": [
+         {
+          "role": "text_field",
+          "raw_role": "AXTextField/AXSecureTextField",
+          "name": "Password",
+          "states": {
+           "editable": true,
+           "secure": true,
+           "multiline": false
+          },
+          "bounds": [
+           8,
+           824,
+           264,
+           28
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  0,
+  0,
+  1,
+  1,
+  4
+ ]
+}

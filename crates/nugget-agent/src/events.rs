@@ -90,6 +90,9 @@ pub enum AgentEvent {
     Suspended {
         task_id: String,
         question: String,
+        /// Candidates the user can pick from (empty: answer in free text).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<String>,
     },
     Finished {
         task_id: String,

@@ -93,6 +93,10 @@ async fn unauthorized_parks_the_source_until_credentials_change() {
     h.wait_state("fake-1", SourceState::NeedsAuth).await;
     let info = h.ingest.get(&id()).await.unwrap();
     assert!(info.last_error.unwrap().contains("authorization"));
+    // Never a silent stop: the health says to reconnect, in plain words.
+    let health = info.health.expect("health");
+    assert_eq!(health.code, "reconnect");
+    assert!(health.fix.contains("Sign in again"), "{}", health.fix);
 
     // No retries while waiting for the user.
     tokio::time::sleep(Duration::from_millis(300)).await;

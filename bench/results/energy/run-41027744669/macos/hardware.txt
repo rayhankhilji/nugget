@@ -1,0 +1,10 @@
+runner: GitHub Actions 1000010428 (macOS ARM64)
+commit: c361fb7580634f8f51cd3bd999112056d2a64298
+before_ref: 40e1994
+scale: quick
+date: 2026-10-30T09:16:22Z
+Apple M1 (Virtual)
+3
+3
+7516192768
+Now drawing from 'AC Power'

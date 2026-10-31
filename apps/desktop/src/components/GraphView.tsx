@@ -72,7 +72,7 @@ export function GraphPanel({
         <CenterPicker onPick={(id) => onCenter(id)} />
         {center && (
           <span className="graph-centered">
-            <Trans k="graph.centredOn" args={{ name: centerName }} tags={{ b: (c) => <b>{c}</b> }} />{" "}
+            <Trans k="graph.centredOn" args={{ name: centerName }} tags={{ b: (c) => <b><bdi>{c}</bdi></b> }} />{" "}
             <button type="button" className="btn btn-ghost btn-small" onClick={() => onCenter(null)}>
               {t("graph.showOverview")}
             </button>

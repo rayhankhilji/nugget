@@ -68,6 +68,16 @@ pub const SECURITY_WORDS: &[&str] = &[
     "authorize",
     "authenticate",
     "trust",
+    // Protections a toggle can switch off (DD3: turning off the screen lock ran unconfirmed).
+    "lock screen",
+    "screen lock",
+    "screen locks",
+    "auto lock",
+    "firewall",
+    "remote access",
+    "remote login",
+    "encryption",
+    "antivirus",
 ];
 /// Buttons that confirm whatever their dialog asks; they take the dialog's risk.
 const AFFIRMATIVE_WORDS: &[&str] = &[
@@ -551,6 +561,15 @@ mod tests {
         assert_eq!(classify_text("Unsubscribe", &k), Some(RiskClass::Destroy));
         assert_eq!(classify_text("Subscribe", &k), Some(RiskClass::Spend));
         assert_eq!(classify_text("Permissions", &k), Some(RiskClass::Security));
+        assert_eq!(
+            classify_text("Lock screen after 5 minutes", &k),
+            Some(RiskClass::Security)
+        );
+        assert_eq!(
+            classify_text("Remote access", &k),
+            Some(RiskClass::Security)
+        );
+        assert_eq!(classify_text("Lock", &k), None);
         // The highest class wins.
         assert_eq!(
             classify_text("Delete and send", &k),

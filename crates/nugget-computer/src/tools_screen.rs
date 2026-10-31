@@ -15,13 +15,13 @@ use crate::render::render;
 use crate::state::Shared;
 
 /// Take a fresh snapshot of `window` (the front window when `None`) and, if it differs from the
-/// cached one in more than `target`'s own subtree or focus, the text to append to the result.
-/// Blocking; call from a blocking task.
+/// cached one in more than `target`'s own subtree or focus, the text to append to the result and
+/// the [`targets`](crate::targets) the new screen shows. Blocking; call from a blocking task.
 pub(super) fn after_action(
     s: &Shared,
     window: Option<&WindowId>,
     target: Option<&ElementId>,
-) -> Option<String> {
+) -> Option<(String, Vec<String>)> {
     let limits = s.config.tree_limits();
     let sel = window.map_or(WindowSel::Focused, |w| WindowSel::Id(w.clone()));
     let (tree, closed) = match s.cu.snapshot(&sel, &limits) {
@@ -31,7 +31,7 @@ pub(super) fn after_action(
         Err(Error::NotFound(_)) if window.is_some() => {
             match s.cu.snapshot(&WindowSel::Focused, &limits) {
                 Ok(t) => (t, true),
-                Err(_) => return Some("\nthe window closed".into()),
+                Err(_) => return Some(("\nthe window closed".into(), Vec::new())),
             }
         }
         Err(e) => {
@@ -45,14 +45,19 @@ pub(super) fn after_action(
         .map(|f| f.node);
     let changed = closed || before.is_none_or(|b| differs(&b, &tree.root, target));
     let opts = s.config.render_options();
-    let text = changed.then(|| render(&view::compact(&tree, &opts), &opts));
+    let shown = changed.then(|| {
+        (
+            render(&view::compact(&tree, &opts), &opts),
+            crate::targets::targets(&tree),
+        )
+    });
     s.remember(tree);
     let lead = if closed {
         "the window closed; the front window now shows"
     } else {
         "the window changed; it now shows"
     };
-    text.map(|t| format!("\n{lead}:\n{}", t.trim_end()))
+    shown.map(|(t, targets)| (format!("\n{lead}:\n{}", t.trim_end()), targets))
 }
 
 /// The trees differ in more than `target`'s subtree and keyboard focus.

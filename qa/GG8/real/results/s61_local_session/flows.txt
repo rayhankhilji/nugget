@@ -1,0 +1,60 @@
+1793392137.437338 ?     Out IP6 :: > ff02::1:ff30:c8f8: ICMP6, neighbor solicitation, who has fe80::9825:97ff:fe30:c8f8, length 32
+1793392137.773326 ?     M   IP6 :: > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28
+1793392137.837343 ?     Out IP6 :: > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28
+1793392138.157344 ?     M   IP6 :: > ff02::1:ff9a:76b9: ICMP6, neighbor solicitation, who has fe80::90ad:4aff:fe9a:76b9, length 32
+1793392138.477337 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28
+1793392138.477363 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16
+1793392139.181344 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28
+1793392139.181369 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16
+1793392139.246301 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28
+1793392139.821313 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28
+1793392142.381288 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16
+1793392143.021293 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16
+1793392150.253295 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16
+1793392150.765281 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16
+1793392165.614297 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16
+1793392166.125284 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16
+1793392194.797283 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16
+1793392196.845293 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16
+1793392258.286284 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16
+1793392262.381293 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16
+1793392341.919146 lo    In  IP 127.0.0.1.50420 > 127.0.0.1.7319: tcp 0
+1793392341.919164 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50420: tcp 0
+1793392341.919175 lo    In  IP 127.0.0.1.50420 > 127.0.0.1.7319: tcp 0
+1793392341.919229 lo    In  IP 127.0.0.1.50420 > 127.0.0.1.7319: tcp 325
+1793392341.919234 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50420: tcp 0
+1793392341.919249 lo    In  IP 127.0.0.1.50420 > 127.0.0.1.7319: tcp 163
+1793392341.919254 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50420: tcp 0
+1793392341.919780 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50420: tcp 945
+1793392341.919796 lo    In  IP 127.0.0.1.50420 > 127.0.0.1.7319: tcp 0
+1793392341.919814 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50420: tcp 0
+1793392341.919985 lo    In  IP 127.0.0.1.50420 > 127.0.0.1.7319: tcp 0
+1793392341.920001 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50420: tcp 0
+1793392341.920208 lo    In  IP 127.0.0.1.50432 > 127.0.0.1.7319: tcp 0
+1793392341.920215 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50432: tcp 0
+1793392341.920222 lo    In  IP 127.0.0.1.50432 > 127.0.0.1.7319: tcp 0
+1793392341.920282 lo    In  IP 127.0.0.1.50432 > 127.0.0.1.7319: tcp 325
+1793392341.920288 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50432: tcp 0
+1793392341.920309 lo    In  IP 127.0.0.1.50432 > 127.0.0.1.7319: tcp 126
+1793392341.920314 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50432: tcp 0
+1793392341.958992 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50432: tcp 1948
+1793392341.959010 lo    In  IP 127.0.0.1.50432 > 127.0.0.1.7319: tcp 0
+1793392341.959026 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50432: tcp 0
+1793392341.959349 lo    In  IP 127.0.0.1.50432 > 127.0.0.1.7319: tcp 0
+1793392341.959367 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50432: tcp 0
+1793392341.959590 lo    In  IP 127.0.0.1.50442 > 127.0.0.1.7319: tcp 0
+1793392341.959599 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50442: tcp 0
+1793392341.959606 lo    In  IP 127.0.0.1.50442 > 127.0.0.1.7319: tcp 0
+1793392341.959638 lo    In  IP 127.0.0.1.50442 > 127.0.0.1.7319: tcp 325
+1793392341.959643 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50442: tcp 0
+1793392341.959654 lo    In  IP 127.0.0.1.50442 > 127.0.0.1.7319: tcp 134
+1793392341.959658 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50442: tcp 0
+1793392341.994648 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50442: tcp 2616
+1793392341.994665 lo    In  IP 127.0.0.1.50442 > 127.0.0.1.7319: tcp 0
+1793392341.994680 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50442: tcp 0
+1793392341.994936 lo    In  IP 127.0.0.1.50442 > 127.0.0.1.7319: tcp 0
+1793392341.994964 lo    In  IP 127.0.0.1.7319 > 127.0.0.1.50442: tcp 0
+1793392385.261285 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16
+1793392385.262271 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16
+1793392626.925323 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16
+1793392631.021325 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16

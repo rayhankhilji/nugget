@@ -1,0 +1,27 @@
+# First-party Nugget plugins, built with the plugin SDK (crates/nugget-plugin/sdk). This is its own
+# cargo workspace (not a member of the root one): everything here builds for `wasm32-wasip2` (see
+# `.cargo/config.toml`), with its own lockfile. `cargo test-native` runs the tests on the host
+# triple against the SDK's in-process test host. `template/` is a standalone workspace on purpose,
+# so it can be copied out of the repository as-is.
+[workspace]
+members = ["rss", "obsidian", "read-later"]
+exclude = ["template"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/rayhankhilji/nugget"
+publish = false
+
+[workspace.dependencies]
+nugget-plugin-sdk = { path = "../crates/nugget-plugin/sdk" }
+roxmltree = { version = "0.21", default-features = false, features = ["std", "positions"] }
+
+[profile.release]
+opt-level = "s"
+strip = true
+codegen-units = 1
+lto = true

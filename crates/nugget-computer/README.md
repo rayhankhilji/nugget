@@ -28,6 +28,9 @@ The full table is in the crate docs (`src/lib.rs`).
 - **Untrusted screen text.** Names and values are escaped so they cannot forge element lines,
   ids or fences, and results are marked untrusted so the agent loop fences them.
 - **Secure fields** are never typed into; their text is masked in previews and logs.
+- **Targets.** Results that show a screen (`observe`, actions that return the changed window) list
+  its items (rows, files, events, products) by label in `ToolResult::targets`, for the agent's
+  ambiguity check; never sent to the model (`src/targets.rs`).
 - **Screenshot fallback** (`screenshot_fallback = true`, off by default) only when a window has
   no actionable element; the PNG goes to the result's data, never to coordinate clicks.
 

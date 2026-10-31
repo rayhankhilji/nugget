@@ -1,0 +1,567 @@
+{
+  "schema_version": 1,
+  "suite": "energy",
+  "status": "ok",
+  "started_at": "2026-10-30T09:24:16.828082Z",
+  "finished_at": "2026-10-30T09:28:34.481731Z",
+  "duration_ms": 257653,
+  "harness_version": "0.0.1",
+  "git_commit": "c361fb7580634f8f51cd3bd999112056d2a64298",
+  "environment": {
+    "os": "macos",
+    "arch": "aarch64",
+    "cpus": 3,
+    "build_profile": "release"
+  },
+  "config": {
+    "scale": "quick",
+    "seed": 42,
+    "params": {
+      "attribution": "package energy is the whole machine's: each scenario with an energy source also meters an equal window with nothing launched (a11y_poll: its own sleeping window) and reports attributable = window minus baseline, as mean watts; noisy on shared VMs",
+      "energy_source": "none",
+      "energy_source.note": "powermetrics: no processor energy or power in its samples (virtual Mac?)",
+      "sample_interval_s": 1.0,
+      "scenarios": [
+        "shell_idle",
+        "shell_focus"
+      ],
+      "settle_s": 12.0,
+      "shell_focus": "measured",
+      "shell_focus.driver": "open -a TextEdit (three documents, reopened to bring each to the front)",
+      "shell_focus.focus_every_s": 5.0,
+      "shell_focus.focus_s": 60.0,
+      "shell_focus.plan": [
+        "0s:Quarterly report",
+        "5s:Team offsite",
+        "10s:Vendor contract",
+        "15s:Quarterly report",
+        "20s:Team offsite",
+        "25s:Vendor contract",
+        "30s:Quarterly report",
+        "35s:Team offsite",
+        "40s:Vendor contract",
+        "45s:Quarterly report",
+        "50s:Team offsite",
+        "55s:Vendor contract"
+      ],
+      "shell_focus.probe": "debug build: settled on the probe's read_ahead_loop line; read-ahead counts reported",
+      "shell_focus.read_ahead_off.daemon.process_source": "powermetrics",
+      "shell_focus.read_ahead_off.daemon.processes": 1,
+      "shell_focus.read_ahead_off.energy_note": "powermetrics: no processor energy or power in its samples (virtual Mac?)",
+      "shell_focus.read_ahead_off.energy_source": "none",
+      "shell_focus.read_ahead_off.process_source": "powermetrics",
+      "shell_focus.read_ahead_off.processes": 1,
+      "shell_focus.read_ahead_off.server.process_source": "powermetrics",
+      "shell_focus.read_ahead_off.server.processes": 1,
+      "shell_focus.read_ahead_off.shell.process_source": "powermetrics",
+      "shell_focus.read_ahead_off.shell.processes": 1,
+      "shell_focus.read_ahead_off.window_s": 60.083,
+      "shell_focus.read_ahead_on.daemon.process_source": "powermetrics",
+      "shell_focus.read_ahead_on.daemon.processes": 1,
+      "shell_focus.read_ahead_on.energy_note": "powermetrics: no processor energy or power in its samples (virtual Mac?)",
+      "shell_focus.read_ahead_on.energy_source": "none",
+      "shell_focus.read_ahead_on.process_source": "powermetrics",
+      "shell_focus.read_ahead_on.processes": 1,
+      "shell_focus.read_ahead_on.server.process_source": "powermetrics",
+      "shell_focus.read_ahead_on.server.processes": 1,
+      "shell_focus.read_ahead_on.shell.process_source": "powermetrics",
+      "shell_focus.read_ahead_on.shell.processes": 1,
+      "shell_focus.read_ahead_on.window_s": 60.004,
+      "shell_focus.server_exe": "/Users/runner/work/nugget/nugget/target/debug/nuggetd-fake-llama-server",
+      "shell_focus.shell_exe": "/Users/runner/work/_temp/before-target/debug/nugget-desktop",
+      "shell_focus.stack": "nugget-desktop --minimized (Double Tap on, read-ahead off then on, update channel off, isolated config dir) connected to nuggetd on an empty temporary NUGGET_HOME whose only provider is the fake llama-server on a loopback port (openai_compatible, on-device: read-ahead prefills with cache_prompt; the fake answers at once); a scripted window of focus switches among three text-field windows; shell (with descendants), daemon and server metered separately; the shell restarted between the runs",
+      "shell_focus.window_s": 60.0,
+      "shell_focus.windows": [
+        "Quarterly report",
+        "Team offsite",
+        "Vendor contract"
+      ],
+      "shell_idle": "measured",
+      "shell_idle.daemon.process_source": "powermetrics",
+      "shell_idle.daemon.processes": 1,
+      "shell_idle.energy_note": "powermetrics: no processor energy or power in its samples (virtual Mac?)",
+      "shell_idle.energy_source": "none",
+      "shell_idle.idle_s": 60.0,
+      "shell_idle.probe": "debug build: settled on the probe's read_ahead_loop line; read-ahead counts reported",
+      "shell_idle.process_source": "powermetrics",
+      "shell_idle.processes": 1,
+      "shell_idle.shell.process_source": "powermetrics",
+      "shell_idle.shell.processes": 1,
+      "shell_idle.shell_exe": "/Users/runner/work/_temp/before-target/debug/nugget-desktop",
+      "shell_idle.stack": "nugget-desktop --minimized (hidden in the tray; Double Tap on, read-ahead on, update channel off, isolated config dir) connected to nuggetd on an empty temporary NUGGET_HOME (no providers, [runtime], [mcp] and vault off); nothing in front but the desktop; shell metered with its descendants (webview processes), daemon separately",
+      "shell_idle.window_s": 60.087,
+      "timeout_s": 300.0
+    }
+  },
+  "metrics": [
+    {
+      "name": "energy.shell_idle.shell.window_s",
+      "value": 60.08730125,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Length of the metered window (the idle shell)"
+    },
+    {
+      "name": "energy.shell_idle.shell.cpu_percent",
+      "value": 0.47349374037008174,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU time of the idle shell (descendants included) as a share of one core"
+    },
+    {
+      "name": "energy.shell_idle.shell.wakeups_per_s",
+      "value": 4.092495483534664,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of the idle shell per second (Linux: voluntary + involuntary context switches of all threads; macOS: idle + interrupt wakeups)"
+    },
+    {
+      "name": "energy.shell_idle.shell.energy_impact",
+      "value": 0.5102409929751659,
+      "unit": "score/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "macOS energy impact of the idle shell per second (powermetrics tasks, unitless)"
+    },
+    {
+      "name": "energy.shell_idle.daemon.window_s",
+      "value": 60.08730125,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Length of the metered window (the daemon beside the idle shell)"
+    },
+    {
+      "name": "energy.shell_idle.daemon.cpu_percent",
+      "value": 0.021383220382883043,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU time of the daemon beside the idle shell (descendants included) as a share of one core"
+    },
+    {
+      "name": "energy.shell_idle.daemon.wakeups_per_s",
+      "value": 0.16740936494311928,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of the daemon beside the idle shell per second (Linux: voluntary + involuntary context switches of all threads; macOS: idle + interrupt wakeups)"
+    },
+    {
+      "name": "energy.shell_idle.daemon.energy_impact",
+      "value": 0.02305727208575037,
+      "unit": "score/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "macOS energy impact of the daemon beside the idle shell per second (powermetrics tasks, unitless)"
+    },
+    {
+      "name": "energy.shell_idle.read_ahead_sends",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "draft.read_ahead calls the shell made in the window (probe)"
+    },
+    {
+      "name": "energy.shell_idle.read_ahead_started",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-aheads the daemon started (probe: Started)"
+    },
+    {
+      "name": "energy.shell_idle.read_ahead_skipped",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-aheads the daemon skipped: rate limit, unchanged prompt, refused (probe)"
+    },
+    {
+      "name": "energy.shell_idle.read_ahead_failed",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-ahead calls that failed (probe)"
+    },
+    {
+      "name": "energy.shell_idle.read_ahead_cancels",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "draft.read_ahead_cancel calls (focus left a field while a read-ahead could run; probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.shell.window_s",
+      "value": 60.082609625,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Length of the metered window (the shell during focus changes (read-ahead off))"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.shell.cpu_percent",
+      "value": 0.009456183456131686,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU time of the shell during focus changes (read-ahead off) (descendants included) as a share of one core"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.shell.wakeups_per_s",
+      "value": 0.100689445809536,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of the shell during focus changes (read-ahead off) per second (Linux: voluntary + involuntary context switches of all threads; macOS: idle + interrupt wakeups)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.shell.energy_impact",
+      "value": 0.010463077914227046,
+      "unit": "score/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "macOS energy impact of the shell during focus changes (read-ahead off) per second (powermetrics tasks, unitless)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.daemon.window_s",
+      "value": 60.082609625,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Length of the metered window (the daemon during focus changes (read-ahead off))"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.daemon.cpu_percent",
+      "value": 0.009394955725292092,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU time of the daemon during focus changes (read-ahead off) (descendants included) as a share of one core"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.daemon.wakeups_per_s",
+      "value": 0.1344368388765292,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of the daemon during focus changes (read-ahead off) per second (Linux: voluntary + involuntary context switches of all threads; macOS: idle + interrupt wakeups)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.daemon.energy_impact",
+      "value": 0.010402166314916344,
+      "unit": "score/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "macOS energy impact of the daemon during focus changes (read-ahead off) per second (powermetrics tasks, unitless)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.server.window_s",
+      "value": 60.082609625,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Length of the metered window (the fake local model server during focus changes (read-ahead off))"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.server.cpu_percent",
+      "value": 0.0,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU time of the fake local model server during focus changes (read-ahead off) (descendants included) as a share of one core"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.server.wakeups_per_s",
+      "value": 0.0,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of the fake local model server during focus changes (read-ahead off) per second (Linux: voluntary + involuntary context switches of all threads; macOS: idle + interrupt wakeups)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.switches",
+      "value": 12.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Focus switches made in the window"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.switch_errors",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Focus switches that failed (params: switch_error)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.read_ahead_sends",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "draft.read_ahead calls the shell made in the window (probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.read_ahead_started",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-aheads the daemon started (probe: Started)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.read_ahead_skipped",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-aheads the daemon skipped: rate limit, unchanged prompt, refused (probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.read_ahead_failed",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-ahead calls that failed (probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_off.read_ahead_cancels",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "draft.read_ahead_cancel calls (focus left a field while a read-ahead could run; probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.shell.window_s",
+      "value": 60.003629333,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Length of the metered window (the shell during focus changes (read-ahead on))"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.shell.cpu_percent",
+      "value": 0.37608363249827276,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU time of the shell during focus changes (read-ahead on) (descendants included) as a share of one core"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.shell.wakeups_per_s",
+      "value": 3.6900638879900476,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of the shell during focus changes (read-ahead on) per second (Linux: voluntary + involuntary context switches of all threads; macOS: idle + interrupt wakeups)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.shell.energy_impact",
+      "value": 0.40486054892268775,
+      "unit": "score/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "macOS energy impact of the shell during focus changes (read-ahead on) per second (powermetrics tasks, unitless)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.daemon.window_s",
+      "value": 60.003629333,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Length of the metered window (the daemon during focus changes (read-ahead on))"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.daemon.cpu_percent",
+      "value": 0.018189031153976683,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU time of the daemon during focus changes (read-ahead on) (descendants included) as a share of one core"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.daemon.wakeups_per_s",
+      "value": 0.16937262965007255,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of the daemon during focus changes (read-ahead on) per second (Linux: voluntary + involuntary context switches of all threads; macOS: idle + interrupt wakeups)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.daemon.energy_impact",
+      "value": 0.01990984501856588,
+      "unit": "score/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "macOS energy impact of the daemon during focus changes (read-ahead on) per second (powermetrics tasks, unitless)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.server.window_s",
+      "value": 60.003629333,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Length of the metered window (the fake local model server during focus changes (read-ahead on))"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.server.cpu_percent",
+      "value": 0.004312767086845077,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU time of the fake local model server during focus changes (read-ahead on) (descendants included) as a share of one core"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.server.wakeups_per_s",
+      "value": 0.0,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of the fake local model server during focus changes (read-ahead on) per second (Linux: voluntary + involuntary context switches of all threads; macOS: idle + interrupt wakeups)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.server.energy_impact",
+      "value": 0.004339862836724675,
+      "unit": "score/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "macOS energy impact of the fake local model server during focus changes (read-ahead on) per second (powermetrics tasks, unitless)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.switches",
+      "value": 12.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Focus switches made in the window"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.switch_errors",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Focus switches that failed (params: switch_error)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.read_ahead_sends",
+      "value": 4.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "draft.read_ahead calls the shell made in the window (probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.read_ahead_started",
+      "value": 3.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-aheads the daemon started (probe: Started)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.read_ahead_skipped",
+      "value": 1.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-aheads the daemon skipped: rate limit, unchanged prompt, refused (probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.read_ahead_failed",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "read-ahead calls that failed (probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_on.read_ahead_cancels",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "draft.read_ahead_cancel calls (focus left a field while a read-ahead could run; probe)"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_added.cpu_percent",
+      "value": 0.37973429155767074,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "CPU of shell + daemon + server with read-ahead on minus off, share of one core"
+    },
+    {
+      "name": "energy.shell_focus.read_ahead_added.wakeups_per_s",
+      "value": 3.624310232954055,
+      "unit": "1/s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wakeups of shell + daemon + server with read-ahead on minus off"
+    }
+  ],
+  "message": null
+}

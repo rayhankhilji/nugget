@@ -1,0 +1,531 @@
+{
+ "date": "2026-10-29",
+ "tz": "America/New_York",
+ "cards": [
+  {
+   "id": "723944fb25c601b6",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+   "detail": "In \"Re: Revised checkout mockups\" on 2026-10-27.",
+   "rank": 0.946325149167802,
+   "sensitive": false,
+   "due": "2026-10-29T17:00:00-04:00",
+   "people": [
+    "dana@northwind-outfitters.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261027-1602-s1-maya-promise.eml",
+     "Yes, I'll send the revised mockups by Thursday."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to dana@northwind-outfitters.example",
+    "Remind me 2026-10-29T17:00:00-04:00"
+   ]
+  },
+  {
+   "id": "b7fb6a531ef6b4fc",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+   "detail": "In \"Re: Q4 design budget\" on 2026-10-27.",
+   "rank": 0.8895135146183086,
+   "sensitive": false,
+   "due": "2026-10-30T17:00:00-04:00",
+   "people": [
+    "theo@larkspur.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261027-1105-s2-maya-promise.eml",
+     "Sure, I'll send the budget estimate by Friday."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to theo@larkspur.example",
+    "Remind me 2026-10-30T17:00:00-04:00"
+   ]
+  },
+  {
+   "id": "b4f9008fd90ea2a0",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "No answer from Sofia Alvarez: brunch?",
+   "detail": "You asked 11 days ago and haven't heard back.",
+   "rank": 0.8387558147531772,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "sofia.alvarez@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+     "Brunch next weekend?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to sofia.alvarez@gmail.com",
+    "Remind me 2026-10-29T14:00:00.001257334Z"
+   ]
+  },
+  {
+   "id": "d04812050c1a357a",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Priya Raman: Onboarding copy",
+   "detail": "Priya Raman wrote 1 day ago and hasn't heard back.",
+   "rank": 0.80492212838912,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "priya@larkspur.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-1400-x6-priya-ask.eml",
+     "Could you review the onboarding copy draft?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to priya@larkspur.example",
+    "Archive \"Onboarding copy\""
+   ]
+  },
+  {
+   "id": "1767d32fce21dbb4",
+   "kind": "renewal",
+   "state": "new",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "detail": "Keep it, or cancel before the charge.",
+   "rank": 0.7868589768034375,
+   "sensitive": false,
+   "due": "2026-11-03T09:00:00-04:00",
+   "people": [
+    "billing@pixelboard.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+     "Your Pixelboard Pro plan renews soon"
+    ]
+   ],
+   "actions": [
+    "Remind me 2026-11-02T09:00:00-04:00"
+   ]
+  },
+  {
+   "id": "a5e07a71cb0d04b3",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Kelsey Vance: Senior designer role at a fintech?",
+   "detail": "Kelsey Vance wrote 1 day ago and hasn't heard back.",
+   "rank": 0.7600419596779711,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "kelsey@talentbridge.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-1400-n-kelsey.eml",
+     "Would you be open to a quick chat?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to kelsey@talentbridge.example",
+    "Archive \"Senior designer role at a fintech?\""
+   ]
+  }
+ ],
+ "cards_all": [
+  {
+   "id": "723944fb25c601b6",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+   "detail": "In \"Re: Revised checkout mockups\" on 2026-10-27.",
+   "rank": 0.946325149167802,
+   "sensitive": false,
+   "due": "2026-10-29T17:00:00-04:00",
+   "people": [
+    "dana@northwind-outfitters.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261027-1602-s1-maya-promise.eml",
+     "Yes, I'll send the revised mockups by Thursday."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to dana@northwind-outfitters.example",
+    "Remind me 2026-10-29T17:00:00-04:00"
+   ]
+  },
+  {
+   "id": "b7fb6a531ef6b4fc",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+   "detail": "In \"Re: Q4 design budget\" on 2026-10-27.",
+   "rank": 0.8895135146183086,
+   "sensitive": false,
+   "due": "2026-10-30T17:00:00-04:00",
+   "people": [
+    "theo@larkspur.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261027-1105-s2-maya-promise.eml",
+     "Sure, I'll send the budget estimate by Friday."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to theo@larkspur.example",
+    "Remind me 2026-10-30T17:00:00-04:00"
+   ]
+  },
+  {
+   "id": "b4f9008fd90ea2a0",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "No answer from Sofia Alvarez: brunch?",
+   "detail": "You asked 11 days ago and haven't heard back.",
+   "rank": 0.8387558147531772,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "sofia.alvarez@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+     "Brunch next weekend?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to sofia.alvarez@gmail.com",
+    "Remind me 2026-10-29T14:00:00.001257334Z"
+   ]
+  },
+  {
+   "id": "d04812050c1a357a",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Priya Raman: Onboarding copy",
+   "detail": "Priya Raman wrote 1 day ago and hasn't heard back.",
+   "rank": 0.80492212838912,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "priya@larkspur.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-1400-x6-priya-ask.eml",
+     "Could you review the onboarding copy draft?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to priya@larkspur.example",
+    "Archive \"Onboarding copy\""
+   ]
+  },
+  {
+   "id": "1767d32fce21dbb4",
+   "kind": "renewal",
+   "state": "new",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "detail": "Keep it, or cancel before the charge.",
+   "rank": 0.7868589768034375,
+   "sensitive": false,
+   "due": "2026-11-03T09:00:00-04:00",
+   "people": [
+    "billing@pixelboard.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+     "Your Pixelboard Pro plan renews soon"
+    ]
+   ],
+   "actions": [
+    "Remind me 2026-11-02T09:00:00-04:00"
+   ]
+  },
+  {
+   "id": "a5e07a71cb0d04b3",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Kelsey Vance: Senior designer role at a fintech?",
+   "detail": "Kelsey Vance wrote 1 day ago and hasn't heard back.",
+   "rank": 0.7600419596779711,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "kelsey@talentbridge.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-1400-n-kelsey.eml",
+     "Would you be open to a quick chat?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to kelsey@talentbridge.example",
+    "Archive \"Senior designer role at a fintech?\""
+   ]
+  }
+ ],
+ "brief_top": [
+  {
+   "actions": [
+    "draft_reply",
+    "reminder"
+   ],
+   "card_id": "723944fb25c601b6",
+   "due": "2026-10-29T17:00:00-04:00",
+   "factors": [
+    {
+     "contribution": 1.818181837424763,
+     "name": "urgency",
+     "value": 0.7272727349699052,
+     "weight": 2.5
+    },
+    {
+     "contribution": 1.120832604463821,
+     "name": "importance",
+     "value": 0.7472217363092141,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.6306272129201714,
+     "name": "freshness",
+     "value": 0.7882840161502143,
+     "weight": 0.8
+    }
+   ],
+   "kind": "follow_up",
+   "rank": 0.946325149167802,
+   "summary": "In \"Re: Revised checkout mockups\" on 2026-10-27.",
+   "title": "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+  },
+  {
+   "actions": [
+    "draft_reply",
+    "reminder"
+   ],
+   "card_id": "b7fb6a531ef6b4fc",
+   "due": "2026-10-30T17:00:00-04:00",
+   "factors": [
+    {
+     "contribution": 1.120832604463821,
+     "name": "importance",
+     "value": 0.7472217363092141,
+     "weight": 1.5
+    },
+    {
+     "contribution": 1.0526315853972197,
+     "name": "urgency",
+     "value": 0.4210526341588879,
+     "weight": 2.5
+    },
+    {
+     "contribution": 0.6123173013895481,
+     "name": "freshness",
+     "value": 0.7653966267369351,
+     "weight": 0.8
+    }
+   ],
+   "kind": "follow_up",
+   "rank": 0.8895135146183086,
+   "summary": "In \"Re: Q4 design budget\" on 2026-10-27.",
+   "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+  },
+  {
+   "actions": [
+    "draft_reply",
+    "reminder"
+   ],
+   "card_id": "b4f9008fd90ea2a0",
+   "due": null,
+   "factors": [
+    {
+     "contribution": 1.267857144416337,
+     "name": "urgency",
+     "value": 0.5071428577665347,
+     "weight": 2.5
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    },
+    {
+     "contribution": 0.5,
+     "name": "question",
+     "value": 1.0,
+     "weight": 0.5
+    }
+   ],
+   "kind": "follow_up",
+   "rank": 0.8387558147531772,
+   "summary": "You asked 11 days ago and haven't heard back.",
+   "title": "No answer from Sofia Alvarez: brunch?"
+  },
+  {
+   "actions": [
+    "draft_reply",
+    "archive_thread"
+   ],
+   "card_id": "d04812050c1a357a",
+   "due": null,
+   "factors": [
+    {
+     "contribution": 1.006806090655658,
+     "name": "importance",
+     "value": 0.6712040604371053,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.623040625161869,
+     "name": "freshness",
+     "value": 0.7788007814523362,
+     "weight": 0.8
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    }
+   ],
+   "kind": "unanswered_thread",
+   "rank": 0.80492212838912,
+   "summary": "Priya Raman wrote 1 day ago and hasn't heard back.",
+   "title": "Reply to Priya Raman: Onboarding copy"
+  },
+  {
+   "actions": [
+    "reminder"
+   ],
+   "card_id": "1767d32fce21dbb4",
+   "due": "2026-11-03T09:00:00-04:00",
+   "factors": [
+    {
+     "contribution": 1.2000000000000002,
+     "name": "importance",
+     "value": 0.8,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    },
+    {
+     "contribution": 0.5923019097031619,
+     "name": "freshness",
+     "value": 0.7403773871289523,
+     "weight": 0.8
+    }
+   ],
+   "kind": "renewal",
+   "rank": 0.7868589768034375,
+   "summary": "Keep it, or cancel before the charge.",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+  }
+ ],
+ "brief_ready_top": [
+  [
+   "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+   "In \"Re: Revised checkout mockups\" on 2026-10-27."
+  ],
+  [
+   "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+   "In \"Re: Q4 design budget\" on 2026-10-27."
+  ],
+  [
+   "No answer from Sofia Alvarez: brunch?",
+   "You asked 11 days ago and haven't heard back."
+  ],
+  [
+   "Reply to Priya Raman: Onboarding copy",
+   "Priya Raman wrote 1 day ago and hasn't heard back."
+  ],
+  [
+   "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "Keep it, or cancel before the charge."
+  ]
+ ],
+ "check": {
+  "hits": [
+   {
+    "scenario": "S2",
+    "expect": {
+     "kind": "follow_up",
+     "match": "budget",
+     "first": "2026-10-29",
+     "last": "2026-11-02"
+    },
+    "cards": [
+     "b7fb6a531ef6b4fc"
+    ]
+   },
+   {
+    "scenario": "S5",
+    "expect": {
+     "kind": "renewal",
+     "match": "pixelboard",
+     "first": "2026-10-28",
+     "last": "2026-11-03"
+    },
+    "cards": [
+     "1767d32fce21dbb4"
+    ]
+   },
+   {
+    "scenario": "X6",
+    "expect": {
+     "kind": "unanswered_thread",
+     "match": "onboarding copy",
+     "first": "2026-10-29",
+     "last": "2026-11-05"
+    },
+    "cards": [
+     "d04812050c1a357a"
+    ]
+   }
+  ],
+  "misses": [
+   {
+    "scenario": "S3",
+    "expect": {
+     "kind": "follow_up",
+     "match": "brochure",
+     "first": "2026-10-29",
+     "last": "2026-10-30"
+    },
+    "cards": []
+   },
+   {
+    "scenario": "S4",
+    "expect": {
+     "kind": "meeting_prep",
+     "match": "northwind design qa",
+     "first": "2026-10-29",
+     "last": "2026-10-30"
+    },
+    "cards": []
+   }
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "duplicates": [],
+  "brief_checks": []
+ }
+}

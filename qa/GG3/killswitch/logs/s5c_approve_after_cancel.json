@@ -1,0 +1,92 @@
+{
+  "commit": "0d81796",
+  "runs": [
+    {
+      "after": {
+        "cancel_reply": "ok",
+        "approve_reply": "no open confirmation act_ff540547f9356b369b3f8d42b13c2006:8",
+        "finished": {
+          "outcome": "cancelled"
+        },
+        "submits_at_extension": 0,
+        "events_tail": [
+          "action_proposed",
+          "confirmation_needed",
+          "finished"
+        ]
+      },
+      "pipelined": {
+        "cancel_reply": "ok",
+        "approve_reply": "accepted (null)",
+        "finished": {
+          "outcome": "cancelled"
+        },
+        "submits_at_extension": 0,
+        "events_tail": [
+          "action_proposed",
+          "confirmation_needed",
+          "finished"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "after": {
+        "cancel_reply": "ok",
+        "approve_reply": "no open confirmation act_8417b4f30338aa168a3ca4c2a9c5d4ed:8",
+        "finished": {
+          "outcome": "cancelled"
+        },
+        "submits_at_extension": 0,
+        "events_tail": [
+          "action_proposed",
+          "confirmation_needed",
+          "finished"
+        ]
+      },
+      "pipelined": {
+        "cancel_reply": "ok",
+        "approve_reply": "accepted (null)",
+        "finished": {
+          "outcome": "cancelled"
+        },
+        "submits_at_extension": 0,
+        "events_tail": [
+          "action_proposed",
+          "confirmation_needed",
+          "finished"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "after": {
+        "cancel_reply": "ok",
+        "approve_reply": "no open confirmation act_b2c0eeac3488422624012ff09f334a17:8",
+        "finished": {
+          "outcome": "cancelled"
+        },
+        "submits_at_extension": 0,
+        "events_tail": [
+          "action_proposed",
+          "confirmation_needed",
+          "finished"
+        ]
+      },
+      "pipelined": {
+        "cancel_reply": "ok",
+        "approve_reply": "accepted (null)",
+        "finished": {
+          "outcome": "cancelled"
+        },
+        "submits_at_extension": 0,
+        "events_tail": [
+          "action_proposed",
+          "confirmation_needed",
+          "finished"
+        ]
+      },
+      "ok": true
+    }
+  ]
+}

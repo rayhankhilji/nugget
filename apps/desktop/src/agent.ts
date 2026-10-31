@@ -45,7 +45,7 @@ export type TimelineItem =
   | { kind: "step"; step: number }
   | { kind: "model"; step: number; text: string; toolCalls: string[] }
   | ActionItem
-  | { kind: "question"; question: string }
+  | { kind: "question"; question: string; options: string[] }
   | { kind: "finished"; outcome: AgentOutcome; summary: string | null };
 
 /** A pending confirmation, with when it arrived (for the countdown). */
@@ -61,6 +61,8 @@ export interface RunView {
   pending: PendingConfirmation[];
   /** Open `ask_user` question. */
   question: string | null;
+  /** Candidate answers offered with the open question (untrusted text; empty: free text only). */
+  options: string[];
   outcome: AgentOutcome | null;
   summary: string | null;
   verification: AgentVerificationCounts;
@@ -74,6 +76,7 @@ export function emptyRun(taskId: string, goal = ""): RunView {
     items: [],
     pending: [],
     question: null,
+    options: [],
     outcome: null,
     summary: null,
     verification: { passed: 0, failed: 0, unverifiable: 0 },
@@ -86,10 +89,24 @@ export function runFromDetail(detail: AgentTaskDetail, nowMs: number): RunView {
   const run = emptyRun(detail.summary.task_id, detail.summary.goal);
   run.pending = (detail.pending ?? []).map((request) => ({ request, receivedMs: nowMs }));
   run.question = detail.summary.state === "needs_input" ? (detail.question ?? null) : null;
+  run.options = run.question ? cleanOptions(detail.options) : [];
   run.verification = { ...detail.summary.verification };
   for (const p of run.pending) run.items.push(actionFromRequest(p.request));
-  if (run.question) run.items.push({ kind: "question", question: run.question });
+  if (run.question) run.items.push({ kind: "question", question: run.question, options: run.options });
   return run;
+}
+
+/** Non-empty, distinct option strings (a newer or odd daemon may send anything). */
+function cleanOptions(options: unknown): string[] {
+  if (!Array.isArray(options)) return [];
+  const out: string[] = [];
+  for (const o of options) if (typeof o === "string" && o.trim() && !out.includes(o)) out.push(o);
+  return out;
+}
+
+/** The run after the user answered its open question: question and options cleared. */
+export function answered(run: RunView): RunView {
+  return { ...run, question: null, options: [], outcome: null };
 }
 
 function newAction(actionId: string, tool: string): ActionItem {
@@ -189,8 +206,10 @@ export function reduceRun(run: RunView, notice: AgentEventNotice, nowMs: number)
         injections: run.injections + 1,
         items: withAction(run.items, e.action_id, e.tool, (a) => ({ ...a, injection: e.finding })),
       };
-    case "suspended":
-      return { ...run, question: e.question, items: [...run.items, { kind: "question", question: e.question }] };
+    case "suspended": {
+      const options = cleanOptions(e.options);
+      return { ...run, question: e.question, options, items: [...run.items, { kind: "question", question: e.question, options }] };
+    }
     case "finished": {
       // `needs_input` ends the turn but the run waits for `agent.answer`: keep the question open.
       const asking = e.outcome.outcome === "needs_input";
@@ -199,6 +218,7 @@ export function reduceRun(run: RunView, notice: AgentEventNotice, nowMs: number)
         ...run,
         pending: [],
         question,
+        options: question ? run.options : [],
         outcome: e.outcome,
         summary: e.summary ?? null,
         items: [

@@ -287,7 +287,10 @@ impl Updates {
                 tracing::info!(version = %update.version, "update downloaded; installs at quit");
                 s.staged = Some(bytes);
             }
-            Err(e) => s.last_error = Some(e.to_string()),
+            Err(e) => {
+                tracing::warn!(version = %update.version, error = %e, "update download failed");
+                s.last_error = Some(e.to_string());
+            }
         }
     }
 

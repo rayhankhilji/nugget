@@ -10,7 +10,9 @@ use futures::StreamExt;
 use nugget_core::capability::Locality;
 use nugget_core::egress::EgressEvent;
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-use nugget_core::ipc::{AskStarted, ChatDelta, ChatDone, ChatStarted, method, notification};
+use nugget_core::ipc::{
+    AskStarted, ChatDelta, ChatDone, ChatStarted, ClaimFlag, FlaggedClaim, method, notification,
+};
 use nugget_core::paths::Paths;
 use nugget_ingest::MemorySecrets;
 use nugget_ipc::{Client, Notification};
@@ -28,22 +30,62 @@ const SECRET: &str = "SECRETPASSAGE 4111 1111 1111 1111";
 /// What the mock model replies to a follow-up rewriting request.
 const REWRITTEN: &str = "heron river walk";
 
+/// A question whose answer streams markers split across deltas, in non-canonical forms.
+const SPLIT_MARKERS_QUESTION: &str = "Which river did the heron fish by?";
+const SPLIT_MARKERS_REPLY: &[&str] = &[
+    "The heron fished by the river [",
+    "Passage ",
+    "1, 9]. It caught 3 fish [1",
+    "].",
+];
+
+/// A question whose (local) answer quotes the sensitive item without anything the PII scan
+/// finds: only the daemon's memory of the answer's sources can keep it from a cloud model.
+const ACCOUNT_QUESTION: &str = "What is the heron account code?";
+const ACCOUNT_REPLY: &str = "The heron account code is HERONCANARY-7 [1].";
+
+/// A question whose answer stops mid-marker: the stream ends without finishing.
+const CUT_SHORT_QUESTION: &str = "Did the heron by the river stop early?";
+/// A question whose answer the provider filters.
+const FILTERED_QUESTION: &str = "Was the heron by the river filtered?";
+
 /// Streams a short answer for any chat request ([`REWRITTEN`] for a query rewrite).
 struct Answer;
 
 impl Respond for Answer {
     fn respond(&self, req: &Request) -> ResponseTemplate {
-        let reply = if String::from_utf8_lossy(&req.body).contains("Standalone search query:") {
-            REWRITTEN
+        let body = String::from_utf8_lossy(&req.body);
+        let reply: &[&str] = if body.contains("Standalone search query:") {
+            &[REWRITTEN]
+        } else if body.contains(SPLIT_MARKERS_QUESTION) {
+            SPLIT_MARKERS_REPLY
+        } else if body.contains(ACCOUNT_QUESTION) && !body.contains("And the wire details?") {
+            &[ACCOUNT_REPLY]
         } else {
-            "Herons [1]"
+            &["Herons [1]"]
         };
-        let chunks = [
-            json!({"choices": [{"index": 0, "delta": {"content": reply}}]}),
-            json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
-        ];
+        let cut_short = body.contains(CUT_SHORT_QUESTION);
+        let reply: &[&str] = if cut_short || body.contains(FILTERED_QUESTION) {
+            &["The heron fished [", "1"]
+        } else {
+            reply
+        };
+        let mut chunks: Vec<Value> = reply
+            .iter()
+            .map(|r| json!({"choices": [{"index": 0, "delta": {"content": r}}]}))
+            .collect();
+        let finish = if body.contains(FILTERED_QUESTION) {
+            "content_filter"
+        } else {
+            "stop"
+        };
+        if !cut_short {
+            chunks.push(json!({"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}));
+        }
         let mut body: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
-        body.push_str("data: [DONE]\n\n");
+        if !cut_short {
+            body.push_str("data: [DONE]\n\n");
+        }
         ResponseTemplate::new(200)
             .insert_header("content-type", "text/event-stream")
             .set_body_string(body)
@@ -108,7 +150,11 @@ fn iref(key: &str) -> ItemRef {
 /// One sensitive and one ordinary item about herons, as ingest would store them.
 fn seed(store: &Store) {
     for (key, text, sensitive) in [
-        ("bank.md", format!("Heron savings account {SECRET}."), true),
+        (
+            "bank.md",
+            format!("Heron savings account {SECRET}. Account code HERONCANARY-7."),
+            true,
+        ),
         (
             "walk.md",
             "We watched a heron fishing by the river.".to_owned(),
@@ -117,7 +163,10 @@ fn seed(store: &Store) {
     ] {
         let item = NewItem::new("files-1", key, content_hash(&text))
             .with_title(key)
-            .with_metadata(json!({"sensitive": sensitive}));
+            .with_metadata(json!({
+                "sensitive": sensitive,
+                "url": format!("file:///home/alice/Documents/{key}"),
+            }));
         store
             .upsert_item_with_chunks(&item, &[NewChunk::text(text)])
             .unwrap();
@@ -303,6 +352,7 @@ async fn ask_never_sends_sensitive_passages_to_a_cloud_model() {
         .await;
     let (_, done) = collect(&mut notes, &chat.stream_id).await;
     assert_eq!(done.error, None);
+    assert_eq!(done.check, None, "plain chats are not checked");
     let chats = h.egress("chat").await;
     assert_eq!(chats.len(), 1, "{chats:?}");
     assert_eq!(chats[0].items, vec![iref("walk.md")]);
@@ -397,7 +447,7 @@ fn history() -> Value {
 fn answer_messages(requests: &[Value]) -> Vec<(String, String)> {
     let answer = requests
         .iter()
-        .find(|r| r.to_string().contains("Passages:"))
+        .find(|r| r.to_string().contains("<passages>"))
         .expect("an answering request");
     answer["messages"]
         .as_array()
@@ -450,7 +500,7 @@ async fn ask_rewrites_followups_with_a_local_model_and_forwards_history() {
         ["system", "user", "assistant", "user"],
         "{messages:?}"
     );
-    assert!(messages[0].1.contains("Passages:"));
+    assert!(messages[0].1.contains("<passages>"));
     assert!(messages[1].1.contains("Where did we watch herons?"));
     assert!(messages[2].1.contains("By the river"));
     assert!(messages[3].1.contains("what about the second one?"));
@@ -545,6 +595,7 @@ async fn ask_with_nothing_relevant_answers_as_a_general_chat() {
     let (text, done) = collect(&mut notes, &started.stream_id).await;
     assert_eq!(done.error, None);
     assert!(!text.is_empty());
+    assert_eq!(done.check, None, "general answers are not checked");
     let requests = h.requests().await;
     assert_eq!(requests.len(), 1);
     let roles: Vec<&str> = requests[0]["messages"]
@@ -554,7 +605,7 @@ async fn ask_with_nothing_relevant_answers_as_a_general_chat() {
         .map(|m| m["role"].as_str().unwrap())
         .collect();
     assert_eq!(roles, ["user"], "no sourced system prompt");
-    assert!(!h.bodies().await.contains("numbered passages"));
+    assert!(!h.bodies().await.contains("<passages>"));
     assert_eq!(audited_ask(&h.store)["general"], json!(true));
 
     // With passages it is a sourced answer, as before.
@@ -567,5 +618,292 @@ async fn ask_with_nothing_relevant_answers_as_a_general_chat() {
     assert!(!started.general);
     assert!(!started.citations.is_empty());
     collect(&mut notes, &started.stream_id).await;
+    h.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_normalises_markers_and_checks_the_answer() {
+    let mut h = start(LOCAL).await;
+    let mut notes = h.client.notifications();
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": SPLIT_MARKERS_QUESTION, "budget_tokens": 2000}),
+        )
+        .await;
+    assert!(!started.general, "{started:?}");
+    assert!(started.citations.iter().all(|c| c.n != 9));
+    let (text, done) = collect(&mut notes, &started.stream_id).await;
+    assert_eq!(done.error, None);
+    // `[Passage 1, 9]` split over three deltas: canonical `[1]`, the unknown `[9]` dropped.
+    assert_eq!(
+        text,
+        "The heron fished by the river [1]. It caught 3 fish [1]."
+    );
+    let check = done.check.expect("a sourced answer is checked");
+    assert!(!check.not_found);
+    assert_eq!(check.claims, 2);
+    assert_eq!(check.invalid_citations, 1);
+    assert_eq!(
+        check.flagged,
+        vec![FlaggedClaim {
+            text: "It caught 3 fish [1].".into(),
+            reason: ClaimFlag::Unsupported,
+        }]
+    );
+
+    // The grounded prompt: dated passages and the exact not-found reply.
+    let bodies = h.bodies().await;
+    assert!(bodies.contains("<passages>"), "{bodies}");
+    assert!(bodies.contains(nuggetd::ask::NOT_FOUND_REPLY));
+    assert!(bodies.contains("Today is "));
+    h.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_flushes_held_text_and_skips_the_check_on_failed_answers() {
+    let mut h = start(LOCAL).await;
+    let mut notes = h.client.notifications();
+    for (question, error) in [
+        (CUT_SHORT_QUESTION, "stream ended"),
+        (FILTERED_QUESTION, "filtered"),
+    ] {
+        let started: AskStarted = h
+            .call(
+                method::RETRIEVE_ASK,
+                json!({"query": question, "budget_tokens": 2000}),
+            )
+            .await;
+        assert!(!started.general, "{started:?}");
+        let (text, done) = collect(&mut notes, &started.stream_id).await;
+        // The open `[1` the filter held is sent before `chat.done`.
+        assert_eq!(text, "The heron fished [1", "{question}");
+        let e = done.error.expect("an error");
+        assert!(e.contains(error), "{question}: {e}");
+        assert_eq!(done.check, None, "{question}");
+    }
+    h.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_dates_today_at_the_clients_offset() {
+    let mut h = start(LOCAL).await;
+    let mut notes = h.client.notifications();
+    for minutes in [14 * 60, -12 * 60] {
+        let started: AskStarted = h
+            .call(
+                method::RETRIEVE_ASK,
+                json!({"query": "heron fishing river", "budget_tokens": 2000,
+                       "utc_offset_minutes": minutes}),
+            )
+            .await;
+        collect(&mut notes, &started.stream_id).await;
+        let offset = time::UtcOffset::from_whole_seconds(minutes * 60).unwrap();
+        let today = time::OffsetDateTime::now_utc().to_offset(offset).date();
+        let line = format!(
+            "Today is {:04}-{:02}-{:02}.",
+            today.year(),
+            u8::from(today.month()),
+            today.day()
+        );
+        let requests = h.requests().await;
+        let last = requests.last().unwrap().to_string();
+        assert!(last.contains(&line), "{line} not in {last}");
+    }
+    h.stop().await;
+}
+
+/// Local and cloud providers on the same mock, each asked explicitly.
+const LOCAL_AND_CLOUD: &str = r#"
+[[providers]]
+id = "ollama"
+kind = "openai_compatible"
+base_url = "{mock}"
+model = "local-model"
+tiers = ["synthesis"]
+max_retries = 0
+
+[[providers]]
+id = "remote"
+kind = "openai_compatible"
+base_url = "{mock}"
+model = "remote-model"
+tiers = ["synthesis"]
+max_retries = 0
+locality = "cloud"
+"#;
+
+/// The requests the mock received that went to `model`.
+async fn requests_to(h: &Harness, model: &str) -> Vec<String> {
+    h.mock
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .filter(|b| b.contains(&format!("\"model\":\"{model}\"")))
+        .collect()
+}
+
+/// GG8-1 (QA s53): a follow-up's history quoting a card number and a sensitive item's canary,
+/// as a local model answered it, goes to a cloud provider. The turn is withheld, and the ledger
+/// lists no item for it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_followup_history_with_pii_never_reaches_a_cloud_model() {
+    let mut h = start(CLOUD).await;
+    let mut notes = h.client.notifications();
+    let history = json!([
+        {"role": "user", "text": "How will the heron account be paid?"},
+        {"role": "assistant", "text": "It will be paid by card. The card number is 4111 1111 1111 1111, expiry 09/29. GG8CANARY-SENS-1 [1]"},
+    ]);
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "And the wire details?", "budget_tokens": 2000,
+                   "provider": "remote", "history": history}),
+        )
+        .await;
+    assert_eq!(started.locality, Locality::Cloud);
+    let _ = collect(&mut notes, &started.stream_id).await;
+
+    let bodies = h.bodies().await;
+    assert!(!bodies.contains("4111"), "a card number reached the cloud");
+    assert!(
+        !bodies.contains("GG8CANARY-SENS-1"),
+        "the sensitive answer reached the cloud"
+    );
+    assert!(
+        bodies.contains("left out here"),
+        "the turn is replaced, not silently dropped"
+    );
+    // The user's own question still goes: it holds nothing private.
+    assert!(bodies.contains("How will the heron account be paid?"));
+    assert_eq!(audited_ask(&h.store)["history_withheld"], json!(1));
+    h.stop().await;
+}
+
+/// GG8-1, real-model path: the user asks a local model, whose answer quotes a sensitive item
+/// (nothing the PII scan would find), then the follow-up goes to a cloud model. The daemon
+/// remembers what that answer was drawn from and withholds it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_followup_never_forwards_a_local_answer_from_a_sensitive_item_to_the_cloud() {
+    let mut h = start(LOCAL_AND_CLOUD).await;
+    let mut notes = h.client.notifications();
+    let local: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": ACCOUNT_QUESTION, "budget_tokens": 2000, "provider": "ollama"}),
+        )
+        .await;
+    assert!(local.citations.iter().any(|c| c.sensitive));
+    let (answer, done) = collect(&mut notes, &local.stream_id).await;
+    assert!(done.error.is_none());
+    assert_eq!(answer, ACCOUNT_REPLY);
+
+    // The client sends the turns back as it stored them.
+    let history = json!([
+        {"role": "user", "text": ACCOUNT_QUESTION},
+        {"role": "assistant", "text": answer},
+    ]);
+    let cloud: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "And the wire details?", "budget_tokens": 2000,
+                   "provider": "remote", "history": history.clone()}),
+        )
+        .await;
+    let _ = collect(&mut notes, &cloud.stream_id).await;
+    let sent = requests_to(&h, "remote-model").await.join("\n");
+    assert!(!sent.is_empty());
+    assert!(
+        !sent.contains("HERONCANARY-7"),
+        "the sensitive answer reached the cloud"
+    );
+    assert!(!sent.contains("4111"));
+
+    // A local follow-up still gets the whole conversation.
+    let again: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "And the wire details?", "budget_tokens": 2000,
+                   "provider": "ollama", "history": history}),
+        )
+        .await;
+    let _ = collect(&mut notes, &again.stream_id).await;
+    let local_sent = requests_to(&h, "local-model").await;
+    assert!(local_sent.last().unwrap().contains("HERONCANARY-7"));
+    h.stop().await;
+}
+
+/// GG8-6: a cloud follow-up's ledger row lists the items its history's answers came from.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_followup_ledger_lists_the_items_of_the_history() {
+    let mut h = start(CLOUD).await;
+    let mut notes = h.client.notifications();
+    // First answer from the cloud: only the ordinary item is packed.
+    let first: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "Where did we watch herons?", "budget_tokens": 2000}),
+        )
+        .await;
+    assert!(first.citations.iter().all(|c| !c.sensitive));
+    let (answer, _) = collect(&mut notes, &first.stream_id).await;
+
+    // A follow-up about something unrelated: its own context holds nothing, so any item in
+    // its ledger row came from the history.
+    let history = json!([
+        {"role": "user", "text": "Where did we watch herons?"},
+        {"role": "assistant", "text": answer},
+    ]);
+    let next: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "zzqx unrelated", "budget_tokens": 2000, "history": history}),
+        )
+        .await;
+    let _ = collect(&mut notes, &next.stream_id).await;
+    let rows = h.egress("ask").await;
+    assert!(rows.len() >= 2, "{rows:?}");
+    let walk = iref("walk.md");
+    assert!(
+        rows.iter().all(|r| r.items.contains(&walk)),
+        "every ask row, the follow-up's too, names the item: {rows:?}"
+    );
+    assert!(rows.iter().all(|r| !r.items.contains(&iref("bank.md"))));
+    // The follow-up's audit row says the history contributed it (whatever its own context was).
+    assert_eq!(audited_ask(&h.store)["history_items"], json!(1));
+    h.stop().await;
+}
+
+/// GG8-9: Ask never sends local file paths (the items' `file://` URLs) to a cloud model.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_sends_no_local_paths_to_a_cloud_model() {
+    let mut h = start(CLOUD).await;
+    let mut notes = h.client.notifications();
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "Where did we watch herons?", "budget_tokens": 2000}),
+        )
+        .await;
+    // The client still gets the URL to open the item.
+    assert!(
+        started
+            .citations
+            .iter()
+            .any(|c| c.url.as_deref().is_some_and(|u| u.starts_with("file://")))
+    );
+    let _ = collect(&mut notes, &started.stream_id).await;
+    let bodies = h.bodies().await;
+    assert!(bodies.contains("<passages>"));
+    assert!(
+        !bodies.contains("file://"),
+        "a local path reached the cloud"
+    );
+    assert!(
+        !bodies.contains("/home/alice"),
+        "a local path reached the cloud"
+    );
     h.stop().await;
 }

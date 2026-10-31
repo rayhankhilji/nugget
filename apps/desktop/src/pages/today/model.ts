@@ -3,6 +3,7 @@ import type { CardEvidence, CardFactor, CardLearned, LearnedView } from "../../a
 import { isSafeEvidenceUrl } from "../../api";
 import { formatDate, t, type MessageKey } from "../../i18n";
 import { truncateText } from "../../knowledge";
+import { plainSnippet } from "../../components/Provenance";
 
 /** The catalog entry for `key`, else `fallback` (for values a newer daemon may send). */
 function known(key: string, fallback: string): string {
@@ -100,7 +101,10 @@ export function formatClock(rfc3339: string): string {
 export const MAX_CARD_QUOTE_CHARS = 280;
 
 export interface EvidenceLine {
+  /** Plain text (Markdown stripped), cut short; `null` when nothing is left. */
   quote: string | null;
+  /** The whole plain-text quote (for a tooltip when cut). */
+  full: string;
   truncated: boolean;
   /** `source · key`, shown as the citation. */
   source: string;
@@ -110,10 +114,12 @@ export interface EvidenceLine {
 
 /** A card citation for display: plain text only, quote cut short, link only when safe. */
 export function evidenceLine(ev: CardEvidence): EvidenceLine {
-  const raw = (ev.quote ?? "").replace(/\s+/g, " ").trim();
+  // Strip Markdown before collapsing and cutting, so line starts and links are seen whole.
+  const raw = plainSnippet(ev.quote ?? "");
   const { text, truncated } = truncateText(raw, MAX_CARD_QUOTE_CHARS);
   return {
     quote: raw ? text : null,
+    full: raw,
     truncated,
     source: `${ev.item.source} · ${ev.item.key}`,
     openUrl: isSafeEvidenceUrl(ev.url) ? ev.url : null,

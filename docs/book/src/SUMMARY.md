@@ -24,6 +24,7 @@
 - [Today: proactive cards and the morning brief](guide/today.md)
 - [Plugins](guide/plugins.md)
 - [Privacy](guide/privacy.md)
+- [Backup, restore and export](guide/backup.md)
 - [Languages](guide/languages.md)
 - [Accessibility](guide/accessibility.md)
 - [Troubleshooting](guide/troubleshooting.md)

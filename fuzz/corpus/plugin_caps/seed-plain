@@ -1,0 +1,6 @@
+feeds.example.com
+https://feeds.example.com/rss
+feeds.example.com
+*.cdn.example.com
+$api_token
+@folder

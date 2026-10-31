@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ApiError, errorMessage } from "../api";
+import { ApiError } from "../api";
 import { useT } from "../i18n";
 import "../styles-pages.css";
 
@@ -19,20 +19,68 @@ export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "acce
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
-/** Inline error. Offline errors are handled app-wide, so they render as a quiet hint here. */
+/**
+ * What an error means to the user: the text to show (and announce), and the technical text kept
+ * behind "Details".
+ * - busy / locked, timed out, version mismatch, failed start: a translated sentence.
+ * - any other daemon (rpc) error: the daemon's own message stays visible, since it usually says
+ *   what to fix (a bad path, a duplicate name); its code goes under Details, never number-formatted.
+ * - anything else (shell io errors, script errors): "Something went wrong", raw text under Details.
+ */
+export function describeError(e: ApiError, t: ReturnType<typeof useT>): { headline: string; detail: string | null } {
+  const raw = e.message.trim();
+  const code = e.kind === "rpc" && e.code !== null ? t("common.errorCode", { code: String(e.code) }) : "";
+  const detail = [raw, code].filter(Boolean).join(" ") || null;
+  if (e.kind === "rpc" || e.kind === "protocol" || e.kind === "spawn") {
+    if (e.isBusy || /\b(locked|busy)\b/i.test(raw)) return { headline: t("common.error.busy"), detail };
+    if (/timed? ?out|timeout|deadline/i.test(raw)) return { headline: t("common.error.timeout"), detail };
+  }
+  if (e.kind === "protocol") return { headline: t("common.error.protocol"), detail };
+  if (e.kind === "rpc" && raw) return { headline: raw, detail: code || null };
+  return { headline: t("common.error.generic"), detail };
+}
+
+/**
+ * Inline error: what went wrong (a translated sentence for known cases, else the daemon's own
+ * message), an optional Retry, and the technical text behind "Details". Offline errors are
+ * handled app-wide, so they render as a quiet hint here.
+ */
 export function ErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const t = useT();
   if (!error) return null;
   const e = ApiError.from(error);
   if (e.isMethodNotFound) return <NotAvailable />;
+  if (e.isOffline) {
+    return (
+      <div className="note" role="alert">
+        <span>{t("common.offlineHint")}</span>
+        {onRetry && (
+          <button type="button" className="btn btn-small" onClick={onRetry}>
+            {t("common.retry")}
+          </button>
+        )}
+      </div>
+    );
+  }
+  // App code throws plain `Error`s with an already translated sentence (e.g. Plugins' approve);
+  // show those as they are. Runtime errors (TypeError, …) and shell errors keep the generic line.
+  const own = error instanceof Error && !(error instanceof ApiError) && error.name === "Error" && error.message.trim();
+  const { headline, detail } = own ? { headline: error.message.trim(), detail: null } : describeError(e, t);
   return (
-    <div className={e.isOffline ? "note" : "note note-error"} role="alert">
-      <span>{e.isOffline ? t("common.offlineHint") : errorMessage(e)}</span>
-      {e.kind === "rpc" && e.code !== null && <span className="muted small"> {t("common.errorCode", { code: e.code })}</span>}
+    <div className="note note-error" role="alert">
+      <span className="note-text" dir="auto">
+        {headline}
+      </span>
       {onRetry && (
-        <button type="button" className="btn btn-ghost btn-small" onClick={onRetry}>
+        <button type="button" className="btn btn-small" onClick={onRetry}>
           {t("common.retry")}
         </button>
+      )}
+      {detail && (
+        <details className="note-details">
+          <summary>{t("common.details")}</summary>
+          <p dir="auto">{detail}</p>
+        </details>
       )}
     </div>
   );

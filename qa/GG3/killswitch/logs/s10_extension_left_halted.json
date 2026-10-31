@@ -1,0 +1,98 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "extension_left_halted": "3/30",
+      "examples": [
+        {
+          "try": 1,
+          "halt_request_at_ms_after_kill_sent": 5.57,
+          "first_task_log_tail": [
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          },
+          "next_task_policy_still_resumed": true
+        },
+        {
+          "try": 22,
+          "halt_request_at_ms_after_kill_sent": 4.63,
+          "first_task_log_tail": [
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          },
+          "next_task_policy_still_resumed": true
+        },
+        {
+          "try": 24,
+          "halt_request_at_ms_after_kill_sent": 2.77,
+          "first_task_log_tail": [
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          },
+          "next_task_policy_still_resumed": true
+        }
+      ],
+      "ok": false
+    },
+    {
+      "extension_left_halted": "1/30",
+      "examples": [
+        {
+          "try": 17,
+          "halt_request_at_ms_after_kill_sent": 4.72,
+          "first_task_log_tail": [
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          },
+          "next_task_policy_still_resumed": true
+        }
+      ],
+      "ok": false
+    },
+    {
+      "extension_left_halted": "1/30",
+      "examples": [
+        {
+          "try": 26,
+          "halt_request_at_ms_after_kill_sent": 5.19,
+          "first_task_log_tail": [
+            "decision(browser_submit):approved",
+            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
+            "finished:halted"
+          ],
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          },
+          "next_task_policy_still_resumed": true
+        }
+      ],
+      "ok": false
+    }
+  ]
+}

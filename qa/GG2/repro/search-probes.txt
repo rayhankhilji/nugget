@@ -1,0 +1,12 @@
+# Exact-word searches for items a user would expect to find. A gold item missing from all of its
+# probes' hits after ingest was made metadata-only (triage "junk") or never indexed.
+boiler engineer WarmFlow
+Corvid pre-boarding call Lena paperwork
+Kestrel Mobile monthly statement
+Ironleaf Gym membership cancellation
+Bright Smile Dental appointment
+Lumen Fiber bill
+receipt Grindhouse Coffee
+Pantry Box
+City Power electricity bill
+Northgate Auto car service

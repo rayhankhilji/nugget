@@ -1,0 +1,271 @@
+{
+ "scenario": "s40_saas_tokens",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com",
+  "api.notion.com",
+  "slack.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.130",
+   "dst": "203.0.113.138",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 94
+  },
+  {
+   "src": "203.0.113.130",
+   "dst": "203.0.113.138",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 14
+  }
+ ],
+ "observed_hosts": {
+  "slack.com": {
+   "requests": 14,
+   "bytes_in": 0,
+   "paths": [
+    "GET /api/auth.test",
+    "GET /api/conversations.history",
+    "GET /api/users.conversations",
+    "GET /api/users.info"
+   ]
+  },
+  "api.notion.com": {
+   "requests": 6,
+   "bytes_in": 164,
+   "paths": [
+    "GET /v1/blocks/p-acme/children",
+    "GET /v1/blocks/p-pay/children",
+    "GET /v1/users/me",
+    "POST /v1/search"
+   ]
+  },
+  "api.anthropic.com": {
+   "requests": 1,
+   "bytes_in": 1023,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "slack.com": {
+   "rows": 14,
+   "bytes_sent": 2116,
+   "features": [
+    "sync:slack"
+   ]
+  },
+  "api.notion.com": {
+   "rows": 6,
+   "bytes_sent": 1049,
+   "features": [
+    "sync:notion"
+   ]
+  },
+  "api.anthropic.com": {
+   "rows": 1,
+   "bytes_sent": 1023,
+   "features": [
+    "ask"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request GET api.notion.com/v1/blocks/p-acme/children?page_size=100",
+   "canary": "GG8CANARY-NOTIONTOKEN-1",
+   "count": 1
+  },
+  {
+   "where": "request GET api.notion.com/v1/blocks/p-pay/children?page_size=100",
+   "canary": "GG8CANARY-NOTIONTOKEN-1",
+   "count": 1
+  },
+  {
+   "where": "request GET api.notion.com/v1/users/me",
+   "canary": "GG8CANARY-NOTIONTOKEN-1",
+   "count": 2
+  },
+  {
+   "where": "request GET slack.com/api/auth.test",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 2
+  },
+  {
+   "where": "request GET slack.com/api/conversations.history?channel=C1&oldest=1785542400.000000&latest=1793389883.000000&inclusive=true&limit=200",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 1
+  },
+  {
+   "where": "request GET slack.com/api/conversations.history?channel=C1&oldest=1793318400.000000&latest=1793389894.000000&inclusive=true&limit=200",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 1
+  },
+  {
+   "where": "request GET slack.com/api/conversations.history?channel=C1&oldest=1793386880.000002&limit=1&inclusive=false",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 1
+  },
+  {
+   "where": "request GET slack.com/api/conversations.history?channel=D1&oldest=1785542400.000000&latest=1793389883.000000&inclusive=true&limit=200",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 1
+  },
+  {
+   "where": "request GET slack.com/api/conversations.history?channel=D1&oldest=1793318400.000000&latest=1793389894.000000&inclusive=true&limit=200",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 1
+  },
+  {
+   "where": "request GET slack.com/api/conversations.history?channel=D1&oldest=1793387880.000003&limit=1&inclusive=false",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 1
+  },
+  {
+   "where": "request GET slack.com/api/users.conversations?types=im%2Cmpim%2Cpublic_channel%2Cprivate_channel&exclude_archived=true&limit=200",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 2
+  },
+  {
+   "where": "request GET slack.com/api/users.info?user=U1",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 2
+  },
+  {
+   "where": "request GET slack.com/api/users.info?user=U2",
+   "canary": "GG8CANARY-SLACKTOKEN-1",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NOTION-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-SLACK-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-SLACK-NORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "request POST api.notion.com/v1/search",
+   "canary": "GG8CANARY-NOTIONTOKEN-1",
+   "count": 2
+  }
+ ],
+ "checks": [
+  {
+   "id": "sync.slack.items",
+   "ok": true,
+   "detail": "state=idle items=2 err=None",
+   "severity": null,
+   "t": 1793389891.426099
+  },
+  {
+   "id": "sync.notion.items",
+   "ok": true,
+   "detail": "state=idle items=2 err=None",
+   "severity": null,
+   "t": 1793389891.42615
+  },
+  {
+   "id": "ledger.sync:slack",
+   "ok": true,
+   "detail": "requests=6 ledger_rows=6 hosts=['slack.com'] bytes_sent=889",
+   "severity": null,
+   "t": 1793389891.429747
+  },
+  {
+   "id": "ledger.sync:notion",
+   "ok": true,
+   "detail": "requests=4 ledger_rows=4 hosts=['api.notion.com'] bytes_sent=680",
+   "severity": null,
+   "t": 1793389891.4298575
+  },
+  {
+   "id": "settings.client_secret_refused",
+   "ok": true,
+   "detail": "-32602: settings must not contain `client_secret`; set it with sources.secret.set",
+   "severity": null,
+   "t": 1793389891.4321468
+  },
+  {
+   "id": "ask.answered",
+   "ok": true,
+   "detail": "cit=2 excl=2",
+   "severity": null,
+   "t": 1793389891.4528985
+  },
+  {
+   "id": "ask.connector_content_sent",
+   "ok": true,
+   "detail": "non-sensitive connector passages reached the cloud (expected)",
+   "severity": null,
+   "t": 1793389891.453254
+  },
+  {
+   "id": "ask.no_sensitive_connector_content",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389891.4532852
+  },
+  {
+   "id": "tokens.confined",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389893.4542038
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793389881.8573,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793389882.3609498,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793389882.4017172,
+   "label": "synced-start"
+  },
+  {
+   "t": 1793389893.4575787,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793389893.465387,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793389893.9684303,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793389900.978925,
+   "note": "after restart: 20 SaaS requests, ledger rows 21"
+  },
+  {
+   "t": 1793389900.9819438,
+   "label": "daemon.stop"
+  }
+ ]
+}

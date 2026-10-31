@@ -21,6 +21,7 @@ tracing.workspace = true
 quick-xml = "0.42"
 
 [dev-dependencies]
+nugget-connector = { workspace = true, features = ["testkit"] }
 wiremock = "0.6"
 
 [lints]

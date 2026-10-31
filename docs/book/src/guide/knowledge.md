@@ -127,7 +127,7 @@ yourself can be withdrawn the same way. Over IPC, `knowledge.claim.status` sets 
 
 ## In the desktop app
 
-The **Knowledge** page lists entities by kind, shows each entity's facts with a **Why?** button that
+The **Knowledge** page lists entities by kind, shows each entity's facts with a **Based on N sources** button that
 opens the evidence, lets you merge duplicates and reject wrong facts, and opens the entity's vault
 page. It also shows how many entities and facts there are and how many items are waiting for
 extraction. `knowledge.status` adds the last run, the model used for LLM extraction, and vault pages
@@ -135,14 +135,14 @@ that failed validation or have merge conflicts. The **graph view** draws the nei
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/knowledge-dark.png">
-  <img src="../images/screenshots/knowledge-light.png" alt="The Knowledge page: the entity list, and Ada Wexford's details with her facts, each with a confidence, a Why? button and a Reject button" loading="lazy">
+  <img src="../images/screenshots/knowledge-light.png" alt="The Knowledge page: the entity list, and Ada Wexford's details with her facts, each with its sources button, and a confidence where it is below 80%" loading="lazy">
 </picture>
 
-**Why?** opens the evidence for a fact: the quoted passage and the item it came from.
+**Based on N sources** opens the evidence for a fact: the quoted passage and the item it came from.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/knowledge-why-dark.png">
-  <img src="../images/screenshots/knowledge-why-light.png" alt="A fact's evidence opened with Why?: a quote from the Wren Mobile usability test calendar event and a link to open it" loading="lazy">
+  <img src="../images/screenshots/knowledge-why-light.png" alt="A fact's evidence opened with Based on 1 source: a quote from the Wren Mobile usability test calendar event and a link to open it" loading="lazy">
 </picture>
 
 <picture>

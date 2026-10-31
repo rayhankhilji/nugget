@@ -75,6 +75,15 @@ describe("isSourceInfo", () => {
     const { id: _id, ...noId } = source();
     expect(isSourceInfo(noId)).toBe(false);
   });
+
+  it("checks the optional health field", () => {
+    const health = { code: "offline", reason: "r", fix: "f", item_errors: 0 };
+    expect(isSourceInfo({ ...source(), health })).toBe(true);
+    expect(isSourceInfo({ ...source(), health: null })).toBe(true);
+    expect(isSourceInfo({ ...source(), health: { code: "x", reason: "r" } })).toBe(true);
+    expect(isSourceInfo({ ...source(), health: { ...health, item_errors: -1 } })).toBe(false);
+    expect(isSourceInfo({ ...source(), health: { code: "offline" } })).toBe(false);
+  });
 });
 
 describe("isIngestProgress", () => {

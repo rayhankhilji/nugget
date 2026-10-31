@@ -90,7 +90,7 @@ export function UpdateSettings() {
       <p className="muted small">{t("updates.intro", { version: status.current_version })}</p>
 
       {!status.configured ? (
-        <div className="note">{t("updates.unconfigured")}</div>
+        <div className="note small">{t("updates.unconfigured")}</div>
       ) : (
         <>
           <div className="row" style={{ justifyContent: "flex-start", alignItems: "center" }}>
@@ -104,14 +104,16 @@ export function UpdateSettings() {
                 ))}
               </select>
             </label>
-            <label className="field-inline">
+            <label className="switch">
               <input
                 type="checkbox"
+                role="switch"
                 checked={settings.auto_install}
                 disabled={busy || settings.channel === "off"}
                 onChange={(e) => setSettings(settings.channel, e.target.checked)}
               />
-              {t("updates.autoInstall")}
+              <span className="switch-track" aria-hidden="true" />
+              <span>{t("updates.autoInstall")}</span>
             </label>
             <button type="button" className="btn btn-ghost btn-small" disabled={busy || settings.channel === "off"} onClick={() => void run("updates_check")}>
               {t("updates.checkNow")}
@@ -155,7 +157,7 @@ export function UpdateSettings() {
 
       <h3 className="ask-sub">{t("updates.login.title")}</h3>
       {settings.start_at_login === null ? (
-        <div className="note" style={{ display: "block" }}>
+        <div className="note small" style={{ display: "block" }}>
           <p>{t("updates.login.ask")}</p>
           <div className="row" style={{ justifyContent: "flex-start" }}>
             <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => void run("login_set", { enabled: true })}>
@@ -167,14 +169,16 @@ export function UpdateSettings() {
           </div>
         </div>
       ) : (
-        <label className="field-inline">
+        <label className="switch">
           <input
             type="checkbox"
+            role="switch"
             checked={settings.start_at_login}
             disabled={busy}
             onChange={(e) => void run("login_set", { enabled: e.target.checked })}
           />
-          {t("updates.login.toggle")}
+          <span className="switch-track" aria-hidden="true" />
+          <span>{t("updates.login.toggle")}</span>
         </label>
       )}
       <AppSettings />

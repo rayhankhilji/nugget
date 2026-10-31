@@ -1,0 +1,328 @@
+{
+ "scenario": "s41_caldav_imap",
+ "mode": "sinkhole",
+ "dns_names": [
+  "caldav.gg8-synthetic.test",
+  "imap.gg8-synthetic.test"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.130",
+   "dst": "203.0.113.138",
+   "dport": "143",
+   "proto": "tcp",
+   "packets": 12
+  },
+  {
+   "src": "203.0.113.130",
+   "dst": "203.0.113.138",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 25
+  },
+  {
+   "src": "203.0.113.130",
+   "dst": "203.0.113.138",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 20
+  },
+  {
+   "src": "203.0.113.130",
+   "dst": "203.0.113.138",
+   "dport": "993",
+   "proto": "tcp",
+   "packets": 20
+  }
+ ],
+ "observed_hosts": {
+  "caldav.gg8-synthetic.test": {
+   "requests": 6,
+   "bytes_in": 1891,
+   "paths": [
+    "PROPFIND /",
+    "PROPFIND /cal/home/",
+    "PROPFIND /cal/home/work/",
+    "REPORT /cal/home/work/"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "imap.gg8-synthetic.test": {
+   "rows": 5,
+   "bytes_sent": 1300,
+   "features": [
+    "sync:imap"
+   ]
+  },
+  "caldav.gg8-synthetic.test": {
+   "rows": 6,
+   "bytes_sent": 3093,
+   "features": [
+    "sync:caldav"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [
+  "imap.gg8-synthetic.test"
+ ],
+ "raw_or_failed_tls": [
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:993",
+   "first_bytes_b64": "FgMBAP8BAAD7AwO7Hr1QjaJ/+570bXmJZDlJua2QVT4Vr2QIrRl/tIUWTyBTWnOa7C7u2hTMVyQ5jzDfyI4BPjiEjgZyWPnp0dPGWgAUEwITARMDwCzAK8ypwDDAL8yoAP8BAACeACsABQQDBAMDACMAAAAzACYAJAAdACC7IMlIxTmehNXtoKFBCQtiVO3hYCL7LZcYW/lwriJHMAAFAAUBAAAAAAANABwAGgUDBAMGAwgHCAYIBQgEBgEFAQQBCQQJBQkGAAsAAgEAABcAAAAKAAoACAAdABcAGBHsAAAAHAAaAAAXaW1hcC5nZzgtc3ludGhldGljLnRlc3QALQACAQE=",
+   "t": 1793389908.9156432
+  },
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:993",
+   "first_bytes_b64": "FgMBAP8BAAD7AwPiOK4aVHYYk949/ynGuHeyaXCmAqdOhySDweeyPx0bViCl097yHYufmFOvSoxsdsM4dH+RCAyd+Un5tSbGmNHsIwAUEwITARMDwCzAK8ypwDDAL8yoAP8BAACeACMAAAAAABwAGgAAF2ltYXAuZ2c4LXN5bnRoZXRpYy50ZXN0ADMAJgAkAB0AIDu9GK5t6QPXjtvFQfnG5cOT4QDb0Crsk41+4/oHcgYbAC0AAgEBAA0AHAAaBQMEAwYDCAcIBggFCAQGAQUBBAEJBAkFCQYAFwAAAAoACgAIAB0AFwAYEewAKwAFBAMEAwMACwACAQAABQAFAQAAAAA=",
+   "t": 1793389908.9190822
+  },
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:143",
+   "first_bytes_b64": "",
+   "t": 1793389911.9262304
+  },
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:993",
+   "first_bytes_b64": "FgMBAP8BAAD7AwOzhxSUK8sVILCQqQ9Lpk1pEQCqJMTzHfzgS99SKbO3bCARx7D4QuIxdMh4mMYcOECEkE3L475Fsi1CElqqqePdagAUEwITARMDwCzAK8ypwDDAL8yoAP8BAACeABcAAAAAABwAGgAAF2ltYXAuZ2c4LXN5bnRoZXRpYy50ZXN0AAUABQEAAAAAAA0AHAAaBQMEAwYDCAcIBggFCAQGAQUBBAEJBAkFCQYAIwAAADMAJgAkAB0AIKjGE3Gyj/hbkyrQXjzt8oY3C/bapQ/25n8vsAgHaeEWACsABQQDBAMDAAoACgAIAB0AFwAYEewALQACAQEACwACAQA=",
+   "t": 1793389912.0528507
+  },
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:143",
+   "first_bytes_b64": "",
+   "t": 1793389914.9348328
+  },
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:993",
+   "first_bytes_b64": "FgMBAP8BAAD7AwPK7me6lAhTWAIb/51lBKFQXi8a1350TW3Vgi3vqFeSjSAjqnN1dkB6tsePRIA7RXDUP7E/QNkvZ6Q+zCeP44yF2QAUEwITARMDwCzAK8ypwDDAL8yoAP8BAACeAAsAAgEAAC0AAgEBAAUABQEAAAAAAAoACgAIAB0AFwAYEewAKwAFBAMEAwMAMwAmACQAHQAgr9lKDT9LKPIMBnGBFJ340oK4mIAVok6YGkgbTKsqzEEAFwAAAAAAHAAaAAAXaW1hcC5nZzgtc3ludGhldGljLnRlc3QAIwAAAA0AHAAaBQMEAwYDCAcIBggFCAQGAQUBBAEJBAkFCQY=",
+   "t": 1793389919.09013
+  },
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:143",
+   "first_bytes_b64": "",
+   "t": 1793389922.122501
+  },
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:993",
+   "first_bytes_b64": "FgMBAP8BAAD7AwNJqIil/ezN5YsxwJAlxZLUF+cFEeRyJobGXvFN8UXtcCC41oqx6Ub+NszgWogi2aRqKP78ji9hgvUfCTBY0gY4XQAUEwITARMDwCzAK8ypwDDAL8yoAP8BAACeAC0AAgEBAAUABQEAAAAAAAAAHAAaAAAXaW1hcC5nZzgtc3ludGhldGljLnRlc3QACwACAQAADQAcABoFAwQDBgMIBwgGCAUIBAYBBQEEAQkECQUJBgAjAAAAMwAmACQAHQAgouHLuvolKCw21wvP8blmu72cAxRE1o/NqoNkcQG5oiUAFwAAACsABQQDBAMDAAoACgAIAB0AFwAYEew=",
+   "t": 1793389931.7566335
+  },
+  {
+   "raw_tcp": true,
+   "client": "203.0.113.130",
+   "listen": "203.0.113.138:143",
+   "first_bytes_b64": "",
+   "t": 1793389931.81449
+  }
+ ],
+ "canaries": [],
+ "checks": [
+  {
+   "id": "caldav.needs_auth_before_secret",
+   "ok": false,
+   "detail": "syncing",
+   "severity": null,
+   "t": 1793389902.8658283
+  },
+  {
+   "id": "caldav.nothing_before_secret",
+   "ok": true,
+   "detail": 0,
+   "severity": null,
+   "t": 1793389902.865931
+  },
+  {
+   "id": "caldav.synced",
+   "ok": true,
+   "detail": "state=idle items=2 err=None",
+   "severity": null,
+   "t": 1793389908.887084
+  },
+  {
+   "id": "ledger.sync:caldav",
+   "ok": true,
+   "detail": "requests=6 rows=6 methods=['PROPFIND', 'PROPFIND', 'PROPFIND', 'REPORT', 'PROPFIND', 'PROPFIND']",
+   "severity": null,
+   "t": 1793389908.8892608
+  },
+  {
+   "id": "caldav.password_confined",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389908.8896074
+  },
+  {
+   "id": "caldav.only_https",
+   "ok": true,
+   "detail": [
+    "https"
+   ],
+   "severity": null,
+   "t": 1793389908.8896322
+  },
+  {
+   "id": "caldav.http_lan_refused",
+   "ok": true,
+   "detail": "sources.add refused: -32602: caldav: refusing plain http to a non-loopback host; use https",
+   "severity": null,
+   "t": 1793389908.890649
+  },
+  {
+   "id": "imap.attempted",
+   "ok": true,
+   "detail": [
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb0303bb1ebd508d"
+    ],
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb0303e238ae1a54"
+    ],
+    [
+     "203.0.113.138:143",
+     ""
+    ],
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb0303b38714942b"
+    ],
+    [
+     "203.0.113.138:143",
+     ""
+    ],
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb0303caee67ba94"
+    ],
+    [
+     "203.0.113.138:143",
+     ""
+    ],
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb030349a888a5fd"
+    ],
+    [
+     "203.0.113.138:143",
+     ""
+    ]
+   ],
+   "severity": null,
+   "t": 1793389933.911938
+  },
+  {
+   "id": "imap.no_plaintext_credentials",
+   "ok": true,
+   "detail": 0,
+   "severity": null,
+   "t": 1793389933.912028
+  },
+  {
+   "id": "imap.993_starts_tls",
+   "ok": true,
+   "detail": [
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb0303bb1ebd508d"
+    ],
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb0303e238ae1a54"
+    ],
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb0303b38714942b"
+    ],
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb0303caee67ba94"
+    ],
+    [
+     "203.0.113.138:993",
+     "16030100ff010000fb030349a888a5fd"
+    ]
+   ],
+   "severity": null,
+   "t": 1793389933.9120483
+  },
+  {
+   "id": "imap.143_sends_nothing_before_greeting",
+   "ok": true,
+   "detail": [
+    [
+     "203.0.113.138:143",
+     ""
+    ],
+    [
+     "203.0.113.138:143",
+     ""
+    ],
+    [
+     "203.0.113.138:143",
+     ""
+    ],
+    [
+     "203.0.113.138:143",
+     ""
+    ]
+   ],
+   "severity": null,
+   "t": 1793389933.9120615
+  },
+  {
+   "id": "ledger.sync:imap_failed_attempts",
+   "ok": true,
+   "detail": "connections=9 ledger_rows=5 [{'at': '2026-10-30T19:52:11.75717388Z', 'bytes_received': 0, 'bytes_sent': 260, 'feature': 'sync:imap', 'host': 'imap.gg8-synthetic.test:993', 'items': []}, {'at': '2026-10-30T19:51:59.090532216Z', 'bytes_received': 0, 'bytes_sent': 260, 'feature': 'sync:imap', 'host': 'imap.gg8-synthetic.test:993', 'items': []}, {'at': '2026-10-30T19:51:52.053548154Z', 'bytes_received': 0, 'bytes_sent': 260, 'feature': 'sync:imap', 'host': 'imap.gg8-synthetic.test:993', 'items': []}]",
+   "severity": null,
+   "t": 1793389933.9168942
+  },
+  {
+   "id": "password.not_in_logs",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389933.919413
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793389902.3429155,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793389902.8461952,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793389933.9145083,
+   "note": "imap-1: state=error err=network error: TLS handshake with imap.gg8-synthetic.test: tls handshake eof"
+  },
+  {
+   "t": 1793389933.9145129,
+   "note": "imap-2: state=error err=network error: unexpected end of file"
+  },
+  {
+   "t": 1793389933.9235032,
+   "label": "daemon.stop"
+  }
+ ]
+}

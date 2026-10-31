@@ -103,6 +103,47 @@ describe("knowledge flow", () => {
     expect(within(list()).queryAllByRole("listitem")).toEqual([]);
   });
 
+  it("keeps focus in the search field when a search that found nothing is cleared", async () => {
+    daemon({ knowledge_entities: filterEntities });
+    await renderApp({ page: "knowledge" });
+    const box = within(list()).getByRole("searchbox", { name: t("knowledge.searchLabel") });
+    await type(box, "zzz");
+    await findByText(t("knowledge.noMatches"));
+    await type(box, "");
+    expect(document.activeElement).toBe(box);
+    await findByText(/^Ada Lovelace/, { root: list(), selector: "button" });
+    // Still the same, focused field: never unmounted while the stale empty result was showing.
+    expect(within(list()).getByRole("searchbox")).toBe(box);
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("keeps focus on a kind chip when a kind with no entities is deselected", async () => {
+    daemon({ knowledge_entities: filterEntities });
+    await renderApp({ page: "knowledge" });
+    const kinds = within(list()).getByRole("group", { name: t("knowledge.filterByKind") });
+    const place = within(kinds).getByRole("button", { name: t("knowledge.kindPlural.place") });
+    await click(place);
+    await findByText(t("knowledge.noMatches"));
+    place.focus();
+    await click(place);
+    await findByText(/^Ada Lovelace/, { root: list(), selector: "button" });
+    expect(document.activeElement).toBe(place);
+  });
+
+  it("shows one error when status and list both fail, and Retry reloads both", async () => {
+    const d = daemon().failOnce("knowledge_status", errors.rpc("database is locked")).failOnce("knowledge_entities", errors.rpc("database is locked"));
+    await renderApp({ page: "knowledge" });
+    await waitFor(() => expect(getByRole("main").querySelectorAll('[role="alert"]').length).toBe(1));
+    const alert = getByRole("main").querySelector('[role="alert"]')!;
+    const statusCalls = d.count("knowledge_status");
+    const listCalls = d.count("knowledge_entities");
+    await click(within(alert as HTMLElement).getByRole("button", { name: t("common.retry") }));
+    await findByText(/^Ada Lovelace/, { root: list(), selector: "button" });
+    expect(d.count("knowledge_status")).toBeGreaterThan(statusCalls);
+    expect(d.count("knowledge_entities")).toBeGreaterThan(listCalls);
+    expect(getByRole("main").querySelectorAll('[role="alert"]').length).toBe(0);
+  });
+
   it("recovers from a failed entity list with Retry", async () => {
     const d = daemon().failOnce("knowledge_entities", errors.rpc("graph store unavailable"));
     await renderApp({ page: "knowledge" });

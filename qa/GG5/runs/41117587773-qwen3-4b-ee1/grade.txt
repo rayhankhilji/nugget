@@ -1,0 +1,168 @@
+== phase1: 36 entities, 41 claims, extractor local-chat, vault {'pages': 34, 'conflicts': [], 'invalid': [], 'files': 36}
+   entities resolved 1:1 13/19; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_3gpe5x6fbbayitlx', 'Mara Okafor', None), ('ent_irxnqj6pr7xv5qve', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - ife_okafor: [] kinds []
+     - priyanka_rao: [] kinds []
+     - halden_bay_bouldering: [('ent_x5uvpk2zztiwptor', 'Halden Bay Bouldering', None)] kinds ['place']
+     - halden_bay: [] kinds []
+     - port_ellery: [] kinds []
+   gold facts current 3/18; stale shown as current 0; forbidden current 0
+     - missing F3 mara_okafor works_at brightwell found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[('superseded', 'The user has title Staff Engineer.')]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[]
+     - missing F9 sam_patel works_on harbor found=[]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 41; uncited 0; quote not in source 18
+   sensitive strings found 49: [('claim', '4000 0566 5566 5556'), ('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('claim', 'NCU-4471-0093-218'), ('claim', 'anaemia'), ('claim', 'ferrous sulfate'), ('claim', 'iron-deficiency'), ('claim', '£210,437.55'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers'), ('entity_name', 'anaemia'), ('entity_name', 'iron-deficiency'), ('graph_node', 'Counselling session'), ('graph_node', 'Jonas Albers'), ('graph_node', 'anaemia'), ('graph_node', 'iron-deficiency'), ('vault', '4000 0566 5566 5556'), ('vault', 'Counselling session'), ('vault', 'Jonas Albers'), ('vault', 'NCU-4471-0093-218'), ('vault', 'anaemia'), ('vault', 'ferrous sulfate'), ('vault', 'heavy periods'), ('vault', 'iron-deficiency'), ('vault', '£210,437.55')]
+   entities without a vault page: 2
+== phase2: 61 entities, 86 claims, extractor local-chat, vault {'pages': 60, 'conflicts': [], 'invalid': [], 'files': 64}
+   entities resolved 1:1 11/20; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_3gpe5x6fbbayitlx', 'Mara Okafor', None), ('ent_irxnqj6pr7xv5qve', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - robert_chen: [('ent_jkeesmk7ore5gxk4', 'R. Chen', None), ('ent_olvgwjj4jxeitq3t', 'Rob Chen', None)] kinds ['person']
+     - dana_whitfield: [('ent_bnyaakcynr6xibgo', 'Dana', None), ('ent_mio4xm32oxuxob4v', 'Dana Whitfield', None)] kinds ['person']
+     - theo_lindqvist: [('ent_xiwlvx46swbt7jsp', 'Theo', None), ('ent_l7eux2fj3vltfldj', 'Theo Lindqvist', None)] kinds ['person']
+     - priyanka_rao: [('ent_xwqf2vsq7v6eq3uz', 'Priyanka', None), ('ent_c6wxhue4cq6vd3f4', 'Priyanka Rao', None)] kinds ['person']
+     - lumenfold: [('ent_s6x2pxpnaa2nmw7b', 'Lumenfold', None), ('ent_eeqndcsakhy55t2g', 'Tessellate Systems', None)] kinds ['organization']
+     - halden_bay_bouldering: [('ent_x5uvpk2zztiwptor', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_det2y3ltr6wzga7t', 'Harbor', None), ('ent_hdyzodwqjarjicvo', 'Harbor', None), ('ent_srybsnxizbfx7t3s', 'harbor', None)] kinds ['event', 'project', 'topic']
+     - halden_bay: [] kinds []
+   gold facts current 7/25; stale shown as current 0; forbidden current 0
+     - missing F2 dana_whitfield has_title Head of Product found=[]
+     - missing F3 mara_okafor works_at brightwell found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[('superseded', 'The user has title Staff Engineer.')]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F18 harbor due_on 2026-12-03 found=[]
+     - missing F19 priyanka_rao has_title HR Business Partner found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F24 dana_whitfield friend_of mara_okafor found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 86; uncited 0; quote not in source 38
+   sensitive strings found 49: [('claim', '4000 0566 5566 5556'), ('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('claim', 'NCU-4471-0093-218'), ('claim', 'anaemia'), ('claim', 'ferrous sulfate'), ('claim', 'iron-deficiency'), ('claim', '£210,437.55'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers'), ('entity_name', 'anaemia'), ('entity_name', 'iron-deficiency'), ('graph_node', 'Counselling session'), ('graph_node', 'Jonas Albers'), ('graph_node', 'anaemia'), ('graph_node', 'iron-deficiency'), ('vault', '4000 0566 5566 5556'), ('vault', 'Counselling session'), ('vault', 'Jonas Albers'), ('vault', 'NCU-4471-0093-218'), ('vault', 'anaemia'), ('vault', 'ferrous sulfate'), ('vault', 'heavy periods'), ('vault', 'iron-deficiency'), ('vault', '£210,437.55')]
+   entities without a vault page: 1
+== edits: 63 entities, 87 claims, extractor local-chat, vault {'pages': 60, 'conflicts': ['Person/R. Chen (ent_jkeesmk7ore5gxk4).md'], 'invalid': [], 'files': 64}
+   entities resolved 1:1 10/20; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_3gpe5x6fbbayitlx', 'Mara Okafor', None), ('ent_irxnqj6pr7xv5qve', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - robert_chen: [('ent_jkeesmk7ore5gxk4', 'R. Chen', None), ('ent_olvgwjj4jxeitq3t', 'Rob Chen', None)] kinds ['person']
+     - dana_whitfield: [('ent_bnyaakcynr6xibgo', 'Dana', None), ('ent_mio4xm32oxuxob4v', 'Dana Whitfield', None)] kinds ['person']
+     - theo_lindqvist: [('ent_xiwlvx46swbt7jsp', 'Theo', None), ('ent_l7eux2fj3vltfldj', 'Theo Lindqvist', None)] kinds ['person']
+     - ife_okafor: [('ent_wynzku5racijnsio', 'Ife', None), ('ent_clos2dtbyicsdjcu', 'Ife Okafor', None)] kinds ['person']
+     - priyanka_rao: [('ent_xwqf2vsq7v6eq3uz', 'Priyanka', None), ('ent_c6wxhue4cq6vd3f4', 'Priyanka Rao', None)] kinds ['person']
+     - lumenfold: [('ent_s6x2pxpnaa2nmw7b', 'Lumenfold', None), ('ent_eeqndcsakhy55t2g', 'Tessellate Systems', None)] kinds ['organization']
+     - halden_bay_bouldering: [('ent_x5uvpk2zztiwptor', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_det2y3ltr6wzga7t', 'Harbor', None), ('ent_hdyzodwqjarjicvo', 'Harbor', None), ('ent_srybsnxizbfx7t3s', 'harbor', None)] kinds ['event', 'project', 'topic']
+     - halden_bay: [] kinds []
+   gold facts current 7/25; stale shown as current 0; forbidden current 0
+     - missing F2 dana_whitfield has_title Head of Product found=[]
+     - missing F3 mara_okafor works_at brightwell found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[('superseded', 'The user has title Staff Engineer.')]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F18 harbor due_on 2026-12-03 found=[]
+     - missing F19 priyanka_rao has_title HR Business Partner found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F24 dana_whitfield friend_of mara_okafor found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 86; uncited 0; quote not in source 36
+   sensitive strings found 49: [('claim', '4000 0566 5566 5556'), ('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('claim', 'NCU-4471-0093-218'), ('claim', 'anaemia'), ('claim', 'ferrous sulfate'), ('claim', 'iron-deficiency'), ('claim', '£210,437.55'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers'), ('entity_name', 'anaemia'), ('entity_name', 'iron-deficiency'), ('graph_node', 'Counselling session'), ('graph_node', 'Jonas Albers'), ('graph_node', 'anaemia'), ('graph_node', 'iron-deficiency'), ('vault', '4000 0566 5566 5556'), ('vault', 'Counselling session'), ('vault', 'Jonas Albers'), ('vault', 'NCU-4471-0093-218'), ('vault', 'anaemia'), ('vault', 'ferrous sulfate'), ('vault', 'heavy periods'), ('vault', 'iron-deficiency'), ('vault', '£210,437.55')]
+   entities without a vault page: 3
+== reextract: 85 entities, 94 claims, extractor local-chat, vault {'pages': 84, 'conflicts': ['Person/R. Chen (ent_jkeesmk7ore5gxk4).md'], 'invalid': [], 'files': 94}
+   entities resolved 1:1 11/20; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_3gpe5x6fbbayitlx', 'Mara Okafor', None), ('ent_irxnqj6pr7xv5qve', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - robert_chen: [('ent_jkeesmk7ore5gxk4', 'R. Chen', None), ('ent_olvgwjj4jxeitq3t', 'Rob Chen', None)] kinds ['person']
+     - dana_whitfield: [('ent_3wpdji22tf77myn7', 'Dana', None), ('ent_bnyaakcynr6xibgo', 'Dana', None), ('ent_mio4xm32oxuxob4v', 'Dana Whitfield', None)] kinds ['person']
+     - theo_lindqvist: [('ent_6seovqvlyipamj35', 'Theo', None), ('ent_i4un5xraac3ck33m', 'Theo', None), ('ent_l7eux2fj3vltfldj', 'Theo Lindqvist', None)] kinds ['person']
+     - ife_okafor: [('ent_uf2dpgxomammrkqn', 'Ife', None), ('ent_uo6g2rum5lwjvg7n', 'Ife', None), ('ent_wynzku5racijnsio', 'Ife', None), ('ent_clos2dtbyicsdjcu', 'Ife Okafor', None)] kinds ['person']
+     - priyanka_rao: [('ent_xwqf2vsq7v6eq3uz', 'Priyanka', None), ('ent_c6wxhue4cq6vd3f4', 'Priyanka Rao', None)] kinds ['person']
+     - lumenfold: [('ent_s6x2pxpnaa2nmw7b', 'Lumenfold', None), ('ent_eeqndcsakhy55t2g', 'Tessellate Systems', None)] kinds ['organization']
+     - halden_bay_bouldering: [('ent_x5uvpk2zztiwptor', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_det2y3ltr6wzga7t', 'Harbor', None), ('ent_hdyzodwqjarjicvo', 'Harbor', None), ('ent_jyq76q6tg56vig5n', 'Harbor', None), ('ent_srybsnxizbfx7t3s', 'harbor', None)] kinds ['event', 'place', 'project', 'topic']
+   gold facts current 8/25; stale shown as current 0; forbidden current 0
+     - missing F2 dana_whitfield has_title Head of Product found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[('superseded', 'The user has title Staff Engineer.'), ('superseded', 'The user has title Staff Engineer, Platform.')]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F7 robert_chen works_at brightwell found=[('superseded', 'Robert Chen works at Brightwell (has a brightwell.example address).')]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F18 harbor due_on 2026-12-03 found=[]
+     - missing F19 priyanka_rao has_title HR Business Partner found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F24 dana_whitfield friend_of mara_okafor found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 93; uncited 0; quote not in source 34
+   sensitive strings found 49: [('claim', '4000 0566 5566 5556'), ('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('claim', 'NCU-4471-0093-218'), ('claim', 'anaemia'), ('claim', 'ferrous sulfate'), ('claim', 'iron-deficiency'), ('claim', '£210,437.55'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers'), ('entity_name', 'anaemia'), ('entity_name', 'iron-deficiency'), ('graph_node', 'Counselling session'), ('graph_node', 'Jonas Albers'), ('graph_node', 'anaemia'), ('graph_node', 'iron-deficiency'), ('vault', '4000 0566 5566 5556'), ('vault', 'Counselling session'), ('vault', 'Jonas Albers'), ('vault', 'NCU-4471-0093-218'), ('vault', 'anaemia'), ('vault', 'ferrous sulfate'), ('vault', 'heavy periods'), ('vault', 'iron-deficiency'), ('vault', '£210,437.55')]
+   entities without a vault page: 1
+== restart: 71 entities, 84 claims, extractor None, vault {'pages': 71, 'conflicts': ['Person/R. Chen (ent_jkeesmk7ore5gxk4).md'], 'invalid': [], 'files': 95}
+   entities resolved 1:1 13/20; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_3gpe5x6fbbayitlx', 'Mara Okafor', None), ('ent_irxnqj6pr7xv5qve', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - robert_chen: [('ent_jkeesmk7ore5gxk4', 'R. Chen', None), ('ent_olvgwjj4jxeitq3t', 'Rob Chen', None)] kinds ['person']
+     - theo_lindqvist: [('ent_6seovqvlyipamj35', 'Theo', None), ('ent_l7eux2fj3vltfldj', 'Theo Lindqvist', None)] kinds ['person']
+     - ife_okafor: [('ent_uo6g2rum5lwjvg7n', 'Ife', None), ('ent_clos2dtbyicsdjcu', 'Ife Okafor', None)] kinds ['person']
+     - lumenfold: [('ent_s6x2pxpnaa2nmw7b', 'Lumenfold', None), ('ent_eeqndcsakhy55t2g', 'Tessellate Systems', None)] kinds ['organization']
+     - halden_bay_bouldering: [('ent_x5uvpk2zztiwptor', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_det2y3ltr6wzga7t', 'Harbor', None), ('ent_hdyzodwqjarjicvo', 'Harbor', None), ('ent_jyq76q6tg56vig5n', 'Harbor', None), ('ent_srybsnxizbfx7t3s', 'harbor', None)] kinds ['event', 'place', 'project', 'topic']
+   gold facts current 7/25; stale shown as current 0; forbidden current 0
+     - missing F2 dana_whitfield has_title Head of Product found=[]
+     - missing F3 mara_okafor works_at brightwell found=[('retracted', 'The user works at Brightwell Analytics.')]
+     - missing F4 mara_okafor has_title Staff Engineer found=[('superseded', 'The user has title Staff Engineer.'), ('retracted', 'The user has title Staff Engineer, Platform.')]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[('retracted', 'R. Chen has title VP Engineering.')]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F18 harbor due_on 2026-12-03 found=[]
+     - missing F19 priyanka_rao has_title HR Business Partner found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F24 dana_whitfield friend_of mara_okafor found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 83; uncited 0; quote not in source 34
+   sensitive strings found 49: [('claim', '4000 0566 5566 5556'), ('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('claim', 'NCU-4471-0093-218'), ('claim', 'anaemia'), ('claim', 'ferrous sulfate'), ('claim', 'iron-deficiency'), ('claim', '£210,437.55'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers'), ('entity_name', 'anaemia'), ('entity_name', 'iron-deficiency'), ('graph_node', 'Counselling session'), ('graph_node', 'Jonas Albers'), ('graph_node', 'anaemia'), ('graph_node', 'iron-deficiency'), ('vault', '4000 0566 5566 5556'), ('vault', 'Counselling session'), ('vault', 'Jonas Albers'), ('vault', 'NCU-4471-0093-218'), ('vault', 'anaemia'), ('vault', 'ferrous sulfate'), ('vault', 'heavy periods'), ('vault', 'iron-deficiency'), ('vault', '£210,437.55')]
+== edit E2 delete first fact line (Robert Chen) (Person/R. Chen (ent_jkeesmk7ore5gxk4).md)
+   edits: {"claim 99": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+   reextract: {"claim 99": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+   restart: {"claim 99": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+== edit E3 add fact + note (Sam Okonkwo) (Person/Sam (ent_hbfrjaabuesbh72j).md)
+   edits: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+   reextract: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+   restart: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+== edit E4 add alias Bobby (Robert Chen) (Person/R. Chen (ent_jkeesmk7ore5gxk4).md)
+   edits: {"added_lines_still_on_page": ["aliases: [\"robert.chen@brightwell.example\",\"Robert Chen\",\"Bob\", \"Bobby\"]"], "removed_lines_back_on_page": [], "robert_aliases": []}
+   reextract: {"added_lines_still_on_page": ["aliases: [\"robert.chen@brightwell.example\",\"Robert Chen\",\"Bob\", \"Bobby\"]"], "removed_lines_back_on_page": [], "robert_aliases": []}
+   restart: {"added_lines_still_on_page": ["aliases: [\"robert.chen@brightwell.example\",\"Robert Chen\",\"Bob\", \"Bobby\"]"], "removed_lines_back_on_page": [], "robert_aliases": []}
