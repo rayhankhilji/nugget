@@ -578,7 +578,7 @@ async fn a_new_vault_records_the_temporal_version() {
     let k = env.knowledge(plain_cfg(), None);
     run(&k).await;
     let state = env.store.get_state("knowledge").unwrap().unwrap();
-    assert_eq!(state["temporal"], json!(1));
+    assert_eq!(state["temporal"], json!(2));
 }
 
 #[tokio::test]
@@ -719,13 +719,13 @@ async fn the_backfill_stops_at_the_deadline_and_resumes() {
     .await
     .unwrap();
     let state = env.store.get_state("knowledge").unwrap().unwrap();
-    assert_ne!(state["temporal"], json!(1), "not finished");
+    assert_ne!(state["temporal"], json!(2), "not finished");
     assert!(state["temporal_cursor"].is_string(), "{state}");
 
     // The next run finishes the job.
     run(&k).await;
     let state = env.store.get_state("knowledge").unwrap().unwrap();
-    assert_eq!(state["temporal"], json!(1));
+    assert_eq!(state["temporal"], json!(2));
     assert!(state["temporal_cursor"].is_null());
     for c in env.all_claims() {
         assert!(c.valid_from.is_some(), "{c:?}");

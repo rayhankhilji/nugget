@@ -46,7 +46,9 @@ pub const EXTRACTOR_VERSION: u32 = 2;
 /// from [`EXTRACTOR_VERSION`], whose bump would re-extract every item with the LLM.
 ///
 /// - 1: EE1 validity intervals, past-tense and start cues, order-independent supersession.
-pub(crate) const TEMPORAL_VERSION: u32 = 1;
+/// - 2: items dated by their own date (frontmatter, event start, file-name date) rather than
+///   the file's mtime (GG5-6): single-valued facts are settled again with those dates.
+pub(crate) const TEMPORAL_VERSION: u32 = 2;
 pub(crate) const STATE_KEY: &str = "knowledge";
 /// The pre-sharding notes index (read for migration, cleared once moved).
 pub(crate) const NOTES_KEY: &str = "knowledge/notes";
