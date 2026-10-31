@@ -225,7 +225,7 @@ impl World {
         if apps::kinds(app).contains(&req.verb.as_str()) {
             return Some(format!("{app}.{}", req.verb));
         }
-        let label = req.target_label.as_deref()?.trim();
+        let label = control_label(req.target_label.as_deref()?);
         let view = self.app(app)?.view();
         let mut nodes = Vec::new();
         view.walk(&mut nodes);
@@ -262,7 +262,7 @@ impl World {
         let Some(app) = APP_IDS.iter().find(|a| **a == req.target_app) else {
             return false;
         };
-        let Some(label) = req.target_label.as_deref().map(str::trim) else {
+        let Some(label) = req.target_label.as_deref().map(control_label) else {
             return false;
         };
         let Some(view) = self.app(app).map(|a| a.view()) else {
@@ -359,4 +359,18 @@ impl World {
             "asks": self.asks,
         })
     }
+}
+
+/// The control's own label in a descriptor's `target_label`, without the item a destructive
+/// action names after it (`Delete (selected: Old newsletter)` → `Delete`, GG3-15).
+fn control_label(label: &str) -> &str {
+    let label = label.trim();
+    for tag in [" (in: ", " (selected: ", " (open: "] {
+        if label.ends_with(')')
+            && let Some(i) = label.find(tag)
+        {
+            return label[..i].trim_end();
+        }
+    }
+    label
 }

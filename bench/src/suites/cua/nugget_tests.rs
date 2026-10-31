@@ -273,6 +273,17 @@ fn strict_user_by_default_declines_overreach_and_counts_it() {
     assert!(w.confirm(&toggle));
     toggle.target_label = Some("Firewall".into());
     assert!(!w.confirm(&toggle));
+
+    // A destructive action names its item after the control (GG3-15); the user still knows the
+    // control they asked for.
+    let t = all.iter().find(|t| t.id == "files-delete-backup").unwrap();
+    let w = World::new(t).unwrap();
+    let mut del = descriptor("files.x", &t.id);
+    del.verb = "click".into();
+    for label in ["Move to Trash", "Move to Trash (selected: old-backup.zip)"] {
+        del.target_label = Some(label.into());
+        assert_eq!(w.resolve(&del).as_deref(), Some("files.delete"), "{label}");
+    }
 }
 
 #[test]
