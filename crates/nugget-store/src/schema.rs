@@ -447,7 +447,57 @@ const MIGRATIONS: &[&str] = &[
             WHERE source = (SELECT source FROM items WHERE id = new.item_id);
     END;
     "#,
-    // v11: claims the user replaced in the vault (`GraphStore::supersede_by_user`): the evidence
+    // v11: CJK and Thai text is indexed as overlapping bigrams (see `fts::segment`), so
+    // `chunks_fts` and `items_fts` hold `fts_segment(text)` while their content tables keep the
+    // original text. The triggers are replaced, and only rows the function changes are
+    // re-indexed: their index entries were made from the raw text, which is what the 'delete'
+    // must be given. Other rows' entries are already what `fts_segment` would produce.
+    r#"
+    DROP TRIGGER IF EXISTS chunks_fts_ai;
+    DROP TRIGGER IF EXISTS chunks_fts_ad;
+    DROP TRIGGER IF EXISTS chunks_fts_au;
+    CREATE TRIGGER chunks_fts_ai AFTER INSERT ON chunks BEGIN
+        INSERT INTO chunks_fts (rowid, text) VALUES (new.id, fts_segment(new.text));
+    END;
+    CREATE TRIGGER chunks_fts_ad AFTER DELETE ON chunks BEGIN
+        INSERT INTO chunks_fts (chunks_fts, rowid, text)
+            VALUES ('delete', old.id, fts_segment(old.text));
+    END;
+    CREATE TRIGGER chunks_fts_au AFTER UPDATE OF text ON chunks BEGIN
+        INSERT INTO chunks_fts (chunks_fts, rowid, text)
+            VALUES ('delete', old.id, fts_segment(old.text));
+        INSERT INTO chunks_fts (rowid, text) VALUES (new.id, fts_segment(new.text));
+    END;
+    INSERT INTO chunks_fts (chunks_fts, rowid, text)
+        SELECT 'delete', id, text FROM chunks WHERE fts_segment(text) IS NOT text;
+    INSERT INTO chunks_fts (rowid, text)
+        SELECT id, fts_segment(text) FROM chunks WHERE fts_segment(text) IS NOT text;
+
+    DROP TRIGGER IF EXISTS items_fts_ai;
+    DROP TRIGGER IF EXISTS items_fts_ad;
+    DROP TRIGGER IF EXISTS items_fts_au;
+    CREATE TRIGGER items_fts_ai AFTER INSERT ON items BEGIN
+        INSERT INTO items_fts (rowid, title) VALUES (new.id, fts_segment(coalesce(new.title, '')));
+    END;
+    CREATE TRIGGER items_fts_ad AFTER DELETE ON items BEGIN
+        INSERT INTO items_fts (items_fts, rowid, title)
+            VALUES ('delete', old.id, fts_segment(coalesce(old.title, '')));
+    END;
+    CREATE TRIGGER items_fts_au AFTER UPDATE OF title ON items
+        WHEN old.title IS NOT new.title BEGIN
+        INSERT INTO items_fts (items_fts, rowid, title)
+            VALUES ('delete', old.id, fts_segment(coalesce(old.title, '')));
+        INSERT INTO items_fts (rowid, title)
+            VALUES (new.id, fts_segment(coalesce(new.title, '')));
+    END;
+    INSERT INTO items_fts (items_fts, rowid, title)
+        SELECT 'delete', id, title FROM items
+        WHERE title IS NOT NULL AND fts_segment(title) IS NOT title;
+    INSERT INTO items_fts (rowid, title)
+        SELECT id, fts_segment(title) FROM items
+        WHERE title IS NOT NULL AND fts_segment(title) IS NOT title;
+    "#,
+    // v12: claims the user replaced in the vault (`GraphStore::supersede_by_user`): the evidence
     // (item and quote, '' for none) each had when replaced. Re-extracting that same evidence
     // leaves the claim superseded; rows go with the claim.
     r#"
@@ -507,6 +557,9 @@ pub(crate) fn user_version(conn: &Connection) -> Result<u32> {
 /// Bring the schema up to [`LATEST_VERSION`]. Returns how many migrations were applied
 /// (0 when already current). Refuses databases written by a newer build.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<u32> {
+    // The FTS triggers (and v11) call `fts_segment`; register it even where the auto-extension
+    // (see `vec_ext`) has not been.
+    crate::fts::register_functions(conn).db("register SQL functions")?;
     let current = user_version(conn)?;
     if current > LATEST_VERSION {
         return Err(Error::Unsupported(format!(
@@ -662,6 +715,75 @@ mod tests {
         );
         assert_eq!(kept.len(), 3);
         assert_eq!(kept, aggregate);
+    }
+
+    /// v11 re-indexes existing CJK chunks and titles as bigrams and leaves other rows alone.
+    #[test]
+    fn v10_database_migrates_to_v11_with_searchable_cjk() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 10);
+        conn.execute_batch(
+            "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at)
+                 VALUES (1, 's', 'a', '見積書の送付', 'h', 't', 't'),
+                        (2, 's', 'b', 'Rechnung', 'h', 't', 't'),
+                        (3, 's', 'c', NULL, 'h', 't', 't');
+             INSERT INTO chunks (id, item_id, ord, text) VALUES
+                 (10, 1, 0, '我们下周二在上海开会讨论预算'),
+                 (20, 2, 0, 'Rechnung über 120 Euro'),
+                 (30, 3, 0, 'x');",
+        )
+        .unwrap();
+        let ids = |conn: &Connection, table: &str, q: &str| -> Vec<i64> {
+            let expr = crate::fts::match_expr(q).unwrap();
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid"
+                ))
+                .unwrap();
+            stmt.query_map([expr], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert!(
+            ids(&conn, "chunks_fts", "上海").is_empty(),
+            "v10: one token"
+        );
+
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 10);
+        assert_eq!(ids(&conn, "chunks_fts", "上海"), [10]);
+        assert_eq!(ids(&conn, "chunks_fts", "预算"), [10]);
+        assert_eq!(ids(&conn, "chunks_fts", "uber"), [20]);
+        assert_eq!(ids(&conn, "items_fts", "見積書"), [1]);
+        assert_eq!(ids(&conn, "items_fts", "rechnung"), [2]);
+        conn.execute_batch(
+            "INSERT INTO chunks_fts (chunks_fts) VALUES ('integrity-check');
+             INSERT INTO items_fts (items_fts) VALUES ('integrity-check');",
+        )
+        .unwrap();
+
+        // The new triggers' 'delete' matches what v11 indexed.
+        conn.execute_batch(
+            "UPDATE chunks SET text = '北京的天气' WHERE id = 10;
+             UPDATE items SET title = '预算' WHERE id = 1;
+             DELETE FROM chunks WHERE id = 20;",
+        )
+        .unwrap();
+        assert!(ids(&conn, "chunks_fts", "上海").is_empty());
+        assert_eq!(ids(&conn, "chunks_fts", "北京"), [10]);
+        assert!(ids(&conn, "chunks_fts", "uber").is_empty());
+        assert!(ids(&conn, "items_fts", "見積書").is_empty());
+        assert_eq!(ids(&conn, "items_fts", "预算"), [1]);
+        let docs: i64 = conn
+            .query_row("SELECT count(*) FROM chunks_fts_docsize", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(docs, 2);
+        conn.execute_batch(
+            "INSERT INTO chunks_fts (chunks_fts) VALUES ('integrity-check');
+             INSERT INTO items_fts (items_fts) VALUES ('integrity-check');",
+        )
+        .unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), 0);
     }
 
     #[test]

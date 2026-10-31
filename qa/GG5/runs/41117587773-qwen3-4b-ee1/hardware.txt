@@ -1,0 +1,11 @@
+model: qwen3-4b-q4km
+runner: GitHub Actions 1000011415 (Linux X64)
+harness commit: 660b060c8d15db3a490538a7af9db1377ed773b7
+product: ee/entity-resolution a670826b5705166116da0796e9c0bfc8e9388e34
+date: 2026-10-30T20:24:05Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V45 96-Core Processor
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          10           0           4          14
+Swap:              2           0           2

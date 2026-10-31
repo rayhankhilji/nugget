@@ -1,0 +1,2021 @@
+{
+ "overview": {
+  "edges": [
+   {
+    "claim": 1,
+    "from": "ent_3l554u5fbbdgbtti",
+    "predicate": "located_at",
+    "to": "ent_mndkobw5fo5ge774"
+   },
+   {
+    "claim": 2,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "organized",
+    "to": "ent_3l554u5fbbdgbtti"
+   },
+   {
+    "claim": 3,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_3l554u5fbbdgbtti"
+   },
+   {
+    "claim": 4,
+    "from": "ent_vtsf2khvna7dsozv",
+    "predicate": "attended",
+    "to": "ent_3l554u5fbbdgbtti"
+   },
+   {
+    "claim": 5,
+    "from": "ent_2dzrtthmyumov3vk",
+    "predicate": "located_at",
+    "to": "ent_cj3ljhk4ehdz5koi"
+   },
+   {
+    "claim": 6,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "organized",
+    "to": "ent_2dzrtthmyumov3vk"
+   },
+   {
+    "claim": 7,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_2dzrtthmyumov3vk"
+   },
+   {
+    "claim": 8,
+    "from": "ent_pngkpc2h5tar2jjq",
+    "predicate": "attended",
+    "to": "ent_2dzrtthmyumov3vk"
+   },
+   {
+    "claim": 10,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "has_title",
+    "to": "ent_2dzrtthmyumov3vk"
+   },
+   {
+    "claim": 11,
+    "from": "ent_t3y322htimt6lixu",
+    "predicate": "located_at",
+    "to": "ent_4mlxnp3ylpxguoro"
+   },
+   {
+    "claim": 12,
+    "from": "ent_frqdxjn76szsk3l3",
+    "predicate": "organized",
+    "to": "ent_t3y322htimt6lixu"
+   },
+   {
+    "claim": 14,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_t3y322htimt6lixu"
+   },
+   {
+    "claim": 15,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "works_at",
+    "to": "ent_r4jw42uwirndqzn2"
+   },
+   {
+    "claim": 17,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "part_of",
+    "to": "ent_sttsnwekxxjsg56f"
+   },
+   {
+    "claim": 18,
+    "from": "ent_zkb7gn2ndj7curkv",
+    "predicate": "located_at",
+    "to": "ent_gof42uavyqdrmzv3"
+   },
+   {
+    "claim": 19,
+    "from": "ent_gq6eqi65qjcxao2j",
+    "predicate": "organized",
+    "to": "ent_zkb7gn2ndj7curkv"
+   },
+   {
+    "claim": 20,
+    "from": "ent_gq6eqi65qjcxao2j",
+    "predicate": "attended",
+    "to": "ent_zkb7gn2ndj7curkv"
+   },
+   {
+    "claim": 21,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_zkb7gn2ndj7curkv"
+   },
+   {
+    "claim": 22,
+    "from": "ent_frqdxjn76szsk3l3",
+    "predicate": "works_at",
+    "to": "ent_r4jw42uwirndqzn2"
+   },
+   {
+    "claim": 23,
+    "from": "ent_vtsf2khvna7dsozv",
+    "predicate": "works_at",
+    "to": "ent_r4jw42uwirndqzn2"
+   },
+   {
+    "claim": 25,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "corresponded_with",
+    "to": "ent_frqdxjn76szsk3l3"
+   },
+   {
+    "claim": 26,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "corresponded_with",
+    "to": "ent_vtsf2khvna7dsozv"
+   },
+   {
+    "claim": 27,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "corresponded_with",
+    "to": "ent_3a3kbkmedbzwmt4g"
+   },
+   {
+    "claim": 28,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "leads",
+    "to": "ent_2s25iyw6xz6iavyk"
+   },
+   {
+    "claim": 29,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "works_at",
+    "to": "ent_vtsf2khvna7dsozv"
+   },
+   {
+    "claim": 31,
+    "from": "ent_rc6qwgbv4fcchvr2",
+    "predicate": "works_at",
+    "to": "ent_di5mlniwu6rbs3gl"
+   },
+   {
+    "claim": 32,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "corresponded_with",
+    "to": "ent_rc6qwgbv4fcchvr2"
+   },
+   {
+    "claim": 34,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "corresponded_with",
+    "to": "ent_pngkpc2h5tar2jjq"
+   },
+   {
+    "claim": 35,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "corresponded_with",
+    "to": "ent_c3xdrh4zhy5nseuz"
+   },
+   {
+    "claim": 36,
+    "from": "ent_di5mlniwu6rbs3gl",
+    "predicate": "reports_to",
+    "to": "ent_b7mfqk6orzzpvmqr"
+   },
+   {
+    "claim": 40,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "has_topic",
+    "to": "ent_3ki5i5gdkdhn3rp6"
+   },
+   {
+    "claim": 41,
+    "from": "ent_frqdxjn76szsk3l3",
+    "predicate": "works_on",
+    "to": "ent_2s25iyw6xz6iavyk"
+   },
+   {
+    "claim": 43,
+    "from": "ent_wwfwwixpfjwtcz2q",
+    "predicate": "prefers",
+    "to": "ent_u6zt3d7oq67c7mqz"
+   },
+   {
+    "claim": 44,
+    "from": "ent_xc6clqutpivwvgsh",
+    "predicate": "prefers",
+    "to": "ent_vruxg2g7l4g4wcsa"
+   },
+   {
+    "claim": 45,
+    "from": "ent_zk4d4s77vum7v7wa",
+    "predicate": "has_title",
+    "to": "ent_2kwqotez2j3uvcad"
+   },
+   {
+    "claim": 46,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "committed_to",
+    "to": "ent_r6bx4lytuh6gndvn"
+   },
+   {
+    "claim": 47,
+    "from": "ent_zk4d4s77vum7v7wa",
+    "predicate": "committed_to",
+    "to": "ent_4ob3zsz77vhxdsrm"
+   },
+   {
+    "claim": 48,
+    "from": "ent_c3xdrh4zhy5nseuz",
+    "predicate": "has_topic",
+    "to": "ent_z6uohfgr2nkuax3l"
+   },
+   {
+    "claim": 49,
+    "from": "ent_c3xdrh4zhy5nseuz",
+    "predicate": "works_at",
+    "to": "ent_gcw53xf3cadnznvg"
+   },
+   {
+    "claim": 50,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "has_topic",
+    "to": "ent_527ct2djt6td7vyw"
+   },
+   {
+    "claim": 51,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "has_topic",
+    "to": "ent_qrjllsqy2krczhcn"
+   },
+   {
+    "claim": 52,
+    "from": "ent_vtsf2khvna7dsozv",
+    "predicate": "works_on",
+    "to": "ent_2s25iyw6xz6iavyk"
+   },
+   {
+    "claim": 53,
+    "from": "ent_3a3kbkmedbzwmt4g",
+    "predicate": "works_on",
+    "to": "ent_2s25iyw6xz6iavyk"
+   },
+   {
+    "claim": 54,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "part_of",
+    "to": "ent_r4jw42uwirndqzn2"
+   },
+   {
+    "claim": 55,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "has_title",
+    "to": "ent_vtsf2khvna7dsozv"
+   },
+   {
+    "claim": 56,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "has_title",
+    "to": "ent_3a3kbkmedbzwmt4g"
+   },
+   {
+    "claim": 57,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "has_title",
+    "to": "ent_frqdxjn76szsk3l3"
+   },
+   {
+    "claim": 58,
+    "from": "ent_2s25iyw6xz6iavyk",
+    "predicate": "references",
+    "to": "ent_di5mlniwu6rbs3gl"
+   },
+   {
+    "claim": 59,
+    "from": "ent_scfg5u642xpmle64",
+    "predicate": "located_at",
+    "to": "ent_jsuoj5utet2yepbi"
+   },
+   {
+    "claim": 60,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "organized",
+    "to": "ent_scfg5u642xpmle64"
+   },
+   {
+    "claim": 61,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_scfg5u642xpmle64"
+   },
+   {
+    "claim": 62,
+    "from": "ent_3a3kbkmedbzwmt4g",
+    "predicate": "attended",
+    "to": "ent_scfg5u642xpmle64"
+   },
+   {
+    "claim": 63,
+    "from": "ent_atbaggejjxexi33d",
+    "predicate": "located_at",
+    "to": "ent_mndkobw5fo5ge774"
+   },
+   {
+    "claim": 64,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "organized",
+    "to": "ent_atbaggejjxexi33d"
+   },
+   {
+    "claim": 65,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "attended",
+    "to": "ent_atbaggejjxexi33d"
+   },
+   {
+    "claim": 66,
+    "from": "ent_frqdxjn76szsk3l3",
+    "predicate": "attended",
+    "to": "ent_atbaggejjxexi33d"
+   },
+   {
+    "claim": 67,
+    "from": "ent_vtsf2khvna7dsozv",
+    "predicate": "attended",
+    "to": "ent_atbaggejjxexi33d"
+   },
+   {
+    "claim": 68,
+    "from": "ent_tuzpoz7jk5fg2bks",
+    "predicate": "invited_to",
+    "to": "ent_atbaggejjxexi33d"
+   },
+   {
+    "claim": 69,
+    "from": "ent_mxgtgtov4htsk67b",
+    "predicate": "located_at",
+    "to": "ent_ntcu6jf67muc6fui"
+   },
+   {
+    "claim": 70,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "organized",
+    "to": "ent_mxgtgtov4htsk67b"
+   },
+   {
+    "claim": 71,
+    "from": "ent_c3xdrh4zhy5nseuz",
+    "predicate": "attended",
+    "to": "ent_mxgtgtov4htsk67b"
+   },
+   {
+    "claim": 72,
+    "from": "ent_pngkpc2h5tar2jjq",
+    "predicate": "invited_to",
+    "to": "ent_mxgtgtov4htsk67b"
+   },
+   {
+    "claim": 75,
+    "from": "ent_tuzpoz7jk5fg2bks",
+    "predicate": "works_at",
+    "to": "ent_jmalfxvhmsgegop5"
+   },
+   {
+    "claim": 76,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "corresponded_with",
+    "to": "ent_tuzpoz7jk5fg2bks"
+   },
+   {
+    "claim": 77,
+    "from": "ent_tuzpoz7jk5fg2bks",
+    "predicate": "has_title",
+    "to": "ent_jmalfxvhmsgegop5"
+   },
+   {
+    "claim": 78,
+    "from": "ent_7apnujvp5ilhvne7",
+    "predicate": "works_at",
+    "to": "ent_r4jw42uwirndqzn2"
+   },
+   {
+    "claim": 79,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "corresponded_with",
+    "to": "ent_7apnujvp5ilhvne7"
+   },
+   {
+    "claim": 83,
+    "from": "ent_3a3kbkmedbzwmt4g",
+    "predicate": "has_topic",
+    "to": "ent_mdeu6pj5uxrkedxh"
+   },
+   {
+    "claim": 84,
+    "from": "ent_3a3kbkmedbzwmt4g",
+    "predicate": "has_title",
+    "to": "ent_g5llo2mjo4andtbf"
+   },
+   {
+    "claim": 87,
+    "from": "ent_3a3kbkmedbzwmt4g",
+    "predicate": "has_title",
+    "to": "ent_r4jw42uwirndqzn2"
+   },
+   {
+    "claim": 88,
+    "from": "ent_hxpzjpt7gv5dnmqp",
+    "predicate": "has_topic",
+    "to": "ent_527ct2djt6td7vyw"
+   },
+   {
+    "claim": 89,
+    "from": "ent_hxpzjpt7gv5dnmqp",
+    "predicate": "has_topic",
+    "to": "ent_pswnvt6c7c23ioqa"
+   },
+   {
+    "claim": 90,
+    "from": "ent_hxpzjpt7gv5dnmqp",
+    "predicate": "part_of",
+    "to": "ent_2s25iyw6xz6iavyk"
+   },
+   {
+    "claim": 91,
+    "from": "ent_znvqtdxiwjph7abo",
+    "predicate": "leads",
+    "to": "ent_hxpzjpt7gv5dnmqp"
+   },
+   {
+    "claim": 95,
+    "from": "ent_frqdxjn76szsk3l3",
+    "predicate": "has_title",
+    "to": "ent_7apnujvp5ilhvne7"
+   }
+  ],
+  "nodes": [
+   {
+    "depth": 0,
+    "id": "ent_znvqtdxiwjph7abo",
+    "kind": "person",
+    "name": "Mara Okafor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_2s25iyw6xz6iavyk",
+    "kind": "project",
+    "name": "Harbor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_3a3kbkmedbzwmt4g",
+    "kind": "person",
+    "name": "Dana Whitfield"
+   },
+   {
+    "depth": 0,
+    "id": "ent_frqdxjn76szsk3l3",
+    "kind": "person",
+    "name": "R. Chen"
+   },
+   {
+    "depth": 0,
+    "id": "ent_vtsf2khvna7dsozv",
+    "kind": "person",
+    "name": "Sam Patel"
+   },
+   {
+    "depth": 0,
+    "id": "ent_r4jw42uwirndqzn2",
+    "kind": "organization",
+    "name": "Brightwell Analytics"
+   },
+   {
+    "depth": 0,
+    "id": "ent_atbaggejjxexi33d",
+    "kind": "event",
+    "name": "Harbor go/no-go review (launch 3 Dec)"
+   },
+   {
+    "depth": 0,
+    "id": "ent_2dzrtthmyumov3vk",
+    "kind": "event",
+    "name": "Climbing with Sam"
+   },
+   {
+    "depth": 0,
+    "id": "ent_c3xdrh4zhy5nseuz",
+    "kind": "person",
+    "name": "Ife Okafor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_tuzpoz7jk5fg2bks",
+    "kind": "person",
+    "name": "Gus Ferreira"
+   },
+   {
+    "depth": 0,
+    "id": "ent_pngkpc2h5tar2jjq",
+    "kind": "person",
+    "name": "Sam"
+   },
+   {
+    "depth": 0,
+    "id": "ent_zkb7gn2ndj7curkv",
+    "kind": "event",
+    "name": "Counselling session"
+   },
+   {
+    "depth": 0,
+    "id": "ent_scfg5u642xpmle64",
+    "kind": "event",
+    "name": "Drinks with Dana (new job!)"
+   },
+   {
+    "depth": 0,
+    "id": "ent_3l554u5fbbdgbtti",
+    "kind": "event",
+    "name": "Harbor stand-up"
+   },
+   {
+    "depth": 0,
+    "id": "ent_hxpzjpt7gv5dnmqp",
+    "kind": "project",
+    "name": "Harbor-launch-plan"
+   },
+   {
+    "depth": 0,
+    "id": "ent_mxgtgtov4htsk67b",
+    "kind": "event",
+    "name": "Ife staying (Gull Point Sunday)"
+   },
+   {
+    "depth": 0,
+    "id": "ent_di5mlniwu6rbs3gl",
+    "kind": "organization",
+    "name": "Tessellate Systems"
+   },
+   {
+    "depth": 0,
+    "id": "ent_rc6qwgbv4fcchvr2",
+    "kind": "person",
+    "name": "Gus Ferreira"
+   },
+   {
+    "depth": 0,
+    "id": "ent_7apnujvp5ilhvne7",
+    "kind": "person",
+    "name": "Priyanka Rao"
+   },
+   {
+    "depth": 0,
+    "id": "ent_t3y322htimt6lixu",
+    "kind": "event",
+    "name": "1:1 Mara / Bob"
+   },
+   {
+    "depth": 0,
+    "id": "ent_jmalfxvhmsgegop5",
+    "kind": "organization",
+    "name": "Lumenfold"
+   },
+   {
+    "depth": 0,
+    "id": "ent_mndkobw5fo5ge774",
+    "kind": "place",
+    "name": "Brightwell HQ, Room Fathom"
+   },
+   {
+    "depth": 0,
+    "id": "ent_527ct2djt6td7vyw",
+    "kind": "topic",
+    "name": "harbor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_zk4d4s77vum7v7wa",
+    "kind": "person",
+    "name": "Bob"
+   },
+   {
+    "depth": 0,
+    "id": "ent_gq6eqi65qjcxao2j",
+    "kind": "person",
+    "name": "Jonas Albers"
+   },
+   {
+    "depth": 0,
+    "id": "ent_sttsnwekxxjsg56f",
+    "kind": "organization",
+    "name": "Northshore Credit Union"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ntcu6jf67muc6fui",
+    "kind": "place",
+    "name": "12 Saltmarsh Row, Halden Bay"
+   },
+   {
+    "depth": 0,
+    "id": "ent_cj3ljhk4ehdz5koi",
+    "kind": "place",
+    "name": "Halden Bay Bouldering"
+   },
+   {
+    "depth": 0,
+    "id": "ent_cusjcjgpa4sexwll",
+    "kind": "event",
+    "name": "Harbor launch"
+   },
+   {
+    "depth": 0,
+    "id": "ent_u6zt3d7oq67c7mqz",
+    "kind": "preference",
+    "name": "18-month term"
+   },
+   {
+    "depth": 0,
+    "id": "ent_gof42uavyqdrmzv3",
+    "kind": "place",
+    "name": "Albers Counselling, 3 Quay Lane, Halden Bay"
+   },
+   {
+    "depth": 0,
+    "id": "ent_4mlxnp3ylpxguoro",
+    "kind": "place",
+    "name": "Brightwell HQ, Bob's office"
+   },
+   {
+    "depth": 0,
+    "id": "ent_xc6clqutpivwvgsh",
+    "kind": "project",
+    "name": "Career"
+   },
+   {
+    "depth": 0,
+    "id": "ent_oyllqxmszzpiwam6",
+    "kind": "commitment",
+    "name": "Cut-over window"
+   },
+   {
+    "depth": 0,
+    "id": "ent_2kwqotez2j3uvcad",
+    "kind": "person",
+    "name": "Dana"
+   },
+   {
+    "depth": 0,
+    "id": "ent_g5llo2mjo4andtbf",
+    "kind": "project",
+    "name": "Harbor dashboards"
+   },
+   {
+    "depth": 0,
+    "id": "ent_b7mfqk6orzzpvmqr",
+    "kind": "project",
+    "name": "Harbor object storage"
+   },
+   {
+    "depth": 0,
+    "id": "ent_e2nolksmvjthvriw",
+    "kind": "commitment",
+    "name": "Launch date"
+   },
+   {
+    "depth": 0,
+    "id": "ent_gcw53xf3cadnznvg",
+    "kind": "organization",
+    "name": "Port Ellery General"
+   },
+   {
+    "depth": 0,
+    "id": "ent_vruxg2g7l4g4wcsa",
+    "kind": "preference",
+    "name": "Principal"
+   },
+   {
+    "depth": 0,
+    "id": "ent_lme3poza6p4ryavk",
+    "kind": "commitment",
+    "name": "Rollback deadline"
+   },
+   {
+    "depth": 0,
+    "id": "ent_wwfwwixpfjwtcz2q",
+    "kind": "project",
+    "name": "Tessellate renewal"
+   },
+   {
+    "depth": 0,
+    "id": "ent_jsuoj5utet2yepbi",
+    "kind": "place",
+    "name": "The Anchor, Halden Bay"
+   },
+   {
+    "depth": 0,
+    "id": "ent_qrjllsqy2krczhcn",
+    "kind": "topic",
+    "name": "data-platform"
+   },
+   {
+    "depth": 0,
+    "id": "ent_z6uohfgr2nkuax3l",
+    "kind": "topic",
+    "name": "family"
+   },
+   {
+    "depth": 0,
+    "id": "ent_mdeu6pj5uxrkedxh",
+    "kind": "topic",
+    "name": "friends"
+   },
+   {
+    "depth": 0,
+    "id": "ent_pswnvt6c7c23ioqa",
+    "kind": "topic",
+    "name": "launch"
+   },
+   {
+    "depth": 0,
+    "id": "ent_3ki5i5gdkdhn3rp6",
+    "kind": "topic",
+    "name": "one-on-one"
+   },
+   {
+    "depth": 0,
+    "id": "ent_4ob3zsz77vhxdsrm",
+    "kind": "commitment",
+    "name": "talk to Priyanka"
+   },
+   {
+    "depth": 0,
+    "id": "ent_r6bx4lytuh6gndvn",
+    "kind": "commitment",
+    "name": "write the Harbor launch plan"
+   },
+   {
+    "depth": 0,
+    "id": "ent_n47dy2b2mslnkeyk",
+    "kind": "organization",
+    "name": "Corvid Labs"
+   },
+   {
+    "depth": 0,
+    "id": "ent_tacz5wabdm5pdccc",
+    "kind": "topic",
+    "name": "journal"
+   },
+   {
+    "depth": 0,
+    "id": "ent_l2sj6ff4ngl5tq2r",
+    "kind": "organization",
+    "name": "Harbor"
+   },
+   {
+    "depth": 0,
+    "id": "ent_wqpoh3i55cha4dar",
+    "kind": "person",
+    "name": "Theo Lindqvist"
+   },
+   {
+    "depth": 0,
+    "id": "ent_urxut5ax5xpzrhxa",
+    "kind": "place",
+    "name": "Gull Point"
+   },
+   {
+    "depth": 0,
+    "id": "ent_62sdfmmoqnyzcwyl",
+    "kind": "place",
+    "name": "Halden Bay"
+   },
+   {
+    "depth": 0,
+    "id": "ent_orzbbzpin25qbm72",
+    "kind": "topic",
+    "name": "finance"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ke7zqh2wk4uf2rdr",
+    "kind": "person",
+    "name": "Bob"
+   },
+   {
+    "depth": 0,
+    "id": "ent_iq4finfehyy6x4ze",
+    "kind": "person",
+    "name": "Dana"
+   },
+   {
+    "depth": 0,
+    "id": "ent_mts4r4pnqjlho52f",
+    "kind": "person",
+    "name": "Dana"
+   },
+   {
+    "depth": 0,
+    "id": "ent_dtrbfgiuoduvbh47",
+    "kind": "person",
+    "name": "Dr. Lena Brandt"
+   },
+   {
+    "depth": 0,
+    "id": "ent_eyc2ujc6bkeo33vs",
+    "kind": "place",
+    "name": "Halden Bay station"
+   },
+   {
+    "depth": 0,
+    "id": "ent_vg7dpype2lhkduvw",
+    "kind": "event",
+    "name": "Harbor launch plan"
+   },
+   {
+    "depth": 0,
+    "id": "ent_bvqmyptyqt3p7far",
+    "kind": "project",
+    "name": "Harbor self-serve dashboards"
+   },
+   {
+    "depth": 0,
+    "id": "ent_hdz4cm4syyfifg7l",
+    "kind": "person",
+    "name": "Ife"
+   },
+   {
+    "depth": 0,
+    "id": "ent_wxp5kqfrtnwxafef",
+    "kind": "person",
+    "name": "Ife"
+   },
+   {
+    "depth": 0,
+    "id": "ent_faud2cb263vmoqn7",
+    "kind": "organization",
+    "name": "Mum"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ztk6igufgy7ue4wo",
+    "kind": "person",
+    "name": "Patel"
+   },
+   {
+    "depth": 0,
+    "id": "ent_tybxe6cwntb2mydh",
+    "kind": "place",
+    "name": "Port Ellery"
+   },
+   {
+    "depth": 0,
+    "id": "ent_srwcgaab5ell3rn2",
+    "kind": "organization",
+    "name": "Priyanka in HR"
+   },
+   {
+    "depth": 0,
+    "id": "ent_xtgtxudikpl35kkv",
+    "kind": "place",
+    "name": "Saltmarsh Row"
+   },
+   {
+    "depth": 0,
+    "id": "ent_zlcotkhzlrdvrhcb",
+    "kind": "person",
+    "name": "Sam"
+   },
+   {
+    "depth": 0,
+    "id": "ent_nrgwdg6f46vav2yr",
+    "kind": "person",
+    "name": "Sam (Patel"
+   },
+   {
+    "depth": 0,
+    "id": "ent_25vxkubwhyefg4pq",
+    "kind": "person",
+    "name": "Theo"
+   },
+   {
+    "depth": 0,
+    "id": "ent_ayxs6kw2xkodrxw7",
+    "kind": "person",
+    "name": "Theo"
+   },
+   {
+    "depth": 0,
+    "id": "ent_oe5utpocbjkieo5k",
+    "kind": "person",
+    "name": "Theo"
+   },
+   {
+    "depth": 0,
+    "id": "ent_per7ild3yg3ku2a6",
+    "kind": "person",
+    "name": "Theo"
+   },
+   {
+    "depth": 0,
+    "id": "ent_jrur7ojvncr3r2nm",
+    "kind": "topic",
+    "name": "health"
+   },
+   {
+    "depth": 0,
+    "id": "ent_xkkysfwjvapbqgjv",
+    "kind": "topic",
+    "name": "hr"
+   },
+   {
+    "depth": 0,
+    "id": "ent_dly4x22ykr5ud3nq",
+    "kind": "topic",
+    "name": "mortgage"
+   },
+   {
+    "depth": 0,
+    "id": "ent_oirvh36odywmg3ez",
+    "kind": "topic",
+    "name": "payslip"
+   },
+   {
+    "depth": 0,
+    "id": "ent_oeaknzkdjlpwgbct",
+    "kind": "topic",
+    "name": "performance-review"
+   },
+   {
+    "depth": 0,
+    "id": "ent_nrkoqf2fshnxfvaz",
+    "kind": "topic",
+    "name": "promotion"
+   }
+  ],
+  "truncated": false
+ },
+ "centered": {
+  "ent_ke7zqh2wk4uf2rdr": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_ke7zqh2wk4uf2rdr",
+     "kind": "person",
+     "name": "Bob"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_zk4d4s77vum7v7wa": {
+   "edges": [
+    {
+     "claim": 45,
+     "from": "ent_zk4d4s77vum7v7wa",
+     "predicate": "has_title",
+     "to": "ent_2kwqotez2j3uvcad"
+    },
+    {
+     "claim": 47,
+     "from": "ent_zk4d4s77vum7v7wa",
+     "predicate": "committed_to",
+     "to": "ent_4ob3zsz77vhxdsrm"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_zk4d4s77vum7v7wa",
+     "kind": "person",
+     "name": "Bob"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2kwqotez2j3uvcad",
+     "kind": "person",
+     "name": "Dana"
+    },
+    {
+     "depth": 1,
+     "id": "ent_4ob3zsz77vhxdsrm",
+     "kind": "commitment",
+     "name": "talk to Priyanka"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_2kwqotez2j3uvcad": {
+   "edges": [
+    {
+     "claim": 45,
+     "from": "ent_zk4d4s77vum7v7wa",
+     "predicate": "has_title",
+     "to": "ent_2kwqotez2j3uvcad"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_2kwqotez2j3uvcad",
+     "kind": "person",
+     "name": "Dana"
+    },
+    {
+     "depth": 1,
+     "id": "ent_zk4d4s77vum7v7wa",
+     "kind": "person",
+     "name": "Bob"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_iq4finfehyy6x4ze": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_iq4finfehyy6x4ze",
+     "kind": "person",
+     "name": "Dana"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_mts4r4pnqjlho52f": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_mts4r4pnqjlho52f",
+     "kind": "person",
+     "name": "Dana"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_3a3kbkmedbzwmt4g": {
+   "edges": [
+    {
+     "claim": 27,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_3a3kbkmedbzwmt4g"
+    },
+    {
+     "claim": 53,
+     "from": "ent_3a3kbkmedbzwmt4g",
+     "predicate": "works_on",
+     "to": "ent_2s25iyw6xz6iavyk"
+    },
+    {
+     "claim": 56,
+     "from": "ent_2s25iyw6xz6iavyk",
+     "predicate": "has_title",
+     "to": "ent_3a3kbkmedbzwmt4g"
+    },
+    {
+     "claim": 62,
+     "from": "ent_3a3kbkmedbzwmt4g",
+     "predicate": "attended",
+     "to": "ent_scfg5u642xpmle64"
+    },
+    {
+     "claim": 83,
+     "from": "ent_3a3kbkmedbzwmt4g",
+     "predicate": "has_topic",
+     "to": "ent_mdeu6pj5uxrkedxh"
+    },
+    {
+     "claim": 84,
+     "from": "ent_3a3kbkmedbzwmt4g",
+     "predicate": "has_title",
+     "to": "ent_g5llo2mjo4andtbf"
+    },
+    {
+     "claim": 87,
+     "from": "ent_3a3kbkmedbzwmt4g",
+     "predicate": "has_title",
+     "to": "ent_r4jw42uwirndqzn2"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_3a3kbkmedbzwmt4g",
+     "kind": "person",
+     "name": "Dana Whitfield"
+    },
+    {
+     "depth": 1,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2s25iyw6xz6iavyk",
+     "kind": "project",
+     "name": "Harbor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_scfg5u642xpmle64",
+     "kind": "event",
+     "name": "Drinks with Dana (new job!)"
+    },
+    {
+     "depth": 1,
+     "id": "ent_mdeu6pj5uxrkedxh",
+     "kind": "topic",
+     "name": "friends"
+    },
+    {
+     "depth": 1,
+     "id": "ent_g5llo2mjo4andtbf",
+     "kind": "project",
+     "name": "Harbor dashboards"
+    },
+    {
+     "depth": 1,
+     "id": "ent_r4jw42uwirndqzn2",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_dtrbfgiuoduvbh47": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_dtrbfgiuoduvbh47",
+     "kind": "person",
+     "name": "Dr. Lena Brandt"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_rc6qwgbv4fcchvr2": {
+   "edges": [
+    {
+     "claim": 31,
+     "from": "ent_rc6qwgbv4fcchvr2",
+     "predicate": "works_at",
+     "to": "ent_di5mlniwu6rbs3gl"
+    },
+    {
+     "claim": 32,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_rc6qwgbv4fcchvr2"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_rc6qwgbv4fcchvr2",
+     "kind": "person",
+     "name": "Gus Ferreira"
+    },
+    {
+     "depth": 1,
+     "id": "ent_di5mlniwu6rbs3gl",
+     "kind": "organization",
+     "name": "Tessellate Systems"
+    },
+    {
+     "depth": 1,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_tuzpoz7jk5fg2bks": {
+   "edges": [
+    {
+     "claim": 68,
+     "from": "ent_tuzpoz7jk5fg2bks",
+     "predicate": "invited_to",
+     "to": "ent_atbaggejjxexi33d"
+    },
+    {
+     "claim": 75,
+     "from": "ent_tuzpoz7jk5fg2bks",
+     "predicate": "works_at",
+     "to": "ent_jmalfxvhmsgegop5"
+    },
+    {
+     "claim": 76,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_tuzpoz7jk5fg2bks"
+    },
+    {
+     "claim": 77,
+     "from": "ent_tuzpoz7jk5fg2bks",
+     "predicate": "has_title",
+     "to": "ent_jmalfxvhmsgegop5"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_tuzpoz7jk5fg2bks",
+     "kind": "person",
+     "name": "Gus Ferreira"
+    },
+    {
+     "depth": 1,
+     "id": "ent_atbaggejjxexi33d",
+     "kind": "event",
+     "name": "Harbor go/no-go review (launch 3 Dec)"
+    },
+    {
+     "depth": 1,
+     "id": "ent_jmalfxvhmsgegop5",
+     "kind": "organization",
+     "name": "Lumenfold"
+    },
+    {
+     "depth": 1,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_hdz4cm4syyfifg7l": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_hdz4cm4syyfifg7l",
+     "kind": "person",
+     "name": "Ife"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_wxp5kqfrtnwxafef": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_wxp5kqfrtnwxafef",
+     "kind": "person",
+     "name": "Ife"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_c3xdrh4zhy5nseuz": {
+   "edges": [
+    {
+     "claim": 35,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_c3xdrh4zhy5nseuz"
+    },
+    {
+     "claim": 48,
+     "from": "ent_c3xdrh4zhy5nseuz",
+     "predicate": "has_topic",
+     "to": "ent_z6uohfgr2nkuax3l"
+    },
+    {
+     "claim": 49,
+     "from": "ent_c3xdrh4zhy5nseuz",
+     "predicate": "works_at",
+     "to": "ent_gcw53xf3cadnznvg"
+    },
+    {
+     "claim": 71,
+     "from": "ent_c3xdrh4zhy5nseuz",
+     "predicate": "attended",
+     "to": "ent_mxgtgtov4htsk67b"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_c3xdrh4zhy5nseuz",
+     "kind": "person",
+     "name": "Ife Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_z6uohfgr2nkuax3l",
+     "kind": "topic",
+     "name": "family"
+    },
+    {
+     "depth": 1,
+     "id": "ent_gcw53xf3cadnznvg",
+     "kind": "organization",
+     "name": "Port Ellery General"
+    },
+    {
+     "depth": 1,
+     "id": "ent_mxgtgtov4htsk67b",
+     "kind": "event",
+     "name": "Ife staying (Gull Point Sunday)"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_gq6eqi65qjcxao2j": {
+   "edges": [
+    {
+     "claim": 19,
+     "from": "ent_gq6eqi65qjcxao2j",
+     "predicate": "organized",
+     "to": "ent_zkb7gn2ndj7curkv"
+    },
+    {
+     "claim": 20,
+     "from": "ent_gq6eqi65qjcxao2j",
+     "predicate": "attended",
+     "to": "ent_zkb7gn2ndj7curkv"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_gq6eqi65qjcxao2j",
+     "kind": "person",
+     "name": "Jonas Albers"
+    },
+    {
+     "depth": 1,
+     "id": "ent_zkb7gn2ndj7curkv",
+     "kind": "event",
+     "name": "Counselling session"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_znvqtdxiwjph7abo": {
+   "edges": [
+    {
+     "claim": 2,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "organized",
+     "to": "ent_3l554u5fbbdgbtti"
+    },
+    {
+     "claim": 3,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_3l554u5fbbdgbtti"
+    },
+    {
+     "claim": 6,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "organized",
+     "to": "ent_2dzrtthmyumov3vk"
+    },
+    {
+     "claim": 7,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_2dzrtthmyumov3vk"
+    },
+    {
+     "claim": 10,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "has_title",
+     "to": "ent_2dzrtthmyumov3vk"
+    },
+    {
+     "claim": 14,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_t3y322htimt6lixu"
+    },
+    {
+     "claim": 15,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "works_at",
+     "to": "ent_r4jw42uwirndqzn2"
+    },
+    {
+     "claim": 17,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "part_of",
+     "to": "ent_sttsnwekxxjsg56f"
+    },
+    {
+     "claim": 21,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_zkb7gn2ndj7curkv"
+    },
+    {
+     "claim": 25,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_frqdxjn76szsk3l3"
+    },
+    {
+     "claim": 26,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_vtsf2khvna7dsozv"
+    },
+    {
+     "claim": 27,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_3a3kbkmedbzwmt4g"
+    },
+    {
+     "claim": 28,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "leads",
+     "to": "ent_2s25iyw6xz6iavyk"
+    },
+    {
+     "claim": 32,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_rc6qwgbv4fcchvr2"
+    },
+    {
+     "claim": 34,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_pngkpc2h5tar2jjq"
+    },
+    {
+     "claim": 35,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_c3xdrh4zhy5nseuz"
+    },
+    {
+     "claim": 46,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "committed_to",
+     "to": "ent_r6bx4lytuh6gndvn"
+    },
+    {
+     "claim": 60,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "organized",
+     "to": "ent_scfg5u642xpmle64"
+    },
+    {
+     "claim": 61,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_scfg5u642xpmle64"
+    },
+    {
+     "claim": 64,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "organized",
+     "to": "ent_atbaggejjxexi33d"
+    },
+    {
+     "claim": 65,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "attended",
+     "to": "ent_atbaggejjxexi33d"
+    },
+    {
+     "claim": 70,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "organized",
+     "to": "ent_mxgtgtov4htsk67b"
+    },
+    {
+     "claim": 76,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_tuzpoz7jk5fg2bks"
+    },
+    {
+     "claim": 79,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_7apnujvp5ilhvne7"
+    },
+    {
+     "claim": 91,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "leads",
+     "to": "ent_hxpzjpt7gv5dnmqp"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3l554u5fbbdgbtti",
+     "kind": "event",
+     "name": "Harbor stand-up"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2dzrtthmyumov3vk",
+     "kind": "event",
+     "name": "Climbing with Sam"
+    },
+    {
+     "depth": 1,
+     "id": "ent_t3y322htimt6lixu",
+     "kind": "event",
+     "name": "1:1 Mara / Bob"
+    },
+    {
+     "depth": 1,
+     "id": "ent_r4jw42uwirndqzn2",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    },
+    {
+     "depth": 1,
+     "id": "ent_sttsnwekxxjsg56f",
+     "kind": "organization",
+     "name": "Northshore Credit Union"
+    },
+    {
+     "depth": 1,
+     "id": "ent_zkb7gn2ndj7curkv",
+     "kind": "event",
+     "name": "Counselling session"
+    },
+    {
+     "depth": 1,
+     "id": "ent_frqdxjn76szsk3l3",
+     "kind": "person",
+     "name": "R. Chen"
+    },
+    {
+     "depth": 1,
+     "id": "ent_vtsf2khvna7dsozv",
+     "kind": "person",
+     "name": "Sam Patel"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3a3kbkmedbzwmt4g",
+     "kind": "person",
+     "name": "Dana Whitfield"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2s25iyw6xz6iavyk",
+     "kind": "project",
+     "name": "Harbor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_rc6qwgbv4fcchvr2",
+     "kind": "person",
+     "name": "Gus Ferreira"
+    },
+    {
+     "depth": 1,
+     "id": "ent_pngkpc2h5tar2jjq",
+     "kind": "person",
+     "name": "Sam"
+    },
+    {
+     "depth": 1,
+     "id": "ent_c3xdrh4zhy5nseuz",
+     "kind": "person",
+     "name": "Ife Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_r6bx4lytuh6gndvn",
+     "kind": "commitment",
+     "name": "write the Harbor launch plan"
+    },
+    {
+     "depth": 1,
+     "id": "ent_scfg5u642xpmle64",
+     "kind": "event",
+     "name": "Drinks with Dana (new job!)"
+    },
+    {
+     "depth": 1,
+     "id": "ent_atbaggejjxexi33d",
+     "kind": "event",
+     "name": "Harbor go/no-go review (launch 3 Dec)"
+    },
+    {
+     "depth": 1,
+     "id": "ent_mxgtgtov4htsk67b",
+     "kind": "event",
+     "name": "Ife staying (Gull Point Sunday)"
+    },
+    {
+     "depth": 1,
+     "id": "ent_tuzpoz7jk5fg2bks",
+     "kind": "person",
+     "name": "Gus Ferreira"
+    },
+    {
+     "depth": 1,
+     "id": "ent_7apnujvp5ilhvne7",
+     "kind": "person",
+     "name": "Priyanka Rao"
+    },
+    {
+     "depth": 1,
+     "id": "ent_hxpzjpt7gv5dnmqp",
+     "kind": "project",
+     "name": "Harbor-launch-plan"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_ztk6igufgy7ue4wo": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_ztk6igufgy7ue4wo",
+     "kind": "person",
+     "name": "Patel"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_7apnujvp5ilhvne7": {
+   "edges": [
+    {
+     "claim": 78,
+     "from": "ent_7apnujvp5ilhvne7",
+     "predicate": "works_at",
+     "to": "ent_r4jw42uwirndqzn2"
+    },
+    {
+     "claim": 79,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_7apnujvp5ilhvne7"
+    },
+    {
+     "claim": 95,
+     "from": "ent_frqdxjn76szsk3l3",
+     "predicate": "has_title",
+     "to": "ent_7apnujvp5ilhvne7"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_7apnujvp5ilhvne7",
+     "kind": "person",
+     "name": "Priyanka Rao"
+    },
+    {
+     "depth": 1,
+     "id": "ent_r4jw42uwirndqzn2",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    },
+    {
+     "depth": 1,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_frqdxjn76szsk3l3",
+     "kind": "person",
+     "name": "R. Chen"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_frqdxjn76szsk3l3": {
+   "edges": [
+    {
+     "claim": 12,
+     "from": "ent_frqdxjn76szsk3l3",
+     "predicate": "organized",
+     "to": "ent_t3y322htimt6lixu"
+    },
+    {
+     "claim": 22,
+     "from": "ent_frqdxjn76szsk3l3",
+     "predicate": "works_at",
+     "to": "ent_r4jw42uwirndqzn2"
+    },
+    {
+     "claim": 25,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_frqdxjn76szsk3l3"
+    },
+    {
+     "claim": 41,
+     "from": "ent_frqdxjn76szsk3l3",
+     "predicate": "works_on",
+     "to": "ent_2s25iyw6xz6iavyk"
+    },
+    {
+     "claim": 57,
+     "from": "ent_2s25iyw6xz6iavyk",
+     "predicate": "has_title",
+     "to": "ent_frqdxjn76szsk3l3"
+    },
+    {
+     "claim": 66,
+     "from": "ent_frqdxjn76szsk3l3",
+     "predicate": "attended",
+     "to": "ent_atbaggejjxexi33d"
+    },
+    {
+     "claim": 95,
+     "from": "ent_frqdxjn76szsk3l3",
+     "predicate": "has_title",
+     "to": "ent_7apnujvp5ilhvne7"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_frqdxjn76szsk3l3",
+     "kind": "person",
+     "name": "R. Chen"
+    },
+    {
+     "depth": 1,
+     "id": "ent_t3y322htimt6lixu",
+     "kind": "event",
+     "name": "1:1 Mara / Bob"
+    },
+    {
+     "depth": 1,
+     "id": "ent_r4jw42uwirndqzn2",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    },
+    {
+     "depth": 1,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2s25iyw6xz6iavyk",
+     "kind": "project",
+     "name": "Harbor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_atbaggejjxexi33d",
+     "kind": "event",
+     "name": "Harbor go/no-go review (launch 3 Dec)"
+    },
+    {
+     "depth": 1,
+     "id": "ent_7apnujvp5ilhvne7",
+     "kind": "person",
+     "name": "Priyanka Rao"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_pngkpc2h5tar2jjq": {
+   "edges": [
+    {
+     "claim": 8,
+     "from": "ent_pngkpc2h5tar2jjq",
+     "predicate": "attended",
+     "to": "ent_2dzrtthmyumov3vk"
+    },
+    {
+     "claim": 34,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_pngkpc2h5tar2jjq"
+    },
+    {
+     "claim": 72,
+     "from": "ent_pngkpc2h5tar2jjq",
+     "predicate": "invited_to",
+     "to": "ent_mxgtgtov4htsk67b"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_pngkpc2h5tar2jjq",
+     "kind": "person",
+     "name": "Sam"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2dzrtthmyumov3vk",
+     "kind": "event",
+     "name": "Climbing with Sam"
+    },
+    {
+     "depth": 1,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_mxgtgtov4htsk67b",
+     "kind": "event",
+     "name": "Ife staying (Gull Point Sunday)"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_zlcotkhzlrdvrhcb": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_zlcotkhzlrdvrhcb",
+     "kind": "person",
+     "name": "Sam"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_nrgwdg6f46vav2yr": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_nrgwdg6f46vav2yr",
+     "kind": "person",
+     "name": "Sam (Patel"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_vtsf2khvna7dsozv": {
+   "edges": [
+    {
+     "claim": 4,
+     "from": "ent_vtsf2khvna7dsozv",
+     "predicate": "attended",
+     "to": "ent_3l554u5fbbdgbtti"
+    },
+    {
+     "claim": 23,
+     "from": "ent_vtsf2khvna7dsozv",
+     "predicate": "works_at",
+     "to": "ent_r4jw42uwirndqzn2"
+    },
+    {
+     "claim": 26,
+     "from": "ent_znvqtdxiwjph7abo",
+     "predicate": "corresponded_with",
+     "to": "ent_vtsf2khvna7dsozv"
+    },
+    {
+     "claim": 29,
+     "from": "ent_2s25iyw6xz6iavyk",
+     "predicate": "works_at",
+     "to": "ent_vtsf2khvna7dsozv"
+    },
+    {
+     "claim": 52,
+     "from": "ent_vtsf2khvna7dsozv",
+     "predicate": "works_on",
+     "to": "ent_2s25iyw6xz6iavyk"
+    },
+    {
+     "claim": 55,
+     "from": "ent_2s25iyw6xz6iavyk",
+     "predicate": "has_title",
+     "to": "ent_vtsf2khvna7dsozv"
+    },
+    {
+     "claim": 67,
+     "from": "ent_vtsf2khvna7dsozv",
+     "predicate": "attended",
+     "to": "ent_atbaggejjxexi33d"
+    }
+   ],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_vtsf2khvna7dsozv",
+     "kind": "person",
+     "name": "Sam Patel"
+    },
+    {
+     "depth": 1,
+     "id": "ent_3l554u5fbbdgbtti",
+     "kind": "event",
+     "name": "Harbor stand-up"
+    },
+    {
+     "depth": 1,
+     "id": "ent_r4jw42uwirndqzn2",
+     "kind": "organization",
+     "name": "Brightwell Analytics"
+    },
+    {
+     "depth": 1,
+     "id": "ent_znvqtdxiwjph7abo",
+     "kind": "person",
+     "name": "Mara Okafor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_2s25iyw6xz6iavyk",
+     "kind": "project",
+     "name": "Harbor"
+    },
+    {
+     "depth": 1,
+     "id": "ent_atbaggejjxexi33d",
+     "kind": "event",
+     "name": "Harbor go/no-go review (launch 3 Dec)"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_25vxkubwhyefg4pq": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_25vxkubwhyefg4pq",
+     "kind": "person",
+     "name": "Theo"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_ayxs6kw2xkodrxw7": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_ayxs6kw2xkodrxw7",
+     "kind": "person",
+     "name": "Theo"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_oe5utpocbjkieo5k": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_oe5utpocbjkieo5k",
+     "kind": "person",
+     "name": "Theo"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_per7ild3yg3ku2a6": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_per7ild3yg3ku2a6",
+     "kind": "person",
+     "name": "Theo"
+    }
+   ],
+   "truncated": false
+  },
+  "ent_wqpoh3i55cha4dar": {
+   "edges": [],
+   "nodes": [
+    {
+     "depth": 0,
+     "id": "ent_wqpoh3i55cha4dar",
+     "kind": "person",
+     "name": "Theo Lindqvist"
+    }
+   ],
+   "truncated": false
+  }
+ }
+}

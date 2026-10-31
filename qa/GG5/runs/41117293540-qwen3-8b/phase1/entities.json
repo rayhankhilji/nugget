@@ -1,0 +1,1784 @@
+{
+ "list": [
+  {
+   "claims": 0,
+   "id": "ent_ntcu6jf67muc6fui",
+   "kind": "place",
+   "mentions": 1,
+   "name": "12 Saltmarsh Row, Halden Bay",
+   "updated_at": "2026-10-30T20:33:37.441286299Z"
+  },
+  {
+   "claims": 4,
+   "id": "ent_t3y322htimt6lixu",
+   "kind": "event",
+   "mentions": 1,
+   "name": "1:1 Mara / Bob",
+   "updated_at": "2026-10-30T20:28:53.445878241Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_r4jw42uwirndqzn2",
+   "kind": "organization",
+   "mentions": 1,
+   "name": "Brightwell Analytics",
+   "updated_at": "2026-10-30T20:30:02.746561824Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_4mlxnp3ylpxguoro",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Brightwell HQ, Bob's office",
+   "updated_at": "2026-10-30T20:28:53.445878241Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_mndkobw5fo5ge774",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Brightwell HQ, Room Fathom",
+   "updated_at": "2026-10-30T20:32:39.239547597Z"
+  },
+  {
+   "claims": 4,
+   "id": "ent_2dzrtthmyumov3vk",
+   "kind": "event",
+   "mentions": 1,
+   "name": "Climbing with Sam",
+   "updated_at": "2026-10-30T20:30:02.746561824Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_dtrbfgiuoduvbh47",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Dr. Lena Brandt",
+   "updated_at": "2026-10-30T20:34:21.39457136Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_orzbbzpin25qbm72",
+   "kind": "topic",
+   "mentions": 2,
+   "name": "finance",
+   "updated_at": "2026-10-30T20:33:37.441286299Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_62sdfmmoqnyzcwyl",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Halden Bay",
+   "updated_at": "2026-10-30T20:33:37.441286299Z"
+  },
+  {
+   "claims": 2,
+   "id": "ent_cj3ljhk4ehdz5koi",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Halden Bay Bouldering",
+   "updated_at": "2026-10-30T20:26:53.440856879Z"
+  },
+  {
+   "claims": 4,
+   "id": "ent_3l554u5fbbdgbtti",
+   "kind": "event",
+   "mentions": 1,
+   "name": "Harbor stand-up",
+   "updated_at": "2026-10-30T20:32:39.239547597Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_jrur7ojvncr3r2nm",
+   "kind": "topic",
+   "mentions": 1,
+   "name": "health",
+   "updated_at": "2026-10-30T20:34:21.39457136Z"
+  },
+  {
+   "claims": 9,
+   "id": "ent_znvqtdxiwjph7abo",
+   "kind": "person",
+   "mentions": 0,
+   "name": "Mara Okafor",
+   "updated_at": "2026-10-30T20:32:39.239547597Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_dly4x22ykr5ud3nq",
+   "kind": "topic",
+   "mentions": 1,
+   "name": "mortgage",
+   "updated_at": "2026-10-30T20:33:37.441286299Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_sttsnwekxxjsg56f",
+   "kind": "organization",
+   "mentions": 3,
+   "name": "Northshore Credit Union",
+   "updated_at": "2026-10-30T20:33:37.441286299Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_oirvh36odywmg3ez",
+   "kind": "topic",
+   "mentions": 1,
+   "name": "payslip",
+   "updated_at": "2026-10-30T20:30:02.746561824Z"
+  },
+  {
+   "claims": 2,
+   "id": "ent_frqdxjn76szsk3l3",
+   "kind": "person",
+   "mentions": 1,
+   "name": "R. Chen",
+   "updated_at": "2026-10-30T20:28:53.445878241Z"
+  },
+  {
+   "claims": 0,
+   "id": "ent_xtgtxudikpl35kkv",
+   "kind": "place",
+   "mentions": 1,
+   "name": "Saltmarsh Row",
+   "updated_at": "2026-10-30T20:33:37.441286299Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_pngkpc2h5tar2jjq",
+   "kind": "person",
+   "mentions": 1,
+   "name": "Sam",
+   "updated_at": "2026-10-30T20:26:53.440856879Z"
+  },
+  {
+   "claims": 1,
+   "id": "ent_vtsf2khvna7dsozv",
+   "kind": "person",
+   "mentions": 2,
+   "name": "Sam Patel",
+   "updated_at": "2026-10-30T20:32:39.239547597Z"
+  }
+ ],
+ "details": {
+  "ent_ntcu6jf67muc6fui": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_ntcu6jf67muc6fui",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 6,
+     "item": {
+      "key": "0:Finance/2026-07-01-mortgage-statement.md",
+      "source": "files-1"
+     },
+     "surface": "12 Saltmarsh Row, Halden Bay",
+     "title": "2026-07-01-mortgage-statement",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-07-01-mortgage-statement.md"
+    }
+   ],
+   "name": "12 Saltmarsh Row, Halden Bay",
+   "vault_path": null
+  },
+  "ent_t3y322htimt6lixu": {
+   "aliases": [],
+   "attributes": {
+    "all_day": false,
+    "end": "2026-06-03T13:30:00Z",
+    "location": "Brightwell HQ, Bob's office",
+    "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=WE",
+    "start": "2026-06-03T13:00:00Z",
+    "timezone": "UTC"
+   },
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 11,
+     "object": {
+      "entity": {
+       "id": "ent_4mlxnp3ylpxguoro",
+       "name": "Brightwell HQ, Bob's office"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_t3y322htimt6lixu",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "updated_at": "2026-10-30T20:28:53.445878241Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 12,
+     "object": {
+      "entity": {
+       "id": "ent_t3y322htimt6lixu",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_frqdxjn76szsk3l3",
+      "name": "R. Chen"
+     },
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:28:53.445878241Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 13,
+     "object": {
+      "entity": {
+       "id": "ent_t3y322htimt6lixu",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_frqdxjn76szsk3l3",
+      "name": "R. Chen"
+     },
+     "text": "R. Chen attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:28:53.445878241Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 14,
+     "object": {
+      "entity": {
+       "id": "ent_t3y322htimt6lixu",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:28:53.445878241Z"
+    }
+   ],
+   "id": "ent_t3y322htimt6lixu",
+   "identifiers": [
+    [
+     "ical_uid",
+     "one-on-one-mara-20260603@brightwell.example"
+    ]
+   ],
+   "kind": "event",
+   "mentions": [
+    {
+     "chunk_id": 3,
+     "item": {
+      "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+      "source": "files-1"
+     },
+     "surface": "1:1 Mara / Bob",
+     "title": "1:1 Mara / Bob",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+    }
+   ],
+   "name": "1:1 Mara / Bob",
+   "vault_path": "Event/1-1 Mara - Bob (ent_t3y322htimt6lixu).md"
+  },
+  "ent_r4jw42uwirndqzn2": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "Employer: Brightwell Analytics",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 15,
+     "object": {
+      "entity": {
+       "id": "ent_r4jw42uwirndqzn2",
+       "name": "Brightwell Analytics"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user works at Brightwell Analytics.",
+     "updated_at": "2026-10-30T20:30:02.746561824Z"
+    }
+   ],
+   "id": "ent_r4jw42uwirndqzn2",
+   "identifiers": [],
+   "kind": "organization",
+   "mentions": [
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "Brightwell Analytics",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    }
+   ],
+   "name": "Brightwell Analytics",
+   "vault_path": "Organization/Brightwell Analytics (ent_r4jw42uwirndqzn2).md"
+  },
+  "ent_4mlxnp3ylpxguoro": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 11,
+     "object": {
+      "entity": {
+       "id": "ent_4mlxnp3ylpxguoro",
+       "name": "Brightwell HQ, Bob's office"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_t3y322htimt6lixu",
+      "name": "1:1 Mara / Bob"
+     },
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "updated_at": "2026-10-30T20:28:53.445878241Z"
+    }
+   ],
+   "id": "ent_4mlxnp3ylpxguoro",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 3,
+     "item": {
+      "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+      "source": "files-1"
+     },
+     "surface": "Brightwell HQ, Bob's office",
+     "title": "1:1 Mara / Bob",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+    }
+   ],
+   "name": "Brightwell HQ, Bob's office",
+   "vault_path": "Place/Brightwell HQ, Bob's office (ent_4mlxnp3ylpxguoro).md"
+  },
+  "ent_mndkobw5fo5ge774": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 1,
+     "object": {
+      "entity": {
+       "id": "ent_mndkobw5fo5ge774",
+       "name": "Brightwell HQ, Room Fathom"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_3l554u5fbbdgbtti",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "updated_at": "2026-10-30T20:32:39.239547597Z"
+    }
+   ],
+   "id": "ent_mndkobw5fo5ge774",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 1,
+     "item": {
+      "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+      "source": "files-1"
+     },
+     "surface": "Brightwell HQ, Room Fathom",
+     "title": "Harbor stand-up",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+    }
+   ],
+   "name": "Brightwell HQ, Room Fathom",
+   "vault_path": "Place/Brightwell HQ, Room Fathom (ent_mndkobw5fo5ge774).md"
+  },
+  "ent_2dzrtthmyumov3vk": {
+   "aliases": [],
+   "attributes": {
+    "all_day": false,
+    "end": "2026-04-16T20:00:00Z",
+    "location": "Halden Bay Bouldering",
+    "rrule": "FREQ=WEEKLY;BYDAY=TH",
+    "start": "2026-04-16T17:30:00Z",
+    "timezone": "UTC"
+   },
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 5,
+     "object": {
+      "entity": {
+       "id": "ent_cj3ljhk4ehdz5koi",
+       "name": "Halden Bay Bouldering"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_2dzrtthmyumov3vk",
+      "name": "Climbing with Sam"
+     },
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 6,
+     "object": {
+      "entity": {
+       "id": "ent_2dzrtthmyumov3vk",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 7,
+     "object": {
+      "entity": {
+       "id": "ent_2dzrtthmyumov3vk",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 8,
+     "object": {
+      "entity": {
+       "id": "ent_2dzrtthmyumov3vk",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_pngkpc2h5tar2jjq",
+      "name": "Sam"
+     },
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Event: Climbing with Sam",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 10,
+     "object": {
+      "entity": {
+       "id": "ent_2dzrtthmyumov3vk",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "superseded",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user has title Climbing with Sam.",
+     "updated_at": "2026-10-30T20:30:02.746561824Z"
+    }
+   ],
+   "id": "ent_2dzrtthmyumov3vk",
+   "identifiers": [
+    [
+     "ical_uid",
+     "climbing-thursdays-20260416@mailbox.example"
+    ]
+   ],
+   "kind": "event",
+   "mentions": [
+    {
+     "chunk_id": 2,
+     "item": {
+      "key": "0:Calendar/2026-04-16-climbing.ics",
+      "source": "files-1"
+     },
+     "surface": "Climbing with Sam",
+     "title": "Climbing with Sam",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+    }
+   ],
+   "name": "Climbing with Sam",
+   "vault_path": "Event/Climbing with Sam (ent_2dzrtthmyumov3vk).md"
+  },
+  "ent_dtrbfgiuoduvbh47": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_dtrbfgiuoduvbh47",
+   "identifiers": [],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Health/2026-05-12-gp-visit.md",
+      "source": "files-1"
+     },
+     "surface": "Dr. Lena Brandt",
+     "title": "2026-05-12-gp-visit",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-05-12-gp-visit.md"
+    }
+   ],
+   "name": "Dr. Lena Brandt",
+   "vault_path": null
+  },
+  "ent_orzbbzpin25qbm72": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_orzbbzpin25qbm72",
+   "identifiers": [
+    [
+     "tag",
+     "finance"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "#finance",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    },
+    {
+     "chunk_id": 6,
+     "item": {
+      "key": "0:Finance/2026-07-01-mortgage-statement.md",
+      "source": "files-1"
+     },
+     "surface": "#finance",
+     "title": "2026-07-01-mortgage-statement",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-07-01-mortgage-statement.md"
+    }
+   ],
+   "name": "finance",
+   "vault_path": "Topic/finance (ent_orzbbzpin25qbm72).md"
+  },
+  "ent_62sdfmmoqnyzcwyl": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_62sdfmmoqnyzcwyl",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 6,
+     "item": {
+      "key": "0:Finance/2026-07-01-mortgage-statement.md",
+      "source": "files-1"
+     },
+     "surface": "Halden Bay",
+     "title": "2026-07-01-mortgage-statement",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-07-01-mortgage-statement.md"
+    }
+   ],
+   "name": "Halden Bay",
+   "vault_path": null
+  },
+  "ent_cj3ljhk4ehdz5koi": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 5,
+     "object": {
+      "entity": {
+       "id": "ent_cj3ljhk4ehdz5koi",
+       "name": "Halden Bay Bouldering"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_2dzrtthmyumov3vk",
+      "name": "Climbing with Sam"
+     },
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 9,
+     "object": {
+      "entity": {
+       "id": "ent_cj3ljhk4ehdz5koi",
+       "name": "Halden Bay Bouldering"
+      },
+      "literal": null
+     },
+     "predicate": "located_in",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user located in Halden Bay Bouldering.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    }
+   ],
+   "id": "ent_cj3ljhk4ehdz5koi",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 2,
+     "item": {
+      "key": "0:Calendar/2026-04-16-climbing.ics",
+      "source": "files-1"
+     },
+     "surface": "Halden Bay Bouldering",
+     "title": "Climbing with Sam",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+    }
+   ],
+   "name": "Halden Bay Bouldering",
+   "vault_path": "Place/Halden Bay Bouldering (ent_cj3ljhk4ehdz5koi).md"
+  },
+  "ent_3l554u5fbbdgbtti": {
+   "aliases": [],
+   "attributes": {
+    "all_day": false,
+    "end": "2026-03-10T09:45:00Z",
+    "location": "Brightwell HQ, Room Fathom",
+    "rrule": "FREQ=WEEKLY;BYDAY=TU,WE,TH",
+    "start": "2026-03-10T09:30:00Z",
+    "timezone": "UTC"
+   },
+   "claims": [
+    {
+     "confidence": 0.8999999761581421,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 1,
+     "object": {
+      "entity": {
+       "id": "ent_mndkobw5fo5ge774",
+       "name": "Brightwell HQ, Room Fathom"
+      },
+      "literal": null
+     },
+     "predicate": "located_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_3l554u5fbbdgbtti",
+      "name": "Harbor stand-up"
+     },
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "updated_at": "2026-10-30T20:32:39.239547597Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 2,
+     "object": {
+      "entity": {
+       "id": "ent_3l554u5fbbdgbtti",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:32:39.239547597Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 3,
+     "object": {
+      "entity": {
+       "id": "ent_3l554u5fbbdgbtti",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:32:39.239547597Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 4,
+     "object": {
+      "entity": {
+       "id": "ent_3l554u5fbbdgbtti",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_vtsf2khvna7dsozv",
+      "name": "Sam Patel"
+     },
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:32:39.239547597Z"
+    }
+   ],
+   "id": "ent_3l554u5fbbdgbtti",
+   "identifiers": [
+    [
+     "ical_uid",
+     "harbor-standup-20260310@brightwell.example"
+    ]
+   ],
+   "kind": "event",
+   "mentions": [
+    {
+     "chunk_id": 1,
+     "item": {
+      "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+      "source": "files-1"
+     },
+     "surface": "Harbor stand-up",
+     "title": "Harbor stand-up",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+    }
+   ],
+   "name": "Harbor stand-up",
+   "vault_path": "Event/Harbor stand-up (ent_3l554u5fbbdgbtti).md"
+  },
+  "ent_jrur7ojvncr3r2nm": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_jrur7ojvncr3r2nm",
+   "identifiers": [
+    [
+     "tag",
+     "health"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": 7,
+     "item": {
+      "key": "0:Health/2026-05-12-gp-visit.md",
+      "source": "files-1"
+     },
+     "surface": "#health",
+     "title": "2026-05-12-gp-visit",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-05-12-gp-visit.md"
+    }
+   ],
+   "name": "health",
+   "vault_path": null
+  },
+  "ent_znvqtdxiwjph7abo": {
+   "aliases": [],
+   "attributes": {
+    "is_me": true
+   },
+   "claims": [
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 2,
+     "object": {
+      "entity": {
+       "id": "ent_3l554u5fbbdgbtti",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:32:39.239547597Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 3,
+     "object": {
+      "entity": {
+       "id": "ent_3l554u5fbbdgbtti",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:32:39.239547597Z"
+    },
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 6,
+     "object": {
+      "entity": {
+       "id": "ent_2dzrtthmyumov3vk",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 7,
+     "object": {
+      "entity": {
+       "id": "ent_2dzrtthmyumov3vk",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 9,
+     "object": {
+      "entity": {
+       "id": "ent_cj3ljhk4ehdz5koi",
+       "name": "Halden Bay Bouldering"
+      },
+      "literal": null
+     },
+     "predicate": "located_in",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user located in Halden Bay Bouldering.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Event: Climbing with Sam",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 10,
+     "object": {
+      "entity": {
+       "id": "ent_2dzrtthmyumov3vk",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "has_title",
+     "status": "superseded",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user has title Climbing with Sam.",
+     "updated_at": "2026-10-30T20:30:02.746561824Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 14,
+     "object": {
+      "entity": {
+       "id": "ent_t3y322htimt6lixu",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:28:53.445878241Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "Employer: Brightwell Analytics",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 15,
+     "object": {
+      "entity": {
+       "id": "ent_r4jw42uwirndqzn2",
+       "name": "Brightwell Analytics"
+      },
+      "literal": null
+     },
+     "predicate": "works_at",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user works at Brightwell Analytics.",
+     "updated_at": "2026-10-30T20:30:02.746561824Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "Employee: Mara Okafor, Staff Engineer",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 16,
+     "object": {
+      "entity": null,
+      "literal": "Staff Engineer"
+     },
+     "predicate": "has_title",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user has title Staff Engineer.",
+     "updated_at": "2026-10-30T20:30:02.746561824Z"
+    },
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "Paid into Northshore Credit Union current account.",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 17,
+     "object": {
+      "entity": {
+       "id": "ent_sttsnwekxxjsg56f",
+       "name": "Northshore Credit Union"
+      },
+      "literal": null
+     },
+     "predicate": "part_of",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user part of Northshore Credit Union.",
+     "updated_at": "2026-10-30T20:30:02.746561824Z"
+    }
+   ],
+   "id": "ent_znvqtdxiwjph7abo",
+   "identifiers": [
+    [
+     "email",
+     "mara.okafor@brightwell.example"
+    ],
+    [
+     "email",
+     "mara.okafor@mailbox.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [],
+   "name": "Mara Okafor",
+   "vault_path": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md"
+  },
+  "ent_dly4x22ykr5ud3nq": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_dly4x22ykr5ud3nq",
+   "identifiers": [
+    [
+     "tag",
+     "mortgage"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Finance/2026-07-01-mortgage-statement.md",
+      "source": "files-1"
+     },
+     "surface": "#mortgage",
+     "title": "2026-07-01-mortgage-statement",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-07-01-mortgage-statement.md"
+    }
+   ],
+   "name": "mortgage",
+   "vault_path": null
+  },
+  "ent_sttsnwekxxjsg56f": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.699999988079071,
+     "evidence": [
+      {
+       "chunk_id": 4,
+       "item": {
+        "key": "0:Finance/2026-04-30-payslip-april.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-30T09:00:00Z",
+       "quote": "Paid into Northshore Credit Union current account.",
+       "title": "2026-04-30-payslip-april",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+      }
+     ],
+     "id": 17,
+     "object": {
+      "entity": {
+       "id": "ent_sttsnwekxxjsg56f",
+       "name": "Northshore Credit Union"
+      },
+      "literal": null
+     },
+     "predicate": "part_of",
+     "status": "active",
+     "subject": {
+      "id": "ent_znvqtdxiwjph7abo",
+      "name": "Mara Okafor"
+     },
+     "text": "The user part of Northshore Credit Union.",
+     "updated_at": "2026-10-30T20:30:02.746561824Z"
+    }
+   ],
+   "id": "ent_sttsnwekxxjsg56f",
+   "identifiers": [],
+   "kind": "organization",
+   "mentions": [
+    {
+     "chunk_id": 4,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "Northshore Credit Union",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    },
+    {
+     "chunk_id": 5,
+     "item": {
+      "key": "0:Finance/2026-05-21-new-debit-card.eml",
+      "source": "files-1"
+     },
+     "surface": "Northshore Credit Union",
+     "title": "Your replacement debit card has been dispatched",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-05-21-new-debit-card.eml"
+    },
+    {
+     "chunk_id": 6,
+     "item": {
+      "key": "0:Finance/2026-07-01-mortgage-statement.md",
+      "source": "files-1"
+     },
+     "surface": "Northshore Credit Union",
+     "title": "2026-07-01-mortgage-statement",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-07-01-mortgage-statement.md"
+    }
+   ],
+   "name": "Northshore Credit Union",
+   "vault_path": "Organization/Northshore Credit Union (ent_sttsnwekxxjsg56f).md"
+  },
+  "ent_oirvh36odywmg3ez": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_oirvh36odywmg3ez",
+   "identifiers": [
+    [
+     "tag",
+     "payslip"
+    ]
+   ],
+   "kind": "topic",
+   "mentions": [
+    {
+     "chunk_id": null,
+     "item": {
+      "key": "0:Finance/2026-04-30-payslip-april.md",
+      "source": "files-1"
+     },
+     "surface": "#payslip",
+     "title": "2026-04-30-payslip-april",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-04-30-payslip-april.md"
+    }
+   ],
+   "name": "payslip",
+   "vault_path": "Topic/payslip (ent_oirvh36odywmg3ez).md"
+  },
+  "ent_frqdxjn76szsk3l3": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.949999988079071,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 12,
+     "object": {
+      "entity": {
+       "id": "ent_t3y322htimt6lixu",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "organized",
+     "status": "active",
+     "subject": {
+      "id": "ent_frqdxjn76szsk3l3",
+      "name": "R. Chen"
+     },
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:28:53.445878241Z"
+    },
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ],
+     "id": 13,
+     "object": {
+      "entity": {
+       "id": "ent_t3y322htimt6lixu",
+       "name": "1:1 Mara / Bob"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_frqdxjn76szsk3l3",
+      "name": "R. Chen"
+     },
+     "text": "R. Chen attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "updated_at": "2026-10-30T20:28:53.445878241Z"
+    }
+   ],
+   "id": "ent_frqdxjn76szsk3l3",
+   "identifiers": [
+    [
+     "email",
+     "robert.chen@brightwell.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 3,
+     "item": {
+      "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+      "source": "files-1"
+     },
+     "surface": "R. Chen",
+     "title": "1:1 Mara / Bob",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+    }
+   ],
+   "name": "R. Chen",
+   "vault_path": "Person/R. Chen (ent_frqdxjn76szsk3l3).md"
+  },
+  "ent_xtgtxudikpl35kkv": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [],
+   "id": "ent_xtgtxudikpl35kkv",
+   "identifiers": [],
+   "kind": "place",
+   "mentions": [
+    {
+     "chunk_id": 6,
+     "item": {
+      "key": "0:Finance/2026-07-01-mortgage-statement.md",
+      "source": "files-1"
+     },
+     "surface": "Saltmarsh Row",
+     "title": "2026-07-01-mortgage-statement",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Finance/2026-07-01-mortgage-statement.md"
+    }
+   ],
+   "name": "Saltmarsh Row",
+   "vault_path": null
+  },
+  "ent_pngkpc2h5tar2jjq": {
+   "aliases": [],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ],
+     "id": 8,
+     "object": {
+      "entity": {
+       "id": "ent_2dzrtthmyumov3vk",
+       "name": "Climbing with Sam"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_pngkpc2h5tar2jjq",
+      "name": "Sam"
+     },
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "updated_at": "2026-10-30T20:26:53.440856879Z"
+    }
+   ],
+   "id": "ent_pngkpc2h5tar2jjq",
+   "identifiers": [
+    [
+     "email",
+     "sokonkwo@mailbox.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 2,
+     "item": {
+      "key": "0:Calendar/2026-04-16-climbing.ics",
+      "source": "files-1"
+     },
+     "surface": "Sam",
+     "title": "Climbing with Sam",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+    }
+   ],
+   "name": "Sam",
+   "vault_path": "Person/Sam (ent_pngkpc2h5tar2jjq).md"
+  },
+  "ent_vtsf2khvna7dsozv": {
+   "aliases": [
+    "Sam"
+   ],
+   "attributes": {},
+   "claims": [
+    {
+     "confidence": 0.8500000238418579,
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ],
+     "id": 4,
+     "object": {
+      "entity": {
+       "id": "ent_3l554u5fbbdgbtti",
+       "name": "Harbor stand-up"
+      },
+      "literal": null
+     },
+     "predicate": "attended",
+     "status": "active",
+     "subject": {
+      "id": "ent_vtsf2khvna7dsozv",
+      "name": "Sam Patel"
+     },
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "updated_at": "2026-10-30T20:32:39.239547597Z"
+    }
+   ],
+   "id": "ent_vtsf2khvna7dsozv",
+   "identifiers": [
+    [
+     "email",
+     "sam.patel@brightwell.example"
+    ]
+   ],
+   "kind": "person",
+   "mentions": [
+    {
+     "chunk_id": 2,
+     "item": {
+      "key": "0:Calendar/2026-04-16-climbing.ics",
+      "source": "files-1"
+     },
+     "surface": "Sam",
+     "title": "Climbing with Sam",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+    },
+    {
+     "chunk_id": 1,
+     "item": {
+      "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+      "source": "files-1"
+     },
+     "surface": "Sam Patel",
+     "title": "Harbor stand-up",
+     "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+    }
+   ],
+   "name": "Sam Patel",
+   "vault_path": "Person/Sam Patel (ent_vtsf2khvna7dsozv).md"
+  }
+ }
+}
