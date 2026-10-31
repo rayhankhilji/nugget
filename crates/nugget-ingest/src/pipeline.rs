@@ -40,6 +40,7 @@ use crate::ingest::{IngestEvent, Inner};
 use crate::known::join_err;
 use crate::metrics::Metrics;
 use crate::pii::{self, PiiFindings};
+use crate::sensitivity;
 use crate::supervisor::Control;
 use crate::triage;
 use crate::util::cap_error;
@@ -498,7 +499,18 @@ async fn prepare(
 
     // 4. Triage plan. Triage itself runs in the background after the item is written
     //    (`triage.rs`): it never delays search and never removes content from it.
-    let pii_sensitive = !ex.pii.is_empty();
+    // Deterministic rules first (GG4-6): PII patterns, then health / money / credentials /
+    // legal words and sensitive senders. They hold with or without a model.
+    let rule = if !ex.pii.is_empty() {
+        Some("pii")
+    } else {
+        sensitivity::classify(
+            title.as_deref(),
+            ex.text.as_deref().unwrap_or(""),
+            &ex.extracted_meta,
+        )
+    };
+    let rule_sensitive = rule.is_some();
     let has_text = ex.text.as_deref().is_some_and(|t| !t.trim().is_empty());
     let wants_triage = inner.cfg.triage
         && has_text
@@ -508,9 +520,9 @@ async fn prepare(
             .is_some_and(|r| ai::triage_provider(r).is_some());
     let plan = if !wants_triage {
         TriagePlan::None
-    } else if pii_sensitive {
+    } else if let Some(rule) = rule {
         // Already sensitive by rule; junk alone is not worth a model call.
-        TriagePlan::Skipped
+        TriagePlan::Skipped(rule)
     } else {
         match earlier_labels(inner, item, &ex.hash).await {
             Some(prev) => TriagePlan::Reused(prev),
@@ -518,13 +530,13 @@ async fn prepare(
         }
     };
     let (junk, sensitive) = match &plan {
-        TriagePlan::None | TriagePlan::Skipped => (false, pii_sensitive),
+        TriagePlan::None | TriagePlan::Skipped(_) => (false, rule_sensitive),
         // Until triage has run the item counts as sensitive: searchable locally, never sent
         // to cloud models.
         TriagePlan::Pending => (false, true),
         TriagePlan::Reused(v) => (
             v.get("junk").and_then(Value::as_bool).unwrap_or(false),
-            pii_sensitive || v.get("sensitive").and_then(Value::as_bool).unwrap_or(true),
+            rule_sensitive || v.get("sensitive").and_then(Value::as_bool).unwrap_or(true),
         ),
     };
     let title = title.or_else(|| Some(fallback_title(&key)));
@@ -578,6 +590,9 @@ async fn prepare(
         meta.insert("tags".into(), json!(ex.tags));
     }
     meta.insert("sensitive".into(), Value::Bool(sensitive));
+    if let Some(rule) = rule {
+        meta.insert("sensitive_rule".into(), Value::String(rule.into()));
+    }
     if !ex.pii.is_empty() {
         let mut p = Map::new();
         for (k, n) in [
@@ -598,10 +613,10 @@ async fn prepare(
         TriagePlan::Pending => {
             meta.insert("triage".into(), json!({"state": triage::PENDING}));
         }
-        TriagePlan::Skipped => {
+        TriagePlan::Skipped(rule) => {
             meta.insert(
                 "triage".into(),
-                json!({"state": triage::SKIPPED, "reason": "pii"}),
+                json!({"state": triage::SKIPPED, "reason": rule}),
             );
         }
         TriagePlan::Reused(v) => {
@@ -650,8 +665,8 @@ async fn prepare(
 enum TriagePlan {
     /// No triage: off, no local triage provider, or no text.
     None,
-    /// Labels known by rule (PII found): no model call.
-    Skipped,
+    /// Sensitive by rule (PII or `sensitivity` rules; the rule's name): no model call.
+    Skipped(&'static str),
     /// To be labelled by the background job.
     Pending,
     /// Same content as the stored item, which was already labelled: keep its labels.
@@ -662,7 +677,7 @@ impl TriagePlan {
     fn mark(&self) -> TriageMark {
         match self {
             TriagePlan::Pending => TriageMark::Pending,
-            TriagePlan::Skipped => TriageMark::Skipped,
+            TriagePlan::Skipped(_) => TriageMark::Skipped,
             TriagePlan::None | TriagePlan::Reused(_) => TriageMark::None,
         }
     }

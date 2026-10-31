@@ -42,7 +42,7 @@ async fn junk_and_sensitive_labels_never_remove_items_from_search() {
     .await;
     h.factory.state("fake-1").script(vec![
         Step::Send(text_doc("spam", "WIN BIG SPAM offer click now", Some("1"))),
-        Step::Send(text_doc("memo", "CONFIDENTIAL merger memo", Some("1"))),
+        Step::Send(text_doc("memo", "HUSHHUSH merger memo", Some("1"))),
         Step::Send(text_doc("note", "grocery list: eggs, milk", Some("1"))),
         Step::Return(json!("done")),
     ]);
@@ -148,11 +148,7 @@ async fn pending_items_never_reach_cloud_embedders_until_triage_clears_them() {
     .await;
     h.factory.state("fake-1").script(vec![
         Step::Send(text_doc("plain", "lunch menu for friday", Some("1"))),
-        Step::Send(text_doc(
-            "secret",
-            "CONFIDENTIAL diagnosis letter",
-            Some("1"),
-        )),
+        Step::Send(text_doc("secret", "HUSHHUSH quarterly letter", Some("1"))),
         Step::Return(json!("done")),
     ]);
     h.add("fake-1").await;
@@ -171,7 +167,7 @@ async fn pending_items_never_reach_cloud_embedders_until_triage_clears_them() {
     h.ingest.reembed_now();
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
-        !cloud.embedded().iter().any(|t| t.contains("diagnosis")),
+        !cloud.embedded().iter().any(|t| t.contains("quarterly")),
         "a sensitive item reached the cloud"
     );
     assert_eq!(
@@ -453,7 +449,7 @@ async fn triage_off_labels_by_pii_only() {
     })
     .await;
     h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "CONFIDENTIAL alpha", Some("1"))),
+        Step::Send(text_doc("a", "HUSHHUSH alpha", Some("1"))),
         Step::Return(json!("done")),
     ]);
     h.add("fake-1").await;

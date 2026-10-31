@@ -91,21 +91,26 @@ jobs:
           path: ${{ runner.temp }}/models-cache
           key: qa-gg2-models-${{ env.CHAT_MODEL }}-${{ hashFiles('manifests/default.json') }}
 
-      # BEFORE in a worktree, built into the same target dir so dependencies are shared; the
-      # binary is copied out before AFTER overwrites it.
+      # BEFORE in a worktree with its own target dir: cargo decides freshness by mtimes, and a
+      # shared target dir let AFTER (older checkout mtimes) reuse BEFORE's binary (run
+      # 41197266492 measured the old code twice).
       - name: Build nuggetd BEFORE (${{ env.BEFORE_REF }})
         run: |
           git worktree add --detach "$RUNNER_TEMP/before-src" "$BEFORE_REF"
           cargo build --release --locked -p nuggetd \
-            --manifest-path "$RUNNER_TEMP/before-src/Cargo.toml" --target-dir "$GITHUB_WORKSPACE/target"
+            --manifest-path "$RUNNER_TEMP/before-src/Cargo.toml" --target-dir "$RUNNER_TEMP/before-target"
           mkdir -p "$RUNNER_TEMP/bin"
-          cp target/release/nuggetd "$RUNNER_TEMP/bin/nuggetd-before"
+          cp "$RUNNER_TEMP/before-target/release/nuggetd" "$RUNNER_TEMP/bin/nuggetd-before"
+          rm -rf "$RUNNER_TEMP/before-target"
 
       - name: Build nuggetd AFTER (${{ github.sha }})
         run: |
           cargo build --release --locked -p nuggetd
           cp target/release/nuggetd "$RUNNER_TEMP/bin/nuggetd-after"
           git worktree remove --force "$RUNNER_TEMP/before-src"
+          if cmp -s "$RUNNER_TEMP/bin/nuggetd-before" "$RUNNER_TEMP/bin/nuggetd-after"; then
+            echo "::error::BEFORE and AFTER binaries are identical"; exit 1
+          fi
 
       - name: Generate corpus (dates anchored to ${{ env.CORPUS_TODAY }})
         run: |

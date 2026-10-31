@@ -46,7 +46,9 @@
 //! - **Search before triage.** Items are searchable as soon as they are written; triage labels
 //!   them later in the background and never removes an item (or its chunks) from search. See
 //!   the `triage` module docs and `ingest.status.triage` for progress.
-//! - **Privacy.** Items with PII findings (or flagged by triage) are *sensitive*; so is every
+//! - **Privacy.** Items with PII findings, items the deterministic sensitivity rules flag
+//!   (health, money, credentials, legal, sensitive senders like `hr@`), and items flagged by
+//!   triage are *sensitive*; so is every
 //!   item still waiting for triage or whose triage failed (fail closed). Triage never
 //!   uses `Cloud` providers; embeddings use `Cloud` providers only when
 //!   [`IngestConfig::allow_cloud_embeddings`] is set **and** the item is not sensitive.
@@ -59,7 +61,8 @@
 //!
 //! # Item metadata
 //! Items are stored with `metadata` = `{ source: <connector metadata>, url?, mime, extracted?,
-//! links?, tags?, sensitive, pii?: {card?, ssn?, iban?, secret?} (counts only), junk, triage?:
+//! links?, tags?, sensitive, sensitive_rule?: "pii" | "health" | "financial" |
+//! "credentials" | "legal" | "identity", pii?: {card?, ssn?, iban?, secret?} (counts only), junk, triage?:
 //! {state: "pending" | "done" | "skipped" | "failed", junk?, sensitive?, provider?, reason?,
 //! error?}, truncated?, extract_error?, embed_error?, embedding_provider? }`.
 
@@ -74,6 +77,7 @@ mod power;
 mod priority;
 mod reembed;
 mod secrets;
+mod sensitivity;
 mod sources;
 mod supervisor;
 mod triage;

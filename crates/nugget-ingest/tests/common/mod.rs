@@ -392,7 +392,7 @@ impl Provider for FakeProvider {
                 json!({
                     "n": n,
                     "junk": block.contains("SPAM"),
-                    "sensitive": block.contains("CONFIDENTIAL"),
+                    "sensitive": block.contains("HUSHHUSH"),
                 })
             })
             .collect();
