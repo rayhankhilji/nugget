@@ -394,13 +394,15 @@ impl Tool for AskUserTool {
         RiskClass::Observe
     }
     async fn call(&self, args: Value, _ctx: &ToolCtx) -> ToolResult {
-        let question = args["question"].as_str().unwrap_or_default().trim().to_string();
+        let question = args["question"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         // An empty question leaves the user nothing to answer (GG3-23); whitespace passes the
         // schema's `minLength`, so check here too.
         if question.is_empty() {
-            return ToolResult::error(
-                "ask_user needs a question for the user. Nothing was asked.",
-            );
+            return ToolResult::error("ask_user needs a question for the user. Nothing was asked.");
         }
         let options = args["options"]
             .as_array()
@@ -545,7 +547,9 @@ mod tests {
         };
         let r = AskUserTool.call(json!({"question": "  "}), &ctx).await;
         assert!(r.is_error && r.control.is_none());
-        let ok = AskUserTool.call(json!({"question": "Which one?"}), &ctx).await;
+        let ok = AskUserTool
+            .call(json!({"question": "Which one?"}), &ctx)
+            .await;
         assert!(matches!(ok.control, Some(Control::AskUser { .. })));
     }
 

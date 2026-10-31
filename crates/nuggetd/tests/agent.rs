@@ -734,13 +734,18 @@ async fn the_kill_switch_halts_a_task_waiting_on_a_confirmation() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stop_all_agents_ends_a_task_waiting_on_ask_user() {
     let mut rig = start(contact_page("Write to us using the form below.")).await;
-    rig.script.push("ask_user", json!({"question": "Which form?"}));
     rig.script
-        .push("browser_type", json!({"element": "n1", "text": "after Stop"}));
+        .push("ask_user", json!({"question": "Which form?"}));
+    rig.script.push(
+        "browser_type",
+        json!({"element": "n1", "text": "after Stop"}),
+    );
     let mut events = Events::new(&rig.client);
     let task = rig.run("Fill in the form").await.task_id;
     events
-        .until(&task, |e| matches!(e, AgentEvent::Suspended { .. }).then_some(()))
+        .until(&task, |e| {
+            matches!(e, AgentEvent::Suspended { .. }).then_some(())
+        })
         .await;
     let calls = rig.model_requests().await.len();
 
@@ -759,7 +764,12 @@ async fn stop_all_agents_ends_a_task_waiting_on_ask_user() {
     );
     // ...and after Resume there is nothing left to answer.
     let _: KillState = rig.call(m::POLICY_RESUME, json!({})).await;
-    assert!(rig.client.call_value(m::AGENT_ANSWER, answer).await.is_err());
+    assert!(
+        rig.client
+            .call_value(m::AGENT_ANSWER, answer)
+            .await
+            .is_err()
+    );
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(rig.browser.acts().is_empty());
     assert_eq!(rig.model_requests().await.len(), calls);
@@ -797,14 +807,9 @@ async fn an_approval_after_stop_is_refused() {
 async fn stop_and_resume_reach_the_extension_and_the_overlay_is_hidden_after_a_task() {
     let mut rig = start(contact_page("Hello")).await;
     rig.script.push("browser_snapshot", json!({}));
-    rig.script.push(
-        "browser_scroll",
-        json!({"dy": 100}),
-    );
-    rig.script.push(
-        "finish",
-        json!({"summary": "Scrolled.", "outcome": "done"}),
-    );
+    rig.script.push("browser_scroll", json!({"dy": 100}));
+    rig.script
+        .push("finish", json!({"summary": "Scrolled.", "outcome": "done"}));
     let mut events = Events::new(&rig.client);
     let task = rig.run("Scroll the page").await.task_id;
     events.finished(&task).await;

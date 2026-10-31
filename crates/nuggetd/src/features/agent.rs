@@ -987,8 +987,8 @@ impl EventSink for Runs {
                 Some(t) => self.track(t, &event),
                 None => true,
             };
-            let idle = matches!(event, AgentEvent::Finished { .. })
-                && tasks.values().all(|t| !t.active());
+            let idle =
+                matches!(event, AgentEvent::Finished { .. }) && tasks.values().all(|t| !t.active());
             (send, idle)
         };
         if send {

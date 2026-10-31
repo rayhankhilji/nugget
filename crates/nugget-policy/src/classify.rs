@@ -2001,6 +2001,11 @@ const SHELL_DANGER: &[&str] = &[
 ];
 
 const SETTINGS_APPS: &[&str] = &[
+    // A bare "Settings" app id or name (GNOME Settings and others call themselves so): its
+    // switches are security changes and ask first (GG3-25: it matched nothing, so turning off
+    // automatic updates or the screen lock went unconfirmed). Only the well-known OS settings
+    // ids in `rules.rs` also get the hard deny on security panes; this name is too ambiguous.
+    "settings",
     "com.apple.systempreferences",
     "com.apple.settings*",
     "system settings",
