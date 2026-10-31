@@ -282,8 +282,8 @@ pub struct RunState {
     pub mutations: Vec<MutationRecord>,
     pub actions: Vec<ActionRecord>,
     pub consecutive_verify_failures: u32,
-    /// Set when an observation looked like an injection; cleared once the user approves a
-    /// risky action.
+    /// Set when an observation looked like an injection; an approved risky action clears only
+    /// the entities it names ([`InjectionFinding::after_approval`]).
     pub suspicion: Option<InjectionFinding>,
     /// Per-run nonce for untrusted-content fences.
     pub fence: String,
@@ -998,7 +998,10 @@ impl Agent {
             }
         };
         if matches!(gate_outcome, GateOutcome::Approved { .. }) && risk >= RiskClass::Edit {
-            st.suspicion = None;
+            st.suspicion = st
+                .suspicion
+                .take()
+                .and_then(|f| f.after_approval(&descriptor));
         }
         if !gate_outcome.executes() {
             let msg = match &gate_outcome {
