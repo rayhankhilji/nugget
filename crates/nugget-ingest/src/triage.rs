@@ -36,7 +36,7 @@ use nugget_core::Result;
 use nugget_core::ids::ItemRef;
 use nugget_core::ipc::{TriageProgress, TriageState};
 use nugget_infer::Provider;
-use nugget_store::{Item, NewItem};
+use nugget_store::Item;
 use serde_json::{Value, json};
 
 use crate::ai::{self, Triage, TriageDoc};
@@ -336,8 +336,8 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
         Ok(l) => l,
         Err(e) => {
             tracing::warn!(error = %e, "reading items for triage failed");
-            finish_in_flight(inner);
             requeue_front(inner, refs);
+            finish_in_flight(inner);
             return BatchOutcome::Failed;
         }
     };
@@ -390,8 +390,8 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
             items = refs.len(),
             "triage yielded to an interactive request"
         );
-        finish_in_flight(inner);
         requeue_front(inner, refs);
+        finish_in_flight(inner);
         return BatchOutcome::Yielded;
     };
     let router = inner.router.as_ref();
@@ -406,6 +406,7 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
                 tokio::task::spawn_blocking(move || {
                     let mut n = 0u64;
                     let mut opened = false;
+                    let mut retry = Vec::new();
                     for (l, t) in batch.iter().zip(labels) {
                         match apply(&me, &l.item, Verdict::Labelled(t, &provider_id)) {
                             Ok(Some(sensitive)) => {
@@ -414,15 +415,19 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
                             }
                             Ok(None) => {}
                             Err(e) => {
+                                // Keep it queued: the next batch tries again.
                                 tracing::warn!(item = %l.item.item.key, error = %e, "storing triage labels failed");
+                                retry.push(l.item.item.clone());
                             }
                         }
                     }
-                    (n, opened)
+                    (n, opened, retry)
                 })
                 .await
-                .unwrap_or((0, false))
+                .unwrap_or_else(|_| (0, false, refs.clone()))
             };
+            // Requeue before clearing `in_flight`, so `pending` never reads 0 in between.
+            requeue_front(inner, applied.2);
             {
                 let mut q = lock(&inner.triage);
                 q.in_flight = 0;
@@ -447,7 +452,6 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
             let mut give_up = Vec::new();
             {
                 let mut q = lock(&inner.triage);
-                q.in_flight = 0;
                 let batched = refs.len() > 1;
                 let mut retry = Vec::new();
                 for (r, l) in refs.iter().zip(&batch) {
@@ -467,6 +471,7 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
                 }
                 drop(q);
                 requeue_front(inner, retry);
+                finish_in_flight(inner);
             }
             if !give_up.is_empty() {
                 let me = inner.clone();
@@ -551,19 +556,20 @@ fn apply(inner: &Inner, read: &Item, verdict: Verdict<'_>) -> Result<Option<bool
     let Some(now) = store.get_item(&read.item)? else {
         return Ok(None);
     };
-    if now.content_hash != read.content_hash
-        || now.updated_at != read.updated_at
-        || !is_pending(&now.metadata)
-    {
+    // A changed content hash means the pipeline rewrote the item (and queued it again).
+    // `updated_at` may move for other reasons (the re-embed job), which do not affect labels.
+    if now.content_hash != read.content_hash || !is_pending(&now.metadata) {
         return Ok(None);
     }
     let mut metadata = now.metadata.clone();
     let Value::Object(m) = &mut metadata else {
         return Ok(None);
     };
+    // Sensitive by rule (PII or `sensitivity` rules) whatever the model says.
     let pii = m
         .get("pii")
-        .is_some_and(|p| p.as_object().is_some_and(|o| !o.is_empty()));
+        .is_some_and(|p| p.as_object().is_some_and(|o| !o.is_empty()))
+        || m.get("sensitive_rule").is_some_and(Value::is_string);
     let sensitive = match verdict {
         Verdict::Labelled(t, provider) => {
             m.insert("junk".into(), Value::Bool(t.junk));
@@ -593,18 +599,10 @@ fn apply(inner: &Inner, read: &Item, verdict: Verdict<'_>) -> Result<Option<bool
         }
     };
     m.insert("sensitive".into(), Value::Bool(sensitive));
-    let mut new = NewItem::new(
-        now.item.source.as_str(),
-        now.item.key.as_str(),
-        now.content_hash.clone(),
-    )
-    .with_metadata(metadata);
-    new.title = now.title.clone();
-    new.mime = now.mime.clone();
-    new.text = now.text.clone();
-    new.source_modified_at = now.source_modified_at;
-    new.version = now.version.clone();
-    // Same content hash: the item's chunks and vectors stay as they are.
-    store.upsert_item(&new)?;
+    // Metadata only: chunks, vectors and `updated_at` stay as they are, so consumers that
+    // fingerprint items by `content_hash:updated_at` (knowledge extraction) do not redo them.
+    if !store.set_item_metadata(&now.item, &now.content_hash, &metadata)? {
+        return Ok(None);
+    }
     Ok(Some(sensitive))
 }

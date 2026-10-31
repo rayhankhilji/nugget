@@ -18,6 +18,16 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
+/// `ChatRequest::feature` tags of background model work: triage itself, knowledge
+/// extraction, the proactive judge and capability probes. Triage does not yield to these
+/// (they are not waiting users); every other feature counts as interactive.
+pub const BACKGROUND_FEATURES: &[&str] = &["triage", "knowledge", "proactive_judge", "probe"];
+
+/// Whether a chat with this feature tag is interactive (see [`BACKGROUND_FEATURES`]).
+pub fn is_interactive(feature: &str) -> bool {
+    !BACKGROUND_FEATURES.contains(&feature)
+}
+
 /// Tracks interactive model requests in flight. Cheap to share (`Arc`).
 #[derive(Debug)]
 pub struct Foreground {

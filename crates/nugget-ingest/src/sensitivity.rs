@@ -30,7 +30,6 @@ const WORDS: &[(&str, &str)] = &[
     ("clinic", "health"),
     ("hospital", "health"),
     ("medical", "health"),
-    ("patient", "health"),
     ("diagnosis", "health"),
     ("diagnosed", "health"),
     ("prescription", "health"),
@@ -38,6 +37,19 @@ const WORDS: &[(&str, &str)] = &[
     ("pharmacy", "health"),
     ("hba1c", "health"),
     ("biopsy", "health"),
+    ("doctor", "health"),
+    ("dentist", "health"),
+    ("gp", "health"),
+    ("symptoms", "health"),
+    ("surgery", "health"),
+    ("cancer", "health"),
+    ("diabetes", "health"),
+    ("depression", "health"),
+    ("anxiety", "health"),
+    ("hiv", "health"),
+    ("pregnant", "health"),
+    ("mri", "health"),
+    ("diagnoses", "health"),
     ("anaemia", "health"),
     ("anemia", "health"),
     ("oncology", "health"),
@@ -56,24 +68,29 @@ const WORDS: &[(&str, &str)] = &[
     ("payslip", "financial"),
     ("payroll", "financial"),
     ("paycheck", "financial"),
-    ("bonus", "financial"),
     ("mortgage", "financial"),
     ("pension", "financial"),
+    ("salaries", "financial"),
+    ("loan", "financial"),
+    ("debt", "financial"),
+    ("overdraft", "financial"),
+    ("irs", "financial"),
     ("iban", "financial"),
     ("gehalt", "financial"),
     ("salaire", "financial"),
     ("salario", "financial"),
     // credentials
-    ("password", "credentials"),
     ("passcode", "credentials"),
     ("otp", "credentials"),
     ("2fa", "credentials"),
     ("passwort", "credentials"),
     ("contraseña", "credentials"),
     // legal / identity
-    ("confidential", "legal"),
     ("passport", "identity"),
     ("lawsuit", "legal"),
+    ("lawyer", "legal"),
+    ("police", "legal"),
+    ("arrest", "legal"),
     ("attorney", "legal"),
     ("solicitor", "legal"),
     ("subpoena", "legal"),
@@ -99,6 +116,12 @@ const PHRASES: &[(&str, &str)] = &[
     ("debit card", "financial"),
     ("fraud alert", "financial"),
     ("tax return", "financial"),
+    ("income tax", "financial"),
+    ("tax refund", "financial"),
+    ("bank statement", "financial"),
+    ("password is", "credentials"),
+    ("temporary password", "credentials"),
+    ("green card", "identity"),
     ("credit score", "financial"),
     ("pay slip", "financial"),
     ("verification code", "credentials"),
@@ -119,7 +142,6 @@ const PHRASES: &[(&str, &str)] = &[
 /// Mailbox names (the part before `@`) of senders that handle sensitive matters.
 const ROLE_MAILBOXES: &[(&str, &str)] = &[
     ("hr", "financial"),
-    ("people", "financial"),
     ("payroll", "financial"),
     ("benefits", "financial"),
     ("legal", "legal"),
@@ -128,7 +150,23 @@ const ROLE_MAILBOXES: &[(&str, &str)] = &[
     ("compliance", "legal"),
 ];
 
-/// Words in a sender's domain that name a sensitive kind of organisation.
+/// Words that name a sensitive kind of organisation when they appear anywhere in a domain
+/// label (`northshorebank`, `albers-counselling`).
+const DOMAIN_STEMS: &[(&str, &str)] = &[
+    ("therapy", "health"),
+    ("therapist", "health"),
+    ("counselling", "health"),
+    ("counseling", "health"),
+    ("clinic", "health"),
+    ("hospital", "health"),
+    ("pharmacy", "health"),
+    ("dental", "health"),
+    ("medical", "health"),
+    ("healthcare", "health"),
+    ("bank", "financial"),
+];
+
+/// Words in a sender's domain (whole labels) that name a sensitive kind of organisation.
 const DOMAIN_WORDS: &[(&str, &str)] = &[
     ("therapy", "health"),
     ("therapist", "health"),
@@ -174,6 +212,7 @@ const FOLDERS_AND_TAGS: &[(&str, &str)] = &[
 
 fn tokens(s: &str) -> Vec<String> {
     s.to_lowercase()
+        .replace(['\u{2019}', '\u{2018}'], "'")
         .split(|c: char| !(c.is_alphanumeric() || c == '\''))
         .map(|t| t.trim_matches('\'').to_owned())
         .filter(|t| !t.is_empty())
@@ -190,6 +229,15 @@ pub(crate) fn classify(
     text: &str,
     extracted: &Value,
 ) -> Option<&'static str> {
+    // A title or subject that says "confidential" (not a footer in the body).
+    let subject = extracted.get("subject").and_then(Value::as_str);
+    if [title, subject]
+        .into_iter()
+        .flatten()
+        .any(|t| tokens(t).iter().any(|w| w == "confidential"))
+    {
+        return Some("legal");
+    }
     // Folders (not the file name) and tags. File-source keys may carry a `<root>:` prefix.
     let folders = key.rsplit_once(['/', '\\']).map_or("", |(dir, _)| dir);
     let filed = folders
@@ -204,14 +252,15 @@ pub(crate) fn classify(
             return Some(kind);
         }
     }
-    let subject = extracted.get("subject").and_then(Value::as_str);
     let mut toks = Vec::new();
     for part in [title, subject, Some(text)].into_iter().flatten() {
         toks.extend(tokens(part));
         toks.push(String::new()); // no phrase spans two fields
     }
     let set: HashSet<&str> = toks.iter().map(String::as_str).collect();
-    if let Some((_, kind)) = WORDS.iter().find(|(w, _)| set.contains(w)) {
+    // Whole words, and simple plurals of them ("medications", "lawyers").
+    let plural_of = |w: &str| set.contains(format!("{w}s").as_str());
+    if let Some((_, kind)) = WORDS.iter().find(|(w, _)| set.contains(w) || plural_of(w)) {
         return Some(kind);
     }
     let joined = format!(" {} ", toks.join(" "));
@@ -222,17 +271,41 @@ pub(crate) fn classify(
         return Some(kind);
     }
     let from = extracted.get("from").and_then(Value::as_str).unwrap_or("");
-    sender_kind(from)
+    if let Some(kind) = sender_kind(from) {
+        return Some(kind);
+    }
+    // Mail sent to such organisations (the user's reply to a therapist) too.
+    ["to", "cc"]
+        .iter()
+        .filter_map(|k| extracted.get(*k).and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .find_map(|a| address(a).and_then(|(_, d)| domain_kind(&d)))
 }
 
-/// Rules on a sender (`Name <mailbox@domain>` or a bare address).
-fn sender_kind(from: &str) -> Option<&'static str> {
-    let addr = match (from.rfind('<'), from.rfind('>')) {
-        (Some(a), Some(b)) if a < b => &from[a + 1..b],
-        _ => from,
+/// `(mailbox, domain)` of `Name <mailbox@domain>` or a bare address, lowercase.
+fn address(s: &str) -> Option<(String, String)> {
+    let addr = match (s.rfind('<'), s.rfind('>')) {
+        (Some(a), Some(b)) if a < b => &s[a + 1..b],
+        _ => s,
     };
-    let (mailbox, domain) = addr.trim().rsplit_once('@')?;
-    let mailbox = mailbox.to_lowercase();
+    let (m, d) = addr.trim().rsplit_once('@')?;
+    Some((m.to_lowercase(), d.to_lowercase()))
+}
+
+fn domain_kind(domain: &str) -> Option<&'static str> {
+    domain.split(['.', '-']).find_map(|part| {
+        DOMAIN_WORDS
+            .iter()
+            .find(|(w, _)| *w == part)
+            .or_else(|| DOMAIN_STEMS.iter().find(|(w, _)| part.contains(w)))
+            .map(|(_, k)| *k)
+    })
+}
+
+/// Rules on a sender: role mailboxes, then the domain.
+fn sender_kind(from: &str) -> Option<&'static str> {
+    let (mailbox, domain) = address(from)?;
     let base = mailbox.split(['+', '.', '-', '_']).next().unwrap_or("");
     if let Some((_, kind)) = ROLE_MAILBOXES
         .iter()
@@ -240,13 +313,7 @@ fn sender_kind(from: &str) -> Option<&'static str> {
     {
         return Some(kind);
     }
-    let domain = domain.to_lowercase();
-    domain.split(['.', '-']).find_map(|part| {
-        DOMAIN_WORDS
-            .iter()
-            .find(|(w, _)| *w == part)
-            .map(|(_, k)| *k)
-    })
+    domain_kind(&domain)
 }
 
 #[cfg(test)]
@@ -324,6 +391,54 @@ mod tests {
     }
 
     #[test]
+    fn review_cases_are_caught() {
+        assert_eq!(
+            mail(
+                "a@gmail.com",
+                "Hi",
+                "Dr. Patel wants to discuss your MRI next week"
+            ),
+            Some("health")
+        );
+        assert_eq!(
+            mail("a@gmail.com", "Hi", "new medications from Monday"),
+            Some("health")
+        );
+        assert_eq!(
+            mail("a@gmail.com", "Hi", "renew my driver\u{2019}s license"),
+            Some("identity")
+        );
+        assert_eq!(mail("a@x.example", "Card", "hello"), None);
+        assert_eq!(
+            mail(
+                "Northshore <alerts@northshorebank.example>",
+                "Card",
+                "hello"
+            ),
+            Some("financial")
+        );
+        // The user's own reply to a therapist (no quote): the recipient's domain counts.
+        let reply = json!({
+            "from": "Mara <mara@mailbox.example>",
+            "to": ["Jonas Albers <jonas@albers-counselling.example>"],
+            "subject": "Re: Thursday",
+        });
+        assert_eq!(
+            classify("r.eml", &[], Some("Re: Thursday"), "See you then", &reply),
+            Some("health")
+        );
+        // "Confidential" counts in a subject, not in a body footer.
+        assert_eq!(
+            mail("a@x.example", "Confidential: offer", "hi"),
+            Some("legal")
+        );
+        assert_eq!(
+            mail("a@x.example", "Lunch", "This email is confidential."),
+            None
+        );
+    }
+
+    #[test]
     fn ordinary_content_is_not() {
         for (from, subject, body) in [
             (
@@ -342,7 +457,21 @@ mod tests {
                 "Big savings on shoes this week. Unsubscribe here.",
             ),
             // Substrings never match: "therapy" is not in "therapyx", "hr" is not "hrm".
-            ("x <hrm@banker.example>", "therapyx", "the bonuses page"),
+            (
+                "x <hrm@x.example>",
+                "therapyx",
+                "thanks for being patient, bonus points",
+            ),
+            (
+                "Acme <noreply@acme.example>",
+                "Reset your password",
+                "Click the link to reset your password.",
+            ),
+            (
+                "Ops <people@acme.example>",
+                "Team lunch",
+                "Pizza on Friday.",
+            ),
         ] {
             assert_eq!(mail(from, subject, body), None, "{subject}");
         }

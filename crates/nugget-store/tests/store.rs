@@ -694,6 +694,31 @@ mod sources {
     }
 
     #[test]
+    fn set_item_metadata_keeps_updated_at_chunks_and_checks_the_hash() {
+        let store = Store::open_in_memory().unwrap();
+        let new = NewItem::new("s", "k", "h1").with_text("alpha text");
+        store.upsert_item(&new).unwrap();
+        store
+            .replace_chunks(&new.item, &[NewChunk::text("alpha text")])
+            .unwrap();
+        let before = store.get_item(&new.item).unwrap().unwrap();
+        let meta = serde_json::json!({"triage": {"state": "done"}, "sensitive": false});
+        assert!(store.set_item_metadata(&new.item, "h1", &meta).unwrap());
+        let after = store.get_item(&new.item).unwrap().unwrap();
+        assert_eq!(after.metadata, meta);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(after.text.as_deref(), Some("alpha text"));
+        assert_eq!(store.search_text("alpha", 10).unwrap().len(), 1);
+        // Another content hash: nothing written.
+        assert!(
+            !store
+                .set_item_metadata(&new.item, "other", &serde_json::json!({}))
+                .unwrap()
+        );
+        assert_eq!(store.get_item(&new.item).unwrap().unwrap().metadata, meta);
+    }
+
+    #[test]
     fn items_pending_triage_lists_pending_items_in_pages() {
         let store = Store::open_in_memory().unwrap();
         let meta = |state: &str| serde_json::json!({"triage": {"state": state}});

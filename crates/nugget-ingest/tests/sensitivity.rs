@@ -88,8 +88,7 @@ async fn gg4_sensitive_mail_is_flagged_without_a_model() {
 
 #[tokio::test]
 async fn gg4_sensitive_mail_is_flagged_even_when_the_model_under_flags() {
-    // The fake model labels these mails not sensitive (no marker word): the rules still hold,
-    // and the model is not asked about them at all.
+    // The fake model labels these mails not sensitive (no marker word): the rules still hold.
     let local = FakeProvider::new("local-chat", Locality::OnDevice);
     let h = start(Opts {
         router: Some(router(&[(
@@ -113,13 +112,11 @@ async fn gg4_sensitive_mail_is_flagged_even_when_the_model_under_flags() {
             "{key}: {}",
             it.metadata
         );
-        assert_eq!(it.metadata["triage"]["state"], json!("skipped"), "{key}");
+        // The (local) model labelled it not sensitive; the rule still wins.
+        assert_eq!(it.metadata["triage"]["state"], json!("done"), "{key}");
+        assert_eq!(it.metadata["triage"]["sensitive"], json!(false), "{key}");
+        assert!(it.metadata["sensitive_rule"].is_string(), "{key}");
     }
-    let asked = local.chats().join("\n");
-    assert!(
-        !asked.contains("metformin") && !asked.contains("118,500"),
-        "{asked}"
-    );
     for (key, _) in ORDINARY {
         let it = h.item("mail", key).unwrap();
         assert_eq!(it.metadata["triage"]["state"], json!("done"), "{key}");

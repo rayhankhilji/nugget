@@ -375,9 +375,10 @@ impl Provider for RuntimeSlot {
         if !matches!(self.role, RuntimeRole::Chat | RuntimeRole::Draft) {
             return Err(Error::Unsupported(format!("{} does not chat", self.id)));
         }
-        // Every chat but triage is interactive here (Ask, Double Tap, agent, drafts): mark it
-        // for its whole stream so background triage leaves the model alone (HH2).
-        let guard = (req.feature != nugget_ingest::FEATURE_TRIAGE)
+        // Interactive chats (Ask, Double Tap, agent, drafts) are marked for their whole stream
+        // so background triage leaves the model alone; background work (knowledge, proactive
+        // judge, probes, triage itself) is not (HH2).
+        let guard = nugget_ingest::is_interactive(&req.feature)
             .then(|| self.foreground.get().map(|f| f.begin()))
             .flatten();
         let stream = self.ready().await?.chat(req).await?;
@@ -583,6 +584,22 @@ pub(crate) fn localities(providers: &[Arc<dyn Provider>]) -> HashMap<ProviderId,
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn background_features_never_hold_the_foreground() {
+        // HH2: triage yields to interactive chats only.
+        for f in [
+            nugget_ingest::FEATURE_TRIAGE,
+            nugget_knowledge::llm::FEATURE_KNOWLEDGE,
+            nugget_proactive::judge::FEATURE_JUDGE,
+            nugget_infer::FEATURE_PROBE,
+        ] {
+            assert!(!nugget_ingest::is_interactive(f), "{f}");
+        }
+        for f in ["ask", "chat", "agent", "draft", "query_rewrite"] {
+            assert!(nugget_ingest::is_interactive(f), "{f}");
+        }
+    }
     use super::*;
     use nugget_models::GpuKind;
 

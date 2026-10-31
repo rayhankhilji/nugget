@@ -522,14 +522,15 @@ async fn prepare(
     // while no local triage model is routable yet (the job picks it up once one is). Only
     // `assume_unflagged_safe` lets items triage cannot decide now count as not sensitive.
     let can_triage = inner.cfg.triage && has_text && (routable || !inner.cfg.assume_unflagged_safe);
-    let plan = if let Some(rule) = rule {
-        // Sensitive by rule; junk alone is not worth a model call.
-        TriagePlan::Skipped(rule)
-    } else if can_triage {
+    // With a model, rule hits are triaged too (for the junk label) but stay sensitive whatever
+    // it answers (`triage::apply` reads `sensitive_rule`).
+    let plan = if can_triage {
         match earlier_labels(inner, item, &ex.hash).await {
             Some(prev) => TriagePlan::Reused(prev),
             None => TriagePlan::Pending,
         }
+    } else if let Some(rule) = rule {
+        TriagePlan::Skipped(rule)
     } else {
         TriagePlan::Unknown(if !inner.cfg.triage {
             "off"

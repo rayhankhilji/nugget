@@ -91,7 +91,7 @@ pub use ingest::{AUTH_TIMEOUT, Ingest, IngestBuilder, IngestEvent, ItemError, Se
 pub use known::StoreKnownItems;
 pub use pii::{PiiFindings, scan as scan_pii};
 pub use power::{NoPowerPolicy, PowerPolicy, SystemPowerPolicy};
-pub use priority::{Foreground, ForegroundGuard};
+pub use priority::{BACKGROUND_FEATURES, Foreground, ForegroundGuard, is_interactive};
 pub use reembed::ReembedStats;
 pub use secrets::{KeyringSecrets, MemorySecrets, account_belongs_to};
 pub use util::{MAX_ERROR_CHARS, cap_error};
