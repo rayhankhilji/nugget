@@ -76,7 +76,7 @@ jobs:
 
       # A real release whose bundled model manifest has no signature from the release key would
       # build fine and then offer no model downloads. Stop before anything is built.
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.mode.outputs.release == 'true'
         with:
           persist-credentials: false
@@ -128,7 +128,7 @@ jobs:
           - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: "appimage,deb,rpm", arch: amd64, experimental: false }
           - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, bundles: "appimage,deb,rpm", arch: arm64, experimental: true }
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -177,11 +177,11 @@ jobs:
         if: runner.os == 'Windows'
 
       # No cache restore on release builds: every byte comes from this run.
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: apps/desktop/package.json
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
@@ -351,7 +351,7 @@ jobs:
           esac
           ls -l "$out"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bundle-${{ matrix.target }}
           path: ${{ runner.temp }}/out/
@@ -366,7 +366,7 @@ jobs:
             "target/${{ matrix.target }}/release/bundle" > "$RUNNER_TEMP/bundle-report.md"
           cat "$RUNNER_TEMP/bundle-report.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bundle-report-${{ matrix.target }}
           path: ${{ runner.temp }}/bundle-report.md
@@ -396,7 +396,7 @@ jobs:
           SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
         run: ./packaging/scripts/smoke-windows.ps1 (Get-ChildItem "$env:RUNNER_TEMP/out" -Filter '*-setup.exe')[0].FullName
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && contains(fromJSON('["x86_64-unknown-linux-gnu","aarch64-apple-darwin","x86_64-pc-windows-msvc"]'), matrix.target)
         with:
           name: smoke-${{ matrix.target }}
@@ -412,7 +412,7 @@ jobs:
       contents: read
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install Rust toolchain
@@ -426,10 +426,10 @@ jobs:
             --manifest-path apps/desktop/src-tauri/Cargo.toml --override-filename nugget-desktop.cdx
           mkdir -p "$RUNNER_TEMP/sbom"
           cp crates/nuggetd/nuggetd.cdx.json apps/desktop/src-tauri/nugget-desktop.cdx.json "$RUNNER_TEMP/sbom/"
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: apps/desktop/package.json
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: Frontend SBOM (CycloneDX)
@@ -438,7 +438,7 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts
           npx --yes @cyclonedx/cdxgen@12.9.0 -t pnpm --required-only --spec-version 1.5 \
             -o "$RUNNER_TEMP/sbom/nugget-desktop-frontend.cdx.json" .
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom
           path: ${{ runner.temp }}/sbom/
@@ -459,15 +459,15 @@ jobs:
       attestations: write
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: apps/desktop/package.json
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       # Only the locked Tauri CLI is needed (`tauri signer sign`); no install scripts run in the
@@ -479,7 +479,7 @@ jobs:
       # Only the installers (`bundle-<target>`) become release assets. The run also uploads
       # `bundle-report-<target>` and `smoke-<target>` (logs, screenshots), which must not be
       # attached, checksummed or attested; `bundle-*` matches the reports too, so filter by name.
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: bundle-*
           path: ${{ runner.temp }}/artifacts
@@ -559,7 +559,7 @@ jobs:
           python3 packaging/scripts/updater_manifest.py payloads "$dist" |
             while read -r f; do python3 -I "$check" updater "$f" "$f.sig" "$NUGGET_UPDATER_PUBKEY"; done
 
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sbom
           path: ${{ runner.temp }}/dist/sbom
@@ -571,7 +571,7 @@ jobs:
           rmdir sbom
           python3 "$GITHUB_WORKSPACE/packaging/scripts/updater_manifest.py" checksums .
 
-      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: ${{ runner.temp }}/dist/SHA256SUMS
 
@@ -594,7 +594,7 @@ jobs:
       contents: write # upload to the rolling `updater-feed` release
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Update beta.json and stable.json
