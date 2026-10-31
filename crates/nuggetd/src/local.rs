@@ -224,6 +224,8 @@ pub(crate) struct RuntimeSlot {
     active: Mutex<Option<Active>>,
     router: OnceLock<Weak<Router>>,
     on_ready: OnceLock<ReadyHook>,
+    /// Interactive chats hold a guard on it so background triage yields (HH2).
+    foreground: OnceLock<Arc<nugget_ingest::Foreground>>,
 }
 
 impl RuntimeSlot {
@@ -373,7 +375,19 @@ impl Provider for RuntimeSlot {
         if !matches!(self.role, RuntimeRole::Chat | RuntimeRole::Draft) {
             return Err(Error::Unsupported(format!("{} does not chat", self.id)));
         }
-        self.ready().await?.chat(req).await
+        // Every chat but triage is interactive here (Ask, Double Tap, agent, drafts): mark it
+        // for its whole stream so background triage leaves the model alone (HH2).
+        let guard = (req.feature != nugget_ingest::FEATURE_TRIAGE)
+            .then(|| self.foreground.get().map(|f| f.begin()))
+            .flatten();
+        let stream = self.ready().await?.chat(req).await?;
+        Ok(match guard {
+            Some(g) => Box::pin(futures::StreamExt::map(stream, move |ev| {
+                let _held = &g;
+                ev
+            })),
+            None => stream,
+        })
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -458,6 +472,7 @@ impl LocalRuntime {
                     active: Mutex::new(None),
                     router: OnceLock::new(),
                     on_ready: OnceLock::new(),
+                    foreground: OnceLock::new(),
                 })
             })
             .collect();
@@ -480,6 +495,13 @@ impl LocalRuntime {
     }
 
     /// Call `hook` whenever a slot's server becomes ready on a new config (set once).
+    /// Mark interactive chats on `fg` (see `nugget_ingest::Foreground`). Call once.
+    pub fn set_foreground(&self, fg: Arc<nugget_ingest::Foreground>) {
+        for s in &self.slots {
+            let _ = s.foreground.set(fg.clone());
+        }
+    }
+
     pub fn on_ready(&self, hook: ReadyHook) {
         for s in &self.slots {
             let _ = s.on_ready.set(hook.clone());

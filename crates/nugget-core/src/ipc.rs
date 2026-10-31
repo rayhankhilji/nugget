@@ -490,6 +490,42 @@ pub struct IngestStatus {
     #[serde(default)]
     pub triage_provider: Option<ProviderId>,
     pub sources: Vec<SourceInfo>,
+    /// Background triage progress. Items are searchable as soon as they are indexed; triage
+    /// (junk / sensitive labels) runs afterwards at low priority. Absent from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage: Option<TriageProgress>,
+}
+
+/// What the background triage job is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageState {
+    /// Triage is turned off or no local triage provider is routable.
+    Off,
+    /// Nothing to triage.
+    Idle,
+    /// Classifying items.
+    Running,
+    /// Waiting for interactive model requests (Ask, Double Tap, agent) to finish.
+    Yielding,
+    /// Waiting for power (battery) to allow heavy work.
+    Paused,
+}
+
+/// Background triage counters since the daemon started (`pending` is the current backlog).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriageProgress {
+    pub state: TriageState,
+    /// Items indexed and searchable whose triage has not run yet.
+    pub pending: u64,
+    /// Items triaged by the model.
+    pub done: u64,
+    /// Items labelled by rule without a model call (e.g. PII already found).
+    #[serde(default)]
+    pub skipped: u64,
+    /// Items whose triage failed for good (they stay searchable and count as sensitive).
+    #[serde(default)]
+    pub failed: u64,
 }
 
 // ---- retrieval ----

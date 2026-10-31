@@ -28,10 +28,12 @@ use crate::config::IngestConfig;
 use crate::known::{StoreKnownItems, join_err};
 use crate::metrics::Metrics;
 use crate::power::{PowerPolicy, SystemPowerPolicy};
+use crate::priority::Foreground;
 use crate::reembed::{self, ReembedState, ReembedStats};
 use crate::secrets::{KeyringSecrets, ScopedSecrets, account_belongs_to, default_accounts};
 use crate::sources::{self, SourceEntry};
 use crate::supervisor::{Control, run_source};
+use crate::triage::{self, TriageQueue};
 use crate::util::cap_error;
 
 /// Capacity of the event broadcast; slow subscribers miss old events (`RecvError::Lagged`).
@@ -164,6 +166,10 @@ pub(crate) struct Inner {
     /// Wakes the re-embed job.
     pub reembed: Notify,
     pub reembed_state: Mutex<ReembedState>,
+    /// Background triage: queue and counters, its wake-up, and interactive model use.
+    pub triage: Mutex<TriageQueue>,
+    pub triage_wake: Notify,
+    pub foreground: Arc<Foreground>,
     auth_generation: AtomicU64,
 }
 
@@ -490,6 +496,7 @@ pub struct IngestBuilder {
     secrets: Option<Arc<dyn SecretStore>>,
     power: Option<Arc<dyn PowerPolicy>>,
     settings_resolver: Option<SettingsResolver>,
+    foreground: Option<Arc<Foreground>>,
 }
 
 impl std::fmt::Debug for IngestBuilder {
@@ -527,6 +534,13 @@ impl IngestBuilder {
         self
     }
 
+    /// Tracker of interactive model requests that background triage yields to. Default: a new
+    /// one with [`IngestConfig::triage_idle_ms`] of grace; get it with [`Ingest::foreground`].
+    pub fn foreground(mut self, foreground: Arc<Foreground>) -> Self {
+        self.foreground = Some(foreground);
+        self
+    }
+
     /// Load `<config>/sources.toml` and start a supervisor for every enabled source.
     /// Must be called inside a Tokio runtime.
     pub async fn start(self) -> Result<Ingest> {
@@ -543,6 +557,11 @@ impl IngestBuilder {
             .secrets
             .unwrap_or_else(|| Arc::new(KeyringSecrets::new()));
         let cfg = self.cfg;
+        let foreground = self.foreground.unwrap_or_else(|| {
+            Arc::new(Foreground::new(std::time::Duration::from_millis(
+                cfg.triage_idle_ms,
+            )))
+        });
         let inner = Arc::new_cyclic(|weak| Inner {
             metrics: Metrics::new(cfg.freshness_window),
             extract_slots: Arc::new(Semaphore::new(cfg.extraction_slots())),
@@ -565,6 +584,9 @@ impl IngestBuilder {
             write_lock: Mutex::new(()),
             reembed: Notify::new(),
             reembed_state: Mutex::new(ReembedState::default()),
+            triage: Mutex::new(TriageQueue::default()),
+            triage_wake: Notify::new(),
+            foreground,
             auth_generation: AtomicU64::new(0),
         });
         {
@@ -576,6 +598,7 @@ impl IngestBuilder {
         let ids: Vec<SourceId> = lock(&inner.slots).keys().cloned().collect();
         inner.start_sources(ids).await;
         inner.tracker.spawn(reembed::run(inner.clone()));
+        inner.tracker.spawn(triage::run(inner.clone()));
         Ok(Ingest { inner })
     }
 }
@@ -638,6 +661,7 @@ impl Ingest {
             secrets: None,
             power: None,
             settings_resolver: None,
+            foreground: None,
         }
     }
 
@@ -950,6 +974,7 @@ impl Ingest {
             embedding_provider,
             triage_provider,
             sources: self.list().await?,
+            triage: Some(self.inner.triage_progress()),
         })
     }
 
@@ -1161,6 +1186,22 @@ impl Ingest {
     /// embedding provider becomes available.
     pub fn reembed_now(&self) {
         self.inner.reembed.notify_one();
+    }
+
+    /// Interactive model requests in flight, which background triage yields to. The daemon
+    /// marks every on-device chat that is not triage with [`Foreground::begin`].
+    pub fn foreground(&self) -> Arc<Foreground> {
+        self.inner.foreground.clone()
+    }
+
+    /// Wake the background triage job (for example when a local triage model became ready).
+    pub fn triage_now(&self) {
+        self.inner.triage_wake.notify_one();
+    }
+
+    /// Background triage backlog and counters (also in [`Ingest::status`]).
+    pub fn triage_progress(&self) -> nugget_core::ipc::TriageProgress {
+        self.inner.triage_progress()
     }
 
     /// Progress of the re-embed job.

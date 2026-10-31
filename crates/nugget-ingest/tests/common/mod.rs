@@ -290,6 +290,12 @@ pub struct FakeProvider {
     pub nan: AtomicBool,
     /// The task prefixes it reports as `(query, document)` (none by default).
     pub prefixes: Mutex<(String, String)>,
+    /// Chat requests wait while this is `false` (see [`FakeProvider::block_chat`]).
+    chat_open: tokio::sync::watch::Sender<bool>,
+    /// Chat requests that returned a reply (others were dropped while blocked).
+    pub chats_completed: AtomicUsize,
+    /// Reply to triage with unusable output.
+    pub chat_invalid: AtomicBool,
 }
 
 impl FakeProvider {
@@ -305,7 +311,19 @@ impl FakeProvider {
             dim: 4,
             nan: AtomicBool::new(false),
             prefixes: Mutex::new((String::new(), String::new())),
+            chat_open: tokio::sync::watch::channel(true).0,
+            chats_completed: AtomicUsize::new(0),
+            chat_invalid: AtomicBool::new(false),
         })
+    }
+
+    /// Hold every chat request until [`FakeProvider::unblock_chat`].
+    pub fn block_chat(&self) {
+        self.chat_open.send_replace(false);
+    }
+
+    pub fn unblock_chat(&self) {
+        self.chat_open.send_replace(true);
     }
 
     /// Block embedding calls whose input contains `marker` (`""` blocks everything).
@@ -354,16 +372,35 @@ impl Provider for FakeProvider {
             .collect::<Vec<_>>()
             .join("\n");
         self.chat_inputs.lock().unwrap().push(text.clone());
-        let junk = text.contains("SPAM");
-        let sensitive = text.contains("CONFIDENTIAL");
-        let reply = json!({
-            "keep": !junk,
-            "junk": junk,
-            "sensitive": sensitive,
-            "summary": "A short summary of the document.",
-            "title": "Triage title"
-        })
-        .to_string();
+        let mut rx = self.chat_open.subscribe();
+        while !*rx.borrow_and_update() {
+            if rx.changed().await.is_err() {
+                break;
+            }
+        }
+        self.chats_completed.fetch_add(1, Ordering::SeqCst);
+        // One label pair per `<document n="k">` block of a triage batch.
+        let items: Vec<Value> = text
+            .split("<document n=\"")
+            .skip(1)
+            .map(|block| {
+                let n: u64 = block
+                    .split('"')
+                    .next()
+                    .and_then(|k| k.parse().ok())
+                    .unwrap_or(0);
+                json!({
+                    "n": n,
+                    "junk": block.contains("SPAM"),
+                    "sensitive": block.contains("CONFIDENTIAL"),
+                })
+            })
+            .collect();
+        let reply = if self.chat_invalid.load(Ordering::SeqCst) {
+            "not json".to_owned()
+        } else {
+            json!({ "items": items }).to_string()
+        };
         Ok(Box::pin(futures::stream::iter(vec![
             Ok(ChatEvent::TextDelta(reply)),
             Ok(ChatEvent::Done {
@@ -487,6 +524,7 @@ pub struct Opts {
     pub secrets: Option<MemorySecrets>,
     /// Pre-scripted factory (sources in `sources.toml` start syncing during `start`).
     pub factory: Option<Arc<FakeFactory>>,
+    pub foreground: Option<Arc<nugget_ingest::Foreground>>,
 }
 
 impl Default for Opts {
@@ -499,6 +537,7 @@ impl Default for Opts {
             dir: None,
             secrets: None,
             factory: None,
+            foreground: None,
         }
     }
 }
@@ -515,13 +554,14 @@ pub async fn start(opts: Opts) -> Harness {
     let factory = opts.factory.unwrap_or_default();
     let mut registry = Registry::new();
     registry.register(Arc::new(SharedFactory(factory.clone())));
-    let ingest = Ingest::builder(opts.cfg, store.clone(), registry, paths.clone())
+    let mut builder = Ingest::builder(opts.cfg, store.clone(), registry, paths.clone())
         .router(opts.router)
         .secrets(Arc::new(secrets.clone()))
-        .power(opts.power)
-        .start()
-        .await
-        .unwrap();
+        .power(opts.power);
+    if let Some(fg) = opts.foreground {
+        builder = builder.foreground(fg);
+    }
+    let ingest = builder.start().await.unwrap();
     Harness {
         ingest,
         store,

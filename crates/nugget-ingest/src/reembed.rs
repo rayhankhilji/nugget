@@ -187,7 +187,7 @@ fn is_sensitive(item: &Item) -> bool {
 }
 
 /// All chunk texts of an item, in order (positions are contiguous from 0).
-fn chunk_texts(store: &nugget_store::Store, item: &ItemRef) -> Result<Vec<String>> {
+pub(crate) fn chunk_texts(store: &nugget_store::Store, item: &ItemRef) -> Result<Vec<String>> {
     let mut out = Vec::new();
     let mut from = 0u32;
     loop {

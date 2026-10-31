@@ -29,13 +29,23 @@ pub struct IngestConfig {
     pub queue_capacity: usize,
     /// Keep the full extracted text on the item row (needed for previews and re-chunking).
     pub keep_text: bool,
-    /// Run triage (keep / junk / sensitive / summary) when a local `Tier::Triage` provider
-    /// with JSON-schema output exists. Cloud triage providers are never used.
+    /// Label items (junk / sensitive) when a local `Tier::Triage` provider with JSON-schema
+    /// output exists. Cloud triage providers are never used. Triage runs in the background
+    /// after an item is indexed, so it never delays search, and it never removes an item from
+    /// search; until it has run, the item counts as sensitive (kept away from cloud models).
     pub triage: bool,
-    /// Timeout for one triage call.
+    /// Timeout for triaging one item (a batch gets this per item).
     pub triage_timeout_ms: u64,
-    /// Characters of text sent to triage.
+    /// Characters of each item's text sent to triage.
     pub triage_max_chars: usize,
+    /// Items labelled per triage request (small items share one request). Default 8.
+    pub triage_batch: usize,
+    /// Characters of text per triage request; an item longer than this goes alone.
+    /// Default 6 000.
+    pub triage_batch_chars: usize,
+    /// Background triage waits this long after the last interactive model request (Ask,
+    /// Double Tap, agent) before it uses the local model again. Default 3 s.
+    pub triage_idle_ms: u64,
     /// Compute embeddings with `Tier::Embedding` providers.
     pub embeddings: bool,
     /// Allow `Cloud` embedding providers for non-sensitive items. Default `false`: on-device and
@@ -87,6 +97,9 @@ impl Default for IngestConfig {
             triage: true,
             triage_timeout_ms: 30_000,
             triage_max_chars: 6_000,
+            triage_batch: 8,
+            triage_batch_chars: 6_000,
+            triage_idle_ms: 3_000,
             embeddings: true,
             allow_cloud_embeddings: false,
             embed_batch: 32,

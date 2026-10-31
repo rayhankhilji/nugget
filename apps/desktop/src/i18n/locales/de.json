@@ -477,6 +477,7 @@
   "status.embeddings": "Embeddings",
   "status.textOnly": "Nur Textsuche",
   "status.triage": "KI-Sortierung",
+  "status.triagePending": "{n} noch einzuordnen; schon durchsuchbar",
   "status.off": "Aus",
   "status.freshnessHint": "Die Verzögerung ist die Zeit von einer Änderung in einer Quelle, bis sie durchsuchbar ist, gemessen über die letzten Änderungen.",
   "status.errors": "Fehler",

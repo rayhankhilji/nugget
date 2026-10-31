@@ -318,61 +318,7 @@ async fn cloud_embeddings_are_off_by_default() {
     h.ingest.shutdown().await;
 }
 
-#[tokio::test]
-async fn local_triage_marks_junk_and_sensitive_items() {
-    let local = FakeProvider::new("lan", Locality::LocalNetwork);
-    let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
-        ..Default::default()
-    })
-    .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("spam", "WIN BIG SPAM offer click now", Some("1"))),
-        Step::Send(text_doc("memo", "CONFIDENTIAL merger memo", Some("1"))),
-        Step::Send(text_doc("note", "grocery list: eggs, milk", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-
-    let spam = h
-        .item("fake-1", "spam")
-        .expect("junk is stored metadata-only");
-    assert_eq!(spam.metadata["junk"], json!(true));
-    assert_eq!(spam.metadata["triage"]["junk"], json!(true));
-    assert_eq!(spam.text, None);
-    assert_eq!(
-        h.store.search_text("offer", 10).unwrap().len(),
-        0,
-        "junk is not chunked"
-    );
-    assert!(!local.embedded().iter().any(|t| t.contains("SPAM")));
-
-    let memo = h.item("fake-1", "memo").unwrap();
-    assert_eq!(memo.metadata["sensitive"], json!(true));
-    assert_eq!(memo.metadata["junk"], json!(false));
-
-    let note = h.item("fake-1", "note").unwrap();
-    assert_eq!(
-        note.metadata["triage"]["summary"],
-        json!("A short summary of the document.")
-    );
-    assert_eq!(h.store.search_text("eggs", 10).unwrap().len(), 1);
-    assert_eq!(local.chats().len(), 3);
-    let status = h.ingest.status().await.unwrap();
-    assert_eq!(
-        status.triage_provider.as_ref().map(|p| p.as_str()),
-        Some("lan")
-    );
-    assert_eq!(
-        status.embedding_provider.as_ref().map(|p| p.as_str()),
-        Some("lan")
-    );
-    h.ingest.shutdown().await;
-}
+// Triage (background, batched, low priority): see tests/triage.rs.
 
 #[tokio::test]
 async fn bad_items_are_recorded_and_never_stop_the_source() {

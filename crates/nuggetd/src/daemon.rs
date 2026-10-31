@@ -456,9 +456,14 @@ impl Daemon {
         // Items indexed text-only while no embedder was routable get vectors once one is.
         if let Some(l) = &local {
             let ingest = ingest.clone();
+            l.set_foreground(ingest.foreground());
             l.on_ready(Arc::new(move |role| {
                 if role == nugget_core::ipc::RuntimeRole::Embedding {
                     ingest.reembed_now();
+                }
+                // A chat model became ready: background triage can start (HH2).
+                if role == nugget_core::ipc::RuntimeRole::Chat {
+                    ingest.triage_now();
                 }
             }));
         }

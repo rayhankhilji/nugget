@@ -694,6 +694,41 @@ mod sources {
     }
 
     #[test]
+    fn items_pending_triage_lists_pending_items_in_pages() {
+        let store = Store::open_in_memory().unwrap();
+        let meta = |state: &str| serde_json::json!({"triage": {"state": state}});
+        for (s, k, m) in [
+            ("b", "two", meta("pending")),
+            ("a", "one", meta("pending")),
+            ("a", "done", meta("done")),
+            ("a", "none", serde_json::json!({})),
+        ] {
+            store
+                .upsert_item(&NewItem::new(s, k, "h").with_metadata(m))
+                .unwrap();
+        }
+        let r = |s: &str, k: &str| nugget_core::ids::ItemRef {
+            source: SourceId::new(s),
+            key: ItemKey::new(k),
+        };
+        assert_eq!(
+            store.items_pending_triage(None, 10).unwrap(),
+            vec![r("a", "one"), r("b", "two")]
+        );
+        assert_eq!(
+            store.items_pending_triage(None, 1).unwrap(),
+            vec![r("a", "one")]
+        );
+        assert_eq!(
+            store
+                .items_pending_triage(Some(&r("a", "one")), 10)
+                .unwrap(),
+            vec![r("b", "two")]
+        );
+        assert!(store.items_pending_triage(None, 0).unwrap().is_empty());
+    }
+
+    #[test]
     fn items_missing_embeddings_lists_text_only_items_in_pages() {
         let store = Store::open_in_memory().unwrap();
         // No vector table yet: every item with chunks is listed; chunkless items never are.

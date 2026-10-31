@@ -477,6 +477,7 @@
   "status.embeddings": "Embeddings",
   "status.textOnly": "Text-only search",
   "status.triage": "AI sorting",
+  "status.triagePending": "{n} left to sort; already searchable",
   "status.off": "Off",
   "status.freshnessHint": "Delay is the time from a change in a source to it being searchable, over recent changes.",
   "status.errors": "Errors",

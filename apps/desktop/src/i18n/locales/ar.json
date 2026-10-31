@@ -477,6 +477,7 @@
   "status.embeddings": "التضمينات",
   "status.textOnly": "بحث نصي فقط",
   "status.triage": "الفرز بالذكاء الاصطناعي",
+  "status.triagePending": "{n} متبقية للفرز؛ قابلة للبحث بالفعل",
   "status.off": "متوقف",
   "status.freshnessHint": "التأخير هو الوقت المنقضي من حدوث تغيير في مصدر حتى يصبح قابلًا للبحث، محسوبًا على التغييرات الأخيرة.",
   "status.errors": "الأخطاء",

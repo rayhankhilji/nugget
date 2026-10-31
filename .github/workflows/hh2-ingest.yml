@@ -1,0 +1,167 @@
+name: HH2 ingest before/after (real models)
+
+# Before/after measurement for HH2 (qa/HH2/README.md): how long the GG2 corpus takes to become
+# searchable and fully triaged, and how slow Ask is meanwhile, with the 4B on one CPU runner.
+# BEFORE is nuggetd at `before_ref` (triage inline, one LLM call per item before indexing);
+# AFTER is this commit. Both run on the same job, so they share a CPU, a corpus with fixed
+# dates and the cached models; each gets a fresh Nugget home. The GG2 harness (ask_qa.py,
+# gen_corpus.py, search-probes.txt) is read from the QA commit at run time, not copied here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_model:
+        description: "Manifest id of the chat model"
+        default: qwen3-4b-q4km
+        type: string
+      before_ref:
+        description: "Commit for the BEFORE build"
+        default: 7add95a300e2783fad8b595acfb4665f41b96d27
+        type: string
+      triage_timeout_min:
+        description: "Minutes to wait for full triage, per build"
+        default: "75"
+        type: string
+  # TEMPORARY: measure on push while HH2 is in progress; remove before the final push.
+  push:
+    branches: [hh/ingest-triage]
+    paths:
+      - "qa/HH2/**"
+      - ".github/workflows/hh2-ingest.yml"
+      - "crates/nugget-ingest/**"
+      - "crates/nuggetd/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  CHAT_MODEL: ${{ inputs.chat_model || 'qwen3-4b-q4km' }}
+  BEFORE_REF: ${{ inputs.before_ref || '7add95a300e2783fad8b595acfb4665f41b96d27' }}
+  TRIAGE_TIMEOUT_MIN: ${{ inputs.triage_timeout_min || '75' }}
+  # The QA branch commit holding the GG2 harness (docs/qa/GG2.md).
+  GG2_REF: 1f2b7867722291eae20d46884c02b86ba24c73f0
+  # Fixed corpus date, so both builds (and reruns) see identical data.
+  CORPUS_TODAY: "2026-10-30"
+  OUT: ${{ github.workspace }}/hh2-out
+
+jobs:
+  ingest:
+    name: ingest before/after (${{ inputs.chat_model || 'qwen3-4b-q4km' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Extract the GG2 harness from the QA commit
+        run: |
+          git cat-file -e "$GG2_REF^{commit}" 2>/dev/null || git fetch --no-tags origin qa/ask
+          mkdir -p "$RUNNER_TEMP/gg2"
+          git show "$GG2_REF:qa/GG2/harness/ask_qa.py" > "$RUNNER_TEMP/gg2/ask_qa.py"
+          git show "$GG2_REF:qa/GG2/harness/gen_corpus.py" > "$RUNNER_TEMP/gg2/gen_corpus.py"
+          git show "$GG2_REF:qa/GG2/harness/score.py" > "$RUNNER_TEMP/gg2/score.py"
+          git show "$GG2_REF:qa/GG2/repro/search-probes.txt" > "$RUNNER_TEMP/gg2/search-probes.txt"
+          git show "$GG2_REF:qa/GG2/results/run2-41188514821/4b/config.toml" > "$RUNNER_TEMP/gg2/gg2-4b-config.toml"
+          ls -l "$RUNNER_TEMP/gg2"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: hh2-ingest
+
+      # Models and the llama-server build, keyed by the signed manifest that pins them (as in
+      # qa-GG2.yml). ingest_timeline.py moves them into each fresh home and back afterwards.
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/models-cache
+          key: qa-gg2-models-${{ env.CHAT_MODEL }}-${{ hashFiles('manifests/default.json') }}
+
+      # BEFORE in a worktree, built into the same target dir so dependencies are shared; the
+      # binary is copied out before AFTER overwrites it.
+      - name: Build nuggetd BEFORE (${{ env.BEFORE_REF }})
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/before-src" "$BEFORE_REF"
+          cargo build --release --locked -p nuggetd \
+            --manifest-path "$RUNNER_TEMP/before-src/Cargo.toml" --target-dir "$GITHUB_WORKSPACE/target"
+          mkdir -p "$RUNNER_TEMP/bin"
+          cp target/release/nuggetd "$RUNNER_TEMP/bin/nuggetd-before"
+
+      - name: Build nuggetd AFTER (${{ github.sha }})
+        run: |
+          cargo build --release --locked -p nuggetd
+          cp target/release/nuggetd "$RUNNER_TEMP/bin/nuggetd-after"
+          git worktree remove --force "$RUNNER_TEMP/before-src"
+
+      - name: Generate corpus (dates anchored to ${{ env.CORPUS_TODAY }})
+        run: |
+          mkdir -p "$OUT"
+          python3 "$RUNNER_TEMP/gg2/gen_corpus.py" --out "$RUNNER_TEMP/corpus" \
+            --questions "$RUNNER_TEMP/questions.jsonl" --today "$CORPUS_TODAY"
+          cp "$RUNNER_TEMP/questions.jsonl" "$RUNNER_TEMP/corpus-manifest.json" "$OUT/"
+
+      - name: Record hardware
+        run: |
+          {
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "before: $BEFORE_REF"
+            echo "after: ${{ github.sha }}"
+            echo "chat model: $CHAT_MODEL"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Core|Flags' | cut -c1-160
+            free -g
+          } | tee "$OUT/hardware.txt"
+
+      - name: Run BEFORE
+        run: |
+          python3 qa/HH2/ingest_timeline.py --label "before ${BEFORE_REF:0:7}" \
+            --nuggetd "$RUNNER_TEMP/bin/nuggetd-before" --home "$RUNNER_TEMP/home-before" \
+            --corpus "$RUNNER_TEMP/corpus" --questions "$RUNNER_TEMP/questions.jsonl" \
+            --out "$OUT/before" --chat-model "$CHAT_MODEL" --gg2-dir "$RUNNER_TEMP/gg2" \
+            --models-cache "$RUNNER_TEMP/models-cache" --triage-timeout "$((TRIAGE_TIMEOUT_MIN * 60))"
+
+      - name: Run AFTER
+        if: always()
+        run: |
+          python3 qa/HH2/ingest_timeline.py --label "after ${GITHUB_SHA:0:7}" \
+            --nuggetd "$RUNNER_TEMP/bin/nuggetd-after" --home "$RUNNER_TEMP/home-after" \
+            --corpus "$RUNNER_TEMP/corpus" --questions "$RUNNER_TEMP/questions.jsonl" \
+            --out "$OUT/after" --chat-model "$CHAT_MODEL" --gg2-dir "$RUNNER_TEMP/gg2" \
+            --models-cache "$RUNNER_TEMP/models-cache" --triage-timeout "$((TRIAGE_TIMEOUT_MIN * 60))"
+
+      - name: Compare
+        if: always()
+        run: |
+          for d in before after; do [ -f "$OUT/$d/result.json" ] || { echo "::warning::no $d result"; exit 0; }; done
+          python3 qa/HH2/compare.py "$OUT/before" "$OUT/after" --hardware "$OUT/hardware.txt" | tee "$OUT/compare.md"
+          cat "$OUT/compare.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect daemon logs
+        if: always()
+        run: |
+          for d in before after; do
+            [ -d "$RUNNER_TEMP/home-$d/data/logs" ] && cp -r "$RUNNER_TEMP/home-$d/data/logs" "$OUT/$d/logs" || true
+          done
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hh2-ingest-${{ github.run_id }}
+          path: ${{ env.OUT }}
+          if-no-files-found: warn
+          retention-days: 30
