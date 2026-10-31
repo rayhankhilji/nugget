@@ -49,7 +49,8 @@ real-model observation comes from the GitHub runs.
 ## Findings
 
 Severity is user impact. "Verified" means a second, fresh agent reproduced it from the repro text
-alone (`qa/GG5/verify/<area>.md`); real-model findings are verified by a second run of the workflow.
+alone (`qa/GG5/verify/<area>.md`); real-model findings were re-checked by a fresh agent against the raw run artifacts, and reproduced by a
+second run of the workflow where noted.
 Each finding names its detailed write-up (`qa/GG5/findings/<area>.md`, same title), which has the full
 quotes and the code walk; ids differ between runs, names do not.
 
@@ -60,7 +61,7 @@ qa/GG5/corpus/gold.json --run <o>`. The area scripts each do this themselves wit
 Real models: dispatch `.github/workflows/qa-GG5.yml` (`models`, optional `product_ref`).
 
 ### GG5-1 · Blocker · The model writes a card number, an account number, balances, a salary and a diagnosis into plain-text vault pages
-- Verified: VERIFY_1. Area: real-model.md, first finding.
+- Verified: REPRODUCED from the raw artifacts (`qa/GG5/verify/real-model.md`). Area: real-model.md, first finding.
 - Repro: real-model runs; `python3 -I qa/GG5/scenarios/real-model/sensitive_claims.py qa/GG5/corpus/gold.json qa/GG5/runs/41117293540-qwen3-4b reextract`.
 - Expected: health and finance details do not end up in generated text, least of all a card number from a mail Nugget's own PII
   scan flags as sensitive; the vault is plain text the guide says you may sync. Deterministic-only, none of them reach the vault.
@@ -70,7 +71,8 @@ Real models: dispatch `.github/workflows/qa-GG5.yml` (`models`, optional `produc
   `Person/Gross salary (monthly (…).md` `has title £7,450.00`; `Person/Balance at 30 June 2026 (…).md` `has title £210,437.55`.
   EE1 branch: the card number on `Organization/Northshore Credit Union`, the account number and balances in Mara's own history
   (`The user has title NCU-4471-0093-218.`), `Lena Brandt dislikes [[Preference/iron-deficiency anaemia]]`, a person
-  "Prescription" `has title ferrous sulfate 200 mg`, and "iron-deficiency anaemia" in the vault README. 8B: none.
+  "Prescription" `has title ferrous sulfate 200 mg`, and "iron-deficiency anaemia" in the vault README. 8B: model claims from the payslip, but no figures, identifiers or diagnosis.
+  The card number is in the 4B and EE1 vaults from phase1 to restart.
 - Frequency: 4B integration and EE1 4B (2 of 3 runs); 8B 0.
 - Cause: local extraction runs on sensitive items by design (`crates/nugget-knowledge/src/llm.rs:188-214`, sensitivity only
   excludes cloud providers); the gate never checks what a `has_title` object is (`llm.rs:172-186`, `1697`, `1751`), an unknown
@@ -158,9 +160,9 @@ Real models: dispatch `.github/workflows/qa-GG5.yml` (`models`, optional `produc
   date for currentness; keep mtime only as a fallback.
 
 ### GG5-7 · High · "Nothing pending" while new files are still unextracted: a backlog of runs swallows new-item signals
-- Verified: VERIFY_7. Area: real-model.md, second finding.
+- Verified: REPRODUCED (`verify/real-model.md`; coverage counts match exactly). Area: real-model.md, second finding.
 - Repro: `python3 -I qa/GG5/scenarios/real-model/coverage.py qa/GG5/runs/41117293540-qwen3-4b` (files that reached the graph per
-  snapshot): 4B phase2 24/42, 8B phase1 7/23, while `knowledge.status` said `pending_items: 0` for 20 s.
+  snapshot): 4B phase2 24/42, 8B phase1 7/23 and 0 of the 19 phase-2 files at phase2, while `knowledge.status` said `pending_items: 0` for 20 s.
 - Expected: new mail is extracted within a run or two, and `pending_items` counts work not yet done.
 - Actual: in the 4B run 18 of the 19 phase-2 files (Dana's new-job mail, the launch move, the breakup note, both `Work/` documents)
   were not extracted when status said nothing was pending; they waited for the 10-minute periodic run or a later commit.
@@ -174,13 +176,14 @@ Real models: dispatch `.github/workflows/qa-GG5.yml` (`models`, optional `produc
 - Note for this report: phase1/phase2/edits snapshots of the 4B and 8B runs are incomplete because of this; numbers below use `reextract`/`restart`.
 
 ### GG5-8 · High · A knowledge run without the model replaces the model's facts: at every restart before the chat model is up, and at shutdown
-- Verified: VERIFY_8. Area: real-model.md, third finding.
+- Verified: REPRODUCED with corrected counts (`verify/real-model.md`). Area: real-model.md, third finding.
 - Repro: 4B daemon log `qa/GG5/runs/41117293540-qwen3-4b/nuggetd.2026-10-30.log`: `21:28:32.804 knowledge run processed 19 … took_ms 111`,
   then `21:28:36.574 local runtime ready role chat`; `python3 -I qa/GG5/scenarios/real-model/restart_diff.py qa/GG5/runs/<run>`.
 - Expected: restarting the app does not change the knowledge graph.
-- Actual: 4B 152 → 120 claims, 116 → 86 entities, 32 vault pages turned into "no longer in your knowledge graph" stubs (20 claims gone,
-  12 active and 5 superseded → retracted); 8B 14 files in 77 ms, same effect; EE1: the run kept going after SIGTERM once llama-server was
-  stopped (`background tasks did not stop in time`, then `LLM extraction failed … error decoding response body`).
+- Actual: 4B 152 → 120 claims, 116 → 86 entities, 30 vault pages turned into "no longer in your knowledge graph" stubs (20 claims gone,
+  12 active and 5 superseded → retracted); 8B 14 files in 77 ms, 7 claims retracted; EE1: the run kept going after SIGTERM once llama-server was
+  stopped (`background tasks did not stop in time`, then `LLM extraction failed … error decoding response body`), and claims were still written 24 ms after the daemon logged "stopped"; there, junk came back
+  as current (`Mara has_title neighbour of the year`). After restart `knowledge.status.extractor_provider` stayed null 30 s after the chat model was ready.
   RESTART_LATER
 - Frequency: 4B and 8B at startup, EE1 at shutdown.
 - Cause: `extract_and_apply` retracts the file's old evidence first (`crates/nugget-knowledge/src/session.rs:776`), the LLM step returns
@@ -258,11 +261,11 @@ Real models: dispatch `.github/workflows/qa-GG5.yml` (`models`, optional `produc
 - Owner: desktop app (not EE1). Fix direction: no Restore on superseded facts, or a confirmed "Make current again" with Undo; count current facts only.
 
 ### GG5-15 · Medium · The model makes wrong or invented facts current
-- Verified: VERIFY_15. Area: real-model.md, sixth finding.
+- Verified: REPRODUCED (`verify/real-model.md`). Area: real-model.md, sixth finding.
 - Repro: `python3 -I qa/GG5/scenarios/real-model/claims_of.py qa/GG5/runs/<run> reextract -i Work/` (also `-n Dana`, `-p due_on`, `-i fwd-data-weekly`).
 - Actual: EE1 `R. Chen leads Harbor` from "I asked her in March to lead Harbor"; EE1 `Mara Okafor has title Principal Engineer` current from
   "I support her case for promotion to Principal Engineer"; 4B/EE1 an organisation "VP Engineering" (`R. Chen works at VP Engineering`);
-  4B four junk current titles for Mara from an evidence list; 4B Dana both at Brightwell and Corvid Labs from one sentence; 8B Dana still
+  4B three junk current titles for Mara from an evidence list (next to the correct `Staff Engineer, Platform`); 4B Dana both at Brightwell and Corvid Labs from one sentence; 8B Dana still
   "Design Lead" from "Before that she was Design Lead"; 8B three conflicting current Harbor launch dates. The injection mail's claims were
   stored (4B `Mara works_at Corvid Labs`, 8B `has_title Head of Platform`) but superseded, never current. Junk: at `reextract` 63 of 4B's 67
   model `has_title` claims are not titles (8B 11/12, EE1 13/16).
@@ -289,20 +292,21 @@ Real models: dispatch `.github/workflows/qa-GG5.yml` (`models`, optional `produc
 - Owner: nugget-vault rendering (EE1). Fix direction: redact addresses and phone numbers in quotes unless `include_identifiers`.
 
 ### GG5-18 · Medium · Local model calls time out at 120 s on a 4-core CPU, and each timeout uses up a whole run
-- Verified: VERIFY_18. Area: real-model.md fourth.
+- Verified: REPRODUCED (`verify/real-model.md`; per-file counts match). Area: real-model.md fourth.
 - Repro: `python3 -I qa/GG5/scenarios/real-model/llm_log.py qa/GG5/runs/<run>`.
 - Actual: 4B 10 timeouts on 5 files (GP note and counselling invite gave up after 3), 8B 13 on 8; 70-93 s per extracted file on EPYC 7763
-  (EE1's run on a 9V45: 0 timeouts, 29-54 s). The partial answer is thrown away. Deterministic facts survive.
-- Cause: `max_output_tokens` 1024 at ~8-10 tok/s does not fit `timeout_ms = 120000`; `chat_json` wraps the whole stream in a timeout (`llm.rs:257-261`).
+  (EE1's run on a 9V45: 0 timeouts, 29-54 s). The partial answer is thrown away and a timeout ends the run (a late one can stretch it to 226 s). Deterministic facts survive.
+- Cause: `max_output_tokens` 1024 at the estimated ~8-10 tok/s (not measured in the artifacts) does not fit `timeout_ms = 120000`; `chat_json` wraps the whole stream in a timeout (`llm.rs:257-261`).
 - Owner: crates/nugget-knowledge llm.rs/config.rs. Fix direction: derive the timeout from output cap and measured speed, or keep what
   streamed by the deadline; a smaller cap for calendar items; don't let one timeout consume the run budget.
 
 ### GG5-19 · Medium · Re-extracting an unchanged file gives different model facts, and first names stay split
-- Verified: VERIFY_19. Area: real-model.md fifth.
+- Verified: PARTIALLY REPRODUCED (`verify/real-model.md`): counting only model claims on `.eml`/`.ics` files whose text did not change,
+  15 of 20 files changed (the author's 19/34 also counted deterministic and edited-note changes); the nonce cause is a hypothesis. Area: real-model.md fifth.
 - Repro: `python3 -I qa/GG5/scenarios/real-model/item_claims_diff.py qa/GG5/runs/41117587773-qwen3-4b-ee1 edits reextract`.
 - Actual: 19 of 34 files changed their claims when only re-saved (e.g. `(Mara Okafor, works_at, Tessellate Systems)` →
   `(Gus Ferreira, has_title, Tessellate Systems)`). At `reextract`: 4B Theo ×4, Dana ×3, Ife ×3; 8B Theo ×5, Dana ×4.
-- Cause: a fresh random nonce in every prompt (`llm.rs:465`, `619`) at temperature 0; graph-dependent post-processing; the graph fold skips
+- Likely cause (not proven): a fresh random nonce in every prompt (`llm.rs:465`, `619`) at temperature 0; graph-dependent post-processing; the graph fold skips
   names the graph already has (`llm.rs:2069-2073`).
 - Owner: crates/nugget-knowledge (EE1 targets folding; its run improves it: 13/20 gold entities 1:1, Sam Patel and Gus right, no bare Bob;
   Theo, Ife and Robert still split).
