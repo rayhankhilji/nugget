@@ -20,3 +20,13 @@ t_s,cpu_pct,rss_mb,items,chunks,queue,state,progress_phase,progress_done,progres
 38,93,214,14395,18696,66,syncing,indexing,14350,,3,41.3,6.0
 40,94,215,15062,20030,66,syncing,indexing,15050,,2,43.7,6.0
 42,94,215,15712,21330,66,syncing,indexing,15700,,3,46.1,6.0
+44,93,215,16370,22646,66,syncing,indexing,16350,,2,48.5,6.0
+46,94,215,17002,23910,66,syncing,indexing,17000,,2,50.8,6.0
+48,95,216,17654,25214,66,syncing,indexing,17650,,2,53.4,6.0
+50,95,216,18319,26544,66,syncing,indexing,18300,,5,55.5,6.0
+52,93,217,18956,27818,41,syncing,indexing,18950,,3,57.9,6.0
+54,93,217,19613,29132,66,syncing,indexing,19600,,4,60.3,6.0
+56,86,244,20002,29910,0,watching,indexing,20004,,5,61.7,6.0
+58,21,273,20002,29910,0,watching,indexing,20004,,3,61.7,6.0
+60,88,278,20002,29910,0,watching,indexing,20004,,5,63.0,6.0
+62,169,285,20002,29910,0,watching,indexing,20004,,6,65.0,6.0
