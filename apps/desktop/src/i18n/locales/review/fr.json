@@ -623,6 +623,11 @@
     "ask.dates.notApplied",
     "ask.dates.notAppliedDay",
     "ask.partial",
-    "ask.partialHint"
+    "ask.partialHint",
+    "searchui.rename",
+    "searchui.renameSaved",
+    "searchui.renameTitle",
+    "searchui.renamed",
+    "searchui.nameTaken"
   ]
 }

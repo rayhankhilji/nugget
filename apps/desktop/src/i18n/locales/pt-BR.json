@@ -2121,6 +2121,11 @@
   "searchui.filtersCleared": "Filtros limpos",
   "searchui.datesCleared": "Datas limpas",
   "searchui.savedDeleted": "Pesquisa salva “{name}” excluída",
+  "searchui.rename": "Renomear",
+  "searchui.renameSaved": "Renomear a pesquisa salva {name}",
+  "searchui.renameTitle": "Renomear pesquisa salva",
+  "searchui.renamed": "Pesquisa salva renomeada para “{name}”",
+  "searchui.nameTaken": "Já existe outra pesquisa salva chamada “{name}”.",
   "searchui.recentCleared": "Pesquisas recentes limpas",
   "searchui.recentWithFilters": "{query} · {n, plural, one {# filtro} other {# filtros}}",
   "searchui.resultsFiltered": "{n, plural, one {# resultado} other {# resultados}} para “{query}” com {filters, plural, one {# filtro} other {# filtros}}"

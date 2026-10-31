@@ -496,6 +496,30 @@ async fn faceted_search_filters_and_counts_disjunctively() {
         )
         .await;
     assert_eq!(keys(&r), ["e1", "m1"]);
+    // JJ2: with a time zone, each date at its own offset. A London client in winter sends +0,
+    // but 23:30 UTC on 31 March is already summer time there (00:30 on 1 April).
+    let r = h
+        .call(
+            "search.faceted",
+            json!({"query": "budget", "utc_offset_minutes": 0, "time_zone": "Europe/London",
+                   "filters": {"from": "2024-03-01", "to": "2024-03-31"}}),
+        )
+        .await;
+    assert_eq!(keys(&r), ["m1"]);
+    assert_eq!(
+        values(&r["facets"]["months"]),
+        pairs(&[("2023-11", 1), ("2024-03", 1), ("2024-04", 2)]),
+        "months bucket at each date's own offset"
+    );
+    // A zone the bundled database doesn't know falls back to the offset.
+    let r = h
+        .call(
+            "search.faceted",
+            json!({"query": "budget", "utc_offset_minutes": 0, "time_zone": "Mars/Olympus",
+                   "filters": {"from": "2024-03-01", "to": "2024-03-31"}}),
+        )
+        .await;
+    assert_eq!(keys(&r), ["e1", "m1"]);
     let r = h
         .call(
             "search.faceted",

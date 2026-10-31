@@ -2121,6 +2121,11 @@
   "searchui.filtersCleared": "Filters cleared",
   "searchui.datesCleared": "Dates cleared",
   "searchui.savedDeleted": "Deleted saved search “{name}”",
+  "searchui.rename": "Rename",
+  "searchui.renameSaved": "Rename saved search {name}",
+  "searchui.renameTitle": "Rename saved search",
+  "searchui.renamed": "Renamed saved search to “{name}”",
+  "searchui.nameTaken": "Another saved search is already called “{name}”.",
   "searchui.recentCleared": "Recent searches cleared",
   "searchui.recentWithFilters": "{query} · {n, plural, one {# filter} other {# filters}}",
   "searchui.resultsFiltered": "{n, plural, one {# result} other {# results}} for “{query}” with {filters, plural, one {# filter} other {# filters}}"

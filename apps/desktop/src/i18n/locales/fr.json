@@ -2121,6 +2121,11 @@
   "searchui.filtersCleared": "Filtres effacés",
   "searchui.datesCleared": "Dates effacées",
   "searchui.savedDeleted": "Recherche enregistrée « {name} » supprimée",
+  "searchui.rename": "Renommer",
+  "searchui.renameSaved": "Renommer la recherche enregistrée {name}",
+  "searchui.renameTitle": "Renommer la recherche enregistrée",
+  "searchui.renamed": "Recherche enregistrée renommée en « {name} »",
+  "searchui.nameTaken": "Une autre recherche enregistrée s’appelle déjà « {name} ».",
   "searchui.recentCleared": "Historique des recherches effacé",
   "searchui.recentWithFilters": "{query} · {n, plural, one {# filtre} other {# filtres}}",
   "searchui.resultsFiltered": "{n, plural, one {# résultat} other {# résultats}} pour « {query} » avec {filters, plural, one {# filtre} other {# filtres}}"

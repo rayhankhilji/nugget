@@ -71,9 +71,14 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `search` | `SearchRequest`: `{query, limit}` (`limit` at most 200) | list of `SearchHit`: `item`, `chunk_id`, `title`, `snippet`, `score`, `url` | yes |
-| `search.faceted` | `{query, limit, offset, filters, utc_offset_minutes}`: `filters` has `sources`, `kinds` (`mail`, `event`, `chat`, `file`), `people`, `from`, `to`; `limit` at most 100 | Hits (each with its item date, kind, `sensitive` and people) and facet counts for `sources`, `kinds`, `people` and `months` | yes |
-| `search.timeline` | `{entity, from, to, limit}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
-| `search.preview` | `{item, chunk_id}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
+| `search.faceted` | `{query, limit, offset, filters, utc_offset_minutes, time_zone}`: `filters` has `sources`, `kinds` (`mail`, `event`, `chat`, `file`), `people`, `from`, `to`; `limit` at most 100 | Hits (each with its item date, kind, `sensitive` and people) and facet counts for `sources`, `kinds`, `people` and `months` | yes |
+| `search.timeline` | `{entity, from, to, limit, utc_offset_minutes, time_zone}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
+| `search.preview` | `{item, chunk_id, utc_offset_minutes, time_zone}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
+
+`time_zone` is an IANA name (`Europe/Berlin`): with it, `from`/`to` days and `months` buckets use
+each date's own offset, so ranges across a daylight-saving change are right. Without it, or for a
+name the daemon's bundled time zone database lacks, `utc_offset_minutes` (the client's current
+offset) applies to every date, and without that the configured `[retrieve] date_utc_offset_minutes`.
 
 ### Retrieval
 

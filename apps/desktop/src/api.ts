@@ -1060,9 +1060,10 @@ export const api = {
   pickFolders: (multiple: boolean) => call<string[]>("pick_folders", { multiple }),
 
   // II2 (types and notes in the II2 block at the end of this file).
-  searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { utc_offset_minutes: utcOffsetMinutes(), ...request } }),
-  searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { utc_offset_minutes: utcOffsetMinutes(), ...request } }),
-  searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request }),
+  // JJ2: with the time zone, the daemon dates each day and month at its own offset (DST).
+  searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { ...localZone(), ...request } }),
+  searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { ...localZone(), ...request } }),
+  searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request: { ...localZone(), ...request } }),
 };
 
 /** `revealed`: the file could run code, so its folder was shown instead of opening it. */
@@ -2748,7 +2749,7 @@ export type ItemKind = "mail" | "event" | "chat" | "file";
 export const ITEM_KINDS: readonly ItemKind[] = ["mail", "event", "chat", "file"];
 export type EntityRefView = { id: string; name: string; kind: string };
 export type FacetedFilters = { sources?: string[]; kinds?: ItemKind[]; people?: string[]; from?: string | null; to?: string | null };
-export type FacetedRequest = { query: string; limit?: number; offset?: number; filters?: FacetedFilters; utc_offset_minutes?: number };
+export type FacetedRequest = { query: string; limit?: number; offset?: number; filters?: FacetedFilters; utc_offset_minutes?: number; time_zone?: string };
 export type FacetedHit = SearchHit & {
   date: string | null;
   date_source: "extracted" | "modified" | "indexed";
@@ -2766,7 +2767,7 @@ export type FacetedResult = {
   pool_limited: boolean;
   facets: { sources: FacetCount[]; kinds: FacetCount[]; people: PersonFacet[]; months: FacetCount[] };
 };
-export type TimelineRequest = { entity: string; from?: string | null; to?: string | null; limit?: number; utc_offset_minutes?: number };
+export type TimelineRequest = { entity: string; from?: string | null; to?: string | null; limit?: number; utc_offset_minutes?: number; time_zone?: string };
 export type TimelineEvent =
   | { type: "item"; at: string | null; date_source: string; item: ItemRef; title: string | null; snippet: string; kind: ItemKind; url: string | null; sensitive: boolean }
   | {
@@ -2783,7 +2784,7 @@ export type TimelineEvent =
       };
     };
 export type Timeline = { entity: EntityRefView; events: TimelineEvent[]; months: FacetCount[]; total: number; truncated: boolean };
-export type PreviewRequest = { item: ItemRef; chunk_id?: number | null };
+export type PreviewRequest = { item: ItemRef; chunk_id?: number | null; utc_offset_minutes?: number; time_zone?: string };
 export type ItemPreview = {
   item: ItemRef;
   title: string | null;
@@ -2803,4 +2804,20 @@ export type ItemPreview = {
 /** The local UTC offset in minutes (east positive), for the daemon's date filters and months. */
 export function utcOffsetMinutes(d: Date = new Date()): number {
   return -d.getTimezoneOffset();
+}
+
+/** JJ2: this machine's IANA time zone (`Europe/Berlin`), when the runtime knows it. */
+export function timeZoneName(): string | undefined {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === "string" && tz ? tz : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The zone fields of a search request: the offset (older daemons) and the zone's name. */
+export function localZone(): { utc_offset_minutes: number; time_zone?: string } {
+  const tz = timeZoneName();
+  return tz ? { utc_offset_minutes: utcOffsetMinutes(), time_zone: tz } : { utc_offset_minutes: utcOffsetMinutes() };
 }

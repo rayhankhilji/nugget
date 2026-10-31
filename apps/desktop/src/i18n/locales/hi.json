@@ -2121,6 +2121,11 @@
   "searchui.filtersCleared": "फ़िल्टर हटा दिए गए",
   "searchui.datesCleared": "तारीख़ें हटा दी गईं",
   "searchui.savedDeleted": "सहेजी गई खोज “{name}” हटा दी गई",
+  "searchui.rename": "नाम बदलें",
+  "searchui.renameSaved": "सहेजी गई खोज {name} का नाम बदलें",
+  "searchui.renameTitle": "सहेजी गई खोज का नाम बदलें",
+  "searchui.renamed": "सहेजी गई खोज का नाम बदलकर “{name}” किया गया",
+  "searchui.nameTaken": "एक अन्य सहेजी गई खोज का नाम पहले से “{name}” है।",
   "searchui.recentCleared": "हाल की खोजें मिटा दी गईं",
   "searchui.recentWithFilters": "{query} · {n, plural, one {# फ़िल्टर} other {# फ़िल्टर}}",
   "searchui.resultsFiltered": "“{query}” के लिए {n, plural, one {# नतीजा} other {# नतीजे}}, {filters, plural, one {# फ़िल्टर} other {# फ़िल्टर}} के साथ"

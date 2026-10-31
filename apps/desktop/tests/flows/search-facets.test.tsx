@@ -125,6 +125,9 @@ describe("faceted search", () => {
     await findByText("Engine note 1");
 
     expect(req(d.last("search_faceted"))).toMatchObject({ query: "engine", limit: 25, offset: 0, filters: { sources: [], kinds: [], people: [], from: null, to: null } });
+    // JJ2: the time zone goes along, so the daemon dates each day at its own offset.
+    expect(req(d.last("search_faceted"))).toMatchObject({ time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    expect(typeof req(d.last("search_faceted")).utc_offset_minutes).toBe("number");
     expect(typeof req(d.last("search_faceted")).utc_offset_minutes).toBe("number");
     expect(d.count("search")).toBe(0);
 
@@ -262,7 +265,7 @@ describe("result preview", () => {
     const title = (await findByText("Engine note 1")).closest("button")!;
     await click(title);
     const panel = await findByRole("region", { name: "Engine note 1" });
-    expect(req(d.last("search_preview"))).toEqual({ item: { source: "files-1", key: "notes/n1.md" }, chunk_id: 1 });
+    expect(req(d.last("search_preview"))).toMatchObject({ item: { source: "files-1", key: "notes/n1.md" }, chunk_id: 1 });
     await waitFor(() => expect(panel.textContent).toContain("Full text about the engine"));
     expect(panel.querySelectorAll("mark").length).toBeGreaterThan(0);
     expect(panel.textContent).toContain("Ada works on the engine");
@@ -465,6 +468,32 @@ describe("review fixes", () => {
     await click(within(getByRole("region", { name: t("searchui.recent") })).getByRole("button", { name: t("searchui.clearRecent") }));
     expect(document.activeElement).toBe(searchBox());
     expect(said(t("searchui.recentCleared"))).toBe(true);
+  });
+
+  it("renames a saved search, refusing a name another one has (JJ2)", async () => {
+    daemon({ search_faceted: faceted([hit(1)]) });
+    localStorage.setItem(SAVED_KEY, JSON.stringify([{ id: "a", name: "A", state: "q=a" }, { id: "b", name: "B", state: "q=b" }]));
+    await renderApp({ page: "search" });
+    const opener = within(main()).getByRole("button", { name: t("searchui.renameSaved", { name: "A" }) });
+    await click(opener);
+    const dialog = await findByRole("dialog", { name: t("searchui.renameTitle") });
+    const input = within(dialog).getByRole("textbox", { name: t("searchui.saveName") }) as HTMLInputElement;
+    expect(input.value).toBe("A");
+    await type(input, "b");
+    expect(within(dialog).getByRole("alert").textContent).toBe(t("searchui.nameTaken", { name: "b" }));
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect((within(dialog).getByRole("button", { name: t("searchui.rename") }) as HTMLButtonElement).disabled).toBe(true);
+    expect(await violations(dialog)).toEqual([]);
+
+    await type(input, "Engine mail");
+    await press(input, "Enter");
+    await waitFor(() => expect(queryByRole("dialog")).toBeNull());
+    expect(within(main()).getByRole("button", { name: t("searchui.runSaved", { name: "Engine mail" }) })).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem(SAVED_KEY)!)).toEqual([
+      { id: "a", name: "Engine mail", state: "q=a" },
+      { id: "b", name: "B", state: "q=b" },
+    ]);
+    expect(said(t("searchui.renamed", { name: "Engine mail" }))).toBe(true);
   });
 
   it("records recents only for explicit runs and labels filtered ones", async () => {

@@ -2121,6 +2121,11 @@
   "searchui.filtersCleared": "تم مسح عوامل التصفية",
   "searchui.datesCleared": "تم مسح التواريخ",
   "searchui.savedDeleted": "تم حذف البحث المحفوظ «{name}»",
+  "searchui.rename": "إعادة تسمية",
+  "searchui.renameSaved": "إعادة تسمية البحث المحفوظ {name}",
+  "searchui.renameTitle": "إعادة تسمية البحث المحفوظ",
+  "searchui.renamed": "تمت إعادة تسمية البحث المحفوظ إلى “{name}”",
+  "searchui.nameTaken": "يوجد بحث محفوظ آخر باسم “{name}” بالفعل.",
   "searchui.recentCleared": "تم مسح عمليات البحث الأخيرة",
   "searchui.recentWithFilters": "{query} · {n, plural, zero {بلا عوامل تصفية} one {عامل تصفية واحد} two {عاملا تصفية} few {# عوامل تصفية} many {# عامل تصفية} other {# عامل تصفية}}",
   "searchui.resultsFiltered": "{n, plural, zero {لا نتائج} one {نتيجة واحدة} two {نتيجتان} few {# نتائج} many {# نتيجة} other {# نتيجة}} لـ «{query}» مع {filters, plural, zero {بلا عوامل تصفية} one {عامل تصفية واحد} two {عاملَي تصفية} few {# عوامل تصفية} many {# عامل تصفية} other {# عامل تصفية}}"

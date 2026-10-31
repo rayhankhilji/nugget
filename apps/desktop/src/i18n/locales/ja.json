@@ -2121,6 +2121,11 @@
   "searchui.filtersCleared": "絞り込みを解除しました",
   "searchui.datesCleared": "日付を解除しました",
   "searchui.savedDeleted": "保存した検索「{name}」を削除しました",
+  "searchui.rename": "名前を変更",
+  "searchui.renameSaved": "保存した検索「{name}」の名前を変更",
+  "searchui.renameTitle": "保存した検索の名前を変更",
+  "searchui.renamed": "保存した検索の名前を「{name}」に変更しました",
+  "searchui.nameTaken": "「{name}」という名前の保存した検索がすでにあります。",
   "searchui.recentCleared": "最近の検索を消去しました",
   "searchui.recentWithFilters": "{query} · {n, plural, other {絞り込み # 件}}",
   "searchui.resultsFiltered": "「{query}」の検索結果：{n, plural, other {# 件}}（絞り込み {filters, plural, other {# 件}}）"
