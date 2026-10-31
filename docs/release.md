@@ -1001,6 +1001,13 @@ gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
 
 ## 8. Known gaps
 
+- **NSIS smoke test fails on the current code.** In the dry run of this branch,
+  [41113647335](https://github.com/rayhankhilji/nugget/actions/runs/41113647335) (both
+  attempts), every job passed except the Windows NSIS smoke step: after the app quits, the
+  `CTRL_BREAK` the script sends ends `nuggetd` with `0xC000013A` before it logs the signal, so
+  its graceful shutdown path didn't run. `nuggetd`'s signal handling is unchanged since dry run
+  40848720974, where the step passed, so a change elsewhere in the daemon is the likely cause. Fix
+  it before tagging.
 - **No real key has signed anything yet.** Apple signing and notarization, Azure Trusted
   Signing, the updater key and the manifest release key have been exercised only with throwaway
   keys (rehearsal, signing proof) or not at all (Apple). The RC in Step 7 is their first real
