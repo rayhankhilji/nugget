@@ -1,0 +1,16 @@
+{
+  "name": "nugget-mcp-compat-ts",
+  "private": true,
+  "description": "Nugget MCP server compatibility check with the official TypeScript SDK",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "compat": "node ../fixture.mjs -- node client.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2"
+  }
+}

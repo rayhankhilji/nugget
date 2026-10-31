@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "created_at": "2026-10-30T14:28:12Z",
+  "app_version": "0.0.1",
+  "schema_version": 10,
+  "os": "linux",
+  "key_id": "9dc651ba2f678f9c",
+  "items": 5,
+  "chunks": 5,
+  "entities": 0,
+  "audit_entries": 1,
+  "files": {
+    "key.json": {
+      "bytes": 347,
+      "sha256": "5c94aff25596b860370dba50f8a539d238cf9965c980bab6c86f98589b9c40d1"
+    },
+    "store.nbk": {
+      "bytes": 274432,
+      "sha256": "3c6a52b63d4f3bd5b0719231216cf122857e483cd4fae75f283c72051d018a75"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+[package]
+name = "nugget-rss"
+description = "Nugget plugin: RSS 2.0, Atom and RSS 1.0 feeds connector plus a headlines tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nugget-plugin-sdk.workspace = true
+roxmltree.workspace = true

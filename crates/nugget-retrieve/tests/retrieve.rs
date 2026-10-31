@@ -555,10 +555,37 @@ async fn mmr_uses_vectors_when_the_query_was_embedded() {
     assert_eq!(emb2.calls(), 1);
 }
 
-/// Wraps the hash embedder and records how many texts each `embed` call carried.
+/// Wraps the hash embedder and records each call as (`"query"` or `"document"`, number of texts),
+/// and every text it was sent. Reports `prefixes` as its model's task prefixes.
 struct Recording {
     inner: HashEmbedder,
-    batches: std::sync::Mutex<Vec<usize>>,
+    batches: std::sync::Mutex<Vec<(&'static str, usize)>>,
+    texts: std::sync::Mutex<Vec<String>>,
+    /// The items `embed_items` was told the texts come from.
+    items: std::sync::Mutex<Vec<ItemRef>>,
+    prefixes: (String, String),
+}
+
+impl Recording {
+    fn new(prefixes: (&str, &str)) -> Self {
+        Self {
+            inner: embedder(),
+            batches: Default::default(),
+            texts: Default::default(),
+            items: Default::default(),
+            prefixes: (prefixes.0.to_owned(), prefixes.1.to_owned()),
+        }
+    }
+
+    /// A recording embedder that runs in the cloud.
+    fn cloud() -> Self {
+        Self {
+            inner: embedder()
+                .with_id("cloud-embed")
+                .with_locality(Locality::Cloud),
+            ..Self::new(("", ""))
+        }
+    }
 }
 
 #[async_trait]
@@ -573,9 +600,166 @@ impl Provider for Recording {
         self.inner.chat(req).await
     }
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        self.batches.lock().unwrap().push(texts.len());
+        self.batches.lock().unwrap().push(("document", texts.len()));
+        self.texts.lock().unwrap().extend_from_slice(texts);
         self.inner.embed(texts).await
     }
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.batches.lock().unwrap().push(("query", texts.len()));
+        self.texts.lock().unwrap().extend_from_slice(texts);
+        self.inner.embed_query(texts).await
+    }
+    async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+        self.items.lock().unwrap().extend_from_slice(items);
+        self.embed(texts).await
+    }
+    fn embed_prefixes(&self) -> (String, String) {
+        self.prefixes.clone()
+    }
+}
+
+/// GG8's canary notes (`qa/GG8/fixtures/corpus`): sensitive, so ingest leaves them without a
+/// vector when only a cloud embedder is allowed.
+const CANARIES: [(&str, &str); 4] = [
+    (
+        "iban",
+        "Acme renewal: wire instructions. Pay the Acme renewal to IBAN GB82 WEST 1234 5698 7654 32. GG8CANARY-SENS-2",
+    ),
+    (
+        "acme-payment",
+        "Acme renewal payment by card. Card number 4111 1111 1111 1111, expiry 09/29. GG8CANARY-SENS-1",
+    ),
+    (
+        "deploy-key",
+        "Acme renewal deploy key AKIAIOSFODNN7GG8TEST for the billing bucket. GG8CANARY-SENS-3",
+    ),
+    (
+        "hr-ssn",
+        "Acme renewal HR file: SSN 512-34-6789 for the account owner. GG8CANARY-SENS-4",
+    ),
+];
+
+/// GG8-2: with cloud embedding allowed, search must not send a sensitive note to the cloud
+/// embedder, also not for MMR's passage vectors of chunks stored without one. A non-sensitive
+/// passage without a vector may go, and its item is named for the egress ledger (GG8-6).
+#[tokio::test]
+async fn sensitive_passages_never_reach_a_cloud_embedder() {
+    let local = embedder();
+    let flagged =
+        |store: &Store, key: &str, text: &str, sensitive: bool, emb: Option<&HashEmbedder>| {
+            let item = NewItem::new("notes", key, content_hash(text))
+                .with_title(key)
+                .with_metadata(serde_json::json!({ "sensitive": sensitive }));
+            store.upsert_item(&item).unwrap();
+            let chunk = match emb {
+                Some(e) => NewChunk::embedded(text, e.embed_text(text)),
+                None => NewChunk::text(text),
+            };
+            store.replace_chunks(&item.item, &[chunk]).unwrap();
+        };
+    let cfg = RetrieveConfig {
+        allow_cloud_embedding: true,
+        ..Default::default()
+    };
+    let search = |store: Store| {
+        let cfg = cfg.clone();
+        async move {
+            let rec = Arc::new(Recording::cloud());
+            let r = Retriever::new(store, Some(router(vec![rec.clone()], true)), cfg);
+            let res = r.search("Acme renewal", 10).await.unwrap();
+            let ctx = r.pack_context("Acme renewal", 2_000).await.unwrap();
+            assert!(!ctx.response.text.is_empty());
+            let texts = rec.texts.lock().unwrap().clone();
+            let items = rec.items.lock().unwrap().clone();
+            (res, texts, items)
+        }
+    };
+    let leaked = |texts: &[String]| -> Vec<String> {
+        texts
+            .iter()
+            .filter(|t| {
+                [
+                    "GG8CANARY",
+                    "4111 1111",
+                    "512-34-6789",
+                    "GB82 WEST",
+                    "AKIAIOSFODNN7",
+                ]
+                .iter()
+                .any(|c| t.contains(c))
+            })
+            .cloned()
+            .collect()
+    };
+
+    // The sensitive notes have no vector; a non-sensitive one has.
+    let store = Store::open_in_memory().unwrap();
+    for (key, text) in CANARIES {
+        flagged(&store, key, text, true, None);
+    }
+    flagged(
+        &store,
+        "renewal",
+        "Acme renewal is due in November.",
+        false,
+        Some(&local),
+    );
+    let (res, texts, _) = search(store).await;
+    assert_eq!(leaked(&texts), Vec::<String>::new());
+    assert_eq!(
+        res.similarity,
+        Similarity::Lexical,
+        "MMR falls back to words"
+    );
+    assert!(
+        keys(&res.items).contains(&"acme-payment"),
+        "still found by text"
+    );
+
+    // A sensitive note that is unflagged (no `sensitive: false`) counts as sensitive too.
+    let store = Store::open_in_memory().unwrap();
+    let item = NewItem::new("notes", "unknown", content_hash("x")).with_title("unknown");
+    store.upsert_item(&item).unwrap();
+    store
+        .replace_chunks(&item.item, &[NewChunk::text(CANARIES[1].1)])
+        .unwrap();
+    flagged(
+        &store,
+        "renewal",
+        "Acme renewal is due in November.",
+        false,
+        Some(&local),
+    );
+    let (_, texts, _) = search(store).await;
+    assert_eq!(leaked(&texts), Vec::<String>::new());
+
+    // Only non-sensitive passages lack a vector: they are embedded, and their items listed.
+    let store = Store::open_in_memory().unwrap();
+    flagged(
+        &store,
+        "renewal",
+        "Acme renewal is due in November.",
+        false,
+        Some(&local),
+    );
+    flagged(
+        &store,
+        "plain",
+        "Acme renewal call notes: agreed the price.",
+        false,
+        None,
+    );
+    let (res, texts, items) = search(store).await;
+    assert_eq!(res.similarity, Similarity::Vector);
+    assert!(
+        texts.iter().any(|t| t.contains("agreed the price")),
+        "{texts:?}"
+    );
+    // Once for the search, once for the context.
+    assert_eq!(
+        items.iter().map(|i| i.key.as_str()).collect::<Vec<_>>(),
+        ["plain", "plain"]
+    );
 }
 
 #[tokio::test]
@@ -599,10 +783,7 @@ async fn vector_mmr_embeds_only_passages_stored_without_a_vector() {
         ),
         Some(&local),
     );
-    let rec = Arc::new(Recording {
-        inner: embedder(),
-        batches: Default::default(),
-    });
+    let rec = Arc::new(Recording::new(("", "")));
     let r = Retriever::new(
         store,
         Some(router(vec![rec.clone()], true)),
@@ -614,8 +795,56 @@ async fn vector_mmr_embeds_only_passages_stored_without_a_vector() {
     assert_eq!(keys(&res.items)[2], "dup-b", "{:?}", keys(&res.items));
     assert_eq!(
         *rec.batches.lock().unwrap(),
-        vec![1, 1],
-        "the query, then only the one passage without a stored vector"
+        vec![("query", 1), ("document", 1)],
+        "the query (as a query), then only the one passage without a stored vector (as a document)"
+    );
+}
+
+/// A store with `dup-a` embedded and `dup-b` (same text) stored text-only, so vector MMR embeds
+/// one passage. With `prefixes`, the index's scheme is recorded before any vector is stored.
+fn prefix_store(prefixes: Option<(&str, &str)>) -> Store {
+    let local = embedder();
+    let store = Store::open_in_memory().unwrap();
+    if let Some((q, d)) = prefixes {
+        store.adopt_embedding_prefixes(q, d).unwrap();
+    }
+    let dup = "Quarterly sales forecast for the northern region: widgets up, gizmos flat.";
+    add(&store, Doc::new("dup-a", "Report A", &[dup]), Some(&local));
+    add(&store, Doc::new("dup-b", "Report B", &[dup]), None);
+    store
+}
+
+#[tokio::test]
+async fn an_index_built_without_prefixes_gets_prefix_free_queries() {
+    const NOMIC: (&str, &str) = ("search_query: ", "search_document: ");
+    let search = |store: Store| async move {
+        let rec = Arc::new(Recording::new(NOMIC));
+        let r = Retriever::new(
+            store,
+            Some(router(vec![rec.clone()], true)),
+            RetrieveConfig::default(),
+        );
+        let res = r.search("quarterly sales forecast", 3).await.unwrap();
+        assert_eq!(res.similarity, Similarity::Vector);
+        rec.texts.lock().unwrap().clone()
+    };
+
+    // Vectors stored before any scheme was recorded: the provider's model takes prefixes, but
+    // neither the query nor the passage MMR embeds get them, matching the stored vectors.
+    let legacy = search(prefix_store(None)).await;
+    assert_eq!(legacy.len(), 2, "{legacy:?}");
+    assert_eq!(legacy[0], "quarterly sales forecast");
+    assert!(
+        legacy.iter().all(|t| !t.starts_with("search_")),
+        "{legacy:?}"
+    );
+
+    // An index built with the prefixes: the query and the passage get them.
+    let prefixed = search(prefix_store(Some(NOMIC))).await;
+    assert_eq!(prefixed[0], "search_query: quarterly sales forecast");
+    assert!(
+        prefixed[1].starts_with("search_document: Quarterly"),
+        "{prefixed:?}"
     );
 }
 

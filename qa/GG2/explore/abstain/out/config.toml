@@ -1,0 +1,104 @@
+# Nugget daemon (nuggetd) configuration.
+#
+# Nugget is local-first. Out of the box every tier below is served by a model running on this
+# machine, behind an OpenAI-compatible server (Ollama on its default port), so nothing leaves the
+# device until you add a cloud provider.
+#
+# Never put secrets in this file. Providers reference API keys as "env:VAR" (an environment
+# variable) or "keychain:NAME" (an OS keychain entry).
+#
+# Tiers: triage | light | synthesis | agentic | embedding. When several providers serve a tier
+# they are tried in file order, filtered by the capabilities their probe proved. Unprobed
+# providers only serve plain chat; probe one from the app or the providers.probe IPC method.
+#
+# Provider fields: id, kind (anthropic | openai_responses | openai_compatible), base_url, model,
+# api_key, tiers. Optional: locality, context_tokens, max_output_tokens, connect_timeout_secs,
+# idle_timeout_secs, max_retries, retry_base_ms, headers, extra_body.
+# Restart nuggetd after editing this file.
+
+[models]
+# Parallel connections per local model download.
+download_parts = 4
+
+# The local model chosen for each tier (ids from the app's Models page). The on-device runtime
+# below falls back to `triage` (chat) and `embedding` when [runtime] names no model.
+[models.selected]
+# triage = "qwen3-4b-q4km"
+# embedding = "nomic-embed-text-v1.5-q8"
+
+# --- On-device runtime (llama.cpp llama-server, managed by nuggetd) ------------------------------
+# When a selected model is installed (Models page), nuggetd runs it on 127.0.0.1 and routes to it
+# as `local-chat` (triage, light, synthesis) and `local-embedding` (embedding). Providers you
+# configure below that run on this device or your network are tried first; cloud providers come
+# after the runtime and are never used for triage or (by default) embeddings.
+[runtime]
+enabled = true
+# Manifest model ids. Unset: [models.selected], then the recommendation for this machine.
+# chat_model = "qwen3-4b-q4km"
+# embedding_model = "nomic-embed-text-v1.5-q8"
+# A reranker that reorders search results (served as `local-rerank`; never chosen automatically).
+# rerank_model = "bge-reranker-v2-m3-q4km"
+# Or one you run yourself (`llama-server --reranking ...`), which takes precedence:
+# [retrieve.reranker]
+# base_url = "http://127.0.0.1:8013"
+# Stop a server after this many idle minutes (0 = keep running); it restarts on the next request.
+idle_stop_minutes = 0
+
+# --- Knowledge graph ---------------------------------------------------------------------------
+# People, organisations, projects and facts extracted from your indexed items, every fact cited.
+# Extraction runs after indexing, periodically and at start. Deterministic extractors always run;
+# the LLM extractor only uses models on this device or your network unless you list sources in
+# `llm.cloud_sources` (sensitive items never go to the cloud).
+[knowledge]
+enabled = false
+# Who you are, so mail and calendar facts hang off your own entity.
+# [knowledge.me]
+# name = "Your Name"
+# emails = ["you@example.com"]
+
+# --- Markdown vault --------------------------------------------------------------------------------
+# One Markdown page per entity, with footnote citations. Your edits are merged back: changed or
+# added fact lines become facts you asserted. Default location: ~/Nugget Vault.
+[vault]
+enabled = false
+# path = "~/Nugget Vault"
+
+# --- MCP (Model Context Protocol) -----------------------------------------------------------------
+# Lets AI apps (Claude Desktop, Claude Code, Cursor) read your knowledge with a per-app token,
+# scoped and audited. Local only: stdio through `nuggetd mcp --client <id>` and, when `http` is
+# on, streamable HTTP on 127.0.0.1. Set apps up with `nuggetd mcp install --client <app>`.
+[mcp]
+enabled = true
+http = false
+port = 7319
+# HTTP limits: connections served at once (others wait), milliseconds a connection gets to send a
+# request's headers (also the idle keep-alive limit), and milliseconds a request gets for its body.
+# max_connections = 64
+# header_timeout_ms = 10000
+# body_timeout_ms = 30000
+
+# --- On-device: Ollama ---------------------------------------------------------------------------
+# Install Ollama (https://ollama.com), then pull the model, e.g. `ollama pull qwen3:4b`.
+[[providers]]
+id = "local"
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:18793/v1"
+model = "capture"
+tiers = ["triage", "light", "synthesis"]
+
+# --- Cloud: Anthropic (uncomment to use; requests are recorded in the egress ledger) -------------
+# Set the key in your environment, or store it in the OS keychain and use "keychain:anthropic".
+# [[providers]]
+# id = "anthropic"
+# kind = "anthropic"
+# model = "claude-opus-5-5"
+# api_key = "env:ANTHROPIC_API_KEY"
+# tiers = ["synthesis", "agentic"]
+
+# --- Cloud: OpenAI (uncomment to use; requests are recorded in the egress ledger) ----------------
+# [[providers]]
+# id = "openai"
+# kind = "openai_responses"
+# model = "gpt-5"
+# api_key = "env:OPENAI_API_KEY"
+# tiers = ["synthesis", "agentic"]

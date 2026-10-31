@@ -1,0 +1,562 @@
+[
+ {
+  "at": "2026-10-30T19:57:27.998099164Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:27.119386899Z",
+  "bytes_received": 522,
+  "bytes_sent": 559,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:22.994247061Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:22.279136585Z",
+  "bytes_received": 522,
+  "bytes_sent": 559,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:22.233276998Z",
+  "bytes_received": 522,
+  "bytes_sent": 559,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:17.990213193Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:12.986937323Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:12.383788176Z",
+  "bytes_received": 41,
+  "bytes_sent": 182,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:12.340356219Z",
+  "bytes_received": 173,
+  "bytes_sent": 291,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:12.335206323Z",
+  "bytes_received": 99,
+  "bytes_sent": 145,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:12.288973882Z",
+  "bytes_received": 173,
+  "bytes_sent": 291,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:12.287109868Z",
+  "bytes_received": 47,
+  "bytes_sent": 281,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:12.238969056Z",
+  "bytes_received": 173,
+  "bytes_sent": 291,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:12.194957192Z",
+  "bytes_received": 173,
+  "bytes_sent": 291,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:07.983347936Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:57:02.979924965Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:57.975655544Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:52.972308156Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:47.968367624Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:42.964087997Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:37.959608301Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:32.95600603Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:27.95149984Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:22.945810234Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:17.9413346Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:17.575297252Z",
+  "bytes_received": 41,
+  "bytes_sent": 182,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:17.530322655Z",
+  "bytes_received": 173,
+  "bytes_sent": 291,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:17.525488606Z",
+  "bytes_received": 99,
+  "bytes_sent": 145,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:17.475525273Z",
+  "bytes_received": 173,
+  "bytes_sent": 291,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:17.47125323Z",
+  "bytes_received": 47,
+  "bytes_sent": 281,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:17.423145585Z",
+  "bytes_received": 173,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:17.375225481Z",
+  "bytes_received": 171,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:12.9371719Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:07.932907379Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:56:02.92766133Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:57.92063178Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:52.916898163Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:47.912226224Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:42.907788821Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:37.90365959Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:32.899994859Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:27.894647389Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:22.891266695Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:17.887275125Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:17.323059518Z",
+  "bytes_received": 41,
+  "bytes_sent": 181,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:17.279759045Z",
+  "bytes_received": 171,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:17.275356073Z",
+  "bytes_received": 99,
+  "bytes_sent": 144,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:17.230497149Z",
+  "bytes_received": 171,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:17.227497097Z",
+  "bytes_received": 47,
+  "bytes_sent": 280,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:17.179082326Z",
+  "bytes_received": 171,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:17.13257703Z",
+  "bytes_received": 171,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:12.883258419Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:07.879538342Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:55:02.876119281Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:57.870775214Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:52.867274422Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:47.862378055Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:42.858494413Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:37.848248869Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:32.842433132Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:27.836857559Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:22.833249633Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:17.82837453Z",
+  "bytes_received": 34,
+  "bytes_sent": 262,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:17.079151109Z",
+  "bytes_received": 41,
+  "bytes_sent": 181,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:17.035043821Z",
+  "bytes_received": 171,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:17.031335216Z",
+  "bytes_received": 99,
+  "bytes_sent": 144,
+  "feature": "sync:gmail",
+  "host": "gmail.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:16.983169228Z",
+  "bytes_received": 171,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:16.935724273Z",
+  "bytes_received": 171,
+  "bytes_sent": 290,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:16.887433693Z",
+  "bytes_received": 171,
+  "bytes_sent": 404,
+  "feature": "sync:gmail",
+  "host": "oauth2.googleapis.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:54:12.823250973Z",
+  "bytes_received": 153,
+  "bytes_sent": 185,
+  "feature": "sync:github",
+  "host": "github.com",
+  "items": []
+ }
+]

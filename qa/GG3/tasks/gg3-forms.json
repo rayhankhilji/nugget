@@ -1,0 +1,259 @@
+[
+  {
+    "id": "gg3-form-uk-move",
+    "instruction": "Please do my change of address: I'm Alex Kim, alex.kim@example.com, phone +44 20 7946 0000. New address is 4 Baker Street, London, NW1 6XE, United Kingdom. Untick the newsletter and submit it.",
+    "apps": [
+      "forms"
+    ],
+    "difficulty": "hard",
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/forms/submitted/fields",
+          "op": "like",
+          "value": {
+            "full_name": "Alex Kim",
+            "email": "alex.kim@example.com",
+            "phone": "7946",
+            "street": "4 Baker Street",
+            "city": "London",
+            "postcode": "NW1 6XE",
+            "country": "United Kingdom"
+          }
+        },
+        {
+          "path": "/forms/submitted/newsletter",
+          "op": "eq",
+          "value": false
+        }
+      ]
+    },
+    "reference": [
+      {
+        "type": [
+          "forms.full_name",
+          "Alex Kim"
+        ]
+      },
+      {
+        "type": [
+          "forms.email",
+          "alex.kim@example.com"
+        ]
+      },
+      {
+        "type": [
+          "forms.phone",
+          "+44 20 7946 0000"
+        ]
+      },
+      {
+        "click": "forms.next"
+      },
+      {
+        "type": [
+          "forms.street",
+          "4 Baker Street"
+        ]
+      },
+      {
+        "type": [
+          "forms.city",
+          "London"
+        ]
+      },
+      {
+        "type": [
+          "forms.postcode",
+          "NW1 6XE"
+        ]
+      },
+      {
+        "select": [
+          "forms.country",
+          "United Kingdom"
+        ]
+      },
+      {
+        "click": "forms.next"
+      },
+      {
+        "click": "forms.consent"
+      },
+      {
+        "click": "forms.newsletter"
+      },
+      {
+        "confirm": "forms.submit"
+      },
+      {
+        "click": "forms.submit"
+      },
+      {
+        "finish": "done"
+      }
+    ]
+  },
+  {
+    "id": "gg3-form-typo-recovery",
+    "instruction": "Submit my change of address: Alex Kim, email alex.kim@example,com (sorry, that's a dot, not a comma), new address Prinsengracht 263, 1016 GV Amsterdam, Netherlands.",
+    "apps": [
+      "forms"
+    ],
+    "difficulty": "hard",
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/forms/submitted/fields",
+          "op": "like",
+          "value": {
+            "full_name": "Alex Kim",
+            "email": "alex.kim@example.com",
+            "street": "Prinsengracht 263",
+            "city": "Amsterdam",
+            "postcode": "1016 GV",
+            "country": "Netherlands"
+          }
+        }
+      ]
+    },
+    "reference": [
+      {
+        "type": [
+          "forms.full_name",
+          "Alex Kim"
+        ]
+      },
+      {
+        "type": [
+          "forms.email",
+          "alex.kim@example.com"
+        ]
+      },
+      {
+        "click": "forms.next"
+      },
+      {
+        "type": [
+          "forms.street",
+          "Prinsengracht 263"
+        ]
+      },
+      {
+        "type": [
+          "forms.city",
+          "Amsterdam"
+        ]
+      },
+      {
+        "type": [
+          "forms.postcode",
+          "1016 GV"
+        ]
+      },
+      {
+        "select": [
+          "forms.country",
+          "Netherlands"
+        ]
+      },
+      {
+        "click": "forms.next"
+      },
+      {
+        "click": "forms.consent"
+      },
+      {
+        "confirm": "forms.submit"
+      },
+      {
+        "click": "forms.submit"
+      },
+      {
+        "finish": "done"
+      }
+    ]
+  },
+  {
+    "id": "gg3-relayout-form",
+    "instruction": "Fill in the change-of-address form and submit it: Alex Kim, alex.kim@example.com, Calle Mayor 3, 28013 Madrid, Spain.",
+    "apps": [
+      "forms"
+    ],
+    "difficulty": "hard",
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/forms/submitted/fields",
+          "op": "like",
+          "value": {
+            "full_name": "Alex Kim",
+            "email": "alex.kim@example.com",
+            "city": "Madrid",
+            "postcode": "28013",
+            "country": "Spain"
+          }
+        }
+      ]
+    },
+    "reference": [
+      {
+        "type": [
+          "forms.full_name",
+          "Alex Kim"
+        ]
+      },
+      {
+        "type": [
+          "forms.email",
+          "alex.kim@example.com"
+        ]
+      },
+      {
+        "click": "forms.next"
+      },
+      {
+        "type": [
+          "forms.street",
+          "Calle Mayor 3"
+        ]
+      },
+      {
+        "type": [
+          "forms.city",
+          "Madrid"
+        ]
+      },
+      {
+        "type": [
+          "forms.postcode",
+          "28013"
+        ]
+      },
+      {
+        "select": [
+          "forms.country",
+          "Spain"
+        ]
+      },
+      {
+        "click": "forms.next"
+      },
+      {
+        "click": "forms.consent"
+      },
+      {
+        "confirm": "forms.submit"
+      },
+      {
+        "click": "forms.submit"
+      },
+      {
+        "finish": "done"
+      }
+    ]
+  }
+]

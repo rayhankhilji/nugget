@@ -8,6 +8,7 @@ import {
   restartOnboarding,
   saveState,
   shouldShowOnboarding,
+  stepGoalMet,
   STEPS,
   STORAGE_KEY,
   type Action,
@@ -80,6 +81,33 @@ describe("onboarding state machine", () => {
     expect(s.finished).toBe(true);
   });
 
+  it("Continue marks a step done only when it set something up, else skips it", () => {
+    let s = run({ type: "continue" }, { type: "chooseAi", ai: "later" }, { type: "continue" });
+    expect(s.step).toBe("source");
+    expect(s.skipped).toEqual(["ai"]);
+    s = reduce(s, { type: "continue" });
+    expect(s.skipped).toEqual(["ai", "source"]);
+    expect(s.completed).toEqual(["welcome"]);
+
+    s = run({ type: "next" }, { type: "chooseAi", ai: "local" }, { type: "aiSetUp", ai: "local", what: "qwen3-4b" }, { type: "continue" });
+    expect(s.completed).toEqual(["welcome", "ai"]);
+    // A setup on another path doesn't count for the current choice.
+    expect(stepGoalMet({ ...s, ai: "byok" }, "ai")).toBe(false);
+    s = reduce(s, { type: "sourcesFound", names: ["Notes"] });
+    s = reduce(s, { type: "continue" });
+    expect(s.completed).toEqual(["welcome", "ai", "source"]);
+    expect(s.sources).toEqual(["Notes"]);
+  });
+
+  it("counts steps completed in progress saved before setups were recorded", () => {
+    const old = parseState(JSON.stringify({ version: 1, step: "trigger", completed: ["welcome", "ai", "source"], skipped: [], ai: "local", finished: false }))!;
+    expect(stepGoalMet(old, "ai")).toBe(true);
+    expect(stepGoalMet(old, "source")).toBe(true);
+    // Once this run records a setup, that record decides.
+    expect(stepGoalMet({ ...old, aiSetup: { ai: "byok", what: "anthropic" } }, "ai")).toBe(false);
+    expect(stepGoalMet({ ...old, ai: "later" }, "ai")).toBe(false);
+  });
+
   it("restart keeps the AI choice", () => {
     const s = run({ type: "chooseAi", ai: "byok" }, { type: "skipAll" }, { type: "restart" });
     expect(s).toEqual({ ...INITIAL, ai: "byok" });
@@ -110,6 +138,10 @@ describe("onboarding persistence", () => {
       completed: ["welcome"],
     });
     expect(loadState(memoryStorage({ [STORAGE_KEY]: "garbage" }))).toEqual(INITIAL);
+    expect(
+      parseState(JSON.stringify({ version: 1, step: "done", aiSetup: { ai: "byok", what: "anthropic" }, sources: ["Notes", 3] })),
+    ).toEqual({ ...INITIAL, step: "done", aiSetup: { ai: "byok", what: "anthropic" }, sources: ["Notes"] });
+    expect(parseState(JSON.stringify({ version: 1, step: "done", aiSetup: { ai: "cloud", what: 1 } }))).toEqual({ ...INITIAL, step: "done" });
   });
 
   it("survives storage that throws", () => {

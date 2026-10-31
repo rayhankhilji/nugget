@@ -700,3 +700,574 @@ async fn components_with_foreign_imports_are_refused() {
         .unwrap();
     assert!(host.load(&store.load("dev.nugget.evil").unwrap()).is_err());
 }
+
+// ---- capabilities beyond what the user approved ----
+
+/// Load `crate_name` with `caps` declared in its manifest but only `approved` approved (as if
+/// the index recorded a narrower approval): the host must enforce the intersection.
+fn load_with_approval(caps: &str, approved: crate::Capabilities) -> Option<Fx> {
+    let mut fx = hostile(caps)?;
+    let store = crate::PluginStore::open_at(fx.dir.path().join("plugins")).unwrap();
+    let mut verified = store.load(fx.plugin.id()).unwrap();
+    verified.installed.approved = approved;
+    fx.plugin = fx.host.load(&verified).unwrap();
+    Some(fx)
+}
+
+#[tokio::test]
+async fn declared_but_unapproved_capabilities_are_denied() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+    let caps = format!(
+        "{}\nsecrets = [\"token\"]\nkv_max_bytes = 100\nfile_roots = [\"folder\"]",
+        local_host(&server)
+    );
+    // Approved: nothing but an extra host and root the manifest does not declare.
+    let approved = crate::Capabilities {
+        hosts: vec!["https://example.com".into()],
+        file_roots: vec!["other".into()],
+        ..Default::default()
+    };
+    let Some(fx) = load_with_approval(&caps, approved) else {
+        return;
+    };
+    fx.secrets.0.lock().unwrap().insert(
+        crate::secret_account(fx.plugin.id(), "token"),
+        "s3cret".into(),
+    );
+    assert_denied(
+        fx.tool("fetch", json!({ "url": server.uri() })).await,
+        "declared, unapproved host",
+    );
+    // Approved but no longer declared: also denied (no network attempt either way).
+    assert_denied(
+        fx.tool("fetch", json!({ "url": "https://example.com/" }))
+            .await,
+        "approved, undeclared host",
+    );
+    assert_denied(
+        fx.tool("secret", json!({ "name": "token" })).await,
+        "unapproved secret",
+    );
+    let (r, _) = fx.sync(json!({ "mode": "kv" }), None).await;
+    assert_denied(r, "unapproved kv store");
+    let path = dir.path().to_str().unwrap();
+    for root in ["folder", "other"] {
+        let (r, _) = fx
+            .sync(
+                json!({ "mode": "fs", "root": root, "path": "a.txt", "folder": path, "other": path }),
+                None,
+            )
+            .await;
+        assert_denied(r, root);
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(fx.egress.0.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn host_rules_hold_end_to_end() {
+    let caps = "hosts = [\"example.com\", \"*.example.org\", \"http://127.0.0.1:9\"]";
+    let Some(fx) = hostile(caps) else { return };
+    for url in [
+        // Scheme downgrade: `example.com` means https only.
+        "http://example.com/",
+        // Port mismatch.
+        "https://example.com:8443/",
+        "http://127.0.0.1:10/",
+        "https://127.0.0.1:9/",
+        // The wildcard does not cover the apex or lookalikes.
+        "https://example.org/",
+        "https://evilexample.org/",
+        "https://example.org.evil.net/",
+        // Credentials in the URL, and host confusion through userinfo.
+        "https://user:pw@example.com/",
+        "https://user@example.com/",
+        "https://example.com@evil.net/",
+        "https://evil.net/#@example.com",
+        "https://evil.net\\@example.com/",
+        // Other schemes.
+        "ftp://example.com/",
+        "ws://example.com/",
+        "data:text/plain,hi",
+    ] {
+        assert_denied(fx.tool("fetch", json!({ "url": url })).await, url);
+    }
+    // Nothing was sent, so nothing reached the ledger.
+    assert!(fx.egress.0.lock().unwrap().is_empty());
+}
+
+// ---- file roots (`nugget:plugin/fs`) ----
+
+const FS_CAPS: &str = "file_roots = [\"folder\"]";
+
+/// A temp folder `vault` with a few files, and a secret next to it.
+fn vault() -> (tempfile::TempDir, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("vault");
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    std::fs::write(root.join("a.txt"), "alpha").unwrap();
+    std::fs::write(root.join(".hidden"), "h").unwrap();
+    std::fs::write(root.join("sub").join("b.md"), "# bee").unwrap();
+    std::fs::write(dir.path().join("secret.txt"), "top secret").unwrap();
+    let root = root.to_str().unwrap().to_string();
+    (dir, root)
+}
+
+/// Run one `fs` op in a sync and return the JSON the guest emitted.
+async fn fs_sync(fx: &Fx, settings: Value) -> nugget_core::Result<Value> {
+    let mut settings = settings;
+    settings["mode"] = json!("fs");
+    let (r, sink) = fx.sync(settings, None).await;
+    r?;
+    let changes = sink.changes.lock().unwrap().clone();
+    let Some(Change::Upsert(doc)) = changes.first() else {
+        panic!("{changes:?}")
+    };
+    let Content::Text(t) = &doc.content else {
+        panic!()
+    };
+    Ok(serde_json::from_str(t).unwrap())
+}
+
+fn fs_settings(root: &str, op: &str, path: &str) -> Value {
+    json!({ "folder": root, "root": "folder", "op": op, "path": path })
+}
+
+#[tokio::test]
+async fn connectors_read_inside_their_file_roots() {
+    let (_tmp, root) = vault();
+    let Some(fx) = hostile(FS_CAPS) else { return };
+    let out = fs_sync(&fx, fs_settings(&root, "read", "a.txt"))
+        .await
+        .unwrap();
+    assert_eq!(out, json!({ "len": 5, "text": "alpha" }));
+    let out = fs_sync(&fx, fs_settings(&root, "read", "sub/b.md"))
+        .await
+        .unwrap();
+    assert_eq!(out["text"], "# bee");
+    let list = fs_sync(&fx, fs_settings(&root, "list", "")).await.unwrap();
+    assert_eq!(
+        list,
+        json!([
+            { "name": ".hidden", "is_dir": false, "size": 1 },
+            { "name": "a.txt", "is_dir": false, "size": 5 },
+            { "name": "sub", "is_dir": true, "size": 0 },
+        ])
+    );
+    let stat = fs_sync(&fx, fs_settings(&root, "stat", "sub"))
+        .await
+        .unwrap();
+    assert_eq!(stat, json!({ "name": "sub", "is_dir": true, "size": 0 }));
+    let stat = fs_sync(&fx, fs_settings(&root, "stat", "")).await.unwrap();
+    assert_eq!(stat["name"], "");
+
+    // A single file can be the root.
+    let file = std::path::Path::new(&root).join("a.txt");
+    let out = fs_sync(&fx, fs_settings(file.to_str().unwrap(), "read", ""))
+        .await
+        .unwrap();
+    assert_eq!(out["text"], "alpha");
+    let r = fs_sync(&fx, fs_settings(file.to_str().unwrap(), "list", "")).await;
+    assert!(matches!(r, Err(Error::Invalid(_))), "{r:?}");
+
+    // `validate` may read too (to check the folder), through the same checks.
+    let factory = fx.factory();
+    factory
+        .validate(&json!({ "folder": root, "fs": { "root": "folder", "op": "stat", "path": "" } }))
+        .unwrap();
+    assert!(matches!(
+        factory.validate(
+            &json!({ "folder": root, "fs": { "root": "folder", "op": "read", "path": "../secret.txt" } })
+        ),
+        Err(Error::Invalid(_))
+    ));
+    assert!(
+        factory
+            .validate(
+                &json!({ "folder": root, "fs": { "root": "nope", "op": "stat", "path": "" } })
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("capability denied")
+    );
+    assert!(
+        fx.egress.0.lock().unwrap().is_empty(),
+        "file reads are not egress"
+    );
+}
+
+#[tokio::test]
+async fn file_access_needs_a_declared_root() {
+    let (_tmp, root) = vault();
+    // No file_roots at all.
+    let Some(fx) = hostile("") else { return };
+    assert_denied(
+        fs_sync(&fx, fs_settings(&root, "read", "a.txt")).await,
+        "no file_roots",
+    );
+    // A root that is not declared, even when the settings have a field of that name.
+    let Some(fx) = hostile(FS_CAPS) else { return };
+    let r = fs_sync(
+        &fx,
+        json!({ "other": root, "root": "other", "op": "read", "path": "a.txt" }),
+    )
+    .await;
+    assert_denied(r, "undeclared root");
+    // Root names are matched exactly (no traversal through the name).
+    for name in ["../folder", "folder/..", "FOLDER", ""] {
+        let r = fs_sync(
+            &fx,
+            json!({ "folder": root, "root": name, "op": "read", "path": "a.txt" }),
+        )
+        .await;
+        assert_denied(r, name);
+    }
+}
+
+#[tokio::test]
+async fn tools_never_get_file_access() {
+    let (_tmp, root) = vault();
+    let Some(fx) = hostile(FS_CAPS) else { return };
+    for op in ["read", "list", "stat"] {
+        assert_denied(fx.tool("file", fs_settings(&root, op, "a.txt")).await, op);
+    }
+}
+
+#[tokio::test]
+async fn relative_paths_cannot_leave_the_root() {
+    let (_tmp, root) = vault();
+    let Some(fx) = hostile(FS_CAPS) else { return };
+    let abs_secret = std::path::Path::new(&root)
+        .parent()
+        .unwrap()
+        .join("secret.txt");
+    for bad in [
+        "../secret.txt",
+        "sub/../../secret.txt",
+        "..",
+        "/etc/passwd",
+        abs_secret.to_str().unwrap(),
+        "..\\secret.txt",
+        "sub\\b.md",
+        "a.txt\0",
+        "C:\\Windows\\win.ini",
+        "C:/Windows/win.ini",
+        "\\\\server\\share\\x",
+        "./a.txt",
+        "sub//b.md",
+    ] {
+        for op in ["read", "list", "stat"] {
+            let r = fs_sync(&fx, fs_settings(&root, op, bad)).await;
+            assert!(matches!(r, Err(Error::Invalid(_))), "{op} {bad:?}: {r:?}");
+        }
+    }
+    let r = fs_sync(&fx, fs_settings(&root, "read", "missing.txt")).await;
+    assert!(matches!(r, Err(Error::NotFound(_))), "{r:?}");
+    // Everything above fails the syntax check. A path that passes it can only leave the root
+    // through a symlink, so containment proper is tested in `symlinks_cannot_escape_the_root`
+    // (and `tests::fs`); one such case here, where symlinks can be made without privileges.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            std::path::Path::new(&root).parent().unwrap(),
+            std::path::Path::new(&root).join("parent"),
+        )
+        .unwrap();
+        crate::fs::check_relative("parent/secret.txt").unwrap();
+        for op in ["read", "stat"] {
+            assert_denied(
+                fs_sync(&fx, fs_settings(&root, op, "parent/secret.txt")).await,
+                "syntactically valid escape",
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_root_setting_must_be_an_absolute_path() {
+    let (_tmp, root) = vault();
+    let Some(fx) = hostile(FS_CAPS) else { return };
+    let missing = std::path::Path::new(&root).join("nope");
+    for (folder, want) in [
+        (json!("relative/path"), "absolute"),
+        (json!("vault"), "absolute"),
+        (json!(""), "not set"),
+        (Value::Null, "not set"),
+        (json!(["/etc"]), "path string"),
+        (json!(42), "path string"),
+    ] {
+        let r = fs_sync(
+            &fx,
+            json!({ "folder": folder, "root": "folder", "op": "list", "path": "" }),
+        )
+        .await;
+        match r {
+            Err(Error::Invalid(m)) if m.contains(want) => {}
+            other => panic!("{folder}: expected Invalid({want}), got {other:?}"),
+        }
+    }
+    // The setting is absent altogether.
+    let r = fs_sync(&fx, json!({ "root": "folder", "op": "list", "path": "" })).await;
+    assert!(
+        matches!(r, Err(Error::Invalid(ref m)) if m.contains("not set")),
+        "{r:?}"
+    );
+    let r = fs_sync(&fx, fs_settings(missing.to_str().unwrap(), "list", "")).await;
+    assert!(matches!(r, Err(Error::NotFound(_))), "{r:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinks_cannot_escape_the_root() {
+    use std::os::unix::fs::symlink;
+    let (tmp, root) = vault();
+    let r = std::path::Path::new(&root);
+    symlink(tmp.path().join("secret.txt"), r.join("leak.txt")).unwrap();
+    symlink(tmp.path(), r.join("up")).unwrap();
+    symlink("/", r.join("slash")).unwrap();
+    symlink(r.join("a.txt"), r.join("alias.txt")).unwrap();
+    let Some(fx) = hostile(FS_CAPS) else { return };
+    for (op, path) in [
+        ("read", "leak.txt"),
+        ("stat", "leak.txt"),
+        ("read", "up/secret.txt"),
+        ("list", "up"),
+        ("list", "slash"),
+        ("read", "slash/etc/hosts"),
+    ] {
+        // `/etc/hosts` exists on every Unix CI runner: an escape that exists is always a
+        // denial, never "not found".
+        let res = fs_sync(&fx, fs_settings(&root, op, path)).await;
+        match res {
+            Err(Error::Other(m)) if m.contains("capability denied") => {}
+            other => panic!("{op} {path}: expected a denial, got {other:?}"),
+        }
+    }
+    // Links inside the root work; links out of it are left out of listings.
+    let out = fs_sync(&fx, fs_settings(&root, "read", "alias.txt"))
+        .await
+        .unwrap();
+    assert_eq!(out["text"], "alpha");
+    let names: Vec<String> = fs_sync(&fx, fs_settings(&root, "list", ""))
+        .await
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, [".hidden", "a.txt", "alias.txt", "sub"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn special_files_are_not_read() {
+    let (_tmp, root) = vault();
+    let fifo = std::path::Path::new(&root).join("pipe");
+    let ok = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .is_ok_and(|s| s.success());
+    if !ok {
+        eprintln!("WARNING: mkfifo unavailable; skipping");
+        return;
+    }
+    let Some(fx) = hostile(FS_CAPS) else { return };
+    // Reading a FIFO would block forever; it is refused up front.
+    let r = fs_sync(&fx, fs_settings(&root, "read", "pipe")).await;
+    assert!(
+        matches!(r, Err(Error::Invalid(ref m)) if m.contains("regular")),
+        "{r:?}"
+    );
+}
+
+#[tokio::test]
+async fn file_size_listing_and_read_budget_caps_hold() {
+    let (_tmp, root) = vault();
+    let r = std::path::Path::new(&root);
+    std::fs::write(r.join("big.bin"), vec![b'x'; 2048]).unwrap();
+    std::fs::write(r.join("mid.bin"), vec![b'y'; 1000]).unwrap();
+    let crowded = r.join("crowded");
+    std::fs::create_dir(&crowded).unwrap();
+    for i in 0..11 {
+        std::fs::write(crowded.join(format!("f{i}")), "").unwrap();
+    }
+    let limits = Limits {
+        max_fs_file_bytes: 1024,
+        max_fs_dir_entries: 10,
+        max_fs_read_bytes_per_sync: 2500,
+        max_fs_read_bytes_per_call: 1500,
+        ..test_limits()
+    };
+    let Some(fx) = hostile_with(FS_CAPS, limits) else {
+        return;
+    };
+    let res = fs_sync(&fx, fs_settings(&root, "read", "big.bin")).await;
+    assert!(
+        matches!(res, Err(Error::Invalid(ref m)) if m.contains("larger than 1024")),
+        "{res:?}"
+    );
+    assert_eq!(
+        fs_sync(&fx, fs_settings(&root, "read", "mid.bin"))
+            .await
+            .unwrap()["len"],
+        1000
+    );
+    // 11 entries > 10: the listing fails rather than being cut short silently.
+    let res = fs_sync(&fx, fs_settings(&root, "list", "crowded")).await;
+    assert!(
+        matches!(res, Err(Error::Invalid(ref m)) if m.contains("more than 10")),
+        "{res:?}"
+    );
+    std::fs::remove_file(crowded.join("f10")).unwrap();
+    let list = fs_sync(&fx, fs_settings(&root, "list", "crowded"))
+        .await
+        .unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 10);
+
+    // Two reads of 1000 fit the sync budget of 2500; a third does not.
+    let mut many = fs_settings(&root, "read_many", "");
+    many["paths"] = json!(["mid.bin", "mid.bin"]);
+    assert_eq!(fs_sync(&fx, many.clone()).await.unwrap()["len"], 2000);
+    many["paths"] = json!(["mid.bin", "mid.bin", "mid.bin"]);
+    assert_denied(fs_sync(&fx, many).await, "sync read budget");
+    // The budget is per call: the next sync starts afresh. `validate` has its own, smaller one.
+    let factory = fx.factory();
+    factory
+        .validate(&json!({ "folder": root, "fs": { "root": "folder", "op": "read_many", "paths": ["mid.bin"] } }))
+        .unwrap();
+    let err = factory
+        .validate(&json!({ "folder": root, "fs": { "root": "folder", "op": "read_many", "paths": ["mid.bin", "mid.bin"] } }))
+        .unwrap_err();
+    assert!(err.to_string().contains("budget"), "{err}");
+}
+
+// ---- CPU and memory limits in a connector sync ----
+
+#[tokio::test]
+async fn sync_fuel_stops_a_spinning_connector() {
+    let limits = Limits {
+        sync_fuel: 50_000_000,
+        ..test_limits()
+    };
+    let Some(fx) = hostile_with("", limits) else {
+        return;
+    };
+    let (r, _) = fx.sync(json!({ "mode": "spin" }), None).await;
+    assert_err_contains(r, "out of fuel");
+}
+
+#[tokio::test]
+async fn the_sync_deadline_stops_a_connector_with_fuel_to_spare() {
+    let limits = Limits {
+        sync_fuel: u64::MAX / 2,
+        sync_timeout: Duration::from_millis(300),
+        ..test_limits()
+    };
+    let Some(fx) = hostile_with("", limits) else {
+        return;
+    };
+    let started = std::time::Instant::now();
+    let (r, _) = fx.sync(json!({ "mode": "spin" }), None).await;
+    assert_err_contains(r, "time limit");
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+#[tokio::test]
+async fn sync_memory_is_capped() {
+    let Some(fx) = hostile("") else { return };
+    let (r, _) = fx.sync(json!({ "mode": "alloc", "mib": 512 }), None).await;
+    assert_err_contains(r, "memory limit");
+    let (r, _) = fx.sync(json!({ "mode": "alloc", "mib": 4 }), None).await;
+    r.unwrap();
+}
+
+#[tokio::test]
+async fn the_fs_op_budget_stops_a_listing_loop() {
+    let (_tmp, root) = vault();
+    let limits = Limits {
+        max_fs_ops_per_sync: 5,
+        max_fs_ops_per_call: 3,
+        ..test_limits()
+    };
+    let Some(fx) = hostile_with(FS_CAPS, limits) else {
+        return;
+    };
+    let mut lp = fs_settings(&root, "list_loop", "");
+    lp["times"] = json!(5);
+    assert_eq!(fs_sync(&fx, lp.clone()).await.unwrap()["times"], 5);
+    lp["times"] = json!(1_000_000);
+    let started = std::time::Instant::now();
+    match fs_sync(&fx, lp).await {
+        Err(Error::Other(m))
+            if m.contains("capability denied") && m.contains("operation budget") => {}
+        other => panic!("expected the op budget to stop the loop, got {other:?}"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(10));
+    // `validate` has its own, smaller budget.
+    let factory = fx.factory();
+    let v = |times: u64| json!({ "folder": root, "fs": { "root": "folder", "op": "list_loop", "path": "", "times": times } });
+    factory.validate(&v(3)).unwrap();
+    let err = factory.validate(&v(4)).unwrap_err();
+    assert!(err.to_string().contains("operation budget"), "{err}");
+}
+
+#[tokio::test]
+async fn fs_errors_do_not_reveal_host_paths() {
+    let (tmp, root) = vault();
+    let canon = std::fs::canonicalize(&root).unwrap();
+    let canon = canon.to_str().unwrap().to_string();
+    let parent = std::fs::canonicalize(tmp.path()).unwrap();
+    let parent = parent.to_str().unwrap().to_string();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        tmp.path().join("secret.txt"),
+        std::path::Path::new(&root).join("leak"),
+    )
+    .unwrap();
+    std::fs::write(std::path::Path::new(&root).join("big.bin"), vec![0u8; 4096]).unwrap();
+    let limits = Limits {
+        max_fs_file_bytes: 1024,
+        ..test_limits()
+    };
+    let Some(fx) = hostile_with(FS_CAPS, limits) else {
+        return;
+    };
+    let mut errors = Vec::new();
+    for (op, path) in [
+        ("read", "missing.txt"),
+        ("read", "../secret.txt"),
+        ("read", "sub"),
+        ("list", "a.txt"),
+        ("read", "big.bin"),
+        ("read", "leak"),
+        ("stat", "leak"),
+        ("list", "nope"),
+    ] {
+        errors.push(
+            fs_sync(&fx, fs_settings(&root, op, path))
+                .await
+                .unwrap_err()
+                .to_string(),
+        );
+    }
+    let missing = std::path::Path::new(&root).join("gone");
+    errors.push(
+        fs_sync(&fx, fs_settings(missing.to_str().unwrap(), "list", ""))
+            .await
+            .unwrap_err()
+            .to_string(),
+    );
+    for e in &errors {
+        assert!(
+            !e.contains(&canon) && !e.contains(&parent) && !e.contains(&root),
+            "{e}"
+        );
+    }
+}

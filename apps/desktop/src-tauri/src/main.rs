@@ -20,6 +20,14 @@ mod window_state;
 use tauri::{Manager, RunEvent, WindowEvent};
 use tracing_subscriber::EnvFilter;
 
+/// Passed by a compositor key binding: start a Double Tap draft in the running Nugget.
+const DOUBLE_TAP_ARG: &str = "--double-tap";
+
+/// Whether a second launch's arguments (program name first) ask for a Double Tap draft.
+fn wants_double_tap(argv: &[String]) -> bool {
+    argv.iter().skip(1).any(|a| a == DOUBLE_TAP_ARG)
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -30,8 +38,13 @@ fn main() {
     let app = tauri::Builder::default()
         // First, so a second launch exits before anything else starts; it focuses this window
         // instead (an autostart launch while Nugget already runs changes nothing).
+        // `--double-tap` starts a draft instead, for desktops without a GlobalShortcuts portal
+        // (sway: `bindsym <keys> exec nugget-desktop --double-tap`); Nugget must already be
+        // running, since a first launch with it just opens normally.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if !argv.iter().any(|a| a == autostart::HIDDEN_ARG) {
+            if wants_double_tap(&argv) {
+                tauri::async_runtime::spawn(doubletap::flow::fire(app.clone()));
+            } else if !argv.iter().any(|a| a == autostart::HIDDEN_ARG) {
                 tray::show_main(app, None);
             }
         }))
@@ -100,7 +113,15 @@ fn main() {
             commands::plugins_approve,
             commands::plugins_remove,
             commands::plugins_enable,
+            commands::plugins_catalog,
             commands::pick_plugin_file,
+            commands::backup_status,
+            commands::backup_configure,
+            commands::backup_set_passphrase,
+            commands::backup_run,
+            commands::backup_list,
+            commands::backup_restore,
+            commands::export_run,
             history::chat_history_load,
             history::chat_history_save,
             history::chat_history_delete,
@@ -209,4 +230,18 @@ fn main() {
         RunEvent::Reopen { .. } => tray::show_main(handle, None),
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn double_tap_argument() {
+        let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(wants_double_tap(&argv(&["nugget-desktop", "--double-tap"])));
+        assert!(!wants_double_tap(&argv(&["nugget-desktop", "--minimized"])));
+        assert!(!wants_double_tap(&argv(&["--double-tap"])));
+        assert!(!wants_double_tap(&[]));
+    }
 }

@@ -25,6 +25,7 @@ tokio-rustls = { version = "0.26.6", default-features = false, features = ["tls1
 rustls-platform-verifier = "0.7.1"
 
 [dev-dependencies]
+nugget-connector = { workspace = true, features = ["testkit"] }
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 
 [lints]

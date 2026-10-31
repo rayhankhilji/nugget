@@ -191,6 +191,45 @@ pub struct ChatDone {
     pub error: Option<String>,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
+    /// What the daemon's post-check found in a sourced `retrieve.ask` answer; absent on plain
+    /// chats, general answers and failed streams.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<AnswerCheck>,
+}
+
+/// The daemon's post-check of a sourced `retrieve.ask` answer, sent on `chat.done`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerCheck {
+    /// The answer says the user's items don't contain what was asked.
+    #[serde(default)]
+    pub not_found: bool,
+    /// Sentences of the answer that state something (not counting a "not found" reply).
+    #[serde(default)]
+    pub claims: u32,
+    /// Claims the client should mark, in answer order.
+    #[serde(default)]
+    pub flagged: Vec<FlaggedClaim>,
+    /// Citation markers that named a passage the model was not given; removed from the text.
+    #[serde(default)]
+    pub invalid_citations: u32,
+}
+
+/// One claim of an answer the post-check could not tie to its sources.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlaggedClaim {
+    /// The sentence exactly as it appears in the streamed answer text.
+    pub text: String,
+    pub reason: ClaimFlag,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ClaimFlag {
+    /// States something but cites no passage.
+    Uncited,
+    /// Cites passages, but a number, amount or date it states is in none of them.
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -323,6 +362,30 @@ pub struct SourceInfo {
     /// Same shape as [`SourceSpec::settings`]; never contains secrets.
     #[serde(default)]
     pub settings: serde_json::Value,
+    /// Plain-language sync health: what is wrong (if anything) and how to fix it. Filled by the
+    /// daemon from `state`, `last_error` and recent item errors; absent from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<SourceHealth>,
+}
+
+/// A source's sync health, for people rather than logs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceHealth {
+    /// Stable machine code (`ok`, `syncing`, `disabled`, `reconnect`, `not_set_up`,
+    /// `rate_limited`, `offline`, `server_error`, `too_large`, `disk_full`, `config`,
+    /// `item_errors`, `error`); clients translate it and fall back to `reason`/`fix`.
+    pub code: String,
+    /// One sentence on what is going on, in English.
+    pub reason: String,
+    /// One sentence on what the user can do, in English (empty when nothing is needed).
+    #[serde(default)]
+    pub fix: String,
+    /// Items that failed in recent passes (each one skipped; the rest of the sync went on).
+    #[serde(default)]
+    pub item_errors: u64,
+    /// The most recent item-level failure message, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_item_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -483,6 +546,10 @@ pub struct AskRequest {
     /// are forwarded to the answering model. Untrusted text: `System` entries are ignored.
     #[serde(default)]
     pub history: Vec<ChatMessage>,
+    /// The client's current UTC offset, in minutes (clamped to ±18 hours): the daemon dates
+    /// "today" in the answer prompt with it. Without it, the daemon's configured offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc_offset_minutes: Option<i32>,
 }
 
 fn default_ask_tier() -> Tier {
@@ -967,6 +1034,7 @@ pub mod plugin_method {
     pub const APPROVE: &str = "plugins.approve";
     pub const REMOVE: &str = "plugins.remove";
     pub const ENABLE: &str = "plugins.enable";
+    pub const CATALOG: &str = "plugins.catalog";
 }
 
 /// Capabilities a plugin requests or the user approved.
@@ -981,6 +1049,9 @@ pub struct PluginCapabilities {
     /// Size of the plugin's key-value store in bytes (`0` = none).
     #[serde(default)]
     pub kv_max_bytes: u64,
+    /// Settings fields of a connector source that hold a folder or file the plugin may read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_roots: Vec<String>,
 }
 
 /// Who signed a plugin, as far as this daemon trusts it.
@@ -1094,6 +1165,59 @@ pub struct PluginRemoveResult {
 pub struct PluginEnableParams {
     pub id: String,
     pub enabled: bool,
+}
+
+/// One `.nuggetplugin` file found in a catalog directory (`plugins.catalog`). Verified as
+/// `plugins.install` would, but not installed. When `error` is set the package cannot be
+/// installed and only `path` and `file_name` are reliable.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginCatalogEntry {
+    /// Absolute path to pass to `plugins.install`.
+    pub path: String,
+    pub file_name: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+    /// What the package's manifest requests.
+    #[serde(default)]
+    pub requested: PluginCapabilities,
+    #[serde(default)]
+    pub connector_display_name: Option<String>,
+    #[serde(default)]
+    pub signature: PluginSignature,
+    /// Hex ed25519 public key that signed the package (empty when unknown or unsigned).
+    #[serde(default)]
+    pub signer: String,
+    /// The installed version of this plugin, if any.
+    #[serde(default)]
+    pub installed_version: Option<String>,
+    /// Installed at an older version than this package.
+    #[serde(default)]
+    pub update_available: bool,
+    /// Installing it would ask for approval (a new install, or an update asking for more).
+    #[serde(default)]
+    pub needs_approval: bool,
+    /// Why it cannot be installed (unreadable, unsigned, untrusted signer, ...).
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginCatalogResult {
+    pub entries: Vec<PluginCatalogEntry>,
+    /// The directories that were searched.
+    #[serde(default)]
+    pub dirs: Vec<String>,
+    /// More packages were found than are listed.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 // ---- Agent (M4) ----
@@ -1284,6 +1408,9 @@ pub struct AgentTaskDetail {
     /// The `ask_user` question when the state is `needs_input`.
     #[serde(default)]
     pub question: Option<String>,
+    /// Candidate answers offered with `question` (empty: free text). Untrusted screen text.
+    #[serde(default)]
+    pub options: Vec<String>,
 }
 
 /// Status of the tamper-evident action log.

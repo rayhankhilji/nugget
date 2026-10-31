@@ -1,0 +1,32 @@
+# Obsidian vault importer. It reads only the folder the user picks (the `vault` setting), through
+# the host's read-only `fs` interface: no network, no secrets, no key-value store.
+id = "dev.nugget.obsidian"
+name = "Obsidian vault"
+version = "0.1.0"
+description = "Imports the Markdown notes of an Obsidian vault (or any folder of Markdown notes), with front matter, tags, aliases and [[wikilinks]] as metadata. Read-only."
+kind = ["connector"]
+
+[capabilities]
+file_roots = ["vault"]
+
+[connector]
+display_name = "Obsidian vault"
+poll_interval_secs = 600
+
+[connector.settings_schema]
+type = "object"
+required = ["vault"]
+
+[connector.settings_schema.properties.vault]
+type = "string"
+title = "Vault folder"
+description = "Absolute path of the vault folder (the one that holds .obsidian)."
+
+[connector.settings_schema.properties.exclude]
+type = "array"
+title = "Folders to skip"
+description = "Vault-relative folders to leave out, such as Templates or Archive/Private."
+maxItems = 64
+
+[connector.settings_schema.properties.exclude.items]
+type = "string"

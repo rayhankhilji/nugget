@@ -10,7 +10,9 @@
 // download, fake llama-server) and times app start to a cited answer streamed by that model;
 // byok.mjs checks and saves an API key in onboarding. a11y.mjs runs axe-core over every page and the
 // main dialogs in light and dark and checks the accessibility tree; prefs.mjs checks reduced motion,
-// more contrast and 200% zoom; keyboard.mjs completes the core flows without a mouse.
+// more contrast and 200% zoom; keyboard.mjs completes the core flows without a mouse; visual.mjs
+// compares screenshots of the main screens with committed baselines (Linux only); backup.mjs
+// backs up, exports, wipes the home and restores the backup through the UI.
 //
 // usage: pnpm run e2e        (see e2e/README.md for the environment variables)
 import { spawnSync } from "node:child_process";
@@ -26,6 +28,8 @@ import { byokScenario } from "./byok.mjs";
 import { a11yScenario } from "./a11y.mjs";
 import { prefsScenario } from "./prefs.mjs";
 import { keyboardScenario } from "./keyboard.mjs";
+import { backupScenario } from "./backup.mjs";
+import { visualScenario } from "./visual.mjs";
 import {
   check,
   DESKTOP,
@@ -51,11 +55,12 @@ import {
 /**
  * Scenarios to run (E2E_SCENARIOS, comma-separated): every page on an indexed home, the same pages
  * in other locales (sharing that home), a first run, a first run with the recommended local model,
- * bring-your-own-key, the accessibility audit, display preferences and keyboard-only use.
+ * bring-your-own-key, the accessibility audit, display preferences, keyboard-only use,
+ * screenshots compared with baselines, and backup, export and restore into a wiped home.
  */
-const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard"];
+const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard", "visual", "backup"];
 /** Scenarios that use the shared indexed home. */
-const INDEXED = ["pages", "i18n", "a11y", "prefs"];
+const INDEXED = ["pages", "i18n", "a11y", "prefs", "visual"];
 
 // ---- the page registry, read from the app source so new pages are covered automatically ----
 
@@ -406,7 +411,12 @@ async function main() {
         } else if (name === "prefs") {
           const { daemon } = await indexedHome(bin);
           summary.prefs = await prefsScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });
-        } else summary.keyboard = await keyboardScenario({ browser, bin });
+        } else if (name === "visual") {
+          // Linux only: elsewhere visualScenario just logs a skip, so no daemon is started for it.
+          const socket = process.platform === "linux" ? (await indexedHome(bin)).daemon.socket : null;
+          summary.visual = await visualScenario({ browser, socket, pages: pageRegistry(), onboarded: ONBOARDED });
+        } else if (name === "backup") summary.backup = await backupScenario({ browser, bin });
+        else summary.keyboard = await keyboardScenario({ browser, bin });
       } catch (e) {
         // A setup failure (daemon, indexing) fails the scenario and lets the next one run.
         results.push({ name: `scenario ${name}`, ok: false, ms: 0, error: e.stack ?? String(e) });

@@ -1,0 +1,846 @@
+{
+  "schema_version": 1,
+  "suite": "memory",
+  "status": "ok",
+  "started_at": "2026-10-30T08:38:42.944729322Z",
+  "finished_at": "2026-10-30T08:50:26.965296126Z",
+  "duration_ms": 704020,
+  "harness_version": "0.0.1",
+  "git_commit": "a4aada52e0303190f39967dc208bf9e5138cdc78",
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "cpus": 4,
+    "build_profile": "release"
+  },
+  "config": {
+    "scale": "full",
+    "seed": 42,
+    "params": {
+      "backend": "real",
+      "change_gap_mean_s": 0.5,
+      "change_timeout_s": 120.0,
+      "changes": 1000,
+      "docs": 20000,
+      "embed_prefixes": "auto",
+      "embedder": "hash-bow (nugget_retrieve::eval::HashEmbedder, in-process, deterministic, on-device), dim 256",
+      "eval_docs": 57,
+      "eval_queries": 42,
+      "eval_set": "nugget-retrieve fixtures",
+      "files_per_dir": 250,
+      "freshness_phase": true,
+      "probe_interval_ms": 20,
+      "queries": 1000,
+      "query_noise": 0.25,
+      "query_terms": 4,
+      "reranker": "none",
+      "retrieve_config": "RetrieveConfig::default()",
+      "stack": "nugget-store (SQLCipher, temp dir) + nugget-ingest + files connector (native watcher) + nugget-retrieve",
+      "watcher_debounce_ms": 300
+    }
+  },
+  "metrics": [
+    {
+      "name": "retrieval.eval.text_only.recall@1",
+      "value": 0.5952380952380952,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; text_only recall@1 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.text_only.recall@5",
+      "value": 0.8928571428571429,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; text_only recall@5 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.text_only.recall@10",
+      "value": 0.9047619047619048,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; text_only recall@10 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.text_only.mrr@10",
+      "value": 0.7678571428571429,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; text_only mrr@10 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.text_only.ndcg@10",
+      "value": 0.7978587060850062,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; text_only ndcg@10 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid.recall@1",
+      "value": 0.7142857142857143,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid recall@1 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid.recall@5",
+      "value": 0.9642857142857143,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid recall@5 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid.recall@10",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.9047619047619048,
+      "target_met": true,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid recall@10 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid.mrr@10",
+      "value": 0.8952380952380953,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid mrr@10 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid.ndcg@10",
+      "value": 0.9171272659546598,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid ndcg@10 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid_mmr.recall@1",
+      "value": 0.7142857142857143,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid_mmr recall@1 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid_mmr.recall@5",
+      "value": 0.9642857142857143,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid_mmr recall@5 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid_mmr.recall@10",
+      "value": 0.9761904761904762,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.9047619047619048,
+      "target_met": true,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid_mmr recall@10 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid_mmr.mrr@10",
+      "value": 0.8769841269841269,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid_mmr mrr@10 (binary relevance)"
+    },
+    {
+      "name": "retrieval.eval.hybrid_mmr.ndcg@10",
+      "value": 0.8917446388068174,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget-retrieve eval set written as Markdown files and ingested through the real pipeline; hybrid_mmr ndcg@10 (binary relevance)"
+    },
+    {
+      "name": "baseline.eval_direct.text_only.recall@10",
+      "value": 0.8809523809523809,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Same eval set indexed directly (eval::index, one chunk per paragraph), text_only recall@10; reference for the pipeline numbers"
+    },
+    {
+      "name": "baseline.eval_direct.text_only.mrr@10",
+      "value": 0.6786375661375661,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Same eval set indexed directly (eval::index, one chunk per paragraph), text_only mrr@10; reference for the pipeline numbers"
+    },
+    {
+      "name": "baseline.eval_direct.hybrid.recall@10",
+      "value": 0.9880952380952381,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Same eval set indexed directly (eval::index, one chunk per paragraph), hybrid recall@10; reference for the pipeline numbers"
+    },
+    {
+      "name": "baseline.eval_direct.hybrid.mrr@10",
+      "value": 0.7918556311413454,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Same eval set indexed directly (eval::index, one chunk per paragraph), hybrid mrr@10; reference for the pipeline numbers"
+    },
+    {
+      "name": "baseline.eval_direct.hybrid_mmr.recall@10",
+      "value": 0.9880952380952381,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Same eval set indexed directly (eval::index, one chunk per paragraph), hybrid_mmr recall@10; reference for the pipeline numbers"
+    },
+    {
+      "name": "baseline.eval_direct.hybrid_mmr.mrr@10",
+      "value": 0.7856103552532122,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Same eval set indexed directly (eval::index, one chunk per paragraph), hybrid_mmr mrr@10; reference for the pipeline numbers"
+    },
+    {
+      "name": "ingest.wall_s",
+      "value": 51.263742321,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Initial ingest: from adding the files source to every file indexed (scan, extract, chunk, embed, store)"
+    },
+    {
+      "name": "ingest.files_per_s",
+      "value": 390.1392893785492,
+      "unit": "files/s",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Initial ingest throughput in files"
+    },
+    {
+      "name": "ingest.chunks_per_s",
+      "value": 390.1392893785492,
+      "unit": "chunks/s",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Initial ingest throughput in chunks (each embedded)"
+    },
+    {
+      "name": "ingest.mib_per_s",
+      "value": 0.33749104566966387,
+      "unit": "MiB/s",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Initial ingest throughput in file bytes"
+    },
+    {
+      "name": "ingest.chunks",
+      "value": 20000.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Chunks produced by the initial ingest"
+    },
+    {
+      "name": "ingest.embed.ms_per_1k_chunks",
+      "value": 28.916097399999998,
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Initial ingest: time spent in embedding calls per 1,000 chunks embedded (sum of call durations; calls may overlap)"
+    },
+    {
+      "name": "ingest.embed.ms_per_1k_items",
+      "value": 28.916097399999998,
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Initial ingest: time spent in embedding calls per 1,000 items (files)"
+    },
+    {
+      "name": "ingest.embed.share_of_wall",
+      "value": 0.011281305691236915,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Initial ingest: embedding call time over ingest wall time (capped at 1)"
+    },
+    {
+      "name": "ingest.embed.chars_per_chunk",
+      "value": 906.0735,
+      "unit": "chars",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Mean characters per embedded chunk (task prefix included when the model has one)"
+    },
+    {
+      "name": "resources.db_bytes_per_1k_items",
+      "value": 4048420.0,
+      "unit": "bytes",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Encrypted database on disk (main file + WAL + SHM) after the initial ingest, per 1k items. Includes fixed overhead (sqlite-vec allocates vectors in blocks of 1024), so small corpora overstate it"
+    },
+    {
+      "name": "retrieval.bm25.recall@1",
+      "value": 0.779,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's bm25 top 1"
+    },
+    {
+      "name": "retrieval.bm25.recall@5",
+      "value": 0.893,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's bm25 top 5"
+    },
+    {
+      "name": "retrieval.bm25.recall@10",
+      "value": 0.916,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's bm25 top 10"
+    },
+    {
+      "name": "retrieval.bm25.mrr@10",
+      "value": 0.8270242063492068,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Mean reciprocal rank of the target in the Retriever's bm25 top 10"
+    },
+    {
+      "name": "retrieval.bm25.ndcg@10",
+      "value": 0.848719374667854,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nDCG@10 of the Retriever's bm25 ranking (one relevant document per query)"
+    },
+    {
+      "name": "retrieval.vector.recall@1",
+      "value": 0.035,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's vector top 1"
+    },
+    {
+      "name": "retrieval.vector.recall@5",
+      "value": 0.117,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's vector top 5"
+    },
+    {
+      "name": "retrieval.vector.recall@10",
+      "value": 0.17,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's vector top 10"
+    },
+    {
+      "name": "retrieval.vector.mrr@10",
+      "value": 0.07138928571428574,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Mean reciprocal rank of the target in the Retriever's vector top 10"
+    },
+    {
+      "name": "retrieval.vector.ndcg@10",
+      "value": 0.09453652928941973,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nDCG@10 of the Retriever's vector ranking (one relevant document per query)"
+    },
+    {
+      "name": "retrieval.hybrid.recall@1",
+      "value": 0.285,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's hybrid top 1"
+    },
+    {
+      "name": "retrieval.hybrid.recall@5",
+      "value": 0.771,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's hybrid top 5"
+    },
+    {
+      "name": "retrieval.hybrid.recall@10",
+      "value": 0.877,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.874,
+      "target_met": true,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's hybrid top 10"
+    },
+    {
+      "name": "retrieval.hybrid.mrr@10",
+      "value": 0.48204126984126905,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Mean reciprocal rank of the target in the Retriever's hybrid top 10"
+    },
+    {
+      "name": "retrieval.hybrid.ndcg@10",
+      "value": 0.5780251990497839,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nDCG@10 of the Retriever's hybrid ranking (one relevant document per query)"
+    },
+    {
+      "name": "retrieval.hybrid.text_only_fallbacks",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Queries the retriever answered text-only (embedding unavailable or failed)"
+    },
+    {
+      "name": "retrieval.hybrid_mmr.recall@1",
+      "value": 0.285,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's hybrid_mmr top 1"
+    },
+    {
+      "name": "retrieval.hybrid_mmr.recall@5",
+      "value": 0.636,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's hybrid_mmr top 5"
+    },
+    {
+      "name": "retrieval.hybrid_mmr.recall@10",
+      "value": 0.821,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Known-item queries over the synthetic corpus ingested from files; share whose target is in the Retriever's hybrid_mmr top 10"
+    },
+    {
+      "name": "retrieval.hybrid_mmr.mrr@10",
+      "value": 0.43132301587301564,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Mean reciprocal rank of the target in the Retriever's hybrid_mmr top 10"
+    },
+    {
+      "name": "retrieval.hybrid_mmr.ndcg@10",
+      "value": 0.5230819087214417,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nDCG@10 of the Retriever's hybrid_mmr ranking (one relevant document per query)"
+    },
+    {
+      "name": "retrieval.hybrid_mmr.text_only_fallbacks",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Queries the retriever answered text-only (embedding unavailable or failed)"
+    },
+    {
+      "name": "baseline.fake.retrieval.bm25.recall@10",
+      "value": 0.926,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "M0 fake index (memory --backend fake) on the identical corpus and queries: bm25 recall@10"
+    },
+    {
+      "name": "baseline.fake.retrieval.bm25.mrr@10",
+      "value": 0.8364269841269846,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "M0 fake index (memory --backend fake) on the identical corpus and queries: bm25 mrr@10"
+    },
+    {
+      "name": "baseline.fake.retrieval.vector.recall@10",
+      "value": 0.132,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "M0 fake index (memory --backend fake) on the identical corpus and queries: vector recall@10"
+    },
+    {
+      "name": "baseline.fake.retrieval.vector.mrr@10",
+      "value": 0.05898412698412704,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "M0 fake index (memory --backend fake) on the identical corpus and queries: vector mrr@10"
+    },
+    {
+      "name": "baseline.fake.retrieval.hybrid.recall@10",
+      "value": 0.874,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "M0 fake index (memory --backend fake) on the identical corpus and queries: hybrid recall@10"
+    },
+    {
+      "name": "baseline.fake.retrieval.hybrid.mrr@10",
+      "value": 0.43677539682539623,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "M0 fake index (memory --backend fake) on the identical corpus and queries: hybrid mrr@10"
+    },
+    {
+      "name": "query.latency.p50_ms",
+      "value": 14.960325,
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Retriever::search latency (hybrid + MMR, query embedding included), median"
+    },
+    {
+      "name": "query.latency.p95_ms",
+      "value": 23.567408,
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Retriever::search latency (hybrid + MMR, query embedding included), 95th percentile"
+    },
+    {
+      "name": "query.embed.p50_ms",
+      "value": 0.004126,
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Query embedding call latency during known-item retrieval, median"
+    },
+    {
+      "name": "query.embed.p95_ms",
+      "value": 0.005588,
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Query embedding call latency during known-item retrieval, 95th percentile"
+    },
+    {
+      "name": "freshness.p50_s",
+      "value": 0.541779831,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Median time from a file operation on disk to Retriever::search reflecting it (real watcher, pipeline and store)"
+    },
+    {
+      "name": "freshness.p95_s",
+      "value": 0.684689817,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": 60.0,
+      "target_met": true,
+      "description": "95th-percentile file-operation-to-searchable time (M1 exit criterion: at most 60 s)"
+    },
+    {
+      "name": "freshness.max_s",
+      "value": 0.957638743,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Worst file-operation-to-searchable time (timeouts count at the timeout)"
+    },
+    {
+      "name": "freshness.changes",
+      "value": 1000.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "File operations measured (edits, creates, deletes, renames)"
+    },
+    {
+      "name": "freshness.timeouts",
+      "value": 0.0,
+      "unit": "count",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "File operations not reflected in search within the timeout"
+    },
+    {
+      "name": "freshness.edit.p95_s",
+      "value": 0.680986562,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "95th-percentile time until a file edit is reflected in search"
+    },
+    {
+      "name": "freshness.insert.p95_s",
+      "value": 0.69175589,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "95th-percentile time until a file insert is reflected in search"
+    },
+    {
+      "name": "freshness.delete.p95_s",
+      "value": 0.618661981,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "95th-percentile time until a file delete is reflected in search"
+    },
+    {
+      "name": "freshness.rename.p95_s",
+      "value": 0.699724353,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "95th-percentile time until a file rename is reflected in search"
+    },
+    {
+      "name": "propagation.edit_rate",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "Share of file edits fully reflected in search within the timeout (new content found; old content, deleted items and old paths gone)"
+    },
+    {
+      "name": "propagation.insert_rate",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "Share of file inserts fully reflected in search within the timeout (new content found; old content, deleted items and old paths gone)"
+    },
+    {
+      "name": "propagation.delete_rate",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "Share of file deletes fully reflected in search within the timeout (new content found; old content, deleted items and old paths gone)"
+    },
+    {
+      "name": "propagation.rename_rate",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "Share of file renames fully reflected in search within the timeout (new content found; old content, deleted items and old paths gone)"
+    },
+    {
+      "name": "propagation.final_keys_match",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "After all changes: Jaccard overlap of indexed item keys and files on disk"
+    },
+    {
+      "name": "propagation.final_content_match",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "After all changes: share of changed files still on disk whose current content finds them"
+    },
+    {
+      "name": "freshness.ingest_reported.p95_s",
+      "value": 0.015,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Ingest's own p95 from a change reaching the pipeline to committed (excludes the watcher debounce and the search), from Ingest::status"
+    },
+    {
+      "name": "resources.db_bytes",
+      "value": 83962576.0,
+      "unit": "bytes",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Encrypted database on disk (main file + WAL + SHM) at the end of the run"
+    },
+    {
+      "name": "resources.peak_rss_mib",
+      "value": 217.1796875,
+      "unit": "MiB",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Peak resident set size of the whole benchmark process (store, ingest, watcher, retriever, embedder and the harness itself), from /proc/self/status VmHWM"
+    }
+  ],
+  "targets": [
+    {
+      "metric": "retrieval.eval.hybrid.recall@10",
+      "comparison": "at_least",
+      "target": 0.9047619047619048,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "retrieval.eval.hybrid_mmr.recall@10",
+      "comparison": "at_least",
+      "target": 0.9047619047619048,
+      "value": 0.9761904761904762,
+      "pass": true
+    },
+    {
+      "metric": "retrieval.hybrid.recall@10",
+      "comparison": "at_least",
+      "target": 0.874,
+      "value": 0.877,
+      "pass": true
+    },
+    {
+      "metric": "freshness.p95_s",
+      "comparison": "at_most",
+      "target": 60.0,
+      "value": 0.684689817,
+      "pass": true
+    },
+    {
+      "metric": "propagation.edit_rate",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "propagation.insert_rate",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "propagation.delete_rate",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "propagation.rename_rate",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "propagation.final_keys_match",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "propagation.final_content_match",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    }
+  ],
+  "message": null
+}

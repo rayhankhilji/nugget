@@ -23,13 +23,21 @@ pub(crate) fn record(event: &str, detail: impl FnOnce() -> serde_json::Value) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64() * 1000.0)
         .unwrap_or_default();
-    let line = serde_json::json!({ "t": t, "event": event, "detail": detail() });
+    let mut line = serde_json::json!({ "t": t, "event": event, "detail": detail() }).to_string();
+    line.push('\n');
+    // One write of the whole line under a lock: `writeln!` on a `File` issues several writes, and
+    // the read-ahead thread records alongside the Double Tap flow, so lines interleaved and the
+    // driver read broken JSON (Real OS, macOS overlay run 41115883351).
+    static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
     {
-        let _ = writeln!(f, "{line}");
+        let _ = f.write_all(line.as_bytes());
     }
 }
 

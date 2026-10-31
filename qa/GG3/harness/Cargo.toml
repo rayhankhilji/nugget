@@ -1,0 +1,24 @@
+# GG3 QA harness: runs the bench's computer-use tasks plus the GG3 tasks (qa/GG3/tasks) through
+# the real agent loop, with session perturbations (slow screens, modal dialogs, relayouts, a fake
+# sign-in prompt) the bench's apps cannot stage on their own. Not a workspace member: it is its
+# own workspace so that it never changes the product's build. See qa/GG3/README.md.
+[package]
+name = "gg3-harness"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[[bin]]
+name = "gg3-cua"
+path = "src/main.rs"
+
+[dependencies]
+nugget-bench = { path = "../../../bench" }
+nugget-policy = { path = "../../../crates/nugget-policy" }
+nugget-core = { path = "../../../crates/nugget-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4.5", features = ["derive", "env"] }

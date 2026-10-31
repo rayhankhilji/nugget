@@ -1,0 +1,378 @@
+{
+  "linux/firefox/ckeditor": [
+    "detect",
+    "read",
+    "secure",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/firefox/contenteditable": [
+    "detect",
+    "read",
+    "secure",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/firefox/draftjs": [
+    "detect",
+    "read",
+    "secure",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/firefox/lexical": [
+    "detect",
+    "read",
+    "secure",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/firefox/mail-compose": [
+    "detect",
+    "read",
+    "secure",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/firefox/prosemirror": [
+    "detect",
+    "read",
+    "secure",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/firefox/quill": [
+    "detect",
+    "read",
+    "secure",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/firefox/textarea": [
+    "detect",
+    "read",
+    "secure",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/gedit/native": [
+    "detect",
+    "read",
+    "insert:*",
+    "undo:*"
+  ],
+  "linux/writer/native": [
+    "detect",
+    "read",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:combining",
+    "undo:*"
+  ],
+  "macos/safari/ckeditor": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "recipients",
+    "subject",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:long",
+    "undo:*"
+  ],
+  "macos/safari/contenteditable": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:long",
+    "undo:*"
+  ],
+  "macos/safari/draftjs": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:long",
+    "undo:*"
+  ],
+  "macos/safari/lexical": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:long",
+    "undo:*"
+  ],
+  "macos/safari/mail-compose": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "recipients",
+    "subject",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:long",
+    "undo:*"
+  ],
+  "macos/safari/prosemirror": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:long",
+    "undo:*"
+  ],
+  "macos/safari/quill": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:long",
+    "undo:*"
+  ],
+  "macos/safari/textarea": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:ascii",
+    "insert:newlines",
+    "insert:emoji",
+    "insert:rtl",
+    "insert:long",
+    "undo:*"
+  ],
+  "macos/textedit/native": [
+    "detect",
+    "read"
+  ],
+  "windows-2022/wordpad/native": [
+    "detect",
+    "read",
+    "insert:*",
+    "undo:ascii",
+    "undo:newlines",
+    "undo:emoji",
+    "undo:combining",
+    "undo:long"
+  ],
+  "windows/chrome/ckeditor": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "recipients",
+    "subject",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/chrome/contenteditable": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/chrome/draftjs": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/chrome/lexical": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/chrome/mail-compose": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "recipients",
+    "subject",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/chrome/prosemirror": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/chrome/quill": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/chrome/textarea": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/edge/ckeditor": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "recipients",
+    "subject",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/edge/contenteditable": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/edge/draftjs": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/edge/lexical": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/edge/mail-compose": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "recipients",
+    "subject",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/edge/prosemirror": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/edge/quill": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/edge/textarea": [
+    "detect",
+    "read",
+    "secure",
+    "thread_precision",
+    "thread_recall",
+    "from_me",
+    "insert:*",
+    "undo:*"
+  ],
+  "windows/notepad/native": [
+    "detect",
+    "read",
+    "insert:*",
+    "undo:ascii"
+  ]
+}

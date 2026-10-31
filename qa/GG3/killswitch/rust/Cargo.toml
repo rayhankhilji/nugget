@@ -1,0 +1,22 @@
+# QA probe (GG3 kill switch): the real agent loop + real PolicyEngine/KillSwitch + the real
+# computer-use tools (nugget-computer) over a fake accessibility backend whose actions take time,
+# to show what the kill switch does to an OS action already dispatched. Not a workspace member.
+[package]
+name = "ks-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+nugget-agent = { path = "../../../../crates/nugget-agent" }
+nugget-policy = { path = "../../../../crates/nugget-policy" }
+nugget-computer = { path = "../../../../crates/nugget-computer" }
+nugget-a11y = { path = "../../../../crates/nugget-a11y" }
+nugget-infer = { path = "../../../../crates/nugget-infer" }
+nugget-core = { path = "../../../../crates/nugget-core" }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+serde_json = "1"

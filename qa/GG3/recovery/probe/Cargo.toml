@@ -1,0 +1,28 @@
+# GG3 recovery probe: deterministic scripted-model runs of the real agent loop + computer-use
+# tools over the bench apps, capturing the exact texts the model sees on errors, waits, asks and
+# budgets. Own workspace (like qa/GG3/harness) so it never changes the product build.
+[package]
+name = "gg3-recovery-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[[bin]]
+name = "gg3-recovery"
+path = "src/main.rs"
+
+[dependencies]
+nugget-bench = { path = "../../../../bench" }
+nugget-agent = { path = "../../../../crates/nugget-agent" }
+nugget-computer = { path = "../../../../crates/nugget-computer" }
+nugget-infer = { path = "../../../../crates/nugget-infer" }
+nugget-policy = { path = "../../../../crates/nugget-policy" }
+nugget-core = { path = "../../../../crates/nugget-core" }
+nugget-a11y = { path = "../../../../crates/nugget-a11y" }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+serde_json = "1"

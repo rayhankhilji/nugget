@@ -1,0 +1,24 @@
+computer keys_risk Delete          space=Destroy enter=Destroy click=Destroy
+computer keys_risk Löschen         space=Edit enter=Send click=Edit
+computer keys_risk Revoke access   space=Edit enter=Send click=Edit
+computer keys_risk Make admin      space=Edit enter=Send click=Edit
+computer keys_risk Checkout        space=Edit enter=Send click=Edit
+computer keys_risk Firewall        space=Edit enter=Send click=Edit
+computer keys_risk Send            space=Send enter=Send click=Send
+computer keys_risk Senden          space=Edit enter=Send click=Edit
+settings                       click      Automatic updates              None -> risk=Edit decision=Allow
+com.apple.systempreferences    click      Automatic updates              None -> risk=Security decision=Confirm("Nugget is about to change security or system settings in com.apple.systempreferences: click “Automatic updates”. Treated as security (changes a system settings app). Task v.")
+com.apple.systempreferences    click      Lock screen after 5 minutes    None -> risk=Security decision=Deny("Blocked: security, privacy and account panes of system settings (com.apple.systempreferences) are off limits to Nugget [rule default:deny-security-panes]")
+gnome-control-center           click      Lock screen after 5 minutes    None -> risk=Security decision=Deny("Blocked: security, privacy and account panes of system settings (gnome-control-center) are off limits to Nugget [rule default:deny-security-panes]")
+SystemSettings                 click      Automatic updates              None -> risk=Security decision=Confirm("Nugget is about to change security or system settings in SystemSettings: click “Automatic updates”. Treated as security (changes a system settings app). Task v.")
+com.apple.systempreferences    press_key  Firewall                       Some("space") -> risk=Edit decision=Deny("Blocked: security, privacy and account panes of system settings (com.apple.systempreferences) are off limits to Nugget [rule default:deny-security-panes]")
+com.apple.systempreferences    press_key  Lock screen after 5 minutes    Some("space") -> risk=Edit decision=Deny("Blocked: security, privacy and account panes of system settings (com.apple.systempreferences) are off limits to Nugget [rule default:deny-security-panes]")
+settings                       click      Firewall                       None -> risk=Security decision=Confirm("Nugget is about to change security or system settings in settings: click “Firewall”. Treated as security (label matches security keyword “firewall”). Task v.")
+settings                       press_key  Firewall                       Some("space") -> risk=Edit decision=Allow
+mail                           click      Löschen                        None -> risk=Destroy decision=Confirm("Nugget is about to delete or overwrite data in mail: click “Löschen”. Treated as destroy (label matches destroy keyword “lösch”). Task v.")
+mail                           press_key  Löschen                        Some("space") -> risk=Edit decision=Allow
+mail                           press_key  Löschen                        Some("enter") -> risk=Edit decision=Allow
+mail                           click      Senden                         None -> risk=Send decision=Confirm("Nugget is about to send something on your behalf in mail: click “Senden”. Treated as send (label matches send keyword “senden”). Task v.")
+mail                           press_key  Senden                         Some("space") -> risk=Edit decision=Allow
+shop                           press_key  Bezahlen                       Some("space") -> risk=Edit decision=Allow
+mail                           press_key  Delete                         Some("space") -> risk=Edit decision=Allow

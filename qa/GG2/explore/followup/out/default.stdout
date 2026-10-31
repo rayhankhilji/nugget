@@ -1,0 +1,10 @@
+{"conv": "F01", "turn": 1, "q": "When is my dentist appointment?", "query_rewrite": null, "started_ms": 2138, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F01", "turn": 2, "q": "Who is it with?", "query_rewrite": null, "started_ms": 1706, "hit": false, "orig_hit": false, "general": false, "error": null}
+{"conv": "F01", "turn": 3, "q": "And where is it?", "query_rewrite": null, "started_ms": 2014, "hit": false, "orig_hit": false, "general": false, "error": null}
+{"conv": "F02", "turn": 1, "q": "How much was the hotel in Lisbon?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F02", "turn": 2, "q": "How many nights was that?", "query_rewrite": null, "started_ms": 2024, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F02", "turn": 3, "q": "And what about Kyoto?", "query_rewrite": null, "started_ms": 2075, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F04", "turn": 1, "q": "Who is Bob Lindqvist?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F04", "turn": 2, "q": "When is he on leave?", "query_rewrite": null, "started_ms": 1869, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F13", "turn": 1, "q": "Where are my farewell drinks?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F13", "turn": 2, "q": "What time?", "query_rewrite": null, "started_ms": 1818, "hit": false, "orig_hit": false, "general": false, "error": null}

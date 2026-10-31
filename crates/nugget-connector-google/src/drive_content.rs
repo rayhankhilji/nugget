@@ -856,6 +856,55 @@ fn clean_line(s: &str, max: usize) -> String {
         .collect()
 }
 
+/// Fuzzing entry point (`fuzz/fuzz_targets/drive_export.rs`); not part of the API.
+///
+/// Runs every parser a Drive, Sheets or Slides response body goes through, offline: the
+/// mime/extension decision for `mime_type` and `name`, the text clean-up of a Docs, Slides or
+/// CSV export capped at `cap`, Sheets metadata (titles and the values range URL), Sheets values
+/// as CSV, Slides JSON as Markdown, and a `files.list` entry. Returns `(what, output, max_len)`
+/// for the caller to check: `what` is `"text"` (only `\n` and `\t` as control characters),
+/// `"csv"` (also `\r`), `"line"` (no control characters), `"version"` (a line without `|`),
+/// `"json"` (an object) or `"url"` (a Sheets values URL that must stay one path segment on the
+/// Sheets host).
+#[doc(hidden)]
+pub fn fuzz_export(
+    mime_type: &str,
+    name: &str,
+    body: &[u8],
+    cap: usize,
+) -> Vec<(&'static str, String, usize)> {
+    let mut out = Vec::new();
+    if let Kind::Skip(reason) = kind(mime_type, name) {
+        out.push(("line", reason, 200));
+    }
+    out.push(("text", clean_text(body, cap), cap));
+    if let Ok(meta) = serde_json::from_slice::<SpreadsheetMeta>(body) {
+        for props in meta.sheets.iter().map(|s| &s.properties).take(MAX_SHEETS) {
+            out.push(("line", clean_line(&props.title, MAX_TITLE), MAX_TITLE * 4));
+            if props.title.len() <= MAX_RANGE_TITLE {
+                let range = sheet_range(&props.title);
+                if let Ok(url) = api_url(
+                    "https://sheets.googleapis.com/v4",
+                    &["spreadsheets", "s1", "values", &range],
+                    &[("majorDimension", "ROWS")],
+                ) {
+                    out.push(("url", url.to_string(), usize::MAX));
+                }
+            }
+        }
+    }
+    if let Ok(v) = serde_json::from_slice::<SheetValues>(body) {
+        let (csv, _) = rows_to_csv(&v.values, cap);
+        out.push(("csv", csv, cap));
+    }
+    if let Ok(v) = serde_json::from_slice::<Value>(body) {
+        // The truncation line after the capped slides.
+        out.push(("text", render_slides(&v, cap), cap.saturating_add(80)));
+    }
+    out.extend(crate::drive::fuzz_file_entry(body));
+    out
+}
+
 #[cfg(test)]
 mod unit {
     use serde_json::json;
@@ -1063,6 +1112,46 @@ mod unit {
         let mut s = String::from("ab");
         assert!(!push_capped(&mut s, "cdé", 5));
         assert_eq!(s, "abcd");
+    }
+
+    /// The fuzz entry point keeps the contract its target checks (and does not panic).
+    #[test]
+    fn fuzz_entry_outputs_are_bounded() {
+        let bodies: [&[u8]; 4] = [
+            br#"{"sheets":[{"properties":{"title":"../a/?#%2F'x'"}},{"properties":{"title":".."}}]}"#,
+            br#"{"values":[["a,b","\u0007\r\n"],[1,true,null]]}"#,
+            br#"{"slides":[{"pageElements":[{"shape":{"text":{"textElements":[{"textRun":{"content":"h\u000bi\u0000"}}]}}}]},{}]}"#,
+            br#"{"id":"x_1","name":"n\u202e\n","version":"1|2","owners":[{"displayName":"\u0000"}]}"#,
+        ];
+        for cap in [0, 1, 5, 4096] {
+            for body in bodies {
+                for (what, out, max) in fuzz_export("application/x-y\u{0}", "a.zip", body, cap) {
+                    assert!(out.len() <= max, "{what} {out:?}");
+                    match what {
+                        "text" => assert!(
+                            !out.chars()
+                                .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+                        ),
+                        "csv" => assert!(
+                            !out.chars()
+                                .any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r'))
+                        ),
+                        "line" | "version" => {
+                            assert!(!out.chars().any(|c| c.is_control()), "{out:?}");
+                            assert!(what == "line" || !out.contains('|'), "{out:?}");
+                        }
+                        "json" => assert!(serde_json::from_str::<Value>(&out).unwrap().is_object()),
+                        "url" => {
+                            let u = Url::parse(&out).unwrap();
+                            assert_eq!(u.host_str(), Some("sheets.googleapis.com"));
+                            assert_eq!(u.path_segments().unwrap().count(), 5, "{out}");
+                            assert_eq!(u.query(), Some("majorDimension=ROWS"));
+                        }
+                        other => panic!("{other}"),
+                    }
+                }
+            }
+        }
     }
 
     // ---- against a mock server ----

@@ -8,6 +8,11 @@ authentication.
 The password is stored in your OS keychain (account `password:<source id>`). It never appears in
 `sources.toml`, logs or IPC responses.
 
+**Access.** An app password grants whatever the provider attaches to it. Where the provider lets you
+choose (Fastmail does), give it only IMAP for an `imap` source and only CalDAV for a `caldav` source.
+Nugget only reads: IMAP mailboxes are opened read-only, and CalDAV sync uses read requests
+(`PROPFIND` and `REPORT`).
+
 ## Rules both connectors enforce
 
 - **IMAP is TLS only.** Either implicit TLS (IMAPS, port 993, the default) or `starttls` (port 143),
@@ -74,3 +79,66 @@ and self-hosted Dovecot. For Gmail and Google Calendar, prefer the [Google sourc
 they sign in with OAuth instead of a password, and they sync Gmail's labels and deletions natively.
 
 All settings: [Connector settings → `imap`, `caldav`](../reference/connectors.md#imap).
+
+## Checking IMAP with a real account
+
+The IMAP connector is tested against a mock IMAP server; nobody has run this checklist against a live
+account yet. It takes about 10 minutes with **window_days** set to 30. Use a provider from the table
+above. If a step fails, see [Reporting a failed check](sources.md#reporting-a-failed-check).
+
+1. **Connect.** Create an app password (IMAP access only, where the provider allows), add an IMAP
+   source and enter it when asked. Expected: there is no consent screen; the source switches to
+   `syncing`. A wrong password instead gives **Needs sign-in** with **Set password**.
+2. **First sync.** Wait for `idle` or `watching`. Expected: the item count is close to the number of
+   messages from the last 30 days in INBOX and Sent together. Messages that were unread stay unread in
+   your other mail apps.
+3. **New mail and changes.** Send yourself a message. Expected: it appears within seconds without
+   **Sync now** (IMAP IDLE on the inbox). Flag an older message and choose **Sync now**: it is re-read.
+4. **Move.** Move a message from INBOX to a folder Nugget does not sync, and choose **Sync now**.
+   Expected: it disappears. Add that folder to `folders` (keep INBOX): it appears there, under the new
+   folder. A move is a delete in one folder plus a new item in the other.
+5. **Delete.** Delete a message so it is expunged (or moved to Trash, which is not synced) and choose
+   **Sync now**. Expected: it disappears from search.
+6. **Unicode.** Send yourself a message with the subject `Grüße 🍰 日本語 test`, and add a folder with a
+   non-Latin name (such as `Rechnungen ü`) to `folders`. Expected: the subject shows exactly and is
+   searchable, and the folder syncs.
+7. **Large message.** Set **max_message_mb** to 1 and send yourself a message with a 3 MB attachment.
+   Expected: the message is indexed by its headers only: its subject and sender are searchable, its
+   body is not, and its details say `truncated`. Under the limit, the body is indexed and attachments
+   are listed by name only.
+8. **Revoke.** Delete the app password at your provider, then choose **Sync now**. Expected: **Needs
+   sign-in** (health `reconnect`), with the reason that the source no longer accepts Nugget's
+   sign-in and the fix "Enter a new app password". **Set password** with a new app password recovers
+   it.
+9. **Egress.** Expected: the **Privacy** page shows the traffic under `sync:imap`, to your IMAP server
+   only.
+
+## Checking CalDAV with a real account
+
+Nobody has run this checklist against a live account yet. It takes about 10 minutes; a test calendar
+helps. If a step fails, see [Reporting a failed check](sources.md#reporting-a-failed-check).
+
+1. **Connect.** Create an app password (CalDAV access only, where the provider allows), add a CalDAV
+   source with the URL from the table above, and enter the password. Expected: no consent screen;
+   Nugget discovers your calendars and starts `syncing`.
+2. **First sync.** Wait for `idle`. Expected: one item per event or task stored on the server, with
+   no date window. A repeating event is **one** item, its changed occurrences included.
+3. **Edit.** Change an event's title and choose **Sync now**. Expected: the item shows the new title.
+4. **Move.** Move an event to another calendar on the same account and choose **Sync now**. Expected:
+   it disappears from the old calendar and appears under the new one.
+5. **Delete.** Delete an event and choose **Sync now**. Expected: it disappears from search.
+6. **Unicode.** Create an event titled `Café ☕ 会議`. Expected: the title shows exactly that and is
+   searchable.
+7. **Large event.** Paste a very long description. Expected: the event is indexed; each property is
+   cut at 64 KiB, and attachments are not indexed. A server response over 32 MiB stops the pass with
+   health `too_large`.
+8. **Recurring event.** Create a weekly event and move one occurrence. Expected: one item whose text
+   includes a `Repeats:` line with the rule (for example `FREQ=WEEKLY`), and a section for the moved
+   occurrence.
+9. **Another time zone.** Create an event in a different time zone from yours. Expected: the time is
+   shown as written in the event, followed by its zone, for example
+   `2026-11-03 09:00 (America/New_York)`. If the server stored the time in UTC, it shows `(UTC)`
+   instead, which is still the right moment.
+10. **Revoke.** Delete the app password and choose **Sync now**. Expected: **Needs sign-in** (health
+    `reconnect`) with the fix "Enter a new app password"; **Set password** recovers it.
+11. **Egress.** Expected: traffic under `sync:caldav`, to your CalDAV server only.

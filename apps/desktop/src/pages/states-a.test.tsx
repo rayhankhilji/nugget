@@ -179,6 +179,30 @@ describe("sources states", () => {
     expect(text()).toContain("Check that the source is still there, then choose Sync now.");
   });
 
+  it("turns the health code into a plain reason and fix", async () => {
+    const health = { code: "offline", reason: "x", fix: "y", item_errors: 0 };
+    mockDaemon({ sources_list: [{ ...failing, last_error: "network error: dns", health }] });
+    await show(<SourcesPage />);
+    expect(text()).toContain("Nugget could not reach the service behind Home mail.");
+    expect(text()).toContain("Check your internet connection, VPN or proxy; Nugget retries automatically.");
+  });
+
+  it("shows the daemon's English text for a code this build does not know", async () => {
+    const health = { code: "disk_full", reason: "This computer is out of disk space.", fix: "Free up disk space." };
+    mockDaemon({ sources_list: [{ ...failing, last_error: "insufficient disk space", health }] });
+    await show(<SourcesPage />);
+    expect(text()).toContain("This computer is out of disk space.");
+    expect(text()).toContain("Free up disk space.");
+  });
+
+  it("reports skipped items on a healthy source", async () => {
+    const health = { code: "item_errors", reason: "x", fix: "", item_errors: 2, last_item_error: "bad.pdf: corrupt" };
+    mockDaemon({ sources_list: [{ ...failing, state: "idle", last_error: null, health }] });
+    await show(<SourcesPage />);
+    expect(text()).toContain("some items could not be read and were skipped: 2.");
+    expect(text()).toContain("Last skipped item: bad.pdf: corrupt");
+  });
+
   it("with the daemon stopped, says it isn't reachable and offers Retry", async () => {
     mockDaemon(offline("sources_list"));
     await show(<SourcesPage />);

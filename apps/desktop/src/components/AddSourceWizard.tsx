@@ -31,6 +31,7 @@ const KIND_BLURB: Record<SourceKind, MessageKey> = {
 };
 
 const BOLD: Record<string, TagRenderer> = { b: (c) => <b>{c}</b> };
+const CODE: Record<string, TagRenderer> = { code: (c) => <code>{c}</code> };
 
 const GOOGLE_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials";
 
@@ -174,14 +175,30 @@ function FormError({ error }: { error: unknown }) {
   );
 }
 
-function Actions({ onBack, busy, submitLabel }: { onBack: () => void; busy: boolean; submitLabel: string }) {
+/**
+ * Back and submit. `blocked` says why submitting can't work yet: the submit stays focusable
+ * (aria-disabled, so pressing it explains) and the reason is shown next to it.
+ */
+function Actions({ onBack, busy, submitLabel, blocked }: { onBack: () => void; busy: boolean; submitLabel: string; blocked?: string | null }) {
   const t = useT();
+  const hintId = useId();
   return (
     <div className="dialog-actions">
+      {blocked && (
+        <p id={hintId} className="muted small dialog-actions-hint">
+          {blocked}
+        </p>
+      )}
       <button type="button" className="btn" onClick={onBack} disabled={busy}>
         {t("common.back")}
       </button>
-      <button type="submit" className="btn btn-primary" disabled={busy}>
+      <button
+        type="submit"
+        className="btn btn-primary"
+        disabled={busy}
+        aria-disabled={blocked ? true : undefined}
+        aria-describedby={blocked ? hintId : undefined}
+      >
         {busy ? (
           <>
             <Spinner label={t("addSource.working")} /> {submitLabel}
@@ -194,12 +211,21 @@ function Actions({ onBack, busy, submitLabel }: { onBack: () => void; busy: bool
   );
 }
 
+/** `fallback` is the name used when the field is left empty (said in the hint, not as a placeholder that looks filled in). */
 function NameField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   const t = useT();
   return (
-    <Field label={t("addSource.name")} optional hint={t("addSource.nameHint")}>
+    <Field label={t("addSource.name")} optional hint={t("addSource.nameHintDefault", { name: placeholder })}>
       {(a) => (
-        <input {...a} type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoComplete="off" />
+        <input
+          {...a}
+          type="text"
+          dir="auto"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={t("addSource.namePlaceholder")}
+          autoComplete="off"
+        />
       )}
     </Field>
   );
@@ -260,18 +286,33 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
     }
   };
 
-  const defaultName = roots.length === 1 ? baseName(roots[0]!) : roots.length > 1 ? t("addSource.folder.defaultMany") : t("addSource.folder.defaultNone");
+  // What an empty Name saves as: the folders listed plus a typed path not added yet.
+  const typed = draft.trim();
+  const named = typed && isAbsolutePath(typed) && !roots.includes(typed) ? [...roots, typed] : roots;
+  const defaultName = named.length === 1 ? baseName(named[0]!) : named.length > 1 ? t("addSource.folder.defaultMany") : t("addSource.folder.defaultNone");
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (roots.length === 0) {
+    // A typed path that wasn't added with "Add" yet counts too.
+    const typed = draft.trim();
+    if (typed && !isAbsolutePath(typed)) {
+      setRootsError(t("addSource.folder.fullPath"));
+      return;
+    }
+    const all = typed && !roots.includes(typed) ? [...roots, typed] : roots;
+    if (all.length === 0) {
       setRootsError(t("addSource.folder.needOne"));
       return;
     }
+    if (all !== roots) {
+      setRoots(all);
+      setDraft("");
+    }
+    const fallback = all.length === 1 ? baseName(all[0]!) : t("addSource.folder.defaultMany");
     setBusy(true);
     setError(null);
     try {
-      const s = await save(name.trim() || defaultName, { roots, include: splitList(include), exclude: splitList(exclude) });
+      const s = await save(name.trim() || fallback, { roots: all, include: splitList(include), exclude: splitList(exclude) });
       onAdded(s);
       onClose();
     } catch (err) {
@@ -289,7 +330,7 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
           <ul className="path-list">
             {roots.map((r) => (
               <li key={r}>
-                <code>{r}</code>
+                <code dir="ltr">{r}</code>
                 <button type="button" className="btn btn-ghost btn-small" onClick={() => setRoots((rs) => rs.filter((x) => x !== r))} aria-label={t("addSource.folder.removePath", { path: r })}>
                   {t("addSource.folder.remove")}
                 </button>
@@ -309,6 +350,7 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
           <input
             id="folder-path"
             type="text"
+            dir="ltr"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onDraftKey}
@@ -326,15 +368,18 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
           </p>
         )}
       </fieldset>
-      <Field label={t("addSource.folder.include")} optional hint={t("addSource.folder.includeHint")}>
-        {(a) => <textarea {...a} rows={2} value={include} onChange={(e) => setInclude(e.target.value)} spellCheck={false} />}
-      </Field>
-      <Field label={t("addSource.folder.exclude")} optional hint={t("addSource.folder.excludeHint")}>
-        {(a) => <textarea {...a} rows={2} value={exclude} onChange={(e) => setExclude(e.target.value)} spellCheck={false} />}
-      </Field>
       <NameField value={name} onChange={setName} placeholder={defaultName} />
+      <details className="advanced" open={Boolean(include || exclude) || undefined}>
+        <summary>{t("addSource.advanced")}</summary>
+        <Field label={t("addSource.folder.include")} optional hint={<Trans k="addSource.folder.includeHint" tags={CODE} />}>
+          {(a) => <textarea {...a} dir="ltr" rows={2} value={include} onChange={(e) => setInclude(e.target.value)} spellCheck={false} />}
+        </Field>
+        <Field label={t("addSource.folder.exclude")} optional hint={<Trans k="addSource.folder.excludeHint" tags={CODE} />}>
+          {(a) => <textarea {...a} dir="ltr" rows={2} value={exclude} onChange={(e) => setExclude(e.target.value)} spellCheck={false} />}
+        </Field>
+      </details>
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.folder.submit")} />
+      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.folder.submit")} blocked={roots.length === 0 && !typed ? t("addSource.folder.needOneHint") : null} />
     </form>
   );
 }
@@ -385,7 +430,7 @@ function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
       <Field label={t("addSource.vault.label")} hint={t("addSource.vault.hint")} error={vaultError}>
         {(a) => (
           <div className="inline-row">
-            <input {...a} type="text" value={vault} onChange={(e) => setVault(e.target.value)} autoComplete="off" spellCheck={false} />
+            <input {...a} type="text" dir="ltr" value={vault} onChange={(e) => setVault(e.target.value)} autoComplete="off" spellCheck={false} />
             <button ref={browseRef} data-autofocus="" type="button" className="btn" onClick={() => void browse()}>
               {t("addSource.vault.browse")}
             </button>

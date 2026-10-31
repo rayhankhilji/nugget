@@ -313,3 +313,49 @@ fn debug_builds_trust_the_dev_key() {
     let dev = parse_verifying_key(DEV_PUBLIC_KEY_HEX).unwrap();
     assert!(trusted_keys().unwrap().contains(&dev));
 }
+
+/// A manifest signed by two trusted keys (release + development during a key rotation) advances
+/// both series, so an older manifest signed by only one of them cannot be replayed.
+#[test]
+fn a_dual_signed_manifest_advances_every_signing_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let trust = ManifestTrust::open(dir.path()).unwrap();
+    let (a, b) = (key(1), key(2));
+    let keys = [a.verifying_key(), b.verifying_key()];
+    let (b4, s4) = signed(4, &b);
+    verify_manifest_checked(&b4, s4.as_bytes(), &keys, &trust).unwrap();
+    let bytes = manifest_bytes(5);
+    let sig = format!(
+        "{}\n{}\n",
+        sign_manifest(&bytes, &a),
+        sign_manifest(&bytes, &b)
+    );
+    verify_manifest_checked(&bytes, sig.as_bytes(), &keys, &trust).unwrap();
+    assert_eq!(trust.accepted_version(&a.verifying_key()).unwrap(), Some(5));
+    assert_eq!(trust.accepted_version(&b.verifying_key()).unwrap(), Some(5));
+    // The old manifest signed only by `b` (e.g. a downgraded app that trusts only `b`).
+    let err = verify_manifest_checked(&b4, s4.as_bytes(), &keys, &trust).unwrap_err();
+    assert!(matches!(err, Error::Integrity(_)), "{err}");
+    let err =
+        verify_manifest_checked(&b4, s4.as_bytes(), &[b.verifying_key()], &trust).unwrap_err();
+    assert!(matches!(err, Error::Integrity(_)), "{err}");
+}
+
+/// All or nothing: refused by one signer's record, nothing is recorded for the other.
+#[test]
+fn a_rollback_for_one_signer_records_nothing_for_the_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let trust = ManifestTrust::open(dir.path()).unwrap();
+    let (a, b) = (key(1), key(2));
+    let keys = [a.verifying_key(), b.verifying_key()];
+    accept(&trust, 9, &b).unwrap();
+    let bytes = manifest_bytes(5);
+    let sig = format!(
+        "{}\n{}\n",
+        sign_manifest(&bytes, &a),
+        sign_manifest(&bytes, &b)
+    );
+    verify_manifest_checked(&bytes, sig.as_bytes(), &keys, &trust).unwrap_err();
+    assert_eq!(trust.accepted_version(&a.verifying_key()).unwrap(), None);
+    assert_eq!(trust.accepted_version(&b.verifying_key()).unwrap(), Some(9));
+}

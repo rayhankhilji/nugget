@@ -196,6 +196,11 @@ pub struct PackedPassage {
     pub chunk_ids: Vec<ChunkId>,
     /// The primary passage was cut to fit the budget.
     pub truncated: bool,
+    /// The block's text below its `[n] Title (source)` header in
+    /// [`ContextResponse::text`](nugget_core::ipc::ContextResponse::text): what the passage
+    /// really says, without the ambiguity of re-parsing headers out of the rendered text.
+    #[serde(default)]
+    pub text: String,
 }
 
 /// A packed context with diagnostics.

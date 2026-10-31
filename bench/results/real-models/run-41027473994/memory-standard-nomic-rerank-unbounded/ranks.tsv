@@ -1,0 +1,74 @@
+query	target	text	fake.hybrid@10	fake.bm25	fake.vector	real.bm25@10	real.vector@10	real.hybrid@10	real.hybrid_mmr@10	real.hybrid_rerank@10	real.hybrid_mmr_rerank@10	real.bm25	real.vector
+0	734	gipata zulygiru rulo zulofomi	1	1	-	1	-	2	3	1	1	1	-
+1	2003	kaka nevikaru soka fozuta	3	6	20	7	-	-	-	7	8	7	-
+2	4221	nekataru lolylolo balo kaka	4	1	-	1	-	2	2	1	1	1	-
+3	3325	mirulyru paka folovi balo	4	1	44	1	-	2	2	1	1	1	-
+4	2438	kavipa deka lososomi vika	9	4	79	8	-	-	-	1	1	8	-
+5	2308	foka miremi neka renemi	3	1	36	3	-	-	10	3	3	3	-
+6	882	girukaru bafomiru neremi baka	8	1	-	1	-	3	3	4	3	1	-
+7	3983	kagitalo giruly nebaneru zumipata	8	1	-	1	-	3	2	1	1	1	-
+8	2539	milytami negikalo nerupa karede	2	1	56	1	-	3	3	1	1	1	-
+9	2982	loka milypa milo bademilo	-	38	-	-	-	-	-	-	-	38	-
+10	2962	negiso pane gideta detami	3	1	80	1	-	2	2	1	1	1	-
+11	3919	kaka fokalo lolyru rely	4	1	-	1	-	3	2	5	5	1	-
+12	2574	mikaruta lylomita forudemi givi	1	1	5	1	-	3	2	1	1	1	-
+13	3309	sozurelo losodelo sorulylo rekavi	4	1	16	1	-	2	2	1	1	1	-
+14	3234	nelozu lyka detavi nenevita	3	1	-	1	-	2	3	1	1	1	-
+15	46	fozuviru refo karunelo sogita	1	1	1	1	-	1	1	1	1	1	-
+16	1583	rupavi virekaru talobami tagilo	5	1	14	1	-	5	5	1	1	1	-
+17	2490	reka milo rurely denedemi	1	10	10	-	-	-	-	-	-	17	-
+18	1026	bapami fobareru kamimi viloso	1	1	3	1	-	3	3	2	2	1	-
+19	3868	bakalo gikami soremilo vigipalo	2	1	14	1	-	2	3	1	1	1	-
+20	2811	vitavilo nemi lylyreru vika	5	1	-	1	-	1	1	4	3	1	-
+21	4023	zupane kavizulo vimi zukaso	2	1	15	1	-	6	6	1	1	1	-
+22	4124	virelomi virulylo loka refoviru	4	1	-	1	-	3	3	4	4	1	-
+23	2422	deloneru soba lyderumi gilyrelo	2	1	-	1	-	3	3	1	1	1	46
+24	899	zutalolo kaka zuta lososo	3	1	-	1	-	2	2	1	1	1	-
+25	4716	lodepalo lypami karure lygikata	1	1	1	1	-	5	4	2	2	1	-
+26	60	takaru banevi pasogi nerulo	1	1	4	1	-	1	1	1	1	1	-
+27	2336	lorulylo karu sogilo lone	5	1	93	1	-	1	1	1	1	1	-
+28	1343	solyfolo bagipami rufosomi dezutaru	-	1	-	1	-	3	3	4	4	1	-
+29	362	rubalo lyreruru rulo nebataru	1	1	-	1	-	6	7	2	2	1	-
+30	2021	sotata sobaly karuly gigine	4	1	-	1	-	3	3	2	2	1	-
+31	3977	zulokalo giruly paka milo	1	1	1	1	-	3	2	1	1	1	-
+32	1470	kaka rezuvi loregimi miviloru	3	1	-	1	-	2	2	2	2	1	-
+33	4067	kademimi gikarulo kaka pasopalo	4	1	-	1	-	5	5	1	1	1	-
+34	1910	gifodeta gidesoru lykade vika	1	6	1	6	-	-	-	3	2	6	-
+35	296	basogiru losodeta zuka derukaru	4	1	68	1	-	2	3	1	1	1	-
+36	4988	katasota neka rupata fonekami	-	4	-	4	-	7	7	9	9	4	-
+37	2211	lytabalo nedelota kalorulo devilylo	1	1	5	1	-	4	6	4	4	1	-
+38	85	gika lolyba gilyta patalomi	7	1	71	1	-	1	1	1	1	1	82
+39	237	tadedemi bakaruta dekalo bafoforu	3	1	-	1	-	3	3	3	3	1	-
+40	4855	kalo fotami milyrelo dedelo	4	1	-	1	-	4	3	1	1	1	-
+41	2956	karu kalore kaka paru	3	2	19	2	-	6	5	1	1	2	-
+42	2246	kaka vinefolo zuta panesota	1	1	1	1	-	5	5	1	1	1	-
+43	840	fosofolo zufogimi kaka loka	1	1	22	1	-	1	1	3	2	1	-
+44	1626	ruka baloly lolo lysota	5	1	-	1	-	3	3	3	2	1	-
+45	811	mizuvita bane kademi lyrelomi	1	1	-	1	-	2	3	1	1	1	-
+46	2104	barumiru lodezulo loka fomi	1	1	7	1	-	2	2	1	1	1	-
+47	3055	lyminelo repa bamily lypazuta	4	1	-	1	-	4	3	1	1	1	51
+48	1496	tazudelo batazuru talofomi gizulo	10	1	-	1	-	1	1	1	1	1	-
+49	2534	rurene gikavi gizutalo zuminemi	1	1	1	1	-	2	2	1	1	1	-
+# hybrid@10 real_only: 28 36
+#   q28 target 1343 "solyfolo bagipami rufosomi dezutaru"
+#     fake: target 1/- | 353(3/1) 1143(2/2) 1872(5/3) 887(11/7) 121(10/11) 3204(6/20) 2364(19/15) 864(8/29) 2114(13/35) 4994(29/22)
+#     real: target 1/- | 3204(6/5) 0(31/40) 1343*(1/-) 1425(80/1) 1143(2/-) 4019(43/2) 353(3/-) 2609(-/3) 409(4/-) 3015(-/4)
+#   q36 target 4988 "katasota neka rupata fonekami"
+#     fake: target 4/- | 1184(2/2) 1756(6/3) 974(3/10) 180(1/14) 2904(9/11) 3246(16/5) 1043(15/6) 4396(27/4) 2258(22/9) 3795(8/26)
+#     real: target 4/- | 180(2/1) 457(19/2) 2970(1/-) 974(3/-) 2943(-/3) 4231(-/4) 4988*(4/-) 1184(5/-) 1888(-/5) 1756(6/-)
+# hybrid@10 fake_only: 1 4 5 17 34
+#   q1 target 2003 "kaka nevikaru soka fozuta"
+#     fake: target 6/20 | 3789(18/2) 4744(27/1) 2003*(6/20) 2378(14/16) 4515(7/27) 3849(19/14) 2313(36/9) 424(20/26) 3621(38/22) 646(1/-)
+#     real: target 7/- | 1850(6/2) 4844(29/3) 4744(28/6) 4545(11/36) 646(1/-) 928(77/1) 2496(2/-) 228(3/-) 1149(4/-) 4757(-/4)
+#   q4 target 2438 "kavipa deka lososomi vika"
+#     fake: target 4/79 | 1692(3/6) 92(7/20) 3058(36/11) 1493(1/-) 2900(-/1) 693(-/2) 3762(2/-) 642(-/3) 2438*(4/79) 4324(-/4)
+#     real: target 8/- | 4223(34/20) 1493(1/94) 2921(83/1) 69(-/2) 3762(2/-) 873(-/3) 4320(3/-) 488(-/4) 990(4/-) 769(-/5)
+#   q5 target 2308 "foka miremi neka renemi"
+#     fake: target 1/36 | 4546(7/13) 1182(19/5) 2308*(1/36) 4305(14/22) 4009(28/24) 1114(38/27) 205(-/1) 233(2/-) 1834(-/2) 2156(98/3)
+#     real: target 3/- | 1818(13/2) 4546(7/8) 3422(17/6) 4351(4/31) 4009(11/38) 128(32/27) 233(1/-) 351(-/1) 3368(2/-) 1589(-/3)
+#   q17 target 2490 "reka milo rurely denedemi"
+#     fake: target 10/10 | 2490*(10/10) 4310(2/23) 1815(3/26) 4703(7/27) 4579(16/37) 73(1/-) 3220(-/1) 502(-/2) 2152(-/3) 4212(4/73)
+#     real: target 17/- | 3737(32/31) 351(-/1) 679(1/-) 73(2/-) 4384(-/2) 2328(3/-) 2388(-/3) 3189(-/4) 4310(4/-) 2121(-/5)
+#   q34 target 1910 "gifodeta gidesoru lykade vika"
+#     fake: target 6/1 | 1910*(6/1) 3430(1/10) 3477(10/2) 3047(9/3) 230(2/22) 4477(16/6) 611(3/23) 4462(15/17) 4142(20/16) 821(27/11)
+#     real: target 6/- | 4596(31/3) 4142(25/22) 2273(38/32) 630(-/1) 3430(1/-) 611(2/-) 1282(-/2) 1890(3/-) 112(-/4) 230(4/-)

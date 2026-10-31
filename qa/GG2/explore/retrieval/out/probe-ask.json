@@ -1,0 +1,30 @@
+[
+ {
+  "q1": "When is my dentist appointment?",
+  "query": "What time?",
+  "history_len": 2,
+  "error": "-32003: local: connection failed: error sending request for url (http://127.0.0.1:11434/v1/chat/completions): client error (Connect)",
+  "started_ms": 4147
+ },
+ {
+  "q1": "When is my dentist appointment?",
+  "query": "Who is it with?",
+  "history_len": 2,
+  "error": "-32003: local: connection failed: error sending request for url (http://127.0.0.1:11434/v1/chat/completions): client error (Connect)",
+  "started_ms": 3364
+ },
+ {
+  "q1": "When is my Kyoto flight?",
+  "query": "What time does it leave?",
+  "history_len": 2,
+  "error": "-32003: local: connection failed: error sending request for url (http://127.0.0.1:11434/v1/chat/completions): client error (Connect)",
+  "started_ms": 3491
+ },
+ {
+  "q1": "How much is my Lumen Fiber bill?",
+  "query": "How does that compare to the previous one?",
+  "history_len": 2,
+  "error": "-32003: local: connection failed: error sending request for url (http://127.0.0.1:11434/v1/chat/completions): client error (Connect)",
+  "started_ms": 3602
+ }
+]

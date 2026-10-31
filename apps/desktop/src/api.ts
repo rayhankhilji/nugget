@@ -83,6 +83,8 @@ export interface ChatDone {
   error: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  /** Post-check of a sourced `retrieve.ask` answer (absent for plain chat and older daemons). */
+  check?: AnswerCheck;
 }
 
 export interface ItemRef {
@@ -165,6 +167,35 @@ export interface SourceInfo {
   last_sync?: string | null;
   last_error?: string | null;
   settings?: SourceSettings;
+  /** Plain-language sync health (FF2); absent from older daemons. */
+  health?: SourceHealth | null;
+}
+
+/** Codes of {@link SourceHealth.code}; unknown codes fall back to the daemon's English text. */
+export type SourceHealthCode =
+  | "ok"
+  | "syncing"
+  | "disabled"
+  | "reconnect"
+  | "not_set_up"
+  | "disk_full"
+  | "rate_limited"
+  | "offline"
+  | "server_error"
+  | "too_large"
+  | "config"
+  | "item_errors"
+  | "error";
+
+export interface SourceHealth {
+  code: SourceHealthCode | string;
+  /** English fallback: what is going on. */
+  reason: string;
+  /** English fallback: what the user can do (empty when nothing is needed). */
+  fix?: string;
+  /** Items skipped in recent passes. */
+  item_errors?: number;
+  last_item_error?: string | null;
 }
 
 export interface SourceRef {
@@ -263,6 +294,8 @@ export interface AskRequest {
   tier?: Tier;
   /** Earlier turns, oldest first: a follow-up is rewritten for retrieval and they go to the model. */
   history?: ChatMessage[];
+  /** The client's current UTC offset in minutes (east positive): the daemon's "today". */
+  utc_offset_minutes?: number;
 }
 
 /** Answer streaming as `chat.delta` / `chat.done`, plus the context the model was given. */
@@ -573,7 +606,19 @@ export function isSourceInfo(v: unknown): v is SourceInfo {
     isCount(v.chunks) &&
     isOptString(v.last_sync) &&
     isOptString(v.last_error) &&
-    (v.settings === undefined || v.settings === null || isRecord(v.settings))
+    (v.settings === undefined || v.settings === null || isRecord(v.settings)) &&
+    (v.health === undefined || v.health === null || isSourceHealth(v.health))
+  );
+}
+
+export function isSourceHealth(v: unknown): v is SourceHealth {
+  return (
+    isRecord(v) &&
+    typeof v.code === "string" &&
+    typeof v.reason === "string" &&
+    isOptString(v.fix) &&
+    (v.item_errors === undefined || isCount(v.item_errors)) &&
+    isOptString(v.last_item_error)
   );
 }
 
@@ -1458,6 +1503,8 @@ export interface DoubleTapSettings {
    * in excluded apps, terminals or secure fields. Absent from an older shell: treated as on.
    */
   read_ahead?: boolean;
+  /** Keep reading ahead on battery (low power mode always pauses it). Absent: treated as on. */
+  read_ahead_on_battery?: boolean;
 }
 
 export interface ModifierOption {
@@ -1483,6 +1530,20 @@ export interface DoubleTapStatus {
   hint: string | null;
   modifiers: ModifierOption[];
   recommended_trigger: TriggerSpec;
+  /** Where the running listener's shortcut stands; `null` when nothing is listening (older shells omit it). */
+  shortcut?: ShortcutStatus | null;
+}
+
+/**
+ * A desktop-owned shortcut (the Wayland GlobalShortcuts portal); every other backend is `active`
+ * with no `trigger`.
+ */
+export interface ShortcutStatus {
+  state: "active" | "awaiting_consent" | "not_assigned" | "rebinding" | "failed";
+  /** `active` only: the key the desktop bound, when it differs from the configured chord. */
+  trigger: string | null;
+  /** `failed` only: why. */
+  error: string | null;
 }
 
 /** `nugget_core::ipc::VoiceStatus`. */
@@ -1762,7 +1823,7 @@ export type AgentEvent =
   | { event: "action_done"; task_id: string; action_id: string; tool: string; is_error: boolean; summary: string; replayed: boolean }
   | { event: "verification"; task_id: string; action_id: string; tool: string; verification: Verification }
   | { event: "injection_suspected"; task_id: string; action_id: string; tool: string; finding: InjectionFinding }
-  | { event: "suspended"; task_id: string; question: string }
+  | { event: "suspended"; task_id: string; question: string; options?: string[] }
   | { event: "finished"; task_id: string; outcome: AgentOutcome; summary: string | null };
 
 /** One `agent.event` notification. */
@@ -1822,6 +1883,8 @@ export interface AgentTaskDetail {
   explain: string;
   pending: ConfirmationRequest[];
   question?: string | null;
+  /** Candidate answers offered with `question` (untrusted screen text: render as plain text). */
+  options?: string[];
 }
 
 export type PolicyEffect = "allow" | "confirm" | "deny";
@@ -1964,6 +2027,7 @@ export function askInConversation(
     provider: route.provider,
     tier: route.tier,
     history: history.filter((m) => m.role !== "system").slice(-CHAT_ASK_HISTORY),
+    utc_offset_minutes: -new Date().getTimezoneOffset(),
   });
 }
 
@@ -2143,3 +2207,279 @@ export const learningApi = {
   /** Audited; the daemon then emits `cards.changed` with reason `reset_learning`. */
   resetLearning: (request: ResetLearningRequest) => call<ResetLearningResult>("proactive_reset_learning", { request }),
 };
+
+// ---- FF4 plugins ----
+// Mirrors `PluginCatalogEntry` / `PluginCatalogResult` and the `file_roots` capability in the
+// `// ---- Plugins (M6) ----` block of `nugget_core::ipc`.
+
+// Declaration merge: `PluginCapabilities` (W6 block) gains file access.
+export interface PluginCapabilities {
+  /** Source settings fields holding a folder or file the plugin may read (absent from older daemons). */
+  file_roots?: string[];
+}
+
+/** `capabilities.file_roots`, empty when absent. */
+export function pluginFileRoots(c: PluginCapabilities | null | undefined): string[] {
+  return Array.isArray(c?.file_roots) ? c.file_roots.filter((f): f is string => typeof f === "string") : [];
+}
+
+/** File roots in `requested` that `previous` did not have (all of them for a new install). */
+export function newPluginFileRoots(requested: PluginCapabilities, previous: PluginCapabilities | null | undefined): string[] {
+  const old = previous ? pluginFileRoots(previous) : [];
+  return pluginFileRoots(requested).filter((f) => !old.includes(f));
+}
+
+/** A `.nuggetplugin` package found in a catalog folder, verified but not installed. */
+export interface PluginCatalogEntry {
+  /** Absolute path; pass it to `installPlugin`. */
+  path: string;
+  file_name: string;
+  /** Empty when `error` is set. */
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  kinds: string[];
+  requested: PluginCapabilities;
+  connector_display_name?: string | null;
+  signature: PluginSignature;
+  signer: string;
+  installed_version?: string | null;
+  /** Installed at an older version. */
+  update_available: boolean;
+  /** Installing asks for approval (new install, or an update asking for more access). */
+  needs_approval: boolean;
+  /** Why it can't be installed. */
+  error?: string | null;
+}
+
+export interface PluginCatalogResult {
+  entries: PluginCatalogEntry[];
+  dirs?: string[];
+  truncated?: boolean;
+}
+
+function isPluginCapabilities(v: unknown): v is PluginCapabilities {
+  if (typeof v !== "object" || v === null) return false;
+  const c = v as Record<string, unknown>;
+  return Array.isArray(c.hosts) && Array.isArray(c.secrets) && typeof c.kv_max_bytes === "number";
+}
+
+export function isPluginCatalogEntry(v: unknown): v is PluginCatalogEntry {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return (
+    typeof e.path === "string" &&
+    typeof e.file_name === "string" &&
+    typeof e.id === "string" &&
+    typeof e.name === "string" &&
+    typeof e.version === "string" &&
+    Array.isArray(e.kinds) &&
+    isPluginCapabilities(e.requested) &&
+    (PLUGIN_SIGNATURES as readonly unknown[]).includes(e.signature) &&
+    typeof e.update_available === "boolean" &&
+    (e.error === undefined || e.error === null || typeof e.error === "string")
+  );
+}
+
+/** Plugins available to install from the catalog folders (`plugins.catalog`). Older daemons answer "method not found". */
+export const listPluginCatalog = async (): Promise<PluginCatalogResult> => {
+  const r = await call<PluginCatalogResult>("plugins_catalog");
+  return {
+    entries: Array.isArray(r?.entries) ? r.entries.filter(isPluginCatalogEntry) : [],
+    dirs: Array.isArray(r?.dirs) ? r.dirs.filter((d): d is string => typeof d === "string") : [],
+    truncated: r?.truncated === true,
+  };
+};
+
+// ---- EE3: Ask answer check ----
+
+/** Why the daemon's post-check flagged a claim. Newer daemons may send other values (shown like `unsupported`). */
+export type ClaimFlag = "uncited" | "unsupported";
+
+/** One claim of an answer the post-check could not tie to its sources. */
+export interface FlaggedClaim {
+  /** The sentence exactly as it appears in the streamed answer text. */
+  text: string;
+  /** Kept as sent, so a value this version doesn't know survives a re-save. */
+  reason: ClaimFlag | (string & {});
+}
+
+/** The daemon's post-check of a sourced `retrieve.ask` answer, sent on `chat.done`. */
+export interface AnswerCheck {
+  /** The answer says the user's items don't contain what was asked. */
+  not_found: boolean;
+  /** Sentences of the answer that state something. */
+  claims: number;
+  /** Claims to mark, in answer order. */
+  flagged: FlaggedClaim[];
+  /** Citation markers that named a passage the model was not given (removed from the text). */
+  invalid_citations: number;
+}
+
+// Declaration merge: `StoredChatMessage` (chat history) keeps an answer's check.
+export interface StoredChatMessage {
+  /** The answer's post-check, when it came with one (absent from turns saved before EE3). */
+  check?: AnswerCheck | null;
+}
+
+// ---- FF1: backup, restore, export ----
+//
+// `backup.*` and `export.run` (`crates/nuggetd/src/features/backup*`; snake_case like the rest of
+// the IPC). Backups are encrypted with the store key, which is sealed under the user's backup
+// passphrase; exports are plain files and NOT encrypted.
+
+/** One backup on disk (`BackupInfo`). */
+export interface BackupInfo {
+  /** The backup directory (`<folder>/nugget-backup-YYYYMMDDTHHMMSSZ`). */
+  path: string;
+  /** RFC 3339. */
+  created_at: string;
+  items: number;
+  bytes: number;
+  schema_version: number;
+  app_version: string;
+  /** `linux`, `macos` or `windows`: the computer the backup was made on. */
+  os: string;
+}
+
+/** The daemon found its database damaged at start and has not written to it. */
+export interface BackupRecovery {
+  /** Why the database was refused (plain text from the daemon). */
+  reason: string;
+  /** The damaged database file. */
+  db_path: string;
+  /** Where the damaged file was set aside, if it was moved. */
+  moved_to: string | null;
+  latest_backup: BackupInfo | null;
+}
+
+export interface BackupStatus {
+  folder: string | null;
+  /** 0 = manual only. */
+  interval_hours: number;
+  keep: number;
+  passphrase_set: boolean;
+  running: boolean;
+  last_backup: BackupInfo | null;
+  last_error: string | null;
+  /** RFC 3339; `null` when manual only or not configured. */
+  next_due: string | null;
+  restore_pending: boolean;
+  recovery: BackupRecovery | null;
+}
+
+/** `backup.configure`: only the fields given change. */
+export interface BackupConfigure {
+  folder?: string;
+  interval_hours?: number;
+  keep?: number;
+}
+
+export interface BackupList {
+  /** Newest first. */
+  backups: BackupInfo[];
+}
+
+export interface BackupRestoreRequest {
+  path: string;
+  /** Needed when the backup's key is not this computer's store key (another computer, lost key). */
+  passphrase?: string;
+}
+
+export interface BackupRestoreResult {
+  staged: boolean;
+  restart_required: boolean;
+}
+
+export interface ExportResult {
+  /** The export directory (`<folder>/nugget-export-YYYYMMDDTHHMMSSZ`). */
+  path: string;
+  items: number;
+  entities: number;
+  claims: number;
+  audit_entries: number;
+  egress_rows: number;
+  vault_files: number;
+}
+
+export type ExportPhase = "items" | "graph" | "audit" | "egress" | "vault";
+export const EXPORT_PHASES: readonly ExportPhase[] = ["items", "graph", "audit", "egress", "vault"];
+
+/** `export.progress` notification params. */
+export interface ExportProgress {
+  phase: ExportPhase | string;
+  done: number;
+}
+
+/** This feature's daemon notifications (they arrive through `events.onNotification`). */
+export const BACKUP_NOTIFICATION = { changed: "backup.changed", exportProgress: "export.progress" } as const;
+
+/** Schedules the UI offers, as `interval_hours`. */
+export const BACKUP_INTERVALS = { manual: 0, daily: 24, weekly: 168 } as const;
+export type BackupSchedule = keyof typeof BACKUP_INTERVALS;
+
+/** The schedule an `interval_hours` value reads as (other values show as the closest choice). */
+export function scheduleOf(hours: number): BackupSchedule {
+  if (hours <= 0) return "manual";
+  return hours < 96 ? "daily" : "weekly";
+}
+
+/** The daemon's minimum passphrase length (`backup.set_passphrase`). */
+export const MIN_BACKUP_PASSPHRASE = 8;
+
+export function isBackupStatus(v: unknown): v is BackupStatus {
+  return isRecord(v) && typeof v.passphrase_set === "boolean" && typeof v.running === "boolean" && isCount(v.keep) && isCount(v.interval_hours);
+}
+
+export function isExportProgress(v: unknown): v is ExportProgress {
+  return isRecord(v) && typeof v.phase === "string" && isCount(v.done);
+}
+
+export const backupApi = {
+  /** Older daemons answer "method not found". */
+  status: () => call<BackupStatus>("backup_status"),
+  configure: (request: BackupConfigure) => call<BackupStatus>("backup_configure", { request }),
+  /** Write-only: callers drop the passphrase from their state right after this resolves. */
+  setPassphrase: (passphrase: string) => call<{ ok: boolean }>("backup_set_passphrase", { request: { passphrase } }),
+  /** Back up now; `backup.changed` follows. Fails without a folder or a passphrase. */
+  run: () => call<BackupInfo>("backup_run", { request: {} }),
+  /** Backups in `folder` (default: the configured folder), newest first. */
+  list: (folder?: string | null) => call<BackupList>("backup_list", { request: folder ? { folder } : {} }),
+  /** Verifies and stages the backup; the daemon then exits by itself and applies it at its next start. */
+  restore: (request: BackupRestoreRequest) => call<BackupRestoreResult>("backup_restore", { request }),
+  /** Progress arrives as `export.progress` notifications. */
+  exportRun: (folder: string) => call<ExportResult>("export_run", { request: { folder } }),
+};
+
+/** How long to wait for the daemon to exit after staging a restore. */
+export const RESTORE_EXIT_TIMEOUT_MS = 15_000;
+const RESTORE_POLL_MS = 250;
+
+export type RestorePhase = "staging" | "restarting" | "done";
+
+/**
+ * Restore a backup end to end: stage it (`backup.restore`), wait until the daemon has shut
+ * itself down, start it again with the app's `start_daemon` (the daemon applies the staged
+ * restore as it starts) and wait until it answers. `onPhase` reports progress. Throws an
+ * `ApiError` from the step that failed. The current data is set aside by the daemon, never deleted.
+ */
+export async function restoreAndRestart(
+  request: BackupRestoreRequest,
+  onPhase: (phase: RestorePhase) => void = () => {},
+  sleep: (ms: number) => Promise<void> = sleepMs,
+): Promise<ConnectionInfo> {
+  onPhase("staging");
+  await backupApi.restore(request);
+  onPhase("restarting");
+  // `start_daemon` returns at once while the old daemon still answers: wait for it to go first.
+  for (let waited = 0; waited < RESTORE_EXIT_TIMEOUT_MS; waited += RESTORE_POLL_MS) {
+    const c = await api.connection().catch(() => null);
+    if (!c?.connected) break;
+    await sleep(RESTORE_POLL_MS);
+  }
+  const conn = await api.startDaemon();
+  if (!conn.connected) throw new ApiError({ kind: "spawn", message: conn.error ?? t("backup.restore.didNotStart") });
+  onPhase("done");
+  return conn;
+}

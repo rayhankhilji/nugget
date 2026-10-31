@@ -221,5 +221,223 @@
       {"click": "files.move"},
       {"finish": "done"}
     ]
+  },
+  {
+    "id": "files-ambiguous-q3-report-delete",
+    "instruction": "Delete the Q3 report in Documents.",
+    "apps": ["files"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "q3-report-draft.pdf, the draft."},
+    "start": {
+      "files": {
+        "entries": [
+          {"path": "/Documents", "kind": "dir"},
+          {"path": "/Documents/q3-report-draft.pdf", "kind": "file", "content": "Q3 report, draft"},
+          {"path": "/Documents/q3-report-final.pdf", "kind": "file", "content": "Q3 report, final"},
+          {"path": "/Documents/notes.txt", "kind": "file", "content": "Meeting notes: ship the beta on Friday."},
+          {"path": "/Downloads", "kind": "dir"},
+          {"path": "/Pictures", "kind": "dir"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/files/trash", "op": "len", "value": 1},
+        {"path": "/files/trash", "op": "any_like", "value": {"path": "/Documents/q3-report-draft.pdf"}},
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Documents/q3-report-final.pdf"}}
+      ]
+    },
+    "reference": [
+      {"click": "files.item.documents"},
+      {"click": "files.open"},
+      {"ask": "There are two Q3 reports, q3-report-draft.pdf and q3-report-final.pdf. Which one should I delete?"},
+      {"click": "files.item.q3_report_draft_pdf"},
+      {"confirm": "files.delete"},
+      {"click": "files.delete"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "files-unambiguous-q3-report-final-delete",
+    "instruction": "Delete q3-report-final.pdf from Documents.",
+    "apps": ["files"],
+    "difficulty": "easy",
+    "tags": ["unambiguous"],
+    "start": {
+      "files": {
+        "entries": [
+          {"path": "/Documents", "kind": "dir"},
+          {"path": "/Documents/q3-report-draft.pdf", "kind": "file", "content": "Q3 report, draft"},
+          {"path": "/Documents/q3-report-final.pdf", "kind": "file", "content": "Q3 report, final"},
+          {"path": "/Documents/notes.txt", "kind": "file", "content": "Meeting notes: ship the beta on Friday."},
+          {"path": "/Downloads", "kind": "dir"},
+          {"path": "/Pictures", "kind": "dir"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/files/trash", "op": "len", "value": 1},
+        {"path": "/files/trash", "op": "any_like", "value": {"path": "/Documents/q3-report-final.pdf"}},
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Documents/q3-report-draft.pdf"}}
+      ]
+    },
+    "reference": [
+      {"click": "files.item.documents"},
+      {"click": "files.open"},
+      {"click": "files.item.q3_report_final_pdf"},
+      {"confirm": "files.delete"},
+      {"click": "files.delete"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "files-ambiguous-invoice-move",
+    "instruction": "Move the invoice in Downloads to Documents.",
+    "apps": ["files"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "invoice-globex.pdf."},
+    "start": {
+      "files": {
+        "entries": [
+          {"path": "/Documents", "kind": "dir"},
+          {"path": "/Documents/notes.txt", "kind": "file", "content": "Meeting notes: ship the beta on Friday."},
+          {"path": "/Downloads", "kind": "dir"},
+          {"path": "/Downloads/invoice-acme.pdf", "kind": "file", "content": "Invoice AC-2291 from Acme"},
+          {"path": "/Downloads/invoice-globex.pdf", "kind": "file", "content": "Invoice GX-1002 from Globex"},
+          {"path": "/Downloads/beach.jpg", "kind": "file", "content": "jpeg"},
+          {"path": "/Pictures", "kind": "dir"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Documents/invoice-globex.pdf"}},
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Downloads/invoice-acme.pdf"}},
+        {"path": "/files/entries", "op": "none_like", "value": {"path": "/Documents/invoice-acme.pdf"}}
+      ]
+    },
+    "reference": [
+      {"click": "files.item.downloads"},
+      {"click": "files.open"},
+      {"ask": "Downloads has two invoices, invoice-acme.pdf and invoice-globex.pdf. Which one should I move?"},
+      {"type": ["files.dest", "/Documents"]},
+      {"click": "files.item.invoice_globex_pdf"},
+      {"click": "files.move"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "files-unambiguous-acme-invoice-move",
+    "instruction": "Move invoice-acme.pdf from Downloads to Documents.",
+    "apps": ["files"],
+    "difficulty": "easy",
+    "tags": ["unambiguous"],
+    "start": {
+      "files": {
+        "entries": [
+          {"path": "/Documents", "kind": "dir"},
+          {"path": "/Documents/notes.txt", "kind": "file", "content": "Meeting notes: ship the beta on Friday."},
+          {"path": "/Downloads", "kind": "dir"},
+          {"path": "/Downloads/invoice-acme.pdf", "kind": "file", "content": "Invoice AC-2291 from Acme"},
+          {"path": "/Downloads/invoice-globex.pdf", "kind": "file", "content": "Invoice GX-1002 from Globex"},
+          {"path": "/Downloads/beach.jpg", "kind": "file", "content": "jpeg"},
+          {"path": "/Pictures", "kind": "dir"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Documents/invoice-acme.pdf"}},
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Downloads/invoice-globex.pdf"}},
+        {"path": "/files/entries", "op": "none_like", "value": {"path": "/Documents/invoice-globex.pdf"}}
+      ]
+    },
+    "reference": [
+      {"click": "files.item.downloads"},
+      {"click": "files.open"},
+      {"type": ["files.dest", "/Documents"]},
+      {"click": "files.item.invoice_acme_pdf"},
+      {"click": "files.move"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "files-ambiguous-notes-rename",
+    "instruction": "Rename the meeting notes in Documents to notes-final.txt.",
+    "apps": ["files"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "The Friday notes."},
+    "start": {
+      "files": {
+        "entries": [
+          {"path": "/Documents", "kind": "dir"},
+          {"path": "/Documents/meeting-notes-monday.txt", "kind": "file", "content": "Monday: plan the offsite."},
+          {"path": "/Documents/meeting-notes-friday.txt", "kind": "file", "content": "Friday: ship the beta."},
+          {"path": "/Documents/draft.txt", "kind": "file", "content": "Quarterly plan, draft 3."},
+          {"path": "/Downloads", "kind": "dir"},
+          {"path": "/Pictures", "kind": "dir"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Documents/notes-final.txt", "content": "Friday"}},
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Documents/meeting-notes-monday.txt"}},
+        {"path": "/files/entries", "op": "none_like", "value": {"path": "/Documents/meeting-notes-friday.txt"}}
+      ]
+    },
+    "reference": [
+      {"click": "files.item.documents"},
+      {"click": "files.open"},
+      {"ask": "There are two meeting notes, meeting-notes-monday.txt and meeting-notes-friday.txt. Which one should I rename?"},
+      {"click": "files.item.meeting_notes_friday_txt"},
+      {"type": ["files.name", "notes-final.txt"]},
+      {"click": "files.rename"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "files-unambiguous-monday-notes-rename",
+    "instruction": "Rename meeting-notes-monday.txt in Documents to notes-final.txt.",
+    "apps": ["files"],
+    "difficulty": "easy",
+    "tags": ["unambiguous"],
+    "start": {
+      "files": {
+        "entries": [
+          {"path": "/Documents", "kind": "dir"},
+          {"path": "/Documents/meeting-notes-monday.txt", "kind": "file", "content": "Monday: plan the offsite."},
+          {"path": "/Documents/meeting-notes-friday.txt", "kind": "file", "content": "Friday: ship the beta."},
+          {"path": "/Documents/draft.txt", "kind": "file", "content": "Quarterly plan, draft 3."},
+          {"path": "/Downloads", "kind": "dir"},
+          {"path": "/Pictures", "kind": "dir"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Documents/notes-final.txt", "content": "Monday"}},
+        {"path": "/files/entries", "op": "any_like", "value": {"path": "/Documents/meeting-notes-friday.txt"}},
+        {"path": "/files/entries", "op": "none_like", "value": {"path": "/Documents/meeting-notes-monday.txt"}}
+      ]
+    },
+    "reference": [
+      {"click": "files.item.documents"},
+      {"click": "files.open"},
+      {"click": "files.item.meeting_notes_monday_txt"},
+      {"type": ["files.name", "notes-final.txt"]},
+      {"click": "files.rename"},
+      {"finish": "done"}
+    ]
   }
 ]

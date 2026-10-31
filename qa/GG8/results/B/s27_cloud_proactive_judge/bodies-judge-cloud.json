@@ -1,0 +1,37 @@
+[
+ {
+  "host": "api.anthropic.com",
+  "path": "/v1/messages",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "accept",
+    "text/event-stream"
+   ],
+   [
+    "x-api-key",
+    "sk-ant-GG8CANARY-APIKEY-anthropic"
+   ],
+   [
+    "anthropic-version",
+    "2026-10-21"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.anthropic.com"
+   ],
+   [
+    "content-length",
+    "1833"
+   ]
+  ],
+  "body": "{\"max_tokens\":1200,\"messages\":[{\"content\":[{\"text\":\"{\\n  \\\"suggestions\\\": [\\n    {\\n      \\\"actions\\\": [\\n        \\\"draft_reply\\\",\\n        \\\"archive_thread\\\"\\n      ],\\n      \\\"detail\\\": \\\"Priya Raman wrote 3 days ago and hasn't heard back.\\\",\\n      \\\"due\\\": null,\\n      \\\"evidence\\\": [\\n        \\\"Our contract renews on 14 November 2026.\\\"\\n      ],\\n      \\\"key\\\": \\\"unanswered:951042b0cea46cae\\\",\\n      \\\"kind\\\": \\\"unanswered_thread\\\",\\n      \\\"title\\\": \\\"Reply to Priya Raman: Acme renewal: can you confirm by Friday?\\\"\\n    },\\n    {\\n      \\\"actions\\\": [\\n        \\\"draft_reply\\\",\\n        \\\"archive_thread\\\"\\n      ],\\n      \\\"detail\\\": \\\"Marta Sousa wrote 1 day ago and hasn't heard back.\\\",\\n      \\\"due\\\": null,\\n      \\\"evidence\\\": [\\n        \\\"Let me know.\\\"\\n      ],\\n      \\\"key\\\": \\\"unanswered:696efdfb14d29501\\\",\\n      \\\"kind\\\": \\\"unanswered_thread\\\",\\n      \\\"title\\\": \\\"Reply to Marta Sousa: Kickoff in Lisbon on 3 December?\\\"\\n    }\\n  ]\\n}\",\"type\":\"text\"}],\"role\":\"user\"}],\"model\":\"claude-mock\",\"output_config\":{\"format\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"confidence\":{\"type\":\"number\"},\"key\":{\"type\":\"string\"},\"suggested_action\":{\"type\":[\"string\",\"null\"]},\"summary\":{\"type\":\"string\"}},\"required\":[\"key\",\"summary\",\"confidence\"],\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"items\"],\"type\":\"object\"},\"type\":\"json_schema\"}},\"stream\":true,\"system\":\"You review suggestions a personal assistant found in the user's own mail, calendar and notes. For each suggestion, write a one-sentence summary of why it matters now, pick the most useful action from the ones it lists (or none), and give your confidence from 0 to 1 that the user will want to act on it. Use only the evidence given. Do not add suggestions. Reply with JSON only.\"}"
+ }
+]

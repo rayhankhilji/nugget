@@ -36,7 +36,7 @@ Features you will see:
 | Feature | Caused by |
 |---|---|
 | `chat` | A chat in the Chat page to a non-local provider |
-| `ask` | Ask with context to a non-local provider |
+| `ask` | Ask a question with a non-local provider |
 | `embed` | Embeddings sent to a non-local embedding provider (only if you opted in, or a LAN server) |
 | `triage` | Triage on a local-network provider (cloud is never used for triage) |
 | `knowledge` | LLM fact extraction on a non-local provider (only for sources you allowed) |
@@ -152,7 +152,7 @@ See [Double Tap: Read-ahead](double-tap.md#read-ahead).
 
 Separately from the egress ledger, the daemon keeps an append-only **audit log** of changes: sources
 added, updated and removed, sign-ins started and finished, secrets set (the account name only, never
-the value), model installs, every MCP call (arguments summarised, never content), every draft (without its
+the value), model installs, every MCP call (arguments summarised, a query only as its length and a keyed hash, never content), every draft (without its
 content) and plugin installs and approvals. Each new entry is chained to the previous one with an HMAC-SHA256 keyed from
 your store key, so editing or deleting old entries is detectable; `nuggetd status` reports whether
 the chain verified at startup. The newest entry is also anchored in your OS keychain, so cutting off

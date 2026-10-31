@@ -14,6 +14,9 @@
 //!   effect *and* the after-observation shows it (the value reads back, the item is selected,
 //!   the element or window changed); it fails when the observation contradicts the intent, and is
 //!   unverifiable otherwise.
+//! - Results that show a screen (`observe`, and actions that return the changed window) carry
+//!   its [`targets`](nugget_agent::ToolResult::targets): the list rows, files, events and other
+//!   items the task could refer to, by label ([`targets`] module). They never reach the model.
 //! - Screenshot fallback ([`ComputerConfig::screenshot_fallback`], off by default): only when a
 //!   window has no actionable element, a PNG goes into the result's `data` (for the user and the
 //!   log); nothing is ever clicked by coordinates.
@@ -55,6 +58,7 @@ mod observe;
 pub mod render;
 pub mod risk;
 mod state;
+pub mod targets;
 mod tools;
 
 use std::sync::Arc;

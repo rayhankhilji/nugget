@@ -212,7 +212,7 @@ fn mean_vector(
     Ok(sum.into_iter().map(|s| (s / n) as f32).collect())
 }
 
-fn ann_ready(conn: &Connection) -> Result<bool> {
+pub(crate) fn ann_ready(conn: &Connection) -> Result<bool> {
     conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM meta WHERE key = ?1)",
         [META_ANN_READY],

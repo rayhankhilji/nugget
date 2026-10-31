@@ -222,6 +222,11 @@ fn base_rel(id: &EntityId) -> String {
     format!(".nugget/base/entities/{}.md", short_id(id))
 }
 
+/// A merge base written ahead of its page: `<fingerprint of the page text> <page path>\n<base>`.
+fn pending_rel(base: &str) -> String {
+    format!("{base}.pending")
+}
+
 fn conflict_rel(page: &str) -> String {
     format!(".nugget/conflicts/{page}")
 }
@@ -244,6 +249,13 @@ impl Vault {
         config: VaultConfig,
     ) -> Result<Self> {
         let fs = SafeFs::new(root.as_ref())?;
+        let swept = fs.sweep_temp_files();
+        if swept > 0 {
+            tracing::info!(
+                files = swept,
+                "vault: removed temp files of interrupted writes"
+            );
+        }
         let state = match fs.read(STATE_FILE) {
             Ok(Some(text)) => match serde_json::from_str::<State>(&text) {
                 Ok(s) => s,
@@ -635,7 +647,63 @@ impl Vault {
     }
 
     fn read_base(&self, id: &EntityId) -> Option<String> {
-        self.fs.read(&base_rel(id)).ok().flatten()
+        self.read_base_at(&base_rel(id))
+    }
+
+    /// The merge base at `base`, first completing a page write that was interrupted between
+    /// the page and its base (see [`Vault::write_page`]): if the page holds what the pending
+    /// base was written for, that base is the right one; otherwise the old one still is.
+    fn read_base_at(&self, base: &str) -> Option<String> {
+        let pending = pending_rel(base);
+        if let Ok(Some(p)) = self.fs.read(&pending) {
+            let landed = p.split_once('\n').and_then(|(head, generated)| {
+                let (fp, page) = head.split_once(' ')?;
+                let text = self.fs.read(page).ok().flatten()?;
+                (fingerprint(&text) == fp).then_some(generated)
+            });
+            if let Some(generated) = landed
+                && self.fs.write(base, generated).is_err()
+            {
+                return Some(generated.to_owned()); // pending kept: retried next time
+            }
+            let _ = self.fs.remove(&pending);
+        }
+        self.fs.read(base).ok().flatten()
+    }
+
+    /// Write page `rel`, whose merge base at `base` becomes `generated` (written afterwards with
+    /// [`Vault::write_base`]). The base is first recorded as pending, with the fingerprint of
+    /// the page text, so a crash (or failed write) between the page and its base never leaves
+    /// the new page next to the old base: that pair would make every generated change since
+    /// the last render look like a user edit, and turn into `user_asserted` or `rejected`
+    /// claims on the next pass.
+    fn write_page(&self, rel: &str, text: &str, base: &str, generated: &str) -> Result<()> {
+        self.fs.write(
+            &pending_rel(base),
+            &format!("{} {rel}\n{generated}", fingerprint(text)),
+        )?;
+        self.fs.write(rel, text)
+    }
+
+    /// Whether the file at `rel` is a page whose frontmatter names entity `id`.
+    fn is_page_of(&self, rel: &str, id: &EntityId) -> bool {
+        self.fs.read(rel).ok().flatten().is_some_and(|t| {
+            Doc::parse(&t)
+                .fm
+                .and_then(|fm| doc::fm_get(&fm, "nugget_id"))
+                .and_then(|v| doc::fm_scalar(&v))
+                .is_some_and(|v| v == id.as_str())
+        })
+    }
+
+    /// Write a merge base and drop its pending copy (see [`Vault::write_page`]).
+    fn write_base(&self, base: &str, generated: &str) -> Result<()> {
+        self.fs.write(base, generated)?;
+        let pending = pending_rel(base);
+        if self.fs.is_file(&pending) {
+            self.fs.remove(&pending)?;
+        }
+        Ok(())
     }
 
     fn save_state(&self, st: &State) -> Result<()> {
@@ -787,7 +855,12 @@ impl Vault {
             let rendered = ctx.render_entity(&entity, &claims)?;
             let gen_text = rendered.doc.render();
             let mut rel = page_rel_path(entity.kind, &entity.name, &id, self.config.max_name_chars);
-            if src.as_deref() != Some(rel.as_str()) && self.fs.is_file(&rel) {
+            // (Unless it is this entity's own page, left there by a move interrupted between
+            // writing the new path and removing the old one: then the move completes.)
+            if src.as_deref() != Some(rel.as_str())
+                && self.fs.is_file(&rel)
+                && !self.is_page_of(&rel, &id)
+            {
                 // Something else already sits at the new path: stay where we are.
                 if let Some(s) = &src {
                     tracing::warn!(page = %rel, "vault: target path taken; not moving page");
@@ -831,7 +904,7 @@ impl Vault {
                 self.fs.read(&rel).ok().flatten()
             };
             if current.as_deref() != Some(text.as_str()) {
-                self.fs.write(&rel, &text)?;
+                self.write_page(&rel, &text, &base_rel(&id), &gen_text)?;
                 pass.report.written.push(rel.clone());
             }
             if let Some(s) = &src
@@ -854,7 +927,7 @@ impl Vault {
                 }
                 let _ = self.fs.remove(&conflict_rel(&p.path));
             }
-            self.fs.write(&base_rel(&id), &gen_text)?;
+            self.write_base(&base_rel(&id), &gen_text)?;
             if conflicts.is_empty() {
                 let _ = self.fs.remove(&conflict_rel(&rel));
             } else {
@@ -957,10 +1030,10 @@ impl Vault {
             if self.fs.read(&rel).ok().flatten() != user_text {
                 return Ok(()); // changed under us; next pass
             }
-            self.fs.write(&rel, &text)?;
+            self.write_page(&rel, &text, &base_rel(id), &gen_text)?;
             pass.report.written.push(rel.clone());
         }
-        self.fs.write(&base_rel(id), &gen_text)?;
+        self.write_base(&base_rel(id), &gen_text)?;
         if conflicts.is_empty() {
             let _ = self.fs.remove(&conflict_rel(&rel));
         } else {
@@ -999,12 +1072,7 @@ impl Vault {
                 return Ok(());
             }
         };
-        let base = self
-            .fs
-            .read(INDEX_BASE)
-            .ok()
-            .flatten()
-            .map(|b| Doc::parse(&b));
+        let base = self.read_base_at(INDEX_BASE).map(|b| Doc::parse(&b));
         let prev_conflicts = st
             .index
             .as_ref()
@@ -1028,10 +1096,10 @@ impl Vault {
         };
         let text = doc.render();
         if user_text.as_deref() != Some(text.as_str()) {
-            self.fs.write(INDEX_PAGE, &text)?;
+            self.write_page(INDEX_PAGE, &text, INDEX_BASE, &gen_text)?;
             pass.report.written.push(INDEX_PAGE.into());
         }
-        self.fs.write(INDEX_BASE, &gen_text)?;
+        self.write_base(INDEX_BASE, &gen_text)?;
         if conflicts.is_empty() {
             let _ = self.fs.remove(&conflict_rel(INDEX_PAGE));
         } else {
@@ -1042,5 +1110,124 @@ impl Vault {
             conflicts,
         });
         Ok(())
+    }
+}
+
+/// Crash safety: a pass interrupted at the worst points (here by an injected write or removal
+/// failure, which leaves the files as a hard kill would) must not invent user edits or leave
+/// two pages for one entity.
+#[cfg(test)]
+mod interrupted_writes {
+    use super::*;
+    use crate::paths::fail;
+    use nugget_core::ids::{ItemKey, ItemRef, SourceId};
+    use nugget_graph::{EntityPatch, Evidence, MemGraph, NewEntity};
+
+    fn claim(subject: &EntityId, pred: &str, text: &str) -> NewClaim {
+        NewClaim {
+            subject: subject.clone(),
+            predicate: pred.into(),
+            object: ClaimObject::Literal(text.into()),
+            text: text.into(),
+            confidence: 0.9,
+            status: ClaimStatus::Active,
+            evidence: vec![Evidence {
+                item: ItemRef {
+                    source: SourceId::new("files"),
+                    key: ItemKey::new("notes.md"),
+                },
+                chunk_id: None,
+                quote: None,
+            }],
+            valid_from: None,
+            valid_to: None,
+        }
+    }
+
+    fn setup() -> (tempfile::TempDir, Arc<MemGraph>, Vault, EntityId) {
+        let dir = tempfile::tempdir().unwrap();
+        let graph = Arc::new(MemGraph::new());
+        let sam = graph
+            .create_entity(&NewEntity::new(EntityKind::Person, "Sam Lee"))
+            .unwrap();
+        graph
+            .add_claim(&claim(&sam, "prefers", "Prefers tea."))
+            .unwrap();
+        let vault = Vault::new(
+            dir.path().join("vault"),
+            graph.clone(),
+            Arc::new(NoItems),
+            VaultConfig::default(),
+        )
+        .unwrap();
+        vault.render_all().unwrap();
+        (dir, graph, vault, sam)
+    }
+
+    fn user_made(graph: &MemGraph, id: &EntityId) -> Vec<String> {
+        graph
+            .claims_for(id, true)
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.status != ClaimStatus::Active)
+            .map(|c| format!("{:?}: {}", c.status, c.text))
+            .collect()
+    }
+
+    #[test]
+    fn page_written_without_its_base_is_not_a_user_edit() {
+        let (_dir, graph, vault, sam) = setup();
+        let old = graph.claims_for(&sam, false).unwrap()[0].id;
+        graph
+            .add_claim(&claim(&sam, "works_on", "Works on Apollo."))
+            .unwrap();
+        graph.set_claim_status(old, ClaimStatus::Retracted).unwrap();
+        // The page is rewritten, then the pass stops before its merge base is.
+        fail::next_change_to(&base_rel(&sam));
+        assert!(vault.render_all().is_err());
+        vault.render_all().unwrap();
+        assert_eq!(user_made(&graph, &sam), vec!["Retracted: Prefers tea."]);
+        let page = std::fs::read_to_string(vault.page_path(&sam).unwrap().unwrap()).unwrap();
+        assert!(page.contains("Works on Apollo.") && !page.contains("Prefers tea."));
+        assert!(!vault.fs.is_file(&pending_rel(&base_rel(&sam))));
+        // Interrupted before the page itself: the old base stays, and is right.
+        graph
+            .add_claim(&claim(&sam, "likes", "Likes chess."))
+            .unwrap();
+        fail::next_change_to(vault.state_page(&sam).as_str());
+        assert!(vault.render_all().is_err());
+        vault.render_all().unwrap();
+        assert_eq!(user_made(&graph, &sam), vec!["Retracted: Prefers tea."]);
+    }
+
+    #[test]
+    fn interrupted_move_leaves_one_page() {
+        let (_dir, graph, vault, sam) = setup();
+        let old = vault.state_page(&sam);
+        graph
+            .update_entity(
+                &sam,
+                &EntityPatch {
+                    name: Some("Samantha Lee".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // The page is written at its new path, then removing the old one fails.
+        fail::next_change_to(&old);
+        assert!(vault.render_all().is_err());
+        assert!(vault.fs.is_file(&old));
+        vault.render_all().unwrap();
+        let new = vault.state_page(&sam);
+        assert_ne!(new, old);
+        assert!(new.contains("Samantha Lee"), "{new}");
+        assert!(!vault.fs.is_file(&old), "old page left behind");
+        assert!(vault.fs.is_file(&new));
+    }
+
+    impl Vault {
+        fn state_page(&self, id: &EntityId) -> String {
+            self.lock().pages[id].path.clone()
+        }
     }
 }

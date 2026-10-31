@@ -189,7 +189,9 @@ pub struct DraftConfig {
     pub grounding: bool,
     /// What the streaming check does when `grounding` is on: stop a copied credential while
     /// streaming word by word (the default: it adds next to no latency), or hold and check
-    /// whole sentences, values included (see `bench/README.md`, "Grounded drafts").
+    /// whole sentences, values included (see `bench/README.md`, "Grounded drafts"). With
+    /// grounding off, or a screenshot in the prompt, the credential stop still runs whenever a
+    /// cited passage is sensitive.
     pub grounding_check: GroundingCheck,
     #[serde(skip)]
     pub limits: PromptLimits,
@@ -763,11 +765,14 @@ impl Drafter {
                         lock(&self.inner.last_full).insert(provider.id().clone(), fp);
                     }
                     timings.provider_open_ms = Some(ms(t0.elapsed()));
-                    // Values read off a screenshot can't be checked, so no post-check then.
-                    let ground = (config.grounding && !screenshot).then(|| {
-                        Grounder::for_draft(ctx, &context, req.instruction.as_deref(), &voice)
-                            .with_check(config.grounding_check)
-                    });
+                    let ground = stream_check(
+                        config,
+                        screenshot,
+                        ctx,
+                        &context,
+                        req.instruction.as_deref(),
+                        &voice,
+                    );
                     return Ok(self.start(
                         provider, kind, ctx, context, screenshot, band, stream, t0, timings, ground,
                     ));
@@ -868,7 +873,7 @@ impl Drafter {
     /// In order, it skips when: `[draft.read_ahead]` is off ([`ReadAheadSkip::Disabled`]);
     /// drafting would be refused here ([`ReadAheadSkip::Refused`]); the draft would go to a
     /// cloud provider ([`ReadAheadSkip::Cloud`]: nothing at all is sent, not even a connection
-    /// prewarm, and no retrieval runs); there is no [`Warmer`] or no provider
+    /// prewarm, and no retrieval runs); there is no [`Warmer`] or no available provider
     /// ([`ReadAheadSkip::Unavailable`]); a read-ahead sent its prefill less than
     /// `min_interval_ms` ago ([`ReadAheadSkip::RateLimited`]). Otherwise it cancels any
     /// read-ahead in flight, prepares the draft exactly as `begin` does (retrieval and voice
@@ -904,6 +909,9 @@ impl Drafter {
             .ok_or(ReadAheadSkip::Unavailable)?;
         if provider.meta().locality == Locality::Cloud {
             return Err(ReadAheadSkip::Cloud);
+        }
+        if !provider.available() {
+            return Err(ReadAheadSkip::Unavailable);
         }
         let warmer = self.warmer().ok_or(ReadAheadSkip::Unavailable)?;
         let app = ctx.app.id.as_deref().map(normalize_app_id);
@@ -1173,7 +1181,8 @@ impl Drafter {
     }
 
     /// Providers to try, and whether the choice was explicit (request or per-app setting).
-    /// Routed by tier, a non-cloud first candidate puts [`LocalBudget::provider`] (when set,
+    /// Routed by tier, providers that are not [`available`](Provider::available) are left out,
+    /// and a non-cloud first candidate (before that) puts [`LocalBudget::provider`] (when set,
     /// known to the router and not a cloud provider) first, the tier's candidates after it as
     /// fallback; while it is cooling down after a failure it goes after them instead.
     fn candidates(
@@ -1190,12 +1199,16 @@ impl Drafter {
             return Ok((vec![p], true));
         }
         let mut c = router.candidates(self.inner.config.tier, &Capabilities::default());
-        if c.is_empty() {
-            return Err(Error::NotFound(format!(
+        let no_provider = || {
+            Error::NotFound(format!(
                 "no provider is available for the {:?} tier",
                 self.inner.config.tier
-            )));
-        }
+            ))
+        };
+        let routed_local = c.first().ok_or_else(no_provider)?.meta().locality != Locality::Cloud;
+        // Unavailable providers (a runtime slot without its model) are skipped, as `begin`'s
+        // fallback would skip them, so prewarm and read-ahead report the provider drafts use.
+        c.retain(|p| p.available());
         let local = self
             .inner
             .config
@@ -1203,9 +1216,9 @@ impl Drafter {
             .provider
             .as_ref()
             .and_then(|id| router.provider(id))
-            .filter(|p| p.meta().locality != Locality::Cloud);
+            .filter(|p| p.available() && p.meta().locality != Locality::Cloud);
         if let Some(local) = local
-            && c[0].meta().locality != Locality::Cloud
+            && routed_local
         {
             c.retain(|p| p.id() != local.id());
             let cooling =
@@ -1215,6 +1228,9 @@ impl Drafter {
             } else {
                 c.insert(0, local);
             }
+        }
+        if c.is_empty() {
+            return Err(no_provider());
         }
         Ok((c, false))
     }
@@ -1552,6 +1568,28 @@ impl Drafter {
             },
         )
     }
+}
+
+/// The streaming check on a draft: the configured grounding check; with grounding off, or with
+/// a screenshot (values read off it can't be checked), still the credential stop
+/// ([`GroundingCheck::Secrets`]) whenever a cited passage is sensitive, so that a credential in
+/// the prompt never goes into a message whatever the settings or the screen ask.
+fn stream_check(
+    config: &DraftConfig,
+    screenshot: bool,
+    ctx: &DraftContext,
+    context: &ContextResponse,
+    instruction: Option<&str>,
+    voice: &VoiceHints,
+) -> Option<Grounder> {
+    let check = if config.grounding && !screenshot {
+        config.grounding_check
+    } else if context.citations.iter().any(|c| c.sensitive) {
+        GroundingCheck::Secrets
+    } else {
+        return None;
+    };
+    Some(Grounder::for_draft(ctx, context, instruction, voice).with_check(check))
 }
 
 /// Post-processing settings for this field.
@@ -2565,5 +2603,35 @@ sale costs $25."
         assert_eq!(c.local.candidate_tokens, 1_500);
         assert!(c.local.answer_plan);
         assert_eq!(c.local.limits, PromptLimits::local());
+    }
+
+    #[test]
+    fn credential_stop_runs_with_grounding_off_or_a_screenshot() {
+        let mut sens = cite(1, "k1", Some("Vault"));
+        sens.sensitive = true;
+        let context = ContextResponse {
+            text: "[1] Vault (notes)\nThe VPN password is tangerine-Otter-42.".into(),
+            citations: vec![sens],
+            excluded_sensitive: 0,
+        };
+        let plain = ContextResponse {
+            text: "[1] Alpha (notes)\nfirst".into(),
+            citations: vec![cite(1, "k1", Some("Alpha"))],
+            excluded_sensitive: 0,
+        };
+        let ctx = DraftContext::default();
+        let voice = VoiceHints::default();
+        let off = DraftConfig {
+            grounding: false,
+            ..Default::default()
+        };
+        for (config, screenshot) in [(DraftConfig::default(), true), (off.clone(), false)] {
+            let mut g = stream_check(&config, screenshot, &ctx, &context, None, &voice)
+                .expect("a sensitive passage is always checked");
+            let out = g.feed("Sure: the password is tangerine-Otter-42 today.", true);
+            assert!(!out.contains("tangerine"), "{out:?}");
+            assert_eq!(g.report().secrets_dropped, 1);
+            assert!(stream_check(&config, screenshot, &ctx, &plain, None, &voice).is_none());
+        }
     }
 }

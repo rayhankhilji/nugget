@@ -1,0 +1,263 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "extension_halted_by_kill": "0/10",
+      "tries": [
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388915952,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916025,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916110,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916199,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916288,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916382,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916471,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916572,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916659,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916754,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        }
+      ],
+      "ok": true
+    },
+    {
+      "extension_halted_by_kill": "0/10",
+      "tries": [
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916847,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388916943,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917050,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917148,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917246,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917343,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917447,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917543,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917648,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917789,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        }
+      ],
+      "ok": true
+    },
+    {
+      "extension_halted_by_kill": "0/10",
+      "tries": [
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388917906,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388918031,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388918184,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388918330,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388918504,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388918696,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388918856,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388919004,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388919156,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        },
+        {
+          "halt_pushed_to_extension_by_kill": false,
+          "daemon_halted_after_resume": false,
+          "next_task_snapshot_result": "{\"captured_at_ms\":1793388919287,\"elements\":[{\"disabled\":false,\"editable\":true,\"focused\":false,\"form\":\"f1\",\"id\":\"n1\",\"in_",
+          "next_task_finished": {
+            "outcome": "succeeded"
+          }
+        }
+      ],
+      "ok": true
+    }
+  ]
+}

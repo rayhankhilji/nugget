@@ -1,0 +1,253 @@
+{
+ "scenario": "s21_cloud_draft",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 20
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 8
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 3,
+   "bytes_in": 11208,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 3,
+   "bytes_sent": 11208,
+   "features": [
+    "draft"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-FINAL-1",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-THREAD-1",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-THREADSENS-1",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "read_ahead.skipped_cloud",
+   "ok": false,
+   "detail": {
+    "done": true,
+    "started": true
+   },
+   "severity": null,
+   "t": 1793390532.3756368
+  },
+  {
+   "id": "read_ahead.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793390534.3759818
+  },
+  {
+   "id": "prewarm.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390537.3781736
+  },
+  {
+   "id": "secure.refused",
+   "ok": true,
+   "detail": "-32602: drafting is refused in password and secure fields",
+   "severity": null,
+   "t": 1793390537.3812096
+  },
+  {
+   "id": "secure.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793390539.3815649
+  },
+  {
+   "id": "excluded_app.refused",
+   "ok": true,
+   "detail": "-32602: drafting is disabled in 1Password",
+   "severity": null,
+   "t": 1793390539.3844364
+  },
+  {
+   "id": "excluded_app.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793390541.384767
+  },
+  {
+   "id": "draft.answered",
+   "ok": true,
+   "detail": "{'citations': [{'chunk_id': 3, 'date': '2026-10-30', 'item': {'key': '0:acme-renewal.md', 'source': 'files-1'}, 'n': 1, 'sensitive': False, 'title': 'acme-renewal', 'url': 'file:///tmp/gg8/s21_cloud_draft/Documents/acme-renewal.md'}, {'chunk_id': 7, 'date': '2026-10-30', 'item': {'key': '0:weekly-notes.md', 'source': 'files-1'}, 'n': 2, 'sensitive': False, 'title': 'weekly-notes', 'url': 'file:///tmp/gg8/s21_cloud_draft/Documents/weekly-notes.md'}, {'chunk_id': 6, 'date': '2026-10-30', 'item': {'key': '0:lisbon-trip.md', 'source': 'files-1'}, 'n': 3, 'sensitive': False, 'title': 'lisbon-trip', 'url': 'file:///tmp/gg8/s21_cloud_draft/Documents/lisbon-trip.md'}], 'excluded_sensitive': 4, 'field_kind': 'email_body', 'locality': 'cloud', 'provider': 'anthropic', 'stream_id': 'a85292db-728f-4061-9726-9db757688059'} {'stream_id': 'a85292db-728f-4061-9726-9db757688059', 'error': None, 'input_tokens': 100, 'output_tokens': 3}",
+   "severity": null,
+   "t": 1793390541.4376225
+  },
+  {
+   "id": "draft.excluded_sensitive",
+   "ok": true,
+   "detail": 4,
+   "severity": null,
+   "t": 1793390541.4376564
+  },
+  {
+   "id": "draft.no_sensitive_content",
+   "ok": true,
+   "detail": "1 requests; leaked: []",
+   "severity": null,
+   "t": 1793390541.4378598
+  },
+  {
+   "id": "draft.no_screenshot",
+   "ok": true,
+   "detail": "",
+   "severity": null,
+   "t": 1793390541.437872
+  },
+  {
+   "id": "draft.thread_sent_as_documented",
+   "ok": true,
+   "detail": "",
+   "severity": null,
+   "t": 1793390541.437875
+  },
+  {
+   "id": "draft.no_local_paths",
+   "ok": true,
+   "detail": "",
+   "severity": "Low",
+   "t": 1793390541.4378817
+  },
+  {
+   "id": "draft.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 1 rows (features ['draft']); unmatched []",
+   "severity": null,
+   "t": 1793390542.945997
+  },
+  {
+   "id": "draft.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390542.9460194
+  },
+  {
+   "id": "draft.thread_with_card_number",
+   "ok": false,
+   "detail": "status={'citations': [{'chunk_id': 8, 'date': '2026-10-30', 'item': {'key': 'feedback/a85292db-728f-4061-9726-9db757688059', 'source': 'nugget-voice'}, 'n': 1, 'sensitive': False, 'title': None, 'url': None}, {'chunk_id': 3, 'date': '2026-10-30', 'item': {'key': '0:acme-renewal.md', 'source': 'files-1'}, 'n': 2, 'sensitive': False, 'title': 'acme-renewal', 'url': 'file:///tmp/gg8/s21_cloud_draft/Documents/acme-renewal.md'}, {'chunk_id': 7, 'date': '2026-10-30', 'item': {'key': '0:weekly-notes.md', 'source': 'files-1'}, 'n': 3, 'sensitive': False, 'title': 'weekly-notes', 'url': 'file:///tmp/gg8/s21_cloud_draft/Documents/weekly-notes.md'}, {'chunk_id': 6, 'date': '2026-10-30', 'item': {'key': '0:lisbon-trip.md', 'source': 'files-1'}, 'n': 4, 'sensitive': False, 'title': 'lisbon-trip', 'url': 'file:///tmp/gg8/s21_cloud_draft/Documents/lisbon-trip.md'}], 'excluded_sensitive': 4, 'field_kind': 'email_body', 'locality': 'cloud', 'provider': 'anthropic', 'stream_id': '292a6d3a-823f-48d2-a9fc-be59084c89af'} sent_card=True",
+   "severity": "Medium",
+   "t": 1793390543.0175173
+  },
+  {
+   "id": "draft2.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 2 rows (features ['draft']); unmatched []",
+   "severity": null,
+   "t": 1793390544.522208
+  },
+  {
+   "id": "draft2.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390544.52223
+  },
+  {
+   "id": "keys.keys_only_to_own_host",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390545.1209488
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793390530.8417616,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390531.3453267,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390534.3778293,
+   "note": "prewarm -> {'locality': 'on_device', 'provider': 'local-chat', 'retrieval': True}"
+  },
+  {
+   "t": 1793390544.5244892,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793390544.5568736,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390545.0601017,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390545.1206133,
+   "note": "allow_cloud_screenshots=true: image sent=True"
+  },
+  {
+   "t": 1793390545.1235912,
+   "label": "daemon.stop"
+  }
+ ]
+}

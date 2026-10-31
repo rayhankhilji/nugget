@@ -1,9 +1,9 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState, type RefObject } from "react";
 import { api, type PageId } from "../api";
 import { useT } from "../i18n";
 import { LanguagePicker } from "../i18n/LanguagePicker";
 import { Logo } from "../components/Logo";
-import { loadState, reduce, saveState, STEPS, stepIndex, type OnboardingState } from "./machine";
+import { loadState, reduce, saveState, stepGoalMet, STEPS, stepIndex, type OnboardingState } from "./machine";
 import { AiStep } from "./AiStep";
 import { TriggerStep } from "./TriggerStep";
 import { DoneStep, PermissionsStep, SourceStep, STEP_TITLE, WelcomeStep } from "./steps";
@@ -34,6 +34,9 @@ export function Onboarding({
   const first = useRef(true);
   const exitTo = useRef<PageId | undefined>(undefined);
   const searchable = useSearchableItems(connected && state.step === "done");
+  const mainRef = useRef<HTMLElement>(null);
+  const footRef = useRef<HTMLElement>(null);
+  const stuck = useContentUnder(mainRef, footRef);
 
   useEffect(() => {
     saveState(state);
@@ -54,6 +57,8 @@ export function Onboarding({
   const stepProps = { state, dispatch, connected, headingRef };
   // Finishing with something indexed goes straight to Search: the first useful thing to do.
   const toSearch = isLast && searchable > 0;
+  // Continue on a step that set nothing up counts as skipping it; say so next to the button.
+  const unmet = !isLast && !stepGoalMet(state);
 
   return (
     <div className="onboarding">
@@ -64,11 +69,14 @@ export function Onboarding({
         </div>
         <div className="ob-top-actions">
           <LanguagePicker />
-          {!isLast && (
-            <button type="button" className="btn btn-ghost" onClick={() => dispatch({ type: "skipAll" })}>
-              {t("onboarding.skipAll")}
-            </button>
-          )}
+          {/* Hidden, not removed, on the last step so the header and stepper don't shift. */}
+          <button
+            type="button"
+            className={isLast ? "btn btn-ghost ob-invisible" : "btn btn-ghost"}
+            onClick={() => dispatch({ type: "skipAll" })}
+          >
+            {t("onboarding.skipAll")}
+          </button>
         </div>
       </header>
 
@@ -84,7 +92,7 @@ export function Onboarding({
                   onClick={() => dispatch({ type: "goto", step: s })}
                 >
                   <span className="ob-step-num" aria-hidden="true">
-                    {n + 1}
+                    {status === "done" ? <StepGlyph kind="done" /> : status === "skipped" ? <StepGlyph kind="skipped" /> : n + 1}
                   </span>
                   <span>{t(STEP_TITLE[s])}</span>
                   {status !== "todo" && (
@@ -97,7 +105,7 @@ export function Onboarding({
         </ol>
       </nav>
 
-      <main className="ob-main" aria-labelledby="ob-heading">
+      <main className="ob-main" aria-labelledby="ob-heading" ref={mainRef}>
         <p className="muted small ob-count">{t("onboarding.stepOf", { n: i + 1, total: STEPS.length })}</p>
         <div className="ob-panel" key={state.step}>
           {state.step === "welcome" && <WelcomeStep {...stepProps} />}
@@ -109,14 +117,19 @@ export function Onboarding({
         </div>
       </main>
 
-      <footer className="ob-actions">
+      <footer className={stuck ? "ob-actions ob-actions-stuck" : "ob-actions"} ref={footRef}>
         {i > 0 && (
           <button type="button" className="btn" onClick={() => dispatch({ type: "back" })}>
             {t("onboarding.back")}
           </button>
         )}
         <span className="ob-spacer" />
-        {!isLast && (
+        {unmet && (
+          <span className="muted small ob-hint" id="ob-continue-hint">
+            {t("onboarding.continueSkips")}
+          </span>
+        )}
+        {!isLast && state.step !== "welcome" && (
           <button type="button" className="btn btn-ghost" onClick={() => dispatch({ type: "skip" })}>
             {t("onboarding.skipStep")}
           </button>
@@ -124,15 +137,57 @@ export function Onboarding({
         <button
           type="button"
           className="btn btn-primary"
+          aria-describedby={unmet ? "ob-continue-hint" : undefined}
           onClick={() => {
             exitTo.current = toSearch ? "search" : undefined;
-            dispatch({ type: "next" });
+            dispatch({ type: "continue" });
           }}
         >
           {toSearch ? t("onboarding.done.search") : isLast ? t("onboarding.done.start") : t("onboarding.continue")}
         </button>
       </footer>
     </div>
+  );
+}
+
+/** Whether the step's content runs on under the sticky footer (then the footer casts a shadow). */
+function useContentUnder(main: RefObject<HTMLElement | null>, foot: RefObject<HTMLElement | null>): boolean {
+  const [under, setUnder] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const m = main.current;
+      const f = foot.current;
+      if (!m || !f) return;
+      // The main area's padding is breathing room, not content.
+      const pad = parseFloat(getComputedStyle(m).paddingBlockEnd) || 0;
+      const footer = f.getBoundingClientRect();
+      setUnder(m.getBoundingClientRect().bottom - pad > footer.top + 1);
+      // Focus scrolling (Tab) keeps the focused control clear of the sticky footer.
+      document.documentElement.style.scrollPaddingBlockEnd = `${Math.ceil(footer.height) + 12}px`;
+    };
+    check();
+    window.addEventListener("scroll", check, { passive: true, capture: true });
+    window.addEventListener("resize", check);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(check);
+    if (main.current) ro?.observe(main.current);
+    // The footer grows when the hint appears or it wraps.
+    if (foot.current) ro?.observe(foot.current);
+    return () => {
+      document.documentElement.style.scrollPaddingBlockEnd = "";
+      window.removeEventListener("scroll", check, { capture: true });
+      window.removeEventListener("resize", check);
+      ro?.disconnect();
+    };
+  }, [main, foot]);
+  return under;
+}
+
+/** A check for a done step, a dash for a skipped one (the step's number otherwise). */
+function StepGlyph({ kind }: { kind: "done" | "skipped" }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {kind === "done" ? <path d="M2.5 6.5 5 9l4.5-5.5" /> : <path d="M3 6h6" />}
+    </svg>
   );
 }
 

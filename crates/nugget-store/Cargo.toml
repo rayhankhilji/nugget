@@ -11,7 +11,7 @@ repository.workspace = true
 nugget-core.workspace = true
 nugget-graph.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 time.workspace = true
 tracing.workspace = true
 # SQLCipher (SQLite + AES-256) built from source with a vendored OpenSSL, so every OS gets the same,
@@ -25,6 +25,11 @@ getrandom = "0.3"
 # Liveness locks of egress ledger owners (same crate as the daemon lock in nugget-ipc).
 fs4 = "1"
 zeroize = "1"
+# Backup key envelope: passphrase KDF and AEAD.
+argon2 = { version = "0.5", features = ["zeroize"] }
+# NFC for backup passphrases and backup file paths (already in the workspace lock).
+unicode-normalization = "0.1"
+chacha20poly1305 = "0.10"
 
 # OS keychains. Each target only pulls in its native backend; anything else falls back to a key file.
 # The backend set must match nugget-infer's exactly; see the `keyring` entry in the root Cargo.toml.

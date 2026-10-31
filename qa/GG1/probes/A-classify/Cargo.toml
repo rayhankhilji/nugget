@@ -1,0 +1,14 @@
+# GG1 area A probe: reads nugget-a11y's thread/role helpers directly (quoted mail parsing,
+# AT-SPI role mapping, family detection). Its own workspace; never touches the product workspace.
+[package]
+name = "gg1-probe-a-classify"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[dependencies]
+nugget-a11y = { path = "../../../../crates/nugget-a11y" }
+nugget-core = { path = "../../../../crates/nugget-core" }

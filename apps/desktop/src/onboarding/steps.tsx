@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject } from "react";
 import { api, events, type ConnectorKind, type SourceInfo } from "../api";
 import { useEvent } from "../hooks";
-import { Trans, useT, type MessageKey } from "../i18n";
+import { formatList, Trans, useT, type MessageKey } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Announce, useAnnouncer } from "../components/Announce";
-import { pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
+import { CopyButton } from "../components/CopyButton";
+import { legacyDone, pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
 import { detectOs, type Os } from "./platform";
+import { TriggerKeys } from "./TriggerStep";
+import { loadTrigger, readTrigger } from "./trigger";
+import { detectAiSetup } from "./detect";
 
 export interface StepProps {
   state: OnboardingState;
@@ -32,7 +36,6 @@ export function OfflineNote() {
 }
 
 const STRONG = { strong: (c: ReactNode) => <strong>{c}</strong> };
-const CODE = { code: (c: ReactNode) => <code>{c}</code> };
 
 // ---- 1. welcome ----
 
@@ -80,11 +83,26 @@ export function indexPhase(s: Pick<SourceInfo, "state" | "items" | "last_error">
   return s.items > 0 ? "ready" : "waiting";
 }
 
-export function SourceStep({ headingRef, connected }: StepProps) {
+export function SourceStep({ headingRef, connected, dispatch }: StepProps) {
   const t = useT();
   const [open, setOpen] = useState<ConnectorKind | "pick" | null>(null);
   const [added, setAdded] = useState<SourceInfo[]>([]);
   const [announcement, announce] = useAnnouncer();
+
+  // Sources set up before (running setup again) count too, so Continue marks the step done.
+  useEffect(() => {
+    if (!connected) return;
+    let alive = true;
+    api
+      .sourcesList()
+      .then((list) => alive && list.length > 0 && dispatch({ type: "sourcesFound", names: list.map((s) => s.name) }))
+      .catch(() => {
+        /* unknown: adding one here still counts */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [connected, dispatch]);
 
   return (
     <>
@@ -112,6 +130,7 @@ export function SourceStep({ headingRef, connected }: StepProps) {
           onClose={() => setOpen(null)}
           onAdded={(s) => {
             setAdded((list) => [...list.filter((x) => x.id !== s.id), s]);
+            dispatch({ type: "sourcesFound", names: [s.name] });
             announce(t("onboarding.source.addedAnnounce", { name: s.name }));
           }}
         />
@@ -201,6 +220,22 @@ function IndexProgress({ added, announce }: { added: SourceInfo[]; announce: (te
 
 // ---- 4. permissions ----
 
+// i18n-ignore-block: a shell command is code, not prose.
+const GNOME_A11Y_COMMAND = "gsettings set org.gnome.desktop.interface toolkit-accessibility true";
+// i18n-ignore-end
+
+/** A command on its own line: left-to-right in every locale, never broken mid-token, with a copy button. */
+export function CommandSnippet({ text, what }: { text: string; what: string }) {
+  return (
+    <div className="ob-snippet" dir="ltr">
+      <pre tabIndex={0} aria-label={what}>
+        {text}
+      </pre>
+      <CopyButton text={text} what={what} />
+    </div>
+  );
+}
+
 const OS_LABEL: Record<Exclude<Os, "other">, MessageKey> = {
   macos: "onboarding.perm.os.macos",
   windows: "onboarding.perm.os.windows",
@@ -233,7 +268,8 @@ function PermissionList({ os }: { os: Exclude<Os, "other"> }) {
       return (
         <ul className="ob-perm-list">
           <li>
-            <Trans k="onboarding.perm.linux.atspi" tags={{ ...STRONG, ...CODE }} />
+            <Trans k="onboarding.perm.linux.atspiShort" tags={STRONG} />
+            <CommandSnippet text={GNOME_A11Y_COMMAND} what={t("onboarding.perm.linux.copyCommand")} />
           </li>
           <li>{t("onboarding.perm.linux.wayland")}</li>
           <li>{t("onboarding.perm.linux.flatpak")}</li>
@@ -280,12 +316,6 @@ function OtherHeading({ id, level, children }: { id: string; level: 2 | 3; child
 
 // ---- 6. done ----
 
-const AI_SUMMARY: Record<NonNullable<OnboardingState["ai"]>, MessageKey> = {
-  local: "onboarding.done.ai.local",
-  byok: "onboarding.done.ai.byok",
-  later: "onboarding.done.ai.later",
-};
-
 export const STEP_TITLE: Record<StepId, MessageKey> = {
   welcome: "onboarding.step.welcome",
   ai: "onboarding.step.ai",
@@ -295,20 +325,94 @@ export const STEP_TITLE: Record<StepId, MessageKey> = {
   done: "onboarding.step.done",
 };
 
-export function DoneStep({ headingRef, state, dispatch, searchable = 0 }: StepProps & { searchable?: number }) {
+export function DoneStep({ headingRef, state, dispatch, connected, searchable = 0 }: StepProps & { searchable?: number }) {
   const t = useT();
   const pending = pendingSteps(state);
   const withAi = state.ai === "local" || state.ai === "byok";
+  const os = detectOs();
+  // The shell's trigger is what Double Tap runs with; the local copy is only a first-render cache.
+  const [trigger, setTrigger] = useState(() => loadTrigger(os));
+  useEffect(() => {
+    let alive = true;
+    readTrigger(os)
+      .then((p) => alive && setTrigger(p))
+      .catch(() => {
+        /* keep the cached copy */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [os]);
+
+  // The summary follows what is really there (a key saved or a model installed before, sources
+  // added earlier), not only what this run of setup recorded.
+  const { ai: choice, aiSetup } = state;
+  const knownSources = (state.sources?.length ?? 0) > 0;
+  useEffect(() => {
+    if (!connected) return;
+    let alive = true;
+    if ((choice === "local" || choice === "byok") && aiSetup?.ai !== choice) {
+      void detectAiSetup(choice).then((what) => alive && what && dispatch({ type: "aiSetUp", ai: choice, what }));
+    }
+    if (!knownSources) {
+      api
+        .sourcesList()
+        .then((list) => alive && list.length > 0 && dispatch({ type: "sourcesFound", names: list.map((s) => s.name) }))
+        .catch(() => {});
+    }
+    return () => {
+      alive = false;
+    };
+  }, [connected, choice, aiSetup?.ai, knownSources, dispatch]);
+
+  const aiReady = withAi && aiSetup?.ai === state.ai ? aiSetup : null;
+  // Progress saved before setups were recorded: the step was completed, so it was set up.
+  const aiLegacy = withAi && !aiReady && legacyDone(state, "ai");
+  const sources = state.sources ?? [];
+  const sourcesLegacy = sources.length === 0 && legacyDone(state, "source");
+  const ai = aiReady
+    ? aiReady.ai === "local"
+      ? t("onboarding.done.summary.aiLocal", { model: aiReady.what })
+      : t("onboarding.done.summary.aiByok", { provider: aiReady.what })
+    : aiLegacy
+      ? t(state.ai === "local" ? "onboarding.done.summary.aiLocalPlain" : "onboarding.done.summary.aiByokPlain")
+      : withAi
+        ? t("onboarding.done.summary.aiNotSetUp")
+        : t("onboarding.done.summary.aiLater");
+  const aiSet = aiReady !== null || aiLegacy;
   return (
     <>
       <StepHeading headingRef={headingRef}>{t("onboarding.done.heading")}</StepHeading>
-      <p className="ob-lead">{t(withAi ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}</p>
+      <p className="ob-lead">{t(aiSet ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}</p>
       {searchable > 0 && (
-        <p className="note" role="status">
+        <p className="note ob-index-ready" role="status">
           {t("onboarding.done.searchable", { count: searchable })}
         </p>
       )}
-      {state.ai && <p>{t(AI_SUMMARY[state.ai])}</p>}
+      <dl className="ob-summary">
+        <div className={aiSet ? "ob-summary-set" : "ob-summary-unset"}>
+          <dt>{t("onboarding.done.summary.ai")}</dt>
+          <dd>{ai}</dd>
+        </div>
+        <div className={sources.length || sourcesLegacy ? "ob-summary-set" : "ob-summary-unset"}>
+          <dt>{t("onboarding.done.summary.sources")}</dt>
+          <dd>
+            {sources.length ? (
+              <bdi>{formatList(sources)}</bdi>
+            ) : sourcesLegacy ? (
+              t("onboarding.done.summary.sourcesAdded")
+            ) : (
+              t("onboarding.done.summary.sourcesNone")
+            )}
+          </dd>
+        </div>
+        <div className="ob-summary-set">
+          <dt>{t("onboarding.done.summary.trigger")}</dt>
+          <dd>
+            <TriggerKeys pref={trigger} os={os} />
+          </dd>
+        </div>
+      </dl>
       {pending.length > 0 ? (
         <>
           <p>{t("onboarding.done.pending", { count: pending.length })}</p>

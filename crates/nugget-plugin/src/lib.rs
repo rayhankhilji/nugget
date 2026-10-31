@@ -3,8 +3,10 @@
 //!
 //! - **Interface.** The WIT world `nugget:plugin/plugin` (`wit/plugin.wit`). A plugin exports a
 //!   `connector` (cursor-based sync that emits upserts, deletes and checkpoints) and/or `tools`.
-//!   It imports only `http`, `kv`, `secrets`, `log`, `clock` and, during a sync, `sink`. There is
-//!   no filesystem, socket, environment or other clock: WASI imports are linked to traps.
+//!   It imports only `http`, `kv`, `secrets`, `log`, `clock`, `fs` (read-only, connectors only,
+//!   below the paths the user chose for the manifest's `file_roots`; see [`fs`]) and, during a
+//!   sync, `sink`. There is no other filesystem access, no socket, environment or other clock:
+//!   WASI imports are linked to traps.
 //! - **Capabilities** ([`Capabilities`]) are declared in `nugget-plugin.toml`, approved by the
 //!   user at install, and enforced by the host on every import call (deny by default).
 //! - **Limits** ([`Limits`]): fuel, an epoch deadline and a `tokio` timeout per call, and a cap
@@ -22,6 +24,7 @@
 
 mod agent;
 mod connector;
+pub mod fs;
 mod host;
 mod kv;
 mod manifest;
@@ -33,7 +36,8 @@ pub use connector::{PluginConnector, PluginConnectorFactory, plugin_kind};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use host::{HostConfig, Limits, LoadedPlugin, PluginHost, ToolSpec, secret_account};
 pub use manifest::{
-    Capabilities, ConnectorAuth, ConnectorSection, HostRule, MANIFEST_FILE, Manifest, PluginKind,
+    Capabilities, ConnectorAuth, ConnectorSection, HostRule, MANIFEST_FILE, MAX_FILE_ROOTS,
+    Manifest, PluginKind,
 };
 pub use package::{
     MAX_WASM_BYTES, PACKAGE_EXTENSION, PluginPackage, SIGNATURE_FILE, VerifiedPackage, WASM_FILE,

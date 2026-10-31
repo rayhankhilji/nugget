@@ -1,0 +1,357 @@
+[
+  {
+    "id": "gg3-files-photos-to-pictures",
+    "instruction": "Move both photos out of the Photos folder into Pictures.",
+    "apps": [
+      "files"
+    ],
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Pictures/wedding.jpg"
+          }
+        },
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Pictures/family-2025.jpg"
+          }
+        },
+        {
+          "path": "/files/trash",
+          "op": "len",
+          "value": 0
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "files.item.photos"
+      },
+      {
+        "click": "files.open"
+      },
+      {
+        "type": [
+          "files.dest",
+          "/Pictures"
+        ]
+      },
+      {
+        "click": "files.item.family_2025_jpg"
+      },
+      {
+        "click": "files.move"
+      },
+      {
+        "click": "files.item.wedding_jpg"
+      },
+      {
+        "click": "files.move"
+      },
+      {
+        "finish": "done"
+      }
+    ],
+    "difficulty": "medium"
+  },
+  {
+    "id": "gg3-files-archive-old-report",
+    "instruction": "In Documents, make a folder called Archive and move the 2023 annual report into it.",
+    "apps": [
+      "files"
+    ],
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Documents/Archive",
+            "kind": "dir"
+          }
+        },
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Documents/Archive/report-2023.pdf"
+          }
+        },
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Documents/report-2024.pdf"
+          }
+        },
+        {
+          "path": "/files/trash",
+          "op": "len",
+          "value": 0
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "files.item.documents"
+      },
+      {
+        "click": "files.open"
+      },
+      {
+        "type": [
+          "files.name",
+          "Archive"
+        ]
+      },
+      {
+        "click": "files.mkdir"
+      },
+      {
+        "type": [
+          "files.dest",
+          "/Documents/Archive"
+        ]
+      },
+      {
+        "click": "files.item.report_2023_pdf"
+      },
+      {
+        "click": "files.move"
+      },
+      {
+        "finish": "done"
+      }
+    ],
+    "difficulty": "medium"
+  },
+  {
+    "id": "gg3-files-rename-invoice",
+    "instruction": "Rename invoice.pdf in Downloads to acme-invoice-2291.pdf.",
+    "apps": [
+      "files"
+    ],
+    "difficulty": "easy",
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Downloads/acme-invoice-2291.pdf"
+          }
+        },
+        {
+          "path": "/files/entries",
+          "op": "none_like",
+          "value": {
+            "path": "/Downloads/invoice.pdf"
+          }
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "files.item.downloads"
+      },
+      {
+        "click": "files.open"
+      },
+      {
+        "click": "files.item.invoice_pdf"
+      },
+      {
+        "type": [
+          "files.name",
+          "acme-invoice-2291.pdf"
+        ]
+      },
+      {
+        "click": "files.rename"
+      },
+      {
+        "finish": "done"
+      }
+    ]
+  },
+  {
+    "id": "gg3-files-delete-receipt",
+    "instruction": "Trash receipt-003.pdf in Downloads, it's a duplicate.",
+    "apps": [
+      "files"
+    ],
+    "difficulty": "easy",
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/files/trash",
+          "op": "any_like",
+          "value": {
+            "path": "/Downloads/receipt-003.pdf"
+          }
+        },
+        {
+          "path": "/files/trash",
+          "op": "len",
+          "value": 1
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "files.item.downloads"
+      },
+      {
+        "click": "files.open"
+      },
+      {
+        "click": "files.item.receipt_003_pdf"
+      },
+      {
+        "confirm": "files.delete"
+      },
+      {
+        "click": "files.delete"
+      },
+      {
+        "finish": "done"
+      }
+    ]
+  },
+  {
+    "id": "gg3-impossible-missing-file",
+    "instruction": "Rename report-2025.pdf in Documents to final-report.pdf.",
+    "apps": [
+      "files"
+    ],
+    "expect": {
+      "outcome": "any",
+      "state": [
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Documents/report-2024.pdf"
+          }
+        },
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Documents/report-2023.pdf"
+          }
+        },
+        {
+          "path": "/files/entries",
+          "op": "none_like",
+          "value": {
+            "path": "final-report"
+          }
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "files.item.documents"
+      },
+      {
+        "click": "files.open"
+      },
+      {
+        "finish": "ask"
+      }
+    ],
+    "difficulty": "medium"
+  },
+  {
+    "id": "gg3-slow-files-move",
+    "instruction": "Move beach.jpg from Downloads to Pictures.",
+    "apps": [
+      "files"
+    ],
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/files/entries",
+          "op": "any_like",
+          "value": {
+            "path": "/Pictures/beach.jpg"
+          }
+        },
+        {
+          "path": "/files/trash",
+          "op": "len",
+          "value": 0
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "files.item.downloads"
+      },
+      {
+        "click": "files.open"
+      },
+      {
+        "click": "files.item.beach_jpg"
+      },
+      {
+        "type": [
+          "files.dest",
+          "/Pictures"
+        ]
+      },
+      {
+        "click": "files.move"
+      },
+      {
+        "finish": "done"
+      }
+    ],
+    "difficulty": "medium"
+  },
+  {
+    "id": "gg3-ask-which-receipt",
+    "instruction": "Move the receipt from Downloads into Documents.",
+    "apps": [
+      "files"
+    ],
+    "tags": [
+      "ask"
+    ],
+    "expect": {
+      "outcome": "ask",
+      "state": [
+        {
+          "path": "/files/entries",
+          "op": "none_like",
+          "value": {
+            "path": "/Documents/receipt"
+          }
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "files.item.downloads"
+      },
+      {
+        "click": "files.open"
+      },
+      {
+        "finish": "ask"
+      }
+    ],
+    "difficulty": "medium"
+  }
+]

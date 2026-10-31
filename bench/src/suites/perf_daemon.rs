@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use nugget_core::ids::SourceId;
 use nugget_core::ipc::{
     IngestStatus, KnowledgeStatus, SearchHit, SourceInfo, SourceState, StatusResponse, method,
 };
@@ -52,7 +53,7 @@ use crate::suites::{SYNTHETIC_SOURCE, doc_text, item_ref};
 pub const NUGGETD_ENV: &str = "NUGGET_BENCH_NUGGETD";
 
 /// Version used for the markers of ingested files, so they never collide with seeded items.
-const INGEST_VERSION: u32 = 9;
+pub(crate) const INGEST_VERSION: u32 = 9;
 /// How often readiness conditions are polled.
 const POLL: Duration = Duration::from_millis(20);
 
@@ -199,14 +200,14 @@ pub fn run_with(
     Ok(out)
 }
 
-/// Everything a daemon run needs to know about its home.
-struct Env {
-    exe: PathBuf,
-    home: PathBuf,
-    paths: Paths,
+/// Everything a daemon run needs to know about its home. Shared with the `energy` suite.
+pub(crate) struct Env {
+    pub(crate) exe: PathBuf,
+    pub(crate) home: PathBuf,
+    pub(crate) paths: Paths,
     /// Scratch space next to the home (stderr capture, the watched folder, the vault).
-    work: PathBuf,
-    timeout: Duration,
+    pub(crate) work: PathBuf,
+    pub(crate) timeout: Duration,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -230,8 +231,13 @@ fn name(base: usize, i: usize) -> String {
     )
 }
 
-/// Key file, config and the seeded store.
-fn seed_home(paths: &Paths, corpus: &Corpus, dim: usize, seed: u64) -> Result<(), BenchError> {
+/// Key file, config and the seeded store (an empty corpus gives an empty store).
+pub(crate) fn seed_home(
+    paths: &Paths,
+    corpus: &Corpus,
+    dim: usize,
+    seed: u64,
+) -> Result<(), BenchError> {
     std::fs::create_dir_all(&paths.data)?;
     std::fs::create_dir_all(&paths.config)?;
     let mut key = [0u8; 32];
@@ -276,7 +282,7 @@ fn seed_home(paths: &Paths, corpus: &Corpus, dim: usize, seed: u64) -> Result<()
 
 /// Write `config.toml`: hermetic (no providers, runtime or MCP listener), the vault at `vault`
 /// or off.
-fn write_config(paths: &Paths, vault: Option<&Path>) -> Result<(), BenchError> {
+pub(crate) fn write_config(paths: &Paths, vault: Option<&Path>) -> Result<(), BenchError> {
     let vault = match vault {
         // A TOML literal string: no escapes, so Windows paths are taken as written.
         Some(v) => format!("enabled = true\npath = '{}'", v.display()),
@@ -290,9 +296,9 @@ fn write_config(paths: &Paths, vault: Option<&Path>) -> Result<(), BenchError> {
 }
 
 /// A running daemon. Killed on drop if [`stop`](Self::stop) was not reached.
-struct Daemon {
+pub(crate) struct Daemon {
     child: Option<Child>,
-    pid: u32,
+    pub(crate) pid: u32,
     stderr: PathBuf,
 }
 
@@ -306,7 +312,7 @@ impl Drop for Daemon {
 }
 
 impl Daemon {
-    fn spawn(env: &Env, run: &str) -> Result<Self, BenchError> {
+    pub(crate) fn spawn(env: &Env, run: &str) -> Result<Self, BenchError> {
         let stderr = env.work.join(format!("nuggetd-{run}.stderr"));
         let child = Command::new(&env.exe)
             .env("NUGGET_HOME", &env.home)
@@ -327,7 +333,7 @@ impl Daemon {
     }
 
     /// Fails if the process has exited, with the tail of its stderr.
-    fn check_alive(&mut self) -> Result<(), BenchError> {
+    pub(crate) fn check_alive(&mut self) -> Result<(), BenchError> {
         let Some(child) = self.child.as_mut() else {
             return Err(BenchError::Failed("daemon already stopped".into()));
         };
@@ -350,7 +356,11 @@ impl Daemon {
     }
 
     /// Spawn-to-first-`status` time and a connected client.
-    async fn ready(&mut self, env: &Env, t0: Instant) -> Result<(Duration, Client), BenchError> {
+    pub(crate) async fn ready(
+        &mut self,
+        env: &Env,
+        t0: Instant,
+    ) -> Result<(Duration, Client), BenchError> {
         loop {
             self.check_alive()?;
             if let Ok(client) = Client::connect(&env.paths).await {
@@ -381,7 +391,7 @@ impl Daemon {
     }
 
     /// Graceful stop (SIGTERM on Unix), bounded; returns how long it took.
-    async fn stop(&mut self) -> Result<Duration, BenchError> {
+    pub(crate) async fn stop(&mut self) -> Result<Duration, BenchError> {
         let Some(mut child) = self.child.take() else {
             return Ok(Duration::ZERO);
         };
@@ -412,7 +422,7 @@ impl Daemon {
     }
 }
 
-async fn call<R: DeserializeOwned>(
+pub(crate) async fn call<R: DeserializeOwned>(
     client: &Client,
     m: &str,
     params: Value,
@@ -427,7 +437,11 @@ async fn call<R: DeserializeOwned>(
     }
 }
 
-async fn search(client: &Client, q: &str, timeout: Duration) -> Result<Vec<SearchHit>, BenchError> {
+pub(crate) async fn search(
+    client: &Client,
+    q: &str,
+    timeout: Duration,
+) -> Result<Vec<SearchHit>, BenchError> {
     call(
         client,
         method::SEARCH,
@@ -441,6 +455,22 @@ async fn search(client: &Client, q: &str, timeout: Duration) -> Result<Vec<Searc
 async fn wait_for<T, F, Fut>(
     daemon: &mut Daemon,
     timeout: Duration,
+    what: &str,
+    f: F,
+) -> Result<T, BenchError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Option<T>, BenchError>>,
+{
+    wait_every(daemon, timeout, POLL, what, f).await
+}
+
+/// [`wait_for`] polling every `poll` (the `energy` suite polls slowly, so its own IPC traffic
+/// stays a small part of what it meters).
+pub(crate) async fn wait_every<T, F, Fut>(
+    daemon: &mut Daemon,
+    timeout: Duration,
+    poll: Duration,
     what: &str,
     mut f: F,
 ) -> Result<T, BenchError>
@@ -459,7 +489,7 @@ where
                 "{what} not reached within {timeout:?}"
             )));
         }
-        tokio::time::sleep(POLL).await;
+        tokio::time::sleep(poll).await;
     }
 }
 
@@ -723,42 +753,8 @@ async fn profile(
 
     // Ingest through the daemon: a watched folder, then files dropped into it.
     let folder = env.work.join("inbox");
-    std::fs::create_dir_all(&folder)?;
-    let src: SourceInfo = call(
-        &client,
-        method::SOURCES_ADD,
-        json!({"kind": "files", "name": "bench-inbox", "settings": {"roots": [folder], "exclude": []}}),
-        call_timeout,
-    )
-    .await?;
-    let src_id = &src.id;
-    wait_for(&mut d, env.timeout, "the watched folder", || async move {
-        let st: IngestStatus = call(c, method::INGEST_STATUS, json!({}), call_timeout).await?;
-        Ok(st
-            .sources
-            .iter()
-            .any(|s| s.id == *src_id && s.state == SourceState::Watching)
-            .then_some(()))
-    })
-    .await?;
-    let files = Corpus::generate(CorpusConfig {
-        docs: p.ingest_files,
-        words_per_doc: p.words_per_doc,
-        seed: seed ^ 0x1A6E_5700,
-        ..CorpusConfig::default()
-    });
-    let texts: Vec<String> = files
-        .docs
-        .iter()
-        .map(|doc| {
-            format!(
-                "# {}\n\n{}\n\n{}\n",
-                doc.title,
-                doc.body,
-                marker(doc.id, INGEST_VERSION)
-            )
-        })
-        .collect();
+    let src_id = &watch_folder(&mut d, &client, &folder, env.timeout, POLL).await?;
+    let texts = ingest_texts(p.ingest_files, p.words_per_doc, seed);
     let probe = &marker(p.ingest_files - 1, INGEST_VERSION);
     let t = Instant::now();
     for (i, text) in texts.iter().enumerate() {
@@ -818,6 +814,60 @@ async fn profile(
     drop(client);
     d.stop().await?;
     Ok(())
+}
+
+/// Add a files source on `folder` (created if missing) and wait until it is watched. Returns
+/// the source id.
+pub(crate) async fn watch_folder(
+    d: &mut Daemon,
+    client: &Client,
+    folder: &Path,
+    timeout: Duration,
+    poll: Duration,
+) -> Result<SourceId, BenchError> {
+    let call_timeout = Duration::from_secs(60).min(timeout);
+    std::fs::create_dir_all(folder)?;
+    let src: SourceInfo = call(
+        client,
+        method::SOURCES_ADD,
+        json!({"kind": "files", "name": "bench-inbox", "settings": {"roots": [folder], "exclude": []}}),
+        call_timeout,
+    )
+    .await?;
+    let src_id = &src.id;
+    wait_every(d, timeout, poll, "the watched folder", || async move {
+        let st: IngestStatus = call(client, method::INGEST_STATUS, json!({}), call_timeout).await?;
+        Ok(st
+            .sources
+            .iter()
+            .any(|s| s.id == *src_id && s.state == SourceState::Watching)
+            .then_some(()))
+    })
+    .await?;
+    Ok(src.id)
+}
+
+/// `n` Markdown files to drop into a watched folder, each ending in its unique
+/// [`INGEST_VERSION`] marker (`marker(i, INGEST_VERSION)` finds file `i`).
+pub(crate) fn ingest_texts(n: usize, words_per_doc: usize, seed: u64) -> Vec<String> {
+    let files = Corpus::generate(CorpusConfig {
+        docs: n,
+        words_per_doc,
+        seed: seed ^ 0x1A6E_5700,
+        ..CorpusConfig::default()
+    });
+    files
+        .docs
+        .iter()
+        .map(|doc| {
+            format!(
+                "# {}\n\n{}\n\n{}\n",
+                doc.title,
+                doc.body,
+                marker(doc.id, INGEST_VERSION)
+            )
+        })
+        .collect()
 }
 
 /// What the OS cheaply reports about a process. `None` where unavailable.

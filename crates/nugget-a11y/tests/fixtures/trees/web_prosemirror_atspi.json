@@ -1,0 +1,799 @@
+{
+ "note": "Modelled on Firefox on Linux (AT-SPI) for the FF3 ProseMirror fixture in a chat page. Focus is on the last paragraph inside the editable root (a section); over AT-SPI the root's text is one U+FFFC per paragraph, which snapshots do not keep. Divs with text are sections; the log holds list items with Slack-like grouping; the sidebar of other conversations is a decoy.",
+ "app": {
+  "id": "firefox",
+  "name": "Firefox",
+  "window_title": "Nugget fixture: ProseMirror — Mozilla Firefox"
+ },
+ "field_value": "Draft: hello\nsecond line",
+ "root": {
+  "role": "window",
+  "raw_role": "frame",
+  "name": "Nugget fixture: ProseMirror — Mozilla Firefox",
+  "bounds": [
+   0,
+   0,
+   1280,
+   860
+  ],
+  "children": [
+   {
+    "role": "group",
+    "raw_role": "panel",
+    "bounds": [
+     0,
+     0,
+     1280,
+     80
+    ],
+    "children": [
+     {
+      "role": "text_field",
+      "raw_role": "entry",
+      "name": "Search with Google or enter address",
+      "states": {
+       "editable": true,
+       "multiline": false
+      }
+     }
+    ]
+   },
+   {
+    "role": "group",
+    "raw_role": "internal frame",
+    "bounds": [
+     0,
+     80,
+     1280,
+     780
+    ],
+    "children": [
+     {
+      "role": "web_area",
+      "raw_role": "document web",
+      "name": "Nugget fixture: ProseMirror",
+      "bounds": [
+       0,
+       80,
+       1280,
+       780
+      ],
+      "attrs": {
+       "url": "http://127.0.0.1:41873/index.html?editor=prosemirror"
+      },
+      "children": [
+       {
+        "role": "group",
+        "raw_role": "landmark",
+        "name": "Conversations",
+        "bounds": [
+         0,
+         80,
+         300,
+         780
+        ],
+        "attrs": {
+         "xml_roles": "navigation"
+        },
+        "children": [
+         {
+          "role": "search_field",
+          "raw_role": "entry",
+          "name": "Search conversations",
+          "states": {
+           "editable": true,
+           "multiline": false
+          },
+          "bounds": [
+           8,
+           88,
+           284,
+           28
+          ],
+          "attrs": {
+           "xml_roles": "searchbox"
+          }
+         },
+         {
+          "role": "list",
+          "raw_role": "list",
+          "bounds": [
+           0,
+           120,
+           300,
+           288
+          ],
+          "children": [
+           {
+            "role": "list_item",
+            "raw_role": "list item",
+            "bounds": [
+             0,
+             120,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "link",
+              "name": "Jordan Lee Q3 offsite venue Can we move the offsite to Thursday instead? 9:41 AM",
+              "bounds": [
+               8,
+               120,
+               284,
+               66
+              ],
+              "children": [
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Jordan Lee",
+                "bounds": [
+                 16,
+                 124,
+                 180,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Q3 offsite venue",
+                "bounds": [
+                 16,
+                 142,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Can we move the offsite to Thursday instead?",
+                "bounds": [
+                 16,
+                 160,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "9:41 AM",
+                "bounds": [
+                 220,
+                 124,
+                 60,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "list item",
+            "bounds": [
+             0,
+             192,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "link",
+              "name": "Priya Patel Lunch plans Are we still on for lunch tomorrow at noon? Yesterday",
+              "bounds": [
+               8,
+               192,
+               284,
+               66
+              ],
+              "children": [
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Priya Patel",
+                "bounds": [
+                 16,
+                 196,
+                 180,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Lunch plans",
+                "bounds": [
+                 16,
+                 214,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Are we still on for lunch tomorrow at noon?",
+                "bounds": [
+                 16,
+                 232,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Yesterday",
+                "bounds": [
+                 220,
+                 196,
+                 60,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "list item",
+            "bounds": [
+             0,
+             264,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "link",
+              "name": "Design team Sprint review Slides are in the shared folder, take a look. Mon",
+              "bounds": [
+               8,
+               264,
+               284,
+               66
+              ],
+              "children": [
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Design team",
+                "bounds": [
+                 16,
+                 268,
+                 180,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Sprint review",
+                "bounds": [
+                 16,
+                 286,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Slides are in the shared folder, take a look.",
+                "bounds": [
+                 16,
+                 304,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Mon",
+                "bounds": [
+                 220,
+                 268,
+                 60,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "list item",
+            "bounds": [
+             0,
+             336,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "link",
+              "name": "Alex Kim Invoice #2041 Thanks for the quick turnaround on this one! Oct 24",
+              "bounds": [
+               8,
+               336,
+               284,
+               66
+              ],
+              "children": [
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Alex Kim",
+                "bounds": [
+                 16,
+                 340,
+                 180,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Invoice #2041",
+                "bounds": [
+                 16,
+                 358,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Thanks for the quick turnaround on this one!",
+                "bounds": [
+                 16,
+                 376,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "section",
+                "raw_role": "section",
+                "value": "Oct 24",
+                "bounds": [
+                 220,
+                 340,
+                 60,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "landmark",
+        "bounds": [
+         300,
+         80,
+         980,
+         780
+        ],
+        "attrs": {
+         "xml_roles": "main"
+        },
+        "children": [
+         {
+          "role": "heading",
+          "raw_role": "heading",
+          "name": "Design team",
+          "bounds": [
+           320,
+           90,
+           400,
+           30
+          ]
+         },
+         {
+          "role": "log",
+          "raw_role": "section",
+          "name": "Messages",
+          "bounds": [
+           300,
+           130,
+           980,
+           540
+          ],
+          "attrs": {
+           "xml_roles": "log"
+          },
+          "children": [
+           {
+            "role": "list_item",
+            "raw_role": "list item",
+            "bounds": [
+             320,
+             140,
+             940,
+             44
+            ],
+            "children": [
+             {
+              "role": "section",
+              "raw_role": "section",
+              "value": "Maya Chen",
+              "bounds": [
+               368,
+               140,
+               160,
+               18
+              ]
+             },
+             {
+              "role": "section",
+              "raw_role": "section",
+              "value": "10:02 AM",
+              "bounds": [
+               536,
+               140,
+               70,
+               18
+              ]
+             },
+             {
+              "role": "section",
+              "raw_role": "section",
+              "bounds": [
+               368,
+               160,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "paragraph",
+                "raw_role": "paragraph",
+                "value": "Morning! Did everyone get a chance to look at the venue options?",
+                "bounds": [
+                 368,
+                 160,
+                 700,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "list item",
+            "bounds": [
+             320,
+             192,
+             940,
+             44
+            ],
+            "children": [
+             {
+              "role": "section",
+              "raw_role": "section",
+              "value": "10:03 AM",
+              "bounds": [
+               320,
+               192,
+               70,
+               18
+              ]
+             },
+             {
+              "role": "section",
+              "raw_role": "section",
+              "bounds": [
+               368,
+               212,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "paragraph",
+                "raw_role": "paragraph",
+                "value": "The second one has a terrace and fits all twelve of us.",
+                "bounds": [
+                 368,
+                 212,
+                 700,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "list item",
+            "bounds": [
+             320,
+             244,
+             940,
+             64
+            ],
+            "children": [
+             {
+              "role": "section",
+              "raw_role": "section",
+              "value": "Sam Ortiz",
+              "bounds": [
+               368,
+               244,
+               160,
+               18
+              ]
+             },
+             {
+              "role": "section",
+              "raw_role": "section",
+              "value": "10:15 AM",
+              "bounds": [
+               536,
+               244,
+               70,
+               18
+              ]
+             },
+             {
+              "role": "section",
+              "raw_role": "section",
+              "bounds": [
+               368,
+               264,
+               700,
+               40
+              ],
+              "children": [
+               {
+                "role": "paragraph",
+                "raw_role": "paragraph",
+                "value": "Terrace sounds great for September.",
+                "bounds": [
+                 368,
+                 264,
+                 700,
+                 18
+                ]
+               },
+               {
+                "role": "paragraph",
+                "raw_role": "paragraph",
+                "value": "Can we check the catering menu first?",
+                "bounds": [
+                 368,
+                 284,
+                 700,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "list item",
+            "bounds": [
+             320,
+             316,
+             940,
+             44
+            ],
+            "children": [
+             {
+              "role": "section",
+              "raw_role": "section",
+              "value": "You",
+              "bounds": [
+               368,
+               316,
+               160,
+               18
+              ]
+             },
+             {
+              "role": "section",
+              "raw_role": "section",
+              "value": "10:20 AM",
+              "bounds": [
+               536,
+               316,
+               70,
+               18
+              ]
+             },
+             {
+              "role": "section",
+              "raw_role": "section",
+              "bounds": [
+               368,
+               336,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "paragraph",
+                "raw_role": "paragraph",
+                "value": "Let's book it, I'll ask about catering.",
+                "bounds": [
+                 368,
+                 336,
+                 700,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "role": "section",
+          "raw_role": "section",
+          "value": "3 members online",
+          "bounds": [
+           320,
+           672,
+           300,
+           18
+          ],
+          "attrs": {
+           "xml_roles": "status"
+          }
+         },
+         {
+          "role": "toolbar",
+          "raw_role": "tool bar",
+          "name": "Formatting",
+          "bounds": [
+           320,
+           690,
+           300,
+           24
+          ],
+          "children": [
+           {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Bold"
+           },
+           {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Italic"
+           }
+          ]
+         },
+         {
+          "role": "section",
+          "raw_role": "section",
+          "name": "Message",
+          "states": {
+           "editable": true,
+           "multiline": true
+          },
+          "bounds": [
+           330,
+           700,
+           860,
+           80
+          ],
+          "attrs": {
+           "identifier": "editor"
+          },
+          "children": [
+           {
+            "role": "paragraph",
+            "raw_role": "paragraph",
+            "value": "Draft: hello",
+            "states": {
+             "editable": true,
+             "multiline": true,
+             "focused": false
+            },
+            "bounds": [
+             340,
+             702,
+             800,
+             18
+            ]
+           },
+           {
+            "role": "paragraph",
+            "raw_role": "paragraph",
+            "value": "second line",
+            "states": {
+             "editable": true,
+             "multiline": true,
+             "focused": true
+            },
+            "bounds": [
+             340,
+             722,
+             800,
+             18
+            ]
+           }
+          ]
+         },
+         {
+          "role": "button",
+          "raw_role": "push button",
+          "name": "Send",
+          "bounds": [
+           1200,
+           740,
+           60,
+           30
+          ]
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "form",
+        "name": "Account",
+        "bounds": [
+         0,
+         820,
+         300,
+         40
+        ],
+        "children": [
+         {
+          "role": "text_field",
+          "raw_role": "password text",
+          "name": "Password",
+          "states": {
+           "editable": true,
+           "secure": true,
+           "multiline": false
+          },
+          "bounds": [
+           8,
+           824,
+           284,
+           28
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  1,
+  0,
+  1,
+  4,
+  1
+ ]
+}

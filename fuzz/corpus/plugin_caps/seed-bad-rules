@@ -1,0 +1,11 @@
+*.com
+ftp://example.com/
+example.com/path
+user@example.com
+*
+ex*ample.com
+https://*.1.2.3.4
+$Bad Secret
+$dup
+$dup
+@Bad-Root

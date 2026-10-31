@@ -17,12 +17,23 @@ export interface OnboardingState {
   /** Steps the user skipped. A step later completed is removed from here. */
   skipped: StepId[];
   ai: AiChoice | null;
+  /**
+   * What the AI step actually set up, and on which path: a local model installed (or installing),
+   * or a provider whose key was saved. Absent until something is set up.
+   */
+  aiSetup?: { ai: AiChoice; what: string };
+  /** Names of the sources there are (added in setup, or already there). Absent: none known. */
+  sources?: string[];
   /** The flow is over (finished or skipped as a whole); don't show it on launch. */
   finished: boolean;
 }
 
 export type Action =
   | { type: "next" }
+  /** The footer's Continue: `next` when the step did what it is for, else `skip`. */
+  | { type: "continue" }
+  | { type: "aiSetUp"; ai: AiChoice; what: string }
+  | { type: "sourcesFound"; names: string[] }
   | { type: "back" }
   | { type: "skip" }
   | { type: "goto"; step: StepId }
@@ -56,8 +67,38 @@ function advance(step: StepId): StepId {
   return STEPS[Math.min(stepIndex(step) + 1, STEPS.length - 1)]!;
 }
 
+/**
+ * Whether a step's goal is met, so Continue can mark it done. The AI step needs a model installed
+ * (or installing) or a key saved on the chosen path; the source step needs a source. The other
+ * steps are done once seen.
+ */
+export function stepGoalMet(state: OnboardingState, step: StepId = state.step): boolean {
+  if (step === "ai") return (state.ai === "local" || state.ai === "byok") && (state.aiSetup?.ai === state.ai || legacyDone(state, "ai"));
+  if (step === "source") return (state.sources?.length ?? 0) > 0 || legacyDone(state, "source");
+  return true;
+}
+
+/**
+ * Progress saved before setups were recorded (no `aiSetup` / `sources`): a step completed then
+ * was done, so it still counts.
+ */
+export function legacyDone(state: OnboardingState, step: "ai" | "source"): boolean {
+  const recorded = step === "ai" ? state.aiSetup !== undefined : state.sources !== undefined;
+  return !recorded && state.completed.includes(step);
+}
+
 export function reduce(state: OnboardingState, action: Action): OnboardingState {
   switch (action.type) {
+    case "continue":
+      return reduce(state, { type: stepGoalMet(state) ? "next" : "skip" });
+    case "aiSetUp":
+      return state.aiSetup?.ai === action.ai && state.aiSetup.what === action.what
+        ? state
+        : { ...state, aiSetup: { ai: action.ai, what: action.what } };
+    case "sourcesFound": {
+      const names = [...new Set([...(state.sources ?? []), ...action.names])];
+      return names.length === (state.sources?.length ?? 0) ? state : { ...state, sources: names };
+    }
     case "next": {
       if (state.step === "done") return { ...state, finished: true, completed: withStep(state.completed, "done") };
       return {
@@ -121,8 +162,9 @@ export function parseState(raw: string | null): OnboardingState | null {
   const o = v as Record<string, unknown>;
   if (o.version !== 1 || !isStep(o.step)) return null;
   const steps = (x: unknown) => (Array.isArray(x) ? x.filter(isStep) : []);
-  const ai = o.ai === "local" || o.ai === "byok" || o.ai === "later" ? o.ai : null;
-  return {
+  const isAi = (x: unknown): x is AiChoice => x === "local" || x === "byok" || x === "later";
+  const ai = isAi(o.ai) ? o.ai : null;
+  const out: OnboardingState = {
     version: 1,
     step: o.step,
     completed: steps(o.completed),
@@ -130,6 +172,15 @@ export function parseState(raw: string | null): OnboardingState | null {
     ai,
     finished: o.finished === true,
   };
+  const setup = o.aiSetup as Record<string, unknown> | null | undefined;
+  if (setup && typeof setup === "object" && isAi(setup.ai) && typeof setup.what === "string") {
+    out.aiSetup = { ai: setup.ai, what: setup.what };
+  }
+  if (Array.isArray(o.sources)) {
+    const names = o.sources.filter((x): x is string => typeof x === "string");
+    if (names.length) out.sources = names;
+  }
+  return out;
 }
 
 export function loadState(storage: Pick<Storage, "getItem"> | null = safeStorage()): OnboardingState {

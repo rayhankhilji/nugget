@@ -1,0 +1,912 @@
+{
+ "note": "Modelled on Chromium on macOS (AX) for the FF3 Lexical fixture in a chat page: a role=log of articles with Slack-like grouping, a decoy sidebar of other conversations with previews, a formatting toolbar, a status line and a password field. Focus is on the editor root (AXTextArea with paragraph groups).",
+ "app": {
+  "id": "com.google.Chrome",
+  "name": "Google Chrome",
+  "window_title": "Nugget fixture: Lexical"
+ },
+ "field_value": "Draft: hello\nsecond line",
+ "root": {
+  "role": "window",
+  "raw_role": "AXWindow",
+  "name": "Nugget fixture: Lexical",
+  "bounds": [
+   0,
+   0,
+   1280,
+   860
+  ],
+  "children": [
+   {
+    "role": "toolbar",
+    "raw_role": "AXToolbar",
+    "name": "Navigation",
+    "bounds": [
+     0,
+     0,
+     1280,
+     80
+    ],
+    "children": [
+     {
+      "role": "text_field",
+      "raw_role": "AXTextField",
+      "name": "Address and search bar",
+      "value": "127.0.0.1:41873/index.html?editor=lexical",
+      "states": {
+       "editable": true,
+       "multiline": false
+      }
+     }
+    ]
+   },
+   {
+    "role": "group",
+    "raw_role": "AXGroup",
+    "bounds": [
+     0,
+     80,
+     1280,
+     780
+    ],
+    "children": [
+     {
+      "role": "web_area",
+      "raw_role": "AXWebArea",
+      "name": "Nugget fixture: Lexical",
+      "bounds": [
+       0,
+       80,
+       1280,
+       780
+      ],
+      "attrs": {
+       "url": "http://127.0.0.1:41873/index.html?editor=lexical"
+      },
+      "children": [
+       {
+        "role": "group",
+        "raw_role": "AXGroup/AXLandmarkNavigation",
+        "name": "Conversations",
+        "bounds": [
+         0,
+         80,
+         300,
+         780
+        ],
+        "children": [
+         {
+          "role": "text_field",
+          "raw_role": "AXTextField/AXSearchField",
+          "name": "Search conversations",
+          "value": "",
+          "states": {
+           "editable": true,
+           "multiline": false
+          },
+          "bounds": [
+           8,
+           88,
+           284,
+           28
+          ]
+         },
+         {
+          "role": "list",
+          "raw_role": "AXList",
+          "bounds": [
+           0,
+           120,
+           300,
+           288
+          ],
+          "children": [
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             120,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "Jordan Lee Q3 offsite venue Can we move the offsite to Thursday instead? 9:41 AM",
+              "bounds": [
+               8,
+               120,
+               284,
+               66
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Jordan Lee",
+                "bounds": [
+                 16,
+                 124,
+                 180,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Q3 offsite venue",
+                "bounds": [
+                 16,
+                 142,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Can we move the offsite to Thursday instead?",
+                "bounds": [
+                 16,
+                 160,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "9:41 AM",
+                "bounds": [
+                 220,
+                 124,
+                 60,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             192,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "Priya Patel Lunch plans Are we still on for lunch tomorrow at noon? Yesterday",
+              "bounds": [
+               8,
+               192,
+               284,
+               66
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Priya Patel",
+                "bounds": [
+                 16,
+                 196,
+                 180,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Lunch plans",
+                "bounds": [
+                 16,
+                 214,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Are we still on for lunch tomorrow at noon?",
+                "bounds": [
+                 16,
+                 232,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Yesterday",
+                "bounds": [
+                 220,
+                 196,
+                 60,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             264,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "Design team Sprint review Slides are in the shared folder, take a look. Mon",
+              "bounds": [
+               8,
+               264,
+               284,
+               66
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Design team",
+                "bounds": [
+                 16,
+                 268,
+                 180,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Sprint review",
+                "bounds": [
+                 16,
+                 286,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Slides are in the shared folder, take a look.",
+                "bounds": [
+                 16,
+                 304,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Mon",
+                "bounds": [
+                 220,
+                 268,
+                 60,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             336,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "Alex Kim Invoice #2041 Thanks for the quick turnaround on this one! Oct 24",
+              "bounds": [
+               8,
+               336,
+               284,
+               66
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Alex Kim",
+                "bounds": [
+                 16,
+                 340,
+                 180,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Invoice #2041",
+                "bounds": [
+                 16,
+                 358,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Thanks for the quick turnaround on this one!",
+                "bounds": [
+                 16,
+                 376,
+                 260,
+                 18
+                ]
+               },
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Oct 24",
+                "bounds": [
+                 220,
+                 340,
+                 60,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "AXGroup/AXLandmarkMain",
+        "bounds": [
+         300,
+         80,
+         980,
+         780
+        ],
+        "children": [
+         {
+          "role": "heading",
+          "raw_role": "AXHeading",
+          "name": "# design-team",
+          "bounds": [
+           320,
+           90,
+           400,
+           30
+          ]
+         },
+         {
+          "role": "group",
+          "raw_role": "AXGroup/AXApplicationLog",
+          "name": "Messages in #design-team",
+          "bounds": [
+           300,
+           130,
+           980,
+           540
+          ],
+          "children": [
+           {
+            "role": "article",
+            "raw_role": "AXGroup/AXDocumentArticle",
+            "bounds": [
+             320,
+             140,
+             940,
+             44
+            ],
+            "children": [
+             {
+              "role": "image",
+              "raw_role": "AXImage",
+              "name": "Maya Chen",
+              "bounds": [
+               320,
+               140,
+               36,
+               36
+              ]
+             },
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "Maya Chen",
+              "bounds": [
+               368,
+               140,
+               120,
+               18
+              ]
+             },
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "10:02 AM",
+              "bounds": [
+               496,
+               140,
+               70,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "bounds": [
+               368,
+               160,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "group",
+                "raw_role": "AXGroup",
+                "bounds": [
+                 368,
+                 160,
+                 700,
+                 18
+                ],
+                "children": [
+                 {
+                  "role": "static_text",
+                  "raw_role": "AXStaticText",
+                  "value": "Morning! Did everyone get a chance to look at the venue options?",
+                  "bounds": [
+                   368,
+                   160,
+                   700,
+                   18
+                  ]
+                 }
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "article",
+            "raw_role": "AXGroup/AXDocumentArticle",
+            "bounds": [
+             320,
+             192,
+             940,
+             44
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "10:03 AM",
+              "bounds": [
+               320,
+               192,
+               70,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "bounds": [
+               368,
+               212,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "group",
+                "raw_role": "AXGroup",
+                "bounds": [
+                 368,
+                 212,
+                 700,
+                 18
+                ],
+                "children": [
+                 {
+                  "role": "static_text",
+                  "raw_role": "AXStaticText",
+                  "value": "The second one has a terrace and fits all twelve of us.",
+                  "bounds": [
+                   368,
+                   212,
+                   700,
+                   18
+                  ]
+                 }
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "article",
+            "raw_role": "AXGroup/AXDocumentArticle",
+            "bounds": [
+             320,
+             244,
+             940,
+             64
+            ],
+            "children": [
+             {
+              "role": "image",
+              "raw_role": "AXImage",
+              "name": "Sam Ortiz",
+              "bounds": [
+               320,
+               244,
+               36,
+               36
+              ]
+             },
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "Sam Ortiz",
+              "bounds": [
+               368,
+               244,
+               120,
+               18
+              ]
+             },
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "10:15 AM",
+              "bounds": [
+               496,
+               244,
+               70,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "bounds": [
+               368,
+               264,
+               700,
+               40
+              ],
+              "children": [
+               {
+                "role": "group",
+                "raw_role": "AXGroup",
+                "bounds": [
+                 368,
+                 264,
+                 700,
+                 18
+                ],
+                "children": [
+                 {
+                  "role": "static_text",
+                  "raw_role": "AXStaticText",
+                  "value": "Terrace sounds great for September.",
+                  "bounds": [
+                   368,
+                   264,
+                   700,
+                   18
+                  ]
+                 }
+                ]
+               },
+               {
+                "role": "group",
+                "raw_role": "AXGroup",
+                "bounds": [
+                 368,
+                 284,
+                 700,
+                 18
+                ],
+                "children": [
+                 {
+                  "role": "static_text",
+                  "raw_role": "AXStaticText",
+                  "value": "Can we check the catering menu first?",
+                  "bounds": [
+                   368,
+                   284,
+                   700,
+                   18
+                  ]
+                 }
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "article",
+            "raw_role": "AXGroup/AXDocumentArticle",
+            "bounds": [
+             320,
+             316,
+             940,
+             44
+            ],
+            "children": [
+             {
+              "role": "image",
+              "raw_role": "AXImage",
+              "name": "You",
+              "bounds": [
+               320,
+               316,
+               36,
+               36
+              ]
+             },
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "You",
+              "bounds": [
+               368,
+               316,
+               120,
+               18
+              ]
+             },
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "10:20 AM",
+              "bounds": [
+               496,
+               316,
+               70,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "bounds": [
+               368,
+               336,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "group",
+                "raw_role": "AXGroup",
+                "bounds": [
+                 368,
+                 336,
+                 700,
+                 18
+                ],
+                "children": [
+                 {
+                  "role": "static_text",
+                  "raw_role": "AXStaticText",
+                  "value": "Let's book it, I'll ask about catering.",
+                  "bounds": [
+                   368,
+                   336,
+                   700,
+                   18
+                  ]
+                 }
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "role": "group",
+          "raw_role": "AXGroup/AXApplicationStatus",
+          "bounds": [
+           320,
+           672,
+           400,
+           18
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "3 members online",
+            "bounds": [
+             320,
+             672,
+             300,
+             18
+            ]
+           }
+          ]
+         },
+         {
+          "role": "toolbar",
+          "raw_role": "AXToolbar",
+          "name": "Formatting",
+          "bounds": [
+           320,
+           690,
+           300,
+           24
+          ],
+          "children": [
+           {
+            "role": "button",
+            "raw_role": "AXButton",
+            "name": "Bold"
+           },
+           {
+            "role": "button",
+            "raw_role": "AXButton",
+            "name": "Italic"
+           },
+           {
+            "role": "button",
+            "raw_role": "AXButton",
+            "name": "Insert link"
+           }
+          ]
+         },
+         {
+          "role": "text_area",
+          "raw_role": "AXTextArea",
+          "name": "Message #design-team",
+          "value": "Draft: hello\nsecond line",
+          "states": {
+           "focused": true,
+           "editable": true,
+           "multiline": true
+          },
+          "bounds": [
+           330,
+           700,
+           860,
+           80
+          ],
+          "attrs": {
+           "dom_classes": "editor-input ContentEditable__root"
+          },
+          "children": [
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+             340,
+             700,
+             800,
+             18
+            ],
+            "children": [
+             {
+              "role": "static_text",
+              "raw_role": "AXStaticText",
+              "value": "Draft: hello",
+              "bounds": [
+               340,
+               700,
+               800,
+               18
+              ]
+             }
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+             340,
+             720,
+             800,
+             18
+            ],
+            "children": [
+             {
+              "role": "static_text",
+              "raw_role": "AXStaticText",
+              "value": "second line",
+              "bounds": [
+               340,
+               720,
+               800,
+               18
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "role": "button",
+          "raw_role": "AXButton",
+          "name": "Send",
+          "bounds": [
+           1200,
+           740,
+           60,
+           30
+          ]
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "AXGroup",
+        "name": "Account",
+        "bounds": [
+         0,
+         820,
+         300,
+         40
+        ],
+        "children": [
+         {
+          "role": "text_field",
+          "raw_role": "AXTextField/AXSecureTextField",
+          "name": "Password",
+          "states": {
+           "editable": true,
+           "secure": true,
+           "multiline": false
+          },
+          "bounds": [
+           8,
+           824,
+           284,
+           28
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  1,
+  0,
+  1,
+  4
+ ]
+}

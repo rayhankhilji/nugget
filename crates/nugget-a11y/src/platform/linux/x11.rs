@@ -568,6 +568,50 @@ pub fn activate_pid(pid: u32) -> Result<bool> {
     Ok(sent)
 }
 
+/// The window manager's active window (EWMH `_NET_ACTIVE_WINDOW`): its owner's pid
+/// (`_NET_WM_PID`) and title (`_NET_WM_NAME`, else `WM_NAME`). `Ok(None)` when there is none.
+pub fn active_window() -> Result<Option<(u32, Option<String>)>> {
+    let (conn, screen) = connect()?;
+    let root = conn.setup().roots[screen].root;
+    let active = intern(&conn, "_NET_ACTIVE_WINDOW")?;
+    let wm_pid = intern(&conn, "_NET_WM_PID")?;
+    let net_name = intern(&conn, "_NET_WM_NAME")?;
+    let utf8 = intern(&conn, "UTF8_STRING")?;
+    let w = conn
+        .get_property(false, root, active, AtomEnum::WINDOW, 0, 1)
+        .map_err(xerr)?
+        .reply()
+        .map_err(xerr)?
+        .value32()
+        .and_then(|mut v| v.next())
+        .filter(|w| *w != NONE);
+    let Some(w) = w else { return Ok(None) };
+    let pid = conn
+        .get_property(false, w, wm_pid, AtomEnum::CARDINAL, 0, 1)
+        .map_err(xerr)?
+        .reply()
+        .map_err(xerr)?
+        .value32()
+        .and_then(|mut v| v.next());
+    let Some(pid) = pid else { return Ok(None) };
+    let mut title = None;
+    for (prop, ty) in [
+        (net_name, utf8),
+        (AtomEnum::WM_NAME.into(), AtomEnum::STRING.into()),
+    ] {
+        let r = conn
+            .get_property(false, w, prop, ty, 0, 1024)
+            .map_err(xerr)?
+            .reply()
+            .map_err(xerr)?;
+        if !r.value.is_empty() {
+            title = Some(String::from_utf8_lossy(&r.value).into_owned());
+            break;
+        }
+    }
+    Ok(Some((pid, title)))
+}
+
 /// Largest screenshot area, in pixels.
 const MAX_CAPTURE_PIXELS: u64 = 4096 * 4096;
 

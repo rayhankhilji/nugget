@@ -162,21 +162,37 @@ pub(crate) fn strip_html(s: &str, max: usize) -> String {
         }
         match c {
             '<' => {
+                let at = chars.clone();
                 let mut tag = String::new();
+                // The last two characters before `>` (to find the end of a comment).
+                let mut tail = ['\0'; 2];
+                let comment = |tag: &str| tag.starts_with("!--");
+                let mut closed = false;
                 for t in chars.by_ref() {
-                    if t == '>' {
+                    if t == '>' && (!comment(&tag) || (tag.len() >= 5 && tail == ['-', '-'])) {
+                        closed = true;
                         break;
                     }
+                    tail = [tail[1], t];
                     if tag.len() < 16 {
                         tag.push(t.to_ascii_lowercase());
                     }
+                }
+                if !closed && comment(&tag) {
+                    // An unterminated comment: keep the text after `<!--`.
+                    chars = at;
+                    chars.nth(2);
+                    continue;
                 }
                 let name = tag
                     .trim_start_matches('/')
                     .split(|c: char| c.is_whitespace() || c == '/')
                     .next()
                     .unwrap_or("");
-                if matches!(name, "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3") {
+                if matches!(name, "script" | "style") && !tag.starts_with('/') {
+                    // Their content is code, never text: skip to the closing tag (if any).
+                    skip_to_close(&mut chars, name);
+                } else if matches!(name, "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3") {
                     out.push('\n');
                 }
             }
@@ -229,6 +245,30 @@ pub(crate) fn strip_html(s: &str, max: usize) -> String {
         cleaned.push('\n');
     }
     truncate_chars(cleaned.trim(), max)
+}
+
+/// Consume input up to and including `</name ...>` (ASCII case-insensitive). Without a closing
+/// tag nothing is consumed: the text after the opening tag is kept (e.g. "the <style> tag").
+fn skip_to_close(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, name: &str) {
+    let close: Vec<char> = format!("</{name}").chars().collect();
+    let mut probe = chars.clone();
+    let mut matched = 0;
+    while let Some(c) = probe.next() {
+        if c.to_ascii_lowercase() == close[matched] {
+            matched += 1;
+            if matched == close.len() {
+                for t in probe.by_ref() {
+                    if t == '>' {
+                        break;
+                    }
+                }
+                *chars = probe;
+                return;
+            }
+        } else {
+            matched = usize::from(c == '<');
+        }
+    }
 }
 
 pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
@@ -290,5 +330,30 @@ mod unit {
         assert_eq!(strip_html("plain", 3), "pla");
         let _ = strip_html("<a href='x", 10);
         let _ = strip_html("&#", 10);
+    }
+
+    #[test]
+    fn regression_strip_html_drops_script_style_and_comments() {
+        // Before the fix script and style bodies were kept as text, and a comment holding `>`
+        // leaked its rest.
+        let s = strip_html(
+            "<style>p{color:red}</style><SCRIPT type=x>if (a<b) alert('x')</ScRiPt >\
+             <!-- a > b hidden --><p>Kept &amp; shown</p>",
+            1000,
+        );
+        assert_eq!(s, "Kept & shown");
+        assert_eq!(strip_html("a<!---->b", 100), "ab");
+    }
+
+    #[test]
+    fn regression_strip_html_keeps_text_after_an_unclosed_script_style_or_comment() {
+        // Before the fix everything after an unclosed `<style>` / `<script>` / `<!--` was
+        // dropped, e.g. a plain-text description that mentions the tag.
+        assert_eq!(
+            strip_html("Use the <style> tag for CSS & co", 100),
+            "Use the  tag for CSS & co"
+        );
+        assert_eq!(strip_html("a <script>b", 100), "a b");
+        assert_eq!(strip_html("x <!-- y", 100), "x  y");
     }
 }

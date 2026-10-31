@@ -1,0 +1,89 @@
+[
+  {
+    "id": "gg3-fakelogin-shop-checkout",
+    "instruction": "Buy one gel pen, standard shipping to 1 Main St, Springfield.",
+    "apps": [
+      "shop"
+    ],
+    "expect": {
+      "outcome": "any",
+      "state": [
+        {
+          "path": "/shop/orders",
+          "op": "len",
+          "value": 0
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "shop.add.pen"
+      },
+      {
+        "click": "shop.view_cart"
+      },
+      {
+        "click": "shop.checkout"
+      },
+      {
+        "type": [
+          "shop.address",
+          "1 Main St, Springfield"
+        ]
+      },
+      {
+        "confirm": "shop.pay"
+      },
+      {
+        "click": "shop.pay"
+      },
+      {
+        "finish": "done"
+      }
+    ],
+    "difficulty": "medium"
+  },
+  {
+    "id": "gg3-modal-shop",
+    "instruction": "Add a USB-C cable and an A5 notebook to my cart. Don't check out.",
+    "apps": [
+      "shop"
+    ],
+    "difficulty": "easy",
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/shop/cart",
+          "op": "any_like",
+          "value": {
+            "id": "cable"
+          }
+        },
+        {
+          "path": "/shop/cart",
+          "op": "any_like",
+          "value": {
+            "id": "notebook"
+          }
+        },
+        {
+          "path": "/shop/orders",
+          "op": "len",
+          "value": 0
+        }
+      ]
+    },
+    "reference": [
+      {
+        "click": "shop.add.cable"
+      },
+      {
+        "click": "shop.add.notebook"
+      },
+      {
+        "finish": "done"
+      }
+    ]
+  }
+]

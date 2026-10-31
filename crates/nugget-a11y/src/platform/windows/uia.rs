@@ -25,9 +25,9 @@ use windows::Win32::UI::Accessibility::{
     IUIAutomationScrollItemPattern, IUIAutomationScrollPattern, IUIAutomationSelectionItemPattern,
     IUIAutomationTextPattern, IUIAutomationTextRange, IUIAutomationTogglePattern,
     IUIAutomationValuePattern, ScrollAmount, TextPatternRangeEndpoint_End,
-    TextPatternRangeEndpoint_Start, TextUnit_Character, UIA_AriaPropertiesPropertyId,
-    UIA_AriaRolePropertyId, UIA_AutomationIdPropertyId, UIA_BoundingRectanglePropertyId,
-    UIA_ClassNamePropertyId, UIA_ControlTypePropertyId,
+    TextPatternRangeEndpoint_Start, TextUnit_Character, TreeScope_Descendants,
+    UIA_AriaPropertiesPropertyId, UIA_AriaRolePropertyId, UIA_AutomationIdPropertyId,
+    UIA_BoundingRectanglePropertyId, UIA_ClassNamePropertyId, UIA_ControlTypePropertyId,
     UIA_ExpandCollapseExpandCollapseStatePropertyId, UIA_ExpandCollapsePatternId,
     UIA_HasKeyboardFocusPropertyId, UIA_HelpTextPropertyId, UIA_InvokePatternId,
     UIA_IsEnabledPropertyId, UIA_IsExpandCollapsePatternAvailablePropertyId,
@@ -48,15 +48,26 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_CONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowTextLengthW, GetWindowTextW,
+    ES_MULTILINE, GA_ROOT, GUITHREADINFO, GWL_STYLE, GetAncestor, GetForegroundWindow,
+    GetGUIThreadInfo, GetWindowLongW, GetWindowTextLengthW, GetWindowTextW,
     GetWindowThreadProcessId, SMTO_ABORTIFHUNG, SendMessageTimeoutW,
 };
 use windows::core::BSTR;
 
 use crate::Rect;
+use crate::platform::text_map;
+
+/// Cap on the text read to measure a selection endpoint (characters).
+const MEASURE_MAX_CHARS: i32 = 1 << 20;
+/// Selection ranges looked at (multiple selections are reported as one span).
+const MAX_SELECTION_RANGES: i32 = 16;
 
 /// Edit-control messages (`CommCtrl.h`), for edit controls without a TextPattern.
 const EM_GETSEL: u32 = 0x00B0;
+const WM_GETTEXT: u32 = 0x000D;
+const WM_GETTEXTLENGTH: u32 = 0x000E;
+/// Ancestors climbed to find the element's top-level window.
+const WINDOW_DEPTH: usize = 64;
 const EM_SETSEL: u32 = 0x00B1;
 
 /// `SendMessageTimeoutW` that gives up on a hung window; `None` on failure or timeout.
@@ -75,6 +86,26 @@ fn send_timeout(hwnd: HWND, msg: u32, wparam: usize, lparam: isize) -> Option<us
         )
     };
     (r.0 != 0).then_some(out)
+}
+
+/// `WM_GETTEXT` into `buf` with a timeout; the number of UTF-16 units copied.
+fn get_text_timeout(hwnd: HWND, buf: &mut [u16]) -> Option<usize> {
+    let mut out = 0usize;
+    // SAFETY: WM_GETTEXT is a system message whose buffer the system marshals across
+    // processes; `buf` is valid for `buf.len()` units (passed as the capacity, terminator
+    // included) for the duration of the call, and `out` is a valid out-pointer.
+    let r = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXT,
+            WPARAM(buf.len()),
+            LPARAM(buf.as_mut_ptr() as isize),
+            SMTO_ABORTIFHUNG,
+            500,
+            Some(&mut out),
+        )
+    };
+    (r.0 != 0).then_some(out.min(buf.len().saturating_sub(1)))
 }
 
 fn werr(e: windows::core::Error) -> Error {
@@ -158,6 +189,8 @@ fn automation() -> Result<IUIAutomation> {
 
 /// The foreground window and its process.
 pub struct Foreground {
+    /// The window handle, as an integer (for noticing foreground changes).
+    pub hwnd: isize,
     pub pid: i32,
     pub exe: Option<String>,
     pub title: String,
@@ -179,6 +212,7 @@ pub fn foreground() -> Result<Option<Foreground>> {
     let n = unsafe { GetWindowTextW(hwnd, &mut buf) }.max(0) as usize;
     let title = String::from_utf16_lossy(&buf[..n.min(buf.len())]);
     Ok(Some(Foreground {
+        hwnd: hwnd.0 as isize,
         pid: pid as i32,
         exe: exe_name(pid),
         title,
@@ -538,7 +572,12 @@ impl UiaEl {
         }
     }
 
-    /// The text of the whole document range, capped.
+    pub fn has_text_pattern(&self) -> bool {
+        self.text().is_some()
+    }
+
+    /// The text of the whole document range, capped (`TextPattern.DocumentRange.GetText`).
+    /// Line endings are as the control reports them (`\r\n`, or `\r` for RichEdit paragraphs).
     pub fn document_text(&self, max_bytes: usize) -> Option<String> {
         let t = self.text()?;
         let max = i32::try_from(max_bytes).unwrap_or(i32::MAX);
@@ -566,22 +605,56 @@ impl UiaEl {
         Some(hwnd)
     }
 
-    /// `EM_GETSEL` as character offsets into the value (UTF-16 units from the control).
+    /// A plain Win32 edit (not RichEdit), whose UIA proxy may cut its text short (classic
+    /// Notepad's 5000-character value came back as 4096 units).
+    fn plain_edit_hwnd(&self) -> Option<HWND> {
+        let hwnd = self.edit_hwnd()?;
+        (!self
+            .info()
+            .class_name
+            .to_ascii_lowercase()
+            .contains("richedit"))
+        .then_some(hwnd)
+    }
+
+    /// The text of a plain edit through `WM_GETTEXT`, up to `max_units` UTF-16 units.
+    pub fn edit_text(&self, max_units: usize) -> Option<String> {
+        let hwnd = self.plain_edit_hwnd()?;
+        let len = send_timeout(hwnd, WM_GETTEXTLENGTH, 0, 0)?.min(max_units);
+        let mut buf = vec![0u16; len + 1];
+        let n = get_text_timeout(hwnd, &mut buf)?;
+        Some(String::from_utf16_lossy(&buf[..n]))
+    }
+
+    /// `EM_GETSEL` as character offsets into the value with line endings normalised to `\n`
+    /// (the control counts UTF-16 units, and `\r\n` as two).
     fn edit_selection(&self) -> Option<(u32, u32)> {
         let hwnd = self.edit_hwnd()?;
-        let (text, _) = self.value_pattern()?;
-        let units: Vec<u16> = text.encode_utf16().collect();
+        let text = self
+            .edit_text(0x1_0000)
+            .or_else(|| self.value_pattern().map(|(v, _)| v))?;
+        let units = text.encode_utf16().count();
         // The packed return value holds 16-bit offsets.
-        if units.len() > 0xFFFF {
+        if units > 0xFFFF {
             return None;
         }
         let r = send_timeout(hwnd, EM_GETSEL, 0, 0)?;
         let (s, e) = (r & 0xFFFF, (r >> 16) & 0xFFFF);
-        if s > units.len() || e > units.len() {
+        if s > units || e > units {
             return None;
         }
-        let chars = |n: usize| String::from_utf16_lossy(&units[..n]).chars().count() as u32;
+        let map = text_map::normalize_newlines(&text);
+        let chars = |n: usize| map.to_text(text_map::utf16_to_chars(&text, n));
         Some((chars(s), chars(e)))
+    }
+
+    /// Whether this is a multi-line Win32 edit (`ES_MULTILINE`); `None` when it has no window
+    /// of its own (a windowless or web control).
+    pub fn edit_is_multiline(&self) -> Option<bool> {
+        let hwnd = self.edit_hwnd()?;
+        // SAFETY: a window handle; returns 0 for an invalid one.
+        let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) };
+        Some(style & ES_MULTILINE != 0)
     }
 
     /// The caret of an edit control from its GUI thread (physical pixels).
@@ -625,31 +698,53 @@ impl UiaEl {
         })
     }
 
-    /// Selection as character offsets: the text length from the document start to each end.
-    /// Edit controls without a TextPattern answer `EM_GETSEL`.
+    /// Selection as character offsets into the document text with line endings normalised to
+    /// `\n`: the normalised length of the text from the document start to each endpoint. Several
+    /// selection ranges are reported as one span from the first start to the last end; a
+    /// degenerate range is the caret. Edit controls without a TextPattern answer `EM_GETSEL`.
     pub fn selection_offsets(&self) -> Option<(u32, u32)> {
+        // A plain edit: its own messages, in the same text `edit_text` reads.
+        if self.plain_edit_hwnd().is_some()
+            && let Some(sel) = self.edit_selection()
+        {
+            return Some(sel);
+        }
         let Some(t) = self.text() else {
             return self.edit_selection();
         };
         // SAFETY: valid pattern/range interfaces, all owned.
         unsafe {
             let sel = t.GetSelection().ok()?;
-            if sel.Length().ok()? < 1 {
-                return None;
+            let n = sel.Length().ok()?.min(MAX_SELECTION_RANGES);
+            if n < 1 {
+                return self.edit_selection();
             }
-            let range = sel.GetElement(0).ok()?;
             let doc = t.DocumentRange().ok()?;
-            let measure = |endpoint| -> Option<u32> {
+            let measure = |range: &IUIAutomationTextRange, endpoint| -> Option<u32> {
                 let r: IUIAutomationTextRange = doc.Clone().ok()?;
-                r.MoveEndpointByRange(TextPatternRangeEndpoint_End, &range, endpoint)
+                r.MoveEndpointByRange(TextPatternRangeEndpoint_End, range, endpoint)
                     .ok()?;
-                let s = r.GetText(-1).ok()?.to_string();
-                Some(s.chars().count() as u32)
+                let s = r.GetText(MEASURE_MAX_CHARS).ok()?.to_string();
+                Some(text_map::normalize_newlines(&s).len())
             };
-            Some((
-                measure(TextPatternRangeEndpoint_Start)?,
-                measure(TextPatternRangeEndpoint_End)?,
-            ))
+            let mut out: Option<(u32, u32)> = None;
+            for i in 0..n {
+                let Ok(range) = sel.GetElement(i) else {
+                    continue;
+                };
+                let (Some(a), Some(b)) = (
+                    measure(&range, TextPatternRangeEndpoint_Start),
+                    measure(&range, TextPatternRangeEndpoint_End),
+                ) else {
+                    continue;
+                };
+                let (a, b) = (a.min(b), a.max(b));
+                out = Some(match out {
+                    Some((s, e)) => (s.min(a), e.max(b)),
+                    None => (a, b),
+                });
+            }
+            out
         }
     }
 
@@ -698,19 +793,22 @@ impl UiaEl {
         }
     }
 
-    /// Put the caret at a character offset (best effort).
+    /// Put the caret at a character offset into the normalised text (best effort).
     pub fn set_caret(&self, offset: u32) {
         let Some(t) = self.text() else {
             if let (Some(hwnd), Some((text, _))) = (self.edit_hwnd(), self.value_pattern()) {
-                let u: usize = text
-                    .chars()
-                    .take(offset as usize)
-                    .map(char::len_utf16)
-                    .sum();
+                let raw = text_map::normalize_newlines(&text).to_source(offset);
+                let u = text_map::chars_to_utf16(&text, raw);
                 let _ = send_timeout(hwnd, EM_SETSEL, u, u as isize);
             }
             return;
         };
+        // The character unit counts what the control stores (`\r\n` as two in an Edit).
+        let offset = self
+            .document_text(MEASURE_MAX_CHARS as usize)
+            .map_or(offset, |text| {
+                text_map::normalize_newlines(&text).to_source(offset)
+            });
         // SAFETY: valid interfaces.
         unsafe {
             let Ok(r) = t.DocumentRange() else { return };
@@ -723,6 +821,50 @@ impl UiaEl {
             let _ = r.MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, n);
             let _ = r.MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, n);
             let _ = r.Select();
+        }
+    }
+
+    /// Whether this element belongs to the foreground window: it, or an ancestor, is in the
+    /// foreground process, or its nearest native window's top-level window is the foreground
+    /// window. Firefox's content runs in a child process whose elements carry that process's
+    /// id. Bounded walk up.
+    pub fn in_foreground(&self, fg_hwnd: isize, fg_pid: i32) -> bool {
+        let mut cur = Some(self.clone());
+        for _ in 0..WINDOW_DEPTH {
+            let Some(e) = cur else { return false };
+            if e.info().process_id == fg_pid {
+                return true;
+            }
+            // SAFETY: valid element; the handle is only compared.
+            if let Ok(h) = unsafe { e.el.CurrentNativeWindowHandle() }
+                && !h.is_invalid()
+            {
+                // SAFETY: any window handle; an invalid one yields a null handle.
+                let root = unsafe { GetAncestor(h, GA_ROOT) };
+                if !root.is_invalid() {
+                    return root.0 as isize == fg_hwnd;
+                }
+            }
+            cur = e.parent_element();
+        }
+        false
+    }
+
+    /// The descendant that has keyboard focus, when the focus is reported on a container
+    /// (a document or window) instead of the element inside it.
+    pub fn keyboard_focus_descendant(&self) -> Option<UiaEl> {
+        let a = automation().ok()?;
+        // SAFETY: valid automation and element interfaces; the condition and the VARIANT are
+        // owned for the call.
+        unsafe {
+            let cond = a
+                .CreatePropertyCondition(UIA_HasKeyboardFocusPropertyId, &VARIANT::from(true))
+                .ok()?;
+            let el = self.el.FindFirst(TreeScope_Descendants, &cond).ok()?;
+            Some(UiaEl {
+                el,
+                cached: Cell::new(false),
+            })
         }
     }
 

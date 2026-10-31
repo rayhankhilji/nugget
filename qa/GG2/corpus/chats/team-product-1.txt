@@ -1,0 +1,7 @@
+Team chat export (#product), 2026-07-31
+[2026-07-31 9:42] Dana Whitlock: anyone seen the new Beacon numbers?
+[2026-07-31 10:34] Nadia Brennan: thanks!
+[2026-07-31 11:24] Dana Whitlock: can we push the design review to Thursday?
+[2026-07-31 12:54] Mei Chen: PR is up for review
+[2026-07-31 13:51] Mei Chen: can we push the design review to Thursday?
+[2026-07-31 14:14] Mei Chen: +1

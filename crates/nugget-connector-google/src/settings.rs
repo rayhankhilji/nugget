@@ -10,7 +10,8 @@ fn default_window() -> u32 {
     365
 }
 
-#[derive(Debug, Clone, Deserialize)]
+// Not `Debug`: holds the OAuth `client_secret`.
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GmailSettings {
     pub client_id: String,
@@ -30,7 +31,8 @@ pub(crate) struct GmailSettings {
     pub allow_modify: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+// Not `Debug`: holds the OAuth `client_secret`.
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CalendarSettings {
     pub client_id: String,
@@ -55,7 +57,8 @@ fn default_drive_file_mb() -> u32 {
     DEFAULT_DRIVE_FILE_MB
 }
 
-#[derive(Debug, Clone, Deserialize)]
+// Not `Debug`: holds the OAuth `client_secret`.
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DriveSettings {
     pub client_id: String,
@@ -241,4 +244,35 @@ fn common_schema() -> Value {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod unit {
+    use super::*;
+
+    /// `true` when `T: Debug` (inherent method wins), `false` otherwise (trait fallback).
+    struct Probe<T>(std::marker::PhantomData<T>);
+    trait NotDebug {
+        fn is_debug(&self) -> bool {
+            false
+        }
+    }
+    impl<T> NotDebug for Probe<T> {}
+    impl<T: std::fmt::Debug> Probe<T> {
+        #[allow(dead_code)]
+        fn is_debug(&self) -> bool {
+            true
+        }
+    }
+
+    /// Settings carry the OAuth `client_secret`: they must not be `Debug`, so no `{:?}` or
+    /// `tracing` field can print it.
+    #[test]
+    fn settings_holding_secrets_are_not_debug() {
+        use std::marker::PhantomData;
+        assert!(!Probe::<GmailSettings>(PhantomData).is_debug());
+        assert!(!Probe::<CalendarSettings>(PhantomData).is_debug());
+        assert!(!Probe::<DriveSettings>(PhantomData).is_debug());
+        assert!(Probe::<String>(PhantomData).is_debug());
+    }
 }

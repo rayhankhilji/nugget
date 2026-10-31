@@ -474,8 +474,23 @@ export async function keyboardScenario({ browser, bin }) {
 
       await page.keyboard.press(`${MOD}+1`);
       await pageMain(page, "app.nav.today").waitFor();
-      const actionBtn = page.locator("main").getByRole("button", { name: action.label, exact: true });
-      await tabTo(page, actionBtn, { what: `the card action "${action.label}"`, max: 80 });
+      // Known action kinds show a short verb ("Draft reply"); the accessible name adds the
+      // daemon's full label ("Draft reply: Draft a reply to Ana") so two such actions differ.
+      let actionName = action.label;
+      try {
+        const short = t(`today.actionKind.${action.kind}`);
+        if (short && !short.startsWith("today.")) {
+          actionName = short === action.label ? short : t("today.actionFullName").replace("{label}", short).replace("{full}", action.label);
+        }
+      } catch {
+        /* an unknown kind keeps the daemon's label */
+      }
+      // Within this card's actions group: two cards can offer the same kind of action.
+      const actionBtn = page
+        .locator("main")
+        .getByRole("group", { name: t("today.actionsLabel").replace("{title}", card.title), exact: true })
+        .getByRole("button", { name: actionName, exact: true });
+      await tabTo(page, actionBtn, { what: `the card action "${actionName}"`, max: 80 });
       await markOpener(page);
       await page.keyboard.press("Enter");
       await expectDialogFocused(page, "the card action dialog");

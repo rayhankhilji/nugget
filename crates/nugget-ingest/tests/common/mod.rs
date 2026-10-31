@@ -280,12 +280,16 @@ pub struct FakeProvider {
     pub chat_inputs: Mutex<Vec<String>>,
     /// Every text sent for embedding.
     pub embed_inputs: Mutex<Vec<String>>,
+    /// The item named for each text sent through `embed_items` (the egress ledger's items).
+    pub embed_items: Mutex<Vec<ItemRef>>,
     /// Embedding calls containing this marker wait until `open` is set.
     pub block_marker: Mutex<Option<String>>,
     open: tokio::sync::watch::Sender<bool>,
     pub dim: usize,
     /// Return NaN vectors.
     pub nan: AtomicBool,
+    /// The task prefixes it reports as `(query, document)` (none by default).
+    pub prefixes: Mutex<(String, String)>,
 }
 
 impl FakeProvider {
@@ -295,10 +299,12 @@ impl FakeProvider {
             locality,
             chat_inputs: Mutex::new(Vec::new()),
             embed_inputs: Mutex::new(Vec::new()),
+            embed_items: Mutex::new(Vec::new()),
             block_marker: Mutex::new(None),
             open: tokio::sync::watch::channel(true).0,
             dim: 4,
             nan: AtomicBool::new(false),
+            prefixes: Mutex::new((String::new(), String::new())),
         })
     }
 
@@ -366,6 +372,15 @@ impl Provider for FakeProvider {
                 output_tokens: None,
             }),
         ])))
+    }
+
+    fn embed_prefixes(&self) -> (String, String) {
+        self.prefixes.lock().unwrap().clone()
+    }
+
+    async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+        self.embed_items.lock().unwrap().extend_from_slice(items);
+        self.embed(texts).await
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {

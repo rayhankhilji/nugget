@@ -116,6 +116,8 @@ Search and context packing (`nugget_retrieve::RetrieveConfig`).
 | `max_candidates` | integer | `512` | At most this many candidate chunks |
 | `fusion_depth_factor` | integer | `4` | Hybrid search fuses the top `max(limit × factor, min_fusion_depth)` hits of each list |
 | `min_fusion_depth` | integer | `40` | Minimum hits per list in fusion |
+| `fusion` | `rrf` or `convex` | `rrf` | How hybrid search combines the full-text and vector lists. `rrf` (reciprocal-rank fusion) uses ranks only; `convex` combines normalised scores, which keeps a strong match from one list on top but measured worse on English queries (see [Benchmarks](../architecture/benchmarks.md)) |
+| `fusion_text_weight` | float, 0 to 1 | `0.5` | `convex` only: the full-text list's weight (the vector list gets the rest) |
 | `mmr` | bool | `true` | Re-rank with maximal marginal relevance for diversity |
 | `mmr_lambda` | float, 0 to 1 | `0.7` | MMR trade-off: 1.0 is pure relevance, 0.0 pure novelty |
 | `mmr_pool_factor` | integer | `3` | Items MMR chooses from, as a multiple of the requested count |
@@ -131,6 +133,9 @@ Search and context packing (`nugget_retrieve::RetrieveConfig`).
 | `rerank_pool` | integer | `30` | Top grouped candidates scored by a reranker, when one is configured, before MMR |
 | `rerank_weight` | float, 0 to 1 | `0.7` | Share of the reranker's score in relevance; 1.0 replaces the first-stage score |
 | `rerank_timeout_ms` | integer | `2500` | After this, reranking is skipped and the first-stage order kept |
+| `rerank_adaptive` | bool | `true` | Keep the reranker within `rerank_timeout_ms`: size its pool from its measured time per passage, halve the pool after a timeout, and pause reranking when fewer than `rerank_min_pool` passages would fit, so a slow reranker (a 2-core CPU) never makes every search wait |
+| `rerank_min_pool` | integer | `8` | The smallest pool worth reranking; below it, reranking pauses |
+| `rerank_cooldown_ms` | integer | `600000` | How long reranking pauses when it cannot meet its budget, doubling on each consecutive pause up to 8× |
 | `reranker` | table | unset | A reranker you run yourself, below |
 | `dates` | bool | `true` | Parse date phrases ("last week", "in march") and keep items modified in that range, falling back to unfiltered results when none match |
 | `date_utc_offset_minutes` | integer | `0` | UTC offset used to resolve date phrases (clamped to ±18 h) |
@@ -301,6 +306,8 @@ file order, then the managed runtime, then cloud providers in file order. See
 | `stream_usage` | bool | `true` | OpenAI-compatible only: ask for token usage in the stream. Turn off for servers that reject `stream_options` |
 | `max_tokens_param` | `max_tokens` or `max_completion_tokens` | `max_tokens` | OpenAI-compatible only: the name of the output-cap field (OpenAI reasoning models need `max_completion_tokens`) |
 | `embed_batch_size` | integer | `64` | OpenAI-compatible only: texts per embeddings request |
+| `embed_query_prefix` | string | per model | OpenAI-compatible only: text put before search queries for embedding models that expect a task prefix. Unset: the model's known default (`search_query: ` for nomic-embed-text); `""`: none |
+| `embed_document_prefix` | string | per model | OpenAI-compatible only: text put before passages when indexing. Unset: the model's known default (`search_document: ` for nomic-embed-text); `""`: none. An index keeps the scheme it was built with; changing this takes effect after a re-index |
 | `llama_cpp` | bool | `true` for on-device endpoints, else `false` | OpenAI-compatible only: the server is llama.cpp's `llama-server`. Requests then ask it to reuse the cached prompt prefix, and the stable prefix can be evaluated ahead of a request. Ollama, LM Studio and vLLM ignore the extra fields |
 | `slot_affinity` | bool | `false` | OpenAI-compatible `llama-server` only: send requests that share a cache key to a fixed server slot. Off by default, because `llama-server` already picks the idle slot with the longest cached prefix, and a pinned request waits when its slot is busy |
 | `socket_path` | string | unset | Unix only, OpenAI-compatible on-device servers: send every request to this Unix socket. `base_url` then supplies only the scheme, `Host` header and path prefix (for example `http://localhost/v1`). The on-device runtime uses this for `llama-server` by default |
@@ -329,7 +336,7 @@ is logged) and the rest of the daemon runs normally. The keys are not final; the
 | `policy` | The safety policy for agent actions; rules are edited from the Safety page (`policy.set`) |
 | `browser` | Settings of the browser extension bridge; not settled yet |
 | `proactive` | `enabled`, the time of the morning brief, and where the card judge may run (its locality) |
-| `plugins` | `trusted_keys` (trusted publisher keys) and a developer-mode switch that allows unsigned plugins |
+| `plugins` | `trusted_keys` (trusted publisher keys), `dev_mode` (allows unsigned plugins) and `catalog_dirs` (absolute folders whose `.nuggetplugin` files the Plugins page lists as available; default `<data>/plugin-catalog`, plus the folders in the `NUGGET_PLUGIN_CATALOG` environment variable) |
 
 When a feature lands, its keys get their own table on this page.
 
@@ -379,7 +386,8 @@ Grounding (AA3; see `bench/README.md`, "Grounded drafts"):
 
 The desktop app has its own switch, **Read ahead while you reply** on the Double Tap page
 (`read_ahead` in its Double Tap settings, next to `allow_terminals`); read-ahead runs only when both
-are on.
+are on. Its `read_ahead_on_battery` (default `true`, **Read ahead on battery**) pauses
+read-ahead on battery power when off; low power mode or battery saver always pauses it.
 
 ## Example
 
