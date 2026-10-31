@@ -30,13 +30,51 @@ inserted.
 5. **Voice.** Style statistics (length, greetings, sign-offs, formality, punctuation habits) and a
    few short examples of messages you wrote, chosen by recipient, then channel, then topic.
 6. **The draft streams into an overlay** next to the caret. **Enter** accepts, **Tab** lets you edit,
-   **Esc** cancels.
+   **R** retries, **S**/**L**/**F**/**C** make it shorter, longer, more formal or more casual, **Esc**
+   cancels (see [The overlay](#the-overlay)).
 7. **Insertion.** Nugget inserts at the caret through the accessibility API and reads the field back
    to check the text arrived. If that is not possible, it pastes through the clipboard, saving and
    restoring every clipboard format, not just text.
 
 Whether you accepted, edited or cancelled is recorded as feedback, so the voice profile can learn
 from your edits.
+
+## The overlay
+
+The overlay opens just below the caret (above it near the bottom of the screen), lined up with the
+caret's end in a right-to-left field, and never over the line you are typing in. It grows with the
+draft up to a maximum height and then scrolls; on a second monitor or a scaled display it is sized
+for that screen.
+
+| Key | In the overlay |
+|---|---|
+| **Enter** | Insert the draft (while it is still streaming: insert what is shown and stop the rest). |
+| **Tab** | Edit the draft in place. While editing, **Enter** is a new line, **Ctrl+Enter** (**⌘↩** on macOS) inserts your edit, **Ctrl+Shift+Enter** (**⌘⇧↩**) inserts the original draft as is. |
+| **R** | Retry: a new draft from the same context. |
+| **S**, **L**, **F**, **C** | Shorter, longer, more formal, more casual: a new draft that rewrites the current one (your edit, if you made one). |
+| **H** | Previous drafts: pick one to insert it instead. |
+| **Esc** | Cancel. The overlay closes and the keyboard goes back to the field you were typing in. |
+
+Every action is also a button (Shift+Tab reaches them), and the letter keys work only outside the
+editor. Retry and the refinements are new requests to the same provider Double Tap chose for the
+app (your local model, or the cloud provider you picked for it), with the same privacy rules: they
+send nothing a first draft would not. If a draft fails, the overlay stays open with Retry instead of
+closing on its own.
+
+**Screen readers.** The overlay announces what it is doing (reading, drafting, rewriting, draft
+ready with its length, inserted, errors) without reading every streamed word; the draft is a
+labelled region you can read in full. Animations stop when the system asks for reduced motion.
+
+**Previous drafts.** The last 20 drafts you inserted or dismissed are kept so you can insert one
+again, from the overlay (**H**) or the **Recent drafts** list on the Double Tap page (copy, remove,
+clear all). They are kept in memory only, never written to disk, and are gone when Nugget quits.
+Drafts that drew on items marked sensitive, drafts for fields labelled as a password, PIN or code,
+and drafts that contain a card number or a long run of digits are never kept.
+
+**Try your shortcut.** The Double Tap page has a practice field with a sample message to answer.
+Click into it and press your trigger: the real flow runs (the same overlay, the same provider), but
+the draft goes into the practice field, nothing is read from or inserted into another app, it does
+not count as feedback for your voice profile, and it is not kept in the history.
 
 ## Your voice profile
 

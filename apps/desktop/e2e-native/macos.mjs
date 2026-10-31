@@ -77,6 +77,10 @@ export const macos = {
     await helper.call("trigger");
   },
 
+  /** The overlay's Retry key. */
+  async retry() {
+    await helper.call("retry");
+  },
   async enter() {
     await helper.call("enter");
   },
