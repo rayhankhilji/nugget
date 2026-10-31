@@ -18,9 +18,9 @@ use async_trait::async_trait;
 use nugget_core::ids::{EntityId, ItemRef};
 use nugget_core::ipc::SearchHit;
 use nugget_core::{Error, Result};
-use nugget_graph::{ClaimStatus, Entity, GraphStore};
+use nugget_graph::{ClaimStatus, Entity, EntityKind, GraphStore};
 use nugget_ipc::{Notifier, RpcError, parse_params, to_result};
-use nugget_store::{EntityLinkRow, Item, Store};
+use nugget_store::{EntityLinkRow, ItemMeta, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::{OffsetDateTime, UtcOffset};
@@ -57,8 +57,8 @@ const HIT_PEOPLE: usize = 5;
 
 const DEFAULT_TIMELINE_LIMIT: usize = 300;
 const MAX_TIMELINE_LIMIT: usize = 1000;
-/// Mentions read for one timeline.
-const TIMELINE_MENTIONS: usize = 5000;
+/// Distinct mentioning items read for one timeline; past it the timeline reports `truncated`.
+const TIMELINE_ITEMS: usize = 20_000;
 /// Evidence entries shown per fact.
 const FACT_EVIDENCE: usize = 10;
 /// Snippet length of a timeline item (characters).
@@ -320,8 +320,9 @@ impl SearchUi {
         let graph = self.state.knowledge.graph.clone();
         let wanted_people = f.people.clone();
         let (items, selected, selected_names) = blocking(move || {
-            let items = load_pool(&store, hits, &source_kinds, offset)?;
             let (selected, names) = resolve_people(graph.as_ref(), &wanted_people)?;
+            let live: HashSet<String> = selected.iter().filter_map(|s| s.live.clone()).collect();
+            let items = load_pool(&store, hits, &source_kinds, offset, &live)?;
             Ok((items, selected, names))
         })
         .await?;
@@ -379,6 +380,7 @@ impl SearchUi {
                 people: i
                     .people
                     .iter()
+                    .filter(|p| is_people_kind(p.kind))
                     .take(HIT_PEOPLE)
                     .map(EntityRefView::from)
                     .collect(),
@@ -396,21 +398,32 @@ impl SearchUi {
     }
 }
 
-/// Dates, items and mentioned entities of the pool, in retriever order. Hits whose item is gone
-/// (deleted since the search) are dropped.
+/// Entity kinds shown in the people facet and on hits ("people and projects").
+fn is_people_kind(kind: EntityKind) -> bool {
+    matches!(
+        kind,
+        EntityKind::Person | EntityKind::Organization | EntityKind::Project
+    )
+}
+
+/// Dates, details (no text) and mentioned entities of the pool, in retriever order. Hits whose
+/// item is gone (deleted since the search) are dropped. Each item keeps the entities of the
+/// people kinds ([`is_people_kind`]) plus any `selected` (live ids) it mentions, so a selected
+/// entity of another kind still filters and counts.
 fn load_pool(
     store: &Store,
     hits: Vec<SearchHit>,
     source_kinds: &HashMap<String, String>,
     offset: UtcOffset,
+    selected: &HashSet<String>,
 ) -> Result<Vec<PoolItem>> {
     let refs: Vec<ItemRef> = hits.iter().map(|h| h.item.clone()).collect();
     let dates = store.item_dates(&refs)?;
-    let items = store.get_items(&refs)?;
+    let mut metas = store.item_meta(&refs)?;
     let mut people = store.entities_in_items(&refs)?;
     let mut out = Vec::with_capacity(hits.len());
-    for (hit, item) in hits.into_iter().zip(items) {
-        let (Some(item), Some(d)) = (item, dates.get(&hit.item)) else {
+    for hit in hits {
+        let (Some(item), Some(d)) = (metas.remove(&hit.item), dates.get(&hit.item)) else {
             continue;
         };
         let (at, date_source) = logic::own_date(d, offset);
@@ -422,7 +435,12 @@ fn load_pool(
                 .map(String::as_str),
         );
         out.push(PoolItem {
-            people: people.remove(&hit.item).unwrap_or_default(),
+            people: people
+                .remove(&hit.item)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|p| is_people_kind(p.kind) || selected.contains(p.id.as_str()))
+                .collect(),
             sensitive: nugget_retrieve::is_sensitive(&item.metadata),
             hit,
             at,
@@ -548,9 +566,12 @@ impl SearchUi {
                 &store,
                 graph.as_ref(),
                 &id,
-                &range,
-                limit,
-                offset,
+                &Window {
+                    range,
+                    limit,
+                    offset,
+                    max_items: TIMELINE_ITEMS,
+                },
                 &source_kinds,
             )
         })
@@ -558,26 +579,34 @@ impl SearchUi {
     }
 }
 
+/// Which events a timeline keeps.
+struct Window {
+    range: DayRange,
+    limit: usize,
+    offset: UtcOffset,
+    /// Distinct mentioning items read at most.
+    max_items: usize,
+}
+
 fn build_timeline(
     store: &Store,
     graph: &dyn GraphStore,
     id: &str,
-    range: &DayRange,
-    limit: usize,
-    offset: UtcOffset,
+    w: &Window,
     source_kinds: &HashMap<String, String>,
 ) -> Result<TimelineResult> {
+    let (range, limit, offset, max_items) = (&w.range, w.limit, w.offset, w.max_items);
     let entity = graph
         .get_entity(&EntityId::new(id))?
         .ok_or_else(|| Error::NotFound(format!("entity {id}")))?;
-    let mentions = graph.mentions_for(&entity.id, TIMELINE_MENTIONS)?;
+    let (mentions, capped) = store.items_mentioning(&entity.id, max_items)?;
     let claims: Vec<_> = graph
         .claims_for(&entity.id, false)?
         .into_iter()
         .filter(|c| c.status.is_active())
         .collect();
 
-    // Every item involved, with the first mention's surface.
+    // Every item involved, with a mention surface.
     let mut order: Vec<ItemRef> = Vec::new();
     let mut surfaces: HashMap<ItemRef, Option<String>> = HashMap::new();
     for m in &mentions {
@@ -652,12 +681,17 @@ fn build_timeline(
             }
         }
     }
-    let loaded: HashMap<ItemRef, Item> = wanted
+    // Details without text, and the first chunk of each kept item for its snippet.
+    let loaded: HashMap<ItemRef, ItemMeta> = store.item_meta(&wanted)?;
+    let item_refs: Vec<ItemRef> = cut
+        .kept
         .iter()
-        .cloned()
-        .zip(store.get_items(&wanted)?)
-        .filter_map(|(r, i)| i.map(|i| (r, i)))
+        .filter_map(|e| match &e.payload {
+            Pending::Item { item, .. } => Some(item.clone()),
+            Pending::Fact { .. } => None,
+        })
         .collect();
+    let firsts = store.first_chunks(&item_refs)?;
 
     let mut kept = cut.kept;
     // Final order with titles as the tie-break among items.
@@ -681,7 +715,7 @@ fn build_timeline(
                     surface,
                 } => {
                     let it = loaded.get(&item);
-                    let text = it.and_then(|i| i.text.as_deref()).unwrap_or("");
+                    let text = firsts.get(&item).map_or("", String::as_str);
                     let snippet = match logic::snippet(text, SNIPPET_CHARS) {
                         s if s.is_empty() => surface.unwrap_or_default(),
                         s => s,
@@ -732,7 +766,8 @@ fn build_timeline(
         events,
         months: cut.months,
         total: cut.total,
-        truncated: cut.truncated,
+        // Past the item cap, older or newer items may be missing.
+        truncated: cut.truncated || capped,
     })
 }
 
@@ -898,5 +933,95 @@ mod tests {
             key: nugget_core::ids::ItemKey::new("k"),
         };
         assert!(check_item("item", &empty).is_err());
+    }
+
+    #[test]
+    fn timeline_keeps_the_newest_and_reports_the_item_cap() {
+        use nugget_graph::{Mention, NewEntity};
+        use nugget_store::{NewChunk, NewItem, content_hash};
+        use time::format_description::well_known::Rfc3339;
+
+        let store = Store::open_in_memory().unwrap();
+        let graph = store.graph();
+        let e = graph
+            .create_entity(&NewEntity::new(EntityKind::Person, "Sam"))
+            .unwrap();
+        for i in 0..5 {
+            let key = format!("k{i}");
+            let body = format!("Note {i} about Sam, which is long enough to snip.");
+            let it = NewItem::new("files", key.as_str(), content_hash(&body))
+                .with_title(format!("Note {i}"))
+                .with_modified_at(
+                    OffsetDateTime::parse(&format!("2024-0{}-01T00:00:00Z", i + 1), &Rfc3339)
+                        .unwrap(),
+                )
+                .with_metadata(serde_json::json!({"sensitive": false}))
+                .with_text(body.clone());
+            store
+                .upsert_item_with_chunks(&it, &[NewChunk::text(body)])
+                .unwrap();
+            graph
+                .add_mention(&Mention {
+                    entity: e.clone(),
+                    item: it.item.clone(),
+                    chunk_id: None,
+                    surface: "Sam".into(),
+                    confidence: 0.9,
+                })
+                .unwrap();
+        }
+        let kinds = HashMap::new();
+        let run = |limit: usize, cap: usize| {
+            let t = build_timeline(
+                &store,
+                &graph,
+                e.as_str(),
+                &Window {
+                    range: DayRange::default(),
+                    limit,
+                    offset: UtcOffset::UTC,
+                    max_items: cap,
+                },
+                &kinds,
+            )
+            .unwrap();
+            serde_json::to_value(&t).unwrap()
+        };
+        let keys = |v: &Value| -> Vec<String> {
+            v["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| e["item"]["key"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        // Newest two, ascending; snippets come from the first chunk.
+        let t = run(2, 100);
+        assert_eq!(keys(&t), ["k3", "k4"]);
+        assert_eq!(t["total"], 5);
+        assert_eq!(t["truncated"], true);
+        assert_eq!(t["events"][1]["date_source"], "modified");
+        assert_eq!(
+            t["events"][1]["snippet"],
+            "Note 4 about Sam, which is long enough to snip."
+        );
+        assert_eq!(t["events"][1]["title"], "Note 4");
+        let all = run(10, 100);
+        assert_eq!(keys(&all), ["k0", "k1", "k2", "k3", "k4"]);
+        assert_eq!(all["truncated"], false);
+        // Past the item cap the timeline says it is incomplete.
+        let capped = run(10, 2);
+        assert_eq!(capped["total"], 2);
+        assert_eq!(capped["truncated"], true);
+        assert_eq!(run(10, 5)["truncated"], false);
+    }
+
+    #[test]
+    fn people_kinds() {
+        assert!(is_people_kind(EntityKind::Person));
+        assert!(is_people_kind(EntityKind::Organization));
+        assert!(is_people_kind(EntityKind::Project));
+        assert!(!is_people_kind(EntityKind::Topic));
+        assert!(!is_people_kind(EntityKind::Place));
     }
 }

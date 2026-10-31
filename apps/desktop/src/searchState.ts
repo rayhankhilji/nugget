@@ -93,6 +93,11 @@ export function hasFilters(s: SearchState): boolean {
   return s.sources.length > 0 || s.kinds.length > 0 || s.people.length > 0 || !!s.from || !!s.to;
 }
 
+/** How many filter values are set (a date range counts once). */
+export function activeFilters(s: SearchState): number {
+  return s.sources.length + s.kinds.length + s.people.length + (s.from || s.to ? 1 : 0);
+}
+
 /** The daemon's filter object for `search.faceted`. */
 export function toFilters(s: SearchState): FacetedFilters {
   return { sources: s.sources, kinds: s.kinds, people: s.people, from: s.from, to: s.to };

@@ -1891,7 +1891,7 @@
   "searchui.clearFilters": "Clear filters",
   "searchui.facet.kind": "Kind",
   "searchui.facet.source": "Source",
-  "searchui.facet.person": "People",
+  "searchui.facet.person": "People and projects",
   "searchui.facet.date": "Date",
   "searchui.kind.mail": "Mail",
   "searchui.kind.event": "Event",
@@ -1944,5 +1944,13 @@
   "searchui.recent": "Recent searches",
   "searchui.clearRecent": "Clear recent",
   "searchui.runRecent": "Search again for “{query}”",
-  "searchui.paletteSaved": "Saved search: {name}"
+  "searchui.paletteSaved": "Saved search: {name}",
+  "searchui.facetOption": "{label}, {count, plural, one {# result} other {# results}}",
+  "searchui.poolLimited": "Filter counts cover the best {pool} matches.",
+  "searchui.filtersCleared": "Filters cleared",
+  "searchui.datesCleared": "Dates cleared",
+  "searchui.savedDeleted": "Deleted saved search “{name}”",
+  "searchui.recentCleared": "Recent searches cleared",
+  "searchui.recentWithFilters": "{query} · {n, plural, one {# filter} other {# filters}}",
+  "searchui.resultsFiltered": "{n, plural, one {# result} other {# results}} for “{query}” with {filters, plural, one {# filter} other {# filters}}"
 }

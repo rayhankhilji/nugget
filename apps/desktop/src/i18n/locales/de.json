@@ -1896,7 +1896,7 @@
   "searchui.clearFilters": "Filter zurücksetzen",
   "searchui.facet.kind": "Art",
   "searchui.facet.source": "Quelle",
-  "searchui.facet.person": "Personen",
+  "searchui.facet.person": "Personen und Projekte",
   "searchui.facet.date": "Datum",
   "searchui.kind.mail": "E-Mail",
   "searchui.kind.event": "Termin",
@@ -1949,5 +1949,13 @@
   "searchui.recent": "Letzte Suchen",
   "searchui.clearRecent": "Verlauf löschen",
   "searchui.runRecent": "Erneut nach „{query}“ suchen",
-  "searchui.paletteSaved": "Gespeicherte Suche: {name}"
+  "searchui.paletteSaved": "Gespeicherte Suche: {name}",
+  "searchui.facetOption": "{label}, {count, plural, one {# Ergebnis} other {# Ergebnisse}}",
+  "searchui.poolLimited": "Die Filterzahlen umfassen die {pool} besten Treffer.",
+  "searchui.filtersCleared": "Filter zurückgesetzt",
+  "searchui.datesCleared": "Datum zurückgesetzt",
+  "searchui.savedDeleted": "Gespeicherte Suche „{name}“ gelöscht",
+  "searchui.recentCleared": "Letzte Suchen gelöscht",
+  "searchui.recentWithFilters": "{query} · {n, plural, one {# Filter} other {# Filter}}",
+  "searchui.resultsFiltered": "{n, plural, one {# Ergebnis} other {# Ergebnisse}} für „{query}“ mit {filters, plural, one {# Filter} other {# Filtern}}"
 }

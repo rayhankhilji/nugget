@@ -26,7 +26,7 @@ import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } fro
 import { formatDate, formatNumber, useT } from "../i18n";
 import { sourceKindLabel } from "../format";
 import { addRecent } from "../savedSearches";
-import { decode, EMPTY_STATE, encode, hasFilters, toFilters, type SearchState } from "../searchState";
+import { activeFilters, decode, EMPTY_STATE, encode, hasFilters, normalize, toFilters, type SearchState } from "../searchState";
 import { Facets, kindLabel } from "../components/search/Facets";
 import { Preview } from "../components/search/Preview";
 import { RecentSearchList, SavedSearchList, SaveSearchDialog } from "../components/search/SavedSearches";
@@ -52,6 +52,8 @@ export function SearchPage() {
   const [state, setState] = useState<SearchState>(EMPTY_STATE);
   const [facets, setFacets] = useState<FacetedResult["facets"] | null>(null);
   const [total, setTotal] = useState<number | null>(null);
+  /** The pool size when the daemon capped its candidates (facet counts may be partial). */
+  const [poolLimited, setPoolLimited] = useState<number | null>(null);
   const [moreBusy, setMoreBusy] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -60,6 +62,10 @@ export function SearchPage() {
   const faceted = useRef<boolean | null>(null);
   /** Only the latest search may update the page. */
   const seq = useRef(0);
+  /** The wanted state, updated at once (before any answer), so quick changes build on each other. */
+  const stateRef = useRef<SearchState>(EMPTY_STATE);
+  /** The encoded search (without timeline) the shown results answer. */
+  const shownKey = useRef<string | null>(null);
   /** The result whose preview is open, to hand focus back when it closes. */
   const returnFocus = useRef<HTMLElement | null>(null);
   const opener = useOpener();
@@ -79,9 +85,21 @@ export function SearchPage() {
   const failing = (sources.data ?? []).filter((s) => s.state === "error" || s.last_error).length;
   const nothingHint = stillIndexing ? t("search.indexingHint") : t("search.noSourcesHint");
 
-  /** Run `next` (its query and filters); `append` loads the next page of the same search. */
-  const runState = async (next: SearchState, append = false) => {
-    const q = next.q.trim();
+  /** Make `next` the wanted state right away (the controls show it while the search runs). */
+  const want = (next: SearchState): SearchState => {
+    const n = normalize(next);
+    stateRef.current = n;
+    setState(n);
+    return n;
+  };
+
+  /**
+   * Run `next` (its query and filters); `append` loads the next page of the same search.
+   * `record` adds it to recent searches (explicit runs only, not filter changes or paging).
+   */
+  const runState = async (wanted: SearchState, { append = false, record = false }: { append?: boolean; record?: boolean } = {}) => {
+    const next = append ? stateRef.current : want({ ...wanted, timeline: null });
+    const q = next.q;
     if (!q) return;
     const mine = ++seq.current;
     const offset = append ? (hits?.length ?? 0) : 0;
@@ -105,16 +123,21 @@ export function SearchPage() {
         setHits((prev) => (append ? [...(prev ?? []), ...result.hits] : result.hits));
         setFacets(result.facets);
         setTotal(result.total);
+        setPoolLimited(result.pool_limited ? result.pool : null);
       } else {
         setHits(plain);
         setFacets(null);
         setTotal(null);
+        setPoolLimited(null);
       }
       if (!append) {
         setSelected(null);
         setSearched(q);
-        setState({ ...next, q, timeline: null });
-        addRecent(encode({ ...next, q }));
+        shownKey.current = encode(next);
+        if (record) addRecent(encode(next));
+        const n = result ? result.total : (plain?.length ?? 0);
+        const active = activeFilters(next);
+        announce(active > 0 ? t("searchui.resultsFiltered", { n, query: q, filters: active }) : t("search.resultsFor", { n, query: q }));
       }
     } catch (err) {
       if (mine === seq.current) setError(err);
@@ -130,38 +153,51 @@ export function SearchPage() {
     e?.preventDefault();
     const q = (override ?? query).trim();
     if (!q) return;
-    // A new query keeps the filters only when the daemon can apply them.
-    return runState({ ...state, q, timeline: null });
+    // A new query keeps the current filters (they stay visible and clearable).
+    return runState({ ...stateRef.current, q }, { record: true });
   };
 
   /** Apply an encoded state: a saved or recent search, a timeline requested from elsewhere. */
   const apply = (encoded: string) => {
     const s = decode(encoded);
-    setQuery(s.q);
     if (s.timeline) {
       setSelected(null);
+      if (!s.q && !hasFilters(s)) {
+        // Only a timeline (the entity page's button): keep the search as it is underneath.
+        const next = { ...stateRef.current, timeline: s.timeline };
+        stateRef.current = next;
+        setState(next);
+        return;
+      }
+      setQuery(s.q);
+      stateRef.current = s;
       setState(s);
       return;
     }
+    setQuery(s.q);
     inputRef.current?.focus();
-    void runState(s);
+    void runState(s, { record: true });
   };
 
   // A search from the command palette: fill the box and run it, keeping focus in the box.
   usePendingSearch((q) => {
     setQuery(q);
     inputRef.current?.focus();
-    void runState({ ...EMPTY_STATE, q });
+    void runState({ ...EMPTY_STATE, q }, { record: true });
   });
   usePendingSearchState(apply);
 
   const openTimeline = (entityId: string) => {
     setSelected(null);
-    setState((s) => ({ ...s, timeline: entityId }));
+    stateRef.current = { ...stateRef.current, timeline: entityId };
+    setState(stateRef.current);
   };
   const closeTimeline = () => {
-    setState((s) => ({ ...s, timeline: null }));
-    if (!hits && state.q) void runState({ ...state, timeline: null });
+    const back = { ...stateRef.current, timeline: null };
+    stateRef.current = back;
+    setState(back);
+    // Results for another search (a saved timeline with its own query): run that search.
+    if (back.q && shownKey.current !== encode(back)) void runState(back);
     focusBack.current = true;
   };
   // Back on the results: focus their heading (or the box when there are none yet).
@@ -258,10 +294,10 @@ export function SearchPage() {
 
       {askOpen && <AskPanel initialQuestion={query.trim()} byId={byId} onOpen={opener.open} />}
 
-      <SavedSearchList onRun={apply} />
-      {!query.trim() && <RecentSearchList onRun={apply} />}
+      <SavedSearchList onRun={apply} announce={announce} onEmpty={() => inputRef.current?.focus()} />
+      {!query.trim() && <RecentSearchList onRun={apply} announce={announce} onEmpty={() => inputRef.current?.focus()} />}
 
-      <ErrorNote error={error} onRetry={() => void runState({ ...state, q: state.q || query.trim() })} />
+      <ErrorNote error={error} onRetry={() => void runState({ ...stateRef.current, q: stateRef.current.q || query.trim() })} />
       {failing > 0 && (
         <p className="note" role="status">
           {t("search.failingSources", { n: failing })} <GoToPage page="sources" className="btn btn-ghost btn-small" />
@@ -271,15 +307,21 @@ export function SearchPage() {
       <div aria-live="polite" className={opener.status ? (opener.status.error ? "note note-error" : "note") : "visually-hidden"}>
         {opener.status?.text}
       </div>
-      {/* Announces each finished search once; the visible heading below carries the same text. */}
-      <div aria-live="polite" className="visually-hidden">
-        {hits && !busy && t("search.resultsFor", { n: count, query: searched })}
-      </div>
+      {/* Each finished search is announced through `announce` (with the filter count, so a
+          filter change that keeps the same count is still heard). */}
 
       {busy && !hits && <Loading label={t("search.searching")} lines={4} />}
       <div className={`sr-body${facets ? " sr-has-facets" : ""}${preview ? " sr-has-preview" : ""}`}>
         {facets && hits && (
-          <Facets facets={facets} state={state} sourceName={sourceName} onChange={(next) => void runState(next)} onTimeline={openTimeline} />
+          <Facets
+            facets={facets}
+            state={state}
+            sourceName={sourceName}
+            onChange={(update) => void runState(update(stateRef.current))}
+            onTimeline={openTimeline}
+            poolLimited={poolLimited}
+            announce={announce}
+          />
         )}
         <div className="sr-results">
           {hits && (
@@ -292,7 +334,7 @@ export function SearchPage() {
               title={t("search.noResults", { query: searched })}
               action={
                 filtered ? (
-                  <button type="button" className="btn btn-primary" onClick={() => void runState({ ...state, sources: [], kinds: [], people: [], from: null, to: null })}>
+                  <button type="button" className="btn btn-primary" onClick={() => void runState({ ...stateRef.current, sources: [], kinds: [], people: [], from: null, to: null })}>
                     {t("searchui.clearFilters")}
                   </button>
                 ) : nothingIndexed ? (
@@ -367,7 +409,7 @@ export function SearchPage() {
             </ol>
           )}
           {hits && total !== null && hits.length < total && (
-            <button type="button" className="btn sr-more" disabled={moreBusy || busy} onClick={() => void runState(state, true)}>
+            <button type="button" className="btn sr-more" disabled={moreBusy || busy} onClick={() => void runState(stateRef.current, { append: true })}>
               {moreBusy ? <Spinner label={t("searchui.loadingMore")} /> : t("searchui.showMore", { shown: hits.length, total })}
             </button>
           )}

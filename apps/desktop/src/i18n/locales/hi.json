@@ -1891,7 +1891,7 @@
   "searchui.clearFilters": "फ़िल्टर हटाएँ",
   "searchui.facet.kind": "प्रकार",
   "searchui.facet.source": "स्रोत",
-  "searchui.facet.person": "लोग",
+  "searchui.facet.person": "लोग और प्रोजेक्ट",
   "searchui.facet.date": "तारीख़",
   "searchui.kind.mail": "मेल",
   "searchui.kind.event": "इवेंट",
@@ -1944,5 +1944,13 @@
   "searchui.recent": "हाल की खोजें",
   "searchui.clearRecent": "हाल की खोजें मिटाएँ",
   "searchui.runRecent": "“{query}” फिर से खोजें",
-  "searchui.paletteSaved": "सहेजी गई खोज: {name}"
+  "searchui.paletteSaved": "सहेजी गई खोज: {name}",
+  "searchui.facetOption": "{label}, {count, plural, one {# नतीजा} other {# नतीजे}}",
+  "searchui.poolLimited": "फ़िल्टर की गिनती सबसे अच्छे {pool} मिलानों पर आधारित है।",
+  "searchui.filtersCleared": "फ़िल्टर हटा दिए गए",
+  "searchui.datesCleared": "तारीख़ें हटा दी गईं",
+  "searchui.savedDeleted": "सहेजी गई खोज “{name}” हटा दी गई",
+  "searchui.recentCleared": "हाल की खोजें मिटा दी गईं",
+  "searchui.recentWithFilters": "{query} · {n, plural, one {# फ़िल्टर} other {# फ़िल्टर}}",
+  "searchui.resultsFiltered": "“{query}” के लिए {n, plural, one {# नतीजा} other {# नतीजे}}, {filters, plural, one {# फ़िल्टर} other {# फ़िल्टर}} के साथ"
 }

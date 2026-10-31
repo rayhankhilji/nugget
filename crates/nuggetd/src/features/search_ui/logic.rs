@@ -110,7 +110,7 @@ pub(crate) enum DateSource {
     Extracted,
     /// The source's modification time.
     Modified,
-    /// When Nugget first indexed the item.
+    /// When Nugget last indexed the item (the store's `updated_at`).
     Indexed,
 }
 

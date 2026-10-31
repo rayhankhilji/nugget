@@ -543,6 +543,14 @@
     "searchui.timelineTitle",
     "searchui.timelineTruncated",
     "searchui.to",
-    "searchui.undated"
+    "searchui.undated",
+    "searchui.datesCleared",
+    "searchui.facetOption",
+    "searchui.filtersCleared",
+    "searchui.poolLimited",
+    "searchui.recentCleared",
+    "searchui.recentWithFilters",
+    "searchui.resultsFiltered",
+    "searchui.savedDeleted"
   ]
 }

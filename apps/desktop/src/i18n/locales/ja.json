@@ -1891,7 +1891,7 @@
   "searchui.clearFilters": "絞り込みを解除",
   "searchui.facet.kind": "種類",
   "searchui.facet.source": "ソース",
-  "searchui.facet.person": "人物",
+  "searchui.facet.person": "人物とプロジェクト",
   "searchui.facet.date": "日付",
   "searchui.kind.mail": "メール",
   "searchui.kind.event": "予定",
@@ -1944,5 +1944,13 @@
   "searchui.recent": "最近の検索",
   "searchui.clearRecent": "履歴を消去",
   "searchui.runRecent": "「{query}」を再検索",
-  "searchui.paletteSaved": "保存した検索：{name}"
+  "searchui.paletteSaved": "保存した検索：{name}",
+  "searchui.facetOption": "{label}、{count, plural, other {# 件}}",
+  "searchui.poolLimited": "絞り込みの件数は上位 {pool} 件の一致が対象です。",
+  "searchui.filtersCleared": "絞り込みを解除しました",
+  "searchui.datesCleared": "日付を解除しました",
+  "searchui.savedDeleted": "保存した検索「{name}」を削除しました",
+  "searchui.recentCleared": "最近の検索を消去しました",
+  "searchui.recentWithFilters": "{query} · {n, plural, other {絞り込み # 件}}",
+  "searchui.resultsFiltered": "「{query}」の検索結果：{n, plural, other {# 件}}（絞り込み {filters, plural, other {# 件}}）"
 }

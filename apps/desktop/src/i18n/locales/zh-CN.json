@@ -1891,7 +1891,7 @@
   "searchui.clearFilters": "清除筛选",
   "searchui.facet.kind": "类型",
   "searchui.facet.source": "来源",
-  "searchui.facet.person": "人物",
+  "searchui.facet.person": "人物和项目",
   "searchui.facet.date": "日期",
   "searchui.kind.mail": "邮件",
   "searchui.kind.event": "日程",
@@ -1944,5 +1944,13 @@
   "searchui.recent": "最近的搜索",
   "searchui.clearRecent": "清除最近记录",
   "searchui.runRecent": "再次搜索“{query}”",
-  "searchui.paletteSaved": "已保存的搜索：{name}"
+  "searchui.paletteSaved": "已保存的搜索：{name}",
+  "searchui.facetOption": "{label}，{count, plural, other {# 条结果}}",
+  "searchui.poolLimited": "筛选计数仅涵盖最匹配的 {pool} 项。",
+  "searchui.filtersCleared": "已清除筛选",
+  "searchui.datesCleared": "已清除日期",
+  "searchui.savedDeleted": "已删除保存的搜索“{name}”",
+  "searchui.recentCleared": "已清除最近的搜索",
+  "searchui.recentWithFilters": "{query} · {n, plural, other {# 个筛选}}",
+  "searchui.resultsFiltered": "“{query}”的结果：{n, plural, other {# 条}}（{filters, plural, other {# 个筛选}}）"
 }

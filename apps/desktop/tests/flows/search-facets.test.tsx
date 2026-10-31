@@ -337,3 +337,171 @@ describe("timeline", () => {
     expect(main().getAttribute("aria-label")).toBe(t("app.nav.search"));
   });
 });
+
+/** Set an input's value the way a browser does (React sees it) and fire input. */
+async function setValue(el: HTMLInputElement, value: string) {
+  const { act } = await import("react");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+const liveText = () => Array.from(document.querySelectorAll('[role="status"][aria-live="polite"]')).map((e) => e.textContent?.trim() ?? "");
+
+describe("review fixes", () => {
+  it("two quick toggles both reach the final request, and a late older answer doesn't win", async () => {
+    const d = daemon();
+    d.once("search_faceted", faceted([hit(1)]));
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+
+    const first = d.hang("search_faceted");
+    const second = d.hang("search_faceted");
+    await click(within(filters()).getByRole("checkbox", { name: /^Mail/ }));
+    // The box stays ticked while its search runs.
+    expect((within(filters()).getByRole("checkbox", { name: /^Mail/ }) as HTMLInputElement).checked).toBe(true);
+    await click(within(filters()).getByRole("checkbox", { name: /^Work mail/ }));
+    expect(req(d.last("search_faceted"))).toMatchObject({ filters: { kinds: ["mail"], sources: ["gmail-1"] } });
+
+    await second.resolve(faceted([hit(7)]));
+    await findByText("Engine note 7");
+    await first.resolve(faceted([hit(8)]));
+    expect(main().textContent).not.toContain("Engine note 8");
+    expect((within(filters()).getByRole("checkbox", { name: /^Mail/ }) as HTMLInputElement).checked).toBe(true);
+    expect((within(filters()).getByRole("checkbox", { name: /^Work mail/ }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("Retry after a failed filter change reruns the new filters", async () => {
+    const d = daemon({ search_faceted: faceted([hit(1)]) });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    d.failOnce("search_faceted", { kind: "rpc", message: "index is locked", code: -32000 });
+    await click(within(filters()).getByRole("checkbox", { name: /^Mail/ }));
+    const alert = await findByRole("alert");
+    await click(within(alert).getByRole("button", { name: t("common.retry") }));
+    await waitFor(() => expect(req(d.last("search_faceted"))).toMatchObject({ filters: { kinds: ["mail"] } }));
+    expect(d.count("search_faceted")).toBe(3);
+  });
+
+  it("names facet checkboxes with their count", async () => {
+    daemon({ search_faceted: faceted([hit(1)]) });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    expect(within(filters()).getByRole("checkbox", { name: "Mail, 2 results" })).toBeTruthy();
+    expect(within(filters()).getByRole("checkbox", { name: "Ada Lovelace, 4 results" })).toBeTruthy();
+    expect(within(filters()).getByRole("group", { name: "People and projects" })).toBeTruthy();
+  });
+
+  it("a timeline-only request keeps the search underneath; Back returns to it intact", async () => {
+    const { requestSearchState } = await import("../../src/hooks.nav");
+    const { encode } = await import("../../src/searchState");
+    const d = daemon({ search_faceted: faceted([hit(1)]), search_timeline: timeline });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    await click(within(filters()).getByRole("checkbox", { name: /^Mail/ }));
+    const before = d.count("search_faceted");
+    await (await import("react")).act(async () => requestSearchState(encode({ timeline: "e1" })));
+    await findByRole("heading", { name: t("searchui.timelineTitle", { name: "Ada Lovelace" }) });
+    await click(getByRole("button", { name: t("searchui.backToResults") }));
+    await findByText("Engine note 1");
+    expect((searchBox() as HTMLInputElement).value).toBe("engine");
+    expect((within(filters()).getByRole("checkbox", { name: /^Mail/ }) as HTMLInputElement).checked).toBe(true);
+    // Same search: no rerun needed.
+    expect(d.count("search_faceted")).toBe(before);
+    await click(getByRole("button", { name: t("searchui.saveSearch") }));
+    const dialog = await findByRole("dialog", { name: t("searchui.saveTitle") });
+    expect((within(dialog).getByRole("textbox", { name: t("searchui.saveName") }) as HTMLInputElement).value).toBe("engine");
+  });
+
+  it("applies typed dates only when complete, debounced, and swaps a reversed range", async () => {
+    const d = daemon({ search_faceted: faceted([hit(1)]) });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    const date = within(filters()).getByRole("group", { name: t("searchui.facet.date") });
+    const [from, to] = Array.from(date.querySelectorAll<HTMLInputElement>('input[type="date"]'));
+    const n = d.count("search_faceted");
+    await setValue(from!, "0002-01-01");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(d.count("search_faceted")).toBe(n);
+    await setValue(from!, "2024-06-01");
+    expect(d.count("search_faceted")).toBe(n);
+    await waitFor(() => expect(d.count("search_faceted")).toBe(n + 1));
+    expect(req(d.last("search_faceted"))).toMatchObject({ filters: { from: "2024-06-01", to: null } });
+    await setValue(to!, "2024-01-31");
+    await press(to!, "Enter");
+    await waitFor(() => expect(req(d.last("search_faceted"))).toMatchObject({ filters: { from: "2024-01-31", to: "2024-06-01" } }));
+  });
+
+  it("keeps focus and announces when Clear filters, Clear dates, Delete and Clear recent remove themselves", async () => {
+    const d = daemon({ search_faceted: faceted([hit(1)]) });
+    localStorage.setItem(SAVED_KEY, JSON.stringify([{ id: "a", name: "A", state: "q=a" }, { id: "b", name: "B", state: "q=b" }]));
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    await click(within(filters()).getByRole("button", { name: t("searchui.monthPick", { month: "March 2024", count: 4 }) }));
+    await click(within(filters()).getByRole("button", { name: t("searchui.clearDates") }));
+    expect(document.activeElement?.textContent).toBe(t("searchui.filters"));
+    expect(liveText()).toContain(t("searchui.datesCleared"));
+    await click(within(filters()).getByRole("checkbox", { name: /^Mail/ }));
+    await click(within(filters()).getByRole("button", { name: t("searchui.clearFilters") }));
+    expect(document.activeElement?.textContent).toBe(t("searchui.filters"));
+    expect(liveText()).toContain(t("searchui.filtersCleared"));
+    expect(d.count("search_faceted")).toBeGreaterThan(1);
+
+    await click(within(main()).getByRole("button", { name: t("searchui.deleteSaved", { name: "A" }) }));
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(t("searchui.runSaved", { name: "B" }));
+    expect(liveText()).toContain(t("searchui.savedDeleted", { name: "A" }));
+    await click(within(main()).getByRole("button", { name: t("searchui.deleteSaved", { name: "B" }) }));
+    expect(document.activeElement).toBe(searchBox());
+
+    await type(searchBox(), "");
+    await click(within(getByRole("region", { name: t("searchui.recent") })).getByRole("button", { name: t("searchui.clearRecent") }));
+    expect(document.activeElement).toBe(searchBox());
+    expect(liveText()).toContain(t("searchui.recentCleared"));
+  });
+
+  it("records recents only for explicit runs and labels filtered ones", async () => {
+    daemon({ search_faceted: faceted([hit(1)]) });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    await click(within(filters()).getByRole("checkbox", { name: /^Mail/ }));
+    expect(JSON.parse(localStorage.getItem(RECENT_KEY)!)).toEqual(["q=engine"]);
+    await press(searchBox(), "Enter");
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(RECENT_KEY)!)).toEqual(["q=engine&kind=mail", "q=engine"]));
+    await type(searchBox(), "");
+    const recent = getByRole("region", { name: t("searchui.recent") });
+    expect(within(recent).getByRole("button", { name: t("searchui.runRecent", { query: t("searchui.recentWithFilters", { query: "engine", n: 1 }) }) })).toBeTruthy();
+    expect(within(recent).getByRole("button", { name: t("searchui.runRecent", { query: "engine" }) })).toBeTruthy();
+  });
+
+  it("notes a limited pool and announces each finished search with its filters", async () => {
+    daemon({ search_faceted: { ...faceted([hit(1)]), pool_limited: true, pool: 300 } });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    expect(filters().textContent).toContain(t("searchui.poolLimited", { pool: 300 }));
+    expect(liveText()).toContain(t("search.resultsFor", { n: 1, query: "engine" }));
+    await click(within(filters()).getByRole("checkbox", { name: /^Mail/ }));
+    await waitFor(() => expect(liveText()).toContain(t("searchui.resultsFiltered", { n: 1, query: "engine", filters: 1 })));
+  });
+
+  it("resets Jump to month after Show the latest events", async () => {
+    const d = daemon();
+    d.once("search_timeline", { ...timeline, events: timeline.events.slice(2), truncated: true, total: 3 }).on("search_timeline", { ...timeline, events: timeline.events.slice(0, 2), months: [{ value: "2024-01", count: 2 }], total: 2 });
+    localStorage.setItem(SAVED_KEY, JSON.stringify([{ id: "s1", name: "Ada timeline", state: "timeline=e1" }]));
+    await renderApp({ page: "search" });
+    await click(within(main()).getByRole("button", { name: t("searchui.runSaved", { name: "Ada timeline" }) }));
+    const jump = () => getByRole("combobox", { name: t("searchui.jumpToMonth") }) as HTMLSelectElement;
+    await findByText(t("searchui.timelineTruncated", { shown: 1, total: 3 }));
+    await selectOption(jump(), "2024-01");
+    await click(await findByRole("button", { name: t("searchui.timelineLatest") }));
+    expect(jump().value).toBe("");
+  });
+});

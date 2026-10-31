@@ -48,6 +48,7 @@ struct Seed {
     sam: EntityId,
     samuel: EntityId,
     acme: EntityId,
+    topic: EntityId,
     works_at: i64,
     lives_in: i64,
     rejected: i64,
@@ -224,6 +225,12 @@ fn seed(store: &Store) -> Seed {
         iref("files", "f1"),
         iref("files", "f2"),
     );
+    // A topic: not in the people facet nor on hits, but selectable.
+    let topic = g
+        .create_entity(&NewEntity::new(EntityKind::Topic, "Budgeting"))
+        .unwrap();
+    g.add_mention(&mention(&topic, &m1, "budget")).unwrap();
+    g.add_mention(&mention(&topic, &m2, "budget")).unwrap();
     g.add_mention(&mention(&sam, &m1, "Sam")).unwrap();
     g.add_mention(&mention(&acme, &m1, "Acme")).unwrap();
     g.add_mention(&mention(&samuel, &m2, "Samuel")).unwrap();
@@ -263,6 +270,7 @@ fn seed(store: &Store) -> Seed {
         sam,
         samuel,
         acme,
+        topic,
         works_at,
         lives_in,
         rejected,
@@ -431,6 +439,25 @@ async fn faceted_search_filters_and_counts_disjunctively() {
         values(&r["facets"]["kinds"]),
         pairs(&[("mail", 2), ("event", 1)])
     );
+
+    // An entity of another kind filters and shows when selected.
+    let r = h
+        .call(
+            "search.faceted",
+            json!({"query": "budget", "filters": {"people": [s.topic.as_str()]}}),
+        )
+        .await;
+    assert_eq!(keys(&r), ["m1", "m2"]);
+    let topic = r["facets"]["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["value"] == s.topic.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(topic["count"], 2);
+    assert_eq!(topic["kind"], "topic");
+    assert_eq!(topic["name"], "Budgeting");
 
     // An unknown person matches nothing but stays visible.
     let r = h
@@ -690,8 +717,10 @@ async fn preview_shows_text_passage_people_and_facts() {
         .iter()
         .map(|e| e["name"].as_str().unwrap())
         .collect();
-    assert_eq!(people.len(), 2);
+    // The preview lists every kind of entity the item mentions.
+    assert_eq!(people.len(), 3, "{people:?}");
     assert!(people.contains(&"Sam Lee") && people.contains(&"Acme"));
+    assert!(people.contains(&"Budgeting"));
     let facts = p["facts"].as_array().unwrap();
     assert_eq!(facts.len(), 1, "the rejected fact is left out: {facts:?}");
     assert_eq!(facts[0]["id"], s.works_at);

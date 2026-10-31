@@ -3,7 +3,7 @@
  * `search.faceted`. Every group is a fieldset of checkboxes (Tab between them, Space toggles),
  * so it works the same with a keyboard and a screen reader. Each change reruns the search.
  */
-import { useId } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { FacetedResult, ItemKind } from "../../api";
 import { formatDate, formatNumber, useT, type MessageKey } from "../../i18n";
 import { hasFilters, isDate, monthDate, monthRange, type SearchState } from "../../searchState";
@@ -29,16 +29,30 @@ export function Facets({
   sourceName,
   onChange,
   onTimeline,
+  poolLimited = null,
+  announce,
 }: {
   facets: FacetedResult["facets"];
   state: SearchState;
   sourceName: (id: string) => string;
-  onChange: (next: SearchState) => void;
+  /** Gets an update of the latest state (two quick changes both apply). */
+  onChange: (update: (s: SearchState) => SearchState) => void;
   onTimeline: (entityId: string) => void;
+  /** The pool size when the daemon's candidate pool was capped (counts may be partial). */
+  poolLimited?: number | null;
+  announce?: (text: string) => void;
 }) {
   const t = useT();
   const id = useId();
-  const set = (patch: Partial<SearchState>) => onChange({ ...state, ...patch });
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const set = (patch: Partial<SearchState> | ((s: SearchState) => Partial<SearchState>)) =>
+    onChange((s) => ({ ...s, ...(typeof patch === "function" ? patch(s) : patch) }));
+  /** A control that removes itself: keep focus in the filters and say what happened. */
+  const clearing = (patch: Partial<SearchState>, said: string) => {
+    set(patch);
+    headingRef.current?.focus();
+    announce?.(said);
+  };
   const months = facets.months.slice(-MONTHS_SHOWN);
   const maxMonth = Math.max(1, ...months.map((m) => m.count));
   const monthPicked = (m: string) => {
@@ -49,15 +63,16 @@ export function Facets({
   return (
     <section id="search-filters" className="sr-facets" aria-labelledby={`${id}-h`}>
       <div className="sr-facets-head">
-        <h2 id={`${id}-h`} className="sr-facets-title" tabIndex={-1}>
+        <h2 id={`${id}-h`} ref={headingRef} className="sr-facets-title" tabIndex={-1}>
           {t("searchui.filters")}
         </h2>
         {hasFilters(state) && (
-          <button type="button" className="btn btn-small btn-ghost" onClick={() => set({ sources: [], kinds: [], people: [], from: null, to: null })}>
+          <button type="button" className="btn btn-small btn-ghost" onClick={() => clearing({ sources: [], kinds: [], people: [], from: null, to: null }, t("searchui.filtersCleared"))}>
             {t("searchui.clearFilters")}
           </button>
         )}
       </div>
+      {poolLimited !== null && <p className="muted small sr-pool-note">{t("searchui.poolLimited", { pool: poolLimited })}</p>}
 
       {facets.kinds.length > 0 && (
         <fieldset className="sr-facet" data-facet="kind">
@@ -68,7 +83,7 @@ export function Facets({
               label={kindLabel(t, f.value)}
               count={f.count}
               checked={state.kinds.includes(f.value as ItemKind)}
-              onChange={(on) => set({ kinds: toggle(state.kinds, f.value as ItemKind, on) })}
+              onChange={(on) => set((s) => ({ kinds: toggle(s.kinds, f.value as ItemKind, on) }))}
             />
           ))}
         </fieldset>
@@ -83,7 +98,7 @@ export function Facets({
               label={sourceName(f.value)}
               count={f.count}
               checked={state.sources.includes(f.value)}
-              onChange={(on) => set({ sources: toggle(state.sources, f.value, on) })}
+              onChange={(on) => set((s) => ({ sources: toggle(s.sources, f.value, on) }))}
             />
           ))}
         </fieldset>
@@ -94,7 +109,7 @@ export function Facets({
           <legend>{t("searchui.facet.person")}</legend>
           {facets.people.map((f) => (
             <div key={f.value} className="sr-facet-row">
-              <Check label={f.name} count={f.count} checked={state.people.includes(f.value)} onChange={(on) => set({ people: toggle(state.people, f.value, on) })} />
+              <Check label={f.name} count={f.count} checked={state.people.includes(f.value)} onChange={(on) => set((s) => ({ people: toggle(s.people, f.value, on) }))} />
               <button type="button" className="btn btn-ghost btn-small sr-facet-tl" onClick={() => onTimeline(f.value)} aria-label={t("searchui.timelineFor", { name: f.name })}>
                 {t("searchui.timeline")}
               </button>
@@ -106,17 +121,11 @@ export function Facets({
       <fieldset className="sr-facet" data-facet="date">
         <legend>{t("searchui.facet.date")}</legend>
         <div className="sr-dates">
-          <label className="sr-date">
-            <span>{t("searchui.from")}</span>
-            <input type="date" value={state.from ?? ""} max={state.to ?? undefined} onChange={(e) => set({ from: isDate(e.target.value) ? e.target.value : null })} />
-          </label>
-          <label className="sr-date">
-            <span>{t("searchui.to")}</span>
-            <input type="date" value={state.to ?? ""} min={state.from ?? undefined} onChange={(e) => set({ to: isDate(e.target.value) ? e.target.value : null })} />
-          </label>
+          <DateInput label={t("searchui.from")} value={state.from} max={state.to} onCommit={(v) => set({ from: v })} />
+          <DateInput label={t("searchui.to")} value={state.to} min={state.from} onCommit={(v) => set({ to: v })} />
         </div>
         {(state.from || state.to) && (
-          <button type="button" className="btn btn-small btn-ghost" onClick={() => set({ from: null, to: null })}>
+          <button type="button" className="btn btn-small btn-ghost" onClick={() => clearing({ from: null, to: null }, t("searchui.datesCleared"))}>
             {t("searchui.clearDates")}
           </button>
         )}
@@ -150,10 +159,63 @@ export function Facets({
   );
 }
 
+/** How long a typed date waits before it applies (a complete, valid date only). */
+export const DATE_DEBOUNCE_MS = 400;
+
+/** A complete date a person means: valid and not a partly typed year like 0002. */
+function completeDate(v: string): string | null {
+  return isDate(v) && Number(v.slice(0, 4)) >= 1000 ? v : null;
+}
+
+/**
+ * A date field that applies its value only when it is a complete date (after a short pause, on
+ * blur or on Enter) or when it is emptied, so typing a year doesn't search on every keystroke.
+ */
+function DateInput({ label, value, min, max, onCommit }: { label: string; value: string | null; min?: string | null; max?: string | null; onCommit: (v: string | null) => void }) {
+  const [text, setText] = useState(value ?? "");
+  const timer = useRef<number | undefined>(undefined);
+  const commitRef = useRef(onCommit);
+  commitRef.current = onCommit;
+  // A new value from outside (a month pick, Clear dates) replaces what is typed.
+  useEffect(() => setText(value ?? ""), [value]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const commit = (v: string) => {
+    window.clearTimeout(timer.current);
+    const d = v === "" ? null : completeDate(v);
+    if (v !== "" && d === null) return;
+    if (d !== (value ?? null)) commitRef.current(d);
+  };
+  return (
+    <label className="sr-date">
+      <span>{label}</span>
+      <input
+        type="date"
+        value={text}
+        min={min ?? undefined}
+        max={max ?? undefined}
+        onChange={(e) => {
+          const v = e.target.value;
+          setText(v);
+          window.clearTimeout(timer.current);
+          if (v === "" || completeDate(v)) timer.current = window.setTimeout(() => commit(v), DATE_DEBOUNCE_MS);
+        }}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit(e.currentTarget.value);
+          }
+        }}
+      />
+    </label>
+  );
+}
+
 function Check({ label, count, checked, onChange }: { label: string; count: number; checked: boolean; onChange: (on: boolean) => void }) {
+  const t = useT();
   return (
     <label className="sr-check">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={t("searchui.facetOption", { label, count })} />
       <bdi className="sr-check-label">{label}</bdi>
       <span className="sr-count">{formatNumber(count)}</span>
     </label>

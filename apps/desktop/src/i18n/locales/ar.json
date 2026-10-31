@@ -1891,7 +1891,7 @@
   "searchui.clearFilters": "مسح عوامل التصفية",
   "searchui.facet.kind": "النوع",
   "searchui.facet.source": "المصدر",
-  "searchui.facet.person": "الأشخاص",
+  "searchui.facet.person": "الأشخاص والمشاريع",
   "searchui.facet.date": "التاريخ",
   "searchui.kind.mail": "بريد",
   "searchui.kind.event": "حدث",
@@ -1944,5 +1944,13 @@
   "searchui.recent": "عمليات البحث الأخيرة",
   "searchui.clearRecent": "مسح الأخيرة",
   "searchui.runRecent": "البحث مجددًا عن «{query}»",
-  "searchui.paletteSaved": "بحث محفوظ: {name}"
+  "searchui.paletteSaved": "بحث محفوظ: {name}",
+  "searchui.facetOption": "{label}، {count, plural, zero {لا نتائج} one {نتيجة واحدة} two {نتيجتان} few {# نتائج} many {# نتيجة} other {# نتيجة}}",
+  "searchui.poolLimited": "تشمل أعداد عوامل التصفية أفضل {pool} نتيجة مطابقة.",
+  "searchui.filtersCleared": "تم مسح عوامل التصفية",
+  "searchui.datesCleared": "تم مسح التواريخ",
+  "searchui.savedDeleted": "تم حذف البحث المحفوظ «{name}»",
+  "searchui.recentCleared": "تم مسح عمليات البحث الأخيرة",
+  "searchui.recentWithFilters": "{query} · {n, plural, zero {بلا عوامل تصفية} one {عامل تصفية واحد} two {عاملا تصفية} few {# عوامل تصفية} many {# عامل تصفية} other {# عامل تصفية}}",
+  "searchui.resultsFiltered": "{n, plural, zero {لا نتائج} one {نتيجة واحدة} two {نتيجتان} few {# نتائج} many {# نتيجة} other {# نتيجة}} لـ «{query}» مع {filters, plural, zero {بلا عوامل تصفية} one {عامل تصفية واحد} two {عاملَي تصفية} few {# عوامل تصفية} many {# عامل تصفية} other {# عامل تصفية}}"
 }

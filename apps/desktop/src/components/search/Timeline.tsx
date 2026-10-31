@@ -78,6 +78,7 @@ export function Timeline({
 
   useEffect(() => {
     focusedTitle.current = false;
+    setJump("");
     setWindowTo(null);
     setAllMonths([]);
     setData(null);
@@ -147,7 +148,14 @@ export function Timeline({
             <p className="note">
               {data.truncated ? t("searchui.timelineTruncated", { shown: data.events.length, total: data.total }) : null}
               {windowTo && (
-                <button type="button" className="btn btn-small" onClick={() => setWindowTo(null)}>
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  onClick={() => {
+                    setJump("");
+                    setWindowTo(null);
+                  }}
+                >
                   {t("searchui.timelineLatest")}
                 </button>
               )}
