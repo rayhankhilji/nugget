@@ -1,0 +1,242 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "kill_then_approve": {
+        "tools_offered": [
+          "ask_user",
+          "click",
+          "finish",
+          "note",
+          "observe",
+          "open_app",
+          "press_key",
+          "scroll",
+          "set_value",
+          "type_text",
+          "wait_for"
+        ],
+        "request_action": {
+          "declared_risk": "send",
+          "target_app": "computer",
+          "target_label": "unknown element e7",
+          "task_id": "99c9e299fca74ae9af78548a0486f8c1",
+          "text_preview": null,
+          "verb": "click"
+        },
+        "request_reason": "Nugget is about to send something on your behalf in computer: click “unknown element e7”. Task 99c9e299fca74ae9af78548a0486f8c1.",
+        "approve_reply": "confirmation act_a7e35bcf0286b748d3bbb0ced326fdaf:2 is no longer open",
+        "finished": {
+          "outcome": "halted"
+        },
+        "executed_results": [],
+        "log_tail": [
+          "run_started",
+          "model_turn",
+          "decision(click):rejected",
+          "finished:halted"
+        ]
+      },
+      "approve": {
+        "tools_offered": [
+          "ask_user",
+          "click",
+          "finish",
+          "note",
+          "observe",
+          "open_app",
+          "press_key",
+          "scroll",
+          "set_value",
+          "type_text",
+          "wait_for"
+        ],
+        "request_action": {
+          "declared_risk": "send",
+          "target_app": "computer",
+          "target_label": "unknown element e7",
+          "task_id": "a0868ae6c2f84e50a81e6bd9552c7166",
+          "text_preview": null,
+          "verb": "click"
+        },
+        "request_reason": "Nugget is about to send something on your behalf in computer: click “unknown element e7”. Task a0868ae6c2f84e50a81e6bd9552c7166.",
+        "approve_reply": "accepted",
+        "finished": {
+          "detail": "no desktop",
+          "outcome": "failed"
+        },
+        "executed_results": [
+          "click: click on ⟦e7⟧ failed: not found: unknown element e7; observe the window first. Observe again for fresh ids.",
+          "observe: could not read the window: AT-SPI: Failed to connect to address 'unix:path=/run/user/0/bus': No such file or directory (os error 2). Accessibility permission is not granted; ask the user to grant it.",
+          "finish: finished"
+        ],
+        "log_tail": [
+          "executed(observe):ran",
+          "model_turn",
+          "decision(finish):allowed",
+          "executed(finish):ran",
+          "finished:failed"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "kill_then_approve": {
+        "tools_offered": [
+          "ask_user",
+          "click",
+          "finish",
+          "note",
+          "observe",
+          "open_app",
+          "press_key",
+          "scroll",
+          "set_value",
+          "type_text",
+          "wait_for"
+        ],
+        "request_action": {
+          "declared_risk": "send",
+          "target_app": "computer",
+          "target_label": "unknown element e7",
+          "task_id": "f01ae22e6df948a793835f62b07ef197",
+          "text_preview": null,
+          "verb": "click"
+        },
+        "request_reason": "Nugget is about to send something on your behalf in computer: click “unknown element e7”. Task f01ae22e6df948a793835f62b07ef197.",
+        "approve_reply": "confirmation act_cfd8257dafdd6c13628fa3bf79e6622e:2 is no longer open",
+        "finished": {
+          "outcome": "halted"
+        },
+        "executed_results": [],
+        "log_tail": [
+          "run_started",
+          "model_turn",
+          "decision(click):rejected",
+          "finished:halted"
+        ]
+      },
+      "approve": {
+        "tools_offered": [
+          "ask_user",
+          "click",
+          "finish",
+          "note",
+          "observe",
+          "open_app",
+          "press_key",
+          "scroll",
+          "set_value",
+          "type_text",
+          "wait_for"
+        ],
+        "request_action": {
+          "declared_risk": "send",
+          "target_app": "computer",
+          "target_label": "unknown element e7",
+          "task_id": "26eb886d83be4b88acecccb2e541333e",
+          "text_preview": null,
+          "verb": "click"
+        },
+        "request_reason": "Nugget is about to send something on your behalf in computer: click “unknown element e7”. Task 26eb886d83be4b88acecccb2e541333e.",
+        "approve_reply": "accepted",
+        "finished": {
+          "detail": "no desktop",
+          "outcome": "failed"
+        },
+        "executed_results": [
+          "click: click on ⟦e7⟧ failed: not found: unknown element e7; observe the window first. Observe again for fresh ids.",
+          "observe: could not read the window: AT-SPI: Failed to connect to address 'unix:path=/run/user/0/bus': No such file or directory (os error 2). Accessibility permission is not granted; ask the user to grant it.",
+          "finish: finished"
+        ],
+        "log_tail": [
+          "executed(observe):ran",
+          "model_turn",
+          "decision(finish):allowed",
+          "executed(finish):ran",
+          "finished:failed"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "kill_then_approve": {
+        "tools_offered": [
+          "ask_user",
+          "click",
+          "finish",
+          "note",
+          "observe",
+          "open_app",
+          "press_key",
+          "scroll",
+          "set_value",
+          "type_text",
+          "wait_for"
+        ],
+        "request_action": {
+          "declared_risk": "send",
+          "target_app": "computer",
+          "target_label": "unknown element e7",
+          "task_id": "bd1d88dfd0aa4c5a83c80792194cb8d0",
+          "text_preview": null,
+          "verb": "click"
+        },
+        "request_reason": "Nugget is about to send something on your behalf in computer: click “unknown element e7”. Task bd1d88dfd0aa4c5a83c80792194cb8d0.",
+        "approve_reply": "no open confirmation act_1c96d4fc91dda87f431ff83012c147a6:2",
+        "finished": {
+          "outcome": "halted"
+        },
+        "executed_results": [],
+        "log_tail": [
+          "run_started",
+          "model_turn",
+          "decision(click):rejected",
+          "finished:halted"
+        ]
+      },
+      "approve": {
+        "tools_offered": [
+          "ask_user",
+          "click",
+          "finish",
+          "note",
+          "observe",
+          "open_app",
+          "press_key",
+          "scroll",
+          "set_value",
+          "type_text",
+          "wait_for"
+        ],
+        "request_action": {
+          "declared_risk": "send",
+          "target_app": "computer",
+          "target_label": "unknown element e7",
+          "task_id": "dcbded1d21694df6afc0d074c3998db0",
+          "text_preview": null,
+          "verb": "click"
+        },
+        "request_reason": "Nugget is about to send something on your behalf in computer: click “unknown element e7”. Task dcbded1d21694df6afc0d074c3998db0.",
+        "approve_reply": "accepted",
+        "finished": {
+          "detail": "no desktop",
+          "outcome": "failed"
+        },
+        "executed_results": [
+          "click: click on ⟦e7⟧ failed: not found: unknown element e7; observe the window first. Observe again for fresh ids.",
+          "observe: could not read the window: AT-SPI: Failed to connect to address 'unix:path=/run/user/0/bus': No such file or directory (os error 2). Accessibility permission is not granted; ask the user to grant it.",
+          "finish: finished"
+        ],
+        "log_tail": [
+          "executed(observe):ran",
+          "model_turn",
+          "decision(finish):allowed",
+          "executed(finish):ran",
+          "finished:failed"
+        ]
+      },
+      "ok": true
+    }
+  ]
+}

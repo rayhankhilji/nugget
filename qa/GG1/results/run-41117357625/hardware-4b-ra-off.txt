@@ -1,0 +1,10 @@
+label: 4b-ra-off
+runner: GitHub Actions 1000011476 (Linux X64)
+commit: ea46d10fbe4bdb1b137daac1e916e826c9253c7c
+date: 2026-10-30T20:41:25Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V74 80-Core Processor
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           9           0           5          14
+Swap:              2           0           2

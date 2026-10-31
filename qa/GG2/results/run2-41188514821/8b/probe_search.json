@@ -1,0 +1,522 @@
+{
+ "boiler engineer WarmFlow": [
+  {
+   "key": "0:mail/3-home/boiler.eml",
+   "title": "Boiler service visit",
+   "score": 1.0
+  },
+  {
+   "key": "0:documents/work/Bob Lindqvist 1-1 notes.md",
+   "title": "Bob Lindqvist 1-1 notes",
+   "score": 0.8880394697189331
+  },
+  {
+   "key": "0:notes/misc/09 ideas for side project.md",
+   "title": "09 ideas for side project",
+   "score": 0.49193549156188965
+  },
+  {
+   "key": "0:notes/misc/01 reading notes.md",
+   "title": "01 reading notes",
+   "score": 0.44202902913093567
+  },
+  {
+   "key": "0:calendar/physio.ics",
+   "title": "Physio (knee) with Ines",
+   "score": 0.4013158082962036
+  },
+  {
+   "key": "0:mail/5-bills/citypower-prev.eml",
+   "title": "Your City Power bill is ready",
+   "score": 0.37654322385787964
+  },
+  {
+   "key": "0:notes/misc/03 running log.md",
+   "title": "03 running log",
+   "score": 0.3674698770046234
+  },
+  {
+   "key": "0:calendar/onboarding-call.ics",
+   "title": "Corvid pre-boarding call with Lena",
+   "score": 0.37195122241973877
+  },
+  {
+   "key": "0:documents/contracts/Corvid offer letter v1.md",
+   "title": "Corvid offer letter v1",
+   "score": 0.3910256624221802
+  },
+  {
+   "key": "0:mail/2-corvid/06-welcome.eml",
+   "title": "Welcome to Corvid!",
+   "score": 0.35465118288993835
+  }
+ ],
+ "Corvid pre-boarding call Lena paperwork": [
+  {
+   "key": "0:calendar/onboarding-call.ics",
+   "title": "Corvid pre-boarding call with Lena",
+   "score": 1.0
+  },
+  {
+   "key": "0:documents/contracts/Corvid offer letter v1.md",
+   "title": "Corvid offer letter v1",
+   "score": 0.8932512998580933
+  },
+  {
+   "key": "0:mail/2-corvid/06-welcome.eml",
+   "title": "Welcome to Corvid!",
+   "score": 0.8429505825042725
+  },
+  {
+   "key": "0:mail/2-corvid/03-accept.eml",
+   "title": "Re: Your offer from Corvid Labs",
+   "score": 0.8188288807868958
+  },
+  {
+   "key": "0:mail/4-health/dentist-rescheduled.eml",
+   "title": "Your appointment has been rescheduled",
+   "score": 0.7955623865127563
+  },
+  {
+   "key": "0:documents/contracts/Corvid offer letter v2.md",
+   "title": "Corvid offer letter v2",
+   "score": 0.8832291960716248
+  },
+  {
+   "key": "0:mail/2-corvid/04-offer-v3.eml",
+   "title": "Final offer (v3) for signature",
+   "score": 0.7821798920631409
+  },
+  {
+   "key": "0:documents/contracts/Corvid offer letter v3 FINAL signed.md",
+   "title": "Corvid offer letter v3 FINAL signed",
+   "score": 0.8457739949226379
+  },
+  {
+   "key": "0:mail/1-fernhill/resignation.eml",
+   "title": "Resignation",
+   "score": 0.7057181000709534
+  },
+  {
+   "key": "0:mail/1-fernhill/misc-33.eml",
+   "title": "Customer call: Pinecrest",
+   "score": 0.6565972566604614
+  }
+ ],
+ "Kestrel Mobile monthly statement": [
+  {
+   "key": "0:mail/5-bills/kestrel.eml",
+   "title": "Kestrel Mobile: your monthly statement",
+   "score": 1.0
+  },
+  {
+   "key": "0:documents/work/Handover plan.md",
+   "title": "Handover plan",
+   "score": 0.49193549156188965
+  },
+  {
+   "key": "0:mail/1-fernhill/misc-39.eml",
+   "title": "Beacon dashboard: weekly numbers",
+   "score": 0.46212124824523926
+  },
+  {
+   "key": "0:mail/1-fernhill/budget-03.eml",
+   "title": "Re: Q4 budget for Atlas",
+   "score": 0.49193549156188965
+  },
+  {
+   "key": "0:documents/contracts/Corvid offer letter v2.md",
+   "title": "Corvid offer letter v2",
+   "score": 0.4841270446777344
+  },
+  {
+   "key": "0:chats/whatsapp-jun.txt",
+   "title": "whatsapp-jun",
+   "score": 0.4841270446777344
+  },
+  {
+   "key": "0:mail/6-travel/porto-conference.eml",
+   "title": "Invoice: Hotel Ribeira Porto",
+   "score": 0.4692308008670807
+  },
+  {
+   "key": "0:notes/misc/09 ideas for side project.md",
+   "title": "09 ideas for side project",
+   "score": 0.42957746982574463
+  },
+  {
+   "key": "0:mail/9-newsletters/pantry-box-1.eml",
+   "title": "Pantry Box: your box is on its way",
+   "score": 0.44202902913093567
+  },
+  {
+   "key": "0:documents/work/Bob Lindqvist 1-1 notes.md",
+   "title": "Bob Lindqvist 1-1 notes",
+   "score": 0.4357143044471741
+  }
+ ],
+ "Ironleaf Gym membership cancellation": [
+  {
+   "key": "0:mail/5-bills/gym-cancel.eml",
+   "title": "Membership cancellation confirmed",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/4-health/dentist-rescheduled.eml",
+   "title": "Your appointment has been rescheduled",
+   "score": 0.9339644908905029
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-35.eml",
+   "title": "Your receipt from Green Leaf Pharmacy",
+   "score": 0.49193549156188965
+  },
+  {
+   "key": "0:mail/1-fernhill/farewell.eml",
+   "title": "Farewell drinks",
+   "score": 0.4841270446777344
+  },
+  {
+   "key": "0:mail/1-fernhill/misc-19.eml",
+   "title": "Quarry tool feedback",
+   "score": 0.40666669607162476
+  },
+  {
+   "key": "0:documents/work/Handover plan.md",
+   "title": "Handover plan",
+   "score": 0.4552238881587982
+  },
+  {
+   "key": "0:mail/3-home/lease-renewal.eml",
+   "title": "Lease renewal for 14 Alder Street, Apt 3",
+   "score": 0.3860759735107422
+  },
+  {
+   "key": "0:mail/1-fernhill/resignation.eml",
+   "title": "Resignation",
+   "score": 0.4236111342906952
+  },
+  {
+   "key": "0:mail/1-fernhill/misc-10.eml",
+   "title": "Incident retro",
+   "score": 0.33888891339302063
+  },
+  {
+   "key": "0:mail/5-bills/citypower-prev.eml",
+   "title": "Your City Power bill is ready",
+   "score": 0.37195122241973877
+  }
+ ],
+ "Bright Smile Dental appointment": [
+  {
+   "key": "0:calendar/dentist-last-time.ics",
+   "title": "Dentist: check-up (Dr. Kim)",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/4-health/blood-results.eml",
+   "title": "Your blood test results",
+   "score": 0.9186683893203735
+  },
+  {
+   "key": "0:mail/4-health/dentist-booked.eml",
+   "title": "Appointment confirmation",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/4-health/dentist-rescheduled.eml",
+   "title": "Your appointment has been rescheduled",
+   "score": 0.9608740210533142
+  },
+  {
+   "key": "0:calendar/dentist.ics",
+   "title": "Dentist: check-up and cleaning (Dr. Kim)",
+   "score": 0.9761260747909546
+  },
+  {
+   "key": "0:mail/2-corvid/05-signed.eml",
+   "title": "Re: Final offer (v3) for signature",
+   "score": 0.47304567694664
+  },
+  {
+   "key": "0:documents/contracts/Corvid offer letter v1.md",
+   "title": "Corvid offer letter v1",
+   "score": 0.45892488956451416
+  },
+  {
+   "key": "0:calendar/onboarding-call.ics",
+   "title": "Corvid pre-boarding call with Lena",
+   "score": 0.4521760046482086
+  },
+  {
+   "key": "0:mail/4-health/physio.eml",
+   "title": "Booking confirmed: Riverside Physio",
+   "score": 0.43306997418403625
+  },
+  {
+   "key": "0:notes/health log.md",
+   "title": "health log",
+   "score": 0.46587833762168884
+  }
+ ],
+ "Lumen Fiber bill": [
+  {
+   "key": "0:mail/5-bills/lumen-1.eml",
+   "title": "Your Lumen Fiber bill for July",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/6-travel/porto-conference.eml",
+   "title": "Invoice: Hotel Ribeira Porto",
+   "score": 0.9037533402442932
+  },
+  {
+   "key": "0:mail/5-bills/citypower-prev.eml",
+   "title": "Your City Power bill is ready",
+   "score": 0.9384616017341614
+  },
+  {
+   "key": "0:mail/5-bills/lumen-2.eml",
+   "title": "Your Lumen Fiber bill for August",
+   "score": 0.9838709831237793
+  },
+  {
+   "key": "0:mail/5-bills/lumen-4.eml",
+   "title": "Your Lumen Fiber bill for October",
+   "score": 0.9682540893554688
+  },
+  {
+   "key": "0:mail/5-bills/lumen-3.eml",
+   "title": "Your Lumen Fiber bill for September",
+   "score": 0.9531250596046448
+  },
+  {
+   "key": "0:mail/5-bills/citypower.eml",
+   "title": "Your City Power bill is ready",
+   "score": 0.9242424964904785
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-27.eml",
+   "title": "Your receipt from Green Leaf Pharmacy",
+   "score": 0.44202902913093567
+  },
+  {
+   "key": "0:mail/5-bills/kestrel.eml",
+   "title": "Kestrel Mobile: your monthly statement",
+   "score": 0.4552238881587982
+  },
+  {
+   "key": "0:mail/5-bills/gym-cancel.eml",
+   "title": "Membership cancellation confirmed",
+   "score": 0.448529452085495
+  }
+ ],
+ "receipt Grindhouse Coffee": [
+  {
+   "key": "0:mail/8-receipts/receipt-23.eml",
+   "title": "Your receipt from Grindhouse Coffee",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-06.eml",
+   "title": "Your receipt from Grindhouse Coffee",
+   "score": 0.9923135638237
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-30.eml",
+   "title": "Your receipt from Grindhouse Coffee",
+   "score": 0.9761844873428345
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-49.eml",
+   "title": "Your receipt from Grindhouse Coffee",
+   "score": 0.969444751739502
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-16.eml",
+   "title": "Your receipt from Grindhouse Coffee",
+   "score": 0.969444751739502
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-48.eml",
+   "title": "Your receipt from Grindhouse Coffee",
+   "score": 0.9535980820655823
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-03.eml",
+   "title": "Your receipt from FreshMart",
+   "score": 0.8452346324920654
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-20.eml",
+   "title": "Your receipt from Hardware Haven",
+   "score": 0.8229376077651978
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-02.eml",
+   "title": "Your receipt from FreshMart",
+   "score": 0.8271089792251587
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-07.eml",
+   "title": "Your receipt from FreshMart",
+   "score": 0.8130600452423096
+  }
+ ],
+ "Pantry Box": [
+  {
+   "key": "0:mail/9-newsletters/pantry-box-1.eml",
+   "title": "Pantry Box: your box is on its way",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/1-fernhill/misc-64.eml",
+   "title": "Incident retro",
+   "score": 0.4841270446777344
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-12.eml",
+   "title": "Your receipt from Noodle Bar 88",
+   "score": 0.4765625298023224
+  },
+  {
+   "key": "0:notes/wifi and home.md",
+   "title": "wifi and home",
+   "score": 0.49193549156188965
+  },
+  {
+   "key": "0:documents/contracts/Corvid offer letter v1.md",
+   "title": "Corvid offer letter v1",
+   "score": 0.44202902913093567
+  },
+  {
+   "key": "0:notes/misc/33 recipe.md",
+   "title": "33 recipe",
+   "score": 0.40666669607162476
+  },
+  {
+   "key": "0:calendar/misc/45-lunch.ics",
+   "title": "Lunch with Nadia",
+   "score": 0.412162184715271
+  },
+  {
+   "key": "0:chats/team-product-5.txt",
+   "title": "team-product-5",
+   "score": 0.3674698770046234
+  },
+  {
+   "key": "0:calendar/misc/18-product.ics",
+   "title": "Product review",
+   "score": 0.35465118288993835
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-07.eml",
+   "title": "Your receipt from FreshMart",
+   "score": 0.3860759735107422
+  }
+ ],
+ "City Power electricity bill": [
+  {
+   "key": "0:mail/5-bills/citypower-prev.eml",
+   "title": "Your City Power bill is ready",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/5-bills/lumen-1.eml",
+   "title": "Your Lumen Fiber bill for July",
+   "score": 0.9761260747909546
+  },
+  {
+   "key": "0:mail/6-travel/porto-conference.eml",
+   "title": "Invoice: Hotel Ribeira Porto",
+   "score": 0.8989483118057251
+  },
+  {
+   "key": "0:mail/5-bills/citypower.eml",
+   "title": "Your City Power bill is ready",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/6-travel/lisbon-hotel.eml",
+   "title": "Your stay at Casa do Rio: receipt",
+   "score": 0.8914327025413513
+  },
+  {
+   "key": "0:mail/5-bills/lumen-4.eml",
+   "title": "Your Lumen Fiber bill for October",
+   "score": 0.9534826874732971
+  },
+  {
+   "key": "0:mail/5-bills/lumen-2.eml",
+   "title": "Your Lumen Fiber bill for August",
+   "score": 0.9534826874732971
+  },
+  {
+   "key": "0:mail/5-bills/lumen-3.eml",
+   "title": "Your Lumen Fiber bill for September",
+   "score": 0.9248031973838806
+  },
+  {
+   "key": "0:mail/5-bills/gym-cancel.eml",
+   "title": "Membership cancellation confirmed",
+   "score": 0.7531024217605591
+  },
+  {
+   "key": "0:calendar/car-service.ics",
+   "title": "Car service: Northgate Auto",
+   "score": 0.4521760046482086
+  }
+ ],
+ "Northgate Auto car service": [
+  {
+   "key": "0:calendar/car-service.ics",
+   "title": "Car service: Northgate Auto",
+   "score": 1.0
+  },
+  {
+   "key": "0:mail/3-home/boiler.eml",
+   "title": "Boiler service visit",
+   "score": 0.49193549156188965
+  },
+  {
+   "key": "0:documents/contracts/Corvid offer letter v1.md",
+   "title": "Corvid offer letter v1",
+   "score": 0.4841270446777344
+  },
+  {
+   "key": "0:mail/9-newsletters/riverside-running-club-2.eml",
+   "title": "Riverside Running Club: parkrun volunteers needed",
+   "score": 0.4552238881587982
+  },
+  {
+   "key": "0:mail/2-corvid/06-welcome.eml",
+   "title": "Welcome to Corvid!",
+   "score": 0.49193549156188965
+  },
+  {
+   "key": "0:mail/8-receipts/receipt-22.eml",
+   "title": "Your receipt from Green Leaf Pharmacy",
+   "score": 0.42957746982574463
+  },
+  {
+   "key": "0:calendar/dentist-last-time.ics",
+   "title": "Dentist: check-up (Dr. Kim)",
+   "score": 0.448529452085495
+  },
+  {
+   "key": "0:mail/6-travel/lisbon-flight.eml",
+   "title": "Booking confirmed: Lisbon",
+   "score": 0.44202902913093567
+  },
+  {
+   "key": "0:notes/wifi and home.md",
+   "title": "wifi and home",
+   "score": 0.46212124824523926
+  },
+  {
+   "key": "0:documents/work/Atlas vendor proposal.md",
+   "title": "Atlas vendor proposal",
+   "score": 0.4692308008670807
+  }
+ ]
+}

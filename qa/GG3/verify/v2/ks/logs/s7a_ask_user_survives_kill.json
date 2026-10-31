@@ -1,0 +1,44 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "state_while_killed": "needs_input",
+      "listed_state_while_killed": "needs_input",
+      "state_after_resume": "needs_input",
+      "answer_reply": "ok",
+      "finished": {
+        "outcome": "succeeded"
+      },
+      "acts_after_kill": [
+        "type:typed after Stop all agents + Resume"
+      ],
+      "ok": false
+    },
+    {
+      "state_while_killed": "needs_input",
+      "listed_state_while_killed": "needs_input",
+      "state_after_resume": "needs_input",
+      "answer_reply": "ok",
+      "finished": {
+        "outcome": "succeeded"
+      },
+      "acts_after_kill": [
+        "type:typed after Stop all agents + Resume"
+      ],
+      "ok": false
+    },
+    {
+      "state_while_killed": "needs_input",
+      "listed_state_while_killed": "needs_input",
+      "state_after_resume": "needs_input",
+      "answer_reply": "ok",
+      "finished": {
+        "outcome": "succeeded"
+      },
+      "acts_after_kill": [
+        "type:typed after Stop all agents + Resume"
+      ],
+      "ok": false
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+job: 8b-s3
+runner: GitHub Actions 1000011250 (Linux X64)
+commit: 0d81796b88f2b0431d59895e4a119cac53c38e22
+date: 2026-10-30T19:26:19Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V74 80-Core Processor
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          11           0           3          14
+Swap:              2           0           2

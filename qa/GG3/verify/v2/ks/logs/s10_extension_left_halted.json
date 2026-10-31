@@ -1,0 +1,20 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "extension_left_halted": "0/30",
+      "examples": [],
+      "ok": true
+    },
+    {
+      "extension_left_halted": "0/30",
+      "examples": [],
+      "ok": true
+    },
+    {
+      "extension_left_halted": "0/30",
+      "examples": [],
+      "ok": true
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "task": "52de1698ab314977b2c27462e625c4e4",
+      "finished": {
+        "outcome": "halted"
+      },
+      "approve_once_reply": {
+        "code": -32001,
+        "message": "no open confirmation act_38a80bec517c4f5bb750a2fd410c0770:8"
+      },
+      "approve_task_reply": {
+        "code": -32001,
+        "message": "no open confirmation act_38a80bec517c4f5bb750a2fd410c0770:8"
+      },
+      "task_approvals_after": [],
+      "submits_at_extension": 0,
+      "model_requests": 3,
+      "ok": true
+    }
+  ]
+}

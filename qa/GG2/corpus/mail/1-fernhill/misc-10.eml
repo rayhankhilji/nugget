@@ -1,0 +1,11 @@
+From: Nadia Brennan <nadia.brennan@fernhill.example>
+To: Dana Whitlock <dana.whitlock@example.net>
+Date: Thu, 10 Sep 2026 08:23:00 +0000
+Subject: Incident retro
+Message-ID: <gg2-120@fernhill.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Retro for the 28-minute ingestion outage. Root cause: expired certificate.
+
+Nadia

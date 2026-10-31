@@ -1,0 +1,9 @@
+label: 8b-s0  model: qwen3-8b-q4km
+runner: GitHub Actions 1000011280 (Linux X64)
+commit: 2b8522840b38f270d589fff6f94bbf880f01865d
+date: 2026-10-30T19:36:23Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 7763 64-Core Processor
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          10           0           4          14
+Swap:              2           0           2

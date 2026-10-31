@@ -136,7 +136,7 @@ Briefs in `docs/waves/wave-ff/`. Each lead runs a build layer and an independent
 |---|---|---|---|
 | FF1 | `ff/data-safety` | session_01CTjRSquqrkkGYfv4TUQEat | crash-safety harness, encrypted backup/restore, open-format export, corruption recovery (merged) |
 | FF2 | `ff/connector-hardening` | session_01CTjRSsffsNYDoWtbuPyEx5 | connector conformance suite (pagination, 429s, token refresh, deltas, crashes), fixes, sync status (merged) |
-| FF3 | `ff/a11y-apps` | session_01CTjRSrGRrLv1FvtvRdVkMp | Double Tap read/insert matrix across native editors, browsers and rich-editor frameworks on 3 OSes |
+| FF3 | `ff/a11y-apps` | session_01CTjRSrGRrLv1FvtvRdVkMp | Double Tap read/insert matrix across native editors, browsers and rich-editor frameworks on 3 OSes (merged) |
 | FF4 | `ff/mcp-plugins` | session_01CTjRSrAf5oakXNcKynQoQK | MCP compatibility with official SDK clients, plugin SDK and three first-party plugins (merged) |
 
 ## Wave GG (independent QA, new files only): cloud sessions from 5f1998e
@@ -144,9 +144,9 @@ Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every 
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| GG1 | `qa/doubletap` | session_01CTjRStX6Dx5a8tNZozvNrv | Double Tap end to end, 60+ scenarios, real models |
-| GG2 | `qa/ask` | session_01CTjRSsqzVXFPgqGksu9bV6 | Ask and Chat over a realistic persona corpus, 100+ questions |
-| GG3 | `qa/agent` | session_01CTjRStQCE4cZD93QkhUFM6 | computer-use agent, 50+ tasks incl. injection, kill switch, confirmations |
+| GG1 | `qa/doubletap` | session_01CTjRStX6Dx5a8tNZozvNrv | Double Tap end to end, 60+ scenarios, real models (merged) |
+| GG2 | `qa/ask` | session_01CTjRSsqzVXFPgqGksu9bV6 | Ask and Chat over a realistic persona corpus, 100+ questions (merged) |
+| GG3 | `qa/agent` | session_01CTjRStQCE4cZD93QkhUFM6 | computer-use agent, 50+ tasks incl. injection, kill switch, confirmations (merged) |
 | GG4 | `qa/proactive` | session_01CTjRSs4jvVBSuALYkXyaPB | proactive cards and morning brief over two simulated weeks |
 | GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases |
 | GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux |
