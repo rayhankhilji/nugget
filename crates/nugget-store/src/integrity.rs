@@ -1225,6 +1225,26 @@ mod tests {
     }
 
     #[test]
+    fn a_clean_close_without_drop_is_not_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 20);
+        s.close_cleanly();
+        // Closed cleanly: no lock left, the log folded in and truncated.
+        assert!(!crate::egress::unclean_close_left(&path));
+        assert_eq!(
+            fs::metadata(sidecar(&path, "-wal")).map_or(0, |m| m.len()),
+            0
+        );
+        std::mem::forget(s); // as a daemon exiting without dropping it
+        assert_eq!(
+            check_file_on_open(&path, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Due)
+        );
+    }
+
+    #[test]
     fn background_damage_makes_the_next_open_check_in_full() {
         let dir = tempfile::tempdir().unwrap();
         let path = closed_store(dir.path());

@@ -265,6 +265,16 @@ impl EgressWriter {
         }
     }
 
+    /// Unlock and remove this handle's owner lock file (a clean exit).
+    pub(crate) fn release_lock(&self) {
+        let lock = self
+            .lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        drop(lock);
+    }
+
     /// Tests: let go of the owner lock as a crashed process would (the lock file stays behind,
     /// unlocked), while this handle keeps running.
     #[cfg(test)]
@@ -602,6 +612,29 @@ impl Store {
     /// Wait until every egress event recorded so far is written to the database.
     pub fn flush_egress(&self) {
         self.egress_writer().flush();
+    }
+
+    /// End this handle cleanly before the process exits (a daemon that stops without dropping
+    /// its store): flush the ledger, fold the write-ahead log into the database and truncate it
+    /// (so the next open has no log to scan or replay), then release this handle's owner lock.
+    /// Without this, an exit reads like a crash to the next open (its lock file is left behind
+    /// unlocked), which then runs SQLite's full check before opening (see
+    /// [`crate::check_file_on_open`]). Best effort; the handle stays usable, but egress rows it
+    /// records afterwards count as an exited owner's.
+    pub fn close_cleanly(&self) {
+        self.flush_egress();
+        let checkpoint = self.db().with_conn(|c| {
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .db("checkpoint")
+        });
+        match checkpoint {
+            Ok(0) => {}
+            Ok(_) => tracing::debug!("checkpoint at close was busy; the log stays"),
+            Err(e) => tracing::warn!(error = %e, "checkpoint at close failed"),
+        }
+        self.egress_writer().release_lock();
     }
 
     /// The most recent egress events, newest first. Includes every event recorded before the

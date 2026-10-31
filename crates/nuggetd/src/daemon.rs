@@ -679,7 +679,10 @@ impl Daemon {
         }
         let store = state.store.clone();
         let _ = blocking(move || {
-            store.flush_egress();
+            // Flushes the ledger, truncates the WAL and releases the owner lock: the process
+            // exits without dropping the store, which would otherwise read as a crash at the
+            // next start (and cost a full page check, ~5 s per GB; II5).
+            store.close_cleanly();
             Ok(())
         })
         .await;
