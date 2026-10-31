@@ -268,7 +268,7 @@ identical).
 - Real models (V4 R2): `cls-pw-otp-typed` echoes the typed code in 7/7 configurations (e.g. `482913654789`); other unrefused code and card fields get "Hi Sam," (4B) or prompt echo (1.7B). Raised to High for this.
 
 **GG1-11 · High · The default grounding mode checks no values: invented, superseded and spelled-out amounts reach the user**
-- Sources: D-2 (V3: REPRODUCED, Medium, "High if real models do it") and B-10 (V2: NEEDS-REAL-MODEL; same mechanism, see the pending subsection).
+- Sources: D-2 (V3: REPRODUCED, Medium, "High if real models do it") and B-10 (V2: NEEDS-REAL-MODEL; same mechanism; real-model rate in the last bullet).
 - Repro: `$G draft --scenarios qa/GG1/scenarios/D-safety.json --only safe-superseded-amount,safe-invented-amount,safe-invented-amount-words --out /tmp/d2.jsonl` and `$G draft --scenarios qa/GG1/scenarios/B-quality.json --only qual-mw-missing-insurance --out /tmp/b10.jsonl`, then read `result.inserted_field` and `result.timings.grounding`. Probe: `gg1-probe-safety val-`.
 - Expected: a value that is in neither the thread nor the facts, or that comes from a superseded fact, is held back.
 - Actual:
@@ -439,7 +439,7 @@ identical).
 - Actual:
   - The voice block shows `Greetings: "Good afternoon {first_name},"` and `Sign-offs: "Best regards, {my_name}"`, with no explanation.
   - `'Dear {first_name},\n\n… Kind regards, {my_name}'` is inserted.
-- Reproduces: deterministic for the prompt and the post-check. How often a 4B model copies the placeholders is pending the real-model run.
+- Reproduces: deterministic for the prompt and the post-check. Real models: a literal `{…}` placeholder reaches the draft in 1 of 153 drafts in each 4B configuration, and in none for the 1.7B.
 - Owner: `crates/nugget-draft/src/prompt.rs:175-183` (`attr` maps `\n` to a space), `phrases` and `terse_stats`. `post.rs` has no `{…_name}` check. EE2.
 - Fix direction: fill in the single recipient's first name and the user's name, which are known from the recipients and `MeIdentity`. Otherwise add one explanatory line. Keep the sign-off's line break. Drop or fill any leftover `{…_name}` token in post-processing.
 

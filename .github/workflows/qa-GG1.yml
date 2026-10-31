@@ -6,10 +6,6 @@ name: QA GG1 (Double Tap, real models)
 # against the GG1 rubric. Reports, prompts and drafts are uploaded as artifacts.
 
 on:
-  # TEMPORARY (removed before the final push): runs on pushes to qa/doubletap whose commit
-  # message carries [gg1-run], since workflow_dispatch only works once the file is on main.
-  push:
-    branches: [qa/doubletap]
   workflow_dispatch:
     inputs:
       only:
@@ -20,14 +16,18 @@ on:
         description: "Drafts per scenario in the main 4B run"
         default: "2"
         type: string
+      judge_run_id:
+        description: "Judge only: the run id whose drafts to judge (empty: draft, then judge)"
+        default: ""
+        type: string
 
 permissions:
   contents: read
-  # [gg1-judge] downloads the artifacts of an earlier run.
+  # judge_run_id downloads the artifacts of an earlier run.
   actions: read
 
 concurrency:
-  # Per commit: a later push must not supersede a queued real-model run.
+  # Per commit: a later dispatch must not supersede a queued real-model run.
   group: ${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: false
 
@@ -42,13 +42,12 @@ env:
   RESULTS: ${{ github.workspace }}/gg1-results
   ONLY: ${{ inputs.only || '' }}
   REPEATS: ${{ inputs.repeats || '2' }}
-  # The run whose drafts a [gg1-judge] push judges.
-  JUDGE_RUN_ID: "41117357625"
+  JUDGE_RUN_ID: ${{ inputs.judge_run_id || '' }}
 
 jobs:
   draft:
     name: draft ${{ matrix.label }}
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]')
+    if: inputs.judge_run_id == ''
     runs-on: ${{ matrix.os }}
     timeout-minutes: 300
     strategy:
@@ -120,7 +119,7 @@ jobs:
   # the 4B: checks whether the text-only harness findings on retrieval hold in the product setup.
   draft-embed:
     name: draft 4b-embed-ra-off
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]') || contains(github.event.head_commit.message, '[gg1-embed]')
+    if: inputs.judge_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
@@ -165,7 +164,7 @@ jobs:
   judge:
     name: judge (8B) shard ${{ matrix.shard }}
     needs: draft
-    if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]') || contains(github.event.head_commit.message, '[gg1-judge]'))
+    if: always() && (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
@@ -190,13 +189,13 @@ jobs:
       - name: Build the harness
         run: cargo build --release --manifest-path qa/GG1/harness/Cargo.toml
       - uses: actions/download-artifact@v4
-        if: ${{ !contains(github.event.head_commit.message, '[gg1-judge]') }}
+        if: ${{ env.JUDGE_RUN_ID == '' }}
         with:
           pattern: gg1-*-ra-off
           path: drafts
-      # [gg1-judge]: judge the drafts of an earlier run (JUDGE_RUN_ID) instead of drafting again.
+      # judge_run_id: judge the drafts of an earlier run instead of drafting again.
       - uses: actions/download-artifact@v4
-        if: ${{ contains(github.event.head_commit.message, '[gg1-judge]') }}
+        if: ${{ env.JUDGE_RUN_ID != '' }}
         with:
           pattern: gg1-*-ra-off
           path: drafts
@@ -228,7 +227,7 @@ jobs:
   summary:
     name: summary
     needs: [draft, judge]
-    if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]'))
+    if: always() && (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
