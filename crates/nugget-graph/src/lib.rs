@@ -22,7 +22,18 @@
 //!   survives; it gets the union of the evidence, the maximum confidence and the strongest status
 //!   ([`ClaimStatus::strongest`]: `UserAsserted` > `Rejected` > `Active`), except that an explicit
 //!   `set_claim_status` to `UserAsserted` or `Rejected` keeps the requested status. Folded-away
-//!   claim ids are gone (`get_claim` returns `None`) and never reused.
+//!   claim ids are gone (`get_claim` returns `None`) and never reused. When the survivor ends
+//!   up `UserAsserted` but was not itself user-asserted, it takes the text of the newest
+//!   user-asserted claim of the group (and `add_claim` of a `UserAsserted` claim onto a live
+//!   twin sets the twin's text): the user's wording is never replaced by generated text.
+//! - **Replaced by the user:** [`GraphStore::supersede_by_user`] makes a claim `Superseded` and
+//!   remembers the evidence it had (item and quote). Re-extracting that same evidence never
+//!   makes it current again: [`GraphStore::add_evidence`] of remembered evidence leaves a
+//!   `Retracted` or `Superseded` claim `Superseded` (unless a live twin exists, which it then
+//!   folds into as usual), and [`GraphStore::add_claim`] of an extracted claim whose evidence is
+//!   all remembered lands in it, `Superseded`, when no live twin exists. Evidence it does not
+//!   remember (the source now states the fact differently) follows the normal rules and makes
+//!   the store forget the record, as does making the claim live with `set_claim_status`.
 //! - Quotes are cut to [`MAX_QUOTE_CHARS`] characters on every write.
 //! - **`limit` 0 means unlimited** everywhere a method takes a `limit` (`list_entities`,
 //!   `mentions_for`, `neighbourhood`, `changes_since`); implementations may still apply a
@@ -73,6 +84,22 @@ pub trait GraphStore: Send + Sync {
     /// Set a claim's status. `Active` needs evidence (`Invalid` otherwise). Making a claim live
     /// folds it into a live twin, if any (see the crate invariants for the survivor).
     fn set_claim_status(&self, claim: ClaimId, status: ClaimStatus) -> Result<()>;
+    /// The user replaced `claim` with their own wording (a vault edit): it becomes
+    /// `Superseded` and its current evidence is remembered as replaced by the user, so that
+    /// re-extracting that evidence does not make it current again (see the crate invariants).
+    /// `NotFound` for an unknown claim. The default only sets the status.
+    fn supersede_by_user(&self, claim: ClaimId) -> Result<()> {
+        self.set_claim_status(claim, ClaimStatus::Superseded)
+    }
+
+    /// Whether `claim` was replaced by the user ([`GraphStore::supersede_by_user`]) and every
+    /// piece of `evidence` (non-empty) is evidence it had then (same item and quote): adding it
+    /// does not make the claim current. The default remembers nothing (`false`).
+    fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> Result<bool> {
+        let _ = (claim, evidence);
+        Ok(false)
+    }
+
     /// Claims where the entity is subject or object.
     fn claims_for(&self, entity: &EntityId, include_inactive: bool) -> Result<Vec<Claim>>;
 
@@ -139,7 +166,10 @@ pub trait GraphStore: Send + Sync {
     /// `new.aliases` move too (its name stays). Mentions of `entity` move when their item
     /// supports a moved claim and no claim left on `entity`. Every claim must have `entity` as
     /// subject or object (`Invalid` otherwise); an identifier held by a third entity is
-    /// `Invalid`. Returns the new entity's id.
+    /// `Invalid`. Ids merged into `entity` earlier whose name (as it was when merged) is the new
+    /// entity's name or one of its aliases, and not `entity`'s own name, resolve to the new
+    /// entity afterwards (undoing a mistaken merge redirects the old id to the split-off
+    /// entity); they count as changed. Returns the new entity's id.
     fn split(&self, entity: &EntityId, claims: &[ClaimId], new: &NewEntity) -> Result<EntityId> {
         let _ = (entity, claims, new);
         Err(nugget_core::Error::Unsupported(

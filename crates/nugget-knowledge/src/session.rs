@@ -668,6 +668,10 @@ impl<'a> Session<'a> {
                 .iter()
                 .filter(|c| c.status == ClaimStatus::Superseded && !c.evidence.is_empty())
             {
+                // Replaced by the user's edit: stays history.
+                if self.graph().replaced_by_user(c.id, &c.evidence)? {
+                    continue;
+                }
                 let f = self.freshness(c)?;
                 if best.as_ref().is_none_or(|(bf, _)| f > *bf) {
                     best = Some((f, c.id));
@@ -738,7 +742,9 @@ impl<'a> Session<'a> {
     /// The newest date among a claim's evidence (user assertions: when asserted).
     fn freshness(&mut self, c: &Claim) -> Result<Option<OffsetDateTime>> {
         if c.evidence.is_empty() {
-            return Ok(Some(c.updated_at));
+            // Only a user assertion is dated by its write (a retracted claim's last write is
+            // its retraction, which says nothing about when the fact held).
+            return Ok((c.status == ClaimStatus::UserAsserted).then_some(c.updated_at));
         }
         let scan: Vec<&Evidence> = c.evidence.iter().rev().take(FRESHNESS_SCAN).collect();
         self.prefetch_dates(scan.iter().map(|e| &e.item))?;
@@ -1361,6 +1367,15 @@ impl<'a> Session<'a> {
             self.add_evidence_op(c.id, &new.evidence);
             return Ok(Queued::Id(c.id));
         }
+        // The user replaced this value in the vault and the source still says the same: it
+        // stays superseded (the store keeps it so) and does not compete with the user's value.
+        if let Some(c) = &same
+            && matches!(c.status, ClaimStatus::Superseded | ClaimStatus::Retracted)
+            && self.graph().replaced_by_user(c.id, &new.evidence)?
+        {
+            self.add_evidence_op(c.id, &new.evidence);
+            return Ok(Queued::Id(c.id));
+        }
         let all_evidence: Vec<ItemRef> = all
             .iter()
             .flat_map(|c| c.evidence.iter().rev().take(FRESHNESS_SCAN))
@@ -1414,7 +1429,9 @@ impl<'a> Session<'a> {
         };
         if !historical {
             for (c, f) in others {
-                if c.status == ClaimStatus::Active && f < fresh {
+                // A user-asserted value too: a strictly newer source supersedes it (an older or
+                // equally old one is recorded as history above).
+                if c.status.is_active() && f < fresh {
                     // Valid until the newer value's evidence.
                     self.status_op(c.id, ClaimStatus::Superseded, fresh.map(Some));
                     self.stats.claims_superseded += 1;

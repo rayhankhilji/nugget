@@ -447,6 +447,18 @@ const MIGRATIONS: &[&str] = &[
             WHERE source = (SELECT source FROM items WHERE id = new.item_id);
     END;
     "#,
+    // v11: claims the user replaced in the vault (`GraphStore::supersede_by_user`): the evidence
+    // (item and quote, '' for none) each had when replaced. Re-extracting that same evidence
+    // leaves the claim superseded; rows go with the claim.
+    r#"
+    CREATE TABLE IF NOT EXISTS claim_user_replaced (
+        claim_id INTEGER NOT NULL REFERENCES claims (id) ON DELETE CASCADE,
+        source   TEXT NOT NULL,
+        key      TEXT NOT NULL,
+        quote    TEXT NOT NULL,
+        PRIMARY KEY (claim_id, source, key, quote)
+    ) WITHOUT ROWID;
+    "#,
 ];
 
 /// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when

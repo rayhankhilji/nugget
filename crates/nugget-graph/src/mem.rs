@@ -34,6 +34,20 @@ struct State {
     detail_sources: HashMap<EntityId, Vec<(DetailKey, ItemRef)>>,
     seq: u64,
     changed: HashMap<EntityId, u64>,
+    /// Claims the user replaced in the vault: the evidence (item, quote) they had then.
+    user_replaced: HashMap<ClaimId, Vec<EvidenceKey>>,
+    /// Names of merged ids, as they were when merged (split re-points them by name).
+    tomb_names: HashMap<EntityId, String>,
+}
+
+/// What identifies a piece of evidence for "replaced by the user": the item and the quote.
+type EvidenceKey = (ItemRef, String);
+
+fn evidence_key(ev: &Evidence) -> EvidenceKey {
+    (
+        ev.item.clone(),
+        clamp_quote(ev.quote.as_deref().unwrap_or("")),
+    )
 }
 
 fn now() -> OffsetDateTime {
@@ -137,10 +151,17 @@ impl State {
         }
         group.sort_unstable();
         let keep = group[0];
-        let mut status = self.claims[&keep].status;
+        let keep_status = self.claims[&keep].status;
+        let mut status = keep_status;
         let mut confidence = self.claims[&keep].confidence;
+        // The user's wording, if the survivor is not the user's own claim.
+        let mut user_text = None;
         for gone in &group[1..] {
             let g = self.claims.remove(gone).expect("claim in group");
+            self.user_replaced.remove(gone);
+            if g.status == ClaimStatus::UserAsserted {
+                user_text = Some(g.text.clone());
+            }
             status = status.strongest(g.status);
             confidence = confidence.max(g.confidence);
             let k = self.claims.get_mut(&keep).expect("survivor");
@@ -148,8 +169,15 @@ impl State {
                 push_unique(&mut k.evidence, ev);
             }
         }
+        self.user_replaced.remove(&keep);
         let k = self.claims.get_mut(&keep).expect("survivor");
         k.status = explicit.unwrap_or(status);
+        if k.status == ClaimStatus::UserAsserted
+            && keep_status != ClaimStatus::UserAsserted
+            && let Some(t) = user_text
+        {
+            k.text = t;
+        }
         k.confidence = confidence;
         k.updated_at = now();
         keep
@@ -341,6 +369,7 @@ impl State {
             }
         }
         self.merged.insert(from.clone(), into.clone());
+        self.tomb_names.insert(from.clone(), gone.name.clone());
         if let Some(rows) = self.detail_sources.remove(&from) {
             let dst = self.detail_sources.entry(into.clone()).or_default();
             for r in rows {
@@ -420,9 +449,41 @@ impl State {
             if new.status.is_user_decision() {
                 c.status = new.status;
             }
+            if new.status == ClaimStatus::UserAsserted {
+                c.text = new.text.clone();
+            }
             c.updated_at = now();
             self.touch_ends(&subject, &object);
             return Ok(existing);
+        }
+        // Extracted again from the evidence of a claim the user replaced: it stays replaced.
+        if !new.status.is_user_decision() && !new.evidence.is_empty() {
+            let keys: Vec<EvidenceKey> = new.evidence.iter().map(evidence_key).collect();
+            let replaced = self
+                .claims
+                .values()
+                .find(|c| {
+                    matches!(c.status, ClaimStatus::Superseded | ClaimStatus::Retracted)
+                        && c.subject == subject
+                        && c.predicate == new.predicate
+                        && c.object == object
+                        && self
+                            .user_replaced
+                            .get(&c.id)
+                            .is_some_and(|r| keys.iter().all(|k| r.contains(k)))
+                })
+                .map(|c| c.id);
+            if let Some(id) = replaced {
+                let c = self.claims.get_mut(&id).expect("claim");
+                for ev in &new.evidence {
+                    push_unique(&mut c.evidence, ev.clamped());
+                }
+                c.confidence = c.confidence.max(new.confidence);
+                c.status = ClaimStatus::Superseded;
+                c.updated_at = now();
+                self.touch_ends(&subject, &object);
+                return Ok(id);
+            }
         }
         self.next_claim += 1;
         let id = self.next_claim;
@@ -453,9 +514,27 @@ impl State {
     }
 
     fn add_evidence(&mut self, claim: ClaimId, ev: &Evidence) -> Result<()> {
+        let remembered = self.claim_mut(claim).is_ok()
+            && self
+                .user_replaced
+                .get(&claim)
+                .is_some_and(|r| r.contains(&evidence_key(ev)));
+        if !remembered {
+            self.user_replaced.remove(&claim);
+        }
+        let twin = {
+            let c = self.claim_mut(claim)?;
+            let (s, p, o) = (c.subject.clone(), c.predicate.clone(), c.object.clone());
+            self.live_twin(&s, &p, &o, Some(claim)).is_some()
+        };
         let c = self.claim_mut(claim)?;
         push_unique(&mut c.evidence, ev.clamped());
-        let revived = c.status == ClaimStatus::Retracted;
+        let mut revived = c.status == ClaimStatus::Retracted;
+        if revived && remembered && !twin {
+            // Replaced by the user, and the source still says the same: not current again.
+            c.status = ClaimStatus::Superseded;
+            revived = false;
+        }
         if revived {
             c.status = ClaimStatus::Active;
         }
@@ -478,9 +557,28 @@ impl State {
         c.updated_at = now();
         self.touch_claim(claim);
         if status.is_live() {
+            self.user_replaced.remove(&claim);
             self.fold(claim, status.is_user_decision().then_some(status));
         }
         Ok(())
+    }
+
+    fn supersede_by_user(&mut self, claim: ClaimId) -> Result<()> {
+        let c = self.claim_mut(claim)?;
+        c.status = ClaimStatus::Superseded;
+        c.updated_at = now();
+        let keys: Vec<EvidenceKey> = c.evidence.iter().map(evidence_key).collect();
+        self.user_replaced.insert(claim, keys);
+        self.touch_claim(claim);
+        Ok(())
+    }
+
+    fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> bool {
+        !evidence.is_empty()
+            && self
+                .user_replaced
+                .get(&claim)
+                .is_some_and(|r| evidence.iter().all(|ev| r.contains(&evidence_key(ev))))
     }
 
     fn update_claim(&mut self, claim: ClaimId, patch: &ClaimPatch) -> Result<ClaimId> {
@@ -659,7 +757,40 @@ impl State {
         for id in &ids {
             self.fold(*id, None);
         }
+        // Ids merged into `from` under one of the new entity's names now resolve to it.
+        let own = normalize_name(&self.entities[&from].name);
+        let merged_ids = self.entities[&from].merged_ids.clone();
+        let mut repointed = Vec::new();
+        for m in merged_ids {
+            let named = self
+                .tomb_names
+                .get(&m)
+                .map(|n| normalize_name(n))
+                .is_some_and(|n| n != own && to_aliases.contains(&n));
+            if named {
+                repointed.push(m.clone());
+            }
+            // Flat, like the store: every merged id points straight at its survivor.
+            self.merged
+                .insert(m.clone(), if named { to.clone() } else { from.clone() });
+        }
+        if !repointed.is_empty() {
+            self.entities
+                .get_mut(&from)
+                .expect("live entity")
+                .merged_ids
+                .retain(|m| !repointed.contains(m));
+            let t = self.entities.get_mut(&to).expect("new entity");
+            for m in &repointed {
+                push_unique(&mut t.merged_ids, m.clone());
+            }
+        }
         let mut seen = HashSet::new();
+        for m in repointed {
+            self.seq += 1;
+            let seq = self.seq;
+            self.changed.insert(m, seq);
+        }
         for e in std::iter::once(from).chain(others) {
             if seen.insert(e.clone()) && self.entities.contains_key(&e) {
                 self.touch(&e);
@@ -699,6 +830,7 @@ impl State {
             let dead: Vec<ClaimId> = refs.iter().map(|c| c.id).collect();
             let mut others = Vec::new();
             for c in dead {
+                self.user_replaced.remove(&c);
                 let c = self.claims.remove(&c).expect("claim");
                 others.push(c.subject);
                 if let ClaimObject::Entity(o) = c.object {
@@ -945,6 +1077,14 @@ impl GraphStore for MemGraph {
 
     fn set_claim_status(&self, claim: ClaimId, status: ClaimStatus) -> Result<()> {
         self.lock().set_claim_status(claim, status)
+    }
+
+    fn supersede_by_user(&self, claim: ClaimId) -> Result<()> {
+        self.lock().supersede_by_user(claim)
+    }
+
+    fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> Result<bool> {
+        Ok(self.lock().replaced_by_user(claim, evidence))
     }
 
     fn claims_for(&self, entity: &EntityId, include_inactive: bool) -> Result<Vec<Claim>> {
