@@ -1,0 +1,95 @@
+name: Bisect CTRL_BREAK shutdown (temporary)
+
+# TEMPORARY: finds the commit after which nuggetd, started the way the desktop app starts it
+# (CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW), dies with 0xC000013A on CTRL_BREAK instead of
+# shutting down cleanly. Remove before merging.
+
+on:
+  push:
+    branches: [ee/release-readiness]
+    paths: [".github/workflows/bisect-ctrlbreak.yml"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    name: ${{ matrix.sha }}
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        sha: [13b305b, 8a520e3, 872faf7, 0218218, 7f828fe, 66b4b35, eddd716]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check out the commit under test
+        shell: bash
+        run: git checkout --quiet ${{ matrix.sha }} && git log -1 --oneline
+      - name: Use Strawberry Perl for vendored OpenSSL
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+      - name: Build nuggetd
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo build --release --locked -p nuggetd
+      - name: CTRL_BREAK the way smoke-windows.ps1 does
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/check.py" <<'EOF'
+          import ctypes, glob, os, subprocess, sys, tempfile, time
+
+          exe = os.path.abspath(sys.argv[1])
+          home = tempfile.mkdtemp(prefix="nugget-ctrlbreak-")
+          env = dict(os.environ, NUGGET_HOME=home)
+          CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW = 0x200, 0x08000000
+          p = subprocess.Popen([exe], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL,
+                               creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+
+          def log():
+              text = ""
+              for f in sorted(glob.glob(os.path.join(home, "data", "logs", "nuggetd*.log"))):
+                  with open(f, encoding="utf-8", errors="replace") as fh:
+                      text += fh.read()
+              return text
+
+          deadline = time.time() + 90
+          while "nuggetd ready" not in log():
+              if p.poll() is not None or time.time() > deadline:
+                  print(log()); sys.exit(f"nuggetd never became ready (exit {p.poll()})")
+              time.sleep(0.5)
+          time.sleep(10)
+          helper = (
+              "import ctypes,sys\n"
+              "k=ctypes.windll.kernel32\n"
+              "pid=int(sys.argv[1])\n"
+              "k.FreeConsole()\n"
+              "ok=k.AttachConsole(pid) and k.SetConsoleCtrlHandler(None,True) and k.GenerateConsoleCtrlEvent(1,pid)\n"
+              "import time; time.sleep(3)\n"
+              "sys.exit(0 if ok else 1)\n"
+          )
+          h = subprocess.run([sys.executable, "-c", helper, str(p.pid)], creationflags=CREATE_NO_WINDOW)
+          try:
+              code = p.wait(30)
+          except subprocess.TimeoutExpired:
+              p.kill(); code = None
+          text = log()
+          print("\n".join(text.splitlines()[-15:]))
+          signal = "console control signal received" in text
+          stopped = '"stopped"' in text
+          print(f"helper={h.returncode} exit={'none' if code is None else hex(code & 0xFFFFFFFF)} signal_logged={signal} stopped_logged={stopped}")
+          sys.exit(0 if (code == 0 and signal and stopped) else 1)
+          EOF
+          python "$RUNNER_TEMP/check.py" target/release/nuggetd.exe
