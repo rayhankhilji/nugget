@@ -336,14 +336,16 @@ impl RpcHandler {
     pub(crate) async fn knowledge_status(&self) -> Result<Value, RpcError> {
         let k = self.state.knowledge.clone();
         let graph = k.graph.clone();
-        let counts = blocking(move || graph.counts()).await?;
+        let kn = k.knowledge.clone();
+        let (counts, pending) =
+            blocking(move || Ok((graph.counts()?, kn.pending_items()?))).await?;
         let st = k.knowledge.status();
-        let pending = st.last_run.as_ref().map_or(0, |r| r.remaining);
         to_result(KnowledgeStatus {
             entities: counts.entities,
             claims: counts.claims,
             mentions: counts.mentions,
             pending_items: pending,
+            running: st.running,
             last_run: k.last_run(),
             extractor_provider: k.extractor_provider(),
             vault: k.vault_status(),

@@ -1,6 +1,8 @@
 //! The public handle: [`Knowledge`].
 
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,6 +32,11 @@ pub struct RunStats {
     pub items_unchanged: u64,
     pub items_deleted: u64,
     pub items_failed: u64,
+    /// Changed items left as they are because the model could not run for them now (request
+    /// budget spent, power constrained, stopping) and their facts came from the model: they
+    /// are picked up again by the next runs.
+    #[serde(default)]
+    pub items_deferred: u64,
     /// Planned items left for the next run (budget exhausted).
     pub remaining: u64,
     pub entities_created: u64,
@@ -92,6 +99,11 @@ pub struct KnowledgeStatus {
 }
 
 impl Inner {
+    /// Whether [`Knowledge::interrupt`] was called.
+    pub fn stopping(&self) -> bool {
+        self.stopping.load(Ordering::Relaxed)
+    }
+
     /// The user's splits (a snapshot; [`Knowledge::record_split`] replaces it).
     pub fn splits(&self) -> Result<Arc<Vec<Split>>> {
         let mut cached = self.splits.lock().unwrap_or_else(|p| p.into_inner());
@@ -118,6 +130,14 @@ pub(crate) struct Inner {
     /// against the ledger, which at scale costs more than the run's own work. Only runs (under
     /// `run_lock`) write the pipeline state, so the carried state equals what is persisted.
     carry: Mutex<Option<(bool, Plan)>>,
+    /// Items of the current (or carried) plan not processed yet.
+    plan_left: AtomicU64,
+    /// The change-log position the current (or carried) plan covers; `None` before the first
+    /// plan (then the stored cursor is used).
+    planned_through: Mutex<Option<Option<u64>>>,
+    /// Set by [`Knowledge::interrupt`]: runs stop between items and leave model-extracted
+    /// items they cannot finish untouched.
+    stopping: AtomicBool,
     status: Mutex<KnowledgeStatus>,
     tx: broadcast::Sender<Vec<EntityId>>,
 }
@@ -172,6 +192,9 @@ impl Knowledge {
                 splits: Mutex::new(None),
                 run_lock: tokio::sync::Mutex::new(()),
                 carry: Mutex::new(None),
+                plan_left: AtomicU64::new(0),
+                planned_through: Mutex::new(None),
+                stopping: AtomicBool::new(false),
                 status: Mutex::new(status),
                 tx,
             }),
@@ -213,6 +236,13 @@ impl Knowledge {
 
     async fn run(&self, budget: RunBudget) -> Result<(RunStats, State)> {
         let started = Instant::now();
+        if self.inner.stopping() {
+            let feed = self.inner.feed.clone();
+            let state = tokio::task::spawn_blocking(move || State::load(feed.as_ref()))
+                .await
+                .map_err(|e| Error::Other(format!("knowledge state task failed: {e}")))??;
+            return Ok((RunStats::default(), state));
+        }
         let deadline = budget
             .max_millis
             .map(|ms| started + Duration::from_millis(ms));
@@ -240,6 +270,12 @@ impl Knowledge {
             }
         };
         let total = (p.deletes.len() + p.upserts.len()) as u64;
+        self.inner.plan_left.store(total, Ordering::Relaxed);
+        *self
+            .inner
+            .planned_through
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(p.next_cursor);
         let mut s = Session::new(
             &self.inner,
             p.state,
@@ -250,22 +286,27 @@ impl Knowledge {
         s.stats.planned = total;
         let (mut deletes_done, mut upserts_done) = (0usize, 0usize);
         let mut spent = 0usize;
+        let stop = |s: &Session, spent: usize| {
+            spent >= budget.max_items || s.out_of_time(deadline) || self.inner.stopping()
+        };
         for item in &p.deletes {
-            if spent >= budget.max_items || s.out_of_time(deadline) {
+            if stop(&s, spent) {
                 break;
             }
             s.process_delete(item)?;
             spent += 1;
             deletes_done += 1;
+            self.inner.plan_left.fetch_sub(1, Ordering::Relaxed);
         }
         for w in &p.upserts {
-            if spent >= budget.max_items || s.out_of_time(deadline) {
+            if stop(&s, spent) {
                 break;
             }
             if s.process_upsert(w).await? {
                 spent += 1;
             }
             upserts_done += 1;
+            self.inner.plan_left.fetch_sub(1, Ordering::Relaxed);
         }
         let done = (deletes_done + upserts_done) as u64;
         s.resolve_pending_links()?;
@@ -277,6 +318,9 @@ impl Knowledge {
             s.touched.extend(pruned);
         }
         s.stats.remaining = total - done;
+        self.inner
+            .plan_left
+            .store(s.stats.remaining, Ordering::Relaxed);
         if s.stats.remaining == 0
             && let Some(c) = p.next_cursor
         {
@@ -309,6 +353,61 @@ impl Knowledge {
             *self.inner.carry.lock().unwrap_or_else(|p| p.into_inner()) = Some((llm_ready, rest));
         }
         Ok((stats, state))
+    }
+
+    /// Stop: the running run (if any) ends after the item at hand, and an item whose facts came
+    /// from the model is left as it is rather than re-extracted without it (its in-flight
+    /// request may be cut off). Later runs do nothing until [`Knowledge::resume`]. For daemon
+    /// shutdown, before the model runtime stops.
+    pub fn interrupt(&self) {
+        self.inner.stopping.store(true, Ordering::Relaxed);
+    }
+
+    /// Undo [`Knowledge::interrupt`].
+    pub fn resume(&self) {
+        self.inner.stopping.store(false, Ordering::Relaxed);
+    }
+
+    /// Wait until no run is in progress (a run started later is not waited for).
+    pub async fn idle(&self) {
+        drop(self.inner.run_lock.lock().await);
+    }
+
+    /// Items not extracted yet: what is left of the current or carried plan, plus the items
+    /// changed after the change-log position that plan covers (not planned yet), plus items
+    /// deferred for the model. Without a change log only the plan is counted. Blocking (store
+    /// reads): call it off the async runtime.
+    pub fn pending_items(&self) -> Result<u64> {
+        const MAX_COUNTED: usize = 100_000;
+        let left = self.inner.plan_left.load(Ordering::Relaxed);
+        let through = *self
+            .inner
+            .planned_through
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let feed = self.inner.feed.as_ref();
+        let state = State::load(feed)?;
+        let cursor = match through {
+            Some(c) => c,
+            None => state.item_cursor,
+        };
+        let mut unplanned: HashSet<nugget_core::ids::ItemRef> = HashSet::new();
+        if let Some(c) = cursor
+            && let Some((changes, _)) = feed.items_changed_since(c, MAX_COUNTED)?
+        {
+            unplanned.extend(changes.into_iter().map(|c| c.item));
+        }
+        // While a plan is open it already holds the deferred items.
+        let deferred = if left > 0 {
+            0
+        } else {
+            state
+                .deferred
+                .iter()
+                .filter(|d| !unplanned.contains(*d))
+                .count()
+        };
+        Ok(left + unplanned.len() as u64 + deferred as u64)
     }
 
     /// Current status (cheap).

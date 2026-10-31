@@ -169,12 +169,20 @@ impl KnowledgeService {
                 }
             });
         }
+        // Stop runs between items once the daemon stops, before the model runtime goes away.
+        let k = self.knowledge.clone();
+        let stopping = stop.clone();
+        tasks.spawn(async move {
+            stopping.cancelled().await;
+            k.interrupt();
+        });
         let me = self.clone();
         let ingest = ingest.clone();
         tasks.spawn(async move { me.worker(ingest, stop).await });
     }
 
-    /// Ask the worker to run soon (e.g. after a source was removed).
+    /// Ask the worker to run soon (e.g. after a source was removed, or when a local model
+    /// became ready: items waiting for the model are retried).
     pub fn wake(&self) {
         self.wake.notify_one();
     }
@@ -194,6 +202,10 @@ impl KnowledgeService {
         // Startup run: pick up whatever was indexed while extraction was not running.
         let mut due: Option<Instant> = self.cfg.enabled.then(Instant::now);
         let mut periodic = interval.map(|i| Instant::now() + i);
+        // The commit counter when the current chain of runs started. A run that cannot finish
+        // its plan carries the rest over to the next run, which does not plan again, so commits
+        // that arrive meanwhile are planned only by a run after the chain.
+        let mut chain_from: Option<u64> = None;
         loop {
             let deadline = if self.cfg.enabled {
                 [due, periodic].into_iter().flatten().min()
@@ -241,10 +253,20 @@ impl KnowledgeService {
             match due {
                 Some(at) if now >= at => {
                     due = None;
+                    let from = *chain_from.get_or_insert(seen);
                     match self.run_now().await {
-                        Ok(stats) if stats.remaining > 0 => due = Some(Instant::now()),
-                        Ok(_) => {}
-                        Err(e) => tracing::warn!(error = %e, "knowledge run failed"),
+                        Ok(stats) => {
+                            if stats.remaining == 0 {
+                                chain_from = None;
+                            }
+                            if run_again(&stats, from, *committed.borrow()) {
+                                due = Some(Instant::now());
+                            }
+                        }
+                        Err(e) => {
+                            chain_from = None;
+                            tracing::warn!(error = %e, "knowledge run failed");
+                        }
                     }
                 }
                 // Vault edits applied by the watcher change the graph too (a run syncs the
@@ -288,6 +310,8 @@ impl KnowledgeService {
                 deleted = stats.items_deleted,
                 failed = stats.items_failed,
                 remaining = stats.remaining,
+                deferred = stats.items_deferred,
+                llm_requests = stats.llm_requests,
                 entities = stats.changed_entities,
                 constrained,
                 took_ms,
@@ -373,9 +397,8 @@ impl KnowledgeService {
         if st.llm_provider.is_some() {
             return st.llm_provider;
         }
-        if !st.llm_local_available {
-            return None;
-        }
+        // Asked of the router now, not as of the last run: a model that became ready since is
+        // reported right away.
         let caps = nugget_core::capability::Capabilities {
             json_schema: true,
             ..Default::default()
@@ -386,6 +409,17 @@ impl KnowledgeService {
             .find(|p| p.meta().locality != nugget_core::capability::Locality::Cloud)
             .map(|p| p.id().clone())
     }
+}
+
+/// Whether the worker runs again right away after a run: the plan was cut by the budget (the
+/// rest is carried over); or the chain of carried-over runs that began when the commit counter
+/// was `chain_from` is over and commits arrived since (a carried plan never plans again, so
+/// they are not in it); or items were left for the model because this run's request budget
+/// ran out.
+fn run_again(stats: &RunStats, chain_from: u64, committed: u64) -> bool {
+    stats.remaining > 0
+        || committed != chain_from
+        || (stats.items_deferred > 0 && stats.llm_requests > 0)
 }
 
 /// Sleep until `deadline`, or forever without one.
@@ -455,6 +489,34 @@ async fn forward_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runs_again_after_a_carried_chain_that_missed_commits() {
+        let done = RunStats::default();
+        let carried = RunStats {
+            remaining: 3,
+            ..RunStats::default()
+        };
+        // Budget cut: continue the chain.
+        assert!(run_again(&carried, 7, 7));
+        // Chain over, nothing committed since it started: sleep.
+        assert!(!run_again(&done, 7, 7));
+        // Chain over, commits arrived while it ran (QA GG5-7): plan again now.
+        assert!(run_again(&done, 7, 9));
+        // Items deferred because the request budget ran out: retry with a fresh budget.
+        let deferred = RunStats {
+            items_deferred: 2,
+            llm_requests: 4,
+            ..RunStats::default()
+        };
+        assert!(run_again(&deferred, 7, 7));
+        // Deferred without any request (power constrained): wait for a later trigger.
+        let constrained = RunStats {
+            items_deferred: 2,
+            ..RunStats::default()
+        };
+        assert!(!run_again(&constrained, 7, 7));
+    }
 
     #[test]
     fn vault_paths() {

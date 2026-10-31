@@ -36,6 +36,9 @@ use crate::sources;
 
 /// How long shutdown waits for chat streams and installs to stop.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+/// How long shutdown waits for an interrupted knowledge run, before and after stopping the
+/// local models.
+const KNOWLEDGE_GRACE: Duration = Duration::from_secs(3);
 
 /// How to start a daemon.
 #[derive(Clone)]
@@ -179,6 +182,7 @@ pub(crate) fn spawn_refresh(state: &Arc<State>, slot: Arc<RuntimeSlot>) {
 
 fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
     let stop = state.shutdown.clone();
+    let knowledge = state.knowledge.clone();
     // Route chat to the slot while its model loads (the request waits for the server).
     slot.starting();
     state.tasks.spawn(async move {
@@ -193,7 +197,11 @@ fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
         tokio::select! {
             () = stop.cancelled() => {}
             r = start => match r {
-                Ok(_) => tracing::info!(provider = %slot.id(), %model, "local runtime ready"),
+                Ok(_) => {
+                    tracing::info!(provider = %slot.id(), %model, "local runtime ready");
+                    // Items waiting for a model are retried now, not at the periodic run.
+                    knowledge.wake();
+                }
                 Err(e) => {
                     slot.start_failed();
                     tracing::warn!(provider = %slot.id(), %model, error = %e, "local runtime did not start");
@@ -577,9 +585,8 @@ impl Daemon {
 
         // Forward ingest events to every client; start installed local models (not awaited).
         crate::hub::spawn_forwarder(state.hub.clone(), &state.ingest, state.shutdown.clone());
-        state
-            .knowledge
-            .spawn(&state.ingest, &state.tasks, state.shutdown.clone());
+        // Local models first: a starting chat model is routable at once (requests wait for
+        // it), so knowledge's startup run extracts with it instead of without it.
         if let Some(l) = &state.local {
             for slot in &l.slots {
                 if slot.is_installed() {
@@ -587,6 +594,9 @@ impl Daemon {
                 }
             }
         }
+        state
+            .knowledge
+            .spawn(&state.ingest, &state.tasks, state.shutdown.clone());
 
         let features = crate::features::build(&crate::features::FeatureContext {
             state: &state,
@@ -674,9 +684,14 @@ impl Daemon {
             m.shutdown().await;
         }
         state.ingest.shutdown().await;
+        // Knowledge runs were interrupted at `wind_down`; one may still wait on a model request.
+        // Give it a moment to end before the runtime stops (a request cut off then leaves its
+        // item as it was).
+        let _ = tokio::time::timeout(KNOWLEDGE_GRACE, state.knowledge.knowledge.idle()).await;
         if let Some(l) = &state.local {
             l.runtime.shutdown().await;
         }
+        let _ = tokio::time::timeout(KNOWLEDGE_GRACE, state.knowledge.knowledge.idle()).await;
         let store = state.store.clone();
         let _ = blocking(move || {
             store.flush_egress();

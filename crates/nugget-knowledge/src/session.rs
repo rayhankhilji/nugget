@@ -102,10 +102,10 @@ pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) 
         state.item_cursor = None;
         state.version = EXTRACTOR_VERSION;
     }
-    if let Some(cursor) = state.item_cursor
+    let mut p = if let Some(cursor) = state.item_cursor
         && let Some((changes, next)) = feed.items_changed_since(cursor, 0)?
     {
-        return plan_incremental(
+        plan_incremental(
             feed,
             state,
             notes,
@@ -113,9 +113,46 @@ pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) 
             next,
             llm_ready,
             max_llm_attempts,
-        );
+        )?
+    } else {
+        plan_full(feed, state, notes, reset, llm_ready, max_llm_attempts)?
+    };
+    plan_deferred(feed, &mut p)?;
+    Ok(p)
+}
+
+/// Add the items left deferred ([`State::deferred`]) that the plan does not cover already.
+/// Their ledger entry still describes the version whose (model) facts are in the graph, so
+/// [`Session::process_upsert`] sees them as changed.
+fn plan_deferred(feed: &dyn ItemFeed, p: &mut Plan) -> Result<()> {
+    if p.state.deferred.is_empty() {
+        return Ok(());
     }
-    plan_full(feed, state, notes, reset, llm_ready, max_llm_attempts)
+    let mut planned: HashSet<ItemRef> = p.deletes.iter().cloned().collect();
+    planned.extend(p.upserts.iter().map(|w| w.item.clone()));
+    for item in p.state.deferred.clone() {
+        if planned.contains(&item) {
+            continue;
+        }
+        if !p.ledgers.contains_key(&item.source) {
+            let l = SourceLedger::load(feed, &item.source)?;
+            p.ledgers.insert(item.source.clone(), l);
+        }
+        let prev = p.ledgers[&item.source].get(&item.key).cloned();
+        let Some(prev) = prev else {
+            // Forgotten meanwhile (reset, deletion): nothing to protect any more.
+            p.state.deferred.retain(|d| *d != item);
+            continue;
+        };
+        planned.insert(item.clone());
+        p.upserts.push(Work {
+            item,
+            version: prev.version.clone(),
+            prev: Some(prev),
+            llm_retry: false,
+        });
+    }
+    Ok(())
 }
 
 fn plan_full(
@@ -662,6 +699,7 @@ impl<'a> Session<'a> {
         self.stats.claims_retracted += r.reuse.len() as u64;
         self.restore_superseded(&r.single_valued)?;
         self.ledger(&item.source).remove(&item.key);
+        self.undefer(item);
         self.since_flush += 1;
         self.stats.items_deleted += 1;
         Ok(())
@@ -728,6 +766,7 @@ impl<'a> Session<'a> {
             if w.version != p.version {
                 self.ledger(&w.item.source).set(&w.item.key, entry);
             }
+            self.undefer(&w.item);
             self.stats.items_unchanged += 1;
             return Ok(false);
         }
@@ -738,8 +777,20 @@ impl<'a> Session<'a> {
             .as_ref()
             .filter(|p| p.fingerprint == fp)
             .map_or(LLM_NONE, |p| p.llm);
-        match self.extract_and_apply(&item, prev_llm).await {
-            Ok(llm) => {
+        // The graph holds the model's facts of an earlier version of this item.
+        let had_model = w.prev.as_ref().is_some_and(|p| p.llm == LLM_DONE);
+        match self.extract_and_apply(&item, prev_llm, had_model).await {
+            Ok(None) => {
+                // Keep the earlier facts; the ledger keeps describing the version they are
+                // from, and the next plans pick the item up again.
+                self.stats.items_deferred += 1;
+                if !self.state.deferred.contains(&w.item) {
+                    self.state.deferred.push(w.item.clone());
+                }
+                return Ok(false);
+            }
+            Ok(Some(llm)) => {
+                self.undefer(&w.item);
                 self.stats.items_processed += 1;
                 self.record(
                     &w.item,
@@ -769,11 +820,35 @@ impl<'a> Session<'a> {
         Ok(true)
     }
 
-    /// Retract the item's old evidence, extract again, apply. Returns the LLM status.
-    async fn extract_and_apply(&mut self, item: &Item, prev_llm: u32) -> Result<u32> {
+    fn undefer(&mut self, item: &ItemRef) {
+        self.state.deferred.retain(|d| d != item);
+    }
+
+    /// Whether the model is wanted for `item` but cannot run for it now: this run's request
+    /// budget is spent (or zero: power constrained), or the pipeline is stopping.
+    fn llm_blocked(&self, item: &Item) -> bool {
+        let junk = item.metadata.get("junk") == Some(&Value::Bool(true));
+        self.inner.cfg.llm.enabled
+            && self.inner.router.is_some()
+            && !junk
+            && (self.llm_left == 0 || self.inner.stopping())
+    }
+
+    /// Retract the item's old evidence, extract again, apply. Returns the LLM status, or
+    /// `None` when the item was left as it is: `had_model` (the graph holds the model's facts
+    /// of an earlier version) and the model could not run for it now, so re-extracting would
+    /// replace those facts with the deterministic extractors' alone.
+    async fn extract_and_apply(
+        &mut self,
+        item: &Item,
+        prev_llm: u32,
+        had_model: bool,
+    ) -> Result<Option<u32>> {
+        if had_model && self.llm_blocked(item) {
+            return Ok(None);
+        }
         let date = crate::extract::item_date(item);
         self.dates.insert(item.item.clone(), Some(date));
-        let retracted = self.retract(&item.item)?;
         let chunks = self
             .feed()
             .chunks(&item.item, self.inner.cfg.max_chunks_per_item.max(1))?;
@@ -795,6 +870,12 @@ impl<'a> Session<'a> {
             self.learn_me(&emails, name.as_deref())?;
         }
         let llm = self.llm_step(item, &chunks, &mut ex, prev_llm).await;
+        if had_model && llm >= LLM_PENDING && self.inner.stopping() {
+            // The request was cut off by shutdown (the runtime stops with the daemon).
+            return Ok(None);
+        }
+        // Retracted only now, once the model step is known to have run (or not to be wanted).
+        let retracted = self.retract(&item.item)?;
         let mut reuse = retracted.reuse;
         if let Err(e) = self.apply(ex, item, date, &mut reuse).await {
             self.discard();
@@ -803,7 +884,7 @@ impl<'a> Session<'a> {
         self.commit()?;
         self.stats.claims_retracted += reuse.len() as u64;
         self.restore_superseded(&retracted.single_valued)?;
-        Ok(llm)
+        Ok(Some(llm))
     }
 
     async fn llm_step(

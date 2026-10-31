@@ -822,8 +822,13 @@ pub struct KnowledgeStatus {
     pub entities: u64,
     pub claims: u64,
     pub mentions: u64,
-    /// Items changed but not yet processed by extraction.
+    /// Items changed but not yet processed by extraction: what is left of the current or
+    /// carried-over plan, items changed since that plan was made, and items waiting for the
+    /// model.
     pub pending_items: u64,
+    /// An extraction run is in progress.
+    #[serde(default)]
+    pub running: bool,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_run: Option<time::OffsetDateTime>,
     /// Provider used for LLM extraction, if any (deterministic extractors always run).
