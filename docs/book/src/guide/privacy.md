@@ -73,7 +73,9 @@ machine. Requests to your **local network** are recorded.
   written when it connects; rows still waiting when you quit the app are lost. Byte counts for
   the updater's own requests are estimates (the feed it reads is the one the app fetched and
   verified), and a download is recorded under the host the feed names, even if that host
-  redirects to a content server.
+  redirects to a content server. These rows are not marked by source: any program running as
+  you can add `update_check` or `update_download` rows the same way (at most 60 a minute), though
+  never rows for Nugget's own features.
 - It does not record what other programs do with what Nugget gives them. An app connected over
   [MCP](mcp.md) may send the passages it reads to its own cloud model; that is the app's traffic.
   Likewise, pages the [agent](agent.md) opens in your browser are your browser's traffic.

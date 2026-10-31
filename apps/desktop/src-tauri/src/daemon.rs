@@ -253,8 +253,9 @@ impl Daemon {
         }
     }
 
-    /// Send every queued row, oldest first. A row the daemon refuses (an older daemon without
-    /// `egress.record`, or invalid) is dropped with a warning; on a lost connection the rest wait.
+    /// Send every queued row, oldest first. A row the daemon refuses for good (an older daemon
+    /// without `egress.record`, or invalid) is dropped with a warning; on any other error (lost
+    /// connection, still busy, a storage error) the rest wait for the next connection.
     async fn flush_egress(&self, client: &Client) {
         let mut rows = self.egress_queue().take().into_iter();
         while let Some(row) = rows.next() {
@@ -262,7 +263,10 @@ impl Daemon {
                 retry_busy(|| client.call::<_, serde_json::Value>(method::EGRESS_RECORD, &row));
             match sent.await {
                 Ok(_) => {}
-                Err(IpcError::Rpc(e)) => {
+                Err(IpcError::Rpc(e))
+                    if e.code == nugget_ipc::code::INVALID_PARAMS
+                        || e.code == nugget_ipc::code::METHOD_NOT_FOUND =>
+                {
                     tracing::warn!(host = %row.host, feature = %row.feature, error = %e.message, "nuggetd refused an egress row; dropped");
                 }
                 Err(e) => {

@@ -752,6 +752,12 @@ impl RpcHandler {
     /// flushed before answering, so `egress.recent` shows it right away.
     async fn egress_record(&self, req: EgressRecordRequest) -> Result<Value, RpcError> {
         let event = client_egress_event(req, time::OffsetDateTime::now_utc())?;
+        if !client_egress_allowed(std::time::Instant::now()) {
+            return Err(RpcError::new(
+                code::SERVER_BUSY,
+                "too many egress.record calls; try again in a minute",
+            ));
+        }
         let store = self.state.store.clone();
         blocking(move || store.record_egress(&event)).await?;
         Ok(Value::Null)
@@ -1308,6 +1314,75 @@ async fn run_install(
 const MAX_EGRESS_HOST: usize = 260;
 /// How far ahead of the daemon's clock a recorded time may be (clock skew between processes).
 const EGRESS_FUTURE_SLACK: time::Duration = time::Duration::minutes(5);
+/// How old a recorded time may be. The app queues rows in memory only, so real ones are minutes
+/// or hours old at most.
+const EGRESS_MAX_AGE: time::Duration = time::Duration::days(30);
+/// Rows `egress.record` accepts per minute, across all clients: an update check makes a handful,
+/// so this only stops a client from flooding the ledger (and pushing real rows off the Privacy
+/// page's recent list).
+const EGRESS_RECORD_PER_MINUTE: u32 = 60;
+
+type EgressWindow = std::sync::Mutex<Option<(std::time::Instant, u32)>>;
+
+/// Fixed one-minute window shared by all connections.
+fn client_egress_allowed(now: std::time::Instant) -> bool {
+    static WINDOW: EgressWindow = std::sync::Mutex::new(None);
+    egress_window_allows(&WINDOW, now)
+}
+
+fn egress_window_allows(window: &EgressWindow, now: std::time::Instant) -> bool {
+    let mut w = window.lock().unwrap_or_else(|p| p.into_inner());
+    match &mut *w {
+        Some((start, n)) if now.duration_since(*start) < std::time::Duration::from_secs(60) => {
+            if *n >= EGRESS_RECORD_PER_MINUTE {
+                return false;
+            }
+            *n += 1;
+        }
+        _ => *w = Some((now, 1)),
+    }
+    true
+}
+
+/// A bare `host[:port]`: a DNS name (ASCII labels; IDNs in punycode), an IPv4 address, or an
+/// IPv6 address in brackets, with an optional numeric port.
+fn valid_egress_host(host: &str) -> bool {
+    let (name, port) = if let Some(rest) = host.strip_prefix('[') {
+        let Some((addr, after)) = rest.split_once(']') else {
+            return false;
+        };
+        if addr.parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        match after {
+            "" => return true,
+            p => match p.strip_prefix(':') {
+                Some(p) => return p.parse::<u16>().is_ok(),
+                None => return false,
+            },
+        }
+    } else {
+        match host.split_once(':') {
+            Some((name, port)) => (name, Some(port)),
+            None => (host, None),
+        }
+    };
+    if port.is_some_and(|p| p.parse::<u16>().is_err()) {
+        return false;
+    }
+    if name.parse::<std::net::Ipv4Addr>().is_ok() {
+        return true;
+    }
+    let name = name.strip_suffix('.').unwrap_or(name);
+    !name.is_empty()
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+}
 
 /// Validate an `egress.record` request: a known client feature, a bare `host[:port]` (no scheme,
 /// path, credentials or spaces) and a time not in the future. The row never lists items.
@@ -1323,19 +1398,18 @@ fn client_egress_event(
         )));
     }
     let host = req.host.trim().to_ascii_lowercase();
-    let host_ok = !host.is_empty()
-        && host.len() <= MAX_EGRESS_HOST
-        && host
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
+    let host_ok = host.len() <= MAX_EGRESS_HOST && valid_egress_host(&host);
     if !host_ok {
         return Err(RpcError::invalid_params(
             "host must be a bare host name or address, with an optional :port",
         ));
     }
-    let at = req.at.unwrap_or(now);
+    let at = req.at.unwrap_or(now).to_offset(time::UtcOffset::UTC);
     if at > now + EGRESS_FUTURE_SLACK {
         return Err(RpcError::invalid_params("at is in the future"));
+    }
+    if at < now - EGRESS_MAX_AGE {
+        return Err(RpcError::invalid_params("at is more than 30 days old"));
     }
     Ok(nugget_core::egress::EgressEvent {
         at,
@@ -1406,6 +1480,24 @@ mod tests {
             let e = client_egress_event(record(host, "update_check", None), now).unwrap_err();
             assert_eq!(e.code, code::INVALID_PARAMS, "{host:?}");
         }
+        for host in [
+            "::::", "][", "-", ".", "a:b:c", "a:99999", "[::1", "[zz]", "a..b", "-a.com",
+        ] {
+            let e = client_egress_event(record(host, "update_check", None), now).unwrap_err();
+            assert_eq!(e.code, code::INVALID_PARAMS, "{host:?}");
+        }
+        for host in [
+            "github.com",
+            "objects.githubusercontent.com:443",
+            "127.0.0.1:8443",
+            "[::1]:8443",
+            "xn--bcher-kva.example",
+        ] {
+            assert!(
+                client_egress_event(record(host, "update_check", None), now).is_ok(),
+                "{host:?}"
+            );
+        }
         let long = "a".repeat(MAX_EGRESS_HOST + 1);
         assert!(client_egress_event(record(&long, "update_check", None), now).is_err());
     }
@@ -1423,6 +1515,33 @@ mod tests {
         assert!(
             client_egress_event(record("github.com", "update_check", Some(ahead)), now).is_err()
         );
+        let ancient = now - time::Duration::days(31);
+        assert!(
+            client_egress_event(record("github.com", "update_check", Some(ancient)), now).is_err()
+        );
+        let offset = queued.to_offset(time::UtcOffset::from_hms(2, 0, 0).unwrap());
+        let ev =
+            client_egress_event(record("github.com", "update_check", Some(offset)), now).unwrap();
+        assert_eq!(ev.at.offset(), time::UtcOffset::UTC);
+        assert_eq!(ev.at, queued);
+    }
+
+    #[test]
+    fn client_egress_is_rate_limited_per_minute() {
+        let window = EgressWindow::new(None);
+        let t0 = std::time::Instant::now();
+        let allowed = (0..EGRESS_RECORD_PER_MINUTE + 5)
+            .filter(|_| egress_window_allows(&window, t0))
+            .count();
+        assert_eq!(allowed, EGRESS_RECORD_PER_MINUTE as usize);
+        assert!(!egress_window_allows(
+            &window,
+            t0 + std::time::Duration::from_secs(59)
+        ));
+        assert!(egress_window_allows(
+            &window,
+            t0 + std::time::Duration::from_secs(61)
+        ));
     }
 
     #[test]

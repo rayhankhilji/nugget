@@ -301,6 +301,12 @@ impl Updates {
         let auto = {
             let mut s = self.lock();
             s.busy = false;
+            // The user switched channel (or turned updates off) while this check ran:
+            // `set_settings` already cleared the old answer; don't bring it back.
+            if check_target(&s.settings, PUBKEY).map(|(_, u)| u).as_deref() != Some(url.as_str()) {
+                drop(s);
+                return Ok(self.publish(app));
+            }
             s.last_checked = Some(now_secs());
             match result {
                 Ok(update) => {
@@ -329,8 +335,15 @@ impl Updates {
 
     /// Auto-install: fetch and verify now, install at quit (see `install_staged`).
     async fn download_staged(&self, app: &AppHandle) {
-        let Some(update) = self.lock().pending.clone() else {
-            return;
+        let update = {
+            let s = self.lock();
+            if s.settings.active_channel().is_none() || !s.settings.auto_install {
+                return;
+            }
+            let Some(update) = s.pending.clone() else {
+                return;
+            };
+            update
         };
         self.set_busy(app, true);
         let result = download(app, &update).await;

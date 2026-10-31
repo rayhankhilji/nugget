@@ -51,11 +51,16 @@ async fn client_requests_are_recorded_and_validated() {
     .await
     .unwrap();
     assert_eq!(r, Value::Null);
+    // Queued in the app for an hour, then sent: the row keeps when the request was made.
+    let queued = time::OffsetDateTime::now_utc() - time::Duration::hours(1);
+    let queued_at = queued
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
     call(
         &client,
         method::EGRESS_RECORD,
         json!({
-            "at": "2026-01-02T03:04:05Z",
+            "at": queued_at,
             "host": "objects.example.com",
             "feature": "update_download",
             "bytes_sent": 0,
@@ -110,7 +115,7 @@ async fn client_requests_are_recorded_and_validated() {
         .unwrap();
     assert_eq!(download.host, "objects.example.com");
     assert_eq!(download.bytes_received, 9_000_000);
-    assert_eq!(download.at.unix_timestamp(), 1_767_323_045);
+    assert_eq!(download.at.unix_timestamp(), queued.unix_timestamp());
 
     let _ = tx.send(());
     tokio::time::timeout(WAIT, server)
