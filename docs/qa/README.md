@@ -38,10 +38,10 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG1-3 VS Code integrated terminal not refused | High | EE2 follow-up (classify) | routed |
 | GG1-4 Each thread message cut from the front: newest question lost | High | EE2 follow-up (prompt) | routed |
 | GG1-5 Draft glued to typed text ("Sounds good,i'll") | High | EE2 follow-up (post) | routed |
-| GG1-6 Date phrases in the thread filter retrieval and drop the needed fact | High | DD4 follow-up (retrieval) | routed |
+| GG1-6 Date phrases in the thread filter retrieval and drop the needed fact | High | DD4 follow-up (retrieval) | fixed in c03b984 (drafts ignore date phrases) |
 | GG1-7 Form fields get no facts and no field name | High | EE2 follow-up | routed |
 | GG1-8 Japanese length counted in whitespace words | High | EE2 follow-up | routed |
-| GG1-9 Japanese facts never retrieved | High | DD4 follow-up (retrieval) | routed |
+| GG1-9 Japanese facts never retrieved | High | DD4 follow-up (retrieval) | fixed in c03b984 (CJK/Thai bigram search, schema v11) |
 | GG1-10 One-time-code and card fields not refused, value echoed | High | EE2 follow-up (classify) | routed |
 | GG1-11 Default grounding mode checks no values: invented figure | High | EE2 (in progress, recall work) | routed |
 | GG1-12 Latency without read-ahead on CPU (15.9 s p50) | High | known (PLAN M3 local: partly met) | open |
@@ -53,13 +53,13 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 |---|---|---|---|
 | GG2-1 Planted instructions obeyed (passport to attacker, French spread) | **Blocker** | EE3: re-test on the grounded prompt, fix what remains | routed |
 | GG2-2 Model not told today's date; mail passages lack Date/From | High | EE3 (grounded prompt adds today and dates: re-test) | routed |
-| GG2-3 Date filters and Citation.date use file mtime, not mail Date or DTSTART | High | DD4 follow-up (retrieval) | routed |
-| GG2-4 Default config's Ollama entry tried first: follow-ups never rewritten, ~2 s failover | High | DD4 follow-up (rewrite, routing) | routed |
+| GG2-3 Date filters and Citation.date use file mtime, not mail Date or DTSTART | High | DD4 follow-up (retrieval) | fixed in c03b984 (copied-folder time questions 76.9% → 92.3%) |
+| GG2-4 Default config's Ollama entry tried first: follow-ups never rewritten, ~2 s failover | High | DD4 follow-up (rewrite, routing) | fixed in c03b984 (example commented out; unprobed on-device providers after the runtime slot; rewrite falls back to the heuristic) |
 | GG2-5 Sources appear only with the first token (35–95 s) | High | EE3 | routed |
 | GG2-6 One triage LLM call per item: 315 files take 41 min, Ask 3× slower meanwhile | High | HH2 (ingest triage) | routed |
 | GG2-7 4B triage leaves real items unsearchable | High | HH2 (ingest triage) | routed |
-| GG2-8 No relevance floor: near-misses become answers | High | DD4 follow-up (retrieval) | routed |
-| GG2-9 to GG2-18 | Medium/Low | retrieval items DD4, prompt items EE3 | routed |
+| GG2-8 No relevance floor: near-misses become answers | High | DD4 follow-up (retrieval) | partly fixed in c03b984 (near misses marked "partial match" in the Ask prompt; dropping them emptied 58 answerable contexts); real-model effect not yet re-measured |
+| GG2-9 to GG2-18 | Medium/Low | retrieval items DD4, prompt items EE3 | retrieval items (9–13) fixed in c03b984; prompt items with EE3 |
 
 ## GG3: computer-use agent ([report](GG3.md)), tested at 0d81796, before DD3
 
