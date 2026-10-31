@@ -2621,12 +2621,36 @@ export type QuickAskPage = Extract<PageId, "chat" | "search">;
 export const QUICK_ASK_COMMAND = "nugget-desktop --quick-ask";
 /** Text for the question field, sent by the shell; never submitted by itself. */
 export const QUICK_ASK_PREFILL_EVENT = "quickask:prefill";
+/** JJ2: sent to the main window when "Open in Chat" or "Show in Search" carries a question. */
+export const QUICK_ASK_HANDOVER_EVENT = "quickask:handover";
+
+/** JJ2: a quick-ask question (and, for Chat, its finished answer) carried to the main window. */
+export interface QuickAskHandover {
+  /** Set by the shell: the page it opened. */
+  page?: QuickAskPage | "";
+  question: string;
+  answer?: QuickAskHandoverAnswer | null;
+}
+
+export interface QuickAskHandoverAnswer {
+  text: string;
+  provider?: string | null;
+  citations?: Citation[];
+  general?: boolean;
+  date?: AskDateFilter | null;
+}
 
 export const quickAskApi = {
   settingsGet: () => call<QuickAskView>("quickask_settings_get"),
   settingsSet: (settings: QuickAskSettings) => call<QuickAskView>("quickask_settings_set", { settings }),
   hide: () => call<null>("quickask_hide"),
-  openMain: (page: QuickAskPage) => call<null>("quickask_open_main", { page }),
+  /** JJ2: with `handover`, the page picks up the question (and Chat the finished answer). */
+  openMain: (page: QuickAskPage, handover?: QuickAskHandover) =>
+    call<null>("quickask_open_main", handover ? { page, handover } : { page }),
+  /** JJ2, main window: the handover waiting for it, once. */
+  takeHandover: () => call<QuickAskHandover | null>("quickask_handover_take"),
+  /** JJ2, main window: a handover is waiting (take it with {@link quickAskApi.takeHandover}). */
+  onHandover: (h: () => void) => on<unknown>(QUICK_ASK_HANDOVER_EVENT, () => h()),
   /** II4: a prefill sent before this window subscribed, once. */
   takePrefill: () => call<string | null>("quickask_prefill_take"),
   onPrefill: (h: (text: string) => void) =>

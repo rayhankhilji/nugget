@@ -21,7 +21,8 @@ import {
   type Tier,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
-import { usePendingNewChat } from "../hooks.nav";
+import { usePendingChatHandover, usePendingNewChat } from "../hooks.nav";
+import { handoverCitations } from "../quickask/handover";
 import { localityLabel, tierLabel } from "../format";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
@@ -447,6 +448,43 @@ export function ChatPage() {
     inputRef.current?.focus();
   };
   usePendingNewChat(startNew);
+
+  // JJ2: quick ask's "Open in Chat": a new conversation with its question and finished answer
+  // (saved like any other), or with the question in the composer when there was no answer yet.
+  usePendingChatHandover((h) => {
+    const question = h.question.trim();
+    if (!question) return;
+    if (active) {
+      setInput(question);
+      return;
+    }
+    freshChat.current = true;
+    setConvId(newConversationId());
+    setConfirmClear(false);
+    lastSaved.current = "";
+    const a = h.answer;
+    if (a && a.text.trim()) {
+      const citations = handoverCitations(a.citations);
+      setTurns([
+        { id: nextTurnId++, role: "user", text: question },
+        {
+          id: nextTurnId++,
+          role: "assistant",
+          text: a.text,
+          state: "done",
+          provider: a.provider ?? undefined,
+          citations: citations.length ? citations : undefined,
+          generalAnswer: a.general === true || undefined,
+          dateFilter: a.date ?? undefined,
+        },
+      ]);
+      setInput("");
+    } else {
+      setTurns([]);
+      setInput(question);
+    }
+    inputRef.current?.focus();
+  });
 
   const open = (c: StoredConversation) => {
     if (active || c.id === convId) return;

@@ -15,6 +15,7 @@ import {
   type ChatDone,
   type Citation,
   type Locality,
+  type QuickAskHandover,
   type QuickAskPage,
 } from "../api";
 import { citedNumbers, groupSources, splitCitations, withheldNotice } from "../citations";
@@ -28,6 +29,8 @@ import { askCitations } from "../askSearch";
 import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
 
 interface Answer {
+  /** The question this answers (the field may have changed since). */
+  question: string;
   streamId: string | null;
   provider: string | null;
   locality: Locality | null;
@@ -42,6 +45,7 @@ interface Answer {
 }
 
 const PENDING: Answer = {
+  question: "",
   streamId: null,
   provider: null,
   locality: null,
@@ -154,7 +158,7 @@ export function QuickAsk() {
     streams.current.clear();
     waiting.current = true;
     setFailure(null);
-    setAnswer({ ...PENDING });
+    setAnswer({ ...PENDING, question: q });
     announce(t("announce.answering"));
     try {
       const started = await api.retrieveAsk({
@@ -168,6 +172,7 @@ export function QuickAsk() {
       streams.current.clear();
       streams.current.set(started.stream_id, s);
       setAnswer({
+        question: q,
         streamId: started.stream_id,
         provider: started.provider,
         locality: started.locality,
@@ -219,8 +224,27 @@ export function QuickAsk() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answerError]);
 
+  // JJ2: the question goes along, and to Chat the answer with its sources once it finished
+  // (the question in the field, alone, if it changed since).
+  const handover = (): QuickAskHandover | undefined => {
+    const typed = question.trim() || answer?.question || "";
+    if (!typed) return undefined;
+    if (finished && answer && answer.question === typed && answer.text.trim()) {
+      return {
+        question: typed,
+        answer: {
+          text: answer.text,
+          provider: answer.provider,
+          citations: answer.citations,
+          general: answer.general,
+          date: answer.date,
+        },
+      };
+    }
+    return { question: typed };
+  };
   const openMain = (page: QuickAskPage) => {
-    quickAskApi.openMain(page).catch((err: unknown) => setFailure(errorMessage(err)));
+    quickAskApi.openMain(page, handover()).catch((err: unknown) => setFailure(errorMessage(err)));
   };
 
   const withheld = answer?.provider ? withheldNotice(answer.excludedSensitive, answer.provider) : null;
