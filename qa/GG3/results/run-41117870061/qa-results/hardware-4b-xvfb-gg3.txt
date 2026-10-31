@@ -1,0 +1,11 @@
+job: 4b-xvfb-gg3
+runner: GitHub Actions 1000011422 (Linux X64)
+commit: 81802f1dc1b8cc3d0bfb18b0e9c2d68804e1e25d
+date: 2026-10-30T20:21:11Z
+CPU(s):                                  4
+Model name:                              Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      126%
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           8           0           6          14
+Swap:              2           0           2
