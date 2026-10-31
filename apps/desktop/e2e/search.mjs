@@ -17,8 +17,10 @@ const MOD = process.platform === "darwin" ? "Meta" : "Control";
 const QUERY = "budget";
 const SAVED_NAME = "Budget, one kind";
 
-/** The integer at the end of a facet checkbox's accessible name ("Mail 3" → 3). */
-const countOf = (name) => Number(name.match(/(\d[\d,]*)\s*$/)?.[1]?.replace(/,/g, "") ?? NaN);
+/** The count in a facet checkbox's accessible name ("Mail, 3 results" → 3; `searchui.facetOption`). */
+const countOf = (name) => Number(name.match(/,\s*(\d[\d,]*)\s+results?$/)?.[1]?.replace(/,/g, "") ?? NaN);
+/** The value label in a facet checkbox's accessible name ("Mail, 3 results" → "Mail"). */
+const labelOf = (name) => name.replace(/,\s*\d[\d,]*\s+results?$/, "");
 
 export async function searchScenario({ browser, socket, onboarded }) {
   const bridge = await startBridge({ socket, dist: DIST });
@@ -56,7 +58,7 @@ export async function searchScenario({ browser, socket, onboarded }) {
       const filters = main.locator("#search-filters");
       const kinds = filters.getByRole("group", { name: t("searchui.facet.kind") }).getByRole("checkbox");
       const names = await until("the Kind filter lists kinds with counts", async () => {
-        const n = await kinds.evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") || e.closest("label")?.textContent?.trim() || ""));
+        const n = await kinds.evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? ""));
         return [n.length > 0 && n.every((x) => countOf(x) > 0) && (await results.count()) > 0, n];
       });
       const sources = await filters.getByRole("group", { name: t("searchui.facet.source") }).getByRole("checkbox").count();
@@ -72,8 +74,8 @@ export async function searchScenario({ browser, socket, onboarded }) {
     await check("search: ticking a Kind narrows the results and asks the daemon with that filter", async () => {
       expect(kindName, "no kind to filter by");
       const want = countOf(kindName);
-      const label = kindName.replace(/\s*\d[\d,]*\s*$/, "");
-      const box = main.locator("#search-filters").getByRole("group", { name: t("searchui.facet.kind") }).getByRole("checkbox", { name: new RegExp(`^${label}\\b`) });
+      const label = labelOf(kindName);
+      const box = main.locator("#search-filters").getByRole("group", { name: t("searchui.facet.kind") }).getByRole("checkbox", { name: kindName, exact: true });
       await box.check();
       const got = await until(`results narrow to ${want} ${label} item(s)`, async () => {
         const n = await results.count();

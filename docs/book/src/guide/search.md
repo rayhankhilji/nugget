@@ -14,7 +14,7 @@ value with how many results it has:
   Outlook, or an `.eml` file in a folder), events are calendar entries (CalDAV, Google or Microsoft
   calendars, `.ics` files), chats are messages from messaging apps, and everything else is a file.
 - **Source**: the source (folder, account or app) each result came from.
-- **People**: the people, organisations and projects from the [knowledge graph](knowledge.md) that
+- **People and projects**: the people, organisations and projects from the [knowledge graph](knowledge.md) that
   the results mention. Choose one to keep only the results that mention them.
 - **Date**: a **From** and **To** date, or a month from the results-by-month bars. Dates are the
   item's *own* date: when an event starts, when a mail was sent, otherwise when the file was last
@@ -25,7 +25,7 @@ all apply. The counts in each group show what you would get if you changed that 
 other filters, so you can see where results are before you click. **Clear filters** removes them all.
 
 Filters work on the best matches for your query (up to 300 items); when a query matches more than
-that, the counts say so. Filtering never changes how results are ranked, only which are shown.
+that, a note under the filters says the counts cover only the best matches. Filtering never changes how results are ranked, only which are shown.
 
 Everything is reachable from the keyboard: Tab moves through the filter groups, Space ticks a value,
 and the up and down arrow keys move between results.
@@ -54,7 +54,7 @@ by month.
 Open one from:
 
 - the **Timeline** button on an entity's page in [Knowledge](knowledge.md), or
-- a person under a search result, or the **Timeline** next to a value in the People filter.
+- a person under a search result, or the **Timeline** button next to a value in the People and projects filter.
 
 Items are placed at their own date (see Filters above). Facts are placed at the date they apply from
 when Nugget knows it, otherwise at the date of the source they came from. **Jump to month** moves to
