@@ -22,15 +22,6 @@ on:
         description: "Minutes to wait for full triage, per build"
         default: "75"
         type: string
-  # TEMPORARY: measure on push while HH2 is in progress; remove before the final push.
-  push:
-    branches: [hh/ingest-triage]
-    paths:
-      - "qa/HH2/**"
-      - ".github/workflows/hh2-ingest.yml"
-      - "crates/nugget-ingest/**"
-      - "crates/nuggetd/**"
-
 permissions:
   contents: read
 
