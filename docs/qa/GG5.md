@@ -22,7 +22,7 @@ view), used the way a person would on a realistic synthetic life.
 | [41117293540](https://github.com/rayhankhilji/nugget/actions/runs/41117293540) | integration `e7299584` | qwen3-4b-q4km | AMD EPYC 7763, 4 vCPU | `qa/GG5/runs/41117293540-qwen3-4b/` |
 | [41117293540](https://github.com/rayhankhilji/nugget/actions/runs/41117293540) | integration `e7299584` | qwen3-8b-q4km | AMD EPYC 7763, 4 vCPU | `qa/GG5/runs/41117293540-qwen3-8b/` |
 | [41117587773](https://github.com/rayhankhilji/nugget/actions/runs/41117587773) | `ee/entity-resolution` `a670826` | qwen3-4b-q4km | AMD EPYC 9V45, 4 vCPU | `qa/GG5/runs/41117587773-qwen3-4b-ee1/` |
-| [41192088580](https://github.com/rayhankhilji/nugget/actions/runs/41192088580) | integration (second run, adds `restart-later`) | qwen3-4b-q4km | RUN2_CPU | `qa/GG5/runs/41192088580-qwen3-4b/` |
+| [41192088580](https://github.com/rayhankhilji/nugget/actions/runs/41192088580) | integration (second run, adds `restart-later`) | qwen3-4b-q4km | AMD EPYC 9V74, 4 vCPU | `qa/GG5/runs/41192088580-qwen3-4b/` |
 
 Embeddings: nomic-embed-text-v1.5-q8 in every run. Extraction settings are the defaults (120 s per request, 120 s per run).
 
@@ -73,7 +73,7 @@ Real models: dispatch `.github/workflows/qa-GG5.yml` (`models`, optional `produc
   (`The user has title NCU-4471-0093-218.`), `Lena Brandt dislikes [[Preference/iron-deficiency anaemia]]`, a person
   "Prescription" `has title ferrous sulfate 200 mg`, and "iron-deficiency anaemia" in the vault README. 8B: model claims from the payslip, but no figures, identifiers or diagnosis.
   The card number is in the 4B and EE1 vaults from phase1 to restart.
-- Frequency: 4B integration and EE1 4B (2 of 3 runs); 8B 0.
+- Frequency: 3 of 4 runs: both integration 4B runs (the second also has `anaemia` and the account number in claims) and EE1 4B; 8B 0.
 - Cause: local extraction runs on sensitive items by design (`crates/nugget-knowledge/src/llm.rs:188-214`, sensitivity only
   excludes cloud providers); the gate never checks what a `has_title` object is (`llm.rs:172-186`, `1697`, `1751`), an unknown
   subject becomes a person (`llm.rs:157-170`), the quote only has to contain the subject or the object (`llm.rs:1823`); and the vault
@@ -184,8 +184,11 @@ Real models: dispatch `.github/workflows/qa-GG5.yml` (`models`, optional `produc
   12 active and 5 superseded → retracted); 8B 14 files in 77 ms, 7 claims retracted; EE1: the run kept going after SIGTERM once llama-server was
   stopped (`background tasks did not stop in time`, then `LLM extraction failed … error decoding response body`), and claims were still written 24 ms after the daemon logged "stopped"; there, junk came back
   as current (`Mara has_title neighbour of the year`). After restart `knowledge.status.extractor_provider` stayed null 30 s after the chat model was ready.
-  RESTART_LATER
-- Frequency: 4B and 8B at startup, EE1 at shutdown.
+  Second 4B run (41192088580, EPYC 9V74): the startup run processed 7 files in 44 ms at 11:22:44.906, the chat model was ready at
+  11:22:47.69; 139 → 118 claims, 105 → 89 entities. `restart-later` (12 minutes on): the model came back only with the 10-minute
+  periodic run (it started ~11:32:45 and was still running at the snapshot: 121 claims, 99 entities), and
+  `knowledge.status.extractor_provider` was still null 12 minutes after the model was ready.
+- Frequency: every real-model run: 4B (2 runs) and 8B at startup, EE1 at shutdown.
 - Cause: `extract_and_apply` retracts the file's old evidence first (`crates/nugget-knowledge/src/session.rs:776`), the LLM step returns
   `LLM_PENDING` when no provider is ready (`session.rs:837`), and only the deterministic part is applied (`session.rs:799`). The files
   were pending because of GG5-7. Shutdown: `crates/nuggetd/src/daemon.rs:654-683` stops the runtime while the run continues.
