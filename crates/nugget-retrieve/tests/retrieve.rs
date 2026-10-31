@@ -1068,3 +1068,37 @@ async fn sensitive_items_can_be_left_out_of_the_context() {
         "numbering restarts after exclusion"
     );
 }
+
+/// QA GG8-3: a text the user sent with Double Tap (kept by `nugget-voice` as a voice sample)
+/// never comes back from search or as context, which is what Ask, drafts and MCP read.
+#[tokio::test]
+async fn voice_samples_are_never_retrieved() {
+    let store = Store::open_in_memory().unwrap();
+    let note = "Biopsy appointment notes: results due next week.";
+    let item = NewItem::new("notes", "biopsy.md", content_hash(note)).with_title("Biopsy");
+    store
+        .upsert_item_with_chunks(&item, &[NewChunk::text(note)])
+        .unwrap();
+    let sent = "Thanks doctor, I will call about the biopsy results. GG8CANARY-VOICE-final";
+    let voice = NewItem::new(
+        nugget_core::ids::VOICE_SAMPLES_SOURCE,
+        "feedback/stream-1",
+        content_hash(sent),
+    );
+    store
+        .upsert_item_with_chunks(&voice, &[NewChunk::text(sent)])
+        .unwrap();
+    // The store still finds it (the voice profile searches it for exemplars)...
+    assert_eq!(store.search_text("biopsy", 10).unwrap().len(), 2);
+    // ...retrieval does not.
+    let r = Retriever::new(store, None, RetrieveConfig::default());
+    let found = r.search("biopsy results", 10).await.unwrap();
+    assert_eq!(keys(&found.items), ["biopsy.md"]);
+    let ctx = r.build_context("biopsy results", 1_500).await.unwrap();
+    assert!(!ctx.text.contains("GG8CANARY"), "{}", ctx.text);
+    assert!(
+        ctx.citations
+            .iter()
+            .all(|c| c.item.key.as_str() == "biopsy.md")
+    );
+}

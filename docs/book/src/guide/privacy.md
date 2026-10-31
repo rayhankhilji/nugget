@@ -88,6 +88,19 @@ treated as sensitive. Sensitive items:
 - are left out of the context when Ask uses a cloud model (the answer says how many were withheld);
 - are hidden from MCP clients unless a client is explicitly allowed to see them.
 
+The same scan runs on what a Double Tap draft would send to a cloud model: a thread message, the
+field's text, the subject or your instruction in which it finds anything is withheld whole (the
+model sees "[withheld: …]", never the value), as a sensitive item would be. A local model gets
+them as they are.
+
+## Your Double Tap texts
+
+When you insert a draft, the text you finally send is kept, encrypted, as a sample of your voice.
+Voice samples are a drafting aid only: they are not a source, search, Ask and drafts never use them
+as context, and MCP clients never see them, whatever their scopes. They reach a cloud model only as
+voice examples in a cloud Double Tap draft, and not at all when the text was flagged sensitive (by
+the scan above, or because the draft drew on sensitive items).
+
 ## What leaves for each feature
 
 | Feature | With a local model | With a cloud model |

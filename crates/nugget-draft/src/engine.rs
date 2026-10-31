@@ -393,6 +393,7 @@ struct Inner {
     feedback: RwLock<Option<Arc<dyn FeedbackSink>>>,
     warmer: RwLock<Option<Arc<dyn Warmer>>>,
     retrieval_runner: RwLock<Option<Arc<dyn RetrievalRunner>>>,
+    sensitive_scan: RwLock<Option<SensitiveScan>>,
     config: DraftConfig,
     sessions: Mutex<Sessions>,
     cache: Mutex<Cache>,
@@ -495,6 +496,7 @@ impl Drafter {
                 feedback: RwLock::new(None),
                 warmer: RwLock::new(None),
                 retrieval_runner: RwLock::new(None),
+                sensitive_scan: RwLock::new(None),
                 config,
                 sessions: Mutex::new(Sessions::default()),
                 cache: Mutex::new(Cache::default()),
@@ -519,6 +521,19 @@ impl Drafter {
             .feedback
             .write()
             .unwrap_or_else(|e| e.into_inner()) = Some(sink);
+    }
+
+    /// The deterministic sensitive-content scan (card, ID and account numbers, secrets) applied
+    /// to the thread, field text, subject and instruction of drafts bound for a cloud provider:
+    /// a text it flags is withheld from the prompt, as sensitive retrieved items are
+    /// ([`withhold_sensitive`]). Without one, cloud prompts carry those texts as they are.
+    pub fn with_sensitive_scan(self, scan: SensitiveScan) -> Self {
+        *self
+            .inner
+            .sensitive_scan
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(scan);
+        self
     }
 
     /// Connection prewarming used by [`prewarm`](Self::prewarm).
@@ -790,7 +805,23 @@ impl Drafter {
         ask: &Ask,
     ) -> (ChatRequest, bool, LengthBand) {
         let config = &self.inner.config;
-        let ctx = &req.context;
+        let scan = self
+            .inner
+            .sensitive_scan
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let (withheld_ctx, withheld_instruction) = match (&scan, cloud) {
+            (Some(scan), true) => {
+                withhold_sensitive(&req.context, req.instruction.as_deref(), scan)
+            }
+            _ => (None, None),
+        };
+        let ctx = withheld_ctx.as_ref().unwrap_or(&req.context);
+        let instruction = match &withheld_instruction {
+            Some(i) => Some(i.as_str()),
+            None => req.instruction.as_deref(),
+        };
         let screenshot = ctx.thread.is_empty()
             && ctx
                 .screenshot_png_base64
@@ -808,7 +839,7 @@ impl Drafter {
             ctx,
             voice,
             context,
-            instruction: req.instruction.as_deref(),
+            instruction,
             screenshot,
             band,
             limits: self.limits_for(cloud),
@@ -1114,6 +1145,16 @@ impl Drafter {
             .unwrap_or_else(|e| e.into_inner())
             .clone();
         if let (Some(sink), Some(s)) = (sink, session) {
+            // A sent text with a card, ID or account number or a secret is stored as a sensitive
+            // sample: never a voice example for cloud models.
+            let scanned = final_text.as_deref().is_some_and(|t| {
+                self.inner
+                    .sensitive_scan
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_ref()
+                    .is_some_and(|scan| scan(t))
+            });
             sink.record(FeedbackRecord {
                 stream_id: fb.stream_id,
                 outcome,
@@ -1124,7 +1165,7 @@ impl Drafter {
                 draft,
                 final_text,
                 insert_verified: fb.insert_verified,
-                sensitive: s.sensitive,
+                sensitive: s.sensitive || scanned,
             })
             .await?;
         }
@@ -1588,6 +1629,48 @@ fn voice_query(ctx: &DraftContext, kind: FieldKind, topic: &str, for_cloud: bool
         topic: topic.to_owned(),
         for_cloud,
     }
+}
+
+/// A deterministic sensitive-content scan: whether `text` holds a card, ID or account number or
+/// a secret ([`Drafter::with_sensitive_scan`]).
+pub type SensitiveScan = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// What a withheld text is replaced with in a cloud prompt.
+pub const WITHHELD_TEXT: &str =
+    "[withheld: this text contains a card, ID or account number or a secret]";
+
+/// The draft's context and instruction with every text `scan` flags withheld (thread messages,
+/// the field's text, the subject, the instruction), or `None` for each when nothing was. The
+/// scanner reports no positions, so a flagged text goes as a whole, like a sensitive item: the
+/// cloud model sees that something was withheld, never what. A withheld field also drops its
+/// selection, and its screenshot goes too (the window around the field may show the same text).
+pub fn withhold_sensitive(
+    ctx: &DraftContext,
+    instruction: Option<&str>,
+    scan: &SensitiveScan,
+) -> (Option<DraftContext>, Option<String>) {
+    let mut out = ctx.clone();
+    let mut changed = false;
+    for m in &mut out.thread {
+        if scan(&m.text) {
+            m.text = WITHHELD_TEXT.to_owned();
+            changed = true;
+        }
+    }
+    if !out.field.value.is_empty() && scan(&out.field.value) {
+        out.field.value = WITHHELD_TEXT.to_owned();
+        out.field.selection = None;
+        out.screenshot_png_base64 = None;
+        changed = true;
+    }
+    if out.subject.as_deref().is_some_and(|s| scan(s)) {
+        out.subject = Some(WITHHELD_TEXT.to_owned());
+        changed = true;
+    }
+    let instruction = instruction
+        .filter(|i| scan(i))
+        .map(|_| WITHHELD_TEXT.to_owned());
+    (changed.then_some(out), instruction)
 }
 
 /// Lock a mutex, recovering from poisoning.

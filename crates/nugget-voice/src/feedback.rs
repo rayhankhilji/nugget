@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use crate::Channel;
 
 /// Source id of feedback items in the store.
-pub const FEEDBACK_SOURCE: &str = "nugget-voice";
+pub const FEEDBACK_SOURCE: &str = nugget_core::ids::VOICE_SAMPLES_SOURCE;
 /// `metadata.kind` of feedback items.
 pub const FEEDBACK_KIND: &str = "voice_feedback";
 /// Longest final text kept (characters).

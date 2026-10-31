@@ -42,7 +42,10 @@ pub struct ScopeFilter {
 impl ScopeFilter {
     /// May content from an item in `source` with this sensitivity be returned?
     pub fn allows(&self, source: &SourceId, sensitive: bool) -> bool {
-        if sensitive && !self.include_sensitive {
+        // Voice samples are never served, whatever the scopes list.
+        if (sensitive && !self.include_sensitive)
+            || nugget_core::ids::is_private_source(source.as_str())
+        {
             return false;
         }
         match &self.sources {
@@ -157,10 +160,12 @@ impl Scope {
     }
 
     fn source_allowed(&self, source: &SourceId) -> bool {
-        self.filter
-            .sources
-            .as_ref()
-            .is_none_or(|l| l.iter().any(|s| s == source))
+        !nugget_core::ids::is_private_source(source.as_str())
+            && self
+                .filter
+                .sources
+                .as_ref()
+                .is_none_or(|l| l.iter().any(|s| s == source))
     }
 
     pub fn entity_visible(&self, origins: &[Origin]) -> bool {
@@ -329,4 +334,23 @@ pub fn distinct_origins(origins: impl IntoIterator<Item = Origin>) -> Vec<Origin
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+#[cfg(test)]
+mod voice_tests {
+    use super::*;
+
+    /// QA GG8-3: an MCP client never gets voice samples, with default scopes or when it lists
+    /// the source explicitly.
+    #[test]
+    fn voice_samples_are_never_allowed() {
+        let voice = SourceId::new(nugget_core::ids::VOICE_SAMPLES_SOURCE);
+        assert!(!ScopeFilter::default().allows(&voice, false));
+        let listed = ScopeFilter {
+            sources: Some(vec![voice.clone()]),
+            include_sensitive: true,
+        };
+        assert!(!listed.allows(&voice, false));
+        assert!(ScopeFilter::default().allows(&SourceId::new("files-1"), false));
+    }
 }

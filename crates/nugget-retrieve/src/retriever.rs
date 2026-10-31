@@ -471,6 +471,12 @@ impl Retriever {
             ),
         };
 
+        // Voice samples (the texts the user sent with Double Tap) are never knowledge.
+        let hits: Vec<_> = hits
+            .into_iter()
+            .filter(|h| !nugget_core::ids::is_private_source(h.item.source.as_str()))
+            .collect();
+
         // 3. Group by item.
         let mut cands = group_by_item(hits, self.config.max_matches_per_item);
 

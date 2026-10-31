@@ -67,8 +67,8 @@ pub use classify::{
 };
 pub use engine::{
     DraftConfig, DraftStream, DraftTimings, Drafter, FeedbackOutcome, FeedbackRecord, FeedbackSink,
-    LocalBudget, MAX_BUDGET_TOKENS, NoVoice, Prewarm, RetrievalRunner, VoiceQuery, VoiceSource,
-    Warmer, post_options, retrieval_query,
+    LocalBudget, MAX_BUDGET_TOKENS, NoVoice, Prewarm, RetrievalRunner, SensitiveScan, VoiceQuery,
+    VoiceSource, WITHHELD_TEXT, Warmer, post_options, retrieval_query, withhold_sensitive,
 };
 pub use grounding::{Grounder, GroundingCheck, GroundingReport};
 pub use prompt::{FEATURE_DRAFT, LengthBand, PromptLimits};

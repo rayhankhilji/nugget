@@ -415,7 +415,11 @@ fn start_with(state: &Arc<State>, cfg: &DraftSection) -> Arc<dyn Feature> {
         state.store.clone(),
     ))))
     .with_warmer(Arc::new(ProviderWarmer))
-    .with_retrieval_runner(Arc::new(BlockingRetrieval));
+    .with_retrieval_runner(Arc::new(BlockingRetrieval))
+    // The ingest scan that marks items sensitive, on what a cloud draft would send (GG8-4).
+    .with_sensitive_scan(Arc::new(|text: &str| {
+        !nugget_ingest::scan_pii(text).is_empty()
+    }));
 
     // Subscribe before anything can commit, so no change is missed while the profile loads.
     let events = state.ingest.subscribe();
