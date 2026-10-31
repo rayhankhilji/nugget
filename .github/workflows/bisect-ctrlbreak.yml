@@ -1,9 +1,9 @@
 name: Bisect CTRL_BREAK shutdown (temporary)
 
-# TEMPORARY: the NSIS smoke step fails (nuggetd exits 0xC000013A on CTRL_BREAK without logging
-# the signal) while a standalone nuggetd built from the same commits shuts down cleanly. This
-# runs the real smoke script against the installers of an old green dry run and the failing one,
-# on today's runner, to separate a code change from a runner change. Remove before merging.
+# TEMPORARY: the NSIS smoke step fails on eddd716 (nuggetd exits 0xC000013A on CTRL_BREAK) and
+# passes on 13b305b, on the same runner image. A standalone nuggetd from either commit shuts down
+# cleanly. This swaps the daemon between the two installers to tell whether the app or the daemon
+# carries the change. Remove before merging.
 
 on:
   push:
@@ -15,16 +15,16 @@ permissions:
   actions: read # download artifacts from earlier runs
 
 jobs:
-  smoke:
-    name: smoke ${{ matrix.label }}
+  swap:
+    name: app ${{ matrix.app }} + nuggetd ${{ matrix.daemon }}
     runs-on: windows-2022
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { label: "13b305b (green dry run 40848720974)", run: "40848720974" }
-          - { label: "eddd716 (failing dry run 41113647335)", run: "41113647335" }
+          - { app: "eddd716", app_run: "41113647335", daemon: "13b305b", daemon_run: "40848720974" }
+          - { app: "13b305b", app_run: "40848720974", daemon: "eddd716", daemon_run: "41113647335" }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -32,23 +32,36 @@ jobs:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: bundle-x86_64-pc-windows-msvc
-          run-id: ${{ matrix.run }}
+          run-id: ${{ matrix.app_run }}
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/bundle
-      - name: Runner image
+          path: ${{ runner.temp }}/app
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: bundle-x86_64-pc-windows-msvc
+          run-id: ${{ matrix.daemon_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/daemon
+      - name: Take nuggetd.exe out of the other installer
         shell: pwsh
         run: |
-          "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion"
-          [Environment]::OSVersion.VersionString
-      - name: NSIS smoke test (current script)
+          $setup = (Get-ChildItem "$env:RUNNER_TEMP/daemon" -Filter '*-setup.exe')[0].FullName
+          $dir = Join-Path $env:RUNNER_TEMP 'daemon-install'
+          Start-Process -FilePath $setup -ArgumentList '/S', "/D=$dir" -Wait
+          Copy-Item (Join-Path $dir 'nuggetd.exe') (Join-Path $env:RUNNER_TEMP 'swap-nuggetd.exe')
+          Start-Process -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S', "_?=$dir" -Wait
+          Get-FileHash (Join-Path $env:RUNNER_TEMP 'swap-nuggetd.exe')
+      - name: NSIS smoke with the swapped daemon
         shell: pwsh
         env:
           SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
-        run: ./packaging/scripts/smoke-windows.ps1 (Get-ChildItem "$env:RUNNER_TEMP/bundle" -Filter '*-setup.exe')[0].FullName
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: smoke-${{ matrix.run }}
-          path: ${{ runner.temp }}/smoke/
-          if-no-files-found: ignore
-          retention-days: 3
+        run: |
+          $src = Get-Content packaging/scripts/smoke-windows.ps1 -Raw
+          $hook = "`n    Copy-Item -Force (Join-Path `$env:RUNNER_TEMP 'swap-nuggetd.exe') (Join-Path `$installDir 'nuggetd.exe'); Log 'swapped in nuggetd.exe from ${{ matrix.daemon }}'`n"
+          $anchor = 'Log "installed silently in ${tInstalled}s:'
+          $i = $src.IndexOf($anchor)
+          if ($i -lt 0) { throw 'anchor not found' }
+          $eol = $src.IndexOf("`n", $i)
+          $patched = $src.Substring(0, $eol + 1) + $hook + $src.Substring($eol + 1)
+          $script = Join-Path $env:RUNNER_TEMP 'smoke-swapped.ps1'
+          Set-Content -LiteralPath $script -Value $patched -Encoding utf8
+          & $script (Get-ChildItem "$env:RUNNER_TEMP/app" -Filter '*-setup.exe')[0].FullName
