@@ -45,6 +45,9 @@ pub(crate) trait Reader: Send + Sync + 'static {
         None
     }
     fn poll_interval(&self) -> Duration;
+    /// Called after a pass that succeeded end to end (read, every change sent, deletes done),
+    /// so a reader may remember what it read. The default does nothing.
+    fn pass_succeeded(&self) {}
 }
 
 enum Emit {
@@ -178,6 +181,7 @@ impl MessagingConnector {
             )
             .await?;
         }
+        self.reader.pass_succeeded();
         tracing::debug!(
             kind = self.reader.kind(),
             documents = produced.len(),
