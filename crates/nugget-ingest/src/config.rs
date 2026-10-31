@@ -46,9 +46,15 @@ pub struct IngestConfig {
     pub assume_unflagged_safe: bool,
     /// Items labelled per triage request (small items share one request). Default 8.
     pub triage_batch: usize,
-    /// Characters of text per triage request; an item longer than this goes alone.
-    /// Default 6 000.
+    /// Most characters of text per triage request (the measured prefill rate usually allows
+    /// fewer; see `triage_request_ms`). Default 6 000.
     pub triage_batch_chars: usize,
+    /// Prompt processing one triage request may take, in ms: requests carry as much text as
+    /// the measured prefill rate gets through in this time (between 300 characters and
+    /// `triage_batch_chars`), and a longer item is labelled in parts. A local server cannot stop
+    /// part-way through a prompt step, so this bounds how long an interactive request can wait
+    /// behind triage. Default 3 000.
+    pub triage_request_ms: u64,
     /// Background triage waits this long after the last interactive model request (Ask,
     /// Double Tap, agent) before it uses the local model again. Default 3 s.
     pub triage_idle_ms: u64,
@@ -106,6 +112,7 @@ impl Default for IngestConfig {
             assume_unflagged_safe: false,
             triage_batch: 8,
             triage_batch_chars: 6_000,
+            triage_request_ms: 3_000,
             triage_idle_ms: 3_000,
             embeddings: true,
             allow_cloud_embeddings: false,

@@ -267,16 +267,19 @@ async fn small_items_are_batched_within_the_count_and_character_budgets() {
     local.unblock_chat();
     triage_settled(&h).await;
     let chats = local.chats();
-    // 10 short items in batches of at most 4 (4 + 4 + 2), the long one alone.
+    // 10 short items in batches of at most 4 (4 + 4 + 2); the long one (1,500 characters,
+    // more than the first request's 800-character budget) alone, in parts.
     let docs: Vec<usize> = chats
         .iter()
+        .filter(|c| !c.contains("long text"))
         .map(|c| c.matches("<document n=").count())
         .collect();
     assert!(docs.iter().all(|&n| n <= 4), "{docs:?}");
-    assert_eq!(docs.iter().sum::<usize>(), 11, "{docs:?}");
-    assert!(chats.len() <= 5, "{docs:?}");
-    let long = chats.iter().find(|c| c.contains("long text")).unwrap();
-    assert_eq!(long.matches("<document n=").count(), 1);
+    assert_eq!(docs.iter().sum::<usize>(), 10, "{docs:?}");
+    assert!(docs.len() <= 4, "{docs:?}");
+    let long: Vec<&String> = chats.iter().filter(|c| c.contains("long text")).collect();
+    assert!(long.len() >= 2, "{long:?}");
+    assert!(long.iter().all(|c| c.matches("<document n=").count() == 1));
     h.ingest.shutdown().await;
 }
 
@@ -664,5 +667,74 @@ async fn labels_leave_updated_at_alone_and_survive_a_concurrent_metadata_write()
         "labels must not bump updated_at"
     );
     assert_eq!(local.chats().len(), 1, "labelled once, not retried");
+    h.ingest.shutdown().await;
+}
+
+#[tokio::test]
+async fn requests_are_sized_by_the_measured_prefill_rate_and_long_items_go_in_parts() {
+    // A model that takes 1 ms per prompt character before its first token, and a 200 ms target:
+    // after the first request, no request may carry much more than the 300-character floor,
+    // and a long item is labelled in parts (sensitive if any part is).
+    let local = local_model();
+    local
+        .prefill_us_per_char
+        .store(1_000, std::sync::atomic::Ordering::SeqCst);
+    let h = start(Opts {
+        cfg: IngestConfig {
+            triage_request_ms: 200,
+            ..cfg()
+        },
+        router: Some(router(&[(
+            local.clone(),
+            vec![Tier::Triage, Tier::Embedding],
+        )])),
+        ..Default::default()
+    })
+    .await;
+    let mut long = "an ordinary paragraph about the garden. ".repeat(40);
+    long.push_str("HUSHHUSH at the very end");
+    let mut script: Vec<Step> = (0..6)
+        .map(|i| {
+            Step::Send(text_doc(
+                &format!("s{i}"),
+                &format!(
+                    "short note number {i} with some words to make it longer than fifty characters"
+                ),
+                Some("1"),
+            ))
+        })
+        .collect();
+    script.push(Step::Send(text_doc("long", &long, Some("1"))));
+    script.push(Step::Return(json!("done")));
+    h.factory.state("fake-1").script(script);
+    h.add("fake-1").await;
+    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    eventually_async("triage settled", || {
+        let ingest = h.ingest.clone();
+        async move {
+            let t = ingest.status().await.unwrap().triage.unwrap();
+            t.pending == 0 && t.done == 7
+        }
+    })
+    .await;
+    let chats = local.chats();
+    // Every request after the first fits the measured budget (document text plus markup).
+    for c in &chats[1..] {
+        let docs = c.matches("<document n=").count();
+        assert!(
+            c.chars().count() <= 300 + 120 * docs,
+            "{} chars: {c}",
+            c.len()
+        );
+    }
+    let parts: Vec<&String> = chats.iter().filter(|c| c.contains("(part ")).collect();
+    assert!(parts.len() >= 3, "{chats:#?}");
+    let long = h.item("fake-1", "long").unwrap();
+    assert_eq!(long.metadata["triage"]["state"], json!("done"));
+    assert_eq!(
+        long.metadata["sensitive"],
+        json!(true),
+        "a sensitive last part marks the whole item"
+    );
     h.ingest.shutdown().await;
 }

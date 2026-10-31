@@ -296,6 +296,8 @@ pub struct FakeProvider {
     pub chats_completed: AtomicUsize,
     /// Reply to triage with unusable output.
     pub chat_invalid: AtomicBool,
+    /// Simulated prefill: microseconds of delay per character of the request.
+    pub prefill_us_per_char: std::sync::atomic::AtomicU64,
 }
 
 impl FakeProvider {
@@ -314,6 +316,7 @@ impl FakeProvider {
             chat_open: tokio::sync::watch::channel(true).0,
             chats_completed: AtomicUsize::new(0),
             chat_invalid: AtomicBool::new(false),
+            prefill_us_per_char: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -377,6 +380,10 @@ impl Provider for FakeProvider {
             if rx.changed().await.is_err() {
                 break;
             }
+        }
+        let us = self.prefill_us_per_char.load(Ordering::SeqCst);
+        if us > 0 {
+            tokio::time::sleep(Duration::from_micros(us * text.chars().count() as u64)).await;
         }
         self.chats_completed.fetch_add(1, Ordering::SeqCst);
         // One label pair per `<document n="k">` block of a triage batch.

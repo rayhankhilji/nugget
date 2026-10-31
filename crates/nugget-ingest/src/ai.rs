@@ -9,10 +9,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::StreamExt;
 use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
-use nugget_infer::{ChatRequest, ChatResponse, Message, Provider, Router};
+use nugget_infer::{ChatEvent, ChatRequest, Message, Provider, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -106,19 +107,31 @@ people, events and appointments, notes, documents, bills and receipts are never 
 sensitive: true if it contains credentials, financial, medical, legal or identity details. \
 Reply with JSON only.";
 
+/// Labels for a batch and how long the provider took to its first token (the prompt's
+/// prefill, which a local server cannot interrupt part-way).
+pub(crate) struct Labelled {
+    pub labels: Vec<Triage>,
+    pub first_token: Option<Duration>,
+}
+
 /// Label `docs` with one request to `provider` (must be local; checked again here). Each text
 /// is cut to `max_chars`. Errors when the reply does not label every document exactly once.
+/// The reply is streamed: dropping the future closes the connection, which makes llama-server
+/// cancel the request at its next step.
 pub(crate) async fn triage_batch(
     provider: &dyn Provider,
     docs: &[TriageDoc<'_>],
     max_chars: usize,
     timeout: Duration,
-) -> Result<Vec<Triage>> {
+) -> Result<Labelled> {
     if !is_local(provider) {
         return Err(Error::Invalid("triage never uses cloud providers".into()));
     }
     if docs.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Labelled {
+            labels: Vec::new(),
+            first_token: None,
+        });
     }
     let mut prompt = String::new();
     for (i, d) in docs.iter().enumerate() {
@@ -154,13 +167,31 @@ pub(crate) async fn triage_batch(
         .with_feature(FEATURE_TRIAGE);
     req.temperature = Some(0.0);
     req.items = docs.iter().map(|d| d.item.clone()).collect();
-    let resp = tokio::time::timeout(timeout, async {
-        let stream = provider.chat(req).await?;
-        ChatResponse::collect(stream).await
+    let started = std::time::Instant::now();
+    let (text, first_token) = tokio::time::timeout(timeout, async {
+        let mut stream = provider.chat(req).await?;
+        let mut text = String::new();
+        let mut first = None;
+        while let Some(ev) = stream.next().await {
+            match ev? {
+                ChatEvent::TextDelta(t) => {
+                    if first.is_none() && !t.is_empty() {
+                        first = Some(started.elapsed());
+                    }
+                    text.push_str(&t);
+                }
+                ChatEvent::Done { .. } => return Ok::<_, Error>((text, first)),
+                _ => {}
+            }
+        }
+        Err(Error::Provider("triage stream ended early".into()))
     })
     .await
     .map_err(|_| Error::Provider("triage timed out".into()))??;
-    parse_triage(&resp.text(), docs.len())
+    Ok(Labelled {
+        labels: parse_triage(&text, docs.len())?,
+        first_token,
+    })
 }
 
 pub(crate) fn parse_triage(raw: &str, n: usize) -> Result<Vec<Triage>> {
