@@ -260,4 +260,4 @@ REPRO_RESULTS
 - `qa/GG3/results/` (reports with traces, `summary.md`, `overreach.md`, `summarize.py`, `overreach.py` in `qa/GG3/`)
 - `qa/GG3/probes/`, `qa/GG3/recovery/`, `qa/GG3/killswitch/` (deterministic probes, each with a README)
 - `qa/GG3/candidates.md`, `qa/GG3/verify/v1/`, `qa/GG3/verify/v2/` (verification layer)
-- `.github/workflows/qa-GG3.yml` (workflow_dispatch only; `qa/GG3/.full-matrix.txt` holds the 9-job matrix used for run 41114070631)
+- `.github/workflows/qa-GG3.yml` (workflow_dispatch only; its matrix is the 9 jobs of run 41114070631; runs 41117870061 and 41188498408 used temporary matrices for the perturbed-task rerun and the repro, see git history)

@@ -1,0 +1,10 @@
+job: repro-4b-notriage
+runner: GitHub Actions 1000011823 (Linux X64)
+commit: 900b4fa7537508611218317abe521d020bf496e1
+date: 2026-10-31T09:32:14Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 7763 64-Core Processor
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          11           0           3          14
+Swap:              2           0           2

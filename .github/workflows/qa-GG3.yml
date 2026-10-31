@@ -7,10 +7,6 @@ name: QA GG3 (computer-use agent, real models)
 # its JSON report (scores, outcomes, confirmations, wrapper log, full action trace per task).
 
 on:
-  # TEMPORARY (removed before the final push): run on pushes to qa/agent.
-  push:
-    branches: [qa/agent]
-    paths: [qa/GG3/RUN]
   workflow_dispatch:
     inputs:
       task_timeout_s:
@@ -45,11 +41,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # REPRO (temporary matrix): second real-model run of the tasks behind the GG3 findings,
-          # for the verification layer.
-          - { label: repro-4b, model: qwen3-4b-q4km, args: "--set all --tasks mail-ask-two-sams,files-ask-which-report,shop-ask-which-charger,forms-ask-missing-details,calendar-ask-meeting-dana,gg3-ask-thursday-meeting,gg3-ask-two-priya,gg3-ask-which-receipt,files-delete-backup,gg3-files-delete-receipt,cross-receipt-total-email,gg3-files-archive-old-report,mail-compose-new,gg3-inject-file-exfil,gg3-fakelogin-shop-checkout,gg3-fakelogin-mail-reply,gg3-impossible-reply-jordan" }
-          - { label: repro-4b-notriage, model: qwen3-4b-q4km, args: "--set all --no-triage --tasks mail-refuse-bank-phish,forms-refuse-impersonation,settings-refuse-coworker-laptop,cross-refuse-giftcard-scam,mail-ask-two-sams,files-ask-which-report,shop-ask-which-charger,forms-ask-missing-details,calendar-ask-meeting-dana,gg3-ask-thursday-meeting,gg3-ask-two-priya,gg3-ask-which-receipt" }
-          - { label: repro-8b, model: qwen3-8b-q4km, args: "--set all --tasks gg3-impossible-reply-jordan,gg3-ask-two-priya,gg3-ask-thursday-meeting,files-ask-which-report,gg3-files-photos-to-pictures" }
+          # 4B (the default chat tier), bench triage on (as the bench runs it), all 81 tasks.
+          - { label: 4b-s0, model: qwen3-4b-q4km, args: "--set all --shard 0 --shard-count 2" }
+          - { label: 4b-s1, model: qwen3-4b-q4km, args: "--set all --shard 1 --shard-count 2" }
+          # 4B with triage off: what the daemon runs today (it does not turn triage on).
+          - { label: 4b-notriage-s0, model: qwen3-4b-q4km, args: "--set all --no-triage --shard 0 --shard-count 2" }
+          - { label: 4b-notriage-s1, model: qwen3-4b-q4km, args: "--set all --no-triage --shard 1 --shard-count 2" }
+          # 8B (agentic tier), slower: four shards.
+          - { label: 8b-s0, model: qwen3-8b-q4km, args: "--set all --shard 0 --shard-count 4" }
+          - { label: 8b-s1, model: qwen3-8b-q4km, args: "--set all --shard 1 --shard-count 4" }
+          - { label: 8b-s2, model: qwen3-8b-q4km, args: "--set all --shard 2 --shard-count 4" }
+          - { label: 8b-s3, model: qwen3-8b-q4km, args: "--set all --shard 3 --shard-count 4" }
+          # The Xvfb desktop (kiosk Chromium windows, AT-SPI) with the GG3 tasks, 4B.
+          - { label: 4b-xvfb-gg3, model: qwen3-4b-q4km, args: "--set gg3 --env xvfb", xvfb: true }
     steps:
       - uses: actions/checkout@v5
         with:
