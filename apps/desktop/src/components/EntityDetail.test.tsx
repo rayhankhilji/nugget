@@ -130,4 +130,21 @@ describe("EntityDetailPanel facts", () => {
     expect(container.querySelector(".fact-group-recency")).toBeNull();
     expect(container.querySelector("time")).toBeNull();
   });
+
+  it("offers no Restore on a superseded fact and counts current facts only (GG5-14)", async () => {
+    const detail: EntityDetail = {
+      ...timed,
+      claims: [timed.claims[0]!, { ...timed.claims[1]!, status: "superseded" }, { ...timed.claims[1]!, id: 4, status: "rejected" }],
+    };
+    mockDaemon({ knowledge_entity: detail });
+    const { container } = await render(panel());
+    expect(container.querySelector("h3.entity-section")!.textContent).toMatch(/\b1\b/);
+    expect(container.querySelector("h3.entity-section")!.textContent).not.toMatch(/\b2\b/);
+    const superseded = container.querySelector("li.fact-superseded")!;
+    expect(superseded.querySelector("button.fact-reject")).toBeNull();
+    expect(Array.from(superseded.querySelectorAll("button")).map((b) => b.textContent)).not.toContain("Restore");
+    // A rejected fact can still be restored.
+    const rejected = container.querySelector("li.fact-retracted")!;
+    expect(Array.from(rejected.querySelectorAll("button")).map((b) => b.textContent)).toContain("Restore");
+  });
 });
