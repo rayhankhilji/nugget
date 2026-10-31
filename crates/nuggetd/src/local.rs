@@ -422,6 +422,11 @@ impl Provider for RuntimeSlot {
         }
     }
 
+    /// Until its model is installed the slot fails fast (`Unsupported`).
+    fn available(&self) -> bool {
+        self.is_installed()
+    }
+
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
         if !matches!(self.role, RuntimeRole::Chat | RuntimeRole::Draft) {
             return Err(Error::Unsupported(format!("{} does not chat", self.id)));

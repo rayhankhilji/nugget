@@ -485,7 +485,14 @@ async fn audit_entry_per_call_without_content() {
     assert_eq!(entries[0].detail["transport"], "stdio");
     assert_eq!(entries[0].detail["items"], json!(["files:docs/plan.md"]));
     assert_eq!(entries[1].detail["transport"], "loopback_http");
-    assert_eq!(entries[1].detail["args"]["query"], "apollo budget");
+    // The query is kept as its length and a keyed hash, never the text (GG8-8).
+    assert_eq!(entries[1].detail["args"]["query"]["chars"], 13);
+    assert_eq!(
+        entries[1].detail["args"]["query"]["hmac"]
+            .as_str()
+            .map(str::len),
+        Some(16)
+    );
     assert_eq!(entries[2].detail["outcome"], "denied");
     assert_eq!(entries[3].action, "mcp.resource_read");
     for e in &entries {
@@ -495,6 +502,7 @@ async fn audit_entry_per_call_without_content() {
             "no content in audit: {s}"
         );
         assert!(!s.contains("Ignore previous"), "no content in audit: {s}");
+        assert!(!s.contains("apollo budget"), "no query in audit: {s}");
     }
 }
 

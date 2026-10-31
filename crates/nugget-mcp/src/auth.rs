@@ -65,6 +65,17 @@ impl ServerKey {
         mac.update(token.as_bytes());
         hex(&mac.finalize().into_bytes())
     }
+
+    /// `HMAC-SHA256(key, text)`, first 16 hex characters: lets the audit log tell repeated
+    /// arguments apart without keeping (or allowing a dictionary guess of) the text.
+    pub fn hash_audit_text(&self, text: &str) -> String {
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.0).expect("any key length");
+        mac.update(b"nugget-mcp-audit-v1\0");
+        mac.update(text.as_bytes());
+        let mut h = hex(&mac.finalize().into_bytes());
+        h.truncate(16);
+        h
+    }
 }
 
 impl std::fmt::Debug for ServerKey {
@@ -210,6 +221,10 @@ impl ClientRegistry {
             key,
             touch_interval: Duration::from_secs(60),
         }
+    }
+
+    pub(crate) fn key(&self) -> &ServerKey {
+        &self.key
     }
 
     /// Change how often `last_used` is persisted (default 60 s; zero = every request).

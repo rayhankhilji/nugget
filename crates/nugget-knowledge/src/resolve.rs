@@ -666,7 +666,7 @@ When unsure, answer same=false.",
         )
         .await
         {
-            Ok(v) => {
+            Ok((v, _)) => {
                 v.get("same") == Some(&Value::Bool(true))
                     && v.get("confidence").and_then(Value::as_f64).unwrap_or(0.0) >= 0.8
             }
