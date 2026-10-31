@@ -40,9 +40,10 @@
 //!   no longer write credentials.
 //! - **Bounded errors.** `last_error`, item errors and progress errors are capped at
 //!   [`MAX_ERROR_CHARS`] characters (see [`cap_error`]).
-//! - **Privacy.** Items with PII findings (or flagged by triage) are *sensitive*. Triage never
-//!   uses `Cloud` providers; embeddings use `Cloud` providers only when
-//!   [`IngestConfig::allow_cloud_embeddings`] is set **and** the item is not sensitive.
+//! - **Privacy.** Items with PII findings (or flagged by triage, or marked by their connector with
+//!   `metadata.sensitive = true`) are *sensitive*. Triage never uses `Cloud` providers;
+//!   embeddings use `Cloud` providers only when [`IngestConfig::allow_cloud_embeddings`] is set
+//!   **and** the item is not sensitive.
 //! - **Isolation.** A bad item is recorded (see [`Ingest::errors`]) and skipped; it never stops
 //!   its source. Sources never block each other.
 //! - **Backpressure.** `ChangeSink::send` waits when the source's queue
