@@ -136,7 +136,7 @@ fn be32(b: &[u8]) -> u32 {
 /// big-endian when the magic number's low bit is set, little-endian otherwise.
 fn wal_checksum(big_endian: bool, data: &[u8], s: (u32, u32)) -> (u32, u32) {
     let (mut s0, mut s1) = s;
-    for w in data.chunks_exact(8) {
+    for w in data.as_chunks::<8>().0 {
         let (x0, x1) = if big_endian {
             (be32(&w[..4]), be32(&w[4..]))
         } else {

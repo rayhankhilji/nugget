@@ -944,7 +944,7 @@ pub async fn pick_plugin_file(app: AppHandle) -> Result<Option<String>> {
 // through, never logged. The daemon validates everything else.
 
 /// Paths beyond this are a UI bug.
-const MAX_PATH_LEN: usize = 4096;
+const MAX_BACKUP_PATH_LEN: usize = 4096;
 
 fn check_backup_request(request: &Value) -> Result<()> {
     let Some(fields) = request.as_object() else {
@@ -954,7 +954,7 @@ fn check_backup_request(request: &Value) -> Result<()> {
         let limit = if name == "passphrase" {
             MAX_SECRET_LEN
         } else {
-            MAX_PATH_LEN
+            MAX_BACKUP_PATH_LEN
         };
         if value.as_str().is_some_and(|s| s.len() > limit) {
             return Err(CmdError::Other(format!("the {name} is too long")));
