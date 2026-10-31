@@ -251,6 +251,11 @@ pub struct ItemDates {
     /// usually RFC 3339), when it is a string.
     #[serde(default)]
     pub extracted_date: Option<String>,
+    /// When the event happens, for calendar items: `metadata.extracted.start` (ICS `DTSTART`,
+    /// `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS[Z]`) or a connector's `metadata.start.date_time` /
+    /// `metadata.start.date`, as stored.
+    #[serde(default)]
+    pub event_start: Option<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub source_modified_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
