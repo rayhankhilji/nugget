@@ -57,18 +57,28 @@ pub fn screen_text(s: &str, max_chars: usize) -> String {
     let mut out = String::with_capacity(s.len().min(max_chars * 2));
     let mut chars = 0usize;
     let mut pending_space = false;
+    // The last character that was not invisible, and the first shaping character (joiner or
+    // variation selector) of the invisible run since then; decided when the run ends.
     let mut prev: Option<char> = None;
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
+    let mut held: Option<char> = None;
+    for c in s.chars() {
         // Invisible characters are deleted, not spaced: `Ig\u{200B}nore` is one word on screen,
-        // and spacing it would hide the word from the injection detector (`Ig nore`). Joiners
-        // and variation selectors that shape non-ASCII text are kept (see [`shapes_text`]).
+        // and spacing it would hide the word from the injection detector (`Ig nore`).
         if nugget_policy::is_invisible(c) {
-            let next = it.clone().find(|n| !nugget_policy::is_invisible(*n));
-            if shapes_text(c, prev, next) && chars < max_chars {
-                out.push(c);
+            if held.is_none() && is_shaping(c) {
+                held = Some(c);
             }
             continue;
+        }
+        if let Some(h) = held.take()
+            && shapes_text(h, prev, Some(c))
+        {
+            if chars >= max_chars {
+                out.push('…');
+                return out;
+            }
+            out.push(h);
+            chars += 1;
         }
         prev = Some(c);
         if c.is_control() || c.is_whitespace() {
@@ -100,16 +110,33 @@ pub fn screen_text(s: &str, max_chars: usize) -> String {
         }
         chars += 1;
     }
+    // A variation selector at the very end still belongs to its base character.
+    if let Some(h) = held
+        && shapes_text(h, prev, None)
+        && chars < max_chars
+    {
+        out.push(h);
+    }
     out
 }
 
-/// An invisible character that changes how the text around it is drawn, kept between two
-/// visible characters when one of them is not ASCII: the zero-width non-joiner and joiner
-/// (Persian `می‌خواهم`, Indic conjuncts, emoji sequences such as 👩‍💻), the Mongolian free
-/// variation selectors, and variation selectors after their base character (❤️). Everything
-/// else [`nugget_policy::is_invisible`] lists (zero-width spaces, bidi controls, soft hyphen, tag
-/// characters, …) draws nothing and is deleted; line and paragraph separators are whitespace
-/// and become spaces like other breaks.
+/// Joiners and variation selectors: the invisible characters that may shape visible text.
+fn is_shaping(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200C}' | '\u{200D}' | '\u{180B}'..='\u{180D}' | '\u{FE00}'..='\u{FE0F}'
+    )
+}
+
+/// Whether a run of invisible characters between `prev` and `next` keeps one shaping character
+/// `c` (the run's first joiner or selector; the rest of the run is deleted). Kept, and counted
+/// toward the length cap, when the text around it is not plain ASCII: the zero-width
+/// non-joiner and joiner between two visible characters, one of them not ASCII (Persian
+/// `می‌خواهم`, Indic conjuncts, emoji sequences such as 👩‍💻), the Mongolian free variation
+/// selectors likewise, and a variation selector after a non-ASCII base character (❤️).
+/// Everything else [`nugget_policy::is_invisible`] lists (zero-width spaces, bidi controls, soft
+/// hyphen, tag characters, …) draws nothing and is deleted; line and paragraph separators are
+/// whitespace and become spaces like other breaks.
 fn shapes_text(c: char, prev: Option<char>, next: Option<char>) -> bool {
     let visible = |x: char| !x.is_whitespace() && !x.is_control();
     let Some(p) = prev.filter(|&p| visible(p)) else {
@@ -457,6 +484,39 @@ mod tests {
         assert_eq!(screen_text("Ig\u{200C}no\u{200D}re\u{FE0F}", 50), "Ignore");
         assert_eq!(screen_text("\u{200D}a", 50), "a");
         assert_eq!(screen_text("👩\u{200D} x", 50), "👩 x");
+        // One shaping character per gap, however long the run.
+        assert_eq!(
+            screen_text("👩\u{200D}\u{200D}\u{200D}💻", 50),
+            "👩\u{200D}💻"
+        );
+    }
+
+    /// Long invisible runs are handled in one pass and never exceed the cap: kept joiners count
+    /// toward it.
+    #[test]
+    fn invisible_runs_are_linear_and_capped() {
+        let n = 200_000;
+        let t0 = std::time::Instant::now();
+        for s in [
+            format!("a{}é", "\u{200D}".repeat(n)),
+            format!("a{}", "\u{200B}".repeat(n)),
+            format!("é{}", "\u{FE0F}".repeat(n)),
+            "é\u{200D}".repeat(n / 2),
+        ] {
+            let out = screen_text(&s, 80);
+            assert!(out.chars().count() <= 81, "{} chars", out.chars().count());
+        }
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            t0.elapsed()
+        );
+        assert_eq!(
+            screen_text("é\u{200D}".repeat(100).as_str(), 5)
+                .chars()
+                .count(),
+            6
+        );
     }
 
     /// GG3-17 (review PA-3 on the computer-use path): invisible characters inside a word are
