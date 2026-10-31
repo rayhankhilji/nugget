@@ -16,6 +16,7 @@
   - [Microsoft 365](guide/sources-microsoft.md)
   - [Slack, Notion, GitHub and Linear](guide/sources-saas.md)
 - [Search and Ask, with citations](guide/search-ask.md)
+  - [Filters, saved searches, timelines and previews](guide/search.md)
 - [The knowledge graph and vault](guide/knowledge.md)
 - [Connecting AI apps over MCP](guide/mcp.md)
 - [Double Tap: drafting in your voice](guide/double-tap.md)

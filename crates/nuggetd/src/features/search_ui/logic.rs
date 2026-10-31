@@ -5,9 +5,10 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use nugget_core::{Error, Result};
+use nugget_store::{Item, ItemDates};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use time::format_description::well_known::{Rfc2822, Rfc3339};
+use time::format_description::well_known::Rfc3339;
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 
 /// Largest UTC offset accepted, in minutes (±18 h, as `time` allows).
@@ -122,53 +123,6 @@ pub(crate) enum FactDateSource {
     Recorded,
 }
 
-/// Parse a date as extractors write it: RFC 3339, RFC 2822, a floating
-/// `YYYY-MM-DD[T| ]HH:MM[:SS]` (taken as UTC) or a bare `YYYY-MM-DD` (midnight UTC).
-pub(crate) fn parse_lenient(s: &str) -> Option<OffsetDateTime> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    if let Ok(t) = OffsetDateTime::parse(s, &Rfc3339) {
-        return Some(t);
-    }
-    if let Ok(t) = OffsetDateTime::parse(s, &Rfc2822) {
-        return Some(t);
-    }
-    let (day, rest) = match s.split_once(['T', 't', ' ']) {
-        Some((d, t)) => (d, Some(t)),
-        None => (s, None),
-    };
-    let date = parse_ymd(day)?;
-    let time = match rest {
-        None => Time::MIDNIGHT,
-        Some(t) => {
-            let t = t.trim().trim_end_matches(['Z', 'z']);
-            let mut parts = t.split(':');
-            let num = |p: Option<&str>| -> Option<u8> {
-                match p {
-                    None => Some(0),
-                    Some(p) => {
-                        // Seconds may carry a fraction; it is dropped.
-                        let p = p.split('.').next().unwrap_or(p);
-                        (p.len() == 2 && p.bytes().all(|b| b.is_ascii_digit()))
-                            .then(|| p.parse().ok())
-                            .flatten()
-                    }
-                }
-            };
-            let h = parts.next().and_then(|p| num(Some(p)))?;
-            let m = parts.next().and_then(|p| num(Some(p)))?;
-            let sec = num(parts.next())?;
-            if parts.next().is_some() {
-                return None;
-            }
-            Time::from_hms(h, m, sec).ok()?
-        }
-    };
-    Some(PrimitiveDateTime::new(date, time).assume_utc())
-}
-
 /// A strict `YYYY-MM-DD`.
 fn parse_ymd(s: &str) -> Option<Date> {
     let b = s.as_bytes();
@@ -188,19 +142,35 @@ fn parse_ymd(s: &str) -> Option<Date> {
     Date::from_calendar_date(y, m, d).ok()
 }
 
-/// An item's own date: its extracted date when that parses, else its source modification time,
-/// else when it was indexed. (One place, so a shared "own date" helper can replace it.)
-pub(crate) fn own_date(
-    extracted: Option<&str>,
-    modified: Option<OffsetDateTime>,
-    created: OffsetDateTime,
-) -> (OffsetDateTime, DateSource) {
-    if let Some(t) = extracted.and_then(parse_lenient) {
-        return (t, DateSource::Extracted);
-    }
-    match modified {
-        Some(t) => (t, DateSource::Modified),
-        None => (created, DateSource::Indexed),
+/// An item's own date, as the retriever dates it ([`nugget_retrieve::dates::item_date`]: event
+/// start, else extracted date, else source modification time, else last indexed), and which of
+/// those it came from. Event starts report `extracted` (the contract's value for "the item says
+/// when it happened").
+pub(crate) fn own_date(d: &ItemDates, offset: UtcOffset) -> (OffsetDateTime, DateSource) {
+    let at = nugget_retrieve::dates::item_date(d, offset);
+    let fallback = d.source_modified_at.unwrap_or(d.updated_at);
+    let source = if (d.event_start.is_some() || d.extracted_date.is_some()) && at != fallback {
+        DateSource::Extracted
+    } else if d.source_modified_at.is_some() {
+        DateSource::Modified
+    } else {
+        DateSource::Indexed
+    };
+    (at, source)
+}
+
+/// The [`ItemDates`] of a loaded item (the fields `nugget_retrieve::dates::item_date_of` reads).
+pub(crate) fn dates_of(item: &Item) -> ItemDates {
+    let text = |v: &Value| v.as_str().map(str::to_owned);
+    let m = &item.metadata;
+    ItemDates {
+        extracted_date: text(&m["extracted"]["date"]),
+        event_start: text(&m["extracted"]["start"])
+            .or_else(|| text(&m["start"]["date_time"]))
+            .or_else(|| text(&m["start"]["date"])),
+        source_modified_at: item.source_modified_at,
+        created_at: item.created_at,
+        updated_at: item.updated_at,
     }
 }
 
@@ -694,54 +664,55 @@ mod tests {
         );
     }
 
-    #[test]
-    fn lenient_dates() {
-        assert_eq!(
-            parse_lenient("2024-03-02T10:00:00+01:00"),
-            Some(dt("2024-03-02T09:00:00Z"))
-        );
-        assert_eq!(
-            parse_lenient("Sat, 02 Mar 2024 10:00:00 +0000"),
-            Some(dt("2024-03-02T10:00:00Z"))
-        );
-        assert_eq!(
-            parse_lenient(" 2024-03-02 "),
-            Some(dt("2024-03-02T00:00:00Z"))
-        );
-        assert_eq!(
-            parse_lenient("2024-03-02T10:30"),
-            Some(dt("2024-03-02T10:30:00Z"))
-        );
-        assert_eq!(
-            parse_lenient("2024-03-02 10:30:15.25Z"),
-            Some(dt("2024-03-02T10:30:15Z"))
-        );
-        for bad in [
-            "",
-            "soon",
-            "2024-13-01",
-            "2024-02-30",
-            "24-03-02",
-            "2024-03-02T25:00",
-            "2024-03-02T1:00",
-        ] {
-            assert_eq!(parse_lenient(bad), None, "{bad}");
+    fn dates(
+        extracted: Option<&str>,
+        event: Option<&str>,
+        modified: Option<&str>,
+        updated: &str,
+    ) -> ItemDates {
+        ItemDates {
+            extracted_date: extracted.map(str::to_owned),
+            event_start: event.map(str::to_owned),
+            source_modified_at: modified.map(dt),
+            created_at: dt("2020-01-01T00:00:00Z"),
+            updated_at: dt(updated),
         }
     }
 
     #[test]
-    fn own_date_falls_back_in_order() {
-        let m = dt("2024-01-05T12:00:00Z");
-        let c = dt("2024-02-01T00:00:00Z");
+    fn own_date_follows_the_retriever_and_names_its_source() {
+        let u = "2024-02-01T00:00:00Z";
+        let m = Some("2024-01-05T12:00:00Z");
         assert_eq!(
-            own_date(Some("2023-12-24"), Some(m), c),
-            (dt("2023-12-24T00:00:00Z"), DateSource::Extracted)
+            own_date(&dates(Some("2023-12-24T10:00:00Z"), None, m, u), off(0)),
+            (dt("2023-12-24T10:00:00Z"), DateSource::Extracted)
+        );
+        // An event's start wins over the extracted date and reports `extracted`.
+        assert_eq!(
+            own_date(
+                &dates(
+                    Some("2023-12-24T10:00:00Z"),
+                    Some("2024-06-01T09:00:00Z"),
+                    m,
+                    u
+                ),
+                off(0)
+            ),
+            (dt("2024-06-01T09:00:00Z"), DateSource::Extracted)
+        );
+        // Floating dates are read at the offset.
+        assert_eq!(
+            own_date(&dates(Some("2023-12-24"), None, None, u), off(60)).0,
+            dt("2023-12-23T23:00:00Z")
         );
         assert_eq!(
-            own_date(Some("garbage"), Some(m), c),
-            (m, DateSource::Modified)
+            own_date(&dates(Some("garbage"), None, m, u), off(0)),
+            (dt("2024-01-05T12:00:00Z"), DateSource::Modified)
         );
-        assert_eq!(own_date(None, None, c), (c, DateSource::Indexed));
+        assert_eq!(
+            own_date(&dates(None, None, None, u), off(0)),
+            (dt(u), DateSource::Indexed)
+        );
         assert_eq!(
             serde_json::to_value(DateSource::Indexed).unwrap(),
             "indexed"

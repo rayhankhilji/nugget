@@ -178,7 +178,7 @@ fn seed(store: &Store) -> Seed {
         NewItem::new("mail", "m2", content_hash("m2"))
             .with_title("Budget follow-up")
             .with_metadata(json!({"sensitive": false, "kind": "email",
-                                  "extracted": {"date": "Wed, 10 Apr 2024 09:00:00 +0000"}})),
+                                  "extracted": {"date": "2024-04-10T09:00:00Z"}})),
         "Following up on the budget with Samuel.",
     );
     put(
@@ -187,7 +187,7 @@ fn seed(store: &Store) -> Seed {
             .with_title("Budget planning")
             .with_mime("text/calendar")
             .with_metadata(json!({"sensitive": false,
-                                  "extracted": {"date": "2024-03-31T23:30:00Z"}})),
+                                  "extracted": {"start": "2024-03-31T23:30:00Z"}})),
         "Budget planning meeting with Sam.",
     );
     let f1_chunk = put(
@@ -363,12 +363,18 @@ async fn faceted_search_filters_and_counts_disjunctively() {
         names.contains(&"Sam Lee") && names.contains(&"Acme"),
         "{names:?}"
     );
-    // RFC 2822 extracted date, kind from metadata synonym.
+    // Kind from a metadata synonym.
     let m2 = hit("m2");
     assert_eq!(m2["date"], "2024-04-10T09:00:00Z");
     assert_eq!(m2["kind"], "mail");
     assert_eq!(m2["people"][0]["id"], s.sam.as_str());
-    assert_eq!(hit("e1")["kind"], "event");
+    let e1 = hit("e1");
+    assert_eq!(e1["kind"], "event");
+    assert_eq!(
+        e1["date"], "2024-03-31T23:30:00Z",
+        "dated by the event start"
+    );
+    assert_eq!(e1["date_source"], "extracted");
     let f1 = hit("f1");
     assert_eq!(f1["kind"], "file");
     assert_eq!(f1["sensitive"], true);

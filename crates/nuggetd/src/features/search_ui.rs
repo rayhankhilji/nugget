@@ -178,20 +178,6 @@ fn clamp_limit(limit: Option<u32>, default: usize, max: usize) -> usize {
     }
 }
 
-/// The extracted date string of an item's metadata.
-fn extracted_date(metadata: &Value) -> Option<&str> {
-    metadata.get("extracted")?.get("date")?.as_str()
-}
-
-/// An item's own date.
-fn item_own_date(item: &Item) -> (OffsetDateTime, DateSource) {
-    logic::own_date(
-        extracted_date(&item.metadata),
-        item.source_modified_at,
-        item.created_at,
-    )
-}
-
 /// Run a future that does blocking store work on the blocking pool.
 async fn on_blocking_thread<T, F>(fut: F) -> Result<T>
 where
@@ -334,7 +320,7 @@ impl SearchUi {
         let graph = self.state.knowledge.graph.clone();
         let wanted_people = f.people.clone();
         let (items, selected, selected_names) = blocking(move || {
-            let items = load_pool(&store, hits, &source_kinds)?;
+            let items = load_pool(&store, hits, &source_kinds, offset)?;
             let (selected, names) = resolve_people(graph.as_ref(), &wanted_people)?;
             Ok((items, selected, names))
         })
@@ -416,6 +402,7 @@ fn load_pool(
     store: &Store,
     hits: Vec<SearchHit>,
     source_kinds: &HashMap<String, String>,
+    offset: UtcOffset,
 ) -> Result<Vec<PoolItem>> {
     let refs: Vec<ItemRef> = hits.iter().map(|h| h.item.clone()).collect();
     let dates = store.item_dates(&refs)?;
@@ -426,11 +413,7 @@ fn load_pool(
         let (Some(item), Some(d)) = (item, dates.get(&hit.item)) else {
             continue;
         };
-        let (at, date_source) = logic::own_date(
-            d.extracted_date.as_deref(),
-            d.source_modified_at,
-            d.created_at,
-        );
+        let (at, date_source) = logic::own_date(d, offset);
         let kind = logic::classify_kind(
             &item.metadata,
             item.mime.as_deref(),
@@ -612,15 +595,7 @@ fn build_timeline(
         }
     }
     let dates = store.item_dates(&order)?;
-    let own = |item: &ItemRef| {
-        dates.get(item).map(|d| {
-            logic::own_date(
-                d.extracted_date.as_deref(),
-                d.source_modified_at,
-                d.created_at,
-            )
-        })
-    };
+    let own = |item: &ItemRef| dates.get(item).map(|d| logic::own_date(d, offset));
 
     let mut events: Vec<Dated<Pending>> = Vec::new();
     for item in &order {
@@ -802,9 +777,11 @@ impl SearchUi {
     async fn preview(&self, p: PreviewParams) -> Result<PreviewResult> {
         check_item("item", &p.item)?;
         let source_kind = self.source_kinds().await.remove(p.item.source.as_str());
+        let offset = self.offset(None)?;
         let store = self.state.store.clone();
         let graph = self.state.knowledge.graph.clone();
-        blocking(move || build_preview(&store, graph.as_ref(), p, source_kind.as_deref())).await
+        blocking(move || build_preview(&store, graph.as_ref(), p, source_kind.as_deref(), offset))
+            .await
     }
 }
 
@@ -813,11 +790,12 @@ fn build_preview(
     graph: &dyn GraphStore,
     p: PreviewParams,
     source_kind: Option<&str>,
+    offset: UtcOffset,
 ) -> Result<PreviewResult> {
     let item = store
         .get_item(&p.item)?
         .ok_or_else(|| Error::NotFound(format!("item {}:{}", p.item.source, p.item.key)))?;
-    let (at, date_source) = item_own_date(&item);
+    let (at, date_source) = logic::own_date(&logic::dates_of(&item), offset);
     let full = item.text.as_deref().unwrap_or("");
     let (text, truncated) = logic::cut_chars(full, PREVIEW_CHARS);
     let passage = match p.chunk_id {
@@ -920,18 +898,5 @@ mod tests {
             key: nugget_core::ids::ItemKey::new("k"),
         };
         assert!(check_item("item", &empty).is_err());
-    }
-
-    #[test]
-    fn extracted_date_reads_strings_only() {
-        assert_eq!(
-            extracted_date(&serde_json::json!({"extracted": {"date": "2024-01-01"}})),
-            Some("2024-01-01")
-        );
-        assert_eq!(
-            extracted_date(&serde_json::json!({"extracted": {"date": 5}})),
-            None
-        );
-        assert_eq!(extracted_date(&serde_json::json!({})), None);
     }
 }
