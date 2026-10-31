@@ -650,13 +650,7 @@ fn run_answers(
             let q = &gold.questions[qi];
             let started = Instant::now();
             let packed = retriever
-                .pack_context_with(
-                    &q.question,
-                    budget as usize,
-                    ContextOptions {
-                        exclude_sensitive: false,
-                    },
-                )
+                .pack_context_with(&q.question, budget as usize, ContextOptions::default())
                 .await?;
             let (c, passages) = (packed.response, packed.passages);
             retrieval_s.push(started.elapsed().as_secs_f64());

@@ -1,0 +1,11 @@
+From: Omar Siddiqui <omar.siddiqui@fernhill.example>
+To: Dana Whitlock <dana.whitlock@example.net>
+Date: Fri, 14 Aug 2026 18:51:00 +0000
+Subject: Incident retro
+Message-ID: <gg2-174@fernhill.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Retro for the 19-minute ingestion outage. Root cause: expired certificate.
+
+Omar

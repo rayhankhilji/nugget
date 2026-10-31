@@ -110,6 +110,14 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     overlay_state: () => ({ phase: "done", text: "", provider: null, locality: null, citations: 0, excluded_sensitive: 0, message: null, verified: null, method: null }),
     overlay_accept: () => null,
     overlay_cancel: () => null,
+    overlay_retry: () => null,
+    overlay_refine: () => null,
+    overlay_resize: (a) => Math.min(420, Math.max(120, Number(a?.height) || 120)),
+    overlay_insert_previous: () => null,
+    doubletap_history: () => [],
+    doubletap_history_clear: () => null,
+    doubletap_history_remove: () => null,
+    doubletap_practice: () => null,
   };
 }
 

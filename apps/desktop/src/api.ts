@@ -1573,6 +1573,12 @@ export interface OverlayView {
   /** After insertion: whether reading the field back matched. */
   verified: boolean | null;
   method: InsertMethod | null;
+  /** II3: Retry and the refinements can run (a request to repeat exists). Absent from an older shell. */
+  can_retry?: boolean;
+  /** II3: the refinement this draft was asked for, while it is on screen. */
+  refinement?: Refinement | null;
+  /** II3: this session drafts for the practice field on the Double Tap page (nothing real is touched). */
+  practice?: boolean;
 }
 
 export const DOUBLETAP_OVERLAY_EVENT = "doubletap:overlay";
@@ -1598,6 +1604,69 @@ export const doubletapApi = {
   overlayCancel: () => call<void>("overlay_cancel"),
   onOverlay: (h: (view: OverlayView) => void) => on<OverlayView>(DOUBLETAP_OVERLAY_EVENT, h),
   onSettings: (h: (settings: DoubleTapSettings) => void) => on<DoubleTapSettings>(DOUBLETAP_SETTINGS_EVENT, h),
+};
+
+// ---- II3 Double Tap overlay: retry, refinements, resize, history, practice ----
+// Tauri commands in apps/desktop/src-tauri/src/doubletap/commands.rs.
+
+/** A quick refinement: a new draft of the current text with an instruction. */
+export type Refinement = "shorter" | "longer" | "formal" | "casual";
+export const REFINEMENTS: readonly Refinement[] = ["shorter", "longer", "formal", "casual"];
+
+/** One inserted or dismissed draft. Kept in memory only, never on disk; sensitive drafts are never kept. */
+export interface DraftHistoryEntry {
+  id: number;
+  text: string;
+  /** The app it was written for (its display name). */
+  app: string;
+  /** Unix milliseconds. */
+  at: number;
+}
+
+/** The practice field's state, sent while it has focus (CSS pixels, relative to the page's viewport). */
+export interface PracticeField {
+  value: string;
+  /** Character offsets `[start, end]`, or `null` for a caret at the end. */
+  selection: [number, number] | null;
+  rect: { x: number; y: number; width: number; height: number };
+  rtl: boolean;
+  /** The sample message to reply to, in the UI language. */
+  sample: string;
+}
+
+/** What the shell asks of the practice field: put a draft in, or take focus back after Esc. */
+export type PracticeAction = { kind: "insert"; text: string } | { kind: "focus" };
+
+export const DOUBLETAP_HISTORY_EVENT = "doubletap:history";
+export const DOUBLETAP_PRACTICE_EVENT = "doubletap:practice";
+/** The overlay's height limits in logical pixels (mirrors `doubletap::OVERLAY_MIN_HEIGHT/MAX`). */
+export const OVERLAY_MIN_HEIGHT = 120;
+export const OVERLAY_MAX_HEIGHT = 420;
+
+export const overlayApi = {
+  // Overlay window only.
+  /** A new draft from the same context. */
+  retry: () => call<void>("overlay_retry"),
+  /** A new draft of `base` (the edited text, or `null` for the text shown) with the refinement. */
+  refine: (kind: Refinement, base: string | null) => call<void>("overlay_refine", { kind, base }),
+  /** Ask for this content height (logical px); returns the height applied (clamped, fitted to the screen). */
+  resize: (height: number) => call<number>("overlay_resize", { height }),
+  /** Insert a draft from the history instead of the one shown. */
+  insertPrevious: (id: number) => call<void>("overlay_insert_previous", { id }),
+};
+
+export const draftHistoryApi = {
+  /** Newest first, at most 20. */
+  list: () => call<DraftHistoryEntry[]>("doubletap_history"),
+  clear: () => call<void>("doubletap_history_clear"),
+  remove: (id: number) => call<void>("doubletap_history_remove", { id }),
+  onChange: (h: (entries: DraftHistoryEntry[]) => void) => on<DraftHistoryEntry[]>(DOUBLETAP_HISTORY_EVENT, h),
+};
+
+export const practiceApi = {
+  /** Main window only: the practice field gained focus or changed (`null` when it loses focus). */
+  set: (field: PracticeField | null) => call<void>("doubletap_practice", { field }),
+  onAction: (h: (action: PracticeAction) => void) => on<PracticeAction>(DOUBLETAP_PRACTICE_EVENT, h),
 };
 
 // ---- W6 plugins ----

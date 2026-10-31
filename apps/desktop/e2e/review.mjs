@@ -170,12 +170,42 @@ const OVERLAY_VIEWS = {
     locality: "on_device",
     citations: 2,
     excluded_sensitive: 1,
+    can_retry: true,
+  },
+  // II3: a refinement on its way, the draft edited before inserting, a practice session, and the
+  // previous drafts list (`_keys` are pressed and `_type` typed after the page settles; `_history`
+// is the list).
+  refining: { phase: "reading", text: "", refinement: "shorter", can_retry: true },
+  edited: {
+    phase: "done",
+    text: "Thanks Ines, the contract is with Vellum & Thistle LLP for review.",
+    provider: "local-chat",
+    locality: "on_device",
+    can_retry: true,
+    _keys: ["Tab", "End"],
+    _type: " See you Friday.",
+  },
+  practice: { phase: "done", text: "Friday morning works for me. Shall we say 10:00?", provider: "local-chat", locality: "on_device", can_retry: true, practice: true },
+  history: {
+    phase: "done",
+    text: "Thanks Ines, the contract is with Vellum & Thistle LLP for review.",
+    provider: "local-chat",
+    locality: "on_device",
+    can_retry: true,
+    _keys: ["h"],
+    _history: [
+      { id: 2, text: "Friday at 10 suits me. I'll bring the draft agenda.", app: "Mail", at: 0 },
+      { id: 1, text: "Sounds good, see you then.", app: "Slack", at: 0 },
+    ],
   },
   refused: { phase: "refused", text: "", message: "Double Tap is off in password managers." },
   error: { phase: "error", text: "", message: "The model stopped answering. Check Models, then try again." },
   inserted: { phase: "inserted", text: "", verified: true, method: "accessibility" },
 };
-const overlayView = (v) => ({ provider: null, locality: null, citations: 0, excluded_sensitive: 0, message: null, verified: null, method: null, ...v });
+const overlayView = (v) => {
+  const { _keys, _type, _history, ...view } = v;
+  return { provider: null, locality: null, citations: 0, excluded_sensitive: 0, message: null, verified: null, method: null, ...view };
+};
 
 async function main() {
   const require = createRequire(import.meta.url);
@@ -337,10 +367,17 @@ async function main() {
                 await page.route("**/invoke", async (route) => {
                   const body = JSON.parse(route.request().postData() ?? "{}");
                   if (body.cmd === "overlay_state") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: overlayView(v) }) });
+                  if (body.cmd === "doubletap_history") {
+                    const now = Date.now();
+                    const list = (v._history ?? []).map((h, i) => ({ ...h, at: now - (i + 1) * 300_000 }));
+                    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: list }) });
+                  }
                   return route.continue();
                 });
                 await page.goto(`${full.url}overlay.html`);
                 await settle(page);
+                for (const k of v._keys ?? []) await page.keyboard.press(k);
+                if (v._type) await page.keyboard.type(v._type);
                 await sleep(300);
                 await snap(page, dir, `overlay-${phase}`, { full: false });
                 await page.close();

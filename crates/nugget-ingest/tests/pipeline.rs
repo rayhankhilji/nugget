@@ -263,6 +263,13 @@ async fn sensitive_items_never_reach_cloud_providers() {
     );
     let local_seen = local.embedded().join("\n");
     assert!(local_seen.contains("4111"), "sensitive items embed locally");
+    // GG8-6: the cloud requests name the (only) item they carried, for the egress ledger.
+    let cloud_items = cloud.embed_items.lock().unwrap().clone();
+    assert!(!cloud_items.is_empty());
+    assert!(
+        cloud_items.iter().all(|i| i.key.as_str() == "clean"),
+        "{cloud_items:?}"
+    );
 
     for (key, field) in [
         ("card", "card"),

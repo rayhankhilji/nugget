@@ -1,0 +1,211 @@
+{
+ "scenario": "s51_logs_audit_info",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com",
+  "dav.example.test"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.194",
+   "dst": "203.0.113.202",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 34
+  },
+  {
+   "src": "203.0.113.194",
+   "dst": "203.0.113.202",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 8
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 2,
+   "bytes_in": 5026,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  },
+  "dav.example.test": {
+   "requests": 3,
+   "bytes_in": 1098,
+   "paths": [
+    "PROPFIND /cal/"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "dav.example.test": {
+   "rows": 3,
+   "bytes_sent": 1614,
+   "features": [
+    "sync:caldav"
+   ]
+  },
+  "api.anthropic.com": {
+   "rows": 2,
+   "bytes_sent": 5026,
+   "features": [
+    "ask",
+    "draft"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-logs",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-DRAFT-field",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-DRAFT-instruction",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-DRAFT-subject",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-DRAFT-thread",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-QUERY-ask",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "store.noncontent_tables_clean",
+   "ok": false,
+   "detail": {
+    "audit": [
+     "GG8CANARY-QUERY-mcp"
+    ]
+   },
+   "severity": null,
+   "t": 1793389905.6338212
+  },
+  {
+   "id": "logs.no[GG8CANARY-DRAFT]",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389905.6340451
+  },
+  {
+   "id": "logs.no[GG8CANARY-QUERY]",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389905.6340687
+  },
+  {
+   "id": "logs.no[GG8CANARY-PASSWORD]",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389905.634082
+  },
+  {
+   "id": "logs.no[GG8CANARY-APIKEY]",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389905.6340945
+  },
+  {
+   "id": "logs.no[GG8CANARY-NORMAL]",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389905.634123
+  },
+  {
+   "id": "logs.no[GG8CANARY-SENS]",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389905.6341496
+  },
+  {
+   "id": "logs.no[ngt_UOBQPH_4qyWdW8qR]",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389905.6341662
+  },
+  {
+   "id": "files.private_modes",
+   "ok": false,
+   "detail": [
+    "0o755 Documents",
+    "0o755 config",
+    "0o755 data/policy",
+    "0o755 data/vault",
+    "0o755 data/models",
+    "0o755 data/plugins",
+    "0o644 data/policy/actions.jsonl",
+    "0o644 data/logs/nuggetd.2026-10-30.log",
+    "0o644 data/models/manifest-trust.json",
+    "0o755 data/plugins/blobs",
+    "0o755 data/plugins/state",
+    "0o755 data/plugins/blobs/sha256"
+   ],
+   "severity": null,
+   "t": 1793389905.6345348
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793389893.7246816,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793389894.2292583,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793389895.3331838,
+   "note": "draft: {'citations': [{'chunk_id': 7, 'date': '2026-10-30', 'item': {'key': '0:weekly-notes.md', 'source': 'files-1'}, 'n': 1, 'sensitive': False, 'title': 'weekly-notes', 'url': 'file:///tmp/gg8/s51_logs_audit_info/Documents/weekly-notes.md'}, {'chunk_id': 3, 'date': '2026-10-30', 'item': {'key': '0:acme-renewal.md', 'source': 'files-1'}, 'n': 2, 'sensitive': False, 'title': 'acme-renewal', 'url': 'file:///tmp/gg8/s51_logs_audit_info/Documents/acme-renewal.md'}, {'chunk_id': 6, 'date': '2026-10-30', 'item': {'key': '0:lisbon-trip.md', 'source': 'files-1'}, 'n': 3, 'sensitive': False, 'title': 'lisbon-trip', 'url': 'file:///tmp/gg8/s51_logs_audit_info/Documents/lisbon-trip.md'}], 'excluded_sensitive': 4, 'field_kind': 'email_body', 'locality': 'cloud', 'provider': 'anthropic', 'stream_id': 'cd5f2c7c-9e57-4535-85a3-4d3c438cf2d2'} GG8-MOCK-REPLY: noted. {'stream_id': 'cd5f2c7c-9e57-4535-85a3-4d3c438cf2d2', 'error': None, 'input_tokens': 100, 'output_tokens': 3}"
+  },
+  {
+   "t": 1793389905.3873296,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793389905.6338058,
+   "note": "store hits: {\"audit\": [\"GG8CANARY-QUERY-mcp\"], \"chunks\": [\"GG8CANARY-DRAFT-final\", \"GG8CANARY-NORMAL-1\", \"GG8CANARY-NORMAL-2\", \"GG8CANARY-NORMAL-3\", \"GG8CANARY-SENS-1\", \"GG8CANARY-SENS-2\", \"GG8CANARY-SENS-3\", \"GG8CANARY-SENS-4\"], \"items\": [\"GG8CANARY-DRAFT-final\"]}"
+  }
+ ]
+}

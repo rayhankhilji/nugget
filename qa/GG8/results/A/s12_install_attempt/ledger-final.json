@@ -1,0 +1,18 @@
+[
+ {
+  "at": "2026-10-30T19:50:27.534911503Z",
+  "bytes_received": 0,
+  "bytes_sent": 271,
+  "feature": "model_download",
+  "host": "huggingface.co",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:50:27.138073837Z",
+  "bytes_received": 0,
+  "bytes_sent": 271,
+  "feature": "model_download",
+  "host": "huggingface.co",
+  "items": []
+ }
+]

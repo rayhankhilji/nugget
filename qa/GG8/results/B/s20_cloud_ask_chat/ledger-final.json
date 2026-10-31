@@ -1,0 +1,44 @@
+[
+ {
+  "at": "2026-10-30T20:02:07.9755897Z",
+  "bytes_received": 1053,
+  "bytes_sent": 195,
+  "feature": "chat",
+  "host": "api.anthropic.com",
+  "items": [
+   {
+    "key": "0:acme-renewal.md",
+    "source": "files-1"
+   }
+  ]
+ },
+ {
+  "at": "2026-10-30T20:02:06.420398066Z",
+  "bytes_received": 1053,
+  "bytes_sent": 344,
+  "feature": "ask",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T20:02:04.869447843Z",
+  "bytes_received": 1053,
+  "bytes_sent": 1415,
+  "feature": "ask",
+  "host": "api.anthropic.com",
+  "items": [
+   {
+    "key": "0:acme-renewal.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:lisbon-trip.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:weekly-notes.md",
+    "source": "files-1"
+   }
+  ]
+ }
+]

@@ -546,6 +546,7 @@ async fn prepare(
                 &inner.store,
                 router,
                 &providers,
+                item,
                 &chunk_texts,
                 inner.cfg.embed_batch,
                 inner.cfg.embed_timeout(),

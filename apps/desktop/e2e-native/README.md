@@ -23,10 +23,14 @@
 7. checks that **it streams the fake provider's draft**: several growing `streaming` views, then
    `done` with the provider `fake` and the streamed text, and screenshots it (`overlay.png`
    cropped to the window, `overlay-screen.png`, `overlay-streaming.png` mid-stream);
-8. **accepts with Enter**, the overlay's own key. If the window system did not give the overlay
+8. checks that **the overlay fitted itself to the draft** (it asked the shell for its content
+   height: probe `resize`), then **retries with R**, the overlay's Retry key: the view goes back
+   to `reading`, the fake provider gets a new streaming request and a second draft reaches `done`
+   (`overlay-retried.png`);
+9. **accepts with Enter**, the overlay's own key. If the window system did not give the overlay
    the keyboard, it clicks the overlay's text first (no button there) and the summary says
    `overlay focused: false`;
-9. checks that **the draft is inserted into the target**: the overlay reaches `inserted`, and the
+10. checks that **the draft is inserted into the target**: the overlay reaches `inserted`, and the
    text is read back from the target app itself (the fixture's own report of its buffer on
    Linux, UI Automation on Notepad, Accessibility on TextEdit), with the field's original text
    kept; then the overlay hides.

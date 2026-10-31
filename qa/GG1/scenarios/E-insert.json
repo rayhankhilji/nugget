@@ -1,0 +1,1331 @@
+{
+ "scenarios": [
+  {
+   "id": "ins-join-comma-nospace",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Half-typed chat reply ending in a comma with no trailing space; the draft must be joined with a space.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "Sounds good,",
+      "selection": [
+       12,
+       12
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "Hey Mara, can you send me the deck before the review?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "I'll send the deck by Friday.",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "no_repeat_prefix": true,
+    "inserted_forbidden_regex": [
+     ",\\S"
+    ],
+    "inserted_required_regex": [
+     "^Sounds good, \\S"
+    ]
+   }
+  },
+  {
+   "id": "ins-join-comma-space",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Same as ins-join-comma-nospace but the user left a trailing space: no double space.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "Sounds good, ",
+      "selection": [
+       13,
+       13
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "Hey Mara, can you send me the deck before the review?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "I'll send the deck by Friday.",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "no_repeat_prefix": true,
+    "inserted_forbidden_regex": [
+     "  "
+    ],
+    "inserted_required_regex": [
+     "^Sounds good, I'll"
+    ]
+   }
+  },
+  {
+   "id": "ins-join-model-leading-space",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Trailing space typed and the model starts its continuation with a space (common for continuations): no double space.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "Sounds good, ",
+      "selection": [
+       13,
+       13
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "Hey Mara, can you send me the deck before the review?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": " i'll send the deck by friday",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "  "
+    ]
+   }
+  },
+  {
+   "id": "ins-join-half-sentence-word",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Half a sentence without trailing space; the model continues it. Expect 'I can do Thursday', not 'I can doThursday'.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "I can do",
+      "selection": [
+       8,
+       8
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "Which day works for the review, Thursday or Friday?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "Thursday at 3pm if that works for you.",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "doThursday",
+     "do[A-Za-z]"
+    ],
+    "inserted_required_regex": [
+     "^I can do Thursday"
+    ]
+   }
+  },
+  {
+   "id": "ins-join-midword",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Caret right after a partial word ('Thurs'); the model restarts the word. Expect no 'ThursThursday'.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "I can do Thurs",
+      "selection": [
+       14,
+       14
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "Which day works for the review, Thursday or Friday?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "Thursday at 3pm works for me.",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "ThursThursday",
+     "Thurs ?Thursday"
+    ]
+   }
+  },
+  {
+   "id": "ins-repeat-half-sentence",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "The model repeats the half sentence the user typed (a frequent small-model failure). The engine has no overlap removal: expect no duplicated words.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: dates"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,\n\nThanks for the update. I think we should",
+      "selection": [
+       49,
+       49
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, the vendor pushed the review again. What do you suggest?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: dates"
+    }
+   },
+   "fake_reply": "I think we should move the review to Monday and keep the scope as is.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "no_repeat_prefix": true,
+    "inserted_forbidden_regex": [
+     "we should\\s*I think we should",
+     "should\\s*should"
+    ]
+   }
+  },
+  {
+   "id": "ins-capital-after-half-sentence",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Lower-case continuation expected after 'and'; the model starts a new capitalised sentence. Expect a space and lower case (or at least a space).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "Thanks Ana, the plan looks good and",
+      "selection": [
+       35,
+       35
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz",
+       "text": "Here's the plan for next week, let me know what you think.",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "Happy to start on Monday.",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "andHappy",
+     "and Happy"
+    ]
+   }
+  },
+  {
+   "id": "ins-greeting-typed",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Greeting already typed (with blank line); the model writes its own greeting. Expect it dropped, no 'Hi Ana,' twice.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: order"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,\n\n",
+      "selection": [
+       9,
+       9
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, what was the total on the order and when is delivery?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: order"
+    }
+   },
+   "fake_reply": "Hi Ana,\n\nThe total is $8,750 and delivery is on November 21.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "total",
+      "any_of": [
+       "8,750"
+      ]
+     }
+    ],
+    "inserted_forbidden_regex": [
+     "Hi Ana,[\\s\\S]*Hi Ana,"
+    ],
+    "inserted_required_regex": [
+     "^Hi Ana,\\n\\nThe total"
+    ]
+   }
+  },
+  {
+   "id": "ins-greeting-typed-no-newline",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Greeting typed with no newline after it; the model writes its own greeting and a blank line. Expect the body on a new paragraph, not 'Hi Ana,The total'.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: order"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,",
+      "selection": [
+       7,
+       7
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, what was the total on the order and when is delivery?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: order"
+    }
+   },
+   "fake_reply": "Hi Ana,\n\nThe total is $8,750 and delivery is on November 21.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "Hi Ana,\\S",
+     "Hi Ana,[\\s\\S]*Hi Ana,"
+    ]
+   }
+  },
+  {
+   "id": "ins-greeting-typed-chat",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Chat greeting typed on the same line; the model repeats it inline. Expect no 'hey sam! hey sam!'.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "hey sam! ",
+      "selection": [
+       9,
+       9
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "can you cover the friday standup?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "hey sam! yes, i can cover friday.",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "hey sam!\\s*hey sam"
+    ]
+   }
+  },
+  {
+   "id": "ins-caret-middle-between-greeting-signoff",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Caret on the empty line between a typed greeting and a typed sign-off; the model writes a full email. Expect only the body inserted.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: kickoff"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,\n\n\n\nBest,\nMara",
+      "selection": [
+       9,
+       9
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, does Thursday still work for the kickoff?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: kickoff"
+    }
+   },
+   "fake_reply": "Hi Ana,\n\nYes, Thursday at 3pm still works for me.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "no_signoff_name": "Mara",
+    "inserted_forbidden_regex": [
+     "Hi Ana,[\\s\\S]*Hi Ana,",
+     "Best,[\\s\\S]*Best,"
+    ],
+    "inserted_required_regex": [
+     "^Hi Ana,\\n\\nYes, Thursday at 3pm still works for me\\.\\n\\nBest,\\nMara$"
+    ]
+   }
+  },
+  {
+   "id": "ins-selection-replace-sentence",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "The user selected one sentence of their reply to replace it. Expect only that sentence replaced.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: kickoff"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,\n\nI can't make Thursday, sorry.\n\nBest,\nMara",
+      "selection": [
+       9,
+       38
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, does Thursday still work for the kickoff?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: kickoff"
+    }
+   },
+   "fake_reply": "Thursday works after all, see you at 3pm.",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "inserted_required_regex": [
+     "^Hi Ana,\\n\\nThursday works after all, see you at 3pm\\.\\n\\nBest,\\nMara$"
+    ]
+   }
+  },
+  {
+   "id": "ins-selection-replace-reversed",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "As ins-selection-replace-sentence with the selection given focus-before-anchor (reversed offsets).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: kickoff"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,\n\nI can't make Thursday, sorry.\n\nBest,\nMara",
+      "selection": [
+       38,
+       9
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, does Thursday still work for the kickoff?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: kickoff"
+    }
+   },
+   "fake_reply": "Hi Ana,\n\nThursday works after all, see you at 3pm.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "inserted_required_regex": [
+     "^Hi Ana,\\n\\nThursday works after all, see you at 3pm\\.\\n\\nBest,\\nMara$"
+    ]
+   }
+  },
+  {
+   "id": "ins-selection-one-word",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "One word selected mid-sentence in chat; the model adds a full stop. Expect 'can we meet Friday at 3?', not 'Friday. at 3?'.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "can we meet Thursday at 3?",
+      "selection": [
+       12,
+       20
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "thursday is bad for me, sorry",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "Friday.",
+   "expect": {
+    "kind": "chat_message",
+    "inserted_forbidden_regex": [
+     "Friday\\. at"
+    ],
+    "inserted_required_regex": [
+     "^can we meet Friday at 3\\?$"
+    ]
+   }
+  },
+  {
+   "id": "ins-single-line-field",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Single-line chat input (role text_field) and a multi-paragraph model reply. Expect one line, no newline (would send the message).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "org.example.webchat",
+      "name": "Support Chat",
+      "url": "https://support.example.net/chat"
+     },
+     "field": {
+      "role": "text_field",
+      "placeholder": "Type a message",
+      "value": "",
+      "selection": [
+       0,
+       0
+      ]
+     },
+     "thread": [
+      {
+       "author": "Agent Lee",
+       "text": "Hi! Could you tell me your order total so I can look it up?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "Thanks!\n\nThe total was $8,750.\nIt was signed on October 12.",
+   "expect": {
+    "single_line": true,
+    "inserted_forbidden_regex": [
+     "\\n",
+     "  ",
+     "!The"
+    ]
+   }
+  },
+  {
+   "id": "ins-emoji-offsets",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Emoji before the caret (selection in characters). Expect the draft after the emoji text, nothing cut or doubled.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "🎉 congrats! ",
+      "selection": [
+       12,
+       12
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "we shipped the beta!! 🚀",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "So proud of the team 🙌",
+   "expect": {
+    "kind": "chat_message",
+    "inserted_required_regex": [
+     "^🎉 congrats! So proud of the team 🙌$"
+    ]
+   }
+  },
+  {
+   "id": "ins-emoji-modifier-offsets",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Emoji with a skin-tone modifier (two chars, four UTF-16 units) before the caret.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "👍🏽 ok, ",
+      "selection": [
+       7,
+       7
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "can you take the 4pm call?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "i'll take it",
+   "expect": {
+    "kind": "chat_message",
+    "inserted_required_regex": [
+     "^👍🏽 ok, i'll take it$"
+    ]
+   }
+  },
+  {
+   "id": "ins-cjk-no-space",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Japanese half-typed reply; CJK must be joined without a space.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "了解です。",
+      "selection": [
+       5,
+       5
+      ]
+     },
+     "thread": [
+      {
+       "author": "Kenji Mori",
+       "text": "資料は明日までに送ってもらえますか？",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "明日までに送ります。",
+   "expect": {
+    "kind": "chat_message",
+    "language": "ja",
+    "inserted_required_regex": [
+     "^了解です。明日までに送ります。$"
+    ]
+   }
+  },
+  {
+   "id": "ins-rtl-join",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Arabic half-typed reply ending with an Arabic comma and no space.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "شكرا،",
+      "selection": [
+       5,
+       5
+      ]
+     },
+     "thread": [
+      {
+       "author": "Layla Haddad",
+       "text": "هل يمكنك إرسال الملف قبل الاجتماع؟",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "سأرسل الملف غدا.",
+   "expect": {
+    "kind": "chat_message",
+    "language": "ar",
+    "inserted_required_regex": [
+     "^شكرا، سأرسل"
+    ]
+   }
+  },
+  {
+   "id": "ins-caret-above-quote",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Reply above a quoted message whose sign-off ('Best,') is in the quote. The draft's own sign-off must be kept.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: order total"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "\n\nOn Mon, 26 Oct 2026, Ana Ruiz <ana.ruiz@client.example.com> wrote:\n> Can you confirm the order total?\n>\n> Best,\n> Ana",
+      "selection": [
+       0,
+       0
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Can you confirm the order total?\n\nBest,\nAna",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: order total"
+    }
+   },
+   "fake_reply": "Hi Ana,\n\nThe order total is $8,750.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "total",
+      "any_of": [
+       "8,750"
+      ]
+     }
+    ],
+    "inserted_required_regex": [
+     "Best,\\nMara\\n\\nOn Mon"
+    ]
+   }
+  },
+  {
+   "id": "ins-signoff-already-below",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Sign-off already typed below the caret (caret at 0). Expect no second sign-off.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: delivery"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "\n\nBest,\nMara",
+      "selection": [
+       0,
+       0
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, can you confirm delivery is still November 21?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: delivery"
+    }
+   },
+   "fake_reply": "Hi Ana,\n\nYes, delivery is still on November 21.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "Best,[\\s\\S]*Best,"
+    ]
+   }
+  },
+  {
+   "id": "ins-no-selection-known",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "The field reports no selection (some apps): the harness and the Linux backend append at the end, macOS inserts at the real caret. Prompt marks the caret at the end.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: delivery"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,\n\nBest,\nMara",
+      "selection": null
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, can you confirm delivery is still November 21?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: delivery"
+    }
+   },
+   "fake_reply": "Yes, delivery is still on November 21.",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "Mara\\S"
+    ]
+   }
+  },
+  {
+   "id": "ins-preamble-and-quotes",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Model wraps the reply in a preamble and quotes; only the reply is inserted.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "",
+      "selection": [
+       0,
+       0
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "Hey Mara, can you send me the deck before the review?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "Sure, here's a reply you could send:\n\n\"yep, deck is coming friday\"",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "inserted_required_regex": [
+     "^yep, deck is coming friday$"
+    ]
+   }
+  },
+  {
+   "id": "ins-trailing-newline-chat",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Model ends with newlines in a chat composer (Return would send). Expect no trailing newline inserted.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "",
+      "selection": [
+       0,
+       0
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "Hey Mara, can you send me the deck before the review?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "yep, deck is coming friday\n\n",
+   "expect": {
+    "kind": "chat_message",
+    "inserted_forbidden_regex": [
+     "\\n$"
+    ]
+   }
+  },
+  {
+   "id": "ins-email-join-comma",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Email body with half a sentence ending in a comma (no space) after a greeting.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: review"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,\n\nThanks for the update,",
+      "selection": [
+       31,
+       31
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, the vendor pushed the review again to next week.",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: review"
+    }
+   },
+   "fake_reply": "I'll move our prep meeting to Monday.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     ",I'll"
+    ]
+   }
+  },
+  {
+   "id": "ins-email-after-newline",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Half-typed email ending with a newline: draft must not start with a stray space.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: review"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Hi Ana,\n\nThanks for the update.\n",
+      "selection": [
+       32,
+       32
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Hi Mara, the vendor pushed the review again to next week.",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: review"
+    }
+   },
+   "fake_reply": " I'll move our prep meeting to Monday.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "inserted_forbidden_regex": [
+     "\\n "
+    ]
+   }
+  },
+  {
+   "id": "ins-ra-secure",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Password field: refused at trigger; with --read-ahead on the read-ahead must skip as refused and send nothing.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.Safari",
+      "name": "Safari",
+      "url": "https://login.example.com"
+     },
+     "field": {
+      "role": "text_field",
+      "label": "Password",
+      "secure": true
+     }
+    }
+   },
+   "fake_reply": "ok",
+   "expect": {
+    "refuse": "secure",
+    "read_ahead": "refused"
+   }
+  },
+  {
+   "id": "ins-ra-search",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Search box: refused; read-ahead must skip as refused.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack"
+     },
+     "field": {
+      "role": "search_field",
+      "placeholder": "Search Fernway"
+     }
+    }
+   },
+   "fake_reply": "ok",
+   "expect": {
+    "refuse": "search",
+    "read_ahead": "refused"
+   }
+  },
+  {
+   "id": "ins-ra-terminal",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Terminal: refused by default; read-ahead must skip as refused.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.Terminal",
+      "name": "Terminal"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "shell"
+     }
+    }
+   },
+   "fake_reply": "ok",
+   "expect": {
+    "refuse": "terminal",
+    "read_ahead": "refused"
+   }
+  },
+  {
+   "id": "ins-ra-excluded",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "App in excluded_apps: refused; read-ahead must skip as refused.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Slack | Sam Okafor | Fernway"
+     },
+     "field": {
+      "role": "text_area",
+      "placeholder": "Message Sam Okafor",
+      "value": "",
+      "selection": [
+       0,
+       0
+      ]
+     },
+     "thread": [
+      {
+       "author": "Sam Okafor",
+       "text": "Hey Mara, can you send me the deck before the review?",
+       "from_me": false
+      }
+     ]
+    }
+   },
+   "fake_reply": "ok",
+   "expect": {
+    "refuse": "disabled in Slack",
+    "read_ahead": "refused"
+   },
+   "config": {
+    "excluded_apps": [
+     "com.tinyspeck.slackmacgap"
+    ]
+   }
+  },
+  {
+   "id": "ins-ra-long-thread",
+   "persona": "ins-mara",
+   "area": "insertion",
+   "description": "Long email thread; read-ahead should complete and the trigger reuse it (cached prompt share with real models).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: order schedule"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "",
+      "selection": [
+       0,
+       0
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Message 0: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": false
+      },
+      {
+       "author": "Mara Quill <mara.quill@fernway.example.org>",
+       "text": "Message 1: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": true
+      },
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Message 2: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": false
+      },
+      {
+       "author": "Mara Quill <mara.quill@fernway.example.org>",
+       "text": "Message 3: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": true
+      },
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Message 4: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": false
+      },
+      {
+       "author": "Mara Quill <mara.quill@fernway.example.org>",
+       "text": "Message 5: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": true
+      },
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Message 6: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": false
+      },
+      {
+       "author": "Mara Quill <mara.quill@fernway.example.org>",
+       "text": "Message 7: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": true
+      },
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Message 8: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": false
+      },
+      {
+       "author": "Mara Quill <mara.quill@fernway.example.org>",
+       "text": "Message 9: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": true
+      },
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Message 10: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": false
+      },
+      {
+       "author": "Mara Quill <mara.quill@fernway.example.org>",
+       "text": "Message 11: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": true
+      },
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Message 12: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": false
+      },
+      {
+       "author": "Mara Quill <mara.quill@fernway.example.org>",
+       "text": "Message 13: We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. We went over the schedule for the order again and the delivery window still looks fine. ",
+       "from_me": true
+      },
+      {
+       "author": "Ana Ruiz <ana.ruiz@client.example.com>",
+       "text": "Final question: what is the order total again, and is November 21 still the delivery date?",
+       "from_me": false
+      }
+     ],
+     "recipients": [
+      "ana.ruiz@client.example.com"
+     ],
+     "subject": "Re: order schedule"
+    }
+   },
+   "fake_reply": "Hi Ana,\n\nThe total is $8,750 and November 21 is still the delivery date.\n\nBest,\nMara",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "total",
+      "any_of": [
+       "8,750"
+      ]
+     }
+    ],
+    "read_ahead": "done"
+   }
+  }
+ ]
+}

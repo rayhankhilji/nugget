@@ -1,0 +1,8 @@
+Slack DM export: Sam Ortega <-> Dana Whitlock
+
+[2026-10-10 11:02] Sam Ortega: quick q, did Bob sign off on dropping the contractor data-quality work?
+[2026-10-10 11:05] Dana Whitlock: yes, Bob Lindqvist agreed, we drop it and his team covers the checks
+[2026-10-10 11:06] Sam Ortega: great. then I'll book the $60k contractor line as final
+[2026-10-10 11:07] Sam Ortega: also heads up the travel budget for offsites is frozen till January
+[2026-10-24 15:40] Sam Ortega: congrats on Corvid!! who do I talk to about Atlas spend after you leave?
+[2026-10-24 15:42] Dana Whitlock: Theo Marchetti from the 17th onwards, I'll loop you in

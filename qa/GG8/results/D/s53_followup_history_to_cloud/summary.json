@@ -1,0 +1,91 @@
+{
+ "scenario": "s53_followup_history_to_cloud",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.194",
+   "dst": "203.0.113.202",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 2
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 1,
+   "bytes_in": 462,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 1,
+   "bytes_sent": 462,
+   "features": [
+    "ask"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-followup",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-SENS-1",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "followup.answered",
+   "ok": true,
+   "detail": "anthropic excluded=2",
+   "severity": null,
+   "t": 1793439158.9673622
+  },
+  {
+   "id": "followup.history_to_cloud_has_no_sensitive",
+   "ok": false,
+   "detail": [
+    "4111 1111 1111 1111",
+    "GG8CANARY-SENS-1"
+   ],
+   "severity": null,
+   "t": 1793439158.9675462
+  },
+  {
+   "id": "followup.ledger_lists_source_item",
+   "ok": false,
+   "detail": [
+    []
+   ],
+   "severity": null,
+   "t": 1793439158.9696114
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793439153.2535326,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793439157.8334997,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793439158.9707582,
+   "label": "daemon.stop"
+  }
+ ]
+}

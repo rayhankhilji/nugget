@@ -1,0 +1,35 @@
+# GG1 QA harness: drives Double Tap's real drafting engine (`nugget_draft::Drafter`) over the
+# GG1 scenarios in `qa/GG1/scenarios/` and the synthetic world in `qa/GG1/world/`, against real
+# local models (installed and served by nugget-runtime, as `nugget-bench --local-models`) or a
+# scripted in-process provider. Its own workspace, so it never touches the product workspace.
+[package]
+name = "gg1-harness"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[[bin]]
+name = "gg1"
+path = "src/main.rs"
+
+[dependencies]
+nugget-bench = { path = "../../../bench", default-features = false }
+nugget-core = { path = "../../../crates/nugget-core" }
+nugget-draft = { path = "../../../crates/nugget-draft" }
+nugget-infer = { path = "../../../crates/nugget-infer" }
+nugget-retrieve = { path = "../../../crates/nugget-retrieve" }
+nugget-store = { path = "../../../crates/nugget-store" }
+nugget-voice = { path = "../../../crates/nugget-voice" }
+async-trait = "0.1"
+clap = { version = "4.5", features = ["derive"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "0.3", features = ["parsing", "formatting", "macros"] }
+tokio = { version = "1", features = ["full"] }
+
+[profile.release]
+codegen-units = 16

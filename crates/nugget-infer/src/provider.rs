@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_core::capability::Locality;
 use nugget_core::egress::EgressSink;
-use nugget_core::ids::ProviderId;
+use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
 use reqwest::header::{HeaderName, HeaderValue};
 
@@ -22,6 +22,13 @@ use crate::types::{ChatRequest, ChatStream, FEATURE_PREWARM, ProviderKind, Provi
 pub trait Provider: Send + Sync {
     fn id(&self) -> &ProviderId;
     fn meta(&self) -> ProviderMeta;
+    /// False when the provider cannot serve anything right now and fails fast without
+    /// contacting anything (a local runtime slot whose model is not installed), so that callers
+    /// resolving a provider ahead of a request (status, prewarm) skip it as the request's own
+    /// fallback would. The default is true.
+    fn available(&self) -> bool {
+        true
+    }
     /// Start a streaming chat. Transient HTTP failures are retried before the stream starts;
     /// errors after that arrive as `Err` items and end the stream.
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream>;
@@ -32,6 +39,13 @@ pub trait Provider: Send + Sync {
     /// embed queries and documents differently; the default treats queries as documents.
     /// Wrappers must forward both this and [`Provider::embed`].
     async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.embed(texts).await
+    }
+    /// [`Provider::embed`] with the item each text comes from (`items[i]` for `texts[i]`; empty
+    /// when unknown), so the egress ledger lists the items whose content left the device. The
+    /// default ignores `items`; adapters that call a server record them. Wrappers forward it.
+    async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+        let _ = items;
         self.embed(texts).await
     }
     /// The model's task prefixes as `(query, document)` (see [`crate::embed_prefixes`]); empty

@@ -1,0 +1,11 @@
+suite: memory full
+runner: GitHub Actions 1000010855 (Linux X64)
+commit: 71dc0bb35e3324ac2a9bf364aca02276334df69c
+date: 2026-10-30T14:23:30Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 7763 64-Core Processor
+Thread(s) per core:                      2
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext 
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          11           0           3          14
+Swap:              2           0           2

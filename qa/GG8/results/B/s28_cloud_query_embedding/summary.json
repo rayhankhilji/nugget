@@ -1,0 +1,113 @@
+{
+ "scenario": "s28_cloud_query_embedding",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.cloudllm.test"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 54
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 14
+  }
+ ],
+ "observed_hosts": {
+  "api.cloudllm.test": {
+   "requests": 6,
+   "bytes_in": 2538,
+   "paths": [
+    "POST /v1/chat/completions",
+    "POST /v1/embeddings"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.cloudllm.test": {
+   "rows": 6,
+   "bytes_sent": 2538,
+   "features": [
+    "embed",
+    "probe"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.cloudllm.test/v1/chat/completions",
+   "canary": "GG8CANARY-APIKEY-cloudllm",
+   "count": 5
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-APIKEY-cloudllm",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "search.embeds_sent",
+   "ok": false,
+   "detail": "0 embedding requests",
+   "severity": null,
+   "t": 1793390032.0576339
+  },
+  {
+   "id": "search.embed.no_sensitive_content",
+   "ok": true,
+   "detail": "0 requests; leaked: []",
+   "severity": null,
+   "t": 1793390032.0576859
+  },
+  {
+   "id": "search.embed.ledger_rows",
+   "ok": true,
+   "detail": "0 requests, 0 rows (features []); unmatched []",
+   "severity": null,
+   "t": 1793390033.5614164
+  },
+  {
+   "id": "search.embed.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390033.5614398
+  },
+  {
+   "id": "context.embed.no_sensitive_content",
+   "ok": true,
+   "detail": "0 requests; leaked: []",
+   "severity": null,
+   "t": 1793390035.5663714
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793390013.3704584,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390013.874103,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390032.057624,
+   "note": "search hits: ['iban', 'acme-renewal', 'acme-payment', 'acme-deploy-key', 'lisbon-trip', 'weekly-notes', 'hr-ssn']"
+  },
+  {
+   "t": 1793390035.569842,
+   "label": "daemon.stop"
+  }
+ ]
+}

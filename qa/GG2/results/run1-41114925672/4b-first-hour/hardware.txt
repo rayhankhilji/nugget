@@ -1,0 +1,10 @@
+label: 4b-first-hour  model: qwen3-4b-q4km
+runner: GitHub Actions 1000011283 (Linux X64)
+commit: 2b8522840b38f270d589fff6f94bbf880f01865d
+date: 2026-10-30T19:35:55Z
+CPU(s):                                  4
+Model name:                              INTEL(R) XEON(R) PLATINUM 8573C
+CPU(s) scaling MHz:                      96%
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          10           0           4          14
+Swap:              2           0           2

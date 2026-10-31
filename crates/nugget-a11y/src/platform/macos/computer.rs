@@ -825,12 +825,48 @@ pub(super) fn open_app(name: &str) -> Result<()> {
         if app.running.isHidden() {
             app.running.unhide();
         }
+        // `activateWithOptions` can return true and still be refused (macOS 14+, from a
+        // background process, or for an app not launched through LaunchServices): check that
+        // the app became frontmost, as `focus()` sees it.
+        let pid = app.running.processIdentifier();
+        let frontmost = || {
+            let t0 = std::time::Instant::now();
+            loop {
+                if frontmost_pid() == Some(pid) {
+                    return true;
+                }
+                if t0.elapsed() >= ACTIVATE_WAIT {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        };
         if app
             .running
             .activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows)
+            && frontmost()
         {
             return Ok(());
         }
+        // The accessibility way, which works from a background process: `AXFrontmost` on the
+        // app, and its main window raised.
+        let ax_app = AxEl(ax::application(pid));
+        if let Some(w) = ["AXMainWindow", "AXFocusedWindow"]
+            .iter()
+            .find_map(|a| ax_app.get(a).and_then(AxEl::element))
+            .or_else(|| {
+                ax::attr_values(&ax_app.0, "AXWindows", 1)
+                    .into_iter()
+                    .find_map(AxEl::element)
+            })
+        {
+            let _ = perform_named(&w, "AXRaise");
+            let _ = set_bool(&w, "AXMain", true);
+        }
+        if set_bool(&ax_app, "AXFrontmost", true).is_ok() && frontmost() {
+            return Ok(());
+        }
+        tracing::debug!(pid, "activation refused; asking LaunchServices");
         // macOS 14+ may refuse activation from a background process; LaunchServices does not.
         if let Some(id) = &app.entry.id {
             return run_open("-b", id);

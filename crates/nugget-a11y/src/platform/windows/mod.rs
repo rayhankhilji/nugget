@@ -4,10 +4,15 @@
 //! - Frontmost: `GetForegroundWindow`; the focused element (`GetFocusedElement`) must belong to
 //!   that window's process.
 //! - Secure fields: `IsPassword`; their value is never requested.
-//! - Value and selection: `ValuePattern` and `TextPattern` (selection offsets are measured as
-//!   the text length from the document start to each endpoint).
-//! - Insertion: `ValuePattern.SetValue` with the selection replaced, for plain edit controls
-//!   whose whole value was read; rich documents and web content use the clipboard fallback.
+//! - Value and selection: `TextPattern.DocumentRange` text when the element has a text pattern
+//!   (rich edits, Notepad's document, browsers), else `ValuePattern`; selection offsets are the
+//!   text length from the document start to each endpoint. Line endings (`\r\n`, RichEdit's
+//!   `\r`) are normalised to `\n` in the value and the offsets alike.
+//! - Insertion: `ValuePattern.SetValue` with the selection replaced, for single-line plain edit
+//!   controls whose whole value was read. Multi-line edits (Notepad), rich documents and web
+//!   content use the clipboard fallback: one paste is one undo step and keeps the caret.
+//! - Focus: right after a window comes to the foreground, a browser can report its document or
+//!   pane before the web tree is built; the focus is read once more after a short wait.
 //! - Bounds are converted from physical pixels to logical points with the window's DPI.
 //! - Computer use (M4) is in `computer`: windows, pattern-based actions, key input, launch.
 
@@ -18,8 +23,12 @@ mod uia;
 use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use crate::computer::{AppEntry, KeyInput, UiAction, UiActionKind};
 use crate::engine::{FieldRead, Platform, PlatformWindow, Target};
+use crate::platform::{hints, text_map};
 use crate::role::{Role, role_from_uia, uia as ct};
 use crate::sanitize;
 use crate::tree::{Element, Node, States};
@@ -47,6 +56,33 @@ fn scale_rect(r: Rect, scale: f64) -> Rect {
     }
 }
 
+/// How long after a window comes to the foreground a placeholder focus is read again.
+const FRESH_FOREGROUND: Duration = Duration::from_secs(3);
+/// The wait before reading the focus again.
+const FOCUS_RETRY_WAIT: Duration = Duration::from_millis(200);
+
+/// The last foreground window seen: its handle, when it was first seen, and whether its one
+/// focus retry was used.
+static LAST_FOREGROUND: Mutex<Option<(isize, Instant, bool)>> = Mutex::new(None);
+
+/// Track the foreground window (every call), and decide whether a placeholder focus is read
+/// again: once per window, within [`FRESH_FOREGROUND`] of it coming to the foreground.
+fn take_focus_retry(hwnd: isize, placeholder: bool) -> bool {
+    let mut last = LAST_FOREGROUND.lock().unwrap_or_else(|p| p.into_inner());
+    if last.is_none_or(|(h, _, _)| h != hwnd) {
+        *last = Some((hwnd, Instant::now(), false));
+    }
+    match last.as_mut() {
+        Some((_, since, retried))
+            if placeholder && !*retried && since.elapsed() < FRESH_FOREGROUND =>
+        {
+            *retried = true;
+            true
+        }
+        _ => false,
+    }
+}
+
 fn looks_like_url(s: &str) -> bool {
     let l = s.trim_start().to_ascii_lowercase();
     l.starts_with("http://") || l.starts_with("https://") || l.starts_with("file://")
@@ -67,6 +103,8 @@ impl UiaEl {
             ct::EDIT => Some(
                 info.aria_properties.contains("multiline=true")
                     || info.class_name.to_ascii_lowercase().contains("richedit")
+                    // Windowless edits (web inputs) have no style to read: a box taller than
+                    // one line is taken as multi-line, so a tall single-line input pastes.
                     || bounds.is_some_and(|b| b.height > 40.0),
             ),
             ct::DOCUMENT => Some(true),
@@ -119,8 +157,13 @@ impl UiaEl {
                     } else if !value.is_empty() {
                         node.value = Some(value);
                     }
+                    // A writable value on a group or custom control: a contenteditable
+                    // region (or a part of one) in Chromium and Firefox.
                     node.states.editable = !read_only
-                        && matches!(info.control_type, ct::EDIT | ct::COMBO_BOX | ct::DOCUMENT);
+                        && matches!(
+                            info.control_type,
+                            ct::EDIT | ct::COMBO_BOX | ct::DOCUMENT | ct::GROUP | ct::CUSTOM
+                        );
                 }
                 None => {
                     if matches!(info.control_type, ct::EDIT | ct::DOCUMENT) {
@@ -181,14 +224,40 @@ impl Platform for UiaPlatform {
 
     fn focus(&self) -> Result<Option<Target<UiaEl>>> {
         let Some(fg) = uia::foreground()? else {
+            tracing::debug!("focus: no foreground window");
             return Ok(None);
         };
-        let Some(el) = UiaEl::focused()? else {
+        let Some(mut el) = UiaEl::focused()? else {
+            tracing::debug!("focus: UI Automation reports no focused element");
             return Ok(None);
         };
-        if el.info().process_id != fg.pid {
-            // Focus is in another process than the foreground window (a tool window, or a
-            // race while windows switch): not the user's target.
+        // Chromium and Firefox build their UIA web tree when a client first asks; until then the
+        // focus is the document or a pane without a text pattern. One bounded retry.
+        let placeholder =
+            hints::uia_focus_is_placeholder(el.info().control_type, el.has_text_pattern());
+        if take_focus_retry(fg.hwnd, placeholder) {
+            std::thread::sleep(FOCUS_RETRY_WAIT);
+            if let Ok(Some(again)) = UiaEl::focused() {
+                el = again;
+            }
+        }
+        // Focus reported on a container (Firefox may report its document or window): the
+        // descendant that has keyboard focus, when there is one.
+        let info = el.info();
+        if hints::uia_focus_is_container(info.control_type, el.has_text_pattern())
+            && let Some(inner) = el.keyboard_focus_descendant()
+        {
+            el = inner;
+        }
+        // Focus must be in the foreground window: a tool window of another process, or a race
+        // while windows switch, is not the user's target. Firefox's (and Chromium's) content
+        // runs in child processes, so the process id alone does not decide.
+        if el.info().process_id != fg.pid && !el.in_foreground(fg.hwnd, fg.pid) {
+            tracing::debug!(
+                focus_pid = el.info().process_id,
+                fg_pid = fg.pid,
+                "focus: the focused element is outside the foreground window"
+            );
             return Ok(None);
         }
         Ok(Some(Target {
@@ -216,14 +285,30 @@ impl Platform for UiaPlatform {
         let state = if node.states.secure {
             FieldState::default()
         } else {
+            // The text pattern first: its text is what the selection offsets are measured in,
+            // and it is the whole document for rich edits and browsers.
+            let max_chars = i32::try_from(max_value_bytes).unwrap_or(i32::MAX);
+            // A plain Win32 edit through its own message: its UIA text can be cut short.
             let raw = el
-                .value_pattern()
-                .map(|(v, _)| v)
-                .filter(|v| !(node.role == Role::WebArea && looks_like_url(v)))
-                .or_else(|| el.document_text(max_value_bytes))
-                .unwrap_or_default();
-            let value = sanitize::clean_value(&raw, max_value_bytes);
-            let truncated = value.len() < raw.len();
+                .edit_text(max_value_bytes)
+                .or_else(|| el.document_text(max_value_bytes));
+            let (raw, capped) = match raw {
+                Some(t) => {
+                    // `GetText(max)` counts UTF-16 units.
+                    let capped = t.encode_utf16().count() >= max_chars as usize;
+                    (t, capped)
+                }
+                None => (
+                    el.value_pattern()
+                        .map(|(v, _)| v)
+                        .filter(|v| !(node.role == Role::WebArea && looks_like_url(v)))
+                        .unwrap_or_default(),
+                    false,
+                ),
+            };
+            let norm = text_map::normalize_newlines(&raw);
+            let value = sanitize::clean_value(&norm.text, max_value_bytes);
+            let truncated = capped || value.len() < norm.text.len();
             FieldState {
                 value,
                 selection: el.selection_offsets(),
@@ -243,6 +328,16 @@ impl Platform for UiaPlatform {
         if !matches!(info.control_type, ct::EDIT | ct::COMBO_BOX) || before.truncated {
             return Err(Error::Unsupported(
                 "ValuePattern insertion only for plain edit controls".into(),
+            ));
+        }
+        // SetValue replaces the whole value: in a multi-line edit (Notepad) that is not one undo
+        // step and loses the caret. A paste is both.
+        let multiline = el
+            .edit_is_multiline()
+            .unwrap_or_else(|| el.read_node().states.multiline == Some(true));
+        if multiline {
+            return Err(Error::Unsupported(
+                "multi-line edit: pasting keeps undo and the caret".into(),
             ));
         }
         let Some((_, read_only)) = el.value_pattern() else {

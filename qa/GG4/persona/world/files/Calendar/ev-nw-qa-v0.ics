@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//GG4 QA//Persona//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:nw-qa-gg4@northwind-outfitters.example
+DTSTAMP:20261026T130000Z
+SEQUENCE:0
+SUMMARY:Northwind design QA
+DTSTART;TZID=America/New_York:20261030T130000
+DTEND;TZID=America/New_York:20261030T140000
+ORGANIZER;CN=Marcus Lee:mailto:marcus@northwind-outfitters.example
+ATTENDEE;CN=Maya Okafor:mailto:maya@larkspur.example
+ATTENDEE;CN=Marcus Lee:mailto:marcus@northwind-outfitters.example
+END:VEVENT
+END:VCALENDAR

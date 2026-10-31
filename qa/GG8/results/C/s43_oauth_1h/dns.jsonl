@@ -1,0 +1,14 @@
+{"from": "203.0.113.130", "qname": "github.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793390264.1236222}
+{"from": "203.0.113.130", "qname": "github.com", "qtype": "AAAA", "answers": [], "t": 1793390264.1240873}
+{"from": "203.0.113.130", "qname": "oauth2.googleapis.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793390268.213576}
+{"from": "203.0.113.130", "qname": "oauth2.googleapis.com", "qtype": "AAAA", "answers": [], "t": 1793390268.2138171}
+{"from": "203.0.113.130", "qname": "gmail.googleapis.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793390268.2689533}
+{"from": "203.0.113.130", "qname": "gmail.googleapis.com", "qtype": "AAAA", "answers": [], "t": 1793390268.2692173}
+{"from": "203.0.113.130", "qname": "gmail.googleapis.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793390328.368751}
+{"from": "203.0.113.130", "qname": "gmail.googleapis.com", "qtype": "AAAA", "answers": [], "t": 1793390328.3690617}
+{"from": "203.0.113.130", "qname": "gmail.googleapis.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793390388.5082476}
+{"from": "203.0.113.130", "qname": "gmail.googleapis.com", "qtype": "AAAA", "answers": [], "t": 1793390388.5085456}
+{"from": "203.0.113.130", "qname": "gmail.googleapis.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793390443.5222752}
+{"from": "203.0.113.130", "qname": "gmail.googleapis.com", "qtype": "AAAA", "answers": [], "t": 1793390443.5226278}
+{"from": "203.0.113.130", "qname": "caldav.gg8-synthetic.test", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793390453.5511293}
+{"from": "203.0.113.130", "qname": "caldav.gg8-synthetic.test", "qtype": "AAAA", "answers": [], "t": 1793390453.5513678}

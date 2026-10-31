@@ -255,6 +255,7 @@ async fn reembed_item(
         &inner.store,
         router,
         &providers,
+        item,
         &texts,
         inner.cfg.embed_batch,
         inner.cfg.embed_timeout(),
