@@ -357,6 +357,7 @@ fn element_desc(found: Option<&Found>, id: &ElementId) -> String {
 }
 
 fn outcome_result(verb: &str, target: &str, outcome: ActionOutcome, extra: Value) -> ToolResult {
+    let outcome = without_secrets(outcome);
     let effect = if outcome.verified {
         "effect observed"
     } else {
@@ -371,6 +372,27 @@ fn outcome_result(verb: &str, target: &str, outcome: ActionOutcome, extra: Value
         d.extend(e);
     }
     ToolResult::untrusted(content).with_data(data)
+}
+
+/// An outcome on a secret field (secure, or labelled as a secret in any language) keeps no
+/// value: the backend's before/after element and its account of the change can echo what was
+/// typed, and both reach the model and the action log (GG3-22).
+fn without_secrets(mut o: ActionOutcome) -> ActionOutcome {
+    let secret = [&o.before, &o.after]
+        .into_iter()
+        .flatten()
+        .any(is_secret_field);
+    if secret {
+        for n in [&mut o.before, &mut o.after].into_iter().flatten() {
+            n.value = None;
+        }
+        o.detail = if o.verified {
+            "the secret field changed".into()
+        } else {
+            "the secret field did not visibly change".into()
+        };
+    }
+    o
 }
 
 fn base64(bytes: &[u8]) -> String {
@@ -1526,6 +1548,11 @@ impl Tool for ComputerTool {
                         Verification::Passed("the option is selected".into())
                     }
                     (Some(false), _) if !(selecting && option_selected) => {
+                        if a.element.as_ref().is_some_and(is_secret_field) {
+                            return Verification::Failed(
+                                "the secret field does not hold the value".into(),
+                            );
+                        }
                         let v = a
                             .element
                             .as_ref()

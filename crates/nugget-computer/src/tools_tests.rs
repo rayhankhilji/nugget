@@ -1342,6 +1342,10 @@ async fn gg3_22_secret_fields_multilingual() {
             "[redacted]",
             "{label}"
         );
+        // Nothing the tool returns (text for the model, data for the log) echoes the value.
+        let r = kit.call("set_value", args.clone()).await;
+        let all = format!("{} {}", r.content, serde_json::to_string(&r.data).unwrap());
+        assert!(!all.contains("hunter2"), "{label}: {all}");
     }
 }
 

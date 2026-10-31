@@ -255,6 +255,14 @@ fn shape(node: &UiNode, parent_name: Option<&str>, focused: bool) -> Shape {
     Shape::Line
 }
 
+/// Roles whose value is something typed in.
+fn is_entry(role: Role) -> bool {
+    matches!(
+        role,
+        Role::TextField | Role::TextArea | Role::SearchField | Role::ComboBox
+    )
+}
+
 /// The line for one element, without indentation.
 pub fn node_line(node: &UiNode, focused: bool, opts: &RenderOptions) -> String {
     let mut line = format!("[{}] ", safe_id(node.id.as_str()));
@@ -267,7 +275,9 @@ pub fn node_line(node: &UiNode, focused: bool, opts: &RenderOptions) -> String {
     if let Some(name) = name {
         line.push_str(&format!(" \"{}\"", screen_text(name, opts.max_text)));
     }
-    if node.states.secure {
+    // Secure fields, and entry fields labelled as secrets in any language (GG3-22: a "Passwort"
+    // field the app does not mark secure), never show their value to the model or the log.
+    if node.states.secure || (is_entry(node.role) && crate::risk::is_secret_field(node)) {
         line.push_str(" value=hidden");
     } else if let Some(v) = node.value.as_deref().filter(|s| !s.is_empty())
         && Some(v.trim()) != name.map(str::trim)
@@ -455,6 +465,36 @@ pub fn render(tree: &UiTree, opts: &RenderOptions) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GG3-22: an entry field labelled as a secret in any language hides its value, even when
+    /// the app does not mark it secure; other fields and non-entry roles do not.
+    #[test]
+    fn secret_labelled_fields_hide_their_value() {
+        let field = |name: &str, role: Role| UiNode {
+            id: nugget_a11y::ElementId("e1".into()),
+            role,
+            name: Some(name.into()),
+            value: Some("hunter2-correct".into()),
+            ..UiNode::default()
+        };
+        let opts = RenderOptions::default();
+        for name in [
+            "Password",
+            "Passwort",
+            "Mot de passe",
+            "Пароль",
+            "密码",
+            "One-time code",
+        ] {
+            let line = node_line(&field(name, Role::TextField), false, &opts);
+            assert!(line.contains("value=hidden"), "{line}");
+            assert!(!line.contains("hunter2"), "{line}");
+        }
+        let line = node_line(&field("Subject", Role::TextField), false, &opts);
+        assert!(line.contains("hunter2"), "{line}");
+        let line = node_line(&field("Password", Role::StaticText), false, &opts);
+        assert!(line.contains("hunter2"), "{line}");
+    }
 
     #[test]
     fn screen_text_escapes_and_caps() {
