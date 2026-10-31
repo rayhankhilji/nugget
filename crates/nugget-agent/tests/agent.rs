@@ -1278,11 +1278,10 @@ async fn erroring_mutations_do_not_count_as_failures_in_a_row() {
     assert_eq!(run.steps, 6, "{:?}", run.outcome);
     assert_eq!(world.value(), 1);
     assert_eq!(run.verification.failed, 4);
-    // Judging is unchanged: the unresolved failures still fail the claim.
-    match &run.outcome {
-        Outcome::Failed(r) => assert!(r.contains("press: nothing changed"), "{r}"),
-        o => panic!("{o:?}"),
-    }
+    // Refused presses did nothing, so there is nothing left undone to fail the claim with (QA
+    // GG3: a refused click on a disabled button failed tasks the model then finished); a request
+    // whose send, delete or payment never happened fails on its own (GG3-8).
+    assert_eq!(run.outcome, Outcome::Partial);
     let note = &model.requests()[1];
     let note = format!("{:?}", note.messages.last().unwrap());
     assert!(note.contains("VERIFICATION FAILED: nothing changed"));
@@ -1717,4 +1716,21 @@ async fn a_picked_option_goes_back_fenced() {
     assert!(before.contains("The user answered"), "{content}");
     assert!(!before.contains("approved wiring"), "{content}");
     assert!(after.contains("approved wiring"), "{content}");
+}
+
+/// A refused call (an error result: it did nothing) does not fail a task the model then finished
+/// some other way.
+#[tokio::test]
+async fn a_refused_call_that_did_nothing_does_not_fail_the_task() {
+    let world = World::new();
+    let model = Scripted::new(vec![
+        turn(vec![("c1", "press", json!({}))]),
+        turn(vec![("c2", "set_value", json!({"value": 2}))]),
+        turn(vec![finish("done")]),
+    ]);
+    let tools = registry(&world).with(Arc::new(Refusing(world.clone())));
+    let run = agent(&model, tools, &FakeGate::new())
+        .run(Task::new("t-refused", "set it to two"), cfg())
+        .await;
+    assert_eq!(run.outcome, Outcome::Succeeded);
 }

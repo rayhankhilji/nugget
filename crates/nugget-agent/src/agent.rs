@@ -1967,15 +1967,23 @@ fn judge(st: &RunState, claim: Claim, summary: &str) -> Outcome {
             a.key == b.key
         }
     };
+    // A call the tool refused (an error result: a disabled button, an unknown id) did nothing;
+    // it is not left to undo. A request that needed its effect is caught below (GG3-8).
+    let refused = |m: &MutationRecord| {
+        st.actions
+            .iter()
+            .any(|a| a.action_id == m.action_id && a.is_error)
+    };
     let unresolved_failure =
         st.mutations
             .iter()
             .enumerate()
             .find_map(|(i, m)| match &m.verification {
                 Verification::Failed(r)
-                    if !st.mutations[i + 1..].iter().any(|later| {
-                        same(later, m) && matches!(later.verification, Verification::Passed(_))
-                    }) =>
+                    if !refused(m)
+                        && !st.mutations[i + 1..].iter().any(|later| {
+                            same(later, m) && matches!(later.verification, Verification::Passed(_))
+                        }) =>
                 {
                     Some(format!("{}: {r}", m.tool))
                 }
