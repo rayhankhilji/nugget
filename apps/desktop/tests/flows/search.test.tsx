@@ -45,7 +45,8 @@ describe("search flow", () => {
     expect(items[0]!.textContent).toContain("Engine notes");
     expect(items[0]!.textContent).toContain("Documents");
     expect(items[1]!.textContent).toContain("Work mail");
-    expect(items[1]!.textContent).toContain("msg-42");
+    // An opaque mail id is not a file name: it stays out of the badge.
+    expect(items[1]!.textContent).not.toContain("msg-42");
 
     await click(within(items[1]!).getByRole("button", { name: t("search.openTitle", { title: "Re: Bernoulli numbers" }) }));
     expect(d.callsTo("open_url")).toEqual([{ url: "https://mail.google.com/mail/u/0/#inbox/msg-42" }]);

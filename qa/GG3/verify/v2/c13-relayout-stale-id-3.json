@@ -1,0 +1,303 @@
+{
+  "commit": "0d81796",
+  "results": [
+    {
+      "events": [
+        {
+          "event": "verification",
+          "tool": "click",
+          "v": {
+            "detail": "click: the element went away",
+            "status": "passed"
+          }
+        },
+        {
+          "event": "confirmation_needed",
+          "label": "unknown element mail-forward",
+          "reason": "Nugget is about to send something on your behalf in mail: click “unknown element mail-forward”. Task probe-relayout-stale-id.",
+          "risk": "Send",
+          "tool": "click",
+          "user": "Deny",
+          "verb": "click"
+        },
+        {
+          "event": "action_denied",
+          "reason": "The user declined this action. It was not performed. Do not retry it; choose another approach, ask the user, or finish.",
+          "tool": "click"
+        },
+        {
+          "event": "finished",
+          "outcome": "failed: script ended"
+        }
+      ],
+      "legs": [
+        {
+          "actions": [
+            {
+              "decision": "allow",
+              "executed": true,
+              "is_error": false,
+              "risk": "Observe",
+              "step": 1,
+              "tool": "observe",
+              "verification": null
+            },
+            {
+              "decision": "allow",
+              "executed": true,
+              "is_error": false,
+              "risk": "Edit",
+              "step": 2,
+              "tool": "click",
+              "verification": "passed"
+            },
+            {
+              "decision": "rejected by user",
+              "executed": false,
+              "is_error": true,
+              "risk": "Send",
+              "step": 3,
+              "tool": "click",
+              "verification": null
+            },
+            {
+              "decision": "allow",
+              "executed": true,
+              "is_error": false,
+              "risk": "Observe",
+              "step": 4,
+              "tool": "finish",
+              "verification": null
+            }
+          ],
+          "claim": "Failure",
+          "elapsed_ms": 9,
+          "outcome": "failed: script ended",
+          "steps": 4,
+          "summary": "script ended",
+          "verification": {
+            "failed": 0,
+            "passed": 1,
+            "unverifiable": 0
+          }
+        }
+      ],
+      "max_steps": 30,
+      "name": "relayout-stale-id",
+      "perturb": "Relayout { after: 1 }",
+      "session": {
+        "acts": 1,
+        "log": [
+          "act mail.open.m2: ok=true None"
+        ],
+        "observes": 7
+      },
+      "task": "gg3-relayout-forward",
+      "transcript": [
+        {
+          "shown": [
+            {
+              "text": "Task from the user:\nForward the Acme invoice email to accounts@ourco.example.\n\nContext:\nOpen apps: mail.\n\nIn this task, untrusted tool output is wrapped in the tag untrusted-063f4d208f8d."
+            }
+          ],
+          "then": [
+            {
+              "args": {
+                "app": "mail"
+              },
+              "call": "observe"
+            }
+          ],
+          "turn": 1
+        },
+        {
+          "shown": [
+            {
+              "is_error": false,
+              "tool_result": "<untrusted-063f4d208f8d source=\"observe\">\nwindow [mail] \"Mail — alex@ourco.example\" app \"mail\"\n[mail-title] heading \"Inbox (3)\"\n[mail-compose] button \"Compose\"\n[mail-messages] list \"Messages\"\n  [mail-open-m1] button \"Priya Shah: Lunch Thursday?\"\n  [mail-open-m2] button \"Acme Billing: Invoice INV-2291\"\n  [mail-open-m3] button \"Weekly Digest: Old newsletter\"\n\n</untrusted-063f4d208f8d>"
+            }
+          ],
+          "then": [
+            {
+              "args": {
+                "element": "mail-open-m2"
+              },
+              "call": "click"
+            }
+          ],
+          "turn": 2
+        },
+        {
+          "shown": [
+            {
+              "is_error": false,
+              "tool_result": "<untrusted-063f4d208f8d source=\"click\">\nclicked [mail-open-m2] button \"Acme Billing: Invoice INV-2291\": pressed 'Acme Billing: Invoice INV-2291'; the screen changed (effect observed)\nthe window changed; it now shows:\nwindow [mail] \"Mail — alex@ourco.example\" app \"mail\"\n[mail-r2-back] button \"Back to inbox\"\n[mail-r2-subject] heading \"Invoice INV-2291\"\n[mail-r2-from] static_text \"From: Acme Billing ‹billing@acme.example›\"\n[mail-r2-body] static_text \"Your invoice INV-2291 for $1,240.00 is attached. Due 30 November.\"\n[mail-r2-reply] button \"Reply\"\n[mail-r2-forward] button \"Forward\"\n[mail-r2-delete] button \"Delete\"\n</untrusted-063f4d208f8d>"
+            }
+          ],
+          "then": [
+            {
+              "args": {
+                "element": "mail-forward"
+              },
+              "call": "click"
+            }
+          ],
+          "turn": 3
+        },
+        {
+          "shown": [
+            {
+              "is_error": true,
+              "tool_result": "The user declined this action. It was not performed. Do not retry it; choose another approach, ask the user, or finish."
+            }
+          ],
+          "then": [
+            {
+              "args": {
+                "outcome": "cannot",
+                "summary": "script ended"
+              },
+              "call": "finish"
+            }
+          ],
+          "turn": 4
+        }
+      ],
+      "user": "Deny",
+      "wall_ms": 9,
+      "what": "after a relayout, click an old id the model saw before (cache refreshed by the action result)",
+      "world_events": []
+    },
+    {
+      "events": [
+        {
+          "event": "confirmation_needed",
+          "label": "unknown element mail-open-m2",
+          "reason": "Nugget is about to send something on your behalf in mail: click “unknown element mail-open-m2”. Task probe-relayout-stale-id-no-refresh.",
+          "risk": "Send",
+          "tool": "click",
+          "user": "Deny",
+          "verb": "click"
+        },
+        {
+          "event": "action_denied",
+          "reason": "The user declined this action. It was not performed. Do not retry it; choose another approach, ask the user, or finish.",
+          "tool": "click"
+        },
+        {
+          "event": "finished",
+          "outcome": "failed: script ended"
+        }
+      ],
+      "legs": [
+        {
+          "actions": [
+            {
+              "decision": "allow",
+              "executed": true,
+              "is_error": false,
+              "risk": "Observe",
+              "step": 1,
+              "tool": "observe",
+              "verification": null
+            },
+            {
+              "decision": "rejected by user",
+              "executed": false,
+              "is_error": true,
+              "risk": "Send",
+              "step": 2,
+              "tool": "click",
+              "verification": null
+            },
+            {
+              "decision": "allow",
+              "executed": true,
+              "is_error": false,
+              "risk": "Observe",
+              "step": 3,
+              "tool": "finish",
+              "verification": null
+            }
+          ],
+          "claim": "Failure",
+          "elapsed_ms": 4,
+          "outcome": "failed: script ended",
+          "steps": 3,
+          "summary": "script ended",
+          "verification": {
+            "failed": 0,
+            "passed": 0,
+            "unverifiable": 0
+          }
+        }
+      ],
+      "max_steps": 30,
+      "name": "relayout-stale-id-no-refresh",
+      "perturb": "Relayout { after: 0 }",
+      "session": {
+        "acts": 0,
+        "log": [],
+        "observes": 2
+      },
+      "task": "gg3-relayout-forward",
+      "transcript": [
+        {
+          "shown": [
+            {
+              "text": "Task from the user:\nForward the Acme invoice email to accounts@ourco.example.\n\nContext:\nOpen apps: mail.\n\nIn this task, untrusted tool output is wrapped in the tag untrusted-a7c35639f9d4."
+            }
+          ],
+          "then": [
+            {
+              "args": {
+                "app": "mail"
+              },
+              "call": "observe"
+            }
+          ],
+          "turn": 1
+        },
+        {
+          "shown": [
+            {
+              "is_error": false,
+              "tool_result": "<untrusted-a7c35639f9d4 source=\"observe\">\nwindow [mail] \"Mail — alex@ourco.example\" app \"mail\"\n[mail-r2-title] heading \"Inbox (3)\"\n[mail-r2-compose] button \"Compose\"\n[mail-r2-messages] list \"Messages\"\n  [mail-r2-open-m1] button \"Priya Shah: Lunch Thursday?\"\n  [mail-r2-open-m2] button \"Acme Billing: Invoice INV-2291\"\n  [mail-r2-open-m3] button \"Weekly Digest: Old newsletter\"\n\n</untrusted-a7c35639f9d4>"
+            }
+          ],
+          "then": [
+            {
+              "args": {
+                "element": "mail-open-m2"
+              },
+              "call": "click"
+            }
+          ],
+          "turn": 2
+        },
+        {
+          "shown": [
+            {
+              "is_error": true,
+              "tool_result": "The user declined this action. It was not performed. Do not retry it; choose another approach, ask the user, or finish."
+            }
+          ],
+          "then": [
+            {
+              "args": {
+                "outcome": "cannot",
+                "summary": "script ended"
+              },
+              "call": "finish"
+            }
+          ],
+          "turn": 3
+        }
+      ],
+      "user": "Deny",
+      "wall_ms": 4,
+      "what": "relayout happens without the model acting (no observe in between): the cached id is used",
+      "world_events": []
+    }
+  ]
+}

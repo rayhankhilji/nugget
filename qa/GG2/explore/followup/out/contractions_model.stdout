@@ -1,0 +1,4 @@
+{"conv": "X04", "turn": 1, "q": "When is my dentist appointment?", "query_rewrite": null, "started_ms": 8, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "X04", "turn": 2, "q": "What's the address?", "query_rewrite": null, "started_ms": 4, "hit": false, "orig_hit": false, "general": false, "error": null}
+{"conv": "X05", "turn": 1, "q": "When is my dentist appointment?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "X05", "turn": 2, "q": "What is the address?", "query_rewrite": "dentist appointment address", "started_ms": 6, "hit": true, "orig_hit": false, "general": false, "error": null}

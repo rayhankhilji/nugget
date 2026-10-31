@@ -17,6 +17,9 @@ it prints `nuggetd is already running (<socket>)` and exits with status 0.
 | `install-service` | Registers `nuggetd` to start at login as a per-user service, and starts it |
 | `uninstall-service` | Stops and removes that service |
 | `mcp` | `nuggetd mcp --client <id>`: the stdio MCP bridge an AI app launches. `nuggetd mcp install --client <app>`: sets an app up |
+| `backup` | `nuggetd backup [--to DIR]`: back up now, to the configured folder or `DIR`. `nuggetd backup set-passphrase`: set the backup passphrase, which seals the store key into every later backup. Goes through the daemon when it runs, works offline otherwise. See [Backup and export](../guide/backup.md) |
+| `restore` | `nuggetd restore --from DIR`: restore a backup (stop the daemon first). The current data is kept aside |
+| `export` | `nuggetd export --to DIR`: export everything in open formats into a new folder in `DIR`. **Not encrypted** |
 
 <!-- check-refs: cli.flags -->
 | Option | Applies to | Meaning |
@@ -27,6 +30,9 @@ it prints `nuggetd is already running (<socket>)` and exits with status 0.
 | `--name NAME` | `mcp install` | Name of the new client in Nugget (default: the app's name) |
 | `--config PATH` | `mcp install` | The app's config file to merge into (default: its usual location) |
 | `--yes`, `-y` | `mcp install` | Do not ask for confirmation. Required when standard input is not a terminal |
+| `--to DIR` | `backup`, `export` | Where to write: for `backup`, instead of the configured folder; for `export`, required |
+| `--from DIR` | `restore` | The backup directory (`nugget-backup-<date and time>`) |
+| `--passphrase-file FILE` | `restore`, `backup set-passphrase` | Read the backup passphrase from `FILE` (else the `NUGGET_BACKUP_PASSPHRASE` environment variable, else a prompt) |
 | `--version` | none | Print the version |
 | `--help` | every command | Print help |
 

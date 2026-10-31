@@ -17,12 +17,13 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use crate::clarify::{Ambiguity, ambiguity};
 use crate::events::{AgentEvent, ConfirmationRequest, Confirmations, EventSink, NoEvents};
 use crate::injection::{HeuristicDetector, InjectionDetector, InjectionFinding, wrap_untrusted};
 use crate::ledger::{ActionLedger, Fnv128, LedgerEntry, MemoryLedger, action_id};
 use crate::log::{ActionLog, LogEntry, MemoryLog, Record, risk_label};
 use crate::tool::{
-    Claim, Control, FINISH, Tool, ToolCtx, ToolRegistry, ToolResult, Verification,
+    ASK_USER, Claim, Control, FINISH, Tool, ToolCtx, ToolRegistry, ToolResult, Verification,
     normalize_finish_args, truncate,
 };
 use crate::types::{Budget, ConfirmAnswer, GateOutcome, Outcome, Usage};
@@ -200,6 +201,11 @@ pub struct AgentConfig {
     /// [`Outcome::Refused`] if so. Any error or unparsable reply carries on with the normal loop.
     /// Off by default.
     pub triage: bool,
+    /// Ask, don't guess: when the goal names a target that matches more than one item a tool
+    /// showed ([`ToolResult::targets`](crate::ToolResult)), suspend before the first action of
+    /// `Edit` risk or higher and ask the user which one, with the candidates as options. On by
+    /// default.
+    pub clarify: bool,
 }
 
 impl Default for AgentConfig {
@@ -215,6 +221,7 @@ impl Default for AgentConfig {
             cancel: CancellationToken::new(),
             halt_poll: Duration::from_millis(50),
             triage: false,
+            clarify: true,
         }
     }
 }
@@ -238,13 +245,25 @@ pub struct ActionRecord {
     pub executed: bool,
     pub is_error: bool,
     pub verification: Option<Verification>,
+    /// Held back by the ambiguity guard ([`AgentConfig::clarify`]): the target could be more than
+    /// one item, so the run asked the user instead. Not executed; `decision` is a denial whose
+    /// reason starts with `held:`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held_for_user: bool,
 }
 
 /// The `ask_user` a suspended run waits on.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingAsk {
     pub question: String,
+    /// Candidates offered to the user (empty: free text).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
     pub call_id: String,
+    /// The ambiguity guard asked, holding back the call `call_id`: the answer goes back to the
+    /// model with a note that the action was not performed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
     /// Results of the other calls in that turn, sent along with the answer.
     pub results: Vec<Part>,
 }
@@ -269,6 +288,13 @@ pub struct RunState {
     /// Per-run nonce for untrusted-content fences.
     pub fence: String,
     pub pending: Option<PendingAsk>,
+    /// The first ambiguous target a tool's screen showed ([`AgentConfig::clarify`]), until the
+    /// user answers a question. A later screen with fewer matches does not clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ambiguity: Option<Ambiguity>,
+    /// Terms the user has already been asked about (lowercase); not asked again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved: Vec<String>,
 }
 
 /// Counts of verification results over a run's mutating actions.
@@ -367,8 +393,16 @@ impl Stopper<'_> {
 enum Act {
     Continue(Part),
     Stop(Outcome),
-    Finish { summary: String, claim: Claim },
-    Ask { question: String, call_id: String },
+    Finish {
+        summary: String,
+        claim: Claim,
+    },
+    Ask {
+        question: String,
+        options: Vec<String>,
+        call_id: String,
+        held: bool,
+    },
 }
 
 /// Per-leg state that is not persisted.
@@ -440,6 +474,8 @@ impl Agent {
             consecutive_verify_failures: 0,
             suspicion: None,
             pending: None,
+            ambiguity: None,
+            resolved: Vec::new(),
         };
         self.events.emit(AgentEvent::RunStarted {
             task_id: st.task.id.clone(),
@@ -480,37 +516,7 @@ impl Agent {
             deadline: started + cfg.budgets.deadline,
             poll: cfg.halt_poll,
         };
-        let mut goal = format!("Request from the user:\n{}", st.task.goal);
-        if let Some(c) = &st.task.context {
-            goal.push_str("\n\nContext:\n");
-            goal.push_str(c);
-        }
-        let req = ChatRequest {
-            system: Some(TRIAGE_PROMPT.into()),
-            messages: vec![Message::user_text(goal)],
-            tools: Vec::new(),
-            json_schema: Some(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "harm": {"type": "string", "enum": [
-                        "none", "fraud_or_scam", "impersonation", "harassment",
-                        "other_serious_harm"
-                    ]},
-                    "reason": {"type": "string"}
-                },
-                "required": ["harm", "reason"],
-                "additionalProperties": false
-            })),
-            max_tokens: Some(TRIAGE_MAX_TOKENS),
-            temperature: cfg.temperature,
-            feature: FEATURE_AGENT.into(),
-            items: st.task.items.clone(),
-            cache: Some(CacheHint {
-                system: true,
-                key: Some("agent:triage".into()),
-                ttl: CacheTtl::default(),
-            }),
-        };
+        let req = triage_request(&st.task, cfg);
         let input_estimate = estimate_tokens(&req.messages) + estimate(TRIAGE_PROMPT);
         let t0 = Instant::now();
         let reply = stop
@@ -556,6 +562,47 @@ impl Agent {
         }
     }
 
+    /// Run the triage check ([`AgentConfig::triage`]) on a goal alone, outside any run: one
+    /// tool-less call, nothing logged and no tool touched. For measuring the triage (refusal
+    /// rates, latency) without running tasks. `cfg.temperature` applies.
+    pub async fn triage_goal(&self, task: &Task, cfg: &AgentConfig) -> TriageReport {
+        let req = triage_request(task, cfg);
+        let input_estimate = estimate_tokens(&req.messages) + estimate(TRIAGE_PROMPT);
+        let t0 = Instant::now();
+        let reply = async { ChatResponse::collect(self.model.chat(req).await?).await }.await;
+        let elapsed = t0.elapsed();
+        match reply {
+            Err(e) => TriageReport {
+                verdict: TriageVerdict::Error,
+                reason: e.to_string(),
+                reply: String::new(),
+                elapsed,
+                usage: Usage::default(),
+            },
+            Ok(resp) => {
+                let text = resp.text();
+                let usage = Usage {
+                    input_tokens: resp.input_tokens.map_or(input_estimate, u64::from),
+                    output_tokens: resp
+                        .output_tokens
+                        .map_or_else(|| estimate(&text) + 16, u64::from),
+                };
+                let (verdict, reason) = match parse_triage(&text) {
+                    Some(Triage::Refuse(r)) => (TriageVerdict::Refuse, r),
+                    Some(Triage::Proceed) => (TriageVerdict::Proceed, String::new()),
+                    None => (TriageVerdict::Unparsed, String::new()),
+                };
+                TriageReport {
+                    verdict,
+                    reason,
+                    reply: truncate(&text, LOG_TEXT_MAX),
+                    elapsed,
+                    usage,
+                }
+            }
+        }
+    }
+
     /// Continue a run suspended by `ask_user`, with the user's answer.
     pub async fn resume(&self, mut st: RunState, answer: &str, cfg: AgentConfig) -> AgentRun {
         let started = Instant::now();
@@ -564,13 +611,33 @@ impl Agent {
             return self.conclude(st, o, None, None, started);
         };
         let mut results = pending.results;
-        results.push(Part::tool_result(
-            pending.call_id,
-            format!("The user answered: {answer}"),
-        ));
+        // An option the user picked is a label from the screen (or the model): it says which
+        // item, but its words are data, so it goes back fenced like the screen it came from.
+        let answer = if pending.options.iter().any(|o| o.trim() == answer.trim()) {
+            format!(
+                "they picked this item:\n{}",
+                wrap_untrusted(ASK_USER, &st.fence, answer.trim(), false)
+            )
+        } else {
+            answer.to_string()
+        };
+        let reply = if pending.held {
+            format!(
+                "This action was NOT performed: the request could mean more than one item, so the \
+                 user was asked which one they meant.\nThe user answered: {answer}\nAct on the one \
+                 they chose; observe again first if needed."
+            )
+        } else {
+            format!("The user answered: {answer}")
+        };
+        results.push(Part::tool_result(pending.call_id, reply));
+        // Any answer settles the open ambiguity: the user has been asked once.
+        if let Some(a) = st.ambiguity.take() {
+            st.resolved.push(a.term.to_lowercase());
+        }
         st.messages.push(Message::user(results));
         let record = Record::Resumed {
-            answer: truncate(answer, LOG_TEXT_MAX),
+            answer: truncate(&answer, LOG_TEXT_MAX),
         };
         if let Err(o) = self.append(&mut st, record) {
             return self.conclude(st, o, None, None, started);
@@ -703,13 +770,20 @@ impl Agent {
                         ended = Some((o, Some(claim), Some(summary)));
                         break;
                     }
-                    Act::Ask { question, call_id } => {
+                    Act::Ask {
+                        question,
+                        options,
+                        call_id,
+                        held,
+                    } => {
                         for later in &calls[i + 1..] {
                             results.push(skipped(&later.id, "the task paused for the user"));
                         }
                         st.pending = Some(PendingAsk {
                             question: question.clone(),
+                            options,
                             call_id,
+                            held,
                             results: std::mem::take(&mut results),
                         });
                         ended = Some((Outcome::NeedsInput(question), None, None));
@@ -807,6 +881,16 @@ impl Agent {
                     window_ms: ms(rate.window),
                 }));
             }
+        }
+
+        // Ask, don't guess: while the goal could mean more than one item a screen showed, an
+        // action that changes something is held back (no gate, no confirmation) and the user is
+        // asked which item they meant.
+        if leg.cfg.clarify
+            && risk >= RiskClass::Edit
+            && let Some(a) = st.ambiguity.clone()
+        {
+            return self.hold(st, call, &aid, tool.as_ref(), risk, a);
         }
 
         let target = tool.describe(&args);
@@ -1030,6 +1114,13 @@ impl Agent {
         if let Err(o) = self.append(st, record) {
             return Act::Stop(o);
         }
+        if leg.cfg.clarify && st.ambiguity.is_none() && !result.targets.is_empty() {
+            st.ambiguity = ambiguity(&st.task.goal, &result.targets)
+                .filter(|a| !st.resolved.contains(&a.term.to_lowercase()));
+            if let Some(a) = &st.ambiguity {
+                tracing::debug!(task = %st.task.id, term = %a.term, "ambiguous target on screen");
+            }
+        }
         self.events.emit(AgentEvent::ActionDone {
             task_id: st.task.id.clone(),
             action_id: aid.clone(),
@@ -1091,11 +1182,21 @@ impl Agent {
                 tool: call.name.clone(),
                 verification: v.clone(),
             });
+            // A reason can quote the result or the screen (an error's text, a field's value):
+            // for an untrusted result it is fenced like the result itself, never left outside.
+            let fenced = |reason: &str| {
+                if result.untrusted {
+                    wrap_untrusted(&call.name, &st.fence, reason, false)
+                } else {
+                    reason.to_string()
+                }
+            };
             match &v {
                 Verification::Passed(_) => st.consecutive_verify_failures = 0,
                 // A tool that reported an error normally refused before acting, so nothing
                 // happened: say so, but do not count it towards the failures-in-a-row stop.
                 Verification::Failed(reason) if result.is_error => {
+                    let reason = fenced(reason);
                     content.push_str(&format!(
                         "\n\nVERIFICATION FAILED: {reason}. The action returned an error and was \
                          not performed. Fix the cause or try a different approach."
@@ -1103,6 +1204,7 @@ impl Agent {
                 }
                 Verification::Failed(reason) => {
                     st.consecutive_verify_failures += 1;
+                    let reason = fenced(reason);
                     content.push_str(&format!(
                         "\n\nVERIFICATION FAILED: {reason}. The action did not have the intended \
                          effect. Observe the current state and try a different approach."
@@ -1118,14 +1220,27 @@ impl Agent {
         }
         match result.control {
             Some(Control::Finish { summary, claim }) => Act::Finish { summary, claim },
-            Some(Control::AskUser { question }) => {
+            Some(Control::AskUser {
+                question,
+                mut options,
+            }) => {
+                // The model asked on its own while an ambiguity is open: offer what the screen
+                // showed.
+                if options.is_empty()
+                    && let Some(a) = &st.ambiguity
+                {
+                    options = a.candidates.clone();
+                }
                 self.events.emit(AgentEvent::Suspended {
                     task_id: st.task.id.clone(),
                     question: question.clone(),
+                    options: options.clone(),
                 });
                 Act::Ask {
                     question,
+                    options,
                     call_id: call.id.clone(),
+                    held: false,
                 }
             }
             None => Act::Continue(Part::ToolResult {
@@ -1133,6 +1248,55 @@ impl Agent {
                 content,
                 is_error: result.is_error,
             }),
+        }
+    }
+
+    /// Hold back a call because its target is ambiguous, and suspend with the candidates as
+    /// options. The call is logged as a `held:` denial and never reaches the gate or the tool.
+    fn hold(
+        &self,
+        st: &mut RunState,
+        call: &ToolCall,
+        aid: &str,
+        tool: &dyn Tool,
+        risk: RiskClass,
+        a: Ambiguity,
+    ) -> Act {
+        let question = a.question();
+        let decision = GateOutcome::Denied {
+            reason: format!(
+                "held: the request could mean more than one item (“{}”); asked the user which one",
+                a.term
+            ),
+        };
+        let record = self.decision_record(
+            st.step,
+            aid,
+            call,
+            tool,
+            risk,
+            None,
+            decision.clone(),
+            false,
+            Instant::now(),
+        );
+        if let Err(o) = self.append(st, record) {
+            return Act::Stop(o);
+        }
+        self.record_action(st, aid, &call.name, risk, decision, false, false, None);
+        if let Some(last) = st.actions.last_mut() {
+            last.held_for_user = true;
+        }
+        self.events.emit(AgentEvent::Suspended {
+            task_id: st.task.id.clone(),
+            question: question.clone(),
+            options: a.candidates.clone(),
+        });
+        Act::Ask {
+            question,
+            options: a.candidates,
+            call_id: call.id.clone(),
+            held: true,
         }
     }
 
@@ -1373,6 +1537,7 @@ impl Agent {
             executed,
             is_error,
             verification,
+            held_for_user: false,
         });
     }
 
@@ -1587,6 +1752,67 @@ fn judge(st: &RunState, claim: Claim, summary: &str) -> Outcome {
             }
         }
     }
+}
+
+/// The triage call for a task: the fixed [`TRIAGE_PROMPT`], the goal and trusted context, a JSON
+/// schema and no tools.
+fn triage_request(task: &Task, cfg: &AgentConfig) -> ChatRequest {
+    let mut goal = format!("Request from the user:\n{}", task.goal);
+    if let Some(c) = &task.context {
+        goal.push_str("\n\nContext:\n");
+        goal.push_str(c);
+    }
+    ChatRequest {
+        system: Some(TRIAGE_PROMPT.into()),
+        messages: vec![Message::user_text(goal)],
+        tools: Vec::new(),
+        json_schema: Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "harm": {"type": "string", "enum": [
+                    "none", "fraud_or_scam", "impersonation", "harassment",
+                    "other_serious_harm"
+                ]},
+                "reason": {"type": "string"}
+            },
+            "required": ["harm", "reason"],
+            "additionalProperties": false
+        })),
+        max_tokens: Some(TRIAGE_MAX_TOKENS),
+        temperature: cfg.temperature,
+        feature: FEATURE_AGENT.into(),
+        items: task.items.clone(),
+        cache: Some(CacheHint {
+            system: true,
+            key: Some("agent:triage".into()),
+            ttl: CacheTtl::default(),
+        }),
+    }
+}
+
+/// What the triage made of a goal ([`Agent::triage_goal`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageVerdict {
+    Proceed,
+    Refuse,
+    /// The reply did not parse; a run would carry on.
+    Unparsed,
+    /// The call failed; a run would carry on.
+    Error,
+}
+
+/// One triage call, measured.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriageReport {
+    pub verdict: TriageVerdict,
+    /// The refusal reason, or the error.
+    pub reason: String,
+    /// The model's reply, cut to a log line.
+    pub reply: String,
+    /// Wall time of the call: what the triage adds to a task.
+    pub elapsed: Duration,
+    pub usage: Usage,
 }
 
 /// A parsed triage verdict.

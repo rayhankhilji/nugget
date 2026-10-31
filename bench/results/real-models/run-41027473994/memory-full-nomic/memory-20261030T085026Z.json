@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "suite": "memory",
+  "status": "failed",
+  "started_at": "2026-10-30T08:50:26.989167004Z",
+  "finished_at": "2026-10-30T09:51:23.085221351Z",
+  "duration_ms": 3656096,
+  "harness_version": "0.0.1",
+  "git_commit": "a4aada52e0303190f39967dc208bf9e5138cdc78",
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "cpus": 4,
+    "build_profile": "release"
+  },
+  "config": {
+    "scale": "full",
+    "seed": 42,
+    "params": {
+      "backend": "real",
+      "change_gap_mean_s": 0.5,
+      "change_timeout_s": 120.0,
+      "changes": 1000,
+      "docs": 20000,
+      "embed_prefixes": "auto",
+      "embedder": "nomic-embed-text-v1.5-q8 (nomic-embed-text-v1.5.Q8_0.gguf, local llama-server llama-server-linux-x86_64-cpu (b11940)), query prefix \"search_query: \", document prefix \"search_document: \"",
+      "eval_docs": 57,
+      "eval_queries": 42,
+      "eval_set": "nugget-retrieve fixtures",
+      "files_per_dir": 250,
+      "freshness_phase": true,
+      "local.embedding": {
+        "file": "nomic-embed-text-v1.5.Q8_0.gguf",
+        "id": "nomic-embed-text-v1.5-q8",
+        "load_s": 0.88,
+        "pending": false,
+        "pending_file": null,
+        "quantisation": "Q8_0",
+        "revision": "0188c9bf409793f810680a5a431e7b899c46104c",
+        "sha256": "3e24342164b3d94991ba9692fdc0dd08e3fd7362e0aacc396a9a5c54a544c3b7",
+        "size_bytes": 146146432
+      },
+      "local.hardware": {
+        "arch": "x86_64",
+        "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+        "gpu": "Unknown",
+        "logical_cores": 4,
+        "meets_16gb": true,
+        "os": "linux",
+        "total_ram_gib": 15.6
+      },
+      "local.install_s": 2.6,
+      "local.runtime": "llama-server-linux-x86_64-cpu (b11940)",
+      "local.thinking": "off",
+      "probe_interval_ms": 20,
+      "queries": 1000,
+      "query_noise": 0.25,
+      "query_terms": 4,
+      "reranker": "none",
+      "retrieve_config": "RetrieveConfig::default()",
+      "stack": "nugget-store (SQLCipher, temp dir) + nugget-ingest + files connector (native watcher) + nugget-retrieve",
+      "watcher_debounce_ms": 300
+    }
+  },
+  "metrics": [],
+  "message": "initial ingest timed out after 3600s: 7713 of 20000 items indexed"
+}

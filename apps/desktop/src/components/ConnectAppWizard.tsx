@@ -214,7 +214,7 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
             aria-describedby={ids.sensitiveWarn}
           />
           <span className="switch-track" aria-hidden="true" />
-          <span>{t("connectApp.allowSensitive")}</span>
+          <span className="switch-label-strong">{t("connectApp.allowSensitive")}</span>
         </label>
         <p id={ids.sensitiveWarn} className={form.includeSensitive ? "note note-warn small" : "muted small field-hint"}>
           {form.includeSensitive ? t("connectApp.sensitiveOn") : t("connectApp.sensitiveOff")}

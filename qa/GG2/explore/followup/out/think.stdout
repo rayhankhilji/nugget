@@ -1,0 +1,8 @@
+{"conv": "F02", "turn": 1, "q": "How much was the hotel in Lisbon?", "query_rewrite": null, "started_ms": 5, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F02", "turn": 2, "q": "How many nights was that?", "query_rewrite": "<think>", "started_ms": 6, "hit": false, "orig_hit": true, "general": false, "error": null}
+{"conv": "F02", "turn": 3, "q": "And what about Kyoto?", "query_rewrite": "<think>", "started_ms": 6, "hit": false, "orig_hit": true, "general": false, "error": null}
+{"conv": "F13", "turn": 1, "q": "Where are my farewell drinks?", "query_rewrite": null, "started_ms": 2, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F13", "turn": 2, "q": "What time?", "query_rewrite": "<think>", "started_ms": 5, "hit": false, "orig_hit": false, "general": false, "error": null}
+{"conv": "X01", "turn": 1, "q": "How much was the hotel in Lisbon?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "X01", "turn": 2, "q": "What about Kyoto?", "query_rewrite": "<think>", "started_ms": 6, "hit": false, "orig_hit": true, "general": false, "error": null}
+{"conv": "X01", "turn": 3, "q": "When do I fly there?", "query_rewrite": "<think>", "started_ms": 5, "hit": false, "orig_hit": false, "general": false, "error": null}

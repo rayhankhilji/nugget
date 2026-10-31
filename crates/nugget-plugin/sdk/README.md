@@ -8,14 +8,18 @@ This folder is its own cargo workspace (not part of the root one). It builds for
 rustup target add wasm32-wasip2
 cd crates/nugget-plugin/sdk
 cargo build --release            # target comes from .cargo/config.toml
+cargo test-native                # tests on the host triple, against testing::TestHost
 ```
 
+To start a plugin of your own, copy `plugins/template` (repository root) and follow its README.
+
 - `src/`: the SDK. Implement `Connector` and/or `Tools`, then call `export_plugin!`. Host access
-  goes through `http`, `kv`, `secrets`, `log`, `now_ms` and `sink`. WASI is not linked, so `std::fs`,
+  goes through `http`, `kv`, `secrets`, `log`, `now_ms`, `fs` and `sink`. On native targets those
+  calls go to `testing::TestHost`, an in-process fake host for unit tests (`cargo test-native`). WASI is not linked, so `std::fs`,
   `std::env`, `SystemTime` and stdout trap. Use `BTreeMap` rather than `HashMap::new`, because
   its random seed needs WASI.
-- `examples/feed-reader/`: an RSS/Atom connector plus a `feed_headlines` tool, with its
-  `nugget-plugin.toml`.
+- `examples/feed-reader/`: a small RSS/Atom connector plus a `feed_headlines` tool, with its
+  `nugget-plugin.toml` (the full version is `plugins/rss` at the repository root).
 - `examples/text-tools/`: two read-only tools (`text_stats`, `top_words`) that compute everything
   locally and declare no capabilities at all.
 - `test-guests/hostile/`: a misbehaving plugin used by the host's security tests.

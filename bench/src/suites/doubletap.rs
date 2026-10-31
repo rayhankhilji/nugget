@@ -517,7 +517,7 @@ fn parse_date(d: &str) -> Result<OffsetDateTime, BenchError> {
 
 /// One store per persona: every knowledge item (sensitive ones flagged) and the persona's sent
 /// messages, one chunk per item, no embeddings.
-fn build_stores(corpus: &Corpus) -> Result<BTreeMap<String, Store>, BenchError> {
+pub(crate) fn build_stores(corpus: &Corpus) -> Result<BTreeMap<String, Store>, BenchError> {
     let mut stores = BTreeMap::new();
     for p in &corpus.personas {
         let store = Store::open_in_memory()?;
@@ -559,7 +559,7 @@ impl Drafters {
     /// What the daemon does when Double Tap is enabled: [`Drafter::prewarm_idle`] once (every
     /// drafter shares the provider and the rules prefix), then wait for it, bounded. Returns
     /// the provider warmed and whether the warm-up finished in time.
-    async fn prewarm_idle(&self, wait: Duration) -> Option<(ProviderId, bool)> {
+    pub(crate) async fn prewarm_idle(&self, wait: Duration) -> Option<(ProviderId, bool)> {
         let mut ids: Vec<&String> = self.by_persona.keys().collect();
         ids.sort();
         let drafter = self.by_persona.get(*ids.first()?)?;
@@ -570,7 +570,7 @@ impl Drafters {
     }
 }
 
-fn build_drafters(
+pub(crate) fn build_drafters(
     corpus: &Corpus,
     stores: &BTreeMap<String, Store>,
     provider: Arc<dyn Provider>,
@@ -800,7 +800,7 @@ impl Probe {
 
 /// Read `task` ahead with the request its trigger will send, bounded by `timeout` (cancelled
 /// when it runs out).
-async fn read_ahead_task(
+pub(crate) async fn read_ahead_task(
     drafters: &Drafters,
     task: &Task,
     timeout: Duration,
@@ -1678,7 +1678,7 @@ async fn run_cache_pass(
 
 /// The provider for `--provider-url` (the `draft` suite's config logic).
 /// `seed` into an OpenAI-compatible config's `extra_body` (llama-server samples with it).
-fn with_seed(cfg: &mut ProviderConfig, seed: u64) {
+pub(crate) fn with_seed(cfg: &mut ProviderConfig, seed: u64) {
     let mut body = cfg.extra_body.take().unwrap_or_else(|| json!({}));
     if let Some(obj) = body.as_object_mut() {
         obj.insert("seed".into(), json!(seed));
@@ -1825,7 +1825,7 @@ fn setup(ctx: &mut RunContext) -> Result<Setup, BenchError> {
 }
 
 /// `n` indices out of `0..all`, evenly spread (all of them when `n >= all`).
-fn spread(all: usize, n: usize) -> Vec<usize> {
+pub(crate) fn spread(all: usize, n: usize) -> Vec<usize> {
     if n >= all {
         return (0..all).collect();
     }

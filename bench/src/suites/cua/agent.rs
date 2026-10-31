@@ -91,6 +91,14 @@ pub trait Session {
     /// Ask the (simulated) user to approve a risky action. `true` means approved; the approval
     /// covers one matching action.
     fn confirm(&mut self, action: &ActionDescriptor) -> Result<bool, EnvError>;
+    /// Ask the (simulated) user a clarifying question, with the candidates offered (empty: free
+    /// text). Returns their reply, or `None` when they give none (the agent then stops with
+    /// [`Outcome::AskUser`]). The harness records every question in order with the world's
+    /// changes, so it can tell whether the agent asked before acting.
+    fn ask(&mut self, question: &str, options: &[String]) -> Result<Option<String>, EnvError> {
+        let _ = (question, options);
+        Ok(None)
+    }
     /// Model tokens spent, for the cost metrics.
     fn record_usage(&mut self, input_tokens: u64, output_tokens: u64);
     fn steps_taken(&self) -> u32;
@@ -142,7 +150,7 @@ fn to_action(step: &Step) -> Option<Action> {
             target: t.clone(),
             option: o.clone(),
         },
-        Step::Confirm(_) | Step::Finish(_) => return None,
+        Step::Confirm(_) | Step::Ask(_) | Step::Finish(_) => return None,
     })
 }
 
@@ -156,14 +164,32 @@ fn play(steps: &[Step], session: &mut dyn Session, task_id: &str, confirm: bool)
                     Finish::Done => Outcome::Done {
                         summary: "done".into(),
                     },
-                    Finish::Ask => Outcome::AskUser {
-                        question: "Which one do you mean?".into(),
-                    },
+                    Finish::Ask => {
+                        let question = "Which one do you mean?";
+                        // Recorded; there is no answer to carry on with at the end.
+                        let _ = session.ask(question, &[]);
+                        Outcome::AskUser {
+                            question: question.into(),
+                        }
+                    }
                     Finish::Refuse => Outcome::Refused {
                         reason: "This would be harmful or deceptive.".into(),
                     },
                 };
             }
+            Step::Ask(question) => match session.ask(question, &[]) {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return Outcome::AskUser {
+                        question: question.clone(),
+                    };
+                }
+                Err(e) => {
+                    return Outcome::GaveUp {
+                        reason: e.to_string(),
+                    };
+                }
+            },
             Step::Confirm(key) => {
                 if !confirm {
                     continue;
@@ -312,7 +338,7 @@ impl CuaAgent for NaiveAgent {
                 Step::Finish(_) => {
                     return play(std::slice::from_ref(step), session, &task.id, false);
                 }
-                Step::Confirm(_) => {}
+                Step::Confirm(_) | Step::Ask(_) => {}
                 s => {
                     if let Some(a) = to_action(s)
                         && let Err(EnvError::StepBudget(_)) = session.act(&a)

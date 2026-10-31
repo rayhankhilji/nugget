@@ -6,7 +6,7 @@ import { graphSourceOptions, kindLabel } from "../knowledge";
 import { EntityDetailPanel } from "../components/EntityDetail";
 import { GraphPanel, KindChips } from "../components/GraphView";
 import { GoToPage } from "../components/GoToPage";
-import { Empty, EmptyState, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { Empty, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 
 const PAGE_SIZE = 50;
 type Tab = "browse" | "graph";
@@ -40,6 +40,8 @@ export function KnowledgePage() {
   });
 
   const vaultRoot = status.data?.vault.path ?? null;
+  // One page-level error: when the status fails, the list's own error (usually the same) is not repeated.
+  const pageError = status.error != null && !isMethodNotFound(status.error);
   const s = status.data;
 
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -79,7 +81,9 @@ export function KnowledgePage() {
         title={t("knowledge.title")}
         description={t("knowledge.description")}
         actions={
-          s && (
+          // The graph tab has its own count line.
+          s &&
+          tab === "browse" && (
             <p className="muted small knowledge-counts">
               {s.pending_items > 0
                 ? t("knowledge.countsWaiting", { entities: s.entities, claims: s.claims, pending: s.pending_items })
@@ -88,7 +92,15 @@ export function KnowledgePage() {
           )
         }
       />
-      {status.error != null && !isMethodNotFound(status.error) && <ErrorNote error={status.error} onRetry={status.reload} />}
+      {pageError && (
+        <ErrorNote
+          error={status.error}
+          onRetry={() => {
+            status.reload();
+            setListTick((n) => n + 1);
+          }}
+        />
+      )}
 
       <div className="tabs" role="tablist" aria-label={t("knowledge.tabsLabel")} onKeyDown={onTabKey}>
         {TABS.map((x) => (
@@ -112,24 +124,31 @@ export function KnowledgePage() {
       </div>
 
       {tab === "browse" && (
-        <div id="kb-panel-browse" role="tabpanel" aria-labelledby="kb-tab-browse" className="kb-layout">
-          <EntityBrowser
-            selected={selected}
-            onSelect={setSelected}
-            total={s?.entities ?? null}
-            refreshKey={listTick}
-            noSources={sources.data?.length === 0}
-            pending={s?.pending_items ?? 0}
-          />
-          <div className="kb-detail">
-            {detail || (s?.entities !== 0 && <Empty title={t("knowledge.chooseTitle")}>{t("knowledge.chooseBody")}</Empty>)}
+        <div id="kb-panel-browse" role="tabpanel" aria-labelledby="kb-tab-browse" className="kb-panel">
+          <div className={selected ? "kb-layout kb-layout-selected" : "kb-layout"}>
+            <EntityBrowser
+              selected={selected}
+              onSelect={setSelected}
+              total={s?.entities ?? null}
+              refreshKey={listTick}
+              noSources={sources.data?.length === 0}
+              pending={s?.pending_items ?? 0}
+              hideError={pageError}
+            />
+            {(detail || (s && s.entities > 0)) && (
+              <div className="kb-detail">
+                {detail || <Empty title={t("knowledge.chooseTitle")}>{t("knowledge.chooseBody")}</Empty>}
+              </div>
+            )}
           </div>
         </div>
       )}
       {tab === "graph" && (
-        <div id="kb-panel-graph" role="tabpanel" aria-labelledby="kb-tab-graph" className={selected ? "kb-graph kb-graph-with-detail" : "kb-graph"}>
-          <GraphPanel center={center} onCenter={setCenter} selected={selected} onOpen={setSelected} sources={sourceOptions} />
-          {selected && <div className="kb-detail kb-detail-side">{detail}</div>}
+        <div id="kb-panel-graph" role="tabpanel" aria-labelledby="kb-tab-graph" className="kb-panel">
+          <div className={selected ? "kb-graph kb-graph-with-detail" : "kb-graph"}>
+            <GraphPanel center={center} onCenter={setCenter} selected={selected} onOpen={setSelected} sources={sourceOptions} />
+            {selected && <div className="kb-detail kb-detail-side">{detail}</div>}
+          </div>
         </div>
       )}
     </div>
@@ -143,6 +162,7 @@ function EntityBrowser({
   refreshKey,
   noSources,
   pending,
+  hideError,
 }: {
   selected: string | null;
   onSelect: (id: string) => void;
@@ -153,6 +173,8 @@ function EntityBrowser({
   noSources: boolean;
   /** Items still waiting for extraction. */
   pending: number;
+  /** The page already shows an error (the list's would repeat it). */
+  hideError?: boolean;
 }) {
   const t = useT();
   const [text, setText] = useState("");
@@ -182,6 +204,19 @@ function EntityBrowser({
   const rows = (list.data ?? []).slice(0, PAGE_SIZE);
   const hasMore = (list.data?.length ?? 0) > PAGE_SIZE;
   const filtered = Boolean(query || kind);
+  // Nothing extracted at all: no point offering search and kind filters.
+  // Only when the settled, unfiltered list is empty: never while a query or kind is set, typed but
+  // not yet debounced, or reloading (the stale result of an old query would unmount the field).
+  const nothing =
+    !filtered && !text.trim() && !kind && page === 0 && !list.loading && list.data !== undefined && rows.length === 0;
+  const firstLoad = list.loading && !list.data;
+  // Once the filters have been offered they stay mounted, so focus in them is never dropped.
+  const filtersShown = useRef(false);
+  const showFilters = filtersShown.current || (!nothing && !(firstLoad && !filtered) && !(list.error != null && !list.data));
+  filtersShown.current = showFilters;
+  // "of N" from the status count, but never fewer pages than the list itself shows.
+  const pages =
+    !filtered && total != null && total > 0 ? Math.max(Math.ceil(total / PAGE_SIZE), page + 1 + (hasMore ? 1 : 0)) : null;
   const from = page * PAGE_SIZE + 1;
   const to = page * PAGE_SIZE + rows.length;
 
@@ -204,6 +239,8 @@ function EntityBrowser({
 
   return (
     <section className="kb-list" aria-label={t("knowledge.entitiesLabel")}>
+      {showFilters && (
+        <>
       <div className="field">
         <label htmlFor="kb-search" className="visually-hidden">
           {t("knowledge.searchLabel")}
@@ -226,9 +263,11 @@ function EntityBrowser({
         label={t("knowledge.filterByKind")}
         single
       />
+        </>
+      )}
       <p className="muted small kb-count" aria-live="polite">
-        {list.loading && !list.data ? (
-          t("knowledge.loading")
+        {firstLoad ? (
+          ""
         ) : rows.length === 0 ? (
           filtered ? t("knowledge.noMatches") : ""
         ) : !filtered && total != null ? (
@@ -239,9 +278,10 @@ function EntityBrowser({
           t("knowledge.range", { from, to })
         )}
       </p>
-      <ErrorNote error={list.error} onRetry={list.reload} />
+      {firstLoad && <Loading label={t("knowledge.loading")} lines={6} />}
+      {!hideError && <ErrorNote error={list.error} onRetry={list.reload} />}
       {list.data && rows.length === 0 && !filtered && (
-        <EmptyState title={t("knowledge.emptyTitle")} action={noSources ? <GoToPage page="sources" /> : undefined}>
+        <EmptyState title={t("knowledge.emptyTitle")} action={noSources ? <GoToPage page="sources" className="btn btn-primary" /> : undefined}>
           {noSources ? t("knowledge.emptyNoSources") : pending > 0 ? t("knowledge.emptyPending", { n: pending }) : t("knowledge.emptyBody")}
         </EmptyState>
       )}
@@ -265,7 +305,7 @@ function EntityBrowser({
           <button type="button" className="btn btn-small" onClick={() => setPage(page - 1)} disabled={page === 0 || list.loading}>
             {t("knowledge.previous")}
           </button>
-          <span className="muted small">{t("knowledge.page", { n: page + 1 })}</span>
+          <span className="muted small">{pages ? t("knowledge.pageOf", { n: page + 1, total: pages }) : t("knowledge.page", { n: page + 1 })}</span>
           <button type="button" className="btn btn-small" onClick={() => setPage(page + 1)} disabled={!hasMore || list.loading}>
             {t("common.next")}
           </button>

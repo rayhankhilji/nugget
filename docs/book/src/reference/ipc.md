@@ -210,6 +210,7 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 | `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | yes |
 | `plugins.remove` | A plugin | Uninstalls it | yes |
 | `plugins.enable` | A plugin and on or off | Turns it on or off | yes |
+| `plugins.catalog` | `{}` | Signed packages found in the catalog folders, verified but not installed, with their trust, requested access and whether they update an installed plugin | yes |
 
 ## Notifications
 

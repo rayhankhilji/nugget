@@ -250,6 +250,9 @@ impl Reranker for Hang {
     fn name(&self) -> &str {
         "hang"
     }
+    fn locality(&self) -> Locality {
+        Locality::OnDevice
+    }
     async fn rerank(&self, _q: &str, _p: &[String]) -> Result<Vec<f32>> {
         std::future::pending().await
     }
@@ -282,6 +285,9 @@ struct Prefer {
 impl Reranker for Prefer {
     fn name(&self) -> &str {
         "prefer"
+    }
+    fn locality(&self) -> Locality {
+        Locality::OnDevice
     }
     async fn rerank(&self, _q: &str, passages: &[String]) -> Result<Vec<f32>> {
         self.seen.fetch_add(passages.len(), Ordering::SeqCst);
@@ -726,4 +732,55 @@ async fn rewrite_falls_back_without_a_usable_model() {
         r.rewrite_query(&history(), "what about it?").await.method,
         RewriteMethod::Unchanged
     );
+}
+
+/// A cloud reranker that records the passages it was sent.
+struct CloudSeen {
+    seen: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl Reranker for CloudSeen {
+    fn name(&self) -> &str {
+        "cloud"
+    }
+    fn locality(&self) -> Locality {
+        Locality::Cloud
+    }
+    async fn rerank(&self, _q: &str, passages: &[String]) -> Result<Vec<f32>> {
+        self.seen.lock().unwrap().extend(passages.iter().cloned());
+        Ok(vec![0.5; passages.len()])
+    }
+}
+
+#[tokio::test]
+async fn sensitive_passages_never_reach_a_cloud_reranker() {
+    let store = Store::open_in_memory().unwrap();
+    for (key, text, sensitive) in [
+        ("a", "Boiler boiler: the boiler alarm PIN is 4417.", true),
+        ("b", "Boiler service booked with the engineer.", false),
+    ] {
+        let item = NewItem::new("notes", key, content_hash(text))
+            .with_title(key)
+            .with_metadata(json!({ "sensitive": sensitive }));
+        store.upsert_item(&item).unwrap();
+        store
+            .replace_chunks(&item.item, &[NewChunk::text(text)])
+            .unwrap();
+    }
+    let cloud = Arc::new(CloudSeen {
+        seen: Mutex::new(Vec::new()),
+    });
+    let r = Retriever::new(store, None, cfg()).with_reranker(cloud.clone());
+    let res = r.search("boiler", 5).await.unwrap();
+    assert!(res.reranked);
+    assert_eq!(
+        keys(&res.items).len(),
+        2,
+        "the sensitive item is still found"
+    );
+    let seen = cloud.seen.lock().unwrap();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!(seen[0].contains("engineer"));
+    assert!(!seen.iter().any(|p| p.contains("4417")), "{seen:?}");
 }

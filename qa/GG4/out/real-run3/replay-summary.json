@@ -1,0 +1,1224 @@
+{
+ "days": [
+  {
+   "day": 1,
+   "date": "2026-10-26",
+   "line": "day  1 2026-10-26 America/New_York open= 1 hits=0 misses=0 forbidden=0 dups=0 brief_ok=0/1 brief_ready=yes (70.3s)",
+   "check": {
+    "hits": [],
+    "misses": [],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-10-26",
+       "meeting": "Design standup",
+       "local": "09:30",
+       "tz": "America/New_York"
+      },
+      "ok": false,
+      "got": []
+     }
+    ]
+   },
+   "titles": [
+    [
+     "follow_up",
+     "No answer from Sofia Alvarez: brunch?",
+     0.74,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 2,
+   "date": "2026-10-27",
+   "line": "day  2 2026-10-27 America/New_York open= 1 hits=0 misses=2 forbidden=0 dups=0 brief_ok=0/0 brief_ready=yes (60.2s)",
+   "check": {
+    "hits": [],
+    "misses": [
+     {
+      "scenario": "S1",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "checkout mockups",
+       "first": "2026-10-27",
+       "last": "2026-10-27"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S4",
+      "expect": {
+       "kind": "meeting_prep",
+       "match": "northwind checkout review",
+       "first": "2026-10-27",
+       "last": "2026-10-28"
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": []
+   },
+   "titles": [
+    [
+     "follow_up",
+     "No answer from Sofia Alvarez: brunch?",
+     0.75,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 3,
+   "date": "2026-10-28",
+   "line": "day  3 2026-10-28 America/New_York open= 4 hits=1 misses=1 forbidden=0 dups=0 brief_ok=1/1 brief_ready=yes (79.1s)",
+   "check": {
+    "hits": [
+     {
+      "scenario": "S5",
+      "expect": {
+       "kind": "renewal",
+       "match": "pixelboard",
+       "first": "2026-10-28",
+       "last": "2026-11-03"
+      },
+      "cards": [
+       "1767d32fce21dbb4"
+      ]
+     }
+    ],
+    "misses": [
+     {
+      "scenario": "S4",
+      "expect": {
+       "kind": "meeting_prep",
+       "match": "northwind checkout review",
+       "first": "2026-10-27",
+       "last": "2026-10-28"
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [],
+    "out_of_window": [
+     {
+      "scenario": "S2",
+      "expect": {
+       "kind": "follow_up",
+       "match": "budget",
+       "first": "2026-10-29",
+       "last": "2026-11-02"
+      },
+      "cards": [
+       [
+        "b7fb6a531ef6b4fc",
+        "follow_up",
+        "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+       ]
+      ]
+     }
+    ],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-10-28",
+       "meeting": "Northwind checkout review",
+       "local": "14:00",
+       "tz": "America/New_York"
+      },
+      "ok": true,
+      "got": [
+       [
+        "Northwind checkout review",
+        "2026-10-28T14:00:00-04:00",
+        false,
+        "14:00"
+       ]
+      ]
+     }
+    ]
+   },
+   "titles": [
+    [
+     "follow_up",
+     "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+     0.92,
+     false
+    ],
+    [
+     "follow_up",
+     "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+     0.89,
+     false
+    ],
+    [
+     "follow_up",
+     "No answer from Sofia Alvarez: brunch?",
+     0.76,
+     false
+    ],
+    [
+     "renewal",
+     "Pixelboard renews 2026-11-03 \u2014 $144.00",
+     0.63,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 4,
+   "date": "2026-10-29",
+   "line": "day  4 2026-10-29 America/New_York open= 4 hits=1 misses=3 forbidden=0 dups=0 brief_ok=0/0 brief_ready=yes (60.2s)",
+   "check": {
+    "hits": [
+     {
+      "scenario": "S2",
+      "expect": {
+       "kind": "follow_up",
+       "match": "budget",
+       "first": "2026-10-29",
+       "last": "2026-11-02"
+      },
+      "cards": [
+       "b7fb6a531ef6b4fc"
+      ]
+     }
+    ],
+    "misses": [
+     {
+      "scenario": "S3",
+      "expect": {
+       "kind": "follow_up",
+       "match": "brochure",
+       "first": "2026-10-29",
+       "last": "2026-10-30"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S4",
+      "expect": {
+       "kind": "meeting_prep",
+       "match": "northwind design qa",
+       "first": "2026-10-29",
+       "last": "2026-10-30"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S5",
+      "expect": {
+       "kind": "renewal",
+       "match": "pixelboard",
+       "first": "2026-10-28",
+       "last": "2026-11-03"
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": []
+   },
+   "titles": [
+    [
+     "follow_up",
+     "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+     0.96,
+     false
+    ],
+    [
+     "follow_up",
+     "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+     0.93,
+     false
+    ],
+    [
+     "follow_up",
+     "No answer from Sofia Alvarez: brunch?",
+     0.79,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.77,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 5,
+   "date": "2026-10-30",
+   "line": "day  5 2026-10-30 America/New_York open= 5 hits=3 misses=4 forbidden=0 dups=0 brief_ok=1/2 brief_ready=yes (82.7s)",
+   "check": {
+    "hits": [
+     {
+      "scenario": "S3",
+      "expect": {
+       "kind": "follow_up",
+       "match": "brochure",
+       "first": "2026-10-29",
+       "last": "2026-10-30"
+      },
+      "cards": [
+       "9c484a96e7e20a20"
+      ]
+     },
+     {
+      "scenario": "S7",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "thanksgiving",
+       "first": "2026-10-30",
+       "last": "2026-11-05"
+      },
+      "cards": [
+       "6259962415126191"
+      ]
+     },
+     {
+      "scenario": "S12",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "agenda",
+       "first": "2026-10-30",
+       "last": "2026-11-02"
+      },
+      "cards": [
+       "575195e380522dc9"
+      ]
+     }
+    ],
+    "misses": [
+     {
+      "scenario": "S2",
+      "expect": {
+       "kind": "follow_up",
+       "match": "budget",
+       "first": "2026-10-29",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S4",
+      "expect": {
+       "kind": "meeting_prep",
+       "match": "northwind design qa",
+       "first": "2026-10-29",
+       "last": "2026-10-30"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S5",
+      "expect": {
+       "kind": "renewal",
+       "match": "pixelboard",
+       "first": "2026-10-28",
+       "last": "2026-11-03"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S6",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "results",
+       "first": "2026-10-30",
+       "last": "2026-11-03",
+       "sensitive": true,
+       "optional": true
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-10-30",
+       "meeting": "Northwind design QA",
+       "local": "15:00",
+       "tz": "America/New_York",
+       "not_local": "13:00"
+      },
+      "ok": false,
+      "got": [
+       [
+        "Northwind design QA",
+        "2026-10-30T13:00:00-04:00",
+        false,
+        "13:00"
+       ],
+       [
+        "Northwind design QA",
+        "2026-10-30T15:00:00-04:00",
+        false,
+        "15:00"
+       ]
+      ]
+     },
+     {
+      "check": {
+       "date": "2026-10-30",
+       "absent": "Mom's birthday"
+      },
+      "ok": true,
+      "got": []
+     }
+    ]
+   },
+   "titles": [
+    [
+     "follow_up",
+     "No answer from Sofia Alvarez: brunch?",
+     0.84,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.79,
+     false
+    ],
+    [
+     "follow_up",
+     "No answer from Jonah Pike: Quote for 500 brochures",
+     0.77,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Harriet Cole: Workshop agenda",
+     0.74,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Ngozi Okafor: Thanksgiving",
+     0.71,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 6,
+   "date": "2026-10-31",
+   "line": "day  6 2026-10-31 America/New_York open= 2 hits=0 misses=7 forbidden=0 dups=0 brief_ok=2/2 brief_ready=yes (60.2s)",
+   "check": {
+    "hits": [],
+    "misses": [
+     {
+      "scenario": "S2",
+      "expect": {
+       "kind": "follow_up",
+       "match": "budget",
+       "first": "2026-10-29",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S3",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "brochure",
+       "first": "2026-10-31",
+       "last": "2026-11-02",
+       "optional": true
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S5",
+      "expect": {
+       "kind": "renewal",
+       "match": "pixelboard",
+       "first": "2026-10-28",
+       "last": "2026-11-03"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S6",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "results",
+       "first": "2026-10-30",
+       "last": "2026-11-03",
+       "sensitive": true,
+       "optional": true
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S7",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "thanksgiving",
+       "first": "2026-10-30",
+       "last": "2026-11-05"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S11",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "radiator",
+       "first": "2026-10-31",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S12",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "agenda",
+       "first": "2026-10-30",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-10-31",
+       "meeting": "Mom's birthday",
+       "all_day": true
+      },
+      "ok": true,
+      "got": [
+       [
+        "Mom's birthday",
+        "2026-10-31T00:00:00-04:00",
+        true
+       ]
+      ]
+     },
+     {
+      "check": {
+       "date": "2026-10-31",
+       "absent": "Design standup"
+      },
+      "ok": true,
+      "got": []
+     }
+    ]
+   },
+   "titles": [
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.88,
+     false
+    ],
+    [
+     "follow_up",
+     "No answer from Sofia Alvarez: brunch?",
+     0.87,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 7,
+   "date": "2026-11-01",
+   "line": "day  7 2026-11-01 America/New_York open= 3 hits=1 misses=7 forbidden=1 dups=0 brief_ok=2/2 brief_ready=yes (65.4s)",
+   "check": {
+    "hits": [
+     {
+      "scenario": "S11",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "radiator",
+       "first": "2026-10-31",
+       "last": "2026-11-02"
+      },
+      "cards": [
+       "f2b1f6677a6e7eab"
+      ]
+     }
+    ],
+    "misses": [
+     {
+      "scenario": "S2",
+      "expect": {
+       "kind": "follow_up",
+       "match": "budget",
+       "first": "2026-10-29",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S3",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "brochure",
+       "first": "2026-10-31",
+       "last": "2026-11-02",
+       "optional": true
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S4",
+      "expect": {
+       "kind": "meeting_prep",
+       "match": "northwind sprint planning",
+       "first": "2026-11-01",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S5",
+      "expect": {
+       "kind": "renewal",
+       "match": "pixelboard",
+       "first": "2026-10-28",
+       "last": "2026-11-03"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S6",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "results",
+       "first": "2026-10-30",
+       "last": "2026-11-03",
+       "sensitive": true,
+       "optional": true
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S7",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "thanksgiving",
+       "first": "2026-10-30",
+       "last": "2026-11-05"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S12",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "agenda",
+       "first": "2026-10-30",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [
+     {
+      "scenario": "S6",
+      "why": "HR letter, no action asked",
+      "card": "50f5c5ab860ee558",
+      "kind": "unanswered_thread",
+      "title": "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+     }
+    ],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-11-01",
+       "absent": "Mom's birthday"
+      },
+      "ok": true,
+      "got": []
+     },
+     {
+      "check": {
+       "date": "2026-11-01",
+       "meeting": "Studio server maintenance",
+       "local": "01:30",
+       "tz": "America/New_York"
+      },
+      "ok": true,
+      "got": [
+       [
+        "Studio server maintenance",
+        "2026-11-01T01:30:00-05:00",
+        false,
+        "01:30"
+       ]
+      ]
+     }
+    ]
+   },
+   "titles": [
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.88,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+     0.82,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Gus Moreno: Radiator repair",
+     0.81,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 8,
+   "date": "2026-11-02",
+   "line": "day  8 2026-11-02 America/New_York open= 3 hits=1 misses=8 forbidden=2 dups=0 brief_ok=2/3 brief_ready=yes (60.2s)",
+   "check": {
+    "hits": [
+     {
+      "scenario": "S10",
+      "expect": {
+       "kind": "any",
+       "match": "brochure files",
+       "first": "2026-11-02",
+       "last": "2026-11-04",
+       "optional": true
+      },
+      "cards": [
+       "1ecee7d6844a481a"
+      ]
+     }
+    ],
+    "misses": [
+     {
+      "scenario": "S2",
+      "expect": {
+       "kind": "follow_up",
+       "match": "budget",
+       "first": "2026-10-29",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S3",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "brochure",
+       "first": "2026-10-31",
+       "last": "2026-11-02",
+       "optional": true
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S4",
+      "expect": {
+       "kind": "meeting_prep",
+       "match": "northwind sprint planning",
+       "first": "2026-11-01",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S5",
+      "expect": {
+       "kind": "renewal",
+       "match": "pixelboard",
+       "first": "2026-10-28",
+       "last": "2026-11-03"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S6",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "results",
+       "first": "2026-10-30",
+       "last": "2026-11-03",
+       "sensitive": true,
+       "optional": true
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S7",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "thanksgiving",
+       "first": "2026-10-30",
+       "last": "2026-11-05"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S11",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "radiator",
+       "first": "2026-10-31",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S12",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "agenda",
+       "first": "2026-10-30",
+       "last": "2026-11-02"
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [
+     {
+      "scenario": "S7",
+      "why": "answered in 30 minutes",
+      "card": "1ecee7d6844a481a",
+      "kind": "commitment",
+      "title": "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+     },
+     {
+      "scenario": "S7",
+      "why": "answered in 30 minutes",
+      "card": "ce342e3370f55c11",
+      "kind": "follow_up",
+      "title": "No answer from Sofia Alvarez: Re: drinks friday?"
+     }
+    ],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-11-02",
+       "meeting": "Northwind sprint planning",
+       "local": "10:00",
+       "tz": "America/New_York"
+      },
+      "ok": true,
+      "got": [
+       [
+        "Northwind sprint planning",
+        "2026-11-02T10:00:00-05:00",
+        false,
+        "10:00"
+       ]
+      ]
+     },
+     {
+      "check": {
+       "date": "2026-11-02",
+       "meeting": "Run club",
+       "local": "07:00",
+       "tz": "America/New_York"
+      },
+      "ok": true,
+      "got": [
+       [
+        "Run club",
+        "2026-11-02T07:00:00-05:00",
+        false,
+        "07:00"
+       ]
+      ]
+     },
+     {
+      "check": {
+       "date": "2026-11-02",
+       "meeting": "Design standup",
+       "local": "09:30",
+       "tz": "America/New_York"
+      },
+      "ok": false,
+      "got": []
+     }
+    ]
+   },
+   "titles": [
+    [
+     "commitment",
+     "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+     0.84,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.83,
+     false
+    ],
+    [
+     "follow_up",
+     "No answer from Sofia Alvarez: Re: drinks friday?",
+     0.81,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 9,
+   "date": "2026-11-03",
+   "line": "day  9 2026-11-03 America/New_York open= 1 hits=0 misses=4 forbidden=0 dups=0 brief_ok=1/1 brief_ready=yes (70.3s)",
+   "check": {
+    "hits": [],
+    "misses": [
+     {
+      "scenario": "S5",
+      "expect": {
+       "kind": "renewal",
+       "match": "pixelboard",
+       "first": "2026-10-28",
+       "last": "2026-11-03"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S6",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "results",
+       "first": "2026-10-30",
+       "last": "2026-11-03",
+       "sensitive": true,
+       "optional": true
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S7",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "thanksgiving",
+       "first": "2026-10-30",
+       "last": "2026-11-05"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S10",
+      "expect": {
+       "kind": "any",
+       "match": "brochure files",
+       "first": "2026-11-02",
+       "last": "2026-11-04",
+       "optional": true
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-11-03",
+       "meeting": "Flight BA178",
+       "local": "19:00",
+       "tz": "America/New_York"
+      },
+      "ok": true,
+      "got": [
+       [
+        "Flight BA178 JFK to LHR",
+        "2026-11-03T19:00:00-05:00",
+        false,
+        "19:00"
+       ]
+      ]
+     }
+    ]
+   },
+   "titles": [
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.75,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 10,
+   "date": "2026-11-04",
+   "line": "day 10 2026-11-04 Europe/London    open= 2 hits=0 misses=3 forbidden=0 dups=0 brief_ok=0/0 brief_ready=yes (70.2s)",
+   "check": {
+    "hits": [],
+    "misses": [
+     {
+      "scenario": "S4",
+      "expect": {
+       "kind": "meeting_prep",
+       "match": "foundry",
+       "first": "2026-11-04",
+       "last": "2026-11-05"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S7",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "thanksgiving",
+       "first": "2026-10-30",
+       "last": "2026-11-05"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S10",
+      "expect": {
+       "kind": "any",
+       "match": "brochure files",
+       "first": "2026-11-02",
+       "last": "2026-11-04",
+       "optional": true
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": []
+   },
+   "titles": [
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.75,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Rebecca Moss: Thursday session",
+     0.63,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 11,
+   "date": "2026-11-05",
+   "line": "day 11 2026-11-05 Europe/London    open= 2 hits=0 misses=2 forbidden=0 dups=0 brief_ok=1/1 brief_ready=yes (60.2s)",
+   "check": {
+    "hits": [],
+    "misses": [
+     {
+      "scenario": "S4",
+      "expect": {
+       "kind": "meeting_prep",
+       "match": "foundry",
+       "first": "2026-11-04",
+       "last": "2026-11-05"
+      },
+      "cards": []
+     },
+     {
+      "scenario": "S7",
+      "expect": {
+       "kind": "unanswered_thread",
+       "match": "thanksgiving",
+       "first": "2026-10-30",
+       "last": "2026-11-05"
+      },
+      "cards": []
+     }
+    ],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-11-05",
+       "meeting": "Foundry service design workshop",
+       "local": "10:00",
+       "tz": "Europe/London"
+      },
+      "ok": true,
+      "got": [
+       [
+        "Foundry service design workshop",
+        "2026-11-05T10:00:00Z",
+        false,
+        "10:00"
+       ]
+      ]
+     }
+    ]
+   },
+   "titles": [
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.77,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Rebecca Moss: Thursday session",
+     0.64,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 12,
+   "date": "2026-11-06",
+   "line": "day 12 2026-11-06 Europe/London    open= 2 hits=0 misses=0 forbidden=0 dups=0 brief_ok=0/2 brief_ready=yes (70.3s)",
+   "check": {
+    "hits": [],
+    "misses": [],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": [
+     {
+      "check": {
+       "date": "2026-11-06",
+       "absent": "Kelsey"
+      },
+      "ok": false,
+      "got": [
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "2026-11-06T09:00:00Z"
+       ],
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "2026-11-06T09:00:00Z"
+       ]
+      ]
+     },
+     {
+      "check": {
+       "date": "2026-11-06",
+       "meeting": "Studio retro",
+       "local": "21:00",
+       "tz": "Europe/London"
+      },
+      "ok": false,
+      "got": [
+       [
+        "Studio retro",
+        "2026-11-06T16:00:00Z",
+        false,
+        "16:00"
+       ]
+      ]
+     }
+    ]
+   },
+   "titles": [
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.78,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Rebecca Moss: Thursday session",
+     0.64,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 13,
+   "date": "2026-11-07",
+   "line": "day 13 2026-11-07 Europe/London    open= 2 hits=0 misses=0 forbidden=0 dups=0 brief_ok=0/0 brief_ready=yes (60.2s)",
+   "check": {
+    "hits": [],
+    "misses": [],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": []
+   },
+   "titles": [
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.79,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Rebecca Moss: Thursday session",
+     0.65,
+     false
+    ]
+   ]
+  },
+  {
+   "day": 14,
+   "date": "2026-11-08",
+   "line": "day 14 2026-11-08 America/New_York open= 2 hits=0 misses=0 forbidden=0 dups=0 brief_ok=0/0 brief_ready=yes (70.3s)",
+   "check": {
+    "hits": [],
+    "misses": [],
+    "forbidden": [],
+    "out_of_window": [],
+    "duplicates": [],
+    "brief_checks": []
+   },
+   "titles": [
+    [
+     "unanswered_thread",
+     "Reply to Kelsey Vance: Senior designer role at a fintech?",
+     0.8,
+     false
+    ],
+    [
+     "unanswered_thread",
+     "Reply to Rebecca Moss: Thursday session",
+     0.66,
+     false
+    ]
+   ]
+  }
+ ],
+ "args": {
+  "out": "/home/runner/work/nugget/nugget/gg4-out/replay",
+  "user": true,
+  "runtime": true,
+  "chat_model": "qwen3-1.7b-q8",
+  "embed_model": "nomic-embed-text-v1.5-q8",
+  "models_home": "/home/runner/work/nugget/nugget/qa/GG4/.models",
+  "judge": "local",
+  "days": "1-14",
+  "start": "07:59:00",
+  "brief_wait": 600.0,
+  "fixed_tz": null
+ }
+}

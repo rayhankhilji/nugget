@@ -1,0 +1,251 @@
+{
+ "scenario": "s26_probe_locality",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.openai.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 51
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 12
+  }
+ ],
+ "observed_hosts": {
+  "api.openai.com": {
+   "requests": 6,
+   "bytes_in": 4052,
+   "paths": [
+    "POST /v1/responses"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.openai.com": {
+   "rows": 6,
+   "bytes_sent": 4052,
+   "features": [
+    "ask",
+    "probe"
+   ]
+  },
+  "127.0.0.1": {
+   "rows": 7,
+   "bytes_sent": 3930,
+   "features": [
+    "ask",
+    "embed",
+    "probe"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [
+  "127.0.0.1"
+ ],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.openai.com/v1/responses",
+   "canary": "GG8CANARY-APIKEY-openai",
+   "count": 6
+  },
+  {
+   "where": "request POST api.openai.com/v1/responses",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.openai.com/v1/responses",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "request POST api.openai.com/v1/responses",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "gateway.locality_cloud",
+   "ok": true,
+   "detail": [
+    {
+     "capabilities": null,
+     "error": null,
+     "id": "gateway",
+     "kind": "openai_compatible",
+     "locality": "cloud",
+     "model": "mock-model",
+     "tiers": [
+      "light"
+     ]
+    }
+   ],
+   "severity": null,
+   "t": 1793389970.6657298
+  },
+  {
+   "id": "probe.ledger_feature",
+   "ok": true,
+   "detail": [
+    [
+     "127.0.0.1:18080",
+     "embed",
+     126
+    ],
+    [
+     "127.0.0.1:18080",
+     "probe",
+     478
+    ],
+    [
+     "127.0.0.1:18080",
+     "probe",
+     504
+    ],
+    [
+     "127.0.0.1:18080",
+     "probe",
+     1098
+    ],
+    [
+     "127.0.0.1:18080",
+     "probe",
+     169
+    ],
+    [
+     "127.0.0.1:18080",
+     "probe",
+     159
+    ],
+    [
+     "api.openai.com",
+     "probe",
+     511
+    ],
+    [
+     "api.openai.com",
+     "probe",
+     554
+    ],
+    [
+     "api.openai.com",
+     "probe",
+     1136
+    ],
+    [
+     "api.openai.com",
+     "probe",
+     218
+    ],
+    [
+     "api.openai.com",
+     "probe",
+     208
+    ]
+   ],
+   "severity": null,
+   "t": 1793389972.9984076
+  },
+  {
+   "id": "probe.requests_ledgered",
+   "ok": true,
+   "detail": "5 requests to api.openai.com, 5 rows",
+   "severity": null,
+   "t": 1793389972.9986668
+  },
+  {
+   "id": "gateway.probe_ledgered",
+   "ok": true,
+   "detail": "6 requests to the cloud-marked loopback gateway; ledger rows: [('127.0.0.1:18080', 'embed'), ('127.0.0.1:18080', 'probe'), ('127.0.0.1:18080', 'probe'), ('127.0.0.1:18080', 'probe'), ('127.0.0.1:18080', 'probe'), ('127.0.0.1:18080', 'probe'), ('api.openai.com', 'probe'), ('api.openai.com', 'probe'), ('api.openai.com', 'probe'), ('api.openai.com', 'probe'), ('api.openai.com', 'probe')]",
+   "severity": "Medium",
+   "t": 1793389972.9992683
+  },
+  {
+   "id": "gateway.ask_withholds_sensitive",
+   "ok": true,
+   "detail": "locality=cloud excluded=4",
+   "severity": "High",
+   "t": 1793389978.0425622
+  },
+  {
+   "id": "gateway.ask_ledgered",
+   "ok": true,
+   "detail": "rows=[('127.0.0.1:18080', 'ask')]",
+   "severity": "Medium",
+   "t": 1793389978.0453465
+  },
+  {
+   "id": "openai.store_false",
+   "ok": true,
+   "detail": "store=False",
+   "severity": null,
+   "t": 1793389978.0553439
+  },
+  {
+   "id": "openai.ask.no_sensitive_content",
+   "ok": true,
+   "detail": "1 requests; leaked: []",
+   "severity": null,
+   "t": 1793389978.0553753
+  },
+  {
+   "id": "openai.ask.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 1 rows (features ['ask']); unmatched []",
+   "severity": null,
+   "t": 1793389979.5617373
+  },
+  {
+   "id": "openai.ask.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389979.5617583
+  },
+  {
+   "id": "keys.keys_only_to_own_host",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389979.562115
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793389969.1586268,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793389969.661783,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793389970.6657202,
+   "note": "providers: [{\"capabilities\": null, \"error\": null, \"id\": \"openai\", \"kind\": \"openai_responses\", \"locality\": \"cloud\", \"model\": \"gpt-mock\", \"tiers\": [\"synthesis\"]}, {\"capabilities\": null, \"error\": null, \"id\": \"gateway\", \"kind\": \"openai_compatible\", \"locality\": \"cloud\", \"model\": \"mock-model\", \"tiers\": [\"light\"]}]"
+  },
+  {
+   "t": 1793389970.9708283,
+   "note": "probe openai: {'context_tokens': None, 'embeddings': False, 'json_schema': False, 'streaming': True, 'tools': False, 'vision': False}"
+  },
+  {
+   "t": 1793389970.995548,
+   "note": "probe gateway: {'context_tokens': None, 'embeddings': True, 'json_schema': False, 'streaming': True, 'tools': False, 'vision': False}"
+  },
+  {
+   "t": 1793389979.5643675,
+   "label": "daemon.stop"
+  }
+ ]
+}

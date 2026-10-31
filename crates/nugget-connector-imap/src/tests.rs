@@ -1,3 +1,4 @@
+mod conformance;
 mod server;
 
 use std::collections::HashMap;
@@ -436,6 +437,68 @@ async fn egress_counts_wire_bytes_with_sync_imap_feature() {
     let sent: u64 = events.iter().map(|e| e.bytes_sent).sum();
     assert!(received > 200_000, "{received}");
     assert!(sent > 100, "{sent}");
+}
+
+/// A STARTTLS server that accepts the TCP connection and never greets: no bytes either way, but
+/// the connection attempt still gets its egress row (GG8-11).
+#[tokio::test]
+async fn a_connection_that_exchanged_no_bytes_is_still_in_the_egress_ledger() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let held = tokio::spawn(async move {
+        let (sock, _) = listener.accept().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        drop(sock);
+    });
+    let mut h = Harness::new(mailbox_state(), Mode::Starttls, json!({})).await;
+    h.settings["port"] = json!(port);
+    let err = h
+        .connector()
+        .with_timeouts(Duration::from_millis(200), Duration::from_secs(30))
+        .sync(None, &*h.store, &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Network(_)), "{err:?}");
+    let events = h.egress.0.lock().unwrap().clone();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].host, format!("127.0.0.1:{port}"));
+    assert_eq!(events[0].feature, "sync:imap");
+    assert_eq!((events[0].bytes_sent, events[0].bytes_received), (0, 0));
+    held.abort();
+}
+
+/// Egress rows name the bare host, with the port only when it is not the mode's default.
+#[test]
+fn egress_host_carries_only_a_non_default_port() {
+    let ctx = ConnectorContext {
+        source: SourceId::new(SOURCE),
+        paths: Paths::rooted(std::env::temp_dir().join("nugget-imap-tests")),
+        egress: Arc::new(Egress::default()),
+        secrets: Arc::new(Secrets::default()),
+        known: Arc::new(Known(Arc::new(FakeStore::default()))),
+    };
+    for (settings, host) in [
+        (json!({"host": " imap.example "}), "imap.example"),
+        (json!({"host": "imap.example", "port": 993}), "imap.example"),
+        (
+            json!({"host": "imap.example", "tls": "starttls"}),
+            "imap.example",
+        ),
+        (
+            json!({"host": "imap.example", "tls": "starttls", "port": 993}),
+            "imap.example:993",
+        ),
+        (
+            json!({"host": "imap.example", "port": 143}),
+            "imap.example:143",
+        ),
+        (json!({"host": "::1", "port": 1993}), "[::1]:1993"),
+    ] {
+        let mut settings = settings;
+        settings["username"] = json!("me@example.com");
+        let c = ImapConnector::new(ImapSettings::parse(&settings).unwrap(), ctx.clone());
+        assert_eq!(c.egress_host(), host, "{settings}");
+    }
 }
 
 #[tokio::test]

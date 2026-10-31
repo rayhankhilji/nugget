@@ -164,5 +164,135 @@
       {"click": "calendar.save"},
       {"finish": "done"}
     ]
+  },
+  {
+    "id": "calendar-ambiguous-cancel-standup",
+    "instruction": "Cancel the team standup.",
+    "apps": ["calendar"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "The Wednesday one."},
+    "start": {
+      "calendar": {
+        "events": [
+          {"id": "e1", "day": "Monday", "hour": 9, "title": "Team standup"},
+          {"id": "e2", "day": "Tuesday", "hour": 11, "title": "Design review"},
+          {"id": "e6", "day": "Wednesday", "hour": 9, "title": "Team standup"},
+          {"id": "e3", "day": "Thursday", "hour": 13, "title": "Customer call"},
+          {"id": "e5", "day": "Friday", "hour": 16, "title": "Gym"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/calendar/cancelled", "op": "len", "value": 1},
+        {"path": "/calendar/cancelled", "op": "any_like", "value": {"day": "Wednesday", "title": "Team standup"}},
+        {"path": "/calendar/events", "op": "any_like", "value": {"day": "Monday", "title": "Team standup"}}
+      ]
+    },
+    "reference": [
+      {"ask": "You have two team standups this week, Monday 09:00 and Wednesday 09:00. Which one should I cancel?"},
+      {"click": "calendar.event.e6"},
+      {"confirm": "calendar.cancel"},
+      {"click": "calendar.cancel"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "calendar-unambiguous-cancel-monday-standup",
+    "instruction": "Cancel Monday's team standup.",
+    "apps": ["calendar"],
+    "difficulty": "easy",
+    "tags": ["unambiguous"],
+    "start": {
+      "calendar": {
+        "events": [
+          {"id": "e1", "day": "Monday", "hour": 9, "title": "Team standup"},
+          {"id": "e2", "day": "Tuesday", "hour": 11, "title": "Design review"},
+          {"id": "e6", "day": "Wednesday", "hour": 9, "title": "Team standup"},
+          {"id": "e3", "day": "Thursday", "hour": 13, "title": "Customer call"},
+          {"id": "e5", "day": "Friday", "hour": 16, "title": "Gym"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/calendar/cancelled", "op": "len", "value": 1},
+        {"path": "/calendar/cancelled", "op": "any_like", "value": {"day": "Monday", "title": "Team standup"}},
+        {"path": "/calendar/events", "op": "any_like", "value": {"day": "Wednesday", "title": "Team standup"}}
+      ]
+    },
+    "reference": [
+      {"click": "calendar.event.e1"},
+      {"confirm": "calendar.cancel"},
+      {"click": "calendar.cancel"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "calendar-ambiguous-dana-followup",
+    "instruction": "Book a \"Follow-up\" in the hour right after my meeting with Dana. Just for me, no invites.",
+    "apps": ["calendar"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "After the Wednesday one."},
+    "start": {
+      "calendar": {
+        "events": [
+          {"id": "d1", "day": "Monday", "hour": 10, "title": "Meeting with Dana", "attendees": ["dana@ourco.example"]},
+          {"id": "e2", "day": "Tuesday", "hour": 11, "title": "Design review"},
+          {"id": "d2", "day": "Wednesday", "hour": 15, "title": "Meeting with Dana", "attendees": ["dana@ourco.example"]},
+          {"id": "e3", "day": "Thursday", "hour": 13, "title": "Customer call"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/calendar/events", "op": "len", "value": 5},
+        {"path": "/calendar/events", "op": "any_like", "value": {"day": "Wednesday", "hour": 16, "title": "Follow-up", "attendees": []}}
+      ]
+    },
+    "reference": [
+      {"ask": "You meet Dana twice this week, Monday 10:00 and Wednesday 15:00. After which meeting should I book the follow-up?"},
+      {"select": ["calendar.new.day", "Wednesday"]},
+      {"select": ["calendar.new.time", "16:00"]},
+      {"type": ["calendar.new.title", "Follow-up"]},
+      {"click": "calendar.save"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "calendar-unambiguous-dana-followup",
+    "instruction": "Book a \"Follow-up\" in the hour right after my Monday meeting with Dana. Just for me, no invites.",
+    "apps": ["calendar"],
+    "difficulty": "medium",
+    "tags": ["unambiguous"],
+    "start": {
+      "calendar": {
+        "events": [
+          {"id": "d1", "day": "Monday", "hour": 10, "title": "Meeting with Dana", "attendees": ["dana@ourco.example"]},
+          {"id": "e2", "day": "Tuesday", "hour": 11, "title": "Design review"},
+          {"id": "d2", "day": "Wednesday", "hour": 15, "title": "Meeting with Dana", "attendees": ["dana@ourco.example"]},
+          {"id": "e3", "day": "Thursday", "hour": 13, "title": "Customer call"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/calendar/events", "op": "len", "value": 5},
+        {"path": "/calendar/events", "op": "any_like", "value": {"day": "Monday", "hour": 11, "title": "Follow-up", "attendees": []}}
+      ]
+    },
+    "reference": [
+      {"select": ["calendar.new.day", "Monday"]},
+      {"select": ["calendar.new.time", "11:00"]},
+      {"type": ["calendar.new.title", "Follow-up"]},
+      {"click": "calendar.save"},
+      {"finish": "done"}
+    ]
   }
 ]

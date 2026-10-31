@@ -5,8 +5,11 @@
 //! with the `files` connector (registered through [`nugget_connector_files::register`]) watching
 //! a temporary folder, and [`nugget_retrieve::Retriever`] for every query. Embeddings come from
 //! an in-process deterministic embedder ([`HashEmbedder`], on-device locality) routed through a
-//! [`Router`] as the `Embedding` tier, or from an OpenAI-compatible server given with
-//! `--embed-url`.
+//! [`Router`] as the `Embedding` tier, from an OpenAI-compatible server given with
+//! `--embed-url`, or with `--local-models` from the manifest's embedding model served by
+//! `nugget-runtime`'s `llama-server`, as the app runs it ([`crate::local::LocalModels`]; task
+//! prefixes per `--memory-embed-prefixes`, and the manifest's reranker with
+//! `--memory-rerank local`).
 //!
 //! Phases:
 //! 1. **Eval set.** `nugget-retrieve`'s labelled fixtures are written as Markdown files, ingested
@@ -27,33 +30,40 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
 
 use nugget_connector::Registry;
 use nugget_connector_files::{FILES_KIND, item_key};
 use nugget_core::capability::{Capabilities, Tier};
 use nugget_core::egress::NullEgress;
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-use nugget_core::ipc::{SourceSpec, SourceState};
+use nugget_core::ipc::{RuntimeRole, SourceSpec, SourceState};
 use nugget_core::paths::Paths;
-use nugget_infer::{Provider, ProviderConfig, Router, build_provider};
+use nugget_infer::{
+    ChatRequest, ChatStream, Provider, ProviderConfig, ProviderMeta, Router, build_provider,
+    build_provider_with,
+};
 use nugget_ingest::{Ingest, IngestConfig, MemorySecrets, NoPowerPolicy};
 use nugget_retrieve::eval::{
     self, EVAL_DEPTH, EvalMode, EvalSet, HashEmbedder, mrr_at, ndcg_at, recall_at,
 };
-use nugget_retrieve::{RetrieveConfig, Retriever, SearchOptions, Strategy};
+use nugget_retrieve::{Fusion, Reranker, RetrieveConfig, Retriever, SearchOptions, Strategy};
 use nugget_store::{Store, StoreKey};
 use serde_json::json;
 
 use crate::corpus::{Corpus, CorpusConfig, Doc, Query, Rng, marker};
 use crate::index::FakeIndex;
+use crate::local::LocalModels;
 use crate::report::{Direction, Metric};
 use crate::runner::{BenchError, RunConfig, RunContext, Scale};
 use crate::stats::summarize;
 use crate::suites::memory::{
-    FRESHNESS_TARGET_S, MemoryParams, RANK_DUMP_DEEP, RankDump, rank_dump_path,
-    retrieval as fake_retrieval,
+    EmbedPrefixes, FRESHNESS_TARGET_S, MemoryParams, MemoryRerank, RANK_DUMP_DEEP, RankDump,
+    rank_dump_path, retrieval as fake_retrieval,
 };
 use crate::suites::{doc_text, item_ref};
 
@@ -84,6 +94,8 @@ pub struct RealParams {
     pub files_per_dir: usize,
     /// Run the eval-set phase.
     pub eval_set: bool,
+    /// Run the freshness phase.
+    pub freshness: bool,
 }
 
 impl RealParams {
@@ -102,13 +114,25 @@ impl RealParams {
             ingest_timeout_s: 3_600.0,
             files_per_dir: 250,
             eval_set: true,
+            freshness: true,
         }
     }
 }
 
 /// Entry point for `memory --backend real`.
 pub fn run(ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-    run_with(ctx, &RealParams::for_scale(ctx.scale()))
+    let mut p = RealParams::for_scale(ctx.scale());
+    let opts = &ctx.config.memory;
+    if let Some(n) = opts.memory_queries {
+        p.queries = n;
+    }
+    p.freshness = !opts.memory_no_freshness;
+    if ctx.config.local.local_models {
+        // A local embedding model on a 2-core CPU indexes 1.5–3 files/s: the full scale's 20,000
+        // files take up to about 4 hours.
+        p.ingest_timeout_s = p.ingest_timeout_s.max(5.0 * 3_600.0);
+    }
+    run_with(ctx, &p)
 }
 
 pub fn run_with(ctx: &mut RunContext, p: &RealParams) -> Result<Vec<Metric>, BenchError> {
@@ -121,6 +145,20 @@ pub fn run_with(ctx: &mut RunContext, p: &RealParams) -> Result<Vec<Metric>, Ben
     let set = EvalSet::builtin()?;
     // Built outside the runtime: resolving a remote host is a blocking lookup.
     let embedder = Embedder::build(&config, p.embedding_dim, &set.synonyms)?;
+    if let Some(local) = &embedder.local {
+        local.record(ctx);
+    }
+    ctx.param(
+        "embed_prefixes",
+        config.memory.memory_embed_prefixes.as_str(),
+    );
+    ctx.param(
+        "reranker",
+        embedder
+            .reranker
+            .as_ref()
+            .map_or_else(|| "none".to_string(), |r| r.name().to_string()),
+    );
 
     ctx.param("backend", "real");
     ctx.param(
@@ -141,7 +179,19 @@ pub fn run_with(ctx: &mut RunContext, p: &RealParams) -> Result<Vec<Metric>, Ben
         "watcher_debounce_ms",
         nugget_connector_files::DEFAULT_DEBOUNCE_MS,
     );
-    ctx.param("retrieve_config", "RetrieveConfig::default()");
+    let rc = &embedder.retrieve;
+    ctx.param(
+        "retrieve_config",
+        if *rc == RetrieveConfig::default() {
+            "RetrieveConfig::default()".to_string()
+        } else {
+            format!(
+                "RetrieveConfig::default() with rerank_pool {} and rerank_timeout_ms {}",
+                rc.rerank_pool, rc.rerank_timeout_ms
+            )
+        },
+    );
+    ctx.param("freshness_phase", p.freshness);
     if p.eval_set {
         ctx.param("eval_set", set.name.clone());
         ctx.param("eval_docs", set.docs.len());
@@ -171,52 +221,144 @@ pub fn run_with(ctx: &mut RunContext, p: &RealParams) -> Result<Vec<Metric>, Ben
              retriever, embedder and the harness itself), from /proc/self/status VmHWM",
         ));
     }
+    if let Some(local) = &embedder.local {
+        for (role, name) in [
+            (RuntimeRole::Embedding, "embedding"),
+            (RuntimeRole::Rerank, "rerank"),
+        ] {
+            if let Some(rss) = local.server_pid(role).and_then(process_peak_rss_bytes) {
+                out.push(Metric::new(
+                    format!("resources.{name}_server.peak_rss_mib"),
+                    rss as f64 / (1024.0 * 1024.0),
+                    "MiB",
+                    Direction::LowerIsBetter,
+                    format!(
+                        "Peak resident set size of the local {name} llama-server process, from \
+                         /proc/<pid>/status VmHWM"
+                    ),
+                ));
+            }
+        }
+    }
+    drop(embedder);
     Ok(out)
 }
 
 // ---------------------------------------------------------------- embedder and stack
 
 struct Embedder {
+    /// The embedding provider, behind [`Timed`].
     provider: Arc<dyn Provider>,
+    stats: Arc<EmbedStats>,
     description: String,
+    /// Retrieval settings of every stack (the app's defaults, plus `--memory-rerank-*`).
+    retrieve: RetrieveConfig,
+    reranker: Option<Arc<dyn Reranker>>,
+    /// The local servers (`--local-models`). Last: stopped after everything above is dropped.
+    local: Option<LocalModels>,
 }
 
 impl Embedder {
     fn build(config: &RunConfig, dim: usize, synonyms: &[Vec<String>]) -> Result<Self, BenchError> {
-        match &config.embed_url {
-            None => {
-                let e = HashEmbedder::new(dim, synonyms);
-                Ok(Self {
-                    description: format!(
-                        "hash-bow (nugget_retrieve::eval::HashEmbedder, in-process, deterministic, \
-                         on-device), dim {dim}"
-                    ),
-                    provider: Arc::new(e),
-                })
-            }
-            Some(url) => {
-                let model = config
-                    .embed_model
-                    .clone()
-                    .unwrap_or_else(|| "default".into());
-                let cfg: ProviderConfig = serde_json::from_value(json!({
-                    "id": "bench-embed",
-                    "kind": "openai_compatible",
-                    "base_url": url,
-                    "model": model,
-                    "tiers": ["embedding"],
-                }))
-                .map_err(|e| BenchError::Failed(format!("embed provider config: {e}")))?;
-                let provider = build_provider(&cfg, Arc::new(NullEgress))?;
-                let locality = provider.meta().locality;
-                Ok(Self {
-                    description: format!(
-                        "openai_compatible {url} model {model} (locality {locality:?})"
-                    ),
-                    provider,
-                })
-            }
+        let opts = &config.memory;
+        let mut retrieve = RetrieveConfig::default();
+        if let Some(n) = opts.memory_rerank_pool {
+            retrieve.rerank_pool = n;
         }
+        if let Some(ms) = opts.memory_rerank_timeout_ms {
+            retrieve.rerank_timeout_ms = ms;
+        }
+        if opts.memory_rerank == MemoryRerank::Local && !config.local.local_models {
+            return Err(BenchError::Failed(
+                "--memory-rerank local needs --local-models".into(),
+            ));
+        }
+        let (provider, description, local, reranker): (Arc<dyn Provider>, _, _, _) = match (
+            &config.embed_url,
+            config.local.local_models,
+        ) {
+            (Some(_), true) => {
+                return Err(BenchError::Failed(
+                    "--embed-url and --local-models are exclusive".into(),
+                ));
+            }
+            (None, true) => {
+                let mut roles = vec![RuntimeRole::Embedding];
+                if opts.memory_rerank == MemoryRerank::Local {
+                    roles.push(RuntimeRole::Rerank);
+                }
+                let local = LocalModels::start(&config.local, &roles)?;
+                let served = local.embedding.as_ref().ok_or_else(|| {
+                    BenchError::Failed("no local embedding model was started".into())
+                })?;
+                let mut cfg = served.config.clone();
+                if opts.memory_embed_prefixes == EmbedPrefixes::Off {
+                    cfg.embed_query_prefix = Some(String::new());
+                    cfg.embed_document_prefix = Some(String::new());
+                }
+                let (qp, dp) = nugget_infer::embed_prefixes(&cfg);
+                let provider = build_provider_with(&cfg, Arc::new(NullEgress), &local.secrets())?;
+                let description = format!(
+                    "{} ({}, local llama-server {}), query prefix {qp:?}, document prefix {dp:?}",
+                    served.entry.id, served.entry.file_name, local.runtime_build
+                );
+                let reranker = match opts.memory_rerank {
+                    MemoryRerank::Local => Some(local.reranker(retrieve.rerank_timeout_ms)?),
+                    MemoryRerank::Off => None,
+                };
+                (provider, description, Some(local), reranker)
+            }
+            (None, false) => {
+                let e = HashEmbedder::new(dim, synonyms);
+                (
+                    Arc::new(e),
+                    format!(
+                        "hash-bow (nugget_retrieve::eval::HashEmbedder, in-process, \
+                             deterministic, on-device), dim {dim}"
+                    ),
+                    None,
+                    None,
+                )
+            }
+            (Some(url), false) => {
+                let (p, d) = Self::remote(config, url)?;
+                (p, d, None, None)
+            }
+        };
+        let stats = Arc::new(EmbedStats::default());
+        Ok(Self {
+            provider: Arc::new(Timed {
+                inner: provider,
+                stats: stats.clone(),
+            }),
+            stats,
+            description,
+            retrieve,
+            reranker,
+            local,
+        })
+    }
+
+    /// An OpenAI-compatible embeddings server (`--embed-url`).
+    fn remote(config: &RunConfig, url: &str) -> Result<(Arc<dyn Provider>, String), BenchError> {
+        let model = config
+            .embed_model
+            .clone()
+            .unwrap_or_else(|| "default".into());
+        let cfg: ProviderConfig = serde_json::from_value(json!({
+            "id": "bench-embed",
+            "kind": "openai_compatible",
+            "base_url": url,
+            "model": model,
+            "tiers": ["embedding"],
+        }))
+        .map_err(|e| BenchError::Failed(format!("embed provider config: {e}")))?;
+        let provider = build_provider(&cfg, Arc::new(NullEgress))?;
+        let locality = provider.meta().locality;
+        Ok((
+            provider,
+            format!("openai_compatible {url} model {model} (locality {locality:?})"),
+        ))
     }
 
     /// A router with this provider as the (probed) `Embedding` tier.
@@ -235,6 +377,119 @@ impl Embedder {
         );
         Arc::new(router)
     }
+
+    /// A retriever over `store` as the app builds it without a reranker.
+    fn retriever(&self, store: Store, router: Arc<Router>) -> Retriever {
+        Retriever::new(store, Some(router), self.retrieve.clone())
+    }
+
+    /// The retrievers of every [`Variant`] over `store`.
+    fn variants(&self, store: &Store, router: &Arc<Router>) -> Variants {
+        let with = |cfg: RetrieveConfig| Retriever::new(store.clone(), Some(router.clone()), cfg);
+        let reranking = |cfg: RetrieveConfig| {
+            self.reranker
+                .as_ref()
+                .map(|rr| with(cfg).with_reranker(rr.clone()))
+        };
+        Variants {
+            plain: self.retriever(store.clone(), router.clone()),
+            convex: with(RetrieveConfig {
+                fusion: Fusion::Convex,
+                ..self.retrieve.clone()
+            }),
+            // As the app builds it with `[runtime] rerank_model`.
+            rerank: reranking(self.retrieve.clone()),
+            // Before the adaptive reranker: every search waits for it.
+            rerank_fixed: reranking(RetrieveConfig {
+                rerank_adaptive: false,
+                ..self.retrieve.clone()
+            }),
+        }
+    }
+}
+
+/// Embedding calls, counted and timed.
+#[derive(Debug, Default)]
+struct EmbedStats {
+    doc_texts: AtomicU64,
+    doc_chars: AtomicU64,
+    doc_ns: AtomicU64,
+    /// Wall time of each query embedding call, ms.
+    query_ms: Mutex<Vec<f64>>,
+}
+
+impl EmbedStats {
+    fn docs(&self) -> (u64, u64, f64) {
+        (
+            self.doc_texts.load(Ordering::Relaxed),
+            self.doc_chars.load(Ordering::Relaxed),
+            self.doc_ns.load(Ordering::Relaxed) as f64 / 1e6,
+        )
+    }
+
+    fn take_query_ms(&self) -> Vec<f64> {
+        std::mem::take(&mut *self.query_ms.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+}
+
+/// A provider that records how many texts it embedded and how long that took.
+struct Timed {
+    inner: Arc<dyn Provider>,
+    stats: Arc<EmbedStats>,
+}
+
+#[async_trait]
+impl Provider for Timed {
+    fn id(&self) -> &nugget_core::ids::ProviderId {
+        self.inner.id()
+    }
+
+    fn meta(&self) -> ProviderMeta {
+        self.inner.meta()
+    }
+
+    async fn chat(&self, req: ChatRequest) -> nugget_core::Result<ChatStream> {
+        self.inner.chat(req).await
+    }
+
+    async fn embed(&self, texts: &[String]) -> nugget_core::Result<Vec<Vec<f32>>> {
+        self.embed_items(texts, &[]).await
+    }
+
+    async fn embed_items(
+        &self,
+        texts: &[String],
+        items: &[ItemRef],
+    ) -> nugget_core::Result<Vec<Vec<f32>>> {
+        let t = Instant::now();
+        let out = self.inner.embed_items(texts, items).await;
+        let ns = t.elapsed().as_nanos() as u64;
+        let s = &self.stats;
+        s.doc_ns.fetch_add(ns, Ordering::Relaxed);
+        s.doc_texts.fetch_add(texts.len() as u64, Ordering::Relaxed);
+        let chars: usize = texts.iter().map(|t| t.chars().count()).sum();
+        s.doc_chars.fetch_add(chars as u64, Ordering::Relaxed);
+        out
+    }
+
+    async fn embed_query(&self, texts: &[String]) -> nugget_core::Result<Vec<Vec<f32>>> {
+        let t = Instant::now();
+        let out = self.inner.embed_query(texts).await;
+        self.stats
+            .query_ms
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(t.elapsed().as_secs_f64() * 1000.0);
+        out
+    }
+
+    fn embed_prefixes(&self) -> (String, String) {
+        self.inner.embed_prefixes()
+    }
+
+    async fn prewarm(&self) -> nugget_core::Result<()> {
+        self.inner.prewarm().await
+    }
 }
 
 /// One isolated stack: temp home, encrypted store, ingest with one `files` source, retriever.
@@ -244,13 +499,16 @@ struct Stack {
     store: Store,
     ingest: Ingest,
     retriever: Retriever,
+    /// The measured retrieval variants (`retriever` is `variants.plain`).
+    variants: Variants,
     source: SourceId,
     // Last: removed after everything above is dropped.
     _home: tempfile::TempDir,
 }
 
 impl Stack {
-    async fn start(source: &str, router: Arc<Router>, seed: u64) -> Result<Self, BenchError> {
+    async fn start(source: &str, embedder: &Embedder, seed: u64) -> Result<Self, BenchError> {
+        let router = embedder.router();
         let home = tempfile::Builder::new().prefix("nugget-bench-").tempdir()?;
         let root = home.path().join("watched");
         std::fs::create_dir_all(&root)?;
@@ -280,13 +538,15 @@ impl Stack {
             .power(Arc::new(NoPowerPolicy))
             .start()
             .await?;
-        let retriever = Retriever::new(store.clone(), Some(router), RetrieveConfig::default());
+        let variants = embedder.variants(&store, &router);
+        let retriever = variants.plain.clone();
         Ok(Self {
             root,
             db_path,
             store,
             ingest,
             retriever,
+            variants,
             source: SourceId::new(source),
             _home: home,
         })
@@ -412,13 +672,56 @@ fn opts(strategy: Strategy, mmr: bool) -> SearchOptions {
     }
 }
 
-/// The retrieval modes measured, with their search options.
-const MODES: [(&str, Strategy, bool); 4] = [
-    ("bm25", Strategy::TextOnly, false),
-    ("vector", Strategy::VectorOnly, false),
-    ("hybrid", Strategy::Auto, false),
-    ("hybrid_mmr", Strategy::Auto, true),
+/// A retriever configuration measured on the same index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Variant {
+    /// `RetrieveConfig::default()` (reciprocal-rank fusion, no reranker).
+    Plain,
+    /// Score-aware fusion (`Fusion::Convex`).
+    Convex,
+    /// With the reranker, adaptive (the app's default).
+    Rerank,
+    /// With the reranker, not adaptive (every search waits for it; before the adaptive one).
+    RerankFixed,
+}
+
+struct Variants {
+    plain: Retriever,
+    convex: Retriever,
+    rerank: Option<Retriever>,
+    rerank_fixed: Option<Retriever>,
+}
+
+/// The retrieval modes measured: name, search options, and the retriever variant (reranking
+/// variants only when a reranker runs).
+const MODES: [(&str, Strategy, bool, Variant); 9] = [
+    ("bm25", Strategy::TextOnly, false, Variant::Plain),
+    ("vector", Strategy::VectorOnly, false, Variant::Plain),
+    ("hybrid", Strategy::Auto, false, Variant::Plain),
+    ("hybrid_mmr", Strategy::Auto, true, Variant::Plain),
+    ("hybrid_convex", Strategy::Auto, false, Variant::Convex),
+    ("hybrid_mmr_convex", Strategy::Auto, true, Variant::Convex),
+    ("hybrid_rerank", Strategy::Auto, false, Variant::Rerank),
+    ("hybrid_mmr_rerank", Strategy::Auto, true, Variant::Rerank),
+    (
+        "hybrid_mmr_rerank_fixed",
+        Strategy::Auto,
+        true,
+        Variant::RerankFixed,
+    ),
 ];
+
+impl Stack {
+    /// The retriever of a variant; `None` for a reranking variant without a reranker.
+    fn retriever_for(&self, v: Variant) -> Option<&Retriever> {
+        match v {
+            Variant::Plain => Some(&self.variants.plain),
+            Variant::Convex => Some(&self.variants.convex),
+            Variant::Rerank => self.variants.rerank.as_ref(),
+            Variant::RerankFixed => self.variants.rerank_fixed.as_ref(),
+        }
+    }
+}
 
 // ---------------------------------------------------------------- phase 1: eval set
 
@@ -427,8 +730,7 @@ async fn eval_phase(
     set: &EvalSet,
     seed: u64,
 ) -> Result<Vec<Metric>, BenchError> {
-    let router = embedder.router();
-    let stack = Stack::start("bench-eval", router.clone(), seed).await?;
+    let stack = Stack::start("bench-eval", embedder, seed).await?;
     for d in &set.docs {
         stack.write(
             &format!("{}.md", d.id),
@@ -446,16 +748,22 @@ async fn eval_phase(
     };
     let mut out = Vec::new();
     let modes = [
-        ("text_only", Strategy::TextOnly, false),
-        ("hybrid", Strategy::Auto, false),
-        ("hybrid_mmr", Strategy::Auto, true),
+        ("text_only", Strategy::TextOnly, false, Variant::Plain),
+        ("hybrid", Strategy::Auto, false, Variant::Plain),
+        ("hybrid_mmr", Strategy::Auto, true, Variant::Plain),
+        ("hybrid_convex", Strategy::Auto, false, Variant::Convex),
+        ("hybrid_mmr_convex", Strategy::Auto, true, Variant::Convex),
+        // What the reranker can do: the eval set is too small for the adaptive pool to matter.
+        ("hybrid_rerank", Strategy::Auto, false, Variant::RerankFixed),
     ];
     let mut recall10 = HashMap::new();
-    for (mode, strategy, mmr) in modes {
+    for (mode, strategy, mmr, variant) in modes {
+        let Some(retriever) = stack.retriever_for(variant) else {
+            continue;
+        };
         let (mut r1, mut r5, mut r10, mut mrr, mut ndcg) = (0.0, 0.0, 0.0, 0.0, 0.0);
         for q in &set.queries {
-            let res = stack
-                .retriever
+            let res = retriever
                 .search_with(&q.query, EVAL_DEPTH, opts(strategy, mmr))
                 .await?;
             if strategy == Strategy::Auto && res.mode.is_text_only() {
@@ -509,7 +817,7 @@ async fn eval_phase(
     // nugget-retrieve eval test does: isolates what the pipeline (extraction, chunking) changes.
     let direct = Store::open_in_memory()?;
     eval::index(&direct, set, Some(embedder.provider.as_ref())).await?;
-    let retriever = Retriever::new(direct.clone(), Some(router), RetrieveConfig::default());
+    let retriever = embedder.retriever(direct.clone(), embedder.router());
     let report = eval::run(&direct, &retriever, set).await?;
     for (mode, name) in [
         (EvalMode::TextOnly, "text_only"),
@@ -606,7 +914,7 @@ async fn synthetic_phase(
     drop(ix);
 
     // Phase 2: initial ingest.
-    let stack = Stack::start("bench-corpus", embedder.router(), seed).await?;
+    let stack = Stack::start("bench-corpus", embedder, seed).await?;
     let mut live: HashMap<usize, LiveDoc> = HashMap::with_capacity(corpus.docs.len());
     let mut bytes = 0usize;
     for doc in &corpus.docs {
@@ -624,6 +932,7 @@ async fn synthetic_phase(
             },
         );
     }
+    let embedded_before = embedder.stats.docs();
     let t = Instant::now();
     stack.add_source().await?;
     stack
@@ -672,6 +981,45 @@ async fn synthetic_phase(
             "Chunks produced by the initial ingest",
         ),
     ]);
+    let embedded = embedder.stats.docs();
+    let (texts, chars, ms) = (
+        embedded.0 - embedded_before.0,
+        embedded.1 - embedded_before.1,
+        embedded.2 - embedded_before.2,
+    );
+    if texts > 0 {
+        out.extend([
+            Metric::new(
+                "ingest.embed.ms_per_1k_chunks",
+                ms * 1000.0 / texts as f64,
+                "ms",
+                Direction::LowerIsBetter,
+                "Initial ingest: time spent in embedding calls per 1,000 chunks embedded (sum of \
+                 call durations; calls may overlap)",
+            ),
+            Metric::new(
+                "ingest.embed.ms_per_1k_items",
+                ms * 1000.0 / corpus.docs.len() as f64,
+                "ms",
+                Direction::LowerIsBetter,
+                "Initial ingest: time spent in embedding calls per 1,000 items (files)",
+            ),
+            Metric::new(
+                "ingest.embed.share_of_wall",
+                (ms / 1000.0 / wall).min(1.0),
+                "ratio",
+                Direction::Info,
+                "Initial ingest: embedding call time over ingest wall time (capped at 1)",
+            ),
+            Metric::new(
+                "ingest.embed.chars_per_chunk",
+                chars as f64 / texts as f64,
+                "chars",
+                Direction::Info,
+                "Mean characters per embedded chunk (task prefix included when the model has one)",
+            ),
+        ]);
+    }
     let db_initial = db_bytes(&stack.db_path);
     out.push(Metric::new(
         "resources.db_bytes_per_1k_items",
@@ -689,9 +1037,39 @@ async fn synthetic_phase(
         .iter()
         .map(|d| Stack::key(&rel_path(d.id, p.files_per_dir, 0)))
         .collect();
+    embedder.stats.take_query_ms();
     out.extend(known_item(&stack, &queries, &keys, &baseline, dump).await?);
+    if let Some(s) = summarize(&embedder.stats.take_query_ms()) {
+        out.extend([
+            Metric::new(
+                "query.embed.p50_ms",
+                s.p50,
+                "ms",
+                Direction::LowerIsBetter,
+                "Query embedding call latency during known-item retrieval, median",
+            ),
+            Metric::new(
+                "query.embed.p95_ms",
+                s.p95,
+                "ms",
+                Direction::LowerIsBetter,
+                "Query embedding call latency during known-item retrieval, 95th percentile",
+            ),
+        ]);
+    }
 
     // Phase 4: freshness and propagation.
+    if !p.freshness {
+        out.push(Metric::new(
+            "resources.db_bytes",
+            db_bytes(&stack.db_path) as f64,
+            "bytes",
+            Direction::Info,
+            "Encrypted database on disk (main file + WAL + SHM) at the end of the run",
+        ));
+        stack.shutdown().await;
+        return Ok(out);
+    }
     stack.wait_watching(Duration::from_secs(120)).await?;
     out.extend(freshness(&stack, &corpus, p, seed, &mut live).await?);
     let status = stack.ingest.status().await?;
@@ -727,30 +1105,36 @@ async fn known_item(
 ) -> Result<Vec<Metric>, BenchError> {
     const KS: [usize; 3] = [1, 5, 10];
     let mut out = Vec::new();
-    let mut latencies_ms = Vec::with_capacity(queries.len());
+    let mut latencies_ms: HashMap<&str, Vec<f64>> = HashMap::new();
     let fake_hybrid = baseline.get("retrieval.hybrid.recall@10").copied();
     let key_ids: HashMap<&ItemKey, usize> = if dump.is_some() {
         keys.iter().enumerate().map(|(i, k)| (k, i)).collect()
     } else {
         HashMap::new()
     };
-    for (mode, strategy, mmr) in MODES {
+    for (mode, strategy, mmr, variant) in MODES {
+        let Some(retriever) = stack.retriever_for(variant) else {
+            continue;
+        };
         let mut hits_at = [0usize; KS.len()];
         let mut rr = 0.0;
+        let mut dcg = 0.0;
         let mut fallbacks = 0usize;
+        let mut reranked = 0usize;
         let mut ranks = Vec::new();
         for q in queries {
             let t = Instant::now();
-            let res = stack
-                .retriever
+            let res = retriever
                 .search_with(&q.text, DEPTH, opts(strategy, mmr))
                 .await?;
-            if mode == "hybrid_mmr" {
-                latencies_ms.push(t.elapsed().as_secs_f64() * 1000.0);
-            }
+            latencies_ms
+                .entry(mode)
+                .or_default()
+                .push(t.elapsed().as_secs_f64() * 1000.0);
             if strategy == Strategy::Auto && res.mode.is_text_only() {
                 fallbacks += 1;
             }
+            reranked += usize::from(res.reranked);
             let target = &keys[q.relevant];
             if dump.is_some() {
                 ranks.push(doc_ids(stack, &key_ids, &res.items));
@@ -761,6 +1145,8 @@ async fn known_item(
                 .position(|i| i.item.source == stack.source && i.item.key == *target)
             {
                 rr += 1.0 / (rank + 1) as f64;
+                // One relevant document: the ideal DCG is 1.
+                dcg += 1.0 / ((rank + 2) as f64).log2();
                 for (i, k) in KS.iter().enumerate() {
                     if rank < *k {
                         hits_at[i] += 1;
@@ -801,6 +1187,23 @@ async fn known_item(
             Direction::HigherIsBetter,
             format!("Mean reciprocal rank of the target in the Retriever's {mode} top 10"),
         ));
+        out.push(Metric::new(
+            format!("retrieval.{mode}.ndcg@10"),
+            dcg / n,
+            "ratio",
+            Direction::HigherIsBetter,
+            format!("nDCG@10 of the Retriever's {mode} ranking (one relevant document per query)"),
+        ));
+        if reranked > 0 {
+            out.push(Metric::new(
+                format!("retrieval.{mode}.reranked_share"),
+                reranked as f64 / n,
+                "ratio",
+                Direction::Info,
+                "Share of queries the reranker scored (the rest timed out or failed and kept the \
+                 first-stage order)",
+            ));
+        }
         if strategy == Strategy::Auto {
             out.push(Metric::new(
                 format!("retrieval.{mode}.text_only_fallbacks"),
@@ -845,20 +1248,68 @@ async fn known_item(
         }
         d.write(&path, queries)?;
     }
-    if let Some(s) = summarize(&latencies_ms) {
+    if let Some(st) = stack
+        .variants
+        .rerank
+        .as_ref()
+        .and_then(Retriever::rerank_status)
+    {
+        let why = st.reason.clone().unwrap_or_else(|| "within budget".into());
         out.push(Metric::new(
-            "query.latency.p50_ms",
+            "rerank.adaptive.pool",
+            st.pool as f64,
+            "count",
+            Direction::Info,
+            format!("Adaptive reranker's pool after the known-item queries (0: paused): {why}"),
+        ));
+        if let Some(ms) = st.per_passage_ms {
+            out.push(Metric::new(
+                "rerank.adaptive.per_passage_ms",
+                ms,
+                "ms",
+                Direction::Info,
+                "Adaptive reranker's measured time per passage (moving average)",
+            ));
+        }
+    }
+    // `query.latency.*` is the app's default search (hybrid + MMR); `query.latency_rerank.*`
+    // the same with the reranker.
+    for (mode, key, what) in [
+        ("hybrid_mmr", "latency", "hybrid + MMR"),
+        (
+            "hybrid_mmr_convex",
+            "latency_convex",
+            "hybrid with convex fusion + MMR",
+        ),
+        (
+            "hybrid_mmr_rerank",
+            "latency_rerank",
+            "hybrid + adaptive rerank + MMR",
+        ),
+        (
+            "hybrid_mmr_rerank_fixed",
+            "latency_rerank_fixed",
+            "hybrid + rerank on every search + MMR",
+        ),
+    ] {
+        let Some(s) = latencies_ms.get(mode).and_then(|l| summarize(l)) else {
+            continue;
+        };
+        out.push(Metric::new(
+            format!("query.{key}.p50_ms"),
             s.p50,
             "ms",
             Direction::LowerIsBetter,
-            "Retriever::search latency (hybrid + MMR, query embedding included), median",
+            format!("Retriever::search latency ({what}, query embedding included), median"),
         ));
         out.push(Metric::new(
-            "query.latency.p95_ms",
+            format!("query.{key}.p95_ms"),
             s.p95,
             "ms",
             Direction::LowerIsBetter,
-            "Retriever::search latency (hybrid + MMR, query embedding included), 95th percentile",
+            format!(
+                "Retriever::search latency ({what}, query embedding included), 95th percentile"
+            ),
         ));
     }
     Ok(out)
@@ -1267,6 +1718,12 @@ pub fn peak_rss_bytes() -> Option<u64> {
     {
         None
     }
+}
+
+/// Peak resident set size of process `pid` in bytes (Linux; `None` elsewhere or once it exited).
+pub fn process_peak_rss_bytes(pid: u32) -> Option<u64> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    parse_vm_hwm(&status)
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]

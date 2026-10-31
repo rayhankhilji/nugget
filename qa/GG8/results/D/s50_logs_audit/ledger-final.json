@@ -1,0 +1,68 @@
+[
+ {
+  "at": "2026-10-30T19:51:28.503626373Z",
+  "bytes_received": 68,
+  "bytes_sent": 538,
+  "feature": "sync:caldav",
+  "host": "dav.example.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:24.056773289Z",
+  "bytes_received": 68,
+  "bytes_sent": 538,
+  "feature": "sync:caldav",
+  "host": "dav.example.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.339440116Z",
+  "bytes_received": 68,
+  "bytes_sent": 538,
+  "feature": "sync:caldav",
+  "host": "dav.example.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.07005162Z",
+  "bytes_received": 1053,
+  "bytes_sent": 3624,
+  "feature": "draft",
+  "host": "api.anthropic.com",
+  "items": [
+   {
+    "key": "0:weekly-notes.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:acme-renewal.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:lisbon-trip.md",
+    "source": "files-1"
+   }
+  ]
+ },
+ {
+  "at": "2026-10-30T19:51:22.003843254Z",
+  "bytes_received": 1053,
+  "bytes_sent": 1387,
+  "feature": "ask",
+  "host": "api.anthropic.com",
+  "items": [
+   {
+    "key": "0:acme-renewal.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:weekly-notes.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:lisbon-trip.md",
+    "source": "files-1"
+   }
+  ]
+ }
+]

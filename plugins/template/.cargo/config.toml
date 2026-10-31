@@ -1,0 +1,8 @@
+[build]
+target = "wasm32-wasip2"
+
+# `cargo test-native`: run this plugin's tests on this machine's own target (Linux, macOS or
+# Windows), where the SDK's host calls go to `nugget_plugin_sdk::testing::TestHost`.
+[alias]
+test-native = "test --target host-tuple"
+clippy-native = "clippy --target host-tuple --all-targets"

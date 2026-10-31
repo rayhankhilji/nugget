@@ -1,0 +1,53 @@
+{
+ "ingest_s": 35,
+ "expected": 315,
+ "ingest_status": {
+  "embedding_provider": null,
+  "freshness_p50_ms": 73,
+  "freshness_p95_ms": 83,
+  "queue_depth": 0,
+  "sources": [
+   {
+    "chunks": 315,
+    "enabled": true,
+    "id": "files-1",
+    "items": 315,
+    "kind": "files",
+    "last_error": null,
+    "last_sync": "2026-10-30T19:28:12.785656384Z",
+    "name": "Dana's files",
+    "settings": {
+     "roots": [
+      "/tmp/claude-0/gg2-time/corpus"
+     ]
+    },
+    "state": "watching"
+   }
+  ],
+  "triage_provider": null
+ },
+ "status": {
+  "audit_chain_ok": true,
+  "chunks": 315,
+  "items": 315,
+  "protocol": 1,
+  "providers": [
+   {
+    "capabilities": null,
+    "error": null,
+    "id": "local",
+    "kind": "openai_compatible",
+    "locality": "on_device",
+    "model": "capture",
+    "tiers": [
+     "triage",
+     "light",
+     "synthesis"
+    ]
+   }
+  ],
+  "uptime_secs": 36,
+  "version": "0.0.1"
+ },
+ "wall_clock_utc": "2026-10-30T19:28:47.475902+00:00"
+}

@@ -17,6 +17,13 @@
 //! restarts its listing, so no event is wrongly taken as missing.
 //!
 //! Versions are `<etag>#<start>:<end>` (Unix seconds), so the window test needs no request.
+//!
+//! Events are parsed one by one: a malformed entry never fails its page. Its `id` and
+//! `status` are still read, so a malformed cancellation is still a delete, and any other
+//! malformed event counts as listed (its indexed version is kept, never taken for missing).
+//! Existence checks read only `status`, and a check that fails for one event keeps it.
+//!
+//! Scopes: `calendar.readonly` only (list calendars and read events); nothing is ever written.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -173,6 +180,35 @@ impl std::fmt::Debug for CalendarConnector {
     }
 }
 
+/// `null` reads as the default (Google sends `"attendees": null` and the like).
+fn null_default<'de, D, T>(d: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
+/// What is read from an event entry that does not parse as a whole.
+#[derive(Deserialize, Default)]
+struct EventStub {
+    #[serde(default, deserialize_with = "lenient_string")]
+    id: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    status: Option<String>,
+}
+
+/// A string, or nothing for any other JSON value.
+fn lenient_string<'de, D>(d: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match Value::deserialize(d)? {
+        Value::String(s) => Some(s),
+        _ => None,
+    })
+}
+
 #[derive(Deserialize)]
 struct CalendarList {
     #[serde(default)]
@@ -184,9 +220,9 @@ struct CalendarList {
 #[derive(Deserialize)]
 struct CalendarEntry {
     id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     selected: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     deleted: bool,
 }
 
@@ -196,8 +232,9 @@ struct EventList {
     summary: Option<String>,
     #[serde(default, rename = "timeZone")]
     time_zone: Option<String>,
-    #[serde(default)]
-    items: Vec<Event>,
+    /// Parsed one by one, so one malformed event does not fail the page.
+    #[serde(default, deserialize_with = "null_default")]
+    items: Vec<Value>,
     #[serde(rename = "nextPageToken")]
     next_page_token: Option<String>,
     #[serde(rename = "nextSyncToken")]
@@ -218,6 +255,7 @@ struct Event {
     description: Option<String>,
     location: Option<String>,
     organizer: Option<Person>,
+    #[serde(deserialize_with = "null_default")]
     attendees: Vec<Attendee>,
     start: Option<EventTime>,
     end: Option<EventTime>,
@@ -245,7 +283,9 @@ struct Attendee {
     display_name: Option<String>,
     #[serde(rename = "responseStatus")]
     response_status: Option<String>,
+    #[serde(deserialize_with = "null_default")]
     optional: bool,
+    #[serde(deserialize_with = "null_default")]
     resource: bool,
 }
 
@@ -478,6 +518,25 @@ impl CalendarConnector {
                 info.time_zone = page.time_zone.clone();
             }
             for ev in page.items {
+                let ev = match serde_json::from_value::<Event>(ev.clone()) {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        let stub: EventStub = serde_json::from_value(ev).unwrap_or_default();
+                        let Some(id) = stub.id.filter(|id| valid_event_id(id)) else {
+                            tracing::warn!(source = %self.ctx.source, calendar = cal, "gcal: skipping a malformed event without an id ({e})");
+                            continue;
+                        };
+                        let key = format!("{cal}/{id}");
+                        if stub.status.as_deref() == Some("cancelled") {
+                            sink.send(Change::Delete(ItemKey::new(key))).await?;
+                        } else {
+                            // Keep what is indexed; never take it for missing.
+                            tracing::warn!(source = %self.ctx.source, calendar = cal, event = %id, "gcal: malformed event; keeping the indexed version ({e})");
+                            seen.insert(key);
+                        }
+                        continue;
+                    }
+                };
                 if !valid_event_id(&ev.id) {
                     continue;
                 }
@@ -567,7 +626,16 @@ impl CalendarConnector {
             })
             .buffered(VERIFY_CONCURRENCY);
         while let Some((key, exists)) = checks.next().await {
-            if !exists? {
+            let exists = match exists {
+                Ok(x) => x,
+                // This event only: keep it rather than fail every resync on it.
+                Err(e @ (Error::Network(_) | Error::Invalid(_) | Error::Other(_))) => {
+                    tracing::warn!(source = %self.ctx.source, event = %key, "gcal: could not check an event; keeping it: {e}");
+                    true
+                }
+                Err(e) => return Err(e),
+            };
+            if !exists {
                 sink.send(Change::Delete(ItemKey::new(key))).await?;
             }
         }
@@ -583,7 +651,8 @@ impl CalendarConnector {
         match resp.status.as_u16() {
             404 | 410 => Ok(false),
             200 => {
-                let ev: Event = GoogleApi::json(&resp, "gcal events.get")?;
+                // Only the status matters; the rest may be malformed.
+                let ev: EventStub = GoogleApi::json(&resp, "gcal events.get")?;
                 Ok(ev.status.as_deref() != Some("cancelled"))
             }
             s => Err(Error::Other(format!("gcal events.get: HTTP {s}"))),

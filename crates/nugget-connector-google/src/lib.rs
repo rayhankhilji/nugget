@@ -17,6 +17,7 @@
 //! and redirects are never followed. Endpoints are injectable with [`GoogleEndpoints`] for tests.
 
 mod api;
+mod carry;
 mod drive;
 mod drive_content;
 mod gcal;

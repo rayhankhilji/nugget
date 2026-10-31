@@ -786,7 +786,7 @@ impl Drafter {
     /// In order, it skips when: `[draft.read_ahead]` is off ([`ReadAheadSkip::Disabled`]);
     /// drafting would be refused here ([`ReadAheadSkip::Refused`]); the draft would go to a
     /// cloud provider ([`ReadAheadSkip::Cloud`]: nothing at all is sent, not even a connection
-    /// prewarm, and no retrieval runs); there is no [`Warmer`] or no provider
+    /// prewarm, and no retrieval runs); there is no [`Warmer`] or no available provider
     /// ([`ReadAheadSkip::Unavailable`]); a read-ahead sent its prefill less than
     /// `min_interval_ms` ago ([`ReadAheadSkip::RateLimited`]). Otherwise it cancels any
     /// read-ahead in flight, prepares the draft exactly as `begin` does (retrieval and voice
@@ -822,6 +822,9 @@ impl Drafter {
             .ok_or(ReadAheadSkip::Unavailable)?;
         if provider.meta().locality == Locality::Cloud {
             return Err(ReadAheadSkip::Cloud);
+        }
+        if !provider.available() {
+            return Err(ReadAheadSkip::Unavailable);
         }
         let warmer = self.warmer().ok_or(ReadAheadSkip::Unavailable)?;
         let app = ctx.app.id.as_deref().map(normalize_app_id);
@@ -1079,7 +1082,8 @@ impl Drafter {
     }
 
     /// Providers to try, and whether the choice was explicit (request or per-app setting).
-    /// Routed by tier, a non-cloud first candidate puts [`LocalBudget::provider`] (when set,
+    /// Routed by tier, providers that are not [`available`](Provider::available) are left out,
+    /// and a non-cloud first candidate (before that) puts [`LocalBudget::provider`] (when set,
     /// known to the router and not a cloud provider) first, the tier's candidates after it as
     /// fallback; while it is cooling down after a failure it goes after them instead.
     fn candidates(
@@ -1096,12 +1100,16 @@ impl Drafter {
             return Ok((vec![p], true));
         }
         let mut c = router.candidates(self.inner.config.tier, &Capabilities::default());
-        if c.is_empty() {
-            return Err(Error::NotFound(format!(
+        let no_provider = || {
+            Error::NotFound(format!(
                 "no provider is available for the {:?} tier",
                 self.inner.config.tier
-            )));
-        }
+            ))
+        };
+        let routed_local = c.first().ok_or_else(no_provider)?.meta().locality != Locality::Cloud;
+        // Unavailable providers (a runtime slot without its model) are skipped, as `begin`'s
+        // fallback would skip them, so prewarm and read-ahead report the provider drafts use.
+        c.retain(|p| p.available());
         let local = self
             .inner
             .config
@@ -1109,9 +1117,9 @@ impl Drafter {
             .provider
             .as_ref()
             .and_then(|id| router.provider(id))
-            .filter(|p| p.meta().locality != Locality::Cloud);
+            .filter(|p| p.available() && p.meta().locality != Locality::Cloud);
         if let Some(local) = local
-            && c[0].meta().locality != Locality::Cloud
+            && routed_local
         {
             c.retain(|p| p.id() != local.id());
             let cooling =
@@ -1121,6 +1129,9 @@ impl Drafter {
             } else {
                 c.insert(0, local);
             }
+        }
+        if c.is_empty() {
+            return Err(no_provider());
         }
         Ok((c, false))
     }

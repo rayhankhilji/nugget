@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget QA//GG5//EN
+BEGIN:VEVENT
+UID:harbor-standup-20260310@brightwell.example
+DTSTAMP:20260305T090000Z
+DTSTART:20260310T093000Z
+DTEND:20260310T094500Z
+RRULE:FREQ=WEEKLY;BYDAY=TU,WE,TH
+SUMMARY:Harbor stand-up
+LOCATION:Brightwell HQ, Room Fathom
+DESCRIPTION:Fifteen minutes: blockers, pipeline status, migration checklist.
+ORGANIZER;CN="Mara Okafor":mailto:mara.okafor@brightwell.example
+ATTENDEE;CN="Mara Okafor";PARTSTAT=ACCEPTED:mailto:mara.okafor@brightwell.example
+ATTENDEE;CN="Sam Patel";PARTSTAT=ACCEPTED:mailto:sam.patel@brightwell.example
+END:VEVENT
+END:VCALENDAR

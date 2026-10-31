@@ -2,17 +2,23 @@
 //! into [`ThreadMessage`]s, plus mail recipients and subject.
 //!
 //! The approach is platform-neutral and runs on snapshots, so it is tested on recorded trees:
-//! 1. Walk the composer's ancestors nearest-first. At each level, score every container in the
-//!    sibling subtrees by how many message-like children it has, its role (`log` > `list`), its
-//!    name ("Messages", "Conversation"...), and its geometry (same column as the composer and
-//!    above it; sidebars are penalised). The first level with a good candidate wins.
+//! 1. Walk the composer's ancestors nearest-first, starting at the editor root when focus sits
+//!    inside a contenteditable (a paragraph of the draft is not the composer). At each level,
+//!    score every container in the sibling subtrees by how many message-like children it has,
+//!    its role (`log` > `list`), its name ("Messages", "Conversation"...), and its geometry (same
+//!    column as the composer and above it). Sidebars, navigation landmarks and lists of other
+//!    conversations (items that are one link each) are penalised; table rows are never a
+//!    thread. The first level with a good candidate wins.
 //! 2. Each child item becomes a message: its text leaves are split into author, timestamp and
 //!    body; summaries such as "Your iMessage, hi, 10:41" or "Alice: hi" are parsed when the
 //!    item has no text children.
 //! 3. `from_me` comes from the author ("You", or one of the configured self names), the item's
-//!    summary, or (chat apps) bubble alignment.
-//! 4. Mail: recipients from To/Cc/Bcc fields, the subject from the Subject field or the window
-//!    title, and the quoted original when the composer holds one.
+//!    summary, or (chat apps) bubble alignment. When one author is the user's "You", the other
+//!    named authors are not the user.
+//! 4. Mail (mail apps, and any page with a Subject or To field next to the composer):
+//!    recipients from To/Cc/Bcc fields, the subject from the Subject field or the window title,
+//!    quoted history ("On ... wrote:" and what follows, `>` lines) cut from each message, and the
+//!    quoted original when the composer holds one.
 //!
 //! The result keeps the newest messages within [`ThreadLimits`].
 
@@ -20,7 +26,7 @@ use nugget_core::ipc::{AppInfo, ThreadMessage};
 
 use crate::role::Role;
 use crate::sanitize;
-use crate::tree::{Node, Snapshot};
+use crate::tree::{Node, Snapshot, editor_root_path};
 
 /// Default cap on messages returned.
 pub const MAX_MESSAGES: usize = 30;
@@ -200,19 +206,24 @@ pub fn extract(
     } else {
         detect_family(app)
     };
-    let mut ctx = ThreadContext::default();
+    let (recipients, subject) = if family.is_mail() {
+        (recipients(&snap.root), subject(&snap.root, app, family))
+    } else {
+        compose_fields_near_composer(snap)
+    };
+    // A page with a To or Subject field right around the composer is a mail compose.
+    let mail = family.is_mail() || !recipients.is_empty() || subject.is_some();
     let mut messages = find_container(snap)
-        .map(|c| messages_from_container(c, family, limits))
+        .map(|c| messages_from_container(c, family, mail, limits))
         .unwrap_or_default();
-    if family.is_mail() {
-        ctx.recipients = recipients(&snap.root);
-        ctx.subject = subject(&snap.root, app, family);
-        if messages.is_empty() {
-            messages = quoted_messages(field_value);
-        }
+    if mail && messages.is_empty() {
+        messages = quoted_messages(field_value);
     }
-    ctx.messages = cap_messages(messages, limits);
-    ctx
+    ThreadContext {
+        messages: cap_messages(messages, limits),
+        recipients,
+        subject,
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -229,6 +240,7 @@ const MESSAGE_WORDS: &[&str] = &[
     "replies",
 ];
 const NAVIGATION_WORDS: &[&str] = &[
+    "conversations",
     "chat list",
     "list of chats",
     "chats",
@@ -291,13 +303,108 @@ fn is_message_like(n: &Node) -> bool {
     chars >= 2 && !contains_editable(n)
 }
 
+/// Labels of regions that hold other conversations or folders, whose whole subtree is
+/// navigation (a narrower list than [`NAVIGATION_WORDS`], which also applies to the container
+/// itself).
+const NAVIGATION_REGIONS: &[&str] = &[
+    "sidebar",
+    "conversations",
+    "chat list",
+    "chats",
+    "channels",
+    "inbox",
+    "folders",
+    "mailboxes",
+    "contacts",
+];
+
+/// A navigation or complementary landmark (AX subroles, AT-SPI/UIA `xml-roles`), or a region
+/// labelled as a list of other conversations.
+fn is_navigation_region(n: &Node) -> bool {
+    let raw = n.raw_role.to_ascii_lowercase();
+    if raw.contains("landmarknavigation") || raw.contains("landmarkcomplementary") {
+        return true;
+    }
+    if n.attr("xml_roles").is_some_and(|x| {
+        x.split_whitespace()
+            .any(|r| r == "navigation" || r == "complementary")
+    }) {
+        return true;
+    }
+    let label = label_of(n);
+    !label.is_empty() && NAVIGATION_REGIONS.iter().any(|w| label.contains(w))
+}
+
+/// A form: a secure field, a text input, a check box or combo box, or an ARIA form inside.
+fn holds_form_controls(c: &Node) -> bool {
+    c.iter().take(1000).any(|d| {
+        d.states.secure
+            || d.role.is_text_input()
+            || matches!(d.role, Role::CheckBox | Role::ComboBox)
+            || d.attr("xml_roles")
+                .is_some_and(|x| x.split_whitespace().any(|r| r == "form"))
+    })
+}
+
+/// A list box, menu, tree or radio group of options (ARIA roles on web content).
+fn is_picker(c: &Node) -> bool {
+    let picker_role = |n: &Node, roles: &[&str]| {
+        n.attr("xml_roles")
+            .is_some_and(|x| x.split_whitespace().any(|r| roles.contains(&r)))
+    };
+    picker_role(
+        c,
+        &[
+            "listbox",
+            "menu",
+            "menubar",
+            "tree",
+            "radiogroup",
+            "tablist",
+        ],
+    ) || (!c.children.is_empty()
+        && c.children
+            .iter()
+            .all(|k| picker_role(k, &["option", "menuitem", "treeitem", "radio", "tab"])))
+}
+
+/// An item whose text all sits in one link or button (an entry in a list of conversations,
+/// with its preview): following single children down to a link or button.
+fn is_link_wrapped(item: &Node) -> bool {
+    let mut n = item;
+    for _ in 0..6 {
+        if matches!(
+            n.role,
+            Role::Link | Role::Button | Role::MenuItem | Role::Tab
+        ) {
+            return true;
+        }
+        match n.children.as_slice() {
+            [only] => n = only,
+            _ => return false,
+        }
+    }
+    false
+}
+
 fn overlap_x(a: &crate::Rect, b: &crate::Rect) -> f64 {
     let l = a.x.max(b.x);
     let r = (a.x + a.width).min(b.x + b.width);
     (r - l).max(0.0)
 }
 
-fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
+/// Score `c` as the message container. `in_nav`: it sits in a navigation region.
+fn score(c: &Node, composer: Option<&Node>, precedes: bool, in_nav: bool) -> f64 {
+    // A table row's cells are the columns of one record, not messages; forms (a password
+    // prompt next to the composer) and pickers (a list box of recipient chips) are controls.
+    // UIA and AX carry no ARIA role for a chips list: one labelled "To"/"Cc" is a field.
+    if c.role == Role::Row
+        || holds_form_controls(c)
+        || is_picker(c)
+        || field_label(c).is_some_and(|l| is_recipient_label_exact(&l))
+    {
+        return 0.0;
+    }
     let items: Vec<&Node> = c.children.iter().filter(|k| is_message_like(k)).collect();
     let n = items.len();
     let label = label_of(c);
@@ -317,8 +424,10 @@ fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
         Role::List | Role::Table => 3.0,
         _ => 0.0,
     };
-    if named_nav {
-        s *= 0.2;
+    // Penalties multiply the whole score, bonuses included.
+    let mut factor = 1.0;
+    if named_nav || in_nav {
+        factor *= 0.2;
     } else if named_msgs {
         s += 6.0;
     }
@@ -332,16 +441,16 @@ fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
     });
     let avg = total_chars as f64 / n as f64;
     if avg < 14.0 {
-        s *= 0.4;
+        factor *= 0.4;
     }
     if structured == 0 && !matches!(c.role, Role::Log | Role::List | Role::Table) {
-        s *= 0.5;
+        factor *= 0.5;
     }
-    if items
-        .iter()
-        .all(|k| matches!(k.role, Role::Link | Role::MenuItem | Role::Tab))
-    {
-        s *= 0.2;
+    let wrapped = items.iter().filter(|k| is_link_wrapped(k)).count();
+    if wrapped == n {
+        factor *= 0.2;
+    } else if wrapped * 2 >= n {
+        factor *= 0.4;
     }
     if let (Some(cb), Some(fb)) = (c.bounds, composer.and_then(|f| f.bounds)) {
         if cb.width > 0.0 && fb.width > 0.0 {
@@ -349,7 +458,7 @@ fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
             if ov >= 0.5 {
                 s += 4.0;
             } else if ov < 0.1 {
-                s *= 0.3;
+                factor *= 0.3;
             }
             if cb.y + cb.height <= fb.y + fb.height * 0.5 + 4.0 {
                 s += 2.0;
@@ -358,13 +467,52 @@ fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
     } else if precedes {
         s += 1.0;
     }
-    s
+    s * factor
 }
 
-/// The best message container around the focused element, searching outward.
+/// Visit the containers under `n` (pre-order, bounded), with whether each sits in a navigation
+/// region.
+fn visit_containers<'a>(
+    n: &'a Node,
+    in_nav: bool,
+    budget: &mut usize,
+    f: &mut impl FnMut(&'a Node, bool),
+) {
+    if *budget == 0 {
+        return;
+    }
+    *budget -= 1;
+    if n.children.is_empty() {
+        return;
+    }
+    let nav = in_nav || is_navigation_region(n);
+    f(n, nav);
+    for c in &n.children {
+        visit_containers(c, nav, budget, f);
+    }
+}
+
+/// Ancestors of the node at `path`, nearest first, each with the index of the child on the path.
+fn ancestors_at<'a>(root: &'a Node, path: &[usize]) -> Vec<(&'a Node, usize)> {
+    let mut out = Vec::with_capacity(path.len());
+    let mut n = root;
+    for &i in path {
+        out.push((n, i));
+        match n.children.get(i) {
+            Some(c) => n = c,
+            None => break,
+        }
+    }
+    out.reverse();
+    out
+}
+
+/// The best message container around the focused element (the editor root when focus is
+/// inside one), searching outward.
 pub fn find_container(snap: &Snapshot) -> Option<&Node> {
-    let composer = snap.focused();
-    for (level, (anc, on_path)) in snap.ancestors().into_iter().enumerate() {
+    let path = editor_root_path(snap);
+    let composer = snap.node_at(&path);
+    for (level, (anc, on_path)) in ancestors_at(&snap.root, &path).into_iter().enumerate() {
         if level >= MAX_LEVELS {
             break;
         }
@@ -373,15 +521,13 @@ pub fn find_container(snap: &Snapshot) -> Option<&Node> {
             if j == on_path {
                 continue;
             }
-            for c in sib.iter().take(5000) {
-                if c.children.is_empty() {
-                    continue;
-                }
-                let s = score(c, composer, j < on_path);
+            let mut budget = 5000;
+            visit_containers(sib, false, &mut budget, &mut |c, in_nav| {
+                let s = score(c, composer, j < on_path, in_nav);
                 if s >= 3.0 && best.is_none_or(|(b, _)| s > b) {
                     best = Some((s, c));
                 }
-            }
+            });
         }
         if let Some((_, c)) = best {
             return Some(c);
@@ -437,9 +583,36 @@ struct Leaf<'a> {
     role: Role,
     text: &'a str,
     x: Option<f64>,
+    /// Top and height, to tell lines apart where one parent holds several.
+    y: Option<(f64, f64)>,
+    /// Identity of the parent element: leaves of one parent are runs of the same line.
+    parent: usize,
+}
+
+impl Leaf<'_> {
+    /// Whether `next` continues this leaf's line (text runs and links in one block).
+    fn same_line(&self, next: &Leaf<'_>) -> bool {
+        let inline = |r: Role| matches!(r, Role::StaticText | Role::Link);
+        // Flat items (UIA) hold every line under one parent: the runs must also overlap.
+        let overlap = match (self.y, next.y) {
+            (Some((a, ah)), Some((b, bh))) => a.max(b) < (a + ah).min(b + bh),
+            _ => true,
+        };
+        self.parent == next.parent && inline(self.role) && inline(next.role) && overlap
+    }
 }
 
 fn collect_leaves<'a>(n: &'a Node, out: &mut Vec<Leaf<'a>>) {
+    collect_leaves_in(n, 0, None, out);
+}
+
+/// `parent_x`: the left edge of the parent block, where a line that a link continues starts.
+fn collect_leaves_in<'a>(
+    n: &'a Node,
+    parent: usize,
+    parent_x: Option<f64>,
+    out: &mut Vec<Leaf<'a>>,
+) {
     if out.len() >= 64 || n.states.secure {
         return;
     }
@@ -447,10 +620,17 @@ fn collect_leaves<'a>(n: &'a Node, out: &mut Vec<Leaf<'a>>) {
         return;
     }
     if let Some(t) = n.own_text() {
+        // A link sits mid-line, after text Firefox keeps in its parent's hypertext.
+        let x = match n.role {
+            Role::Link => parent_x.or(n.bounds.map(|b| b.x)),
+            _ => n.bounds.map(|b| b.x),
+        };
         out.push(Leaf {
             role: n.role,
             text: t,
-            x: n.bounds.map(|b| b.x),
+            x,
+            y: n.bounds.map(|b| (b.y, b.height)),
+            parent,
         });
         return;
     }
@@ -461,12 +641,15 @@ fn collect_leaves<'a>(n: &'a Node, out: &mut Vec<Leaf<'a>>) {
                 role: Role::Button,
                 text: t,
                 x: n.bounds.map(|b| b.x),
+                y: n.bounds.map(|b| (b.y, b.height)),
+                parent,
             });
         }
         return;
     }
+    let id = std::ptr::from_ref(n) as usize;
     for c in &n.children {
-        collect_leaves(c, out);
+        collect_leaves_in(c, id, n.bounds.map(|b| b.x), out);
     }
 }
 
@@ -693,7 +876,12 @@ fn draft_from_item(item: &Node, family: AppFamily) -> Option<Draft> {
     }
     // Buttons that are not the author are actions; the first short leaf before the body is the
     // author when there is a body after it.
+    // "Notes are here:" followed by a link on the same line is the start of the body.
+    let lead_in = leaves.len() >= 2
+        && leaves[0].text.trim_end().ends_with(':')
+        && leaves[0].same_line(&leaves[1]);
     if leaves.len() >= 2
+        && !lead_in
         && looks_like_name(leaves[0].text)
         && leaves[0].role != Role::Paragraph
         && leaves[1..].iter().any(|l| l.role != Role::Button)
@@ -712,13 +900,20 @@ fn draft_from_item(item: &Node, family: AppFamily) -> Option<Draft> {
     }
     let body: Vec<&Leaf<'_>> = leaves.iter().filter(|l| l.role != Role::Button).collect();
     d.indent = body.iter().filter_map(|l| l.x).reduce(f64::min);
-    d.text = body
-        .iter()
-        .map(|l| l.text.trim())
-        .collect::<Vec<_>>()
-        .join("\n");
+    // Runs of one line are joined with a space, lines and blocks with `\n`.
+    let mut text = String::new();
+    for (i, l) in body.iter().enumerate() {
+        if i > 0 {
+            text.push(if body[i - 1].same_line(l) { ' ' } else { '\n' });
+        }
+        text.push_str(l.text.trim());
+    }
+    d.text = text;
     if d.text.is_empty() {
         return None;
+    }
+    if let (Some(s), Some(ts)) = (summary, d.timestamp.clone()) {
+        recover_from_summary(&mut d, s, &ts);
     }
     // A summary may still say whose message it is ("Your iMessage" with text children).
     if let Some(s) = summary {
@@ -731,6 +926,30 @@ fn draft_from_item(item: &Node, family: AppFamily) -> Option<Draft> {
         }
     }
     Some(d)
+}
+
+/// Firefox keeps text that sits directly in a container (the author, a lead-in before a link)
+/// in the container's hypertext, not in a child, so only the item's name has it: "Maya Chen
+/// 10:02 AM Morning!…". Take the author from before the timestamp, and the start of a one-line
+/// body from after it, when the leaves found the rest.
+fn recover_from_summary(d: &mut Draft, summary: &str, ts: &str) {
+    let Some(at) = summary.find(ts) else { return };
+    let (before, after) = (summary[..at].trim(), summary[at + ts.len()..].trim());
+    if d.author.is_none() && !before.is_empty() && looks_like_name(before) {
+        d.author = Some(before.to_string());
+    }
+    let body = d.text.trim();
+    if body.contains('\n') || after.len() <= body.len() || !after.ends_with(body) {
+        return;
+    }
+    let lead = &after[..after.len() - body.len()];
+    let lower = lead.trim().to_lowercase();
+    if lead.ends_with(char::is_whitespace)
+        && !lower.starts_with("to ")
+        && !looks_like_timestamp(&lower)
+    {
+        d.text = after.to_string();
+    }
 }
 
 /// Mark right-aligned bubbles as the user's when the items split cleanly into two columns.
@@ -775,9 +994,103 @@ fn unwrap_container(mut c: &Node) -> &Node {
     c
 }
 
+/// Group consecutive messages under the last author shown (Slack-like grouping shows the author
+/// on the first message only). Generic apps also draw the user's bubbles without an author, so
+/// there an authorless message joins the group only when its body starts in the same column.
+fn group_by_author(drafts: &mut [Draft], family: AppFamily) {
+    let mut last: Option<(String, Option<f64>)> = None;
+    for d in drafts.iter_mut() {
+        match (&d.author, &last) {
+            (Some(a), _) => last = Some((a.clone(), d.indent)),
+            (None, Some((a, indent))) => {
+                // Without geometry there is nothing to tell a continuation from the user's
+                // own unlabelled bubble.
+                let same_column = match (d.indent, *indent) {
+                    (Some(x), Some(y)) => (x - y).abs() <= 8.0,
+                    _ => false,
+                };
+                if family.groups_by_author() || same_column {
+                    d.author = Some(a.clone());
+                }
+            }
+            (None, None) => {}
+        }
+    }
+}
+
+/// Cut quoted history from a mail message: everything from an attribution line ("On ...
+/// wrote:", "Am ... schrieb:", an Outlook "From:" + "Sent:" header) on, and `>` lines. The text
+/// is kept whole when nothing else would be left.
+fn strip_quoted(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut kept: Vec<&str> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let l = line.trim();
+        let lower = l.to_lowercase();
+        let attribution = l.len() < 300
+            && (lower.ends_with("wrote:")
+                || lower.ends_with("schrieb:")
+                || lower.ends_with("a écrit :"));
+        let outlook = lower.starts_with("from:")
+            && lines.get(i + 1).is_some_and(|n| {
+                let n = n.trim().to_lowercase();
+                n.starts_with("sent:") || n.starts_with("date:")
+            });
+        if attribution || outlook {
+            break;
+        }
+        if !l.starts_with('>') {
+            kept.push(line);
+        }
+    }
+    let out = kept.join("\n");
+    if out.trim().is_empty() {
+        text.to_string()
+    } else {
+        out
+    }
+}
+
+/// Some messages are by "You" (or a self name), and every message by another named author has
+/// its body in a different column from all of them.
+fn self_column_is_distinct(drafts: &[Draft], limits: &ThreadLimits) -> bool {
+    let is_self = |d: &Draft| d.author.as_deref().is_some_and(|a| is_self_name(a, limits));
+    let mine: Vec<Option<f64>> = drafts
+        .iter()
+        .filter(|d| is_self(d))
+        .map(|d| d.indent)
+        .collect();
+    if mine.is_empty() || mine.iter().any(Option::is_none) {
+        return false;
+    }
+    drafts
+        .iter()
+        .filter(|d| d.author.is_some() && !is_self(d))
+        .all(|d| {
+            d.indent
+                .is_some_and(|x| mine.iter().flatten().all(|m| (x - m).abs() > 8.0))
+        })
+}
+
+/// Drop a leading "to me, Priya" line (who a mail was sent to) from a message body.
+fn strip_recipient_line(text: &str) -> String {
+    match text.split_once('\n') {
+        Some((first, rest)) if !rest.trim().is_empty() => {
+            let f = first.trim().to_lowercase();
+            if f.starts_with("to me") || f.starts_with("to you") {
+                rest.to_string()
+            } else {
+                text.to_string()
+            }
+        }
+        _ => text.to_string(),
+    }
+}
+
 fn messages_from_container(
     container: &Node,
     family: AppFamily,
+    mail: bool,
     limits: &ThreadLimits,
 ) -> Vec<ThreadMessage> {
     let container = unwrap_container(container);
@@ -789,22 +1102,24 @@ fn messages_from_container(
         .collect();
     // Day separators ("Yesterday", "Monday 3 March") are not messages.
     drafts.retain(|d| !(d.author.is_none() && looks_like_timestamp(&d.text)));
-    if family.groups_by_author() {
-        let mut last: Option<String> = None;
+    if mail {
         for d in &mut drafts {
-            match &d.author {
-                Some(a) => last = Some(a.clone()),
-                None => d.author.clone_from(&last),
-            }
+            d.text = strip_recipient_line(&strip_quoted(&d.text));
         }
     }
+    if family.groups_by_author() || family == AppFamily::Generic {
+        group_by_author(&mut drafts, family);
+    }
+    // An app that shows the user as "You" shows everyone else by name. For apps not known to
+    // do so, only when the user's messages sit in a column of their own.
+    let labels_you = family.labels_self_as_you() || self_column_is_distinct(&drafts, limits);
     for d in &mut drafts {
         if d.from_me.is_none()
             && let Some(a) = &d.author
         {
             if is_self_name(a, limits) {
                 d.from_me = Some(true);
-            } else if family.labels_self_as_you() || !limits.self_names.is_empty() {
+            } else if labels_you || !limits.self_names.is_empty() {
                 d.from_me = Some(false);
             }
         }
@@ -868,7 +1183,28 @@ fn field_label(n: &Node) -> Option<String> {
     Some(l.trim().trim_end_matches(':').trim().to_lowercase())
 }
 
+/// Recipient labels as a whole ("To", "Cc", "To recipients"...).
+fn is_recipient_label_exact(l: &str) -> bool {
+    matches!(
+        l,
+        "to" | "cc"
+            | "bcc"
+            | "an"
+            | "à"
+            | "para"
+            | "kopie"
+            | "cci"
+            | "recipients"
+            | "to recipients"
+            | "cc recipients"
+            | "bcc recipients"
+    )
+}
+
 fn is_recipient_label(l: &str) -> bool {
+    if l.starts_with("to do") || l.starts_with("to-do") || l.starts_with("todo") {
+        return false;
+    }
     matches!(
         l,
         "to" | "cc" | "bcc" | "an" | "à" | "para" | "kopie" | "cci"
@@ -924,8 +1260,65 @@ fn collect_recipient_tokens(field: &Node, out: &mut Vec<String>) {
 /// Recipients from To/Cc/Bcc fields: labelled inputs or token groups, or an input that follows
 /// a "To:" label.
 pub fn recipients(root: &Node) -> Vec<String> {
+    recipients_in(root, false, false)
+}
+
+/// Ancestor levels above the composer searched for To/Subject fields in apps that are not
+/// known mail clients (never the whole page: the search stops below a web area or document).
+const COMPOSE_FIELD_LEVELS: usize = 3;
+
+/// Recipients and subject for an app that is not a known mail client: only from fields right
+/// around the composer (its nearest ancestors), labelled exactly ("To", "Cc", "Subject"...) and
+/// holding an editable input, so a "To Do" list or a search form elsewhere on the page does not
+/// count.
+fn compose_fields_near_composer(snap: &Snapshot) -> (Vec<String>, Option<String>) {
+    let path = editor_root_path(snap);
+    for up in 1..=COMPOSE_FIELD_LEVELS.min(path.len()) {
+        let Some(scope) = snap.node_at(&path[..path.len() - up]) else {
+            break;
+        };
+        if matches!(
+            scope.role,
+            Role::WebArea | Role::Document | Role::Window | Role::Application
+        ) {
+            break;
+        }
+        let recipients = recipients_in(scope, true, true);
+        let subject = subject_field(scope, true);
+        if !recipients.is_empty() || subject.is_some() {
+            // A compose: chips in a list labelled "To" count too, labels still exact.
+            return (recipients_in(scope, true, false), subject);
+        }
+    }
+    (Vec::new(), None)
+}
+
+/// An editable text input, or a token field holding one.
+fn holds_editable_input(n: &Node) -> bool {
+    n.iter()
+        .take(200)
+        .any(|d| d.states.editable && d.role.is_text_input() && !d.states.secure)
+}
+
+/// `exact`: labels must be recipient labels as a whole; `need_input`: the field must hold an
+/// editable input.
+fn recipients_in(root: &Node, exact: bool, need_input: bool) -> Vec<String> {
     let mut out = Vec::new();
-    fn visit(n: &Node, out: &mut Vec<String>, budget: &mut usize) {
+    let label_ok = |l: &str| {
+        if exact {
+            is_recipient_label_exact(l)
+        } else {
+            is_recipient_label(l)
+        }
+    };
+    let field_ok = |c: &Node| !need_input || holds_editable_input(c);
+    fn visit(
+        n: &Node,
+        out: &mut Vec<String>,
+        budget: &mut usize,
+        label_ok: &dyn Fn(&str) -> bool,
+        field_ok: &dyn Fn(&Node) -> bool,
+    ) {
         if *budget == 0 {
             return;
         }
@@ -938,19 +1331,19 @@ pub fn recipients(root: &Node) -> Vec<String> {
                     c.role,
                     Role::Group | Role::List | Role::Section | Role::Unknown
                 );
-            if is_input_like && lbl.as_deref().is_some_and(is_recipient_label) {
+            if is_input_like && lbl.as_deref().is_some_and(label_ok) && field_ok(c) {
                 collect_recipient_tokens(c, out);
                 label_pending = false;
                 continue;
             }
-            if label_pending && is_input_like {
+            if label_pending && is_input_like && field_ok(c) {
                 collect_recipient_tokens(c, out);
                 label_pending = false;
                 continue;
             }
             label_pending = c.role == Role::StaticText
                 && c.own_text().is_some_and(|t| {
-                    is_recipient_label(
+                    label_ok(
                         t.trim()
                             .trim_end_matches(':')
                             .trim()
@@ -958,11 +1351,11 @@ pub fn recipients(root: &Node) -> Vec<String> {
                             .as_str(),
                     )
                 });
-            visit(c, out, budget);
+            visit(c, out, budget, label_ok, field_ok);
         }
     }
     let mut budget = 5000;
-    visit(root, &mut out, &mut budget);
+    visit(root, &mut out, &mut budget, &label_ok, &field_ok);
     out
 }
 
@@ -980,10 +1373,15 @@ fn strip_mail_title(title: &str) -> Option<String> {
     prefixed.then(|| sanitize::clean_line(t, sanitize::MAX_SHORT * 2))
 }
 
-/// The subject: a field labelled "Subject", else a reply-style window title.
-pub fn subject(root: &Node, app: &AppInfo, family: AppFamily) -> Option<String> {
+/// The value of a field labelled "Subject". `strict`: the label exactly, on an editable text
+/// input.
+fn subject_field(root: &Node, strict: bool) -> Option<String> {
     for n in root.iter().take(5000) {
-        if !(n.role.is_text_input() || n.role == Role::Unknown || n.role == Role::Group) {
+        if strict {
+            if !(n.role.is_text_input() && n.states.editable) || n.states.secure {
+                continue;
+            }
+        } else if !(n.role.is_text_input() || n.role == Role::Unknown || n.role == Role::Group) {
             continue;
         }
         let lbl = field_label(n);
@@ -992,11 +1390,19 @@ pub fn subject(root: &Node, app: &AppInfo, family: AppFamily) -> Option<String> 
                 || l == "betreff"
                 || l == "objet"
                 || l == "asunto"
-                || l.starts_with("subject ")
+                || (!strict && l.starts_with("subject "))
         }) && let Some(v) = n.value.as_deref().filter(|v| !v.trim().is_empty())
         {
             return Some(sanitize::clean_line(v, sanitize::MAX_SHORT * 2));
         }
+    }
+    None
+}
+
+/// The subject: a field labelled "Subject", else a reply-style window title.
+pub fn subject(root: &Node, app: &AppInfo, family: AppFamily) -> Option<String> {
+    if let Some(s) = subject_field(root, false) {
+        return Some(s);
     }
     let title = app.window_title.as_deref()?;
     match family {
@@ -1456,5 +1862,454 @@ mod tests {
         let (ctx, _) = run("generic_chat", &limits);
         assert_eq!(ctx.messages.len(), 2);
         assert_eq!(ctx.messages[1].text, "Yes, noon works for me.");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Web editor fixtures (the FF3 app-matrix pages, modelled per platform)
+
+    /// The chat context of the FF3 pages, oldest first. Everyone's messages sit in one column
+    /// (Slack-like), so for a generic page only "You" is known; the others stay unknown.
+    fn chat_truth() -> Vec<(Option<&'static str>, &'static str, Option<bool>)> {
+        vec![
+            (
+                Some("Maya Chen"),
+                "Morning! Did everyone get a chance to look at the venue options?",
+                None,
+            ),
+            (
+                Some("Maya Chen"),
+                "The second one has a terrace and fits all twelve of us.",
+                None,
+            ),
+            (
+                Some("Sam Ortiz"),
+                "Terrace sounds great for September.\nCan we check the catering menu first?",
+                None,
+            ),
+            (
+                Some("You"),
+                "Let's book it, I'll ask about catering.",
+                Some(true),
+            ),
+        ]
+    }
+
+    #[test]
+    fn fixture_web_lexical_chat_ax() {
+        let (ctx, _) = run("web_lexical_chat_ax", &ThreadLimits::default());
+        assert_eq!(summary(&ctx), chat_truth());
+        assert_eq!(ctx.messages[0].timestamp.as_deref(), Some("10:02 AM"));
+        assert_eq!(ctx.messages[1].timestamp.as_deref(), Some("10:03 AM"));
+        assert!(ctx.recipients.is_empty());
+        assert_eq!(ctx.subject, None);
+    }
+
+    #[test]
+    fn fixture_web_prosemirror_atspi_focus_in_paragraph() {
+        let (ctx, _) = run("web_prosemirror_atspi", &ThreadLimits::default());
+        assert_eq!(summary(&ctx), chat_truth());
+        assert_eq!(ctx.messages[3].timestamp.as_deref(), Some("10:20 AM"));
+        assert!(ctx.recipients.is_empty());
+    }
+
+    #[test]
+    fn fixture_web_ckeditor_mail_uia() {
+        let (ctx, _) = run("web_ckeditor_mail_uia", &ThreadLimits::default());
+        assert_eq!(
+            summary(&ctx),
+            vec![
+                (
+                    Some("Maya Chen <maya@example.com>"),
+                    "Hi Jordan,\nCould we hold the offsite at the lakeside venue this year? It has room for everyone.",
+                    None
+                ),
+                (
+                    Some("Jordan Lee <jordan@example.com>"),
+                    "Lakeside works for me. Thursday is better than Friday though.",
+                    None
+                ),
+            ]
+        );
+        assert_eq!(
+            ctx.messages[1].timestamp.as_deref(),
+            Some("Tue, Oct 28, 9:15 AM")
+        );
+        assert_eq!(ctx.recipients, vec!["Maya Chen"]);
+        assert_eq!(ctx.subject.as_deref(), Some("Re: Q3 offsite venue"));
+    }
+
+    #[test]
+    fn fixture_web_mail_compose_ax() {
+        let (ctx, _) = run("web_mail_compose_ax", &ThreadLimits::default());
+        // The inbox of other conversations is not this thread.
+        assert_eq!(summary(&ctx), vec![]);
+        assert_eq!(ctx.recipients, vec!["Jordan Lee"]);
+        assert_eq!(ctx.subject.as_deref(), Some("Q3 offsite venue"));
+    }
+
+    fn load(name: &str) -> (Snapshot, AppInfo) {
+        let path = format!(
+            "{}/tests/fixtures/trees/{name}.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let json = std::fs::read_to_string(&path).unwrap();
+        let fx: Fixture = serde_json::from_str(&json).unwrap();
+        (Snapshot::from_json(&json).unwrap(), fx.app)
+    }
+
+    fn static_text(s: &str, bounds: [f64; 4]) -> Node {
+        Node {
+            role: Role::StaticText,
+            value: Some(s.into()),
+            bounds: Some(crate::Rect {
+                x: bounds[0],
+                y: bounds[1],
+                width: bounds[2],
+                height: bounds[3],
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn decoy_sidebar_alone_is_not_a_thread() {
+        for (name, log_at) in [
+            ("web_lexical_chat_ax", vec![1, 0, 1]),
+            ("web_prosemirror_atspi", vec![1, 0, 1]),
+        ] {
+            let (mut snap, app) = load(name);
+            // Remove the chat log: what is left (the sidebar of other conversations with
+            // previews, the status line, the toolbar) is not a thread.
+            let mut main = &mut snap.root;
+            for &i in &log_at {
+                main = &mut main.children[i];
+            }
+            main.children.remove(1);
+            snap.focus_path[log_at.len()] -= 1;
+            assert!(snap.focused().is_some_and(|f| f.states.focused), "{name}");
+            let ctx = extract(&snap, &app, "", &ThreadLimits::default());
+            assert_eq!(summary(&ctx), vec![], "{name}");
+        }
+    }
+
+    #[test]
+    fn formatted_draft_paragraphs_are_not_a_thread() {
+        // Focus on a text run inside a Lexical paragraph (Chromium after a click), the draft
+        // holding another paragraph of several formatted runs, and no chat log on the page.
+        let (mut snap, app) = load("web_lexical_chat_ax");
+        let main = &mut snap.root.children[1].children[0].children[1];
+        main.children.remove(1);
+        let editor = &mut main.children[3];
+        editor.states.focused = false;
+        let mut runs = Node::new(Role::Group);
+        runs.states.editable = true;
+        runs.bounds = Some(crate::Rect {
+            x: 340.0,
+            y: 700.0,
+            width: 800.0,
+            height: 18.0,
+        });
+        runs.children = vec![
+            static_text(
+                "The first part of the draft says ",
+                [340.0, 700.0, 220.0, 18.0],
+            ),
+            static_text(
+                "something in bold that matters",
+                [560.0, 700.0, 200.0, 18.0],
+            ),
+            static_text(
+                " and then it carries on for a while",
+                [760.0, 700.0, 240.0, 18.0],
+            ),
+        ];
+        let mut leaf = static_text("Second paragraph", [340.0, 720.0, 200.0, 18.0]);
+        leaf.states.focused = true;
+        leaf.states.editable = true;
+        let mut second = Node::new(Role::Group);
+        second.states.editable = true;
+        second.children = vec![leaf];
+        editor.children = vec![runs, second];
+        snap.focus_path = vec![1, 0, 1, 3, 1, 0];
+        assert!(snap.focused().is_some_and(|f| f.states.focused));
+        assert_eq!(crate::tree::editor_root_path(&snap), vec![1, 0, 1, 3]);
+        let ctx = extract(&snap, &app, "", &ThreadLimits::default());
+        assert_eq!(summary(&ctx), vec![]);
+    }
+
+    #[test]
+    fn quoted_history_is_cut_from_mail_messages() {
+        assert_eq!(
+            strip_quoted(
+                "Works for me.\nOn Mon, Oct 27, 2025 at 4:02 PM Maya <m@x.com> wrote:\nHi"
+            ),
+            "Works for me."
+        );
+        assert_eq!(
+            strip_quoted("Sure\n> earlier\n> text\nThanks"),
+            "Sure\nThanks"
+        );
+        assert_eq!(
+            strip_quoted("Numbers below.\nFrom: Bob <bob@x.com>\nSent: Monday\nQ1"),
+            "Numbers below."
+        );
+        // Nothing but a quote: kept as it is.
+        assert_eq!(strip_quoted("> only quoted"), "> only quoted");
+    }
+
+    #[test]
+    fn to_do_lists_and_far_subject_fields_are_not_a_compose() {
+        let (mut snap, app) = load("web_lexical_chat_ax");
+        // A "To Do" widget right next to the composer, and a "Subject" input in the sidebar.
+        let mut todo = Node::new(Role::Group);
+        todo.name = Some("To Do".into());
+        for t in ["Book the venue", "Order catering"] {
+            let mut b = Node::new(Role::Button);
+            b.name = Some(t.into());
+            todo.children.push(b);
+        }
+        let mut add = Node::new(Role::TextField);
+        add.name = Some("Add a task".into());
+        add.states.editable = true;
+        todo.children.push(add);
+        let mut subject = Node::new(Role::TextField);
+        subject.name = Some("Subject".into());
+        subject.value = Some("Weekly notes".into());
+        subject.states.editable = true;
+        let web = &mut snap.root.children[1].children[0];
+        web.children[0].children.push(subject);
+        // A read-only "To" header with a name after it, also near the composer.
+        let mut to = Node::new(Role::StaticText);
+        to.value = Some("To".into());
+        let mut who = Node::new(Role::Group);
+        who.children = vec![static_text("Design team", [0.0, 0.0, 10.0, 10.0])];
+        let main = &mut web.children[1];
+        main.children.insert(3, todo);
+        main.children.insert(3, who);
+        main.children.insert(3, to);
+        snap.focus_path[3] += 3;
+        assert!(snap.focused().is_some_and(|f| f.states.focused));
+        let ctx = extract(&snap, &app, "", &ThreadLimits::default());
+        assert!(ctx.recipients.is_empty(), "{:?}", ctx.recipients);
+        assert_eq!(ctx.subject, None);
+        assert_eq!(ctx.messages.len(), 4);
+        // Mail clients do not take a "To Do" list for recipients either.
+        assert!(!is_recipient_label("to do"));
+        assert!(!is_recipient_label("to-do list"));
+        assert!(is_recipient_label("to recipients"));
+    }
+
+    #[test]
+    fn you_marks_others_only_when_the_user_has_a_column() {
+        let draft = |author: &str, x: Option<f64>| Draft {
+            author: Some(author.into()),
+            text: "text".into(),
+            indent: x,
+            ..Default::default()
+        };
+        let limits = ThreadLimits::default();
+        // One column for everyone (Slack-like): "You" says nothing about the others.
+        let same = [draft("Maya", Some(60.0)), draft("You", Some(60.0))];
+        assert!(!self_column_is_distinct(&same, &limits));
+        // No geometry: unknown.
+        let none = [draft("Maya", None), draft("You", None)];
+        assert!(!self_column_is_distinct(&none, &limits));
+        // Bubbles: the user's on the right.
+        let bubbles = [draft("Maya", Some(60.0)), draft("You", Some(420.0))];
+        assert!(self_column_is_distinct(&bubbles, &limits));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Trees recorded from Chrome on Linux (`Backend::snapshot()`), against the FF3 ground truth
+
+    fn truth_context(name: &str) -> serde_json::Value {
+        let path = format!(
+            "{}/tests/fixtures/apps/truth.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let truth: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        truth["contexts"][name].clone()
+    }
+
+    fn recorded(name: &str, title: &str) -> ThreadContext {
+        let path = format!(
+            "{}/tests/fixtures/trees/{name}.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let snap = Snapshot::from_json(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(snap.focused().is_some_and(|f| f.states.focused), "{name}");
+        let app = AppInfo {
+            id: Some("google-chrome".into()),
+            name: "Google Chrome".into(),
+            window_title: Some(format!("{title} - Google Chrome")),
+            url: None,
+        };
+        extract(&snap, &app, "Draft:", &ThreadLimits::default())
+    }
+
+    fn collapse(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Every truth message found, in order, nothing else: same text (whitespace collapsed),
+    /// the author (an address may follow it), and `from_me` for the user's messages.
+    fn assert_matches_truth(ctx: &ThreadContext, truth: &serde_json::Value) {
+        let want = truth["messages"].as_array().unwrap();
+        let got: Vec<_> = ctx
+            .messages
+            .iter()
+            .map(|m| (m.author.as_deref(), collapse(&m.text), m.from_me))
+            .collect();
+        assert_eq!(got.len(), want.len(), "{got:#?}");
+        for (g, w) in got.iter().zip(want) {
+            assert_eq!(g.1, collapse(w["text"].as_str().unwrap()));
+            let author = w["author"].as_str().unwrap();
+            assert!(
+                g.0.is_some_and(|a| a == author || a.starts_with(&format!("{author} <"))),
+                "{g:?} by {author}"
+            );
+            if w["from_me"].as_bool().unwrap() {
+                assert_eq!(g.2, Some(true), "{g:?}");
+            } else {
+                assert_ne!(g.2, Some(true), "{g:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn recorded_chrome_linux_chat_matches_truth() {
+        let ctx = recorded("web_chrome_linux_chat", "Nugget fixture: Plain textarea");
+        let truth = truth_context("chat");
+        assert_matches_truth(&ctx, &truth);
+        assert_eq!(ctx.messages[1].timestamp.as_deref(), Some("10:03 AM"));
+        assert!(ctx.recipients.is_empty());
+        assert_eq!(ctx.subject, None);
+    }
+
+    #[test]
+    fn recorded_chrome_linux_mail_matches_truth() {
+        let ctx = recorded("web_chrome_linux_mail", "Nugget fixture: Mail compose");
+        let truth = truth_context("mail");
+        assert_matches_truth(&ctx, &truth);
+        assert_eq!(
+            ctx.messages[2].timestamp.as_deref(),
+            Some("Tue, Oct 27, 8:05 AM")
+        );
+        assert_eq!(ctx.recipients, vec!["Jordan Lee", "Priya Natarajan"]);
+        assert_eq!(ctx.subject.as_deref(), Some("Re: Q3 offsite venue"));
+    }
+
+    #[test]
+    fn recorded_browser_trees_match_truth() {
+        for (name, title, context) in [
+            (
+                "web_chrome_windows_mail",
+                "Nugget fixture: Mail compose",
+                "mail",
+            ),
+            (
+                "web_safari_macos_mail",
+                "Nugget fixture: Mail compose",
+                "mail",
+            ),
+            (
+                "web_safari_macos_chat",
+                "Nugget fixture: Plain textarea",
+                "chat",
+            ),
+            (
+                "web_firefox_linux_mail",
+                "Nugget fixture: Mail compose",
+                "mail",
+            ),
+            (
+                "web_firefox_linux_chat",
+                "Nugget fixture: Plain contenteditable",
+                "chat",
+            ),
+            ("web_firefox_linux_quill", "Nugget fixture: Quill", "chat"),
+        ] {
+            let ctx = recorded(name, title);
+            let truth = truth_context(context);
+            eprintln!("{name}");
+            assert_matches_truth(&ctx, &truth);
+            if context == "mail" {
+                assert_eq!(
+                    ctx.recipients,
+                    vec!["Jordan Lee", "Priya Natarajan"],
+                    "{name}"
+                );
+                assert!(
+                    ctx.subject
+                        .as_deref()
+                        .is_some_and(|s| s.ends_with("Q3 offsite venue")),
+                    "{name}"
+                );
+            } else {
+                assert!(ctx.recipients.is_empty(), "{name}");
+            }
+        }
+    }
+    #[test]
+    fn forms_and_pickers_are_never_a_thread() {
+        let item = |t: &str| {
+            let mut n = Node::new(Role::ListItem);
+            n.children = vec![static_text(t, [0.0, 0.0, 300.0, 18.0])];
+            n
+        };
+        let mut form = Node::new(Role::Group);
+        form.children = vec![
+            item("Re-enter password to send"),
+            item("Password for this account"),
+        ];
+        assert!(score(&form, None, true, false) > 0.0);
+        let mut pw = Node::new(Role::TextField);
+        pw.states.secure = true;
+        form.children.push(pw);
+        assert_eq!(score(&form, None, true, false), 0.0);
+        let mut chips = Node::new(Role::List);
+        chips.children = vec![
+            item("Jordan Lee, the venue person"),
+            item("Priya Natarajan"),
+        ];
+        assert!(score(&chips, None, true, false) > 0.0);
+        chips.attrs.insert("xml_roles".into(), "listbox".into());
+        assert_eq!(score(&chips, None, true, false), 0.0);
+    }
+    #[test]
+    fn generic_grouping_follows_the_column() {
+        let draft = |author: Option<&str>, x: f64| Draft {
+            author: author.map(str::to_string),
+            text: "text".into(),
+            indent: Some(x),
+            ..Default::default()
+        };
+        let mut drafts = vec![
+            draft(Some("Maya Chen"), 60.0),
+            draft(None, 60.0),
+            draft(None, 420.0),
+        ];
+        group_by_author(&mut drafts, AppFamily::Generic);
+        let authors: Vec<_> = drafts.iter().map(|d| d.author.as_deref()).collect();
+        // A continuation in the same column joins; a bubble in the other column does not.
+        assert_eq!(authors, [Some("Maya Chen"), Some("Maya Chen"), None]);
+        // Without geometry, an authorless message is not grouped in a generic app.
+        let mut drafts = vec![
+            Draft {
+                indent: None,
+                ..draft(Some("Maya Chen"), 0.0)
+            },
+            Draft {
+                indent: None,
+                ..draft(None, 0.0)
+            },
+        ];
+        group_by_author(&mut drafts, AppFamily::Generic);
+        assert_eq!(drafts[1].author, None);
+        // Slack groups regardless of the column.
+        let mut drafts = vec![draft(Some("Maya Chen"), 60.0), draft(None, 420.0)];
+        group_by_author(&mut drafts, AppFamily::Slack);
+        assert_eq!(drafts[1].author.as_deref(), Some("Maya Chen"));
     }
 }

@@ -1,0 +1,115 @@
+{
+ "scenario": "s22_cloud_draft_feedback",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 18
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 6
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 2,
+   "bytes_in": 6904,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 2,
+   "bytes_sent": 6904,
+   "features": [
+    "draft"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-THREAD-1",
+   "count": 2
+  }
+ ],
+ "checks": [
+  {
+   "id": "prediction.matches_draft",
+   "ok": false,
+   "detail": "prewarm={'locality': 'on_device', 'provider': 'local-chat', 'retrieval': True} read_ahead={'done': True, 'started': True} draft.begin provider=anthropic locality=cloud",
+   "severity": "Low",
+   "t": 1793390548.0809498
+  },
+  {
+   "id": "feedback_secret.not_sent_to_cloud",
+   "ok": true,
+   "detail": "citations=[('0:acme-renewal.md', False), ('0:weekly-notes.md', False), ('0:lisbon-trip.md', False)] excluded_sensitive=4 in_body=False",
+   "severity": "High",
+   "t": 1793390556.1393766
+  },
+  {
+   "id": "after_feedback.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 1 rows (features ['draft']); unmatched []",
+   "severity": null,
+   "t": 1793390557.6439612
+  },
+  {
+   "id": "after_feedback.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390557.6439834
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793390546.4906409,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390546.9945014,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390557.6460385,
+   "label": "daemon.stop"
+  }
+ ]
+}

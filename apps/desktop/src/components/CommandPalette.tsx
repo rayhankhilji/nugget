@@ -219,7 +219,8 @@ export function CommandPalette({
         {query.trim() ? t("palette.count", { count: results.length }) : ""}
       </p>
       <p className="palette-footer muted small" aria-hidden="true">
-        {t("palette.footer")}
+        <kbd dir="ltr">↑↓</kbd> {t("palette.hint.move")} · <kbd dir="ltr">{t("shortcuts.key.enter")}</kbd> {t("palette.hint.choose")} · <kbd dir="ltr">{t("shortcuts.key.esc")}</kbd>{" "}
+        {t("palette.hint.close")}
       </p>
     </dialog>
   );

@@ -1,0 +1,26 @@
+From: Robert Chen <robert.chen@brightwell.example>
+To: Mara Okafor <mara.okafor@brightwell.example>
+Cc: Sam Patel <sam.patel@brightwell.example>, Dana Whitfield <dana.whitfield@brightwell.example>
+Subject: Harbor: you're leading it
+Date: Wed, 04 Mar 2026 09:12:00 +0000
+Message-ID: <harbor-kickoff-20260304@brightwell.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Mara,
+
+As we discussed on Monday: you will lead Harbor, the data-platform migration off the old
+warehouse. It's the biggest thing on the platform roadmap this year and I want a staff
+engineer owning it end to end.
+
+Sam Patel joins as the data engineer on Harbor from next week. Dana has agreed to design the
+new self-serve dashboards alongside her Design Lead work.
+
+Storage will come from Tessellate Systems; their account manager should be in touch.
+
+Let's do a proper kickoff Thursday.
+
+Bob
+Robert Chen
+VP Engineering, Brightwell Analytics

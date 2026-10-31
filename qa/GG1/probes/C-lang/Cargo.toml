@@ -1,0 +1,16 @@
+# GG1 area C (languages): deterministic probe of Double Tap's post-processing, length band,
+# grounding value checks and voice normalisation on German, Spanish, Japanese and Arabic text.
+# Its own workspace, so it never touches the product workspace.
+[package]
+name = "gg1-probe-c-lang"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[dependencies]
+nugget-core = { path = "../../../../crates/nugget-core" }
+nugget-draft = { path = "../../../../crates/nugget-draft" }
+nugget-voice = { path = "../../../../crates/nugget-voice" }

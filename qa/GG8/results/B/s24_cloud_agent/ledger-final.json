@@ -1,0 +1,242 @@
+[
+ {
+  "at": "2026-10-30T19:51:40.166460211Z",
+  "bytes_received": 897,
+  "bytes_sent": 23190,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:40.118332711Z",
+  "bytes_received": 897,
+  "bytes_sent": 22723,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:40.071115461Z",
+  "bytes_received": 897,
+  "bytes_sent": 22256,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:40.021667029Z",
+  "bytes_received": 897,
+  "bytes_sent": 21789,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.972228689Z",
+  "bytes_received": 897,
+  "bytes_sent": 21322,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.922580906Z",
+  "bytes_received": 897,
+  "bytes_sent": 20855,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.874153842Z",
+  "bytes_received": 897,
+  "bytes_sent": 20388,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.826583411Z",
+  "bytes_received": 897,
+  "bytes_sent": 19921,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.77805399Z",
+  "bytes_received": 897,
+  "bytes_sent": 19454,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.729597045Z",
+  "bytes_received": 897,
+  "bytes_sent": 18987,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.681057934Z",
+  "bytes_received": 897,
+  "bytes_sent": 18520,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.632105426Z",
+  "bytes_received": 897,
+  "bytes_sent": 18053,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.58159212Z",
+  "bytes_received": 897,
+  "bytes_sent": 17586,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.533596672Z",
+  "bytes_received": 897,
+  "bytes_sent": 17119,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.486029818Z",
+  "bytes_received": 897,
+  "bytes_sent": 16652,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.437600064Z",
+  "bytes_received": 897,
+  "bytes_sent": 16185,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.389867281Z",
+  "bytes_received": 897,
+  "bytes_sent": 15718,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.341255404Z",
+  "bytes_received": 897,
+  "bytes_sent": 15251,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.294117307Z",
+  "bytes_received": 897,
+  "bytes_sent": 14784,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.24572289Z",
+  "bytes_received": 897,
+  "bytes_sent": 14317,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.1963861Z",
+  "bytes_received": 897,
+  "bytes_sent": 13850,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.145347905Z",
+  "bytes_received": 897,
+  "bytes_sent": 13385,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.09702984Z",
+  "bytes_received": 897,
+  "bytes_sent": 12920,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.048912147Z",
+  "bytes_received": 897,
+  "bytes_sent": 12455,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:39.001040537Z",
+  "bytes_received": 897,
+  "bytes_sent": 11990,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:38.953424059Z",
+  "bytes_received": 897,
+  "bytes_sent": 11525,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:38.904893932Z",
+  "bytes_received": 897,
+  "bytes_sent": 11060,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:38.85716319Z",
+  "bytes_received": 897,
+  "bytes_sent": 10595,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:38.807003742Z",
+  "bytes_received": 897,
+  "bytes_sent": 10130,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:38.708611747Z",
+  "bytes_received": 831,
+  "bytes_sent": 9906,
+  "feature": "agent",
+  "host": "api.anthropic.com",
+  "items": []
+ }
+]

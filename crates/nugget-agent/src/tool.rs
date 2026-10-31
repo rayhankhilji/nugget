@@ -34,8 +34,13 @@ pub struct ToolCtx {
 pub enum Control {
     /// End the run with the model's claim (which the loop checks against verification).
     Finish { summary: String, claim: Claim },
-    /// Suspend the run until the user answers.
-    AskUser { question: String },
+    /// Suspend the run until the user answers. `options` are the candidates the user can pick
+    /// from (empty: a free-text question).
+    AskUser {
+        question: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<String>,
+    },
 }
 
 /// What the model says happened when it calls `finish`. The schema's `done` is
@@ -69,6 +74,12 @@ pub struct ToolResult {
     pub untrusted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<Control>,
+    /// Items on the screen the task could refer to (list rows, files, calendar entries,
+    /// contacts), by their visible label. Untrusted screen text. The loop matches them against
+    /// the goal to catch an ambiguous target ([`AgentConfig::clarify`](crate::AgentConfig)).
+    /// Never sent to the model.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<String>,
 }
 
 impl ToolResult {
@@ -79,6 +90,7 @@ impl ToolResult {
             is_error: false,
             untrusted: false,
             control: None,
+            targets: Vec::new(),
         }
     }
 
@@ -104,6 +116,12 @@ impl ToolResult {
 
     pub fn with_control(mut self, control: Control) -> Self {
         self.control = Some(control);
+        self
+    }
+
+    /// The items on screen this result shows ([`ToolResult::targets`]).
+    pub fn with_targets(mut self, targets: Vec<String>) -> Self {
+        self.targets = targets;
         self
     }
 }
@@ -340,8 +358,12 @@ impl Tool for FinishTool {
     }
 }
 
-/// `ask_user(question)`: suspend the run until the user answers.
+/// `ask_user(question, options?)`: suspend the run until the user answers. `options`, when
+/// given, are the choices offered to the user (at most [`ASK_USER_MAX_OPTIONS`]).
 pub struct AskUserTool;
+
+/// Most choices `ask_user` accepts.
+pub const ASK_USER_MAX_OPTIONS: usize = 6;
 
 #[async_trait]
 impl Tool for AskUserTool {
@@ -356,7 +378,14 @@ impl Tool for AskUserTool {
     fn schema(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {"question": {"type": "string"}},
+            "properties": {
+                "question": {"type": "string"},
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": ASK_USER_MAX_OPTIONS
+                }
+            },
             "required": ["question"],
             "additionalProperties": false
         })
@@ -366,7 +395,17 @@ impl Tool for AskUserTool {
     }
     async fn call(&self, args: Value, _ctx: &ToolCtx) -> ToolResult {
         let question = args["question"].as_str().unwrap_or_default().to_string();
-        ToolResult::ok("waiting for the user").with_control(Control::AskUser { question })
+        let options = args["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|o| !o.is_empty())
+            .take(ASK_USER_MAX_OPTIONS)
+            .map(String::from)
+            .collect();
+        ToolResult::ok("waiting for the user").with_control(Control::AskUser { question, options })
     }
 }
 

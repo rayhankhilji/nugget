@@ -143,11 +143,41 @@ describe("Today page", () => {
     expect(container.textContent).toContain("Could you send <script>x</script> the numbers?");
     expect(container.querySelectorAll(".evidence button").length).toBe(1);
     // Unsupported action is not actionable and explains why.
-    const archive = byText(container, "button", "Archive the thread");
+    const archive = byText(container, "button", "Archive thread");
     expect(archive?.getAttribute("aria-disabled")).toBe("true");
     expect(archive?.getAttribute("title")).toContain("Not available");
     // New card marked seen exactly once.
     expect(feedback).toEqual([{ card_id: "c1", feedback: "seen" }]);
+  });
+
+  it("doesn't repeat inbox cards in the brief, even right after one is dismissed", async () => {
+    // After the dismiss the inbox is empty; the first brief reload is slower than the list (still has c1).
+    let lists = 0;
+    let briefs = 0;
+    setup({
+      cards_list: () => (lists++ === 0 ? list : { ...list, cards: [] }),
+      brief_get: () => (briefs++ < 2 ? brief : { ...brief, top: [] }),
+    });
+    const { container } = await render(<TodayPage />);
+    const briefText = () => container.querySelector(".today-brief")?.textContent ?? "";
+    // c1 is under "Needs you": the brief's Top leaves it out (c2 is a renewal, still listed).
+    expect(briefText()).not.toContain("Ana is waiting");
+    expect(briefText()).not.toContain("Top of the list");
+    expect(briefText()).toContain("Domain renewal");
+    await click(container.querySelector('button[aria-label="Dismiss Reply to Ana about the Q3 plan"]'));
+    await click(byText(container, ".today-dismiss button", "Dismiss card"));
+    expect(container.querySelector(".today-card")).toBeNull();
+    expect(briefText()).not.toContain("Ana is waiting");
+  });
+
+  it("shows a short action label but keeps the daemon's full label in the accessible name", async () => {
+    setup();
+    const { container } = await render(<TodayPage />);
+    const draft = byText(container, "button", "Draft reply")!;
+    expect(draft.getAttribute("aria-label")).toBe("Draft reply: Draft a reply to Ana");
+    expect(draft.getAttribute("title")).toBe("Draft a reply to Ana");
+    const archive = byText(container, "button", "Archive thread")!;
+    expect(archive.getAttribute("aria-label")).toBe("Archive thread: Archive the thread");
   });
 
   it("has no accessibility violations", async () => {
@@ -163,7 +193,7 @@ describe("Today page", () => {
   it("previews, approves, confirms and shows the draft", async () => {
     const { executes, calls } = setup({ open_mailto: null });
     const { container } = await render(<TodayPage />);
-    await click(byText(container, "button", "Draft a reply to Ana"));
+    await click(byText(container, "button", "Draft reply"));
     await flush();
     const dialog = document.querySelector("dialog")!;
     expect(dialog.textContent).toContain("This is a preview");
@@ -187,7 +217,7 @@ describe("Today page", () => {
   it("shows the reason when the policy denies", async () => {
     setup({ cards_execute: { outcome: "denied", detail: "sending is blocked" } });
     const { container } = await render(<TodayPage />);
-    await click(byText(container, "button", "Draft a reply to Ana"));
+    await click(byText(container, "button", "Draft reply"));
     await flush();
     await click(byText(document.querySelector("dialog")!, "button", "Approve"));
     expect(document.querySelector("dialog")?.textContent).toContain("Not allowed: sending is blocked");

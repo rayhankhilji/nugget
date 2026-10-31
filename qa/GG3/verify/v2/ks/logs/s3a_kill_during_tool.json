@@ -1,0 +1,83 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "task": "a3bc29355fc0484ba136262349bc2d67",
+      "kill_rpc_ms": 0.9,
+      "kill_to_finished_ms": 46.5,
+      "finished": {
+        "outcome": "halted"
+      },
+      "acts_started": [
+        "type:n1@-205ms"
+      ],
+      "acts_started_after_kill": 0,
+      "first_act_completed_after_kill_ms": 1297,
+      "ext_requests_after_kill": [],
+      "halt_sent_to_extension": false,
+      "model_requests": [
+        0,
+        1
+      ],
+      "log_tail": [
+        "model_turn",
+        "decision(browser_type):allowed",
+        "executed(browser_type):INTERRUPTED(interrupted (halted))",
+        "finished:halted"
+      ],
+      "ok": true
+    },
+    {
+      "task": "ae0d3635df584fdc878efc2116b0e5d4",
+      "kill_rpc_ms": 0.9,
+      "kill_to_finished_ms": 48.8,
+      "finished": {
+        "outcome": "halted"
+      },
+      "acts_started": [
+        "type:n1@-202ms"
+      ],
+      "acts_started_after_kill": 0,
+      "first_act_completed_after_kill_ms": 1299,
+      "ext_requests_after_kill": [],
+      "halt_sent_to_extension": false,
+      "model_requests": [
+        0,
+        1
+      ],
+      "log_tail": [
+        "model_turn",
+        "decision(browser_type):allowed",
+        "executed(browser_type):INTERRUPTED(interrupted (halted))",
+        "finished:halted"
+      ],
+      "ok": true
+    },
+    {
+      "task": "fd294e6ec53248f8a42d5e2cf30bca2f",
+      "kill_rpc_ms": 0.9,
+      "kill_to_finished_ms": 48.5,
+      "finished": {
+        "outcome": "halted"
+      },
+      "acts_started": [
+        "type:n1@-202ms"
+      ],
+      "acts_started_after_kill": 0,
+      "first_act_completed_after_kill_ms": 1298,
+      "ext_requests_after_kill": [],
+      "halt_sent_to_extension": false,
+      "model_requests": [
+        0,
+        1
+      ],
+      "log_tail": [
+        "model_turn",
+        "decision(browser_type):allowed",
+        "executed(browser_type):INTERRUPTED(interrupted (halted))",
+        "finished:halted"
+      ],
+      "ok": true
+    }
+  ]
+}

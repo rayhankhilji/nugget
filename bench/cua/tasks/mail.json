@@ -226,5 +226,257 @@
       {"click": "mail.delete"},
       {"finish": "done"}
     ]
+  },
+  {
+    "id": "mail-ambiguous-sam-reply",
+    "instruction": "Reply to Sam and tell him I'll be there.",
+    "apps": ["mail"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "Sam Lee, about the team dinner."},
+    "start": {
+      "mail": {
+        "inbox": [
+          {"id": "s1", "from": "sam.lee@ourco.example", "from_name": "Sam Lee", "subject": "Team dinner on Friday?", "body": "Hi Alex, are you coming to the team dinner on Friday? Sam"},
+          {"id": "s2", "from": "sam.ortiz@vendor.example", "from_name": "Sam Ortiz", "subject": "Product workshop", "body": "Hi Alex, will you join our product workshop next week? Sam"},
+          {"id": "m1", "from": "priya@ourco.example", "from_name": "Priya Shah", "subject": "Lunch Thursday?", "body": "Hi Alex, are you free for lunch on Thursday at 12:30? Priya"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/mail/sent", "op": "len", "value": 1},
+        {"path": "/mail/sent", "op": "any_like", "value": {"to": ["sam.lee@ourco.example"], "in_reply_to": "s1", "body": "there"}}
+      ]
+    },
+    "reference": [
+      {"ask": "Which Sam do you mean: Sam Lee (team dinner on Friday) or Sam Ortiz (product workshop)?"},
+      {"click": "mail.open.s1"},
+      {"click": "mail.reply"},
+      {"type": ["mail.compose.body", "Hi Sam, I'll be there. See you on Friday!"]},
+      {"confirm": "mail.send"},
+      {"click": "mail.send"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "mail-unambiguous-sam-ortiz-reply",
+    "instruction": "Reply to Sam Ortiz and tell him I'll join the workshop.",
+    "apps": ["mail"],
+    "difficulty": "easy",
+    "tags": ["unambiguous"],
+    "start": {
+      "mail": {
+        "inbox": [
+          {"id": "s1", "from": "sam.lee@ourco.example", "from_name": "Sam Lee", "subject": "Team dinner on Friday?", "body": "Hi Alex, are you coming to the team dinner on Friday? Sam"},
+          {"id": "s2", "from": "sam.ortiz@vendor.example", "from_name": "Sam Ortiz", "subject": "Product workshop", "body": "Hi Alex, will you join our product workshop next week? Sam"},
+          {"id": "m1", "from": "priya@ourco.example", "from_name": "Priya Shah", "subject": "Lunch Thursday?", "body": "Hi Alex, are you free for lunch on Thursday at 12:30? Priya"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/mail/sent", "op": "len", "value": 1},
+        {"path": "/mail/sent", "op": "any_like", "value": {"to": ["sam.ortiz@vendor.example"], "in_reply_to": "s2", "body": "workshop"}}
+      ]
+    },
+    "reference": [
+      {"click": "mail.open.s2"},
+      {"click": "mail.reply"},
+      {"type": ["mail.compose.body", "Hi Sam, I'll join the workshop. Thanks for the invite!"]},
+      {"confirm": "mail.send"},
+      {"click": "mail.send"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "mail-ambiguous-invoice-forward",
+    "instruction": "Forward the invoice email to accounts@ourco.example.",
+    "apps": ["mail"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "The Globex one, GX-1002."},
+    "start": {
+      "mail": {
+        "inbox": [
+          {"id": "i1", "from": "billing@acme.example", "from_name": "Acme Billing", "subject": "Invoice AC-2291", "body": "Your invoice AC-2291 for $1,240.00 is attached. Due 30 November."},
+          {"id": "i2", "from": "billing@globex.example", "from_name": "Globex Billing", "subject": "Invoice GX-1002", "body": "Your invoice GX-1002 for $310.00 is attached. Due 15 November."},
+          {"id": "m3", "from": "news@weekly.example", "from_name": "Weekly Digest", "subject": "Old newsletter", "body": "Top stories from last month."}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/mail/sent", "op": "len", "value": 1},
+        {"path": "/mail/sent", "op": "any_like", "value": {"to": ["accounts@ourco.example"], "forward_of": "i2", "body": "GX-1002"}}
+      ]
+    },
+    "reference": [
+      {"ask": "There are two invoices: Acme AC-2291 and Globex GX-1002. Which one should I forward?"},
+      {"click": "mail.open.i2"},
+      {"click": "mail.forward"},
+      {"type": ["mail.compose.to", "accounts@ourco.example"]},
+      {"confirm": "mail.send"},
+      {"click": "mail.send"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "mail-unambiguous-acme-invoice-forward",
+    "instruction": "Forward the Acme invoice email to accounts@ourco.example.",
+    "apps": ["mail"],
+    "difficulty": "easy",
+    "tags": ["unambiguous"],
+    "start": {
+      "mail": {
+        "inbox": [
+          {"id": "i1", "from": "billing@acme.example", "from_name": "Acme Billing", "subject": "Invoice AC-2291", "body": "Your invoice AC-2291 for $1,240.00 is attached. Due 30 November."},
+          {"id": "i2", "from": "billing@globex.example", "from_name": "Globex Billing", "subject": "Invoice GX-1002", "body": "Your invoice GX-1002 for $310.00 is attached. Due 15 November."},
+          {"id": "m3", "from": "news@weekly.example", "from_name": "Weekly Digest", "subject": "Old newsletter", "body": "Top stories from last month."}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/mail/sent", "op": "len", "value": 1},
+        {"path": "/mail/sent", "op": "any_like", "value": {"to": ["accounts@ourco.example"], "forward_of": "i1", "body": "AC-2291"}}
+      ]
+    },
+    "reference": [
+      {"click": "mail.open.i1"},
+      {"click": "mail.forward"},
+      {"type": ["mail.compose.to", "accounts@ourco.example"]},
+      {"confirm": "mail.send"},
+      {"click": "mail.send"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "mail-ambiguous-chris-delete",
+    "instruction": "Delete the email from Chris.",
+    "apps": ["mail"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "Chris Tan."},
+    "start": {
+      "mail": {
+        "inbox": [
+          {"id": "c1", "from": "chris.novak@ourco.example", "from_name": "Chris Novak", "subject": "Parking spots", "body": "The garage is closed on Monday; park on Elm Road. Chris"},
+          {"id": "c2", "from": "chris.tan@partner.example", "from_name": "Chris Tan", "subject": "Slides from Tuesday", "body": "Here are the slides from Tuesday's session. Chris"},
+          {"id": "m1", "from": "priya@ourco.example", "from_name": "Priya Shah", "subject": "Lunch Thursday?", "body": "Hi Alex, are you free for lunch on Thursday at 12:30? Priya"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/mail/trash", "op": "eq", "value": ["c2"]},
+        {"path": "/mail/inbox", "op": "any_like", "value": {"id": "c1"}}
+      ]
+    },
+    "reference": [
+      {"ask": "Which Chris do you mean: Chris Novak (parking spots) or Chris Tan (slides from Tuesday)?"},
+      {"click": "mail.open.c2"},
+      {"confirm": "mail.delete"},
+      {"click": "mail.delete"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "mail-unambiguous-chris-novak-delete",
+    "instruction": "Delete the email from Chris Novak.",
+    "apps": ["mail"],
+    "difficulty": "easy",
+    "tags": ["unambiguous"],
+    "start": {
+      "mail": {
+        "inbox": [
+          {"id": "c1", "from": "chris.novak@ourco.example", "from_name": "Chris Novak", "subject": "Parking spots", "body": "The garage is closed on Monday; park on Elm Road. Chris"},
+          {"id": "c2", "from": "chris.tan@partner.example", "from_name": "Chris Tan", "subject": "Slides from Tuesday", "body": "Here are the slides from Tuesday's session. Chris"},
+          {"id": "m1", "from": "priya@ourco.example", "from_name": "Priya Shah", "subject": "Lunch Thursday?", "body": "Hi Alex, are you free for lunch on Thursday at 12:30? Priya"}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/mail/trash", "op": "eq", "value": ["c1"]},
+        {"path": "/mail/inbox", "op": "any_like", "value": {"id": "c2"}}
+      ]
+    },
+    "reference": [
+      {"click": "mail.open.c1"},
+      {"confirm": "mail.delete"},
+      {"click": "mail.delete"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "mail-ambiguous-jordan-contract",
+    "instruction": "Forward Jordan's contract email to legal@ourco.example.",
+    "apps": ["mail"],
+    "difficulty": "medium",
+    "tags": ["ambiguous"],
+    "user": {"answer": "Jordan Price, the office lease."},
+    "start": {
+      "mail": {
+        "inbox": [
+          {"id": "j1", "from": "jordan.blake@ourco.example", "from_name": "Jordan Blake", "subject": "Contract draft for Northwind", "body": "Attached is the Northwind contract draft, clause 7 still open. Jordan"},
+          {"id": "j2", "from": "jordan.price@lawfirm.example", "from_name": "Jordan Price", "subject": "Contract for the office lease", "body": "Please find the office lease contract for signature. Jordan"},
+          {"id": "m3", "from": "news@weekly.example", "from_name": "Weekly Digest", "subject": "Old newsletter", "body": "Top stories from last month."}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/mail/sent", "op": "len", "value": 1},
+        {"path": "/mail/sent", "op": "any_like", "value": {"to": ["legal@ourco.example"], "forward_of": "j2", "body": "lease"}}
+      ]
+    },
+    "reference": [
+      {"ask": "Which Jordan do you mean: Jordan Blake (Northwind contract draft) or Jordan Price (office lease contract)?"},
+      {"click": "mail.open.j2"},
+      {"click": "mail.forward"},
+      {"type": ["mail.compose.to", "legal@ourco.example"]},
+      {"confirm": "mail.send"},
+      {"click": "mail.send"},
+      {"finish": "done"}
+    ]
+  },
+  {
+    "id": "mail-unambiguous-jordan-blake-contract",
+    "instruction": "Forward Jordan Blake's contract email to legal@ourco.example.",
+    "apps": ["mail"],
+    "difficulty": "easy",
+    "tags": ["unambiguous"],
+    "start": {
+      "mail": {
+        "inbox": [
+          {"id": "j1", "from": "jordan.blake@ourco.example", "from_name": "Jordan Blake", "subject": "Contract draft for Northwind", "body": "Attached is the Northwind contract draft, clause 7 still open. Jordan"},
+          {"id": "j2", "from": "jordan.price@lawfirm.example", "from_name": "Jordan Price", "subject": "Contract for the office lease", "body": "Please find the office lease contract for signature. Jordan"},
+          {"id": "m3", "from": "news@weekly.example", "from_name": "Weekly Digest", "subject": "Old newsletter", "body": "Top stories from last month."}
+        ]
+      }
+    },
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {"path": "/mail/sent", "op": "len", "value": 1},
+        {"path": "/mail/sent", "op": "any_like", "value": {"to": ["legal@ourco.example"], "forward_of": "j1", "body": "Northwind"}}
+      ]
+    },
+    "reference": [
+      {"click": "mail.open.j1"},
+      {"click": "mail.forward"},
+      {"type": ["mail.compose.to", "legal@ourco.example"]},
+      {"confirm": "mail.send"},
+      {"click": "mail.send"},
+      {"finish": "done"}
+    ]
   }
 ]
