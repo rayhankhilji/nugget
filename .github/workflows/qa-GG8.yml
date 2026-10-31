@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 200
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install Rust toolchain
@@ -78,7 +78,7 @@ jobs:
         run: |
           sudo chown -R "$USER" "$RESULTS" || true
           find "$RESULTS" -type f -size +100M -print -delete
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: gg8-linux
@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install the Tauri build dependencies, X server and capture tools
@@ -105,10 +105,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: qa-gg8-desktop
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: apps/desktop/package.json
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
       - name: Install frontend dependencies
@@ -137,7 +137,7 @@ jobs:
       - name: Summary
         if: always()
         run: python3 qa/GG8/real/print_summary.py "$RESULTS"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: gg8-desktop
@@ -149,7 +149,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install Rust toolchain
@@ -170,7 +170,7 @@ jobs:
           sudo chown -R "$USER" "$RESULTS" || true
           python3 qa/GG8/real/print_summary.py "$RESULTS"
           find "$RESULTS" -type f -size +100M -print -delete
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: gg8-macos
