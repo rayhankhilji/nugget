@@ -64,6 +64,9 @@ pub const CARET_UNITS: Units = if cfg!(target_os = "macos") {
 
 /// Gap between the caret and the overlay, logical pixels.
 const GAP: f64 = 6.0;
+/// The least height [`fit`] shrinks to (below `min_height`) rather than cover the caret: a
+/// status line and one row of buttons, the rest scrolls. Logical pixels.
+const FLOOR: f64 = 64.0;
 
 fn caret_to_physical(caret: Area, units: Units, screens: &[Screen]) -> Area {
     match units {
@@ -193,7 +196,14 @@ pub fn fit(
                 wanted > below_room && (wanted <= above_room || above_room > below_room),
             );
             let room = if above { above_room } else { below_room };
-            let h = wanted.min(room.max(min_h));
+            // Shorter than `min_height` rather than over the caret when there is not even that
+            // much room; only a side smaller than the floor leaves no choice.
+            let floor = (FLOOR * k).min(min_h);
+            let h = if room >= floor {
+                wanted.min(room)
+            } else {
+                wanted.min(min_h)
+            };
             let y = if above {
                 c.y - gap - h
             } else {
@@ -327,12 +337,14 @@ mod tests {
     }
 
     #[test]
-    fn an_overlay_larger_than_the_screen_sticks_to_the_top_left() {
+    fn an_overlay_larger_than_the_screen_sticks_to_the_left_and_shrinks_below_the_caret() {
         let screens = [screen(0.0, 0.0, 300.0, 200.0, 1.0)];
         let caret = Area::new(100.0, 100.0, 1.0, 10.0);
+        // Wider than the screen: at its left edge. Taller than either side: shrunk to the
+        // larger room (below the caret) instead of covering it.
         assert_eq!(
             place(Some(caret), Units::Physical, &screens, SIZE, None),
-            Some((0, 50))
+            Some((0, 116))
         );
     }
 
@@ -484,5 +496,36 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn fit_shrinks_below_min_height_rather_than_cover_a_tall_selection() {
+        // A multi-line selection: its union rect leaves 84 px above and 214 px below.
+        let screens = [screen(0.0, 0.0, 1920.0, 1080.0, 1.0)];
+        let sel = Area::new(300.0, 140.0, 400.0, 860.0);
+        let f = fit(
+            Some(sel),
+            Units::Physical,
+            &screens,
+            w((440.0, 300.0), 120.0, false, None),
+            None,
+        )
+        .unwrap();
+        let (top, bottom) = (f.y, f.y + f.height as i32);
+        assert!(bottom <= 140 || top >= 1000, "{f:?} overlaps the selection");
+        // Both sides under min_height at 2x: the larger one, shrunk to fit.
+        let screens = [screen(0.0, 0.0, 1600.0, 600.0, 2.0)];
+        let caret = Area::new(100.0, 250.0, 2.0, 120.0);
+        let f = fit(
+            Some(caret),
+            Units::Physical,
+            &screens,
+            w((440.0, 300.0), 120.0, false, None),
+            None,
+        )
+        .unwrap();
+        let (top, bottom) = (f.y, f.y + f.height as i32);
+        assert!(bottom <= 250 || top >= 370, "{f:?} overlaps the caret");
+        assert!(f.height < 240 && f.height >= 128);
     }
 }

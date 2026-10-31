@@ -204,10 +204,11 @@ fn on_trigger(app: &AppHandle) {
 
 // --- the draft flow ------------------------------------------------------------------------------
 
-fn fail(app: &AppHandle, f: Failure) {
+/// A failure of the request made for `generation` (ignored once a newer one replaced it).
+fn fail(app: &AppHandle, generation: u64, f: Failure) {
     match f {
-        Failure::Refused(k) => apply(app, Event::Refused(k.into())),
-        Failure::Error(e) => apply(app, Event::Error(e)),
+        Failure::Refused(k) => apply_for(app, generation, Event::Refused(k.into())),
+        Failure::Error(e) => apply_for(app, generation, Event::Error(e)),
     };
 }
 
@@ -228,7 +229,7 @@ pub(super) fn local_refusal(
 /// The trigger fired (or `doubletap_fire`): read the field, refuse or start a draft.
 pub async fn fire(app: AppHandle) {
     let state = app.state::<DoubleTap>();
-    {
+    let generation = {
         let mut m = lock(&state.machine);
         if m.busy() {
             return;
@@ -236,16 +237,18 @@ pub async fn fire(app: AppHandle) {
         let step = m.apply(Event::Begin);
         let _ = app.emit_to(OVERLAY_LABEL, OVERLAY_EVENT, m.view());
         probe::record("view", || serde_json::json!(m.view()));
+        let generation = m.generation();
         drop(m);
         run(&app, step.effects);
-    }
+        generation
+    };
     *lock(&state.target) = None;
     *lock(&state.request) = None;
     *lock(&state.layout) = Layout::default();
     let s = lock(&state.settings).clone();
     if let Some(field) = practice_target(&app) {
-        apply(&app, Event::Practice);
-        return fire_practice(&app, field, &s).await;
+        apply_for(&app, generation, Event::Practice);
+        return fire_practice(&app, generation, field, &s).await;
     }
     let a11y = state.a11y.clone();
 
@@ -262,17 +265,24 @@ pub async fn fire(app: AppHandle) {
     })
     .await;
     let focused = match read {
-        Err(e) => return fail(&app, Failure::Error(e.to_string())),
-        Ok(Err(e)) => return fail(&app, errors::classify_a11y(&e, false)),
-        Ok(Ok(None)) => return fail(&app, Failure::Refused(errors::REFUSED_NO_FIELD)),
+        Err(e) => return fail(&app, generation, Failure::Error(e.to_string())),
+        Ok(Err(e)) => return fail(&app, generation, errors::classify_a11y(&e, false)),
+        Ok(Ok(None)) => {
+            return fail(&app, generation, Failure::Refused(errors::REFUSED_NO_FIELD));
+        }
         Ok(Ok(Some(f))) => f,
     };
+    // Nugget's own windows (outside the practice field) are not a target: drafting into the
+    // overlay or a settings field would read and write Nugget itself.
+    if super::readahead::is_own(&app, &focused.app) {
+        return fail(&app, generation, Failure::Refused(errors::REFUSED_NO_FIELD));
+    }
     // A secure field's value is never read (the backend leaves it empty) and never sent.
     if focused.field.secure {
-        return fail(&app, Failure::Refused(errors::REFUSED_SECURE));
+        return fail(&app, generation, Failure::Refused(errors::REFUSED_SECURE));
     }
     if let Some(key) = local_refusal(&focused.app, &s) {
-        return fail(&app, Failure::Refused(key));
+        return fail(&app, generation, Failure::Refused(key));
     }
     *lock(&state.target) = Some(Target {
         app: focused.app.clone(),
@@ -286,7 +296,7 @@ pub async fn fire(app: AppHandle) {
             .is_some_and(nugget_policy::redact::is_secure_label),
     });
     let request = draft_request(focused, &s);
-    start(&app, request).await;
+    start(&app, generation, request).await;
 }
 
 /// The practice field, when it has focus in Nugget's main window (frontmost).
@@ -297,7 +307,12 @@ fn practice_target(app: &AppHandle) -> Option<PracticeField> {
 }
 
 /// The trigger fired over the practice field: draft for real from its sandbox context.
-async fn fire_practice(app: &AppHandle, field: PracticeField, s: &settings::DoubleTapSettings) {
+async fn fire_practice(
+    app: &AppHandle,
+    generation: u64,
+    field: PracticeField,
+    s: &settings::DoubleTapSettings,
+) {
     let state = app.state::<DoubleTap>();
     // The page's viewport rect, in physical pixels on the desktop.
     let caret = app.get_webview_window(MAIN_LABEL).and_then(|w| {
@@ -321,20 +336,27 @@ async fn fire_practice(app: &AppHandle, field: PracticeField, s: &settings::Doub
         sensitive: false,
     });
     probe::record("practice", || serde_json::Value::Null);
-    start(app, field.request(provider.map(ProviderId::new))).await;
+    start(
+        app,
+        generation,
+        field.request(provider.map(ProviderId::new)),
+    )
+    .await;
 }
 
 /// Keep the request (for Retry and the refinements) and start the draft.
-async fn start(app: &AppHandle, request: DraftRequest) {
+async fn start(app: &AppHandle, generation: u64, request: DraftRequest) {
     *lock(&app.state::<DoubleTap>().request) = Some(request.clone());
     match begin(app, &request).await {
-        Ok(started) => apply(app, Event::Started(started_event(started))),
-        Err(f) => fail(app, f),
+        Ok(started) => apply(app, Event::Started(started_event(started, generation))),
+        Err(f) => fail(app, generation, f),
     }
 }
 
-fn started_event(started: DraftStarted) -> Started {
+/// `generation` is the request's token: the machine cancels a stream started for an older one.
+fn started_event(started: DraftStarted, generation: u64) -> Started {
     Started {
+        generation,
         sensitive: started.citations.iter().any(|c| c.sensitive),
         stream_id: started.stream_id,
         provider: started.provider.0,
@@ -345,9 +367,13 @@ fn started_event(started: DraftStarted) -> Started {
 }
 
 /// Retry or a refinement: the session's request again, or rewriting `base`.
-async fn redraft(app: AppHandle, refine: Option<(Refinement, String)>) {
+async fn redraft(app: AppHandle, generation: u64, refine: Option<(Refinement, String)>) {
     let Some(request) = lock(&app.state::<DoubleTap>().request).clone() else {
-        return fail(&app, Failure::Error(errors::ERROR_DRAFT_FAILED.into()));
+        return fail(
+            &app,
+            generation,
+            Failure::Error(errors::ERROR_DRAFT_FAILED.into()),
+        );
     };
     let request = match refine {
         Some((kind, base)) => refined_request(&request, &base, kind),
@@ -356,8 +382,8 @@ async fn redraft(app: AppHandle, refine: Option<(Refinement, String)>) {
     // The kept request stays the original: a second refinement rewrites the new draft from the
     // same context, not a rewrite of a rewrite's prompt.
     match begin(&app, &request).await {
-        Ok(started) => apply(&app, Event::Started(started_event(started))),
-        Err(f) => fail(&app, f),
+        Ok(started) => apply(&app, Event::Started(started_event(started, generation))),
+        Err(f) => fail(&app, generation, f),
     }
 }
 
@@ -500,11 +526,23 @@ fn is_disconnect(payload: &str) -> bool {
 
 /// Feed an event to the state machine, emit the view if it changed, run the effects.
 pub fn apply(app: &AppHandle, event: Event) {
+    apply_if(app, None, event);
+}
+
+/// [`apply`] only while the machine's request is still `generation` (checked under its lock).
+fn apply_for(app: &AppHandle, generation: u64, event: Event) {
+    apply_if(app, Some(generation), event);
+}
+
+fn apply_if(app: &AppHandle, generation: Option<u64>, event: Event) {
     let Some(state) = app.try_state::<DoubleTap>() else {
         return;
     };
     let effects = {
         let mut m = lock(&state.machine);
+        if generation.is_some_and(|g| g != m.generation()) {
+            return;
+        }
         let step = m.apply(event);
         if step.changed {
             // Emitted under the lock so views arrive in order.
@@ -563,8 +601,8 @@ fn run(app: &AppHandle, effects: Vec<Effect>) {
                     tauri::async_runtime::spawn(insert(app.clone(), text));
                 }
             }
-            Effect::Redraft(refine) => {
-                tauri::async_runtime::spawn(redraft(app.clone(), refine));
+            Effect::Redraft { generation, refine } => {
+                tauri::async_runtime::spawn(redraft(app.clone(), generation, refine));
             }
             Effect::RestoreFocus => {
                 if is_practice(app) {
@@ -582,10 +620,10 @@ fn run(app: &AppHandle, effects: Vec<Effect>) {
     }
 }
 
+/// The session drafts for the practice field (the state machine decides, so feedback, history
+/// and where the text goes always agree).
 fn is_practice(app: &AppHandle) -> bool {
-    lock(&app.state::<DoubleTap>().target)
-        .as_ref()
-        .is_some_and(|t| t.practice)
+    lock(&app.state::<DoubleTap>().machine).practice()
 }
 
 /// Bring the main window back and hand the practice field its action.
@@ -621,6 +659,7 @@ fn remember(app: &AppHandle, text: &str) {
         .as_ref()
         .map(|t| (t.app.name.clone(), t.practice || t.sensitive))
         .unwrap_or_default();
+    let skip = skip || lock(&state.machine).practice();
     if skip {
         return;
     }

@@ -187,6 +187,8 @@ pub fn overlay_refine(
     base: Option<String>,
 ) -> Result<(), CmdError> {
     only_overlay(&window)?;
+    // The overlay's text is untrusted input to a new request: keep it to a draft's size.
+    let base = base.map(|b| b.chars().take(super::history::MAX_CHARS).collect());
     flow::apply(&app, Event::Refine { kind, base });
     Ok(())
 }

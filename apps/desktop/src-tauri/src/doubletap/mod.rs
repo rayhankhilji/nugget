@@ -146,8 +146,16 @@ fn create_overlay(app: &App) -> tauri::Result<()> {
 }
 
 /// Call from `on_window_event`: closing the overlay (Alt+F4, Cmd+W) cancels instead of
-/// destroying the window.
+/// destroying the window; the main window losing focus forgets the practice field.
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
+    // The practice field only counts while the main window has the keyboard (the page clears it
+    // on blur too; this covers a page that could not).
+    if let WindowEvent::Focused(false) = event
+        && window.label() == MAIN_LABEL
+        && let Some(state) = window.app_handle().try_state::<DoubleTap>()
+    {
+        *lock(&state.practice) = None;
+    }
     if let WindowEvent::CloseRequested { api, .. } = event
         && window.label() == OVERLAY_LABEL
     {

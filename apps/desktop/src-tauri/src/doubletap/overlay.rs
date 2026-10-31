@@ -137,6 +137,9 @@ pub struct Started {
     pub excluded_sensitive: u32,
     /// The draft may draw on items marked sensitive: it is never kept in the history.
     pub sensitive: bool,
+    /// The [`Machine::generation`] the request was made for: a result for an older request (a
+    /// retry cancelled before the daemon answered) is cancelled, never shown.
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -203,8 +206,11 @@ pub enum Effect {
     /// `draft.feedback`.
     Feedback(DraftFeedback),
     /// Ask the daemon for a new draft of the session's context: as before (Retry), or as a
-    /// rewrite of this text with the refinement's instruction.
-    Redraft(Option<(Refinement, String)>),
+    /// rewrite of this text with the refinement's instruction. Its results carry `generation`.
+    Redraft {
+        generation: u64,
+        refine: Option<(Refinement, String)>,
+    },
     /// Give the keyboard back to the field the draft was read from (after Esc or a timeout).
     RestoreFocus,
     /// Keep this draft in the history (never for practice or sensitive drafts).
@@ -273,18 +279,30 @@ impl Machine {
         &self.view
     }
 
+    /// Bumped by every `Begin`, `Retry` and `Refine`: the token of the current request.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The session (the last one, once closed) drafts for the practice field.
+    pub fn practice(&self) -> bool {
+        self.practice
+    }
+
     #[cfg(test)]
     fn is_active(&self) -> bool {
         self.active
     }
 
-    /// A draft is in progress: a new trigger is ignored.
+    /// A draft is in progress, or the overlay holds the keyboard (a retryable error waiting for
+    /// the user): a new trigger is ignored.
     pub fn busy(&self) -> bool {
         self.active
-            && matches!(
-                self.view.phase,
-                Phase::Reading | Phase::Streaming | Phase::Done | Phase::Inserting
-            )
+            && (self.focused
+                || matches!(
+                    self.view.phase,
+                    Phase::Reading | Phase::Streaming | Phase::Done | Phase::Inserting
+                ))
     }
 
     fn hide_after(&self, ms: u64) -> Effect {
@@ -380,7 +398,11 @@ impl Machine {
             {
                 effects.push(Effect::CancelStream(id.clone()));
             }
-            effects.extend(self.feedback("rejected", None, None));
+            // A retry rejects the draft; a refinement keeps its substance, so it says nothing
+            // about the user's voice either way (the refined draft's own outcome is reported).
+            if refine.is_none() {
+                effects.extend(self.feedback("rejected", None, None));
+            }
             self.remember_shown(&mut effects);
         }
         self.generation += 1;
@@ -395,7 +417,10 @@ impl Machine {
         self.buffered_bytes = 0;
         self.accepted = None;
         self.insert_failed = false;
-        effects.push(Effect::Redraft(refine));
+        effects.push(Effect::Redraft {
+            generation: self.generation,
+            refine,
+        });
         Step::changed(effects)
     }
 
@@ -417,7 +442,8 @@ impl Machine {
                 self.requested = false;
                 self.sensitive = false;
                 self.insert_failed = false;
-                // A refusal or error still on screen was shown without the keyboard.
+                // A refusal or error still on screen was shown without the keyboard (a focused
+                // one makes the machine busy).
                 self.focused = false;
                 Step::changed(Vec::new())
             }
@@ -430,8 +456,12 @@ impl Machine {
                 Step::changed(Vec::new())
             }
             Event::Started(s) => {
-                if !self.active || self.view.phase != Phase::Reading || self.stream_id.is_some() {
-                    // Cancelled (or refused) while the request was in flight.
+                if !self.active
+                    || self.view.phase != Phase::Reading
+                    || self.stream_id.is_some()
+                    || s.generation != self.generation
+                {
+                    // Cancelled (or refused, or replaced by a newer request) while in flight.
                     return Step::effects(vec![Effect::CancelStream(s.stream_id)]);
                 }
                 self.view.phase = Phase::Streaming;
@@ -531,10 +561,12 @@ impl Machine {
                 Step::changed(effects)
             }
             Event::InsertPrevious(text) => {
-                if !self.active
-                    || !matches!(self.view.phase, Phase::Streaming | Phase::Done)
-                    || text.trim().is_empty()
-                {
+                // Also after a draft error that kept the keyboard; not after a failed insertion
+                // (the target already has it).
+                let drafting = matches!(self.view.phase, Phase::Streaming | Phase::Done);
+                let open = drafting
+                    || (self.view.phase == Phase::Error && self.focused && !self.insert_failed);
+                if !self.active || !open || text.trim().is_empty() {
                     return Step::default();
                 }
                 let mut effects = Vec::new();
@@ -544,8 +576,10 @@ impl Machine {
                     effects.push(Effect::CancelStream(id.clone()));
                     self.streaming = false;
                 }
-                effects.extend(self.feedback("rejected", None, None));
-                self.remember_shown(&mut effects);
+                if drafting {
+                    effects.extend(self.feedback("rejected", None, None));
+                    self.remember_shown(&mut effects);
+                }
                 self.view.text = text.clone();
                 self.view.phase = Phase::Inserting;
                 self.accepted = None;
@@ -701,7 +735,8 @@ impl Machine {
 mod tests {
     use super::*;
 
-    fn started(id: &str) -> Event {
+    /// `Started` for the machine's current request.
+    fn started(m: &Machine, id: &str) -> Event {
         Event::Started(Started {
             stream_id: id.into(),
             provider: "local".into(),
@@ -709,7 +744,15 @@ mod tests {
             citations: 2,
             excluded_sensitive: 1,
             sensitive: false,
+            generation: m.generation(),
         })
+    }
+
+    fn redraft(m: &Machine, refine: Option<(Refinement, String)>) -> Effect {
+        Effect::Redraft {
+            generation: m.generation(),
+            refine,
+        }
     }
 
     fn delta(id: &str, t: &str) -> Event {
@@ -729,7 +772,7 @@ mod tests {
     fn streaming(id: &str) -> Machine {
         let mut m = Machine::new();
         assert!(m.apply(Event::Begin).changed);
-        let s = m.apply(started(id));
+        let s = m.apply(started(&m, id));
         assert_eq!(s.effects, vec![Effect::Show { focus: true }]);
         m
     }
@@ -882,7 +925,7 @@ mod tests {
         m.apply(Event::Begin);
         assert_eq!(m.apply(Event::Cancel).effects, vec![Effect::Hide]);
         assert_eq!(
-            m.apply(started("late")),
+            m.apply(started(&m, "late")),
             Step::effects(vec![Effect::CancelStream("late".into())])
         );
     }
@@ -895,7 +938,7 @@ mod tests {
         m.apply(delta("chat-x", "someone else's"));
         m.apply(delta("s7", "bird"));
         m.apply(done("s7"));
-        let s = m.apply(started("s7"));
+        let s = m.apply(started(&m, "s7"));
         assert!(s.changed);
         assert_eq!(s.effects, vec![Effect::Show { focus: true }]);
         assert_eq!(m.view().text, "Early bird");
@@ -1075,7 +1118,7 @@ mod tests {
             vec![
                 feedback("r1", "rejected", None, None),
                 Effect::Remember("First".into()),
-                Effect::Redraft(None)
+                redraft(&m, None)
             ]
         );
         assert_eq!(m.view().phase, Phase::Reading);
@@ -1084,7 +1127,7 @@ mod tests {
         assert!(m.busy(), "a new trigger waits for the retry");
         // Deltas of the old stream are ignored; the new stream takes over.
         assert!(!m.apply(delta("r1", "late")).changed);
-        let s = m.apply(started("r2"));
+        let s = m.apply(started(&m, "r2"));
         assert_eq!(s.effects, vec![Effect::Show { focus: true }]);
         assert_eq!(
             m.view().text,
@@ -1096,7 +1139,7 @@ mod tests {
         // Retry while streaming cancels the running stream.
         let s = m.apply(Event::Retry);
         assert_eq!(s.effects[0], Effect::CancelStream("r2".into()));
-        assert_eq!(s.effects.last(), Some(&Effect::Redraft(None)));
+        assert_eq!(s.effects.last(), Some(&redraft(&m, None)));
         // Esc while reading the retry still hands focus back.
         assert_eq!(
             m.apply(Event::Cancel).effects,
@@ -1115,13 +1158,13 @@ mod tests {
         });
         assert_eq!(
             s.effects.last(),
-            Some(&Effect::Redraft(Some((
-                Refinement::Shorter,
-                "A long draft".into()
-            ))))
+            Some(&redraft(
+                &m,
+                Some((Refinement::Shorter, "A long draft".into()))
+            ))
         );
         assert_eq!(m.view().refinement, Some(Refinement::Shorter));
-        m.apply(started("f2"));
+        m.apply(started(&m, "f2"));
         assert_eq!(m.view().refinement, Some(Refinement::Shorter));
         m.apply(delta("f2", "Short"));
         // The user's edit is the base when given; a blank edit falls back to the text shown.
@@ -1131,12 +1174,9 @@ mod tests {
         });
         assert_eq!(
             s.effects.last(),
-            Some(&Effect::Redraft(Some((
-                Refinement::Formal,
-                "My words".into()
-            ))))
+            Some(&redraft(&m, Some((Refinement::Formal, "My words".into()))))
         );
-        m.apply(started("f3"));
+        m.apply(started(&m, "f3"));
         m.apply(delta("f3", "Shown"));
         let s = m.apply(Event::Refine {
             kind: Refinement::Casual,
@@ -1144,7 +1184,7 @@ mod tests {
         });
         assert_eq!(
             s.effects.last(),
-            Some(&Effect::Redraft(Some((Refinement::Casual, "Shown".into()))))
+            Some(&redraft(&m, Some((Refinement::Casual, "Shown".into()))))
         );
         // Nothing to refine yet.
         let mut m = streaming("f4");
@@ -1175,7 +1215,7 @@ mod tests {
         assert!(m.view().can_retry);
         assert_eq!(
             m.apply(Event::Retry).effects,
-            vec![Effect::Redraft(None)],
+            vec![redraft(&m, None)],
             "no feedback or history for a failed draft"
         );
         // The retried request fails: still retryable, still with the keyboard.
@@ -1224,6 +1264,17 @@ mod tests {
             matches!(s.effects[..], [Effect::HideAfter { .. }]),
             "no accepted/edited feedback for a previous draft"
         );
+        // After a draft error that kept the keyboard: no feedback for the failed draft.
+        let mut m = streaming("p2");
+        m.apply(Event::Error("doubletap.error.draft_failed".into()));
+        assert_eq!(
+            m.apply(Event::InsertPrevious("Older".into())).effects,
+            vec![
+                Effect::Hide,
+                Effect::Remember("Older".into()),
+                Effect::Insert("Older".into())
+            ]
+        );
     }
 
     #[test]
@@ -1232,13 +1283,13 @@ mod tests {
         m.apply(Event::Begin);
         assert!(m.apply(Event::Practice).changed);
         assert!(m.view().practice);
-        m.apply(started("q1"));
+        m.apply(started(&m, "q1"));
         m.apply(delta("q1", "Practice draft"));
         m.apply(done("q1"));
         let s = m.apply(Event::Retry);
-        assert_eq!(s.effects, vec![Effect::Redraft(None)]);
+        assert_eq!(s.effects, vec![redraft(&m, None)]);
         assert!(m.view().practice, "a retry stays in practice");
-        m.apply(started("q2"));
+        m.apply(started(&m, "q2"));
         m.apply(delta("q2", "Again"));
         let s = m.apply(Event::Accept(None));
         assert_eq!(
@@ -1272,14 +1323,74 @@ mod tests {
             citations: 1,
             excluded_sensitive: 0,
             sensitive: true,
+            generation: m.generation(),
         }));
         m.apply(delta("z1", "Your PIN is 4821"));
         m.apply(done("z1"));
         // Sticky for the session: a retry's draft may restate it.
         m.apply(Event::Retry);
-        m.apply(started("z2"));
+        m.apply(started(&m, "z2"));
         m.apply(delta("z2", "Again"));
         let s = m.apply(Event::Accept(None));
         assert!(!s.effects.iter().any(|e| matches!(e, Effect::Remember(_))));
+    }
+
+    #[test]
+    fn a_cancelled_retry_never_reaches_the_next_session() {
+        let mut m = streaming("a1");
+        m.apply(delta("a1", "For app A"));
+        m.apply(done("a1"));
+        m.apply(Event::Retry);
+        let stale = started(&m, "a2");
+        m.apply(Event::Cancel);
+        // A new trigger in another app, while A's retry is still in flight.
+        assert!(m.apply(Event::Begin).changed);
+        assert_eq!(
+            m.apply(stale),
+            Step::effects(vec![Effect::CancelStream("a2".into())]),
+            "the old request's draft is cancelled, not shown"
+        );
+        assert_eq!(m.view().phase, Phase::Reading);
+        // The new session's own draft still starts.
+        let s = m.apply(started(&m, "b1"));
+        assert_eq!(s.effects, vec![Effect::Show { focus: true }]);
+        // A newer retry replaces an older one in flight too.
+        m.apply(done("b1"));
+        m.apply(Event::Retry);
+        let older = started(&m, "b2");
+        m.apply(Event::Error("doubletap.error.draft_failed".into()));
+        m.apply(Event::Retry);
+        assert_eq!(
+            m.apply(older).effects,
+            vec![Effect::CancelStream("b2".into())]
+        );
+    }
+
+    #[test]
+    fn a_focused_error_keeps_the_trigger_from_starting_over_it() {
+        let mut m = streaming("k1");
+        m.apply(Event::Done {
+            stream_id: "k1".into(),
+            error: Some("boom".into()),
+        });
+        assert!(
+            m.busy(),
+            "the overlay holds the keyboard: Esc or Retry first"
+        );
+        assert_eq!(m.apply(Event::Begin), Step::default());
+        assert_eq!(
+            m.apply(Event::Cancel).effects,
+            vec![Effect::Hide, Effect::RestoreFocus]
+        );
+        assert!(!m.busy());
+        // A refinement sends no feedback for the draft it rewrites.
+        let mut m = streaming("k2");
+        m.apply(delta("k2", "Text"));
+        m.apply(done("k2"));
+        let s = m.apply(Event::Refine {
+            kind: Refinement::Shorter,
+            base: None,
+        });
+        assert!(!s.effects.iter().any(|e| matches!(e, Effect::Feedback(_))));
     }
 }
