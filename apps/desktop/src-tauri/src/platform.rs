@@ -257,6 +257,16 @@ pub fn setup(app: &tauri::App) {
 
 // ---- commands ----
 
+/// Settings and shell strings change only from the main window (not the quick-ask box or the
+/// Double Tap overlay, whose webviews show untrusted text).
+pub fn main_only<R: Runtime>(window: &tauri::Window<R>) -> Result<(), CmdError> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err(CmdError::Other("not allowed from this window".into()))
+    }
+}
+
 #[tauri::command]
 pub fn platform_settings_get(app: AppHandle) -> PlatformSettings {
     app.state::<Platform>().settings()
@@ -266,8 +276,10 @@ pub fn platform_settings_get(app: AppHandle) -> PlatformSettings {
 #[tauri::command]
 pub fn platform_settings_set(
     app: AppHandle,
+    window: tauri::Window,
     settings: PlatformSettings,
 ) -> Result<PlatformSettings, CmdError> {
+    main_only(&window)?;
     app.state::<Platform>()
         .update(|s| {
             s.notifications = settings.notifications;
@@ -278,8 +290,12 @@ pub fn platform_settings_set(
 
 /// The main window's current-locale strings for the tray and notifications.
 #[tauri::command]
-pub fn shell_labels_set(app: AppHandle, labels: BTreeMap<String, String>) -> usize {
-    if labels.len() > LABELS.len() * 2 {
+pub fn shell_labels_set(
+    app: AppHandle,
+    window: tauri::Window,
+    labels: BTreeMap<String, String>,
+) -> usize {
+    if main_only(&window).is_err() || labels.len() > LABELS.len() * 2 {
         return 0;
     }
     let n = lock(&app.state::<Platform>().labels).apply(&labels);

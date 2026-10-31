@@ -72,13 +72,29 @@ pub enum Link {
     Plugin { path: String },
 }
 
-/// One line of user-visible text: control characters become spaces, trimmed, non-empty.
+/// Characters that reorder or hide text (bidi overrides and isolates, zero-width marks): a link
+/// could use them to make a name read as something else in a confirmation.
+pub fn is_invisible(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
+/// The program's arguments, never panicking on one that isn't valid Unicode (it is kept, lossily,
+/// and then fails validation).
+pub fn launch_args() -> Vec<String> {
+    std::env::args_os()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// One line of user-visible text: control characters become spaces, invisible ones are dropped,
+/// trimmed, non-empty.
 fn text(value: &str, max: usize) -> Result<String, String> {
     if value.chars().count() > max {
         return Err(format!("longer than {max} characters"));
     }
     let clean: String = value
         .chars()
+        .filter(|c| !is_invisible(*c))
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     let clean = clean.trim();
@@ -90,7 +106,10 @@ fn text(value: &str, max: usize) -> Result<String, String> {
 
 /// An identifier as sent: no control characters at all (they are never part of a real one).
 fn reference(value: &str) -> Result<String, String> {
-    if value.is_empty() || value.len() > MAX_REF_LEN || value.chars().any(char::is_control) {
+    if value.is_empty()
+        || value.len() > MAX_REF_LEN
+        || value.chars().any(|c| c.is_control() || is_invisible(c))
+    {
         return Err("not a valid reference".into());
     }
     Ok(value.to_owned())
@@ -178,6 +197,14 @@ pub fn parse_plugin_path(path: &Path) -> Result<Link, String> {
         return Err("not a .nuggetplugin file".into());
     }
     let canonical = std::fs::canonicalize(path).map_err(|e| format!("can't open the file: {e}"))?;
+    // A link named `x.nuggetplugin` must point at a plugin package too.
+    let target_ok = canonical
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case(PLUGIN_EXTENSION));
+    if !target_ok {
+        return Err("not a .nuggetplugin file".into());
+    }
     let meta = std::fs::metadata(&canonical).map_err(|e| format!("can't open the file: {e}"))?;
     if !meta.is_file() {
         return Err("not a file".into());
@@ -258,9 +285,12 @@ fn kind(link: &Link) -> &'static str {
     }
 }
 
-/// The waiting link, once.
+/// The waiting link, once. Only the main window may take it.
 #[tauri::command]
-pub fn deeplink_take(app: AppHandle) -> Option<Link> {
+pub fn deeplink_take(app: AppHandle, window: tauri::Window) -> Option<Link> {
+    if window.label() != "main" {
+        return None;
+    }
     app.try_state::<Pending>()
         .and_then(|p| p.0.lock().unwrap_or_else(PoisonError::into_inner).take())
 }
@@ -289,7 +319,7 @@ pub fn setup(app: &tauri::App) {
         }
     }
     // The first launch's own arguments (a link or file that started Nugget).
-    let links = from_args(&std::env::args().collect::<Vec<_>>());
+    let links = from_args(&launch_args());
     if !links.is_empty() {
         let h = app.handle().clone();
         // After setup, so the quick-ask window and the tray exist.
@@ -361,6 +391,41 @@ mod tests {
         assert!(parse_url(&long).is_err());
         let huge = format!("nugget://search?q={}", "a".repeat(MAX_URL_LEN));
         assert!(parse_url(&huge).is_err());
+    }
+
+    #[test]
+    fn invisible_characters_are_dropped_or_refused() {
+        assert_eq!(
+            parse_url("nugget://search?q=in%E2%80%AEvoice%E2%80%8B"),
+            Ok(Link::Search {
+                query: "invoice".into()
+            })
+        );
+        assert!(parse_url("nugget://item?source=s&key=a%E2%80%AEfdp.exe").is_err());
+        assert!(parse_url("nugget://item?source=s%E2%81%A6&key=a").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plugin_named_link_to_another_file_is_refused() {
+        let dir = std::env::temp_dir().join(format!("nugget-deeplink-ln-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let secret = dir.join("id_key");
+        std::fs::write(&secret, b"secret").unwrap();
+        let link = dir.join("x.nuggetplugin");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&secret, &link).unwrap();
+        assert!(parse_plugin_path(&link).is_err());
+        let real = dir.join("real.nuggetplugin");
+        std::fs::write(&real, b"pkg").unwrap();
+        let alias = dir.join("alias.nuggetplugin");
+        let _ = std::fs::remove_file(&alias);
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        assert!(
+            parse_plugin_path(&alias).is_ok(),
+            "a link to a package is fine"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

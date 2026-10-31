@@ -113,6 +113,7 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
         : { listening: true, error: null, wayland_fallback: false, state: "listening" },
     }),
     quickask_hide: () => null,
+    quickask_prefill_take: () => null,
     // II4: platform settings round-trip in memory; no link is waiting.
     platform_settings_get: () => platformSettings,
     platform_settings_set: (a) => (platformSettings = { ...platformSettings, ...(a?.settings ?? {}), paused_sources: platformSettings.paused_sources }),

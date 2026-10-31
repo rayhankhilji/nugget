@@ -183,6 +183,7 @@ fn main() {
             platform::platform_settings_set,
             platform::shell_labels_set,
             deeplink::deeplink_take,
+            quickask::quickask_prefill_take,
         ])
         .setup(|app| {
             app.manage(updater::Updates::new(app.handle()));
@@ -194,7 +195,7 @@ fn main() {
             let window_state = window_state::init(app);
             if let Some(main) = app.get_webview_window("main") {
                 window_state.restore(&main);
-                let argv: Vec<String> = std::env::args().collect();
+                let argv = deeplink::launch_args();
                 let hidden = autostart::launched_hidden() || wants_quick_ask(&argv);
                 if !(hidden && tray::has_tray(app.handle())) {
                     let _ = main.show();
@@ -217,7 +218,7 @@ fn main() {
             updater::spawn_background_checks(app.handle());
             doubletap::setup(app);
             quickask::setup(app);
-            if wants_quick_ask(&std::env::args().collect::<Vec<_>>()) {
+            if wants_quick_ask(&deeplink::launch_args()) {
                 quickask::toggle(app.handle());
             }
             deeplink::setup(app);

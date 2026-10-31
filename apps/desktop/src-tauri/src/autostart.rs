@@ -31,7 +31,7 @@ pub struct AutostartStatus {
 
 /// True when this launch came from the login entry.
 pub fn launched_hidden() -> bool {
-    std::env::args().skip(1).any(|a| a == HIDDEN_ARG)
+    std::env::args_os().skip(1).any(|a| a == HIDDEN_ARG)
 }
 
 /// The program the entry should start.

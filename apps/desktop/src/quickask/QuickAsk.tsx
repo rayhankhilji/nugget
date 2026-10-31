@@ -94,11 +94,23 @@ export function QuickAsk() {
     return () => window.removeEventListener("keydown", onKey);
   }, [hide]);
 
-  useEvent(quickAskApi.onPrefill, (text) => {
+  const prefill = useCallback((text: string) => {
     setQuestion(text);
     // After the render that puts the text in.
     setTimeout(() => focusInput(true), 0);
+  }, [focusInput]);
+  useEvent(quickAskApi.onPrefill, (text) => {
+    prefill(text);
+    // Consumed: so a later reload doesn't type it in again.
+    quickAskApi.takePrefill().catch(() => {});
   });
+  // A link that started Nugget may have been sent before this page subscribed.
+  useEffect(() => {
+    quickAskApi
+      .takePrefill()
+      .then((text) => text && prefill(text))
+      .catch(() => {});
+  }, [prefill]);
 
   const sync = (id: string) => {
     const s = streams.current.get(id);

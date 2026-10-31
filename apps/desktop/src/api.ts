@@ -2521,6 +2521,8 @@ export const quickAskApi = {
   settingsSet: (settings: QuickAskSettings) => call<QuickAskView>("quickask_settings_set", { settings }),
   hide: () => call<null>("quickask_hide"),
   openMain: (page: QuickAskPage) => call<null>("quickask_open_main", { page }),
+  /** II4: a prefill sent before this window subscribed, once. */
+  takePrefill: () => call<string | null>("quickask_prefill_take"),
   onPrefill: (h: (text: string) => void) =>
     on<unknown>(QUICK_ASK_PREFILL_EVENT, (p) => {
       if (typeof p === "string") h(p);

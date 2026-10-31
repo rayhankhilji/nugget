@@ -898,10 +898,13 @@ pub async fn reminders_list(
 #[tauri::command]
 pub async fn notify(
     app: AppHandle,
+    window: tauri::Window,
     title: String,
     body: String,
     open_today: Option<bool>,
 ) -> Result<()> {
+    // II4: only the main window composes notifications (not the quick-ask box or the overlay).
+    crate::platform::main_only(&window)?;
     crate::notify::show(&app, &title, &body, open_today.unwrap_or(false)).map_err(CmdError::Other)
 }
 

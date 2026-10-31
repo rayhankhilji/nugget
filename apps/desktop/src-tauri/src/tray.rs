@@ -153,6 +153,8 @@ pub struct Tray {
     update_version: Mutex<Option<String>>,
     snapshot: Mutex<Snapshot>,
     refresh_scheduled: AtomicBool,
+    /// A pause or resume is running; further clicks are ignored until it is done.
+    pausing: AtomicBool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -258,6 +260,7 @@ fn build(app: &tauri::App) -> tauri::Result<()> {
         update_version: Mutex::new(None),
         snapshot: Mutex::new(Snapshot::default()),
         refresh_scheduled: AtomicBool::new(false),
+        pausing: AtomicBool::new(false),
     });
     Ok(())
 }
@@ -350,31 +353,75 @@ pub fn relabel(app: &AppHandle) {
 }
 
 /// Bring the status lines, the tooltip and the pause item in line with the snapshot.
-fn render(app: &AppHandle, t: &Tray) {
-    let snapshot = *lock(&t.snapshot);
-    let keys = line_keys(&snapshot);
-    let mut shown = lock(&t.shown);
-    let mut tooltip = vec![];
-    for (i, key) in keys.iter().enumerate() {
-        let line = &t.lines[i];
-        match key {
-            Some(key) => {
-                let text = label(app, key);
-                let _ = line.set_text(&text);
-                tooltip.push(text);
-                if !shown[i] {
-                    // Line i goes right after the lines before it that are shown.
-                    let at = shown[..i].iter().filter(|s| **s).count();
-                    if t.menu.insert(line, at).is_ok() {
-                        shown[i] = true;
-                    }
-                }
+/// A change to the status lines in the menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineOp {
+    /// Insert line `.0` at menu position `.1`.
+    Insert(usize, usize),
+    Remove(usize),
+}
+
+/// The inserts and removes that take the menu from `shown` to `keys`, in order (each position
+/// counts the lines already shown before it). Line 0 is never removed.
+pub fn line_ops(keys: &[Option<&str>; 4], shown: &[bool; 4]) -> Vec<LineOp> {
+    let mut now = *shown;
+    let mut ops = vec![];
+    for i in 0..4 {
+        match keys[i] {
+            Some(_) if !now[i] => {
+                ops.push(LineOp::Insert(i, now[..i].iter().filter(|s| **s).count()));
+                now[i] = true;
             }
-            None if shown[i] && i > 0 && t.menu.remove(line).is_ok() => shown[i] = false,
-            None => {}
+            None if now[i] && i > 0 => {
+                ops.push(LineOp::Remove(i));
+                now[i] = false;
+            }
+            _ => {}
         }
     }
-    drop(shown);
+    ops
+}
+
+/// Redraw on the main thread. Menu calls made elsewhere block until the main thread runs them,
+/// so rendering there (never holding a lock while waiting on it) cannot deadlock with a command
+/// that runs on the main thread, and renders never interleave.
+fn render(app: &AppHandle, _t: &Tray) {
+    let h = app.clone();
+    let posted = app.run_on_main_thread(move || {
+        if let Some(t) = h.try_state::<Tray>() {
+            render_now(&h, &t);
+        }
+    });
+    if let Err(e) = posted {
+        tracing::debug!(error = %e, "tray not redrawn");
+    }
+}
+
+fn render_now(app: &AppHandle, t: &Tray) {
+    let snapshot = *lock(&t.snapshot);
+    let keys = line_keys(&snapshot);
+    let mut tooltip = vec![];
+    for (i, key) in keys.iter().enumerate() {
+        if let Some(key) = key {
+            let text = label(app, key);
+            let _ = t.lines[i].set_text(&text);
+            tooltip.push(text);
+        }
+    }
+    let current = *lock(&t.shown);
+    for op in line_ops(&keys, &current) {
+        let ok = match op {
+            LineOp::Insert(i, at) => t.menu.insert(&t.lines[i], at).is_ok(),
+            LineOp::Remove(i) => t.menu.remove(&t.lines[i]).is_ok(),
+        };
+        if ok {
+            let mut shown = lock(&t.shown);
+            match op {
+                LineOp::Insert(i, _) => shown[i] = true,
+                LineOp::Remove(i) => shown[i] = false,
+            }
+        }
+    }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         // Windows clips tooltips at 127 characters.
         let tip: String = tooltip.join(" · ").chars().take(127).collect();
@@ -481,6 +528,18 @@ fn follow_daemon(app: &AppHandle) {
 /// "Pause indexing": turn off every enabled source and remember which; "Resume indexing" turns
 /// exactly those back on. Survives restarts (the sources stay off in the daemon's config).
 pub async fn toggle_pause(app: &AppHandle) {
+    let Some(t) = app.try_state::<Tray>() else {
+        return;
+    };
+    if t.pausing.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    toggle_pause_once(app).await;
+    t.pausing.store(false, Ordering::SeqCst);
+    refresh(app).await;
+}
+
+async fn toggle_pause_once(app: &AppHandle) {
     let platform = app.state::<Platform>();
     let daemon = app.state::<Daemon>();
     let paused = platform.settings().paused_sources;
@@ -502,28 +561,48 @@ pub async fn toggle_pause(app: &AppHandle) {
                     }
                 }
                 tracing::info!(sources = done.len(), "indexing paused from the tray");
-                platform.update(|p| p.paused_sources = done)
+                platform.update(|p| {
+                    for id in done {
+                        if !p.paused_sources.contains(&id) {
+                            p.paused_sources.push(id);
+                        }
+                    }
+                })
             }
             Err(e) => Err(e.to_string()),
         }
     } else {
+        let known: Option<Vec<String>> = daemon
+            .call::<_, Vec<SourceInfo>>(app, method::SOURCES_LIST, &json!({}))
+            .await
+            .ok()
+            .map(|l| l.iter().map(|s| s.id.to_string()).collect());
+        let mut left = vec![];
         for id in &paused {
+            // A source removed meanwhile: nothing to resume.
+            if known.as_ref().is_some_and(|k| !k.contains(id)) {
+                continue;
+            }
             let update = json!({ "id": id, "enabled": true });
             if let Err(e) = daemon
                 .call::<_, serde_json::Value>(app, method::SOURCES_UPDATE, &update)
                 .await
             {
-                // A source removed meanwhile: nothing to resume.
+                // Kept, so "Resume indexing" can be tried again.
                 tracing::warn!(error = %e, "couldn't resume a source");
+                left.push(id.clone());
             }
         }
-        tracing::info!(sources = paused.len(), "indexing resumed from the tray");
-        platform.update(|p| p.paused_sources.clear())
+        tracing::info!(
+            sources = paused.len() - left.len(),
+            left = left.len(),
+            "indexing resumed from the tray"
+        );
+        platform.update(|p| p.paused_sources = left)
     };
     if let Err(e) = result {
         tracing::warn!(error = %e, "pause/resume indexing failed");
     }
-    refresh(app).await;
 }
 
 /// `Some(reason)` when the tray should not be created.
@@ -726,6 +805,33 @@ mod tests {
         for k in [pause_key(true), pause_key(false)] {
             assert!(keys.contains(&k), "{k}");
         }
+    }
+
+    #[test]
+    fn line_ops_insert_in_order_and_never_remove_the_first_line() {
+        let all = [Some("a"), Some("b"), Some("c"), Some("d")];
+        let first = [Some("a"), None, None, None];
+        let start = [true, false, false, false];
+        assert_eq!(
+            line_ops(&all, &start),
+            [
+                LineOp::Insert(1, 1),
+                LineOp::Insert(2, 2),
+                LineOp::Insert(3, 3)
+            ]
+        );
+        assert_eq!(
+            line_ops(&first, &[true; 4]),
+            [LineOp::Remove(1), LineOp::Remove(2), LineOp::Remove(3)]
+        );
+        // A gap: line 2 unknown while 3 shows; 3 goes right after 1.
+        let gap = [Some("a"), Some("b"), None, Some("d")];
+        assert_eq!(
+            line_ops(&gap, &start),
+            [LineOp::Insert(1, 1), LineOp::Insert(3, 2)]
+        );
+        assert_eq!(line_ops(&gap, &[true, true, false, true]), []);
+        assert_eq!(line_ops(&[None; 4], &start), [], "line 0 stays");
     }
 
     #[test]

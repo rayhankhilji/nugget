@@ -193,6 +193,9 @@ pub struct QuickAsk {
     listener: Mutex<Option<Box<dyn nugget_hotkey::Listener>>>,
     error: Mutex<Option<String>>,
     shown_at: Mutex<Option<Instant>>,
+    /// Text for the question field not yet taken by the window (a link can arrive before the
+    /// window's page has loaded and subscribed to [`PREFILL_EVENT`]).
+    pending_prefill: Mutex<Option<String>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -271,6 +274,7 @@ pub fn setup(app: &App) {
         listener: Mutex::new(None),
         error: Mutex::new(None),
         shown_at: Mutex::new(None),
+        pending_prefill: Mutex::new(None),
     });
     if let Err(e) = create_window(app) {
         tracing::warn!(error = %e, "cannot create the quick-ask window");
@@ -421,11 +425,49 @@ pub fn show_with(app: &AppHandle, prefill: Option<String>) {
     let _ = w.unminimize();
     let _ = w.show();
     let _ = w.set_focus();
-    if let Some(text) = prefill.as_deref().and_then(sanitize_prefill)
-        && let Err(e) = app.emit_to(LABEL, PREFILL_EVENT, text)
-    {
-        tracing::debug!(error = %e, "cannot prefill the quick-ask window");
+    if let Some(text) = prefill.as_deref().and_then(sanitize_prefill) {
+        if let Some(state) = app.try_state::<QuickAsk>() {
+            *lock(&state.pending_prefill) = Some(text.clone());
+        }
+        if let Err(e) = app.emit_to(LABEL, PREFILL_EVENT, text) {
+            tracing::debug!(error = %e, "cannot prefill the quick-ask window");
+        }
     }
+    recheck_focus(app);
+}
+
+/// Focus-stealing prevention can leave the box shown but unfocused, and then no blur ever hides
+/// it: after the grace period ask for focus again, and hide it if it still has none.
+fn recheck_focus(app: &AppHandle) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new()
+        .name("quickask-focus".into())
+        .spawn(move || {
+            for attempt in 0..2 {
+                std::thread::sleep(FOCUS_GRACE + std::time::Duration::from_millis(100));
+                let Some(w) = window(&app) else { return };
+                if !w.is_visible().unwrap_or(false) || w.is_focused().unwrap_or(true) {
+                    return;
+                }
+                if attempt == 0 {
+                    let _ = w.set_focus();
+                } else {
+                    tracing::debug!("quick ask never got focus; hiding it");
+                    let _ = w.hide();
+                }
+            }
+        });
+}
+
+/// The prefill waiting for the window, once (it calls this when it loads and on each
+/// [`PREFILL_EVENT`]).
+#[tauri::command]
+pub fn quickask_prefill_take(app: AppHandle, window: tauri::Window) -> Option<String> {
+    if window.label() != LABEL {
+        return None;
+    }
+    app.try_state::<QuickAsk>()
+        .and_then(|s| lock(&s.pending_prefill).take())
 }
 
 fn place(app: &AppHandle, w: &WebviewWindow) {
