@@ -60,6 +60,20 @@ pub fn macos_needs_manual_accessibility(bundle_id: &str) -> bool {
     })
 }
 
+/// Gecko browsers on macOS, by bundle id. Gecko builds its accessibility tree for VoiceOver or
+/// for a client that sets `AXEnhancedUserInterface` on the app, which is set for these apps
+/// only (elsewhere it slows window animations).
+pub fn macos_is_gecko(bundle_id: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "org.mozilla.", // Firefox, Developer Edition, Nightly, Thunderbird
+        "net.waterfox.",
+        "io.gitlab.librewolf-community",
+        "app.zen-browser.",
+        "org.torproject.",
+    ];
+    PREFIXES.iter().any(|p| bundle_id.starts_with(p))
+}
+
 /// Whether an app bundle at `bundle_path` embeds Chromium (Electron, CEF, or a Chromium
 /// browser framework), for apps not in [`macos_needs_manual_accessibility`]'s list. Checks
 /// for the framework directories only.
@@ -103,6 +117,13 @@ pub fn macos_web_multiline_editor(role: &str, in_web_area: bool) -> bool {
 pub fn uia_focus_is_placeholder(control_type: i32, has_text_pattern: bool) -> bool {
     use crate::role::uia;
     !has_text_pattern && matches!(control_type, uia::DOCUMENT | uia::PANE)
+}
+
+/// UIA: a focused element that is a container (document, pane, window) without a text
+/// pattern; the element with keyboard focus may be one of its descendants.
+pub fn uia_focus_is_container(control_type: i32, has_text_pattern: bool) -> bool {
+    use crate::role::uia;
+    !has_text_pattern && matches!(control_type, uia::DOCUMENT | uia::PANE | uia::WINDOW)
 }
 
 /// AT-SPI: an editable element in web content that is not a native text control
@@ -179,6 +200,25 @@ mod tests {
     }
 
     #[test]
+    fn gecko_bundle_ids() {
+        for id in [
+            "org.mozilla.firefox",
+            "org.mozilla.firefoxdeveloperedition",
+            "org.mozilla.nightly",
+            "io.gitlab.librewolf-community",
+            "app.zen-browser.zen",
+        ] {
+            assert!(macos_is_gecko(id), "{id}");
+            assert!(!macos_needs_manual_accessibility(id), "{id}");
+        }
+        for id in ["com.google.Chrome", "com.apple.Safari", "org.mozillax", ""] {
+            assert!(!macos_is_gecko(id), "{id}");
+        }
+        assert!(macos_needs_manual_accessibility("com.google.Chrome"));
+        assert!(macos_needs_manual_accessibility("com.microsoft.edgemac"));
+    }
+
+    #[test]
     fn bundle_framework_probe() {
         assert!(macos_bundle_embeds_chromium(|p| p.contains("Electron")));
         assert!(!macos_bundle_embeds_chromium(|_| false));
@@ -194,6 +234,11 @@ mod tests {
         assert!(uia_focus_is_placeholder(crate::role::uia::PANE, false));
         assert!(!uia_focus_is_placeholder(crate::role::uia::DOCUMENT, true));
         assert!(!uia_focus_is_placeholder(crate::role::uia::EDIT, false));
+        assert!(uia_focus_is_container(crate::role::uia::WINDOW, false));
+        assert!(uia_focus_is_container(crate::role::uia::DOCUMENT, false));
+        assert!(!uia_focus_is_container(crate::role::uia::DOCUMENT, true));
+        assert!(!uia_focus_is_container(crate::role::uia::EDIT, false));
+        assert!(!uia_focus_is_container(crate::role::uia::GROUP, false));
     }
 
     #[test]

@@ -88,6 +88,8 @@ fn cf_string_list(t: &CFType) -> Option<String> {
 const MANUAL_AX_FRESH: Duration = Duration::from_secs(2);
 /// The wait before reading the focus again.
 const FOCUS_RETRY_WAIT: Duration = Duration::from_millis(250);
+/// Ancestors climbed to find the element's window.
+const WINDOW_DEPTH: usize = 64;
 /// Ancestors climbed to find a web area.
 const WEB_AREA_DEPTH: usize = 40;
 /// Cap on text read through text markers (bytes).
@@ -99,8 +101,10 @@ const MANUAL_AX_BACKOFF: Duration = Duration::from_millis(500);
 
 /// What was done about one pid's web accessibility.
 struct ManualAx {
-    /// The app embeds Chromium.
+    /// The app embeds Chromium (or is a Gecko browser): its web tree must be switched on.
     chromium: bool,
+    /// A Gecko browser: `AXEnhancedUserInterface` is what switches its tree on.
+    gecko: bool,
     /// When `AXManualAccessibility` was set successfully.
     enabled_at: Option<Instant>,
     attempts: u32,
@@ -120,9 +124,11 @@ fn ensure_web_accessibility(app: &AxEl, pid: i32, running: Option<&NSRunningAppl
         let id = running
             .and_then(|r| r.bundleIdentifier())
             .map(|s| s.to_string());
-        let chromium = id
-            .as_deref()
-            .is_some_and(hints::macos_needs_manual_accessibility)
+        let gecko = id.as_deref().is_some_and(hints::macos_is_gecko);
+        let chromium = gecko
+            || id
+                .as_deref()
+                .is_some_and(hints::macos_needs_manual_accessibility)
             || running
                 .and_then(|r| r.bundleURL())
                 .and_then(|u| u.path())
@@ -138,6 +144,7 @@ fn ensure_web_accessibility(app: &AxEl, pid: i32, running: Option<&NSRunningAppl
             pid,
             ManualAx {
                 chromium,
+                gecko,
                 enabled_at: None,
                 attempts: 0,
                 last_attempt: None,
@@ -157,12 +164,20 @@ fn ensure_web_accessibility(app: &AxEl, pid: i32, running: Option<&NSRunningAppl
     if st.enabled_at.is_none() && st.attempts < MANUAL_AX_ATTEMPTS && due {
         st.attempts += 1;
         st.last_attempt = Some(Instant::now());
-        let r = ax::set_attr(&app.0, "AXManualAccessibility", CFBoolean::new(true));
+        let manual = ax::set_attr(&app.0, "AXManualAccessibility", CFBoolean::new(true));
+        // Gecko: `AXEnhancedUserInterface` (what VoiceOver sets); Gecko browsers only, as it
+        // slows window animations elsewhere.
+        let r = if st.gecko {
+            ax::set_attr(&app.0, "AXEnhancedUserInterface", CFBoolean::new(true)).or(manual)
+        } else {
+            manual
+        };
         tracing::debug!(
             pid,
             ok = r.is_ok(),
+            gecko = st.gecko,
             attempt = st.attempts,
-            "set AXManualAccessibility"
+            "switched on web accessibility"
         );
         if r.is_ok() {
             st.enabled_at = Some(Instant::now());
@@ -385,6 +400,35 @@ impl AxEl {
         false
     }
 
+    /// Whether this element belongs to `window`: its `AXWindow` or `AXTopLevelUIElement` is
+    /// that window, or (when those are missing or name another object, as web content in some
+    /// browsers does) the window is one of its ancestors (bounded walk). An element that names
+    /// no window at all is taken as in it.
+    fn in_window(&self, window: &AxEl) -> bool {
+        let named: Vec<AxEl> = ["AXWindow", "AXTopLevelUIElement"]
+            .iter()
+            .filter_map(|a| self.get(a).and_then(AxEl::element))
+            .collect();
+        if named.iter().any(|w| w.same(window)) {
+            return true;
+        }
+        let mut cur = self.parent();
+        for _ in 0..WINDOW_DEPTH {
+            let Some(p) = cur else { break };
+            if p.same(window) {
+                return true;
+            }
+            match p.raw_role().as_str() {
+                // Another window (a panel, a sheet's parent): not this one.
+                "AXWindow" => return false,
+                "AXApplication" => break,
+                _ => {}
+            }
+            cur = p.parent();
+        }
+        named.is_empty()
+    }
+
     fn marker_param(&self, name: &str, param: &CFType) -> Option<CFRetained<CFType>> {
         ax::param_attr(&self.0, name, param)
     }
@@ -512,6 +556,7 @@ impl Platform for AxPlatform {
         computer::require_trust()?;
         let sys = ax::system_wide();
         let Some(app) = ax::attr(&sys, "AXFocusedApplication").and_then(AxEl::element) else {
+            tracing::debug!("focus: no AXFocusedApplication");
             return Ok(None);
         };
         let pid = ax::pid(&app.0);
@@ -530,14 +575,19 @@ impl Platform for AxPlatform {
             }
         }
         let Some(el) = focused else {
+            tracing::debug!(?pid, fresh, "focus: the app reports no AXFocusedUIElement");
             return Ok(None);
         };
         let window = app.get("AXFocusedWindow").and_then(AxEl::element);
         // Only the focused window: an element in another window (or a floating panel) is not
         // the user's target.
-        if let (Some(w), Some(ew)) = (&window, el.get("AXWindow").and_then(AxEl::element))
-            && !w.same(&ew)
+        if let Some(w) = &window
+            && !el.in_window(w)
         {
+            tracing::debug!(
+                ?pid,
+                "focus: the focused element is outside the focused window"
+            );
             return Ok(None);
         }
         let name = running

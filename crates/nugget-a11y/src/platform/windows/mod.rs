@@ -224,9 +224,11 @@ impl Platform for UiaPlatform {
 
     fn focus(&self) -> Result<Option<Target<UiaEl>>> {
         let Some(fg) = uia::foreground()? else {
+            tracing::debug!("focus: no foreground window");
             return Ok(None);
         };
         let Some(mut el) = UiaEl::focused()? else {
+            tracing::debug!("focus: UI Automation reports no focused element");
             return Ok(None);
         };
         // Chromium and Firefox build their UIA web tree when a client first asks; until then the
@@ -239,9 +241,23 @@ impl Platform for UiaPlatform {
                 el = again;
             }
         }
-        if el.info().process_id != fg.pid {
-            // Focus is in another process than the foreground window (a tool window, or a
-            // race while windows switch): not the user's target.
+        // Focus reported on a container (Firefox may report its document or window): the
+        // descendant that has keyboard focus, when there is one.
+        let info = el.info();
+        if hints::uia_focus_is_container(info.control_type, el.has_text_pattern())
+            && let Some(inner) = el.keyboard_focus_descendant()
+        {
+            el = inner;
+        }
+        // Focus must be in the foreground window: a tool window of another process, or a race
+        // while windows switch, is not the user's target. Firefox's (and Chromium's) content
+        // runs in child processes, so the process id alone does not decide.
+        if el.info().process_id != fg.pid && !el.in_foreground(fg.hwnd, fg.pid) {
+            tracing::debug!(
+                focus_pid = el.info().process_id,
+                fg_pid = fg.pid,
+                "focus: the focused element is outside the foreground window"
+            );
             return Ok(None);
         }
         Ok(Some(Target {
@@ -272,7 +288,11 @@ impl Platform for UiaPlatform {
             // The text pattern first: its text is what the selection offsets are measured in,
             // and it is the whole document for rich edits and browsers.
             let max_chars = i32::try_from(max_value_bytes).unwrap_or(i32::MAX);
-            let (raw, capped) = match el.document_text(max_value_bytes) {
+            // A plain Win32 edit through its own message: its UIA text can be cut short.
+            let raw = el
+                .edit_text(max_value_bytes)
+                .or_else(|| el.document_text(max_value_bytes));
+            let (raw, capped) = match raw {
                 Some(t) => {
                     // `GetText(max)` counts UTF-16 units.
                     let capped = t.encode_utf16().count() >= max_chars as usize;
