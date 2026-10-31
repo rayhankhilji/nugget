@@ -167,6 +167,7 @@ pub(crate) async fn embed(
     store: &nugget_store::Store,
     router: &Router,
     providers: &[Arc<dyn Provider>],
+    item: &ItemRef,
     texts: &[String],
     batch: usize,
     timeout: Duration,
@@ -188,7 +189,9 @@ pub(crate) async fn embed(
     'providers: for p in providers {
         let mut out = Vec::with_capacity(texts.len());
         for part in texts.chunks(batch) {
-            let res = tokio::time::timeout(timeout, p.embed(part)).await;
+            // Every chunk is the item's: the egress ledger lists it.
+            let items = vec![item.clone(); part.len()];
+            let res = tokio::time::timeout(timeout, p.embed_items(part, &items)).await;
             let vecs = match res {
                 Ok(Ok(v)) if v.len() == part.len() => v,
                 Ok(Ok(v)) => {

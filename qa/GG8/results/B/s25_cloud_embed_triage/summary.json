@@ -1,0 +1,212 @@
+{
+ "scenario": "s25_cloud_embed_triage",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.cloudllm.test"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 97
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 20
+  }
+ ],
+ "observed_hosts": {
+  "api.cloudllm.test": {
+   "requests": 11,
+   "bytes_in": 4331,
+   "paths": [
+    "POST /v1/chat/completions",
+    "POST /v1/embeddings"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.cloudllm.test": {
+   "rows": 11,
+   "bytes_sent": 4331,
+   "features": [
+    "embed",
+    "probe"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.cloudllm.test/v1/chat/completions",
+   "canary": "GG8CANARY-APIKEY-cloudllm",
+   "count": 5
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-APIKEY-cloudllm",
+   "count": 6
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-SENS-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-SENS-3",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-SENS-4",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "default.no_embeddings",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793390584.7241619
+  },
+  {
+   "id": "default.no_triage_or_other",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793390584.7242
+  },
+  {
+   "id": "optin.embeddings_sent",
+   "ok": true,
+   "detail": [
+    "/v1/embeddings"
+   ],
+   "severity": null,
+   "t": 1793390620.3205173
+  },
+  {
+   "id": "optin.embed.no_sensitive_content",
+   "ok": false,
+   "detail": "2 requests; leaked: ['GG8CANARY-SENS', '4111 1111 1111 1111', '512-34-6789', 'AKIAIOSFODNN7GG8TEST', 'sk-ant-api03-GG8fake', 'GB82 WEST', 'wJalrXUtnFEMI']",
+   "severity": "High",
+   "t": 1793390620.3205721
+  },
+  {
+   "id": "optin.no_triage",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793390620.3205807
+  },
+  {
+   "id": "optin.ledger_rows",
+   "ok": true,
+   "detail": "2 requests, 5 rows (features ['embed']); unmatched []",
+   "severity": null,
+   "t": 1793390621.8249698
+  },
+  {
+   "id": "optin.ledger_items_accurate",
+   "ok": false,
+   "detail": [
+    {
+     "canary": "GG8CANARY-SENS-3",
+     "file": "hr-ssn.md",
+     "row_items": [],
+     "feature": "embed"
+    },
+    {
+     "canary": "GG8CANARY-SENS-2",
+     "file": "acme-deploy-key.md",
+     "row_items": [],
+     "feature": "embed"
+    },
+    {
+     "canary": "GG8CANARY-SENS-4",
+     "file": "iban.md",
+     "row_items": [],
+     "feature": "embed"
+    },
+    {
+     "canary": "GG8CANARY-SENS-1",
+     "file": "acme-payment.md",
+     "row_items": [],
+     "feature": "embed"
+    }
+   ],
+   "severity": null,
+   "t": 1793390621.8249931
+  },
+  {
+   "id": "keys.keys_only_to_own_host",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390621.8274782
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793390559.016395,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390559.5199862,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390559.6855557,
+   "note": "probe: {'context_tokens': None, 'embeddings': True, 'json_schema': True, 'streaming': True, 'tools': False, 'vision': False}"
+  },
+  {
+   "t": 1793390584.7281933,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793390584.7361233,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390585.2392836,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390621.8269303,
+   "note": "ledger features: [\"embed\", \"probe\"]"
+  },
+  {
+   "t": 1793390621.830495,
+   "label": "daemon.stop"
+  }
+ ]
+}

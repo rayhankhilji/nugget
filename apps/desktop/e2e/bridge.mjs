@@ -49,12 +49,42 @@ const doubletapStatus = {
   recommended_trigger: chord,
 };
 
-/** Every command the shell handles without the daemon (`generate_handler!` in src-tauri/src/main.rs). */
-function shellCommands(socket, { pickFolders = [] } = {}) {
-  const conn = () => ({ connected: true, socket, error: null });
+/** Whether something accepts connections on `socket` (a Unix socket path). */
+function answers(socket, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const c = net.connect(socket);
+    const done = (ok) => {
+      clearTimeout(timer);
+      c.destroy();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    c.on("connect", () => done(true));
+    c.on("error", () => done(false));
+  });
+}
+
+/**
+ * Every command the shell handles without the daemon (`generate_handler!` in src-tauri/src/main.rs).
+ * `socket()` is the daemon's current socket. With `startDaemon` (an async function resolving to
+ * the new daemon's socket), `connection_info` reports whether the daemon really answers and
+ * `start_daemon` starts one when it doesn't, like the shell; without it both report "connected".
+ */
+function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket = () => {} } = {}) {
+  const conn = () => ({ connected: true, socket: socket(), error: null });
+  const live = async () => {
+    const up = await answers(socket());
+    return { connected: up, socket: socket(), error: up ? null : "not running" };
+  };
   return {
-    connection_info: conn,
-    start_daemon: conn,
+    connection_info: startDaemon ? live : conn,
+    start_daemon: startDaemon
+      ? async () => {
+          if ((await live()).connected) return conn();
+          onSocket(await startDaemon());
+          return live();
+        }
+      : conn,
     open_url: () => ({ err: { kind: "other", message: "opening links is not available in the e2e bridge" } }),
     open_mailto: () => null,
     pick_folders: (a) => (typeof pickFolders === "function" ? pickFolders(a) : pickFolders),
@@ -84,10 +114,10 @@ function shellCommands(socket, { pickFolders = [] } = {}) {
 }
 
 /** Commands whose shell proxy sends `{}` rather than `null` when there are no params. */
-const EMPTY_OBJECT_PARAMS = new Set(["brief_get", "proactive_metrics", "proactive_refresh", "proactive_learning", "reminders_list"]);
+const EMPTY_OBJECT_PARAMS = new Set(["brief_get", "proactive_metrics", "proactive_refresh", "proactive_learning", "reminders_list", "backup_status"]);
 
 /** Commands whose daemon method keeps an underscore (`proactive_method` in nugget_core::ipc). */
-const METHOD_FOR = { proactive_reset_learning: "proactive.reset_learning" };
+const METHOD_FOR = { proactive_reset_learning: "proactive.reset_learning", backup_set_passphrase: "backup.set_passphrase" };
 
 const snake = (k) => k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 
@@ -224,16 +254,24 @@ class DaemonConn {
  * its outcome: `{ cmd, via: "shell" | "daemon", ok, code?, message? }`. With `shim`, index.html is
  * served with tauri-shim.js inlined, so any browser can open the app (the test injects it itself).
  * `pickFolders` is what the native folder picker "chooses": an array of paths, or a function of
- * the invoke args returning one (default: the user cancels, `[]`).
+ * the invoke args returning one (default: the user cancels, `[]`). `startDaemon` stands in for the
+ * shell spawning nuggetd (see `shellCommands`): an async function resolving to the socket of the
+ * daemon it started; without it `start_daemon` is a no-op. `setSocket(socket)` on the result
+ * points the bridge at another daemon (a scenario that replaced it).
  *
  * The result has `notifications` (every daemon notification seen: `{ method, params, at }`) and
  * `deliverEvents(page)`, which forwards them to a Playwright page as Tauri events, in order.
  */
-export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickFolders = [] }) {
-  const shell = shellCommands(socket, { pickFolders });
+export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickFolders = [], startDaemon = null }) {
   const calls = [];
   const notifications = [];
   const sinks = new Set();
+  const setSocket = (next) => {
+    if (!next || next === daemon.socket) return;
+    daemon.socket = next;
+    void daemon.close();
+  };
+  const shell = shellCommands(() => daemon.socket, { pickFolders, startDaemon, onSocket: setSocket });
   const daemon = new DaemonConn(socket, (n) => {
     notifications.push({ method: n.method, params: n.params, at: Date.now() });
     const events = [{ event: "nugget:notification", payload: { method: n.method, params: n.params } }];
@@ -256,7 +294,12 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
 
   async function invoke(cmd, args) {
     if (Object.hasOwn(shell, cmd)) {
-      const v = shell[cmd](args);
+      let v;
+      try {
+        v = await shell[cmd](args);
+      } catch (e) {
+        v = { err: { kind: "spawn", message: e.message } };
+      }
       if (v && typeof v === "object" && "err" in v && Object.keys(v).length === 1) {
         calls.push({ cmd, via: "shell", ok: false, message: v.err.message });
         return v;
@@ -312,6 +355,7 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
         calls,
         notifications,
         deliverEvents,
+        setSocket,
         close: async () => {
           sinks.clear();
           await daemon.close();

@@ -129,6 +129,30 @@ export const entityDetail: import("../api").EntityDetail = {
   vault_path: null,
 };
 
+/** FF1: one backup in the configured folder. */
+export const backupInfo: import("../api").BackupInfo = {
+  path: "/home/me/Backups/nugget-backup-20261028T120000Z",
+  created_at: now,
+  items: 1234,
+  bytes: 52_428_800,
+  schema_version: 12,
+  app_version: "0.0.1",
+  os: "linux",
+};
+
+export const backupStatus: import("../api").BackupStatus = {
+  folder: "/home/me/Backups",
+  interval_hours: 24,
+  keep: 7,
+  passphrase_set: true,
+  running: false,
+  last_backup: backupInfo,
+  last_error: null,
+  next_due: "2026-10-29T12:00:00Z",
+  restore_pending: false,
+  recovery: null,
+};
+
 export const RESPONSES: Record<string, unknown> = {
   connection_info: { connected: true, socket: "/tmp/nuggetd.sock", error: null },
   status,
@@ -149,4 +173,6 @@ export const RESPONSES: Record<string, unknown> = {
   chat_history_save: null,
   chat_history_delete: null,
   chat_history_clear: null,
+  backup_status: backupStatus,
+  backup_list: { backups: [backupInfo] },
 };

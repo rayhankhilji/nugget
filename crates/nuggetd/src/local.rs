@@ -47,7 +47,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use async_trait::async_trait;
 use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::egress::EgressSink;
-use nugget_core::ids::ProviderId;
+use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::ipc::{RuntimeInfo, RuntimeRole, RuntimeState};
 use nugget_core::{Error, Result};
 use nugget_infer::{
@@ -441,6 +441,13 @@ impl Provider for RuntimeSlot {
             return Err(Error::Unsupported(format!("{} does not embed", self.id)));
         }
         self.ready().await?.embed_query(texts).await
+    }
+
+    async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+        if self.role != RuntimeRole::Embedding {
+            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
+        }
+        self.ready().await?.embed_items(texts, items).await
     }
 
     /// The served model's task prefixes: from its config once running, else from its id (the

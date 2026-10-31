@@ -1,6 +1,6 @@
 //! `Store`: connection lifecycle, encryption, cursors and counts.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use nugget_core::ids::SourceId;
@@ -47,6 +47,9 @@ pub(crate) struct Db {
     /// `None` for in-memory stores (a second connection would open a different database).
     readers: Option<ReadPool>,
     encrypted: bool,
+    /// Database path and key of a file-backed store (for online backups, which open their own
+    /// connection); `None` for in-memory stores.
+    file: Option<(PathBuf, StoreKey)>,
     /// Held while the approximate vector index is built or dropped (see `vector::build_ann`),
     /// so one runs at a time. Shared with the build thread, which holds `Db` only weakly.
     pub(crate) ann_build: Arc<Mutex<()>>,
@@ -188,6 +191,7 @@ impl Store {
             conn: Mutex::new(conn),
             readers,
             encrypted: file.is_some(),
+            file: file.map(|(path, key)| (path.to_path_buf(), key.clone())),
             ann_build: Arc::default(),
         });
         let egress = EgressWriter::spawn(db.clone())?;
@@ -223,6 +227,11 @@ impl Store {
     /// A read on a pooled read-only connection; see [`Db::with_read_conn`].
     pub(crate) fn with_read_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         self.inner.db.with_read_conn(f)
+    }
+
+    /// Database path and key of a file-backed store; `None` for an in-memory one.
+    pub(crate) fn file(&self) -> Option<(&Path, &StoreKey)> {
+        self.inner.db.file.as_ref().map(|(p, k)| (p.as_path(), k))
     }
 
     /// The shared connections (for work that must outlive a borrowed `Store`, holding them
@@ -384,13 +393,38 @@ fn embedding_prefixes(conn: &Connection) -> Result<Option<(String, String)>> {
 
 /// Open the database at `path` (read-write, plus `extra` flags), check that SQLite has SQLCipher,
 /// and key it, failing with `Error::Integrity` when `key` does not decrypt it.
-fn open_keyed(path: &Path, key: &StoreKey, extra: OpenFlags) -> Result<Connection> {
+pub(crate) fn open_keyed(path: &Path, key: &StoreKey, extra: OpenFlags) -> Result<Connection> {
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX | extra,
     )
     .db("open store")?;
+    apply_key(&conn, key, path)?;
+    Ok(conn)
+}
 
+/// Check that SQLite has SQLCipher and key `conn` (opened on `path`, named in errors), failing
+/// with `Error::Integrity` when `key` does not decrypt it.
+pub(crate) fn apply_key(conn: &Connection, key: &StoreKey, path: &Path) -> Result<()> {
+    set_key(conn, key)?;
+    // The key is only checked on first read of the header.
+    match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
+        r.get::<_, i64>(0)
+    }) {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == ErrorCode::NotADatabase => {
+            Err(Error::Integrity(format!(
+                "cannot decrypt store at {}: wrong key or not a Nugget database",
+                path.display()
+            )))
+        }
+        Err(e) => Err(Error::Storage(format!("read store header: {e}"))),
+    }
+}
+
+/// Check that SQLite has SQLCipher and set `key` on `conn`, without reading the database yet
+/// (so a wrong key is only noticed by the first read).
+pub(crate) fn set_key(conn: &Connection, key: &StoreKey) -> Result<()> {
     // Fail closed if this SQLite has no SQLCipher: `PRAGMA key` would silently do nothing.
     let cipher: Option<String> = conn
         .query_row("PRAGMA cipher_version", [], |r| r.get(0))
@@ -407,26 +441,17 @@ fn open_keyed(path: &Path, key: &StoreKey, extra: OpenFlags) -> Result<Connectio
         .db("configure SQLCipher logging")?;
 
     // Raw 256-bit key (x'..' form): no KDF needed, the key is already uniformly random.
-    let pragma = Zeroizing::new(format!(
-        "PRAGMA key = \"x'{}'\";",
-        hex::encode(key.as_bytes())
-    ));
-    conn.execute_batch(&pragma).db("set store key")?;
-
-    // The key is only checked on first read of the header.
-    match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
-        r.get::<_, i64>(0)
-    }) {
-        Ok(_) => {}
-        Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == ErrorCode::NotADatabase => {
-            return Err(Error::Integrity(format!(
-                "cannot decrypt store at {}: wrong key or not a Nugget database",
-                path.display()
-            )));
-        }
-        Err(e) => return Err(Error::Storage(format!("read store header: {e}"))),
+    // Built in place in a zeroized buffer of its final size, so no copy of the hex key is left
+    // behind in a temporary or a reallocated buffer.
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut pragma = Zeroizing::new(String::with_capacity(24 + 64));
+    pragma.push_str("PRAGMA key = \"x'");
+    for b in key.as_bytes() {
+        pragma.push(char::from(HEX[usize::from(b >> 4)]));
+        pragma.push(char::from(HEX[usize::from(b & 0x0f)]));
     }
-    Ok(conn)
+    pragma.push_str("'\";");
+    conn.execute_batch(&pragma).db("set store key")
 }
 
 /// A read-only (`query_only`) connection to the existing, migrated, WAL-mode database at `path`.
@@ -438,7 +463,7 @@ fn open_reader(path: &Path, key: &StoreKey) -> Result<Connection> {
     Ok(conn)
 }
 
-fn set_common_pragmas(conn: &Connection) -> Result<()> {
+pub(crate) fn set_common_pragmas(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA synchronous = NORMAL;
@@ -451,7 +476,7 @@ fn set_common_pragmas(conn: &Connection) -> Result<()> {
 
 /// Owner-only permissions on the database and its WAL/SHM files (Unix). Best effort: the content
 /// is encrypted regardless.
-fn restrict_file_permissions(path: &Path) {
+pub(crate) fn restrict_file_permissions(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

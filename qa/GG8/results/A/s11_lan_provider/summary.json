@@ -1,0 +1,151 @@
+{
+ "scenario": "s11_lan_provider",
+ "mode": "sinkhole",
+ "dns_names": [],
+ "flows_off_namespace": [
+  {
+   "src": "192.168.88.2",
+   "dst": "192.168.88.1",
+   "dport": "8080",
+   "proto": "tcp",
+   "packets": 12
+  }
+ ],
+ "observed_hosts": {
+  "192.168.88.1": {
+   "requests": 1,
+   "bytes_in": 2533,
+   "paths": [
+    "POST /v1/chat/completions"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "192.168.88.1:8080": {
+   "rows": 1,
+   "bytes_sent": 2533,
+   "features": [
+    "ask"
+   ]
+  }
+ },
+ "unledgered_hosts": [
+  "192.168.88.1"
+ ],
+ "ledger_without_traffic": [
+  "192.168.88.1:8080"
+ ],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST 192.168.88.1/v1/chat/completions",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST 192.168.88.1/v1/chat/completions",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "request POST 192.168.88.1/v1/chat/completions",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  },
+  {
+   "where": "request POST 192.168.88.1/v1/chat/completions",
+   "canary": "GG8CANARY-SENS-1",
+   "count": 1
+  },
+  {
+   "where": "request POST 192.168.88.1/v1/chat/completions",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 1
+  },
+  {
+   "where": "request POST 192.168.88.1/v1/chat/completions",
+   "canary": "GG8CANARY-SENS-3",
+   "count": 1
+  },
+  {
+   "where": "request POST 192.168.88.1/v1/chat/completions",
+   "canary": "GG8CANARY-SENS-4",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "ask.answered",
+   "ok": true,
+   "detail": "workstation local_network {'stream_id': '122aac0a-45b7-40a1-8328-bb856a41acd6', 'error': None, 'input_tokens': 100, 'output_tokens': 8}",
+   "severity": null,
+   "t": 1793389760.4702415
+  },
+  {
+   "id": "lan.requests_seen",
+   "ok": true,
+   "detail": {
+    "/v1/chat/completions": 1
+   },
+   "severity": null,
+   "t": 1793389800.4768763
+  },
+  {
+   "id": "ledger.rows_for_lan",
+   "ok": true,
+   "detail": {
+    "ask": 1
+   },
+   "severity": null,
+   "t": 1793389800.4769197
+  },
+  {
+   "id": "ledger.row_count_matches_requests",
+   "ok": true,
+   "detail": "1 requests vs 1 ledger rows; paths={'/v1/chat/completions': 1} features={'ask': 1}",
+   "severity": null,
+   "t": 1793389800.4769287
+  },
+  {
+   "id": "ledger.has_ask",
+   "ok": true,
+   "detail": {
+    "ask": 1
+   },
+   "severity": null,
+   "t": 1793389800.4769323
+  },
+  {
+   "id": "ledger.has_embed",
+   "ok": true,
+   "detail": {
+    "ask": 1
+   },
+   "severity": null,
+   "t": 1793389800.4769428
+  },
+  {
+   "id": "ledger.has_triage",
+   "ok": true,
+   "detail": {
+    "ask": 1
+   },
+   "severity": null,
+   "t": 1793389800.4769557
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793389758.9325862,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793389759.4357474,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793389800.479284,
+   "label": "daemon.stop"
+  }
+ ]
+}

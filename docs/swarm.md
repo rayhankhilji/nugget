@@ -126,7 +126,7 @@ Briefs in `docs/waves/wave-ee/`. Each lead runs a build layer and an independent
 | EE2 | `ee/draft-recall` | session_01CTjRSt5sQsEtmsjpgvdjDp | draft fact recall ≥ 0.8, no invented attachments, read-ahead latency kept |
 | EE3 | `ee/ask-quality` | session_01CTjRSuP6na1rnf1rpacnuU | Ask answer-quality suite with real models (correctness, citations, abstention) and fixes (merged) |
 | EE4 | `ee/security-review-2` | session_01CTjRSrVUg4uRkQ2yhjxPSi | security review of AA, BB, CC and manifest v4; fixes with regression tests (merged) |
-| EE5 | `ee/release-readiness` | session_01CTjRSqf3cixr49jrhBuKmL | Windows cloud signing path, throwaway-key release rehearsal, release checklist, status page |
+| EE5 | `ee/release-readiness` | session_01CTjRSqf3cixr49jrhBuKmL | Windows cloud signing path, throwaway-key release rehearsal, release checklist, status page (merged) |
 | EE6 | `ee/ui-polish` | session_01CTjRSuMKsfCZJQtWc4LnsJ | page-by-page UI review in light/dark/RTL/de, fixes, visual regression check (merged) |
 
 ## Wave FF (alongside DD and EE): cloud sessions from b0ea28f
@@ -134,7 +134,7 @@ Briefs in `docs/waves/wave-ff/`. Each lead runs a build layer and an independent
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| FF1 | `ff/data-safety` | session_01CTjRSquqrkkGYfv4TUQEat | crash-safety harness, encrypted backup/restore, open-format export, corruption recovery |
+| FF1 | `ff/data-safety` | session_01CTjRSquqrkkGYfv4TUQEat | crash-safety harness, encrypted backup/restore, open-format export, corruption recovery (merged) |
 | FF2 | `ff/connector-hardening` | session_01CTjRSsffsNYDoWtbuPyEx5 | connector conformance suite (pagination, 429s, token refresh, deltas, crashes), fixes, sync status (merged) |
 | FF3 | `ff/a11y-apps` | session_01CTjRSrGRrLv1FvtvRdVkMp | Double Tap read/insert matrix across native editors, browsers and rich-editor frameworks on 3 OSes |
 | FF4 | `ff/mcp-plugins` | session_01CTjRSrAf5oakXNcKynQoQK | MCP compatibility with official SDK clients, plugin SDK and three first-party plugins (merged) |
@@ -151,4 +151,4 @@ Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every 
 | GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases |
 | GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux |
 | GG7 | `qa/multilingual` | session_01CTjRSuVMK4RoFUCfw3YT7S | AI features in all 9 UI languages |
-| GG8 | `qa/privacy` | session_01CTjRSt3BBwCh15spCoLbbe | privacy and egress verified from captured network traffic |
+| GG8 | `qa/privacy` | session_01CTjRSt3BBwCh15spCoLbbe | privacy and egress verified from captured network traffic (merged) |

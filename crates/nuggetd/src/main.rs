@@ -5,6 +5,10 @@
 //! - `nuggetd install-service` / `uninstall-service`: run at login as a per-user service.
 //! - `nuggetd mcp --client <id>`: the stdio MCP bridge apps launch (token in `NUGGET_MCP_TOKEN`).
 //! - `nuggetd mcp install --client claude-desktop|claude-code|cursor`: set an app up.
+//! - `nuggetd backup [--to DIR]` / `nuggetd backup set-passphrase`: back up now, or set the
+//!   backup passphrase (through the daemon when it runs, offline otherwise).
+//! - `nuggetd restore --from DIR [--passphrase-file FILE]`: restore a backup (daemon stopped).
+//! - `nuggetd export --to DIR`: export everything in open formats.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -14,7 +18,7 @@ use clap::{Parser, Subcommand};
 use nugget_core::ipc::{StatusResponse, method};
 use nugget_core::paths::Paths;
 use nuggetd::install::{App, InstallOptions};
-use nuggetd::{Daemon, DaemonOptions, Startup, cli, logging, service};
+use nuggetd::{Daemon, DaemonOptions, Startup, backup_cli, cli, logging, service};
 
 /// How long exit waits for blocking work (hashing, SQLite) still running after the daemon stops.
 const RUNTIME_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
@@ -51,6 +55,39 @@ enum Command {
         client: Option<String>,
         #[command(subcommand)]
         action: Option<McpAction>,
+    },
+    /// Back up now (to the configured folder, or DIR), or set the backup passphrase.
+    #[command(args_conflicts_with_subcommands = true)]
+    Backup {
+        /// Write the backup into DIR instead of the configured folder.
+        #[arg(long, value_name = "DIR")]
+        to: Option<PathBuf>,
+        #[command(subcommand)]
+        action: Option<BackupAction>,
+    },
+    /// Restore a backup directory (stop the daemon first). The current data is kept aside.
+    Restore {
+        /// The backup directory (`nugget-backup-<date and time>`).
+        #[arg(long, value_name = "DIR")]
+        from: PathBuf,
+        /// Read the backup passphrase from FILE (else NUGGET_BACKUP_PASSPHRASE, else a prompt).
+        #[arg(long, value_name = "FILE")]
+        passphrase_file: Option<PathBuf>,
+    },
+    /// Export everything in open formats (unencrypted) into a new folder in DIR.
+    Export {
+        #[arg(long, value_name = "DIR")]
+        to: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BackupAction {
+    /// Set the backup passphrase (seals the store key into every later backup).
+    SetPassphrase {
+        /// Read the passphrase from FILE (else NUGGET_BACKUP_PASSPHRASE, else a prompt).
+        #[arg(long, value_name = "FILE")]
+        passphrase_file: Option<PathBuf>,
     },
 }
 
@@ -153,6 +190,36 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some(Command::Backup { to, action }) => {
+            logging::init_cli();
+            let vault = default_vault(&paths, args.home);
+            report(runtime.block_on(async {
+                match action {
+                    Some(BackupAction::SetPassphrase { passphrase_file }) => {
+                        backup_cli::set_passphrase(&paths, passphrase_file.as_deref()).await
+                    }
+                    None => backup_cli::backup(&paths, to, &vault).await,
+                }
+            }))
+        }
+        Some(Command::Restore {
+            from,
+            passphrase_file,
+        }) => {
+            logging::init_cli();
+            let vault = default_vault(&paths, args.home);
+            report(runtime.block_on(backup_cli::restore(
+                &paths,
+                from,
+                passphrase_file.as_deref(),
+                &vault,
+            )))
+        }
+        Some(Command::Export { to }) => {
+            logging::init_cli();
+            let vault = default_vault(&paths, args.home);
+            report(runtime.block_on(backup_cli::export(&paths, to, &vault)))
+        }
         Some(Command::Mcp { .. }) => {
             eprintln!(
                 "nuggetd mcp: use `nuggetd mcp --client <id>` (the stdio bridge) or `nuggetd mcp install --client <app>`"
@@ -222,6 +289,16 @@ async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
             eprintln!("nuggetd: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The vault directory the daemon uses when `[vault] path` is unset (see [`run`]).
+fn default_vault(paths: &Paths, home_flag: Option<PathBuf>) -> PathBuf {
+    match cli::home_override(home_flag) {
+        Ok(None) => std::env::home_dir()
+            .map(|h| h.join("Nugget Vault"))
+            .unwrap_or_else(|| nuggetd::knowledge::default_vault_dir(paths)),
+        _ => nuggetd::knowledge::default_vault_dir(paths),
     }
 }
 

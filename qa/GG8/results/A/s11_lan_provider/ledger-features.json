@@ -1,0 +1,8 @@
+{
+ "paths": {
+  "/v1/chat/completions": 1
+ },
+ "features": {
+  "ask": 1
+ }
+}

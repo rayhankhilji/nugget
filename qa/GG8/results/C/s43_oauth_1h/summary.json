@@ -1,0 +1,275 @@
+{
+ "scenario": "s43_oauth_1h",
+ "mode": "sinkhole",
+ "dns_names": [
+  "caldav.gg8-synthetic.test",
+  "github.com",
+  "gmail.googleapis.com",
+  "oauth2.googleapis.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.130",
+   "dst": "203.0.113.138",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 209
+  },
+  {
+   "src": "203.0.113.130",
+   "dst": "203.0.113.138",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 14
+  }
+ ],
+ "observed_hosts": {
+  "github.com": {
+   "requests": 40,
+   "bytes_in": 5050,
+   "paths": [
+    "POST /login/device/code",
+    "POST /login/oauth/access_token"
+   ]
+  },
+  "oauth2.googleapis.com": {
+   "requests": 1,
+   "bytes_in": 278,
+   "paths": [
+    "POST /token"
+   ]
+  },
+  "gmail.googleapis.com": {
+   "requests": 11,
+   "bytes_in": 0,
+   "paths": [
+    "GET /gmail/v1/users/me/history",
+    "GET /gmail/v1/users/me/messages",
+    "GET /gmail/v1/users/me/profile"
+   ]
+  },
+  "caldav.gg8-synthetic.test": {
+   "requests": 3,
+   "bytes_in": 1098,
+   "paths": [
+    "PROPFIND /"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "github.com": {
+   "rows": 40,
+   "bytes_sent": 10403,
+   "features": [
+    "sync:github"
+   ]
+  },
+  "caldav.gg8-synthetic.test": {
+   "rows": 3,
+   "bytes_sent": 1677,
+   "features": [
+    "sync:caldav"
+   ]
+  },
+  "gmail.googleapis.com": {
+   "rows": 11,
+   "bytes_sent": 2140,
+   "features": [
+    "sync:gmail"
+   ]
+  },
+  "oauth2.googleapis.com": {
+   "rows": 1,
+   "bytes_sent": 404,
+   "features": [
+    "sync:gmail"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request GET gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=1&maxResults=500&historyTypes=messageAdded&historyTypes=messageDeleted&historyTypes=labelAdded&historyTypes=labelRemoved",
+   "canary": "GG8CANARY-ACCESS-google-1",
+   "count": 3
+  },
+  {
+   "where": "request GET gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=after%3A1761854268",
+   "canary": "GG8CANARY-ACCESS-google-1",
+   "count": 1
+  },
+  {
+   "where": "request GET gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=after%3A1761854328",
+   "canary": "GG8CANARY-ACCESS-google-1",
+   "count": 1
+  },
+  {
+   "where": "request GET gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=after%3A1761854388",
+   "canary": "GG8CANARY-ACCESS-google-1",
+   "count": 1
+  },
+  {
+   "where": "request GET gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=after%3A1761854443",
+   "canary": "GG8CANARY-ACCESS-google-1",
+   "count": 1
+  },
+  {
+   "where": "request GET gmail.googleapis.com/gmail/v1/users/me/profile",
+   "canary": "GG8CANARY-ACCESS-google-1",
+   "count": 4
+  },
+  {
+   "where": "request POST github.com/login/oauth/access_token",
+   "canary": "GG8CANARY-DEVICECODE",
+   "count": 39
+  },
+  {
+   "where": "request POST oauth2.googleapis.com/token",
+   "canary": "GG8CANARY-AUTHCODE",
+   "count": 1
+  },
+  {
+   "where": "request POST oauth2.googleapis.com/token",
+   "canary": "GG8CANARY-CLIENTSECRET-google",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "gmail.auth_begin_contacts",
+   "ok": true,
+   "detail": "url_host=accounts.google.com requests=[]",
+   "severity": null,
+   "t": 1793390256.0449765
+  },
+  {
+   "id": "gmail.auth_url_has_no_secret",
+   "ok": true,
+   "detail": "accounts.google.com",
+   "severity": null,
+   "t": 1793390256.0450668
+  },
+  {
+   "id": "outlook.auth_begin_contacts",
+   "ok": true,
+   "detail": "url_host=login.microsoftonline.com requests=[]",
+   "severity": null,
+   "t": 1793390260.0707614
+  },
+  {
+   "id": "outlook.auth_url_has_no_secret",
+   "ok": true,
+   "detail": "login.microsoftonline.com",
+   "severity": null,
+   "t": 1793390260.0708036
+  },
+  {
+   "id": "linear.auth_begin_contacts",
+   "ok": true,
+   "detail": "url_host=linear.app requests=[]",
+   "severity": null,
+   "t": 1793390264.0976994
+  },
+  {
+   "id": "linear.auth_url_has_no_secret",
+   "ok": true,
+   "detail": "linear.app",
+   "severity": null,
+   "t": 1793390264.0977416
+  },
+  {
+   "id": "github.auth_begin_contacts",
+   "ok": true,
+   "detail": "url_host=github.com requests=[('github.com', 'POST', '/login/device/code')]",
+   "severity": null,
+   "t": 1793390268.2018566
+  },
+  {
+   "id": "github.auth_url_has_no_secret",
+   "ok": true,
+   "detail": "github.com",
+   "severity": null,
+   "t": 1793390268.2018921
+  },
+  {
+   "id": "gmail.code_exchanged",
+   "ok": true,
+   "detail": [
+    [
+     "POST",
+     "/token"
+    ]
+   ],
+   "severity": null,
+   "t": 1793390368.5151334
+  },
+  {
+   "id": "ledger.token_exchange",
+   "ok": true,
+   "detail": [
+    [
+     "sync:gmail",
+     "oauth2.googleapis.com"
+    ]
+   ],
+   "severity": null,
+   "t": 1793390368.5183518
+  },
+  {
+   "id": "ledger.google_hosts_all_ledgered",
+   "ok": true,
+   "detail": [
+    "github.com",
+    "gmail.googleapis.com",
+    "oauth2.googleapis.com"
+   ],
+   "severity": null,
+   "t": 1793390453.5245624
+  },
+  {
+   "id": "oauth.tokens_confined",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390453.524968
+  },
+  {
+   "id": "oauth.tokens_not_in_logs_or_files",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390453.5266647
+  },
+  {
+   "id": "caldav.no_credentials_to_foreign_home",
+   "ok": true,
+   "detail": "foreign requests=0 state=error err=invalid input: caldav: refusing to send credentials to `collector.gg8-evil.test` (configured host is `caldav.gg8-synthetic.test`)",
+   "severity": null,
+   "t": 1793390461.5553026
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793390251.4933083,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390251.9962962,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390268.2139893,
+   "note": "redirect -> 200 http://127.0.0.1:42329/"
+  },
+  {
+   "t": 1793390453.5211363,
+   "note": "refresh requests: 0"
+  },
+  {
+   "t": 1793390461.5591953,
+   "label": "daemon.stop"
+  }
+ ]
+}

@@ -771,7 +771,7 @@ impl Retriever {
         let lambda = self.config.mmr_lambda;
 
         if let (Some(p), true) = (provider, self.config.mmr_vectors)
-            && let Some(vectors) = self.pool_vectors(&ids, &texts, p).await?
+            && let Some(vectors) = self.pool_vectors(pool, &ids, &texts, p).await?
         {
             let sim = |i: usize, j: usize| cosine(&vectors[i], &vectors[j]);
             return Ok((mmr_select(&rel, limit, lambda, &sim), Similarity::Vector));
@@ -784,8 +784,14 @@ impl Retriever {
     /// One vector per pool passage: stored embeddings first, the rest embedded with `p`.
     /// `None` (lexical MMR) if the missing ones cannot be embedded or the vectors disagree in
     /// dimension.
+    ///
+    /// Sensitive passages (see [`is_sensitive`]; an item that cannot be checked counts as
+    /// sensitive) are never sent to a `Cloud` embedder, the same rule as ingest's and the
+    /// reranker's: if one of them has no stored vector (ingest leaves sensitive items without one
+    /// when only a cloud embedder is allowed), MMR compares by words instead.
     async fn pool_vectors(
         &self,
+        pool: &[Ranked],
         ids: &[ChunkId],
         texts: &[String],
         p: &Arc<dyn Provider>,
@@ -793,6 +799,10 @@ impl Retriever {
         let mut stored = self.embeddings_by_id(ids)?;
         let mut vectors: Vec<Option<Vec<f32>>> = ids.iter().map(|id| stored.remove(id)).collect();
         let missing: Vec<usize> = (0..ids.len()).filter(|&i| vectors[i].is_none()).collect();
+        if p.meta().locality == Locality::Cloud && missing.iter().any(|&i| pool[i].sensitive) {
+            tracing::debug!(provider = %p.id(), "a sensitive passage has no stored vector; lexical MMR");
+            return Ok(None);
+        }
         if !missing.is_empty() {
             // Documents of this index, so its document prefix (if any).
             let prefix = self
@@ -810,7 +820,8 @@ impl Retriever {
                 })
                 .collect();
             let inputs = nugget_infer::with_prefix(&prefix, &inputs);
-            match p.embed(&inputs).await {
+            let items: Vec<_> = missing.iter().map(|&i| pool[i].cand.item.clone()).collect();
+            match p.embed_items(&inputs, &items).await {
                 Ok(fresh) if validate_vectors(&fresh, inputs.len()).is_ok() => {
                     for (i, v) in missing.into_iter().zip(fresh) {
                         vectors[i] = Some(v);

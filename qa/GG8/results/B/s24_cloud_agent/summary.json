@@ -1,0 +1,117 @@
+{
+ "scenario": "s24_cloud_agent",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 96
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 4
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 30,
+   "bytes_in": 492886,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 30,
+   "bytes_sent": 492886,
+   "features": [
+    "agent"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "file data/policy/actions.jsonl",
+   "canary": "GG8CANARY-GOAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 30
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-GOAL-1",
+   "count": 30
+  }
+ ],
+ "checks": [
+  {
+   "id": "agent.requests",
+   "ok": true,
+   "detail": "30 requests; tools offered: ['ask_user', 'browser_click', 'browser_navigate', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_submit', 'browser_type', 'browser_wait_for', 'click', 'finish', 'note', 'observe', 'open_app', 'press_key', 'scroll', 'set_value', 'type_text', 'wait_for']",
+   "severity": null,
+   "t": 1793389901.8155797
+  },
+  {
+   "id": "agent.no_sensitive_content",
+   "ok": true,
+   "detail": "30 requests; leaked: []",
+   "severity": null,
+   "t": 1793389901.8177848
+  },
+  {
+   "id": "agent.ledger_rows",
+   "ok": true,
+   "detail": "30 requests, 30 rows (features ['agent']); unmatched []",
+   "severity": null,
+   "t": 1793389903.3273163
+  },
+  {
+   "id": "agent.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793389903.3273458
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793389897.1818569,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793389897.6853845,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793389898.7072704,
+   "note": "agent.run -> {'task_id': '0873457617804dd3a7239034f2f4a14a', 'tools': ['ask_user', 'browser_click', 'browser_navigate', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_submit', 'browser_type', 'browser_wait_for', 'click', 'finish', 'note', 'observe', 'open_app', 'press_key', 'scroll', 'set_value', 'type_text', 'wait_for']}"
+  },
+  {
+   "t": 1793389898.8075688,
+   "note": "last event: {'params': {'event': {'action_id': 'act_9f0758901971f0223cd826b58302fbf9', 'event': 'action_done', 'is_error': False, 'replayed': False, 'summary': 'noted', 'task_id': '0873457617804dd3a7239034f2f4a14a', 'tool': 'note'}, 'task_id': '0873457617804dd3a7239034f2f4a14a'}, 'jsonrpc': '2.0', 'method': 'agent.event'}"
+  },
+  {
+   "t": 1793389901.8129632,
+   "note": "agent.get: {'entries': [{'at_ms': 1793389898707, 'deadline_ms': 600000, 'goal': 'Find how the Acme renewal will be paid and note it. GG8CANARY-GOAL-1', 'kind': 'run_started', 'max_steps': 30, 'max_tokens': 500000, 'seq': 0, 'task_id': '0873457617804dd3a7239034f2f4a14a', 'tools': ['ask_user', 'browser_click', 'browser_navigate', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_submit', 'browser_type', 'browser_wait_for', 'click', 'finish', 'note', 'observe', 'open_app', 'press_key', 'scroll', 'set_value', 'type_text', 'wait_for']}, {'at_ms': 1793389898804, 'duration_ms': 96, 'input_tokens': 100, 'kind': 'model_turn', 'output_tokens': 10, 'seq': 1, 'step': 1, 'stop_reason': 'ToolUse', 'task_id': '0873457617804dd3a7239034f2f4a14a', 'text': '', 'tool_calls': ['note']}, {'action': {'declared_risk': 'observe', 'target_app': 'nugget', 'target_label': None, 'task_id': '0873457617804dd3a7239034f2f4a14a', 'text_preview': None, 'verb': 'note'}, 'action_id': 'act_9f0758901971f0223cd826b58302fbf9', 'args': {'text': 'checking the Acme renewal'}, 'at_ms': 1793389898805, 'call_id': 'toolu_gg8', 'decision': 'allowed', 'duration_ms': 0, 'forced_by_injection': False, 'kind': 'decision', 'risk': 'observe', 'seq': 2, 'step': 1, 'task_id': '0873457617804dd3a7239034f2f4a14a', 'tool': 'note'}, {'action_id': 'act_9f0758901971f0223cd826b58302fbf9', 'at_ms': 1793389898805, 'duration_ms': 0, 'interrupted': False, 'is_error': False, 'kind': 'executed', 'result': 'noted', 'seq': 3, 'step': 1, 'task_i"
+  },
+  {
+   "t": 1793389903.3324075,
+   "label": "daemon.stop"
+  }
+ ]
+}
