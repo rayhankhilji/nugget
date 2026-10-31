@@ -1,0 +1,12 @@
+suite: doubletap-ab
+runner: GitHub Actions 1000011279 (Linux X64)
+commit: a5543dd9e4013f0c79e36b8f1bebae798356ed56 (base 4b98b901d49f808f9e28daeec5169d03ae7e4fbd)
+date: 2026-10-30T19:38:58Z
+CPU(s):                                  4
+Model name:                              Intel(R) Xeon(R) 6973P-C
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      143%
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           3           0          11          14
+Swap:              2           0           2
