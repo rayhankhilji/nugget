@@ -2172,6 +2172,66 @@ hours on this CPU (was ~15).
 changed from now on go through the new LLM path, but an existing vault is not re-extracted, since
 that would cost one local-model request per item (26–33 s each here) without the user asking.
 
+**Measured (EE1): entity resolution and time-aware claims.** Changes since AA3:
+
+- *Names.* A short form of a person ("Maggie", "Bob", "M. Thistlewood", "Kate S", an address
+  like `maggie.t@`) joins a full-name person only when the names fit (a small clean-room table
+  of English diminutives in `nugget-knowledge/src/names.rs`; names that are also standalone
+  names, like Liam or Nathan, never match another given name) **and** something corroborates
+  it: a shared address, the same item, the same mail thread (Message-ID / In-Reply-To /
+  References), or the same organisation (a header participant at the person's mail domain, or
+  "NAME from/at/of ORG" in the text; for the user's own domain, only internal mail between
+  colleagues already known from other items). Exactly one corroborated candidate is required;
+  never on a first name alone. The result does not depend on item order (tested in several
+  orders and batchings). Every merge records why on the surviving entity (`merge_log`), shown
+  in the vault's "Merged" section, and a user split removes the record. The same full name
+  under two addresses merges only when one address's mail names the other's organisation (a
+  job change).
+- *Time.* Claims carry `valid_from` from their earliest evidence; for single-valued predicates
+  (`works_at`, `has_title`, `lives_in`, ...) the current value is recomputed from the evidence
+  (newest sighting wins; a quote saying the fact ended, such as "last day at" or "moved from",
+  ends it), and the older values get `valid_to`. Vault pages list current facts first and the
+  superseded ones under *Earlier:* with their interval, each cited. Existing graphs are
+  migrated once, without the model.
+- *Model output.* Phrases, job titles and acronyms proposed as names ("Felix tells me",
+  "Senior Data Engineer" as a place, "GP" as a person) become literals; a short name of the
+  wrong kind ("Ostrander" as a place) takes the kind of its longer name; a mail's sender named
+  only in the headers is a valid claim subject.
+
+Before and after on one runner each, local 4B model, one attempt per item, 180 s per request.
+"Before" is the integration branch before EE1 (`4b98b90`); "after" runs this branch on the same
+items (`--knowledge-corpus original` reproduces the 93-item corpus and its 30-item subset), then
+on the whole corpus with the EE1 hard cases (106 items):
+
+| Metric | Run 41189133384 (EPYC 7763): before 30 / 93 → after 30 / 93 / 106 | Run 41113623942 (EPYC 9V45, without the last fixes): before 30 / 93 → after 30 / 93 / 106 |
+|---|---|---|
+| Entity F1 (target ≥ 0.8) | 0.72 / 0.74 → **0.74 / 0.79 / 0.80** | 0.69 / 0.72 → **0.71 / 0.78 / 0.78** |
+| Entity P / R, 93 items | 0.64 / 0.88 → 0.73 / 0.87 | 0.61 / 0.89 → 0.71 / 0.87 |
+| Claim F1 | 0.57 / 0.74 → 0.58 / 0.71 / 0.71 | 0.60 / 0.71 → 0.57 / 0.74 / 0.73 |
+| Unsupported claims, also injection (target 0) | **0** → **0** | **0** → **0** |
+| Resolution B³ F1 | 0.97 / 0.95 → 0.94 / 0.95 / 0.97 | 0.97 / 0.94 → 0.95 / 0.95 / 0.95 |
+| Hard cases (real model) | nickname and job change fail → still fail (Kate, Rob and both same-first-name pairs pass) | same |
+| Requests timed out | 0 → 0 | 0 → 0 |
+| Latency per request p50 / p95 | 24 / 57 → 24 / 56 s | 17 / 44 → 17 / 42 s |
+
+The entity F1 target is **MISSED** on the 30- and 93-item sets of the old corpus (0.74 and 0.79
+on the better run) and met only on the 106-item corpus (0.802), so the honest reading is that
+EE1 moved the local model from about 0.73 to about 0.79, just short of 0.8. Precision rose by
+0.09–0.10 (fewer duplicate people, kind mistakes and junk names) at unchanged recall and
+latency, and no unsupported or injected claim survived. Claim F1 did not move. The real-model
+hard cases still fail for reasons the dump shows. Both job changes now have the right current
+employer and the old one superseded, but the roles miss: the model writes no title for Priya's
+new role ("Head of Data"), and gives Delphine "Tidewater Billing review" instead of "Legal
+Counsel". Maggie fails because first names in the user's own notes ("Maggie", "Priya" in a
+journal) have nothing to corroborate them, so they stay separate people by design. The
+remaining entity false positives on 93 items: such first names (10), kind mistakes, mostly
+projects called organisations or people (9), and names not in the gold set (8). With the scripted model every
+hard case passes on both corpora (entity F1 0.966 / 0.958).
+
+`EXTRACTOR_VERSION` is again not bumped: the new resolution rules and the time-aware lifecycle
+apply to existing graphs through the one-time migration and the end-of-run settle pass, without
+a model request per item.
+
 ### Bugs the real models exposed
 
 - **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).
