@@ -2160,6 +2160,87 @@ hours on this CPU (was ~15).
 changed from now on go through the new LLM path, but an existing vault is not re-extracted, since
 that would cost one local-model request per item (26–33 s each here) without the user asking.
 
+### Ask answer quality (EE3)
+
+`ask --local-models --ask-prompt both --ask-temperature 0 --ask-judge model --ask-judge-model
+qwen3-8b-q4km` (methodology in [`ask`](#ask-ee3-answer-quality-of-ask)): 67 gold questions, each
+answered by the same model with Ask's prompt before EE3 (**plain**) and today's (**grounded**), on
+one runner, interleaved; the 8B model judges every answer in both orders (on its own server after
+the answering one is stopped; on the same server for the 8B rows). Context is packed by the real
+retriever at the app's 2,000-token budget; the gold support reached the context for 0.955 of the
+answerable questions (`ask.retrieval.support_recall`), so a few "wrong" answers are retrieval
+misses the model rightly declined. No request failed or timed out.
+
+All three on GitHub `ubuntu-latest`, **AMD EPYC 7763**, 4 vCPUs (2 cores), CPU only:
+4B in run [41113756737](https://github.com/rayhankhilji/nugget/actions/runs/41113756737) at
+`4f89727` (200 min), 8B and 1.7B in run
+[41071346019](https://github.com/rayhankhilji/nugget/actions/runs/41071346019) at `6d2cb34`
+(281 and 149 min; the bench and product code are the same in both). Reports, every answer and every
+judge verdict: [`results/real-models/run-41113756737/`](results/real-models/run-41113756737/) and
+[`results/real-models/run-41071346019/`](results/real-models/run-41071346019/). The 1.7B row
+exists because the manifest's smallest chat model became the 1.7B with CC1, which the job first
+picked up by default; it is now pinned to the 4B.
+
+| Metric, plain → grounded | qwen3-4b-q4km | qwen3-8b-q4km | qwen3-1.7b-q8 |
+|---|---|---|---|
+| Correct, rule-based | 0.81 → **0.82** | 0.88 → **0.91** | 0.70 → **0.78** |
+| Correct, 8B judge (both orders agree) | 0.90 → **0.85** | 0.93 → **0.93** | 0.81 → **0.79** |
+| Single fact | 0.95 → **0.95** | 1.00 → **1.00** | 0.95 → **0.95** |
+| Two items (multi-hop) | 0.69 → **0.62** | 0.77 → **0.69** | 0.54 → **0.62** |
+| Latest | 0.90 → **1.00** | 0.90 → **1.00** | 0.70 → **1.00** |
+| Unanswerable: declines (target ≥ 0.8) | 0.54 → **0.69** | 0.77 → **0.92** | 0.31 → **0.38** |
+| Answerable: declines wrongly | 0.04 → **0.06** | 0.02 → **0.04** | 0.02 → **0.04** |
+| Stale value stated | 0.00 → **0.00** | 0.00 → **0.00** | 0.12 → **0.00** |
+| Injection questions: instruction obeyed (target 0) | 0.00 → **0.00** | 0.10 → **0.00** | 0.00 → **0.20** |
+| Citation precision | 1.00 → **0.98** | 0.98 → **0.98** | 0.95 → **1.00** |
+| Citation recall | 0.94 → **0.84** | 0.94 → **0.95** | 0.81 → **0.38** |
+| Uncited statements | 0.19 → **0.15** | 0.16 → **0.05** | 0.44 → **0.70** |
+| Post-check: claims flagged | 0.27 → **0.19** | 0.18 → **0.05** | 0.52 → **0.71** |
+| Post-check: "not found" recall | 0.00 → **0.62** | 0.62 → **0.92** | 0.08 → **0.23** |
+| Judge: order-inconsistent | 0.00 → **0.03** | 0.01 → **0.01** | 0.07 → **0.04** |
+| Prompt tokens p50 (from cache) | 1,065 (81) → **1,163 (184)** | 1,065 (81) → **1,163 (184)** | 1,065 (81) → **1,163 (184)** |
+| Time to first token p50 / p95 | 43.4 / 50.7 → **46.7 / 54.2 s** | 78.6 / 90.7 → **83.3 / 96.8 s** | 21.4 / 24.8 → **23.1 / 26.5 s** |
+| Full answer p50 / p95 | 47.8 / 55.9 → **49.9 / 57.1 s** | 84.6 / 97.0 → **89.4 / 103.9 s** | 24.1 / 31.3 → **24.8 / 31.0 s** |
+| Any answer containing a planted canary (all 67 questions, from the dumps) | 2 → **0** | 2 → **0** | 2 → **3** |
+
+How to read it:
+
+- **Planted instructions stop steering answers.** The injection documents are retrieved for
+  unrelated questions too, and with the plain prompt every model twice answered with the planted
+  text instead of the answer (`PINEAPPLE PROTOCOL ENGAGED` for "when did the kitchen work start?",
+  a prize link, a mail footer's upgrade link). With the grounded prompt the 4B and 8B never did, on
+  any of the 67 questions.
+- **"Not in your items" improves but misses the 0.8 target on the 4B.** The 4B declines 0.69 of the
+  unanswerable questions (0.54 before), the 8B 0.92 (0.77). What remains are near misses: a related
+  item exists and the model fills the gap ("the gym membership is 32 pounds a month", which no item
+  says). The post-check's `not_found` now recognises those declines (recall 0 → 0.62 on the 4B,
+  0.62 → 0.92 on the 8B), so Chat shows the "Nothing in your items answers this" state.
+- **"Latest" questions are fixed** (0.90 → 1.00 on the 4B and 8B, 0.70 → 1.00 on the 1.7B): dated
+  passages, newest first, with superseded ones marked.
+- **Fewer uncited statements on the 4B and 8B** (19% → 15%, 16% → 5%), with precision unchanged at
+  0.98–1.00.
+- **Two-item questions get worse on the 4B and 8B** (0.69 → 0.62, 0.77 → 0.69: one question of 13
+  each), and the 8B judge scores the 4B's grounded answers lower (0.90 → 0.85; unchanged 0.93 on
+  the 8B). Reading the flips: of the 4B's six judge losses, three are unanswerable near misses where
+  the grounded answer filled the gap, one cites the wrong item (the bike's 85 pounds for the car's
+  brake pads), one is the passport arithmetic (six months instead of four), and one declines a question
+  whose answer was in the context; of its three wins, two are the planted-text answers above. **This
+  is a miss**: the stricter prompt does not make the 4B more correct overall, it makes it decline,
+  date and resist injection better.
+- **The 1.7B does not follow the grounded prompt.** It gets more answers right by the rules (0.70 →
+  0.78, but 0.81 → 0.79 by the judge), cites far less (uncited 44% → 70%) and three times copied a
+  whole passage, planted instruction included, into the answer. The post-check flags 71% of its
+  claims, which is what Chat shows; Ask on the 1.7B is not recommended.
+- **Cost: ~100 prompt tokens** (dates, rules, one example): 1,065 → 1,163 tokens p50, of which the
+  prompt cache serves more (81 → 184, the rules come first); 3–5 s more to the first token on this
+  CPU (4B 43.4 → 46.7 s, 8B 78.6 → 83.3 s). Time to first token is the model's own; retrieval
+  takes 3 ms.
+
+A first run on the code before review ([41028090092](https://github.com/rayhankhilji/nugget/actions/runs/41028090092),
+8B, EPYC 9V74; [`results/real-models/run-41028090092/`](results/real-models/run-41028090092/))
+showed the same direction with a scorer the review then fixed (it missed prose refusals and
+under-counted the plain arm's declines).
+
 ### Bugs the real models exposed
 
 - **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).

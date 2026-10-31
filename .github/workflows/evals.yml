@@ -19,9 +19,6 @@ on:
         description: "Manifest id of the chat model (empty: the smallest)"
         default: ""
         type: string
-  # TEMPORARY (EE3): measure the ask suite from its branch; removed before the final push.
-  push:
-    branches: [ee/ask-quality]
   schedule:
     # Weekly, Monday 03:17 UTC.
     - cron: "17 3 * * 1"
@@ -185,6 +182,12 @@ jobs:
               ask --local-chat-model qwen3-4b-q4km --ask-prompt both --ask-temperature 0 --ask-judge model
               --ask-judge-model qwen3-8b-q4km --ask-judge-timeout-s 240
               --ask-dump eval-results/ask-answers.jsonl
+          # The manifest's agentic-tier model answering; it judges itself on the same server.
+          - suite: ask-8b
+            args: >-
+              ask --local-chat-model qwen3-8b-q4km --ask-prompt both --ask-temperature 0
+              --ask-judge model --ask-judge-model qwen3-8b-q4km --ask-judge-timeout-s 240
+              --ask-dump eval-results/ask-answers.jsonl
     steps:
       - uses: actions/checkout@v5
         with:
@@ -256,7 +259,6 @@ jobs:
   # bench arguments. The `chat_model` input does not apply here: every run names its model.
   doubletap:
     name: ${{ matrix.suite }} (real model)
-    if: github.event_name != 'push' # TEMPORARY (EE3)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 340
     strategy:
