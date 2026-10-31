@@ -10,6 +10,7 @@ use nugget_core::ipc::{ChatDelta, ChatDone, DraftStarted, VoiceStatus, method, n
 use nugget_core::paths::Paths;
 use nugget_ingest::MemorySecrets;
 use nugget_ipc::{Client, IpcError, Notification, RpcError, code};
+use nugget_models::{GpuKind, Hardware};
 use nugget_store::{NewChunk, NewItem, Store, StoreKey, content_hash};
 use nuggetd::{Daemon, DaemonOptions, Startup};
 use serde_json::{Value, json};
@@ -171,6 +172,11 @@ struct Harness {
 
 /// `draft` is TOML for the `[draft]` section; `seed` runs on the store before the daemon starts.
 async fn start(draft: &str, seed: impl FnOnce(&Store)) -> Harness {
+    start_in("enabled = false", draft, seed).await
+}
+
+/// [`start`] with `runtime` as the `[runtime]` section (on fixed hardware).
+async fn start_in(runtime: &str, draft: &str, seed: impl FnOnce(&Store)) -> Harness {
     let tmp = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(tmp.path().to_path_buf());
     let (model, base) = FakeModel::start().await;
@@ -183,7 +189,7 @@ async fn start(draft: &str, seed: impl FnOnce(&Store)) -> Harness {
     }
     let config = format!(
         r#"[runtime]
-enabled = false
+{runtime}
 
 [[providers]]
 id = "fake"
@@ -204,6 +210,12 @@ voice_refresh_debounce_ms = 100
     let mut opts = DaemonOptions::new(paths.clone());
     opts.store_key = Some(StoreKey::from_bytes(KEY));
     opts.source_secrets = Some(Arc::new(MemorySecrets::new()));
+    opts.runtime.hardware = Some(Hardware {
+        total_ram: 16 << 30,
+        available_ram: 8 << 30,
+        cpu_cores: 4,
+        gpu: GpuKind::Unknown,
+    });
     let daemon = match Daemon::start(opts).await.unwrap() {
         Startup::Ready(d) => d,
         Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
@@ -680,6 +692,38 @@ async fn read_ahead_skips_cloud_providers_and_refused_fields_and_cancel_answers(
     // Nothing reached the model, and nothing was audited.
     assert!(h.model.seen().is_empty(), "{:?}", h.model.seen());
     assert_eq!(h.audit().len(), audit_before, "{:?}", h.audit());
+    h.stop().await;
+}
+
+/// With the local runtime's chat model not installed, drafts go to the cloud provider (the slot
+/// fails fast), so read-ahead and prewarm must say so too, not name `local-chat` (GG8-10).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn read_ahead_and_prewarm_skip_a_runtime_slot_without_its_model() {
+    let mut h = start_in("idle_stop_minutes = 0", "", |_| {}).await;
+    let rt: Vec<nugget_core::ipc::RuntimeInfo> = h.call(method::RUNTIME_STATUS, json!({})).await;
+    assert!(
+        rt.iter().any(|r| r.provider.as_str() == "local-chat"
+            && r.state == nugget_core::ipc::RuntimeState::NotInstalled),
+        "{rt:?}"
+    );
+    let v: Value = h
+        .call(method::DRAFT_READ_AHEAD, json!({"context": chat_context()}))
+        .await;
+    assert_eq!(v, json!({"started": false, "skipped": "cloud"}));
+    let v: Value = h.call("draft.prewarm", chat_context()).await;
+    assert_eq!(v["provider"], json!("fake"), "{v}");
+    assert_eq!(v["locality"], json!("cloud"), "{v}");
+    // The prewarm only opens the connection: no content reaches the cloud model.
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while h.model.seen().is_empty() && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let seen = h.model.seen();
+    assert!(!seen.is_empty(), "prewarm reached the provider");
+    assert!(
+        seen.iter().all(|s| s.method == "GET" && s.body.is_empty()),
+        "{seen:?}"
+    );
     h.stop().await;
 }
 

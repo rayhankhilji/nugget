@@ -267,17 +267,30 @@ impl ImapConnector {
     }
 
     fn meter(&self) -> EgressMeter {
-        EgressMeter::new(
-            self.ctx.egress.clone(),
-            format!("{}:{}", self.settings.host.trim(), self.settings.port()),
-            FEATURE,
-        )
+        EgressMeter::new(self.ctx.egress.clone(), self.egress_host(), FEATURE)
     }
 
-    async fn connect(&self, meter: &EgressMeter, cancel: &CancellationToken) -> Result<Imap> {
+    /// The host as egress rows name it: bare, with the port only when it is not the default for
+    /// the TLS mode (as the HTTP clients' rows do).
+    fn egress_host(&self) -> String {
+        let host = self.settings.host.trim();
+        if self.settings.port() == ImapSettings::default_port(self.settings.tls) {
+            host.to_string()
+        } else if host.contains(':') {
+            format!("[{host}]:{}", self.settings.port())
+        } else {
+            format!("{host}:{}", self.settings.port())
+        }
+    }
+
+    /// Connect and log in. Every attempt is in the egress ledger once it ends (bytes or not).
+    async fn connect(&self, meter: &mut EgressMeter, cancel: &CancellationToken) -> Result<Imap> {
         let password = self.password()?;
         let ep = self.endpoint()?;
-        let imap = Imap::connect(&ep, &password, meter.counters(), cancel).await?;
+        meter.connecting();
+        let imap = Imap::connect(&ep, &password, meter.counters(), cancel).await;
+        meter.flush();
+        let imap = imap?;
         self.idle_supported
             .store(imap.has("IDLE"), Ordering::Relaxed);
         Ok(imap)
@@ -354,12 +367,9 @@ impl ImapConnector {
         if by_folder.is_empty() {
             return Ok(0);
         }
-        let mut meter = EgressMeter::new(
-            self.ctx.egress.clone(),
-            format!("{}:{}", self.settings.host.trim(), self.settings.port()),
-            ACTION_FEATURE,
-        );
-        let mut imap = self.connect(&meter, cancel).await?;
+        let mut meter =
+            EgressMeter::new(self.ctx.egress.clone(), self.egress_host(), ACTION_FEATURE);
+        let mut imap = self.connect(&mut meter, cancel).await?;
         let result = async {
             if !imap.has("MOVE") {
                 return Err(Error::Unsupported(
@@ -407,7 +417,7 @@ impl ImapConnector {
     ) -> Result<Value> {
         let mut cursor = Cursor::load(cursor);
         let mut meter = self.meter();
-        let mut imap = self.connect(&meter, cancel).await?;
+        let mut imap = self.connect(&mut meter, cancel).await?;
         let known = self.known_tree().await?;
         let folders = self.resolve_folders(&mut imap).await?;
 
@@ -456,7 +466,7 @@ impl ImapConnector {
                         _ = tokio::time::sleep(RECONNECT_DELAY * reconnects as u32) => {}
                         _ = cancel.cancelled() => return Err(Error::Cancelled),
                     }
-                    run.imap = self.connect(&meter, cancel).await?;
+                    run.imap = self.connect(&mut meter, cancel).await?;
                     known = self.known_tree().await?;
                 }
                 Err(e) => return Err(e),
@@ -470,7 +480,7 @@ impl ImapConnector {
 
     async fn run_watch(&self, sink: Arc<dyn ChangeSink>, cancel: CancellationToken) -> Result<()> {
         let mut meter = self.meter();
-        let mut imap = self.connect(&meter, &cancel).await?;
+        let mut imap = self.connect(&mut meter, &cancel).await?;
         if !imap.has("IDLE") {
             imap.logout().await;
             return Err(Error::Unsupported(
