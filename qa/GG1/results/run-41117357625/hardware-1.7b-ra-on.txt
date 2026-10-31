@@ -1,0 +1,11 @@
+label: 1.7b-ra-on
+runner: GitHub Actions 1000011492 (Linux X64)
+commit: ea46d10fbe4bdb1b137daac1e916e826c9253c7c
+date: 2026-10-30T20:46:07Z
+CPU(s):                                  4
+Model name:                              INTEL(R) XEON(R) PLATINUM 8573C
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      137%
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           9           0           5          14
+Swap:              2           0           2
