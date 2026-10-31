@@ -367,6 +367,8 @@ impl Sources {
 /// and the check counts the invalid markers it contains instead.
 pub struct AnswerFilter {
     sources: Sources,
+    /// The items the answer was given, with their sensitivity (see [`AnswerMemory`]).
+    provenance: Vec<(ItemRef, bool)>,
     normalise: bool,
     /// Received but not yet forwarded: from a possible marker (or trailing spaces) on.
     pending: String,
@@ -380,7 +382,7 @@ impl AnswerFilter {
     /// A filter for an answer from `ctx`, whose passages are parsed out of `ctx.text`; prefer
     /// [`packed`](Self::packed).
     pub fn new(ctx: &ContextResponse, normalise: bool) -> Self {
-        Self::with_sources(Sources::new(ctx, None, None), normalise)
+        Self::with_sources(Sources::new(ctx, None, None), provenance(ctx), normalise)
     }
 
     /// A filter for an answer from `ctx` and its packed `passages` (see the module docs);
@@ -391,12 +393,17 @@ impl AnswerFilter {
         today: Option<time::Date>,
         normalise: bool,
     ) -> Self {
-        Self::with_sources(Sources::new(ctx, Some(passages), today), normalise)
+        Self::with_sources(
+            Sources::new(ctx, Some(passages), today),
+            provenance(ctx),
+            normalise,
+        )
     }
 
-    fn with_sources(sources: Sources, normalise: bool) -> Self {
+    fn with_sources(sources: Sources, provenance: Vec<(ItemRef, bool)>, normalise: bool) -> Self {
         Self {
             sources,
+            provenance,
             normalise,
             pending: String::new(),
             text: String::new(),
@@ -419,6 +426,11 @@ impl AnswerFilter {
             return String::new();
         }
         self.drain(true)
+    }
+
+    /// The items the answer was given and whether each is sensitive.
+    pub(crate) fn provenance(&self) -> &[(ItemRef, bool)] {
+        &self.provenance
     }
 
     /// The full answer forwarded so far.
@@ -516,6 +528,123 @@ impl AnswerFilter {
 /// The spaces at the end of `text` that are held back: the last [`MAX_HELD_SPACE`] of them.
 fn held_space(text: &str) -> usize {
     (text.len() - text.trim_end_matches([' ', '\t']).len()).min(MAX_HELD_SPACE)
+}
+
+/// The items of `ctx`, once each, with their sensitivity.
+fn provenance(ctx: &ContextResponse) -> Vec<(ItemRef, bool)> {
+    let mut out: Vec<(ItemRef, bool)> = Vec::new();
+    for c in &ctx.citations {
+        match out.iter_mut().find(|(i, _)| *i == c.item) {
+            Some(e) => e.1 |= c.sensitive,
+            None => out.push((c.item.clone(), c.sensitive)),
+        }
+    }
+    out
+}
+
+/// What replaces an earlier turn that may not go to a cloud model.
+pub const WITHHELD_TURN: &str = "(An earlier message is left out here: it held private details.)";
+
+/// Answers remembered by [`AnswerMemory`].
+const MAX_REMEMBERED_ANSWERS: usize = 512;
+
+/// The sources of recent sourced answers, by the answer's text: a follow-up's history only
+/// carries text, and this is how the daemon knows which items an earlier answer was drawn from
+/// (for the egress ledger) and whether any of them is sensitive (so it never reaches a cloud
+/// model). Bounded; the oldest answers are forgotten first. Identical answers from different
+/// contexts merge (the union of items, sensitive if either was).
+#[derive(Debug, Default)]
+pub(crate) struct AnswerMemory {
+    by_text: HashMap<u64, Vec<(ItemRef, bool)>>,
+    order: std::collections::VecDeque<u64>,
+}
+
+impl AnswerMemory {
+    pub(crate) fn remember(&mut self, text: &str, items: &[(ItemRef, bool)]) {
+        if items.is_empty() || text.trim().is_empty() {
+            return;
+        }
+        let key = answer_key(text);
+        match self.by_text.get_mut(&key) {
+            Some(known) => {
+                for (item, sensitive) in items {
+                    match known.iter_mut().find(|(i, _)| i == item) {
+                        Some(e) => e.1 |= *sensitive,
+                        None => known.push((item.clone(), *sensitive)),
+                    }
+                }
+            }
+            None => {
+                self.by_text.insert(key, items.to_vec());
+                self.order.push_back(key);
+                while self.order.len() > MAX_REMEMBERED_ANSWERS {
+                    if let Some(old) = self.order.pop_front() {
+                        self.by_text.remove(&old);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn sources(&self, text: &str) -> Option<&[(ItemRef, bool)]> {
+        self.by_text.get(&answer_key(text)).map(Vec::as_slice)
+    }
+}
+
+/// The answer's text with whitespace collapsed, hashed.
+fn answer_key(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for w in text.split_whitespace() {
+        w.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// A follow-up's history as it may be sent to a provider.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct SafeHistory {
+    pub turns: Vec<ChatMessage>,
+    /// Items whose content (an earlier answer drawn from them) is in `turns`: egress provenance.
+    pub items: Vec<ItemRef>,
+    /// Turns replaced with [`WITHHELD_TURN`].
+    pub withheld: u32,
+}
+
+/// `history` for a provider: the items each earlier answer was drawn from (per `memory`) become
+/// provenance, and for a `cloud` provider every turn that came from a sensitive item, or that
+/// the deterministic PII and secret scan flags (cards, SSNs, IBANs, keys: also in what the user
+/// typed or pasted, and in answers the daemon doesn't know, e.g. from before a restart), is
+/// replaced with [`WITHHELD_TURN`]. Local providers get the turns unchanged.
+pub(crate) fn safe_history(
+    history: &[ChatMessage],
+    memory: &AnswerMemory,
+    cloud: bool,
+) -> SafeHistory {
+    let mut out = SafeHistory::default();
+    for m in history {
+        let known = match m.role {
+            IpcRole::Assistant => memory.sources(&m.text).unwrap_or_default(),
+            IpcRole::User | IpcRole::System => &[],
+        };
+        let private = known.iter().any(|(_, sensitive)| *sensitive)
+            || !nugget_ingest::scan_pii(&m.text).is_empty();
+        if cloud && private {
+            out.withheld += 1;
+            out.turns.push(ChatMessage {
+                role: m.role,
+                text: WITHHELD_TURN.to_owned(),
+            });
+            continue;
+        }
+        for (item, _) in known {
+            if !out.items.contains(item) {
+                out.items.push(item.clone());
+            }
+        }
+        out.turns.push(m.clone());
+    }
+    out
 }
 
 /// The post-check of a complete answer against the passages it was given: "not found" replies,
@@ -1200,6 +1329,81 @@ Signature is due by November 14.",
             let plain = ask_request(&[], "q", &ctx, &opts);
             assert_eq!(plain.messages, vec![Message::user_text("q")]);
         }
+    }
+
+    fn item(key: &str) -> ItemRef {
+        ItemRef {
+            source: SourceId::new("notes"),
+            key: ItemKey::new(key),
+        }
+    }
+
+    #[test]
+    fn history_for_the_cloud_withholds_private_turns_and_names_the_items() {
+        let mut memory = AnswerMemory::default();
+        memory.remember("From the  bank note [1].", &[(item("bank"), true)]);
+        memory.remember("By the river [1].", &[(item("walk"), false)]);
+        let history = vec![
+            msg(IpcRole::User, "where did we walk?"),
+            msg(IpcRole::Assistant, "By the river [1]."),
+            msg(IpcRole::User, "and the bank?"),
+            // Known, from a sensitive item; whitespace differs from what was remembered.
+            msg(IpcRole::Assistant, "From the bank note [1]."),
+            // Unknown, but the scan finds a card number.
+            msg(IpcRole::Assistant, "Card 4111 1111 1111 1111."),
+            // Typed by the user: scanned too.
+            msg(IpcRole::User, "my IBAN is GB82 WEST 1234 5698 7654 32"),
+        ];
+        let cloud = safe_history(&history, &memory, true);
+        let texts: Vec<&str> = cloud.turns.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "where did we walk?",
+                "By the river [1].",
+                "and the bank?",
+                WITHHELD_TURN,
+                WITHHELD_TURN,
+                WITHHELD_TURN,
+            ]
+        );
+        assert_eq!(cloud.turns[3].role, IpcRole::Assistant);
+        assert_eq!(cloud.turns[5].role, IpcRole::User);
+        assert_eq!(cloud.withheld, 3);
+        assert_eq!(cloud.items, vec![item("walk")]);
+
+        // A local model gets every turn; the items it carries are named.
+        let local = safe_history(&history, &memory, false);
+        assert_eq!(local.turns, history);
+        assert_eq!(local.withheld, 0);
+        assert_eq!(local.items, vec![item("walk"), item("bank")]);
+    }
+
+    #[test]
+    fn answer_memory_merges_identical_answers_and_forgets_the_oldest() {
+        let mut memory = AnswerMemory::default();
+        memory.remember("Herons [1]", &[(item("walk"), false)]);
+        memory.remember("Herons [1]", &[(item("walk"), true), (item("bank"), false)]);
+        assert_eq!(
+            memory.sources("Herons [1]").unwrap(),
+            &[(item("walk"), true), (item("bank"), false)]
+        );
+        // Nothing to remember without items or text.
+        memory.remember("General answer.", &[]);
+        assert!(memory.sources("General answer.").is_none());
+        for i in 0..MAX_REMEMBERED_ANSWERS {
+            memory.remember(&format!("answer {i}"), &[(item("x"), false)]);
+        }
+        assert!(
+            memory.sources("Herons [1]").is_none(),
+            "the oldest is forgotten"
+        );
+        assert!(
+            memory
+                .sources(&format!("answer {}", MAX_REMEMBERED_ANSWERS - 1))
+                .is_some()
+        );
+        assert_eq!(memory.by_text.len(), MAX_REMEMBERED_ANSWERS);
     }
 
     #[test]

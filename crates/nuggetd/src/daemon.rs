@@ -137,6 +137,8 @@ pub(crate) struct State {
     pub hardware: Hardware,
     /// Cancellation per running chat stream.
     pub streams: Mutex<HashMap<String, CancellationToken>>,
+    /// The sources of recent Ask answers, for follow-ups' history (`crate::ask::AnswerMemory`).
+    pub answers: Mutex<crate::ask::AnswerMemory>,
     /// Model ids being installed.
     pub installs: Arc<InFlight>,
     pub tasks: TaskTracker,
@@ -551,6 +553,7 @@ impl Daemon {
             models,
             hardware,
             streams: Mutex::new(HashMap::new()),
+            answers: Mutex::new(crate::ask::AnswerMemory::default()),
             installs: Arc::new(InFlight::default()),
             tasks,
             shutdown,

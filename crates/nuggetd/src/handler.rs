@@ -27,7 +27,9 @@ use nugget_store::AuditEntry;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::ask::{AnswerFilter, AskOptions, AskPrompt, ask_request_packed};
+use crate::ask::{
+    AnswerFilter, AskOptions, AskPrompt, SafeHistory, ask_request_packed, safe_history,
+};
 use crate::config::tier_name;
 use crate::daemon::{InFlightGuard, State, blocking, spawn_refresh};
 use crate::sources::{client_secret_account, reconcile_settings};
@@ -465,11 +467,27 @@ impl RpcHandler {
                         "refusing to send sensitive passages to a cloud provider".into(),
                     )));
                 }
-                let ask = ask_request_packed(&history, &query, &ctx, &passages, &opts);
+                // Earlier turns as they may go to this provider: nothing from a sensitive item
+                // or matching the PII scan reaches a cloud model, and the items earlier answers
+                // came from are provenance.
+                let sent = {
+                    let memory = self
+                        .state
+                        .answers
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner);
+                    safe_history(&history, &memory, cloud)
+                };
+                let mut ask = ask_request_packed(&sent.turns, &query, &ctx, &passages, &opts);
+                for item in &sent.items {
+                    if !ask.items.contains(item) {
+                        ask.items.push(item.clone());
+                    }
+                }
                 match open_stream(p.as_ref(), ask).await {
                     Ok(stream) => {
                         router.report_success(p.id());
-                        return Ok((p, stream, ctx, passages));
+                        return Ok((p, stream, ctx, passages, sent));
                     }
                     Err(e) if !explicit && is_fallback_error(&e) => {
                         tracing::warn!(provider = %p.id(), error = %e, "ask: provider failed; trying next");
@@ -488,7 +506,7 @@ impl RpcHandler {
                 Error::NotFound("no provider could answer".into())
             })))
         };
-        let (provider, stream, ctx, passages) = tokio::select! {
+        let (provider, stream, ctx, passages, sent): (_, _, _, _, SafeHistory) = tokio::select! {
             r = start => r?,
             () = self.state.shutdown.cancelled() => return Err(shutting_down()),
         };
@@ -503,6 +521,7 @@ impl RpcHandler {
             general,
             excluded_sensitive = ctx.excluded_sensitive,
             history = history.len(),
+            history_withheld = sent.withheld,
             rewritten,
             "ask started"
         );
@@ -518,6 +537,8 @@ impl RpcHandler {
                 "passages": ctx.citations.len(),
                 "excluded_sensitive": ctx.excluded_sensitive,
                 "history": history.len(),
+                "history_withheld": sent.withheld,
+                "history_items": sent.items.len(),
                 "rewritten": rewritten,
                 "general": general,
             }),
@@ -1099,6 +1120,14 @@ async fn run_chat(
             tracing::info!(stream = %stream_id, "client disconnected; chat stopped");
             return;
         }
+    }
+    // What the client now holds may come back as a follow-up's history: remember its sources.
+    if let Some(f) = &filter {
+        state
+            .answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remember(f.text(), f.provenance());
     }
     let _ = notify.send(notification::CHAT_DONE, &done).await;
 }
