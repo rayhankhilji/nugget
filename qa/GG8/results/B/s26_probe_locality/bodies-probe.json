@@ -1,0 +1,157 @@
+[
+ {
+  "host": "api.openai.com",
+  "path": "/v1/responses",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "accept",
+    "text/event-stream"
+   ],
+   [
+    "authorization",
+    "Bearer sk-GG8CANARY-APIKEY-openai"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.openai.com"
+   ],
+   [
+    "content-length",
+    "208"
+   ]
+  ],
+  "body": "{\"include\":[\"reasoning.encrypted_content\"],\"input\":[{\"content\":[{\"text\":\"Reply with one word: pong\",\"type\":\"input_text\"}],\"role\":\"user\"}],\"max_output_tokens\":16,\"model\":\"gpt-mock\",\"store\":false,\"stream\":true}"
+ },
+ {
+  "host": "api.openai.com",
+  "path": "/v1/responses",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "accept",
+    "text/event-stream"
+   ],
+   [
+    "authorization",
+    "Bearer sk-GG8CANARY-APIKEY-openai"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.openai.com"
+   ],
+   [
+    "content-length",
+    "218"
+   ]
+  ],
+  "body": "{\"include\":[\"reasoning.encrypted_content\"],\"input\":[{\"content\":[{\"text\":\"Reply with exactly one word: pong\",\"type\":\"input_text\"}],\"role\":\"user\"}],\"max_output_tokens\":2048,\"model\":\"gpt-mock\",\"store\":false,\"stream\":true}"
+ },
+ {
+  "host": "api.openai.com",
+  "path": "/v1/responses",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "accept",
+    "text/event-stream"
+   ],
+   [
+    "authorization",
+    "Bearer sk-GG8CANARY-APIKEY-openai"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.openai.com"
+   ],
+   [
+    "content-length",
+    "1136"
+   ]
+  ],
+  "body": "{\"include\":[\"reasoning.encrypted_content\"],\"input\":[{\"content\":[{\"image_url\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZgAAAC0CAAAAACMSWVwAAACJ0lEQVR4nO3dS4qDQBRAUavJ/rfcPXUSsCgrnib3DIMY4fImDz+v3yOinyOkwqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKgyoMqjCowqAKg3odC8aFY+56H9pYOOdd13nlPCvnP2tiUIVBFQZVGFRhUIVBFQZVGFRhUIVBFQY1vSub3Vnt3nHd9b9Xjv/k9TcxqMKgCoMqDKowqMKgCoMqDKowqMKgCoNauq9sh3c7q9m901Pf91zZDZ41MajCoAqDKgyqMKjCoAqDKgyqMKjCoAqDmt6Vreyv3rlrv/TU/+64/iYGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVBL95XteMfXmDxm5blIbT921sSgCoMqDKowqMKgCoMqDKowqMKgCoMqDGrLM5ize6RPvvfsqWczZzUxqMKgCoMqDKowqMKgCoMqDKowqMKgCoPa8h1MYR81Jn8/E66/iUEVBlUYVGFQhUEVBlUYVGFQhUEVBlUY1Pgv91l9myYGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVCFQRUGVRhUYVB/WYMdeHy8ijIAAAAASUVORK5CYII=\",\"type\":\"input_image\"},{\"text\":\"The image shows a number with exactly 4 digits. Reply with only those 4 digits.\",\"type\":\"input_text\"}],\"role\":\"user\"}],\"max_output_tokens\":2048,\"model\":\"gpt-mock\",\"store\":false,\"stream\":true}"
+ },
+ {
+  "host": "api.openai.com",
+  "path": "/v1/responses",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "accept",
+    "text/event-stream"
+   ],
+   [
+    "authorization",
+    "Bearer sk-GG8CANARY-APIKEY-openai"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.openai.com"
+   ],
+   [
+    "content-length",
+    "554"
+   ]
+  ],
+  "body": "{\"include\":[\"reasoning.encrypted_content\"],\"input\":[{\"content\":[{\"text\":\"Call the record_value tool with value set to exactly \\\"nugget-131861\\\". Do not answer in text.\",\"type\":\"input_text\"}],\"role\":\"user\"}],\"max_output_tokens\":2048,\"model\":\"gpt-mock\",\"store\":false,\"stream\":true,\"tools\":[{\"description\":\"Records a value exactly as given.\",\"name\":\"record_value\",\"parameters\":{\"additionalProperties\":false,\"properties\":{\"value\":{\"description\":\"The value to record.\",\"type\":\"string\"}},\"required\":[\"value\"],\"type\":\"object\"},\"strict\":true,\"type\":\"function\"}]}"
+ },
+ {
+  "host": "api.openai.com",
+  "path": "/v1/responses",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "accept",
+    "text/event-stream"
+   ],
+   [
+    "authorization",
+    "Bearer sk-GG8CANARY-APIKEY-openai"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.openai.com"
+   ],
+   [
+    "content-length",
+    "511"
+   ]
+  ],
+  "body": "{\"include\":[\"reasoning.encrypted_content\"],\"input\":[{\"content\":[{\"text\":\"Tom has 3 apples and buys 4 more. Give the total as `answer` and the unit as `unit`.\",\"type\":\"input_text\"}],\"role\":\"user\"}],\"max_output_tokens\":2048,\"model\":\"gpt-mock\",\"store\":false,\"stream\":true,\"text\":{\"format\":{\"name\":\"output\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"answer\":{\"type\":\"integer\"},\"unit\":{\"enum\":[\"apples\"],\"type\":\"string\"}},\"required\":[\"answer\",\"unit\"],\"type\":\"object\"},\"strict\":true,\"type\":\"json_schema\"}}}"
+ }
+]

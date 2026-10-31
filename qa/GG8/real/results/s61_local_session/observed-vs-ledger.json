@@ -1,0 +1,89 @@
+{
+ "observed": {},
+ "ledger": {
+  "release-assets.githubusercontent.com": {
+   "rows": 1,
+   "bytes_sent": 0,
+   "bytes_received": 22521008,
+   "features": [
+    "runtime_download"
+   ]
+  },
+  "us.aws.cdn.hf.co": {
+   "rows": 2,
+   "bytes_sent": 0,
+   "bytes_received": 1980572450,
+   "features": [
+    "model_download"
+   ]
+  },
+  "huggingface.co": {
+   "rows": 2,
+   "bytes_sent": 2860,
+   "bytes_received": 0,
+   "features": [
+    "model_download"
+   ]
+  },
+  "github.com": {
+   "rows": 1,
+   "bytes_sent": 514,
+   "bytes_received": 0,
+   "features": [
+    "runtime_download"
+   ]
+  }
+ },
+ "unledgered": [],
+ "ledger_rows": [
+  {
+   "at": "2026-10-30T20:28:37.232668299Z",
+   "bytes_received": 22521008,
+   "bytes_sent": 0,
+   "feature": "runtime_download",
+   "host": "release-assets.githubusercontent.com",
+   "items": []
+  },
+  {
+   "at": "2026-10-30T20:28:37.124587214Z",
+   "bytes_received": 1834426017,
+   "bytes_sent": 0,
+   "feature": "model_download",
+   "host": "us.aws.cdn.hf.co",
+   "items": []
+  },
+  {
+   "at": "2026-10-30T20:28:37.09852489Z",
+   "bytes_received": 0,
+   "bytes_sent": 1365,
+   "feature": "model_download",
+   "host": "huggingface.co",
+   "items": []
+  },
+  {
+   "at": "2026-10-30T20:28:37.097436829Z",
+   "bytes_received": 0,
+   "bytes_sent": 514,
+   "feature": "runtime_download",
+   "host": "github.com",
+   "items": []
+  },
+  {
+   "at": "2026-10-30T20:28:36.075747104Z",
+   "bytes_received": 146146433,
+   "bytes_sent": 0,
+   "feature": "model_download",
+   "host": "us.aws.cdn.hf.co",
+   "items": []
+  },
+  {
+   "at": "2026-10-30T20:28:35.925072104Z",
+   "bytes_received": 0,
+   "bytes_sent": 1495,
+   "feature": "model_download",
+   "host": "huggingface.co",
+   "items": []
+  }
+ ],
+ "dns": []
+}

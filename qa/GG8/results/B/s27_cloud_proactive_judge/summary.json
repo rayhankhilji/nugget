@@ -1,0 +1,185 @@
+{
+ "scenario": "s27_cloud_proactive_judge",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 151
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 38
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 16,
+   "bytes_in": 8727,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 16,
+   "bytes_sent": 8727,
+   "features": [
+    "proactive_judge",
+    "probe"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "file Mail/01-renewal-question.eml",
+   "canary": "GG8CANARY-MAILNORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "file Mail/02-card-request.eml",
+   "canary": "GG8CANARY-MAILSENS-1",
+   "count": 1
+  },
+  {
+   "where": "file Mail/03-meeting.eml",
+   "canary": "GG8CANARY-MAILNORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "file Mail/04-api-key.eml",
+   "canary": "GG8CANARY-MAILSENS-2",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 16
+  }
+ ],
+ "checks": [
+  {
+   "id": "judge_off.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793390640.4209163
+  },
+  {
+   "id": "judge_local.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793390651.125616
+  },
+  {
+   "id": "judge_cloud.sent",
+   "ok": true,
+   "detail": "1 requests; cards=['Reply to Priya Raman: Acme renewal: can you confirm by Friday?', 'Reply to Marta Sousa: Kickoff in Lisbon on 3 December?', 'Reply to DevOps: Your new integration key, please confirm receipt']",
+   "severity": null,
+   "t": 1793390661.8807213
+  },
+  {
+   "id": "judge_cloud.no_sensitive_content",
+   "ok": true,
+   "detail": "1 requests; leaked: []",
+   "severity": null,
+   "t": 1793390661.880755
+  },
+  {
+   "id": "judge_cloud.no_sensitive_mail",
+   "ok": true,
+   "detail": "",
+   "severity": "High",
+   "t": 1793390661.880762
+  },
+  {
+   "id": "judge_cloud.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 6 rows (features ['proactive_judge', 'probe']); unmatched []",
+   "severity": null,
+   "t": 1793390663.384552
+  },
+  {
+   "id": "cards.generated",
+   "ok": true,
+   "detail": "{\"off\": [\"Reply to Priya Raman: Acme renewal: can you confirm by Friday?\", \"Reply to Marta Sousa: Kickoff in Lisbon on 3 December?\", \"Reply to DevOps: Your new integration key, please confirm receipt\"], \"local\": [\"Reply to Priya Raman: Acme renewal: can you confirm by Friday?\", \"Reply to Marta Sousa: Kickoff in Lisbon on 3 December?\", \"Reply to DevOps: Your new integration key, please confirm receipt\"], \"cloud\": [\"Reply to Priya Raman: Acme renewal: can you confirm by Friday?\", \"Reply to Marta S",
+   "severity": null,
+   "t": 1793390663.3846142
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793390623.1667502,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390623.670462,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390623.6731684,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793390623.689325,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390624.192318,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390640.4207394,
+   "note": "judge=off: 3 cards ['Reply to Priya Raman: Acme renewal: can you confirm by Friday?', 'Reply to Marta Sousa: Kickoff in Lisbon on 3 December?', 'Reply to DevOps: Your new integration key, please confirm receipt']; 0 cloud requests"
+  },
+  {
+   "t": 1793390640.4231942,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793390640.4559774,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390640.9599721,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390651.1254025,
+   "note": "judge=local: 3 cards ['Reply to Priya Raman: Acme renewal: can you confirm by Friday?', 'Reply to Marta Sousa: Kickoff in Lisbon on 3 December?', 'Reply to DevOps: Your new integration key, please confirm receipt']; 0 cloud requests"
+  },
+  {
+   "t": 1793390651.128828,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793390651.161709,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390651.6655848,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390661.8805594,
+   "note": "judge=cloud: 3 cards ['Reply to Priya Raman: Acme renewal: can you confirm by Friday?', 'Reply to Marta Sousa: Kickoff in Lisbon on 3 December?', 'Reply to DevOps: Your new integration key, please confirm receipt']; 1 cloud requests"
+  },
+  {
+   "t": 1793390663.387662,
+   "label": "daemon.stop"
+  }
+ ]
+}
