@@ -384,11 +384,13 @@ impl SecretStore for FlakySecrets {
         self.inner.get(a)
     }
     fn set(&self, a: &str, v: &str) -> Result<()> {
-        if self
+        // `fetch_update` is `try_update` from Rust 1.99, which is newer than the MSRV.
+        #[allow(deprecated)]
+        let fail = self
             .fail_writes
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-            .is_ok()
-        {
+            .is_ok();
+        if fail {
             return Err(Error::Storage("keychain locked".into()));
         }
         self.inner.set(a, v)

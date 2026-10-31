@@ -233,7 +233,7 @@ repeatable:
 | Today | `cards_list` and `brief_get` answer with one fixed card and brief (the daemon computes them from the wall-clock date) |
 | Models | `models_fit` answers for a fixed machine (16 GB, no GPU, enough disk); on a machine whose memory isn't 16 GB the recommendations differ, so the model list is masked there |
 | the run's own timestamps and paths | in every answer, timestamps from the run (indexing, extraction, sync) become 2026-10-30T08:55:00Z and the temp home's path `/home/robin/.nugget` |
-| what still changes | masked (painted magenta): every `<time>` (`RelativeTime`), and elements whose text is a relative time ("… ago", "just now"), a temp path, a latency ("101 ms"), an uptime ("1m 7s") or a hashed id (`ent_…`) |
+| what still changes | masked (painted magenta): every `<time>` (`RelativeTime`), and elements whose text is a relative time ("… ago", "just now"), a temp path, a latency ("101 ms"), an uptime ("1m 7s") or a hashed id (`ent_…`); on the Knowledge entity screen, the facts list (ordered by when items were indexed, which varies by seconds between runs) |
 
 Comparing needs no extra dependency: in a blank page, Chromium decodes both PNGs (an `<img>` drawn
 on a `<canvas>`, read with `getImageData`). A pixel differs when a channel (RGBA) differs by more
@@ -242,7 +242,16 @@ its size differs, or when it has no baseline. A failure writes `visual-<screen>-
 `-expected.png` and `-diff.png` (differing pixels red over the faded baseline) to the artifacts.
 `summary.json` has `visual.screens` with each screen's `ratio` and `differing` pixel count.
 
-To refresh the baselines after an intended UI change, on Linux (the CI runner is Ubuntu 24.04):
+**The baselines are CI's rendering.** Even with the same fonts, another Linux machine antialiases
+text differently enough to differ by 1–8% (the first baselines, made in a cloud container, failed
+every screen on the CI runner). The committed baselines are the `-actual.png` files from the
+`desktop-e2e` artifact of a CI run, checked by eye before committing. Locally, run the visual
+scenario as a report (`E2E_VISUAL_TOLERANCE=1` accepts any rendering and still writes `summary.json`
+with each screen's ratio), or compare against your own baselines without committing them.
+
+To refresh the baselines after an intended UI change: run E2E on CI, look at the `-actual.png`
+files in its `desktop-e2e` artifact, and copy the right ones into `e2e/visual-baselines/`. On a Linux
+machine that renders like the runner (Ubuntu 24.04), you can also write them directly:
 
 ```sh
 cd apps/desktop

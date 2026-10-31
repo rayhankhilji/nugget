@@ -392,6 +392,11 @@ export async function visualScenario({ browser, socket, pages, onboarded }) {
                 log(`  visual: this machine has ${seen.ram_gb} GB, not ${MACHINE_RAM_GB}: masking the model list`);
                 await page.locator("main ul.cards").evaluate((el) => el.setAttribute("data-visual-mask", ""));
               }
+              // Knowledge entity: facts are ordered by when their items were indexed, which differs
+              // by seconds between runs; the layout around them is still compared.
+              if (name === "knowledge-entity") {
+                await page.locator("ul.facts").evaluateAll((els) => els.forEach((el) => el.setAttribute("data-visual-mask", "")));
+              }
               const { png, stable } = await stableShot(page);
               if (!stable) log(`  visual: ${file} still changed after 5 screenshots; comparing the last`);
               expect(errors.length === 0, `uncaught page errors: ${JSON.stringify(errors)}`);
