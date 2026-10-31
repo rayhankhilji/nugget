@@ -474,22 +474,28 @@ jobs:
   # ---- Linux Wayland ----
   # A private headless Wayland session (tests/fixtures/native/linux/wayland-session.sh): a session
   # bus, the compositor, the accessibility bus and the XDG portals, with a GTK 4 fixture app
-  # running natively on Wayland (GDK_BACKEND=wayland, no XWayland). Two compositors, one per
-  # portal outcome (ubuntu-latest is Ubuntu 26.04):
+  # running natively on Wayland (GDK_BACKEND=wayland, no XWayland). Three compositors
+  # (ubuntu-latest is Ubuntu 26.04: Plasma 6.6, GNOME 50, xdg-desktop-portal 1.21):
   # - sway (wlroots headless): wlr-data-control, so the Wayland clipboard works; its portal
   #   backend (xdg-desktop-portal-wlr) has no GlobalShortcuts, so nugget-hotkey's documented
-  #   "portal unavailable" error is tested.
-  # - kwin (kwin_wayland --virtual as root, xdg-desktop-portal-kde): GlobalShortcuts exists.
-  #   xdg-desktop-portal 1.20 then refuses the session to the test process ("An app id is
-  #   required": it is neither sandboxed nor in a systemd app scope, and its host registration
-  #   is not resolved); the test checks the refusal and its reason. With an older portal
-  #   (Ubuntu 24.04, Plasma 5.27) the session is created and the bind answered, and the keys
-  #   are left to the user in System Settings: the manual step.
-  # GNOME (mutter --headless) is not used: no wlr-data-control, and its GlobalShortcuts bind
-  # needs a consent dialog anyway.
-  # Both run nugget-a11y over AT-SPI on the GTK 4 app (crates/nugget-a11y/tests/linux_wayland.rs)
-  # and Double Tap's read -> draft (scripted provider) -> insert -> read-back path
-  # (crates/nugget-hotkey/tests/wayland_it.rs), with timings in the job summary.
+  #   "portal unavailable" error is tested (the app's fallback is in wayland-app below).
+  # - kwin (kwin_wayland --virtual as root, xdg-desktop-portal-kde on the Wayland QPA) and
+  # - gnome (gnome-shell --headless with a virtual monitor, xdg-desktop-portal-gnome and
+  #   gnome-control-center's global shortcuts provider): GlobalShortcuts. The test registers the
+  #   app id dev.nugget.Nugget (the session provides its desktop file with an existing Exec),
+  #   the desktop asks for consent in its real dialog, accepted over AT-SPI as a user would,
+  #   and Ctrl+Alt+Space is pressed on the compositor's virtual keyboard (KWin fake input,
+  #   Mutter RemoteDesktop): the shortcut must fire through the desktop's own key handling.
+  #   NUGGET_WAYLAND_EXPECT_SHORTCUT_FIRES=1 makes anything short of that a failure. Test-session
+  #   specifics: KWin runs with its restricted-interface check off
+  #   (KWIN_WAYLAND_NO_PERMISSION_CHECKS) so the test's python3 may use fake input; GNOME Shell's
+  #   startup is awaited ("GNOME Shell started at") before the overview it starts in is closed,
+  #   since app accelerators are ignored until then.
+  # sway and kwin also run nugget-a11y over AT-SPI on the GTK 4 app
+  # (crates/nugget-a11y/tests/linux_wayland.rs) and Double Tap's read -> draft (scripted
+  # provider) -> insert -> read-back path (crates/nugget-hotkey/tests/wayland_it.rs), on kwin
+  # fired by the key press. gnome runs the session and portal tests only: Mutter has no
+  # data-control protocol for the Wayland clipboard the insert path uses.
   wayland:
     name: Wayland (${{ matrix.compositor }})
     runs-on: ubuntu-latest
@@ -497,30 +503,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        compositor: [sway, kwin]
+        compositor: [sway, kwin, gnome]
     env:
       NUGGET_WAYLAND_COMPOSITOR: ${{ matrix.compositor }}
       NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts
       NUGGET_GTK4_PYTHON: /usr/bin/python3
-      # KDE's portal implements GlobalShortcuts: fail if the session lost it.
-      NUGGET_WAYLAND_EXPECT_GLOBAL_SHORTCUTS: ${{ matrix.compositor == 'kwin' && '1' || '0' }}
+      # KDE's and GNOME's portals implement GlobalShortcuts: fail if the session lost it, or if
+      # a key press does not fire the bound shortcut.
+      NUGGET_WAYLAND_EXPECT_GLOBAL_SHORTCUTS: ${{ matrix.compositor != 'sway' && '1' || '0' }}
+      NUGGET_WAYLAND_EXPECT_SHORTCUT_FIRES: ${{ matrix.compositor != 'sway' && '1' || '0' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
       - name: Install the Wayland session
-        run: |
-          common="dbus dbus-bin libglib2.0-bin at-spi2-core xdg-desktop-portal python3-gi gir1.2-gtk-4.0"
-          if [ "${{ matrix.compositor }}" = sway ]; then
-            extra="sway wtype xdg-desktop-portal-wlr"
-          else
-            extra="kwin-wayland xdg-desktop-portal-kde qtwayland5 libgl1-mesa-dri libegl1"
-          fi
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends $common $extra
-          dpkg-query -W xdg-desktop-portal xdg-desktop-portal-kde xdg-desktop-portal-wlr sway kwin-wayland 2>/dev/null || true
-          /usr/bin/python3 -c "import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk; print('GTK', Gtk.get_major_version(), Gtk.get_minor_version())"
+        run: tests/fixtures/native/linux/install-wayland-session.sh "${{ matrix.compositor }}"
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
@@ -536,6 +534,7 @@ jobs:
           cargo test -p nugget-hotkey --locked --test wayland_it --no-run
 
       - name: AT-SPI on a GTK 4 Wayland app
+        if: matrix.compositor != 'gnome'
         run: |
           mkdir -p "$NUGGET_WAYLAND_LOGS"
           tests/fixtures/native/linux/wayland-session.sh \
@@ -547,27 +546,34 @@ jobs:
         run: |
           mkdir -p "$NUGGET_WAYLAND_LOGS"
           {
-            echo "### Wayland (${{ matrix.compositor }}): GlobalShortcuts portal"
-            echo "| compositor | trigger | portal | activation |"
-            echo "|---|---|---|---|"
+            echo "### Wayland (${{ matrix.compositor }}): GlobalShortcuts portal (nugget-hotkey test process)"
+            echo "| compositor | registered app id | portal session | bind | consent | activation | fired |"
+            echo "|---|---|---|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
           hotkey="$RUNNER_TEMP/hotkey.md"
           doubletap="$RUNNER_TEMP/doubletap.md"
           : > "$hotkey"; : > "$doubletap"
+          filter=()
+          # The insert path needs a Wayland clipboard (data-control), which Mutter lacks.
+          [ "${{ matrix.compositor }}" = gnome ] && filter=(--skip wayland_doubletap_into_gtk4)
           NUGGET_HOTKEY_SUMMARY="$hotkey" NUGGET_DOUBLETAP_SUMMARY="$doubletap" \
             tests/fixtures/native/linux/wayland-session.sh \
-            cargo test -p nugget-hotkey --locked --test wayland_it -- --ignored --test-threads=1 --nocapture 2>&1 \
+            cargo test -p nugget-hotkey --locked --test wayland_it -- --ignored --test-threads=1 --nocapture "${filter[@]}" 2>&1 \
             | tee "$NUGGET_WAYLAND_LOGS/wayland_it.log"
           status="${PIPESTATUS[0]}"
           cat "$hotkey" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ matrix.compositor }}" != gnome ]; then
+            {
+              echo
+              echo "### Double Tap on Wayland (${{ matrix.compositor }}, GTK 4 text view, scripted provider, no delay)"
+              echo "| OS | mode | app | read field ms | draft started ms | first token ms | first insert call ms | total ms | chunks | insert methods | verified |"
+              echo "|---|---|---|---|---|---|---|---|---|---|---|"
+              cat "$doubletap"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           {
             echo
-            echo "### Double Tap on Wayland (${{ matrix.compositor }}, GTK 4 text view, scripted provider, no delay)"
-            echo "| OS | mode | app | read field ms | draft started ms | first token ms | first insert call ms | total ms | chunks | insert methods | verified |"
-            echo "|---|---|---|---|---|---|---|---|---|---|---|"
-            cat "$doubletap"
-            echo
-            grep -h '^DOUBLETAP-WAYLAND\|^DOUBLETAP-A11Y\|MANUAL STEP\|^STOP:' "$NUGGET_WAYLAND_LOGS/wayland_it.log" | sed 's/^/    /' || true
+            grep -h '^DOUBLETAP-WAYLAND\|^DOUBLETAP-HOTKEY\|^DOUBLETAP-A11Y\|MANUAL STEP\|^STOP:\|accept-shortcut-dialog:\|virtual-keyboard:' "$NUGGET_WAYLAND_LOGS/wayland_it.log" | sed 's/^/    /' || true
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
@@ -575,6 +581,124 @@ jobs:
         if: always()
         with:
           name: wayland-${{ matrix.compositor }}
+          path: wayland-artifacts/
+          if-no-files-found: ignore
+
+  # ---- Double Tap's Wayland shortcut in the installed app ----
+  # The debug .deb (pnpm tauri build --debug --bundles deb: NUGGET_E2E_PROBE works in a debug
+  # build) is built once, checked (packaging/scripts/check-linux-desktop-file.sh) and installed
+  # with apt in each session; the installed nugget-desktop is started natively on Wayland and
+  # tests/fixtures/native/linux/wayland-app-shortcut.sh checks:
+  # - kwin, gnome: the portal session is created for dev.nugget.Nugget from the installed
+  #   /usr/share/applications/dev.nugget.Nugget.desktop; the desktop's consent dialogs (two:
+  #   Double Tap and the agents' kill switch) are accepted over AT-SPI; Ctrl+Alt+Space on the
+  #   compositor's virtual keyboard must fire Double Tap (the probe's `trigger` event).
+  # - sway: no GlobalShortcuts; the listener reports the documented error and the fallback a
+  #   sway user binds (`nugget-desktop --double-tap`, handed to the running app) must start the
+  #   Double Tap flow (the hand-off records no `trigger` event; the flow's first `view` counts).
+  # nuggetd is not bundled in this build (no sidecar): the trigger does not need it.
+  wayland-app-deb:
+    name: Wayland app (debug .deb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install the Tauri build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential file libayatana-appindicator3-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev desktop-file-utils
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wayland-app-deb
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the debug .deb
+        working-directory: apps/desktop
+        run: pnpm tauri build --ci --debug --bundles deb
+
+      - name: Check the package's desktop files
+        run: |
+          deb="$(find target/debug/bundle/deb -name '*.deb' -type f | head -n 1)"
+          [ -n "$deb" ] || { echo "no .deb built" >&2; exit 1; }
+          packaging/scripts/check-linux-desktop-file.sh deb "$deb"
+          mkdir -p "$RUNNER_TEMP/deb" && cp "$deb" "$RUNNER_TEMP/deb/nugget-debug.deb"
+          dpkg-deb -c "$deb" | grep -E 'usr/(bin|share/applications)/'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nugget-debug-deb
+          path: ${{ runner.temp }}/deb/nugget-debug.deb
+          retention-days: 3
+
+  wayland-app:
+    name: Wayland app shortcut (${{ matrix.compositor }})
+    needs: wayland-app-deb
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        compositor: [kwin, gnome, sway]
+    env:
+      NUGGET_WAYLAND_COMPOSITOR: ${{ matrix.compositor }}
+      NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: nugget-debug-deb
+          path: ${{ runner.temp }}/deb
+
+      - name: Install the Wayland session and the package
+        run: |
+          tests/fixtures/native/linux/install-wayland-session.sh "${{ matrix.compositor }}"
+          sudo apt-get install -y --no-install-recommends "$RUNNER_TEMP/deb/nugget-debug.deb"
+          dpkg -L nugget | grep -E 'bin/|applications/' || dpkg-query -W -f='${binary:Package}\n' | grep -i nugget
+
+      - name: Press the shortcut in the installed app
+        run: |
+          mkdir -p "$NUGGET_WAYLAND_LOGS"
+          rows="$RUNNER_TEMP/app.md"
+          : > "$rows"
+          NUGGET_APP_SUMMARY="$rows" tests/fixtures/native/linux/wayland-session.sh \
+            tests/fixtures/native/linux/wayland-app-shortcut.sh 2>&1 | tee "$NUGGET_WAYLAND_LOGS/app-shortcut.log"
+          status="${PIPESTATUS[0]}"
+          {
+            echo "### Double Tap's shortcut in the installed app (${{ matrix.compositor }}, debug .deb)"
+            echo "| compositor | registered app id | portal session | consent | activation | Double Tap fired | press to probe ms |"
+            echo "|---|---|---|---|---|---|---|"
+            cat "$rows"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: wayland-app-${{ matrix.compositor }}
           path: wayland-artifacts/
           if-no-files-found: ignore
 

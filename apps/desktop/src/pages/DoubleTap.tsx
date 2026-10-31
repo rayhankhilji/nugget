@@ -8,12 +8,13 @@ import {
   type DoubleTapSettings,
   type DoubleTapStatus,
   type ProviderInfo,
+  type ShortcutStatus,
   type TriggerSpec,
 } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatRelative } from "../format";
 import { GoToPage } from "../components/GoToPage";
-import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader } from "../components/ui";
+import { Badge, ErrorNote, Loading, NotAvailable, PageHeader } from "../components/ui";
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import {
   addApp,
@@ -44,6 +45,9 @@ export function DoubleTapPage() {
   const [firing, setFiring] = useState(false);
   const [fireNotice, setFireNotice] = useState<Notice>(null);
   const readAheadHintId = useId();
+  const batteryHintId = useId();
+  const tryHintId = useId();
+  const tryOff = saved.data !== undefined && !saved.data.enabled;
 
   // Start editing from what's saved; a later reload doesn't clobber unsaved edits.
   useEffect(() => {
@@ -58,6 +62,15 @@ export function DoubleTapPage() {
     saved.reload();
     status.reload();
   });
+
+  // While the desktop asks about the shortcut (or Nugget binds it again), check back so the page
+  // flips to active once the user approves.
+  const shortcutState = status.data?.shortcut?.state;
+  useEffect(() => {
+    if (shortcutState !== "awaiting_consent" && shortcutState !== "rebinding") return;
+    const id = window.setInterval(status.reload, 2000);
+    return () => window.clearInterval(id);
+  }, [shortcutState, status.reload]);
 
   const dirty = form !== null && saved.data !== undefined && !sameSettings(form, saved.data);
   const invalid = form !== null && triggerError(form.trigger) !== null;
@@ -94,16 +107,30 @@ export function DoubleTapPage() {
   };
 
   return (
-    <div className="page">
+    <div className="page dt-page">
       <PageHeader
         title={t("doubletap.title")}
         description={t("doubletap.description")}
         actions={
-          <button type="button" className="btn" onClick={() => void fire()} disabled={firing || !saved.data?.enabled}>
+          // aria-disabled keeps it focusable, so keyboard users reach the reason it can't run.
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              if (!firing && saved.data?.enabled) void fire();
+            }}
+            aria-disabled={firing || !saved.data?.enabled || undefined}
+            aria-describedby={tryOff ? tryHintId : undefined}
+          >
             {t("doubletap.try.button")}
           </button>
         }
       />
+      {tryOff && (
+        <p id={tryHintId} className="muted small dt-try-hint">
+          {t("doubletap.try.offHint")}
+        </p>
+      )}
       {fireNotice && (
         <p className={fireNotice.error ? "note note-error" : "note"} role="status">
           {fireNotice.text}
@@ -121,6 +148,7 @@ export function DoubleTapPage() {
         <form onSubmit={(e) => void save(e)} noValidate>
           <section aria-labelledby="dt-general">
             <h2 id="dt-general">{t("doubletap.general")}</h2>
+            <div className="switch-stack">
             <label className="switch">
               <input
                 type="checkbox"
@@ -131,6 +159,8 @@ export function DoubleTapPage() {
               <span className="switch-track" aria-hidden="true" />
               <span>{t("doubletap.enabled")}</span>
             </label>
+            {/* Read-ahead only matters while Double Tap is on: nested under it. */}
+            <div className="switch-child">
             <label className="switch">
               <input
                 type="checkbox"
@@ -145,6 +175,23 @@ export function DoubleTapPage() {
             <p id={readAheadHintId} className="muted small">
               {t("doubletap.readAheadHint")}
             </p>
+            <label className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={form.read_ahead_on_battery ?? true}
+                disabled={!(form.read_ahead ?? true)}
+                aria-describedby={batteryHintId}
+                onChange={(e) => setForm({ ...form, read_ahead_on_battery: e.target.checked })}
+              />
+              <span className="switch-track" aria-hidden="true" />
+              <span>{t("doubletap.readAheadOnBattery")}</span>
+            </label>
+            <p id={batteryHintId} className="muted small">
+              {t("doubletap.readAheadOnBatteryHint")}
+            </p>
+            </div>
+            </div>
           </section>
 
           <TriggerPicker
@@ -159,7 +206,7 @@ export function DoubleTapPage() {
           />
 
           <ExcludedApps list={form.excluded_apps} onChange={(excluded_apps) => setForm({ ...form, excluded_apps })} />
-          <label className="switch">
+          <label className="switch dt-terminals">
             <input
               type="checkbox"
               role="switch"
@@ -327,6 +374,7 @@ function TriggerPicker({
           {t("doubletap.trigger.listenError", { error: keyOrText(status.trigger_error) })}
         </p>
       )}
+      <ShortcutNote shortcut={status?.shortcut} />
       {recommended && (
         <button type="button" className="btn btn-ghost btn-small" onClick={() => set(recommended)}>
           {t("doubletap.trigger.useRecommended")}
@@ -334,6 +382,29 @@ function TriggerPicker({
       )}
     </section>
   );
+}
+
+/** Where the desktop's shortcut stands (Wayland portal); nothing when it is simply active. */
+function ShortcutNote({ shortcut }: { shortcut: ShortcutStatus | null | undefined }) {
+  const t = useT();
+  if (!shortcut) return null;
+  if (shortcut.state === "failed") {
+    return (
+      <p className="field-error" role="alert">
+        {t("doubletap.shortcut.failed", { error: keyOrText(shortcut.error ?? "") })}
+      </p>
+    );
+  }
+  let text: string | null = null;
+  if (shortcut.state === "awaiting_consent") text = t("doubletap.shortcut.awaiting_consent");
+  else if (shortcut.state === "not_assigned") text = t("doubletap.shortcut.not_assigned");
+  else if (shortcut.state === "rebinding") text = t("doubletap.shortcut.rebinding");
+  else if (shortcut.state === "active" && shortcut.trigger) text = t("doubletap.shortcut.active_desktop", { trigger: shortcut.trigger });
+  return text ? (
+    <p className="note" role="status">
+      {text}
+    </p>
+  ) : null;
 }
 
 // ---- provider per app ----
@@ -363,18 +434,22 @@ function ProviderTable({ map, onChange }: { map: Record<string, string>; onChang
       <h2 id="dt-providers">{t("doubletap.providers.title")}</h2>
       <p className="muted small">{t("doubletap.providers.description")}</p>
       <ErrorNote error={providers.error} onRetry={providers.reload} />
-      {providers.data && ids.length === 0 && (
-        <p className="muted small">
-          {t("doubletap.providers.noModels")} <GoToPage page="models" className="btn btn-ghost btn-small" />
-        </p>
+      {providers.loading && !providers.data && <Loading label={t("doubletap.providers.loading")} lines={1} />}
+      {providers.data && ids.length === 0 && rows.length === 0 && (
+        <div className="note dt-no-models">
+          <span>{t("doubletap.providers.noModels")}</span>
+          <GoToPage page="models" className="btn" />
+        </div>
       )}
       {rows.length === 0 ? (
-        <EmptyState title={t("doubletap.providers.empty")} />
+        providers.data && ids.length > 0 && <p className="muted small dt-empty-line">{t("doubletap.providers.empty")}</p>
       ) : (
         <ul className="path-list">
           {rows.map((r) => (
             <li key={r.app}>
-              <code>{r.app}</code>
+              <bdi dir="ltr">
+                <code>{r.app}</code>
+              </bdi>
               <span className="inline-row">
                 <select
                   aria-label={t("doubletap.providers.providerFor", { app: r.app })}
@@ -405,8 +480,9 @@ function ProviderTable({ map, onChange }: { map: Record<string, string>; onChang
         </ul>
       )}
       {/* Not a nested <form>: the page is one form, so Enter here adds the row instead of saving. */}
+      {ids.length > 0 && (
       <div
-        className="inline-row"
+        className="inline-row dt-add-row"
         onKeyDown={(e) => {
           if (e.key === "Enter" && e.target instanceof HTMLInputElement) add(e);
         }}
@@ -433,10 +509,11 @@ function ProviderTable({ map, onChange }: { map: Record<string, string>; onChang
             </option>
           ))}
         </select>
-        <button type="button" className="btn btn-small" disabled={!app.trim() || !chosen} onClick={add}>
+        <button type="button" className="btn" disabled={!app.trim() || !chosen} onClick={add}>
           {t("doubletap.add")}
         </button>
       </div>
+      )}
     </section>
   );
 }
@@ -490,7 +567,9 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
               <ul className="path-list" aria-label={t("doubletap.excluded.builtInTitle")}>
                 {activeBuiltIn.map((a) => (
                   <li key={a}>
-                    <code>{a}</code>
+                    <bdi dir="ltr">
+                      <code>{a}</code>
+                    </bdi>
                     <Badge>{t("doubletap.excluded.builtInBadge")}</Badge>
                   </li>
                 ))}
@@ -509,12 +588,14 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
         </>
       )}
       {own.length === 0 ? (
-        <EmptyState title={builtIn.length > 0 ? t("doubletap.excluded.ownEmpty") : t("doubletap.excluded.empty")} />
+        <p className="muted small dt-empty-line">{builtIn.length > 0 ? t("doubletap.excluded.ownEmpty") : t("doubletap.excluded.empty")}</p>
       ) : (
         <ul className="path-list">
           {own.map((a) => (
             <li key={a}>
-              <code>{a}</code>
+              <bdi dir="ltr">
+                <code>{a}</code>
+              </bdi>
               <button
                 type="button"
                 className="btn btn-ghost btn-small"
@@ -528,7 +609,7 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
         </ul>
       )}
       <div
-        className="inline-row"
+        className="inline-row dt-add-row"
         onKeyDown={(e) => {
           if (e.key === "Enter" && e.target instanceof HTMLInputElement) add(e);
         }}
@@ -545,11 +626,11 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
           autoComplete="off"
           onChange={(e) => setValue(e.target.value)}
         />
-        <button type="button" className="btn btn-small" disabled={!value.trim()} onClick={add}>
+        <button type="button" className="btn" disabled={!value.trim()} onClick={add}>
           {t("doubletap.add")}
         </button>
         {builtIn.length === 0 && (
-          <button type="button" className="btn btn-ghost btn-small" onClick={() => void restore()}>
+          <button type="button" className="btn btn-ghost" onClick={() => void restore()}>
             {t("doubletap.excluded.restore")}
           </button>
         )}
@@ -559,6 +640,12 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
 }
 
 // ---- permissions ----
+
+/** Display-server / platform names as people write them (`x11` → X11). Unknown values: first letter up. */
+const SESSION_NAMES: Record<string, string> = { x11: "X11", wayland: "Wayland", macos: "macOS", windows: "Windows" };
+function sessionLabel(session: string): string {
+  return SESSION_NAMES[session.toLowerCase()] ?? session.charAt(0).toLocaleUpperCase() + session.slice(1);
+}
 
 const ACCESS_LABEL: Record<string, MessageKey> = {
   granted: "doubletap.perm.granted",
@@ -617,12 +704,14 @@ function PermissionsCard({
                 </Badge>
               </dd>
             </div>
-            <div>
-              <dt>{t("doubletap.perm.accessibility")}</dt>
-              <dd className="stat-text">
-                <Badge tone={permissionTone(s.accessibility)}>{perm(s.accessibility)}</Badge>
-              </dd>
-            </div>
+            {s.accessibility !== "not_required" && (
+              <div>
+                <dt>{t("doubletap.perm.accessibility")}</dt>
+                <dd className="stat-text">
+                  <Badge tone={permissionTone(s.accessibility)}>{perm(s.accessibility)}</Badge>
+                </dd>
+              </div>
+            )}
             {s.input_monitoring !== "not_required" && (
               <div>
                 <dt>{t("doubletap.perm.inputMonitoring")}</dt>
@@ -633,9 +722,7 @@ function PermissionsCard({
             )}
             <div>
               <dt>{t("doubletap.perm.session")}</dt>
-              <dd className="stat-text">
-                <code>{s.session}</code>
-              </dd>
+              <dd className="stat-text">{sessionLabel(s.session)}</dd>
             </div>
           </dl>
           {s.platform === "macos" && (
@@ -688,7 +775,12 @@ function VoiceCard() {
               <dd className="stat-text">{formatRelative(v.last_built)}</dd>
             </div>
           </dl>
-          {v.samples === 0 && <p className="muted small">{t("doubletap.voice.empty")}</p>}
+          {v.samples === 0 && (
+            <div className="note dt-no-models">
+              <span>{t("doubletap.voice.empty")}</span>
+              <GoToPage page="sources" className="btn" />
+            </div>
+          )}
         </>
       )}
     </section>

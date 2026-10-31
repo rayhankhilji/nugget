@@ -55,19 +55,25 @@ export function StatusPage() {
   };
 
   const s = status.data;
+  // The main status call stands for the daemon: while it is failing or loading for the first time,
+  // the page shows one error (or one loading state) instead of one per section.
+  const pageError = status.error && !isMethodNotFound(status.error) ? status.error : null;
+  const firstLoad = status.loading && !s && !status.error;
+  const quiet = pageError !== null || firstLoad;
 
   return (
     <div className="page">
       <PageHeader
         title={t("status.title")}
+        description={t("status.description")}
         actions={
-          <button type="button" className="btn btn-ghost" onClick={refreshAll}>
+          <button type="button" className="btn btn-ghost" onClick={refreshAll} disabled={firstLoad}>
             {t("common.refresh")}
           </button>
         }
       />
-      <ErrorNote error={status.error} onRetry={status.reload} />
-      {status.loading && !s && <Loading label={t("status.loading")} lines={4} />}
+      <ErrorNote error={status.error} onRetry={refreshAll} />
+      {firstLoad && <Loading label={t("status.loading")} lines={4} />}
       {s && (
         <>
           {s.protocol !== PROTOCOL_VERSION && (
@@ -78,7 +84,9 @@ export function StatusPage() {
           <dl className="stats">
             <div>
               <dt>{t("status.daemon")}</dt>
-              <dd>{t("status.version", { version: s.version })}</dd>
+              <dd>
+                <bdi dir="ltr">{t("status.version", { version: s.version })}</bdi>
+              </dd>
             </div>
             <div>
               <dt>{t("status.uptime")}</dt>
@@ -107,8 +115,8 @@ export function StatusPage() {
 
           <h2>{t("status.providers")}</h2>
           {s.providers.length === 0 ? (
-            <EmptyState title={t("status.noProvidersTitle")}>
-              <Trans k="status.noProviders" tags={{ code: (c) => <code>{c}</code> }} />
+            <EmptyState title={t("status.noProvidersTitle")} action={<GoToPage page="models" className="btn" />}>
+              {t("status.noProviders")}
             </EmptyState>
           ) : (
             <div className="table-wrap" tabIndex={0} role="region" aria-label={t("status.providers")}>
@@ -134,20 +142,39 @@ export function StatusPage() {
         </>
       )}
 
-      <IndexingCard data={ingest.data} error={ingest.error} loading={ingest.loading} onRetry={ingest.reload} />
-      <RuntimeCard data={runtime.data} error={runtime.error} loading={runtime.loading} onRetry={runtime.reload} />
-      <KnowledgeCard data={knowledge.data} error={knowledge.error} loading={knowledge.loading} onRetry={knowledge.reload} />
-      <BackupSettings />
+      {/* While the page shows its one error or loading state, sections with nothing to show are left out. */}
+      {(!quiet || ingest.data) && <IndexingCard data={ingest.data} error={quiet ? null : ingest.error} loading={!quiet && ingest.loading} onRetry={ingest.reload} />}
+      {(!quiet || runtime.data) && (
+      <RuntimeCard
+        data={runtime.data}
+        error={quiet ? null : runtime.error}
+        loading={!quiet && runtime.loading}
+        onRetry={runtime.reload}
+        // "No AI providers" above already offers Go to Models: one button per next step.
+        offerModels={!s || s.providers.length > 0}
+      />
+      )}
+      {(!quiet || knowledge.data) && <KnowledgeCard data={knowledge.data} error={quiet ? null : knowledge.error} loading={!quiet && knowledge.loading} onRetry={knowledge.reload} />}
+      {!quiet && <BackupSettings />}
       <UpdateSettings />
 
       <h2>{t("status.connection")}</h2>
-      <p className="muted small">
-        <Trans
-          k="status.connectionLine"
-          args={{ protocol: PROTOCOL_VERSION, socket: conn.data?.socket || "…" }}
-          tags={{ code: (c) => <code>{c}</code> }}
-        />
-      </p>
+      <details className="tech-details small">
+        <summary>{t("status.technicalDetails")}</summary>
+        <p className="muted tech-details-body">
+          <Trans
+            k="status.connectionLine"
+            args={{ protocol: PROTOCOL_VERSION, socket: conn.data?.socket || "…" }}
+            tags={{
+              code: (c) => (
+                <bdi dir="ltr">
+                  <code>{c}</code>
+                </bdi>
+              ),
+            }}
+          />
+        </p>
+      </details>
     </div>
   );
 }
@@ -290,7 +317,7 @@ function IndexingCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Loading lines={2} />}
+          {loading && !data && <Loading label={t("status.indexingLoading")} lines={2} />}
           {data && (
             <>
               <dl className="stats">
@@ -328,7 +355,7 @@ function IndexingCard({
               </dl>
               <p className="muted small">{t("status.freshnessHint")}</p>
               {data.sources.length === 0 && (
-                <EmptyState title={t("status.noSourcesTitle")} action={<GoToPage page="sources" />}>
+                <EmptyState title={t("status.noSourcesTitle")} action={<GoToPage page="sources" className="btn" />}>
                   {t("status.noSourcesBody")}
                 </EmptyState>
               )}
@@ -374,11 +401,13 @@ function RuntimeCard({
   error,
   loading,
   onRetry,
+  offerModels = true,
 }: {
   data: RuntimeInfo[] | undefined;
   error: unknown;
   loading: boolean;
   onRetry: () => void;
+  offerModels?: boolean;
 }) {
   const t = useT();
   return (
@@ -389,9 +418,9 @@ function RuntimeCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Loading lines={2} />}
+          {loading && !data && <Loading label={t("status.runtimeLoading")} lines={2} />}
           {data && data.length === 0 && (
-            <EmptyState title={t("status.noRuntimesTitle")} action={<GoToPage page="models" />}>
+            <EmptyState title={t("status.noRuntimesTitle")} action={offerModels ? <GoToPage page="models" className="btn" /> : undefined}>
               {t("status.noRuntimes")}
             </EmptyState>
           )}
@@ -414,7 +443,9 @@ function RuntimeCard({
                     return (
                       <tr key={`${r.provider}\u0000${r.model_id}`}>
                         <th scope="row">
-                          <code>{r.model_id}</code>
+                          <bdi dir="ltr">
+                            <code>{r.model_id}</code>
+                          </bdi>
                         </th>
                         <td>
                           {r.role === "embedding"
@@ -473,7 +504,7 @@ function KnowledgeCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Loading lines={2} />}
+          {loading && !data && <Loading label={t("status.knowledgeLoading")} lines={2} />}
           {data && (
             <>
               <dl className="stats">
@@ -500,7 +531,7 @@ function KnowledgeCard({
                   <dt>{t("status.extraction")}</dt>
                   <dd className="stat-text">
                     {data.extractor_provider ?? <span className="muted">{t("status.rulesOnly")}</span>}
-                    <div className="muted small">{t("status.lastRun", { when: formatRelative(data.last_run, now) })}</div>
+                    <div className="stat-sub">{t("status.lastRun", { when: formatRelative(data.last_run, now) })}</div>
                   </dd>
                 </div>
               </dl>
@@ -511,7 +542,9 @@ function KnowledgeCard({
               <h3 className="ask-sub">{t("status.vault")}</h3>
               {vault?.path ? (
                 <p className="vault-line">
-                  <code>{vault.path}</code>{" "}
+                  <bdi dir="ltr" className="vault-path">
+                    <code>{vault.path}</code>
+                  </bdi>{" "}
                   {vaultUrl && (
                     <button type="button" className="btn btn-small" onClick={() => void opener.open(vaultUrl, t("status.vaultFolder"))}>
                       {t("status.openFolder")}
@@ -519,7 +552,9 @@ function KnowledgeCard({
                   )}
                   <span className="muted small">
                     {" "}
-                    {t("status.vaultPages", { n: vault.pages, when: formatRelative(vault.last_render, now) })}
+                    {vault.last_render
+                      ? t("status.vaultPages", { n: vault.pages, when: formatRelative(vault.last_render, now) })
+                      : t("status.vaultNotYet")}
                   </span>
                 </p>
               ) : (

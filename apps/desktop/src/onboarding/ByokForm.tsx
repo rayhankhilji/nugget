@@ -13,13 +13,16 @@ interface KindInfo {
   baseUrl: string;
   /** Default provider id (matches the guide's `keychain:NAME`). */
   name: string;
+  /** Example model id and key prefix, shown as placeholders (never sent). */
+  modelExample: string;
+  keyExample: string;
 }
 
 // i18n-ignore-block: API kinds, URLs and provider ids are code, not prose.
 const KINDS: Record<ByokGuideKind, KindInfo> = {
-  anthropic: { api: "anthropic", label: "onboarding.byok.provider.anthropic", baseUrl: "https://api.anthropic.com", name: "anthropic" },
-  openai: { api: "openai_responses", label: "onboarding.byok.provider.openai", baseUrl: "https://api.openai.com/v1", name: "openai" },
-  compatible: { api: "openai_compatible", label: "onboarding.byok.provider.compatible", baseUrl: "", name: "custom" },
+  anthropic: { api: "anthropic", label: "onboarding.byok.provider.anthropic", baseUrl: "https://api.anthropic.com", name: "anthropic", modelExample: "claude-opus-5-5", keyExample: "sk-ant-…" },
+  openai: { api: "openai_responses", label: "onboarding.byok.provider.openai", baseUrl: "https://api.openai.com/v1", name: "openai", modelExample: "gpt-5", keyExample: "sk-…" },
+  compatible: { api: "openai_compatible", label: "onboarding.byok.provider.compatible", baseUrl: "", name: "custom", modelExample: "qwen3:4b", keyExample: "sk-…" },
 };
 // i18n-ignore-end
 
@@ -45,7 +48,7 @@ type Outcome =
  * plus a `keychain:NAME` provider in config.toml). Shown under the BYOK guide; `kind` follows the
  * guide's provider select, otherwise the form has its own.
  */
-export function ByokForm({ kind }: { kind?: ByokGuideKind }) {
+export function ByokForm({ kind, onSaved }: { kind?: ByokGuideKind; onSaved?: (provider: string) => void }) {
   const t = useT();
   const selectId = useId();
   const [own, setOwn] = useState<ByokGuideKind>("anthropic");
@@ -55,7 +58,7 @@ export function ByokForm({ kind }: { kind?: ByokGuideKind }) {
       <h3 id={`${selectId}-h`}>{t("onboarding.byok.form.heading")}</h3>
       <p className="muted small">{t("onboarding.byok.form.intro")}</p>
       {kind === undefined && (
-        <div className="field-inline">
+        <div className="field">
           <label htmlFor={selectId}>{t("onboarding.byok.form.kind")}</label>
           <select id={selectId} value={own} onChange={(e) => setOwn(e.target.value as ByokGuideKind)}>
             {(Object.keys(KINDS) as ByokGuideKind[]).map((k) => (
@@ -67,12 +70,12 @@ export function ByokForm({ kind }: { kind?: ByokGuideKind }) {
         </div>
       )}
       {/* Keyed by kind: switching provider starts from that provider's defaults. */}
-      <KeyForm key={current} info={KINDS[current]} />
+      <KeyForm key={current} info={KINDS[current]} onSaved={onSaved} />
     </section>
   );
 }
 
-function KeyForm({ info }: { info: KindInfo }) {
+function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: string) => void }) {
   const t = useT();
   const id = useId();
   const ids = { base: `${id}-base`, baseHint: `${id}-base-hint`, model: `${id}-model`, models: `${id}-models`, key: `${id}-key`, name: `${id}-name`, nameHint: `${id}-name-hint` };
@@ -127,6 +130,7 @@ function KeyForm({ info }: { info: KindInfo }) {
         if (r.saved) {
           setApiKey("");
           setOutcome({ type: "saved" });
+          onSaved?.(r.provider_id || name.trim());
         } else {
           setOutcome({ type: "failed", reason: r.ok ? "server_error" : r.reason });
         }
@@ -185,6 +189,7 @@ function KeyForm({ info }: { info: KindInfo }) {
           autoComplete="off"
           spellCheck={false}
           required
+          placeholder={info.keyExample}
           onChange={(e) => setApiKey(e.target.value)}
         />
       </div>
@@ -198,6 +203,7 @@ function KeyForm({ info }: { info: KindInfo }) {
           autoComplete="off"
           spellCheck={false}
           required
+          placeholder={t("onboarding.byok.form.modelPlaceholder", { example: info.modelExample })}
           list={models.length ? ids.models : undefined}
           onChange={(e) => setModel(e.target.value)}
         />
@@ -231,7 +237,7 @@ function KeyForm({ info }: { info: KindInfo }) {
         <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => void run("test")}>
           {busy === "test" ? t("onboarding.byok.form.testing") : t("onboarding.byok.form.test")}
         </button>
-        <button type="submit" className="btn" disabled={busy !== null}>
+        <button type="submit" className="btn btn-primary" disabled={busy !== null}>
           {busy === "save" ? t("onboarding.byok.form.saving") : t("onboarding.byok.form.save")}
         </button>
       </div>

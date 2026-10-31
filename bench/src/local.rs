@@ -5,11 +5,14 @@
 //! models into a [`ModelStore`] (SHA-256 verified, cached under `--models-home` between runs),
 //! then lets [`nugget_runtime::Runtime`] install the runtime build for this machine and start
 //! one server per role, exactly as `nuggetd` does. Suites build their providers from the
-//! configs it returns ([`LocalModels::chat`], [`LocalModels::embedder`]).
+//! configs it returns ([`LocalModels::chat`], [`LocalModels::embedder`],
+//! [`LocalModels::reranker`]).
 //!
-//! - **Models.** By default the smallest chat model (any of the triage, light, synthesis or
-//!   agentic tiers) and the smallest embedding model in the manifest; `--local-chat-model` and
-//!   `--local-embed-model` pick others by manifest id.
+//! - **Models.** By default the chat model the app uses on a typical 8–16 GB machine
+//!   ([`DEFAULT_CHAT_MODEL`], or the smallest chat model if a manifest lacks it) and the smallest
+//!   embedding model in the manifest; `--local-chat-model` and `--local-embed-model` pick others
+//!   by manifest id. (The default used to be the smallest chat model, which silently became the
+//!   Double Tap-only 1.7B once that was signed into the manifest.)
 //! - **Pending entries** (`--local-pending FILE`, bench only): proposed manifest entries from
 //!   `manifests/pending/` that are not signed yet. Each entry must pass
 //!   [`ModelEntry::validate`] and must not reuse a signed id; `--local-chat-model` and
@@ -50,6 +53,22 @@ use crate::runner::{BenchError, RunContext};
 /// Chat tiers: a model serving any of them can draft, extract and drive the agent.
 const CHAT_TIERS: [Tier; 4] = [Tier::Triage, Tier::Light, Tier::Synthesis, Tier::Agentic];
 
+/// The chat model measured when `--local-chat-model` is not given: the one `nuggetd` picks for
+/// chat, drafting and extraction on an 8–16 GB machine, so published numbers describe what most
+/// users run.
+pub const DEFAULT_CHAT_MODEL: &str = "qwen3-4b-q4km";
+
+/// `--local-chat-model`, or [`DEFAULT_CHAT_MODEL`] when the signed manifest has it (otherwise
+/// `None`: the smallest chat model).
+fn chat_model_id<'a>(models: &[ModelEntry], requested: Option<&'a str>) -> Option<&'a str> {
+    requested.or_else(|| {
+        models
+            .iter()
+            .any(|m| m.id == DEFAULT_CHAT_MODEL)
+            .then_some(DEFAULT_CHAT_MODEL)
+    })
+}
+
 /// Whether a hybrid reasoning model may think before it answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, clap::ValueEnum)]
 pub enum Thinking {
@@ -81,12 +100,17 @@ pub struct LocalOptions {
     /// `bench/.local-models`).
     #[arg(long, value_name = "DIR", env = "NUGGET_BENCH_MODELS_HOME")]
     pub models_home: Option<PathBuf>,
-    /// Manifest id of the chat model (default: the smallest chat model in the manifest).
+    /// Manifest id of the chat model (default: `qwen3-4b-q4km`, the model the app uses on a
+    /// typical 8–16 GB machine).
     #[arg(long, value_name = "ID", requires = "local_models")]
     pub local_chat_model: Option<String>,
     /// Manifest id of the embedding model (default: the smallest one in the manifest).
     #[arg(long, value_name = "ID", requires = "local_models")]
     pub local_embed_model: Option<String>,
+    /// Manifest id of the reranker, for suites that start one (default: the smallest model with
+    /// the `rerank` tier).
+    #[arg(long, value_name = "ID", requires = "local_models")]
+    pub local_rerank_model: Option<String>,
     /// Bench only: a JSON file of pending manifest entries (`{"models": [...]}`, as in
     /// `manifests/pending/`), searched after the signed manifest by `--local-chat-model` and
     /// `--local-embed-model`. Repeatable. Entries are validated as signed ones and installed
@@ -193,6 +217,7 @@ pub struct LocalModels {
     runtime: Runtime,
     pub chat: Option<Served>,
     pub embedding: Option<Served>,
+    pub rerank: Option<Served>,
     pub host: HostInfo,
     pub runtime_build: String,
     pub thinking: Thinking,
@@ -205,6 +230,7 @@ impl std::fmt::Debug for LocalModels {
         f.debug_struct("LocalModels")
             .field("chat", &self.chat.as_ref().map(|s| &s.entry.id))
             .field("embedding", &self.embedding.as_ref().map(|s| &s.entry.id))
+            .field("rerank", &self.rerank.as_ref().map(|s| &s.entry.id))
             .field("host", &self.host)
             .finish_non_exhaustive()
     }
@@ -217,6 +243,15 @@ pub fn smallest<'a>(models: &'a [ModelEntry], tiers: &[Tier]) -> Option<&'a Mode
         .filter(|m| !m.tiers.contains(&Tier::Rerank))
         .filter(|m| m.tiers.iter().any(|t| tiers.contains(t)))
         .min_by_key(|m| (m.size, m.id.clone()))
+}
+
+/// The smallest manifest model with the `rerank` tier.
+pub fn smallest_reranker(models: &[ModelEntry]) -> Result<&ModelEntry, BenchError> {
+    models
+        .iter()
+        .filter(|m| m.tiers.contains(&Tier::Rerank))
+        .min_by_key(|m| (m.size, m.id.clone()))
+        .ok_or_else(|| BenchError::Failed("the manifest has no rerank model".into()))
 }
 
 /// A pending (unsigned) manifest entry and the file it was loaded from.
@@ -328,7 +363,7 @@ pub fn pick<'a>(
 }
 
 impl LocalModels {
-    /// Install and start the requested roles (`Chat` and/or `Embedding`).
+    /// Install and start the requested roles (`Chat`, `Embedding` and/or `Rerank`).
     pub fn start(opts: &LocalOptions, roles: &[RuntimeRole]) -> Result<Self, BenchError> {
         Self::start_in(opts, roles, None)
     }
@@ -380,6 +415,7 @@ impl LocalModels {
         let mut runtime_opts = nugget_runtime::RuntimeOptions::default();
         runtime_opts.chat.threads = opts.local_threads;
         runtime_opts.embedding.threads = opts.local_threads;
+        runtime_opts.rerank.threads = opts.local_threads;
         let runtime = Runtime::new(&paths, store.clone(), egress)?.with_options(runtime_opts);
         let host = HostInfo::from_hardware(runtime.hardware());
         let runtime_build = runtime
@@ -394,7 +430,7 @@ impl LocalModels {
                 RuntimeRole::Chat => pick_with_pending(
                     &manifest.models,
                     &pending,
-                    opts.local_chat_model.as_deref(),
+                    chat_model_id(&manifest.models, opts.local_chat_model.as_deref()),
                     &CHAT_TIERS,
                 )?,
                 RuntimeRole::Embedding => pick_with_pending(
@@ -403,6 +439,10 @@ impl LocalModels {
                     opts.local_embed_model.as_deref(),
                     &[Tier::Embedding],
                 )?,
+                RuntimeRole::Rerank => match opts.local_rerank_model.as_deref() {
+                    Some(id) => pick_with_pending(&manifest.models, &pending, Some(id), &[])?,
+                    None => (smallest_reranker(&manifest.models)?, None),
+                },
                 other => {
                     return Err(BenchError::Failed(format!(
                         "local models: role {other:?} is not used by the bench"
@@ -463,6 +503,7 @@ impl LocalModels {
         Ok(Self {
             chat: take(RuntimeRole::Chat),
             embedding: take(RuntimeRole::Embedding),
+            rerank: take(RuntimeRole::Rerank),
             rt,
             runtime,
             host,
@@ -515,6 +556,40 @@ impl LocalModels {
         )?)
     }
 
+    /// A reranker for the rerank server, as `nuggetd` attaches the runtime's `local-rerank`
+    /// slot to search, with this request timeout.
+    pub fn reranker(
+        &self,
+        timeout_ms: u64,
+    ) -> Result<Arc<dyn nugget_retrieve::Reranker>, BenchError> {
+        let served = self
+            .rerank
+            .as_ref()
+            .ok_or_else(|| BenchError::Failed("no local reranker was started".into()))?;
+        let cfg = &served.config;
+        // The runtime's config names the OpenAI-style root (`…/v1`); the reranker its own path.
+        let base = cfg.base_url.as_deref().unwrap_or_default();
+        let base = base.trim_end_matches('/');
+        let base = base.strip_suffix("/v1").unwrap_or(base);
+        let rc = nugget_retrieve::HttpRerankerConfig {
+            base_url: base.to_string(),
+            model: cfg.model.clone(),
+            socket_path: cfg.socket_path.clone(),
+            timeout_ms,
+            ..nugget_retrieve::HttpRerankerConfig::default()
+        };
+        let key = cfg
+            .api_key
+            .as_ref()
+            .map(|k| nugget_infer::SecretResolver::resolve(&self.runtime.secrets(), k))
+            .transpose()?;
+        Ok(Arc::new(nugget_retrieve::HttpReranker::new(
+            &rc,
+            key,
+            Arc::new(NullEgress),
+        )?))
+    }
+
     /// Short label for reports: `qwen3-4b-q4km (Qwen3-4B-Q4_K_M.gguf) via llama-server ...`.
     pub fn chat_label(&self) -> String {
         match &self.chat {
@@ -546,6 +621,7 @@ impl LocalModels {
         for (key, s) in [
             ("local.chat", &self.chat),
             ("local.embedding", &self.embedding),
+            ("local.rerank", &self.rerank),
         ] {
             if let Some(s) = s {
                 ctx.param(key, served_json(s));
@@ -749,6 +825,30 @@ mod tests {
         let embed = pick(&m.models, None, &[Tier::Embedding]).unwrap();
         assert!(!chat.tiers.contains(&Tier::Embedding));
         assert!(embed.tiers.contains(&Tier::Embedding));
+    }
+
+    #[test]
+    fn the_default_chat_model_is_the_4b_not_the_smallest() {
+        let m = default_manifest().unwrap();
+        // The 1.7B Double Tap model is smaller, but the default must stay what users run.
+        assert_ne!(
+            pick(&m.models, None, &CHAT_TIERS).unwrap().id,
+            DEFAULT_CHAT_MODEL
+        );
+        let id = chat_model_id(&m.models, None);
+        assert_eq!(id, Some(DEFAULT_CHAT_MODEL));
+        assert_eq!(
+            pick(&m.models, id, &CHAT_TIERS).unwrap().id,
+            DEFAULT_CHAT_MODEL
+        );
+        assert_eq!(chat_model_id(&m.models, Some("x")), Some("x"));
+        let without: Vec<_> = m
+            .models
+            .iter()
+            .filter(|e| e.id != DEFAULT_CHAT_MODEL)
+            .cloned()
+            .collect();
+        assert_eq!(chat_model_id(&without, None), None);
     }
 
     #[test]

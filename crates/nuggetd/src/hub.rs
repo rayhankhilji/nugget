@@ -143,6 +143,7 @@ mod tests {
             last_sync: None,
             last_error: None,
             settings: json!({"host": "h"}),
+            health: None,
         };
         let (m, v) = ingest_notification(IngestEvent::SourceChanged(info.clone()));
         assert_eq!(m, notification::SOURCES_CHANGED);

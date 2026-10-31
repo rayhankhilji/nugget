@@ -323,6 +323,30 @@ pub struct SourceInfo {
     /// Same shape as [`SourceSpec::settings`]; never contains secrets.
     #[serde(default)]
     pub settings: serde_json::Value,
+    /// Plain-language sync health: what is wrong (if anything) and how to fix it. Filled by the
+    /// daemon from `state`, `last_error` and recent item errors; absent from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<SourceHealth>,
+}
+
+/// A source's sync health, for people rather than logs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceHealth {
+    /// Stable machine code (`ok`, `syncing`, `disabled`, `reconnect`, `not_set_up`,
+    /// `rate_limited`, `offline`, `server_error`, `too_large`, `disk_full`, `config`,
+    /// `item_errors`, `error`); clients translate it and fall back to `reason`/`fix`.
+    pub code: String,
+    /// One sentence on what is going on, in English.
+    pub reason: String,
+    /// One sentence on what the user can do, in English (empty when nothing is needed).
+    #[serde(default)]
+    pub fix: String,
+    /// Items that failed in recent passes (each one skipped; the rest of the sync went on).
+    #[serde(default)]
+    pub item_errors: u64,
+    /// The most recent item-level failure message, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_item_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1284,6 +1308,9 @@ pub struct AgentTaskDetail {
     /// The `ask_user` question when the state is `needs_input`.
     #[serde(default)]
     pub question: Option<String>,
+    /// Candidate answers offered with `question` (empty: free text). Untrusted screen text.
+    #[serde(default)]
+    pub options: Vec<String>,
 }
 
 /// Status of the tamper-evident action log.

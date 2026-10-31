@@ -18,6 +18,11 @@ time.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+wiremock = { version = "0.6", optional = true }
+
+[features]
+# Conformance test kit (`nugget_connector::testkit`) for connector crates' tests.
+testkit = ["dep:wiremock"]
 
 [dev-dependencies]
 wiremock = "0.6"

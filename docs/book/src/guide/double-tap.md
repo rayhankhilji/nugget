@@ -59,6 +59,7 @@ On the **Double Tap** settings page:
 | Provider per app | Which model to use in a given app or site, for example a local model in your work mail and a cloud model in a chat app. Otherwise the `synthesis` tier is used, like Ask |
 | Excluded apps | Apps and sites where Double Tap never reads or drafts |
 | Read ahead while you reply | Read a reply field early so a local model can start on it before the trigger. On by default; see [Read-ahead](#read-ahead) |
+| Read ahead on battery | Off: read-ahead pauses while the computer runs on battery. On by default. Low power mode / battery saver always pauses it |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/double-tap-dark.png">
@@ -92,6 +93,14 @@ read-ahead makes the local model read a prompt of several hundred tokens. Measur
 cloud CPU, that is about 15 CPU-seconds per newly focused reply field with the 4B model, 8 with
 the 1.7B. When you then draft, the draft skips that same reading, so it mostly moves work rather
 than adding it; it is wasted only for fields you focus and don't draft in. See [Latency](#latency).
+Read-ahead pauses in low power mode (macOS) or battery saver (Windows, or the `low-power` platform
+profile on Linux), and on battery when **Read ahead on battery** is off.
+
+**Watching focus.** On macOS and Windows the app is told by the system when another app or window
+comes to the front, and otherwise looks again only every 5 seconds (to catch a window or tab change
+inside the same app). On Linux there is no such notice, so it checks what is in front every second
+while a field is about to be read and every 2 seconds otherwise. The energy measurements are in
+the benchmark notes ([`bench/README.md`, Energy](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md#energy)).
 
 **Turning it off.** Switch off **Read ahead while you reply** on the Double Tap page. To turn it off
 for every client of the daemon, set `enabled = false` under `[draft.read_ahead]` in `config.toml`
@@ -168,7 +177,68 @@ draft is audited without its content.
 |---|---|
 | macOS | Accessibility for the Nugget app (reading fields and inserting). A double tap needs no extra permission; the kill switch's Escape counter needs Accessibility too |
 | Windows | Nothing extra |
-| Linux | Accessibility (AT-SPI) enabled in your desktop. On Wayland, use a chord: the trigger goes through the desktop's global-shortcuts portal |
+| Linux | Accessibility (AT-SPI) enabled in your desktop. On Wayland, use a chord and approve it when the desktop asks (see [Wayland](#wayland)) |
+
+## Wayland
+
+On Wayland an app cannot watch the keyboard, so Double Tap uses a chord (`Ctrl+Alt+Space` by
+default) that the desktop owns: Nugget asks for it through the XDG desktop portal's
+GlobalShortcuts interface and is told when it is pressed. What happens depends on the desktop:
+
+| Desktop | What you see |
+|---|---|
+| KDE Plasma 6 | The first time, Plasma asks whether Nugget may use the shortcut, with the key it suggests. Approve it once; later starts bind it silently. Change the key in System Settings → Keyboard → Shortcuts → Nugget |
+| KDE Plasma 5.27 | Plasma registers the shortcut without a key. Assign one to "Nugget: draft a reply" in System Settings → Shortcuts |
+| GNOME 48 and later | GNOME asks whether Nugget may use the shortcut. Approve it once; later starts bind it silently. Change it in Settings → Keyboard → Keyboard Shortcuts |
+| GNOME before 48, sway, other wlroots desktops | No GlobalShortcuts portal. Bind a key in your compositor to run `nugget-desktop --double-tap` while Nugget is running (for sway: `bindsym Ctrl+Alt+Space exec nugget-desktop --double-tap`), or open Nugget from the tray (Open Nugget) and click Try it on the Double Tap page |
+
+The Double Tap page shows where the shortcut stands: waiting for your approval, no key assigned
+yet, the key your desktop actually uses (the desktop may keep a key you picked in its settings
+over the one Nugget suggests), or that this desktop has no portal. If the desktop drops the
+shortcut later (it restarts its portal, or you remove the binding), Nugget binds it again; a key
+you removed on purpose stays removed until you assign one.
+
+### Why the shortcut used to stay silent
+
+Until this release the shortcut never fired through the portal. The causes, found in the portal's
+and the desktops' sources:
+
+- **The app id.** xdg-desktop-portal 1.19 and later refuse a GlobalShortcuts session to an
+  unsandboxed app they cannot name ("An app id is required"). A host app names itself through
+  the `org.freedesktop.host.portal.Registry` interface, first thing on its D-Bus connection, and
+  Nugget did; but the portal accepts the id only when GLib can load a desktop file named after it
+  (now `dev.nugget.Nugget.desktop`) from the portal's own data directories, **and that file's `Exec`
+  program exists**. The packages shipped only `Nugget.desktop`, and the CI session's stand-in file
+  pointed at a program that was not installed, so GLib rejected it and the portal answered
+  "App info not found". That message came from the portal front end, not from KWin.
+- **An id KDE reads as a file name.** Nugget registered its Tauri identifier,
+  `dev.nugget.desktop`. KDE's shortcut daemon (kglobalaccel) treats any component name ending in
+  `.desktop` as a desktop-file service: it looks for a file of that exact name, finds none, and
+  drops the shortcut silently (and for such services it would launch the file instead of telling
+  the app). The portal still answered the bind with the key, so it looked bound but never fired.
+  The portal app id is now `dev.nugget.Nugget`.
+- **A new shortcut every start.** Nugget gave its shortcut a new id on each start. Plasma 6 and
+  GNOME ask for consent for every shortcut id they have not seen, so each start would have asked
+  again and left stale entries behind. The ids are now fixed (`double-tap`, and `stop-agents` for
+  the agent kill switch), so a consent is remembered.
+
+The fix: the `.deb` and `.rpm` install `dev.nugget.Nugget.desktop` next to `Nugget.desktop`
+(which keeps working), and the AppImage, whose own files the portal cannot see, writes a hidden
+`~/.local/share/applications/dev.nugget.Nugget.desktop` pointing at itself the first time it
+needs the portal (only a file it wrote itself is ever updated). Flatpak and Snap builds get their
+app id from the sandbox and skip the registration.
+
+### How it is verified
+
+`.github/workflows/real-os.yml` runs headless Wayland sessions on GitHub's Ubuntu runners with
+the real portals: KWin (Plasma 6.6, xdg-desktop-portal-kde) and GNOME Shell 50 (headless, a
+virtual monitor, xdg-desktop-portal-gnome), plus sway for the no-portal path. It installs the
+built `.deb`, starts Nugget, accepts the desktop's real consent dialogs over AT-SPI, presses
+`Ctrl+Alt+Space` on a virtual keyboard (KWin's fake-input protocol; Mutter's RemoteDesktop
+keyboard), and checks that Double Tap fired. On KWin the job turns off KWin's per-app
+permission check for the fake-input keyboard (`KWIN_WAYLAND_NO_PERMISSION_CHECKS=1`); the key
+still goes through KWin's input and shortcut handling. Plasma 5.27, GNOME before 48 and physical
+desktops are not covered by CI.
 
 ## Latency
 

@@ -114,7 +114,12 @@ async fn backfill_pages_newest_first_with_checkpoints() {
     );
 
     let cps = sink.checkpoints.lock().unwrap().clone();
-    assert_eq!(cps.len(), 2, "{cps:?}");
+    // Start, page 2, and the closing cursor (committed before any carried work).
+    assert_eq!(cps.len(), 3, "{cps:?}");
+    assert_eq!(
+        cps[2],
+        json!({"phase": "incremental", "history_id": "1000"})
+    );
     assert_eq!(cps[0]["phase"], "backfill");
     assert_eq!(cps[0]["history_id"], "1000");
     assert!(cps[0]["page_token"].is_null());
@@ -268,11 +273,15 @@ async fn history_deltas_add_delete_and_relabel() {
     .unwrap();
     assert_eq!(sink.summary(), vec!["+m3", "-m1", "-m2", "+m4", "-m6"]);
     assert_eq!(out, json!({"phase": "incremental", "history_id": "200"}));
-    // Checkpoint between history pages at the last processed record.
+    // Checkpoint between history pages at the last processed record, then the new position
+    // (committed before any carried work).
     let cps = sink.checkpoints.lock().unwrap().clone();
     assert_eq!(
         cps,
-        vec![json!({"phase": "incremental", "history_id": "104"})]
+        vec![
+            json!({"phase": "incremental", "history_id": "104"}),
+            json!({"phase": "incremental", "history_id": "200"})
+        ]
     );
     let reqs = h.server.received_requests().await.unwrap();
     let q = reqs[0].url.query().unwrap();
@@ -915,7 +924,8 @@ async fn a_fetched_message_must_be_the_one_asked_for() {
         .await;
     let conn = gmail(&h, fast_retry(0));
     let sink = RecSink::default();
+    // The spoofed answer is never indexed; it is one bad item, so the pass still completes.
     let r = run(&conn, None, &sink).await;
-    assert!(matches!(r, Err(Error::Invalid(_))), "{r:?}");
+    assert!(r.is_ok(), "{r:?}");
     assert!(sink.upserts().is_empty());
 }

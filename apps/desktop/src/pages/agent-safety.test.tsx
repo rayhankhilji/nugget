@@ -157,6 +157,48 @@ describe("Agent page", () => {
     await click(byText(container, "button", "Send answer"));
     expect(answers).toEqual([{ request: { task_id: "t3", answer: "Sam Lee" } }]);
   });
+
+  it("offers the candidates the agent saw and answers with the one picked", async () => {
+    const answers: unknown[] = [];
+    const options = ["Sam Lee — Can I take Friday off?", "<b>Sam Ortiz</b> — Renew the contract at +20%?"];
+    const question = "Your request says “Sam”, and I see more than one: Sam Lee, Sam Ortiz. Which one did you mean?";
+    mockDaemon({
+      agent_list: [],
+      policy_get: policy,
+      agent_run: { task_id: "t4", tools: [] },
+      agent_answer: (a: unknown) => {
+        answers.push(a);
+        return null;
+      },
+    });
+    const { container } = await render(<AgentPage />);
+    await flush(5);
+    const goal = container.querySelector<HTMLTextAreaElement>("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(goal, "Reply to Sam");
+      goal.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(byText(container, "button", "Run"));
+    await agentEvent({ event: "suspended", task_id: "t4", question, options });
+
+    const group = container.querySelector<HTMLElement>('.agent-answer [role="group"]')!;
+    expect(group).toBeTruthy();
+    expect(document.getElementById(group.getAttribute("aria-labelledby")!)!.textContent).toBe(question);
+    const buttons = Array.from(group.querySelectorAll("button"));
+    expect(buttons.map((b) => b.textContent)).toEqual(options);
+    // Untrusted screen text stays text.
+    expect(group.querySelector("b")).toBeNull();
+    expect(container.querySelector(".visually-hidden[aria-live]")!.textContent).toContain("2 options");
+    // The free-text answer stays available.
+    expect(container.querySelector(".agent-answer textarea")).toBeTruthy();
+    expect(byText(container, "label", "Something else")).toBeTruthy();
+    expect(await violations()).toEqual([]);
+
+    await click(buttons[1]!);
+    expect(answers).toEqual([{ request: { task_id: "t4", answer: options[1] } }]);
+    expect(container.querySelector(".agent-answer")).toBeNull();
+    expect(container.querySelector(".visually-hidden[aria-live]")!.textContent).toBe("Answer sent.");
+  });
 });
 
 describe("Safety page", () => {

@@ -59,9 +59,9 @@ mod retriever;
 pub mod rewrite;
 mod types;
 
-pub use config::{RecencyBoost, RetrieveConfig};
+pub use config::{Fusion, RecencyBoost, RetrieveConfig};
 pub use dates::{DateQuery, DateRange, parse_date_query};
-pub use rerank::{HttpReranker, HttpRerankerConfig, Reranker};
+pub use rerank::{HttpReranker, HttpRerankerConfig, RerankStatus, Reranker};
 pub use retriever::{Retriever, is_sensitive};
 pub use rewrite::{QueryRewrite, RewriteMethod};
 pub use types::{

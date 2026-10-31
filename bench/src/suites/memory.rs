@@ -27,6 +27,80 @@ use crate::suites::{doc_text, item_ref};
 /// Freshness target from `docs/PLAN.md` §2: about 60 s from change to searchable.
 pub const FRESHNESS_TARGET_S: f64 = 60.0;
 
+/// `memory --backend real` options (flattened into the CLI). With `--local-models` the real
+/// backend embeds with the manifest's embedding model served by `nugget-runtime`
+/// (`--local-embed-model`), as the app does, instead of the in-process hash embedder.
+#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
+pub struct MemoryOptions {
+    /// `memory --backend real --local-models`: also start the manifest's reranker
+    /// (`--local-rerank-model`) and rerank search results with it (`local`), or not (`off`, the
+    /// default, as the app runs without `rerank_model`).
+    #[arg(long, value_enum, default_value_t = MemoryRerank::Off)]
+    pub memory_rerank: MemoryRerank,
+    /// `memory --backend real`: the reranker's request timeout in milliseconds (default: the
+    /// app's, `RetrieveConfig::rerank_timeout_ms`). A rerank that times out keeps the first-stage
+    /// order, as in the app.
+    #[arg(long, value_name = "MS")]
+    pub memory_rerank_timeout_ms: Option<u64>,
+    /// `memory --backend real`: candidates the reranker scores per query (default: the app's,
+    /// `RetrieveConfig::rerank_pool`).
+    #[arg(long, value_name = "N")]
+    pub memory_rerank_pool: Option<usize>,
+    /// `memory --backend real`: the embedding model's task prefixes (`auto`: the model's own, e.g.
+    /// `search_query: ` / `search_document: ` for nomic-embed-text, as the app sends them; `off`:
+    /// none).
+    #[arg(long, value_enum, default_value_t = EmbedPrefixes::Auto)]
+    pub memory_embed_prefixes: EmbedPrefixes,
+    /// `memory`: known-item queries (default: the scale's). Corpus and query generation are
+    /// unchanged; the first N queries of the scale's sequence are asked.
+    #[arg(long, value_name = "N")]
+    pub memory_queries: Option<usize>,
+    /// `memory --backend real`: skip the freshness phase (retrieval quality only).
+    #[arg(long)]
+    pub memory_no_freshness: bool,
+}
+
+impl Default for MemoryOptions {
+    fn default() -> Self {
+        Self {
+            memory_rerank: MemoryRerank::Off,
+            memory_rerank_timeout_ms: None,
+            memory_rerank_pool: None,
+            memory_embed_prefixes: EmbedPrefixes::Auto,
+            memory_queries: None,
+            memory_no_freshness: false,
+        }
+    }
+}
+
+/// Whether `memory --backend real` reranks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, clap::ValueEnum)]
+pub enum MemoryRerank {
+    #[default]
+    Off,
+    /// The manifest's reranker on the local runtime (needs `--local-models`).
+    Local,
+}
+
+/// Task prefixes the embedding model is called with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, clap::ValueEnum)]
+pub enum EmbedPrefixes {
+    /// The model's own (none for models without task prefixes).
+    #[default]
+    Auto,
+    /// None.
+    Off,
+}
+
+impl EmbedPrefixes {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EmbedPrefixes::Auto => "auto",
+            EmbedPrefixes::Off => "off",
+        }
+    }
+}
+
 pub struct MemoryBench;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +153,10 @@ impl Benchmark for MemoryBench {
 }
 
 pub fn run_with(ctx: &mut RunContext, p: &MemoryParams) -> Result<Vec<Metric>, BenchError> {
+    let p = &MemoryParams {
+        queries: ctx.config.memory.memory_queries.unwrap_or(p.queries),
+        ..p.clone()
+    };
     if p.docs == 0 || p.queries == 0 || p.query_terms == 0 {
         return Err(BenchError::Failed(
             "memory needs documents, queries and query terms".into(),

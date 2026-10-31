@@ -207,6 +207,44 @@ function hasProblem(s: SourceInfo): boolean {
   return s.state === "error" || Boolean(s.last_error);
 }
 
+/** Translated reason and fix for the source's health code, or null to keep the generic hint. */
+function healthText(s: SourceInfo, t: TFunction): { reason: string; fix: string } | null {
+  const name = s.name;
+  switch (s.health?.code) {
+    case "reconnect":
+      return { reason: t("sources.health.reconnect", { name }), fix: t("sources.errorHintAuth") };
+    case "rate_limited":
+      return { reason: t("sources.health.rateLimited", { name }), fix: t("sources.health.autoRetry") };
+    case "server_error":
+      return { reason: t("sources.health.serverError", { name }), fix: t("sources.health.autoRetry") };
+    case "offline":
+      return { reason: t("sources.health.offline", { name }), fix: t("sources.health.offlineFix") };
+    case "too_large":
+      return { reason: t("sources.health.tooLarge"), fix: "" };
+    case "config":
+      return { reason: t("sources.health.config", { name }), fix: t("sources.health.configFix") };
+    case undefined:
+    case "ok":
+    case "syncing":
+    case "disabled":
+    case "error":
+    case "item_errors":
+      return null;
+    default:
+      // A code this build has no translation for: the daemon's English text.
+      return s.health ? { reason: s.health.reason, fix: s.health.fix ?? "" } : null;
+  }
+}
+
+/** The folder (or vault) a local source reads, and how many more folders it has. */
+function sourcePath(s: SourceInfo): { path: string; more: number } | null {
+  const roots = s.settings?.roots;
+  if (Array.isArray(roots) && typeof roots[0] === "string") return { path: roots[0], more: roots.length - 1 };
+  const vault = s.settings?.vault;
+  if (typeof vault === "string" && vault) return { path: vault, more: 0 };
+  return null;
+}
+
 function progressText(p: IngestProgress, t: TFunction): string {
   const args = { phase: p.phase, done: p.done, total: p.total };
   if (p.total) return t("sources.progress.total", args);
@@ -241,6 +279,10 @@ function SourceRow({
   const headingId = `source-${s.id}`;
   const mode = connectMode(s.kind, s.settings);
   const signIn = mode === "browser" || mode === "device";
+  const health = healthText(s, t);
+  const path = sourcePath(s);
+  // A healthy state is said by the sync line; only states that need attention get a badge.
+  const quietState = s.state === "watching" || s.state === "idle";
 
   const run = async (what: "toggle" | "sync" | "auth", f: () => Promise<void>) => {
     setBusy(what);
@@ -288,16 +330,34 @@ function SourceRow({
           <h2 id={headingId} className="source-name" dir="auto">
             {s.name}
           </h2>
-          <Badge tone={tone}>{sourceStateLabel(s.state)}</Badge>
+          {!quietState && <Badge tone={tone}>{sourceStateLabel(s.state)}</Badge>}
+          <label className="switch source-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={s.enabled}
+              onChange={() => void toggle()}
+              disabled={busy !== null}
+              aria-describedby={headingId}
+            />
+            <span className="switch-track" aria-hidden="true" />
+            <span>{t("sources.enabled")}</span>
+          </label>
         </div>
         <p className="muted small source-meta">
-          {kindLabel} · <code>{s.id}</code>
+          <span>{kindLabel}</span>
+          {path && (
+            <span className="source-path" title={path.path}>
+              <bdi dir="ltr">{path.path}</bdi>
+              {path.more > 0 && <> {t("sources.morePaths", { n: path.more })}</>}
+            </span>
+          )}
         </p>
         <p className="small source-meta">
           <span>{t("sources.items", { n: s.items })}</span>
-          <span>{t("sources.chunks", { n: s.chunks })}</span>
           <span title={s.last_sync ? formatTime(s.last_sync) : undefined}>
             {s.last_sync ? t("sources.synced", { when: formatRelative(s.last_sync, now) }) : t("sources.neverSynced")}
+            {s.state === "watching" && <> · {t("sources.watchingNote")}</>}
           </span>
         </p>
         {progress && (
@@ -309,9 +369,26 @@ function SourceRow({
         {hasProblem(s) && (
           <div className="note note-error small" role="status">
             <span>{s.last_error ? t("sources.lastError", { error: s.last_error }) : t("sources.errorNoDetail")}</span>
-            <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
-            {isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
+            {health ? (
+              <>
+                <span className="block">{health.reason}</span>
+                {health.fix && <span className="block">{health.fix}</span>}
+              </>
+            ) : (
+              <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
+            )}
+            {!health && isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
           </div>
+        )}
+        {!hasProblem(s) && (s.health?.item_errors ?? 0) > 0 && (
+          <p className="note note-warn small" role="status">
+            <span>{t("sources.health.itemErrors", { n: s.health?.item_errors ?? 0 })}</span>
+            {s.health?.last_item_error && (
+              <span className="block muted" dir="auto">
+                {t("sources.health.lastItemError", { error: s.health.last_item_error })}
+              </span>
+            )}
+          </p>
         )}
         {s.state === "needs_auth" && !s.last_error && mode !== "none" && mode !== "env" && (
           <p className="note small">
@@ -325,18 +402,6 @@ function SourceRow({
         )}
         <ErrorNote error={error} />
         <div className="source-actions">
-          <label className="switch">
-            <input
-              type="checkbox"
-              role="switch"
-              checked={s.enabled}
-              onChange={() => void toggle()}
-              disabled={busy !== null}
-              aria-describedby={headingId}
-            />
-            <span className="switch-track" aria-hidden="true" />
-            <span>{t("sources.enabled")}</span>
-          </label>
           <button type="button" className="btn btn-small" onClick={() => void sync()} disabled={!s.enabled || busy !== null}>
             {busy === "sync" ? <Spinner label={t("sources.startingSync")} /> : t("sources.syncNow")}
           </button>
@@ -361,9 +426,17 @@ function SourceRow({
               {s.state === "needs_auth" ? t("sources.setToken") : t("sources.changeToken")}
             </button>
           )}
-          <button type="button" className="btn btn-small btn-danger-ghost" onClick={onRemove} disabled={busy !== null}>
-            {t("sources.remove")}
-          </button>
+          <span className="source-actions-end">
+            <details className="source-details">
+              <summary className="small">{t("sources.details")}</summary>
+              <p className="muted small">
+                {t("sources.detailsId")} <code>{s.id}</code> · {t("sources.chunks", { n: s.chunks })}
+              </p>
+            </details>
+            <button type="button" className="btn btn-small btn-danger-ghost" onClick={onRemove} disabled={busy !== null}>
+              {t("sources.remove")}
+            </button>
+          </span>
         </div>
       </div>
     </li>

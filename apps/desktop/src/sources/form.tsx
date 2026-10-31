@@ -102,9 +102,17 @@ export function Actions({ onBack, busy, submitLabel }: { onBack: () => void; bus
 export function NameField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   const t = useT();
   return (
-    <Field label={t("addSource.name")} optional hint={t("addSource.nameHint")}>
+    <Field label={t("addSource.name")} optional hint={t("addSource.nameHintDefault", { name: placeholder })}>
       {(a) => (
-        <input {...a} type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoComplete="off" />
+        <input
+          {...a}
+          type="text"
+          dir="auto"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={t("addSource.namePlaceholder")}
+          autoComplete="off"
+        />
       )}
     </Field>
   );

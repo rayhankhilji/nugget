@@ -165,6 +165,35 @@ export interface SourceInfo {
   last_sync?: string | null;
   last_error?: string | null;
   settings?: SourceSettings;
+  /** Plain-language sync health (FF2); absent from older daemons. */
+  health?: SourceHealth | null;
+}
+
+/** Codes of {@link SourceHealth.code}; unknown codes fall back to the daemon's English text. */
+export type SourceHealthCode =
+  | "ok"
+  | "syncing"
+  | "disabled"
+  | "reconnect"
+  | "not_set_up"
+  | "disk_full"
+  | "rate_limited"
+  | "offline"
+  | "server_error"
+  | "too_large"
+  | "config"
+  | "item_errors"
+  | "error";
+
+export interface SourceHealth {
+  code: SourceHealthCode | string;
+  /** English fallback: what is going on. */
+  reason: string;
+  /** English fallback: what the user can do (empty when nothing is needed). */
+  fix?: string;
+  /** Items skipped in recent passes. */
+  item_errors?: number;
+  last_item_error?: string | null;
 }
 
 export interface SourceRef {
@@ -573,7 +602,19 @@ export function isSourceInfo(v: unknown): v is SourceInfo {
     isCount(v.chunks) &&
     isOptString(v.last_sync) &&
     isOptString(v.last_error) &&
-    (v.settings === undefined || v.settings === null || isRecord(v.settings))
+    (v.settings === undefined || v.settings === null || isRecord(v.settings)) &&
+    (v.health === undefined || v.health === null || isSourceHealth(v.health))
+  );
+}
+
+export function isSourceHealth(v: unknown): v is SourceHealth {
+  return (
+    isRecord(v) &&
+    typeof v.code === "string" &&
+    typeof v.reason === "string" &&
+    isOptString(v.fix) &&
+    (v.item_errors === undefined || isCount(v.item_errors)) &&
+    isOptString(v.last_item_error)
   );
 }
 
@@ -1458,6 +1499,8 @@ export interface DoubleTapSettings {
    * in excluded apps, terminals or secure fields. Absent from an older shell: treated as on.
    */
   read_ahead?: boolean;
+  /** Keep reading ahead on battery (low power mode always pauses it). Absent: treated as on. */
+  read_ahead_on_battery?: boolean;
 }
 
 export interface ModifierOption {
@@ -1483,6 +1526,20 @@ export interface DoubleTapStatus {
   hint: string | null;
   modifiers: ModifierOption[];
   recommended_trigger: TriggerSpec;
+  /** Where the running listener's shortcut stands; `null` when nothing is listening (older shells omit it). */
+  shortcut?: ShortcutStatus | null;
+}
+
+/**
+ * A desktop-owned shortcut (the Wayland GlobalShortcuts portal); every other backend is `active`
+ * with no `trigger`.
+ */
+export interface ShortcutStatus {
+  state: "active" | "awaiting_consent" | "not_assigned" | "rebinding" | "failed";
+  /** `active` only: the key the desktop bound, when it differs from the configured chord. */
+  trigger: string | null;
+  /** `failed` only: why. */
+  error: string | null;
 }
 
 /** `nugget_core::ipc::VoiceStatus`. */
@@ -1762,7 +1819,7 @@ export type AgentEvent =
   | { event: "action_done"; task_id: string; action_id: string; tool: string; is_error: boolean; summary: string; replayed: boolean }
   | { event: "verification"; task_id: string; action_id: string; tool: string; verification: Verification }
   | { event: "injection_suspected"; task_id: string; action_id: string; tool: string; finding: InjectionFinding }
-  | { event: "suspended"; task_id: string; question: string }
+  | { event: "suspended"; task_id: string; question: string; options?: string[] }
   | { event: "finished"; task_id: string; outcome: AgentOutcome; summary: string | null };
 
 /** One `agent.event` notification. */
@@ -1822,6 +1879,8 @@ export interface AgentTaskDetail {
   explain: string;
   pending: ConfirmationRequest[];
   question?: string | null;
+  /** Candidate answers offered with `question` (untrusted screen text: render as plain text). */
+  options?: string[];
 }
 
 export type PolicyEffect = "allow" | "confirm" | "deny";

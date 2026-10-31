@@ -17,6 +17,7 @@ use wiremock::MockServer;
 
 use crate::{Endpoints, RetryPolicy};
 
+mod conformance;
 mod factory;
 mod github;
 mod linear;

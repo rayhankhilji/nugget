@@ -18,7 +18,7 @@ use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
 
 use crate::config::{Config, Flavor, IGNORE_FILES, is_junk_file, is_secret_file};
-use crate::key::{file_url, item_key, join_rel, obsidian_url, rel_key};
+use crate::key::{file_url, item_key, obsidian_url, rel_key};
 
 /// Item key → last known connector version (`None` = unknown, always re-sent).
 pub(crate) type KnownMap = BTreeMap<String, Option<String>>;
@@ -276,18 +276,18 @@ fn walk_root(
 ) -> Result<()> {
     // Restrict the walk to the targets: descend only into their ancestors and themselves.
     let whole = targets.iter().any(|t| t.rel.is_empty());
-    let mut scope_set: HashSet<PathBuf> = HashSet::new();
-    let mut ancestors: HashSet<PathBuf> = HashSet::new();
+    // Compared as key strings (`rel_key`), not paths: a target comes from a key, and a key of a
+    // non-UTF-8 name does not join back into the same path.
+    let mut scope_set: HashSet<String> = HashSet::new();
+    let mut ancestors: HashSet<String> = HashSet::new();
     if !whole {
         for t in targets {
-            let p = join_rel(root, &t.rel);
-            for a in p.ancestors().skip(1) {
-                if a == root || !a.starts_with(root) {
-                    break;
-                }
-                ancestors.insert(a.to_path_buf());
+            let mut prefix = t.rel.as_str();
+            while let Some((parent, _)) = prefix.rsplit_once('/') {
+                ancestors.insert(parent.to_string());
+                prefix = parent;
             }
-            scope_set.insert(p);
+            scope_set.insert(t.rel.clone());
         }
     }
 
@@ -389,22 +389,27 @@ fn keep_entry(
     cfg: &Config,
     root: &Path,
     whole: bool,
-    scope: &HashSet<PathBuf>,
-    ancestors: &HashSet<PathBuf>,
+    scope: &HashSet<String>,
+    ancestors: &HashSet<String>,
     e: &DirEntry,
 ) -> bool {
     if e.depth() == 0 {
         return true;
     }
     let path = e.path();
-    if !whole
-        && !ancestors.contains(path)
-        && !path
-            .ancestors()
-            .take_while(|a| *a != root)
-            .any(|a| scope.contains(a))
-    {
-        return false;
+    if !whole {
+        let Ok(rel) = path.strip_prefix(root) else {
+            return false;
+        };
+        let rel = rel_key(rel);
+        let in_scope = ancestors.contains(&rel)
+            || scope.contains(&rel)
+            || rel
+                .match_indices('/')
+                .any(|(i, _)| scope.contains(&rel[..i]));
+        if !in_scope {
+            return false;
+        }
     }
     let name = e.file_name().to_string_lossy();
     let is_dir = e.file_type().is_some_and(|t| t.is_dir());
@@ -713,5 +718,48 @@ mod tests {
             s,
             Scope::Targets(vec![t(0, "a-b"), t(0, "a/b"), t(0, "a/bc"), t(1, "")])
         );
+    }
+
+    /// A live event for a non-UTF-8 name reconciles that file (its key does not join back into
+    /// the on-disk path, so scope matching must compare keys).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn regression_targeted_reconcile_finds_non_utf8_names() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("r");
+        let sub = root.join(OsStr::from_bytes(b"d\xff"));
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join(OsStr::from_bytes(b"n\xfe.md")), "x").unwrap();
+        std::fs::write(sub.join("plain.md"), "y").unwrap();
+        let cfg = Arc::new(Config::files(&json!({ "roots": [root] })).unwrap());
+        let file_key = item_key(0, Path::new(OsStr::from_bytes(b"d\xff/n\xfe.md")));
+        let (_, file_rel) = crate::key::parse_key(&file_key).unwrap();
+        let dir_rel = rel_key(Path::new(OsStr::from_bytes(b"d\xff")));
+        let mut known = KnownMap::new();
+        known.insert(file_key.clone(), Some("0:0".into()));
+        for target in [file_rel.to_string(), dir_rel] {
+            let mut sent = Vec::new();
+            let out = reconcile(
+                &cfg,
+                &Scope::targets(vec![t(0, &target)]),
+                &known,
+                false,
+                &CancellationToken::new(),
+                0,
+                &mut |e| {
+                    sent.push(format!("{e:?}"));
+                    true
+                },
+            )
+            .unwrap();
+            assert!(out.deleted.is_empty(), "{target}: {sent:?}");
+            assert!(
+                out.found.contains_key(&file_key),
+                "{target}: {:?}",
+                out.found
+            );
+        }
     }
 }

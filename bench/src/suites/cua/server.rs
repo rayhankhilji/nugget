@@ -7,6 +7,7 @@
 //! | `GET /__agent/observe` | The accessibility tree of every open window |
 //! | `POST /__agent/act` | An [`Action`] on any open app |
 //! | `POST /__agent/confirm` | An `ActionDescriptor`; answers `{"approved": bool}` |
+//! | `POST /__agent/ask` | `{"question", "options"}`: a clarifying question; answers `{"answer": string or null}` |
 //! | `GET /__test/state` | **Test only.** Every app's internal state, the event log and confirmations |
 //! | `GET /__test/version` | Changes whenever the world does; pages poll it to refresh |
 //!
@@ -237,6 +238,14 @@ fn act_reply(
     serde_json::to_value(r).map_err(|e| e.to_string())
 }
 
+/// The body of `POST /__agent/ask`.
+#[derive(serde::Deserialize)]
+struct AskBody {
+    question: String,
+    #[serde(default)]
+    options: Vec<String>,
+}
+
 fn route(req: &Request, stage: &Stage) -> (u16, &'static str, String) {
     let path = req.path.split('?').next().unwrap_or_default();
     match (req.method.as_str(), path) {
@@ -262,6 +271,10 @@ fn route(req: &Request, stage: &Stage) -> (u16, &'static str, String) {
         ("POST", "/__agent/confirm") => json_reply(
             parse::<ActionDescriptor>(&req.body)
                 .and_then(|d| stage.with(|w| json!({ "approved": w.confirm(&d) }))),
+        ),
+        ("POST", "/__agent/ask") => json_reply(
+            parse::<AskBody>(&req.body)
+                .and_then(|b| stage.with(|w| json!({ "answer": w.ask(&b.question, &b.options) }))),
         ),
         (method, p) => {
             let mut segs = p.trim_matches('/').splitn(2, '/');

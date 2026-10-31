@@ -445,3 +445,62 @@ fn outcomes_map_to_the_harness() {
     assert_eq!(outcome_of(&run(O::Failed("f".into()))).kind(), "gave_up");
     assert_eq!(outcome_of(&run(O::Halted)).kind(), "gave_up");
 }
+
+#[test]
+fn nugget_arm_asks_then_resumes_with_the_answer() {
+    let t: Vec<Task> = tasks()
+        .into_iter()
+        .filter(|t| t.has_tag("ambiguous") || t.has_tag("unambiguous"))
+        .collect();
+    assert!(t.len() >= 16);
+    for clarify in [true, false] {
+        let mut agent = NuggetAgent::new(&t).with_clarify(clarify);
+        let eps = run(&mut agent, &t);
+        for e in &eps {
+            assert!(
+                e.score.success,
+                "clarify {clarify} {}: {:?}",
+                e.id, e.score.reasons
+            );
+            let ambiguous = e.tags.iter().any(|x| x == "ambiguous");
+            assert_eq!(e.asks.len(), usize::from(ambiguous), "{}", e.id);
+        }
+        for d in agent.task_details() {
+            let ambiguous = t.iter().any(|x| x.id == d.id && x.has_tag("ambiguous"));
+            if ambiguous {
+                assert_eq!(d.asks.len(), 1, "{d:?}");
+                assert!(d.asks[0].answer.is_some() && !d.asks[0].held, "{d:?}");
+            }
+        }
+        let m = metrics(&eps);
+        assert_eq!(metric(&m, "judgement.ask_rate"), 1.0);
+        assert_eq!(metric(&m, "judgement.needless_question_rate"), 0.0);
+        assert!(
+            agent
+                .params()
+                .contains(&("clarify".into(), serde_json::json!(clarify)))
+        );
+    }
+}
+
+#[test]
+fn a_held_action_is_played_again_after_the_answer() {
+    let m = ScriptedModel::new(
+        &[
+            Step::Click("files.rename".into()),
+            Step::Finish(task::Finish::Done),
+        ],
+        &["files".into()],
+    );
+    m.next_for_test(&[]).unwrap();
+    let shown = |s: &str| vec![(format!("[{}]", nugget_env::encode_id(s)), false)];
+    let first = m.next_for_test(&shown("files.rename")).unwrap();
+    assert_eq!(first[0].0, "click");
+    let held = vec![(
+        "This action was NOT performed: ...\nThe user answered: x".to_string(),
+        false,
+    )];
+    // Observes again, then clicks the same element.
+    assert_eq!(m.next_for_test(&held).unwrap()[0].0, "observe");
+    assert_eq!(m.next_for_test(&shown("files.rename")).unwrap(), first);
+}

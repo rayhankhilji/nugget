@@ -24,7 +24,7 @@ export function PrivacyPage() {
         actions={
           <>
             <label className="field-inline">
-              <span>{t("privacy.show")}</span>
+              <span className="visually-hidden">{t("privacy.show")}</span>
               <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
                 {LIMITS.map((l) => (
                   <option key={l} value={l}>
@@ -33,7 +33,7 @@ export function PrivacyPage() {
                 ))}
               </select>
             </label>
-            <button type="button" className="btn btn-ghost" onClick={egress.reload}>
+            <button type="button" className="btn btn-ghost" onClick={egress.reload} disabled={egress.loading && !egress.data}>
               {t("common.refresh")}
             </button>
           </>
@@ -43,7 +43,9 @@ export function PrivacyPage() {
       {egress.loading && !egress.data && <Loading label={t("privacy.loading")} lines={5} />}
 
       {egress.data && rows.length === 0 && (
-        <EmptyState title={t("privacy.emptyTitle")}>{t("privacy.emptyBody")}</EmptyState>
+        <div className="privacy-clear">
+          <EmptyState title={t("privacy.emptyTitle")}>{t("privacy.emptyBody")}</EmptyState>
+        </div>
       )}
 
       {rows.length > 0 && (
@@ -90,7 +92,9 @@ export function PrivacyPage() {
                   <tr key={`${r.at}-${i}`}>
                     <td className="nowrap">{formatTime(r.at)}</td>
                     <td>
-                      <code>{r.host}</code>
+                      <bdi dir="ltr">
+                        <code>{r.host}</code>
+                      </bdi>
                     </td>
                     <td>{r.feature}</td>
                     <td className="num">{formatBytes(r.bytes_sent)}</td>

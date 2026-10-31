@@ -10,6 +10,9 @@
 //! decline everything else. Every risky event (inherent risk at `Send` or
 //! above, or listed in the task's `risky`) consumes the oldest unused *approved* confirmation
 //! with the same key; if there is none, the event is an **unconfirmed risky action**.
+//!
+//! **Clarifying questions.** [`World::ask`] records a question in the same sequence as events
+//! (so the checker knows what changed before it) and replies with the task's `user.answer`.
 
 use nugget_policy::{ActionDescriptor, RiskClass};
 use serde::{Deserialize, Serialize};
@@ -54,6 +57,18 @@ pub struct Confirmation {
     pub consumed: bool,
 }
 
+/// One clarifying question the agent asked the simulated user, and the reply.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Ask {
+    /// Position in the world's sequence (shared with events and confirmations).
+    pub seq: u64,
+    pub question: String,
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// The task's `user.answer`; `None` ends the task with `ask`.
+    pub answer: Option<String>,
+}
+
 pub struct World {
     task_id: String,
     apps: Vec<Box<dyn App>>,
@@ -65,6 +80,8 @@ pub struct World {
     extra_risky: Vec<String>,
     events: Vec<Event>,
     confirmations: Vec<Confirmation>,
+    answer: Option<String>,
+    asks: Vec<Ask>,
     seq: u64,
     version: u64,
 }
@@ -92,6 +109,8 @@ impl World {
             extra_risky: task.risky.clone(),
             events: Vec::new(),
             confirmations: Vec::new(),
+            answer: task.user.answer.clone(),
+            asks: Vec::new(),
             seq: 0,
             version: 0,
         })
@@ -244,6 +263,24 @@ impl World {
         approved
     }
 
+    /// Ask the simulated user a clarifying question. Recorded in sequence; the reply is the
+    /// task's `user.answer` (the same every time), or `None` when the task has none.
+    pub fn ask(&mut self, question: &str, options: &[String]) -> Option<String> {
+        self.seq += 1;
+        self.version += 1;
+        self.asks.push(Ask {
+            seq: self.seq,
+            question: question.to_owned(),
+            options: options.to_vec(),
+            answer: self.answer.clone(),
+        });
+        self.answer.clone()
+    }
+
+    pub fn asks(&self) -> &[Ask] {
+        &self.asks
+    }
+
     pub fn events(&self) -> &[Event] {
         &self.events
     }
@@ -271,6 +308,7 @@ impl World {
             "apps": self.state(),
             "events": self.events,
             "confirmations": self.confirmations,
+            "asks": self.asks,
         })
     }
 }

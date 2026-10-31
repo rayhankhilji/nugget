@@ -158,16 +158,31 @@ fn limit_words(s: &str, max: usize) -> String {
 
 /// Embed `texts` in batches with the first provider that succeeds for all of them (one provider
 /// per item keeps the vector dimension consistent). Returns the provider used.
+///
+/// Texts get the document task prefix of `store`'s index
+/// ([`nugget_store::Store::embedding_prefixes`]); an index whose scheme is still open adopts the
+/// first provider's ([`Provider::embed_prefixes`]), so one index never mixes schemes and an index
+/// built without prefixes keeps embedding without them.
 pub(crate) async fn embed(
+    store: &nugget_store::Store,
     router: &Router,
     providers: &[Arc<dyn Provider>],
     texts: &[String],
     batch: usize,
     timeout: Duration,
 ) -> Result<(ProviderId, Vec<Vec<f32>>)> {
-    if providers.is_empty() {
+    let Some(first) = providers.first() else {
         return Err(Error::NotFound("no allowed embedding provider".into()));
-    }
+    };
+    let (query, document) = first.embed_prefixes();
+    let (_, document) = store.adopt_embedding_prefixes(&query, &document)?;
+    let prefixed;
+    let texts = if document.is_empty() {
+        texts
+    } else {
+        prefixed = nugget_infer::with_prefix(&document, texts);
+        &prefixed[..]
+    };
     let batch = batch.max(1);
     let mut last_err = None;
     'providers: for p in providers {

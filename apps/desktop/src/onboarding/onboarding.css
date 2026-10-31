@@ -1,12 +1,20 @@
 /* First-run onboarding. Logical properties only, so the layout mirrors in right-to-left locales. */
 
+/* The footer follows the content (no dead space above it in a tall window) and sticks to the
+   bottom of the window once the content is taller than it. */
 .onboarding {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto auto auto;
+  align-content: start;
   min-height: 100%;
   max-inline-size: 880px;
   margin-inline: auto;
-  padding-inline: 24px;
+  padding-inline: var(--space-5);
+}
+
+/* Keep a hidden control's slot so the header doesn't change height between steps. */
+.ob-invisible {
+  visibility: hidden;
 }
 
 .ob-top {
@@ -60,6 +68,7 @@
 
 .ob-step button:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .ob-step button[aria-current="step"] {
@@ -85,12 +94,24 @@
   color: var(--surface);
 }
 
+/* Skipped: an amber dash, distinct from both the green check (done) and the plain number (to do). */
 .ob-step-skipped .ob-step-num {
-  border-style: dashed;
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.ob-step-num svg {
+  display: block;
 }
 
 .ob-main {
-  padding-block: 18px;
+  padding-block: 18px var(--space-6);
+}
+
+/* Sections revealed by a choice scroll into view clear of the sticky footer. */
+.ob-main h2 {
+  scroll-margin-block-end: 96px;
 }
 
 .ob-main h1:focus {
@@ -144,6 +165,7 @@
 
 .ob-card ul,
 .ob-perm-list {
+  min-inline-size: 0;
   margin: 0;
   padding-inline-start: 20px;
   display: grid;
@@ -167,31 +189,126 @@
 }
 
 .ob-section {
-  margin-block-start: 8px;
+  margin-block-start: var(--space-2);
+}
+
+.ob-section > h2 {
+  margin-block-start: var(--space-5);
+}
+
+/* Model cards: three short cards share one row in a wide window instead of leaving one orphaned. */
+.cards.ob-models {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.ob-models-group {
+  font-size: var(--fs-md);
+  margin-block: var(--space-4) var(--space-2);
+}
+
+.ob-model-best {
+  border-color: var(--accent);
+}
+
+/* On a selected (accent-soft) choice card the accent badge would lose its pill: give it a surface. */
+.kind-option:has(input:checked) .badge-accent {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Stacked label-over-control fields, capped so they don't stretch across the whole step. */
+.ob-field,
+.ob-byok-fields .field,
+.ob-byok-form > .field,
+.ob-fields .field {
+  max-inline-size: 480px;
+}
+
+.ob-fields .field {
+  margin: 0;
+  min-inline-size: 200px;
+}
+
+.ob-byok-form {
+  margin-block-start: var(--space-4);
+}
+
+.ob-byok-fields .row {
+  justify-content: flex-start;
+}
+
+/* One search model would stretch across the row: keep it card-sized. */
+.cards.ob-models-search {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
 .ob-fields {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  margin-block: 8px 12px;
+  gap: var(--space-4);
+  margin-block: var(--space-2) var(--space-3);
 }
 
-.field-inline {
-  display: inline-flex;
+/* Two trigger kinds: fill the row rather than leave an empty third column. */
+.kind-picker.ob-choices-two {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+/* "Your trigger: [Ctrl] [Alt] [Space]" as key caps, not a full-width band. */
+.ob-trigger-summary {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-block: var(--space-3) var(--space-1);
+  font-weight: 600;
 }
 
-.field-inline select {
-  min-height: 30px;
-  padding-block: 4px;
-  padding-inline: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  background: var(--surface);
+.ob-trigger-summary kbd,
+.ob-summary kbd {
+  font-size: var(--fs-xs);
   color: var(--text);
-  font: inherit;
+  border-color: var(--control-border);
+}
+
+.ob-keys {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+/* What setup did, on the last step. */
+.ob-summary {
+  display: grid;
+  gap: var(--space-2);
+  margin-block: var(--space-4);
+  padding-block: var(--space-3);
+  padding-inline: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  max-inline-size: 640px;
+}
+
+.ob-summary > div {
+  display: grid;
+  grid-template-columns: minmax(8em, max-content) 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.ob-summary dt {
+  color: var(--muted);
+}
+
+.ob-summary dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ob-summary-unset dd {
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .ob-guide {
@@ -209,11 +326,12 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-block-end: 8px;
+  margin-block: var(--space-2);
 }
 
 .ob-snippet pre {
   flex: 1;
+  min-inline-size: 0;
   margin: 0;
   padding: 8px 12px;
   overflow-x: auto;
@@ -223,15 +341,63 @@
   font-family: var(--mono);
   font-size: 12px;
   text-align: start;
+  white-space: pre;
 }
 
 .ob-details {
   margin-block: 12px;
 }
 
-.ob-details summary {
+/* Disclosures: a drawn chevron instead of the browser's triangle, turned when open. */
+.ob-details summary,
+.ob-manual > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: fit-content;
+  padding-block: var(--space-1);
+  padding-inline: var(--space-1) var(--space-2);
+  border-radius: var(--radius-small);
+  list-style: none;
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 600;
+}
+
+.ob-details summary::-webkit-details-marker,
+.ob-manual > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ob-details summary::before,
+.ob-manual > summary::before {
+  content: "";
+  inline-size: 6px;
+  block-size: 6px;
+  border-block-end: 2px solid currentColor;
+  border-inline-end: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease-out;
+}
+
+/* The inline-end border flips sides in right-to-left text, so the turns mirror too. */
+[dir="rtl"] .ob-details summary::before,
+[dir="rtl"] .ob-manual > summary::before {
+  transform: rotate(45deg);
+}
+
+.ob-details[open] > summary::before,
+.ob-manual[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+[dir="rtl"] .ob-details[open] > summary::before,
+[dir="rtl"] .ob-manual[open] > summary::before {
+  transform: rotate(-45deg);
+}
+
+.ob-details summary:hover,
+.ob-manual > summary:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .ob-details h3 {
@@ -279,10 +445,27 @@
   inset-block-end: 0;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding-block: 12px 18px;
   border-block-start: 1px solid var(--border);
   background: var(--bg);
+}
+
+/* Content continues under the footer: a shadow says there's more to scroll. */
+.ob-actions-stuck {
+  box-shadow: 0 -10px 12px -10px rgb(0 0 0 / 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ob-actions-stuck {
+    box-shadow: 0 -12px 14px -10px rgb(0 0 0 / 0.8);
+  }
+}
+
+.ob-hint {
+  text-align: end;
+  max-inline-size: 46ch;
 }
 
 .ob-spacer {
@@ -292,30 +475,32 @@
 /* Sidebar settings (language, run setup again). */
 .sidebar-settings {
   display: grid;
-  gap: 6px;
-  margin-block-start: 8px;
-  font-size: 12px;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  font-size: var(--fs-xs);
 }
 
-.sidebar-settings {
+/* Language: the label always sits above a full-width select. */
+.sidebar-language {
+  display: grid;
+  gap: 2px;
   min-inline-size: 0;
+  color: var(--muted);
 }
 
-/* Stay inside the sidebar: wrap the label above the picker rather than overflow it. */
-.sidebar-settings .field-inline {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  min-inline-size: 0;
+.sidebar-language label {
+  padding-inline: 2px;
 }
 
 .sidebar-settings select {
+  inline-size: 100%;
   min-inline-size: 0;
-  max-inline-size: 100%;
+  font-size: var(--fs-sm);
 }
 
+/* "Run setup again": same width as the select, quiet until hovered. */
 .sidebar-settings .btn {
-  max-inline-size: 100%;
+  inline-size: 100%;
   white-space: normal;
 }
 
@@ -330,7 +515,5 @@
 }
 
 .ob-manual > summary {
-  cursor: pointer;
-  font-weight: 600;
   margin-block-end: 0.5rem;
 }

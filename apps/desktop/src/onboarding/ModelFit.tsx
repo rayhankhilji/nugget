@@ -37,11 +37,14 @@ export function FitNotes({
   fit,
   freeDisk,
   installed = false,
+  why = true,
 }: {
   fit: ModelFit;
   freeDisk: number | null;
   /** Already installed: disk space no longer matters. */
   installed?: boolean;
+  /** Explain why it is recommended (onboarding says so on its one suggested model only). */
+  why?: boolean;
 }) {
   const t = useT();
   const gpu = t(GPU[fit.gpu] ?? GPU.unknown);
@@ -50,7 +53,7 @@ export function FitNotes({
       <p className="muted small ob-fit-needs">
         {t("onboarding.models.fit.needs", { ram: fit.min_ram_gb, disk: formatBytes(fit.disk_needed_bytes) })}
       </p>
-      {fit.recommended && fit.fits_ram && (
+      {why && fit.recommended && fit.fits_ram && (
         <p className="small ob-fit-why">
           {fit.reasons.includes("gpu_accelerated")
             ? t("onboarding.models.fit.whyGpu", { ram: fit.machine_ram_gb, gpu })

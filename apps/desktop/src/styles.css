@@ -33,19 +33,45 @@
   --skeleton: color-mix(in srgb, var(--text) 9%, transparent);
   --user-bubble: #f1ece1;
 
+  /* Button outline: 3:1 against --surface and --bg in both themes (follows --control-border). */
+  --btn-border: var(--control-border);
+  /* Destructive button fill and its text (>= 4.5:1). */
+  --danger-bg: var(--bad);
+  --danger-text: #ffffff;
+  /* Outline of dialogs and popovers. */
+  --dialog-border: var(--border);
+
   --radius: 10px;
   --radius-small: 6px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 
+  /* Shared scale (EE6). Spacing 4/8/12/16/24/32; type: h1 = xl, h2 = lg, h3 = md semibold. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  /* Controls on one row share a height: buttons, inputs, selects, segmented. */
+  --control-h: 34px;
+  --control-h-small: 26px;
+
   /* Knowledge graph: one colour per entity kind (also used by the canvas). */
-  --kind-person: #2f6fdb;
-  --kind-organization: #8a46b0;
-  --kind-project: #b87a00;
-  --kind-commitment: #c93a4d;
-  --kind-preference: #1f8a7e;
-  --kind-event: #d06a12;
-  --kind-place: #3a8a3a;
-  --kind-topic: #a8507f;
+  /* Hues spread round the wheel (blue, violet, magenta, red, orange, olive, green, cyan) and kept
+     away from the amber accent; each is >= 3:1 on --surface. */
+  --kind-person: #1f5fd6;
+  --kind-organization: #7d3fc8;
+  --kind-project: #6b7f00;
+  --kind-commitment: #d12b2b;
+  --kind-preference: #008b9a;
+  --kind-event: #e06a00;
+  --kind-place: #1e8e3e;
+  --kind-topic: #c0308f;
   --graph-edge: rgb(80 72 60 / 0.28);
 }
 
@@ -70,19 +96,21 @@
     --focus: #7cb0ff;
     --link: #8cb8ff;
     --control-border: #787266;
+    --danger-bg: #cf4436;
+    --dialog-border: #45423c;
     --backdrop: rgb(0 0 0 / 0.6);
     --overlay-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
     --user-bubble: #2a2722;
     --shadow: none;
 
     --kind-person: #7aa7ff;
-    --kind-organization: #c49bec;
-    --kind-project: #e8b54a;
-    --kind-commitment: #ff8a96;
-    --kind-preference: #5fd0c1;
-    --kind-event: #ffa45c;
-    --kind-place: #82d07f;
-    --kind-topic: #ec98c6;
+    --kind-organization: #b48cf0;
+    --kind-project: #c2d14a;
+    --kind-commitment: #ff7a7a;
+    --kind-preference: #4fd0dd;
+    --kind-event: #ffa04d;
+    --kind-place: #6fd27a;
+    --kind-topic: #f08ac8;
     --graph-edge: rgb(236 232 225 / 0.22);
   }
 }
@@ -99,27 +127,35 @@ body,
 }
 
 body {
-  font: 14px/1.5 var(--font);
+  font: var(--fs-md)/1.5 var(--font);
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  /* Native checkboxes, radios, ranges and progress bars take the brand colour, not browser blue. */
+  accent-color: var(--accent);
 }
 
 h1 {
-  font-size: 20px;
+  font-size: var(--fs-xl);
   font-weight: 650;
   margin: 0;
   letter-spacing: -0.01em;
 }
 
 h2 {
-  font-size: 15px;
+  font-size: var(--fs-lg);
   font-weight: 600;
-  margin: 28px 0 10px;
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+h3 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin: var(--space-4) 0 var(--space-2);
 }
 
 p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 
 code {
@@ -147,7 +183,7 @@ kbd {
 }
 
 .small {
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .nowrap {
@@ -185,7 +221,7 @@ kbd {
   border-radius: 4px;
   background: var(--surface);
   color: var(--muted);
-  font: 11px/16px var(--font);
+  font: var(--fs-xs)/18px var(--font);
   text-align: center;
   white-space: nowrap;
 }
@@ -194,8 +230,12 @@ kbd {
 
 .shell {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  height: 100%;
+  grid-template-columns: 208px minmax(0, 1fr);
+  /* One viewport tall: the sidebar's nav and <main> scroll on their own; the window never does. */
+  grid-template-rows: minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .skip-link {
@@ -217,8 +257,9 @@ kbd {
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px 10px;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-4) var(--space-2) var(--space-3);
   background: var(--sidebar);
   border-inline-end: 1px solid var(--border);
 }
@@ -226,10 +267,21 @@ kbd {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 8px;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
   font-weight: 700;
-  font-size: 16px;
+  font-size: var(--fs-lg);
+}
+
+/* The nav takes the room left between the brand and the footer and scrolls inside it. */
+.sidebar nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
 }
 
 .sidebar nav ul {
@@ -240,10 +292,19 @@ kbd {
   gap: 2px;
 }
 
+.nav-group-label {
+  margin: 0 0 var(--space-1);
+  padding-inline: var(--space-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+
 .nav-item {
+  position: relative;
   width: 100%;
   text-align: start;
-  padding: 7px 10px;
+  padding: 5px var(--space-3);
   border: 0;
   border-radius: var(--radius-small);
   background: transparent;
@@ -252,23 +313,46 @@ kbd {
   cursor: pointer;
 }
 
-.nav-item:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
+/* Inside the scrolling nav an outer ring would be clipped at its edges. */
+.nav-item:focus-visible {
+  outline-offset: -2px;
 }
 
+.nav-item:hover {
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+}
+
+/* Selected: a stronger fill plus an inline-start bar, so it doesn't rely on a faint tint. */
 .nav-item[aria-current="page"] {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 16%, var(--sidebar));
+  color: var(--text);
   font-weight: 600;
 }
 
+.nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 6px;
+  inset-inline-start: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* Pinned under the nav: connection status, then language and setup. */
+.sidebar-foot {
+  display: grid;
+  gap: var(--space-2);
+  padding-block-start: var(--space-2);
+  border-block-start: 1px solid var(--border);
+}
+
 .conn {
-  margin-top: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
@@ -290,33 +374,86 @@ kbd {
 main {
   overflow: auto;
   min-width: 0;
+  min-height: 0;
 }
 
+/* Page width: every page starts at the same inline-start edge. Content sits in a 1280px frame
+   centred in <main> (so very wide windows keep balanced margins); a normal page fills up to
+   980px of it from the start edge, and .page-wide (Knowledge) grows into the whole frame from
+   that same edge instead of re-centring. */
 .page {
+  --page-frame: 1280px;
   max-width: 980px;
-  margin: 0 auto;
-  padding: 24px 28px 40px;
+  margin-block: 0;
+  margin-inline: max(0px, calc((100% - var(--page-frame)) / 2)) auto;
+  padding: var(--space-5) var(--space-6) var(--space-6);
 }
 
+/* Title and description on the start side, actions pinned top-end; only the text wraps. The
+   text column keeps at least 14rem, so a page with many header controls wraps its controls
+   (still at the end) rather than squeezing the title. */
 .page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
+  display: grid;
+  grid-template-columns: minmax(min(100%, 14rem), 1fr) auto;
+  align-items: start;
+  column-gap: var(--space-4);
+  row-gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.page-header h1,
+.page-header p {
+  overflow-wrap: break-word;
 }
 
 .page-header p {
-  margin: 4px 0 0;
-  max-width: 60ch;
+  margin: var(--space-1) 0 0;
+  max-width: 68ch;
 }
 
 .page-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+/* Narrow windows (200% zoom): the actions go under the text rather than squeezing it. */
+@media (max-width: 720px) {
+  .page {
+    padding-inline: var(--space-4);
+  }
+
+  .page-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page-actions {
+    justify-content: flex-start;
+  }
+
+  /* The sidebar is a top bar here (see the later narrow-window rules): one wrapping row. */
+  .sidebar nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    overflow: visible;
+  }
+
+  /* Still names its list (aria-labelledby reads hidden elements). */
+  .nav-group-label {
+    display: none;
+  }
+
+  .sidebar-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    padding: 0;
+    border: 0;
+  }
 }
 
 .center {
@@ -327,7 +464,7 @@ main {
 
 .row {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
   justify-content: center;
 }
@@ -339,24 +476,29 @@ main {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 32px;
-  padding: 5px 14px;
-  border: 1px solid var(--border);
+  min-height: var(--control-h);
+  padding: 4px 14px;
+  border: 1px solid var(--btn-border);
   border-radius: var(--radius-small);
   background: var(--surface);
   color: var(--text);
   font: inherit;
   font-weight: 500;
+  line-height: 1.3;
   cursor: pointer;
   box-shadow: var(--shadow);
 }
 
-.btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--text) 25%, var(--border));
+.btn:hover:where(:not(:disabled):not([aria-disabled="true"])) {
+  background: color-mix(in srgb, var(--text) 5%, var(--surface));
 }
 
+/* Disabled: a neutral, flat look for every variant (a faded amber primary read as broken). */
 .btn:disabled {
-  opacity: 0.55;
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--text) 6%, var(--surface));
+  color: var(--muted);
+  box-shadow: none;
   cursor: default;
 }
 
@@ -364,7 +506,10 @@ main {
    A button that is busy for a moment is aria-disabled rather than disabled, so it keeps keyboard
    focus (a disabled button drops it to the page body); it looks disabled all the same. */
 .btn[aria-disabled="true"] {
-  opacity: 0.55;
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--text) 6%, var(--surface));
+  color: var(--muted);
+  box-shadow: none;
   cursor: default;
 }
 /* ---- end keyboard focus ---- */
@@ -375,7 +520,7 @@ main {
   color: var(--accent-contrast);
 }
 
-.btn-primary:hover:not(:disabled) {
+.btn-primary:hover:where(:not(:disabled):not([aria-disabled="true"])) {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
 }
@@ -385,10 +530,16 @@ main {
   box-shadow: none;
 }
 
+.btn-ghost:disabled,
+.btn-ghost[aria-disabled="true"] {
+  background: transparent;
+}
+
+/* Only for dense rows and tables; next to an input use a normal .btn. */
 .btn-small {
-  min-height: 24px;
-  padding: 1px 8px;
-  font-size: 12px;
+  min-height: var(--control-h-small);
+  padding: 2px 10px;
+  font-size: var(--fs-xs);
 }
 
 input,
@@ -399,7 +550,13 @@ textarea {
   background: var(--surface);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-small);
-  padding: 6px 10px;
+  padding: 5px 10px;
+}
+
+/* Single-line fields line up with buttons on the same row. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]),
+select {
+  min-height: var(--control-h);
 }
 
 select {
@@ -423,12 +580,12 @@ textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
 .field-inline select {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   max-width: 280px;
 }
 
@@ -474,10 +631,10 @@ textarea:focus-visible {
 .note {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  margin: 8px 0;
-  padding: 8px 12px;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-small);
   background: color-mix(in srgb, var(--text) 5%, transparent);
   color: var(--muted);
@@ -488,8 +645,28 @@ textarea:focus-visible {
   color: var(--bad);
 }
 
+.note-error .note-text {
+  font-weight: 600;
+}
+
+/* ErrorNote: the technical text under a "Details" disclosure, on its own line. */
+.note-details {
+  flex-basis: 100%;
+  font-size: var(--fs-xs);
+}
+
+.note-details summary {
+  cursor: pointer;
+  inline-size: fit-content;
+}
+
+.note-details p {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
 .empty {
-  padding: 40px 16px;
+  padding: var(--space-6) var(--space-4);
   text-align: center;
 }
 
@@ -643,7 +820,6 @@ textarea:focus-visible {
 .search-bar input {
   flex: 1;
   min-width: 0;
-  padding: 8px 12px;
 }
 
 .results {
@@ -655,7 +831,7 @@ textarea:focus-visible {
 }
 
 .result {
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-4);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -672,8 +848,16 @@ textarea:focus-visible {
 }
 
 .result-snippet {
-  margin: 4px 0;
+  margin: var(--space-1) 0 var(--space-2);
   overflow-wrap: anywhere;
+}
+
+.result-snippet mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  color: inherit;
+  font-weight: 600;
 }
 
 /* ---- models ---- */
@@ -747,9 +931,10 @@ progress::-moz-progress-bar {
 
 /* ---- tables & stats ---- */
 
+/* 110px minimum: five tiles fit on one row in a 900px window, so no tile is left alone below. */
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
   margin: 0 0 16px;
 }
@@ -764,6 +949,9 @@ progress::-moz-progress-bar {
 .stats dt {
   font-size: 12px;
   color: var(--muted);
+  /* Long single words (de "Hintergrunddienst") break inside narrow tiles instead of overflowing. */
+  overflow-wrap: anywhere;
+  hyphens: auto;
 }
 
 .stats dd {
@@ -821,12 +1009,20 @@ tbody tr:last-child > * {
   width: min(480px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   overflow: auto;
-  padding: 18px 20px 16px;
-  border: 1px solid var(--border);
+  padding: 0;
+  border: 1px solid var(--dialog-border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--overlay-shadow);
+}
+
+/* A fixed title bar, a body that scrolls, and (inside the body) a footer that stays in view:
+   Next / Cancel / Merge never drop below the fold, even at 900x600. */
+.dialog[open]:has(> .dialog-body) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .dialog-wide {
@@ -838,43 +1034,79 @@ tbody tr:last-child > * {
 }
 
 .dialog-head {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: var(--space-3);
+  padding-block: var(--space-4) var(--space-2);
+  padding-inline: var(--space-5) var(--space-4);
 }
 
 .dialog-head h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--fs-lg);
+}
+
+.dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-5) 0;
+}
+
+/* Bodies without a footer still end with breathing room. */
+.dialog-body:not(:has(.dialog-actions)) {
+  padding-block-end: var(--space-5);
+}
+
+/* With a sticky footer, keep a field scrolled into view by Tab clear of it (WCAG 2.4.11):
+   the footer is about 64px, more when its buttons wrap. */
+.dialog-body:has(.dialog-actions) {
+  scroll-padding-block-end: 96px;
+}
+
+/* A scrollable body that is itself a Tab stop (Dialog's `scrollable`): ring inside the frame. */
+.dialog-body:focus-visible {
+  outline-offset: -2px;
 }
 
 .dialog-desc {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .dialog-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.dialog-body .dialog-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-inline: calc(-1 * var(--space-5));
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  border-block-start: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .btn-icon {
-  min-height: 28px;
-  width: 28px;
+  min-height: var(--control-h-small);
+  width: var(--control-h-small);
   padding: 0;
 }
 
 .btn-danger {
-  background: var(--bad);
-  border-color: var(--bad);
-  color: var(--surface);
+  background: var(--danger-bg);
+  border-color: var(--danger-bg);
+  color: var(--danger-text);
 }
 
 .btn-danger:hover:not(:disabled) {
-  border-color: var(--bad);
+  border-color: var(--danger-bg);
   filter: brightness(1.08);
 }
 
@@ -900,7 +1132,7 @@ fieldset {
 .field > label,
 .field > legend {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   padding: 0;
   margin-bottom: 2px;
 }
@@ -1061,8 +1293,8 @@ fieldset {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
@@ -1130,8 +1362,8 @@ fieldset {
 
 .source {
   display: flex;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1178,7 +1410,51 @@ h2.source-name {
 }
 
 .source-meta.muted {
-  gap: 4px;
+  gap: var(--space-1) var(--space-3);
+}
+
+.source-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The on/off switch belongs to the whole card: top end, beside the name. */
+.source-switch {
+  margin-inline-start: auto;
+}
+
+.source-actions-end {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-inline-start: auto;
+}
+
+/* Why the submit can't go yet (Add folder), at the start of the footer. */
+.dialog-actions-hint {
+  margin: 0;
+  margin-inline-end: auto;
+  align-self: center;
+}
+
+details.advanced {
+  margin: 0 0 var(--space-3);
+}
+
+details.advanced > summary {
+  cursor: pointer;
+  margin-block-end: var(--space-2);
+  color: var(--link);
+}
+
+.source-details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.source-details p {
+  margin: var(--space-1) 0 0;
 }
 
 .source-body .note {
@@ -1200,12 +1476,21 @@ h2.source-name {
 .source-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  max-width: 100%;
   padding: 0 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text);
   font-weight: 500;
+  font-style: normal;
+}
+
+.source-badge-file {
+  font-weight: 400;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 /* ---- search: results & ask ---- */
@@ -1348,9 +1633,29 @@ h4.ask-sub {
   margin-top: 28px;
 }
 
+/* Words, not numbers: tabular figures would space out hyphens ("Text-only"). */
 .stats dd.stat-text {
   font-size: 14px;
-  overflow-wrap: anywhere;
+  font-variant-numeric: normal;
+  overflow-wrap: break-word;
+}
+
+/* One secondary-line style for every tile. */
+.stat-sub {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.status-card .switch {
+  display: flex;
+  margin-block: var(--space-2);
+}
+
+.switch-hint {
+  margin-block-start: 0;
+  margin-inline-start: 40px;
 }
 
 .stat-unit {
@@ -1401,7 +1706,7 @@ h4.ask-sub {
 
 .tabs-small .tab {
   padding: 5px 10px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .chips {
@@ -1415,13 +1720,14 @@ h4.ask-sub {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: var(--control-h-small);
   padding: 2px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: 999px;
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
@@ -1438,23 +1744,34 @@ h4.ask-sub {
 
 .segmented {
   display: inline-flex;
-  border: 1px solid var(--border);
+  align-items: stretch;
+  min-height: var(--control-h);
+  border: 1px solid var(--btn-border);
   border-radius: var(--radius-small);
   overflow: hidden;
 }
 
 .segmented button {
-  padding: 3px 12px;
+  padding: 2px var(--space-3);
   border: 0;
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
+.segmented button:hover:not([aria-pressed="true"]) {
+  background: color-mix(in srgb, var(--text) 5%, var(--surface));
+}
+
+/* The focus ring would be clipped by the rounded frame; draw it inside. */
+.segmented button:focus-visible {
+  outline-offset: -2px;
+}
+
 .segmented button + button {
-  border-inline-start: 1px solid var(--border);
+  border-inline-start: 1px solid var(--btn-border);
 }
 
 .segmented button[aria-pressed="true"] {
@@ -1492,20 +1809,49 @@ h4.ask-sub {
   margin: 0;
 }
 
+/* The tab panels are size containers: the layout follows the space next to the sidebar, not
+   the window (a 900px window leaves about 680px here). */
+.kb-panel {
+  container-type: inline-size;
+  container-name: kb;
+}
+
 .kb-layout {
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: var(--space-4);
   align-items: start;
 }
 
+.kb-list {
+  min-width: 0;
+}
+
+/* Nothing to show beside the list (no entities yet): the list and its empty state take the width. */
+.kb-layout:not(:has(> .kb-detail)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .kb-list .field {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
+}
+
+/* Kind filters in one row that scrolls sideways instead of wrapping into a tall block. */
+.kb-list .chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-block-end: var(--space-1);
+  margin-block-end: var(--space-1);
+  scrollbar-width: thin;
+}
+
+.kb-list .chips .chip {
+  flex: none;
 }
 
 .kb-count {
   min-height: 18px;
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-1);
 }
 
 .entity-list {
@@ -1554,12 +1900,17 @@ h4.ask-sub {
   margin-top: 10px;
 }
 
+/* Sticky, so the selected entity stays in view however far down the list it was picked. */
 .kb-detail {
   min-width: 0;
-  padding: 16px 18px;
+  padding: var(--space-4);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  position: sticky;
+  top: var(--space-3);
+  max-height: calc(100vh - 2 * var(--space-3));
+  overflow: auto;
 }
 
 /* ---- knowledge: entity detail ---- */
@@ -1609,8 +1960,33 @@ h2.entity-name {
 .entity-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 12px 0 4px;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-1);
+}
+
+.entity-actions-end {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+}
+
+.entity-goto {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* Reject sits quietly until the fact is hovered or focused (always shown without hover). */
+@media (hover: hover) {
+  .fact .fact-reject {
+    opacity: 0;
+  }
+
+  .fact:hover .fact-reject,
+  .fact:focus-within .fact-reject,
+  .fact-reject:focus-visible {
+    opacity: 1;
+  }
 }
 
 .undo-note {
@@ -1721,10 +2097,14 @@ h4.fact-predicate {
 
 .mentions li {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 4px 10px;
-  font-size: 13px;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--fs-sm);
+}
+
+.mention-open {
+  margin-inline-start: auto;
 }
 
 .mention-surface {
@@ -1747,8 +2127,22 @@ h4.fact-predicate {
   border-radius: var(--radius-small);
 }
 
+.merge-option,
+.split-fact {
+  font-weight: 400;
+}
+
+.merge-option-text {
+  display: grid;
+}
+
 .merge-name {
-  font-weight: 600;
+  font-weight: 500;
+}
+
+.merge-warning {
+  margin: var(--space-2) 0 0;
+  color: var(--bad);
 }
 
 .merge-preview {
@@ -1872,7 +2266,33 @@ h4.fact-predicate {
 }
 
 .graph-help {
-  margin: 6px 0 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0 0;
+}
+
+.graph-keys summary {
+  cursor: pointer;
+  color: var(--link);
+}
+
+.graph-keys p {
+  max-width: 70ch;
+  margin: var(--space-1) 0 0;
+}
+
+/* One row of kind chips that scrolls sideways, so the canvas starts higher. */
+.graph-panel > .chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-block-end: var(--space-1);
+  scrollbar-width: thin;
+}
+
+.graph-panel > .chips .chip {
+  flex: none;
 }
 
 .list-more {
@@ -1938,6 +2358,11 @@ h3.token-heading:focus {
   gap: 6px;
 }
 
+.vault-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .vault-pages {
   display: grid;
   gap: 2px;
@@ -1950,13 +2375,30 @@ h3.token-heading:focus {
   gap: 8px;
 }
 
-@media (max-width: 900px) {
+@container kb (max-width: 560px) {
   .kb-layout,
   .kb-graph-with-detail {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .kb-detail,
   .kb-detail-side {
+    position: static;
+    max-height: none;
+  }
+
+  /* Stacked: the chosen entity comes first, above the list it was picked from. */
+  .kb-layout-selected .kb-detail {
+    order: -1;
+  }
+}
+
+@container kb (max-width: 760px) {
+  .kb-graph-with-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .kb-graph-with-detail .kb-detail-side {
     position: static;
     max-height: none;
   }
@@ -2001,16 +2443,17 @@ h3.token-heading:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 5px 8px;
-  padding-inline-start: 10px;
+  min-height: var(--control-h);
+  padding-block: 4px;
+  padding-inline: var(--space-3) var(--space-2);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-small);
   background: var(--surface);
   color: var(--muted);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   text-align: start;
   cursor: pointer;
 }
@@ -2019,19 +2462,21 @@ h3.token-heading:focus {
   color: var(--text);
 }
 
-/* Long translations wrap the label; the shortcut hint never shrinks below its text. */
+/* The label is kept short so it fits on one line; a long translation still wraps rather than
+   being cut. The shortcut hint never shrinks below its text. */
 .palette-trigger > span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .palette-trigger > kbd {
   flex: none;
 }
 
+/* Clear of the page title and the sidebar trigger at 900x600. */
 .palette {
   width: min(560px, calc(100vw - 32px));
-  margin-top: 12vh;
+  margin-top: max(14vh, 100px);
   padding: 0;
   overflow: hidden;
   display: flex;
@@ -2058,7 +2503,7 @@ h3.token-heading:focus {
   border: 0;
   padding: 4px 0;
   background: transparent;
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 /* The dialog is the visible boundary; the input's own ring would sit flush against it. */
@@ -2081,8 +2526,8 @@ h3.token-heading:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 7px 10px;
+  gap: var(--space-3);
+  padding: 7px var(--space-3);
   border-radius: var(--radius-small);
   cursor: pointer;
 }
@@ -2104,16 +2549,28 @@ h3.token-heading:focus {
   white-space: nowrap;
 }
 
+/* Two aligned columns at the row end: the shortcut (blank when there is none), then the type. */
 .palette-meta {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 5.5em minmax(4.5em, max-content);
   align-items: center;
-  gap: 8px;
+  column-gap: var(--space-2);
   flex-shrink: 0;
 }
 
+.palette-meta kbd {
+  grid-column: 1;
+  justify-self: end;
+}
+
 .palette-group {
-  font-size: 12px;
+  grid-column: 2;
+  font-size: var(--fs-xs);
   color: var(--muted);
+}
+
+.palette-footer kbd {
+  margin-inline: 2px;
 }
 
 .palette-option[aria-selected="true"] .palette-group {
@@ -2133,20 +2590,37 @@ h3.token-heading:focus {
 
 .shortcut-list {
   display: grid;
-  gap: 6px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--space-4);
+  row-gap: var(--space-2);
   margin: 0;
 }
 
+/* Rows share the list's two columns, so every description starts at the same edge. */
 .shortcut-row {
-  display: grid;
-  grid-template-columns: 8em 1fr;
-  gap: 12px;
-  align-items: baseline;
+  display: contents;
 }
 
 .shortcut-row dt,
 .shortcut-row dd {
   margin: 0;
+}
+
+.shortcut-row dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) 6px;
+}
+
+.shortcut-list kbd {
+  color: var(--text);
+  border-color: var(--control-border);
+}
+
+.shortcut-or {
+  font-size: var(--fs-xs);
+  color: var(--muted);
 }
 
 @media (forced-colors: active) {
@@ -2165,8 +2639,8 @@ h3.token-heading:focus {
 .state-error {
   display: grid;
   justify-items: center;
-  gap: 8px;
-  padding: 40px 16px;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
   text-align: center;
   color: var(--muted);
 }
@@ -2219,6 +2693,15 @@ h3.token-heading:focus {
 
 .state-skeleton:nth-child(3n) {
   width: 60%;
+}
+
+/* Empty states (EmptyState in components/ui.tsx): one next step, always a normal-size button,
+   whatever size class the page gave it. */
+.pg-empty-action .btn,
+.state-empty .btn {
+  min-height: var(--control-h);
+  padding: 4px 14px;
+  font-size: var(--fs-md);
 }
 
 @keyframes shimmer {
@@ -2459,12 +2942,252 @@ tr[aria-current="true"] {
   margin-inline-end: 10px;
 }
 
+/* Six risk classes: 3 + 3 on wide windows, 2 + 2 + 2 when narrow; never a lone orphan. */
 .limits-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 0 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 var(--space-3);
+}
+
+@media (max-width: 760px) {
+  .limits-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.input-narrow {
+  max-width: 14ch;
+}
+
+/* Safety: built-in rules. The name column gets room; Effect and On shrink to their content. */
+.rules-table .rules-col-name {
+  width: 28%;
+}
+
+.rules-table .rules-col-fit {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.rules-table tbody th {
+  min-width: 140px;
+}
+
+.rule-applies {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.rule-conds {
+  display: block;
+}
+
+.pattern-summary {
+  display: grid;
+  gap: var(--space-1);
+}
+
+/* Globs, ids and hosts read left-to-right in every locale; isolate them from the surrounding text. */
+.pattern-inline {
+  unicode-bidi: isolate;
+  direction: ltr;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.pattern-details summary,
+.tech-details summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--link, var(--accent));
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.pattern-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 2px var(--space-3);
+  border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  text-align: start;
+}
+
+.pattern-list code {
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.tech-details-body {
+  margin: var(--space-2) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: baseline;
+}
+
+.safety-kill .card-title,
+.card-head h2.card-title,
+.card-head h3.card-title {
+  margin: 0;
+}
+
+.safety-kill .card-head {
+  align-items: center;
 }
 
 .log-hash {
   overflow-wrap: anywhere;
+}
+
+/* ---- Double Tap page ---- */
+
+.switch-stack {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+/* A setting that depends on the one above: indented under it. */
+.switch-child {
+  display: grid;
+  gap: var(--space-1);
+  padding-inline-start: var(--space-5);
+  border-inline-start: 2px solid var(--border);
+  margin-inline-start: 15px;
+}
+
+.switch-child p {
+  margin: 0;
+  max-width: 70ch;
+}
+
+.dt-page .kind-picker {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.dt-add-row {
+  align-items: stretch;
+  margin-block-start: var(--space-2);
+}
+
+.dt-empty-line {
+  margin: var(--space-2) 0;
+}
+
+.dt-no-models {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.dt-terminals {
+  margin-block-start: var(--space-4);
+}
+
+.dt-save {
+  margin-block-start: var(--space-5);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--border);
+}
+
+/* ---- Models page ---- */
+
+.models-intro {
+  margin: 0 0 var(--space-4);
+  color: var(--muted);
+}
+
+.models-group {
+  margin-block: var(--space-5);
+}
+
+.models-group > p {
+  margin-block: 0 var(--space-3);
+}
+
+/* Install buttons line up across a row: the actions sit at the bottom of every card. */
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-card > .card-actions {
+  margin-top: auto;
+  padding-block-start: var(--space-1);
+}
+
+.model-card p {
+  margin: 0;
+}
+
+.model-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.model-id {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.model-id code {
+  font-size: inherit;
+}
+
+.pg-skeleton-card {
+  min-height: 132px;
+}
+
+/* ---- Connected apps, Plugins, Privacy ---- */
+
+/* Option labels in a group read as body text; only the group's legend is bold. */
+.field > label.check {
+  font-weight: 400;
+}
+
+.switch-label-strong {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.pg-skeleton-table {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+/* "Nothing has left this device" is good news: say so with colour and a check mark. */
+.privacy-clear .pg-empty {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--good) 45%, var(--border));
+  background: color-mix(in srgb, var(--good) 6%, var(--surface));
+}
+
+.privacy-clear .pg-empty-title::before {
+  content: "✓";
+  margin-inline-end: var(--space-2);
+  color: var(--good);
+}
+
+/* ---- Agent ---- */
+
+.agent-no-model {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-block: var(--space-4);
 }

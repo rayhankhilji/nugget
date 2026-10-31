@@ -15,10 +15,10 @@ import {
 import { useAsync, useEvent, useOpener } from "../hooks";
 import { usePendingSearch } from "../hooks.nav";
 import { citedNumbers, splitCitations, withheldNotice } from "../citations";
-import { sourceKindLabel } from "../format";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
-import { SourceIcon } from "../components/SourceIcon";
+import { Highlight, itemFileName, plainSnippet, SourceBadge } from "../components/Provenance";
+import { sourceKindOf } from "../recency";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatNumber, useT } from "../i18n";
 
@@ -133,14 +133,15 @@ export function SearchPage() {
         </h2>
       )}
       {hits && hits.length === 0 && (
-        <EmptyState title={t("search.noResults", { query: searched })} action={nothingIndexed ? <GoToPage page="sources" /> : undefined}>
+        <EmptyState title={t("search.noResults", { query: searched })} action={nothingIndexed ? <GoToPage page="sources" className="btn btn-primary" /> : undefined}>
           {nothingIndexed ? nothingHint : t("search.noResultsHint")}
         </EmptyState>
       )}
       {hits && hits.length > 0 && (
         <ol className={busy ? "results pg-stale" : "results"} aria-labelledby="search-results-heading" aria-busy={busy}>
           {hits.map((h, i) => {
-            const title = h.title || h.item.key;
+            const source = byId.get(h.item.source);
+            const title = h.title || itemFileName(h.item.key, source?.kind ?? sourceKindOf(h.item.source)) || t("search.untitled");
             return (
               <li key={`${h.item.source}\u0000${h.item.key}\u0000${i}`} className="result">
                 <div className="result-head">
@@ -148,9 +149,6 @@ export function SearchPage() {
                     {title}
                   </span>
                   <span className="result-tools">
-                    <span className="muted small" title={t("search.score")}>
-                      {formatNumber(h.score, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
-                    </span>
                     {isOpenableUrl(h.url) && (
                       <button type="button" className="btn btn-small" onClick={() => void opener.open(h.url!, title)} aria-label={t("search.openTitle", { title })}>
                         {t("search.open")}
@@ -159,10 +157,10 @@ export function SearchPage() {
                   </span>
                 </div>
                 <p className="result-snippet" dir="auto">
-                  {h.snippet}
+                  <Highlight text={plainSnippet(h.snippet)} query={searched} />
                 </p>
                 <p className="muted small result-meta">
-                  <SourceBadge id={h.item.source} source={byId.get(h.item.source)} /> <code>{h.item.key}</code>
+                  <SourceBadge sourceId={h.item.source} name={source?.name} kind={source?.kind} itemKey={h.item.key} title={h.title} />
                 </p>
               </li>
             );
@@ -171,24 +169,13 @@ export function SearchPage() {
       )}
       {!hits && !busy && !error &&
         (nothingIndexed ? (
-          <EmptyState title={stillIndexing ? t("search.indexingTitle") : t("search.noSourcesTitle")} action={<GoToPage page="sources" />}>
+          <EmptyState title={stillIndexing ? t("search.indexingTitle") : t("search.noSourcesTitle")} action={<GoToPage page="sources" className="btn btn-primary" />}>
             {nothingHint}
           </EmptyState>
         ) : (
           <EmptyState title={t("search.typeQuery")}>{t("search.typeQueryHint")}</EmptyState>
         ))}
     </div>
-  );
-}
-
-function SourceBadge({ id, source }: { id: string; source: SourceInfo | undefined }) {
-  const t = useT();
-  const kind = source?.kind ?? "";
-  return (
-    <span className="source-badge" title={source ? t("search.sourceBadge", { kind: sourceKindLabel(kind), id }) : id}>
-      <SourceIcon kind={kind} size={13} />
-      <span dir="auto">{source?.name ?? id}</span>
-    </span>
   );
 }
 
@@ -472,7 +459,7 @@ function CitationItem({
   idPrefix?: string;
 }) {
   const t = useT();
-  const title = c.title || c.item.key;
+  const title = c.title || itemFileName(c.item.key, source?.kind ?? sourceKindOf(c.item.source)) || t("search.untitled");
   return (
     <li id={`${idPrefix}-${c.n}`} tabIndex={-1} className="citation">
       <span className="cite-n">[{c.n}]</span>
@@ -489,7 +476,7 @@ function CitationItem({
           )}
         </span>
         <span className="muted small">
-          <SourceBadge id={c.item.source} source={source} />
+          <SourceBadge sourceId={c.item.source} name={source?.name} kind={source?.kind} itemKey={c.item.key} title={c.title} />
         </span>
       </span>
       {isOpenableUrl(c.url) && (

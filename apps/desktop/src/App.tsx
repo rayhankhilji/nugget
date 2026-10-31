@@ -61,6 +61,12 @@ export const PAGES: readonly PageDef[] = [
   { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: "," },
 ];
 
+/**
+ * The nav shows the pages in two groups: the user's own stuff (Today … Sources) and, from this
+ * page on, setup and settings. Order, ids and shortcuts don't change.
+ */
+const FIRST_SETTINGS_PAGE: PageId = "apps";
+
 const PAGE_KEY = "nugget.page";
 const PALETTE: Combo = { mod: true, key: "K" };
 
@@ -256,12 +262,11 @@ export function App() {
 
   const shortcutRows = useMemo<ShortcutRow[]>(
     () => [
-      { combo: PALETTE, label: t("shortcuts.palette") },
-      { combo: { mod: true, key: `1–${Math.min(9, PAGES.length)}` }, label: t("shortcuts.pages") },
-      ...PAGES.filter((p) => p.shortcut).map((p) => ({ combo: { mod: true, key: p.shortcut! }, label: t("shortcuts.openPage", { page: t(p.label) }) })),
-      { combo: { key: "?" }, label: t("shortcuts.help") },
-      { combo: { mod: true, key: "/" }, label: t("shortcuts.help") },
-      { combo: { key: "Escape" }, label: t("shortcuts.close") },
+      { combos: [PALETTE], label: t("shortcuts.palette") },
+      { combos: [{ mod: true, key: `1–${Math.min(9, PAGES.length)}` }], label: t("shortcuts.pages") },
+      ...PAGES.filter((p) => p.shortcut).map((p) => ({ combos: [{ mod: true, key: p.shortcut! }], label: t("shortcuts.openPage", { page: t(p.label) }) })),
+      { combos: [{ key: "?" }, { mod: true, key: "/" }], label: t("shortcuts.help") },
+      { combos: [{ key: "Escape" }], label: t("shortcuts.close") },
     ],
     [t],
   );
@@ -276,6 +281,26 @@ export function App() {
     const next = buttons[(i + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length];
     next?.focus();
   };
+
+  const navItem = (p: PageDef, i: number) => {
+    const combo = pageCombo(p, i);
+    const label = t(p.label);
+    return (
+      <li key={p.id}>
+        <button
+          type="button"
+          className="nav-item"
+          aria-current={p.id === page ? "page" : undefined}
+          aria-keyshortcuts={combo ? comboAria(combo) : undefined}
+          title={combo ? t("shortcuts.hint", { label, keys: comboLabel(combo) }) : undefined}
+          onClick={() => go(p.id)}
+        >
+          {label}
+        </button>
+      </li>
+    );
+  };
+  const split = Math.max(0, PAGES.findIndex((p) => p.id === FIRST_SETTINGS_PAGE));
 
   const current = PAGES.find((p) => p.id === page) ?? PAGES[0]!;
   const Current = current.Component;
@@ -293,35 +318,24 @@ export function App() {
           <span>{t("app.name")}</span>
         </div>
         <button type="button" className="palette-trigger" onClick={() => setPalette(true)} aria-keyshortcuts={comboAria(PALETTE)} aria-haspopup="dialog">
-          <span>{t("app.openPalette")}</span>
+          <span className="palette-trigger-label">{t("app.openPalette")}</span>
           <kbd aria-hidden="true" dir="ltr">
             {comboLabel(PALETTE)}
           </kbd>
         </button>
         <nav aria-label={t("app.navLabel")} onKeyDown={onNavKey}>
-          <ul>
-            {PAGES.map((p, i) => {
-              const combo = pageCombo(p, i);
-              const label = t(p.label);
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    className="nav-item"
-                    aria-current={p.id === page ? "page" : undefined}
-                    aria-keyshortcuts={combo ? comboAria(combo) : undefined}
-                    title={combo ? t("shortcuts.hint", { label, keys: comboLabel(combo) }) : undefined}
-                    onClick={() => go(p.id)}
-                  >
-                    {label}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <ul>{PAGES.slice(0, split).map((p, i) => navItem(p, i))}</ul>
+          <div>
+            <p className="nav-group-label" id="nav-group-settings">
+              {t("app.navGroup.settings")}
+            </p>
+            <ul aria-labelledby="nav-group-settings">{PAGES.slice(split).map((p, i) => navItem(p, split + i))}</ul>
+          </div>
         </nav>
-        <ConnectionPill conn={conn} />
-        <SidebarSettings onSetup={() => setOnboarding(true)} />
+        <div className="sidebar-foot">
+          <ConnectionPill conn={conn} />
+          <SidebarSettings onSetup={() => setOnboarding(true)} />
+        </div>
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} aria-label={t(current.label)}>
         {conn === null ? (

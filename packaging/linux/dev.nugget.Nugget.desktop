@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Nugget
+Comment=Local-first personal AI
+Exec=/usr/bin/nugget-desktop
+Icon=nugget-desktop
+StartupWMClass=nugget-desktop
+Categories=Office;
+Terminal=false
+NoDisplay=true
