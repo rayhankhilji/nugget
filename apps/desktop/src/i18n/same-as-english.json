@@ -103,7 +103,10 @@
     "status.vault",
     "today.learning.scope.domain",
     "updates.badge.beta",
-    "updates.title"
+    "updates.title",
+    "searchui.kind.chat",
+    "searchui.saveName",
+    "searchui.text"
   ],
   "es": [
     "addSource.linear.include",
@@ -131,7 +134,8 @@
     "status.embeddings",
     "status.role.chat",
     "status.role.embedding",
-    "updates.badge.beta"
+    "updates.badge.beta",
+    "searchui.kind.chat"
   ],
   "fr": [
     "addSource.folder.defaultNone",
@@ -185,7 +189,9 @@
     "status.mentions",
     "today.factor.importance",
     "updates.badge.stable",
-    "updates.channel.stable"
+    "updates.channel.stable",
+    "searchui.facet.date",
+    "searchui.facet.source"
   ],
   "hi": [
     "addSource.linear.include",

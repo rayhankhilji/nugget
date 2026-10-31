@@ -1,44 +1,77 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
   api,
   errorMessage,
   events,
+  isCommandMissing,
   isMethodNotFound,
   isOpenableUrl,
   type ChatDone,
   type Citation,
   type ContextResponse,
+  type FacetedHit,
+  type FacetedResult,
   type Locality,
   type SearchHit,
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
-import { usePendingSearch } from "../hooks.nav";
+import { usePendingSearch, usePendingSearchState } from "../hooks.nav";
 import { citedNumbers, splitCitations, withheldNotice } from "../citations";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
 import { Highlight, itemFileName, plainSnippet, SourceBadge } from "../components/Provenance";
 import { sourceKindOf } from "../recency";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
-import { formatNumber, useT } from "../i18n";
+import { formatDate, formatNumber, useT } from "../i18n";
+import { sourceKindLabel } from "../format";
+import { addRecent } from "../savedSearches";
+import { decode, EMPTY_STATE, encode, hasFilters, toFilters, type SearchState } from "../searchState";
+import { Facets, kindLabel } from "../components/search/Facets";
+import { Preview } from "../components/search/Preview";
+import { RecentSearchList, SavedSearchList, SaveSearchDialog } from "../components/search/SavedSearches";
+import { Timeline } from "../components/search/Timeline";
+import "../styles-search.css";
 
 const LIMITS = [10, 25, 50];
 const BUDGETS = [1000, 2000, 4000, 8000];
+
+/** A result from `search.faceted` (with date, kind, people) or from plain `search` (without). */
+type Hit = SearchHit & Partial<Omit<FacetedHit, keyof SearchHit>>;
 
 export function SearchPage() {
   const t = useT();
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(25);
-  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [hits, setHits] = useState<Hit[] | null>(null);
   const [searched, setSearched] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  /** The search shown: query, filters and, when set, the timeline in view. */
+  const [state, setState] = useState<SearchState>(EMPTY_STATE);
+  const [facets, setFacets] = useState<FacetedResult["facets"] | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [announcement, announce] = useAnnouncer();
+  /** Whether the daemon serves `search.faceted` (unknown until the first search). */
+  const faceted = useRef<boolean | null>(null);
+  /** Only the latest search may update the page. */
+  const seq = useRef(0);
+  /** The result whose preview is open, to hand focus back when it closes. */
+  const returnFocus = useRef<HTMLElement | null>(null);
   const opener = useOpener();
   const inputRef = useRef<HTMLInputElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   // Source names and kinds for badges. Optional: older daemons don't have `sources.list` (null).
   const sources = useAsync(() => api.sourcesList().catch(() => null));
   const byId = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
+  const sourceName = (id: string) => {
+    const s = byId.get(id);
+    return s?.name || sourceKindLabel(s?.kind ?? sourceKindOf(id));
+  };
   // Nothing to search yet: no sources, or none has indexed an item. Unknown (older daemon) is not "nothing".
   const nothingIndexed = !!sources.data && sources.data.reduce((n, s) => n + s.items, 0) === 0;
   // Sources exist but none has indexed anything yet: indexing is still running (or failing).
@@ -46,28 +79,139 @@ export function SearchPage() {
   const failing = (sources.data ?? []).filter((s) => s.state === "error" || s.last_error).length;
   const nothingHint = stillIndexing ? t("search.indexingHint") : t("search.noSourcesHint");
 
-  const run = async (e?: FormEvent, override?: string) => {
+  /** Run `next` (its query and filters); `append` loads the next page of the same search. */
+  const runState = async (next: SearchState, append = false) => {
+    const q = next.q.trim();
+    if (!q) return;
+    const mine = ++seq.current;
+    const offset = append ? (hits?.length ?? 0) : 0;
+    if (append) setMoreBusy(true);
+    else setBusy(true);
+    setError(null);
+    try {
+      let result: FacetedResult | null = null;
+      if (faceted.current !== false) {
+        try {
+          result = await api.searchFaceted({ query: q, limit, offset, filters: toFilters(next) });
+          faceted.current = true;
+        } catch (err) {
+          if (!isCommandMissing(err)) throw err;
+          faceted.current = false;
+        }
+      }
+      const plain = result ? null : await api.search(q, limit);
+      if (mine !== seq.current) return;
+      if (result) {
+        setHits((prev) => (append ? [...(prev ?? []), ...result.hits] : result.hits));
+        setFacets(result.facets);
+        setTotal(result.total);
+      } else {
+        setHits(plain);
+        setFacets(null);
+        setTotal(null);
+      }
+      if (!append) {
+        setSelected(null);
+        setSearched(q);
+        setState({ ...next, q, timeline: null });
+        addRecent(encode({ ...next, q }));
+      }
+    } catch (err) {
+      if (mine === seq.current) setError(err);
+    } finally {
+      if (mine === seq.current) {
+        setBusy(false);
+        setMoreBusy(false);
+      }
+    }
+  };
+
+  const run = (e?: FormEvent, override?: string) => {
     e?.preventDefault();
     const q = (override ?? query).trim();
     if (!q) return;
-    setBusy(true);
-    setError(null);
-    try {
-      setHits(await api.search(q, limit));
-      setSearched(q);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
+    // A new query keeps the filters only when the daemon can apply them.
+    return runState({ ...state, q, timeline: null });
+  };
+
+  /** Apply an encoded state: a saved or recent search, a timeline requested from elsewhere. */
+  const apply = (encoded: string) => {
+    const s = decode(encoded);
+    setQuery(s.q);
+    if (s.timeline) {
+      setSelected(null);
+      setState(s);
+      return;
     }
+    inputRef.current?.focus();
+    void runState(s);
   };
 
   // A search from the command palette: fill the box and run it, keeping focus in the box.
   usePendingSearch((q) => {
     setQuery(q);
     inputRef.current?.focus();
-    void run(undefined, q);
+    void runState({ ...EMPTY_STATE, q });
   });
+  usePendingSearchState(apply);
+
+  const openTimeline = (entityId: string) => {
+    setSelected(null);
+    setState((s) => ({ ...s, timeline: entityId }));
+  };
+  const closeTimeline = () => {
+    setState((s) => ({ ...s, timeline: null }));
+    if (!hits && state.q) void runState({ ...state, timeline: null });
+    focusBack.current = true;
+  };
+  // Back on the results: focus their heading (or the box when there are none yet).
+  const focusBack = useRef(false);
+  useEffect(() => {
+    if (!focusBack.current || state.timeline) return;
+    focusBack.current = false;
+    (headingRef.current ?? inputRef.current)?.focus();
+  }, [state.timeline]);
+
+  const select = (i: number, from: HTMLElement) => {
+    returnFocus.current = from;
+    setSelected(i);
+  };
+  const closePreview = () => {
+    setSelected(null);
+    if (returnFocus.current?.isConnected) returnFocus.current.focus();
+  };
+
+  // Arrow keys move between results (each result's title is a button).
+  const onResultsKey = (e: KeyboardEvent<HTMLOListElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>(".result-select"));
+    const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0) return;
+    e.preventDefault();
+    buttons[Math.max(0, Math.min(buttons.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
+  };
+
+  const count = total ?? hits?.length ?? 0;
+  const shownState = { ...state, q: state.q || query.trim() };
+  const canSave = !!shownState.q || !!state.timeline;
+  const preview = selected !== null ? hits?.[selected] : undefined;
+  const filtered = hasFilters(state);
+
+  if (state.timeline) {
+    return (
+      <div className="page">
+        <PageHeader title={t("search.title")} description={t("search.description")} actions={<SaveButton disabled={!canSave} onClick={() => setSaving(true)} />} />
+        <div aria-live="polite" className={opener.status ? (opener.status.error ? "note note-error" : "note") : "visually-hidden"}>
+          {opener.status?.text}
+        </div>
+        <Timeline entityId={state.timeline} onBack={closeTimeline} onOpen={opener.open} />
+        {saving && (
+          <SaveSearchDialog state={encode(state)} defaultName="" onClose={() => setSaving(false)} onSaved={(name) => announce(t("searchui.savedAnnounce", { name }))} />
+        )}
+        <Announce message={announcement} />
+      </div>
+    );
+  }
 
   return (
     <div className="page">
@@ -75,9 +219,12 @@ export function SearchPage() {
         title={t("search.title")}
         description={t("search.description")}
         actions={
-          <button type="button" className="btn btn-ghost" aria-expanded={askOpen} aria-controls="ask-panel" onClick={() => setAskOpen((o) => !o)}>
-            {askOpen ? t("search.hideAsk") : t("search.ask")}
-          </button>
+          <>
+            <SaveButton disabled={!canSave} onClick={() => setSaving(true)} />
+            <button type="button" className="btn btn-ghost" aria-expanded={askOpen} aria-controls="ask-panel" onClick={() => setAskOpen((o) => !o)}>
+              {askOpen ? t("search.hideAsk") : t("search.ask")}
+            </button>
+          </>
         }
       />
       <form className="search-bar" role="search" onSubmit={run}>
@@ -111,7 +258,10 @@ export function SearchPage() {
 
       {askOpen && <AskPanel initialQuestion={query.trim()} byId={byId} onOpen={opener.open} />}
 
-      <ErrorNote error={error} onRetry={() => void run()} />
+      <SavedSearchList onRun={apply} />
+      {!query.trim() && <RecentSearchList onRun={apply} />}
+
+      <ErrorNote error={error} onRetry={() => void runState({ ...state, q: state.q || query.trim() })} />
       {failing > 0 && (
         <p className="note" role="status">
           {t("search.failingSources", { n: failing })} <GoToPage page="sources" className="btn btn-ghost btn-small" />
@@ -123,59 +273,145 @@ export function SearchPage() {
       </div>
       {/* Announces each finished search once; the visible heading below carries the same text. */}
       <div aria-live="polite" className="visually-hidden">
-        {hits && !busy && t("search.resultsFor", { n: hits.length, query: searched })}
+        {hits && !busy && t("search.resultsFor", { n: count, query: searched })}
       </div>
 
       {busy && !hits && <Loading label={t("search.searching")} lines={4} />}
-      {hits && (
-        <h2 id="search-results-heading" className="pg-results-heading">
-          {t("search.resultsFor", { n: hits.length, query: searched })}
-        </h2>
-      )}
-      {hits && hits.length === 0 && (
-        <EmptyState title={t("search.noResults", { query: searched })} action={nothingIndexed ? <GoToPage page="sources" className="btn btn-primary" /> : undefined}>
-          {nothingIndexed ? nothingHint : t("search.noResultsHint")}
-        </EmptyState>
-      )}
-      {hits && hits.length > 0 && (
-        <ol className={busy ? "results pg-stale" : "results"} aria-labelledby="search-results-heading" aria-busy={busy}>
-          {hits.map((h, i) => {
-            const source = byId.get(h.item.source);
-            const title = h.title || itemFileName(h.item.key, source?.kind ?? sourceKindOf(h.item.source)) || t("search.untitled");
-            return (
-              <li key={`${h.item.source}\u0000${h.item.key}\u0000${i}`} className="result">
-                <div className="result-head">
-                  <span className="result-title" dir="auto">
-                    {title}
-                  </span>
-                  <span className="result-tools">
-                    {isOpenableUrl(h.url) && (
-                      <button type="button" className="btn btn-small" onClick={() => void opener.open(h.url!, title)} aria-label={t("search.openTitle", { title })}>
-                        {t("search.open")}
+      <div className={`sr-body${facets ? " sr-has-facets" : ""}${preview ? " sr-has-preview" : ""}`}>
+        {facets && hits && (
+          <Facets facets={facets} state={state} sourceName={sourceName} onChange={(next) => void runState(next)} onTimeline={openTimeline} />
+        )}
+        <div className="sr-results">
+          {hits && (
+            <h2 id="search-results-heading" className="pg-results-heading" ref={headingRef} tabIndex={-1}>
+              {t("search.resultsFor", { n: count, query: searched })}
+            </h2>
+          )}
+          {hits && hits.length === 0 && (
+            <EmptyState
+              title={t("search.noResults", { query: searched })}
+              action={
+                filtered ? (
+                  <button type="button" className="btn btn-primary" onClick={() => void runState({ ...state, sources: [], kinds: [], people: [], from: null, to: null })}>
+                    {t("searchui.clearFilters")}
+                  </button>
+                ) : nothingIndexed ? (
+                  <GoToPage page="sources" className="btn btn-primary" />
+                ) : undefined
+              }
+            >
+              {filtered ? t("searchui.noResultsFiltered") : nothingIndexed ? nothingHint : t("search.noResultsHint")}
+            </EmptyState>
+          )}
+          {hits && hits.length > 0 && (
+            <ol className={busy ? "results pg-stale" : "results"} aria-labelledby="search-results-heading" aria-busy={busy} onKeyDown={onResultsKey}>
+              {hits.map((h, i) => {
+                const source = byId.get(h.item.source);
+                const title = h.title || itemFileName(h.item.key, source?.kind ?? sourceKindOf(h.item.source)) || t("search.untitled");
+                return (
+                  <li key={`${h.item.source}\u0000${h.item.key}\u0000${i}`} className={selected === i ? "result sr-selected" : "result"}>
+                    <div className="result-head">
+                      <button
+                        type="button"
+                        className="result-title result-select"
+                        dir="auto"
+                        aria-expanded={selected === i}
+                        aria-controls={selected === i ? "search-preview" : undefined}
+                        onClick={(e) => select(i, e.currentTarget)}
+                      >
+                        {title}
                       </button>
+                      <span className="result-tools">
+                        {isOpenableUrl(h.url) && (
+                          <button type="button" className="btn btn-small" onClick={() => void opener.open(h.url!, title)} aria-label={t("search.openTitle", { title })}>
+                            {t("search.open")}
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                    {(h.kind || h.date || h.sensitive) && (
+                      <p className="small sr-meta">
+                        {h.kind && <span className="badge">{kindLabel(t, h.kind)}</span>}
+                        {h.date && (
+                          <time dateTime={h.date} className="muted">
+                            {formatDate(h.date)}
+                          </time>
+                        )}
+                        {h.sensitive && (
+                          <span className="badge badge-warn" title={t("search.sensitiveTitle")}>
+                            {t("search.sensitive")}
+                          </span>
+                        )}
+                      </p>
                     )}
-                  </span>
-                </div>
-                <p className="result-snippet" dir="auto">
-                  <Highlight text={plainSnippet(h.snippet)} query={searched} />
-                </p>
-                <p className="muted small result-meta">
-                  <SourceBadge sourceId={h.item.source} name={source?.name} kind={source?.kind} itemKey={h.item.key} title={h.title} />
-                </p>
-              </li>
-            );
-          })}
-        </ol>
+                    <p className="result-snippet" dir="auto">
+                      <Highlight text={plainSnippet(h.snippet)} query={searched} />
+                    </p>
+                    <p className="muted small result-meta">
+                      <SourceBadge sourceId={h.item.source} name={source?.name} kind={source?.kind} itemKey={h.item.key} title={h.title} />
+                    </p>
+                    {h.people && h.people.length > 0 && (
+                      <ul className="chips sr-people" aria-label={t("searchui.peopleIn", { title })}>
+                        {h.people.map((p) => (
+                          <li key={p.id}>
+                            <button type="button" className="chip" onClick={() => openTimeline(p.id)} aria-label={t("searchui.timelineFor", { name: p.name })}>
+                              <bdi>{p.name}</bdi>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          {hits && total !== null && hits.length < total && (
+            <button type="button" className="btn sr-more" disabled={moreBusy || busy} onClick={() => void runState(state, true)}>
+              {moreBusy ? <Spinner label={t("searchui.loadingMore")} /> : t("searchui.showMore", { shown: hits.length, total })}
+            </button>
+          )}
+          {!hits && !busy && !error &&
+            (nothingIndexed ? (
+              <EmptyState title={stillIndexing ? t("search.indexingTitle") : t("search.noSourcesTitle")} action={<GoToPage page="sources" className="btn btn-primary" />}>
+                {nothingHint}
+              </EmptyState>
+            ) : (
+              <EmptyState title={t("search.typeQuery")}>{t("search.typeQueryHint")}</EmptyState>
+            ))}
+        </div>
+        {preview && (
+          <Preview
+            item={preview.item}
+            chunkId={preview.chunk_id}
+            fallbackTitle={preview.title ?? ""}
+            query={searched}
+            source={byId.get(preview.item.source)}
+            onClose={closePreview}
+            onTimeline={openTimeline}
+            onOpen={opener.open}
+          />
+        )}
+      </div>
+      {saving && (
+        <SaveSearchDialog
+          state={encode(shownState)}
+          defaultName={shownState.q}
+          onClose={() => setSaving(false)}
+          onSaved={(name) => announce(t("searchui.savedAnnounce", { name }))}
+        />
       )}
-      {!hits && !busy && !error &&
-        (nothingIndexed ? (
-          <EmptyState title={stillIndexing ? t("search.indexingTitle") : t("search.noSourcesTitle")} action={<GoToPage page="sources" className="btn btn-primary" />}>
-            {nothingHint}
-          </EmptyState>
-        ) : (
-          <EmptyState title={t("search.typeQuery")}>{t("search.typeQueryHint")}</EmptyState>
-        ))}
+      <Announce message={announcement} />
     </div>
+  );
+}
+
+function SaveButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
+  const t = useT();
+  return (
+    <button type="button" className="btn btn-ghost" disabled={disabled} onClick={onClick} aria-haspopup="dialog">
+      {t("searchui.saveSearch")}
+    </button>
   );
 }
 

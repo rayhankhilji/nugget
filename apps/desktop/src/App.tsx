@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { api, events, errorMessage, type ConnectionInfo, type PageId } from "./api";
 import { useEvent } from "./hooks";
-import { requestNewChat, requestSearch, usePendingPage } from "./hooks.nav";
+import { requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
 import { useT, type MessageKey } from "./i18n";
 import { Logo } from "./components/Logo";
@@ -9,6 +9,8 @@ import { Offline } from "./components/Offline";
 import { RecoveryBanner } from "./components/BackupSettings";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { ShortcutsHelp, type ShortcutRow } from "./components/ShortcutsHelp";
+import { SavedSearchNav } from "./components/search/SavedSearches";
+import { useSavedSearches, type SavedSearch } from "./savedSearches";
 import { ChatPage } from "./pages/Chat";
 import { SearchPage } from "./pages/Search";
 import { KnowledgePage } from "./pages/Knowledge";
@@ -103,6 +105,7 @@ export function App() {
   const mainRef = useRef<HTMLElement>(null);
   // Set when a shortcut or the palette navigates: focus moves to the new page once it renders.
   const focusMain = useRef(false);
+  const saved = useSavedSearches();
 
   const go = useCallback((id: PageId) => {
     setPage(id);
@@ -201,6 +204,15 @@ export function App() {
     }
   });
 
+  /** Open Search with a saved search applied (the page takes focus itself). */
+  const runSaved = useCallback(
+    (s: SavedSearch) => {
+      requestSearchState(s.state);
+      go("search");
+    },
+    [go],
+  );
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const pages = PAGES.map((p, i): PaletteItem => {
       const combo = pageCombo(p, i);
@@ -243,8 +255,15 @@ export function App() {
         },
       },
     ];
-    return [...pages, ...actions];
-  }, [t, go, jump]);
+    const searches = saved.map((s): PaletteItem => ({
+      id: `saved:${s.id}`,
+      label: t("searchui.paletteSaved", { name: s.name }),
+      keywords: t("app.keywords.search"),
+      group: t("palette.group.action"),
+      run: () => runSaved(s),
+    }));
+    return [...pages, ...actions, ...searches];
+  }, [t, go, jump, saved, runSaved]);
 
   const searchItem = useCallback(
     (q: string): PaletteItem => ({
@@ -332,6 +351,7 @@ export function App() {
             <ul aria-labelledby="nav-group-settings">{PAGES.slice(split).map((p, i) => navItem(p, split + i))}</ul>
           </div>
         </nav>
+        <SavedSearchNav onRun={runSaved} />
         <div className="sidebar-foot">
           <ConnectionPill conn={conn} />
           <SidebarSettings onSetup={() => setOnboarding(true)} />
