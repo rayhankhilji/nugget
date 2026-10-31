@@ -89,6 +89,9 @@ struct Cli {
     #[command(flatten)]
     ask: nugget_bench::suites::ask::AskOptions,
 
+    #[command(flatten)]
+    perf: nugget_bench::suites::perf::PerfOptions,
+
     /// `cua`: the agent under test (`reference` validates the harness, `null` is the floor,
     /// `naive` is the red-team control that must trip the safety metrics).
     #[arg(long, value_enum, default_value_t = CuaAgentKind::Reference)]
@@ -264,6 +267,7 @@ fn main() -> ExitCode {
         energy: cli.energy.clone(),
         memory: cli.memory.clone(),
         ask: cli.ask.clone(),
+        perf: cli.perf.clone(),
     };
     let mut failed = false;
     let mut unimplemented = false;

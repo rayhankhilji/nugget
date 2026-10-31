@@ -68,9 +68,23 @@ pub struct CorpusConfig {
     pub topics: usize,
     pub vocab: usize,
     pub words_per_topic: usize,
+    /// Body length in words: exactly this many when `length_sigma` is 0 (the default), else
+    /// the median of a log-normal length distribution.
     pub words_per_doc: usize,
     pub seed: u64,
+    /// Spread of the log-normal body length (σ of `ln(words)`); 0 gives every document exactly
+    /// `words_per_doc` words. [`MAIL_LENGTH_SIGMA`] gives a mailbox-like mix: most items a few
+    /// dozen words, a long tail of long threads and documents.
+    pub length_sigma: f64,
 }
+
+/// σ of `ln(words)` for a mailbox-like size mix (with a median of 80 words: about 10% of items
+/// under 22 words, 10% over 290, 1% over 1,000; capped at [`MAX_WORDS_PER_DOC`]).
+pub const MAIL_LENGTH_SIGMA: f64 = 1.0;
+/// Longest body a log-normal draw may produce.
+pub const MAX_WORDS_PER_DOC: usize = 4_000;
+/// Shortest body a log-normal draw may produce.
+pub const MIN_WORDS_PER_DOC: usize = 8;
 
 impl Default for CorpusConfig {
     fn default() -> Self {
@@ -81,6 +95,7 @@ impl Default for CorpusConfig {
             words_per_topic: 60,
             words_per_doc: 120,
             seed: 42,
+            length_sigma: 0.0,
         }
     }
 }
@@ -159,11 +174,24 @@ impl Corpus {
         }
     }
 
+    /// Body length of the next document: fixed, or a log-normal draw (Box–Muller) when
+    /// `length_sigma` is set. A fixed length draws nothing, so fixed corpora are unchanged.
+    fn doc_len(&self, rng: &mut Rng) -> usize {
+        let sigma = self.config.length_sigma;
+        if sigma <= 0.0 {
+            return self.config.words_per_doc;
+        }
+        let u1 = rng.unit().max(f64::MIN_POSITIVE);
+        let u2 = rng.unit();
+        let z = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+        let len = (self.config.words_per_doc as f64 * (sigma * z).exp()).round() as usize;
+        len.clamp(MIN_WORDS_PER_DOC, MAX_WORDS_PER_DOC)
+    }
+
     /// Generate a fresh document (also used to produce edits of an existing one).
     pub fn make_doc(&self, rng: &mut Rng, id: usize, topic: usize) -> Doc {
-        let words: Vec<u32> = (0..self.config.words_per_doc)
-            .map(|_| self.draw_word(rng, topic))
-            .collect();
+        let len = self.doc_len(rng);
+        let words: Vec<u32> = (0..len).map(|_| self.draw_word(rng, topic)).collect();
         let title_words: Vec<u32> = (0..3).map(|_| self.draw_word(rng, topic)).collect();
         Doc {
             id,
@@ -246,6 +274,29 @@ mod tests {
         assert_eq!(a.queries(20, 4, 0.3, 7), b.queries(20, 4, 0.3, 7));
         let c = Corpus::generate(CorpusConfig { seed: 43, ..cfg });
         assert_ne!(a.docs, c.docs);
+    }
+
+    #[test]
+    fn mail_lengths_are_log_normal_and_deterministic() {
+        let cfg = CorpusConfig {
+            docs: 4_000,
+            words_per_doc: 80,
+            length_sigma: MAIL_LENGTH_SIGMA,
+            ..CorpusConfig::default()
+        };
+        let a = Corpus::generate(cfg.clone());
+        assert_eq!(a.docs, Corpus::generate(cfg).docs);
+        let mut lens: Vec<usize> = a.docs.iter().map(|d| d.words.len()).collect();
+        lens.sort_unstable();
+        let median = lens[lens.len() / 2];
+        assert!((60..=105).contains(&median), "median {median}");
+        assert!(lens[0] >= MIN_WORDS_PER_DOC);
+        assert!(*lens.last().unwrap() <= MAX_WORDS_PER_DOC);
+        // A long tail: the 99th percentile is several times the median.
+        assert!(lens[lens.len() * 99 / 100] > 4 * median);
+        for d in &a.docs {
+            assert_eq!(d.body.split(' ').count(), d.words.len());
+        }
     }
 
     #[test]

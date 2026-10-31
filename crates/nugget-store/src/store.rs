@@ -253,7 +253,10 @@ impl Store {
         self.with_read_conn(|c| {
             let (items, chunks): (i64, i64) = c
                 .query_row(
-                    "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM chunks)",
+                    // The trigger-maintained per-source totals (schema v10): a handful of
+                    // rows, where `count(*)` scanned every item and chunk (tens of ms at 500k).
+                    "SELECT coalesce(sum(max(items, 0)), 0), coalesce(sum(max(chunks, 0)), 0)
+                     FROM source_stats",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )

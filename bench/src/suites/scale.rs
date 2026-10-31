@@ -51,6 +51,9 @@ const DEPTH: usize = 10;
 pub struct StoreParams {
     pub docs: usize,
     pub words_per_doc: usize,
+    /// σ of ln(words per item); 0 gives every item `words_per_doc` words (see
+    /// [`CorpusConfig::length_sigma`]).
+    pub length_sigma: f64,
     /// Chunks each item is split into (each embedded).
     pub chunks_per_item: usize,
     pub dim: usize,
@@ -76,6 +79,7 @@ impl StoreParams {
         Self {
             docs: p.docs,
             words_per_doc: p.words_per_doc,
+            length_sigma: 0.0,
             chunks_per_item: 2,
             dim: p.dim,
             queries: scale.pick(30, 200, 300, 500),
@@ -94,6 +98,7 @@ impl StoreParams {
         Self {
             docs: 100_000,
             words_per_doc: 120,
+            length_sigma: 0.0,
             chunks_per_item: 1,
             dim: 384,
             queries: 100,
@@ -130,7 +135,14 @@ impl Benchmark for ScaleBench {
 
 /// Entry point for `perf --backend real`.
 pub fn run(ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-    run_with(ctx, &StoreParams::for_scale(ctx.scale()))
+    let mut p = StoreParams::for_scale(ctx.scale());
+    let opts = ctx.config.perf.clone();
+    if let Some(n) = opts.perf_items {
+        p.docs = n;
+    }
+    (p.words_per_doc, p.length_sigma) = opts.perf_sizes.shape(p.words_per_doc);
+    ctx.param("sizes", opts.perf_sizes.as_str());
+    run_with(ctx, &p)
 }
 
 /// A router with `embedder` as the (probed) `Embedding` tier, as the real memory backend uses.
@@ -259,6 +271,7 @@ pub fn run_with(ctx: &mut RunContext, p: &StoreParams) -> Result<Vec<Metric>, Be
     );
     ctx.param("docs", p.docs);
     ctx.param("words_per_doc", p.words_per_doc);
+    ctx.param("length_sigma", p.length_sigma);
     ctx.param("chunks_per_item", p.chunks_per_item);
     ctx.param("embedding_dim", p.dim);
     ctx.param("queries", p.queries);
@@ -295,6 +308,7 @@ async fn run_async(p: &StoreParams, seed: u64) -> Result<Vec<Metric>, BenchError
     let corpus = Corpus::generate(CorpusConfig {
         docs: p.docs,
         words_per_doc: p.words_per_doc,
+        length_sigma: p.length_sigma,
         seed,
         ..CorpusConfig::default()
     });
@@ -692,6 +706,7 @@ mod tests {
         let corpus = Corpus::generate(CorpusConfig {
             docs: 2,
             words_per_doc: 10,
+            length_sigma: 0.0,
             seed: 1,
             ..CorpusConfig::default()
         });

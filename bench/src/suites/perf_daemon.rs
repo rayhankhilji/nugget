@@ -62,7 +62,10 @@ const POLL: Duration = Duration::from_millis(20);
 pub struct DaemonParams {
     /// Items seeded into the store before the daemon starts.
     pub items: usize,
+    /// Words per item, or the median when `length_sigma` is set.
     pub words_per_doc: usize,
+    /// σ of ln(words per item); 0 for fixed-length items.
+    pub length_sigma: f64,
     pub dim: usize,
     /// Warm `search` calls after extraction (plus the first one).
     pub searches: usize,
@@ -83,6 +86,7 @@ impl DaemonParams {
         Self {
             items: scale.pick(300, 2_000, 10_000, 100_000),
             words_per_doc: 120,
+            length_sigma: 0.0,
             dim: 384,
             searches: scale.pick(20, 100, 200, 300),
             settle_s: scale.pick(1.0, 5.0, 10.0, 15.0),
@@ -124,7 +128,18 @@ pub fn find_nuggetd() -> Result<PathBuf, String> {
 /// is found.
 pub fn run(ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
     match find_nuggetd() {
-        Ok(exe) => run_with(ctx, &DaemonParams::for_scale(ctx.scale()), &exe),
+        Ok(exe) => {
+            let mut p = DaemonParams::for_scale(ctx.scale());
+            let opts = ctx.config.perf.clone();
+            if let Some(n) = opts.perf_items {
+                // Waits grow with the store: extraction runs at ~150 items/s on a CI runner.
+                p.timeout_s = p.timeout_s.max(n as f64 / 50.0);
+                p.items = n;
+            }
+            (p.words_per_doc, p.length_sigma) = opts.perf_sizes.shape(p.words_per_doc);
+            ctx.param("daemon_sizes", opts.perf_sizes.as_str());
+            run_with(ctx, &p, &exe)
+        }
         Err(why) => {
             eprintln!("note: daemon profile skipped: {why}");
             ctx.param("daemon", format!("skipped: {why}"));
@@ -154,6 +169,7 @@ pub fn run_with(
     );
     ctx.param("daemon_items", p.items);
     ctx.param("daemon_words_per_doc", p.words_per_doc);
+    ctx.param("daemon_length_sigma", p.length_sigma);
     ctx.param("daemon_embedding_dim", p.dim);
     ctx.param("daemon_searches", p.searches);
     ctx.param("daemon_settle_s", p.settle_s);
@@ -170,15 +186,27 @@ pub fn run_with(
     let corpus = Corpus::generate(CorpusConfig {
         docs: p.items,
         words_per_doc: p.words_per_doc,
+        length_sigma: p.length_sigma,
         seed,
         ..CorpusConfig::default()
     });
     let mut out = Vec::new();
     let t = Instant::now();
     seed_home(&paths, &corpus, p.dim, seed)?;
+    let seed_s = t.elapsed().as_secs_f64();
+    out.push(Metric::new(
+        "daemon.seed.items_per_s",
+        p.items as f64 / seed_s.max(1e-9),
+        "items/s",
+        Direction::HigherIsBetter,
+        "Store write throughput while seeding: items (with their chunks, full-text entries and \
+         vectors) written per second in process through the store's write API (hash \
+         embedding included)",
+    ));
+    disk_metrics(&paths, p.items, "after_seed", &mut out);
     out.push(Metric::new(
         "daemon.seed_s",
-        t.elapsed().as_secs_f64(),
+        seed_s,
         "s",
         Direction::Info,
         "Writing the seeded store in process before the daemon starts (embedding included; \
@@ -231,6 +259,29 @@ fn name(base: usize, i: usize) -> String {
     )
 }
 
+/// Longest seeded chunk, in words (about what the ingest chunker emits).
+const SEED_CHUNK_WORDS: usize = 256;
+
+/// An item's chunks as seeded: its text in runs of at most [`SEED_CHUNK_WORDS`] words, each
+/// embedded. Items of up to that many words (every fixed-size item) get one chunk.
+fn seed_chunks(text: &str, embedder: &HashEmbedder) -> Vec<NewChunk> {
+    let words: Vec<&str> = text.split(' ').collect();
+    if words.len() <= SEED_CHUNK_WORDS {
+        return vec![NewChunk::embedded(
+            text.to_owned(),
+            embedder.embed_text(text),
+        )];
+    }
+    words
+        .chunks(SEED_CHUNK_WORDS)
+        .map(|w| {
+            let t = w.join(" ");
+            let v = embedder.embed_text(&t);
+            NewChunk::embedded(t, v)
+        })
+        .collect()
+}
+
 /// Key file, config and the seeded store (an empty corpus gives an empty store).
 pub(crate) fn seed_home(
     paths: &Paths,
@@ -267,8 +318,8 @@ pub(crate) fn seed_home(
                 "extracted": {"frontmatter": {"project": project, "people": [a, b]}},
                 "tags": [format!("topic{}", doc.topic)],
             }));
-        let chunk = NewChunk::embedded(text.clone(), embedder.embed_text(&text));
-        let outcome = store.upsert_item_with_chunks(&item, &[chunk])?;
+        let chunks = seed_chunks(&text, &embedder);
+        let outcome = store.upsert_item_with_chunks(&item, &chunks)?;
         if outcome != UpsertOutcome::Inserted {
             return Err(BenchError::Failed(format!(
                 "seeding {} returned {outcome:?}",
@@ -653,6 +704,14 @@ async fn profile(
             "no search through the daemon found its target".into(),
         ));
     }
+    rss_metric(
+        out,
+        &sample(d.pid),
+        "after_searches",
+        "after the warm searches (under search load)",
+    );
+    hot_paths(&client, &queries[1..], call_timeout, out).await?;
+    disk_metrics(&env.paths, p.items, "after_extract", out);
     peak_metric(
         out,
         &sample(d.pid),
@@ -814,6 +873,210 @@ async fn profile(
     drop(client);
     d.stop().await?;
     Ok(())
+}
+
+/// Calls timed per hot read path.
+const HOT_CALLS: usize = 30;
+/// Entity-list filters typed on the knowledge page: a word every project name has, short
+/// prefixes and a topic tag.
+const FILTERS: [&str; 4] = ["project", "a", "ma", "topic1"];
+
+/// Time one IPC call `n` times; `latency_metrics` under `prefix`.
+async fn time_calls(
+    (client, timeout): (&Client, Duration),
+    m: &str,
+    params: impl Fn(usize) -> Value,
+    n: usize,
+    (prefix, what): (&str, &str),
+    out: &mut Vec<Metric>,
+) -> Result<Vec<Value>, BenchError> {
+    let mut lat = Vec::with_capacity(n);
+    let mut answers = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = Instant::now();
+        let v: Value = call(client, m, params(i), timeout).await?;
+        lat.push(us(t.elapsed()));
+        answers.push(v);
+    }
+    latency_metrics(out, prefix, what, &lat)?;
+    Ok(answers)
+}
+
+/// The read paths the app hits on every screen, timed on the full store after extraction:
+/// status and counts (`status`, `sources.list`, `ingest.status`, `knowledge.status`), the
+/// privacy ledger (`egress.recent`), Ask's retrieval step (`retrieve.context`), and the
+/// knowledge page (`knowledge.entities` pages, `knowledge.entity` detail, `knowledge.graph`).
+async fn hot_paths(
+    client: &Client,
+    queries: &[crate::corpus::Query],
+    timeout: Duration,
+    out: &mut Vec<Metric>,
+) -> Result<(), BenchError> {
+    for (m, name) in [
+        (method::STATUS, "status"),
+        (method::SOURCES_LIST, "sources_list"),
+        (method::INGEST_STATUS, "ingest_status"),
+        (method::KNOWLEDGE_STATUS, "knowledge_status"),
+    ] {
+        time_calls(
+            (client, timeout),
+            m,
+            |_| json!({}),
+            HOT_CALLS,
+            (
+                &format!("daemon.ipc.{name}.latency"),
+                &format!("a `{m}` IPC round trip on the full store"),
+            ),
+            out,
+        )
+        .await?;
+    }
+    time_calls(
+        (client, timeout),
+        method::EGRESS_RECENT,
+        |_| json!({"limit": 200}),
+        HOT_CALLS,
+        (
+            "daemon.ipc.egress_recent.latency",
+            "an `egress.recent` (limit 200, the privacy ledger) IPC round trip",
+        ),
+        out,
+    )
+    .await?;
+
+    let n = queries.len().clamp(1, 50);
+    let answers = time_calls(
+        (client, timeout),
+        method::RETRIEVE_CONTEXT,
+        |i| json!({"query": queries[i % queries.len()].text, "budget_tokens": 2000}),
+        n,
+        (
+            "daemon.ask.retrieve.latency",
+            "Ask's retrieval step: a `retrieve.context` IPC round trip (2,000-token budget, \
+         text-only: no embedding provider)",
+        ),
+        out,
+    )
+    .await?;
+    if answers.iter().all(|a| {
+        a.get("citations")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    }) {
+        return Err(BenchError::Failed(
+            "retrieve.context returned no citations for any query".into(),
+        ));
+    }
+
+    // The knowledge page: the first page of the entity list (as the page opens), deeper pages
+    // (scrolling), a name filter (typing), each entity's detail, and the graph overview.
+    let t = Instant::now();
+    let first: Vec<Value> = call(
+        client,
+        method::KNOWLEDGE_ENTITIES,
+        json!({"limit": 50}),
+        timeout,
+    )
+    .await?;
+    out.push(Metric::new(
+        "daemon.knowledge.page_load_ms",
+        t.elapsed().as_secs_f64() * 1e3,
+        "ms",
+        Direction::LowerIsBetter,
+        "Opening the knowledge page: the first `knowledge.entities` page (50 entities)",
+    ));
+    time_calls(
+        (client, timeout),
+        method::KNOWLEDGE_ENTITIES,
+        |i| json!({"limit": 50, "offset": (i * 997) % 10_000}),
+        HOT_CALLS,
+        (
+            "daemon.knowledge.entities.latency",
+            "a `knowledge.entities` page of 50 at offsets up to 10,000 (scrolling the entity list)",
+        ),
+        out,
+    )
+    .await?;
+    time_calls(
+        (client, timeout),
+        method::KNOWLEDGE_ENTITIES,
+        |i| json!({"limit": 50, "text": FILTERS[i % FILTERS.len()]}),
+        HOT_CALLS,
+        ("daemon.knowledge.entities_filter.latency",
+        "a `knowledge.entities` page of 50 filtered by a short name prefix (typing in the filter)"),
+        out,
+    )
+    .await?;
+    let ids: Vec<Value> = first
+        .iter()
+        .filter_map(|e| e.get("id").cloned())
+        .take(HOT_CALLS)
+        .collect();
+    if ids.is_empty() {
+        return Err(BenchError::Failed(
+            "knowledge.entities returned nothing".into(),
+        ));
+    }
+    time_calls(
+        (client, timeout),
+        method::KNOWLEDGE_ENTITY,
+        |i| json!({"id": ids[i % ids.len()]}),
+        HOT_CALLS,
+        (
+            "daemon.knowledge.entity.latency",
+            "an entity's detail page (`knowledge.entity`: claims, evidence, mentions) for the \
+         first page's entities",
+        ),
+        out,
+    )
+    .await?;
+    time_calls(
+        (client, timeout),
+        method::KNOWLEDGE_GRAPH,
+        |_| json!({"limit": 100}),
+        10,
+        (
+            "daemon.knowledge.graph.latency",
+            "the knowledge graph overview (`knowledge.graph`, 100 nodes)",
+        ),
+        out,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Size on disk of the store (database, WAL and shared memory files).
+fn store_bytes(paths: &Paths) -> u64 {
+    let db = paths.db_file();
+    let mut total = 0;
+    for suffix in ["", "-wal", "-shm"] {
+        let mut p = db.clone().into_os_string();
+        p.push(suffix);
+        total += std::fs::metadata(PathBuf::from(p)).map_or(0, |m| m.len());
+    }
+    total
+}
+
+fn disk_metrics(paths: &Paths, items: usize, when: &str, out: &mut Vec<Metric>) {
+    let bytes = store_bytes(paths) as f64;
+    out.push(Metric::new(
+        format!("daemon.disk.store_mib.{when}"),
+        bytes / (1024.0 * 1024.0),
+        "MiB",
+        Direction::LowerIsBetter,
+        format!(
+            "Store on disk (database + WAL + shm: items, chunks, full-text and vector indexes, \
+             knowledge graph), {}",
+            when.replace('_', " ")
+        ),
+    ));
+    out.push(Metric::new(
+        format!("daemon.disk.bytes_per_item.{when}"),
+        bytes / items.max(1) as f64,
+        "bytes",
+        Direction::LowerIsBetter,
+        format!("Store on disk per seeded item, {}", when.replace('_', " ")),
+    ));
 }
 
 /// Add a files source on `folder` (created if missing) and wait until it is watched. Returns
