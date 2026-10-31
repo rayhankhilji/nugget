@@ -150,6 +150,7 @@ export function SearchPage() {
           itemKey={hitKey}
           estimateSize={110}
           rowClassName="result"
+          focus="none"
           renderItem={(h) => {
             const source = byId.get(h.item.source);
             const title = h.title || itemFileName(h.item.key, source?.kind ?? sourceKindOf(h.item.source)) || t("search.untitled");

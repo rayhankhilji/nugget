@@ -147,7 +147,7 @@ describe("VirtualList", () => {
     expect(document.activeElement!.textContent).toBe("Row 99");
   });
 
-  it("asks for more once near the end and announces loading politely", async () => {
+  it("asks for more near the end and announces loading politely", async () => {
     const onEndReached = vi.fn();
     const items = many(200);
     const ui = (loadingMore: boolean, list = items) => (
@@ -160,14 +160,49 @@ describe("VirtualList", () => {
     act(() => rowsOf(container)[0]!.focus());
     await press(document.activeElement!, "End");
     expect(onEndReached).toHaveBeenCalledTimes(1);
-    // Moving around near the end does not ask again for the same rows.
-    await press(document.activeElement!, "ArrowUp");
-    expect(onEndReached).toHaveBeenCalledTimes(1);
+    // The caller de-duplicates (usePagedList.loadMore); while loading, nothing is asked.
 
     const { container: loading } = await render(ui(true));
     const status = loading.querySelector('[role="status"]')!;
     expect(status.getAttribute("aria-live")).toBe("polite");
     expect(status.textContent).toBe(t("list.loadingMore"));
+  });
+
+  it("asks again after a reset to the same length and first row (retry, refresh, filter round trip)", async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const items = many(40);
+    const ui = (onEndReached: () => void, list = items) => (
+      <VirtualList items={list} itemKey={key} renderItem={(r) => r.label} hasMore onEndReached={onEndReached} initialCount={40} />
+    );
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => root.render(ui(first)));
+    expect(first).toHaveBeenCalledTimes(1);
+    // The caller's state changed (a new callback), the rows are the same: ask again.
+    await act(async () => root.render(ui(second, [...items])));
+    expect(second).toHaveBeenCalledTimes(1);
+    act(() => root.unmount());
+    host.remove();
+  });
+
+  it("keeps rows out of the Tab order and leaves keys alone with focus=none", async () => {
+    const { container } = await render(
+      <VirtualList
+        items={many(50)}
+        itemKey={key}
+        focus="none"
+        renderItem={(r) => (
+          <button type="button">{r.label}</button>
+        )}
+      />,
+    );
+    expect(container.querySelectorAll("li[tabindex]")).toHaveLength(0);
+    const b = container.querySelector("button")!;
+    act(() => b.focus());
+    await press(b, "ArrowDown");
+    expect(document.activeElement).toBe(b);
   });
 
   it("does not ask for more when there is no more", async () => {
@@ -255,6 +290,33 @@ describe("VirtualList", () => {
     expect(idx.at(-1)).toBe(212);
     expect(list.style.paddingBlockStart).toBe(`${197 * 50}px`);
     expect(list.style.paddingBlockEnd).toBe(`${(100_000 - 213) * 50}px`);
+
+    // A focused row scrolled out of the window stays mounted (out of the layout), so focus
+    // doesn't fall to <body>; the window's padding is unchanged.
+    scrollTop = 0;
+    await act(async () => {
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await flush(3);
+    const row0 = list.querySelector<HTMLElement>('[data-index="0"]')!;
+    act(() => row0.focus());
+    scrollTop = 10_000;
+    await act(async () => {
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await flush(3);
+    expect(document.activeElement).toBe(row0);
+    expect(row0.isConnected).toBe(true);
+    expect(row0.hasAttribute("data-vl-detached")).toBe(true);
+    expect(rowsOf(list)[0]).toBe(row0);
+    expect(rowsOf(list)[1]!.dataset.index).toBe("197");
+    expect(list.style.paddingBlockStart).toBe(`${197 * 50}px`);
+    // Still one Tab stop: the focused row.
+    expect(rowsOf(list).filter((r) => r.tabIndex === 0)).toEqual([row0]);
+    // Arrow keys move on from it, back into the window's place.
+    await press(row0, "ArrowDown");
+    expect((document.activeElement as HTMLElement).dataset.index).toBe("1");
+    expect(list.querySelector("[data-vl-detached]")).toBeNull();
     act(() => root.unmount());
     vi.unstubAllGlobals();
     scroller.remove();

@@ -189,7 +189,7 @@ function EntityBrowser({
     (offset: number, limit: number) => api.knowledgeEntities({ text: query || null, kind, limit, offset }),
     [query, kind],
   );
-  const list = usePagedList(fetchPage, `${query}\u0000${kind ?? ""}\u0000${refreshKey}`, { pageSize: PAGE_SIZE });
+  const list = usePagedList(fetchPage, `${query}\u0000${kind ?? ""}\u0000${refreshKey}`, { pageSize: PAGE_SIZE, itemKey: entityKey });
 
   // Keep the list fresh while extraction runs, without refetching on every event (and without
   // pulling a long scrolled-through list from under the reader: see `refresh`).

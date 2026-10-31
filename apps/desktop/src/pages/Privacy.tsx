@@ -98,6 +98,7 @@ export function PrivacyPage() {
                 estimateSize={37}
                 columns={6}
                 rowIndexBase={2}
+                focus="none"
                 renderItem={(r) => (
                   <>
                     <td className="nowrap">{formatTime(r.at)}</td>

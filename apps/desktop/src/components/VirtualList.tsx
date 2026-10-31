@@ -25,6 +25,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FocusEvent,
   type HTMLAttributes,
   type KeyboardEvent,
@@ -69,8 +70,12 @@ export interface VirtualListProps<T> extends Omit<HTMLAttributes<HTMLElement>, "
   /** Called once per length of `items` when the window comes within `endThreshold` rows of the end. */
   onEndReached?: () => void;
   endThreshold?: number;
-  /** `row`: the `<li>`/`<tr>` takes focus. `inner`: an element inside it marked `data-vl-focus`. */
-  focus?: "row" | "inner";
+  /**
+   * `row`: the `<li>`/`<tr>` takes focus. `inner`: an element inside it marked `data-vl-focus`.
+   * `none`: rows are not focus stops and the list leaves keys alone (rows with their own controls,
+   * or a table already in a focusable scroll region).
+   */
+  focus?: "row" | "inner" | "none";
   rowClassName?: string;
   /** Table rows: `aria-rowindex` of the first row (1 + header rows). */
   rowIndexBase?: number;
@@ -208,6 +213,8 @@ export function VirtualList<T>({
   const [active, setActive] = useState(0);
   const [range, setRange] = useState<Range>(() => fallbackRange(n, initialCount, 0));
   const pendingFocus = useRef<number | null>(null);
+  /** The row holding focus: kept rendered (detached) when it scrolls out of the window. */
+  const [focused, setFocused] = useState<number | null>(null);
   const activeIndex = n === 0 ? -1 : Math.min(active, n - 1);
 
   const keys = useMemo(() => items.map((it, i) => itemKey(it, i)), [items, itemKey]);
@@ -286,7 +293,7 @@ export function VirtualList<T>({
     let changed = false;
     for (const child of Array.from(el.children) as HTMLElement[]) {
       const i = child.dataset.index;
-      if (i === undefined) continue;
+      if (i === undefined || child.dataset.vlDetached !== undefined) continue;
       const key = keys[Number(i)];
       const h = child.getBoundingClientRect().height;
       if (key === undefined || h <= 0) continue;
@@ -311,17 +318,14 @@ export function VirtualList<T>({
     row.scrollIntoView?.({ block: "nearest" });
   });
 
-  // Incremental loading: ask once per list length (and first row) as the window nears the end.
-  const asked = useRef("");
-  const firstKey = keys[0] ?? "";
+  // Incremental loading: ask whenever the window nears the end. The caller de-duplicates (see
+  // `usePagedList.loadMore`, a no-op while a page is in flight or already asked for); a new
+  // `onEndReached` (its state changed) asks again, so a refresh or retry never stalls the list.
   useEffect(() => {
     if (!onEndReached || !hasMore || loadingMore || n === 0) return;
     if (range.end < n - endThreshold) return;
-    const mark = `${n}\u0000${firstKey}`;
-    if (asked.current === mark) return;
-    asked.current = mark;
     onEndReached();
-  }, [onEndReached, hasMore, loadingMore, n, range.end, endThreshold, firstKey]);
+  }, [onEndReached, hasMore, loadingMore, n, range.end, endThreshold]);
 
   /** Scroll so row `i` is in view (by its offsets; it may not be rendered yet). */
   const reveal = (i: number) => {
@@ -341,6 +345,7 @@ export function VirtualList<T>({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    if (focus === "none") return;
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || isEditable(e.target)) return;
     const row = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
     if (!row || row.parentElement !== outer.current) return;
@@ -359,7 +364,14 @@ export function VirtualList<T>({
 
   const onFocus = (e: FocusEvent<HTMLElement>) => {
     const row = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
-    if (row && row.parentElement === outer.current) setActive(Number(row.dataset.index));
+    if (!row || row.parentElement !== outer.current) return;
+    const i = Number(row.dataset.index);
+    setActive(i);
+    setFocused(i);
+  };
+  const onBlur = (e: FocusEvent<HTMLElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (!next || !outer.current?.contains(next)) setFocused(null);
   };
 
   const start = Math.min(range.start, n);
@@ -370,25 +382,35 @@ export function VirtualList<T>({
   const after = Math.max(0, (offsets[n] ?? 0) - (offsets[end] ?? 0));
   const setSize = total ?? (hasMore ? -1 : n);
 
-  const rows: ReactNode[] = [];
-  if (table && before > 0) rows.push(<Spacer key="vl-before" size={before} columns={columns} />);
-  for (let i = start; i < end; i++) {
-    const tabIndex: 0 | -1 = i === tabbable ? 0 : -1;
+  // The focused row stays mounted when scrolled out of the window (else focus would fall to
+  // <body>): out of the layout, in document order, until focus leaves it.
+  const detached = focused !== null && focused < n && (focused < start || focused >= end) ? focused : null;
+  const row = (i: number, isDetached: boolean) => {
+    const tabIndex: 0 | -1 = i === (detached ?? tabbable) ? 0 : -1;
     const content = renderItem(items[i]!, { index: i, active: i === activeIndex, tabIndex });
-    const common = { "data-index": i, className: rowClassName, tabIndex: focus === "row" ? tabIndex : undefined };
-    rows.push(
-      table ? (
-        <tr key={keys[i]} {...common} aria-rowindex={rowIndexBase + i}>
-          {content}
-        </tr>
-      ) : (
-        <li key={keys[i]} {...common} aria-setsize={setSize} aria-posinset={i + 1}>
-          {content}
-        </li>
-      ),
+    const common = {
+      "data-index": i,
+      "data-vl-detached": isDetached ? "" : undefined,
+      style: isDetached ? DETACHED : undefined,
+      className: rowClassName,
+      tabIndex: focus === "row" ? tabIndex : undefined,
+    };
+    return table ? (
+      <tr key={keys[i]} {...common} aria-rowindex={rowIndexBase + i}>
+        {content}
+      </tr>
+    ) : (
+      <li key={keys[i]} {...common} aria-setsize={setSize} aria-posinset={i + 1}>
+        {content}
+      </li>
     );
-  }
+  };
+  const rows: ReactNode[] = [];
+  if (detached !== null && detached < start) rows.push(row(detached, true));
+  if (table && before > 0) rows.push(<Spacer key="vl-before" size={before} columns={columns} />);
+  for (let i = start; i < end; i++) rows.push(row(i, false));
   if (table && after > 0) rows.push(<Spacer key="vl-after" size={after} columns={columns} />);
+  if (detached !== null && detached >= end) rows.push(row(detached, true));
 
   const Tag = as;
   const listStyle = table ? style : { ...style, paddingBlockStart: before, paddingBlockEnd: after };
@@ -401,6 +423,7 @@ export function VirtualList<T>({
       style={listStyle}
       onKeyDown={onKeyDown}
       onFocus={onFocus}
+      onBlur={onBlur}
       data-virtual-list=""
     >
       {rows}
@@ -414,6 +437,16 @@ export function VirtualList<T>({
     </>
   );
 }
+
+/** A detached row: out of the layout (no room taken), still focusable and read by assistive tech. */
+const DETACHED: CSSProperties = {
+  position: "absolute",
+  inlineSize: 1,
+  blockSize: 1,
+  overflow: "hidden",
+  clipPath: "inset(50%)",
+  whiteSpace: "nowrap",
+};
 
 function Spacer({ size, columns }: { size: number; columns: number }) {
   return (

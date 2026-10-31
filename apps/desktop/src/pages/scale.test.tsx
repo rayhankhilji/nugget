@@ -47,14 +47,8 @@ describe("Privacy ledger at 50,000 rows", () => {
     expect(rendered[0]!.textContent).toContain("api0.example.com");
     // The summary still counts every row.
     expect(container.querySelector(".stats")!.textContent).toContain(formatNumber(TOTAL));
-    // End reaches the oldest row.
-    const first = rendered[0] as HTMLElement;
-    act(() => first.focus());
-    await press(first, "End");
-    const last = document.activeElement as HTMLElement;
-    expect(last.getAttribute("aria-rowindex")).toBe(String(TOTAL + 1));
-    expect(last.textContent).toContain(`api${(TOTAL - 1) % 7}.example.com`);
-    expect(table.querySelectorAll("tbody tr[data-index]").length).toBeLessThanOrEqual(40);
+    // Rows are not Tab stops: the table's scroll region already is one.
+    expect(table.querySelectorAll("tbody tr[tabindex]")).toHaveLength(0);
   });
 });
 
