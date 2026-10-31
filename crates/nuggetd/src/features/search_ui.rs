@@ -36,9 +36,7 @@ use logic::{
     PersonFacet, SelectedPerson,
 };
 
-const FACETED: &str = "search.faceted";
-const TIMELINE: &str = "search.timeline";
-const PREVIEW: &str = "search.preview";
+use nugget_core::ipc::search_ui_method::{FACETED, PREVIEW, TIMELINE};
 
 /// Candidates asked of the retriever for one faceted search.
 const POOL: usize = 300;

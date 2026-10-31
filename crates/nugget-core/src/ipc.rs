@@ -1060,6 +1060,16 @@ pub struct VoiceStatus {
     pub last_built: Option<time::OffsetDateTime>,
 }
 
+// ---- Search UI (II2) ----
+
+/// IPC method names of the search UI feature (`nuggetd` `features/search_ui`); their request and
+/// response types live in that feature module.
+pub mod search_ui_method {
+    pub const FACETED: &str = "search.faceted";
+    pub const TIMELINE: &str = "search.timeline";
+    pub const PREVIEW: &str = "search.preview";
+}
+
 // ---- Plugins (M6) ----
 
 /// IPC method names of the plugins feature.
