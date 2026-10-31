@@ -5,9 +5,6 @@ name: QA GG2 (Ask and Chat, real models)
 # source, and every question asked over IPC the way the desktop Chat does. See qa/GG2/README.md.
 
 on:
-  # TEMPORARY: removed before the final push.
-  push:
-    branches: [qa/ask]
   workflow_dispatch:
     inputs:
       only:

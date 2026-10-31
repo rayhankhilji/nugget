@@ -15,7 +15,7 @@ the bench crate.
 | `results/run1-41114925672/` | Run 1: answers, scores, configs, daemon logs, llama-server timings, `manual-grades.json`. |
 | `results/run2-*` | Run 2: a repro of the model-level findings, with `search` probes. |
 | `repro/search-probes.txt` | Exact-word searches used to detect items that triage dropped. |
-| `run.env` | Which runs a push of this branch performs (`RUNS=full` or `repro`, `ONLY=ids`). |
+| `run.env` | Defaults for a dispatched run (`RUNS=full` or `repro`, `ONLY=ids`); the workflow inputs override it. |
 
 Local run without models:
 
