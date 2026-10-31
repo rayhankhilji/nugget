@@ -1,0 +1,11 @@
+
+=== p6_verification ===
+[FINDING] refused click (no recipient) + finish(done): app_refused=true sent=0 decisions=["observe:Observe:allowed", "click:Send:approved:unverifiable", "finish:Observe:allowed"] outcome=Unverified(1 change(s) could not be verified (click))
+[INFO   ] refused click twice (focus already there on the 2nd): decisions=["observe:Observe:allowed", "click:Send:approved:unverifiable", "click:Send:approved:FAILED(click: no visible effect)", "finish:Observe:allowed"] outcome=Failed(the model reported success but verification failed (click: click: no visible effect))
+[FINDING] failed Send then a passing click on Discard + finish(done): sent=0 decisions=["observe:Observe:allowed", "click:Send:approved:unverifiable", "click:Send:approved:FAILED(click: no visible effect)", "click:Destroy:approved:passed", "finish:Observe:allowed"] outcome=Unverified(1 change(s) could not be verified (click))
+[FINDING] click on an id not on screen (error) then a passing click + finish(done): sent=0 decisions=["observe:Observe:allowed", "click:Send:approved:FAILED(the action did not complete: click on ⟦mail-send⟧ failed: not found: element 'mail-send' is not on screen (stale or unknown id); observe again. Observe again for fresh ids.)", "click:Edit:allowed:passed", "finish:Observe:allowed"] outcome=succeeded
+[FINDING] user declined the send; model says done: sent=0 decisions=["observe:Observe:allowed", "click:Send:rejected", "finish:Observe:allowed"] outcome=succeeded (bench maps Succeeded/Unverified to Done)
+[INFO   ] no action at all; model says done: outcome=succeeded
+--- p6_verification: verdicts identical in 3/3 runs
+
+4 finding check(s); unstable probes: []

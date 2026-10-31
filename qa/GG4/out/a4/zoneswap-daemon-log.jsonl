@@ -1,0 +1,4 @@
+{"timestamp":"2026-11-03T23:00:48.142984Z","level":"INFO","fields":{"message":"proactive cards configured","enabled":true,"judge":"Off","brief_time":"8:00:00.0","utc_offset":"-05:00:00"},"target":"nuggetd::features::proactive"}
+{"timestamp":"2026-11-03T23:01:06.313281Z","level":"INFO","fields":{"message":"morning brief ready","date":"2026-11-03","cards":0},"target":"nuggetd::features::proactive"}
+{"timestamp":"2026-11-04T02:49:24.206046Z","level":"INFO","fields":{"message":"the local UTC offset changed","utc_offset":"+00:00:00"},"target":"nuggetd::features::proactive"}
+{"timestamp":"2026-11-04T08:00:20.103888Z","level":"INFO","fields":{"message":"morning brief ready","date":"2026-11-04","cards":5},"target":"nuggetd::features::proactive"}

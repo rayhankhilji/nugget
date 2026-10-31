@@ -857,6 +857,9 @@ impl<'a> Session<'a> {
         self.llm_left = self.llm_left.saturating_sub(run.requests);
         self.stats.llm_requests += run.requests as u64;
         self.stats.llm_failed_requests += run.failed_requests as u64;
+        if run.provider.is_some() {
+            self.stats.llm_provider = run.provider;
+        }
         self.stats.llm_claims_accepted += run.gate.claims_accepted;
         self.stats.llm_claims_dropped += run.gate.claims_dropped;
         self.stats.llm_quotes_rejected += run.gate.quotes_rejected;

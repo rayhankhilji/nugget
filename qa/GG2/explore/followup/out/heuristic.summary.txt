@@ -1,0 +1,11 @@
+follow-up turns with support: 29; rewritten: 22
+hit with daemon query (rewrite if any): 27/29
+hit with original text only:           20/29
+started_ms follow-ups: min 3 median 5 max 11
+  F01.2 'Who is it with?' -> 'Who is it with? dentist appointment': hit=True orig_hit=False
+  F06.3 'How does that compare to the previous one?' -> 'How does that compare to the previous one? due': hit=True orig_hit=False
+  F07.2 'What should I do about it?' -> 'What should I do about it? blood test results': hit=True orig_hit=False
+  F08.3 'Who else is on it?' -> 'Who else is on it? booking reference': hit=True orig_hit=False
+  F11.2 'What is it for?' -> 'What is it for? physio': hit=True orig_hit=False
+  F13.2 'What time?' -> 'What time? farewell drinks': hit=True orig_hit=False
+  X01.3 'When do I fly there?' -> 'When do I fly there? kyoto': hit=True orig_hit=False

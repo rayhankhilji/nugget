@@ -1,0 +1,21 @@
+From: Sam Patel <sam.patel@brightwell.example>
+To: Mara Okafor <mara.okafor@brightwell.example>
+Cc: Robert Chen <robert.chen@brightwell.example>
+Subject: Harbor: backfill pipeline is green
+Date: Thu, 02 Apr 2026 17:48:00 +0100
+Message-ID: <pipeline-green-20260402@brightwell.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Mara,
+
+The Harbor backfill pipeline is green end to end on staging: 14 months of events replayed with
+zero row mismatches. I'll leave it running overnight to be sure.
+
+Rob Chen asked for rough storage cost numbers for the board pack; I've put them in the Harbor
+sheet, tab "Tessellate". Rob wants them by Monday so if you could sanity-check them
+tomorrow that would be great.
+
+Cheers,
+Sam

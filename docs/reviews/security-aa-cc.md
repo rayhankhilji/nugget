@@ -276,3 +276,59 @@ untrusted paths:
 | `facts_block` | Retrieved context text turned into the facts block (`prompt_facts::{facts, facts_section}`) | one `<context>` fence and no other angle brackets; every fenced line `F<id> (`; ids from 1, a superseded fact points at a newer one; every line of a sensitive passage lands in a sensitive fact |
 | `secret_stream` | Model output streamed in arbitrary chunks past the credential stop (`Grounder`, `Secrets`/`Sentences`) | whatever the chunking, padding, fullwidth or split spelling, the emitted text reduced to letters and digits never contains the credential; nothing after the end |
 | `drive_export` | Drive file entries, Docs/Sheets/Slides exports and sheet titles (`nugget_connector_google::fuzz_export`) | every output within its cap, no panic, only allowed control characters, metadata a JSON object, the Sheets range URL stays on `sheets.googleapis.com` with 5 path segments and no fragment |
+
+## Findings from QA GG8 (privacy), fixed in wave EE
+
+QA package GG8 (`docs/qa/GG8.md` on `qa/privacy`) verified these lower-severity privacy findings
+against the real daemon; the rest of GG8 is fixed by the owning teams (embed by DD4, Ask by EE3).
+
+| ID | Severity | Status | Title |
+|---|---|---|---|
+| GG8-6 | Medium | Fixed (proactive_judge part) | Ledger rows for cloud Today-judge requests have empty `items` |
+| GG8-7 | Low | Fixed | Debug logs hold MCP tool-call arguments and results |
+| GG8-8 | Low | Fixed | The audit log stores the MCP query verbatim |
+| GG8-10 | Low | Fixed | Read-ahead and prewarm report a local provider when only the cloud is usable |
+| GG8-11 | Low | Fixed | IMAP connections that exchange no bytes are not ledgered; the host carries `:993` |
+| GG8-12 | Low | Fixed | `knowledge.status.extractor_provider` is null during cloud extraction |
+
+#### GG8-6: Ledger rows for cloud Today-judge requests have empty `items`
+- **Severity:** Medium
+- **Status:** Fixed (b82b433), judge part; embed and Ask follow-ups are fixed by DD4 and EE3. Regression: nugget-proactive `tests/engine.rs` `cloud_judge_request_lists_evidence_items`.
+- **Path:** `crates/nugget-proactive/src/judge.rs` (`LlmJudge::enrich`, `JudgeInput`)
+- **Attack:** The request carries card evidence quoted from mail, but `ChatRequest.items` was never set, so the egress ledger could not say which items' content left the machine.
+- **Fix:** `JudgeInput` carries the candidate's evidence item refs (`#[serde(skip)]`, never sent to the model); `enrich` sets their deduplicated union as the request's items. Sensitive candidates are still left out before the request.
+
+#### GG8-7: Debug logs hold MCP tool-call arguments and results
+- **Severity:** Low
+- **Status:** Fixed (b82b433). Regression: nuggetd `logging::tests::debug_level_never_logs_mcp_sdk_content`.
+- **Path:** `crates/nuggetd/src/logging.rs` (`init_daemon`, `init_cli`, `filter_for`, `content_cap`)
+- **Attack:** With `NUGGET_LOG=debug` (what users are told to set when troubleshooting, then attach logs) the MCP SDK's `rmcp::service` events logged `received request` with the query and `response message` with passage text.
+- **Fix:** A second filter layer caps the `rmcp` targets at info whatever `NUGGET_LOG`/`RUST_LOG` say (`debug`, `trace`, `rmcp=trace` included); the daemon's own MCP logging is metadata only. Troubleshooting guide notes it.
+
+#### GG8-8: The audit log stores the MCP query verbatim
+- **Severity:** Low
+- **Status:** Fixed (b82b433). Regression: nugget-mcp `audit::tests::audit_args_keep_no_free_text`, `tests/scopes.rs` (updated: the query never appears in the audit row).
+- **Path:** `crates/nugget-mcp/src/audit.rs` (`summarize_args`), `auth.rs` (`ServerKey::hash_audit_text`), `server.rs`
+- **Attack:** `mcp.tool_call` audit rows kept string arguments clipped to 80 characters, so a query (anything the AI app's user typed) was stored, contrary to privacy.md ("arguments summarised, never content").
+- **Fix:** String arguments other than scope-type ones (`kind`, `source`, `key`, `since`) are stored as `{"chars": n, "hmac": "<16 hex>"}`, an HMAC-SHA256 under the MCP server key with its own domain tag (comparable across restarts; length only without a key). Numbers and booleans as before. `reference/mcp.md` and `guide/privacy.md` updated.
+
+#### GG8-10: Read-ahead and prewarm report a local provider when only the cloud is usable
+- **Severity:** Low (nothing was sent; the status misled the user)
+- **Status:** Fixed (fc1922a). Regression: nuggetd `tests/draft.rs` `read_ahead_and_prewarm_skip_a_runtime_slot_without_its_model`.
+- **Path:** `crates/nugget-draft/src/engine.rs` (`Drafter::candidates`, `read_ahead`), `crates/nugget-infer/src/provider.rs` (`Provider::available`), `crates/nuggetd/src/local.rs` (`RuntimeSlot`)
+- **Attack:** The `local-chat` runtime slot passed the router's capability check with no model installed, so it came first: `draft.prewarm` reported `local-chat`/`on_device` and `draft.read_ahead` answered `{"started":true,"done":true}` (the slot failed fast) instead of `skipped: "cloud"`. `draft.begin` only fell through because the slot failed when opened.
+- **Fix:** New `Provider::available()` (default true; a runtime slot is available only when its model is installed). Candidate resolution drops unavailable providers (an installed `[draft.local]` model still goes first); an explicitly chosen unavailable provider makes read-ahead answer `unavailable`. Read-ahead still skips cloud before retrieval or any request; prewarm to a cloud provider sends only a bodiless `GET …/models`, ledgered under `prewarm` with no items, and never a prompt.
+
+#### GG8-11: IMAP connections that exchange no bytes are not ledgered; the host carries `:993`
+- **Severity:** Low
+- **Status:** Fixed (fc1922a). Regression: nugget-connector-imap `tests::a_connection_that_exchanged_no_bytes_is_still_in_the_egress_ledger`, `tests::egress_host_carries_only_a_non_default_port`.
+- **Path:** `crates/nugget-connector-imap/src/conn.rs` (`EgressMeter`), `lib.rs` (`connect`, `egress_host`), `settings.rs` (`default_port`)
+- **Attack:** `EgressMeter::flush` skipped rows with zero bytes, so a STARTTLS connection to a host that never greeted left no trace; every row's host was `host:port` with the port always present, unlike the HTTP rows.
+- **Fix:** Every connection attempt is recorded when it ends (or is dropped), zero bytes included; the host is bare, with the port only when it isn't the mode's default (993 implicit TLS, 143 STARTTLS), IPv6 bracketed. Handshake and login now get their own row per connection.
+
+#### GG8-12: `knowledge.status.extractor_provider` is null during cloud extraction
+- **Severity:** Low
+- **Status:** Fixed (b82b433). Regression: nugget-knowledge `tests/llm.rs` `status_reports_the_cloud_extractor`.
+- **Path:** `crates/nuggetd/src/knowledge.rs` (`extractor_provider`), `crates/nugget-knowledge/src/{llm,session,knowledge}.rs`
+- **Attack:** `extractor_provider` reported only an available local candidate, so a user with `cloud_sources` could not see that extraction used the cloud.
+- **Fix:** The provider that answered is returned by `chat_json`, kept in the run stats and in `KnowledgeStatus.llm_provider` (`#[serde(default)]`), and reported (cloud included) until a later run answers from another; before any run, the local candidate as before. A request that failed is not reported.

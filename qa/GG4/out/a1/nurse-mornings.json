@@ -1,0 +1,240 @@
+[
+ {
+  "day": 6,
+  "date": "2026-10-31",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.98,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.89,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.8,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda",
+    0.78,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.77,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.72,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Paula Grant, RN: Your results - please call",
+    0.72,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "+new",
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "+new",
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Paula Grant, RN: Your results - please call"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Paula Grant, RN: Your results - please call",
+    "results",
+    false
+   ]
+  ],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S2",
+    "budget"
+   ],
+   [
+    "S5",
+    "pixelboard"
+   ],
+   [
+    "S6",
+    "results"
+   ],
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "S12",
+    "agenda"
+   ]
+  ],
+  "misses": [
+   [
+    "S3",
+    "brochure",
+    true
+   ],
+   [
+    "S11",
+    "radiator",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 7,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.618556704195995,
+      "name": "urgency",
+      "value": 0.247422681678398,
+      "weight": 2.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.7963535980264914,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b7fb6a531ef6b4fc",
+    "due": "2026-10-30T17:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.120832604463821,
+      "name": "importance",
+      "value": 0.7472217363092141,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.9797863249127136,
+    "summary": "In \"Re: Q4 design budget\" on 2026-10-27.",
+    "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   }
+  ]
+ }
+]
