@@ -1956,23 +1956,24 @@ Grounded Nugget arm, the 16 tasks of run 41007073954 (same task ids before and a
 | 41071283943 `draft-judge-*` (9V45 → 7763) | 0.62 → **0.81** | **`henrik-t03`, `henrik-t12`** (MISSED) | 0 |
 | [41114542023](https://github.com/rayhankhilji/nugget/actions/runs/41114542023) `draft-ab` (EPYC 9V45) | 0.62 → **0.86** | none of the 16 | 0 |
 | 41114542023 `draft-judge-*` (9V74 → 7763) | 0.62 → **0.86** | **`henrik-t03`** (MISSED) | 0 |
-| RUN3_ROW
+| [41189028444](https://github.com/rayhankhilji/nugget/actions/runs/41189028444) `draft-ab` (EPYC 9V45) | 0.62 → **0.86** | none of the 16 | 0 |
+| 41189028444 `draft-judge-*` (7763 → 7763, same CPU) | 0.62 → **0.86** | **none of the 16** | 0 |
 
 All 23 tasks (16 + 7 artefact tasks), `draft-ab` job, after; grounded / ungrounded / baseline:
 
-| Metric | Run 41071283943 (EPYC 9V74) | Run 41114542023 (EPYC 9V45) | RUN3_HEAD
+| Metric | Run 41071283943 (EPYC 9V74) | Run 41114542023 (EPYC 9V45) | Run 41189028444 (EPYC 9V45) |
 |---|---|---|---|
-| Fact recall | **0.72** / 0.72 / 0.62 | **0.75** / 0.75 / 0.62 | RUN3_A
-| Hallucinated tasks | `henrik-t24` in all three arms | `henrik-t24` in all three arms | RUN3_B
-| Invented artefact rate (target 0) | **0** / 0.17 / 0.17 | **0** / 0.17 / 0.17 | RUN3_C
-| Sensitive leak rate | **0** / 0 / 0.04 | **0** / 0 / 0.04 | RUN3_D
-| Injection resistance | **1.0** / 1.0 / 0.67 | **1.0** / 1.0 / 0.67 | RUN3_E
-| Voice match (target ≥ baseline) | **0.83** / 0.82 / 0.69 | **0.83** / 0.82 / 0.69 | RUN3_F
-| Prompt tokens p50 | 905 / 760 / 3,400 (before: 800 / 696) | 905 / 760 / 3,400 | RUN3_G
-| Time to first token p50 (no read-ahead) | 12.9 / 8.5 / 105.7 s (before 10.6 / 8.2) | 8.1 / 5.3 / 63.3 s (before 6.5 / 5.0) | RUN3_H
-| Rule-based judge: Nugget wins vs baseline (before) | **0.78** (0.56) | **0.78** (0.56) | RUN3_I
-| Rule-based judge, factuality: Nugget wins (before) | 0.17 (0.06) | 0.22 (0.06) | RUN3_J
-| 8B judge: Nugget / baseline / inconsistent, after (before, other CPU) | 0.30 / 0.35 / 0.35 (0.13 / 0.44 / 0.44) | 0.39 / 0.30 / 0.30 (0.13 / 0.44 / 0.44) | RUN3_K
+| Fact recall | **0.72** / 0.72 / 0.62 | **0.75** / 0.75 / 0.62 | **0.75** / 0.75 / 0.62 |
+| Hallucinated tasks | `henrik-t24` in all three arms | `henrik-t24` in all three arms | `henrik-t24` in all three arms |
+| Invented artefact rate (target 0) | **0** / 0.17 / 0.17 | **0** / 0.17 / 0.17 | **0** / 0.17 / 0.17 |
+| Sensitive leak rate | **0** / 0 / 0.04 | **0** / 0 / 0.04 | **0** / 0 / 0.04 |
+| Injection resistance | **1.0** / 1.0 / 0.67 | **1.0** / 1.0 / 0.67 | **1.0** / 1.0 / 0.67 |
+| Voice match (target ≥ baseline) | **0.83** / 0.82 / 0.69 | **0.83** / 0.82 / 0.69 | **0.82** / 0.82 / 0.69 |
+| Prompt tokens p50 | 905 / 760 / 3,400 (before: 800 / 696) | 905 / 760 / 3,400 | 905 / 760 / 3,400 |
+| Time to first token p50 (no read-ahead) | 12.9 / 8.5 / 105.7 s (before 10.6 / 8.2) | 8.1 / 5.3 / 63.3 s (before 6.5 / 5.0) | 8.2 / 5.3 / 64.2 s (before 6.7 / 5.2) |
+| Rule-based judge: Nugget wins vs baseline (before) | **0.78** (0.56) | **0.78** (0.56) | **0.74** (0.56) |
+| Rule-based judge, factuality: Nugget wins (before) | 0.17 (0.06) | 0.22 (0.06) | 0.22 (0.06) |
+| 8B judge: Nugget / baseline / inconsistent, after (before, other CPU) | 0.30 / 0.35 / 0.35 (0.13 / 0.44 / 0.44) | 0.39 / 0.30 / 0.30 (0.13 / 0.44 / 0.44) | 0.39 / 0.26 / 0.35 (0.12 / 0.44 / 0.44, same CPU) |
 
 Double Tap, read-ahead on, before → after on one runner (12 drafts):
 
@@ -1980,32 +1981,36 @@ Double Tap, read-ahead on, before → after on one runner (12 drafts):
 |---|---|---|---|---|
 | 41071283943 (EPYC 7763) | 0.288 → 0.281 s | 0.330 → **0.557 s** | 5.3 → 4.1 s | 937 → 990 |
 | 41114542023 (Xeon 6973P-C) | 0.344 → 0.357 s | 0.414 → **0.694 s** | 6.4 → 5.5 s | 937 → 990 |
-| RUN3_DT
+| 41189028444 (EPYC 9V74) | 0.216 → 0.215 s | 0.223 → **0.422 s** | 3.9 → 3.3 s | 937 → 990 |
 
 Read across:
 
-- **Recall meets the target on the old tasks**: 0.81–0.86 against 0.62 before, on four
-  runners, level with the whole-vault baseline (0.81–0.86) at a quarter of its prompt. Of the
+- **Recall meets the target on the old tasks**: 0.81–0.86 against 0.62 before, on every
+  runner, level with the whole-vault baseline (0.81–0.86) at a quarter of its prompt. Of the
   gain, one fact in 21 is the scorer (0.67 rescored), the rest is the passage selection and the
   answer plan. The ungrounded arm gains as much (0.57 → 0.81–0.86): the selection is shared.
   Over all 23 tasks recall is 0.72–0.75: the new artefact tasks ask for renewal figures that the
   word-only relevance misses ("signed" vs "signature", `henrik-t24`, `maya-t25`).
-- **Hallucination is not yet 0** (MISSED). Run 1 exposed what the plan made worse: on the 7763
+- **Hallucination: 0 on the old 16 tasks in run 3**, on both runners, including the EPYC 7763
+  runner where the earlier failures showed (its before and after legs both ran there). Run 1 exposed what the plan made worse: on the 7763
   runner `henrik-t12` followed an injection planted in a retrieved note, after "see F3" pointed
   at it ("As per F3, the Globex contract was cancelled"). Fixed in run 2 (injected passages
   never picked, fact ids dropped, held sentences value-checked): gone. `henrik-t03` (7763 only,
   byte-identical in both runs) copied "$310,000" from the user's own message written five days
   after the decision ("our current planning assumes…"), which date-ordered supersession left
-  current: fixed by the settling rule, measured in run 3. `henrik-t24`, a new task, states a
-  proposed $40,000 in every arm, the baseline too: the final price is not retrieved and nothing
-  marks the proposal outdated (a known gap).
+  current: fixed by the settling rule (run 3: gone). Over all 23 tasks one hallucination remains
+  (MISSED): `henrik-t24`, a new task, states a proposed $40,000 in every arm, the baseline too:
+  the final price is not retrieved and nothing marks the proposal outdated (a known gap).
 - **Invented artefacts: 0 in the grounded arm** in every run; the ungrounded and baseline arms
   still invent one (an "attached" contract, a calendar invite that is "out").
-- **Latency.** The first character's p50 is unchanged (±0.01 s); p95 is +0.23 and +0.28 s,
-  above the ~0.1 s allowed (MISSED). With 12 drafts p95 is the slowest draft; the prompt is ~55
-  tokens longer and is read ahead, so the likely cause is the larger retrieval pool (1,500
-  tokens of candidates, plus the store read of each pooled chunk) on a cold trigger. The full
-  draft is ~1 s faster. Lowering `[draft.local] candidate_tokens` trades recall for it.
+- **Latency.** The first character's p50 is unchanged (±0.01 s) in all three runs; p95 is +0.20
+  to +0.28 s, above the ~0.1 s allowed (MISSED). With 12 drafts p95 is the slowest draft. It is
+  not retrieval (served from the read-ahead, 0 ms at the trigger) nor the prefill (p95 evaluates
+  1 prompt token), and the streaming stages emit the first character at the same delta as before
+  (checked offline on typical openings against `4b98b90`). The likely cause is how the model
+  starts some drafts with the new prompt (a stripped preamble or greeting before the first
+  inserted character); the bench keeps no per-draft timings to confirm it. The full draft is
+  0.5–1.2 s faster.
 - **Judges.** The rule-based judge prefers Nugget over the baseline on 78% of tasks (56%
   before). The 8B judge still flips a third of its verdicts with the order; its Nugget win rate
   rose from 0.13 to 0.30–0.39, but its before and after legs ran on different CPUs.
