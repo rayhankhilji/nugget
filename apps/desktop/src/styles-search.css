@@ -122,6 +122,15 @@
   font-size: var(--fs-xs);
 }
 
+/* Chromium moves focus into a date input's day/month/year fields, where `:focus-visible` on the
+   input itself does not reliably match; a field you type into may show its ring on any focus. */
+.sr-date input:focus,
+.sr-date input:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
 .sr-months {
   list-style: none;
   margin: var(--space-2) 0 0;
@@ -409,4 +418,11 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+@media (prefers-contrast: more) {
+  .sr-date input:focus,
+  .sr-date input:focus-within {
+    outline-width: 3px;
+  }
 }
