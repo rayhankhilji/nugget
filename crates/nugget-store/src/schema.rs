@@ -497,17 +497,32 @@ const MIGRATIONS: &[&str] = &[
         SELECT id, fts_segment(title) FROM items
         WHERE title IS NOT NULL AND fts_segment(title) IS NOT title;
     "#,
-    // v12: claims the user replaced in the vault (`GraphStore::supersede_by_user`): the evidence
-    // (item and quote, '' for none) each had when replaced. Re-extracting that same evidence
-    // leaves the claim superseded; rows go with the claim.
+    // v12: user decisions on claims that must outlive re-extraction (see `GraphStore`):
+    // - `claim_replacements`: claims the user replaced in the vault
+    //   (`GraphStore::supersede_by_user`), with the user's claim that replaced them;
+    // - `claim_replacement_evidence`: per replaced claim, the evidence it had then: item, quote
+    //   ('' for none) and the item's content hash at the time (NULL: no item row);
+    // - `claim_assertions`: when a claim was last made `user_asserted` (its `updated_at` moves
+    //   with every fold and evidence add).
+    // Rows go with their claim.
     r#"
-    CREATE TABLE IF NOT EXISTS claim_user_replaced (
-        claim_id INTEGER NOT NULL REFERENCES claims (id) ON DELETE CASCADE,
-        source   TEXT NOT NULL,
-        key      TEXT NOT NULL,
-        quote    TEXT NOT NULL,
+    CREATE TABLE IF NOT EXISTS claim_replacements (
+        claim_id    INTEGER PRIMARY KEY REFERENCES claims (id) ON DELETE CASCADE,
+        replaced_by INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS claim_replacements_by ON claim_replacements (replaced_by);
+    CREATE TABLE IF NOT EXISTS claim_replacement_evidence (
+        claim_id  INTEGER NOT NULL REFERENCES claim_replacements (claim_id) ON DELETE CASCADE,
+        source    TEXT NOT NULL,
+        key       TEXT NOT NULL,
+        quote     TEXT NOT NULL,
+        item_hash TEXT,
         PRIMARY KEY (claim_id, source, key, quote)
     ) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS claim_assertions (
+        claim_id    INTEGER PRIMARY KEY REFERENCES claims (id) ON DELETE CASCADE,
+        asserted_at TEXT NOT NULL
+    );
     "#,
 ];
 

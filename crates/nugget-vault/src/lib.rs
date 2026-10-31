@@ -886,18 +886,19 @@ impl Vault {
                     None => continue,
                 }
             };
-            if c.status.is_active() {
-                // A user decision: re-extracting the same source does not bring it back.
-                g.supersede_by_user(*id)?;
-                rep.superseded.push(*id);
-                touch(pass, &c.object);
-            }
             let new = self.user_claim(st, &owner, &nf.predicate, &nf.content);
             touch(pass, &new.object);
             if owner.id != e.id {
                 pass.affected.insert(owner.id.clone());
             }
-            rep.asserted.push(g.add_claim(&new)?);
+            if c.status.is_active() {
+                // A user decision: re-extracting the same source does not bring it back.
+                rep.asserted.push(g.supersede_by_user(*id, &new)?);
+                rep.superseded.push(*id);
+                touch(pass, &c.object);
+            } else {
+                rep.asserted.push(g.add_claim(&new)?);
+            }
         }
         for nf in &plan.add {
             let new = self.user_claim(st, e, &nf.predicate, &nf.content);
@@ -948,23 +949,26 @@ impl Vault {
             let base_text = self.read_base(&id);
             let base = base_text.as_deref().map(Doc::parse);
             // A page saved by an editor that drops HTML comments gets its markers back, so the
-            // user's edits are read as edits (and the page is not duplicated).
-            let user = user_text.as_deref().map(|u| {
-                match base_text
-                    .as_deref()
-                    .and_then(|b| restore::restore_markers(b, u))
-                {
-                    Some(restored) => Doc::parse(&restored),
-                    None => Doc::parse(u),
-                }
-            });
+            // user's edits are read as edits (and the page is not duplicated). Only lines
+            // clearly deleted from such a page reject their facts.
+            let restored = match (base_text.as_deref(), user_text.as_deref()) {
+                (Some(b), Some(u)) => restore::restore_markers(b, u),
+                _ => None,
+            };
+            let user = match &restored {
+                Some(r) => Some(Doc::parse(&r.text)),
+                None => user_text.as_deref().map(Doc::parse),
+            };
 
             let applied = pass.edits_applied.remove(&id);
             if let (Some(b), Some(u)) = (&base, &user)
                 && prev.as_ref().is_none_or(|p| p.stub.is_none())
                 && !applied
             {
-                let plan = plan_edits(b, u);
+                let mut plan = plan_edits(b, u);
+                if let Some(r) = &restored {
+                    plan.retract.retain(|id| r.deleted.contains(id));
+                }
                 if !plan.is_empty() {
                     self.apply_plan(st, &entity, &plan, pass)?;
                     ctx.forget();

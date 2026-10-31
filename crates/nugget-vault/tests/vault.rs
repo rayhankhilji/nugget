@@ -1270,11 +1270,113 @@ fn edited_fact_is_not_revived_by_re_extracting_its_unchanged_source() {
     );
     assert_eq!(f.status(user), ClaimStatus::UserAsserted);
 
-    // The source changes what it says about the fact: normal rules again.
-    let changed = works_at_again(&f, "Sam from Acme here, now its CTO");
-    assert_eq!(f.status(changed), ClaimStatus::Active);
+    // An LLM rewording its quote on a retry of the same, unchanged item: still replaced.
+    assert_eq!(works_at_again(&f, "Sam (Acme) here"), f.works_at);
+    assert_eq!(f.status(f.works_at), ClaimStatus::Superseded);
+
+    // Another source states it: normal rules again (a changed item with a new quote is
+    // covered by the store tests: `MemGraph` keeps no item versions).
+    f.graph
+        .add_evidence(f.works_at, &ev("mail", "msg-9", "Sam, Acme"))
+        .unwrap();
+    assert_eq!(f.status(f.works_at), ClaimStatus::Active);
     f.vault.render_all().unwrap();
     assert!(f.read(&f.sam).contains("Samantha works at"));
+}
+
+/// Review findings 6 and 7: the user edits the same line twice before a render, then deletes
+/// their own version: the original is free again and the next extraction brings it back.
+#[test]
+fn second_edit_and_deleting_the_users_version() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    f.edit(&f.sam, |t| {
+        replace_line(
+            &t,
+            "<!-- c:1 -->",
+            "- Samantha is an Acme engineer <!-- c:1 -->",
+        )
+    });
+    let r = f.vault.render_all().unwrap();
+    let user = r.edits.asserted[0];
+    // A second edit, of the user's own line.
+    assert!(f.read(&f.sam).contains(&format!("<!-- c:{user} -->")));
+    f.edit(&f.sam, |t| {
+        replace_line(
+            &t,
+            &format!("<!-- c:{user} -->"),
+            &format!("- Samantha is Acme's CTO <!-- c:{user} -->"),
+        )
+    });
+    let r = f.vault.render_all().unwrap();
+    assert_eq!(r.edits.superseded, vec![user]);
+    let second = r.edits.asserted[0];
+    assert!(f.read(&f.sam).contains("Samantha is Acme's CTO"));
+    // The user deletes their line.
+    f.edit(&f.sam, |t| {
+        t.lines()
+            .filter(|l| !l.contains(&format!("<!-- c:{second} -->")))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n"
+    });
+    f.vault.render_all().unwrap();
+    assert_eq!(f.status(second), ClaimStatus::Rejected);
+    // Re-extraction: the original fact (its replacement is gone) is current again.
+    f.graph.retract_item(&item("mail", "msg-1")).unwrap();
+    f.graph
+        .add_evidence(f.works_at, &ev("mail", "msg-1", "Sam from Acme here"))
+        .unwrap();
+    assert_eq!(f.status(f.works_at), ClaimStatus::Active);
+    f.vault.render_all().unwrap();
+    assert!(
+        f.read(&f.sam).contains("Samantha works at"),
+        "{}",
+        f.read(&f.sam)
+    );
+}
+
+/// Review finding 1: a comment-stripped page that was emptied or rewritten rejects nothing,
+/// and a line removed outright from one rejects only that fact.
+#[test]
+fn stripped_pages_reject_only_clear_deletions() {
+    let strip = |t: &str| {
+        let mut s = String::new();
+        let mut rest = t;
+        while let Some(i) = rest.find("<!--") {
+            let j = rest[i..].find("-->").unwrap() + i + 3;
+            s.push_str(rest[..i].strip_suffix(' ').unwrap_or(&rest[..i]));
+            rest = &rest[j..];
+        }
+        s.push_str(rest);
+        s
+    };
+    for text in [
+        "",
+        "# Samantha\n\nRewritten from scratch in another editor.\n",
+    ] {
+        let f = fixture();
+        f.vault.render_all().unwrap();
+        f.write(&f.sam, text);
+        let r = f.vault.render_all().unwrap();
+        assert!(r.edits.retracted.is_empty(), "{text:?}: {:?}", r.edits);
+        assert_eq!(f.status(f.works_at), ClaimStatus::Active);
+        assert_eq!(f.status(f.prefers), ClaimStatus::Active);
+    }
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    f.edit(&f.sam, |t| {
+        strip(&t)
+            .lines()
+            .filter(|l| !l.contains("oat milk"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n"
+    });
+    let r = f.vault.render_all().unwrap();
+    assert_eq!(r.edits.retracted, vec![f.prefers]);
+    assert_eq!(f.status(f.works_at), ClaimStatus::Active);
+    assert_eq!(f.read(&f.sam).matches("# Samantha Lee").count(), 1);
 }
 
 /// GG5-5: a fact line retyped without its marker but with the same link keeps the user's words.

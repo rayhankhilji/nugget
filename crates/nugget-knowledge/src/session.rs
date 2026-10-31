@@ -747,17 +747,26 @@ impl<'a> Session<'a> {
 
     /// The newest date among a claim's evidence (user assertions: when asserted).
     fn freshness(&mut self, c: &Claim) -> Result<Option<OffsetDateTime>> {
+        // A user assertion is at least as fresh as when it was asserted (kept by the store:
+        // `updated_at` moves with folds and evidence). Only it is dated by a write: a retracted
+        // claim's last write is its retraction, which says nothing about when the fact held.
+        let asserted = match c.status {
+            ClaimStatus::UserAsserted => self
+                .graph()
+                .asserted_at(c.id)?
+                .or(c.evidence.is_empty().then_some(c.updated_at)),
+            _ => None,
+        };
         if c.evidence.is_empty() {
-            // Only a user assertion is dated by its write (a retracted claim's last write is
-            // its retraction, which says nothing about when the fact held).
-            return Ok((c.status == ClaimStatus::UserAsserted).then_some(c.updated_at));
+            return Ok(asserted);
         }
         let scan: Vec<&Evidence> = c.evidence.iter().rev().take(FRESHNESS_SCAN).collect();
         self.prefetch_dates(scan.iter().map(|e| &e.item))?;
         Ok(scan
             .iter()
             .filter_map(|e| self.dates.get(&e.item).copied().flatten())
-            .max())
+            .max()
+            .max(asserted))
     }
 
     /// Process a changed (or new) item. Returns `false` when it turned out unchanged.
@@ -1439,9 +1448,16 @@ impl<'a> Session<'a> {
         let target = match same {
             Some(c) => {
                 self.add_evidence_op(c.id, &new.evidence);
-                // Adding evidence revives a retracted claim.
+                // Adding evidence revives a retracted claim, and a superseded one the user
+                // replaced whose source now says it differently (the guard above kept the
+                // unchanged case).
                 let status = match c.status {
                     ClaimStatus::Retracted => ClaimStatus::Active,
+                    ClaimStatus::Superseded
+                        if self.graph().replaced_by_user(c.id, &c.evidence)? =>
+                    {
+                        ClaimStatus::Active
+                    }
                     s => s,
                 };
                 if historical && status == ClaimStatus::Active {

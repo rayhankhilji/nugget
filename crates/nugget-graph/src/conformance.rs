@@ -1115,75 +1115,98 @@ fn quoted(key: &str, quote: &str) -> Evidence {
     }
 }
 
+fn user_claim(subject: &EntityId, pred: &str, object: ClaimObject, text: &str) -> NewClaim {
+    let mut c = claim(subject, pred, object, vec![]);
+    c.status = ClaimStatus::UserAsserted;
+    c.confidence = 1.0;
+    c.text = text.into();
+    c
+}
+
 fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
     let a = person(g, "A");
     let lit = ClaimObject::Literal("Harbor".into());
     let old = g
         .add_claim(&claim(&a, "part_of", lit.clone(), vec![ev("n.md")]))
         .unwrap();
-    g.supersede_by_user(old).unwrap();
-    assert_eq!(
-        g.get_claim(old).unwrap().unwrap().status,
-        ClaimStatus::Superseded
+    let mine = user_claim(
+        &a,
+        "part_of",
+        ClaimObject::Literal("A Harbor project".into()),
+        "A Harbor project (mine)",
     );
+    let user = g.supersede_by_user(old, &mine).unwrap();
+    assert_ne!(user, old);
+    assert_eq!(status(g, old), ClaimStatus::Superseded);
+    assert_eq!(status(g, user), ClaimStatus::UserAsserted);
     assert!(g.replaced_by_user(old, &[ev("n.md")]).unwrap());
-    // Chunk ids do not matter; the item and quote do.
-    assert!(g.replaced_by_user(old, &[quoted("n.md", "quote")]).unwrap());
-    assert!(!g.replaced_by_user(old, &[quoted("n.md", "other")]).unwrap());
+    // A store without items never sees the item change: any quote from it is remembered (an
+    // LLM rewording its quote on a retry does not count as the source changing).
+    assert!(g.replaced_by_user(old, &[quoted("n.md", "other")]).unwrap());
+    assert!(!g.replaced_by_user(old, &[ev("x.md")]).unwrap());
     assert!(!g.replaced_by_user(old, &[]).unwrap());
+    assert!(!g.replaced_by_user(user, &[ev("n.md")]).unwrap());
 
-    // Re-extracting the same source: retracted, then the same evidence again.
+    // Re-extracting the same source: retracted, then evidence from it again.
     g.retract_item(&item("n.md")).unwrap();
-    assert_eq!(
-        g.get_claim(old).unwrap().unwrap().status,
-        ClaimStatus::Retracted
-    );
-    g.add_evidence(old, &ev("n.md")).unwrap();
+    assert_eq!(status(g, old), ClaimStatus::Retracted);
+    g.add_evidence(old, &quoted("n.md", "reworded quote"))
+        .unwrap();
     let c = g.get_claim(old).unwrap().unwrap();
     assert_eq!(c.status, ClaimStatus::Superseded, "not revived");
     assert_eq!(c.evidence.len(), 1);
-    // The same triple added again from the same evidence lands in it.
+    // The same triple added again from the same item lands in it.
     g.retract_item(&item("n.md")).unwrap();
     let again = g
         .add_claim(&claim(&a, "part_of", lit.clone(), vec![ev("n.md")]))
         .unwrap();
     assert_eq!(again, old);
-    assert_eq!(
-        g.get_claim(old).unwrap().unwrap().status,
-        ClaimStatus::Superseded
-    );
-    // While it has evidence, the same evidence again changes nothing.
+    assert_eq!(status(g, old), ClaimStatus::Superseded);
     g.add_evidence(old, &ev("n.md")).unwrap();
-    assert_eq!(
-        g.get_claim(old).unwrap().unwrap().status,
-        ClaimStatus::Superseded
-    );
+    assert_eq!(status(g, old), ClaimStatus::Superseded);
+    assert_eq!(status(g, user), ClaimStatus::UserAsserted);
 
-    // The source now says it differently: normal rules, and the record is forgotten.
-    g.retract_item(&item("n.md")).unwrap();
-    g.add_evidence(old, &quoted("n.md", "Harbor is now part of Acme"))
+    // Evidence from another item makes it current again, whatever the order within a batch.
+    for (i, order) in [["n.md", "x.md"], ["x.md", "n.md"]].iter().enumerate() {
+        let p = person(g, &format!("P{i}"));
+        let gen_id = g
+            .add_claim(&claim(&p, "plays", lit.clone(), vec![ev("p.md")]))
+            .unwrap();
+        g.supersede_by_user(
+            gen_id,
+            &user_claim(&p, "plays", ClaimObject::Literal("x".into()), "x"),
+        )
         .unwrap();
-    assert_eq!(
-        g.get_claim(old).unwrap().unwrap().status,
-        ClaimStatus::Active
-    );
-    assert!(!g.replaced_by_user(old, &[ev("n.md")]).unwrap());
+        g.retract_item(&item("p.md")).unwrap();
+        let mut batch = GraphBatch::new();
+        for key in order {
+            let key = if *key == "n.md" { "p.md" } else { "y.md" };
+            batch.push(GraphOp::AddEvidence {
+                claim: gen_id,
+                evidence: ev(key),
+            });
+        }
+        g.apply_batch(&batch).unwrap();
+        assert_eq!(status(g, gen_id), ClaimStatus::Active, "order {order:?}");
+        assert!(!g.replaced_by_user(gen_id, &[ev("p.md")]).unwrap());
+    }
 
-    // An extracted claim with different evidence is a new claim.
+    // An extracted claim from another item is a new claim.
     let b = person(g, "B");
     let blit = ClaimObject::Literal("Kestrel".into());
     let first = g
         .add_claim(&claim(&b, "works_at", blit.clone(), vec![ev("m.md")]))
         .unwrap();
-    g.supersede_by_user(first).unwrap();
+    g.supersede_by_user(
+        first,
+        &user_claim(&b, "works_at", ClaimObject::Literal("K".into()), "K"),
+    )
+    .unwrap();
     let other = g
         .add_claim(&claim(&b, "works_at", blit.clone(), vec![ev("x.md")]))
         .unwrap();
     assert_ne!(other, first);
-    assert_eq!(
-        g.get_claim(other).unwrap().unwrap().status,
-        ClaimStatus::Active
-    );
+    assert_eq!(status(g, other), ClaimStatus::Active);
 
     // Making it live explicitly forgets the record.
     let d = person(g, "D");
@@ -1191,34 +1214,75 @@ fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
     let x = g
         .add_claim(&claim(&d, "plays", dlit.clone(), vec![ev("d.md")]))
         .unwrap();
-    g.supersede_by_user(x).unwrap();
+    g.supersede_by_user(
+        x,
+        &user_claim(&d, "plays", ClaimObject::Literal("go".into()), "go"),
+    )
+    .unwrap();
     g.set_claim_status(x, ClaimStatus::Active).unwrap();
     assert!(!g.replaced_by_user(x, &[ev("d.md")]).unwrap());
 
-    // A user claim with the same triple: the evidence comes back to it (as a fold).
+    // The user's replacement stops being current (rejected): the record is forgotten, so the
+    // next extraction brings the original back.
+    let f = person(g, "F");
+    let x = g
+        .add_claim(&claim(&f, "plays", dlit.clone(), vec![ev("f.md")]))
+        .unwrap();
+    let mine = g
+        .supersede_by_user(
+            x,
+            &user_claim(&f, "plays", ClaimObject::Literal("go".into()), "go"),
+        )
+        .unwrap();
+    // The user edits their own line again: the newer version now holds the original back.
+    let mine2 = g
+        .supersede_by_user(
+            mine,
+            &user_claim(&f, "plays", ClaimObject::Literal("go!".into()), "go!"),
+        )
+        .unwrap();
+    g.set_claim_status(mine, ClaimStatus::Rejected).unwrap();
+    assert!(
+        g.replaced_by_user(x, &[ev("f.md")]).unwrap(),
+        "an older version going"
+    );
+    g.set_claim_status(mine2, ClaimStatus::Rejected).unwrap();
+    assert!(!g.replaced_by_user(x, &[ev("f.md")]).unwrap());
+    g.retract_item(&item("f.md")).unwrap();
+    g.add_evidence(x, &ev("f.md")).unwrap();
+    assert_eq!(status(g, x), ClaimStatus::Active);
+
+    // A user claim with the same triple: the evidence comes back to it (a fold the user's claim
+    // survives, so its id stays valid for a second edit).
     let e = person(g, "E");
     let elit = ClaimObject::Literal("go".into());
     let gen_id = g
         .add_claim(&claim(&e, "plays", elit.clone(), vec![ev("e.md")]))
         .unwrap();
-    g.supersede_by_user(gen_id).unwrap();
-    let mut mine = claim(&e, "plays", elit.clone(), vec![]);
-    mine.status = ClaimStatus::UserAsserted;
-    mine.text = "E plays go (my words)".into();
-    let user = g.add_claim(&mine).unwrap();
+    let user = g
+        .supersede_by_user(
+            gen_id,
+            &user_claim(&e, "plays", elit.clone(), "E plays go (my words)"),
+        )
+        .unwrap();
     assert_ne!(user, gen_id, "a superseded claim is not a live twin");
+    let asserted = g.asserted_at(user).unwrap().expect("assertion time");
     g.retract_item(&item("e.md")).unwrap();
     g.add_evidence(gen_id, &ev("e.md")).unwrap();
-    let live: Vec<Claim> = g
-        .claims_for(&e, false)
-        .unwrap()
-        .into_iter()
-        .filter(|c| c.predicate == "plays")
-        .collect();
-    assert_eq!(live.len(), 1);
-    assert_eq!(live[0].status, ClaimStatus::UserAsserted);
-    assert_eq!(live[0].text, "E plays go (my words)");
-    assert_eq!(live[0].evidence.len(), 1);
+    assert!(
+        g.get_claim(gen_id).unwrap().is_none(),
+        "folded into the user's claim"
+    );
+    let c = g.get_claim(user).unwrap().unwrap();
+    assert_eq!(c.status, ClaimStatus::UserAsserted);
+    assert_eq!(c.text, "E plays go (my words)");
+    assert_eq!(c.evidence.len(), 1);
+    assert_eq!(
+        g.asserted_at(user).unwrap(),
+        Some(asserted),
+        "evidence does not move the assertion time"
+    );
+    assert_eq!(g.asserted_at(old).unwrap(), None);
 }
 
 fn user_text_survives_folds(g: &dyn GraphStore) {
@@ -1227,14 +1291,19 @@ fn user_text_survives_folds(g: &dyn GraphStore) {
     let mut generated = claim(&a, "plays", lit.clone(), vec![ev("a.md")]);
     generated.text = "A plays chess.".into();
     let id = g.add_claim(&generated).unwrap();
-    let mut mine = claim(&a, "plays", lit.clone(), vec![]);
-    mine.status = ClaimStatus::UserAsserted;
-    mine.text = "A plays chess on Sundays (retyped)".into();
+    assert_eq!(g.asserted_at(id).unwrap(), None);
+    let mine = user_claim(
+        &a,
+        "plays",
+        lit.clone(),
+        "A plays chess on Sundays (retyped)",
+    );
     assert_eq!(g.add_claim(&mine).unwrap(), id);
     let c = g.get_claim(id).unwrap().unwrap();
     assert_eq!(c.status, ClaimStatus::UserAsserted);
     assert_eq!(c.text, "A plays chess on Sundays (retyped)");
     assert_eq!(c.evidence.len(), 1);
+    assert!(g.asserted_at(id).unwrap().is_some());
     // Re-extraction keeps the user's text and status.
     g.retract_item(&item("a.md")).unwrap();
     g.add_claim(&generated).unwrap();
@@ -1242,20 +1311,27 @@ fn user_text_survives_folds(g: &dyn GraphStore) {
     assert_eq!(c.status, ClaimStatus::UserAsserted);
     assert_eq!(c.text, "A plays chess on Sundays (retyped)");
 
-    // A merge folding a newer user claim into an older generated one keeps the user's text.
+    // A merge folding a newer user claim with an older generated one: the user's claim
+    // survives, with its text.
     let b = person(g, "B");
     let c2 = person(g, "C");
     let mut gen_b = claim(&b, "likes", lit.clone(), vec![ev("b.md")]);
     gen_b.text = "B likes chess.".into();
     let older = g.add_claim(&gen_b).unwrap();
-    let mut user_c = claim(&c2, "likes", lit.clone(), vec![]);
-    user_c.status = ClaimStatus::UserAsserted;
-    user_c.text = "C really likes chess".into();
-    g.add_claim(&user_c).unwrap();
+    let user = g
+        .add_claim(&user_claim(
+            &c2,
+            "likes",
+            lit.clone(),
+            "C really likes chess",
+        ))
+        .unwrap();
     g.merge(&c2, &b).unwrap();
-    let c = g.get_claim(older).unwrap().unwrap();
+    assert!(g.get_claim(older).unwrap().is_none());
+    let c = g.get_claim(user).unwrap().unwrap();
     assert_eq!(c.status, ClaimStatus::UserAsserted);
     assert_eq!(c.text, "C really likes chess");
+    assert_eq!(c.evidence.len(), 1);
 }
 
 fn split_repoints_merged_ids_by_name(g: &dyn GraphStore) {
@@ -1280,8 +1356,9 @@ fn split_repoints_merged_ids_by_name(g: &dyn GraphStore) {
     assert_eq!(g.get_entity(&patel).unwrap().unwrap().id, sam);
     let (_, before) = g.changes_since(0, 0).unwrap();
 
+    // Ticking aliases that match other merged ids moves nothing more: the name decides.
     let mut spec = NewEntity::new(EntityKind::Person, "Sam Patel");
-    spec.aliases = vec!["Sam Patel".into()];
+    spec.aliases = vec!["Sam Patel".into(), "Sam Okonkwo".into()];
     spec.identifiers = vec![Identifier::new("email", "sam.patel@b.test")];
     let new = g.split(&sam, &[works], &spec).unwrap();
     assert_ne!(new, patel, "ids are never reused");
@@ -1309,19 +1386,55 @@ fn split_repoints_merged_ids_by_name(g: &dyn GraphStore) {
         "the re-pointed id counts as changed"
     );
 
-    // Splitting off under the entity's own name re-points nothing.
-    let kim = person(g, "Kim");
-    let kim2 = person(g, "Kim");
-    let on_kim2 = g
+    // No id under the new name: an alias decides only when exactly one id matches.
+    let kim = person(g, "Kimberly Lee");
+    let k1 = person(g, "Kim");
+    let k2 = person(g, "K. Lee");
+    let on_k1 = g
         .add_claim(&claim(
-            &kim2,
+            &k1,
             "lives_in",
             ClaimObject::Literal("Oslo".into()),
             vec![ev("k.md")],
         ))
         .unwrap();
-    g.merge(&kim, &kim2).unwrap();
-    g.split(&kim, &[on_kim2], &NewEntity::new(EntityKind::Person, "Kim"))
+    let on_k2 = g
+        .add_claim(&claim(
+            &k2,
+            "lives_in",
+            ClaimObject::Literal("Rome".into()),
+            vec![ev("l.md")],
+        ))
         .unwrap();
-    assert_eq!(g.get_entity(&kim2).unwrap().unwrap().id, kim);
+    g.merge(&kim, &k1).unwrap();
+    g.merge(&kim, &k2).unwrap();
+    let mut two = NewEntity::new(EntityKind::Person, "Kim Lee");
+    two.aliases = vec!["Kim".into(), "K. Lee".into()];
+    let first = g.split(&kim, &[on_k2], &two).unwrap();
+    assert_eq!(
+        g.get_entity(&k2).unwrap().unwrap().id,
+        kim,
+        "two alias matches: ambiguous, nothing moves"
+    );
+    assert_ne!(first, kim);
+    let mut one = NewEntity::new(EntityKind::Person, "Kim L.");
+    one.aliases = vec!["Kim".into()];
+    let second = g.split(&kim, &[on_k1], &one).unwrap();
+    assert_eq!(g.get_entity(&k1).unwrap().unwrap().id, second);
+
+    // Splitting off under the entity's own name re-points nothing.
+    let kai = person(g, "Kai");
+    let kai2 = person(g, "Kai");
+    let on_kai2 = g
+        .add_claim(&claim(
+            &kai2,
+            "lives_in",
+            ClaimObject::Literal("Oslo".into()),
+            vec![ev("m.md")],
+        ))
+        .unwrap();
+    g.merge(&kai, &kai2).unwrap();
+    g.split(&kai, &[on_kai2], &NewEntity::new(EntityKind::Person, "Kai"))
+        .unwrap();
+    assert_eq!(g.get_entity(&kai2).unwrap().unwrap().id, kai);
 }

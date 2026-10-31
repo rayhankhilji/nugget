@@ -15,7 +15,7 @@
 //! that entity; otherwise the object is the text itself. Aliases added to the frontmatter become
 //! graph aliases.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use nugget_graph::ClaimId;
 
@@ -81,7 +81,22 @@ pub(crate) fn plan_edits(base: &Doc, user: &Doc) -> EditPlan {
             _ => {}
         }
     }
-    let base_contents: HashSet<&str> = base_facts.values().map(|(c, _)| c.as_str()).collect();
+    // A base fact's text on a line without its marker (moved or retyped as it was) keeps that
+    // fact, unless its marked line is on the page too.
+    let mut base_contents: HashMap<&str, ClaimId> = HashMap::new();
+    for (id, (c, _)) in &base_facts {
+        base_contents.entry(c.as_str()).or_insert(*id);
+    }
+    let marked: HashSet<ClaimId> = classify_facts(u)
+        .into_iter()
+        .filter_map(|l| match l {
+            FLine::Fact {
+                claim: Some(id),
+                content,
+            } if !content.is_empty() && base_facts.contains_key(&id) => Some(id),
+            _ => None,
+        })
+        .collect();
 
     let mut seen = HashSet::new();
     let mut group: Option<String> = None;
@@ -108,7 +123,13 @@ pub(crate) fn plan_edits(base: &Doc, user: &Doc) -> EditPlan {
                     }
                     continue;
                 }
-                if content.is_empty() || base_contents.contains(content.as_str()) {
+                if content.is_empty() {
+                    continue;
+                }
+                if let Some(&id) = base_contents.get(content.as_str()) {
+                    if !marked.contains(&id) {
+                        seen.insert(id);
+                    }
                     continue;
                 }
                 let nf = NewFact {
@@ -173,6 +194,21 @@ mod tests {
                 }
             ]
         );
+    }
+
+    /// Review finding 2: a fact line moved or retyped without its marker is not a deletion.
+    #[test]
+    fn unmarked_copy_of_a_base_fact_keeps_it() {
+        let base = page("- A [^1] <!-- c:1 -->\n- B [^2] <!-- c:2 -->");
+        let user = page("- B [^2]\n- A <!-- c:1 -->");
+        let p = plan_edits(&base, &user);
+        assert!(p.retract.is_empty(), "{p:?}");
+        assert!(p.add.is_empty());
+        // With its marked line still there, an unmarked copy changes nothing either.
+        let user = page("- B [^2]\n- B changed <!-- c:2 -->\n- A <!-- c:1 -->");
+        let p = plan_edits(&base, &user);
+        assert!(p.retract.is_empty());
+        assert_eq!(p.supersede.len(), 1);
     }
 
     #[test]

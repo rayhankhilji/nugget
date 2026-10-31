@@ -39,6 +39,63 @@ fn card(key: &str, org: &str, modified: &str, version: &str) -> nugget_store::Ne
     }))
 }
 
+fn user_claim(subject: &nugget_core::ids::EntityId, object: ClaimObject) -> NewClaim {
+    NewClaim {
+        subject: subject.clone(),
+        predicate: "works_at".into(),
+        object,
+        text: "my words".into(),
+        confidence: 1.0,
+        status: ClaimStatus::UserAsserted,
+        evidence: Vec::new(),
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+/// Review of GG5-13: once the user's claim also has evidence (a later extraction of the same
+/// value), it is still as fresh as the edit: a source dated between that evidence and the edit
+/// does not supersede it.
+#[tokio::test]
+async fn a_user_value_with_evidence_is_as_fresh_as_the_edit() {
+    let env = Env::new();
+    env.put(
+        card("old", "Acme", "2025-01-01T00:00:00Z", "1"),
+        &["Alice Smith, Acme"],
+    );
+    let k = env.knowledge(cfg(), None);
+    run(&k).await;
+    let alice = env.entity(EntityKind::Person, "Alice Smith");
+    let acme_org = env.entity(EntityKind::Organization, "Acme");
+    let old = env.active(&alice, "works_at")[0].clone();
+    // The user rewords the line keeping the link: same value, the user's words.
+    let mine = env
+        .g()
+        .supersede_by_user(
+            old.id,
+            &user_claim(&alice.id, ClaimObject::Entity(acme_org.id.clone())),
+        )
+        .unwrap();
+    // Re-extraction gives the user's claim the 2025 evidence.
+    k.reset().await.unwrap();
+    run(&k).await;
+    let c = env.g().get_claim(mine).unwrap().unwrap();
+    assert_eq!(c.status, ClaimStatus::UserAsserted);
+    assert!(!c.evidence.is_empty(), "{c:?}");
+    // A source from before the edit (but after that evidence) is history.
+    env.put(
+        card("mid", "Initech", "2026-01-01T00:00:00Z", "1"),
+        &["Alice Smith, Initech"],
+    );
+    run(&k).await;
+    let active: Vec<i64> = env
+        .active(&alice, "works_at")
+        .iter()
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(active, vec![mine]);
+}
+
 #[tokio::test]
 async fn the_users_edit_wins_over_re_extraction_until_a_newer_source() {
     let env = Env::new();
@@ -54,20 +111,15 @@ async fn the_users_edit_wins_over_re_extraction_until_a_newer_source() {
     let acme = acme[0].clone();
 
     // The user rewrites the line in the vault (no link: a literal value).
-    env.g().supersede_by_user(acme.id).unwrap();
     let mine = env
         .g()
-        .add_claim(&NewClaim {
-            subject: alice.id.clone(),
-            predicate: "works_at".into(),
-            object: ClaimObject::Literal("Alice Smith is CTO at Acme (fixed by me)".into()),
-            text: "Alice Smith is CTO at Acme (fixed by me)".into(),
-            confidence: 1.0,
-            status: ClaimStatus::UserAsserted,
-            evidence: Vec::new(),
-            valid_from: None,
-            valid_to: None,
-        })
+        .supersede_by_user(
+            acme.id,
+            &user_claim(
+                &alice.id,
+                ClaimObject::Literal("Alice Smith is CTO at Acme (fixed by me)".into()),
+            ),
+        )
         .unwrap();
 
     let current = |env: &Env| -> Vec<i64> {

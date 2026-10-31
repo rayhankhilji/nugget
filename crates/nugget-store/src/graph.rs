@@ -55,6 +55,9 @@ const LIVE: &str = "status IN ('active', 'user_asserted', 'rejected')";
 /// - [`GraphStore::neighbourhood`] returns at most [`MAX_NEIGHBOURHOOD_NODES`] nodes (also for
 ///   `limit` 0, "unlimited").
 /// - Claim ids are never reused, even for claims folded away (AUTOINCREMENT).
+/// - A claim the user replaced ([`GraphStore::supersede_by_user`]) remembers the content hash
+///   of each item it had evidence from; once an item's content changed, only the quotes it had
+///   then are remembered. `MemGraph` keeps no items, so its items never change.
 ///
 /// [`GraphStore::apply_batch`], [`GraphStore::split`] and [`GraphStore::merge`] each run in one
 /// transaction: a failing op rolls the whole call back. A batch of one item's writes is also
@@ -868,6 +871,9 @@ fn add_claim_tx(tx: &Connection, touched: &mut Touched, new: &NewClaim) -> Resul
                 new.text
             ])
             .db("update claim")?;
+            if new.status == ClaimStatus::UserAsserted {
+                record_assertion(tx, id, touched.now())?;
+            }
             id
         }
         None if let Some(id) =
@@ -906,7 +912,11 @@ fn add_claim_tx(tx: &Connection, touched: &mut Touched, new: &NewClaim) -> Resul
                 touched.now()
             ])
             .db("insert claim")?;
-            tx.last_insert_rowid()
+            let id = tx.last_insert_rowid();
+            if new.status == ClaimStatus::UserAsserted {
+                record_assertion(tx, id, touched.now())?;
+            }
+            id
         }
     };
     let now = touched.now().to_owned();
@@ -917,12 +927,29 @@ fn add_claim_tx(tx: &Connection, touched: &mut Touched, new: &NewClaim) -> Resul
     Ok(id)
 }
 
-/// Key of a piece of evidence in `claim_user_replaced`: the item and the (clamped) quote.
-fn replaced_key(ev: &Evidence) -> (&str, &str, String) {
-    (
-        ev.item.source.as_str(),
-        ev.item.key.as_str(),
-        clamp_quote(ev.quote.as_deref().unwrap_or("")),
+/// When `claim` was made user-asserted (see `GraphStore::asserted_at`).
+fn record_assertion(tx: &Connection, claim: ClaimId, at: &str) -> Result<()> {
+    tx.prepare_cached(
+        "INSERT INTO claim_assertions (claim_id, asserted_at) VALUES (?1, ?2)
+         ON CONFLICT (claim_id) DO UPDATE SET asserted_at = excluded.asserted_at",
+    )
+    .db("prepare assertion record")?
+    .execute(params![claim, at])
+    .db("record assertion")?;
+    Ok(())
+}
+
+/// SQL condition: the evidence row `(?claim, source, key, quote)` named by the given columns is
+/// remembered by the user's replacement of the claim: from an item recorded then, with the same
+/// quote or with the item's content unchanged since (no item row then and now counts as
+/// unchanged).
+fn remembered_sql(claim: &str, source: &str, key: &str, quote: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM claim_replacement_evidence r
+                 WHERE r.claim_id = {claim} AND r.source = {source} AND r.key = {key}
+                   AND (r.quote = {quote}
+                        OR r.item_hash IS (SELECT i.content_hash FROM items i
+                                           WHERE i.source = {source} AND i.key = {key})))"
     )
 }
 
@@ -933,21 +960,44 @@ fn is_replaced_by_user(conn: &Connection, claim: ClaimId, evidence: &[Evidence])
         return Ok(false);
     }
     let mut stmt = conn
-        .prepare_cached(
-            "SELECT EXISTS (SELECT 1 FROM claim_user_replaced
-                            WHERE claim_id = ?1 AND source = ?2 AND key = ?3 AND quote = ?4)",
-        )
+        .prepare_cached(&format!(
+            "SELECT {}",
+            remembered_sql("?1", "?2", "?3", "?4")
+        ))
         .db("prepare replaced lookup")?;
     for ev in evidence {
-        let (source, key, quote) = replaced_key(ev);
+        let quote = clamp_quote(ev.quote.as_deref().unwrap_or(""));
         let hit: bool = stmt
-            .query_row(params![claim, source, key, quote], |r| r.get(0))
+            .query_row(
+                params![claim, ev.item.source.as_str(), ev.item.key.as_str(), quote],
+                |r| r.get(0),
+            )
             .db("read replaced lookup")?;
         if !hit {
             return Ok(false);
         }
     }
     Ok(true)
+}
+
+/// Whether the user replaced `claim` and all of its evidence is remembered.
+fn all_evidence_remembered(tx: &Connection, claim: ClaimId) -> Result<bool> {
+    tx.prepare_cached(&format!(
+        "SELECT EXISTS (SELECT 1 FROM claim_replacements WHERE claim_id = ?1)
+            AND NOT EXISTS (SELECT 1 FROM claim_evidence e WHERE e.claim_id = ?1
+                            AND NOT {})",
+        remembered_sql("?1", "e.source", "e.key", "coalesce(e.quote, '')")
+    ))
+    .db("prepare replaced evidence check")?
+    .query_row([claim], |r| r.get(0))
+    .db("check replaced evidence")
+}
+
+fn has_replacement(tx: &Connection, claim: ClaimId) -> Result<bool> {
+    tx.prepare_cached("SELECT EXISTS (SELECT 1 FROM claim_replacements WHERE claim_id = ?1)")
+        .db("prepare replacement lookup")?
+        .query_row([claim], |r| r.get(0))
+        .db("read replacement lookup")
 }
 
 /// The oldest superseded or retracted claim with `new`'s triple that the user replaced and that
@@ -968,7 +1018,7 @@ fn replaced_twin(
                 "SELECT id FROM claims
                  WHERE subject = ?1 AND predicate = ?2 AND object_entity IS ?3
                    AND object_literal IS ?4 AND status IN ('superseded', 'retracted')
-                   AND EXISTS (SELECT 1 FROM claim_user_replaced r WHERE r.claim_id = claims.id)
+                   AND EXISTS (SELECT 1 FROM claim_replacements r WHERE r.claim_id = claims.id)
                  ORDER BY id",
             )
             .db("prepare replaced twin")?;
@@ -990,7 +1040,7 @@ fn replaced_twin(
 }
 
 fn forget_user_replaced(tx: &Connection, claim: ClaimId) -> Result<()> {
-    tx.prepare_cached("DELETE FROM claim_user_replaced WHERE claim_id = ?1")
+    tx.prepare_cached("DELETE FROM claim_replacements WHERE claim_id = ?1")
         .db("prepare replaced forget")?
         .execute([claim])
         .db("forget replaced claim")?;
@@ -1010,30 +1060,39 @@ fn has_live_twin(tx: &Connection, claim: ClaimId) -> Result<bool> {
     .db("check live twin")
 }
 
-fn supersede_by_user_tx(tx: &Connection, touched: &mut Touched, claim: ClaimId) -> Result<()> {
+fn supersede_by_user_tx(
+    tx: &Connection,
+    touched: &mut Touched,
+    claim: ClaimId,
+    by: &NewClaim,
+) -> Result<ClaimId> {
     let (subject, object, _) = claim_ends(tx, claim)?;
     forget_user_replaced(tx, claim)?;
-    let evidence = evidence_of(tx, claim)?;
-    {
-        let mut insert = tx
-            .prepare_cached(
-                "INSERT OR IGNORE INTO claim_user_replaced (claim_id, source, key, quote)
-                 VALUES (?1, ?2, ?3, ?4)",
-            )
-            .db("prepare replaced record")?;
-        for ev in &evidence {
-            let (source, key, quote) = replaced_key(ev);
-            insert
-                .execute(params![claim, source, key, quote])
-                .db("record replaced claim")?;
-        }
-    }
     tx.prepare_cached("UPDATE claims SET status = 'superseded', updated_at = ?2 WHERE id = ?1")
         .db("prepare replaced status")?
         .execute(params![claim, touched.now()])
         .db("supersede claim")?;
     touch_ends(touched, &subject, object.as_deref());
-    Ok(())
+    let new = add_claim_tx(tx, touched, by)?;
+    // Claims `claim` itself replaced are now replaced by the user's newer version.
+    tx.prepare_cached("UPDATE claim_replacements SET replaced_by = ?2 WHERE replaced_by = ?1")
+        .db("prepare replacement chain")?
+        .execute(params![claim, new])
+        .db("chain replacements")?;
+    tx.prepare_cached("INSERT INTO claim_replacements (claim_id, replaced_by) VALUES (?1, ?2)")
+        .db("prepare replacement record")?
+        .execute(params![claim, new])
+        .db("record replacement")?;
+    tx.prepare_cached(
+        "INSERT OR IGNORE INTO claim_replacement_evidence (claim_id, source, key, quote, item_hash)
+         SELECT e.claim_id, e.source, e.key, coalesce(e.quote, ''),
+                (SELECT i.content_hash FROM items i WHERE i.source = e.source AND i.key = e.key)
+         FROM claim_evidence e WHERE e.claim_id = ?1",
+    )
+    .db("prepare replaced evidence record")?
+    .execute([claim])
+    .db("record replaced evidence")?;
+    Ok(new)
 }
 
 fn add_evidence_tx(
@@ -1044,25 +1103,30 @@ fn add_evidence_tx(
 ) -> Result<()> {
     let (subject, object, status) = claim_ends(tx, claim)?;
     let now = touched.now().to_owned();
-    // Replaced by the user and the source still says the same: not current again (unless a
-    // live claim has the triple, e.g. the user's own; then it folds into that as usual).
-    let remembered = is_replaced_by_user(tx, claim, std::slice::from_ref(ev))?;
-    let stays = remembered && status == "retracted" && !has_live_twin(tx, claim)?;
-    if !remembered {
-        forget_user_replaced(tx, claim)?;
-    }
     insert_evidence(tx, claim, ev, &now)?;
-    tx.prepare_cached(
-        "UPDATE claims SET updated_at = ?2,
-             status = CASE WHEN status <> 'retracted' THEN status
-                           WHEN ?3 THEN 'superseded' ELSE 'active' END
-         WHERE id = ?1",
-    )
-    .db("prepare evidence claim update")?
-    .execute(params![claim, now, stays])
-    .db("update claim")?;
+    // A claim the user replaced stays superseded while all its evidence is remembered (decided
+    // on the whole set, so the order evidence arrives in does not matter), unless its
+    // retraction left a live twin (the user's own claim) to fold into.
+    let replaced =
+        matches!(status.as_str(), "retracted" | "superseded") && has_replacement(tx, claim)?;
+    let stays = replaced
+        && all_evidence_remembered(tx, claim)?
+        && !(status == "retracted" && has_live_twin(tx, claim)?);
+    let revived = !stays && (status == "retracted" || replaced);
+    let next = if stays {
+        "superseded"
+    } else if revived {
+        "active"
+    } else {
+        status.as_str()
+    };
+    tx.prepare_cached("UPDATE claims SET updated_at = ?2, status = ?3 WHERE id = ?1")
+        .db("prepare evidence claim update")?
+        .execute(params![claim, now, next])
+        .db("update claim")?;
     touch_ends(touched, &subject, object.as_deref());
-    if status == "retracted" && !stays {
+    if revived {
+        forget_user_replaced(tx, claim)?;
         fold_tx(tx, claim, None, &now)?;
     }
     Ok(())
@@ -1093,6 +1157,16 @@ fn set_claim_status_tx(
         .execute(params![claim, status_str(status), now])
         .db("set claim status")?;
     touch_ends(touched, &subject, object.as_deref());
+    if status == ClaimStatus::UserAsserted {
+        record_assertion(tx, claim, &now)?;
+    }
+    if !status.is_active() {
+        // The user's replacement is no longer current: what it replaced is free again.
+        tx.prepare_cached("DELETE FROM claim_replacements WHERE replaced_by = ?1")
+            .db("prepare replacement release")?
+            .execute([claim])
+            .db("release replacements")?;
+    }
     if status.is_live() {
         forget_user_replaced(tx, claim)?;
         fold_tx(tx, claim, status.is_user_decision().then_some(status), &now)?;
@@ -1139,29 +1213,27 @@ fn update_claim_tx(
     Ok(())
 }
 
-/// Fold `claim` (just made live) and every live claim with the same triple into the oldest one:
-/// evidence moves, confidence is the maximum, the status is `explicit` or else the strongest.
-/// Returns the survivor.
+/// Fold `claim` (just made live) and every live claim with the same triple into the user's own
+/// claim (the oldest of them), else the oldest one: evidence moves, confidence is the maximum,
+/// the status is `explicit` or else the strongest. Returns the survivor.
 fn fold_tx(
     tx: &Connection,
     claim: ClaimId,
     explicit: Option<ClaimStatus>,
     now: &str,
 ) -> Result<ClaimId> {
-    let group: Vec<(ClaimId, f64, String, String)> = {
+    let group: Vec<(ClaimId, f64, String)> = {
         let mut stmt = tx
             .prepare_cached(&format!(
-                "SELECT o.id, o.confidence, o.status, o.text FROM claims c JOIN claims o
+                "SELECT o.id, o.confidence, o.status FROM claims c JOIN claims o
                    ON o.subject = c.subject AND o.predicate = c.predicate
                   AND o.object_entity IS c.object_entity AND o.object_literal IS c.object_literal
                  WHERE c.id = ?1 AND c.{LIVE} AND o.{LIVE}
-                 ORDER BY o.id"
+                 ORDER BY o.status <> 'user_asserted', o.id"
             ))
             .db("prepare fold group")?;
         let rows = stmt
-            .query_map([claim], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-            })
+            .query_map([claim], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .db("query fold group")?;
         rows.collect::<rusqlite::Result<_>>()
             .db("read fold group")?
@@ -1170,35 +1242,36 @@ fn fold_tx(
         return Ok(claim);
     }
     let keep = group[0].0;
-    let keep_status = status_from_str(&group[0].2)?;
-    let mut status = keep_status;
+    let mut status = status_from_str(&group[0].2)?;
     let mut confidence = group[0].1;
-    // The user's wording, if the survivor is not the user's own claim.
-    let mut user_text: Option<&str> = None;
-    for (gone, conf, st, text) in &group[1..] {
-        let st = status_from_str(st)?;
-        if st == ClaimStatus::UserAsserted {
-            user_text = Some(text);
-        }
-        status = status.strongest(st);
+    for (gone, conf, st) in &group[1..] {
+        status = status.strongest(status_from_str(st)?);
         confidence = confidence.max(*conf);
         move_evidence(tx, keep, *gone)?;
+        tx.prepare_cached(
+            "INSERT INTO claim_assertions (claim_id, asserted_at)
+             SELECT ?1, asserted_at FROM claim_assertions WHERE claim_id = ?2
+             ON CONFLICT (claim_id) DO UPDATE
+                 SET asserted_at = max(asserted_at, excluded.asserted_at)",
+        )
+        .db("prepare assertion move")?
+        .execute(params![keep, gone])
+        .db("move assertion time")?;
+        tx.prepare_cached("UPDATE claim_replacements SET replaced_by = ?1 WHERE replaced_by = ?2")
+            .db("prepare replacement move")?
+            .execute(params![keep, gone])
+            .db("move replacement links")?;
         tx.prepare_cached("DELETE FROM claims WHERE id = ?1")
             .db("prepare folded claim delete")?
             .execute([gone])
             .db("drop folded claim")?;
     }
     let status = explicit.unwrap_or(status);
-    let text = user_text.filter(|_| {
-        status == ClaimStatus::UserAsserted && keep_status != ClaimStatus::UserAsserted
-    });
     tx.prepare_cached(
-        "UPDATE claims SET status = ?2, confidence = ?3, updated_at = ?4,
-             text = coalesce(?5, text)
-         WHERE id = ?1",
+        "UPDATE claims SET status = ?2, confidence = ?3, updated_at = ?4 WHERE id = ?1",
     )
     .db("prepare fold survivor")?
-    .execute(params![keep, status_str(status), confidence, now, text])
+    .execute(params![keep, status_str(status), confidence, now])
     .db("update fold survivor")?;
     forget_user_replaced(tx, keep)?;
     Ok(keep)
@@ -1361,7 +1434,8 @@ fn split_tx(
         fold_tx(tx, id, None, &now)?;
     }
 
-    // Ids merged into `from` under one of the new entity's names now resolve to it.
+    // Ids merged into `from` under the new entity's name (or, failing that, the one id merged
+    // under one of its aliases) now resolve to it.
     let own = normalize_name(&entity_name(tx, &from)?);
     let merged: Vec<(String, String)> = {
         let mut stmt = tx
@@ -1373,15 +1447,18 @@ fn split_tx(
         rows.collect::<rusqlite::Result<_>>()
             .db("read merged ids")?
     };
-    for (id, name) in merged {
-        let n = normalize_name(&name);
-        if n != own && norms.contains(&n) {
-            tx.prepare_cached("UPDATE entities SET merged_into = ?2 WHERE id = ?1")
-                .db("prepare merged id move")?
-                .execute(params![id, to])
-                .db("re-point merged id")?;
-            touched.add(&id);
-        }
+    let merged: Vec<(String, String)> = merged
+        .into_iter()
+        .map(|(id, name)| (id, normalize_name(&name)))
+        .filter(|(_, n)| *n != own)
+        .collect();
+    let aliases: HashSet<String> = norms.iter().cloned().collect();
+    for id in nugget_graph::mem::split_repoint(&merged, &normalize_name(&new.name), &aliases) {
+        tx.prepare_cached("UPDATE entities SET merged_into = ?2 WHERE id = ?1")
+            .db("prepare merged id move")?
+            .execute(params![id, to])
+            .db("re-point merged id")?;
+        touched.add(&id);
     }
     touched.add(&from);
     touched.add(&to);
@@ -1702,14 +1779,27 @@ impl GraphStore for SqliteGraph {
         })
     }
 
-    fn supersede_by_user(&self, claim: ClaimId) -> Result<()> {
+    fn supersede_by_user(&self, claim: ClaimId, by: &NewClaim) -> Result<ClaimId> {
+        validate_claim(by)?;
         self.write("supersede_by_user", |tx, touched| {
-            supersede_by_user_tx(tx, touched, claim)
+            supersede_by_user_tx(tx, touched, claim, by)
         })
     }
 
     fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> Result<bool> {
         self.read(|c| is_replaced_by_user(c, claim, evidence))
+    }
+
+    fn asserted_at(&self, claim: ClaimId) -> Result<Option<OffsetDateTime>> {
+        self.read(|c| {
+            c.prepare_cached("SELECT asserted_at FROM claim_assertions WHERE claim_id = ?1")
+                .db("prepare assertion lookup")?
+                .query_row([claim], |r| r.get::<_, String>(0))
+                .optional()
+                .db("read assertion time")?
+                .map(|t| parse_time(&t))
+                .transpose()
+        })
     }
 
     fn claims_for(&self, entity: &EntityId, include_inactive: bool) -> Result<Vec<Claim>> {
@@ -2142,7 +2232,8 @@ fn fold_duplicate_claims(tx: &Connection, entity: &str, now: &str) -> Result<()>
         if gone.contains(&id) {
             continue;
         }
-        // Ascending ids: `id` is the oldest of its group, so it survives.
+        // Ascending ids: `id` and its twins fold together here; whichever survives, none of
+        // them needs another pass.
         let before: Vec<ClaimId> = {
             let mut stmt = tx
                 .prepare_cached(&format!(

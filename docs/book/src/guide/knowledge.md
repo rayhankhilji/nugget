@@ -123,7 +123,7 @@ back into it with a three-way merge (the last render, your file and the new rend
 | You do this | Nugget does this |
 |---|---|
 | Write anything outside the generated regions (for example under `## Notes`) | Keeps it, in your order, on every re-render |
-| **Edit** a fact line | The old fact becomes `superseded`; your text becomes a new fact with status `user_asserted`, which is **yours**: it needs no source and shows a `(you)` tag. Re-saving the source does not bring the old line back while the source still says the same thing; if the source changes what it says, that is a new fact |
+| **Edit** a fact line | The old fact becomes `superseded`; your text becomes a new fact with status `user_asserted`, which is **yours**: it needs no source and shows a `(you)` tag. Re-saving the source does not bring the old line back while the source still says the same thing; if the source changes what it says, that is a new fact. Delete your own line again and the original comes back the next time its source is read |
 | **Delete** a fact line | The fact becomes `rejected`: re-extraction never brings it back |
 | **Add** a bullet under a fact heading | A new `user_asserted` fact with that heading's relation (`note` outside any heading) |
 | Add an alias in the frontmatter | The alias is added to the entity (spelling such as `["A", "B"]` against `["A","B"]` does not matter) |
@@ -132,7 +132,8 @@ back into it with a three-way merge (the last render, your file and the new rend
 Removing a footnote citation is not treated as an edit. Retyping a fact line without its invisible
 `<!-- c:N -->` marker keeps your wording. If an editor or formatter strips every HTML comment from a
 page, Nugget puts its markers back from the last render, so your changes still count as edits and the
-page is not duplicated. Before writing a page, Nugget re-reads your file and retries if it changed, so
+page is not duplicated; on such a page only lines you clearly removed reject their facts, and a page
+emptied or rewritten that way changes no facts. Before writing a page, Nugget re-reads your file and retries if it changed, so
 a render never overwrites an edit you just made.
 
 For a fact that holds one value at a time (such as where someone works), your value stays current
