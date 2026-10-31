@@ -454,6 +454,9 @@ impl State {
             }
             c.updated_at = now();
             self.touch_ends(&subject, &object);
+            if new.status.is_user_decision() {
+                self.release_if_not_current(existing);
+            }
             return Ok(existing);
         }
         // Extracted again from the evidence of a claim the user replaced: it stays replaced.
@@ -569,15 +572,26 @@ impl State {
         if status == ClaimStatus::UserAsserted {
             self.asserted.insert(claim, now());
         }
-        if !status.is_active() {
-            // The user's replacement is no longer current: what it replaced is free again.
+        let survivor = if status.is_live() {
+            self.user_replaced.remove(&claim);
+            self.fold(claim, status.is_user_decision().then_some(status))
+        } else {
+            claim
+        };
+        // Keyed on the survivor's final status: a user's replacement that is no longer current
+        // frees what it replaced.
+        self.release_if_not_current(survivor);
+        Ok(())
+    }
+
+    fn release_if_not_current(&mut self, claim: ClaimId) {
+        if !self
+            .claims
+            .get(&claim)
+            .is_some_and(|c| c.status.is_active())
+        {
             self.user_replaced.retain(|_, r| r.by != Some(claim));
         }
-        if status.is_live() {
-            self.user_replaced.remove(&claim);
-            self.fold(claim, status.is_user_decision().then_some(status));
-        }
-        Ok(())
     }
 
     fn supersede_by_user(&mut self, claim: ClaimId, by: &NewClaim) -> Result<ClaimId> {
@@ -1143,6 +1157,10 @@ impl GraphStore for MemGraph {
 
     fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> Result<bool> {
         Ok(self.lock().remembers(claim, evidence))
+    }
+
+    fn has_user_replacement(&self, claim: ClaimId) -> Result<bool> {
+        Ok(self.lock().user_replaced.contains_key(&claim))
     }
 
     fn asserted_at(&self, claim: ClaimId) -> Result<Option<OffsetDateTime>> {

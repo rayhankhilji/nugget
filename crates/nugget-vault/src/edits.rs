@@ -126,10 +126,10 @@ pub(crate) fn plan_edits(base: &Doc, user: &Doc) -> EditPlan {
                 if content.is_empty() {
                     continue;
                 }
-                if let Some(&id) = base_contents.get(content.as_str()) {
-                    if !marked.contains(&id) {
-                        seen.insert(id);
-                    }
+                if let Some(&id) = base_contents.get(content.as_str())
+                    && !marked.contains(&id)
+                {
+                    seen.insert(id);
                     continue;
                 }
                 let nf = NewFact {
@@ -204,11 +204,18 @@ mod tests {
         let p = plan_edits(&base, &user);
         assert!(p.retract.is_empty(), "{p:?}");
         assert!(p.add.is_empty());
-        // With its marked line still there, an unmarked copy changes nothing either.
+        // With its marked line still there, an unmarked copy is a fact of the user's own.
         let user = page("- B [^2]\n- B changed <!-- c:2 -->\n- A <!-- c:1 -->");
         let p = plan_edits(&base, &user);
         assert!(p.retract.is_empty());
         assert_eq!(p.supersede.len(), 1);
+        assert_eq!(
+            p.add,
+            vec![NewFact {
+                predicate: "note".into(),
+                content: "B".into()
+            }]
+        );
     }
 
     #[test]

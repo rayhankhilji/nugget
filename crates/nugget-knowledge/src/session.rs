@@ -1453,9 +1453,7 @@ impl<'a> Session<'a> {
                 // unchanged case).
                 let status = match c.status {
                     ClaimStatus::Retracted => ClaimStatus::Active,
-                    ClaimStatus::Superseded
-                        if self.graph().replaced_by_user(c.id, &c.evidence)? =>
-                    {
+                    ClaimStatus::Superseded if self.graph().has_user_replacement(c.id)? => {
                         ClaimStatus::Active
                     }
                     s => s,

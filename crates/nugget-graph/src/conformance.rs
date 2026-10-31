@@ -1283,6 +1283,53 @@ fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
         "evidence does not move the assertion time"
     );
     assert_eq!(g.asserted_at(old).unwrap(), None);
+
+    // Second review, finding 5: release follows the fold survivor's final status.
+    // (a) A retracted claim with U's triple is rejected: it folds into U (the user's claim
+    //     survives) and the group is rejected, so what U replaced is free again.
+    let h = person(g, "H");
+    let tea = ClaimObject::Literal("tea".into());
+    let twin = g
+        .add_claim(&claim(&h, "drinks", tea.clone(), vec![ev("x.md")]))
+        .unwrap();
+    g.retract_item(&item("x.md")).unwrap();
+    let orig = g
+        .add_claim(&claim(
+            &h,
+            "drinks",
+            ClaimObject::Literal("coffee".into()),
+            vec![ev("h.md")],
+        ))
+        .unwrap();
+    let u = g
+        .supersede_by_user(orig, &user_claim(&h, "drinks", tea.clone(), "H drinks tea"))
+        .unwrap();
+    assert_ne!(u, twin);
+    assert!(g.has_user_replacement(orig).unwrap());
+    g.set_claim_status(twin, ClaimStatus::Rejected).unwrap();
+    assert!(
+        g.get_claim(twin).unwrap().is_none(),
+        "folded into the user's claim"
+    );
+    assert_eq!(status(g, u), ClaimStatus::Rejected);
+    assert!(!g.has_user_replacement(orig).unwrap());
+    // (b) add_claim of a rejection of U's triple lands in U and releases too.
+    let k = person(g, "K");
+    let orig = g
+        .add_claim(&claim(
+            &k,
+            "drinks",
+            ClaimObject::Literal("coffee".into()),
+            vec![ev("k.md")],
+        ))
+        .unwrap();
+    let u = g
+        .supersede_by_user(orig, &user_claim(&k, "drinks", tea.clone(), "K drinks tea"))
+        .unwrap();
+    let mut rej = claim(&k, "drinks", tea.clone(), vec![]);
+    rej.status = ClaimStatus::Rejected;
+    assert_eq!(g.add_claim(&rej).unwrap(), u);
+    assert!(!g.has_user_replacement(orig).unwrap());
 }
 
 fn user_text_survives_folds(g: &dyn GraphStore) {

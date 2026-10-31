@@ -1362,6 +1362,14 @@ fn stripped_pages_reject_only_clear_deletions() {
         assert!(r.edits.retracted.is_empty(), "{text:?}: {:?}", r.edits);
         assert_eq!(f.status(f.works_at), ClaimStatus::Active);
         assert_eq!(f.status(f.prefers), ClaimStatus::Active);
+        // Second review, finding 6: the file is left exactly as the user has it (no merge that
+        // would duplicate it) and reported as skipped.
+        assert_eq!(f.read(&f.sam), text);
+        assert!(
+            r.skipped.iter().any(|p| p.contains("Samantha Lee")),
+            "{:?}",
+            r.skipped
+        );
     }
     let f = fixture();
     f.vault.render_all().unwrap();

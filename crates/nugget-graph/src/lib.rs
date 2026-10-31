@@ -109,6 +109,15 @@ pub trait GraphStore: Send + Sync {
         Ok(false)
     }
 
+    /// Whether the user replaced `claim` ([`GraphStore::supersede_by_user`]) and the record
+    /// is still kept: while it is, evidence that is not remembered makes the claim current
+    /// again (see the crate invariants), whatever evidence the claim has now. The default
+    /// keeps no records (`false`).
+    fn has_user_replacement(&self, claim: ClaimId) -> Result<bool> {
+        let _ = claim;
+        Ok(false)
+    }
+
     /// When the claim was last made `UserAsserted` (added as such, a user claim folded into it,
     /// or its status set to it); kept through folds (the latest wins) and later evidence.
     /// `None` if never, or the store does not keep it (the default).

@@ -769,7 +769,8 @@ fn pruned_entities_stay_tombstoned_across_reopen() {
 
 /// GG5-4 review: a claim the user replaced remembers the items it had evidence from and their
 /// content then. Another quote from the same, unchanged item (an LLM retry) stays remembered;
-/// after the item changed, only the quote it had then is.
+/// after the item changed, so does any quote while the quote recorded then is still in its
+/// text (second review, finding 3); once the source no longer says it, a new quote revives.
 #[test]
 fn user_replacement_remembers_item_versions() {
     let s = Store::open_in_memory().unwrap();
@@ -811,20 +812,28 @@ fn user_replacement_remembers_item_versions() {
         ClaimStatus::Superseded
     );
 
-    // The item is saved again (new content): the old quote is still remembered...
+    // The item is saved again (new content) still saying it: any quote is remembered.
     put("Harbor is part of Acme.\n\nre-saved");
     assert!(g.replaced_by_user(old, &[quoted("part of Acme")]).unwrap());
     assert!(
-        !g.replaced_by_user(old, &[quoted("Harbor moved to Acme Labs")])
+        g.replaced_by_user(old, &[quoted("Acme runs Harbor")])
             .unwrap()
     );
     g.retract_item(&iref("files", "n.md")).unwrap();
-    g.add_evidence(old, &quoted("part of Acme")).unwrap();
+    g.add_evidence(old, &quoted("Acme runs Harbor")).unwrap();
     assert_eq!(
         g.get_claim(old).unwrap().unwrap().status,
         ClaimStatus::Superseded
     );
-    // ...a new one is the source saying it differently: current again, record forgotten.
+    // The source no longer says it: a new quote is the source saying it differently.
+    put("Harbor moved to Acme Labs.");
+    assert!(
+        !g.replaced_by_user(old, &[quoted("Harbor moved to Acme Labs")])
+            .unwrap()
+    );
+    // (The quote recorded then still counts as remembered: an extractor quoting it means the
+    // source says it.)
+    assert!(g.replaced_by_user(old, &[quoted("part of Acme")]).unwrap());
     g.retract_item(&iref("files", "n.md")).unwrap();
     g.add_evidence(old, &quoted("Harbor moved to Acme Labs"))
         .unwrap();

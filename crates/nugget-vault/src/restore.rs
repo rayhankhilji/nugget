@@ -10,10 +10,13 @@
 //! with the user's lines (longest common subsequence):
 //! - a line the user kept, or moved (the same text anywhere among the changed lines), gets its
 //!   base line back, comments included;
-//! - within a run of changed lines, a user line that is clearly a version of a base line (the
-//!   same link target, or at least half of the words in common) keeps that base line's trailing
-//!   markers, so a reworded fact line stays the same claim and becomes an edit of it; other
-//!   lines get no marker (a new fact, or text);
+//! - within a run of changed lines, a user line that is clearly a version of a base line keeps
+//!   that base line's trailing markers, so a reworded fact line stays the same claim and
+//!   becomes an edit of it. The same footnote references count most (they survive stripping
+//!   and name the claim's sources), then the same first link target, then at least half of the
+//!   words in common, then how close the lines sit in the run. Pairs are made best first over
+//!   the whole run; a line whose best pair is tied with another stays unmarked (a new fact,
+//!   never an edit of the wrong one), as do lines like no base line;
 //! - lines that were nothing but a marker are put back where they were.
 //!
 //! The markers are only put back when at least half of the base's fact lines were found again;
@@ -125,34 +128,57 @@ pub(crate) fn restore_markers(base: &str, user: &str) -> Option<Restored> {
             }
         }
     }
-    for s in &steps {
-        let Step::Changed(hb, hu) = s else { continue };
-        for &j in hu {
-            if from.contains_key(&j) || us[j].is_empty() {
-                continue;
-            }
-            let best = hb
-                .iter()
-                .copied()
-                .filter(|&i| !taken[i] && !is_marker(i) && !bs[i].is_empty())
-                .map(|i| (similarity(&bs[i], &us[j]), i))
-                .filter(|(s, _)| *s >= 0.5)
-                .max_by(|x, y| x.0.total_cmp(&y.0).then(y.1.cmp(&x.1)));
-            if let Some((_, i)) = best {
-                from.insert(j, i);
-                taken[i] = true;
-            }
-        }
-    }
-
-    // Enough of the base's facts found again?
+    // Enough of the base's facts can still be found again? (Checked before the pairing
+    // below, which is the costly part.)
     let facts: Vec<usize> = (0..n).filter(|&i| claim_of(b[i]).is_some()).collect();
+    let is_fact = |i: usize| claim_of(b[i]).is_some();
     let mut found = vec![false; n];
     for s in &steps {
         if let Step::Same(i) = s {
             found[*i] = true;
         }
     }
+    let possible = facts.iter().filter(|&&i| found[i] || taken[i]).count()
+        + steps
+            .iter()
+            .map(|s| match s {
+                Step::Changed(hb, hu) => {
+                    let users = hu.iter().filter(|j| !from.contains_key(j)).count();
+                    let bases = hb.iter().filter(|&&i| !taken[i] && is_fact(i)).count();
+                    users.min(bases)
+                }
+                Step::Same(_) => 0,
+            })
+            .sum::<usize>();
+    if possible * 2 < facts.len() {
+        return None;
+    }
+
+    // Versions of a base line in the same run, assigned globally by score.
+    let bf: HashMap<usize, Features> = steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::Changed(hb, _) => Some(hb),
+            Step::Same(_) => None,
+        })
+        .flatten()
+        .filter(|&&i| !taken[i] && !is_marker(i) && !bs[i].is_empty())
+        .map(|&i| (i, Features::of(&bs[i])))
+        .collect();
+    for s in &steps {
+        let Step::Changed(hb, hu) = s else { continue };
+        let users: Vec<usize> = hu
+            .iter()
+            .copied()
+            .filter(|j| !from.contains_key(j) && !us[*j].is_empty())
+            .collect();
+        let bases: Vec<usize> = hb.iter().copied().filter(|i| bf.contains_key(i)).collect();
+        for (j, i) in pair(&users, &bases, |j| Features::of(&us[j]), |i| &bf[&i]) {
+            from.insert(j, i);
+            taken[i] = true;
+        }
+    }
+
     let matched = facts.iter().filter(|&&i| found[i] || taken[i]).count();
     if matched * 2 < facts.len() {
         return None;
@@ -230,27 +256,118 @@ fn claim_of(line: &str) -> Option<ClaimId> {
     digits.parse().ok()
 }
 
-/// How clearly `user` is a version of `base`: 1 for the same first link target, else the
-/// share of words in common (footnote numbers aside).
-fn similarity(base: &str, user: &str) -> f64 {
-    let link = |l: &str| wikilinks(l).into_iter().next().map(|(t, _)| t);
-    if let Some(t) = link(base)
-        && link(user).as_ref() == Some(&t)
-    {
-        return 1.0;
+/// What a line is compared by: its footnote references (they survive comment stripping and
+/// name the claim's sources exactly), its first link target and its words.
+struct Features {
+    notes: Vec<String>,
+    link: Option<String>,
+    words: HashSet<String>,
+}
+
+impl Features {
+    fn of(line: &str) -> Self {
+        let mut notes = Vec::new();
+        let mut rest = line;
+        while let Some(at) = rest.find("[^") {
+            let tail = &rest[at + 2..];
+            match tail.find(']') {
+                Some(end) if !tail[..end].contains(char::is_whitespace) => {
+                    notes.push(tail[..end].to_owned());
+                    rest = &tail[end + 1..];
+                }
+                _ => rest = tail,
+            }
+        }
+        notes.sort();
+        Features {
+            notes,
+            link: wikilinks(line).into_iter().next().map(|(t, _)| t),
+            words: line
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty() && !w.chars().all(|c| c.is_ascii_digit()))
+                .map(str::to_lowercase)
+                .collect(),
+        }
     }
-    let words = |l: &str| -> HashSet<String> {
-        l.split(|c: char| !c.is_alphanumeric())
-            .filter(|w| !w.is_empty() && !w.chars().all(|c| c.is_ascii_digit()))
-            .map(str::to_lowercase)
-            .collect()
+}
+
+/// How clearly a user line is a version of a base line: the same footnotes, then the same
+/// first link target, then the share of words in common; `None` when it is not one at all.
+fn score(base: &Features, user: &Features) -> Option<(u8, f64)> {
+    let all = base.words.union(&user.words).count();
+    let words = if all == 0 {
+        0.0
+    } else {
+        base.words.intersection(&user.words).count() as f64 / all as f64
     };
-    let (a, b) = (words(base), words(user));
-    let all = a.union(&b).count();
-    if all == 0 {
-        return 0.0;
+    let tier = if !base.notes.is_empty() && base.notes == user.notes {
+        2
+    } else if base.link.is_some() && base.link == user.link {
+        1
+    } else {
+        0
+    };
+    (tier > 0 || words >= 0.5).then_some((tier, words))
+}
+
+/// Pair user lines with base lines of one changed run: the best-scoring pairs first (score,
+/// then how close their relative positions in the run are). A line whose best pair is tied
+/// with another is left unpaired: an ambiguous line becomes a new fact, never an edit of the
+/// wrong one.
+fn pair<'f>(
+    users: &[usize],
+    bases: &[usize],
+    user_features: impl Fn(usize) -> Features,
+    base_features: impl Fn(usize) -> &'f Features,
+) -> Vec<(usize, usize)> {
+    let pos = |k: usize, len: usize| (k as f64 + 0.5) / len as f64;
+    let mut cands: Vec<((u8, f64, f64), usize, usize)> = Vec::new();
+    for (ku, &j) in users.iter().enumerate() {
+        let uf = user_features(j);
+        for (kb, &i) in bases.iter().enumerate() {
+            if let Some((tier, words)) = score(base_features(i), &uf) {
+                let near = -(pos(ku, users.len()) - pos(kb, bases.len())).abs();
+                cands.push(((tier, words, near), j, i));
+            }
+        }
     }
-    a.intersection(&b).count() as f64 / all as f64
+    let same = |a: &(u8, f64, f64), b: &(u8, f64, f64)| {
+        a.0 == b.0 && (a.1 - b.1).abs() < 1e-9 && (a.2 - b.2).abs() < 1e-9
+    };
+    cands.sort_by(|x, y| {
+        (y.0.0, y.0.1, y.0.2)
+            .partial_cmp(&(x.0.0, x.0.1, x.0.2))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut out = Vec::new();
+    let mut done_u: HashSet<usize> = HashSet::new();
+    let mut done_b: HashSet<usize> = HashSet::new();
+    for (sc, j, i) in &cands {
+        if done_u.contains(j) || done_b.contains(i) {
+            continue;
+        }
+        let rivals: Vec<&((u8, f64, f64), usize, usize)> = cands
+            .iter()
+            .filter(|(s2, j2, i2)| {
+                same(s2, sc)
+                    && (j2 == j) != (i2 == i)
+                    && !done_u.contains(j2)
+                    && !done_b.contains(i2)
+            })
+            .collect();
+        if rivals.is_empty() {
+            out.push((*j, *i));
+            done_u.insert(*j);
+            done_b.insert(*i);
+        } else {
+            // Ambiguous: every user line in the tie stays unpaired.
+            done_u.insert(*j);
+            for (_, j2, _) in rivals {
+                done_u.insert(*j2);
+            }
+        }
+    }
+    out
 }
 
 /// `line` without its `<!-- … -->` comments (and the space before each), trailing space trimmed.
@@ -412,7 +529,61 @@ mod tests {
         assert_eq!(trailing_comments("- a"), "");
         assert_eq!(claim_of("- a [^1] <!-- c:31 -->"), Some(31));
         assert_eq!(claim_of("- a"), None);
-        assert!(similarity("- B likes tea.", "- B likes green tea.") >= 0.5);
-        assert!(similarity("- A works at Acme.", "- C plays chess") < 0.5);
+        let f = Features::of;
+        assert!(score(&f("- B likes tea."), &f("- B likes green tea.")).is_some());
+        assert!(score(&f("- A works at Acme."), &f("- C plays chess")).is_none());
+        assert_eq!(
+            f("- x [^2][^10] y").notes,
+            vec!["10".to_string(), "2".to_string()]
+        );
+    }
+
+    const LINKS: &str = "---\nnugget_id: \"e1\"\n---\n<!-- nugget:begin facts -->\n## Facts\n\n- Co-founded [[O/Acme (e2)|Acme]] [^1] <!-- c:10 -->\n- Works at [[O/Acme (e2)|Acme]] [^2] <!-- c:11 -->\n- Lives in Paris [^3] <!-- c:12 -->\n- Lives in Berlin [^4] <!-- c:13 -->\n- Plays chess [^5] <!-- c:14 -->\n<!-- nugget:end facts -->\n";
+
+    /// Second review, finding 1: footnotes name the claim; a shared link alone is a tie.
+    #[test]
+    fn footnotes_decide_between_lines_with_the_same_link() {
+        let user = strip(LINKS)
+            .replace("- Co-founded [[O/Acme (e2)|Acme]] [^1]\n", "")
+            .replace(
+                "- Works at [[O/Acme (e2)|Acme]] [^2]",
+                "- Advises [[O/Acme (e2)|Acme]] [^2]",
+            )
+            .replace("- Lives in Paris [^3]\n", "")
+            .replace("- Lives in Berlin [^4]", "- Lives in Munich [^4]");
+        let r = restore_markers(LINKS, &user).expect("restored");
+        assert!(
+            r.text
+                .contains("- Advises [[O/Acme (e2)|Acme]] [^2] <!-- c:11 -->"),
+            "{}",
+            r.text
+        );
+        assert!(
+            r.text.contains("- Lives in Munich [^4] <!-- c:13 -->"),
+            "{}",
+            r.text
+        );
+        assert!(
+            !r.text.contains("c:10") && !r.text.contains("c:12"),
+            "{}",
+            r.text
+        );
+    }
+
+    /// Without footnotes, two equally good base lines: the line stays unpaired (a new fact).
+    #[test]
+    fn ambiguous_lines_stay_unpaired() {
+        let base = LINKS.replace(" [^3]", "").replace(" [^4]", "");
+        let user = strip(&base).replace(
+            "- Lives in Paris\n- Lives in Berlin\n",
+            "- Lives in Munich\n",
+        );
+        let r = restore_markers(&base, &user).expect("restored");
+        assert!(r.text.contains("- Lives in Munich\n"), "{}", r.text);
+        assert!(
+            !r.text.contains("c:12") && !r.text.contains("c:13"),
+            "{}",
+            r.text
+        );
     }
 }

@@ -874,6 +874,9 @@ fn add_claim_tx(tx: &Connection, touched: &mut Touched, new: &NewClaim) -> Resul
             if new.status == ClaimStatus::UserAsserted {
                 record_assertion(tx, id, touched.now())?;
             }
+            if new.status.is_user_decision() {
+                release_if_not_current(tx, id)?;
+            }
             id
         }
         None if let Some(id) =
@@ -941,15 +944,20 @@ fn record_assertion(tx: &Connection, claim: ClaimId, at: &str) -> Result<()> {
 
 /// SQL condition: the evidence row `(?claim, source, key, quote)` named by the given columns is
 /// remembered by the user's replacement of the claim: from an item recorded then, with the same
-/// quote or with the item's content unchanged since (no item row then and now counts as
-/// unchanged).
+/// quote, or with the item's content unchanged since (no item row then and now counts as
+/// unchanged), or with the quote recorded then still in the item's text (the source still says
+/// it, whatever quote an extractor picks this time).
 fn remembered_sql(claim: &str, source: &str, key: &str, quote: &str) -> String {
     format!(
         "EXISTS (SELECT 1 FROM claim_replacement_evidence r
                  WHERE r.claim_id = {claim} AND r.source = {source} AND r.key = {key}
                    AND (r.quote = {quote}
                         OR r.item_hash IS (SELECT i.content_hash FROM items i
-                                           WHERE i.source = {source} AND i.key = {key})))"
+                                           WHERE i.source = {source} AND i.key = {key})
+                        OR (r.quote <> ''
+                            AND EXISTS (SELECT 1 FROM chunks ch JOIN items i ON i.id = ch.item_id
+                                        WHERE i.source = {source} AND i.key = {key}
+                                          AND instr(ch.text, r.quote) > 0))))"
     )
 }
 
@@ -991,6 +999,18 @@ fn all_evidence_remembered(tx: &Connection, claim: ClaimId) -> Result<bool> {
     .db("prepare replaced evidence check")?
     .query_row([claim], |r| r.get(0))
     .db("check replaced evidence")
+}
+
+/// When `claim` (a user's replacement) is not current, what it replaced is free again.
+fn release_if_not_current(tx: &Connection, claim: ClaimId) -> Result<()> {
+    tx.prepare_cached(&format!(
+        "DELETE FROM claim_replacements WHERE replaced_by = ?1
+           AND NOT EXISTS (SELECT 1 FROM claims WHERE id = ?1 AND {ACTIVE})"
+    ))
+    .db("prepare replacement release")?
+    .execute([claim])
+    .db("release replacements")?;
+    Ok(())
 }
 
 fn has_replacement(tx: &Connection, claim: ClaimId) -> Result<bool> {
@@ -1160,17 +1180,15 @@ fn set_claim_status_tx(
     if status == ClaimStatus::UserAsserted {
         record_assertion(tx, claim, &now)?;
     }
-    if !status.is_active() {
-        // The user's replacement is no longer current: what it replaced is free again.
-        tx.prepare_cached("DELETE FROM claim_replacements WHERE replaced_by = ?1")
-            .db("prepare replacement release")?
-            .execute([claim])
-            .db("release replacements")?;
-    }
-    if status.is_live() {
+    let survivor = if status.is_live() {
         forget_user_replaced(tx, claim)?;
-        fold_tx(tx, claim, status.is_user_decision().then_some(status), &now)?;
-    }
+        fold_tx(tx, claim, status.is_user_decision().then_some(status), &now)?
+    } else {
+        claim
+    };
+    // Keyed on the survivor's final status: a user's replacement that is no longer current
+    // frees what it replaced.
+    release_if_not_current(tx, survivor)?;
     Ok(())
 }
 
@@ -1788,6 +1806,10 @@ impl GraphStore for SqliteGraph {
 
     fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> Result<bool> {
         self.read(|c| is_replaced_by_user(c, claim, evidence))
+    }
+
+    fn has_user_replacement(&self, claim: ClaimId) -> Result<bool> {
+        self.read(|c| has_replacement(c, claim))
     }
 
     fn asserted_at(&self, claim: ClaimId) -> Result<Option<OffsetDateTime>> {

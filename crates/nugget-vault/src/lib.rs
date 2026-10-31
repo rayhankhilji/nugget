@@ -951,10 +951,22 @@ impl Vault {
             // A page saved by an editor that drops HTML comments gets its markers back, so the
             // user's edits are read as edits (and the page is not duplicated). Only lines
             // clearly deleted from such a page reject their facts.
+            let lost = matches!(
+                (base_text.as_deref(), user_text.as_deref()),
+                (Some(b), Some(u)) if !u.contains(doc::BEGIN) && b.contains(doc::BEGIN)
+            );
             let restored = match (base_text.as_deref(), user_text.as_deref()) {
-                (Some(b), Some(u)) => restore::restore_markers(b, u),
+                (Some(b), Some(u)) if lost => restore::restore_markers(b, u),
                 _ => None,
             };
+            if lost && restored.is_none() {
+                // Emptied or rewritten without markers: the user's text cannot be told from
+                // generated text. Leave the file exactly as it is (no merge, no duplicate).
+                tracing::warn!(page = ?src, "vault: page lost its markers and could not be matched to the last render; leaving it alone");
+                pass.report.skipped.extend(src);
+                pass.notes.insert(id, notes);
+                return Ok(());
+            }
             let user = match &restored {
                 Some(r) => Some(Doc::parse(&r.text)),
                 None => user_text.as_deref().map(Doc::parse),

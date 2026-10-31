@@ -176,3 +176,69 @@ async fn the_users_edit_wins_over_re_extraction_until_a_newer_source() {
         ClaimStatus::Superseded
     );
 }
+
+/// Second review, finding 2: the user edits A into B (a link to another organisation), then B
+/// into C. An older source then says B: the store revives B (it was replaced, and the
+/// evidence is new to it); the session must expect that and keep it as history, so C stays the
+/// only current value.
+#[tokio::test]
+async fn an_older_source_for_an_edited_away_user_value_stays_history() {
+    let env = Env::new();
+    env.put(
+        card("old", "Acme", "2025-01-01T00:00:00Z", "1"),
+        &["Alice Smith, Acme"],
+    );
+    // Another contact makes the organisation Globex known.
+    env.put(
+        nugget_store::NewItem::new("contacts:phone", "bob", nugget_store::content_hash("bob"))
+            .with_mime("application/json")
+            .with_version("bob")
+            .with_modified_at(
+                time::OffsetDateTime::parse(
+                    "2025-01-01T00:00:00Z",
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .unwrap(),
+            )
+            .with_metadata(json!({
+                "source": {"contact": {"name": "Bob Jones", "emails": ["bob@example.net"],
+                                        "organization": "Globex"}},
+                "sensitive": false
+            })),
+        &["Bob Jones, Globex"],
+    );
+    let k = env.knowledge(cfg(), None);
+    run(&k).await;
+    let alice = env.entity(EntityKind::Person, "Alice Smith");
+    let globex = env.entity(EntityKind::Organization, "Globex");
+    let a = env.active(&alice, "works_at")[0].clone();
+    let b = env
+        .g()
+        .supersede_by_user(
+            a.id,
+            &user_claim(&alice.id, ClaimObject::Entity(globex.id.clone())),
+        )
+        .unwrap();
+    let c = env
+        .g()
+        .supersede_by_user(
+            b,
+            &user_claim(
+                &alice.id,
+                ClaimObject::Literal("Alice Smith is a consultant".into()),
+            ),
+        )
+        .unwrap();
+    assert!(env.g().has_user_replacement(b).unwrap());
+    env.put(
+        card("older", "Globex", "2024-01-01T00:00:00Z", "1"),
+        &["Alice Smith, Globex"],
+    );
+    run(&k).await;
+    let active: Vec<i64> = env
+        .active(&alice, "works_at")
+        .iter()
+        .map(|x| x.id)
+        .collect();
+    assert_eq!(active, vec![c], "{:?}", env.claims(&alice, "works_at"));
+}
