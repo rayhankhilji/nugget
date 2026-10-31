@@ -17,13 +17,13 @@ packet log is `qa/GG8/real/results/s60_onboarding/flows.txt` on branch `qa/priva
 | GG8-3 Double Tap sent texts become a hidden source read by MCP and cloud Ask | High | EE2 (`ee/draft-recall`) | in progress |
 | GG8-4 Card number in the Double Tap thread to the cloud unscanned | Medium | EE2 | in progress |
 | GG8-5 Update check on github.com by default, unledgered | Medium | EE5 follow-up | in progress |
-| GG8-6 Ledger rows without items | Medium | embed: DD4 (**fixed**); Ask: EE3 (**fixed**); proactive judge: EE4 follow-up | partly fixed |
-| GG8-7 Debug logs hold MCP arguments and results | Low | EE4 follow-up (`ee/security-review-2`) | in progress |
-| GG8-8 Audit log stores MCP queries verbatim | Low | EE4 follow-up | in progress |
+| GG8-6 Ledger rows without items | Medium | DD4, EE3, EE4 | **fixed** (embed, Ask, proactive judge; regression tests) |
+| GG8-7 Debug logs hold MCP arguments and results | Low | EE4 | **fixed** |
+| GG8-8 Audit log stores MCP queries verbatim | Low | EE4 | **fixed** (keyed hash + length) |
 | GG8-9 Ask sends absolute file paths | Low | EE3 | **fixed** (grounded prompt; regression test) |
-| GG8-10 Read-ahead/prewarm report a local provider when only cloud is usable | Low | EE4 follow-up | in progress |
-| GG8-11 IMAP STARTTLS not ledgered, host carries :993 | Low | EE4 follow-up | in progress |
-| GG8-12 `extractor_provider` null during cloud extraction | Low | EE4 follow-up | in progress |
+| GG8-10 Read-ahead/prewarm report a local provider when only cloud is usable | Low | EE4 | **fixed** |
+| GG8-11 IMAP STARTTLS not ledgered, host carries :993 | Low | EE4 | **fixed** |
+| GG8-12 `extractor_provider` null during cloud extraction | Low | EE4 | **fixed** |
 | First chat after onboarding: "no provider for tier Synthesis" (not privacy) | High | EE3 follow-up | **fixed** (routes while the model loads; regression test) |
 
 Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app under
