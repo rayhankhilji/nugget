@@ -1217,12 +1217,17 @@ impl Vault {
         let rel = prev.path.clone();
         let base_text = self.read_base(id);
         let base = base_text.as_deref().map(Doc::parse);
+        let mut restored_deleted = None;
         let user = match user_text.as_deref() {
             None => None,
             Some(u) => match base_text.as_deref() {
                 Some(b) if !u.contains(doc::BEGIN) && b.contains(doc::BEGIN) => {
                     match restore::restore_markers(b, u) {
-                        Some(restored) => Some(Doc::parse(&restored)),
+                        Some(r) => {
+                            let doc = Doc::parse(&r.text);
+                            restored_deleted = Some(r.deleted);
+                            Some(doc)
+                        }
                         None => {
                             tracing::warn!(page = %rel, "vault: cannot tell the user's text from generated text; leaving the page of a now hidden entity alone");
                             pass.report.skipped.push(rel);
@@ -1239,7 +1244,11 @@ impl Vault {
             && prev.stub.is_none()
             && let Some(e) = ctx.entity(id)?.filter(|e| e.id == *id)
         {
-            let plan = plan_edits(b, u);
+            let mut plan = plan_edits(b, u);
+            // As in `render_page`: on a restored page only clearly deleted lines retract.
+            if let Some(deleted) = &restored_deleted {
+                plan.retract.retain(|c| deleted.contains(c));
+            }
             if !plan.is_empty() {
                 self.apply_plan(st, &e, &plan, pass)?;
                 pass.edits_applied.insert(id.clone());
