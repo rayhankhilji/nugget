@@ -913,7 +913,12 @@ fn explain(action: &ActionDescriptor, ctx: &ActionContext, a: &Assessment) -> St
     if let Some(label) = &r.target_label {
         s.push_str(&format!(" “{label}”"));
     }
-    if let Some(preview) = &r.text_preview {
+    // The confirmation shows the whole bounded preview (what a Send sends), not the log's cut.
+    let secure = r.text_preview.as_deref() == Some(crate::redact::REDACTED);
+    let preview = action.text_preview.as_deref().map(|p| {
+        crate::redact::redact_preview_capped(p, secure, crate::redact::CONFIRM_PREVIEW_CAP)
+    });
+    if let Some(preview) = &preview {
         s.push_str(&format!(" with “{preview}”"));
     }
     s.push('.');
@@ -1674,6 +1679,9 @@ mod tests {
         // GNOME Settings > System > Remote Desktop, and the Sharing panel's master switch.
         assert_remote(&e, &toggle("org.gnome.Settings", "Remote Desktop"), &switch);
         assert_remote(&e, &toggle("gnome-control-center", "Sharing"), &switch);
+        // An app that calls itself just "Settings" (GG3-25).
+        assert_remote(&e, &toggle("settings", "Remote Desktop"), &switch);
+        assert_remote(&e, &toggle("Settings", "Remote access"), &switch);
         // An unnamed switch on a remote-access pane, found by its window title or deep link.
         assert_remote(
             &e,
@@ -1837,5 +1845,59 @@ mod tests {
             &e.assess(&a, &ActionContext::default().with_role("checkbox"))
                 .decision
         ));
+    }
+
+    // GG3-6 (regression): click, Space and Enter on the same control get the same decision.
+    #[test]
+    fn gg3_6_click_space_enter_same_decision() {
+        let e = engine();
+        let ctx = ActionContext::default().with_role("button");
+        for label in [
+            "Löschen",
+            "Supprimer",
+            "Eliminar",
+            "删除",
+            "Senden",
+            "Envoyer",
+            "Bezahlen",
+            "Kaufen",
+            "Revoke",
+            "Admin",
+            "Checkout now",
+        ] {
+            let mut results = Vec::new();
+            for (verb, keys) in [
+                ("click", None),
+                ("press_key", Some("space")),
+                ("press_key", Some("enter")),
+            ] {
+                let mut a = act("mail", verb, Some(label), RiskClass::Edit);
+                a.text_preview = keys.map(Into::into);
+                let out = e.assess(&a, &ctx);
+                results.push((out.risk, is_confirm(&out.decision)));
+            }
+            assert!(results[0].1, "{label}: click must ask ({results:?})");
+            assert!(
+                results.iter().all(|r| *r == results[0]),
+                "{label}: {results:?}"
+            );
+        }
+    }
+
+    // GG3-5: the confirmation names what a Send sends, beyond the log's 80-character cut.
+    #[test]
+    fn gg3_5_confirm_reason_carries_the_send_preview() {
+        let e = engine();
+        let mut a = act("mail", "click", Some("Send"), RiskClass::Send);
+        let body = format!(
+            "To: a@b.example · Subject: Q3 · Message: {}END",
+            "x".repeat(150)
+        );
+        a.text_preview = Some(body);
+        let Decision::Confirm(text) = e.evaluate(&a) else {
+            panic!("a send asks");
+        };
+        assert!(text.contains("To: a@b.example"), "{text}");
+        assert!(text.contains("END"), "{text}");
     }
 }

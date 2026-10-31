@@ -4,6 +4,7 @@
 //! The extension validates again in the page (`extensions/browser/src/actions.ts`); validating
 //! here as well means a bad action is refused before the policy gate or the user is asked about it.
 
+use nugget_policy::preview::{FieldValue, fields_preview};
 use nugget_policy::{ActionDescriptor, RiskClass};
 use serde::{Deserialize, Serialize};
 
@@ -290,7 +291,10 @@ impl BrowserAction {
         let text_preview = match self {
             Self::Type { text, .. } => Some(preview(text)),
             Self::Select { value, .. } => Some(preview(value)),
-            _ => None,
+            // A submit, or a click on a form's submit button, shows what the form sends.
+            _ => self
+                .sent_fields(snapshot)
+                .and_then(|fields| fields_preview(&fields)),
         };
         ActionDescriptor {
             target_app,
@@ -301,6 +305,79 @@ impl BrowserAction {
             task_id: task_id.to_owned(),
         }
     }
+}
+
+impl BrowserAction {
+    /// The form this action submits, if it does: a `submit`, or a click on a button that
+    /// submits its form.
+    pub fn submitted_form<'a>(&self, snapshot: Option<&'a PageSnapshot>) -> Option<&'a str> {
+        let snap = snapshot?;
+        match self {
+            Self::Submit { element } => snap.element(element)?.form.as_deref(),
+            Self::Click { element } => {
+                let e = snap.element(element)?;
+                (matches!(e.role.as_str(), "button" | "menuitem") && submits(e))
+                    .then_some(e.form.as_deref())
+                    .flatten()
+            }
+            _ => None,
+        }
+    }
+
+    /// The fields (with their full values) the form this action submits sends, in page order;
+    /// `None` when the action submits nothing.
+    pub fn sent_fields(&self, snapshot: Option<&PageSnapshot>) -> Option<Vec<FieldValue>> {
+        let form = self.submitted_form(snapshot)?;
+        Some(form_fields(snapshot?, form))
+    }
+}
+
+/// Whether activating `e` submits its form.
+pub(crate) fn submits(e: &ElementInfo) -> bool {
+    e.form.is_some()
+        && (e.tag == "button" && e.input_type.is_none()
+            || matches!(e.input_type.as_deref(), Some("submit" | "image")))
+}
+
+/// Most fields of one form listed in a preview or digest.
+const FORM_FIELDS_MAX: usize = 32;
+
+/// The value-carrying fields of `form`: text inputs, text areas, selects, check boxes and radio
+/// buttons. Password, payment and secret-labelled fields are marked secret (their values are
+/// never shown).
+pub fn form_fields(snapshot: &PageSnapshot, form: &str) -> Vec<FieldValue> {
+    snapshot
+        .form_elements(form)
+        .filter(|e| match e.tag.as_str() {
+            "input" => !matches!(
+                e.input_type.as_deref(),
+                Some("submit" | "button" | "image" | "reset" | "hidden" | "file")
+            ),
+            "textarea" | "select" => true,
+            _ => e.editable,
+        })
+        .take(FORM_FIELDS_MAX)
+        .map(|e| {
+            let label = if e.name.trim().is_empty() {
+                e.input_type.clone().unwrap_or_else(|| e.tag.clone())
+            } else {
+                e.name.clone()
+            };
+            let secret = e.sensitive.is_some()
+                || e.input_type.as_deref() == Some("password")
+                || nugget_policy::redact::is_secure_label(&e.name);
+            let value = if e.sensitive.is_some() {
+                None
+            } else if let Some(c) = e.checked {
+                Some(if c { "checked" } else { "not checked" }.to_string())
+            } else if let Some(opts) = &e.options {
+                opts.iter().find(|o| o.selected).map(|o| o.label.clone())
+            } else {
+                e.value.clone()
+            };
+            FieldValue::new(label, value, secret)
+        })
+        .collect()
 }
 
 fn describe_wait(until: &WaitCondition) -> String {
@@ -369,10 +446,7 @@ fn click_risk(snapshot: Option<&PageSnapshot>, e: &ElementInfo) -> RiskClass {
     match e.role.as_str() {
         "link" => keyword_risk(&e.name).unwrap_or(RiskClass::Observe),
         "button" | "menuitem" => {
-            let submits = e.form.is_some()
-                && (e.tag == "button" && e.input_type.is_none()
-                    || matches!(e.input_type.as_deref(), Some("submit" | "image")));
-            let base = if submits {
+            let base = if submits(e) {
                 form_risk(snapshot, e.form.as_deref()).max(RiskClass::Send)
             } else {
                 RiskClass::Edit

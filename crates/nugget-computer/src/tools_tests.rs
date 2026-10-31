@@ -80,6 +80,10 @@ struct Fake {
     windows: Mutex<Vec<UiTree>>,
     screens: Vec<(&'static str, UiTree)>,
     acts: Mutex<Vec<String>>,
+    /// Every key input, as `text:<id>:<text>` or `keys:<id>:<chords>`.
+    inputs: Mutex<Vec<String>>,
+    /// Cancelled by the first key input (to stop a task in the middle of typing).
+    cancel_on_key: Mutex<Option<tokio_util::sync::CancellationToken>>,
 }
 
 impl Fake {
@@ -106,7 +110,7 @@ impl Fake {
             }
             (_, Some(t)) => {
                 if let Some(n) = node_mut(&mut ws[i].root, id) {
-                    n.value = Some(t.to_string());
+                    n.value = Some(format!("{}{t}", n.value.as_deref().unwrap_or("")));
                 }
             }
             _ => {}
@@ -154,10 +158,32 @@ impl ComputerUse for Fake {
         Ok(out)
     }
     fn key_input(&self, target: Option<&ElementId>, input: &KeyInput) -> Result<ActionOutcome> {
-        let id = target.ok_or_else(|| Error::Invalid("no target".into()))?;
-        let out = self.done(format!("keys:{id}"), id)?;
+        if let Some(t) = self.cancel_on_key.lock().unwrap().take() {
+            t.cancel();
+        }
+        let id = match target {
+            Some(id) => id.clone(),
+            None => {
+                let ws = self.windows.lock().unwrap();
+                ws.iter()
+                    .find_map(|t| t.focused.clone())
+                    .ok_or_else(|| Error::Invalid("no target".into()))?
+            }
+        };
+        let what = match input {
+            KeyInput::Text(t) => format!("text:{id}:{t}"),
+            KeyInput::Keys(k) => format!(
+                "keys:{id}:{}",
+                k.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        };
+        let out = self.done(format!("keys:{id}"), &id)?;
+        self.inputs.lock().unwrap().push(what);
         if let KeyInput::Text(t) = input {
-            self.effect(id, None, Some(t));
+            self.effect(&id, None, Some(t));
         }
         Ok(out)
     }
@@ -177,6 +203,8 @@ impl Kit {
             windows: Mutex::new(windows),
             screens,
             acts: Mutex::new(Vec::new()),
+            inputs: Mutex::new(Vec::new()),
+            cancel_on_key: Mutex::new(None),
         });
         let tools = crate::tools_with(fake.clone(), crate::ComputerConfig::default());
         Kit { fake, tools }
@@ -713,4 +741,352 @@ async fn an_action_that_leaves_the_window_alone_stays_short() {
         .call("set_value", json!({"element": "mail-search", "value": "x"}))
         .await;
     assert!(!r.content.contains("now shows"), "{}", r.content);
+}
+
+/// A compose window: To, Subject, a body, a secret field, Send and Discard.
+fn send_kit() -> Kit {
+    let field = |id: &str, role: Role, name: &str, value: &str| {
+        let mut n = node(id, role, name);
+        n.states.editable = true;
+        n.value = Some(value.into());
+        n
+    };
+    let mut secret = field("c-code", Role::TextField, "Sign-in code", "918273");
+    secret.actions = vec![UiActionKind::SetValue];
+    let compose = window(
+        "w5",
+        "Mail",
+        vec![
+            node("c-search", Role::SearchField, "Search mail"),
+            field("c-to", Role::TextField, "To", "bob@ourco.example"),
+            field("c-subject", Role::TextField, "Subject", "Q3 numbers"),
+            field(
+                "c-body",
+                Role::TextArea,
+                "Message",
+                "Hi Bob,\nthe numbers are attached.\u{202E}",
+            ),
+            secret,
+            node("c-send", Role::Button, "Senden"),
+            node("c-discard", Role::Button, "Discard"),
+        ],
+    );
+    Kit::with(vec![compose], Vec::new())
+}
+
+fn set_field(kit: &Kit, id: &str, value: &str) {
+    let mut ws = kit.fake.windows.lock().unwrap();
+    for t in ws.iter_mut() {
+        if let Some(n) = node_mut(&mut t.root, &ElementId(id.into())) {
+            n.value = Some(value.into());
+        }
+    }
+}
+
+// GG3-5 (regression): a send's confirmation lists what it sends, and the press happens only if
+// the fields still hold exactly that.
+#[tokio::test]
+async fn gg3_5_send_preview_and_freeze() {
+    let kit = send_kit();
+    kit.call("observe", json!({})).await;
+    let send = json!({"element": "c-send"});
+    let d = kit.tool("click").describe(&send);
+    let p = d.text_preview.clone().unwrap_or_default();
+    assert!(
+        p.starts_with("To: bob@ourco.example · Subject: Q3 numbers · Message: Hi Bob, the numbers"),
+        "{p}"
+    );
+    assert!(
+        p.contains("Sign-in code: ••••") && !p.contains("918273"),
+        "{p}"
+    );
+    assert!(!p.contains("Search mail") && !p.contains('\u{202E}') && !p.contains('\n'));
+
+    // The recipient changes after the user saw the confirmation: nothing is pressed.
+    set_field(&kit, "c-to", "archive@files-backup.example");
+    let r = kit.call("click", send.clone()).await;
+    assert!(r.is_error, "{}", r.content);
+    assert!(
+        r.content.contains("changed after it was shown"),
+        "{}",
+        r.content
+    );
+    assert!(r.content.contains("To changed"), "{}", r.content);
+    assert!(
+        !kit.acts().iter().any(|a| a.contains("c-send")),
+        "{:?}",
+        kit.acts()
+    );
+
+    // Described again (the user now sees the new recipient) and unchanged: it sends.
+    let d = kit.tool("click").describe(&send);
+    assert!(
+        d.text_preview
+            .unwrap()
+            .contains("archive@files-backup.example")
+    );
+    let r = kit.call("click", send.clone()).await;
+    assert!(!r.is_error, "{}", r.content);
+    assert!(
+        kit.acts().contains(&"press:c-send".to_string()),
+        "{:?}",
+        kit.acts()
+    );
+
+    // The frozen description was used up: it does not linger for later calls, and describing
+    // something else (Discard is no send) freezes nothing.
+    assert!(
+        kit.tool("click")
+            .describe(&json!({"element": "c-discard"}))
+            .text_preview
+            .is_none()
+    );
+    assert!(kit.fake.windows.lock().unwrap().len() == 1);
+
+    // A field that appears between confirmation and press also refuses.
+    kit.tool("click").describe(&send);
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        let mut bcc = node("c-bcc", Role::TextField, "Bcc");
+        bcc.value = Some("eve@evil.example".into());
+        ws[0].root.children.insert(2, bcc);
+    }
+    let r = kit.call("click", send.clone()).await;
+    assert!(
+        r.is_error && r.content.contains("Bcc appeared"),
+        "{}",
+        r.content
+    );
+
+    // Space on the Send button sends too: same preview after the keys, same freeze.
+    kit.call("observe", json!({})).await;
+    let keys = json!({"element": "c-send", "keys": "space"});
+    let d = kit.tool("press_key").describe(&keys);
+    let p = d.text_preview.unwrap();
+    assert_eq!(p.lines().next(), Some("space"), "{p}");
+    assert!(p.contains("Bcc: eve@evil.example"), "{p}");
+    set_field(&kit, "c-body", "Wire $9,800 to DE89 3704 0044 0532 0130 00");
+    let r = kit.call("press_key", keys).await;
+    assert!(
+        r.is_error && r.content.contains("Message changed"),
+        "{}",
+        r.content
+    );
+    assert!(
+        !kit.fake
+            .inputs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|a| a.starts_with("keys:c-send"))
+    );
+}
+
+// GG3-6 (regression): Space or Enter on a button is judged like a click on it; after Tab the
+// pressed control is unknown.
+#[tokio::test]
+async fn gg3_6_keys_on_a_button_are_a_click() {
+    let kit = Kit::new();
+    kit.call("observe", json!({})).await;
+    let click = kit.risk("click", json!({"element": "mail-send"}));
+    for keys in ["space", "enter"] {
+        let k = kit.risk("press_key", json!({"element": "mail-send", "keys": keys}));
+        assert!(k >= click, "{keys}: {k:?} < {click:?}");
+    }
+    assert_eq!(
+        kit.risk(
+            "press_key",
+            json!({"element": "mail-compose", "keys": "space"})
+        ),
+        kit.risk("click", json!({"element": "mail-compose"}))
+    );
+    assert_eq!(
+        kit.risk(
+            "press_key",
+            json!({"element": "mail-compose", "keys": "tab space"})
+        ),
+        RiskClass::Send
+    );
+}
+
+// GG3-15 (regression): a Delete names what it deletes: the open item's heading, or the selected
+// row.
+#[tokio::test]
+async fn gg3_15_delete_names_the_item() {
+    let mut heading = node("m-subject", Role::Heading, "Lunch Thursday?");
+    heading.actions.clear();
+    let message = window(
+        "w6",
+        "Mail",
+        vec![
+            node("m-back", Role::Button, "Back to inbox"),
+            heading,
+            node("m-delete", Role::Button, "Löschen"),
+        ],
+    );
+    let mut selected = node("r-2", Role::ListItem, "Budget\u{202E} review");
+    selected.states.selected = true;
+    let list = window(
+        "w7",
+        "Files",
+        vec![
+            node("f-delete", Role::Button, "Delete"),
+            node("f-rename", Role::Button, "Rename"),
+            UiNode {
+                children: vec![node("r-1", Role::ListItem, "Holiday plan"), selected],
+                ..node("f-list", Role::List, "Files")
+            },
+        ],
+    );
+    let kit = Kit::with(vec![message, list], Vec::new());
+    kit.call("observe", json!({"window": "w6"})).await;
+    kit.call("observe", json!({"window": "w7"})).await;
+    let d = kit.tool("click").describe(&json!({"element": "m-delete"}));
+    assert_eq!(
+        d.target_label.as_deref(),
+        Some("“Löschen” — open: “Lunch Thursday?”")
+    );
+    let d = kit.tool("click").describe(&json!({"element": "f-delete"}));
+    assert_eq!(
+        d.target_label.as_deref(),
+        Some("“Delete” — selected: “Budget review”")
+    );
+    // Not a Delete: the label is unchanged.
+    let d = kit.tool("click").describe(&json!({"element": "f-rename"}));
+    assert_eq!(d.target_label.as_deref(), Some("Rename"));
+}
+
+// GG3-22 (regression): secret fields are recognised in other languages and wordings.
+#[tokio::test]
+async fn gg3_22_secret_fields_multilingual() {
+    for label in [
+        "Password",
+        "Passwort",
+        "Mot de passe",
+        "Contraseña",
+        "Пароль",
+        "密码",
+        "One-time code",
+        "Sign-in code",
+        "Account key",
+        "6-digit code",
+    ] {
+        let mut f = node("x-field", Role::TextField, label);
+        f.states.editable = true;
+        let kit = Kit::with(vec![window("w8", "Login", vec![f])], Vec::new());
+        kit.call("observe", json!({})).await;
+        let args = json!({"element": "x-field", "value": "hunter2"});
+        assert_eq!(
+            kit.risk("set_value", args.clone()),
+            RiskClass::Security,
+            "{label}"
+        );
+        let d = kit.tool("set_value").describe(&args);
+        assert!(!d.text_preview.unwrap().contains("hunter2"), "{label}");
+        assert_eq!(
+            kit.tool("set_value").redact(&args)["value"],
+            "[redacted]",
+            "{label}"
+        );
+        let t = json!({"element": "x-field", "text": "hunter2"});
+        assert_eq!(
+            kit.tool("type_text").redact(&t)["text"],
+            "[redacted]",
+            "{label}"
+        );
+    }
+}
+
+// GG3-11 (regression): long text and key sequences go to the backend in pieces, and Stop
+// between pieces keeps the rest from being typed.
+#[tokio::test]
+async fn gg3_11_stop_between_pieces_of_typing() {
+    let kit = send_kit();
+    kit.call("observe", json!({})).await;
+    set_field(&kit, "c-subject", "");
+    let text = "a".repeat(super::TYPE_CHUNK) + &"b".repeat(super::TYPE_CHUNK * 3);
+    let c = ctx();
+    *kit.fake.cancel_on_key.lock().unwrap() = Some(c.cancel.clone());
+    let r = kit
+        .tool("type_text")
+        .call(json!({"element": "c-subject", "text": text}), &c)
+        .await;
+    assert!(r.is_error, "{}", r.content);
+    assert!(
+        r.content
+            .contains(&format!("stopped after typing {} of", super::TYPE_CHUNK)),
+        "{}",
+        r.content
+    );
+    let typed: Vec<String> = kit.fake.inputs.lock().unwrap().clone();
+    assert_eq!(typed.len(), 1, "{typed:?}");
+    assert_eq!(
+        typed[0],
+        format!("text:c-subject:{}", "a".repeat(super::TYPE_CHUNK))
+    );
+
+    // Uncancelled, every piece is typed, in order, and the result is the same as one call.
+    let kit = send_kit();
+    kit.call("observe", json!({})).await;
+    set_field(&kit, "c-subject", "");
+    let text = "Quarterly numbers, final version — ünïcödé ok 👍🏽 done";
+    let r = kit
+        .call("type_text", json!({"element": "c-subject", "text": text}))
+        .await;
+    assert!(!r.is_error, "{}", r.content);
+    let value = kit
+        .fake
+        .find(&ElementId("c-subject".into()))
+        .unwrap()
+        .value
+        .unwrap();
+    assert_eq!(value, text);
+
+    // Keys: one chord per call; Stop after the first leaves the rest unpressed.
+    let c = ctx();
+    *kit.fake.cancel_on_key.lock().unwrap() = Some(c.cancel.clone());
+    let r = kit
+        .tool("press_key")
+        .call(
+            json!({"element": "c-subject", "keys": "end shift+home backspace"}),
+            &c,
+        )
+        .await;
+    assert!(
+        r.is_error && r.content.contains("stopped after pressing 1 of 3"),
+        "{}",
+        r.content
+    );
+    let inputs = kit.fake.inputs.lock().unwrap().clone();
+    assert!(
+        !inputs.iter().any(|a| a.contains("backspace")),
+        "{inputs:?}"
+    );
+    assert!(
+        inputs.last().is_some_and(|a| a == "keys:c-subject:end"),
+        "{inputs:?}"
+    );
+}
+
+// GG3-24 (regression): on Linux a missing accessibility bus is named as such, not as a
+// permission the user could grant.
+#[test]
+fn gg3_24_linux_bus_failure_is_not_a_permission() {
+    use super::observe_hint;
+    let bus = Error::Other(
+        "AT-SPI: failed to connect to the accessibility bus: org.freedesktop.DBus.Error".into(),
+    );
+    let linux = observe_hint(&bus, true, true);
+    assert!(
+        linux.contains("Linux accessibility bus (AT-SPI)"),
+        "{linux}"
+    );
+    assert!(!linux.contains("permission"), "{linux}");
+    // Even when permission() cannot tell why, Denied on Linux means the bus.
+    assert!(observe_hint(&Error::Other("x".into()), true, true).contains("AT-SPI"));
+    assert!(observe_hint(&bus, false, true).contains("AT-SPI"));
+    // Elsewhere, Denied is a permission.
+    assert!(observe_hint(&bus, true, false).contains("permission is not granted"));
+    assert!(observe_hint(&Error::NotFound("w".into()), false, true).contains("without arguments"));
+    assert_eq!(observe_hint(&Error::Other("x".into()), false, true), "");
 }

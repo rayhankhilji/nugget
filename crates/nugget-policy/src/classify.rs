@@ -185,6 +185,9 @@ impl RiskClassifier {
         let apps = app_kinds(&action.target_app, ctx.url.as_deref());
         let label = action.target_label.as_deref().map(normalize);
         let preview = action.text_preview.as_deref();
+        // A key press's preview is its keys; anything after a line break is what they send,
+        // shown to the user, never parsed as keys (see [`ActionDescriptor::text_preview`]).
+        let keys_preview = preview.map(|p| p.split(['\n', '\r']).next().unwrap_or(""));
 
         // 1. The verb itself.
         if kind != VerbKind::Key {
@@ -216,13 +219,19 @@ impl RiskClassifier {
         }
 
         // 3. URLs and deep links in the label or typed text (navigation, address bar, links).
+        // A click's preview is what the activation sends (the form's values), not a
+        // destination: a link in a message body does not make its Send a navigation.
         if matches!(
             kind,
             VerbKind::Navigate | VerbKind::Activate | VerbKind::Other
         ) {
-            for text in [action.target_label.as_deref(), preview]
-                .into_iter()
-                .flatten()
+            let preview_counts = kind != VerbKind::Activate;
+            for text in [
+                action.target_label.as_deref(),
+                preview.filter(|_| preview_counts),
+            ]
+            .into_iter()
+            .flatten()
             {
                 if looks_like_url(text)
                     && let Some((class, word)) = self.keyword_risk(&normalize(text))
@@ -285,8 +294,25 @@ impl RiskClassifier {
         }
 
         // 6. Key presses.
+        // Space or Enter on a control presses it: classified exactly like a click on it (same
+        // multilingual tables, same context rules), whatever the key branch below adds.
+        if kind == VerbKind::Key
+            && let (Some(keys), Some(target)) = (keys_preview, action.target_label.as_deref())
+            && activates_target(keys, target, ctx)
+        {
+            let as_click = ActionDescriptor {
+                verb: "click".into(),
+                text_preview: None,
+                declared_risk: RiskClass::Observe,
+                ..action.clone()
+            };
+            let c = self.classify_with_context(&as_click, ctx);
+            if let Some(why) = c.reasons.first() {
+                acc.raise(c.risk, || format!("“{keys}” presses the control: {why}"));
+            }
+        }
         if kind == VerbKind::Key {
-            let keys = [action.target_label.as_deref(), preview]
+            let keys = [action.target_label.as_deref(), keys_preview]
                 .into_iter()
                 .flatten()
                 .map(normalize)
@@ -688,6 +714,59 @@ fn verb_kind(verb: &str) -> VerbKind {
         }
         _ => VerbKind::Other,
     }
+}
+
+/// Roles whose Space or Enter edits text rather than pressing the control (as [`role_key`]
+/// spells them).
+const TEXT_ROLES: &[&str] = &[
+    "textfield",
+    "textbox",
+    "textarea",
+    "searchfield",
+    "searchbox",
+    "combobox",
+    "document",
+    "terminal",
+    "entry",
+    "edit",
+    "input",
+    "spinbutton",
+];
+
+/// Whether pressing `keys` on the target labelled `label` presses it: a chord in `keys` is a
+/// bare Space, Enter, Return or keypad Enter, the target is not a text input (an unknown role
+/// counts as pressable: the check can only raise), and the label is not the keys themselves.
+fn activates_target(keys: &str, label: &str, ctx: &ActionContext) -> bool {
+    if ctx
+        .role
+        .as_deref()
+        .is_some_and(|r| TEXT_ROLES.contains(&role_key(r).as_str()))
+    {
+        return false;
+    }
+    let keys = normalize(keys);
+    if trim_label(&normalize(label)) == trim_label(&keys) {
+        return false;
+    }
+    keys.split(' ').any(|chord| {
+        let parts: Vec<&str> = chord.split('+').filter(|p| !p.is_empty()).collect();
+        let bare = parts.len() == 1;
+        bare && matches!(
+            parts.first().copied().unwrap_or(""),
+            "space"
+                | "spacebar"
+                | "enter"
+                | "return"
+                | "ret"
+                | "kp_enter"
+                | "kpenter"
+                | "numpadenter"
+                | "↩"
+                | "⏎"
+                | "↵"
+                | "␣"
+        )
+    })
 }
 
 fn verb_token_class(token: &str) -> Option<RiskClass> {
@@ -1685,22 +1764,56 @@ const COMPOSE_TITLES: &[&str] = &[
     "편지쓰기",
 ];
 
-const SECURE_LABELS: &[&str] = &[
+/// Field labels that name a secret (shared with [`crate::redact::is_secure_label`] and, through
+/// it, with the executors' own secret-field checks).
+pub(crate) const SECURE_LABELS: &[&str] = &[
     "password*",
     "passcode",
     "passphrase",
+    "passkey",
     "pin",
     "pin code",
     "otp",
+    "totp",
+    "mfa",
     "one-time code",
+    "one time code",
+    "one-time password",
+    "one-time passcode",
     "verification code",
+    "sign-in code",
+    "sign in code",
+    "signin code",
+    "login code",
+    "log-in code",
+    "access code",
+    "auth code",
+    "authentication code",
+    "authenticator code",
+    "2-step code",
     "2fa",
     "security code",
+    "security key",
+    "account key",
+    "recovery key",
+    "recovery code",
+    "backup code",
+    "private key",
     "secret",
     "api key",
     "token",
+    "digit code",
     "ssn",
     "social security",
+    "código de verificación",
+    "code de vérification",
+    "bestätigungscode",
+    "sicherheitscode",
+    "код подтверждения",
+    "验证码",
+    "驗證碼",
+    "認証コード",
+    "인증번호",
     "contraseña",
     "senha",
     "mot de passe",
@@ -2456,5 +2569,116 @@ mod tests {
         }
         // Generous bound for debug builds on slow CI: well under 5 ms per action.
         assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    // GG3-6 (regression): Space or Enter on a control is a click on it, in every UI language
+    // and for words only the policy's tables know.
+    #[test]
+    fn gg3_6_activation_keys_classify_the_label_like_a_click() {
+        let c = RiskClassifier::new();
+        let ctx = ActionContext::default().with_role("button");
+        for label in [
+            "Delete",
+            "Löschen",
+            "Supprimer",
+            "Eliminar",
+            "删除",
+            "Senden",
+            "Envoyer",
+            "Bezahlen",
+            "Kaufen",
+            "Revoke",
+            "Admin",
+            "Checkout now",
+            "Firewall",
+        ] {
+            let click = c
+                .classify_with_context(&action("mail", "click", Some(label), None), &ctx)
+                .risk;
+            assert!(click > RiskClass::Edit, "{label}: click {click:?}");
+            for keys in ["space", "enter", "return", "kp_enter", "Space", "tab space"] {
+                let key = c
+                    .classify_with_context(
+                        &action("mail", "press_key", Some(label), Some(keys)),
+                        &ctx,
+                    )
+                    .risk;
+                assert_eq!(key, click, "{label} / {keys}");
+            }
+            // Without a role (the executor cannot tell) it still counts: the check only raises.
+            let unknown = c.classify(&action("mail", "press_key", Some(label), Some("space")));
+            assert_eq!(
+                unknown.risk,
+                c.classify(&action("mail", "click", Some(label), None)).risk
+            );
+        }
+        // A text field's Space types a space; a modified Space is no press.
+        let field = ActionContext::default().with_role("text_field");
+        assert_eq!(
+            c.classify_with_context(
+                &action("notes", "press_key", Some("Löschen"), Some("space")),
+                &field
+            )
+            .risk,
+            RiskClass::Observe
+        );
+        assert_eq!(
+            c.classify_with_context(
+                &action("notes", "press_key", Some("Löschen"), Some("ctrl+space")),
+                &ctx
+            )
+            .risk,
+            RiskClass::Observe
+        );
+        // A benign button stays benign.
+        assert_eq!(
+            c.classify_with_context(
+                &action("notes", "press_key", Some("Bold"), Some("space")),
+                &ctx
+            )
+            .risk,
+            RiskClass::Observe
+        );
+    }
+
+    // GG3-5: a click's preview is what it sends, not a destination.
+    #[test]
+    fn gg3_5_send_preview_is_not_read_as_a_url() {
+        let c = RiskClassifier::new();
+        let a = action(
+            "mail",
+            "click",
+            Some("Send"),
+            Some("To: a@b.example · Message: pay here https://x.example/delete"),
+        );
+        assert_eq!(c.classify(&a).risk, RiskClass::Send);
+    }
+
+    // GG3-22: secret fields in other languages and newer wordings are Security to type into.
+    #[test]
+    fn gg3_22_secret_labels_multilingual() {
+        let c = RiskClassifier::new();
+        for label in [
+            "Password",
+            "Passwort",
+            "Mot de passe",
+            "Contraseña",
+            "Пароль",
+            "密码",
+            "One-time code",
+            "Sign-in code",
+            "Account key",
+            "6-digit code",
+        ] {
+            assert_eq!(
+                c.classify(&action("app", "set_value", Some(label), Some("x")))
+                    .risk,
+                RiskClass::Security,
+                "{label}"
+            );
+            assert!(crate::redact::is_secure_label(label), "{label}");
+        }
+        assert!(!crate::redact::is_secure_label("Subject"));
+        assert!(!crate::redact::is_secure_label("Postal code"));
     }
 }

@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use nugget_a11y::computer::KeyChord;
+use nugget_a11y::role::Role;
 use nugget_a11y::{
     ActionOutcome, ElementId, KeyInput, ScrollDirection, UiAction, UiActionKind, UiNode, UiTree,
     WindowId, WindowSel,
@@ -12,15 +13,17 @@ use nugget_a11y::{
 use nugget_agent::tool::{redact_default, truncate};
 use nugget_agent::{ActionTarget, Snapshot, Tool, ToolCtx, ToolResult, Verification};
 use nugget_core::Error;
-use nugget_policy::RiskClass;
+use nugget_policy::preview::{changed_fields, fields_digest, fields_preview};
+use nugget_policy::{ActionDescriptor, RiskClass, RiskClassifier};
 use serde_json::{Value, json};
 
 use crate::observe::{self, Probe, Target, find_option, is_choice, precheck, verify_change};
 use crate::render::{has_actionable, header, node_line, render, safe_id, screen_text};
 use crate::risk::{
-    classify_text, input_risk, is_secret_field, is_terminal_app, is_terminal_role, keys_risk,
+    activates, classify_text, input_risk, is_secret_field, is_terminal_app, is_terminal_role,
+    keys_risk_found,
 };
-use crate::state::{Found, Shared, blocking};
+use crate::state::{Found, Frozen, Shared, blocking, send_fields};
 
 #[path = "tools_view.rs"]
 mod view;
@@ -45,6 +48,9 @@ pub const SCROLL_MAX: u64 = 50;
 const SCREENSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;
 /// Characters of typed text shown in a confirmation preview.
 const PREVIEW_MAX: usize = 120;
+/// Characters `type_text` hands the backend at a time, so Stop takes effect between pieces of
+/// a long text instead of after all of it (GG3-11).
+pub const TYPE_CHUNK: usize = 24;
 
 /// Which tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -438,15 +444,8 @@ impl ComputerTool {
         let tree = match blocking(&self.shared, move |s| s.snapshot(&snap_sel)).await {
             Ok(t) => t,
             Err(e) => {
-                let hint = match (&e, self.shared.cu.permission()) {
-                    (_, nugget_a11y::Permission::Denied) => {
-                        " Accessibility permission is not granted; ask the user to grant it."
-                    }
-                    (Error::NotFound(_), _) => {
-                        " Call observe without arguments for the front window."
-                    }
-                    _ => "",
-                };
+                let denied = self.shared.cu.permission() == nugget_a11y::Permission::Denied;
+                let hint = observe_hint(&e, denied, cfg!(target_os = "linux"));
                 return fail(format!("could not read the window: {e}.{hint}"));
             }
         };
@@ -517,6 +516,9 @@ impl ComputerTool {
                 "{} is disabled; nothing was done",
                 element_desc(found.as_ref(), &id)
             ));
+        }
+        if let Some(r) = self.check_frozen(args).await {
+            return r;
         }
         let plan = found
             .as_ref()
@@ -595,7 +597,7 @@ impl ComputerTool {
         })
     }
 
-    async fn type_text_call(&self, args: &Value) -> ToolResult {
+    async fn type_text_call(&self, args: &Value, ctx: &ToolCtx) -> ToolResult {
         let text = args.get("text").and_then(Value::as_str).unwrap_or_default();
         if text.is_empty() {
             return fail("`text` is empty");
@@ -617,9 +619,34 @@ impl ComputerTool {
         {
             return r;
         }
-        let input = KeyInput::Text(text.to_string());
-        let tid = id.clone();
-        match blocking(&self.shared, move |s| s.cu.key_input(tid.as_ref(), &input)).await {
+        // One backend call per piece, checking for Stop in between: a blocking call cannot be
+        // cancelled once it runs, so a long text must not be one call.
+        let total = text.chars().count();
+        let mut typed = 0usize;
+        let mut outcome: Option<ActionOutcome> = None;
+        for (i, piece) in text_chunks(text, TYPE_CHUNK).into_iter().enumerate() {
+            if i > 0 && ctx.cancel.is_cancelled() {
+                return fail(format!(
+                    "stopped after typing {typed} of {total} characters; the rest was not typed"
+                ));
+            }
+            let n = piece.chars().count();
+            let input = KeyInput::Text(piece);
+            let tid = id.clone();
+            match blocking(&self.shared, move |s| s.cu.key_input(tid.as_ref(), &input)).await {
+                Ok(o) => {
+                    typed += n;
+                    outcome = Some(merge_outcomes(outcome, o, true));
+                }
+                Err(e) if typed == 0 => return fail(format!("typing failed: {e}")),
+                Err(e) => {
+                    return fail(format!(
+                        "typing failed after {typed} of {total} characters: {e}"
+                    ));
+                }
+            }
+        }
+        match outcome.ok_or_else(|| Error::Invalid("nothing to type".into())) {
             Ok(o) => {
                 let target = match &id {
                     Some(id) => element_desc(found.as_ref(), id),
@@ -638,7 +665,7 @@ impl ComputerTool {
         }
     }
 
-    async fn press_key_call(&self, args: &Value) -> ToolResult {
+    async fn press_key_call(&self, args: &Value, ctx: &ToolCtx) -> ToolResult {
         let chords = match parse_keys(args) {
             Ok(c) => c,
             Err(e) => return fail(format!("{e}. Nothing was pressed.")),
@@ -648,10 +675,49 @@ impl ComputerTool {
             Err(e) => return fail(e),
         };
         let (found, _) = self.target(args);
+        if let Some(r) = self.check_frozen(args).await {
+            return r;
+        }
         let keys: Vec<String> = chords.iter().map(ToString::to_string).collect();
-        let input = KeyInput::Keys(chords);
-        let tid = id.clone();
-        match blocking(&self.shared, move |s| s.cu.key_input(tid.as_ref(), &input)).await {
+        // One chord per backend call, checking for Stop in between (GG3-11). Only the first goes
+        // to `element`: the rest go wherever the earlier keys moved focus, as one sequence would.
+        let total = chords.len();
+        let mut outcome: Option<ActionOutcome> = None;
+        let mut pressed = 0usize;
+        let mut failed: Option<Error> = None;
+        for (i, chord) in chords.into_iter().enumerate() {
+            if i > 0 && ctx.cancel.is_cancelled() {
+                return fail(format!(
+                    "stopped after pressing {pressed} of {total} keys ({}); the rest were not \
+                     pressed",
+                    keys[..pressed].join(" ")
+                ));
+            }
+            let input = KeyInput::Keys(vec![chord]);
+            let tid = if i == 0 { id.clone() } else { None };
+            match blocking(&self.shared, move |s| s.cu.key_input(tid.as_ref(), &input)).await {
+                Ok(o) => {
+                    pressed += 1;
+                    outcome = Some(merge_outcomes(outcome, o, false));
+                }
+                Err(e) => {
+                    failed = Some(e);
+                    break;
+                }
+            }
+        }
+        let result = match (outcome, failed) {
+            (Some(o), None) => Ok(o),
+            (None, Some(e)) => Err(e),
+            (Some(_), Some(e)) => {
+                return fail(format!(
+                    "key press failed after {pressed} of {total} keys ({}): {e}",
+                    keys[..pressed].join(" ")
+                ));
+            }
+            (None, None) => Err(Error::Invalid("no keys given".into())),
+        };
+        match result {
             Ok(o) => {
                 let r = outcome_result(
                     "pressed",
@@ -847,6 +913,200 @@ impl ComputerTool {
     }
 }
 
+impl ComputerTool {
+    /// For a click or key press that sends, deletes or submits, say what it acts on: the values
+    /// of the fields a send carries go in the preview (and are frozen for `call`, see
+    /// [`ComputerTool::check_frozen`]); a Delete names the selected or open item (GG3-5,
+    /// GG3-15). Screen text, so sanitized and bounded.
+    fn describe_object(
+        &self,
+        args: &Value,
+        f: &Found,
+        key: String,
+        target_app: &str,
+        target_label: &mut Option<String>,
+        text_preview: &mut Option<String>,
+    ) {
+        let chords = parse_keys(args).ok();
+        let activating = self.kind == Kind::Click || chords.as_deref().is_some_and(activates);
+        let ctx = crate::risk::action_context(Some(f));
+        let probe = ActionDescriptor {
+            target_app: target_app.to_string(),
+            verb: self.kind.name().into(),
+            target_label: target_label.clone(),
+            text_preview: text_preview.clone(),
+            declared_risk: RiskClass::Observe,
+            task_id: String::new(),
+        };
+        let class = RiskClassifier::global()
+            .classify_with_context(&probe, &ctx)
+            .risk
+            .max(self.risk(args));
+        let sends = class == RiskClass::Send || (activating && ctx.submits == Some(true));
+        if sends && let Some((window, fields)) = self.shared.send_fields(&f.node.id) {
+            if let Some(shown) = fields_preview(&fields) {
+                *text_preview = Some(match (self.kind, text_preview.take()) {
+                    // A key press's preview starts with its keys; what they send follows on
+                    // the next line (the policy reads only the first line as keys).
+                    (Kind::PressKey, Some(keys)) => format!("{keys}\n{shown}"),
+                    _ => shown,
+                });
+            }
+            let digest = fields_digest(&fields);
+            self.shared.freeze(
+                key,
+                Frozen {
+                    element: f.node.id.clone(),
+                    window,
+                    fields,
+                    digest,
+                },
+            );
+        }
+        let own_row = matches!(f.node.role, Role::ListItem | Role::Row | Role::Cell);
+        if class == RiskClass::Destroy
+            && !own_row
+            && let Some((how, item)) = self.shared.subject_item(&f.node.id)
+            && let Some(l) = target_label.as_deref()
+        {
+            *target_label = Some(format!("“{l}” — {how}: “{item}”"));
+        }
+    }
+
+    /// Before a click or key press whose confirmation listed what it sends: re-read the window
+    /// and press only if the fields still hold exactly that (same digest, same fields, the same
+    /// control). The frozen description is used up either way.
+    async fn check_frozen(&self, args: &Value) -> Option<ToolResult> {
+        let fz = self.shared.thaw(&freeze_key(self.kind, args))?;
+        let current = match element_arg(args) {
+            Ok(Some(id)) => Some(id),
+            _ => self.shared.focused().map(|f| f.node.id),
+        };
+        let why = if current.as_ref() != Some(&fz.element) {
+            "keyboard focus moved to another control".to_string()
+        } else {
+            let window = fz.window.clone();
+            let el = fz.element.clone();
+            let fresh = blocking(&self.shared, move |s| {
+                let tree = s.snapshot(&WindowSel::Id(window))?;
+                Ok(send_fields(&tree, &el))
+            })
+            .await;
+            match fresh {
+                Err(e) => format!("the window could not be read again: {e}"),
+                Ok(None) => "the control is no longer there".into(),
+                Ok(Some(now)) if fields_digest(&now) != fz.digest => {
+                    let changed = changed_fields(&fz.fields, &now);
+                    if changed.is_empty() {
+                        "its fields changed".into()
+                    } else {
+                        changed.join(", ")
+                    }
+                }
+                Ok(Some(_)) => return None,
+            }
+        };
+        let mut r = fail(format!(
+            "The message changed after it was shown for confirmation ({why}); nothing was sent. \
+             Observe and try again."
+        ));
+        r.data = Some(json!({"refused": true, "changed_after_confirmation": true}));
+        Some(r)
+    }
+}
+
+/// What to tell the model when `observe` cannot read a window. On Linux a missing or disabled
+/// accessibility bus (AT-SPI over D-Bus) is not a permission the user can grant: name the bus
+/// instead (GG3-24).
+fn observe_hint(e: &Error, denied: bool, linux: bool) -> &'static str {
+    let msg = e.to_string().to_lowercase();
+    let bus_failure = ["at-spi", "atspi", "d-bus", "dbus", "a11y bus", "org.a11y"]
+        .iter()
+        .any(|w| msg.contains(w));
+    if linux && (bus_failure || denied) {
+        " The Linux accessibility bus (AT-SPI) is not available or turned off; ask the user to \
+         enable assistive technologies and log in again."
+    } else if denied {
+        " Accessibility permission is not granted; ask the user to grant it."
+    } else if matches!(e, Error::NotFound(_)) {
+        " Call observe without arguments for the front window."
+    } else {
+        ""
+    }
+}
+
+/// Key under which a call's send confirmation is frozen: the tool and the element argument
+/// (or the focus).
+fn freeze_key(kind: Kind, args: &Value) -> String {
+    let element = match element_arg(args) {
+        Ok(Some(id)) => id.0,
+        Ok(None) => "(focus)".into(),
+        Err(_) => "(invalid)".into(),
+    };
+    format!("{}:{element}", kind.name())
+}
+
+/// `text` in pieces of about `size` characters, never splitting a CR LF pair or putting a
+/// combining mark, joiner, variation selector or tag character at the start of a piece.
+fn text_chunks(text: &str, size: usize) -> Vec<String> {
+    fn joins(prev: char, c: char) -> bool {
+        (prev == '\r' && c == '\n')
+            || prev == '\u{200D}'
+            || matches!(c,
+                '\u{0300}'..='\u{036F}'
+                | '\u{1AB0}'..='\u{1AFF}'
+                | '\u{1DC0}'..='\u{1DFF}'
+                | '\u{20D0}'..='\u{20FF}'
+                | '\u{200C}'..='\u{200D}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{FE20}'..='\u{FE2F}'
+                | '\u{1F3FB}'..='\u{1F3FF}'
+                | '\u{E0020}'..='\u{E007F}'
+                | '\u{E0100}'..='\u{E01EF}')
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut n = 0usize;
+    let mut prev: Option<char> = None;
+    for c in text.chars() {
+        if n >= size.max(1) && !prev.is_some_and(|p| joins(p, c)) {
+            out.push(std::mem::take(&mut cur));
+            n = 0;
+        }
+        cur.push(c);
+        n += 1;
+        prev = Some(c);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Fold the outcome of one more piece of input into the outcome so far: typed text is verified
+/// when every piece is, keys when any press had a visible effect.
+fn merge_outcomes(acc: Option<ActionOutcome>, next: ActionOutcome, all: bool) -> ActionOutcome {
+    let Some(acc) = acc else {
+        return next;
+    };
+    let verified = if all {
+        acc.verified && next.verified
+    } else {
+        acc.verified || next.verified
+    };
+    let detail = if !all && acc.verified && !next.verified {
+        acc.detail
+    } else {
+        next.detail
+    };
+    ActionOutcome {
+        verified,
+        detail,
+        before: acc.before.or(next.before),
+        after: next.after.or(acc.after),
+    }
+}
+
 /// `set_value`: on a choice control pick the option by name (expanding it first when the
 /// options are not in the tree), else set the value. Returns the outcome, the method and the
 /// option chosen.
@@ -963,9 +1223,7 @@ impl Tool for ComputerTool {
                 let Ok(chords) = parse_keys(args) else {
                     return RiskClass::Edit;
                 };
-                let empty = Vec::new();
-                let ctx = found.as_ref().map_or(&empty, |f| &f.context);
-                keys_risk(&chords, found.as_ref().map(|f| &f.node), ctx, kw)
+                keys_risk_found(&chords, found.as_ref(), kw)
             }
             Kind::OpenApp => {
                 let name = str_arg(args, "name").unwrap_or_default();
@@ -1048,6 +1306,22 @@ impl Tool for ComputerTool {
             }
             _ => {}
         }
+        let mut text_preview = text_preview;
+        if matches!(self.kind, Kind::Click | Kind::PressKey) {
+            // A new description replaces whatever an earlier one of this call froze.
+            let key = freeze_key(self.kind, args);
+            self.shared.thaw(&key);
+            if let Some(f) = found.as_ref().filter(|f| !self.in_terminal(Some(f))) {
+                self.describe_object(
+                    args,
+                    f,
+                    key,
+                    &target_app,
+                    &mut target_label,
+                    &mut text_preview,
+                );
+            }
+        }
         ActionTarget {
             target_app,
             verb: self.kind.name().into(),
@@ -1106,8 +1380,8 @@ impl Tool for ComputerTool {
         match self.kind {
             Kind::Observe => self.observe_call(&args).await,
             Kind::Click => self.click_call(&args).await,
-            Kind::TypeText => self.type_text_call(&args).await,
-            Kind::PressKey => self.press_key_call(&args).await,
+            Kind::TypeText => self.type_text_call(&args, ctx).await,
+            Kind::PressKey => self.press_key_call(&args, ctx).await,
             Kind::SetValue => self.set_value_call(&args).await,
             Kind::Scroll => self.scroll_call(&args).await,
             Kind::OpenApp => self.open_app_call(&args).await,

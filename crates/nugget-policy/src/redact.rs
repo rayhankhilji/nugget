@@ -54,47 +54,11 @@ pub fn is_secure_label(label: &str) -> bool {
     use std::sync::OnceLock;
     static KEYWORDS: OnceLock<Vec<Keyword>> = OnceLock::new();
     let kws = KEYWORDS.get_or_init(|| {
-        [
-            "password*",
-            "passcode",
-            "passphrase",
-            "pin",
-            "pin code",
-            "otp",
-            "one-time code",
-            "verification code",
-            "2fa",
-            "security code",
-            "cvv",
-            "cvc",
-            "csc",
-            "secret",
-            "api key",
-            "token",
-            "ssn",
-            "social security",
-            "contraseña",
-            "senha",
-            "mot de passe",
-            "passwort",
-            "kennwort",
-            "wachtwoord",
-            "hasło",
-            "şifre",
-            "parola",
-            "пароль",
-            "密码",
-            "密碼",
-            "パスワード",
-            "暗証番号",
-            "비밀번호",
-            "암호",
-            "كلمة المرور",
-            "पासवर्ड",
-        ]
-        .iter()
-        .map(|k| Keyword::new(k))
-        .collect()
+        crate::classify::SECURE_LABELS
+            .iter()
+            .chain(["cvv", "cvc", "csc"].iter())
+            .map(|k| Keyword::new(k))
+            .collect()
     });
     let label = normalize(label);
     kws.iter().any(|k| k.matches(&label))
@@ -103,10 +67,19 @@ pub fn is_secure_label(label: &str) -> bool {
 /// Text that would be typed or sent, made safe to log: `[redacted]` for secure fields, card
 /// numbers and long digit runs masked to their last four digits, capped at [`PREVIEW_CAP`].
 pub fn redact_preview(preview: &str, secure: bool) -> String {
+    redact_preview_capped(preview, secure, PREVIEW_CAP)
+}
+
+/// Longest preview a confirmation prompt shows, in characters: room for what a Send or a form
+/// submit sends (see [`crate::preview`]).
+pub const CONFIRM_PREVIEW_CAP: usize = crate::preview::FIELDS_PREVIEW_MAX + 40;
+
+/// [`redact_preview`] with its own cap.
+pub fn redact_preview_capped(preview: &str, secure: bool, max: usize) -> String {
     if secure {
         return REDACTED.to_string();
     }
-    cap(&mask_digits(preview), PREVIEW_CAP)
+    cap(&mask_digits(preview), max)
 }
 
 /// Mask card numbers (Luhn-valid) and any run of 9+ digits (account numbers, national ids),

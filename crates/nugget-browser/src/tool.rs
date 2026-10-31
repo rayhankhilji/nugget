@@ -34,6 +34,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use nugget_agent::{ActionTarget, Tool, ToolCtx, ToolResult};
+use nugget_policy::preview::{FieldValue, changed_fields, fields_digest};
 use nugget_policy::{ActionContext, ActionDescriptor, PolicyGate, RiskClass};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -392,6 +393,15 @@ impl Confirmer for LoopApprovals {
     }
 }
 
+/// One description given to the loop: the call's arguments, what it was shown, at what risk,
+/// and the fields of the form it submits (with their digest), if it submits one.
+type Described = (
+    Value,
+    ActionTarget,
+    RiskClass,
+    Option<(Vec<FieldValue>, String)>,
+);
+
 /// How many descriptions [`BrowserAgentTool`] remembers between `describe` and `call`.
 const DESCRIBED_MAX: usize = 32;
 
@@ -400,8 +410,9 @@ pub struct BrowserAgentTool {
     inner: BrowserTool,
     spec: ToolSpec,
     approvals: Option<Arc<LoopApprovals>>,
-    /// What `describe` told the loop, by arguments, so `call` grants only that.
-    described: Mutex<Vec<(Value, ActionTarget, RiskClass)>>,
+    /// What `describe` told the loop, by arguments, so `call` grants only that, with the
+    /// digest of the form fields a submit was shown with (see [`BrowserAgentTool::check_frozen`]).
+    described: Mutex<Vec<Described>>,
 }
 
 /// The browser tools for the agent's registry, sharing `controller`. The controller's own
@@ -487,9 +498,7 @@ fn element_role(e: &ElementInfo) -> String {
 
 /// Whether activating `e` submits its form (same test as the action classifier).
 fn submits_form(e: &ElementInfo) -> bool {
-    e.form.is_some()
-        && (e.tag == "button" && e.input_type.is_none()
-            || matches!(e.input_type.as_deref(), Some("submit" | "image")))
+    crate::action::submits(e)
 }
 
 fn is_password(e: &ElementInfo) -> bool {
@@ -629,16 +638,22 @@ impl BrowserAgentTool {
         action_context(action.as_ref(), latest)
     }
 
-    fn remember(&self, args: &Value, target: &ActionTarget, risk: RiskClass) {
+    fn remember(
+        &self,
+        args: &Value,
+        target: &ActionTarget,
+        risk: RiskClass,
+        sent: Option<(Vec<FieldValue>, String)>,
+    ) {
         let mut d = self
             .described
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        d.retain(|(a, _, _)| a != args);
+        d.retain(|(a, ..)| a != args);
         if d.len() >= DESCRIBED_MAX {
             d.remove(0);
         }
-        d.push((args.clone(), target.clone(), risk));
+        d.push((args.clone(), target.clone(), risk, sent));
     }
 
     fn recall(&self, args: &Value) -> Option<(ActionTarget, RiskClass)> {
@@ -646,9 +661,59 @@ impl BrowserAgentTool {
             .described
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let i = d.iter().position(|(a, _, _)| a == args)?;
-        let (_, t, r) = d.remove(i);
+        let i = d.iter().position(|(a, ..)| a == args)?;
+        let (_, t, r, _) = d.remove(i);
         Some((t, r))
+    }
+
+    /// The form fields (and digest) this call was described with, if it submits a form.
+    fn frozen(&self, args: &Value) -> Option<(Vec<FieldValue>, String)> {
+        let d = self
+            .described
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        d.iter()
+            .find(|(a, ..)| a == args)
+            .and_then(|(.., sent)| sent.clone())
+    }
+
+    /// Before a submit whose confirmation listed the form's values: take a fresh snapshot and
+    /// submit only if the form still holds exactly those values. `Some` is the refusal.
+    async fn check_frozen(&self, args: &Value, task_id: &str) -> Option<ToolResult> {
+        if self.kind() == Kind::Snapshot {
+            return None;
+        }
+        let (shown, digest) = self.frozen(args)?;
+        let action = to_action(self.kind(), args.clone()).ok()?;
+        let fresh = self
+            .inner
+            .controller
+            .snapshot(task_id, SnapshotOptions::default())
+            .await;
+        let why = match fresh {
+            Err(e) => format!("the page could not be read again: {e}"),
+            Ok(snap) => match action.sent_fields(Some(&snap)) {
+                None => "the form is no longer there".into(),
+                Some(now) if fields_digest(&now) != digest => {
+                    let changed = changed_fields(&shown, &now);
+                    if changed.is_empty() {
+                        "its fields changed".into()
+                    } else {
+                        changed.join(", ")
+                    }
+                }
+                Some(_) => return None,
+            },
+        };
+        // Used up: a retry must be described (and confirmed) again.
+        self.recall(args);
+        Some(
+            ToolResult::error(format!(
+                "Refused: the form changed after it was shown for confirmation ({why}); nothing \
+                 was submitted. Take a new snapshot and try again. {NOT_PERFORMED}"
+            ))
+            .with_data(json!({"refused": true, "changed_after_confirmation": true})),
+        )
     }
 
     /// Record the loop's approval for this call, if what the loop was shown still describes it.
@@ -734,7 +799,15 @@ impl Tool for BrowserAgentTool {
     fn describe(&self, args: &Value) -> ActionTarget {
         let latest = self.latest();
         let target = self.target(args, latest.as_ref());
-        self.remember(args, &target, self.risk_on(args, latest.as_ref()));
+        let sent = (self.kind() != Kind::Snapshot)
+            .then(|| to_action(self.kind(), args.clone()).ok())
+            .flatten()
+            .and_then(|a| a.sent_fields(latest.as_ref()))
+            .map(|f| {
+                let d = fields_digest(&f);
+                (f, d)
+            });
+        self.remember(args, &target, self.risk_on(args, latest.as_ref()), sent);
         target
     }
 
@@ -747,6 +820,12 @@ impl Tool for BrowserAgentTool {
 
     /// Only runs when the agent loop's gate allowed (or the user approved) this call.
     async fn call(&self, args: Value, ctx: &ToolCtx) -> ToolResult {
+        if let Some(refused) = self.check_frozen(&args, &ctx.task_id).await {
+            if let Some(a) = &self.approvals {
+                a.revoke(&ctx.task_id);
+            }
+            return refused;
+        }
         self.grant(&args, &ctx.task_id);
         let out = self
             .inner
@@ -1117,6 +1196,12 @@ mod tests {
             .lock()
             .unwrap()
             .push_back(Ok(act_result(page("s2", url, None), true)));
+        // The click submits the form: it is re-read right before acting (GG3-5), unchanged.
+        rig.bridge
+            .snapshots
+            .lock()
+            .unwrap()
+            .push_back(page("s1b", url, None));
         let before = rig.bridge.acts_sent();
         let (_, r, v) = rig.run("t1", "browser_click", send.clone()).await;
         assert!(!r.is_error, "{}", r.content);
@@ -1474,5 +1559,74 @@ mod tests {
             rig.engine.evaluate_with_context(&d, &tool.context(&args)),
             nugget_policy::Decision::Confirm(_)
         ));
+    }
+
+    // GG3-5 (regression): a submit shows the form's values (secrets masked) and is refused when
+    // the form changed between the confirmation and the action; an unchanged form submits.
+    #[tokio::test]
+    async fn gg3_5_submit_shows_the_form_and_is_frozen_to_it() {
+        let rig = Rig::new();
+        let url = "https://shop.example.com/contact";
+        let with_pw = |id: &str, msg: &str| {
+            let mut p = page(id, url, Some(msg));
+            let mut pw = el("n3", "textbox", "Passwort", "input");
+            pw.editable = true;
+            pw.value = Some("hunter2".into());
+            p.elements.insert(1, pw);
+            p
+        };
+        rig.bridge
+            .snapshots
+            .lock()
+            .unwrap()
+            .push_back(with_pw("s1", "Thursday works"));
+        rig.run("t1", "browser_snapshot", json!({})).await;
+        let send = json!({"element": "n2"});
+        let tool = rig.tool("browser_click");
+        let shown = tool.describe(&send);
+        let preview = shown.text_preview.unwrap_or_default();
+        assert!(preview.contains("Message: Thursday works"), "{preview}");
+        assert!(preview.contains("Passwort: ••••"), "{preview}");
+        assert!(!preview.contains("hunter2"), "{preview}");
+        let submit = rig
+            .tool("browser_submit")
+            .describe(&json!({"element": "n1"}));
+        assert!(
+            submit
+                .text_preview
+                .unwrap_or_default()
+                .contains("Message: Thursday works")
+        );
+
+        // The page rewrote the message after the user saw it: nothing is sent.
+        rig.bridge
+            .snapshots
+            .lock()
+            .unwrap()
+            .push_back(with_pw("s2", "Wire $9,800 today"));
+        let r = tool.call(send.clone(), &ctx("t1")).await;
+        assert!(r.is_error, "{}", r.content);
+        assert!(r.content.contains("Message changed"), "{}", r.content);
+        assert_eq!(rig.bridge.acts_sent(), 0);
+        // Used up: calling again without a new description is not let through either.
+        let r = tool.call(send.clone(), &ctx("t1")).await;
+        assert!(r.is_error);
+        assert_eq!(rig.bridge.acts_sent(), 0);
+
+        // Described again on the current page and unchanged at call time: it submits.
+        tool.describe(&send);
+        rig.bridge
+            .snapshots
+            .lock()
+            .unwrap()
+            .push_back(with_pw("s3", "Wire $9,800 today"));
+        rig.bridge
+            .acts
+            .lock()
+            .unwrap()
+            .push_back(Ok(act_result(page("s4", url, None), true)));
+        let r = tool.call(send, &ctx("t1")).await;
+        assert!(!r.is_error, "{}", r.content);
+        assert_eq!(rig.bridge.acts_sent(), 1);
     }
 }
