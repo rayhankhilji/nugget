@@ -7,10 +7,6 @@ name: QA GG5 (knowledge graph and vault, real models)
 # against qa/GG5/corpus/gold.json. Everything is uploaded as an artifact.
 
 on:
-  # TEMPORARY: removed before the final push.
-  push:
-    branches: [qa/knowledge]
-    paths: [".github/workflows/qa-GG5.yml", "qa/GG5/harness/**", "qa/GG5/corpus/**"]
   workflow_dispatch:
     inputs:
       models:
@@ -26,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.sha }}-${{ inputs.product_ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.product_ref }}
   cancel-in-progress: false
 
 env:
@@ -46,8 +42,7 @@ jobs:
     steps:
       - id: m
         run: |
-          # TEMPORARY push default: the 4B model (a second run of the integration branch).
-          models="${{ inputs.models || 'qwen3-4b-q4km' }}"
+          models="${{ inputs.models || 'qwen3-4b-q4km,qwen3-8b-q4km' }}"
           echo "models=$(jq -cn --arg m "$models" '$m | split(",") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
 
   knowledge:

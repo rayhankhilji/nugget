@@ -396,6 +396,10 @@ Keep these working; each was checked against the running daemon (and the second,
 - Files from git have no meaningful modification time, and Nugget dates notes and calendar files by
   it (GG5-6), so the harness sets each file's mtime from the date in its name or frontmatter, as a
   user's own files would have.
+- The harness's edit E1 rewrites a Dana fact line naming Brightwell into "Dana is Head of Product at Corvid
+  Labs (fixed by me)". In the 4B and 8B runs it hit an already correct line, so Dana's employer after `edits` in
+  those runs reflects the edit, not the model (the EE1 run skipped it). The harness also waits on
+  `pending_items`, which GG5-7 shows is not reliable with a CPU model: compare runs at `reextract`/`restart`.
 - Rerun: push to `qa/knowledge` is no longer a trigger; dispatch `QA GG5` with `models`
   (comma-separated manifest ids) and optionally `product_ref` (build the product from another
   branch, harness and corpus unchanged).
