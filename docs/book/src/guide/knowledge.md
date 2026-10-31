@@ -103,11 +103,11 @@ vault (an item whose sensitivity is unknown counts as sensitive):
   shown, citing only that source.
 - An entity known only from sensitive items (all of its facts and mentions) gets no page, and other
   pages name it without a link. If it had a page before (for example, the item was marked sensitive
-  later), the page is deleted; if you wrote something on it, the file is kept with the heading
-  "Hidden page" and only your own text. When a non-sensitive source supports it again, the page
-  comes back.
+  later), your edits on it are applied first, then the page is deleted; if you wrote something on
+  it (notes or your own frontmatter), the file is kept with the heading "Hidden page" and only your
+  own text. When a non-sensitive source supports it again, the page comes back.
 - On other pages, aliases and identifiers learned only from sensitive items are left out of the
-  frontmatter.
+  frontmatter. Aliases you added yourself in the vault are always shown.
 - A vault written by an earlier version is re-rendered once under these rules. Later, when an item
   becomes sensitive without its facts changing, the pages follow at the entity's next change.
 

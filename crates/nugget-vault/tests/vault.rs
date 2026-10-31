@@ -1474,8 +1474,8 @@ fn an_upgraded_vault_is_rendered_in_full_once() {
     );
 }
 
-/// An entity with a sensitive origin shows only the aliases and identifiers that a
-/// non-sensitive item supplied; one without shows them all.
+/// Aliases and identifiers whose recorded sources are all sensitive are left out of the
+/// frontmatter; those with a non-sensitive source, or none recorded, are shown.
 #[test]
 fn frontmatter_leaves_out_aliases_and_identifiers_learned_from_sensitive_items() {
     let f = fixture();
@@ -1522,10 +1522,11 @@ fn frontmatter_leaves_out_aliases_and_identifiers_learned_from_sensitive_items()
     // Supplied by a non-sensitive item (also by the sensitive one): shown.
     assert!(fm.contains("\"Sam L\""), "{fm}");
     assert!(fm.contains("sam@example.com"), "{fm}");
-    // Only from the invite, or with no recorded source: left out.
+    // No recorded source (the user's own, or from before sources were kept): shown.
+    assert!(fm.contains("\"Sam\""), "{fm}");
+    // Only from the invite: left out.
     assert!(!fm.contains("Sammy"), "{fm}");
     assert!(!fm.contains("1234567"), "{fm}");
-    assert!(!fm.contains("\"Sam\""), "{fm}");
     assert!(
         !page.contains("Sammy") && !page.contains("1234567"),
         "{page}"
@@ -1555,7 +1556,12 @@ fn a_hidden_alias_in_the_users_frontmatter_does_not_churn_the_graph() {
     let path = f.page(&f.sam);
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(!text.contains("Sammy"), "{text}");
-    let edited = text.replacen("aliases: []", "aliases: [\"Sammy\"]", 1);
+    // "sam." is the held alias "Sam" for the graph (normalize_name).
+    let edited = text.replacen(
+        "aliases: [\"Sam\"]",
+        "aliases: [\"Sam\", \"Sammy\", \"sam.\"]",
+        1,
+    );
     assert_ne!(edited, text, "{text}");
     std::fs::write(&path, edited).unwrap();
     let (_, head) = f.graph.changes_since(0, 10_000).unwrap();
@@ -1616,4 +1622,289 @@ fn items_are_looked_up_in_batches_once_per_pass() {
     let seen = items.per_item.lock().unwrap();
     assert!(seen.contains_key(&item("files", "counselling.ics")));
     assert!(seen.values().all(|n| *n == 1), "{seen:?}");
+}
+
+// ---- hidden pages: user edits, frontmatter, markers, missing base, lookups (GG5-3 review 2) ----
+
+/// A vault with Sam, Jonas and the counselling session rendered while the invite is not yet
+/// sensitive. Returns (dir, graph, items, vault, sam, jonas, session).
+fn hidden_fixture() -> (
+    tempfile::TempDir,
+    Arc<MemGraph>,
+    Arc<Switch>,
+    Vault,
+    EntityId,
+    EntityId,
+    EntityId,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let g = Arc::new(MemGraph::new());
+    let (sam, ..) = populate(&g);
+    let (jonas, session, ..) = add_counselling(&g, &sam);
+    let items = Arc::new(Switch {
+        invite_sensitive: false.into(),
+        missing_sensitive: true,
+    });
+    let v = Vault::new(dir.path().join("v"), g.clone(), items.clone(), config()).unwrap();
+    v.render_all().unwrap();
+    (dir, g, items, v, sam, jonas, session)
+}
+
+fn make_sensitive(items: &Switch) {
+    items
+        .invite_sensitive
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Frontmatter the user changed counts as their text: the page is kept (hidden), their own
+/// keys stay, their alias reaches the graph, and no generated text is left.
+#[test]
+fn a_hidden_page_keeps_the_users_frontmatter_and_applies_their_alias() {
+    let (_dir, g, items, v, _sam, jonas, _) = hidden_fixture();
+    let page = v.page_path(&jonas).unwrap().unwrap();
+    let text = std::fs::read_to_string(&page).unwrap();
+    let edited = text.replacen("aliases: []", "aliases: [\"JA\"]\ntags: [\"therapy\"]", 1);
+    assert_ne!(edited, text, "{text}");
+    std::fs::write(&page, edited).unwrap();
+    make_sensitive(&items);
+    let report = v.render_all().unwrap();
+    assert!(
+        page.is_file(),
+        "deleted although the user edited it: {report:?}"
+    );
+    let stub = std::fs::read_to_string(&page).unwrap();
+    assert!(stub.contains("# Hidden page"), "{stub}");
+    assert!(stub.contains("tags: [\"therapy\"]"), "{stub}");
+    for leak in ["# Jonas", "Organizer", "organized", "SECRET", "Counselling"] {
+        assert!(!stub.contains(leak), "{leak} in stub:\n{stub}");
+    }
+    assert!(
+        g.get_entity(&jonas)
+            .unwrap()
+            .unwrap()
+            .aliases
+            .contains(&"JA".to_string())
+    );
+    assert_eq!(v.page_path(&jonas).unwrap(), None);
+    assert!(v.validate().unwrap().is_ok());
+}
+
+/// A reworded fact line on a page whose entity turns sensitive-only is applied first: the
+/// fact is now the user's own, so the entity keeps a normal page.
+#[test]
+fn a_fact_edit_on_a_page_turning_hidden_is_applied_and_keeps_the_page() {
+    let (_dir, g, items, v, _sam, jonas, _) = hidden_fixture();
+    let organized = g.claims_for(&jonas, false).unwrap()[0].id;
+    let page = v.page_path(&jonas).unwrap().unwrap();
+    let text = std::fs::read_to_string(&page).unwrap();
+    let marker = format!("<!-- c:{organized} -->");
+    let edited = replace_line(
+        &text,
+        &marker,
+        &format!("- Jonas runs a book club. {marker}"),
+    );
+    std::fs::write(&page, edited).unwrap();
+    make_sensitive(&items);
+    v.render_all().unwrap();
+    let c = g.get_claim(organized).unwrap().unwrap();
+    assert!(!c.status.is_active(), "{c:?}");
+    assert!(
+        g.claims_for(&jonas, false)
+            .unwrap()
+            .iter()
+            .any(|c| c.status == ClaimStatus::UserAsserted && c.text.contains("book club"))
+    );
+    let now = std::fs::read_to_string(v.page_path(&jonas).unwrap().expect("still a page")).unwrap();
+    assert!(now.contains("Jonas runs a book club."), "{now}");
+    assert!(
+        !now.contains("Organizer") && !now.contains("SECRET"),
+        "{now}"
+    );
+}
+
+/// A deleted fact line on a page turning hidden is applied too (rejected in the graph), and the
+/// deleted region text is never kept as notes.
+#[test]
+fn a_fact_deletion_on_a_page_turning_hidden_is_applied() {
+    let (_dir, g, items, v, _sam, jonas, _) = hidden_fixture();
+    let organized = g.claims_for(&jonas, false).unwrap()[0].id;
+    // A second fact from the invite, so Jonas stays sensitive-only after the deletion.
+    g.add_claim(&claim(
+        &jonas,
+        "phone",
+        ClaimObject::Literal("+49 30 555".into()),
+        "Jonas's phone is +49 30 555.",
+        vec![ev("files", "counselling.ics", "Tel +49 30 555")],
+    ))
+    .unwrap();
+    v.render_all().unwrap();
+    let page = v.page_path(&jonas).unwrap().unwrap();
+    let text = std::fs::read_to_string(&page).unwrap();
+    let marker = format!("<!-- c:{organized} -->");
+    let edited: String = text
+        .lines()
+        .filter(|l| !l.contains(&marker))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&page, format!("{edited}my note\n")).unwrap();
+    make_sensitive(&items);
+    v.render_all().unwrap();
+    assert_eq!(
+        g.get_claim(organized).unwrap().unwrap().status,
+        ClaimStatus::Rejected
+    );
+    let stub = std::fs::read_to_string(&page).unwrap();
+    assert!(
+        stub.contains("my note") && stub.contains("# Hidden page"),
+        "{stub}"
+    );
+    for leak in ["Jonas", "Facts", "Related", "Counselling", "SECRET", "555"] {
+        assert!(!stub.contains(leak), "{leak} in stub:\n{stub}");
+    }
+}
+
+/// A page an editor saved without HTML comments gets its markers back before anything is
+/// decided: the hidden stub keeps the note, not the heading or the facts.
+#[test]
+fn a_comment_stripped_page_turning_hidden_keeps_no_generated_text() {
+    let (_dir, _g, items, v, _sam, jonas, _) = hidden_fixture();
+    let page = v.page_path(&jonas).unwrap().unwrap();
+    let text = std::fs::read_to_string(&page).unwrap();
+    let stripped: String = text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("<!-- nugget:"))
+        .map(|l| match l.find(" <!--") {
+            Some(i) => format!("{}\n", &l[..i]),
+            None => format!("{l}\n"),
+        })
+        .collect();
+    assert!(!stripped.contains("<!--"), "{stripped}");
+    std::fs::write(&page, format!("{stripped}my note\n")).unwrap();
+    make_sensitive(&items);
+    v.render_all().unwrap();
+    let stub = std::fs::read_to_string(&page).unwrap();
+    assert!(stub.contains("my note"), "{stub}");
+    for leak in ["# Jonas", "Organizer", "organized", "SECRET", "Counselling"] {
+        assert!(!stub.contains(leak), "{leak} in stub:\n{stub}");
+    }
+}
+
+/// Without a merge base nothing tells the user's text from the generated text: the page is
+/// never deleted, it becomes a hidden stub.
+#[test]
+fn a_page_without_a_merge_base_is_hidden_not_deleted() {
+    let (_dir, _g, items, v, _sam, _jonas, session) = hidden_fixture();
+    let page = v.page_path(&session).unwrap().unwrap();
+    let base = v.root().join(".nugget/base/entities");
+    for e in std::fs::read_dir(&base).unwrap() {
+        let p = e.unwrap().path();
+        if p.to_string_lossy().contains(&short_id(&session)) {
+            std::fs::remove_file(p).unwrap();
+        }
+    }
+    make_sensitive(&items);
+    let report = v.render_all().unwrap();
+    assert!(page.is_file(), "{report:?}");
+    assert!(
+        !report.removed.iter().any(|r| r.contains("Counselling")),
+        "{report:?}"
+    );
+    let stub = std::fs::read_to_string(&page).unwrap();
+    assert!(stub.contains("# Hidden page"), "{stub}");
+    assert!(
+        !stub.contains("Organizer") && !stub.contains("SECRET"),
+        "{stub}"
+    );
+}
+
+/// A page that cannot be read (here a symlink) does not keep the one-time full render pending.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_page_does_not_force_full_renders_forever() {
+    let (_dir, _g, _items, v, sam, ..) = hidden_fixture();
+    let root = v.root().to_path_buf();
+    let page = v.page_path(&sam).unwrap().unwrap();
+    drop(v);
+    std::fs::remove_file(&page).unwrap();
+    std::os::unix::fs::symlink(root.join("README.md"), &page).unwrap();
+    let state_path = root.join(".nugget/state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    state.as_object_mut().unwrap().remove("rules");
+    std::fs::write(&state_path, serde_json::to_string(&state).unwrap()).unwrap();
+    let g = Arc::new(MemGraph::new());
+    populate(&g);
+    let v = Vault::new(&root, g, Arc::new(lookup), config()).unwrap();
+    assert!(v.needs_full_render());
+    let report = v.render_changed(u64::MAX).unwrap();
+    assert!(!report.skipped.is_empty(), "{report:?}");
+    assert!(!v.needs_full_render(), "{report:?}");
+}
+
+/// A lookup whose batch call always fails: the vault asks item by item instead of counting
+/// every item as sensitive.
+struct NoBatch;
+
+impl ItemLookup for NoBatch {
+    fn source_info(&self, it: &ItemRef) -> nugget_core::Result<Option<SourceInfo>> {
+        Ok(lookup(it))
+    }
+
+    fn source_infos(
+        &self,
+        _items: &[ItemRef],
+    ) -> nugget_core::Result<std::collections::HashMap<ItemRef, SourceInfo>> {
+        Err(nugget_core::Error::Invalid("batch broken".into()))
+    }
+}
+
+#[test]
+fn a_failed_batch_lookup_falls_back_to_one_item_at_a_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let g = Arc::new(MemGraph::new());
+    let (sam, acme, ..) = populate(&g);
+    let v = Vault::new(dir.path().join("v"), g, Arc::new(NoBatch), config()).unwrap();
+    let report = v.render_all().unwrap();
+    assert!(report.removed.is_empty(), "{report:?}");
+    let t = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    assert!(
+        t.contains("Samantha works at") && t.contains("Lunch on Friday"),
+        "{t}"
+    );
+    assert!(v.page_path(&acme).unwrap().is_some());
+}
+
+/// A lookup that fails for the invite: nothing is deleted in that pass.
+struct FailInvite;
+
+impl ItemLookup for FailInvite {
+    fn source_info(&self, it: &ItemRef) -> nugget_core::Result<Option<SourceInfo>> {
+        if it.key.as_str() == "counselling.ics" {
+            return Err(nugget_core::Error::Invalid("store busy".into()));
+        }
+        Ok(lookup(it))
+    }
+
+    fn source_infos(
+        &self,
+        _items: &[ItemRef],
+    ) -> nugget_core::Result<std::collections::HashMap<ItemRef, SourceInfo>> {
+        Err(nugget_core::Error::Invalid("batch broken".into()))
+    }
+}
+
+#[test]
+fn no_page_is_deleted_in_a_pass_with_lookup_errors() {
+    let (dir, g, _items, v, _sam, _jonas, session) = hidden_fixture();
+    let page = v.page_path(&session).unwrap().unwrap();
+    let root = v.root().to_path_buf();
+    drop(v);
+    let v = Vault::new(&root, g, Arc::new(FailInvite), config()).unwrap();
+    let report = v.render_all().unwrap();
+    assert!(report.removed.is_empty(), "{report:?}");
+    assert!(page.is_file());
+    // Still hidden: a failed lookup counts as sensitive.
+    let stub = std::fs::read_to_string(&page).unwrap();
+    assert!(!stub.contains("Organizer"), "{stub}");
+    drop(dir);
 }

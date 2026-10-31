@@ -206,7 +206,8 @@ impl Store {
         Ok(out)
     }
 
-    /// The title and metadata of each stored item in `items` (unknown items are left out),
+    /// The title and metadata of each stored item in `items` (unknown items, and items whose
+    /// stored metadata is not valid JSON, are left out),
     /// without loading its text: what a caller needs to check sensitivity
     /// (`nugget_retrieve::is_sensitive` on the metadata) or cite the item. Looked up in batches
     /// of [`LOOKUP_BATCH`] items, one query each, on a read connection.
@@ -232,13 +233,16 @@ impl Store {
                 let Some(item) = batch.get(idx) else {
                     continue;
                 };
-                out.insert(
-                    item.clone(),
-                    ItemMeta {
-                        title,
-                        metadata: serde_json::from_str(&metadata)?,
-                    },
-                );
+                // One unreadable row does not fail the batch: that item is left out (so a
+                // caller treats it like an unknown item).
+                let metadata = match serde_json::from_str(&metadata) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!(source = %item.source, error = %e, "item_meta: unreadable metadata");
+                        continue;
+                    }
+                };
+                out.insert(item.clone(), ItemMeta { title, metadata });
             }
         }
         Ok(out)

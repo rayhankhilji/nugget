@@ -26,6 +26,8 @@ pub(crate) struct Ctx<'a> {
     entities: RefCell<HashMap<EntityId, Option<Entity>>>,
     /// [`Ctx::entity_sensitive`] per entity (for this pass).
     sensitive: RefCell<HashMap<EntityId, bool>>,
+    /// A source lookup failed in this pass (those items count as sensitive).
+    lookup_failed: std::cell::Cell<bool>,
 }
 
 /// Mentions read per entity to decide whether it is sensitive-only (as `nuggetd`'s graph views
@@ -153,6 +155,7 @@ impl<'a> Ctx<'a> {
             sources: RefCell::default(),
             entities: RefCell::default(),
             sensitive: RefCell::default(),
+            lookup_failed: std::cell::Cell::new(false),
         }
     }
 
@@ -199,29 +202,49 @@ impl<'a> Ctx<'a> {
         if want.is_empty() {
             return;
         }
-        let found = match self.items.source_infos(&want) {
-            Ok(f) => Some(f),
+        let missing = || SourceInfo {
+            sensitive: self.items.missing_is_sensitive(),
+            ..SourceInfo::default()
+        };
+        // A failed lookup counts as sensitive.
+        let failed = || SourceInfo {
+            sensitive: true,
+            ..SourceInfo::default()
+        };
+        let infos: Vec<(ItemRef, SourceInfo)> = match self.items.source_infos(&want) {
+            Ok(mut f) => want
+                .into_iter()
+                .map(|i| {
+                    let info = f.remove(&i).unwrap_or_else(missing);
+                    (i, info)
+                })
+                .collect(),
             Err(e) => {
-                tracing::warn!(error = %e, "vault: source lookup failed");
-                None
+                // One bad item must not count the whole batch as sensitive: ask one by one.
+                tracing::warn!(error = %e, "vault: batched source lookup failed; retrying per item");
+                want.into_iter()
+                    .map(|i| {
+                        let info = match self.items.source_info(&i) {
+                            Ok(Some(info)) => info,
+                            Ok(None) => missing(),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "vault: source lookup failed");
+                                self.lookup_failed.set(true);
+                                failed()
+                            }
+                        };
+                        (i, info)
+                    })
+                    .collect()
             }
         };
-        let missing = self.items.missing_is_sensitive();
-        let mut cache = self.sources.borrow_mut();
-        for item in want {
-            let info = match &found {
-                Some(f) => f.get(&item).cloned().unwrap_or_else(|| SourceInfo {
-                    sensitive: missing,
-                    ..SourceInfo::default()
-                }),
-                // A failed lookup counts as sensitive.
-                None => SourceInfo {
-                    sensitive: true,
-                    ..SourceInfo::default()
-                },
-            };
-            cache.insert(item, info);
-        }
+        self.sources.borrow_mut().extend(infos);
+    }
+
+    /// Whether a source lookup failed in this pass: its items counted as sensitive, so nothing
+    /// is deleted on that answer.
+    pub fn lookup_failed(&self) -> bool {
+        self.lookup_failed.get()
     }
 
     /// Whether the item is sensitive. An item the lookup does not know counts as sensitive when
@@ -262,36 +285,13 @@ impl<'a> Ctx<'a> {
         Ok(out)
     }
 
-    /// Whether any of the entity's origins (evidence of its active claims, its mentions) is a
-    /// sensitive item: then, as for default-scope MCP clients, only the aliases and identifiers
-    /// that a non-sensitive item supplied are shown.
-    fn has_sensitive_origin(&self, id: &EntityId) -> Result<bool> {
-        let claims = self.graph.claims_for(id, false)?;
-        let items = || {
-            claims
-                .iter()
-                .flat_map(|c| c.evidence.iter().map(|e| &e.item))
-        };
-        self.prefetch(items());
-        if items().any(|i| self.item_sensitive(i)) {
-            return Ok(true);
-        }
-        let mentions = self.graph.mentions_for(id, SENSITIVE_MENTIONS)?;
-        self.prefetch(mentions.iter().map(|m| &m.item));
-        Ok(mentions.iter().any(|m| self.item_sensitive(&m.item)))
-    }
-
-    /// The aliases and identifiers the page may show. All of them when no origin of the entity
-    /// is sensitive; otherwise only those whose recorded provenance
-    /// ([`GraphStore::entity_provenance`]) includes a non-sensitive item (a detail without
-    /// recorded provenance cannot be shown to be safe). The same rule MCP applies for
-    /// default-scope clients.
+    /// The aliases and identifiers the page may show: all but those whose recorded provenance
+    /// ([`GraphStore::entity_provenance`]) is only sensitive items. A detail without recorded
+    /// provenance (one the user added in the vault, or from a merge) is shown: the page is the
+    /// user's own file.
     fn shown_details(&self, e: &Entity) -> Result<(Vec<String>, Vec<Identifier>)> {
-        if !self.has_sensitive_origin(&e.id)? {
-            return Ok((e.aliases.clone(), e.identifiers.clone()));
-        }
         let Some(p) = self.graph.entity_provenance(&e.id)? else {
-            return Ok((Vec::new(), Vec::new()));
+            return Ok((e.aliases.clone(), e.identifiers.clone()));
         };
         self.prefetch(
             p.aliases
@@ -299,18 +299,31 @@ impl<'a> Ctx<'a> {
                 .flat_map(|(_, items)| items)
                 .chain(p.identifiers.iter().flat_map(|(_, items)| items)),
         );
-        let public = |items: &[ItemRef]| items.iter().any(|i| !self.item_sensitive(i));
-        let aliases = p
+        let hidden =
+            |items: &[ItemRef]| !items.is_empty() && items.iter().all(|i| self.item_sensitive(i));
+        let hidden_aliases: Vec<&String> = p
             .aliases
             .iter()
-            .filter(|(a, items)| e.aliases.contains(a) && public(items))
-            .map(|(a, _)| a.clone())
+            .filter(|(_, items)| hidden(items))
+            .map(|(a, _)| a)
             .collect();
-        let identifiers = p
+        let hidden_ids: Vec<&Identifier> = p
             .identifiers
             .iter()
-            .filter(|(i, items)| e.identifiers.contains(i) && public(items))
-            .map(|(i, _)| i.clone())
+            .filter(|(_, items)| hidden(items))
+            .map(|(i, _)| i)
+            .collect();
+        let aliases = e
+            .aliases
+            .iter()
+            .filter(|a| !hidden_aliases.contains(a))
+            .cloned()
+            .collect();
+        let identifiers = e
+            .identifiers
+            .iter()
+            .filter(|i| !hidden_ids.contains(i))
+            .cloned()
             .collect();
         Ok((aliases, identifiers))
     }

@@ -38,7 +38,7 @@ pub(crate) struct Merged {
 /// Keys that always come from the new render.
 const FORCED: [&str; 5] = ["nugget_id", "kind", "updated", "merged_into", "status"];
 /// Keys the renderer owns.
-const OURS: [&str; 7] = [
+pub(crate) const OURS: [&str; 7] = [
     "nugget_id",
     "kind",
     "updated",

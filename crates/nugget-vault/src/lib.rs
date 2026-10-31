@@ -59,14 +59,16 @@
 //! - a footnote never cites or quotes a sensitive item, even for a fact that also has other
 //!   evidence (only that other evidence is cited);
 //! - an entity with at least one active fact or mention, all of them from sensitive items, gets
-//!   no page and no index entry, and other pages name it without a link. A page rendered before
-//!   is deleted (with its merge base) when the user wrote nothing on it; otherwise it becomes a
-//!   "no longer in your knowledge graph" stub with a neutral heading that keeps the user's
-//!   notes in place (its file name still names the entity: the user's file is not moved);
-//! - when any of an entity's facts or mentions comes from a sensitive item, the frontmatter
-//!   lists only the aliases and identifiers a non-sensitive item supplied
-//!   (`GraphStore::entity_provenance`), as MCP does for default-scope clients. The page name
-//!   and heading are the entity's name whatever supplied it.
+//!   no page and no index entry, and other pages name it without a link. The user's edits on
+//!   a page rendered before are applied first; then the page is deleted (with its merge base)
+//!   when the user wrote nothing on it, frontmatter included; otherwise it becomes a "no longer
+//!   in your knowledge graph" stub with a neutral heading that keeps the user's own text and
+//!   frontmatter keys in place, never generated text (its file name still names the entity:
+//!   the user's file is not moved). See `Vault::hide_page`;
+//! - the frontmatter leaves out aliases and identifiers whose recorded sources
+//!   (`GraphStore::entity_provenance`) are all sensitive items; one without recorded sources
+//!   (added by the user in the vault, or by a merge) is shown. The page name and heading are
+//!   the entity's name whatever supplied it.
 //!
 //! Sensitivity is not in the graph's change feed. Pages rendered under older rules are
 //! rendered again in full once (see [`Vault::needs_full_render`]); after that, an item turning
@@ -238,6 +240,12 @@ struct Pass {
     rendered: BTreeSet<EntityId>,
     /// Entities whose pages need a re-render because user edits changed their claims.
     affected: BTreeSet<EntityId>,
+    /// A page was left for later because it kept changing under us (not a permanent read
+    /// error): a full pass with such a page does not count as done.
+    retry: bool,
+    /// Entities whose page edits [`Vault::hide_page`] already applied: their next
+    /// [`Vault::render_page`] merges the page without applying them again.
+    edits_applied: BTreeSet<EntityId>,
 }
 
 /// The Markdown vault. All operations are synchronous and serialised on an internal lock; async
@@ -347,7 +355,7 @@ impl Vault {
     /// [`Vault::needs_full_render`]), this renders everything instead, once.
     pub fn render_changed(&self, since_seq: u64) -> Result<RenderReport> {
         let mut st = self.lock();
-        let full = st.rules < RENDER_RULES;
+        let full = st.last_render.is_some() && st.rules < RENDER_RULES;
         let mut ids = Vec::new();
         let mut cur = since_seq;
         loop {
@@ -582,7 +590,8 @@ impl Vault {
     fn run(&self, st: &mut State, ids: Option<Vec<EntityId>>) -> Result<RenderReport> {
         let ctx = Ctx::new(self.graph.as_ref(), self.items.as_ref(), &self.config);
         let mut pass = Pass::default();
-        let full = ids.is_none();
+        // The first pass of a vault renders every page there is under the current rules.
+        let full = ids.is_none() || st.last_render.is_none();
         let ids = match ids {
             Some(v) => v,
             None => {
@@ -619,8 +628,10 @@ impl Vault {
         })();
         st.last_render = Some(OffsetDateTime::now_utc());
         st.version = STATE_VERSION;
-        // A page left alone (unreadable, or changing under us) keeps the full render pending.
-        if full && result.is_ok() && pass.report.skipped.is_empty() {
+        // A page that kept changing under us keeps the full render pending; one that cannot be
+        // read at all (a symlink, too large, not UTF-8) does not, or every sync would render
+        // everything again.
+        if full && result.is_ok() && !pass.retry {
             st.rules = RENDER_RULES;
         }
         self.save_state(st)?;
@@ -896,9 +907,11 @@ impl Vault {
         for a in &plan.aliases {
             // Already held (for example one the page does not show, see `Ctx::shown_details`):
             // adding it again would only mark the entity changed, and re-render it, every pass.
-            let a_low = a.trim().to_lowercase();
-            if a_low == e.name.trim().to_lowercase()
-                || e.aliases.iter().any(|x| x.trim().to_lowercase() == a_low)
+            let norm = nugget_graph::normalize_name(a);
+            if norm == nugget_graph::normalize_name(&e.name)
+                || e.aliases
+                    .iter()
+                    .any(|x| nugget_graph::normalize_name(x) == norm)
             {
                 continue;
             }
@@ -946,8 +959,10 @@ impl Vault {
                 }
             });
 
+            let applied = pass.edits_applied.remove(&id);
             if let (Some(b), Some(u)) = (&base, &user)
                 && prev.as_ref().is_none_or(|p| p.stub.is_none())
+                && !applied
             {
                 let plan = plan_edits(b, u);
                 if !plan.is_empty() {
@@ -1057,6 +1072,7 @@ impl Vault {
             return Ok(());
         }
         tracing::warn!(entity = %id, "vault: page kept changing during render; will retry later");
+        pass.retry = true;
         pass.report
             .skipped
             .push(prev.map(|p| p.path).unwrap_or_default());
@@ -1106,41 +1122,11 @@ impl Vault {
                 return Ok(());
             }
         };
+        if hidden && transition {
+            return self.hide_page(st, ctx, pass, id, user_text);
+        }
         let base = self.read_base(id).map(|b| Doc::parse(&b));
         let user = user_text.as_deref().map(Doc::parse);
-        if hidden && transition {
-            // Live pages linking here are rendered again: they now name it without a link.
-            for (other, p) in &st.pages {
-                if p.stub.is_none() && p.links.contains(id) {
-                    pass.affected.insert(other.clone());
-                }
-            }
-            // Nothing of the user's on the page: delete it (its path and heading name the
-            // entity) with its merge base and conflict copy.
-            if user
-                .as_ref()
-                .is_none_or(|u| user_notes(u, base.as_ref()).is_empty())
-            {
-                if self.fs.read(&rel).ok().flatten() != user_text {
-                    return Ok(()); // changed under us; next pass
-                }
-                if user_text.is_some() {
-                    self.fs.remove(&rel)?;
-                    if let Some((dir, _)) = rel.rsplit_once('/') {
-                        self.fs.prune_empty_dir(dir);
-                    }
-                }
-                let base = base_rel(id);
-                for f in [pending_rel(&base), base, conflict_rel(&rel)] {
-                    if self.fs.is_file(&f) {
-                        self.fs.remove(&f)?;
-                    }
-                }
-                st.pages.remove(id);
-                pass.report.removed.push(rel);
-                return Ok(());
-            }
-        }
         let rendered = ctx.render_stub(id, prev.kind, &prev.name, target, hidden);
         let gen_text = rendered.doc.render();
         let (doc, conflicts) = match (&user, transition) {
@@ -1173,6 +1159,8 @@ impl Vault {
         let text = doc.render();
         if user_text.as_deref() != Some(text.as_str()) {
             if self.fs.read(&rel).ok().flatten() != user_text {
+                pass.retry = true;
+                pass.report.skipped.push(rel);
                 return Ok(()); // changed under us; next pass
             }
             self.write_page(&rel, &text, &base_rel(id), &gen_text)?;
@@ -1194,6 +1182,147 @@ impl Vault {
                 conflicts,
                 links: rendered.links.into_iter().collect(),
                 stub: Some(want),
+                ..prev
+            },
+        );
+        Ok(())
+    }
+
+    /// The page of `id` is to become hidden: its entity (or the one it was merged into) is now
+    /// known only from sensitive items. `user_text` is the page as the user has it.
+    ///
+    /// 1. Markers an editor stripped are restored first (as for a live page). A page whose
+    ///    markers cannot be restored is left exactly as it is (neither rewritten nor deleted):
+    ///    its generated text cannot be told from the user's.
+    /// 2. The user's edits to a live entity's page (fact lines, aliases) are applied to the
+    ///    graph first, as [`Vault::render_page`] does; if the entity is no longer sensitive-only
+    ///    afterwards (an edited fact is the user's own), the page is rendered normally.
+    /// 3. Otherwise the page keeps only what the user wrote outside generated blocks, and their
+    ///    own frontmatter keys, under a neutral heading. It is deleted (with its merge base and
+    ///    conflict copy) only when the user wrote nothing, frontmatter included, there is a
+    ///    merge base to tell, and no source lookup failed in this pass.
+    fn hide_page(
+        &self,
+        st: &mut State,
+        ctx: &Ctx,
+        pass: &mut Pass,
+        id: &EntityId,
+        user_text: Option<String>,
+    ) -> Result<()> {
+        let prev = st.pages[id].clone();
+        let rel = prev.path.clone();
+        let base_text = self.read_base(id);
+        let base = base_text.as_deref().map(Doc::parse);
+        let user = match user_text.as_deref() {
+            None => None,
+            Some(u) => match base_text.as_deref() {
+                Some(b) if !u.contains(doc::BEGIN) && b.contains(doc::BEGIN) => {
+                    match restore::restore_markers(b, u) {
+                        Some(restored) => Some(Doc::parse(&restored)),
+                        None => {
+                            tracing::warn!(page = %rel, "vault: cannot tell the user's text from generated text; leaving the page of a now hidden entity alone");
+                            pass.report.skipped.push(rel);
+                            return Ok(());
+                        }
+                    }
+                }
+                _ => Some(Doc::parse(u)),
+            },
+        };
+
+        // 2. The user's edits first.
+        if let (Some(b), Some(u)) = (&base, &user)
+            && prev.stub.is_none()
+            && let Some(e) = ctx.entity(id)?.filter(|e| e.id == *id)
+        {
+            let plan = plan_edits(b, u);
+            if !plan.is_empty() {
+                self.apply_plan(st, &e, &plan, pass)?;
+                pass.edits_applied.insert(id.clone());
+                ctx.forget();
+                if let Some(fresh) = ctx.entity(id)?
+                    && fresh.id == *id
+                    && !ctx.entity_sensitive(id)?
+                {
+                    return self.render_page(st, ctx, pass, &fresh);
+                }
+            }
+        }
+
+        // Live pages linking here are rendered again: they now name it without a link.
+        for (other, p) in &st.pages {
+            if p.stub.is_none() && p.links.contains(id) {
+                pass.affected.insert(other.clone());
+            }
+        }
+
+        // 3. What is the user's: text outside generated blocks, and frontmatter keys the
+        // renderer does not own.
+        let notes = user.as_ref().map(outside_notes).unwrap_or_default();
+        let user_fm = user.as_ref().and_then(|u| u.fm.clone()).unwrap_or_default();
+        let base_fm = base.as_ref().and_then(|b| b.fm.clone()).unwrap_or_default();
+        let own_keys: Vec<Vec<String>> = doc::fm_entries(&user_fm)
+            .into_iter()
+            .filter(|(k, _)| !merge::OURS.contains(&k.as_str()))
+            .map(|(_, lines)| lines)
+            .collect();
+        let fm_edited = doc::fm_entries(&user_fm) != doc::fm_entries(&base_fm);
+        let keep = user.is_some()
+            && (!notes.is_empty() || fm_edited || base.is_none() || ctx.lookup_failed());
+        if !keep {
+            if self.fs.read(&rel).ok().flatten() != user_text {
+                pass.retry = true;
+                pass.report.skipped.push(rel);
+                return Ok(()); // changed under us; next pass
+            }
+            if user_text.is_some() {
+                self.fs.remove(&rel)?;
+                if let Some((dir, _)) = rel.rsplit_once('/') {
+                    self.fs.prune_empty_dir(dir);
+                }
+            }
+            let base = base_rel(id);
+            for f in [pending_rel(&base), base, conflict_rel(&rel)] {
+                if self.fs.is_file(&f) {
+                    self.fs.remove(&f)?;
+                }
+            }
+            st.pages.remove(id);
+            pass.report.removed.push(rel);
+            return Ok(());
+        }
+
+        let rendered = ctx.render_stub(id, prev.kind, &prev.name, None, true);
+        let gen_text = rendered.doc.render();
+        let mut doc = rendered.doc.clone();
+        if let Some(fm) = doc.fm.as_mut() {
+            fm.extend(own_keys.into_iter().flatten());
+        }
+        if !notes.is_empty() {
+            let mut block = vec![String::new()];
+            block.extend(notes);
+            doc.segs.push(Segment::User(block));
+        }
+        let text = doc.render();
+        if user_text.as_deref() != Some(text.as_str()) {
+            if self.fs.read(&rel).ok().flatten() != user_text {
+                pass.retry = true;
+                pass.report.skipped.push(rel);
+                return Ok(()); // changed under us; next pass
+            }
+            self.write_page(&rel, &text, &base_rel(id), &gen_text)?;
+            pass.report.written.push(rel.clone());
+        }
+        self.write_base(&base_rel(id), &gen_text)?;
+        let _ = self.fs.remove(&conflict_rel(&rel));
+        pass.report.stubs.push(rel);
+        st.pages.insert(
+            id.clone(),
+            PageState {
+                fingerprint: fingerprint(&text),
+                conflicts: Vec::new(),
+                links: Vec::new(),
+                stub: Some(Stub::Hidden),
                 ..prev
             },
         );
@@ -1258,10 +1387,29 @@ impl Vault {
     }
 }
 
-/// What the user wrote on a page (outside generated blocks), without the `## Notes` heading and
-/// surrounding blank lines; empty when they wrote nothing.
+/// What the user wrote on a page (outside generated blocks, plus generated blocks they changed),
+/// without the `## Notes` heading and surrounding blank lines; empty when they wrote nothing.
 fn user_notes(user: &Doc, base: Option<&Doc>) -> Vec<String> {
-    let mut content = user.user_content(base);
+    trim_notes(user.user_content(base))
+}
+
+/// What the user wrote outside generated blocks only (never a generated block's text, even one
+/// they changed: on a hidden page it may hold what came from sensitive items), trimmed as in
+/// [`user_notes`].
+fn outside_notes(user: &Doc) -> Vec<String> {
+    trim_notes(
+        user.segs
+            .iter()
+            .filter_map(|s| match s {
+                Segment::User(lines) => Some(lines.iter().cloned()),
+                Segment::Region { .. } => None,
+            })
+            .flatten()
+            .collect(),
+    )
+}
+
+fn trim_notes(mut content: Vec<String>) -> Vec<String> {
     content.retain(|l| l.trim() != "## Notes");
     while content.first().is_some_and(|l| l.trim().is_empty()) {
         content.remove(0);
