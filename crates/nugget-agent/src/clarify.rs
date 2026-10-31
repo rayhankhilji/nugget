@@ -111,7 +111,7 @@ pub fn ambiguity(goal: &str, targets: &[String]) -> Option<Ambiguity> {
     let mut seen = HashSet::new();
     let goal_words: Vec<(String, String)> = all
         .into_iter()
-        .filter(|(_, lower)| lower.chars().count() >= 2 && !STOP_WORDS.contains(&lower.as_str()))
+        .filter(|(_, lower)| is_content_word(lower))
         .filter(|(_, lower)| !extensions.contains(lower))
         .filter(|(_, lower)| seen.insert(lower.clone()))
         .collect();
@@ -202,7 +202,7 @@ pub fn goal_object(goal: &str) -> Option<String> {
         if PLACE_WORDS.contains(&lower.as_str()) {
             break;
         }
-        if lower.chars().count() >= 2 && !STOP_WORDS.contains(&lower.as_str()) {
+        if is_content_word(&lower) {
             object.push(word);
         }
     }
@@ -275,6 +275,14 @@ pub fn required_risk(goal: &str) -> Option<RiskClass> {
     }
 }
 
+/// A word that can say which item is meant: two characters or more, not a [`STOP_WORDS`] word,
+/// and not a bare number of one or two digits ("2 files"; a year such as `2023` still counts,
+/// and so does a clock time, which [`words`] keeps whole).
+fn is_content_word(lower: &str) -> bool {
+    let n = lower.chars().count();
+    n >= 2 && !STOP_WORDS.contains(&lower) && !(n <= 2 && lower.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// `plural` is `singular` with an `s` or `es` ending.
 fn is_plural_of(plural: &str, singular: &str) -> bool {
     plural
@@ -286,8 +294,24 @@ fn is_plural_of(plural: &str, singular: &str) -> bool {
 /// a word dropped and a possessive `'s` (or a trailing `'`) removed.
 fn words(text: &str) -> Vec<(String, String)> {
     let text = text.replace('’', "'");
+    // A clock time ("13:00") is one word: its parts alone would match every time on screen.
+    let chars: Vec<char> = text.chars().collect();
+    let keep = |i: usize| {
+        let c = chars[i];
+        c.is_alphanumeric()
+            || c == '\''
+            || (c == ':'
+                && i > 0
+                && chars[i - 1].is_ascii_digit()
+                && chars.get(i + 1).is_some_and(char::is_ascii_digit))
+    };
+    let text: String = chars
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| if keep(i) { c } else { ' ' })
+        .collect();
     let mut out = Vec::new();
-    for raw in text.split(|c: char| !(c.is_alphanumeric() || c == '\'')) {
+    for raw in text.split(' ') {
         let raw = raw.trim_matches('\'');
         let raw = raw
             .strip_suffix("'s")
@@ -549,5 +573,30 @@ mod tests {
             None
         );
         assert_eq!(required_risk("Turn on dark mode"), None);
+    }
+
+    #[test]
+    fn clock_times_do_not_make_a_calendar_ambiguous() {
+        let week = t(&[
+            "Monday 09:00 Team standup",
+            "Tuesday 11:00 Design review",
+            "Thursday 13:00 Customer call",
+        ]);
+        assert_eq!(
+            ambiguity(
+                "Block Wednesday 10:00 in my calendar as \"Focus time\".",
+                &week
+            ),
+            None
+        );
+        // The time still picks out its own event.
+        let thursday = t(&[
+            "Thursday 13:00 Customer call",
+            "Thursday 14:00 1:1 with Sam",
+        ]);
+        assert_eq!(ambiguity("Move my Thursday 13:00 meeting", &thursday), None);
+        assert!(ambiguity("Cancel my Thursday meeting", &thursday).is_some());
+        let reports = t(&["File report-2023.pdf", "File report-2024.pdf"]);
+        assert_eq!(ambiguity("Delete the 2023 report", &reports), None);
     }
 }
