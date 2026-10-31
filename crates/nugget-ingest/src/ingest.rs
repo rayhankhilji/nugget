@@ -596,6 +596,20 @@ impl IngestBuilder {
             }
         }
         let ids: Vec<SourceId> = lock(&inner.slots).keys().cloned().collect();
+        // Items the old inline triage stored metadata-only as junk (QA GG2-7) are re-indexed
+        // by their source's next full pass; done before any worker caches stored versions.
+        {
+            let store = inner.store.clone();
+            match tokio::task::spawn_blocking(move || store.reset_versions_of_legacy_junk())
+                .await
+                .map_err(join_err)
+                .and_then(|r| r)
+            {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(items = n, "legacy junk items will be re-indexed"),
+                Err(e) => tracing::warn!(error = %e, "resetting legacy junk items failed"),
+            }
+        }
         inner.start_sources(ids).await;
         inner.tracker.spawn(reembed::run(inner.clone()));
         inner.tracker.spawn(triage::run(inner.clone()));

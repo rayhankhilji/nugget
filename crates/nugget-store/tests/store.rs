@@ -719,6 +719,57 @@ mod sources {
     }
 
     #[test]
+    fn legacy_triage_items_are_listed_and_chunkless_junk_is_reset() {
+        let store = Store::open_in_memory().unwrap();
+        let r = |s: &str, k: &str| nugget_core::ids::ItemRef {
+            source: SourceId::new(s),
+            key: ItemKey::new(k),
+        };
+        let put = |k: &str, meta: serde_json::Value, chunk: bool| {
+            let new = NewItem::new("s", k, "h")
+                .with_metadata(meta)
+                .with_version("v1");
+            store.upsert_item(&new).unwrap();
+            if chunk {
+                store
+                    .replace_chunks(&new.item, &[NewChunk::text("t")])
+                    .unwrap();
+            }
+        };
+        put(
+            "junk",
+            serde_json::json!({"junk": true, "triage": {"keep": false}}),
+            false,
+        );
+        put(
+            "old",
+            serde_json::json!({"junk": false, "sensitive": false}),
+            true,
+        );
+        put(
+            "new",
+            serde_json::json!({"triage": {"state": "done"}, "junk": true}),
+            false,
+        );
+        assert_eq!(
+            store.items_without_triage_state(None, 10).unwrap(),
+            vec![r("s", "junk"), r("s", "old")]
+        );
+        assert_eq!(
+            store
+                .items_without_triage_state(Some(&r("s", "junk")), 10)
+                .unwrap(),
+            vec![r("s", "old")]
+        );
+        assert_eq!(store.reset_versions_of_legacy_junk().unwrap(), 1);
+        let v = |k: &str| store.get_item(&r("s", k)).unwrap().unwrap().version;
+        assert_eq!(v("junk"), None);
+        assert_eq!(v("old").as_deref(), Some("v1"));
+        assert_eq!(v("new").as_deref(), Some("v1"));
+        assert_eq!(store.reset_versions_of_legacy_junk().unwrap(), 0);
+    }
+
+    #[test]
     fn items_pending_triage_lists_pending_items_in_pages() {
         let store = Store::open_in_memory().unwrap();
         let meta = |state: &str| serde_json::json!({"triage": {"state": state}});

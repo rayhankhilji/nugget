@@ -531,3 +531,83 @@ async fn items_wait_sensitive_for_a_triage_model_that_is_not_routable_yet() {
     .await;
     h.ingest.shutdown().await;
 }
+
+#[tokio::test]
+async fn items_from_before_background_triage_are_relabelled_and_old_junk_reindexed() {
+    // A store written by the old pipeline: a model-cleared health note (sensitive: false,
+    // old triage keys), an ordinary note, and a junk item stored without chunks or text.
+    let store = nugget_store::Store::open_in_memory().unwrap();
+    let old = |key: &str, text: Option<&str>, meta: serde_json::Value| {
+        let mut new = nugget_store::NewItem::new("fake-1", key, format!("h-{key}"))
+            .with_metadata(meta)
+            .with_version("1");
+        new.text = text.map(str::to_owned);
+        store.upsert_item(&new).unwrap();
+        if let Some(t) = text {
+            store
+                .replace_chunks(&new.item, &[nugget_store::NewChunk::text(t)])
+                .unwrap();
+        }
+    };
+    let triage_old =
+        json!({"keep": true, "junk": false, "sensitive": false, "summary": "s", "title": "t"});
+    old(
+        "gp",
+        Some("Prescription: ferrous sulfate twice a day"),
+        json!({"sensitive": false, "junk": false, "triage": triage_old}),
+    );
+    old(
+        "note",
+        Some("grocery list: eggs"),
+        json!({"sensitive": false, "junk": false, "triage_error": "timed out"}),
+    );
+    old(
+        "boiler",
+        None,
+        json!({"sensitive": false, "junk": true, "triage": {"keep": false, "junk": true}}),
+    );
+    let local = local_model();
+    let h = start(Opts {
+        router: Some(router(&[(
+            local.clone(),
+            vec![Tier::Triage, Tier::Embedding],
+        )])),
+        store: Some(store),
+        ..Default::default()
+    })
+    .await;
+    eventually("migrated and triaged", || {
+        ["gp", "note"]
+            .iter()
+            .all(|k| h.item("fake-1", k).unwrap().metadata["triage"]["state"] == json!("done"))
+    })
+    .await;
+    let gp = h.item("fake-1", "gp").unwrap();
+    assert_eq!(gp.metadata["sensitive"], json!(true), "{}", gp.metadata);
+    assert_eq!(gp.metadata["sensitive_rule"], json!("health"));
+    assert_eq!(gp.metadata["triage"]["state"], json!("done"));
+    let note = h.item("fake-1", "note").unwrap();
+    assert_eq!(note.metadata["triage"]["state"], json!("done"));
+    assert_eq!(note.metadata["sensitive"], json!(false));
+    assert!(note.metadata.get("triage_error").is_none());
+    // The junk item's version was forgotten: the next pass of its source re-indexes it.
+    assert_eq!(h.item("fake-1", "boiler").unwrap().version, None);
+    h.factory.state("fake-1").script(vec![
+        Step::Send(text_doc(
+            "boiler",
+            "the boiler engineer visits Tuesday",
+            Some("1"),
+        )),
+        Step::Return(json!("done")),
+    ]);
+    h.add("fake-1").await;
+    eventually("re-indexed", || {
+        h.store
+            .search_text("engineer", 10)
+            .map(|v| v.len())
+            .unwrap_or(0)
+            == 1
+    })
+    .await;
+    h.ingest.shutdown().await;
+}

@@ -224,6 +224,7 @@ async fn wait(inner: &Inner, d: Duration) {
 
 /// Queue every item the store still lists as pending (after a restart).
 async fn recover(inner: &Arc<Inner>) {
+    migrate_legacy(inner).await;
     let mut after: Option<ItemRef> = None;
     loop {
         let store = inner.store.clone();
@@ -257,6 +258,118 @@ async fn recover(inner: &Arc<Inner>) {
         }
         after = Some(last);
     }
+}
+
+/// Give items written before background triage existed (no `triage.state`) the labels the
+/// pipeline gives new items: the sensitivity rules, then pending triage (or unknown). Their
+/// old `sensitive: false` came from patterns or a model verdict only (QA GG4-6, GG5-2).
+/// Metadata only (`Store::set_item_metadata`); pending items are queued by the scan after.
+async fn migrate_legacy(inner: &Arc<Inner>) {
+    let mut after: Option<ItemRef> = None;
+    let mut migrated = 0u64;
+    loop {
+        let me = inner.clone();
+        let from = after.clone();
+        let res = tokio::task::spawn_blocking(move || -> Result<(Option<ItemRef>, u64)> {
+            let page = me.store.items_without_triage_state(from.as_ref(), PAGE)?;
+            let last = page.last().cloned();
+            for r in &page {
+                migrate_item(&me, r)?;
+            }
+            Ok((last.filter(|_| page.len() == PAGE), page.len() as u64))
+        })
+        .await
+        .map_err(join_err)
+        .and_then(|r| r);
+        match res {
+            Ok((next, n)) => {
+                migrated += n;
+                match next {
+                    Some(last) => after = Some(last),
+                    None => break,
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "labelling items from before background triage failed");
+                break;
+            }
+        }
+        if inner.shutdown.is_cancelled() {
+            return;
+        }
+    }
+    if migrated > 0 {
+        tracing::info!(
+            items = migrated,
+            "labelled items indexed before background triage"
+        );
+    }
+}
+
+fn migrate_item(inner: &Inner, r: &ItemRef) -> Result<()> {
+    let store = &inner.store;
+    let _w = lock(&inner.write_lock);
+    let Some(item) = store.get_item(r)? else {
+        return Ok(());
+    };
+    let mut metadata = item.metadata.clone();
+    let Value::Object(m) = &mut metadata else {
+        return Ok(());
+    };
+    if m.get("triage").and_then(|t| t.get("state")).is_some() {
+        return Ok(());
+    }
+    let text = match item.text.clone().filter(|t| !t.trim().is_empty()) {
+        Some(t) => t,
+        None => crate::reembed::chunk_texts(store, r)?.join("\n"),
+    };
+    let has_pii = m
+        .get("pii")
+        .is_some_and(|p| p.as_object().is_some_and(|o| !o.is_empty()));
+    let tags: Vec<String> = m
+        .get("tags")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|t| t.as_str().map(str::to_owned))
+        .collect();
+    let extracted = m.get("extracted").cloned().unwrap_or(Value::Null);
+    let rule = if has_pii {
+        Some("pii")
+    } else {
+        crate::sensitivity::classify(
+            r.key.as_str(),
+            &tags,
+            item.title.as_deref(),
+            &text,
+            &extracted,
+        )
+    };
+    let routable = inner
+        .router
+        .as_ref()
+        .is_some_and(|rt| ai::triage_provider(rt).is_some());
+    let can_triage = inner.cfg.triage
+        && !text.trim().is_empty()
+        && (routable || !inner.cfg.assume_unflagged_safe);
+    m.remove("triage_error");
+    if let Some(rule) = rule {
+        m.insert("sensitive_rule".into(), Value::String(rule.into()));
+    }
+    let (state, sensitive) = if can_triage {
+        (json!({"state": PENDING}), true)
+    } else if let Some(rule) = rule {
+        (json!({"state": SKIPPED, "reason": rule}), true)
+    } else {
+        (
+            json!({"state": UNKNOWN, "reason": "migrated"}),
+            !inner.cfg.assume_unflagged_safe,
+        )
+    };
+    m.insert("triage".into(), state);
+    m.insert("sensitive".into(), Value::Bool(sensitive));
+    store.set_item_metadata(r, &item.content_hash, &metadata)?;
+    Ok(())
 }
 
 enum BatchOutcome {
