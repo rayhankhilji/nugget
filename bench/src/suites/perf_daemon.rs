@@ -200,8 +200,8 @@ pub fn run_with(
         "items/s",
         Direction::HigherIsBetter,
         "Store write throughput while seeding: items (with their chunks, full-text entries and \
-         vectors) written per second in process through the store's write API (hash \
-         embedding included)",
+         vectors) written per second in process with `Store::upsert_items_with_chunks`, 256 \
+         items per transaction (hash embedding included)",
     ));
     disk_metrics(&paths, p.items, "after_seed", &mut out);
     out.push(Metric::new(
@@ -259,6 +259,9 @@ fn name(base: usize, i: usize) -> String {
     )
 }
 
+/// Items written per store transaction while seeding.
+const SEED_BATCH: usize = 256;
+
 /// Longest seeded chunk, in words (about what the ingest chunker emits).
 const SEED_CHUNK_WORDS: usize = 256;
 
@@ -304,26 +307,36 @@ pub(crate) fn seed_home(
     let people = (n / 50).max(5);
     let embedder = HashEmbedder::new(dim, &[]);
     let store = Store::open(paths.db_file(), &StoreKey::from_bytes(key))?;
-    for doc in &corpus.docs {
-        let text = doc_text(doc, 0);
-        let r = item_ref(doc.id);
-        let project = format!("Project {}", capitalize(&word(300_000 + doc.id % projects)));
-        let a = name(400_000, doc.id % people);
-        let b = name(400_000, (doc.id * 7 + 3) % people);
-        let item = NewItem::new(r.source.as_str(), r.key.as_str(), content_hash(&text))
-            .with_title(doc.title.clone())
-            .with_version("v0")
-            .with_mime("text/markdown")
-            .with_metadata(json!({
-                "extracted": {"frontmatter": {"project": project, "people": [a, b]}},
-                "tags": [format!("topic{}", doc.topic)],
-            }));
-        let chunks = seed_chunks(&text, &embedder);
-        let outcome = store.upsert_item_with_chunks(&item, &chunks)?;
-        if outcome != UpsertOutcome::Inserted {
+    for batch in corpus.docs.chunks(SEED_BATCH) {
+        let items: Vec<(NewItem, Vec<NewChunk>)> = batch
+            .iter()
+            .map(|doc| {
+                let text = doc_text(doc, 0);
+                let r = item_ref(doc.id);
+                let project = format!("Project {}", capitalize(&word(300_000 + doc.id % projects)));
+                let a = name(400_000, doc.id % people);
+                let b = name(400_000, (doc.id * 7 + 3) % people);
+                let item = NewItem::new(r.source.as_str(), r.key.as_str(), content_hash(&text))
+                    .with_title(doc.title.clone())
+                    .with_version("v0")
+                    .with_mime("text/markdown")
+                    .with_metadata(json!({
+                        "extracted": {"frontmatter": {"project": project, "people": [a, b]}},
+                        "tags": [format!("topic{}", doc.topic)],
+                    }));
+                let chunks = seed_chunks(&text, &embedder);
+                (item, chunks)
+            })
+            .collect();
+        let outcomes = store.upsert_items_with_chunks(&items)?;
+        if let Some((i, o)) = outcomes
+            .iter()
+            .enumerate()
+            .find(|(_, o)| **o != UpsertOutcome::Inserted)
+        {
             return Err(BenchError::Failed(format!(
-                "seeding {} returned {outcome:?}",
-                r.key
+                "seeding {} returned {o:?}",
+                items[i].0.item.key
             )));
         }
     }
