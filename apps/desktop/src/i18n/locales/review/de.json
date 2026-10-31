@@ -710,6 +710,11 @@
     "searchui.recentCleared",
     "searchui.recentWithFilters",
     "searchui.resultsFiltered",
-    "searchui.savedDeleted"
+    "searchui.savedDeleted",
+    "onboarding.welcome.leaves4",
+    "updates.ask.title",
+    "updates.ask.body",
+    "updates.ask.stable",
+    "updates.ask.chosen"
   ]
 }

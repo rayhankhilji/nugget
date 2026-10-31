@@ -25,6 +25,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 futures.workspace = true
+time.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
 # Rust-side APIs only: no plugin command is granted to the webview (see capabilities/default.json).
 # Pinned to the last releases on the Tauri 2.11 line (newer ones need tauri 2.12 and Rust 1.90).
