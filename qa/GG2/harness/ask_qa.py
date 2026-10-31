@@ -183,7 +183,7 @@ async def install(rpc, model_id, timeout=5400):
     raise SystemExit(f"{model_id}: install timed out")
 
 
-async def wait_ingest(rpc, expected, timeout=3600):
+async def wait_ingest(rpc, expected, timeout=3600, timeline=None):
     t = time.time()
     stable = 0
     last = None
@@ -192,6 +192,8 @@ async def wait_ingest(rpc, expected, timeout=3600):
         src = st["sources"][0] if st["sources"] else {}
         cur = (src.get("items"), src.get("chunks"), st["queue_depth"], src.get("state"))
         if cur != last:
+            if timeline is not None:
+                timeline.append({"s": round(time.time() - t), "items": cur[0], "chunks": cur[1], "queue": cur[2], "state": cur[3]})
             log(f"ingest: items={cur[0]} chunks={cur[1]} queue={cur[2]} state={cur[3]} "
                 f"embed={st.get('embedding_provider')} triage={st.get('triage_provider')}")
         stable = stable + 1 if cur == last and cur[2] == 0 and cur[3] in ("watching", "idle") else 0
@@ -280,8 +282,16 @@ async def run(a):
                                                         "settings": {"roots": [os.path.abspath(a.corpus)]}}, timeout=120)
             log("source added:", json.dumps(info))
         expected = sum(len(fs) for _, _, fs in os.walk(a.corpus))
-        st, secs = await wait_ingest(rpc, expected)
-        setup.update(ingest_s=round(secs), expected_files=expected, ingest_status=st)
+        timeline = []
+        st, secs = await wait_ingest(rpc, expected, a.ingest_timeout, timeline)
+        setup.update(ingest_s=round(secs), expected_files=expected, ingest_status=st, ingest_timeline=timeline)
+        if a.probe_search:
+            probes = {}
+            for q in [l.strip() for l in open(a.probe_search, encoding="utf-8") if l.strip() and not l.startswith("#")]:
+                hits, _, _ = await rpc.call("search", {"query": q, "limit": 10}, timeout=120)
+                probes[q] = [{"key": h["item"]["key"], "title": h.get("title"), "score": h.get("score")} for h in hits]
+                log(f"search {q!r}: {[h['key'] for h in probes[q]][:5]}")
+            json.dump(probes, open(os.path.join(a.out, "probe_search.json"), "w"), indent=1)
         status, _, _ = await rpc.call("status", timeout=30)
         rt, _, _ = await rpc.call("runtime.status", timeout=30)
         setup.update(status=status, runtime=rt)
@@ -344,6 +354,8 @@ def main():
     ap.add_argument("--shard", default="0/1")
     ap.add_argument("--only", default="")
     ap.add_argument("--timeout", type=float, default=600)
+    ap.add_argument("--ingest-timeout", type=float, default=3600, help="seconds to wait for ingest to settle")
+    ap.add_argument("--probe-search", default="", help="file of queries to run through `search` after ingest")
     asyncio.run(run(ap.parse_args()))
 
 

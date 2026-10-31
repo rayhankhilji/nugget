@@ -59,30 +59,41 @@ jobs:
           [ -f qa/GG2/run.env ] && cat qa/GG2/run.env >> "$GITHUB_ENV"
           [ -n "${{ inputs.only }}" ] && echo "ONLY=${{ inputs.only }}" >> "$GITHUB_ENV"
           [ -n "${{ inputs.runs }}" ] && echo "RUNS=${{ inputs.runs }}" >> "$GITHUB_ENV"
+          # A repro run uses one 4B and one 8B runner; the others stop here.
+          runs="${{ inputs.runs }}"; [ -z "$runs" ] && [ -f qa/GG2/run.env ] && runs=$(sed -n 's/^RUNS=//p' qa/GG2/run.env)
+          if [ "$runs" = repro ] && { [ "${{ matrix.shard }}" = "1/2" ] || [ "${{ matrix.first_hour }}" = true ]; }; then
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
           true
 
       - name: Install Rust toolchain
+        if: env.SKIP != '1'
         run: rustup toolchain install stable --profile minimal
 
       - uses: Swatinem/rust-cache@v2
+        if: env.SKIP != '1'
         with:
           shared-key: qa-gg2
 
       - name: Cache models and runtime
+        if: env.SKIP != '1'
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/h/data/models
           key: qa-gg2-models-${{ matrix.model }}-${{ hashFiles('manifests/default.json') }}
 
       - name: Build nuggetd
+        if: env.SKIP != '1'
         run: cargo build --release --locked -p nuggetd
 
       - name: Generate corpus (dates anchored to today)
+        if: env.SKIP != '1'
         run: |
           python3 qa/GG2/harness/gen_corpus.py --out "$RUNNER_TEMP/corpus" --questions "$RUNNER_TEMP/questions.jsonl"
           mkdir -p qa-out && cp "$RUNNER_TEMP/questions.jsonl" qa-out/
 
       - name: Record hardware
+        if: env.SKIP != '1'
         run: |
           {
             echo "label: ${{ matrix.label }}  model: ${{ matrix.model }}"
@@ -93,6 +104,7 @@ jobs:
           } | tee qa-out/hardware.txt
 
       - name: Ask
+        if: env.SKIP != '1'
         run: |
           if [ "${RUNS:-full}" = repro ] && [ "${{ matrix.shard }}" = "1/2" ]; then echo "repro: one 8b runner is enough"; exit 0; fi
           only="${ONLY:-}"
@@ -104,7 +116,8 @@ jobs:
           fi
           python3 qa/GG2/harness/ask_qa.py --nuggetd target/release/nuggetd --home "$RUNNER_TEMP/h" \
             --corpus "$RUNNER_TEMP/corpus" --questions "$RUNNER_TEMP/questions.jsonl" --out qa-out \
-            --chat-model "${{ matrix.model }}" --shard "$shard" --only "$only" ${{ matrix.extra }}
+            --chat-model "${{ matrix.model }}" --shard "$shard" --only "$only" ${{ matrix.extra }} \
+            --ingest-timeout 6000 --probe-search qa/GG2/repro/search-probes.txt
 
       - name: Score
         if: always()

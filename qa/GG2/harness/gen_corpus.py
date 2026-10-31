@@ -701,7 +701,8 @@ def filler(c: Corpus):
 # ---------------------------------------------------------------------------------------------
 # Questions
 
-ABSTAIN = (r"(not (in|mentioned|found|included|contain|have|see|sure)|n[o']t (find|see|have|know|mention|contain|include|appear|say|specif|provide|show)"
+ABSTAIN = (r"(none of the (provided |available |given )?(passages|information|items|documents)|cannot be answered|not addressed"
+           r"|not (in|mentioned|found|included|contain|have|see|sure)|n[o']t (find|see|have|know|mention|contain|include|appear|say|specif|provide|show)"
            r"|no (information|mention|record|details|data|passage|evidence|reference)|isn't (in|mentioned|available|specified)"
            r"|aren't (any|in)|unable to|cannot (find|determine|answer|tell|confirm)|can't (find|determine|answer|tell|confirm)"
            r"|don't contain|do not contain|there is no|there are no|not available|no .*(available|found))")
