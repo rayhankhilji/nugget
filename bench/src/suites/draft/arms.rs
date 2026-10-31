@@ -312,6 +312,8 @@ impl<'a> NuggetArm<'a> {
                     // As nugget-draft: the local budget leaves sensitive passages out too.
                     exclude_sensitive: exclude_sensitive
                         || self.local.as_ref().is_some_and(|l| !l.include_sensitive),
+                    // As nugget-draft: thread text is not a date query.
+                    ignore_dates: true,
                 },
             )
             .await?;

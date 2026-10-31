@@ -1280,6 +1280,7 @@ async fn sensitive_items_can_be_left_out_of_the_context() {
     // For a cloud model: sensitive (and unflagged) items never reach the packed text.
     let opts = nugget_retrieve::ContextOptions {
         exclude_sensitive: true,
+        ..Default::default()
     };
     let cloud = r.build_context_with("heron", 4000, opts).await.unwrap();
     assert_eq!(cloud.excluded_sensitive, 2);

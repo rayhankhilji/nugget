@@ -115,7 +115,7 @@ Briefs in `docs/waves/wave-dd/`.
 | DD1 | `dd/wayland-shortcut` | session_01CTjRSrbhjVwZjhmA3QQoAb | Double Tap global shortcut on Wayland (portal app id, packaging, KWin/GNOME CI) (merged) |
 | DD2 | `dd/energy` | session_01CTjRSt524Nw1erCRtS19P5 | energy and battery cost of daemon, shell, indexing and read-ahead; cut waste (merged) |
 | DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence (merged) |
-| DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker (merged) |
+| DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker (merged); retrieval package from QA GG2/GG1 (merged) |
 
 ## Wave EE (after AA3, alongside DD): cloud sessions from the EE briefs commit
 Briefs in `docs/waves/wave-ee/`. Each lead runs a build layer and an independent review layer of subagents.
@@ -152,3 +152,23 @@ Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every 
 | GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux |
 | GG7 | `qa/multilingual` | session_01CTjRSuVMK4RoFUCfw3YT7S | AI features in all 9 UI languages |
 | GG8 | `qa/privacy` | session_01CTjRSt3BBwCh15spCoLbbe | privacy and egress verified from captured network traffic (merged) |
+
+## Wave HH (fixes from QA): cloud sessions from the integration branch
+Each package comes from a QA report and is briefed in its session's first message. Each lead runs a build layer and a review layer with at most 2 subagents.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| HH1 | `hh/agent-safety` | session_01CTjRSqmXYyfpHJMkM85Dkm | agent safety controls from GG3: ambiguous targets, destructive actions, honest success judging, Send confirmation, key presses |
+| HH2 | `hh/ingest-triage` | session_01CTjRSuENAr49jmyhRicJfp | fast, accurate ingest triage from GG2, plus GG4-6 and GG5-2 |
+| HH3 | `hh/vault-worker` | session_01CTjRSrrQ23MtSpaPTRSLsG | vault merge-back, sensitivity and the knowledge worker from GG5 |
+
+## Wave II (new features alongside the fix waves): cloud sessions from fd101a3
+Briefs in `docs/waves/wave-ii/`. Each lead runs a build layer and a review layer with at most 2 subagents.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| II1 | `ii/messaging-imports` | session_01CTjRStzbSDngszaVDyqEKd | iMessage, WhatsApp and Telegram imports; Signal only if a safe export exists |
+| II2 | `ii/search-timeline` | session_01CTjRSu5FjmNFwghuCH6zXU | search facets, saved and recent searches, timeline view, previews |
+| II3 | `ii/doubletap-overlay` | session_01CTjRSssSYSW1zounPmKgQR | Double Tap overlay: edit before insert, retry, refine, practice field, draft history, accessibility |
+| II4 | `ii/platform-integration` | session_01CTjRSqcYoFMkRXF5giqCX2 | tray, launch at login, notifications, `nugget://` links, plugin file association, quick-ask window, single instance |
+| II5 | `ii/scale` | session_01CTjRSqY1SocQ9DVnvje1WF | 500k-item bench and fixes, virtualised lists, README Scale section |

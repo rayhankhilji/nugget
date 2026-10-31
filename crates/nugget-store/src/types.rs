@@ -257,9 +257,9 @@ pub struct ItemDates {
     /// `metadata.extracted.frontmatter.created`, when a string.
     #[serde(default)]
     pub frontmatter_created: Option<String>,
-    /// When the item's event starts: `metadata.extracted.start` (an .ics file's first event),
-    /// else `metadata.source.start.date_time` / `.date` (a calendar connector's event), when a
-    /// string.
+    /// When the event happens, for calendar items: `metadata.extracted.start` (ICS `DTSTART`,
+    /// `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS[Z]`) or a connector's `metadata.start.date_time` /
+    /// `metadata.start.date` (or under `metadata.source.start`), as stored.
     #[serde(default)]
     pub event_start: Option<String>,
     /// The item's title (it may carry a date, like a file name).
