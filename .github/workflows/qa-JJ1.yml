@@ -1,0 +1,108 @@
+name: QA JJ1 (wave II features, real models)
+
+# Independent QA of the wave II features and HH2 triage (docs/qa/JJ1.md, harness in qa/JJ1/).
+# Each part runs nuggetd --release with the signed manifest's 4B chat model and embedder on one
+# CPU runner: Double Tap refinements (en, de), ingest triage with Ask during the sync, and Ask
+# over imported messages.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_model:
+        description: "Manifest id of the chat model"
+        default: qwen3-4b-q4km
+        type: string
+      parts:
+        description: "Comma-separated parts (refine, triage, messaging)"
+        default: "refine,triage,messaging"
+        type: string
+  push:
+    branches: [qa/wave-ii]
+    paths: ["qa/JJ1/run.env"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  CHAT_MODEL: ${{ inputs.chat_model || 'qwen3-4b-q4km' }}
+  # A dispatch's input wins; otherwise qa/JJ1/run.env's PARTS (default: all).
+  PARTS_INPUT: ${{ inputs.parts }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-jj1
+      - run: cargo build --release --locked -p nuggetd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuggetd
+          path: target/release/nuggetd
+          retention-days: 3
+
+  real:
+    needs: build
+    name: ${{ matrix.part }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [refine, triage, messaging]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Skip parts not asked for
+        run: |
+          PARTS="$PARTS_INPUT"; [ -z "$PARTS" ] && PARTS=$(sed -n 's/^PARTS=//p' qa/JJ1/run.env 2>/dev/null); PARTS="${PARTS:-refine,triage,messaging}"
+          case ",$PARTS," in *",${{ matrix.part }},"*) ;; *) echo "SKIP=1" >> "$GITHUB_ENV";; esac
+      - uses: actions/download-artifact@v4
+        if: env.SKIP != '1'
+        with:
+          name: nuggetd
+          path: bin
+      - name: Cache models and runtime
+        if: env.SKIP != '1'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/models-cache
+          key: qa-jj1-models-${{ env.CHAT_MODEL }}-${{ hashFiles('manifests/default.json') }}
+      - name: Record hardware
+        if: env.SKIP != '1'
+        run: |
+          mkdir -p out
+          { echo "part: ${{ matrix.part }}  model: $CHAT_MODEL"; echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"; date -u +%FT%TZ; lscpu | grep -E 'Model name|^CPU\(s\)'; free -g; } | tee out/hardware-${{ matrix.part }}.txt
+      - name: Run
+        if: env.SKIP != '1'
+        run: |
+          chmod +x bin/nuggetd
+          python3 qa/JJ1/harness/realmodel.py --nuggetd bin/nuggetd --home "$RUNNER_TEMP/h" --out out \
+            --part ${{ matrix.part }} --chat-model "$CHAT_MODEL" --models-cache "$RUNNER_TEMP/models-cache"
+          cat out/${{ matrix.part }}.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload
+        if: always() && env.SKIP != '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-jj1-${{ matrix.part }}
+          path: |
+            out
+            !out/work/export
+          retention-days: 30
