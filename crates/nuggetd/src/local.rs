@@ -36,8 +36,11 @@
 //!   and knows its context size, embedding embeds) and stay set: after an idle stop the next
 //!   request starts the server again.
 //!
-//! **Routing order**, per tier: configured providers that are not `Cloud` (config order), then
-//! the runtime slot, then configured `Cloud` providers. Ingest (triage, embeddings) and
+//! **Routing order**, per tier: configured `LocalNetwork` providers and `OnDevice` ones with a
+//! stored successful probe (config order), then the runtime slot, then unprobed `OnDevice`
+//! providers (an example server that is not running would otherwise cost every request a failed
+//! connection; a successful probe moves it ahead from the next start), then configured `Cloud`
+//! providers. Ingest (triage, embeddings) and
 //! retrieval (query embeddings) additionally refuse cloud providers unless allowed in config.
 
 use std::collections::HashMap;
@@ -196,28 +199,49 @@ fn starting_capabilities(role: RuntimeRole) -> Option<Capabilities> {
     }
 }
 
+/// Where a configured provider goes relative to the runtime slots.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Place {
+    BeforeRuntime,
+    AfterRuntime,
+    Last,
+}
+
+fn place(loc: Locality, probed: bool) -> Place {
+    match loc {
+        Locality::Cloud => Place::Last,
+        Locality::OnDevice if !probed => Place::AfterRuntime,
+        _ => Place::BeforeRuntime,
+    }
+}
+
 /// The routing order described in the module docs. `configured` are the built user providers
-/// in config order with their tiers and locality; `local` the runtime slots with their tiers.
+/// in config order with their tiers, locality and whether a probe of them has succeeded (a
+/// stored probe result); `local` the runtime slots with their tiers.
 pub(crate) fn tier_map(
-    configured: &[(ProviderId, Vec<Tier>, Locality)],
+    configured: &[(ProviderId, Vec<Tier>, Locality, bool)],
     local: &[(ProviderId, Vec<Tier>)],
 ) -> TierMap {
     let mut map = TierMap::new();
     for tier in Tier::ROUTED {
-        let user = |cloud: bool| {
+        let user = |at: Place| {
             configured
                 .iter()
-                .filter(move |(_, tiers, loc)| {
-                    tiers.contains(&tier) && (*loc == Locality::Cloud) == cloud
+                .filter(move |(_, tiers, loc, probed)| {
+                    tiers.contains(&tier) && place(*loc, *probed) == at
                 })
-                .map(|(id, _, _)| id.clone())
+                .map(|(id, ..)| id.clone())
         };
         let mut ids: Vec<ProviderId> = Vec::new();
         let runtime = local
             .iter()
             .filter(|(_, tiers)| tiers.contains(&tier))
             .map(|(id, _)| id.clone());
-        for id in user(false).chain(runtime).chain(user(true)) {
+        for id in user(Place::BeforeRuntime)
+            .chain(runtime)
+            .chain(user(Place::AfterRuntime))
+            .chain(user(Place::Last))
+        {
             if !ids.contains(&id) {
                 ids.push(id);
             }
@@ -645,13 +669,20 @@ mod tests {
                 pid("cloud"),
                 vec![Tier::Triage, Tier::Synthesis, Tier::Embedding],
                 Locality::Cloud,
+                true,
             ),
             (
                 pid("ollama"),
                 vec![Tier::Synthesis, Tier::Embedding],
                 Locality::OnDevice,
+                true,
             ),
-            (pid("lan"), vec![Tier::Triage], Locality::LocalNetwork),
+            (
+                pid("lan"),
+                vec![Tier::Triage],
+                Locality::LocalNetwork,
+                false,
+            ),
         ];
         let local = vec![
             (
@@ -675,6 +706,52 @@ mod tests {
             vec![pid("ollama"), pid("local-embedding"), pid("cloud")]
         );
         assert!(!map.contains_key(&Tier::Agentic));
+    }
+
+    #[test]
+    fn unprobed_on_device_providers_come_after_the_runtime() {
+        let configured = vec![
+            (
+                pid("cloud"),
+                vec![Tier::Triage, Tier::Light],
+                Locality::Cloud,
+                false,
+            ),
+            (
+                pid("example"),
+                vec![Tier::Triage, Tier::Light, Tier::Synthesis],
+                Locality::OnDevice,
+                false,
+            ),
+            (pid("probed"), vec![Tier::Light], Locality::OnDevice, true),
+            (pid("lan"), vec![Tier::Light], Locality::LocalNetwork, false),
+        ];
+        let local = vec![(
+            pid("local-chat"),
+            vec![Tier::Triage, Tier::Light, Tier::Synthesis],
+        )];
+        let map = tier_map(&configured, &local);
+        assert_eq!(
+            map[&Tier::Light],
+            vec![
+                pid("probed"),
+                pid("lan"),
+                pid("local-chat"),
+                pid("example"),
+                pid("cloud")
+            ]
+        );
+        assert_eq!(
+            map[&Tier::Triage],
+            vec![pid("local-chat"), pid("example"), pid("cloud")]
+        );
+        assert_eq!(
+            map[&Tier::Synthesis],
+            vec![pid("local-chat"), pid("example")]
+        );
+        // Without the runtime, the unprobed provider still serves.
+        let map = tier_map(&configured, &[]);
+        assert_eq!(map[&Tier::Synthesis], vec![pid("example")]);
     }
 
     fn manifest() -> Manifest {

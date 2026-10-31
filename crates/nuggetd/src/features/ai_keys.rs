@@ -883,24 +883,20 @@ mod tests {
         assert_eq!(p.model, "model \"a\"");
         assert_eq!(p.base_url.as_deref(), Some("http://127.0.0.1:9/v1"));
         assert_eq!(p.tiers.len(), 3);
-        assert!(cfg.providers.iter().any(|p| p.id.as_str() == "local"));
+        assert_eq!(
+            cfg.providers.len(),
+            1,
+            "the default config has none of its own"
+        );
         assert_eq!(
             secrets.get(&provider_account("custom")).unwrap().as_deref(),
             Some(GOOD)
         );
 
-        // The same id again (and the default `local`) is refused, and nothing changes.
+        // The same id again is refused, and nothing changes.
         let other = MemorySecrets::new();
         assert_eq!(
             write_provider(&path, &other, &entry, "sk-other").unwrap(),
-            Written::Exists
-        );
-        let local = NewProvider {
-            name: "local".into(),
-            ..entry.clone()
-        };
-        assert_eq!(
-            write_provider(&path, &other, &local, "sk-other").unwrap(),
             Written::Exists
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
@@ -922,6 +918,6 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("base_url = \"https://api.openai"));
         let cfg = Config::parse(&text).unwrap();
-        assert_eq!(cfg.providers.len(), 2);
+        assert_eq!(cfg.providers.len(), 1);
     }
 }
