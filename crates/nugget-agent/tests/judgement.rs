@@ -148,6 +148,7 @@ async fn a_destructive_action_on_an_object_never_seen_is_sent_back_then_asked() 
         panic!("{:?}", run.outcome);
     };
     assert!(q.contains("annual report"), "{q}");
+    assert!(q.contains("have not found it"), "{q}");
 
     // Once the report is on screen, deleting it goes ahead.
     let world = World::new();

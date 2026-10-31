@@ -31,10 +31,17 @@ pub struct Ambiguity {
 
 impl Ambiguity {
     /// The question put to the user: fixed text around the term and the candidates.
+    /// With no candidates, the item was never on screen (a delete about to act on a guess).
     pub fn question(&self) -> String {
+        let term = clean(&self.term, CANDIDATE_MAX);
+        if self.candidates.is_empty() {
+            return format!(
+                "Your request says “{term}”, but I have not found it on the screen, and the \
+                 selection may be something else. Which item do you mean, and where is it?"
+            );
+        }
         format!(
-            "Your request says “{}”, and I see more than one: {}. Which one did you mean?",
-            clean(&self.term, CANDIDATE_MAX),
+            "Your request says “{term}”, and I see more than one: {}. Which one did you mean?",
             self.candidates.join(", ")
         )
     }
