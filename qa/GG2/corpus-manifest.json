@@ -44,13 +44,13 @@
    "tags": [],
    "when": "2026-10-05T09:00:00+00:00"
   },
-  "calendar/misc/06-1:1.ics": {
+  "calendar/misc/06-11.ics": {
    "tags": [],
    "when": "2026-10-11T09:00:00+00:00"
   },
   "calendar/misc/07-yoga.ics": {
    "tags": [],
-   "when": "2026-11-11T09:00:00+00:00"
+   "when": "2026-10-30T09:00:00+00:00"
   },
   "calendar/misc/08-quarry.ics": {
    "tags": [],
@@ -114,7 +114,7 @@
   },
   "calendar/misc/23-quarry.ics": {
    "tags": [],
-   "when": "2026-11-01T09:00:00+00:00"
+   "when": "2026-10-30T09:00:00+00:00"
   },
   "calendar/misc/24-quarry.ics": {
    "tags": [],
@@ -142,15 +142,15 @@
   },
   "calendar/misc/30-haircut.ics": {
    "tags": [],
-   "when": "2026-11-05T09:00:00+00:00"
+   "when": "2026-10-30T09:00:00+00:00"
   },
   "calendar/misc/31-haircut.ics": {
    "tags": [],
    "when": "2026-08-31T09:00:00+00:00"
   },
-  "calendar/misc/32-1:1.ics": {
+  "calendar/misc/32-11.ics": {
    "tags": [],
-   "when": "2026-10-31T09:00:00+00:00"
+   "when": "2026-10-30T09:00:00+00:00"
   },
   "calendar/misc/33-team.ics": {
    "tags": [],
@@ -160,7 +160,7 @@
    "tags": [],
    "when": "2026-09-12T09:00:00+00:00"
   },
-  "calendar/misc/35-1:1.ics": {
+  "calendar/misc/35-11.ics": {
    "tags": [],
    "when": "2026-09-05T09:00:00+00:00"
   },
@@ -174,17 +174,17 @@
   },
   "calendar/misc/38-focus.ics": {
    "tags": [],
-   "when": "2026-11-07T09:00:00+00:00"
+   "when": "2026-10-30T09:00:00+00:00"
   },
   "calendar/misc/39-haircut.ics": {
    "tags": [],
-   "when": "2026-11-03T09:00:00+00:00"
+   "when": "2026-10-30T09:00:00+00:00"
   },
-  "calendar/misc/40-1:1.ics": {
+  "calendar/misc/40-11.ics": {
    "tags": [],
-   "when": "2026-10-31T09:00:00+00:00"
+   "when": "2026-10-30T09:00:00+00:00"
   },
-  "calendar/misc/41-1:1.ics": {
+  "calendar/misc/41-11.ics": {
    "tags": [],
    "when": "2026-10-17T09:00:00+00:00"
   },
@@ -492,7 +492,7 @@
   },
   "mail/1-fernhill/misc-40.eml": {
    "tags": [],
-   "when": "2026-10-31T11:46:00+00:00"
+   "when": "2026-10-30T11:46:00+00:00"
   },
   "mail/1-fernhill/misc-41.eml": {
    "tags": [],
@@ -628,7 +628,7 @@
   },
   "mail/1-fernhill/misc-74.eml": {
    "tags": [],
-   "when": "2026-10-31T09:37:00+00:00"
+   "when": "2026-10-30T09:37:00+00:00"
   },
   "mail/1-fernhill/misc-75.eml": {
    "tags": [],
