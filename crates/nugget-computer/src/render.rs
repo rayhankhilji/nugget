@@ -18,7 +18,8 @@
 //! **Everything read from the screen is untrusted.** Names, values, titles and descriptions go
 //! through [`screen_text`]: control characters and line breaks become spaces (so text cannot
 //! start a new line), invisible format characters (zero-width, bidi controls) are deleted (so a
-//! word split by one reaches the injection detector whole), quotes and backslashes are escaped,
+//! word split by one reaches the injection detector whole; joiners that shape non-ASCII text
+//! stay), quotes and backslashes are escaped,
 //! square brackets become `⟦⟧` (so text cannot forge an `[e…]` element id), backticks and angle
 //! brackets are replaced (so it cannot forge a code fence or an `<untrusted-…>` tag), and lengths
 //! are capped. The tools also mark the whole
@@ -56,12 +57,20 @@ pub fn screen_text(s: &str, max_chars: usize) -> String {
     let mut out = String::with_capacity(s.len().min(max_chars * 2));
     let mut chars = 0usize;
     let mut pending_space = false;
-    for c in s.chars() {
-        // Deleted, not spaced: `Ig\u{200B}nore` is one word on screen, and spacing it would hide
-        // the word from the injection detector (`Ig nore`).
-        if is_format(c) {
+    let mut prev: Option<char> = None;
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        // Invisible characters are deleted, not spaced: `Ig\u{200B}nore` is one word on screen,
+        // and spacing it would hide the word from the injection detector (`Ig nore`). Joiners
+        // and variation selectors that shape non-ASCII text are kept (see [`shapes_text`]).
+        if nugget_policy::is_invisible(c) {
+            let next = it.clone().find(|n| !nugget_policy::is_invisible(*n));
+            if shapes_text(c, prev, next) && chars < max_chars {
+                out.push(c);
+            }
             continue;
         }
+        prev = Some(c);
         if c.is_control() || c.is_whitespace() {
             pending_space = !out.is_empty();
             continue;
@@ -94,24 +103,25 @@ pub fn screen_text(s: &str, max_chars: usize) -> String {
     out
 }
 
-/// Invisible format characters: soft hyphen, zero-width spaces and joiners, bidi marks,
-/// embeddings, overrides and isolates, invisible operators, the byte-order mark, and tag
-/// characters (invisible copies of ASCII). They draw nothing, so they are removed. Line and
-/// paragraph separators (U+2028, U+2029) are whitespace and become spaces like other breaks.
-fn is_format(c: char) -> bool {
-    matches!(
-        c,
-        '\u{00AD}'
-            | '\u{034F}'
-            | '\u{061C}'
-            | '\u{180B}'..='\u{180F}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206F}'
-            | '\u{FEFF}'
-            | '\u{E0000}'..='\u{E007F}'
-    )
+/// An invisible character that changes how the text around it is drawn, kept between two
+/// visible characters when one of them is not ASCII: the zero-width non-joiner and joiner
+/// (Persian `می‌خواهم`, Indic conjuncts, emoji sequences such as 👩‍💻), the Mongolian free
+/// variation selectors, and variation selectors after their base character (❤️). Everything
+/// else [`nugget_policy::is_invisible`] lists (zero-width spaces, bidi controls, soft hyphen, tag
+/// characters, …) draws nothing and is deleted; line and paragraph separators are whitespace
+/// and become spaces like other breaks.
+fn shapes_text(c: char, prev: Option<char>, next: Option<char>) -> bool {
+    let visible = |x: char| !x.is_whitespace() && !x.is_control();
+    let Some(p) = prev.filter(|&p| visible(p)) else {
+        return false;
+    };
+    match c {
+        '\u{FE00}'..='\u{FE0F}' => !p.is_ascii(),
+        '\u{200C}' | '\u{200D}' | '\u{180B}'..='\u{180D}' => {
+            next.is_some_and(|n| visible(n) && !(p.is_ascii() && n.is_ascii()))
+        }
+        _ => false,
+    }
 }
 
 /// An element or window id as printed: only `[A-Za-z0-9_-]`, at most 40 characters.
@@ -429,6 +439,24 @@ mod tests {
         assert_eq!(screen_text("a\u{200B}\u{202E}b", 9), "ab");
         assert_eq!(screen_text("a\u{2028}b\u{2029}c\u{85}d", 9), "a b c d");
         assert_eq!(screen_text("  padded  ", 20), "padded");
+    }
+
+    /// Joiners and variation selectors that shape non-ASCII text survive; the same characters
+    /// inside ASCII words do not.
+    #[test]
+    fn shaping_joiners_are_kept() {
+        for t in [
+            "می\u{200C}خواهم",
+            "क्\u{200D}ष",
+            "👩\u{200D}💻",
+            "❤\u{FE0F}",
+            "ᠠ\u{180B}ᠡ",
+        ] {
+            assert_eq!(screen_text(t, 50), t, "{t:?}");
+        }
+        assert_eq!(screen_text("Ig\u{200C}no\u{200D}re\u{FE0F}", 50), "Ignore");
+        assert_eq!(screen_text("\u{200D}a", 50), "a");
+        assert_eq!(screen_text("👩\u{200D} x", 50), "👩 x");
     }
 
     /// GG3-17 (review PA-3 on the computer-use path): invisible characters inside a word are
