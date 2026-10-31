@@ -538,15 +538,16 @@ impl Retriever {
         // Per ranked item: how many of the rare terms it has.
         let mut rare = 0usize;
         let mut has: HashMap<&ItemRef, usize> = HashMap::new();
+        let refs: Vec<ItemRef> = ranked.iter().map(|r| r.cand.item.clone()).collect();
         for t in terms {
-            let hits = self.store.search_text(&t, cap + 1)?;
-            if hits.len() > cap {
+            // Unranked and without snippets (II5): at 250k items a word in 1% of the chunks
+            // cost ~0.15 s per term through `search_text(&t, cap + 1)`.
+            let Some(with) = self.store.text_matches_among(&t, cap, &refs)? else {
                 continue; // Common: says little about what the question is about.
-            }
+            };
             rare += 1;
-            let with: std::collections::HashSet<&ItemRef> = hits.iter().map(|h| &h.item).collect();
-            for r in ranked {
-                if with.contains(&r.cand.item) {
+            for (r, hit) in ranked.iter().zip(with) {
+                if hit {
                     *has.entry(&r.cand.item).or_default() += 1;
                 }
             }

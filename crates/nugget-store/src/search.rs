@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use nugget_core::Result;
+use nugget_core::ids::ItemRef;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::Store;
@@ -67,6 +68,71 @@ impl Store {
         }
         let needles = fts::needles(query);
         self.with_read_conn(|c| text_hits(c, &q, &needles, limit))
+    }
+
+    /// Which of `among` match the full-text `query` (in a chunk's text or the item's title, as
+    /// [`Store::search_text`] matches), provided the query is rare: `None` when more than
+    /// `at_most` chunks and title-only items match it.
+    ///
+    /// For "does this question's key word occur in these few results" checks. Unlike
+    /// `search_text(query, at_most + 1)` it neither ranks the matches nor loads or snippets
+    /// them, so its cost is the index lookup alone (~1% of a 500k-item store matched by a word
+    /// costs ~40 µs per match through `search_text`).
+    pub fn text_matches_among(
+        &self,
+        query: &str,
+        at_most: usize,
+        among: &[ItemRef],
+    ) -> Result<Option<Vec<bool>>> {
+        let Some(q) = fts::match_expr(query) else {
+            return Ok(Some(vec![false; among.len()]));
+        };
+        let lim = at_most.saturating_add(1).min(i64::MAX as usize) as i64;
+        self.with_read_conn(|c| {
+            let mut matched: HashSet<i64> = HashSet::new();
+            let mut n = 0usize;
+            {
+                let mut stmt = c
+                    .prepare_cached(MATCHING_CHUNK_ITEMS_SQL)
+                    .db("prepare matching chunks")?;
+                let mut rows = stmt.query(params![q, lim]).db("matching chunks")?;
+                while let Some(r) = rows.next().db("matching chunks")? {
+                    n += 1;
+                    matched.insert(r.get(0).db("matching chunks")?);
+                }
+            }
+            if n > at_most {
+                return Ok(None);
+            }
+            {
+                let mut stmt = c
+                    .prepare_cached(MATCHING_TITLES_SQL)
+                    .db("prepare matching titles")?;
+                let mut rows = stmt.query(params![q, lim]).db("matching titles")?;
+                while let Some(r) = rows.next().db("matching titles")? {
+                    if matched.insert(r.get(0).db("matching titles")?) {
+                        n += 1;
+                        if n > at_most {
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            let mut id_of = c
+                .prepare_cached("SELECT id FROM items WHERE source = ?1 AND key = ?2")
+                .db("prepare item id")?;
+            among
+                .iter()
+                .map(|r| {
+                    let id: Option<i64> = id_of
+                        .query_row(params![r.source.as_str(), r.key.as_str()], |row| row.get(0))
+                        .optional()
+                        .db("item id")?;
+                    Ok(id.is_some_and(|id| matched.contains(&id)))
+                })
+                .collect::<Result<Vec<bool>>>()
+                .map(Some)
+        })
     }
 
     /// Hybrid search: full-text and (if an embedding is given) vector results fused with
@@ -134,6 +200,16 @@ pub(crate) const TEXT_SEARCH_SQL: &str = "
     JOIN chunks ch ON ch.id = top.id
     JOIN items i ON i.id = ch.item_id
     ORDER BY top.rank, ch.id";
+
+/// Items of the chunks matching an FTS5 query `?1`, unranked, at most `?2` rows (one per chunk).
+pub(crate) const MATCHING_CHUNK_ITEMS_SQL: &str = "
+    SELECT ch.item_id
+    FROM (SELECT rowid AS id FROM chunks_fts WHERE chunks_fts MATCH ?1 LIMIT ?2) m
+    JOIN chunks ch ON ch.id = m.id";
+
+/// Items whose title matches an FTS5 query `?1`, unranked, at most `?2`.
+pub(crate) const MATCHING_TITLES_SQL: &str = "
+    SELECT rowid FROM items_fts WHERE items_fts MATCH ?1 LIMIT ?2";
 
 /// Snippet and text of one matching chunk: `?1` the FTS5 query, `?2` the chunk id.
 pub(crate) const SNIPPET_SQL: &str = "

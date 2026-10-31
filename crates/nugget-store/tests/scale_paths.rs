@@ -121,3 +121,52 @@ fn counts_on_an_empty_store() {
     let f = Store::open(dir.path().join("n.db"), &StoreKey::from_bytes([3; 32])).unwrap();
     assert_eq!(f.counts().unwrap().items, 0);
 }
+
+/// `text_matches_among` agrees with the `search_text(q, at_most + 1)` check it replaces.
+#[test]
+fn text_matches_among_agrees_with_search_text() {
+    let s = Store::open_in_memory().unwrap();
+    for i in 0..60 {
+        // "common" in every item, "rare" in five, "titleword" only in two titles.
+        let mut body = format!("common filler {i}");
+        if i % 12 == 0 {
+            body.push_str(" rare");
+        }
+        let title = if i == 3 || i == 40 {
+            "titleword note"
+        } else {
+            "note"
+        };
+        s.upsert_item_with_chunks(
+            &NewItem::new("files:a", format!("k{i}"), content_hash(&body)).with_title(title),
+            &[NewChunk::text(body.clone())],
+        )
+        .unwrap();
+    }
+    let among: Vec<ItemRef> = (0..60).map(|i| iref("files:a", &format!("k{i}"))).collect();
+    for (q, at_most) in [
+        ("rare", 10),
+        ("rare", 5),
+        ("rare", 4),
+        ("titleword", 3),
+        ("titleword", 1),
+        ("common", 100),
+        ("common", 59),
+        ("absent", 3),
+        ("", 3),
+    ] {
+        let hits = s.search_text(q, at_most + 1).unwrap();
+        let expected = (hits.len() <= at_most).then(|| {
+            among
+                .iter()
+                .map(|r| hits.iter().any(|h| &h.item == r))
+                .collect::<Vec<bool>>()
+        });
+        assert_eq!(
+            s.text_matches_among(q, at_most, &among).unwrap(),
+            expected,
+            "{q} at most {at_most}"
+        );
+    }
+    assert_eq!(s.text_matches_among("rare", 10, &[]).unwrap(), Some(vec![]));
+}
