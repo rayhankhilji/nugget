@@ -656,7 +656,16 @@ Every release run, dry or real, launches the installers it just built:
 Each waits, with a time limit, for a window named `Nugget`, for the app to start the bundled
 `nuggetd` itself (`starting nuggetd`) and connect to it (`connected to nuggetd`), then closes the
 window the way a user would (`WM_DELETE_WINDOW` through the window manager, the close button,
-`WM_CLOSE`), expects a clean exit, and stops the daemon. Any step that times out fails the job.
+`WM_CLOSE`), expects a clean exit, and stops the daemon (SIGTERM; `CTRL_BREAK` on Windows) and
+requires it to log `stopped`. Any step that times out fails the job.
+
+The Windows stop used to fail in about two of three runs: `nuggetd` created its console signal
+listeners only once its shutdown future was first polled, and a `CTRL_BREAK` that arrived before
+any listener existed got Windows' default handler (exit `0xC000013A`, no clean shutdown). It now
+registers them at startup, logs `console control signals registered`, warns about any it cannot
+register and logs which signal stopped it; five extra runs against dry run
+[41245111121](https://github.com/rayhankhilji/nugget/actions/runs/41245111121) passed, as did
+its own smoke step.
 `.github/workflows/package-smoke.yml` runs the AppImage test on pull requests that touch
 `apps/desktop/`, `crates/` or `packaging/`, and `real-os.yml` runs the dmg and NSIS tests on
 pull requests that touch the desktop app or packaging. The macOS Intel build, the MSI and the
@@ -1015,13 +1024,6 @@ gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
 
 ## 8. Known gaps
 
-- **NSIS smoke test fails on the current code.** In the dry run of this branch,
-  [41113647335](https://github.com/rayhankhilji/nugget/actions/runs/41113647335) (both
-  attempts), every job passed except the Windows NSIS smoke step: after the app quits, the
-  `CTRL_BREAK` the script sends ends `nuggetd` with `0xC000013A` before it logs the signal, so
-  its graceful shutdown path didn't run. `nuggetd`'s signal handling is unchanged since dry run
-  40848720974, where the step passed, so a change elsewhere in the daemon is the likely cause. Fix
-  it before tagging.
 - **No real key has signed anything yet.** Apple signing and notarization, Azure Trusted
   Signing, the updater key and the manifest release key have been exercised only with throwaway
   keys (rehearsal, signing proof) or not at all (Apple). The RC in Step 7 is their first real
