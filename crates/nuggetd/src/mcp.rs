@@ -323,6 +323,7 @@ impl KnowledgeBackend for DaemonBackend {
         let q = query.to_owned();
         let opts = ContextOptions {
             exclude_sensitive: !filter.include_sensitive,
+            ..Default::default()
         };
         let packed = off_workers(async move {
             retriever

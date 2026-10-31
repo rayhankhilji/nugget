@@ -1,0 +1,130 @@
+
+## day 1 2026-10-26 America/New_York  refresh={'created': 0, 'open': 1, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.80 sens=False No answer from Sofia Alvarez: brunch?
+  TRANS +new                 follow_up          No answer from Sofia Alvarez: brunch?
+
+## day 2 2026-10-27 America/New_York  refresh={'created': 0, 'open': 1, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.82 sens=False No answer from Sofia Alvarez: brunch?
+  MISSES: [('S1', 'checkout mockups', False), ('S4', 'northwind checkout review', False)]
+
+## day 3 2026-10-28 America/New_York  refresh={'created': 0, 'open': 4, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.90 sens=False You told Dana Whitfield: "Yes, I'll send the revised mockups by Thursday."
+  OPEN  follow_up          r=0.87 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  follow_up          r=0.83 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  renewal            r=0.79 sens=False Pixelboard renews 2026-11-03 — $144.00
+  TRANS +new                 follow_up          You told Dana Whitfield: "Yes, I'll send the revised mockups by Thursday."
+  TRANS +new                 follow_up          You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  TRANS +new                 renewal            Pixelboard renews 2026-11-03 — $144.00
+  HITS: [('S5', 'pixelboard')]
+  MISSES: [('S4', 'northwind checkout review', False)]
+  OUT_OF_WINDOW: [('S2', 'budget', [['b7fb6a531ef6b4fc', 'follow_up', 'You told Theo Brandt: "Sure, I\'ll send the budget estimate by Friday."']])]
+  USER accept                    Pixelboard renews 2026-11-03 — $144.00 (S5) 
+
+## day 4 2026-10-29 America/New_York  refresh={'created': 0, 'open': 4, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.96 sens=False You told Dana Whitfield: "Yes, I'll send the revised mockups by Thursday."
+  OPEN  follow_up          r=0.91 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  follow_up          r=0.86 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  unanswered_thread  r=0.79 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  TRANS +new                 unanswered_thread  Reply to Kelsey Vance: Senior designer role at a fintech?
+  TRANS new->accepted        renewal            Pixelboard renews 2026-11-03 — $144.00
+  HITS: [('S2', 'budget')]
+  MISSES: [('S3', 'brochure', False), ('S4', 'northwind design qa', False), ('S5', 'pixelboard', False)]
+  USER accept                    You told Theo Brandt: "Sure, I'll send the budget estimate by Friday." (S2) 
+
+## day 5 2026-10-30 America/New_York  refresh={'created': 0, 'open': 5, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.92 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  follow_up          r=0.84 sens=False No answer from Jonah Pike: Quote for 500 brochures
+  OPEN  unanswered_thread  r=0.82 sens=False Reply to Harriet Cole: Workshop agenda
+  OPEN  unanswered_thread  r=0.81 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.77 sens=False Reply to Ngozi Okafor: Thanksgiving
+  TRANS +new                 follow_up          No answer from Jonah Pike: Quote for 500 brochures
+  TRANS +new                 unanswered_thread  Reply to Harriet Cole: Workshop agenda
+  TRANS +new                 unanswered_thread  Reply to Ngozi Okafor: Thanksgiving
+  TRANS new->expired         follow_up          You told Dana Whitfield: "Yes, I'll send the revised mockups by Thursday."
+  TRANS new->accepted        follow_up          You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  HITS: [('S3', 'brochure'), ('S7', 'thanksgiving'), ('S12', 'agenda')]
+  MISSES: [('S2', 'budget', False), ('S4', 'northwind design qa', False), ('S5', 'pixelboard', False), ('S6', 'results', True)]
+  USER accept                    No answer from Jonah Pike: Quote for 500 brochures (S3) 
+  USER accept                    Reply to Harriet Cole: Workshop agenda (S12) 
+  USER accept                    Reply to Ngozi Okafor: Thanksgiving (S7) 
+
+## day 6 2026-10-31 America/New_York  refresh={'created': 0, 'open': 2, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.96 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  unanswered_thread  r=0.92 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  TRANS new->done            follow_up          No answer from Jonah Pike: Quote for 500 brochures
+  TRANS new->accepted        unanswered_thread  Reply to Ngozi Okafor: Thanksgiving
+  TRANS new->accepted        unanswered_thread  Reply to Harriet Cole: Workshop agenda
+  MISSES: [('S2', 'budget', False), ('S3', 'brochure', True), ('S5', 'pixelboard', False), ('S6', 'results', True), ('S7', 'thanksgiving', False), ('S11', 'radiator', False), ('S12', 'agenda', False)]
+
+## day 7 2026-11-01 America/New_York  refresh={'created': 2, 'open': 3, 'reason': 'refresh', 'resolved': 1}
+  OPEN  unanswered_thread  r=0.92 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.90 sens=False Reply to Larkspur People Team: Confidential: your 2027 compensation
+  OPEN  unanswered_thread  r=0.89 sens=False Reply to Gus Moreno: Radiator repair
+  TRANS +new                 unanswered_thread  Reply to Larkspur People Team: Confidential: your 2027 compensation
+  TRANS +new                 unanswered_thread  Reply to Gus Moreno: Radiator repair
+  TRANS new->expired         follow_up          No answer from Sofia Alvarez: brunch?
+  HITS: [('S11', 'radiator')]
+  MISSES: [('S2', 'budget', False), ('S3', 'brochure', True), ('S4', 'northwind sprint planning', False), ('S5', 'pixelboard', False), ('S6', 'results', True), ('S7', 'thanksgiving', False), ('S12', 'agenda', False)]
+  FORBIDDEN: [('S6', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'HR letter, no action asked')]
+  LEAKS: [('unanswered_thread', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'compensation', False)]
+  BRIEF_LEAKS: ['compensation']
+  USER dismiss  not_relevant     Reply to Larkspur People Team: Confidential: your 2027 compensation (S6) 
+  USER accept                    Reply to Gus Moreno: Radiator repair (S11) 
+
+## day 8 2026-11-02 America/New_York  refresh={'created': 0, 'open': 3, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.88 sens=False No answer from Sofia Alvarez: Re: drinks friday?
+  OPEN  unanswered_thread  r=0.86 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  commitment         r=0.83 sens=False Due 2026-11-04: Send Jonah the final brochure files by Nov 4
+  TRANS +new                 follow_up          No answer from Sofia Alvarez: Re: drinks friday?
+  TRANS +new                 commitment         Due 2026-11-04: Send Jonah the final brochure files by Nov 4
+  TRANS new->accepted        unanswered_thread  Reply to Gus Moreno: Radiator repair
+  TRANS new->dismissed       unanswered_thread  Reply to Larkspur People Team: Confidential: your 2027 compensation
+  HITS: [('S10', 'brochure files')]
+  MISSES: [('S2', 'budget', False), ('S3', 'brochure', True), ('S4', 'northwind sprint planning', False), ('S5', 'pixelboard', False), ('S6', 'results', True), ('S7', 'thanksgiving', False), ('S11', 'radiator', False), ('S12', 'agenda', False)]
+  FORBIDDEN: [('S7', 'No answer from Sofia Alvarez: Re: drinks friday?', 'answered in 30 minutes')]
+  USER dismiss  already_handled  No answer from Sofia Alvarez: Re: drinks friday? (S7) 
+  USER accept                    Due 2026-11-04: Send Jonah the final brochure files by Nov 4 (S10) 
+
+## day 9 2026-11-03 America/New_York  refresh={'created': 0, 'open': 1, 'reason': 'refresh', 'resolved': 0}
+  OPEN  unanswered_thread  r=0.84 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  TRANS accepted->done       unanswered_thread  Reply to Harriet Cole: Workshop agenda
+  TRANS accepted->done       follow_up          You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  TRANS accepted->done       unanswered_thread  Reply to Gus Moreno: Radiator repair
+  TRANS new->accepted        commitment         Due 2026-11-04: Send Jonah the final brochure files by Nov 4
+  TRANS new->dismissed       follow_up          No answer from Sofia Alvarez: Re: drinks friday?
+  MISSES: [('S5', 'pixelboard', False), ('S6', 'results', True), ('S7', 'thanksgiving', False), ('S10', 'brochure files', True)]
+
+## day 10 2026-11-04 Europe/London  refresh={'created': 1, 'open': 2, 'reason': 'refresh', 'resolved': 0}
+  OPEN  unanswered_thread  r=0.84 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.77 sens=False Reply to Rebecca Moss: Thursday session
+  TRANS +new                 unanswered_thread  Reply to Rebecca Moss: Thursday session
+  MISSES: [('S4', 'foundry', False), ('S7', 'thanksgiving', False), ('S10', 'brochure files', True)]
+  LEAKS: [('unanswered_thread', 'Reply to Rebecca Moss: Thursday session', 'session', False)]
+  BRIEF_LEAKS: ['session']
+
+## day 11 2026-11-05 Europe/London  refresh={'created': 0, 'open': 2, 'reason': 'refresh', 'resolved': 0}
+  OPEN  unanswered_thread  r=0.85 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.77 sens=False Reply to Rebecca Moss: Thursday session
+  TRANS accepted->expired    renewal            Pixelboard renews 2026-11-03 — $144.00
+  MISSES: [('S4', 'foundry', False), ('S7', 'thanksgiving', False)]
+  LEAKS: [('unanswered_thread', 'Reply to Rebecca Moss: Thursday session', 'session', False)]
+  BRIEF_LEAKS: ['session']
+
+## day 12 2026-11-06 Europe/London  refresh={'created': 0, 'open': 2, 'reason': 'refresh', 'resolved': 0}
+  OPEN  unanswered_thread  r=0.86 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.78 sens=False Reply to Rebecca Moss: Thursday session
+  TRANS accepted->done       unanswered_thread  Reply to Ngozi Okafor: Thanksgiving
+  LEAKS: [('unanswered_thread', 'Reply to Rebecca Moss: Thursday session', 'session', False)]
+  BRIEF_LEAKS: ['session']
+
+## day 13 2026-11-07 Europe/London  refresh={'created': 0, 'open': 2, 'reason': 'refresh', 'resolved': 0}
+  OPEN  unanswered_thread  r=0.87 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.78 sens=False Reply to Rebecca Moss: Thursday session
+  LEAKS: [('unanswered_thread', 'Reply to Rebecca Moss: Thursday session', 'session', False)]
+  BRIEF_LEAKS: ['session']
+
+## day 14 2026-11-08 America/New_York  refresh={'created': 0, 'open': 2, 'reason': 'refresh', 'resolved': 0}
+  OPEN  unanswered_thread  r=0.88 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.79 sens=False Reply to Rebecca Moss: Thursday session
+  LEAKS: [('unanswered_thread', 'Reply to Rebecca Moss: Thursday session', 'session', False)]
+  BRIEF_LEAKS: ['session']

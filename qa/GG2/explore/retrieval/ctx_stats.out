@@ -1,0 +1,4 @@
+turns with context: 145, empty: 4
+items per context: min 1 p50 8 max 10; ==10: 65
+chars: p50 2533 max 5381; words p50 339 max 778
+header/citation mismatches: 0 []; contexts with a duplicate item: 0

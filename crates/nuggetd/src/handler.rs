@@ -1007,6 +1007,7 @@ impl AskPlan {
                 let budget = self.budget as usize;
                 let opts = ContextOptions {
                     exclude_sensitive: cloud,
+                    ..Default::default()
                 };
                 let c = on_blocking_thread(async move {
                     retriever.pack_context_with(&q, budget, opts).await

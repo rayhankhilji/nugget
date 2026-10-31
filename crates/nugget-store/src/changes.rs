@@ -17,6 +17,9 @@ use crate::error::{DbExt, parse_time};
 use crate::items::{LOOKUP_BATCH, WANTED_ITEMS_JOIN, item_ref, refs_json};
 use crate::types::{ItemChange, ItemDates};
 
+/// The event start of a calendar item, as stored (see [`ItemDates::event_start`]).
+const EVENT_START_SQL: &str = "CASE WHEN json_type(i.metadata, '$.extracted.start') = 'text'                                      THEN json_extract(i.metadata, '$.extracted.start')                                      WHEN json_type(i.metadata, '$.start.date_time') = 'text'                                      THEN json_extract(i.metadata, '$.start.date_time')                                      WHEN json_type(i.metadata, '$.start.date') = 'text'                                      THEN json_extract(i.metadata, '$.start.date') END";
+
 fn sql_limit(limit: usize) -> i64 {
     if limit == 0 {
         -1
@@ -73,11 +76,89 @@ impl Store {
         })
     }
 
+    /// Items any of whose dates (event start, extracted date, source modification or update
+    /// time) falls on a day from `from_day` through `to_day` (`YYYY-MM-DD`, inclusive, compared
+    /// on the stored text's first ten characters), with their dates, at most `limit` (0: no
+    /// limit). A coarse prefilter: the caller picks each item's own date and checks it exactly.
+    pub fn items_dated_between(
+        &self,
+        from_day: &str,
+        to_day: &str,
+        limit: usize,
+    ) -> Result<Vec<(ItemRef, ItemDates)>> {
+        type Row = (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+        );
+        let rows: Vec<Row> = self.with_read_conn(|c| {
+            let mut stmt = c
+                .prepare_cached(&format!(
+                    "SELECT i.source, i.key,
+                            CASE WHEN json_type(i.metadata, '$.extracted.date') = 'text'
+                                 THEN json_extract(i.metadata, '$.extracted.date') END,
+                            {EVENT_START_SQL},
+                            i.source_modified_at, i.created_at, i.updated_at
+                     FROM items i
+                     WHERE substr(COALESCE({EVENT_START_SQL}, ''), 1, 10) BETWEEN ?1 AND ?2
+                        OR substr(COALESCE(json_extract(i.metadata, '$.extracted.date'), ''), 1, 10)
+                           BETWEEN ?1 AND ?2
+                        OR substr(COALESCE(i.source_modified_at, ''), 1, 10) BETWEEN ?1 AND ?2
+                        OR substr(i.updated_at, 1, 10) BETWEEN ?1 AND ?2
+                     ORDER BY i.id
+                     LIMIT ?3"
+                ))
+                .db("prepare items_dated_between")?;
+            let rows = stmt
+                .query_map(params![from_day, to_day, sql_limit(limit)], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                })
+                .db("query items_dated_between")?;
+            rows.collect::<rusqlite::Result<_>>()
+                .db("read items_dated_between")
+        })?;
+        rows.into_iter()
+            .map(
+                |(source, key, extracted, event, modified, created, updated)| {
+                    Ok((
+                        item_ref(source, key),
+                        ItemDates {
+                            extracted_date: extracted,
+                            event_start: event,
+                            source_modified_at: modified.as_deref().map(parse_time).transpose()?,
+                            created_at: parse_time(&created)?,
+                            updated_at: parse_time(&updated)?,
+                        },
+                    ))
+                },
+            )
+            .collect()
+    }
+
     /// The dates of each stored item in `items` (unknown items are left out), without loading
     /// text or metadata. Looked up in batches of [`LOOKUP_BATCH`] items, one query each, on a
     /// read connection (so a date-filtered search never waits on, or holds up, ingest).
     pub fn item_dates(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, ItemDates>> {
-        type Row = (usize, Option<String>, Option<String>, String, String);
+        type Row = (
+            usize,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+        );
         let mut out = HashMap::with_capacity(items.len());
         for batch in items.chunks(LOOKUP_BATCH) {
             let refs = refs_json(batch)?;
@@ -87,6 +168,7 @@ impl Store {
                         "SELECT want.key,
                                 CASE WHEN json_type(i.metadata, '$.extracted.date') = 'text'
                                      THEN json_extract(i.metadata, '$.extracted.date') END,
+                                {EVENT_START_SQL},
                                 i.source_modified_at, i.created_at, i.updated_at
                          {WANTED_ITEMS_JOIN}"
                     ))
@@ -99,12 +181,13 @@ impl Store {
                             r.get(2)?,
                             r.get(3)?,
                             r.get(4)?,
+                            r.get(5)?,
                         ))
                     })
                     .db("query item_dates")?;
                 rows.collect::<rusqlite::Result<_>>().db("read item_dates")
             })?;
-            for (idx, extracted, modified, created, updated) in rows {
+            for (idx, extracted, event, modified, created, updated) in rows {
                 let Some(item) = batch.get(idx) else {
                     continue;
                 };
@@ -112,6 +195,7 @@ impl Store {
                     item.clone(),
                     ItemDates {
                         extracted_date: extracted,
+                        event_start: event,
                         source_modified_at: modified.as_deref().map(parse_time).transpose()?,
                         created_at: parse_time(&created)?,
                         updated_at: parse_time(&updated)?,

@@ -6,14 +6,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nugget_core::capability::{Capabilities, Locality, Tier};
+use nugget_core::ids::ItemRef;
 use nugget_core::ipc::{ChatMessage, ContextResponse};
 use nugget_core::{Error, Result};
 use nugget_infer::{ChatRequest, ChatResponse, Message, Provider, Router};
 use nugget_store::{Chunk, ChunkId, Item, Store};
 use time::{OffsetDateTime, UtcOffset};
 
+use crate::config::RecencyBoost;
 use crate::config::{Fusion, RetrieveConfig};
-use crate::dates::{DateRange, parse_date_query};
+use crate::dates::{DateRange, item_date, item_date_of, parse_date_query, wants_latest};
 use crate::embed::{embed_first, embedding_candidates, validate_vectors};
 use crate::pack::{PackItem, PackOptions, pack};
 use crate::rank::{
@@ -22,8 +24,8 @@ use crate::rank::{
 };
 use crate::rerank::{RerankGovernor, RerankStatus, Reranker, normalise_scores};
 use crate::rewrite::{
-    FEATURE_REWRITE, QueryRewrite, RewriteMethod, clean_reply, heuristic_rewrite,
-    looks_like_followup, system_prompt, user_prompt,
+    FEATURE_REWRITE, QueryRewrite, RewriteMethod, clean_reply, looks_like_followup, system_prompt,
+    user_prompt,
 };
 use crate::types::{
     ContextOptions, DateFilter, PackedContext, RetrievalMode, RetrievedItem, SearchOptions,
@@ -70,7 +72,7 @@ struct Ranked {
     url: Option<String>,
     /// See [`is_sensitive`].
     sensitive: bool,
-    /// `YYYY-MM-DD` of the source modification time, else the update time.
+    /// `YYYY-MM-DD` of the item's own date (`dates::item_date`).
     date: Option<String>,
 }
 
@@ -80,6 +82,120 @@ struct Ranking {
     items: Vec<Ranked>,
     reranked: bool,
     date: Option<DateFilter>,
+}
+
+/// A query term in at most this share of the chunks is rare (see `Retriever::partial_matches`)...
+const RARE_TERM_SHARE: f64 = 0.01;
+/// ...or in at most this many.
+const RARE_TERM_MIN: usize = 2;
+/// Below this many chunks, word counts say nothing about rarity: no floor.
+const RARE_TERM_MIN_CHUNKS: u64 = 100;
+/// Queries with more content words than this are text, not questions, and get no floor.
+const MAX_TOPIC_TERMS: usize = 6;
+/// Words of a question that are not its topic.
+const QUESTION_WORDS: &[&str] = &[
+    "much",
+    "many",
+    "long",
+    "often",
+    "anything",
+    "something",
+    "know",
+    "tell",
+    "please",
+    "find",
+    "show",
+    "get",
+    "got",
+    "need",
+    "want",
+    "like",
+    "give",
+    "remind",
+    "should",
+    "could",
+    "may",
+    "might",
+    "must",
+    "shall",
+    "does",
+    "done",
+    "say",
+    "said",
+];
+
+/// Most items a period listing considers (newest or soonest are kept).
+const PERIOD_SCAN_LIMIT: usize = 5_000;
+/// Snippet length of a listed item's first chunk.
+const PERIOD_SNIPPET_CHARS: usize = 200;
+
+/// Words that ask about a period rather than a topic ("summarise last week", "what happened
+/// yesterday", "what do I have next week").
+const GENERIC_WORDS: &[&str] = &[
+    // A weekday next to a date ("Thursday 5 November") is part of the date.
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "mail",
+    "mails",
+    "email",
+    "emails",
+    "message",
+    "messages",
+    "receive",
+    "received",
+    "summarise",
+    "summarize",
+    "summary",
+    "recap",
+    "overview",
+    "happened",
+    "happen",
+    "happening",
+    "going",
+    "anything",
+    "everything",
+    "things",
+    "stuff",
+    "news",
+    "updates",
+    "update",
+    "show",
+    "list",
+    "tell",
+    "give",
+    "plans",
+    "planned",
+    "schedule",
+    "agenda",
+    "calendar",
+    "busy",
+    "free",
+    "doing",
+    "done",
+    "get",
+    "got",
+    "up",
+    "on",
+    "items",
+    "s",
+    "t",
+    "please",
+];
+
+/// Whether `rest` (a query without its date phrase) holds no topic: only function words and
+/// [`GENERIC_WORDS`].
+fn is_generic(rest: &str) -> bool {
+    rest.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .all(|w| {
+            crate::rank::STOPWORDS.contains(&w.as_str()) || GENERIC_WORDS.contains(&w.as_str())
+        })
 }
 
 /// Terms of the last user turn appended by the heuristic rewrite.
@@ -182,7 +298,8 @@ impl Retriever {
     }
 
     /// The standalone form of `query` given the conversation so far (see [`crate::rewrite`]).
-    /// Never fails: anything that goes wrong keeps the original query.
+    /// Never fails: if no local model gives a usable rewrite in time, the heuristic rewrite (or
+    /// else the original query) is used.
     pub async fn rewrite_query(&self, history: &[ChatMessage], query: &str) -> QueryRewrite {
         if !self.config.rewrite_followups
             || !history
@@ -193,15 +310,14 @@ impl Retriever {
             return QueryRewrite::unchanged(query);
         }
         let providers = self.rewrite_candidates();
-        let Some(p) = providers.first() else {
-            return match heuristic_rewrite(history, query, HEURISTIC_TERMS) {
-                Some(q) => QueryRewrite {
-                    query: q,
-                    method: RewriteMethod::Heuristic,
-                },
-                None => QueryRewrite::unchanged(query),
-            };
-        };
+        if providers.is_empty() {
+            return QueryRewrite::heuristic(
+                history,
+                query,
+                HEURISTIC_TERMS,
+                RewriteMethod::Heuristic,
+            );
+        }
         let max_chars = self.config.rewrite_max_chars.max(16);
         let mut req = ChatRequest::new(vec![Message::user_text(user_prompt(
             history,
@@ -213,43 +329,55 @@ impl Retriever {
         .with_feature(FEATURE_REWRITE);
         req.temperature = Some(0.0);
         let timeout = Duration::from_millis(self.config.rewrite_timeout_ms.max(1));
-        let reply = tokio::time::timeout(timeout, async {
-            ChatResponse::collect(p.chat(req).await?).await
-        })
-        .await;
+        let deadline = tokio::time::Instant::now() + timeout;
         let router = self.router.as_ref();
-        match reply {
-            Ok(Ok(r)) => {
-                if let Some(router) = router {
-                    router.report_success(p.id());
+        let mut tried: Vec<nugget_core::ids::ProviderId> = Vec::new();
+        for p in &providers {
+            if router.is_some_and(|r| r.in_cooldown(p.id())) {
+                tracing::debug!(provider = %p.id(), "query rewrite: provider in cooldown; skipped");
+                continue;
+            }
+            tried.push(p.id().clone());
+            let reply = tokio::time::timeout_at(deadline, async {
+                ChatResponse::collect(p.chat(req.clone()).await?).await
+            })
+            .await;
+            match reply {
+                Ok(Ok(r)) => {
+                    if let Some(router) = router {
+                        router.report_success(p.id());
+                    }
+                    if let Some(q) = clean_reply(&r.text(), max_chars) {
+                        return QueryRewrite {
+                            query: q,
+                            method: RewriteMethod::Model {
+                                provider: p.id().clone(),
+                            },
+                        };
+                    }
+                    tracing::warn!(provider = %p.id(), "unusable query rewrite; trying the next model");
                 }
-                match clean_reply(&r.text(), max_chars) {
-                    Some(q) => QueryRewrite {
-                        query: q,
-                        method: RewriteMethod::Model {
-                            provider: p.id().clone(),
-                        },
-                    },
-                    None => {
-                        tracing::warn!(provider = %p.id(), "unusable query rewrite; searching the original query");
-                        QueryRewrite::unchanged(query)
+                Ok(Err(e)) => {
+                    tracing::warn!(provider = %p.id(), error = %e, "query rewrite failed; trying the next model");
+                    if let Some(router) = router
+                        && !matches!(e, Error::Invalid(_) | Error::Cancelled)
+                    {
+                        router.report_failure(p.id());
                     }
                 }
-            }
-            Ok(Err(e)) => {
-                tracing::warn!(provider = %p.id(), error = %e, "query rewrite failed; searching the original query");
-                if let Some(router) = router
-                    && !matches!(e, Error::Invalid(_) | Error::Cancelled)
-                {
-                    router.report_failure(p.id());
+                Err(_) => {
+                    tracing::warn!(provider = %p.id(), "query rewrite timed out");
+                    break;
                 }
-                QueryRewrite::unchanged(query)
-            }
-            Err(_) => {
-                tracing::warn!(provider = %p.id(), "query rewrite timed out; searching the original query");
-                QueryRewrite::unchanged(query)
             }
         }
+        tracing::info!(?tried, "no model rewrite; using the heuristic rewrite");
+        QueryRewrite::heuristic(
+            history,
+            query,
+            HEURISTIC_TERMS,
+            RewriteMethod::HeuristicFallback { tried },
+        )
     }
 
     /// Local chat providers for rewriting, best first: the `Light`, then `Triage`, then
@@ -311,7 +439,9 @@ impl Retriever {
         } else {
             max_items
         };
-        let mut ranking = self.rank(query, depth, SearchOptions::default()).await?;
+        let mut ranking = self
+            .rank_dated(query, depth, SearchOptions::default(), !opts.ignore_dates)
+            .await?;
         let mut excluded_sensitive: u32 = 0;
         if opts.exclude_sensitive {
             let mut kept = Vec::with_capacity(max_items);
@@ -327,10 +457,20 @@ impl Retriever {
             }
             ranking.items = kept;
         }
+        // GG2-8: items lacking most of the query's rare key terms are near misses: marked
+        // (`PackedPassage::partial`), so the answer prompt can tell them from an answer and "not
+        // in your items" can win. Not dropped: wording alone cannot rule a passage out (the
+        // phone bill that never says "phone plan" is still the answer).
+        let partial = if opts.ignore_dates {
+            // Thread text, not a question: it is full of words no item has.
+            Default::default()
+        } else {
+            self.partial_matches(query, &ranking.items)?
+        };
         let items = if budget_tokens == 0 {
             Vec::new()
         } else {
-            self.pack_items(&ranking.items)?
+            self.pack_items(&ranking.items, &partial)?
         };
         let (mut response, passages) = pack(
             &items,
@@ -354,25 +494,121 @@ impl Retriever {
         })
     }
 
+    /// The items of `ranked` that lack more than half of the query's rare terms: content words
+    /// (not function or question words) found in at most [`RARE_TERM_SHARE`] of the chunks (at
+    /// least [`RARE_TERM_MIN`]), or in none. Such a term names what the question is about ("therapy",
+    /// "Tokyo"), so an item without it is at best a near miss ("physio", "Kyoto"). Matching is
+    /// the full-text index's (stemmed, so "booked" has "book").
+    fn partial_matches(
+        &self,
+        query: &str,
+        ranked: &[Ranked],
+    ) -> Result<std::collections::HashSet<ItemRef>> {
+        let mut out = std::collections::HashSet::new();
+        if ranked.is_empty() {
+            return Ok(out);
+        }
+        // The topic, without any date phrase ("last week" is not what the question is about).
+        let topic = parse_date_query(query, self.now(), self.date_offset())
+            .map_or_else(|| query.to_owned(), |d| d.cleaned);
+        let chunks = self.store.counts()?.chunks;
+        if chunks < RARE_TERM_MIN_CHUNKS {
+            // Too few chunks to tell a rare word from one that just isn't there yet.
+            return Ok(out);
+        }
+        let cap = (chunks as f64 * RARE_TERM_SHARE)
+            .ceil()
+            .max(RARE_TERM_MIN as f64) as usize;
+        let mut terms: Vec<String> = text_query(&topic)
+            .split_whitespace()
+            .map(str::to_lowercase)
+            .filter(|t| {
+                t.chars().all(char::is_alphanumeric)
+                    && t.chars().count() >= 2
+                    && !crate::rank::STOPWORDS.contains(&t.as_str())
+                    && !QUESTION_WORDS.contains(&t.as_str())
+            })
+            .collect();
+        terms.sort();
+        terms.dedup();
+        if terms.len() > MAX_TOPIC_TERMS {
+            // Not a question but a passage of text: most of its words are in no item.
+            return Ok(out);
+        }
+        // Per ranked item: how many of the rare terms it has.
+        let mut rare = 0usize;
+        let mut has: HashMap<&ItemRef, usize> = HashMap::new();
+        for t in terms {
+            let hits = self.store.search_text(&t, cap + 1)?;
+            if hits.len() > cap {
+                continue; // Common: says little about what the question is about.
+            }
+            rare += 1;
+            let with: std::collections::HashSet<&ItemRef> = hits.iter().map(|h| &h.item).collect();
+            for r in ranked {
+                if with.contains(&r.cand.item) {
+                    *has.entry(&r.cand.item).or_default() += 1;
+                }
+            }
+        }
+        // Missing more than half of them: a question's wording often has a word its answer
+        // lacks ("hotel" for a booking receipt), but not most of its key words.
+        for r in ranked {
+            if has.get(&r.cand.item).copied().unwrap_or(0) * 2 < rare {
+                out.insert(r.cand.item.clone());
+            }
+        }
+        Ok(out)
+    }
+
     // ---- pipeline ----
 
     fn now(&self) -> OffsetDateTime {
         self.now.unwrap_or_else(OffsetDateTime::now_utc)
     }
 
+    /// Where days start, for date phrases and items' own dates.
+    fn date_offset(&self) -> UtcOffset {
+        let minutes = self.config.date_utc_offset_minutes.clamp(-18 * 60, 18 * 60);
+        UtcOffset::from_whole_seconds(minutes * 60).unwrap_or(UtcOffset::UTC)
+    }
+
     /// Rank with any date phrase handled: search the query without the phrase and keep items
-    /// modified in its range; if none match, search the original query unfiltered.
+    /// dated in its range; if none match, search the original query unfiltered (and say so in
+    /// [`DateFilter::applied`]). When nothing but generic words is left ("summarise last week",
+    /// "what happened yesterday"), list the period's items by date instead
+    /// ([`DateFilter::listed`]). `dates: false` skips date phrases (thread text in drafts).
     async fn rank(&self, query: &str, limit: usize, opts: SearchOptions) -> Result<Ranking> {
-        let parsed = if self.config.dates && limit > 0 {
-            let minutes = self.config.date_utc_offset_minutes.clamp(-18 * 60, 18 * 60);
-            let offset = UtcOffset::from_whole_seconds(minutes * 60).unwrap_or(UtcOffset::UTC);
-            parse_date_query(query, self.now(), offset)
+        self.rank_dated(query, limit, opts, true).await
+    }
+
+    async fn rank_dated(
+        &self,
+        query: &str,
+        limit: usize,
+        opts: SearchOptions,
+        dates: bool,
+    ) -> Result<Ranking> {
+        let parsed = if dates && self.config.dates && limit > 0 {
+            parse_date_query(query, self.now(), self.date_offset())
         } else {
             None
         };
         let Some(dq) = parsed else {
             return self.rank_in(query, limit, opts, None).await;
         };
+        if is_generic(&dq.cleaned) {
+            let mut ranking = self.rank_period(dq.range, limit)?;
+            if !ranking.items.is_empty() {
+                ranking.date = Some(DateFilter {
+                    phrase: dq.phrase,
+                    range: dq.range,
+                    applied: true,
+                    listed: true,
+                });
+                return Ok(ranking);
+            }
+        }
         // A query that is only a date has nothing else to search for.
         let searched = if dq.cleaned.chars().any(char::is_alphanumeric) {
             dq.cleaned.as_str()
@@ -388,8 +624,70 @@ impl Retriever {
             phrase: dq.phrase,
             range: dq.range,
             applied,
+            listed: false,
         });
         Ok(ranking)
+    }
+
+    /// The items dated in `range` (see [`item_date`]), newest first, or soonest first for a
+    /// range that starts after now, at most `limit`, each with its first chunk.
+    fn rank_period(&self, range: DateRange, limit: usize) -> Result<Ranking> {
+        let day = |t: OffsetDateTime| iso_date(t);
+        // The stored dates' days are compared as text; a day either side covers time zones.
+        let from = day(range.start - time::Duration::days(1));
+        let to = day(range.end + time::Duration::days(1));
+        let offset = self.date_offset();
+        let mut dated: Vec<(ItemRef, OffsetDateTime)> = self
+            .store
+            .items_dated_between(&from, &to, PERIOD_SCAN_LIMIT)?
+            .into_iter()
+            .map(|(item, d)| (item, item_date(&d, offset)))
+            .filter(|(_, at)| range.contains(*at))
+            .collect();
+        if range.start > self.now() {
+            dated.sort_by_key(|d| d.1);
+        } else {
+            dated.sort_by_key(|d| std::cmp::Reverse(d.1));
+        }
+        let mut items = Vec::new();
+        for (item, at) in dated {
+            if items.len() >= limit {
+                break;
+            }
+            let Some(chunk) = self
+                .store
+                .get_chunks_by_ord(&item, &[0])?
+                .into_iter()
+                .next()
+            else {
+                continue;
+            };
+            let meta = self.store.get_item(&item)?;
+            let rel = 1.0 / (1.0 + items.len() as f32);
+            items.push(Ranked {
+                url: meta.as_ref().and_then(item_url),
+                sensitive: meta.as_ref().is_none_or(|i| is_sensitive(&i.metadata)),
+                date: Some(iso_date(at)),
+                cand: Candidate {
+                    item,
+                    title: chunk.title.clone(),
+                    chunk_id: chunk.id,
+                    snippet: crate::pack::cut(&chunk.text, PERIOD_SNIPPET_CHARS),
+                    raw_score: rel,
+                    matches: Vec::new(),
+                    rel,
+                },
+            });
+        }
+        Ok(Ranking {
+            mode: RetrievalMode::TextOnly {
+                reason: TextOnlyReason::Requested,
+            },
+            similarity: Similarity::None,
+            items,
+            reranked: false,
+            date: None,
+        })
     }
 
     async fn rank_in(
@@ -509,17 +807,19 @@ impl Retriever {
         };
         let keep = pool_len.max(rerank_len);
         let (mut cands, items_meta) = match range {
-            // Date filter: by source modification time, else the store's update time. Filters on
-            // the dates alone (one batched lookup), then loads only the items that are kept.
+            // Date filter: by each item's own date (event start, mail date, source modification
+            // time, update time; see `dates::item_date`). Filters on the dates alone (one batched
+            // lookup), then loads only the items that are kept.
             Some(range) => {
                 let refs: Vec<_> = cands.iter().map(|c| c.item.clone()).collect();
                 let dates = self.store.item_dates(&refs)?;
+                let offset = self.date_offset();
                 let kept: Vec<Candidate> = cands
                     .into_iter()
                     .filter(|c| {
-                        dates.get(&c.item).is_some_and(|d| {
-                            range.contains(d.source_modified_at.unwrap_or(d.updated_at))
-                        })
+                        dates
+                            .get(&c.item)
+                            .is_some_and(|d| range.contains(item_date(d, offset)))
                     })
                     .take(keep)
                     .collect();
@@ -537,12 +837,19 @@ impl Retriever {
             crate::rank::normalise(&mut cands);
         }
 
-        // 5. Recency boost.
-        if let Some(boost) = self.config.recency {
+        // 5. Recency boost: configured, or asked for ("latest", "now", ...).
+        let recency = self.config.recency.or_else(|| {
+            wants_latest(query).then_some(RecencyBoost {
+                half_life_days: 30.0,
+                weight: 1.0,
+            })
+        });
+        if let Some(boost) = recency {
             let now = self.now();
+            let offset = self.date_offset();
             for (c, meta) in cands.iter_mut().zip(&items_meta) {
                 if let Some(item) = meta {
-                    let at = item.source_modified_at.unwrap_or(item.updated_at);
+                    let at = item_date_of(item, offset);
                     let age_days = (now - at).as_seconds_f64() / 86_400.0;
                     c.rel *= recency_factor(age_days, &boost);
                 }
@@ -563,11 +870,11 @@ impl Retriever {
                 sensitive: meta.as_ref().is_none_or(|i| is_sensitive(&i.metadata)),
                 date: meta
                     .as_ref()
-                    .map(|i| iso_date(i.source_modified_at.unwrap_or(i.updated_at))),
+                    .map(|i| iso_date(item_date_of(i, self.date_offset()))),
                 cand,
             })
             .collect();
-        if self.config.recency.is_some() {
+        if recency.is_some() {
             // Stable: equal relevance keeps search order.
             pool.sort_by(|a, b| b.cand.rel.total_cmp(&a.cand.rel));
         }
@@ -873,7 +1180,11 @@ impl Retriever {
     ///
     /// Neighbours are the chunks at `ord ± 1` of the same item, looked up by position with
     /// [`Store::neighbours`].
-    fn pack_items(&self, ranked: &[Ranked]) -> Result<Vec<PackItem>> {
+    fn pack_items(
+        &self,
+        ranked: &[Ranked],
+        partial: &std::collections::HashSet<ItemRef>,
+    ) -> Result<Vec<PackItem>> {
         let mut ids: Vec<ChunkId> = Vec::new();
         for r in ranked {
             ids.push(r.cand.chunk_id);
@@ -917,6 +1228,7 @@ impl Retriever {
                 url: r.url.clone(),
                 sensitive: r.sensitive,
                 date: r.date.clone(),
+                partial: partial.contains(&r.cand.item),
                 primary,
                 neighbours,
                 secondary,

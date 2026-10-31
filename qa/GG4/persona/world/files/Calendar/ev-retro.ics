@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//GG4 QA//Persona//EN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:retro-gg4@larkspur.example
+DTSTAMP:20261030T130000Z
+SEQUENCE:0
+SUMMARY:Studio retro
+DTSTART;TZID=America/New_York:20261106T160000
+DTEND;TZID=America/New_York:20261106T170000
+ORGANIZER;CN=Theo Brandt:mailto:theo@larkspur.example
+ATTENDEE;CN=Maya Okafor:mailto:maya@larkspur.example
+ATTENDEE;CN=Theo Brandt:mailto:theo@larkspur.example
+ATTENDEE;CN=Priya Raman:mailto:priya@larkspur.example
+END:VEVENT
+END:VCALENDAR

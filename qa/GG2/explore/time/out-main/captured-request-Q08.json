@@ -1,0 +1,14 @@
+{
+ "cache_prompt": true,
+ "messages": [
+  {
+   "content": "What do I have tomorrow?",
+   "role": "user"
+  }
+ ],
+ "model": "capture",
+ "stream": true,
+ "stream_options": {
+  "include_usage": true
+ }
+}
