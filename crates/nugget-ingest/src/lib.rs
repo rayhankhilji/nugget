@@ -47,8 +47,10 @@
 //!   them later in the background and never removes an item (or its chunks) from search. See
 //!   the `triage` module docs and `ingest.status.triage` for progress.
 //! - **Privacy.** Items with PII findings, items the deterministic sensitivity rules flag
-//!   (health, money, credentials, legal, sensitive senders like `hr@`), and items flagged by
-//!   triage are *sensitive*; so is every
+//!   (health, money, credentials, legal, `Health/` or `#finance` filing, sensitive senders
+//!   like `hr@`), and items flagged by triage are *sensitive*. Unknown counts as sensitive: an
+//!   item no rule flags stays sensitive until local triage clears it, also while no triage
+//!   model is routable or triage is off ([`IngestConfig::assume_unflagged_safe`] opts out); so is every
 //!   item still waiting for triage or whose triage failed (fail closed). Triage never
 //!   uses `Cloud` providers; embeddings use `Cloud` providers only when
 //!   [`IngestConfig::allow_cloud_embeddings`] is set **and** the item is not sensitive.
@@ -63,7 +65,7 @@
 //! Items are stored with `metadata` = `{ source: <connector metadata>, url?, mime, extracted?,
 //! links?, tags?, sensitive, sensitive_rule?: "pii" | "health" | "financial" |
 //! "credentials" | "legal" | "identity", pii?: {card?, ssn?, iban?, secret?} (counts only), junk, triage?:
-//! {state: "pending" | "done" | "skipped" | "failed", junk?, sensitive?, provider?, reason?,
+//! {state: "pending" | "done" | "skipped" | "failed" | "unknown", junk?, sensitive?, provider?, reason?,
 //! error?}, truncated?, extract_error?, embed_error?, embedding_provider? }`.
 
 mod ai;

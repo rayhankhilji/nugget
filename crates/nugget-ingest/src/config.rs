@@ -38,6 +38,12 @@ pub struct IngestConfig {
     pub triage_timeout_ms: u64,
     /// Characters of each item's text sent to triage.
     pub triage_max_chars: usize,
+    /// Count items whose sensitivity nobody decided (triage off, or no local triage model,
+    /// and no sensitivity rule matched) as **not** sensitive, so cloud models may use them.
+    /// Default `false`: unknown counts as sensitive (kept away from cloud models) until local
+    /// triage clears it. Set it only for a setup without a local model that should still use
+    /// cloud models with unflagged items.
+    pub assume_unflagged_safe: bool,
     /// Items labelled per triage request (small items share one request). Default 8.
     pub triage_batch: usize,
     /// Characters of text per triage request; an item longer than this goes alone.
@@ -97,6 +103,7 @@ impl Default for IngestConfig {
             triage: true,
             triage_timeout_ms: 30_000,
             triage_max_chars: 6_000,
+            assume_unflagged_safe: false,
             triage_batch: 8,
             triage_batch_chars: 6_000,
             triage_idle_ms: 3_000,

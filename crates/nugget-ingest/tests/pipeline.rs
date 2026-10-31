@@ -215,6 +215,9 @@ async fn sensitive_items_never_reach_cloud_providers() {
     let h = start(Opts {
         cfg: IngestConfig {
             allow_cloud_embeddings: true,
+            // No local triage model here: only this opt-out lets unflagged items use the cloud
+            // (by default they count as sensitive; see tests/sensitivity.rs).
+            assume_unflagged_safe: true,
             ..cfg()
         },
         router: Some(r),

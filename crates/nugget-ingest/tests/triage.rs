@@ -11,6 +11,7 @@ use std::time::Duration;
 use common::*;
 use nugget_core::capability::{Locality, Tier};
 use nugget_core::ipc::TriageState;
+use nugget_infer::Provider;
 use nugget_ingest::{Foreground, IngestConfig};
 use serde_json::json;
 
@@ -434,29 +435,95 @@ async fn pending_items_are_triaged_after_a_restart() {
 }
 
 #[tokio::test]
-async fn triage_off_labels_by_pii_only() {
+async fn triage_off_leaves_unflagged_items_unknown_and_sensitive() {
+    for (assume_safe, sensitive) in [(false, true), (true, false)] {
+        let local = local_model();
+        let h = start(Opts {
+            cfg: IngestConfig {
+                triage: false,
+                assume_unflagged_safe: assume_safe,
+                ..cfg()
+            },
+            router: Some(router(&[(
+                local.clone(),
+                vec![Tier::Triage, Tier::Embedding],
+            )])),
+            ..Default::default()
+        })
+        .await;
+        h.factory.state("fake-1").script(vec![
+            Step::Send(text_doc("a", "HUSHHUSH alpha", Some("1"))),
+            Step::Return(json!("done")),
+        ]);
+        h.add("fake-1").await;
+        eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+        let a = h.item("fake-1", "a").unwrap();
+        assert_eq!(a.metadata["triage"]["state"], json!("unknown"));
+        assert_eq!(a.metadata["triage"]["reason"], json!("off"));
+        assert_eq!(
+            a.metadata["sensitive"],
+            json!(sensitive),
+            "assume_safe={assume_safe}"
+        );
+        assert_eq!(h.store.search_text("alpha", 10).unwrap().len(), 1);
+        assert!(local.chats().is_empty());
+        h.ingest.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn items_wait_sensitive_for_a_triage_model_that_is_not_routable_yet() {
+    // A cloud embedder only, no local triage model: the item is pending and sensitive, so it
+    // never reaches the cloud, until a local model labels it.
+    let cloud = FakeProvider::new("cloud", Locality::Cloud);
     let local = local_model();
+    let r = router(&[
+        (cloud.clone(), vec![Tier::Embedding]),
+        (local.clone(), vec![Tier::Triage]),
+    ]);
+    // Not routable for triage until its capabilities are known.
+    r.set_capabilities(local.id(), Default::default());
     let h = start(Opts {
         cfg: IngestConfig {
-            triage: false,
+            allow_cloud_embeddings: true,
             ..cfg()
         },
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: Some(r.clone()),
         ..Default::default()
     })
     .await;
     h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "HUSHHUSH alpha", Some("1"))),
+        Step::Send(text_doc("a", "lunch plans for friday", Some("1"))),
         Step::Return(json!("done")),
     ]);
     h.add("fake-1").await;
     eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
     let a = h.item("fake-1", "a").unwrap();
-    assert!(a.metadata.get("triage").is_none());
-    assert_eq!(a.metadata["sensitive"], json!(false));
-    assert!(local.chats().is_empty());
+    assert_eq!(a.metadata["triage"]["state"], json!("pending"));
+    assert_eq!(a.metadata["sensitive"], json!(true));
+    assert_eq!(h.store.search_text("lunch", 10).unwrap().len(), 1);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(cloud.embedded().is_empty());
+    let t = h.ingest.status().await.unwrap().triage.unwrap();
+    assert_eq!((t.state, t.pending), (TriageState::Off, 1));
+
+    // The local model becomes ready.
+    r.set_capabilities(
+        local.id(),
+        nugget_core::capability::Capabilities {
+            streaming: true,
+            json_schema: true,
+            ..Default::default()
+        },
+    );
+    h.ingest.triage_now();
+    eventually("labelled", || {
+        h.item("fake-1", "a").unwrap().metadata["sensitive"] == json!(false)
+    })
+    .await;
+    eventually("cloud embedded", || {
+        cloud.embedded().iter().any(|t| t.contains("lunch"))
+    })
+    .await;
     h.ingest.shutdown().await;
 }

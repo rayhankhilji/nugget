@@ -58,6 +58,7 @@ pub(crate) const PENDING: &str = "pending";
 pub(crate) const DONE: &str = "done";
 pub(crate) const SKIPPED: &str = "skipped";
 pub(crate) const FAILED: &str = "failed";
+pub(crate) const UNKNOWN: &str = "unknown";
 
 /// The job's queue and counters (behind `Inner::triage`).
 #[derive(Debug)]
@@ -586,8 +587,9 @@ fn apply(inner: &Inner, read: &Item, verdict: Verdict<'_>) -> Result<Option<bool
             true
         }
         Verdict::Off => {
-            m.insert("triage".into(), json!({"state": SKIPPED, "reason": "off"}));
-            pii
+            m.insert("triage".into(), json!({"state": UNKNOWN, "reason": "off"}));
+            // Unknown counts as sensitive unless the user opted out (GG5-2).
+            pii || !inner.cfg.assume_unflagged_safe
         }
     };
     m.insert("sensitive".into(), Value::Bool(sensitive));

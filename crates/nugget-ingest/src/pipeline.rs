@@ -505,6 +505,8 @@ async fn prepare(
         Some("pii")
     } else {
         sensitivity::classify(
+            key.as_str(),
+            &ex.tags,
             title.as_deref(),
             ex.text.as_deref().unwrap_or(""),
             &ex.extracted_meta,
@@ -512,25 +514,34 @@ async fn prepare(
     };
     let rule_sensitive = rule.is_some();
     let has_text = ex.text.as_deref().is_some_and(|t| !t.trim().is_empty());
-    let wants_triage = inner.cfg.triage
-        && has_text
-        && inner
-            .router
-            .as_ref()
-            .is_some_and(|r| ai::triage_provider(r).is_some());
-    let plan = if !wants_triage {
-        TriagePlan::None
-    } else if let Some(rule) = rule {
-        // Already sensitive by rule; junk alone is not worth a model call.
+    let routable = inner
+        .router
+        .as_ref()
+        .is_some_and(|r| ai::triage_provider(r).is_some());
+    // Unknown counts as sensitive (GG5-2): an item the rules don't flag waits for triage, also
+    // while no local triage model is routable yet (the job picks it up once one is). Only
+    // `assume_unflagged_safe` lets items triage cannot decide now count as not sensitive.
+    let can_triage = inner.cfg.triage && has_text && (routable || !inner.cfg.assume_unflagged_safe);
+    let plan = if let Some(rule) = rule {
+        // Sensitive by rule; junk alone is not worth a model call.
         TriagePlan::Skipped(rule)
-    } else {
+    } else if can_triage {
         match earlier_labels(inner, item, &ex.hash).await {
             Some(prev) => TriagePlan::Reused(prev),
             None => TriagePlan::Pending,
         }
+    } else {
+        TriagePlan::Unknown(if !inner.cfg.triage {
+            "off"
+        } else if !has_text {
+            "no_text"
+        } else {
+            "no_model"
+        })
     };
     let (junk, sensitive) = match &plan {
-        TriagePlan::None | TriagePlan::Skipped(_) => (false, rule_sensitive),
+        TriagePlan::Skipped(_) => (false, true),
+        TriagePlan::Unknown(_) => (false, !inner.cfg.assume_unflagged_safe),
         // Until triage has run the item counts as sensitive: searchable locally, never sent
         // to cloud models.
         TriagePlan::Pending => (false, true),
@@ -609,7 +620,12 @@ async fn prepare(
     }
     meta.insert("junk".into(), Value::Bool(junk));
     match &plan {
-        TriagePlan::None => {}
+        TriagePlan::Unknown(reason) => {
+            meta.insert(
+                "triage".into(),
+                json!({"state": triage::UNKNOWN, "reason": reason}),
+            );
+        }
         TriagePlan::Pending => {
             meta.insert("triage".into(), json!({"state": triage::PENDING}));
         }
@@ -663,8 +679,9 @@ async fn prepare(
 
 /// How an item gets its triage labels.
 enum TriagePlan {
-    /// No triage: off, no local triage provider, or no text.
-    None,
+    /// Triage cannot decide (off, no text, or no model with `assume_unflagged_safe`): the
+    /// reason. Sensitive unless `assume_unflagged_safe`.
+    Unknown(&'static str),
     /// Sensitive by rule (PII or `sensitivity` rules; the rule's name): no model call.
     Skipped(&'static str),
     /// To be labelled by the background job.
@@ -678,7 +695,7 @@ impl TriagePlan {
         match self {
             TriagePlan::Pending => TriageMark::Pending,
             TriagePlan::Skipped(_) => TriageMark::Skipped,
-            TriagePlan::None | TriagePlan::Reused(_) => TriageMark::None,
+            TriagePlan::Unknown(_) | TriagePlan::Reused(_) => TriageMark::None,
         }
     }
 }

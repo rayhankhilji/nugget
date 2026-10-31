@@ -6,6 +6,7 @@
 //! also checked against these rules when it is indexed:
 //! - words and phrases about health, therapy, pay, banking, credentials and legal or identity
 //!   matters, in the title, the text and the mail subject;
+//! - folders and tags that name such matters (`Health/`, `Finance/`, `#finance`; GG5-2);
 //! - senders whose mailbox is a role that handles such content (`hr@`, `payroll@`,
 //!   `security@`, ...) or whose domain names it (`…-therapy.example`, `…clinic…`, `…bank…`).
 //!
@@ -37,6 +38,8 @@ const WORDS: &[(&str, &str)] = &[
     ("pharmacy", "health"),
     ("hba1c", "health"),
     ("biopsy", "health"),
+    ("anaemia", "health"),
+    ("anemia", "health"),
     ("oncology", "health"),
     ("pregnancy", "health"),
     ("vaccination", "health"),
@@ -129,6 +132,8 @@ const ROLE_MAILBOXES: &[(&str, &str)] = &[
 const DOMAIN_WORDS: &[(&str, &str)] = &[
     ("therapy", "health"),
     ("therapist", "health"),
+    ("counselling", "health"),
+    ("counseling", "health"),
     ("clinic", "health"),
     ("health", "health"),
     ("healthcare", "health"),
@@ -143,6 +148,30 @@ const DOMAIN_WORDS: &[(&str, &str)] = &[
     ("legal", "legal"),
 ];
 
+/// Folder names (any path segment of the item key) and tags that file an item as sensitive.
+const FOLDERS_AND_TAGS: &[(&str, &str)] = &[
+    ("health", "health"),
+    ("medical", "health"),
+    ("therapy", "health"),
+    ("counselling", "health"),
+    ("counseling", "health"),
+    ("finance", "financial"),
+    ("finances", "financial"),
+    ("financial", "financial"),
+    ("banking", "financial"),
+    ("bank", "financial"),
+    ("tax", "financial"),
+    ("taxes", "financial"),
+    ("payslip", "financial"),
+    ("payslips", "financial"),
+    ("salary", "financial"),
+    ("mortgage", "financial"),
+    ("insurance", "financial"),
+    ("legal", "legal"),
+    ("passwords", "credentials"),
+    ("hr", "financial"),
+];
+
 fn tokens(s: &str) -> Vec<String> {
     s.to_lowercase()
         .split(|c: char| !(c.is_alphanumeric() || c == '\''))
@@ -152,9 +181,29 @@ fn tokens(s: &str) -> Vec<String> {
 }
 
 /// The kind of sensitive content the rules found (`"health"`, `"financial"`, `"credentials"`,
-/// `"legal"`, `"identity"`), if any. `extracted` is the extractor's metadata (for mail: `from`,
-/// `subject`).
-pub(crate) fn classify(title: Option<&str>, text: &str, extracted: &Value) -> Option<&'static str> {
+/// `"legal"`, `"identity"`), if any. `key` is the item key (a path for file sources), `tags`
+/// the extracted tags, `extracted` the extractor's metadata (for mail: `from`, `subject`).
+pub(crate) fn classify(
+    key: &str,
+    tags: &[String],
+    title: Option<&str>,
+    text: &str,
+    extracted: &Value,
+) -> Option<&'static str> {
+    // Folders (not the file name) and tags. File-source keys may carry a `<root>:` prefix.
+    let folders = key.rsplit_once(['/', '\\']).map_or("", |(dir, _)| dir);
+    let filed = folders
+        .split(['/', '\\'])
+        .map(|seg| seg.rsplit(':').next().unwrap_or(seg).trim().to_lowercase())
+        .chain(
+            tags.iter()
+                .map(|t| t.trim_start_matches('#').trim().to_lowercase()),
+        );
+    for name in filed {
+        if let Some((_, kind)) = FOLDERS_AND_TAGS.iter().find(|(w, _)| *w == name) {
+            return Some(kind);
+        }
+    }
     let subject = extracted.get("subject").and_then(Value::as_str);
     let mut toks = Vec::new();
     for part in [title, subject, Some(text)].into_iter().flatten() {
@@ -207,6 +256,8 @@ mod tests {
 
     fn mail(from: &str, subject: &str, body: &str) -> Option<&'static str> {
         classify(
+            "m.eml",
+            &[],
             Some(subject),
             body,
             &json!({"from": from, "subject": subject}),
@@ -252,9 +303,24 @@ mod tests {
             Some("financial")
         );
         assert_eq!(
-            classify(None, "Termin beim Arzt am Montag", &json!({})),
+            classify("n.md", &[], None, "Termin beim Arzt am Montag", &json!({})),
             Some("health")
         );
+    }
+
+    #[test]
+    fn folders_and_tags_file_items_as_sensitive() {
+        let none = json!({});
+        let c = |key: &str, tags: &[&str]| {
+            let tags: Vec<String> = tags.iter().map(|t| t.to_string()).collect();
+            classify(key, &tags, None, "notes", &none)
+        };
+        assert_eq!(c("0:Health/2026-05-12.md", &[]), Some("health"));
+        assert_eq!(c("Notes/Finance/x.md", &[]), Some("financial"));
+        assert_eq!(c("a.md", &["#finance"]), Some("financial"));
+        // The file name alone is not a folder.
+        assert_eq!(c("Notes/health.md", &[]), None);
+        assert_eq!(c("Notes/Projects/Harbor.md", &["harbor"]), None);
     }
 
     #[test]
