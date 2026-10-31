@@ -385,7 +385,8 @@ jobs:
   # The debug build of nugget-desktop with the real nuggetd, drafting with a fake
   # OpenAI-compatible provider on 127.0.0.1: real key presses fire the trigger (XTest under Xvfb
   # with openbox, SendInput, CGEvent), the overlay window must appear in the OS window list and
-  # stream the draft, and Enter in the overlay must insert it into the GTK fixture / Notepad /
+  # stream the draft, resize to fit it, give a new draft on its Retry key (R) (II3), and Enter in
+  # the overlay must insert it into the GTK fixture / Notepad /
   # TextEdit, read back from that app. Screenshots of the overlay, the probe log and timings are
   # uploaded. See apps/desktop/e2e-native/README.md.
   overlay:
