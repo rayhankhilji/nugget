@@ -460,6 +460,7 @@ impl RpcHandler {
                 let PackedContext {
                     response: ctx,
                     passages,
+                    date,
                     ..
                 } = packed;
                 // Belt and braces: nothing marked sensitive is ever sent to a cloud model.
@@ -488,7 +489,7 @@ impl RpcHandler {
                 match open_stream(p.as_ref(), ask).await {
                     Ok(stream) => {
                         router.report_success(p.id());
-                        return Ok((p, stream, ctx, passages, sent));
+                        return Ok((p, stream, ctx, passages, sent, date));
                     }
                     Err(e) if !explicit && is_fallback_error(&e) => {
                         tracing::warn!(provider = %p.id(), error = %e, "ask: provider failed; trying next");
@@ -507,7 +508,7 @@ impl RpcHandler {
                 Error::NotFound("no provider could answer".into())
             })))
         };
-        let (provider, stream, ctx, passages, sent): (_, _, _, _, SafeHistory) = tokio::select! {
+        let (provider, stream, ctx, passages, sent, date): (_, _, _, _, SafeHistory, _) = tokio::select! {
             r = start => r?,
             () = self.state.shutdown.cancelled() => return Err(shutting_down()),
         };
@@ -555,6 +556,8 @@ impl RpcHandler {
             excluded_sensitive: ctx.excluded_sensitive,
             query_rewrite: rewritten.then_some(search_query),
             general,
+            date: date.map(ask_date_filter),
+            partial: passages.iter().filter(|p| p.partial).map(|p| p.n).collect(),
         };
         self.spawn_stream(provider, stream, stream_id, notify, filter);
         to_result(started)
@@ -956,6 +959,17 @@ fn to_infer_request(messages: Vec<ipc::ChatMessage>) -> Result<ChatRequest, RpcE
 /// are empty ones; long turns are cut, then the newest turns within
 /// [`MAX_ASK_HISTORY_MESSAGES`] and [`MAX_ASK_HISTORY_CHARS`] are kept, starting with a user
 /// turn.
+/// The retriever's date filter as Ask reports it to clients.
+fn ask_date_filter(d: nugget_retrieve::DateFilter) -> ipc::AskDateFilter {
+    ipc::AskDateFilter {
+        phrase: d.phrase,
+        start: d.range.start,
+        end: d.range.end,
+        applied: d.applied,
+        listed: d.listed,
+    }
+}
+
 fn ask_history(history: Vec<ipc::ChatMessage>) -> Vec<ipc::ChatMessage> {
     let mut kept: Vec<ipc::ChatMessage> = Vec::new();
     let mut chars = 0usize;

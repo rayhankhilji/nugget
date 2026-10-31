@@ -7,6 +7,7 @@ import {
   isMethodNotFound,
   isOpenableUrl,
   type ChatDone,
+  type AskDateFilter,
   type Citation,
   type ContextResponse,
   type FacetedHit,
@@ -31,6 +32,8 @@ import { Facets, kindLabel } from "../components/search/Facets";
 import { Preview } from "../components/search/Preview";
 import { RecentSearchList, SavedSearchList, SaveSearchDialog } from "../components/search/SavedSearches";
 import { Timeline } from "../components/search/Timeline";
+import { askCitations } from "../askSearch";
+import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
 import "../styles-search.css";
 
 const LIMITS = [10, 25, 50];
@@ -474,6 +477,8 @@ type Answer = {
   /** The passages the model was given (they can differ from the preview, e.g. for a cloud model). */
   citations: Citation[];
   excludedSensitive: number;
+  /** JJ2: the question's date range and how it filtered the search. */
+  date: AskDateFilter | null;
   text: string;
   done: ChatDone | null;
   error: string | null;
@@ -485,6 +490,7 @@ const NO_ANSWER: Omit<Answer, "error"> = {
   locality: null,
   citations: [],
   excludedSensitive: 0,
+  date: null,
   text: "",
   done: null,
 };
@@ -567,8 +573,9 @@ function AskPanel({
         streamId: started.stream_id,
         provider: started.provider,
         locality: started.locality,
-        citations: started.citations,
+        citations: askCitations(started),
         excludedSensitive: started.excluded_sensitive ?? 0,
+        date: started.date ?? null,
         text: s?.text ?? "",
         done: s?.done ?? null,
         error: s?.done?.error ?? null,
@@ -668,6 +675,7 @@ function AskPanel({
               {withheld}
             </p>
           )}
+          <AskDateNote date={answer.date} />
           {answer.error ? (
             <p className="note note-error" role="alert">
               {answer.error}
@@ -758,6 +766,12 @@ function CitationItem({
               <span className="badge badge-warn" title={t("search.sensitiveTitle")}>
                 {t("search.sensitive")}
               </span>
+            </>
+          )}
+          {c.partial && (
+            <>
+              {" "}
+              <PartialBadge />
             </>
           )}
         </span>

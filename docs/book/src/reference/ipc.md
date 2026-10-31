@@ -81,7 +81,7 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `retrieve.context` | `ContextRequest`: `{query, budget_tokens}` (budget at most 131072) | `ContextResponse`: `text` (passages, each under a `[n]` header), `citations`, `excluded_sensitive` | yes |
-| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten); then `chat.delta` and `chat.done` | yes |
+| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten), `general`, `date` (when the question named a date), `partial` (citation numbers of near misses); then `chat.delta` and `chat.done` | yes |
 
 A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. For `retrieve.ask` the daemon chooses
 the provider first, then packs the context for it: with a `cloud` provider, sensitive items are left out
@@ -89,6 +89,15 @@ and counted in `excluded_sensitive`, and the context is repacked if it falls bac
 With `history`, a follow-up question is first rewritten into a standalone query for retrieval, by a
 local (never `cloud`) chat model or, without one, a heuristic; the earlier user and assistant turns
 then go to the model before the question (`system` entries are ignored, and the turns are bounded).
+
+`AskStarted.date` reports a date phrase in the question ("last week", "in March"):
+`{phrase, start, end, applied, listed}`, with `start` (inclusive) and `end` (exclusive) as RFC 3339
+at the offset the phrase was read with. `applied: false` means nothing dated in the range matched,
+so the question was searched without it; `listed: true` means the question was generic ("summarise
+last week") and the sources are the period's items by date. `AskStarted.partial` lists the `n` of
+citations whose item lacks most of the question's rare key words: at best a near miss. The desktop
+shows both under the answer ("Searched items from 26 Oct to 1 Nov", a "Partial match" label). Both
+fields are absent when empty and from older daemons.
 
 ### Sources and ingest
 

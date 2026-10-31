@@ -10,6 +10,7 @@ import {
   isCommandMissing,
   isOpenableUrl,
   type AnswerCheck,
+  type AskDateFilter,
   type AskStarted,
   type ChatDone,
   type ChatMessage,
@@ -29,6 +30,8 @@ import { Announce, useAnnouncer } from "../components/Announce";
 import { Markdown, type CitationLinks } from "../components/Markdown";
 import { citedNumbers, groupSources, stripCitationMarkers, withheldNotice, type SourceEntry } from "../citations";
 import { Trans, useT } from "../i18n";
+import { askCitations } from "../askSearch";
+import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
 import "../styles-chat.css";
 
 interface Turn {
@@ -47,6 +50,8 @@ interface Turn {
   queryRewrite?: string;
   /** Sensitive items withheld from a cloud model (not saved). */
   excludedSensitive?: number;
+  /** JJ2: the question's date range and how it filtered the search (not saved). */
+  dateFilter?: AskDateFilter;
   /** Sources were on but none matched, so this is a plain chat answer. */
   generalAnswer?: boolean;
   /** The daemon's post-check of a sourced answer (`chat.done`), when it came with one. */
@@ -395,12 +400,14 @@ export function ChatPage() {
             state: buffered?.text ? "streaming" : "pending",
           };
           if (asked) {
-            next.citations = asked.citations;
+            next.citations = askCitations(asked);
             next.queryRewrite = asked.query_rewrite ?? undefined;
             next.excludedSensitive = asked.excluded_sensitive ?? 0;
+            next.dateFilter = asked.date ?? undefined;
           } else if (general) {
             next.generalAnswer = true;
             next.excludedSensitive = general.excluded_sensitive ?? 0;
+            next.dateFilter = general.date ?? undefined;
           }
           if (buffered?.done) next = finish(next, buffered.done);
           return next;
@@ -761,6 +768,7 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
           <span className="citation-title" dir="auto">
             {title}
           </span>
+          {e.citations.some((c) => c.partial) && <PartialBadge />}
         </span>
         {url && isOpenableUrl(url) && (
           <button
@@ -803,6 +811,7 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         </div>
       )}
       {turn.queryRewrite && <p className="muted small chat-rewrite">{t("chat.searchedFor", { query: turn.queryRewrite })}</p>}
+      <AskDateNote date={turn.dateFilter} className="chat-dates" />
       {turn.generalAnswer && <p className="muted small chat-general">{t("chat.generalAnswer")}</p>}
       {check?.not_found && <p className="muted small chat-not-found">{t("chat.notFound")}</p>}
       {flagged.length > 0 && (

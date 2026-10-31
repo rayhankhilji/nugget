@@ -284,6 +284,8 @@ export interface Citation {
   sensitive?: boolean;
   /** The item's date (`YYYY-MM-DD`): source modification time, else last update. */
   date?: string;
+  /** JJ2, set by the client from `AskStarted.partial`: at best a near miss for the question. */
+  partial?: boolean;
 }
 
 export interface ContextResponse {
@@ -322,6 +324,24 @@ export interface AskStarted {
   query_rewrite?: string | null;
   /** Nothing relevant in the sources: the daemon answers as an ordinary chat (Z3). */
   general?: boolean;
+  /** JJ2: the question's date phrase and how it filtered the search. */
+  date?: AskDateFilter | null;
+  /** JJ2: citation numbers of near misses (the item lacks some of the question's rare key words). */
+  partial?: number[];
+}
+
+/** JJ2: a date phrase in an Ask question and what it did (`AskStarted.date`). */
+export interface AskDateFilter {
+  /** As written in the question, e.g. `last week`. */
+  phrase: string;
+  /** RFC 3339, inclusive, at the offset the phrase was read with. */
+  start: string;
+  /** RFC 3339, exclusive (midnight after the last day). */
+  end: string;
+  /** `false`: nothing in the range matched, so all dates were searched. */
+  applied: boolean;
+  /** The question was generic: the period's items by date, not search matches. */
+  listed?: boolean;
 }
 
 // ---- local runtime ----

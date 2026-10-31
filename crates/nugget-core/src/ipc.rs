@@ -610,6 +610,36 @@ pub struct AskStarted {
     /// (no passages, no citations). Clients should say so on the reply.
     #[serde(default)]
     pub general: bool,
+    /// The date phrase found in the question and how it shaped the search ("Searched items from
+    /// 26 Oct to 1 Nov"). Absent when the question named no date, and from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<AskDateFilter>,
+    /// Citation numbers (`Citation::n`) of passages that are at best a near miss: the item
+    /// lacks one of the question's rare key terms. Clients label them "partial match".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partial: Vec<u32>,
+}
+
+/// How a date phrase in an Ask question filtered the search (`AskStarted::date`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskDateFilter {
+    /// The phrase as written in the question, e.g. `"last week"`.
+    pub phrase: String,
+    /// Start of the range (inclusive), at the offset the phrase was read with.
+    #[serde(with = "time::serde::rfc3339")]
+    pub start: time::OffsetDateTime,
+    /// End of the range (exclusive): a range of whole days ends at the midnight after its last
+    /// day.
+    #[serde(with = "time::serde::rfc3339")]
+    pub end: time::OffsetDateTime,
+    /// `true`: only items dated in the range were searched. `false`: nothing in the range
+    /// matched, so the whole question was searched without the date (the sources are not from
+    /// that period).
+    pub applied: bool,
+    /// The question was generic ("summarise last week"), so the sources are the period's items
+    /// by date rather than search matches.
+    #[serde(default)]
+    pub listed: bool,
 }
 
 // ---- local runtime ----
