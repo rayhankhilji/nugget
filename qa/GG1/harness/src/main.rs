@@ -1119,7 +1119,7 @@ fn run_judge(
             let mut req = req;
             req.temperature = Some(0.0);
             let t = Instant::now();
-            let verdict = lm.block_on(tokio::time::timeout(timeout, async {
+            let verdict = lm.block_on(async { tokio::time::timeout(timeout, async {
                 let mut raw = String::new();
                 let mut stream = judge.chat(req).await?;
                 while let Some(ev) = stream.next().await {
@@ -1128,7 +1128,7 @@ fn run_judge(
                     }
                 }
                 Ok::<_, Error>(raw)
-            }));
+            }).await });
             let verdict = match verdict.unwrap_or_else(|_| Err(Error::Other("judge timed out".into()))) {
                 Ok(raw) => serde_json::from_str::<Value>(raw.trim())
                     .unwrap_or_else(|_| json!({"unparsed": raw})),

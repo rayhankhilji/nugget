@@ -23,6 +23,8 @@ on:
 
 permissions:
   contents: read
+  # [gg1-judge] downloads the artifacts of an earlier run.
+  actions: read
 
 concurrency:
   # Per commit: a later push must not supersede a queued real-model run.
@@ -40,6 +42,8 @@ env:
   RESULTS: ${{ github.workspace }}/gg1-results
   ONLY: ${{ inputs.only || '' }}
   REPEATS: ${{ inputs.repeats || '2' }}
+  # The run whose drafts a [gg1-judge] push judges.
+  JUDGE_RUN_ID: "41117357625"
 
 jobs:
   draft:
@@ -161,7 +165,7 @@ jobs:
   judge:
     name: judge (8B) shard ${{ matrix.shard }}
     needs: draft
-    if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]'))
+    if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]') || contains(github.event.head_commit.message, '[gg1-judge]'))
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
@@ -186,9 +190,18 @@ jobs:
       - name: Build the harness
         run: cargo build --release --manifest-path qa/GG1/harness/Cargo.toml
       - uses: actions/download-artifact@v4
+        if: ${{ !contains(github.event.head_commit.message, '[gg1-judge]') }}
         with:
           pattern: gg1-*-ra-off
           path: drafts
+      # [gg1-judge]: judge the drafts of an earlier run (JUDGE_RUN_ID) instead of drafting again.
+      - uses: actions/download-artifact@v4
+        if: ${{ contains(github.event.head_commit.message, '[gg1-judge]') }}
+        with:
+          pattern: gg1-*-ra-off
+          path: drafts
+          run-id: ${{ env.JUDGE_RUN_ID }}
+          github-token: ${{ github.token }}
       - name: Judge
         run: |
           mkdir -p "$RESULTS"
