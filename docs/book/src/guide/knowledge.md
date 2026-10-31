@@ -103,8 +103,13 @@ vault (an item whose sensitivity is unknown counts as sensitive):
   shown, citing only that source.
 - An entity known only from sensitive items (all of its facts and mentions) gets no page, and other
   pages name it without a link. If it had a page before (for example, the item was marked sensitive
-  later), the page becomes a "no longer in your knowledge graph" stub; your own notes on it are kept.
-  When a non-sensitive source supports it again, the page comes back.
+  later), the page is deleted; if you wrote something on it, the file is kept with the heading
+  "Hidden page" and only your own text. When a non-sensitive source supports it again, the page
+  comes back.
+- On other pages, aliases and identifiers learned only from sensitive items are left out of the
+  frontmatter.
+- A vault written by an earlier version is re-rendered once under these rules. Later, when an item
+  becomes sensitive without its facts changing, the pages follow at the entity's next change.
 
 The facts are still in the encrypted store. On the **Knowledge** page such entities and facts carry
 a **Sensitive** badge, and the graph view leaves them out unless you turn on **Show sensitive**. MCP
