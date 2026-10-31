@@ -1,0 +1,90 @@
+[
+ {
+  "at": "2026-10-30T19:52:11.75717388Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test:993",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:59.090532216Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test:993",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:52.053548154Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test:993",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:48.919369369Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test:993",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:48.915975235Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test:993",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:43.191112487Z",
+  "bytes_received": 702,
+  "bytes_sent": 568,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:43.143049023Z",
+  "bytes_received": 491,
+  "bytes_sent": 559,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:43.091115093Z",
+  "bytes_received": 1139,
+  "bytes_sent": 490,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:43.047049535Z",
+  "bytes_received": 734,
+  "bytes_sent": 349,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:43.003089602Z",
+  "bytes_received": 702,
+  "bytes_sent": 568,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:42.95544804Z",
+  "bytes_received": 491,
+  "bytes_sent": 559,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ }
+]

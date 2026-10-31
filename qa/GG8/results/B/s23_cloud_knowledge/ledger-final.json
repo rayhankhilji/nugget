@@ -1,0 +1,81 @@
+[
+ {
+  "at": "2026-10-30T20:05:13.101008713Z",
+  "bytes_received": 1184,
+  "bytes_sent": 4790,
+  "feature": "knowledge",
+  "host": "api.anthropic.com",
+  "items": [
+   {
+    "key": "0:weekly-notes.md",
+    "source": "files-1"
+   }
+  ]
+ },
+ {
+  "at": "2026-10-30T20:05:13.096882304Z",
+  "bytes_received": 1184,
+  "bytes_sent": 4773,
+  "feature": "knowledge",
+  "host": "api.anthropic.com",
+  "items": [
+   {
+    "key": "0:lisbon-trip.md",
+    "source": "files-1"
+   }
+  ]
+ },
+ {
+  "at": "2026-10-30T20:05:13.091299368Z",
+  "bytes_received": 1184,
+  "bytes_sent": 4882,
+  "feature": "knowledge",
+  "host": "api.anthropic.com",
+  "items": [
+   {
+    "key": "0:acme-renewal.md",
+    "source": "files-1"
+   }
+  ]
+ },
+ {
+  "at": "2026-10-30T20:05:11.961517924Z",
+  "bytes_received": 1187,
+  "bytes_sent": 427,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T20:05:11.960692871Z",
+  "bytes_received": 802,
+  "bytes_sent": 490,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T20:05:11.95983134Z",
+  "bytes_received": 1053,
+  "bytes_sent": 1076,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T20:05:11.952290784Z",
+  "bytes_received": 785,
+  "bytes_sent": 155,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T20:05:11.868121468Z",
+  "bytes_received": 511,
+  "bytes_sent": 145,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ }
+]

@@ -1,0 +1,230 @@
+{
+ "scenario": "s20_cloud_ask_chat",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 29
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 6
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 3,
+   "bytes_in": 1954,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 3,
+   "bytes_sent": 1954,
+   "features": [
+    "ask",
+    "chat"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-CHAT-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "ask.answered",
+   "ok": true,
+   "detail": "anthropic cloud {'stream_id': 'c8bb5ba6-90b4-442f-8f98-9a7f4c0fbf23', 'error': None, 'input_tokens': 100, 'output_tokens': 3}",
+   "severity": null,
+   "t": 1793390524.9090087
+  },
+  {
+   "id": "ask.excluded_sensitive",
+   "ok": true,
+   "detail": 4,
+   "severity": null,
+   "t": 1793390524.909049
+  },
+  {
+   "id": "ask.one_request",
+   "ok": true,
+   "detail": 1,
+   "severity": null,
+   "t": 1793390524.9092886
+  },
+  {
+   "id": "ask.no_sensitive_content",
+   "ok": true,
+   "detail": "1 requests; leaked: []",
+   "severity": null,
+   "t": 1793390524.9093096
+  },
+  {
+   "id": "ask.no_local_paths",
+   "ok": false,
+   "detail": [
+    "[1] acme-renewal (file:///tmp/gg8/s20_cloud_ask_chat/Documents/acme-renewal.md)",
+    "[2] lisbon-trip (file:///tmp/gg8/s20_cloud_ask_chat/Documents/lisbon-trip.md)",
+    "[3] weekly-notes (file:///tmp/gg8/s20_cloud_ask_chat/Documents/weekly-notes.md)"
+   ],
+   "severity": "Low",
+   "t": 1793390524.9093263
+  },
+  {
+   "id": "ask.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 1 rows (features ['ask']); unmatched []",
+   "severity": null,
+   "t": 1793390526.4135168
+  },
+  {
+   "id": "ask.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390526.4135442
+  },
+  {
+   "id": "followup.answered",
+   "ok": true,
+   "detail": "rewrite=None {'stream_id': '13fdb4dc-4f46-49a3-9401-08bab7a32d09', 'error': None, 'input_tokens': 100, 'output_tokens': 3}",
+   "severity": null,
+   "t": 1793390526.4702256
+  },
+  {
+   "id": "followup.rewrite_not_cloud",
+   "ok": true,
+   "detail": "1 cloud requests: ['{\"max_tokens\":16000,\"messages\":[{\"content\":[{\"text\":\"When is the Acme renewal due and how will it be paid?\",\"type\":\"text\"}],\"role\":\"user\"},{\"content\":[{\"text\":\"GG8-MOCK-REPLY: noted [1].\",\"type\":\"text']",
+   "severity": null,
+   "t": 1793390526.4702566
+  },
+  {
+   "id": "followup.no_sensitive_content",
+   "ok": true,
+   "detail": "1 requests; leaked: []",
+   "severity": null,
+   "t": 1793390526.470321
+  },
+  {
+   "id": "followup.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 1 rows (features ['ask']); unmatched []",
+   "severity": null,
+   "t": 1793390527.9746082
+  },
+  {
+   "id": "followup.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390527.9746306
+  },
+  {
+   "id": "chat.answered",
+   "ok": true,
+   "detail": "{'provider': 'anthropic', 'stream_id': '684747e4-b418-4678-8e8c-e455c84d02c3'} {'stream_id': '684747e4-b418-4678-8e8c-e455c84d02c3', 'error': None, 'input_tokens': 100, 'output_tokens': 3}",
+   "severity": null,
+   "t": 1793390527.9813237
+  },
+  {
+   "id": "chat.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 2 rows (features ['ask', 'chat']); unmatched []",
+   "severity": null,
+   "t": 1793390529.4847107
+  },
+  {
+   "id": "chat.items_in_ledger",
+   "ok": true,
+   "detail": [
+    {
+     "at": "2026-10-30T20:02:07.9755897Z",
+     "bytes_received": 1053,
+     "bytes_sent": 195,
+     "feature": "chat",
+     "host": "api.anthropic.com",
+     "items": [
+      {
+       "key": "0:acme-renewal.md",
+       "source": "files-1"
+      }
+     ]
+    },
+    {
+     "at": "2026-10-30T20:02:06.420398066Z",
+     "bytes_received": 1053,
+     "bytes_sent": 344,
+     "feature": "ask",
+     "host": "api.anthropic.com",
+     "items": []
+    }
+   ],
+   "severity": null,
+   "t": 1793390529.4847617
+  },
+  {
+   "id": "keys.keys_only_to_own_host",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390529.4852464
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793390523.3349783,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390523.839239,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390529.4851518,
+   "note": "headers seen: {'content-type': ['application/json'], 'accept': ['text/event-stream'], 'x-api-key': ['sk-ant-GG8CANARY-APIKEY-anthropic'], 'anthropic-version': ['2026-10-21'], 'user-agent': ['nugget/0.0.1'], 'host': ['api.anthropic.com']}"
+  },
+  {
+   "t": 1793390529.487303,
+   "label": "daemon.stop"
+  }
+ ]
+}

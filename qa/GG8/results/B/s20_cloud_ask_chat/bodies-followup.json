@@ -1,0 +1,37 @@
+[
+ {
+  "host": "api.anthropic.com",
+  "path": "/v1/messages",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "accept",
+    "text/event-stream"
+   ],
+   [
+    "x-api-key",
+    "sk-ant-GG8CANARY-APIKEY-anthropic"
+   ],
+   [
+    "anthropic-version",
+    "2026-10-21"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.anthropic.com"
+   ],
+   [
+    "content-length",
+    "344"
+   ]
+  ],
+  "body": "{\"max_tokens\":16000,\"messages\":[{\"content\":[{\"text\":\"When is the Acme renewal due and how will it be paid?\",\"type\":\"text\"}],\"role\":\"user\"},{\"content\":[{\"text\":\"GG8-MOCK-REPLY: noted [1].\",\"type\":\"text\"}],\"role\":\"assistant\"},{\"content\":[{\"text\":\"And who is the contact there?\",\"type\":\"text\"}],\"role\":\"user\"}],\"model\":\"claude-mock\",\"stream\":true}"
+ }
+]

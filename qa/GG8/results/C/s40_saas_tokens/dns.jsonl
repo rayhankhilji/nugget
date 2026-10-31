@@ -1,0 +1,14 @@
+{"from": "203.0.113.130", "qname": "api.anthropic.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793389881.9149594}
+{"from": "203.0.113.130", "qname": "api.anthropic.com", "qtype": "AAAA", "answers": [], "t": 1793389881.9153705}
+{"from": "203.0.113.130", "qname": "slack.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793389882.3836055}
+{"from": "203.0.113.130", "qname": "slack.com", "qtype": "AAAA", "answers": [], "t": 1793389882.3837984}
+{"from": "203.0.113.130", "qname": "api.notion.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793389882.4010956}
+{"from": "203.0.113.130", "qname": "api.notion.com", "qtype": "AAAA", "answers": [], "t": 1793389882.4013252}
+{"from": "203.0.113.130", "qname": "api.anthropic.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793389891.441858}
+{"from": "203.0.113.130", "qname": "api.anthropic.com", "qtype": "AAAA", "answers": [], "t": 1793389891.4421382}
+{"from": "203.0.113.130", "qname": "api.anthropic.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793389893.4968283}
+{"from": "203.0.113.130", "qname": "api.anthropic.com", "qtype": "AAAA", "answers": [], "t": 1793389893.4971375}
+{"from": "203.0.113.130", "qname": "api.notion.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793389893.6264646}
+{"from": "203.0.113.130", "qname": "api.notion.com", "qtype": "AAAA", "answers": [], "t": 1793389893.626765}
+{"from": "203.0.113.130", "qname": "slack.com", "qtype": "A", "answers": ["203.0.113.138"], "t": 1793389893.6393294}
+{"from": "203.0.113.130", "qname": "slack.com", "qtype": "AAAA", "answers": [], "t": 1793389893.6395707}

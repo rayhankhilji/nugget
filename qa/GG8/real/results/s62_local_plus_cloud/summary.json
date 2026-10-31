@@ -1,0 +1,374 @@
+{
+ "scenario": "s62_local_plus_cloud",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.2",
+   "dst": "203.0.113.10",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 22
+  },
+  {
+   "src": "203.0.113.2",
+   "dst": "203.0.113.10",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 4
+  },
+  {
+   "src": "::",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "::",
+   "dst": "ff02::1:ff3d:b223",
+   "dport": "ff02::1:ff3d:b223",
+   "proto": "ICMP6",
+   "packets": 1
+  },
+  {
+   "src": "::",
+   "dst": "ff02::1:ff9a:76b9",
+   "dport": "ff02::1:ff9a:76b9",
+   "proto": "ICMP6",
+   "packets": 1
+  },
+  {
+   "src": "fe80::90ad:4aff:fe9a:76b9",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "fe80::90ad:4aff:fe9a:76b9",
+   "dst": "ff02::2",
+   "dport": "ff02::2",
+   "proto": "ICMP6",
+   "packets": 4
+  },
+  {
+   "src": "fe80::d8f2:10ff:fe3d:b223",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "fe80::d8f2:10ff:fe3d:b223",
+   "dst": "ff02::2",
+   "dport": "ff02::2",
+   "proto": "ICMP6",
+   "packets": 4
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 2,
+   "bytes_in": 4892,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 2,
+   "bytes_sent": 4892,
+   "features": [
+    "ask",
+    "draft"
+   ]
+  },
+  "release-assets.githubusercontent.com": {
+   "rows": 1,
+   "bytes_sent": 0,
+   "features": [
+    "runtime_download"
+   ]
+  },
+  "us.aws.cdn.hf.co": {
+   "rows": 2,
+   "bytes_sent": 0,
+   "features": [
+    "model_download"
+   ]
+  },
+  "huggingface.co": {
+   "rows": 2,
+   "bytes_sent": 2860,
+   "features": [
+    "model_download"
+   ]
+  },
+  "github.com": {
+   "rows": 1,
+   "bytes_sent": 514,
+   "features": [
+    "runtime_download"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [
+  "github.com",
+  "huggingface.co",
+  "release-assets.githubusercontent.com",
+  "us.aws.cdn.hf.co"
+ ],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "file data/vault/.nugget/base/README.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/base/README.md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/base/README.md",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_ckzudlb723meuadp.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_ivvz63oodyuaztq6.md",
+   "canary": "GG8CANARY-SENS-4",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_jzbhvluzgheskvdi.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_ndse3x6p7uncrejv.md",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_tq73b6orianc54y6.md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_wsivkudmdebiuly7.md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/.nugget/state.json",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/state.json",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/state.json",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/Commitment/Acme renewal deposit (ent_ivvz63oodyuaztq6).md",
+   "canary": "GG8CANARY-SENS-4",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Organization/GG8CANARY-NORMAL-3 (ent_tq73b6orianc54y6).md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Person/Ask Priya whether Acme wants the renewal signed electronically (ent_wsivkudmdebiuly7).md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/Person/GG8CANARY-NORMAL-1 (ent_ckzudlb723meuadp).md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Person/GG8CANARY-SENS-2 (ent_ndse3x6p7uncrejv).md",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Project/Acme renewal notes (ent_jzbhvluzgheskvdi).md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/README.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/README.md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/README.md",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-real",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-SENS-1",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "read_ahead.local.started",
+   "ok": true,
+   "detail": {
+    "started": true
+   },
+   "severity": null,
+   "t": 1793392667.3058972
+  },
+  {
+   "id": "read_ahead.local.nothing_to_cloud",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793392667.3059347
+  },
+  {
+   "id": "read_ahead.cloud.skipped",
+   "ok": true,
+   "detail": {
+    "skipped": "cloud",
+    "started": false
+   },
+   "severity": null,
+   "t": 1793392677.3065917
+  },
+  {
+   "id": "read_ahead.cloud.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "Blocker",
+   "t": 1793392677.306626
+  },
+  {
+   "id": "draft.cloud.no_sensitive",
+   "ok": true,
+   "detail": [],
+   "severity": "Blocker",
+   "t": 1793392677.5490108
+  },
+  {
+   "id": "draft.cloud.excluded_sensitive",
+   "ok": true,
+   "detail": "excluded=3 provider=anthropic",
+   "severity": null,
+   "t": 1793392677.5490286
+  },
+  {
+   "id": "ask.local_first",
+   "ok": true,
+   "detail": "local-chat on_device cloud=0",
+   "severity": null,
+   "t": 1793392694.43139
+  },
+  {
+   "id": "followup.cloud.single_request",
+   "ok": true,
+   "detail": "1 cloud requests; rewrite=None",
+   "severity": null,
+   "t": 1793392697.5006166
+  },
+  {
+   "id": "followup.cloud.no_sensitive",
+   "ok": false,
+   "detail": [
+    "GG8CANARY-SENS",
+    "4111 1111 1111 1111"
+   ],
+   "severity": "Blocker",
+   "t": 1793392697.5006406
+  },
+  {
+   "id": "fallback.observed",
+   "ok": true,
+   "detail": "provider=local-chat locality=on_device excluded=0 cloud_requests=0 err=None",
+   "severity": null,
+   "t": 1793392704.9330418
+  },
+  {
+   "id": "fallback.no_sensitive",
+   "ok": true,
+   "detail": [],
+   "severity": "Blocker",
+   "t": 1793392704.933071
+  },
+  {
+   "id": "every_cloud_request_ledgered",
+   "ok": true,
+   "detail": "observed={'api.anthropic.com'} ledger={('huggingface.co', 'model_download'), ('release-assets.githubusercontent.com', 'runtime_download'), ('us.aws.cdn.hf.co', 'model_download'), ('api.anthropic.com', 'ask'), ('github.com', 'runtime_download'), ('api.anthropic.com', 'draft')}",
+   "severity": "High",
+   "t": 1793392707.9341085
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793392643.7026272,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793392644.203855,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793392647.2046745,
+   "note": "runtime [{'error': None, 'model_id': 'qwen3-1.7b-q8', 'provider': 'local-chat', 'role': 'chat', 'state': 'ready'}, {'error': None, 'model_id': 'nomic-embed-text-v1.5-q8', 'provider': 'local-embedding', 'role': 'embedding', 'state': 'ready'}]"
+  },
+  {
+   "t": 1793392697.5213835,
+   "note": "killed chat server pid='{\"pid\":22384,\"exe\":\"/tmp/gg8/s62_local_plus_cloud/data/models/runtimes/29eb639b5369b044c40b6a4f3693c3e785a98dfc3c3ef0b12314314726c61d64/llama-b11940/llama-server\",\"port\":0}' rc=1; 22384 /tmp/gg8/s62_local_plus_cloud/data/models/runtimes/29eb639b5369b044c40b6a4f3693c3e785a98dfc3c3ef0b12314314726c61d64/llama-b11940/llama-server --host /tmp/gg8/s62_local_plus_cloud/data/run/chat.sock --alias qwen3-1.7b-q8 --ctx-size 8192 --parallel 1 --n-gpu-layers 0 --no-webui --offline --no-sl"
+  },
+  {
+   "t": 1793392707.9339561,
+   "note": "ledger [('api.anthropic.com', 'ask'), ('api.anthropic.com', 'draft'), ('github.com', 'runtime_download'), ('huggingface.co', 'model_download'), ('release-assets.githubusercontent.com', 'runtime_download'), ('us.aws.cdn.hf.co', 'model_download')]"
+  },
+  {
+   "t": 1793392707.9347632,
+   "label": "daemon.stop"
+  }
+ ]
+}

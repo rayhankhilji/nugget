@@ -1,0 +1,37 @@
+[
+ {
+  "host": "api.anthropic.com",
+  "path": "/v1/messages",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "accept",
+    "text/event-stream"
+   ],
+   [
+    "x-api-key",
+    "sk-ant-GG8CANARY-APIKEY-anthropic"
+   ],
+   [
+    "anthropic-version",
+    "2026-10-21"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.anthropic.com"
+   ],
+   [
+    "content-length",
+    "195"
+   ]
+  ],
+  "body": "{\"max_tokens\":16000,\"messages\":[{\"content\":[{\"text\":\"Summarise: Acme renewal due 14 November, contact Priya. GG8CANARY-CHAT-1\",\"type\":\"text\"}],\"role\":\"user\"}],\"model\":\"claude-mock\",\"stream\":true}"
+ }
+]

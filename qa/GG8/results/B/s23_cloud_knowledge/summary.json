@@ -1,0 +1,141 @@
+{
+ "scenario": "s23_cloud_knowledge",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 61
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 14
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 8,
+   "bytes_in": 16738,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 8,
+   "bytes_sent": 16738,
+   "features": [
+    "knowledge",
+    "probe"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 8
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "no_cloud_sources.nothing_sent",
+   "ok": true,
+   "detail": "status={'claims': 0, 'entities': 0, 'extractor_provider': None, 'last_run': '2026-10-30T20:04:26.360491617Z', 'mentions': 0, 'pending_items': 0, 'vault': {'conflicts': [], 'invalid': [], 'last_render': None, 'pages': 0, 'path': '/tmp/gg8/s23_cloud_knowledge/data/vault'}} requests=[]",
+   "severity": "High",
+   "t": 1793390711.3284247
+  },
+  {
+   "id": "cloud_sources.sent",
+   "ok": true,
+   "detail": "3 requests; status={'claims': 0, 'entities': 0, 'extractor_provider': None, 'last_run': '2026-10-30T20:05:13.106377534Z', 'mentions': 0, 'pending_items': 0, 'vault': {'conflicts': [], 'invalid': [], 'last_render': None, 'pages': 0, 'path': '/tmp/gg8/s23_cloud_knowledge/data/vault'}}",
+   "severity": null,
+   "t": 1793390732.0536346
+  },
+  {
+   "id": "knowledge.no_sensitive_content",
+   "ok": true,
+   "detail": "3 requests; leaked: []",
+   "severity": null,
+   "t": 1793390732.0537505
+  },
+  {
+   "id": "knowledge.ledger_rows",
+   "ok": true,
+   "detail": "3 requests, 8 rows (features ['knowledge', 'probe']); unmatched []",
+   "severity": null,
+   "t": 1793390733.5586464
+  },
+  {
+   "id": "knowledge.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793390733.558673
+  },
+  {
+   "id": "knowledge.no_local_paths",
+   "ok": true,
+   "detail": "",
+   "severity": "Low",
+   "t": 1793390733.558972
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793390664.7985885,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390665.305492,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390711.3307977,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793390711.3640466,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793390711.8672318,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793390712.0215967,
+   "note": "probe: {'context_tokens': None, 'embeddings': False, 'json_schema': True, 'streaming': True, 'tools': True, 'vision': False}"
+  },
+  {
+   "t": 1793390733.5612822,
+   "label": "daemon.stop"
+  }
+ ]
+}

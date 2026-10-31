@@ -1,0 +1,178 @@
+name: QA GG8 (privacy and egress, real models)
+
+# GG8: privacy and egress verified from the outside (docs/qa/GG8.md, qa/GG8/). The daemon runs in
+# a network namespace (qa/GG8/harness/netlab.sh) whose every packet is captured, with a logging
+# DNS server and a recording TLS sink; the observed traffic is compared with the egress ledger.
+# - linux: onboarding with the signed manifest's smallest chat and embedding models on the real
+#   internet (s60), a local session with the real llama-server (s61), local models plus a cloud
+#   provider answered by the sink (s62).
+# - desktop: the real desktop app (debug build carrying a throwaway updater key, as a release
+#   build carries the real one) inside the namespace (s65).
+# - macos: onboarding and a local session with packets attributed per process (pktap).
+# Dispatch only; the results are uploaded as artifacts and summarised in the log.
+
+on:
+  workflow_dispatch:
+    inputs:
+      idle_secs:
+        description: "Idle time at the end of the local session (s61)"
+        default: "300"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  GG8_IDLE_SECS: ${{ inputs.idle_secs || '300' }}
+  RESULTS: ${{ github.workspace }}/gg8-results
+
+jobs:
+  linux:
+    name: Daemon, real models (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg8
+      - name: Install capture tools
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q tshark tcpdump iproute2
+      - name: Build nuggetd (release)
+        run: cargo build --release --locked -p nuggetd
+      - name: Record runner
+        run: |
+          mkdir -p "$RESULTS"
+          { echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"; lscpu | grep -E 'Model name|^CPU\(s\)'; free -g
+            cat /etc/resolv.conf; } | tee "$RESULTS/hardware.txt"
+      - name: Scenarios s60 (onboarding), s61 (local session), s62 (local + cloud)
+        run: |
+          for s in s60_onboarding s61_local_session s62_local_plus_cloud; do
+            sudo -E env "PATH=$PATH" GG8_NUGGETD="$PWD/target/release/nuggetd" \
+              GG8_UPSTREAM_DNS=127.0.0.53 \
+              python3 qa/GG8/harness/lab.py run "qa/GG8/real/scenarios/$s.py" --out "$RESULTS" \
+              || echo "::warning::$s exited $?"
+          done
+      - name: Summary
+        if: always()
+        run: python3 qa/GG8/real/print_summary.py "$RESULTS"
+      - name: Trim captures
+        if: always()
+        run: |
+          sudo chown -R "$USER" "$RESULTS" || true
+          find "$RESULTS" -type f -size +100M -print -delete
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gg8-linux
+          path: gg8-results/
+          retention-days: 14
+
+  desktop:
+    name: Desktop app traffic (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install the Tauri build dependencies, X server and capture tools
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            build-essential file libayatana-appindicator3-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev \
+            xvfb dbus-x11 imagemagick tshark tcpdump iproute2
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg8-desktop
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+      - name: Build nuggetd
+        run: cargo build --locked -p nuggetd
+      # A throwaway updater key, so this build has the updater a release build has.
+      - name: Build nugget-desktop (debug, with a throwaway updater key)
+        working-directory: apps/desktop
+        run: |
+          pnpm tauri signer generate --ci -w "$RUNNER_TEMP/gg8-updater.key" -p "" || true
+          if [ -s "$RUNNER_TEMP/gg8-updater.key.pub" ]; then
+            export NUGGET_UPDATER_PUBKEY="$(cat "$RUNNER_TEMP/gg8-updater.key.pub")"
+          else
+            export NUGGET_UPDATER_PUBKEY="gg8-throwaway-key"
+          fi
+          echo "updater key set: ${#NUGGET_UPDATER_PUBKEY} chars"
+          pnpm tauri build --ci --debug --no-bundle
+      - name: Scenario s65 (desktop)
+        run: |
+          mkdir -p "$RESULTS"
+          sudo -E env "PATH=$PATH" GG8_NUGGETD="$PWD/target/debug/nuggetd" \
+            python3 qa/GG8/harness/lab.py run qa/GG8/real/scenarios/s65_desktop.py --out "$RESULTS" \
+            || echo "::warning::s65 exited $?"
+      - name: Summary
+        if: always()
+        run: python3 qa/GG8/real/print_summary.py "$RESULTS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gg8-desktop
+          path: gg8-results/
+          retention-days: 14
+
+  macos:
+    name: Daemon, real models (macOS, pktap)
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg8-macos
+      - name: Build nuggetd (release)
+        run: cargo build --release --locked -p nuggetd
+      - name: Onboarding and a local session, captured per process
+        run: |
+          mkdir -p "$RESULTS/macos"
+          sudo -E python3 qa/GG8/real/macos_run.py --nuggetd target/release/nuggetd \
+            --out "$RESULTS/macos" || echo "::warning::macos_run exited $?"
+      - name: Summary
+        if: always()
+        run: |
+          sudo chown -R "$USER" "$RESULTS" || true
+          python3 qa/GG8/real/print_summary.py "$RESULTS"
+          find "$RESULTS" -type f -size +100M -print -delete
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gg8-macos
+          path: gg8-results/
+          retention-days: 14
