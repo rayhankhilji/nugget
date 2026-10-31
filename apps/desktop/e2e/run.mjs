@@ -31,6 +31,7 @@ import { keyboardScenario } from "./keyboard.mjs";
 import { backupScenario } from "./backup.mjs";
 import { messagingScenario } from "./messaging.mjs";
 import { visualScenario } from "./visual.mjs";
+import { searchScenario } from "./search.mjs";
 import {
   check,
   DESKTOP,
@@ -59,9 +60,9 @@ import {
  * bring-your-own-key, the accessibility audit, display preferences, keyboard-only use,
  * screenshots compared with baselines, and backup, export and restore into a wiped home.
  */
-const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard", "visual", "backup", "messaging"];
+const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard", "visual", "backup", "messaging", "search"];
 /** Scenarios that use the shared indexed home. */
-const INDEXED = ["pages", "i18n", "a11y", "prefs", "visual"];
+const INDEXED = ["pages", "i18n", "a11y", "prefs", "visual", "search"];
 
 // ---- the page registry, read from the app source so new pages are covered automatically ----
 
@@ -418,7 +419,10 @@ async function main() {
           summary.visual = await visualScenario({ browser, socket, pages: pageRegistry(), onboarded: ONBOARDED });
         } else if (name === "backup") summary.backup = await backupScenario({ browser, bin });
         else if (name === "messaging") summary.messaging = await messagingScenario({ browser, bin });
-        else summary.keyboard = await keyboardScenario({ browser, bin });
+        else if (name === "search") {
+          const { daemon } = await indexedHome(bin);
+          summary.search = await searchScenario({ browser, socket: daemon.socket, onboarded: ONBOARDED });
+        } else summary.keyboard = await keyboardScenario({ browser, bin });
       } catch (e) {
         // A setup failure (daemon, indexing) fails the scenario and lets the next one run.
         results.push({ name: `scenario ${name}`, ok: false, ms: 0, error: e.stack ?? String(e) });

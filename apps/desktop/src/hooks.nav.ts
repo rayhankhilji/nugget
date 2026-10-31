@@ -86,3 +86,18 @@ export function requestPluginInstall(path: string): void {
 export function usePendingPluginInstall(onPath: (path: string) => void): void {
   pluginInstall.usePending(onPath);
 }
+
+const searchState = channel<string>();
+
+/**
+ * Ask the Search page to apply an encoded search state (see searchState.ts): a saved search, a
+ * timeline. The caller navigates to the page itself.
+ */
+export function requestSearchState(encoded: string): void {
+  searchState.request(encoded);
+}
+
+/** Run `onState` for a search state requested before mount and for every later request. */
+export function usePendingSearchState(onState: (encoded: string) => void): void {
+  searchState.usePending(onState);
+}

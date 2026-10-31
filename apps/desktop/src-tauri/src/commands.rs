@@ -1044,6 +1044,35 @@ pub async fn export_run(
     daemon.call(&app, "export.run", &request).await
 }
 
+// ---- II2: faceted search, timelines, previews (pass-through; the daemon validates) ----
+
+#[tauri::command]
+pub async fn search_faceted(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.faceted", &request).await
+}
+
+#[tauri::command]
+pub async fn search_timeline(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.timeline", &request).await
+}
+
+#[tauri::command]
+pub async fn search_preview(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.preview", &request).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

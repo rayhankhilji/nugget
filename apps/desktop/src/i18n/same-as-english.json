@@ -109,7 +109,10 @@
     "updates.badge.beta",
     "updates.title",
     "shell.tray.status",
-    "shell.tray.updates"
+    "shell.tray.updates",
+    "searchui.kind.chat",
+    "searchui.saveName",
+    "searchui.text"
   ],
   "es": [
     "addSource.linear.include",
@@ -137,7 +140,8 @@
     "status.embeddings",
     "status.role.chat",
     "status.role.embedding",
-    "updates.badge.beta"
+    "updates.badge.beta",
+    "searchui.kind.chat"
   ],
   "fr": [
     "addSource.folder.defaultNone",
@@ -194,7 +198,9 @@
     "today.factor.importance",
     "updates.badge.stable",
     "updates.channel.stable",
-    "appSettings.notifyHeading"
+    "appSettings.notifyHeading",
+    "searchui.facet.date",
+    "searchui.facet.source"
   ],
   "hi": [
     "addSource.linear.include",

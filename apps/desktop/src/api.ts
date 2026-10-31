@@ -1038,6 +1038,11 @@ export const api = {
   openUrl: (url: string) => call<OpenResult>("open_url", { url }),
   /** Native folder picker; `[]` when cancelled. */
   pickFolders: (multiple: boolean) => call<string[]>("pick_folders", { multiple }),
+
+  // II2 (types and notes in the II2 block at the end of this file).
+  searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { utc_offset_minutes: utcOffsetMinutes(), ...request } }),
+  searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { utc_offset_minutes: utcOffsetMinutes(), ...request } }),
+  searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request }),
 };
 
 /** `revealed`: the file could run code, so its folder was shown instead of opening it. */
@@ -2689,3 +2694,69 @@ export interface MessagingSettings {
 
 /** The daemon's error when macOS keeps the Messages database from Nugget (Full Disk Access is off). */
 export const needsFullDiskAccess = (message: string | null | undefined): boolean => /full disk access/i.test(message ?? "");
+
+// ---- II2: faceted search, timelines, previews ----
+// Served by the daemon's `search_ui` feature (`search.faceted`, `search.timeline`,
+// `search.preview`). Older daemons answer "method not found": callers fall back (see
+// `isCommandMissing`). Everything stays on this device.
+
+export type ItemKind = "mail" | "event" | "chat" | "file";
+export const ITEM_KINDS: readonly ItemKind[] = ["mail", "event", "chat", "file"];
+export type EntityRefView = { id: string; name: string; kind: string };
+export type FacetedFilters = { sources?: string[]; kinds?: ItemKind[]; people?: string[]; from?: string | null; to?: string | null };
+export type FacetedRequest = { query: string; limit?: number; offset?: number; filters?: FacetedFilters; utc_offset_minutes?: number };
+export type FacetedHit = SearchHit & {
+  date: string | null;
+  date_source: "extracted" | "modified" | "indexed";
+  kind: ItemKind;
+  sensitive: boolean;
+  people: EntityRefView[];
+};
+export type FacetCount = { value: string; count: number };
+export type PersonFacet = FacetCount & { name: string; kind: string };
+export type FacetedResult = {
+  query: string;
+  hits: FacetedHit[];
+  total: number;
+  pool: number;
+  pool_limited: boolean;
+  facets: { sources: FacetCount[]; kinds: FacetCount[]; people: PersonFacet[]; months: FacetCount[] };
+};
+export type TimelineRequest = { entity: string; from?: string | null; to?: string | null; limit?: number; utc_offset_minutes?: number };
+export type TimelineEvent =
+  | { type: "item"; at: string | null; date_source: string; item: ItemRef; title: string | null; snippet: string; kind: ItemKind; url: string | null; sensitive: boolean }
+  | {
+      type: "fact";
+      at: string | null;
+      date_source: string;
+      claim: {
+        id: number;
+        predicate: string;
+        text: string;
+        status: string;
+        confidence: number;
+        evidence: { item: ItemRef; title: string | null; quote: string | null }[];
+      };
+    };
+export type Timeline = { entity: EntityRefView; events: TimelineEvent[]; months: FacetCount[]; total: number; truncated: boolean };
+export type PreviewRequest = { item: ItemRef; chunk_id?: number | null };
+export type ItemPreview = {
+  item: ItemRef;
+  title: string | null;
+  kind: ItemKind;
+  mime: string | null;
+  url: string | null;
+  date: string | null;
+  date_source: string;
+  sensitive: boolean;
+  text: string;
+  truncated: boolean;
+  passage: string | null;
+  people: EntityRefView[];
+  facts: { id: number; subject: EntityRefView; predicate: string; text: string; status: string; confidence: number; quote: string | null }[];
+};
+
+/** The local UTC offset in minutes (east positive), for the daemon's date filters and months. */
+export function utcOffsetMinutes(d: Date = new Date()): number {
+  return -d.getTimezoneOffset();
+}

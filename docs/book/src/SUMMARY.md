@@ -17,6 +17,7 @@
   - [Slack, Notion, GitHub and Linear](guide/sources-saas.md)
   - [iMessage, WhatsApp and Telegram](guide/sources-messaging.md)
 - [Search and Ask, with citations](guide/search-ask.md)
+  - [Filters, saved searches, timelines and previews](guide/search.md)
 - [The knowledge graph and vault](guide/knowledge.md)
 - [Connecting AI apps over MCP](guide/mcp.md)
 - [The desktop app on your computer](guide/desktop.md)
