@@ -18,7 +18,7 @@ PEOPLE = {"Zoe Fixer": "Acme Widgets", "Yuri Retyper": "Beta Systems", "Xena Ali
 def note(name, org, date="2026-08-01", extra=""):
     p = WORK / "Notes/People" / (name.replace(" ", "-") + ".md")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(f"---\ntype: person\ndate: {date}\norg: {org}\n---\n# {name}\n\nWorks at {org}.{extra}\n")
+    p.write_text(f"---\ntype: person\ndate: {date}\nemail: {name.split()[0].lower()}@mail{name.split()[0].lower()}.example\norg: {org}\n---\n# {name}\n\nWorks at {org}.{extra}\n")
     return p
 
 def settle(l):

@@ -46,7 +46,7 @@ jobs:
     steps:
       - id: m
         run: |
-          # TEMPORARY push default: EE1's branch with the 4B model.
+          # TEMPORARY push default: the 4B model (a second run of the integration branch).
           models="${{ inputs.models || 'qwen3-4b-q4km' }}"
           echo "models=$(jq -cn --arg m "$models" '$m | split(",") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
 
@@ -60,7 +60,7 @@ jobs:
       matrix:
         model: ${{ fromJson(needs.setup.outputs.models) }}
     env:
-      PRODUCT_REF: ${{ github.event_name == 'push' && 'ee/entity-resolution' || inputs.product_ref }}
+      PRODUCT_REF: ${{ inputs.product_ref }}
       QA_HOME: ${{ github.workspace }}/qa-home
       QA_OUT: ${{ github.workspace }}/qa-out
     steps:

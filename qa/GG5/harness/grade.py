@@ -23,7 +23,7 @@ import unicodedata
 from pathlib import Path
 
 CURRENT = {"active", "user_asserted"}
-LABELS = ["phase1", "phase2", "edits", "reextract", "restart"]
+LABELS = ["phase1", "phase2", "edits", "reextract", "restart", "restart-later"]
 
 
 def norm(s: str) -> str:
@@ -269,7 +269,7 @@ def grade_edits(run: Path, snaps: dict) -> list:
         removed = [l[1:] for l in e["diff"].splitlines() if l.startswith("-") and not l.startswith("---")]
         added = [l[1:] for l in e["diff"].splitlines() if l.startswith("+") and not l.startswith("+++")]
         ids = [int(m) for l in removed for m in re.findall(r"<!-- c:(\d+) -->", l)]
-        for label in ("edits", "reextract", "restart"):
+        for label in ("edits", "reextract", "restart", "restart-later"):
             s = snaps.get(label)
             if not s:
                 continue

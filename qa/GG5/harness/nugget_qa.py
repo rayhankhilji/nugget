@@ -505,6 +505,12 @@ def main():
             time.sleep(10)
             d.settle("restart", args.settle_timeout)
             d.snapshot("restart")
+            # Does what a restart changed come back once the model is up? Wait for the runtime,
+            # then for the periodic run (10 minutes), and look again.
+            d.wait_runtime()
+            time.sleep(660)
+            d.settle("restart-later", args.settle_timeout)
+            d.snapshot("restart-later")
     finally:
         d.stop()
 
