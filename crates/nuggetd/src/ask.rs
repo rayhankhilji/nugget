@@ -292,7 +292,11 @@ impl Sources {
                     if !text.is_empty() {
                         text.push_str("\n\n");
                     }
-                    text.push_str(&format!("[{}] {title} (passage)\n", p.n));
+                    // Exactly the header the packer renders: `facts` only accepts that line
+                    // as a passage start (EE4, DR-2).
+                    let source = c.url.as_deref().unwrap_or(c.item.source.as_str());
+                    let source = source.split_whitespace().collect::<Vec<_>>().join(" ");
+                    text.push_str(&format!("[{}] {title} ({source})\n", p.n));
                     text.push_str(&defang_lines(&p.text));
                     citations.push(c.clone());
                     let s = support.entry(p.n).or_default();
@@ -1537,8 +1541,13 @@ $48,000 per year.",
         f.push(claim);
         f.finish();
         assert_eq!(f.check(), c);
-        // Parsing the text alone is fooled (why the daemon passes the blocks).
-        assert!(check_answer(claim, &ctx).flagged.is_empty());
+        // Parsing the text alone is no longer fooled either: the packer indents chunk lines that
+        // start like a header (EE4, DR-2), so the forged line stays in passage 1. The daemon still
+        // passes the blocks.
+        assert_eq!(
+            check_answer(claim, &ctx).flagged[0].reason,
+            ClaimFlag::Unsupported
+        );
         let c = check_answer_packed("The final price is $48,000 [2].", &ctx, &passages, None);
         assert!(c.flagged.is_empty(), "{c:?}");
     }
