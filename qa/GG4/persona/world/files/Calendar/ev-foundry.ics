@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//GG4 QA//Persona//EN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:foundry-ws-gg4@foundry-ldn.example
+DTSTAMP:20261029T090000Z
+SEQUENCE:0
+SUMMARY:Foundry service design workshop
+DTSTART;TZID=Europe/London:20261105T100000
+DTEND;TZID=Europe/London:20261105T160000
+ORGANIZER;CN=Harriet Cole:mailto:harriet@foundry-ldn.example
+ATTENDEE;CN=Maya Okafor:mailto:maya@larkspur.example
+ATTENDEE;CN=Harriet Cole:mailto:harriet@foundry-ldn.example
+LOCATION:Foundry, 12 Clerkenwell Rd, London
+END:VEVENT
+END:VCALENDAR

@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use nugget_core::capability::Locality;
+use nugget_core::ids::ItemRef;
 use nugget_core::{Error, Result};
 use nugget_infer::{ChatRequest, ChatResponse, Message, Provider};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,9 @@ pub struct JudgeInput {
     pub due: Option<String>,
     pub evidence: Vec<String>,
     pub actions: Vec<String>,
+    /// The candidate's evidence items, for the egress ledger (not sent to the model).
+    #[serde(skip)]
+    pub items: Vec<ItemRef>,
 }
 
 impl JudgeInput {
@@ -54,6 +58,7 @@ impl JudgeInput {
                 .take(4)
                 .collect(),
             actions: c.actions.iter().map(|a| a.name().to_owned()).collect(),
+            items: c.evidence.iter().map(|e| e.item.clone()).collect(),
         }
     }
 }
@@ -176,11 +181,17 @@ impl Judge for LlmJudge {
             return Ok(Vec::new());
         }
         let payload = serde_json::to_string_pretty(&json!({ "suggestions": inputs }))?;
-        let req = ChatRequest::new(vec![Message::user_text(payload)])
+        let mut req = ChatRequest::new(vec![Message::user_text(payload)])
             .with_system(SYSTEM)
             .with_json_schema(Self::schema())
             .with_max_tokens(self.max_tokens)
             .with_feature(FEATURE_JUDGE);
+        // Every item whose content (title, detail, quotes) is in the payload, for the ledger.
+        for item in inputs.iter().flat_map(|i| &i.items) {
+            if !req.items.contains(item) {
+                req.items.push(item.clone());
+            }
+        }
         let stream = self.provider.chat(req).await?;
         let resp = ChatResponse::collect(stream).await?;
         parse_reply(&resp.text())

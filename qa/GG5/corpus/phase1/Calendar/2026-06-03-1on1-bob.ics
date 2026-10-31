@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget QA//GG5//EN
+BEGIN:VEVENT
+UID:one-on-one-mara-20260603@brightwell.example
+DTSTAMP:20260520T120000Z
+DTSTART:20260603T130000Z
+DTEND:20260603T133000Z
+RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=WE
+SUMMARY:1:1 Mara / Bob
+LOCATION:Brightwell HQ, Bob's office
+ORGANIZER;CN="R. Chen":mailto:robert.chen@brightwell.example
+ATTENDEE;CN="R. Chen";PARTSTAT=ACCEPTED:mailto:robert.chen@brightwell.example
+ATTENDEE;CN="Mara Okafor";PARTSTAT=ACCEPTED:mailto:mara.okafor@brightwell.example
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//GG4 QA//Persona//EN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:maint-gg4@larkspur.example
+DTSTAMP:20261028T140000Z
+SEQUENCE:0
+SUMMARY:Studio server maintenance
+DTSTART;TZID=America/New_York:20261101T013000
+DTEND;TZID=America/New_York:20261101T020000
+ORGANIZER;CN=Priya Raman:mailto:priya@larkspur.example
+ATTENDEE;CN=Maya Okafor:mailto:maya@larkspur.example
+ATTENDEE;CN=Priya Raman:mailto:priya@larkspur.example
+END:VEVENT
+END:VCALENDAR

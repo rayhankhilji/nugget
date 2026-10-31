@@ -449,6 +449,7 @@ impl RpcHandler {
                         let q = search_query.clone();
                         let opts = ContextOptions {
                             exclude_sensitive: cloud,
+                            ..Default::default()
                         };
                         let c = on_blocking_thread(async move {
                             retriever.pack_context_with(&q, budget as usize, opts).await

@@ -147,8 +147,28 @@ Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every 
 | GG1 | `qa/doubletap` | session_01CTjRStX6Dx5a8tNZozvNrv | Double Tap end to end, 60+ scenarios, real models (merged) |
 | GG2 | `qa/ask` | session_01CTjRSsqzVXFPgqGksu9bV6 | Ask and Chat over a realistic persona corpus, 100+ questions (merged) |
 | GG3 | `qa/agent` | session_01CTjRStQCE4cZD93QkhUFM6 | computer-use agent, 50+ tasks incl. injection, kill switch, confirmations (merged) |
-| GG4 | `qa/proactive` | session_01CTjRSs4jvVBSuALYkXyaPB | proactive cards and morning brief over two simulated weeks |
-| GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases |
+| GG4 | `qa/proactive` | session_01CTjRSs4jvVBSuALYkXyaPB | proactive cards and morning brief over two simulated weeks (merged) |
+| GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases (merged) |
 | GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux |
 | GG7 | `qa/multilingual` | session_01CTjRSuVMK4RoFUCfw3YT7S | AI features in all 9 UI languages |
 | GG8 | `qa/privacy` | session_01CTjRSt3BBwCh15spCoLbbe | privacy and egress verified from captured network traffic (merged) |
+
+## Wave HH (fixes from QA): cloud sessions from the integration branch
+Each package comes from a QA report and is briefed in its session's first message. Each lead runs a build layer and a review layer with at most 2 subagents.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| HH1 | `hh/agent-safety` | session_01CTjRSqmXYyfpHJMkM85Dkm | agent safety controls from GG3: ambiguous targets, destructive actions, honest success judging, Send confirmation, key presses |
+| HH2 | `hh/ingest-triage` | session_01CTjRSuENAr49jmyhRicJfp | fast, accurate ingest triage from GG2, plus GG4-6 and GG5-2 |
+| HH3 | `hh/vault-worker` | session_01CTjRSrrQ23MtSpaPTRSLsG | vault merge-back, sensitivity and the knowledge worker from GG5 |
+
+## Wave II (new features alongside the fix waves): cloud sessions from fd101a3
+Briefs in `docs/waves/wave-ii/`. Each lead runs a build layer and a review layer with at most 2 subagents.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| II1 | `ii/messaging-imports` | session_01CTjRStzbSDngszaVDyqEKd | iMessage, WhatsApp and Telegram imports; Signal only if a safe export exists |
+| II2 | `ii/search-timeline` | session_01CTjRSu5FjmNFwghuCH6zXU | search facets, saved and recent searches, timeline view, previews |
+| II3 | `ii/doubletap-overlay` | session_01CTjRSssSYSW1zounPmKgQR | Double Tap overlay: edit before insert, retry, refine, practice field, draft history, accessibility |
+| II4 | `ii/platform-integration` | session_01CTjRSqcYoFMkRXF5giqCX2 | tray, launch at login, notifications, `nugget://` links, plugin file association, quick-ask window, single instance |
+| II5 | `ii/scale` | session_01CTjRSqY1SocQ9DVnvje1WF | 500k-item bench and fixes, virtualised lists, README Scale section |

@@ -22,6 +22,13 @@ use crate::types::{ChatRequest, ChatStream, FEATURE_PREWARM, ProviderKind, Provi
 pub trait Provider: Send + Sync {
     fn id(&self) -> &ProviderId;
     fn meta(&self) -> ProviderMeta;
+    /// False when the provider cannot serve anything right now and fails fast without
+    /// contacting anything (a local runtime slot whose model is not installed), so that callers
+    /// resolving a provider ahead of a request (status, prewarm) skip it as the request's own
+    /// fallback would. The default is true.
+    fn available(&self) -> bool {
+        true
+    }
     /// Start a streaming chat. Transient HTTP failures are retried before the stream starts;
     /// errors after that arrive as `Err` items and end the stream.
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream>;
