@@ -39,7 +39,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use nugget_core::egress::EgressSink;
-use nugget_core::ids::ProviderId;
+use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};
 
@@ -577,6 +577,11 @@ impl Provider for OpenAiCompatibleProvider {
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.embed_items(texts, &[]).await
+    }
+
+    /// Each batch's ledger row lists the distinct items of its texts.
+    async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
         let batch = self
             .common
             .cfg
@@ -584,16 +589,22 @@ impl Provider for OpenAiCompatibleProvider {
             .unwrap_or(DEFAULT_EMBED_BATCH)
             .max(1);
         let mut out: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
-        for chunk in texts.chunks(batch) {
+        for (n, chunk) in texts.chunks(batch).enumerate() {
             let body = json!({
                 "model": self.common.cfg.model,
                 "input": chunk,
                 "encoding_format": "float",
             });
+            let mut refs: Vec<ItemRef> = Vec::new();
+            for item in items.iter().skip(n * batch).take(chunk.len()) {
+                if !refs.contains(item) {
+                    refs.push(item.clone());
+                }
+            }
             let v = self
                 .common
                 .http
-                .post_for_json("embeddings", &body, FEATURE_EMBED, &[])
+                .post_for_json("embeddings", &body, FEATURE_EMBED, &refs)
                 .await?;
             out.extend(parse_embeddings(&self.common.id, &v, chunk.len())?);
         }

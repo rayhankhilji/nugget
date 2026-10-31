@@ -453,8 +453,16 @@ impl Provider for Timed {
     }
 
     async fn embed(&self, texts: &[String]) -> nugget_core::Result<Vec<Vec<f32>>> {
+        self.embed_items(texts, &[]).await
+    }
+
+    async fn embed_items(
+        &self,
+        texts: &[String],
+        items: &[ItemRef],
+    ) -> nugget_core::Result<Vec<Vec<f32>>> {
         let t = Instant::now();
-        let out = self.inner.embed(texts).await;
+        let out = self.inner.embed_items(texts, items).await;
         let ns = t.elapsed().as_nanos() as u64;
         let s = &self.stats;
         s.doc_ns.fetch_add(ns, Ordering::Relaxed);

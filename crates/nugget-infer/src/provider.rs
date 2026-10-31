@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_core::capability::Locality;
 use nugget_core::egress::EgressSink;
-use nugget_core::ids::ProviderId;
+use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
 use reqwest::header::{HeaderName, HeaderValue};
 
@@ -32,6 +32,13 @@ pub trait Provider: Send + Sync {
     /// embed queries and documents differently; the default treats queries as documents.
     /// Wrappers must forward both this and [`Provider::embed`].
     async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.embed(texts).await
+    }
+    /// [`Provider::embed`] with the item each text comes from (`items[i]` for `texts[i]`; empty
+    /// when unknown), so the egress ledger lists the items whose content left the device. The
+    /// default ignores `items`; adapters that call a server record them. Wrappers forward it.
+    async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+        let _ = items;
         self.embed(texts).await
     }
     /// The model's task prefixes as `(query, document)` (see [`crate::embed_prefixes`]); empty
