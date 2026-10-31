@@ -397,7 +397,12 @@ fn overlap_x(a: &crate::Rect, b: &crate::Rect) -> f64 {
 fn score(c: &Node, composer: Option<&Node>, precedes: bool, in_nav: bool) -> f64 {
     // A table row's cells are the columns of one record, not messages; forms (a password
     // prompt next to the composer) and pickers (a list box of recipient chips) are controls.
-    if c.role == Role::Row || holds_form_controls(c) || is_picker(c) {
+    // UIA and AX carry no ARIA role for a chips list: one labelled "To"/"Cc" is a field.
+    if c.role == Role::Row
+        || holds_form_controls(c)
+        || is_picker(c)
+        || field_label(c).is_some_and(|l| is_recipient_label_exact(&l))
+    {
         return 0.0;
     }
     let items: Vec<&Node> = c.children.iter().filter(|k| is_message_like(k)).collect();
@@ -578,6 +583,8 @@ struct Leaf<'a> {
     role: Role,
     text: &'a str,
     x: Option<f64>,
+    /// Top and height, to tell lines apart where one parent holds several.
+    y: Option<(f64, f64)>,
     /// Identity of the parent element: leaves of one parent are runs of the same line.
     parent: usize,
 }
@@ -586,15 +593,26 @@ impl Leaf<'_> {
     /// Whether `next` continues this leaf's line (text runs and links in one block).
     fn same_line(&self, next: &Leaf<'_>) -> bool {
         let inline = |r: Role| matches!(r, Role::StaticText | Role::Link);
-        self.parent == next.parent && inline(self.role) && inline(next.role)
+        // Flat items (UIA) hold every line under one parent: the runs must also overlap.
+        let overlap = match (self.y, next.y) {
+            (Some((a, ah)), Some((b, bh))) => a.max(b) < (a + ah).min(b + bh),
+            _ => true,
+        };
+        self.parent == next.parent && inline(self.role) && inline(next.role) && overlap
     }
 }
 
 fn collect_leaves<'a>(n: &'a Node, out: &mut Vec<Leaf<'a>>) {
-    collect_leaves_in(n, 0, out);
+    collect_leaves_in(n, 0, None, out);
 }
 
-fn collect_leaves_in<'a>(n: &'a Node, parent: usize, out: &mut Vec<Leaf<'a>>) {
+/// `parent_x`: the left edge of the parent block, where a line that a link continues starts.
+fn collect_leaves_in<'a>(
+    n: &'a Node,
+    parent: usize,
+    parent_x: Option<f64>,
+    out: &mut Vec<Leaf<'a>>,
+) {
     if out.len() >= 64 || n.states.secure {
         return;
     }
@@ -602,10 +620,16 @@ fn collect_leaves_in<'a>(n: &'a Node, parent: usize, out: &mut Vec<Leaf<'a>>) {
         return;
     }
     if let Some(t) = n.own_text() {
+        // A link sits mid-line, after text Firefox keeps in its parent's hypertext.
+        let x = match n.role {
+            Role::Link => parent_x.or(n.bounds.map(|b| b.x)),
+            _ => n.bounds.map(|b| b.x),
+        };
         out.push(Leaf {
             role: n.role,
             text: t,
-            x: n.bounds.map(|b| b.x),
+            x,
+            y: n.bounds.map(|b| (b.y, b.height)),
             parent,
         });
         return;
@@ -617,6 +641,7 @@ fn collect_leaves_in<'a>(n: &'a Node, parent: usize, out: &mut Vec<Leaf<'a>>) {
                 role: Role::Button,
                 text: t,
                 x: n.bounds.map(|b| b.x),
+                y: n.bounds.map(|b| (b.y, b.height)),
                 parent,
             });
         }
@@ -624,7 +649,7 @@ fn collect_leaves_in<'a>(n: &'a Node, parent: usize, out: &mut Vec<Leaf<'a>>) {
     }
     let id = std::ptr::from_ref(n) as usize;
     for c in &n.children {
-        collect_leaves_in(c, id, out);
+        collect_leaves_in(c, id, n.bounds.map(|b| b.x), out);
     }
 }
 
@@ -887,6 +912,9 @@ fn draft_from_item(item: &Node, family: AppFamily) -> Option<Draft> {
     if d.text.is_empty() {
         return None;
     }
+    if let (Some(s), Some(ts)) = (summary, d.timestamp.clone()) {
+        recover_from_summary(&mut d, s, &ts);
+    }
     // A summary may still say whose message it is ("Your iMessage" with text children).
     if let Some(s) = summary {
         let p = parse_summary(s, family.comma_summaries());
@@ -898,6 +926,30 @@ fn draft_from_item(item: &Node, family: AppFamily) -> Option<Draft> {
         }
     }
     Some(d)
+}
+
+/// Firefox keeps text that sits directly in a container (the author, a lead-in before a link)
+/// in the container's hypertext, not in a child, so only the item's name has it: "Maya Chen
+/// 10:02 AM Morning!…". Take the author from before the timestamp, and the start of a one-line
+/// body from after it, when the leaves found the rest.
+fn recover_from_summary(d: &mut Draft, summary: &str, ts: &str) {
+    let Some(at) = summary.find(ts) else { return };
+    let (before, after) = (summary[..at].trim(), summary[at + ts.len()..].trim());
+    if d.author.is_none() && !before.is_empty() && looks_like_name(before) {
+        d.author = Some(before.to_string());
+    }
+    let body = d.text.trim();
+    if body.contains('\n') || after.len() <= body.len() || !after.ends_with(body) {
+        return;
+    }
+    let lead = &after[..after.len() - body.len()];
+    let lower = lead.trim().to_lowercase();
+    if lead.ends_with(char::is_whitespace)
+        && !lower.starts_with("to ")
+        && !looks_like_timestamp(&lower)
+    {
+        d.text = after.to_string();
+    }
 }
 
 /// Mark right-aligned bubbles as the user's when the items split cleanly into two columns.
@@ -2148,6 +2200,57 @@ mod tests {
         assert_eq!(ctx.subject.as_deref(), Some("Re: Q3 offsite venue"));
     }
 
+    #[test]
+    fn recorded_browser_trees_match_truth() {
+        for (name, title, context) in [
+            (
+                "web_chrome_windows_mail",
+                "Nugget fixture: Mail compose",
+                "mail",
+            ),
+            (
+                "web_safari_macos_mail",
+                "Nugget fixture: Mail compose",
+                "mail",
+            ),
+            (
+                "web_safari_macos_chat",
+                "Nugget fixture: Plain textarea",
+                "chat",
+            ),
+            (
+                "web_firefox_linux_mail",
+                "Nugget fixture: Mail compose",
+                "mail",
+            ),
+            (
+                "web_firefox_linux_chat",
+                "Nugget fixture: Plain contenteditable",
+                "chat",
+            ),
+            ("web_firefox_linux_quill", "Nugget fixture: Quill", "chat"),
+        ] {
+            let ctx = recorded(name, title);
+            let truth = truth_context(context);
+            eprintln!("{name}");
+            assert_matches_truth(&ctx, &truth);
+            if context == "mail" {
+                assert_eq!(
+                    ctx.recipients,
+                    vec!["Jordan Lee", "Priya Natarajan"],
+                    "{name}"
+                );
+                assert!(
+                    ctx.subject
+                        .as_deref()
+                        .is_some_and(|s| s.ends_with("Q3 offsite venue")),
+                    "{name}"
+                );
+            } else {
+                assert!(ctx.recipients.is_empty(), "{name}");
+            }
+        }
+    }
     #[test]
     fn forms_and_pickers_are_never_a_thread() {
         let item = |t: &str| {
