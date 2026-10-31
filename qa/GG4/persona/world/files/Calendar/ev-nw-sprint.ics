@@ -1,0 +1,18 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//GG4 QA//Persona//EN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:nw-sprint-gg4@northwind-outfitters.example
+DTSTAMP:20261027T130000Z
+SEQUENCE:0
+SUMMARY:Northwind sprint planning
+DTSTART;TZID=America/New_York:20261102T100000
+DTEND;TZID=America/New_York:20261102T110000
+ORGANIZER;CN=Dana Whitfield:mailto:dana@northwind-outfitters.example
+ATTENDEE;CN=Maya Okafor:mailto:maya@larkspur.example
+ATTENDEE;CN=Dana Whitfield:mailto:dana@northwind-outfitters.example
+ATTENDEE;CN=Marcus Lee:mailto:marcus@northwind-outfitters.example
+LOCATION:Zoom
+END:VEVENT
+END:VCALENDAR

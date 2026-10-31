@@ -84,8 +84,9 @@ in `<data>/models/manifest-trust.json` (the model store root, `Paths::models_dir
   a development manifest at version 40 says nothing about the release series.
 - The record is written atomically: a temporary file in the same directory, `fsync`, then rename.
   A refused or unverifiable manifest never changes the record.
-- The check runs after the signature and entry checks, against the key that actually verified the
-  signature (`verify_manifest_with_key`).
+- The check runs after the signature and entry checks, against every trusted key whose signature
+  on the manifest is valid: each one's record must allow the version, and all of them advance
+  together (all or nothing), so a manifest signed by two keys leaves neither behind.
 - **API.** `verify_manifest_checked(bytes, sig, keys, &trust)` for any manifest (embedded or
   downloaded); `default_manifest_checked(&paths)` for the bundled one, which the daemon uses at
   start. `verify_manifest` / `default_manifest` still exist and do **not** check rollback; use

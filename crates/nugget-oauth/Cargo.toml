@@ -22,6 +22,7 @@ sha2 = "0.10"
 url = "2.5"
 
 [dev-dependencies]
+nugget-connector = { workspace = true, features = ["testkit"] }
 wiremock = "0.6"
 
 [lints]

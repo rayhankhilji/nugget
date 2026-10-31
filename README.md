@@ -69,7 +69,7 @@ The desktop app on a fictional corpus (light or dark follows your system). More 
 <p>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/knowledge-why-dark.png">
-  <img src="docs/book/src/images/screenshots/knowledge-why-light.png" alt="Knowledge: the facts about Ada Wexford, one opened with Why? to show the quoted calendar event" width="49%">
+  <img src="docs/book/src/images/screenshots/knowledge-why-light.png" alt="Knowledge: the facts about Ada Wexford, one opened with Based on 1 source to show the quoted calendar event" width="49%">
 </picture>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/today-dark.png">
@@ -138,12 +138,31 @@ flowchart LR
   aiapps["AI apps"] <--> mcp
 ```
 
-## Quick start
+## Install
+
+**No release has been published yet**, and the signing keys don't exist yet. When there is one, the
+[Releases](https://github.com/rayhankhilji/nugget/releases) page will carry:
+
+| Platform | Installers |
+|---|---|
+| macOS 11+ (Apple Silicon, Intel) | `.dmg` |
+| Windows 10 and 11 (x64) | NSIS `-setup.exe` (per user, no admin rights) or `.msi` (Program Files) |
+| Linux x64 and arm64 (arm64 experimental; may be missing from a release) | AppImage, `.deb`, `.rpm` |
+
+plus `SHA256SUMS`, SBOMs and build provenance you can check (after `gh auth login`) with
+`gh attestation verify <file> -R rayhankhilji/nugget --signer-workflow rayhankhilji/nugget/.github/workflows/release.yml`. Updates come through the in-app updater:
+you pick the channel, and by default it only notifies you.
+
+Until then, use the unsigned installers from a release dry run (expect Gatekeeper and SmartScreen
+warnings) or build from source. The [install guide](docs/book/src/guide/install.md) covers all of
+it: verifying downloads, unsigned-build warnings, start at login, updates and uninstalling.
+
+### Build from source
 
 You need Rust (rustup; `rust-toolchain.toml` picks the toolchain, MSRV 1.88), a C toolchain, `make`
 and `perl`. The desktop app also needs Node.js 22, pnpm and the
 [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/). Platform details are in the
-[install guide](docs/book/src/guide/install.md).
+[install guide](docs/book/src/guide/install.md#build-from-source).
 
 ```sh
 git clone https://github.com/rayhankhilji/nugget
@@ -160,8 +179,10 @@ cargo build --release -p nugget-desktop
 ./target/release/nugget-desktop
 ```
 
-To keep development data separate, pass `--home /tmp/nugget-dev` to `nuggetd`. To connect an AI app
-over MCP, see [the MCP guide](docs/book/src/guide/mcp.md).
+A release build from source can't download Nugget's own local models unless you build `nuggetd`
+with `NUGGET_TRUST_DEV_MANIFEST_KEY=1` (see the install guide); Ollama, LM Studio and cloud keys
+work either way. To keep development data separate, pass `--home /tmp/nugget-dev` to `nuggetd`. To
+connect an AI app over MCP, see [the MCP guide](docs/book/src/guide/mcp.md).
 
 ## Documentation
 

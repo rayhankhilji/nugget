@@ -1,0 +1,69 @@
+{
+  "commit": "0d81796",
+  "results": [
+    {
+      "events": [
+        {
+          "event": "suspended",
+          "question": ""
+        }
+      ],
+      "legs": [
+        {
+          "actions": [
+            {
+              "decision": "allow",
+              "executed": true,
+              "is_error": false,
+              "risk": "Observe",
+              "step": 1,
+              "tool": "ask_user",
+              "verification": null
+            }
+          ],
+          "claim": null,
+          "elapsed_ms": 1,
+          "outcome": "needs_input: ",
+          "steps": 1,
+          "summary": null,
+          "verification": {
+            "failed": 0,
+            "passed": 0,
+            "unverifiable": 0
+          }
+        }
+      ],
+      "max_steps": 30,
+      "name": "ask-empty-question",
+      "perturb": "None",
+      "session": {
+        "acts": 0,
+        "log": [],
+        "observes": 0
+      },
+      "task": "gg3-ask-two-priya",
+      "transcript": [
+        {
+          "shown": [
+            {
+              "text": "Task from the user:\nDelete Priya's email.\n\nContext:\nOpen apps: mail.\n\nIn this task, untrusted tool output is wrapped in the tag untrusted-b301aa7b2b88."
+            }
+          ],
+          "then": [
+            {
+              "args": {
+                "question": ""
+              },
+              "call": "ask_user"
+            }
+          ],
+          "turn": 1
+        }
+      ],
+      "user": "Approve",
+      "wall_ms": 1,
+      "what": "ask_user with an empty question",
+      "world_events": []
+    }
+  ]
+}

@@ -89,6 +89,32 @@ describe("sources flow", () => {
     await findByRole("heading", { name: "Projects", level: 2 });
   });
 
+  it("explains the blocked Add folder, then adds a typed path without pressing Add", async () => {
+    const added: SourceInfo = { id: "files-2", kind: "files", name: "Projects", enabled: true, state: "syncing", items: 0, chunks: 0, last_sync: null };
+    const d = daemon({ sources_add: added });
+    await renderApp({ page: "sources" });
+    await click(getByRole("button", { name: t("sources.add") }));
+    await click(within(getByRole("dialog")).getByRole("button", { name: t("common.next") }));
+    const dialog = getByRole("dialog", { name: t("addSource.addTitle.files") });
+
+    // Nothing chosen: the submit stays focusable, says why, and pressing it explains.
+    const submitBtn = within(dialog).getByRole("button", { name: t("addSource.folder.submit") });
+    expect(submitBtn.getAttribute("aria-disabled")).toBe("true");
+    expect(dialog.textContent).toContain(t("addSource.folder.needOneHint"));
+    await click(submitBtn);
+    expect(within(dialog).getByRole("alert").textContent).toBe(t("addSource.folder.needOne"));
+    expect(d.count("sources_add")).toBe(0);
+
+    // A typed full path counts, and the name hint says what will be saved.
+    await type(within(dialog).getByRole("textbox", { name: t("addSource.folder.pathLabel") }), "/home/me/Projects");
+    expect(submitBtn.getAttribute("aria-disabled")).toBeNull();
+    expect(dialog.textContent).toContain(t("addSource.nameHintDefault", { name: "Projects" }));
+    await click(submitBtn);
+    expect(d.callsTo("sources_add")).toEqual([
+      { request: { id: null, kind: "files", name: "Projects", settings: expect.objectContaining({ roots: ["/home/me/Projects"] }) } },
+    ]);
+  });
+
   it("adds Google Drive with its opt-ins, saves the secret and starts sign-in", async () => {
     const added: SourceInfo = { id: "gdrive-1", kind: "gdrive", name: "Google Drive", enabled: true, state: "needs_auth", items: 0, chunks: 0, last_sync: null };
     const url = "https://accounts.google.com/o/oauth2/v2/auth?client_id=x";

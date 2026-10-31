@@ -329,11 +329,93 @@ fn normalise(scope: Scope, key: &str) -> String {
     }
 }
 
-/// The domain of a sender address, unless it is a personal mailbox domain.
+/// Mailbox providers whose every country domain is personal mail (`yahoo.co.uk`, `hotmail.fr`,
+/// `web.de`): matched on the first label of the base domain.
+const MAILBOX_BRANDS: &[&str] = &[
+    "gmail",
+    "googlemail",
+    "yahoo",
+    "ymail",
+    "rocketmail",
+    "hotmail",
+    "outlook",
+    "live",
+    "msn",
+    "aol",
+    "icloud",
+    "gmx",
+    "web",
+    "yandex",
+    "mail",
+    "proton",
+    "protonmail",
+    "tutanota",
+    "tuta",
+    "zoho",
+    "fastmail",
+    "orange",
+    "laposte",
+    "libero",
+    "t-online",
+    "qq",
+    "163",
+    "126",
+    "naver",
+    "seznam",
+    "rediffmail",
+];
+
+/// Base domains under which anyone can get their own subdomain and send from it (a Microsoft
+/// 365 tenant, a hosted site): what one sender there taught says nothing about another.
+const HOSTED_SUFFIXES: &[&str] = &[
+    "onmicrosoft.com",
+    "github.io",
+    "herokuapp.com",
+    "vercel.app",
+    "netlify.app",
+    "pages.dev",
+    "web.app",
+    "firebaseapp.com",
+    "appspot.com",
+    "blogspot.com",
+    "me.uk",
+    // Mailing lists and newsletter hosts: every list or newsletter sends from the same domain.
+    "googlegroups.com",
+    "groups.io",
+    "substack.com",
+    // Second levels sold or given to anyone, which `base_domain` (no public suffix list) takes
+    // for the registrable domain: `evil.eu.org` and `acme.eu.org` would be one key.
+    "eu.org",
+    "pp.ua",
+    "uk.com",
+    "us.com",
+    "eu.com",
+    "de.com",
+    "gb.net",
+    "uk.net",
+    "za.com",
+    "cn.com",
+    "jpn.com",
+    "co.com",
+    "gr.jp",
+];
+
+/// Whether unrelated people can get addresses at this base domain.
+fn shared_domain(d: &str) -> bool {
+    PUBLIC_MAIL_DOMAINS.contains(&d)
+        || HOSTED_SUFFIXES.contains(&d)
+        || d.split('.')
+            .next()
+            .is_some_and(|l| MAILBOX_BRANDS.contains(&l))
+}
+
+/// The domain of a sender address, unless unrelated people can get addresses there (a personal
+/// mailbox provider in any country, a hosted tenant suffix): anyone could otherwise sign up
+/// and inherit the lift the user's accepts gave that domain.
 pub fn sender_domain(sender: &str) -> Option<String> {
     let (_, d) = sender.trim().rsplit_once('@')?;
     let d = crate::generators::base_domain(d);
-    (!d.is_empty() && !PUBLIC_MAIL_DOMAINS.contains(&d.as_str())).then_some(d)
+    (!d.is_empty() && !shared_domain(&d)).then_some(d)
 }
 
 /// A card about the conversation itself (an unanswered message, or the user's question still
@@ -435,6 +517,16 @@ impl Learned {
             }
         }
         self.bound(now);
+    }
+
+    /// Forget the label of the thread a card with these features is in: the card is
+    /// sensitive, and the label an earlier card of the thread left is the same subject.
+    pub fn forget_thread_label(&mut self, features: &Features) {
+        if let Some(t) = features.thread.as_deref().filter(|t| !t.is_empty())
+            && let Some(e) = self.entries.get_mut(&entry_id(Scope::Thread, t))
+        {
+            e.label = None;
+        }
     }
 
     /// The effects on a card with these features at `now`, strongest first. Their
@@ -925,6 +1017,45 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    /// PL-1: an address anyone can sign up for does not inherit what the user taught its
+    /// domain.
+    #[test]
+    fn free_signup_domains_teach_nothing_about_the_domain() {
+        for (friend, stranger) in [
+            ("friend@yahoo.co.uk", "phish@yahoo.co.uk"),
+            ("friend@hotmail.fr", "phish@hotmail.fr"),
+            ("friend@web.de", "phish@web.de"),
+            ("alice@corp.onmicrosoft.com", "phish@evil.onmicrosoft.com"),
+            ("ops@team.github.io", "phish@evil.github.io"),
+            // Lists and second levels anyone can register (`base_domain` stops at them).
+            ("team@googlegroups.com", "phish@googlegroups.com"),
+            ("ana@acme.eu.org", "phish@evil.eu.org"),
+            ("ana@acme.uk.com", "phish@evil.uk.com"),
+            ("ana@acme.pp.ua", "phish@evil.pp.ua"),
+        ] {
+            let mut l = Learned::default();
+            for i in 0..10 {
+                l.record(
+                    K,
+                    &mail(friend, &format!("t{i}"), t0()),
+                    Feedback::Accepted,
+                    None,
+                    "",
+                    t0(),
+                );
+            }
+            let e = effect(&l, &mail(stranger, "tx", t0()), Scope::Domain, t0());
+            assert!(e.is_none(), "{stranger} lifted by {friend}: {e:?}");
+            assert!(
+                !l.entries.keys().any(|k| k.starts_with("domain:")),
+                "{friend}"
+            );
+        }
+        // A company domain still learns.
+        assert_eq!(sender_domain("a@mail.acme.io").as_deref(), Some("acme.io"));
+        assert_eq!(sender_domain("a@acme.co.uk").as_deref(), Some("acme.co.uk"));
     }
 
     #[test]

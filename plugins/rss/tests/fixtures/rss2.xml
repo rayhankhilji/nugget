@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Example Blog</title>
+    <link>https://blog.example.substack.com/</link>
+    <description>Posts about things</description>
+    <item>
+      <title>Hello &amp; welcome</title>
+      <link>https://blog.example.substack.com/p/hello</link>
+      <guid isPermaLink="false">post-1</guid>
+      <pubDate>Mon, 02 Jan 2006 15:04:05 GMT</pubDate>
+      <dc:creator>Ada</dc:creator>
+      <category>intro</category>
+      <category>meta</category>
+      <description>A short summary.</description>
+      <content:encoded><![CDATA[<p>The <b>full</b> post.</p>]]></content:encoded>
+    </item>
+    <item>
+      <title>Second post</title>
+      <guid>https://blog.example.substack.com/p/second</guid>
+      <pubDate>Tue, 03 Jan 2006 10:00:00 +0100</pubDate>
+      <description>&lt;p&gt;Escaped HTML body.&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Relative link</title>
+      <link>/p/third</link>
+      <description>Third.</description>
+    </item>
+    <item>
+      <description>No title, no link, no guid.</description>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,179 @@
+[
+ {
+  "at": "2026-10-30T19:51:34.03123648Z",
+  "bytes_received": 252,
+  "bytes_sent": 195,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.988156055Z",
+  "bytes_received": 252,
+  "bytes_sent": 169,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.943101984Z",
+  "bytes_received": 390,
+  "bytes_sent": 195,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.898906885Z",
+  "bytes_received": 233,
+  "bytes_sent": 169,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.855113126Z",
+  "bytes_received": 139,
+  "bytes_sent": 106,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.810955422Z",
+  "bytes_received": 188,
+  "bytes_sent": 190,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.767240659Z",
+  "bytes_received": 137,
+  "bytes_sent": 106,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.754912799Z",
+  "bytes_received": 1001,
+  "bytes_sent": 241,
+  "feature": "sync:notion",
+  "host": "api.notion.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.718863653Z",
+  "bytes_received": 129,
+  "bytes_sent": 97,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:33.711534339Z",
+  "bytes_received": 130,
+  "bytes_sent": 128,
+  "feature": "sync:notion",
+  "host": "api.notion.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:31.440318504Z",
+  "bytes_received": 1053,
+  "bytes_sent": 1023,
+  "feature": "ask",
+  "host": "api.anthropic.com",
+  "items": [
+   {
+    "key": "page/p-acme",
+    "source": "notion-1"
+   },
+   {
+    "key": "C1/day/2026-10-30",
+    "source": "slack-1"
+   }
+  ]
+ },
+ {
+  "at": "2026-10-30T19:51:22.687122821Z",
+  "bytes_received": 252,
+  "bytes_sent": 195,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.63916678Z",
+  "bytes_received": 390,
+  "bytes_sent": 195,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.602722231Z",
+  "bytes_received": 292,
+  "bytes_sent": 155,
+  "feature": "sync:notion",
+  "host": "api.notion.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.595068383Z",
+  "bytes_received": 139,
+  "bytes_sent": 106,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.558972506Z",
+  "bytes_received": 286,
+  "bytes_sent": 156,
+  "feature": "sync:notion",
+  "host": "api.notion.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.551270354Z",
+  "bytes_received": 188,
+  "bytes_sent": 190,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.514777866Z",
+  "bytes_received": 1001,
+  "bytes_sent": 241,
+  "feature": "sync:notion",
+  "host": "api.notion.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.507125712Z",
+  "bytes_received": 137,
+  "bytes_sent": 106,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.466767446Z",
+  "bytes_received": 130,
+  "bytes_sent": 128,
+  "feature": "sync:notion",
+  "host": "api.notion.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-30T19:51:22.463147894Z",
+  "bytes_received": 129,
+  "bytes_sent": 97,
+  "feature": "sync:slack",
+  "host": "slack.com",
+  "items": []
+ }
+]

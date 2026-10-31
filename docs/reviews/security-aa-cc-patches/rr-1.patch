@@ -1,0 +1,183 @@
+diff -ru a/crates/nugget-retrieve/src/rerank.rs b/crates/nugget-retrieve/src/rerank.rs
+--- a/crates/nugget-retrieve/src/rerank.rs
++++ b/crates/nugget-retrieve/src/rerank.rs
+@@ -47,6 +47,12 @@
+     /// A short name for logs.
+     fn name(&self) -> &str;
+ 
++    /// Where the passages go. Sensitive items (see [`crate::is_sensitive`]) are never sent to a
++    /// `Cloud` reranker. Defaults to `Cloud` so an implementation that does not say fails closed.
++    fn locality(&self) -> Locality {
++        Locality::Cloud
++    }
++
+     /// One relevance score per passage, in passage order. Higher is more relevant; the scale is
+     /// the model's own (probabilities or logits): the retriever only compares scores of one call.
+     async fn rerank(&self, query: &str, passages: &[String]) -> Result<Vec<f32>>;
+@@ -330,6 +336,10 @@
+         &self.host
+     }
+ 
++    fn locality(&self) -> Locality {
++        self.locality
++    }
++
+     async fn rerank(&self, query: &str, passages: &[String]) -> Result<Vec<f32>> {
+         self.call(query, passages, &[]).await
+     }
+diff -ru a/crates/nugget-retrieve/src/retriever.rs b/crates/nugget-retrieve/src/retriever.rs
+--- a/crates/nugget-retrieve/src/retriever.rs
++++ b/crates/nugget-retrieve/src/retriever.rs
+@@ -592,10 +592,18 @@
+         n: usize,
+     ) -> Result<bool> {
+         let n = n.min(pool.len());
+-        let ids: Vec<ChunkId> = pool[..n].iter().map(|r| r.cand.chunk_id).collect();
++        // Sensitive items never go to a cloud reranker (as for cloud embeddings and contexts):
++        // only the others are sent, and a withheld item keeps its first-stage relevance.
++        let cloud = reranker.locality() == Locality::Cloud;
++        let sent: Vec<usize> = (0..n).filter(|&i| !(cloud && pool[i].sensitive)).collect();
++        if sent.is_empty() {
++            return Ok(false);
++        }
++        let ids: Vec<ChunkId> = sent.iter().map(|&i| pool[i].cand.chunk_id).collect();
+         let chunks = self.chunks_by_id(&ids)?;
+-        let passages: Vec<String> = pool[..n]
++        let passages: Vec<String> = sent
+             .iter()
++            .map(|&i| &pool[i])
+             .map(|r| {
+                 let text = chunks
+                     .get(&r.cand.chunk_id)
+@@ -606,16 +614,16 @@
+                 }
+             })
+             .collect();
+-        let items: Vec<_> = pool[..n].iter().map(|r| r.cand.item.clone()).collect();
++        let items: Vec<_> = sent.iter().map(|&i| pool[i].cand.item.clone()).collect();
+         let timeout = Duration::from_millis(self.config.rerank_timeout_ms.max(1));
+         let call = reranker.rerank_items(query, &passages, &items);
+         let scores = match tokio::time::timeout(timeout, call).await {
+-            Ok(Ok(s)) if s.len() == n && s.iter().all(|x| x.is_finite()) => s,
++            Ok(Ok(s)) if s.len() == sent.len() && s.iter().all(|x| x.is_finite()) => s,
+             Ok(Ok(s)) => {
+                 tracing::warn!(
+                     reranker = reranker.name(),
+                     got = s.len(),
+-                    expected = n,
++                    expected = sent.len(),
+                     "bad rerank scores; keeping first-stage order"
+                 );
+                 return Ok(false);
+@@ -638,8 +646,17 @@
+             1.0
+         };
+         let scores = normalise_scores(&scores);
++        let mut by_pos: Vec<Option<f32>> = vec![None; pool.len()];
++        for (&i, &s) in sent.iter().zip(&scores) {
++            by_pos[i] = Some(s);
++        }
+         for (i, r) in pool.iter_mut().enumerate() {
+-            let s = scores.get(i).copied().unwrap_or(0.0);
++            let s = match by_pos[i] {
++                Some(s) => s,
++                // Withheld from a cloud reranker: neither promoted nor demoted.
++                None if i < n => r.cand.rel,
++                None => 0.0,
++            };
+             r.cand.rel = w * s + (1.0 - w) * r.cand.rel;
+         }
+         pool.sort_by(|a, b| b.cand.rel.total_cmp(&a.cand.rel));
+diff -ru a/crates/nugget-retrieve/tests/quality.rs b/crates/nugget-retrieve/tests/quality.rs
+--- a/crates/nugget-retrieve/tests/quality.rs
++++ b/crates/nugget-retrieve/tests/quality.rs
+@@ -250,6 +250,9 @@
+     fn name(&self) -> &str {
+         "hang"
+     }
++    fn locality(&self) -> Locality {
++        Locality::OnDevice
++    }
+     async fn rerank(&self, _q: &str, _p: &[String]) -> Result<Vec<f32>> {
+         std::future::pending().await
+     }
+@@ -283,6 +286,9 @@
+     fn name(&self) -> &str {
+         "prefer"
+     }
++    fn locality(&self) -> Locality {
++        Locality::OnDevice
++    }
+     async fn rerank(&self, _q: &str, passages: &[String]) -> Result<Vec<f32>> {
+         self.seen.fetch_add(passages.len(), Ordering::SeqCst);
+         Ok(passages
+@@ -727,3 +733,54 @@
+         RewriteMethod::Unchanged
+     );
+ }
++
++/// A cloud reranker that records the passages it was sent.
++struct CloudSeen {
++    seen: Mutex<Vec<String>>,
++}
++
++#[async_trait]
++impl Reranker for CloudSeen {
++    fn name(&self) -> &str {
++        "cloud"
++    }
++    fn locality(&self) -> Locality {
++        Locality::Cloud
++    }
++    async fn rerank(&self, _q: &str, passages: &[String]) -> Result<Vec<f32>> {
++        self.seen.lock().unwrap().extend(passages.iter().cloned());
++        Ok(vec![0.5; passages.len()])
++    }
++}
++
++#[tokio::test]
++async fn sensitive_passages_never_reach_a_cloud_reranker() {
++    let store = Store::open_in_memory().unwrap();
++    for (key, text, sensitive) in [
++        ("a", "Boiler boiler: the boiler alarm PIN is 4417.", true),
++        ("b", "Boiler service booked with the engineer.", false),
++    ] {
++        let item = NewItem::new("notes", key, content_hash(text))
++            .with_title(key)
++            .with_metadata(json!({ "sensitive": sensitive }));
++        store.upsert_item(&item).unwrap();
++        store
++            .replace_chunks(&item.item, &[NewChunk::text(text)])
++            .unwrap();
++    }
++    let cloud = Arc::new(CloudSeen {
++        seen: Mutex::new(Vec::new()),
++    });
++    let r = Retriever::new(store, None, cfg()).with_reranker(cloud.clone());
++    let res = r.search("boiler", 5).await.unwrap();
++    assert!(res.reranked);
++    assert_eq!(
++        keys(&res.items).len(),
++        2,
++        "the sensitive item is still found"
++    );
++    let seen = cloud.seen.lock().unwrap();
++    assert_eq!(seen.len(), 1, "{seen:?}");
++    assert!(seen[0].contains("engineer"));
++    assert!(!seen.iter().any(|p| p.contains("4417")), "{seen:?}");
++}
+diff -ru a/crates/nuggetd/src/rerank.rs b/crates/nuggetd/src/rerank.rs
+--- a/crates/nuggetd/src/rerank.rs
++++ b/crates/nuggetd/src/rerank.rs
+@@ -171,6 +171,11 @@
+         &self.name
+     }
+ 
++    /// The runtime's own server, on this device.
++    fn locality(&self) -> nugget_core::capability::Locality {
++        nugget_core::capability::Locality::OnDevice
++    }
++
+     async fn rerank(&self, query: &str, passages: &[String]) -> Result<Vec<f32>> {
+         self.rerank_items(query, passages, &[]).await
+     }

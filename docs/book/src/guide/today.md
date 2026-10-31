@@ -29,7 +29,7 @@ Cards start from fixed, deterministic rules, not from a model:
 Newsletters, mailing lists and automated senders (no-reply addresses, automatic replies) never count
 as unanswered threads.
 
-Every card carries its **evidence**: the items and quotes it came from. **Why?** on a card opens
+Every card carries its **evidence**: the items and quotes it came from. **Show N sources** on a card opens
 them, together with the top factors behind its rank.
 
 ## How cards are ranked

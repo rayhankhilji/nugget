@@ -17,6 +17,7 @@
 //! and redirects are never followed. Endpoints are injectable with [`GoogleEndpoints`] for tests.
 
 mod api;
+mod carry;
 mod drive;
 mod drive_content;
 mod gcal;
@@ -30,6 +31,8 @@ use std::time::Duration;
 use nugget_connector::Registry;
 
 pub use drive::{DriveConnector, DriveFactory};
+#[doc(hidden)]
+pub use drive_content::fuzz_export;
 pub use gcal::{CalendarConnector, CalendarFactory};
 pub use gmail::{ACTION_FEATURE as GMAIL_ACTION_FEATURE, GmailConnector, GmailFactory};
 

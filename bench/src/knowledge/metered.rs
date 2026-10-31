@@ -325,6 +325,22 @@ impl Provider for MeteredProvider {
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         self.inner.embed(texts).await
     }
+
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.inner.embed_query(texts).await
+    }
+
+    async fn embed_items(
+        &self,
+        texts: &[String],
+        items: &[nugget_core::ids::ItemRef],
+    ) -> Result<Vec<Vec<f32>>> {
+        self.inner.embed_items(texts, items).await
+    }
+
+    fn embed_prefixes(&self) -> (String, String) {
+        self.inner.embed_prefixes()
+    }
 }
 
 #[cfg(test)]

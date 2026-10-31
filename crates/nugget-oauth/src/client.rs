@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nugget_connector::http::{MeteredHttp, Response};
+use nugget_connector::http::{MeteredHttp, Response, retry_after_ms};
 use nugget_connector::{AuthFlow, SecretStore};
 use nugget_core::{Error, Result};
 use reqwest::Method;
@@ -84,7 +84,9 @@ impl Authorization {
 struct TokenResponse {
     access_token: Option<String>,
     refresh_token: Option<String>,
-    expires_in: Option<i64>,
+    /// Seconds. Some providers (Azure AD v1, ADFS) send it as a string, some as a float.
+    #[serde(default)]
+    expires_in: Option<serde_json::Value>,
     token_type: Option<String>,
     scope: Option<String>,
 }
@@ -238,6 +240,25 @@ impl OAuthClient {
     }
 }
 
+/// Longest token lifetime believed from `expires_in` (servers occasionally send absurd values).
+const MAX_EXPIRES_IN: i64 = 10 * 365 * 86_400;
+
+/// `expires_in` as whole seconds, clamped to `0..=MAX_EXPIRES_IN`. A number, a numeric string
+/// or a float are accepted; anything else (or a non-positive value, which would make every call
+/// refresh) means "the provider did not say", so the token is used until the API rejects it.
+fn expires_in_secs(v: &serde_json::Value) -> Option<i64> {
+    let secs = match v {
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .or_else(|| n.as_f64().filter(|f| f.is_finite()).map(|f| f as i64))?,
+        serde_json::Value::String(s) => {
+            s.trim().parse::<f64>().ok().filter(|f| f.is_finite())? as i64
+        }
+        _ => return None,
+    };
+    (secs > 0).then(|| secs.min(MAX_EXPIRES_IN))
+}
+
 fn parse_token_response(resp: Response) -> Result<TokenSet> {
     let status = resp.status.as_u16();
     if resp.status.is_success() {
@@ -253,7 +274,9 @@ fn parse_token_response(resp: Response) -> Result<TokenSet> {
             refresh_token: tr.refresh_token.filter(|t| !t.is_empty()),
             expires_at: tr
                 .expires_in
-                .map(|s| now.saturating_add(s.clamp(0, 10 * 365 * 86_400))),
+                .as_ref()
+                .and_then(expires_in_secs)
+                .map(|s| now.saturating_add(s)),
             token_type: tr.token_type,
             scope: tr.scope,
         });
@@ -282,15 +305,17 @@ fn parse_token_response(resp: Response) -> Result<TokenSet> {
         (300..=399, _) => Error::Network(format!(
             "unexpected redirect from token endpoint (HTTP {status})"
         )),
-        (429, _) => Error::RateLimited {
-            retry_after_ms: resp
-                .headers
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.trim().parse::<u64>().ok())
-                .map(|s| s.saturating_mul(1000)),
+        // Transient: the provider is overloaded or down. Never `Unauthorized` (that would make
+        // the user reconnect over an outage). `Retry-After` may be seconds or an HTTP-date.
+        (429, _) | (_, "slow_down") => Error::RateLimited {
+            retry_after_ms: retry_after_ms(&resp.headers),
         },
-        (500..=599, _) => Error::Network(format!("token endpoint: HTTP {status}")),
+        (500..=599, _) if retry_after_ms(&resp.headers).is_some() => Error::RateLimited {
+            retry_after_ms: retry_after_ms(&resp.headers),
+        },
+        (500..=599, _) | (_, "temporarily_unavailable" | "server_error") => {
+            Error::Network(format!("token endpoint: HTTP {status} {code}"))
+        }
         (401 | 403, _) => Error::Unauthorized(format!("token endpoint: HTTP {status} {code}")),
         _ => Error::Other(format!(
             "token endpoint: HTTP {status} {code}{}",

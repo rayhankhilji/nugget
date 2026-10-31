@@ -46,7 +46,8 @@ jobs:
     name: Release or dry run
     if: github.event_name != 'release'
     runs-on: ubuntu-22.04
-    permissions: {}
+    permissions:
+      contents: read # the manifest key check reads the repository
     timeout-minutes: 5
     outputs:
       release: ${{ steps.mode.outputs.release }}
@@ -73,6 +74,25 @@ jobs:
             echo "Dry run of $GITHUB_REF_NAME: unsigned installers as workflow artifacts; nothing is signed or published." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # A real release whose bundled model manifest has no signature from the release key would
+      # build fine and then offer no model downloads. Stop before anything is built.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        if: steps.mode.outputs.release == 'true'
+        with:
+          persist-credentials: false
+      - name: Check the manifest release key
+        if: steps.mode.outputs.release == 'true'
+        shell: bash
+        env:
+          NUGGET_MANIFEST_RELEASE_PUBKEY: ${{ vars.NUGGET_MANIFEST_RELEASE_PUBKEY }}
+        run: |
+          if [ -z "$NUGGET_MANIFEST_RELEASE_PUBKEY" ]; then
+            echo "::error::NUGGET_MANIFEST_RELEASE_PUBKEY is not set: a release build would trust no model manifest key (docs/release.md, Step 5)."
+            exit 1
+          fi
+          python3 -I packaging/scripts/check_release_keys.py manifest \
+            manifests/default.json manifests/default.json.sig "$NUGGET_MANIFEST_RELEASE_PUBKEY"
+
   build:
     name: Build (${{ matrix.target }})
     needs: mode
@@ -81,6 +101,17 @@ jobs:
     environment: ${{ needs.mode.outputs.release == 'true' && 'release-build' || '' }}
     permissions:
       contents: read
+      # Azure Trusted Signing logs in with a GitHub OIDC token instead of a stored secret
+      # (packaging/windows/sign.ps1). Job permissions can't depend on the matrix or the mode, so
+      # every leg, dry runs included, may request a token; Azure accepts it only if the Entra
+      # federated credential's subject matches, and that subject is
+      # `repo:rayhankhilji/nugget:environment:release-build`, which only `v*` tags can deploy to.
+      # Known trade-off: on a real release every step of every leg (including the build scripts
+      # of every compiled crate) can mint such a token and so could use the Azure signing identity
+      # for as long as the job runs. On the Windows leg that equals the .pfx exposure (the key sits
+      # in the user store for the whole job). The proper fix is to split the compile (no id-token)
+      # from `tauri bundle` + signing (id-token, no third-party build scripts).
+      id-token: write
     env:
       RELEASE: ${{ needs.mode.outputs.release }}
     timeout-minutes: 120
@@ -206,14 +237,55 @@ jobs:
             echo "::warning::No App Store Connect API key: the app is signed but not notarized."
           fi
 
+      # Two ways to sign, both only on a real release:
+      #  - Azure Trusted Signing (Artifact Signing): `release-build` environment variables
+      #    AZURE_TRUSTED_SIGNING_ENDPOINT/_ACCOUNT/_PROFILE, AZURE_CLIENT_ID, AZURE_TENANT_ID; auth by
+      #    GitHub OIDC only (federated credential, no client secret in CI). Tauri calls
+      #    packaging/windows/sign.ps1 for every file through `bundle.windows.signCommand`.
+      #  - an exportable .pfx (WINDOWS_CERTIFICATE/_PASSWORD), imported and used by thumbprint.
+      # Trusted Signing wins if both are configured.
       - name: Windows signing setup
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ env.RELEASE == 'true' && secrets.WINDOWS_CERTIFICATE || '' }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ env.RELEASE == 'true' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ env.RELEASE == 'true' && vars.AZURE_TRUSTED_SIGNING_ENDPOINT || '' }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ env.RELEASE == 'true' && vars.AZURE_TRUSTED_SIGNING_ACCOUNT || '' }}
+          AZURE_TRUSTED_SIGNING_PROFILE: ${{ env.RELEASE == 'true' && vars.AZURE_TRUSTED_SIGNING_PROFILE || '' }}
+          AZURE_CLIENT_ID: ${{ env.RELEASE == 'true' && vars.AZURE_CLIENT_ID || '' }}
+          AZURE_TENANT_ID: ${{ env.RELEASE == 'true' && vars.AZURE_TENANT_ID || '' }}
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'signing.json'
+          $ats = @(@($env:AZURE_TRUSTED_SIGNING_ENDPOINT, $env:AZURE_TRUSTED_SIGNING_ACCOUNT, $env:AZURE_TRUSTED_SIGNING_PROFILE) | Where-Object { $_ })
+          if ($ats.Count -gt 0) {
+            if ($ats.Count -lt 3 -or -not $env:AZURE_CLIENT_ID -or -not $env:AZURE_TENANT_ID) {
+              Write-Output '::error::Azure Trusted Signing needs all of AZURE_TRUSTED_SIGNING_ENDPOINT, _ACCOUNT, _PROFILE, AZURE_CLIENT_ID and AZURE_TENANT_ID (release-build environment variables).'
+              exit 1
+            }
+            if ($env:WINDOWS_CERTIFICATE) {
+              Write-Output '::warning::Both Azure Trusted Signing and WINDOWS_CERTIFICATE are configured; signing with Trusted Signing and ignoring the .pfx.'
+            }
+            $dlib = & ./packaging/windows/sign.ps1 -InstallDlib (Join-Path $env:RUNNER_TEMP 'artifact-signing') | Select-Object -Last 1
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            # Identifiers only: sign.ps1 authenticates with the job's OIDC token.
+            @(
+              "AZURE_TRUSTED_SIGNING_ENDPOINT=$env:AZURE_TRUSTED_SIGNING_ENDPOINT"
+              "AZURE_TRUSTED_SIGNING_ACCOUNT=$env:AZURE_TRUSTED_SIGNING_ACCOUNT"
+              "AZURE_TRUSTED_SIGNING_PROFILE=$env:AZURE_TRUSTED_SIGNING_PROFILE"
+              "AZURE_TRUSTED_SIGNING_DLIB=$dlib"
+              "AZURE_CLIENT_ID=$env:AZURE_CLIENT_ID"
+              "AZURE_TENANT_ID=$env:AZURE_TENANT_ID"
+              "NUGGET_WINDOWS_SIGNED=1"
+            ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            $script = Join-Path $env:GITHUB_WORKSPACE 'packaging\windows\sign.ps1'
+            @{ bundle = @{ windows = @{ signCommand = @{
+                cmd = 'pwsh'
+                args = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $script, '%1')
+            } } } } | ConvertTo-Json -Depth 6 | Out-File -FilePath $out -Encoding utf8NoBOM
+            Write-Output "Windows signing: Azure Trusted Signing, account $env:AZURE_TRUSTED_SIGNING_ACCOUNT, profile $env:AZURE_TRUSTED_SIGNING_PROFILE"
+            exit 0
+          }
           if (-not $env:WINDOWS_CERTIFICATE) {
             Write-Output '::warning::No Authenticode certificate: the installers are unsigned.'
             '{}' | Out-File -FilePath $out -Encoding utf8NoBOM
@@ -224,6 +296,7 @@ jobs:
           $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
           $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
           Remove-Item $pfx
+          'NUGGET_WINDOWS_SIGNED=1' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint } } } |
             ConvertTo-Json -Depth 4 | Out-File -FilePath $out -Encoding utf8NoBOM
 
@@ -231,6 +304,12 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: echo '{}' > "$RUNNER_TEMP/signing.json"
+
+      # A prerelease tag (v1.0.0-rc.1) needs a numeric MSI version; NSIS is left alone.
+      - name: MSI version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/wix-version.ps1 -Config apps/desktop/src-tauri/tauri.conf.json -Out "$env:RUNNER_TEMP/wix-version.json"
 
       - name: Build bundles
         working-directory: apps/desktop
@@ -240,8 +319,17 @@ jobs:
           NUGGET_UPDATER_PUBKEY: ${{ env.RELEASE == 'true' && vars.NUGGET_UPDATER_PUBKEY || '' }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
+          extra=()
+          if [ -f "$RUNNER_TEMP/wix-version.json" ]; then extra=(--config "$RUNNER_TEMP/wix-version.json"); fi
           pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
-            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"
+            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json" "${extra[@]}"
+
+      # NSIS signs the uninstaller in `!uninstfinalize` and ignores the sign command's exit status,
+      # so a signing failure there would not stop the build. Check every file users run.
+      - name: Verify Windows signatures
+        if: runner.os == 'Windows' && env.NUGGET_WINDOWS_SIGNED == '1'
+        shell: pwsh
+        run: ./packaging/windows/verify-signatures.ps1 -BundleDir "target/${{ matrix.target }}/release/bundle"
 
       - name: Collect artifacts
         shell: bash
@@ -388,10 +476,24 @@ jobs:
         working-directory: apps/desktop
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      # Only the installers (`bundle-<target>`) become release assets. The run also uploads
+      # `bundle-report-<target>` and `smoke-<target>` (logs, screenshots), which must not be
+      # attached, checksummed or attested; `bundle-*` matches the reports too, so filter by name.
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
-          path: ${{ runner.temp }}/dist
-          merge-multiple: true
+          pattern: bundle-*
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Collect the installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dist"
+          for d in "$RUNNER_TEMP"/artifacts/bundle-*/; do
+            case "$(basename "$d")" in bundle-report-*) continue ;; esac
+            cp "$d"* "$RUNNER_TEMP/dist/"
+          done
+          ls -l "$RUNNER_TEMP/dist"
 
       - name: Sign update payloads
         working-directory: apps/desktop
@@ -439,6 +541,23 @@ jobs:
           fi
           pnpm exec tauri signer sign "$feed"
           test -s "$feed.sig"
+
+      # The private key must belong to the public key compiled into the apps, or every installed
+      # app refuses this release. Check the feed and every payload signature before drafting.
+      - name: Check signatures against NUGGET_UPDATER_PUBKEY
+        env:
+          NUGGET_UPDATER_PUBKEY: ${{ vars.NUGGET_UPDATER_PUBKEY }}
+        run: |
+          set -euo pipefail
+          dist="$RUNNER_TEMP/dist"
+          if [ ! -f "$dist/latest.json.sig" ]; then
+            echo "No latest.json.sig (no updater key): nothing to check."
+            exit 0
+          fi
+          check="packaging/scripts/check_release_keys.py"
+          python3 -I "$check" updater "$dist/latest.json" "$dist/latest.json.sig" "$NUGGET_UPDATER_PUBKEY"
+          python3 packaging/scripts/updater_manifest.py payloads "$dist" |
+            while read -r f; do python3 -I "$check" updater "$f" "$f.sig" "$NUGGET_UPDATER_PUBKEY"; done
 
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:

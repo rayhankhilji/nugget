@@ -498,7 +498,9 @@ impl ComputerTool {
                 Err(e) => tracing::debug!(error = %e, "screenshot fallback failed"),
             }
         }
-        ToolResult::untrusted(text).with_data(data)
+        ToolResult::untrusted(text)
+            .with_data(data)
+            .with_targets(crate::targets::targets(&tree))
     }
 
     async fn click_call(&self, args: &Value) -> ToolResult {
@@ -569,10 +571,11 @@ impl ComputerTool {
         .await
         .ok()
         .flatten();
-        if let Some(text) = extra {
+        if let Some((text, targets)) = extra {
             // Screen text: the result stays untrusted, whatever it was.
             r.untrusted = true;
             r.content.push_str(&text);
+            r.targets = targets;
             if let Some(Value::Object(d)) = &mut r.data {
                 d.insert("screen_changed".into(), Value::Bool(true));
             }

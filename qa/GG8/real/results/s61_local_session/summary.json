@@ -1,0 +1,350 @@
+{
+ "scenario": "s61_local_session",
+ "mode": "internet",
+ "dns_names": [],
+ "flows_off_namespace": [
+  {
+   "src": "::",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "::",
+   "dst": "ff02::1:ff30:c8f8",
+   "dport": "ff02::1:ff30:c8f8",
+   "proto": "ICMP6",
+   "packets": 1
+  },
+  {
+   "src": "::",
+   "dst": "ff02::1:ff9a:76b9",
+   "dport": "ff02::1:ff9a:76b9",
+   "proto": "ICMP6",
+   "packets": 1
+  },
+  {
+   "src": "fe80::90ad:4aff:fe9a:76b9",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "fe80::90ad:4aff:fe9a:76b9",
+   "dst": "ff02::2",
+   "dport": "ff02::2",
+   "proto": "ICMP6",
+   "packets": 8
+  },
+  {
+   "src": "fe80::9825:97ff:fe30:c8f8",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "fe80::9825:97ff:fe30:c8f8",
+   "dst": "ff02::2",
+   "dport": "ff02::2",
+   "proto": "ICMP6",
+   "packets": 8
+  }
+ ],
+ "observed_hosts": {},
+ "ledger_hosts": {
+  "release-assets.githubusercontent.com": {
+   "rows": 1,
+   "bytes_sent": 0,
+   "features": [
+    "runtime_download"
+   ]
+  },
+  "us.aws.cdn.hf.co": {
+   "rows": 2,
+   "bytes_sent": 0,
+   "features": [
+    "model_download"
+   ]
+  },
+  "huggingface.co": {
+   "rows": 2,
+   "bytes_sent": 2860,
+   "features": [
+    "model_download"
+   ]
+  },
+  "github.com": {
+   "rows": 1,
+   "bytes_sent": 514,
+   "features": [
+    "runtime_download"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "file data/vault/.nugget/base/README.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/base/README.md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/base/README.md",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_ckzudlb723meuadp.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_ivvz63oodyuaztq6.md",
+   "canary": "GG8CANARY-SENS-4",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_jzbhvluzgheskvdi.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_ndse3x6p7uncrejv.md",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_tq73b6orianc54y6.md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_wsivkudmdebiuly7.md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/.nugget/state.json",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/state.json",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/state.json",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/Commitment/Acme renewal deposit (ent_ivvz63oodyuaztq6).md",
+   "canary": "GG8CANARY-SENS-4",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Organization/GG8CANARY-NORMAL-3 (ent_tq73b6orianc54y6).md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Person/Ask Priya whether Acme wants the renewal signed electronically (ent_wsivkudmdebiuly7).md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/Person/GG8CANARY-NORMAL-1 (ent_ckzudlb723meuadp).md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Person/GG8CANARY-SENS-2 (ent_ndse3x6p7uncrejv).md",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Project/Acme renewal notes (ent_jzbhvluzgheskvdi).md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/README.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/README.md",
+   "canary": "GG8CANARY-NORMAL-3",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/README.md",
+   "canary": "GG8CANARY-SENS-2",
+   "count": 2
+  }
+ ],
+ "checks": [
+  {
+   "id": "search",
+   "ok": true,
+   "detail": [
+    "acme-renewal",
+    "acme-deploy-key",
+    "iban",
+    "acme-payment",
+    "weekly-notes"
+   ],
+   "severity": null,
+   "t": 1793392227.9728858
+  },
+  {
+   "id": "ask.local",
+   "ok": true,
+   "detail": "local-chat on_device 'The Acme renewal is due on 14 November [1].'",
+   "severity": null,
+   "t": 1793392242.7064338
+  },
+  {
+   "id": "ask.local.no_withholding",
+   "ok": true,
+   "detail": 0,
+   "severity": null,
+   "t": 1793392242.7064612
+  },
+  {
+   "id": "chat.local",
+   "ok": true,
+   "detail": "{'provider': 'local-chat', 'stream_id': 'b9bea20b-6a4c-4803-97e3-d3219abbf60c'} 'Lisbon: 1. Porta de Bel\u00e9m, 2. Alfama, 3. Bairro Alto, 4. Chiado, 5. Cascais, 6. Cascais Beach, 7. Lisbon Cathedral, 8. M'",
+   "severity": null,
+   "t": 1793392285.16132
+  },
+  {
+   "id": "read_ahead.local.started",
+   "ok": true,
+   "detail": {
+    "started": true
+   },
+   "severity": null,
+   "t": 1793392285.2633584
+  },
+  {
+   "id": "draft.local",
+   "ok": true,
+   "detail": "local-chat 'I\u2019ll confirm the renewal date and term. Let me know if Acme wants the renewal signed electronically.'",
+   "severity": null,
+   "t": 1793392341.8634608
+  },
+  {
+   "id": "knowledge.ran",
+   "ok": true,
+   "detail": "{\"claims\": 9, \"entities\": 17, \"extractor_provider\": \"local-chat\", \"last_run\": \"2026-10-30T20:32:19.738373726Z\", \"mentions\": 22, \"pending_items\": 0, \"vault\": {\"conflicts\": [], \"invalid\": [], \"last_render\": \"2026-10-30T20:32:19.749429176Z\", \"pages\": 17, \"path\": \"/tmp/gg8/s61_local_session/data/vault\"}}",
+   "severity": null,
+   "t": 1793392341.8640602
+  },
+  {
+   "id": "today.cards",
+   "ok": true,
+   "detail": "{\"cards\": [], \"enabled\": true, \"last_refresh\": \"2026-10-30T20:32:21.864173929Z\"}",
+   "severity": null,
+   "t": 1793392341.865833
+  },
+  {
+   "id": "agent.ran",
+   "ok": false,
+   "detail": "RpcError('-32002: no provider for the agentic tier can call tools (configure one with tiers = [\"agentic\"] and probe it)')",
+   "severity": null,
+   "t": 1793392341.8660834
+  },
+  {
+   "id": "mcp.http.works",
+   "ok": true,
+   "detail": "due on 14 November. Priya Raman (procurement) asked for a 12-month\\nterm at the current price. Reference GG8CANARY-NORMAL-1.\\n\\nOpen points: volume discount, the onboarding of their Lisbon office, and the security questionnaire.\\n</untrusted-content>\\n\\n\",\"untrusted_content\":true},\"isError\":false}}\n",
+   "severity": null,
+   "t": 1793392342.003977
+  },
+  {
+   "id": "mcp.no_sensitive",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793392342.0040095
+  },
+  {
+   "id": "ledger.no_new_rows",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793392642.0047772
+  },
+  {
+   "id": "no_packet_left_namespace",
+   "ok": false,
+   "detail": [
+    "1793392139.181344 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28",
+    "1793392139.181369 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392139.246301 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28",
+    "1793392139.821313 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::16: HBH ICMP6, multicast listener report v2, 1 group record(s), length 28",
+    "1793392142.381288 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392143.021293 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392150.253295 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392150.765281 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392165.614297 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392166.125284 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392194.797283 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392196.845293 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392258.286284 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392262.381293 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392385.261285 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392385.262271 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392626.925323 ?     M   IP6 fe80::90ad:4aff:fe9a:76b9 > ff02::2: ICMP6, router solicitation, length 16",
+    "1793392631.021325 ?     Out IP6 fe80::9825:97ff:fe30:c8f8 > ff02::2: ICMP6, router solicitation, length 16"
+   ],
+   "severity": "Blocker",
+   "t": 1793392642.0089974
+  },
+  {
+   "id": "no_dns",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793392642.009054
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793392138.320616,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793392138.8219073,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793392138.8219106,
+   "label": "session start"
+  },
+  {
+   "t": 1793392227.8915308,
+   "note": "ingest {\"embedding_provider\": \"local-embedding\", \"freshness_p50_ms\": 8379, \"freshness_p95_ms\": 88558, \"queue_depth\": 0, \"sources\": [{\"chunks\": 5, \"enabled\": true, \"id\": \"files-1\", \"items\": 7, \"kind\": \"files\", \"last_error\": null, \"last_sync\": \"2026-10-30T20:30:27.386889614Z\", \"name\": \"Documents\", \"settings\": {\"roots\": [\"/tmp/gg8/s61_local_session/Documents\"]}, \"state\": \"watching\"}], \"triage_provider\": \"local-chat\"}"
+  },
+  {
+   "t": 1793392342.004014,
+   "label": "idle"
+  },
+  {
+   "t": 1793392642.146219,
+   "label": "daemon.stop"
+  }
+ ]
+}

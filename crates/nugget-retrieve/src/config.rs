@@ -27,6 +27,10 @@ pub struct RetrieveConfig {
     pub fusion_depth_factor: usize,
     /// ...but at least this many hits per list.
     pub min_fusion_depth: usize,
+    /// How hybrid search combines the full-text and vector lists (see [`Fusion`]).
+    pub fusion: Fusion,
+    /// [`Fusion::Convex`]: the full-text list's weight (the vector list gets the rest).
+    pub fusion_text_weight: f32,
     /// Re-rank with maximal marginal relevance (MMR) for diversity.
     pub mmr: bool,
     /// MMR trade-off: 1.0 is pure relevance, 0.0 pure novelty.
@@ -80,6 +84,18 @@ pub struct RetrieveConfig {
     pub rerank_weight: f32,
     /// Give up on the reranker after this long and keep the first-stage order.
     pub rerank_timeout_ms: u64,
+    /// Keep the reranker within `rerank_timeout_ms`: size its pool from the measured time per
+    /// passage, halve it after a timeout, and pause reranking (for `rerank_cooldown_ms`) when
+    /// fewer than `rerank_min_pool` passages fit, instead of making every search wait for a
+    /// reranker that cannot answer in time. On a 2-core CPU the manifest's reranker needs about
+    /// 0.5 s per passage, so it never met the 2.5 s budget and each search waited it out (bench
+    /// `memory --local-models --memory-rerank local`). See `rerank::RerankGovernor`.
+    pub rerank_adaptive: bool,
+    /// The smallest pool worth reranking.
+    pub rerank_min_pool: usize,
+    /// How long reranking pauses when it cannot meet its budget (doubling on each consecutive
+    /// pause, up to 8×).
+    pub rerank_cooldown_ms: u64,
     /// A reranker you run yourself (`[retrieve.reranker]` in the daemon's config), e.g.
     /// `llama-server --reranking -m <reranker>.gguf --port 8013` with
     /// `base_url = "http://127.0.0.1:8013"`. The daemon builds an
@@ -112,6 +128,8 @@ impl Default for RetrieveConfig {
             max_candidates: 512,
             fusion_depth_factor: 4,
             min_fusion_depth: 40,
+            fusion: Fusion::Rrf,
+            fusion_text_weight: 0.5,
             mmr: true,
             mmr_lambda: 0.7,
             mmr_pool_factor: 3,
@@ -127,6 +145,9 @@ impl Default for RetrieveConfig {
             rerank_pool: 30,
             rerank_weight: 0.7,
             rerank_timeout_ms: 2_500,
+            rerank_adaptive: true,
+            rerank_min_pool: 8,
+            rerank_cooldown_ms: 10 * 60 * 1000,
             reranker: None,
             dates: true,
             date_utc_offset_minutes: 0,
@@ -136,6 +157,21 @@ impl Default for RetrieveConfig {
             rewrite_history_turns: 6,
         }
     }
+}
+
+/// How hybrid search fuses its full-text and vector lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Fusion {
+    /// Reciprocal-rank fusion in the store (`Store::search_hybrid_with_depth`): ranks only, so a
+    /// chunk both lists hold in their middle outranks one list's best match.
+    #[default]
+    Rrf,
+    /// Score-aware: a weighted sum of each list's scores scaled against their theoretical
+    /// minimum (bm25 / best bm25; (cosine + 1) / (best cosine + 1)), with a chunk missing from
+    /// a list counted at that list's lowest score ([`crate::rank::convex_fuse`]). A list whose
+    /// scores barely differ (a vector leg with no signal for the query) then moves little.
+    Convex,
 }
 
 /// Multiplies an item's relevance by `1 + weight * 0.5^(age_days / half_life_days)`, where the

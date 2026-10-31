@@ -100,6 +100,63 @@ pub fn normalise(cands: &mut [Candidate]) {
     }
 }
 
+/// Score-aware fusion of a full-text list (`text`, bm25 scores, higher better) and a vector list
+/// (`vector`, cosine similarities), best `limit` first (see [`crate::Fusion::Convex`]).
+///
+/// Each list's scores are scaled against their theoretical minimum, `bm25 / best` and
+/// `(cos + 1) / (best + 1)`, so a list keeps its own spread: a vector list of near-equal
+/// similarities (no signal for this query) contributes nearly the same to every chunk instead
+/// of being stretched over `[0, 1]`. A chunk missing from one list counts at that list's lowest
+/// score (it ranked below all of them), not at zero. `score = w × text + (1 − w) × vector`,
+/// `w = text_weight` clamped to `[0, 1]`. Snippets come from the full-text hit when there is one;
+/// ties break on chunk id.
+pub fn convex_fuse(text: Vec<Hit>, vector: Vec<Hit>, text_weight: f32, limit: usize) -> Vec<Hit> {
+    let w = if text_weight.is_finite() {
+        f64::from(text_weight.clamp(0.0, 1.0))
+    } else {
+        0.5
+    };
+    // (scaled scores per chunk, the scaled score of a chunk missing from the list)
+    let scale = |hits: &[Hit], f: &dyn Fn(f64) -> f64| -> (HashMap<ChunkId, f64>, f64) {
+        let raw: Vec<f64> = hits.iter().map(|h| f(f64::from(h.score))).collect();
+        let best = raw.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if hits.is_empty() || !best.is_finite() || best <= 0.0 {
+            return (HashMap::new(), 0.0);
+        }
+        let floor = raw.iter().copied().fold(f64::INFINITY, f64::min).max(0.0) / best;
+        let mut out = HashMap::with_capacity(hits.len());
+        for (h, r) in hits.iter().zip(raw) {
+            let v = (r.max(0.0) / best).clamp(0.0, 1.0);
+            out.entry(h.chunk_id)
+                .and_modify(|x: &mut f64| *x = x.max(v))
+                .or_insert(v);
+        }
+        (out, floor)
+    };
+    let (ts, t_floor) = scale(&text, &|s| s);
+    let (vs, v_floor) = scale(&vector, &|s| s + 1.0);
+    let mut seen: HashMap<ChunkId, Hit> = HashMap::new();
+    for h in text.into_iter().chain(vector) {
+        seen.entry(h.chunk_id).or_insert(h);
+    }
+    let mut out: Vec<(f64, Hit)> = seen
+        .into_values()
+        .map(|h| {
+            let t = ts.get(&h.chunk_id).copied().unwrap_or(t_floor);
+            let v = vs.get(&h.chunk_id).copied().unwrap_or(v_floor);
+            (w * t + (1.0 - w) * v, h)
+        })
+        .collect();
+    out.sort_by(|(sa, a), (sb, b)| sb.total_cmp(sa).then(a.chunk_id.cmp(&b.chunk_id)));
+    out.into_iter()
+        .take(limit)
+        .map(|(score, hit)| Hit {
+            score: score as f32,
+            ..hit
+        })
+        .collect()
+}
+
 /// Recency multiplier for an item `age_days` old: `1 + weight * 0.5^(age / half_life)`.
 /// Future timestamps count as age 0; a non-positive half-life disables the boost.
 pub fn recency_factor(age_days: f64, boost: &RecencyBoost) -> f32 {
@@ -423,5 +480,37 @@ mod tests {
             weight: 1.0,
         };
         assert_eq!(recency_factor(0.0, &off), 1.0);
+    }
+
+    #[test]
+    fn convex_fusion_keeps_a_strong_text_match_over_a_flat_vector_list() {
+        // The vector list has no signal (near-equal similarities) and misses chunk 1, the best
+        // full-text match. Rank fusion would put 3 (in both lists) first; convex fusion keeps 1.
+        let text = vec![hit("a", 1, 10.0), hit("b", 2, 5.0), hit("c", 3, 4.0)];
+        let vector = vec![hit("c", 3, 0.60), hit("d", 4, 0.59), hit("b", 2, 0.58)];
+        let fused = convex_fuse(text, vector, 0.5, 10);
+        let ids: Vec<ChunkId> = fused.iter().map(|h| h.chunk_id).collect();
+        assert_eq!(ids, [1, 2, 3, 4]);
+        // Missing from the vector list counts at its floor, not zero: (1.58 / 1.60).
+        assert!((fused[0].score - (0.5 + 0.5 * 1.58 / 1.60)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn convex_fusion_follows_a_vector_list_with_signal_and_its_weight() {
+        let text = vec![hit("a", 1, 2.0), hit("b", 2, 1.9)];
+        let vector = vec![hit("b", 2, 0.9), hit("c", 3, 0.1)];
+        // Even weights: b is near the top of both lists.
+        let ids = |w: f32| -> Vec<ChunkId> {
+            convex_fuse(text.clone(), vector.clone(), w, 10)
+                .iter()
+                .map(|h| h.chunk_id)
+                .collect()
+        };
+        assert_eq!(ids(0.5), [2, 1, 3]);
+        // All weight on full text: its order, then the vector-only chunk.
+        assert_eq!(ids(1.0), [1, 2, 3]);
+        // Empty lists fuse to nothing; a limit cuts.
+        assert!(convex_fuse(Vec::new(), Vec::new(), 0.5, 10).is_empty());
+        assert_eq!(convex_fuse(text.clone(), vector.clone(), 0.5, 1).len(), 1);
     }
 }

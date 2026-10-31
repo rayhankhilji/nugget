@@ -1,0 +1,11 @@
+model: qwen3-4b-q4km
+runner: GitHub Actions 1000011995 (Linux X64)
+harness commit: cdac19cc0b4b20ff3fc59c458f602d14d37e3810
+product: this commit cdac19cc0b4b20ff3fc59c458f602d14d37e3810
+date: 2026-10-31T10:29:47Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V74 80-Core Processor
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          10           0           4          14
+Swap:              2           0           2

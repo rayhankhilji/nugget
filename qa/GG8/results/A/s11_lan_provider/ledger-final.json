@@ -1,0 +1,39 @@
+[
+ {
+  "at": "2026-10-30T19:49:20.463896525Z",
+  "bytes_received": 1009,
+  "bytes_sent": 2533,
+  "feature": "ask",
+  "host": "192.168.88.1:8080",
+  "items": [
+   {
+    "key": "0:acme-renewal.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:acme-deploy-key.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:acme-payment.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:hr-ssn.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:lisbon-trip.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:weekly-notes.md",
+    "source": "files-1"
+   },
+   {
+    "key": "0:iban.md",
+    "source": "files-1"
+   }
+  ]
+ }
+]

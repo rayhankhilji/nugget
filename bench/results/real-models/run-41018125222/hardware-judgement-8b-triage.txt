@@ -1,0 +1,12 @@
+suite: judgement-8b-triage
+runner: GitHub Actions 1000010230 (Linux X64)
+commit: 321ec471e9c40c2bef42b5eb495d03b09d242740
+date: 2026-10-30T07:15:50Z
+CPU(s):                                  4
+Model name:                              Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      124%
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          11           0           3          14
+Swap:              2           0           2

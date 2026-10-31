@@ -45,18 +45,20 @@ export function AppSettings() {
         error ? null : <Spinner />
       ) : status.supported ? (
         <>
-          <label className="field-inline">
+          <label className="switch">
             <input
               type="checkbox"
+              role="switch"
               checked={status.enabled}
               disabled={busy}
               aria-describedby={hintId}
               onChange={(e) => void toggle(e.target.checked)}
             />
-            {t("appSettings.autostart")}
+            <span className="switch-track" aria-hidden="true" />
+            <span>{t("appSettings.autostart")}</span>
           </label>
           {busy && <Spinner label={t("updates.working")} />}
-          <p id={hintId} className="muted small">
+          <p id={hintId} className="muted small switch-hint">
             {t("appSettings.autostartHint")}
           </p>
         </>

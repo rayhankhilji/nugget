@@ -156,6 +156,13 @@ async fn reembedding_never_sends_sensitive_items_to_cloud_embedders() {
             .is_none()
     );
     assert!(h.ingest.reembed_stats().skipped >= 1);
+    // GG8-6: the re-embed request names the item it carried.
+    let items = cloud.embed_items.lock().unwrap().clone();
+    assert!(!items.is_empty());
+    assert!(
+        items.iter().all(|i| i.key.as_str() == "public"),
+        "{items:?}"
+    );
     h.ingest.shutdown().await;
 }
 

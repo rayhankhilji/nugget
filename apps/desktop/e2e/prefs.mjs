@@ -308,6 +308,12 @@ export async function prefsScenario({ browser, socket, pages, onboarded }) {
         const probes = await page.evaluate(busyProbes);
         expect(probes.spinner.animation !== "none" && probes.spinner.iterations === "infinite", `the spinner doesn't spin: ${JSON.stringify(probes.spinner)}`);
         const canvas = await openGraph(page);
+        // The layout animates here: let it come to rest first, or the node can move away between
+        // finding its pixel and pressing on it (seen under load), and the drag would grab nothing.
+        await until("the animated layout comes to rest", async () => {
+          const w = await watchCanvas(page, canvas, 300);
+          return [!w.changed, w];
+        }, 10_000).catch(() => {});
         await dragNode(page, canvas);
         const afterDrag = await watchCanvas(page, canvas, 600);
         summary.graph.control = { after_drag: afterDrag };

@@ -1,0 +1,28 @@
+# A starting point for a Nugget plugin. Copy this folder anywhere, rename the crate and the id in
+# nugget-plugin.toml, and you have a building, tested plugin. See README.md.
+[package]
+name = "my-nugget-plugin"
+description = "A Nugget plugin: one connector and one tool"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+# A plugin is a WebAssembly component: a `cdylib` built for wasm32-wasip2.
+crate-type = ["cdylib"]
+
+[dependencies]
+# Inside the Nugget repository. Outside it, use the git dependency instead:
+# nugget-plugin-sdk = { git = "https://github.com/rayhankhilji/nugget" }
+nugget-plugin-sdk = { path = "../../crates/nugget-plugin/sdk" }
+
+# Its own workspace, so the folder can be copied anywhere as-is.
+[workspace]
+
+[profile.release]
+opt-level = "s"
+strip = true
+codegen-units = 1
+lto = true

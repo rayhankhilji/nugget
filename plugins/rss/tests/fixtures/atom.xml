@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://example.github.io/blog/">
+  <title type="html">Atom &lt;em&gt;Example&lt;/em&gt;</title>
+  <link rel="self" href="https://example.github.io/blog/atom.xml"/>
+  <link rel="alternate" href="https://example.github.io/blog/"/>
+  <id>urn:uuid:60a76c80-d399-11d9-b93C-0003939e0af6</id>
+  <updated>2006-01-02T15:04:05Z</updated>
+  <entry>
+    <title>HTML content</title>
+    <link rel="alternate" href="posts/html.html"/>
+    <link rel="enclosure" href="https://example.github.io/audio.mp3"/>
+    <id>tag:example.github.io,2006:html</id>
+    <updated>2006-01-02T15:04:05Z</updated>
+    <published>2006-01-01T09:00:00-05:00</published>
+    <author><name>Grace</name></author>
+    <category term="rust" label="Rust"/>
+    <category term="wasm"/>
+    <content type="html">&lt;p&gt;Hello &lt;i&gt;HTML&lt;/i&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>XHTML content</title>
+    <link href="/elsewhere/xhtml"/>
+    <id>tag:example.github.io,2006:xhtml</id>
+    <updated>2006-01-03T00:00:00Z</updated>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>Inline <b>XHTML</b></p></div></content>
+  </entry>
+  <entry>
+    <title>Summary only</title>
+    <id>tag:example.github.io,2006:summary</id>
+    <updated>2006-01-04T00:00:00Z</updated>
+    <summary>Plain &amp; simple</summary>
+  </entry>
+  <entry>
+    <title>Out-of-line content</title>
+    <id>tag:example.github.io,2006:src</id>
+    <content src="https://example.github.io/video.mp4" type="video/mp4"/>
+    <summary type="text">The summary instead</summary>
+  </entry>
+</feed>

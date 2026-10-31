@@ -37,7 +37,15 @@ export function KindPicker({
             {t(g.label)}
           </p>,
           ...g.kinds.map((k) => (
-            <label key={k} className="kind-option">
+            <label
+              key={k}
+              className="kind-option"
+              // A double-click picks the kind and moves on (the buttons can be below the fold).
+              onDoubleClick={() => {
+                onChange(k);
+                onNext();
+              }}
+            >
               <input
                 ref={k === value ? first : undefined}
                 data-autofocus={k === value ? "" : undefined}

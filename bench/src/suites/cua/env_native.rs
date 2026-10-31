@@ -424,6 +424,10 @@ impl Session for NativeSession<'_> {
         self.inner.confirm(action)
     }
 
+    fn ask(&mut self, question: &str, options: &[String]) -> Result<Option<String>, EnvError> {
+        self.inner.ask(question, options)
+    }
+
     fn record_usage(&mut self, input_tokens: u64, output_tokens: u64) {
         self.inner.record_usage(input_tokens, output_tokens);
     }

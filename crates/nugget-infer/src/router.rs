@@ -426,8 +426,17 @@ impl Router {
         }
     }
 
-    /// Embed with the `Embedding` tier, falling back across candidates.
+    /// Embed documents with the `Embedding` tier, falling back across candidates.
     pub async fn embed(&self, texts: &[String]) -> Result<(ProviderId, Vec<Vec<f32>>)> {
+        self.embed_as(texts, false).await
+    }
+
+    /// Embed search queries ([`Provider::embed_query`]) like [`Router::embed`].
+    pub async fn embed_query(&self, texts: &[String]) -> Result<(ProviderId, Vec<Vec<f32>>)> {
+        self.embed_as(texts, true).await
+    }
+
+    async fn embed_as(&self, texts: &[String], query: bool) -> Result<(ProviderId, Vec<Vec<f32>>)> {
         let required = Capabilities {
             embeddings: true,
             ..Default::default()
@@ -438,7 +447,12 @@ impl Router {
         }
         let mut last_err = None;
         for p in candidates {
-            match p.embed(texts).await {
+            let res = if query {
+                p.embed_query(texts).await
+            } else {
+                p.embed(texts).await
+            };
+            match res {
                 Ok(v) => {
                     self.report_success(p.id());
                     return Ok((p.id().clone(), v));

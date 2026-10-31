@@ -1,0 +1,30 @@
+# Read-later importer. Works on the export file (or a folder of export files) the user picks in
+# the `export` setting, read-only through the host's `fs` interface. No network: articles are
+# indexed from what the export holds (title, URL, tags, folder, date, highlighted selection).
+id = "dev.nugget.read-later"
+name = "Read-later exports"
+version = "0.1.0"
+description = "Imports saved articles from a Pocket export (ril_export.html or CSV), an Instapaper CSV export, or a Netscape bookmarks file (Pinboard, Raindrop, browsers). Read-only, no network."
+kind = ["connector"]
+
+[capabilities]
+file_roots = ["export"]
+
+[connector]
+display_name = "Read-later export"
+poll_interval_secs = 3600
+
+[connector.settings_schema]
+type = "object"
+required = ["export"]
+
+[connector.settings_schema.properties.export]
+type = "string"
+title = "Export file or folder"
+description = "Absolute path of the export file (ril_export.html, instapaper-export.csv, part_000000.csv, bookmarks.html) or of a folder holding export files."
+
+[connector.settings_schema.properties.skip_archived]
+type = "boolean"
+title = "Skip archived articles"
+description = "Leave out articles in Pocket's archive or Instapaper's Archive folder."
+default = false

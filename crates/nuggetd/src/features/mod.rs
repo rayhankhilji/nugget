@@ -26,6 +26,7 @@ use crate::daemon::State;
 
 mod agent;
 mod ai_keys;
+pub(crate) mod backup;
 mod browser;
 pub(crate) mod draft;
 mod model_fit;
@@ -127,6 +128,7 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     );
     start(&mut list, "ai_keys", ai_keys::start(cx)); // Z3: bring your own key
     start(&mut list, "model_fit", model_fit::start(cx)); // Z3: explained recommendation
+    start(&mut list, "backup", backup::start(cx)); // FF1: backup, restore, export
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features

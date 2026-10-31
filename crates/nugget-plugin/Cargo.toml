@@ -33,7 +33,7 @@ url = "2"
 # The 36.x LTS line (security fixes backported; rust-version 1.86). 37+ non-LTS releases up to the
 # workspace MSRV (38.x) carry unpatched RustSec advisories, and 39+ needs Rust 1.89. Keep >= 36.0.19.
 # Apache-2.0 WITH LLVM-exception. No WASI: plugins get only the nugget:plugin host imports.
-wasmtime = { version = "36.0.19", default-features = false, features = [
+wasmtime = { version = "36.0.20", default-features = false, features = [
     "async",
     "component-model",
     "cranelift",

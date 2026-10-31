@@ -149,11 +149,20 @@ pub struct DoubleTapSettings {
     /// providers only; see [`super::readahead`] for exactly what is read and sent. On by default.
     #[serde(default = "default_read_ahead")]
     pub read_ahead: bool,
+    /// Keep reading ahead while the computer runs on battery. On by default; low power mode
+    /// (battery saver) always pauses read-ahead, whatever this says.
+    #[serde(default = "default_read_ahead_on_battery")]
+    pub read_ahead_on_battery: bool,
 }
 
 /// The default for [`DoubleTapSettings::read_ahead`] (also used for files written before the
 /// setting existed).
 pub const fn default_read_ahead() -> bool {
+    true
+}
+
+/// The default for [`DoubleTapSettings::read_ahead_on_battery`] (also used for older files).
+pub const fn default_read_ahead_on_battery() -> bool {
     true
 }
 
@@ -166,6 +175,7 @@ impl Default for DoubleTapSettings {
             excluded_apps: default_excluded(),
             allow_terminals: false,
             read_ahead: default_read_ahead(),
+            read_ahead_on_battery: default_read_ahead_on_battery(),
         }
     }
 }
@@ -538,6 +548,11 @@ mod tests {
         assert!(DoubleTapSettings::default().read_ahead);
         assert_eq!(
             serde_json::to_value(DoubleTapSettings::default()).unwrap()["read_ahead"],
+            serde_json::json!(true)
+        );
+        assert!(s.read_ahead_on_battery);
+        assert_eq!(
+            serde_json::to_value(DoubleTapSettings::default()).unwrap()["read_ahead_on_battery"],
             serde_json::json!(true)
         );
         // The defaults validate unchanged.

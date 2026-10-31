@@ -161,22 +161,38 @@ pub fn verify_manifest_with_key(
     sig: &[u8],
     keys: &[VerifyingKey],
 ) -> Result<(Manifest, VerifyingKey)> {
+    verify_manifest_with_keys(bytes, sig, keys).map(|(m, k)| (m, k[0]))
+}
+
+/// [`verify_manifest`], also returning **every** trusted key with a valid signature over `bytes`,
+/// in `keys` order (never empty). Rollback protection records the version for all of them: a
+/// manifest signed by both the release and the development key belongs to both series.
+pub(crate) fn verify_manifest_with_keys(
+    bytes: &[u8],
+    sig: &[u8],
+    keys: &[VerifyingKey],
+) -> Result<(Manifest, Vec<VerifyingKey>)> {
     if keys.is_empty() {
         return Err(Error::Integrity(
             "no trusted manifest keys configured".into(),
         ));
     }
     let sigs = decode_signatures(sig)?;
-    let key = keys
-        .iter()
-        .find(|k| sigs.iter().any(|s| k.verify_strict(bytes, s).is_ok()))
-        .ok_or_else(|| {
-            Error::Integrity("manifest signature does not match any trusted key".into())
-        })?;
+    let mut signers: Vec<VerifyingKey> = Vec::new();
+    for k in keys {
+        if !signers.contains(k) && sigs.iter().any(|s| k.verify_strict(bytes, s).is_ok()) {
+            signers.push(*k);
+        }
+    }
+    if signers.is_empty() {
+        return Err(Error::Integrity(
+            "manifest signature does not match any trusted key".into(),
+        ));
+    }
     let manifest: Manifest = serde_json::from_slice(bytes)
         .map_err(|e| Error::Invalid(format!("manifest is not valid JSON: {e}")))?;
     validate_manifest(&manifest)?;
-    Ok((manifest, *key))
+    Ok((manifest, signers))
 }
 
 /// The manifest bundled with this build, verified against [`trusted_keys`].

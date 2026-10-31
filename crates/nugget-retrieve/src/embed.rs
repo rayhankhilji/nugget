@@ -65,7 +65,8 @@ pub(crate) fn validate_vectors(vectors: &[Vec<f32>], expected: usize) -> Result<
     Ok(())
 }
 
-/// Embed `texts` with the first provider that succeeds. On failure returns the last error.
+/// Embed search queries ([`Provider::embed_query`]) with the first provider that succeeds. On
+/// failure returns the last error.
 pub(crate) async fn embed_first(
     router: &Router,
     providers: &[Arc<dyn Provider>],
@@ -73,7 +74,7 @@ pub(crate) async fn embed_first(
 ) -> Result<(Arc<dyn Provider>, Vec<Vec<f32>>), String> {
     let mut last = String::from("no embedding provider");
     for p in providers {
-        match p.embed(texts).await {
+        match p.embed_query(texts).await {
             Ok(v) => match validate_vectors(&v, texts.len()) {
                 Ok(()) => {
                     router.report_success(p.id());

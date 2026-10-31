@@ -543,8 +543,10 @@ async fn prepare(
             ai::embedding_providers(router, sensitive, inner.cfg.allow_cloud_embeddings);
         if !providers.is_empty() {
             match ai::embed(
+                &inner.store,
                 router,
                 &providers,
+                item,
                 &chunk_texts,
                 inner.cfg.embed_batch,
                 inner.cfg.embed_timeout(),

@@ -30,7 +30,7 @@ cloud embedding provider unless you set
 
 ## Ask
 
-**Ask with context** (on the Search page) answers a question from your own data:
+**Ask a question** (on the Search page) answers a question from your own data:
 
 1. Nugget picks the model first: by default the first provider that serves the `synthesis` tier.
 2. It retrieves the most relevant passages and packs them into a token budget, each under a numbered

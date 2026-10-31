@@ -1,0 +1,64 @@
+[
+ {
+  "host": "api.cloudllm.test",
+  "path": "/v1/embeddings",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "authorization",
+    "Bearer sk-GG8CANARY-APIKEY-cloudllm"
+   ],
+   [
+    "accept",
+    "*/*"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.cloudllm.test"
+   ],
+   [
+    "content-length",
+    "81"
+   ]
+  ],
+  "body": "{\"encoding_format\":\"float\",\"input\":[\"Acme renewal deposit\"],\"model\":\"mock-model\"}"
+ },
+ {
+  "host": "api.cloudllm.test",
+  "path": "/v1/embeddings",
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "authorization",
+    "Bearer sk-GG8CANARY-APIKEY-cloudllm"
+   ],
+   [
+    "accept",
+    "*/*"
+   ],
+   [
+    "user-agent",
+    "nugget/0.0.1"
+   ],
+   [
+    "host",
+    "api.cloudllm.test"
+   ],
+   [
+    "content-length",
+    "895"
+   ]
+  ],
+  "body": "{\"encoding_format\":\"float\",\"input\":[\"# Acme renewal: wire instructions\\n\\nWire the Acme renewal deposit to IBAN GB82 WEST 1234 5698 7654 32. Reference GG8CANARY-SENS-4.\",\"# Acme renewal: payment details\\n\\nFor the Acme Logistics renewal, finance will pay by card. Card number 4111 1111 1111 1111,\\nexpiry 09/29. Billing contact Priya Raman. Reference GG8CANARY-SENS-1.\",\"# Acme renewal: integration credentials\\n\\nThe Acme integration for the renewal uses this API key: sk-ant-api03-GG8fakeKEYxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-AAAAAA\\nand the AWS key AKIAIOSFODNN7GG8TEST with secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYGG8EXAMPLEKEY.\\nReference GG8CANARY-SENS-2.\",\"# Onboarding form for the Acme renewal team\\n\\nNew hire Jordan Ellery, SSN 512-34-6789, starts on the Acme renewal account next Monday.\\nReference GG8CANARY-SENS-3.\"],\"model\":\"mock-model\"}"
+ }
+]
