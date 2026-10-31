@@ -1193,6 +1193,9 @@ fn clean_title(s: &str) -> String {
 struct Ctx {
     /// All chunk text sent, normalised and lower-cased.
     all_lower: String,
+    /// `From` / `To` / `Cc` display names of a mail item, normalised: the people the prompt's
+    /// header lines name ("I" in the body is the sender).
+    header_people: Vec<String>,
     me: Option<String>,
     me_first: Option<String>,
     item_date: OffsetDateTime,
@@ -1302,7 +1305,11 @@ fn clean_entity(kind: EntityKind, raw_name: &str, raw_aliases: &[String], cx: &C
     }
     aliases.retain(|a| cx.in_text(a) && normalize_name(a) != normalize_name(&name));
     aliases.dedup_by_key(|a| normalize_name(a));
-    if !cx.in_text(&name) && aliases.is_empty() {
+    // A person the mail's headers name is in the document too (the prompt shows the header
+    // names; "I" is the sender), though claims about them still need a verbatim quote.
+    let in_headers =
+        kind == EntityKind::Person && cx.header_people.contains(&normalize_name(&name));
+    if !cx.in_text(&name) && aliases.is_empty() && !in_headers {
         // Not named in the text: invented, or injected from outside the document.
         return Cleaned::Dropped("not in text");
     }
@@ -1434,8 +1441,23 @@ fn validate_full(
         .as_deref()
         .and_then(|n| n.split(' ').next().map(str::to_owned))
         .filter(|f| f.chars().count() >= 2);
+    let header_people: Vec<String> = item
+        .metadata
+        .get("extracted")
+        .map(|ex| {
+            ["from", "to", "cc"]
+                .iter()
+                .flat_map(|k| crate::extract::strings(ex.get(*k)))
+                .filter_map(|raw| parse_address(&raw).name)
+                .map(|n| normalize_name(&n))
+                .filter(|n| !n.is_empty())
+                .take(MAX_HEADER_NAMES)
+                .collect()
+        })
+        .unwrap_or_default();
     let cx = Ctx {
         all_lower,
+        header_people,
         me,
         me_first,
         item_date: crate::extract::item_date(item),
@@ -2002,7 +2024,6 @@ pub(crate) fn adopt_known_kinds(
             continue;
         }
         if kinds.is_empty()
-            && e.kind != EntityKind::Person
             && let Some(k) = kind_of_longer_name(graph, me, &name)
         {
             e.kind = k;
@@ -2270,9 +2291,14 @@ mod name_shape_tests {
         extra.entities.push(EntitySpec::new(Place, "Ostrander"));
         extra.entities.push(EntitySpec::new(Place, "Harbourline"));
         extra.entities.push(EntitySpec::new(Place, "Fernhollow"));
+        // A "person" that is only a project's short name; a real first name stays a person.
+        extra.entities.push(EntitySpec::new(Person, "Tracking"));
+        g.create_entity(&NewEntity::new(Person, "Priya Castellane"))
+            .unwrap();
+        extra.entities.push(EntitySpec::new(Person, "Priya"));
         super::adopt_known_kinds(&g, None, &Extraction::default(), &mut extra);
         let kinds: Vec<_> = extra.entities.iter().map(|e| e.kind).collect();
         // Unique longer name: adopted. Two kinds ("Harbourline"): left alone. Unknown: left.
-        assert_eq!(kinds, [Organization, Place, Place]);
+        assert_eq!(kinds, [Organization, Place, Place, Project, Person]);
     }
 }

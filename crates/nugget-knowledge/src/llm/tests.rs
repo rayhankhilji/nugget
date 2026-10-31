@@ -614,3 +614,38 @@ fn role_synonyms_are_one_single_valued_predicate_and_titles_lose_the_employer() 
     assert_eq!(clean_title("Head of Data AT Quillfeather"), "Head of Data");
     assert_eq!(clean_title("CTO @ Acme"), "CTO");
 }
+
+#[test]
+fn the_sender_named_in_the_headers_is_in_the_document() {
+    // The body only signs "Nadia"; her full name is in From, which the prompt shows.
+    let (it, chunks) = item("I've joined Larkspur Analytics as Head of Research.\n\nNadia");
+    let answer = json!({
+        "entities": [
+            {"name": "Nadia Okafor", "kind": "person"},
+            {"name": "Larkspur Analytics", "kind": "organization"},
+            {"name": "Zed Quint", "kind": "person"}
+        ],
+        "claims": [
+            {"subject": "Nadia Okafor", "predicate": "works_at", "object": "Larkspur Analytics",
+             "quote": "I've joined Larkspur Analytics as Head of Research."},
+            {"subject": "Zed Quint", "predicate": "works_at", "object": "Larkspur Analytics",
+             "quote": "I've joined Larkspur Analytics as Head of Research."}
+        ]
+    });
+    let v = validate_full(
+        &answer,
+        &it,
+        &chunks,
+        &LlmConfig::default(),
+        Some("Robin Ashgrove"),
+    );
+    let kept: Vec<String> = v
+        .extraction
+        .claims
+        .iter()
+        .map(|c| format!("{:?}", c.subject))
+        .collect();
+    assert_eq!(kept.len(), 1, "{:?}", v.verdicts);
+    assert!(names(&v.extraction, EntityKind::Person).contains(&"Nadia Okafor".to_owned()));
+    assert!(!names(&v.extraction, EntityKind::Person).contains(&"Zed Quint".to_owned()));
+}

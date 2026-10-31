@@ -28,6 +28,10 @@
 //!   is known at that domain. Webmail domains and the user's own domains (their addresses and
 //!   employers) never count. In a body, an organisation counts only when the text attributes
 //!   the short name to it ("Tamsin from Quillfeather", "at", "of"); merely named, it never does.
+//!   The one exception for the user's own domain is `internal_mail`: mail whose every
+//!   participant is at that domain, each one other than the user already a known person, names
+//!   a colleague ("Felix is doing great") when exactly one name-compatible person has an address
+//!   at that domain.
 //!
 //! **Order.** Both directions apply the same decision ([`Resolver::full_for`]): a short-form
 //! occurrence joins when it is resolved (forward), and a full-name person absorbs existing short
@@ -374,6 +378,7 @@ pub(crate) fn describe(reasons: &[String]) -> String {
             "same_item" => Some("on the same item"),
             "same_thread" => Some("in the same mail thread"),
             "same_org" => Some("same organisation"),
+            "internal_mail" => Some("internal mail between colleagues"),
             "job_change" => Some("one address's mail names the other's organisation"),
             _ => None,
         })
@@ -522,6 +527,67 @@ impl Resolver<'_> {
             .collect())
     }
 
+    /// An item of the short side that is internal mail of one of the user's own domains which
+    /// `f` has an address at: at least two participants, all at that domain, and every one that
+    /// is not the user already a known person (a forged new address does not count). Returns
+    /// the domain and the item.
+    fn internal_mail(&self, s_items: &[ItemRef], f: &Entity) -> Result<Option<(String, ItemRef)>> {
+        let user = self.user_domains()?;
+        let f_user: BTreeSet<String> = emails(&f.identifiers)
+            .filter_map(crate::text::domain_of)
+            .map(|d| crate::text::registrable_domain(&d))
+            .filter(|d| user.contains(d))
+            .collect();
+        if f_user.is_empty() {
+            return Ok(None);
+        }
+        let me_addrs: Vec<String> = match self.me.as_ref().map(|m| self.canonical(m)).transpose()? {
+            Some(Some(me)) => emails(&me.identifiers).map(str::to_lowercase).collect(),
+            _ => Vec::new(),
+        };
+        'items: for i in s_items.iter().rev().take(ITEM_SCAN) {
+            let m = self.meta_of(i)?;
+            if m.participants.len() < 2 {
+                continue;
+            }
+            let mut domain: Option<String> = None;
+            for a in &m.participants {
+                let Some(d) =
+                    crate::text::domain_of(a).map(|d| crate::text::registrable_domain(&d))
+                else {
+                    continue 'items;
+                };
+                if !f_user.contains(&d) || domain.as_ref().is_some_and(|x| *x != d) {
+                    continue 'items;
+                }
+                domain = Some(d);
+                if !me_addrs.contains(a) && !self.known_elsewhere(a, i)? {
+                    continue 'items;
+                }
+            }
+            if let Some(d) = domain {
+                return Ok(Some((d, i.clone())));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Whether the address belongs to a person mentioned on some item other than `item` (an
+    /// address first seen on the item itself, e.g. a forged sender, is not known).
+    fn known_elsewhere(&self, addr: &str, item: &ItemRef) -> Result<bool> {
+        let Some(id) = self
+            .graph
+            .find_by_identifier(&Identifier::new("email", addr))?
+        else {
+            return Ok(false);
+        };
+        Ok(self
+            .graph
+            .mentions_for(&id, MENTION_SCAN)?
+            .iter()
+            .any(|m| m.item != *item))
+    }
+
     /// What corroborates that the short side and `f` are the same person, beyond their names.
     fn corroborate(
         &self,
@@ -614,6 +680,15 @@ impl Resolver<'_> {
                     }
                 }
             }
+        }
+        // Same organisation, inside the user's own: mail whose every participant is at the
+        // user's domains, from known colleagues, names a colleague of the user's (`f` has an
+        // address there). Uniqueness of the name at that domain is checked by the caller.
+        if c.org.is_empty()
+            && let Some((d, i)) = self.internal_mail(s_items, f)?
+        {
+            c.org.push((d, Some(i)));
+            push_reason(&mut c.why, "internal_mail");
         }
         // Same organisation, from the text: an item of the short side attributes the name to
         // one of `f`'s organisations ("Tamsin from Quillfeather").
@@ -777,8 +852,17 @@ impl Resolver<'_> {
         }
         // Organisation domains of every compatible person, for uniqueness.
         let mut domain_count: HashMap<String, usize> = HashMap::new();
+        let user_domains = self.user_domains()?;
         for (f, _, _) in &cands {
-            for d in self.org_domains(emails(&f.identifiers))? {
+            let mut ds = self.org_domains(emails(&f.identifiers))?;
+            // The user's own domains too, for internal mail (`internal_mail`).
+            ds.extend(
+                emails(&f.identifiers)
+                    .filter_map(crate::text::domain_of)
+                    .map(|d| crate::text::registrable_domain(&d))
+                    .filter(|d| user_domains.contains(d)),
+            );
+            for d in ds {
                 *domain_count.entry(d).or_default() += 1;
             }
         }
@@ -800,7 +884,9 @@ impl Resolver<'_> {
             // An organisation only tells people apart when this name is unique in it.
             c.org.retain(|(d, _)| domain_count.get(d) == Some(&1));
             let item_org = c.org.first().and_then(|(_, i)| i.clone());
-            if !c.org.is_empty() {
+            if c.org.is_empty() {
+                c.why.retain(|w| w != "internal_mail");
+            } else {
                 push_reason(&mut c.why, "same_org");
             }
             if c.why.is_empty() {

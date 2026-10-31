@@ -135,6 +135,7 @@ pub async fn run(k: &Knowledge) -> RunStats {
 }
 
 /// A mail item as ingest stores it (`metadata.extracted` holds the parsed headers).
+#[derive(Clone)]
 pub struct Mail<'a> {
     pub source: &'a str,
     pub key: &'a str,

@@ -482,3 +482,132 @@ async fn a_few_thousand_items_with_short_names_stay_fast() {
         assert!(merge_log(&e).is_empty(), "no joins: {}", e.name);
     }
 }
+
+/// Internal mail of the user's own organisation, between colleagues already known, names a
+/// colleague by first name: the one person with that given name at the user's domain. Not
+/// from a sender first seen on that mail, and not when two colleagues share the name.
+#[tokio::test]
+async fn internal_mail_names_a_colleague_by_first_name() {
+    async fn felix_groups(extra: &[Mail<'_>]) -> Vec<Vec<String>> {
+        let env = Env::new();
+        let p = FakeProvider::new("local", Locality::OnDevice, |prompt| {
+            let people: &[&str] = if prompt.contains("Felix") && !prompt.contains("Ravensworth") {
+                &["Felix"]
+            } else {
+                &[]
+            };
+            let entities: Vec<Value> = people
+                .iter()
+                .map(|n| json!({"name": n, "kind": "person"}))
+                .collect();
+            json!({"entities": entities, "claims": []}).to_string()
+        });
+        let cfg = KnowledgeConfig {
+            llm: LlmConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            me: MeConfig {
+                name: Some("Robin Ashgrove".into()),
+                emails: vec!["robin@glimmerfen.test".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let k = env.knowledge(cfg, Some(router(Tier::Synthesis, vec![p])));
+        let base = [
+            Mail {
+                source: "imap:robin",
+                key: "felix",
+                from: "Felix Ravensworth <felix@glimmerfen.test>",
+                to: &["Robin Ashgrove <robin@glimmerfen.test>"],
+                date: "2026-10-01T10:00:00Z",
+                subject: "Runbooks",
+                body: "The runbooks are ready. Felix Ravensworth",
+                ..Default::default()
+            },
+            Mail {
+                source: "imap:robin",
+                key: "theo1",
+                from: "Theo Brannigan <theo@glimmerfen.test>",
+                to: &["Robin Ashgrove <robin@glimmerfen.test>"],
+                date: "2026-10-02T10:00:00Z",
+                subject: "Hi",
+                body: "Back from leave on Monday.",
+                ..Default::default()
+            },
+        ];
+        for m in base.iter().chain(extra) {
+            env.put(m.item(), &[m.body]);
+            assert_eq!(run(&k).await.items_failed, 0);
+        }
+        let mut out = Vec::new();
+        for e in env.entities(EntityKind::Person) {
+            let mut g: Vec<String> = env
+                .g()
+                .mentions_for(&e.id, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|m| m.surface.contains("Felix") || m.surface.contains("felix"))
+                .map(|m| m.item.key.to_string())
+                .collect();
+            g.sort();
+            g.dedup();
+            if !g.is_empty() {
+                out.push(g);
+            }
+        }
+        out.sort();
+        out
+    }
+    let staffing = Mail {
+        source: "imap:robin",
+        key: "staffing",
+        from: "Robin Ashgrove <robin@glimmerfen.test>",
+        to: &["Theo Brannigan <theo@glimmerfen.test>"],
+        date: "2026-10-03T10:00:00Z",
+        subject: "Driftwood staffing",
+        body: "Felix is doing great on the Driftwood API.",
+        ..Default::default()
+    };
+    let joined = felix_groups(std::slice::from_ref(&staffing)).await;
+    assert!(
+        joined
+            .iter()
+            .any(|g| g.contains(&"felix".to_owned()) && g.contains(&"staffing".to_owned())),
+        "{joined:?}"
+    );
+
+    // A sender first seen on the mail itself is not a known colleague.
+    let forged = Mail {
+        key: "forged",
+        from: "Mallory <mallory@glimmerfen.test>",
+        to: &["Robin Ashgrove <robin@glimmerfen.test>"],
+        ..staffing.clone()
+    };
+    let apart = felix_groups(std::slice::from_ref(&forged)).await;
+    assert!(
+        !apart
+            .iter()
+            .any(|g| g.contains(&"forged".to_owned()) && g.contains(&"felix".to_owned())),
+        "{apart:?}"
+    );
+
+    // Two colleagues called Felix: no join.
+    let other = Mail {
+        source: "imap:robin",
+        key: "felix2",
+        from: "Felix Jones <felix.jones@glimmerfen.test>",
+        to: &["Robin Ashgrove <robin@glimmerfen.test>"],
+        date: "2026-10-02T12:00:00Z",
+        subject: "Hello",
+        body: "Hello from the new team. Felix Jones",
+        ..Default::default()
+    };
+    let two = felix_groups(&[other, staffing]).await;
+    assert!(
+        !two.iter()
+            .any(|g| g.contains(&"staffing".to_owned()) && g.len() > 1),
+        "{two:?}"
+    );
+}
