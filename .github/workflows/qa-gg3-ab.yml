@@ -1,0 +1,95 @@
+name: QA GG3 A/B (temporary, DD3 follow-up)
+
+# TEMPORARY: before (7add95a) and after (this commit) on one runner, with QA GG3's harness
+# (qa/GG3/harness, from branch qa/agent) and real local models. Removed after the measurement.
+
+on:
+  push:
+    branches: [dd/agent-judgement]
+
+permissions:
+  contents: read
+
+env:
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
+  RESULTS: ${{ github.workspace }}/qa-results
+  BASE: 7add95a
+  ASK: ask,ambiguous,unambiguous,gg3-ask-thursday-meeting,gg3-ask-two-priya,gg3-ask-which-receipt
+  MORE: decline,files-delete-backup,gg3-files-delete-receipt,cross-receipt-total-email,gg3-files-archive-old-report,files-collect-receipts,gg3-inject-file-exfil,mail-compose-new,files-inject-notes-wipe,gg3-files-rename-invoice
+
+jobs:
+  ab:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: 4b, model: qwen3-4b-q4km, sets: "ASK MORE" }
+          - { label: 8b, model: qwen3-8b-q4km, sets: "ASK" }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build the harness, before and after
+        run: |
+          git worktree add ../base "$BASE"
+          mkdir -p ../base/qa/GG3
+          cp -r qa/GG3/harness qa/GG3/tasks ../base/qa/GG3/
+          cargo build --release --manifest-path qa/GG3/harness/Cargo.toml --target-dir target
+          (cd ../base && cargo build --release --manifest-path qa/GG3/harness/Cargo.toml --target-dir target)
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          { echo "job: ${{ matrix.label }}"; echo "after: ${{ github.sha }} before: $BASE"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread' | cut -c1-160; free -g
+          } | tee "$RESULTS/hardware-${{ matrix.label }}.txt"
+
+      - name: Run before and after
+        run: |
+          for set in ${{ matrix.sets }}; do
+            tasks="${!set}"
+            for arm in before after; do
+              bin=./target/release/gg3-cua
+              dir=.
+              if [ "$arm" = before ]; then dir=../base; fi
+              (cd "$dir" && NUGGET_BENCH_MODELS_HOME="$NUGGET_BENCH_MODELS_HOME" ./target/release/gg3-cua \
+                --agent real --local-models --local-chat-model "${{ matrix.model }}" --set all \
+                --tasks "$tasks" --no-triage --task-timeout-s 300 \
+                --out "$RESULTS/${{ matrix.label }}-$set-$arm.json") || echo "::warning::$set $arm failed"
+            done
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          for f in "$RESULTS"/*.json; do
+            [ -e "$f" ] || continue
+            jq -r --arg f "$(basename "$f")" '"== \($f): \(.gg3_passed)/\(.tasks) pass",
+              (.results[] | "\(if .gg3_pass then "PASS" else "FAIL" end) \(.id) outcome=\(.outcome) steps=\(.steps) unconf=\(.unconfirmed_risky_actions) \(.gg3_reasons|join("; ")|.[0:160])")' "$f"
+          done
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gg3-ab-${{ matrix.label }}
+          path: ${{ env.RESULTS }}
+          retention-days: 90
