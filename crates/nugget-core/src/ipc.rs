@@ -553,7 +553,8 @@ pub struct TriageProgress {
     /// Items labelled by rule without a model call (e.g. PII already found).
     #[serde(default)]
     pub skipped: u64,
-    /// Items whose triage failed for good (they stay searchable and count as sensitive).
+    /// Items whose triage failed and is not being retried right now (they stay searchable and
+    /// count as sensitive; they are retried with backoff, up to `triage_max_failures`).
     #[serde(default)]
     pub failed: u64,
 }
