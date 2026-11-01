@@ -1,14 +1,14 @@
 {
 "lang":"ar",
 "search":[
-{"id":"ar-s1","query":"كشتة","expect":["ar/02-khaled-kashta.eml"],"kind":"exact","why":"Gulf word for a desert camping trip, as written in the informal mail"},
-{"id":"ar-s2","query":"كرسي","expect":["ar/02-khaled-kashta.eml"],"kind":"inflected","why":"singular; the mail has only the broken plural الكراسي"},
-{"id":"ar-s3","query":"تاكيد الحضور","expect":["ar/01-rimal-alkhaleej-ijtima.eml"],"kind":"no_diacritics","why":"typed without hamza (ا for أ); the mail has بتأكيد الحضور"},
-{"id":"ar-s4","query":"التحول الرقمي","expect":["ar/01-rimal-alkhaleej-ijtima.eml"],"kind":"no_diacritics","why":"query without tashkeel; the body writes التَّحَوُّل الرقمي with shadda/fatha/damma"},
-{"id":"ar-s5","query":"فاتوره","expect":["ar/03-afaq-fatura.eml"],"kind":"no_diacritics","why":"ه typed for ta marbuta ة (فاتورة in the base64 body)"},
-{"id":"ar-s6","query":"نورة القحطاني","expect":["ar/04-ard-majlis-alidara.eml"],"kind":"name","why":"sender name in Arabic script (From and signature)"},
-{"id":"ar-s7","query":"طبخة رز ولحم أبيض بالتوابل الخليجية","expect":["ar/05-kabsa-dajaj.md"],"kind":"semantic","why":"paraphrase of the chicken kabsa recipe without shared words"},
-{"id":"ar-s8","query":"printing invoice for brochures and banners","expect":["ar/03-afaq-fatura.eml"],"kind":"cross_lingual","why":"English query for the Arabic print-shop invoice (كتيّبات، Roll-up Banner)"}
+{"id":"ar-s1","query":"كشتة","expect":["ar/02-khaled-kashta.eml"],"kind":"exact"},
+{"id":"ar-s2","query":"كرسي","expect":["ar/02-khaled-kashta.eml"],"kind":"inflected"},
+{"id":"ar-s3","query":"تاكيد الحضور","expect":["ar/01-rimal-alkhaleej-ijtima.eml"],"kind":"no_diacritics"},
+{"id":"ar-s4","query":"التحول الرقمي","expect":["ar/01-rimal-alkhaleej-ijtima.eml"],"kind":"no_diacritics"},
+{"id":"ar-s5","query":"فاتوره","expect":["ar/03-afaq-fatura.eml"],"kind":"no_diacritics"},
+{"id":"ar-s6","query":"نورة القحطاني","expect":["ar/04-ard-majlis-alidara.eml"],"kind":"name"},
+{"id":"ar-s7","query":"طبخة رز ولحم أبيض بالتوابل الخليجية","expect":["ar/05-kabsa-dajaj.md"],"kind":"semantic"},
+{"id":"ar-s8","query":"printing invoice for brochures and banners","expect":["ar/03-afaq-fatura.eml"],"kind":"cross_lingual"}
 ],
 "ask":[
 {"id":"ar-a1","question_lang":"ar","question":"متى وأين الاجتماع مع شركة رمال الخليج؟","facts":[["١٨ نوفمبر","18 نوفمبر","18/11","2026-11-18"],["١٠:٣٠","10:30"],["برج النخبة","حي العليا","طريق الملك فهد"]],"cite":["ar/01-rimal-alkhaleej-ijtima.eml"]},
@@ -17,9 +17,9 @@
 {"id":"ar-a4","question_lang":"en","question":"When is the Excel training workshop, how much does it cost, and by when do they need the participant names?","facts":[["24","٢٤","November 24","2026-11-24"],["8,500","8500","٨٬٥٠٠"],["11 November","November 11","Nov 11","2026-11-11","١١ نوفمبر"]],"cite":["ar/06-almada-warsha-rad.eml"]}
 ],
 "draft":[
-{"id":"ar-d1","file":"ar/01-rimal-alkhaleej-ijtima.eml","register":"formal","instruction":"قبول الدعوة مع طلب تأجيل الموعد إلى الساعة ١٢ ظهرًا","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","تحية طيبة","وتفضلوا","مع خالص"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش"],"note":"Formal MSA business invitation (سعادة، حضرتكم، وتفضلوا بقبول). Reply in formal MSA."},
-{"id":"ar-d2","file":"ar/02-khaled-kashta.eml","register":"informal","instruction":"","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","سعادة","وتفضلوا"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش","إن شاء الله"],"note":"Gulf-dialect message from a friend. A casual Gulf or light MSA reply is fine; formal letter style is wrong."},
-{"id":"ar-d3","file":"ar/06-almada-warsha-rad.eml","register":"formal","instruction":"الموافقة وإرسال أسماء المشاركين قبل ١١ نوفمبر","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","تحية طيبة","وتفضلوا","مع خالص"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش"],"note":"Thread reply to a training centre; polite MSA, keep 'Microsoft Excel' in Latin script."}
+{"id":"ar-d1","file":"ar/01-rimal-alkhaleej-ijtima.eml","register":"formal","instruction":"قبول الدعوة مع طلب تأجيل الموعد إلى الساعة ١٢ ظهرًا","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","تحية طيبة","وتفضلوا","مع خالص"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش"]},
+{"id":"ar-d2","file":"ar/02-khaled-kashta.eml","register":"informal","instruction":"","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","سعادة","وتفضلوا"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش","إن شاء الله"]},
+{"id":"ar-d3","file":"ar/06-almada-warsha-rad.eml","register":"formal","instruction":"الموافقة وإرسال أسماء المشاركين قبل ١١ نوفمبر","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","تحية طيبة","وتفضلوا","مع خالص"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش"]}
 ],
 "extract":{
 "people":[
@@ -62,7 +62,7 @@
 {"file":"ar/01-rimal-alkhaleej-ijtima.eml","expect":"event","date":"2026-11-18","time":"10:30","tz":"Asia/Riyadh"},
 {"file":"ar/02-khaled-kashta.eml","expect":"reply_needed","due":"2026-11-08","who":"خالد المري"},
 {"file":"ar/03-afaq-fatura.eml","expect":"payment_due","due":"2026-11-10","amount":"١٢٬٤٢٠ ر.س"},
-{"file":"ar/04-ard-majlis-alidara.eml","expect":"commitment","due":"2026-11-12","who":"نورة القحطاني","what":"Q3 results presentation for the board"},
-{"file":"ar/06-almada-warsha-rad.eml","expect":"commitment","due":"2026-11-11","who":"ريم الزهراني","what":"send participant names and emails"}
+{"file":"ar/04-ard-majlis-alidara.eml","expect":"commitment","due":"2026-11-12","who":"نورة القحطاني"},
+{"file":"ar/06-almada-warsha-rad.eml","expect":"commitment","due":"2026-11-11","who":"ريم الزهراني"}
 ]
 }

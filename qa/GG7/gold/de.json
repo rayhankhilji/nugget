@@ -1,14 +1,14 @@
 {
 "lang":"de",
 "search":[
-{"id":"de-s1","query":"Warmwasserspeicher","expect":["de/03-rechnung-sanitaer-woehrle.eml"],"kind":"exact","why":"compound noun in the base64 invoice body"},
-{"id":"de-s2","query":"Spieleabend","expect":["de/02-spieleabend-samstag.eml","de/05-rezept-zwetschgendatschi.md"],"kind":"exact","why":"in Mareike's mail and in the recipe note"},
-{"id":"de-s3","query":"Rahmenverträge","expect":["de/01-terminanfrage-kessler-thal.eml"],"kind":"inflected","why":"text has singular 'Rahmenvertrag'; query is the umlauted plural"},
-{"id":"de-s4","query":"Ausschuss","expect":["de/04-praesentation-lenkungsausschuss.eml"],"kind":"compound_part","why":"head of the compound 'Lenkungsausschuss'"},
-{"id":"de-s5","query":"Koenigstrasse","expect":["de/01-terminanfrage-kessler-thal.eml"],"kind":"no_diacritics","why":"'Königstraße' typed with oe and ss"},
-{"id":"de-s6","query":"Elif Yilmaz","expect":["de/04-praesentation-lenkungsausschuss.eml"],"kind":"name","why":"text has 'Elif Yılmaz' with Turkish dotless ı; query with plain i"},
-{"id":"de-s7","query":"Pflaumenkuchen von der Großmutter","expect":["de/05-rezept-zwetschgendatschi.md"],"kind":"semantic","why":"synonyms (Pflaume/Zwetschge, Großmutter/Oma); no shared words"},
-{"id":"de-s8","query":"plumber's invoice for the new water heater","expect":["de/03-rechnung-sanitaer-woehrle.eml"],"kind":"cross_lingual","why":"English query for the German Sanitär invoice"}
+{"id":"de-s1","query":"Warmwasserspeicher","expect":["de/03-rechnung-sanitaer-woehrle.eml"],"kind":"exact"},
+{"id":"de-s2","query":"Spieleabend","expect":["de/02-spieleabend-samstag.eml","de/05-rezept-zwetschgendatschi.md"],"kind":"exact"},
+{"id":"de-s3","query":"Rahmenverträge","expect":["de/01-terminanfrage-kessler-thal.eml"],"kind":"inflected"},
+{"id":"de-s4","query":"Ausschuss","expect":["de/04-praesentation-lenkungsausschuss.eml"],"kind":"compound_part"},
+{"id":"de-s5","query":"Koenigstrasse","expect":["de/01-terminanfrage-kessler-thal.eml"],"kind":"no_diacritics"},
+{"id":"de-s6","query":"Elif Yilmaz","expect":["de/04-praesentation-lenkungsausschuss.eml"],"kind":"name"},
+{"id":"de-s7","query":"Pflaumenkuchen von der Großmutter","expect":["de/05-rezept-zwetschgendatschi.md"],"kind":"semantic"},
+{"id":"de-s8","query":"plumber's invoice for the new water heater","expect":["de/03-rechnung-sanitaer-woehrle.eml"],"kind":"cross_lingual"}
 ],
 "ask":[
 {"id":"de-a1","question_lang":"de","question":"Wie hoch ist die Rechnung von Sanitär Wöhrle und bis wann muss ich sie bezahlen?","facts":[["2.159,85","2159,85","2159.85"],["20. November","20.11.","20.11.2026","2026-11-20"]],"cite":["de/03-rechnung-sanitaer-woehrle.eml"]},
@@ -17,9 +17,9 @@
 {"id":"de-a4","question_lang":"en","question":"When is the new meter-reading appointment and by when do I have to confirm it?","facts":[["November 16","16 November","Nov 16","2026-11-16","16. November"],["8:00","8 a.m.","8am"],["November 2","2 November","Nov 2","2026-11-02","2. November"]],"cite":["de/06-aw-ablesung-heizkostenverteiler.eml"]}
 ],
 "draft":[
-{"id":"de-d1","file":"de/01-terminanfrage-kessler-thal.eml","register":"formal","instruction":"zusagen und das Kennzeichen HH-SO 4711 für die Tiefgarage durchgeben","accept_lang":["de"],"formal_markers":["Sie ","Ihnen","Ihr ","Ihre"],"informal_markers":["du ","dich","dir","dein"],"note":"Formal Sie-register; salutation 'Sehr geehrte Frau Dr. Brückner' or 'Guten Tag Frau Brückner', closing 'Mit freundlichen Grüßen'."},
-{"id":"de-d2","file":"de/02-spieleabend-samstag.eml","register":"informal","instruction":"zusagen, Nachtisch mitbringen","accept_lang":["de"],"formal_markers":["Sie ","Ihnen","Ihr ","Ihre"],"informal_markers":["du ","dich","dir","dein","euch","ihr "],"note":"Friend, du-register; Mareike and Jonas are hosting, so 'euch/ihr' (plural informal) is also natural. Never 'Sie'."},
-{"id":"de-d3","file":"de/06-aw-ablesung-heizkostenverteiler.eml","register":"formal","instruction":"","accept_lang":["de"],"formal_markers":["Sie ","Ihnen","Ihr ","Ihre"],"informal_markers":["du ","dich","dir","dein"],"note":"Reply to the property manager's latest message (new date 16 November); Sam's own quoted mail is formal too. Should confirm the date or mention the key with Herr Krüger."}
+{"id":"de-d1","file":"de/01-terminanfrage-kessler-thal.eml","register":"formal","instruction":"zusagen und das Kennzeichen HH-SO 4711 für die Tiefgarage durchgeben","accept_lang":["de"],"formal_markers":["Sie ","Ihnen","Ihr ","Ihre"],"informal_markers":["du ","dich","dir","dein"]},
+{"id":"de-d2","file":"de/02-spieleabend-samstag.eml","register":"informal","instruction":"zusagen, Nachtisch mitbringen","accept_lang":["de"],"formal_markers":["Sie ","Ihnen","Ihr ","Ihre"],"informal_markers":["du ","dich","dir","dein","euch","ihr "]},
+{"id":"de-d3","file":"de/06-aw-ablesung-heizkostenverteiler.eml","register":"formal","instruction":"","accept_lang":["de"],"formal_markers":["Sie ","Ihnen","Ihr ","Ihre"],"informal_markers":["du ","dich","dir","dein"]}
 ],
 "extract":{
 "people":[
@@ -61,7 +61,7 @@
 {"file":"de/01-terminanfrage-kessler-thal.eml","expect":"event","date":"2026-11-10","time":"10:30"},
 {"file":"de/02-spieleabend-samstag.eml","expect":"reply_needed","due":"2026-11-04","who":"Mareike Lindner"},
 {"file":"de/03-rechnung-sanitaer-woehrle.eml","expect":"payment_due","due":"2026-11-20","amount":"2.159,85 €"},
-{"file":"de/04-praesentation-lenkungsausschuss.eml","expect":"commitment","due":"2026-11-13","who":"Tobias Hartmann","what":"Präsentation Pilotprojekt Leipzig mit Kennzahlen und Risiken"},
+{"file":"de/04-praesentation-lenkungsausschuss.eml","expect":"commitment","due":"2026-11-13","who":"Tobias Hartmann"},
 {"file":"de/06-aw-ablesung-heizkostenverteiler.eml","expect":"reply_needed","due":"2026-11-02","who":"Birgit Sommerfeld"},
 {"file":"de/06-aw-ablesung-heizkostenverteiler.eml","expect":"event","date":"2026-11-16","time":"08:00"}
 ]

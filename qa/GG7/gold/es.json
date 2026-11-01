@@ -1,15 +1,14 @@
 {
 "lang":"es",
-"note":"Files 01-05 are Spain (es-ES, +0100/+0200); file 06 is a Mexican sender (es-MX, -0600) using 'le pido de favor', 'trámites aduanales' and $ amounts with comma thousands, while Spain-style amounts use 1.452,00 €.",
 "search":[
-{"id":"es-s1","query":"F2026-00731","expect":["es/03-factura-reformas-penalver.eml"],"kind":"exact","why":"invoice number in the body"},
-{"id":"es-s2","query":"El Fogón de Triana","expect":["es/02-cumple-lucia-sabado.eml"],"kind":"exact","why":"restaurant name with accented ó"},
-{"id":"es-s3","query":"conejos","expect":["es/05-receta-paella-valenciana.md"],"kind":"inflected","why":"recipe only has singular 'conejo'"},
-{"id":"es-s4","query":"sofreír","expect":["es/05-receta-paella-valenciana.md"],"kind":"compound_part","why":"verb only appears with enclitic pronoun: 'sofreírlo'"},
-{"id":"es-s5","query":"Reformas Penalver","expect":["es/03-factura-reformas-penalver.eml"],"kind":"no_diacritics","why":"'Peñalver' typed with n instead of ñ"},
-{"id":"es-s6","query":"María José Castillo","expect":["es/01-solicitud-reunion-alcazar.eml"],"kind":"name","why":"sender (encoded-word From header) and signature"},
-{"id":"es-s7","query":"fiesta por el aniversario de una amiga","expect":["es/02-cumple-lucia-sabado.eml"],"kind":"semantic","why":"paraphrase of the surprise birthday dinner (cumple, cena sorpresa); no shared content words"},
-{"id":"es-s8","query":"shipping date for the ceramics order from Mexico","expect":["es/06-re-cotizacion-embarque.eml"],"kind":"cross_lingual","why":"English query for the Mexican base64 thread about PED-4471"}
+{"id":"es-s1","query":"F2026-00731","expect":["es/03-factura-reformas-penalver.eml"],"kind":"exact"},
+{"id":"es-s2","query":"El Fogón de Triana","expect":["es/02-cumple-lucia-sabado.eml"],"kind":"exact"},
+{"id":"es-s3","query":"conejos","expect":["es/05-receta-paella-valenciana.md"],"kind":"inflected"},
+{"id":"es-s4","query":"sofreír","expect":["es/05-receta-paella-valenciana.md"],"kind":"compound_part"},
+{"id":"es-s5","query":"Reformas Penalver","expect":["es/03-factura-reformas-penalver.eml"],"kind":"no_diacritics"},
+{"id":"es-s6","query":"María José Castillo","expect":["es/01-solicitud-reunion-alcazar.eml"],"kind":"name"},
+{"id":"es-s7","query":"fiesta por el aniversario de una amiga","expect":["es/02-cumple-lucia-sabado.eml"],"kind":"semantic"},
+{"id":"es-s8","query":"shipping date for the ceramics order from Mexico","expect":["es/06-re-cotizacion-embarque.eml"],"kind":"cross_lingual"}
 ],
 "ask":[
 {"id":"es-a1","question_lang":"es","question":"¿Cuánto tengo que pagar a Reformas Peñalver y cuándo vence la factura?","facts":[["1.452,00","1452,00","1.452","1452"],["20 de noviembre","20/11","20/11/2026","2026-11-20"]],"cite":["es/03-factura-reformas-penalver.eml"]},
@@ -18,9 +17,9 @@
 {"id":"es-a4","question_lang":"en","question":"When does the PED-4471 shipment leave and arrive, and what do I need to send Ricardo by when?","facts":[["November 9","9 November","Nov 9","2026-11-09","9 de noviembre"],["November 23","23 November","Nov 23","2026-11-23","23 de noviembre"],["address","dirección"],["November 4","4 November","Nov 4","2026-11-04","4 de noviembre"]],"cite":["es/06-re-cotizacion-embarque.eml"]}
 ],
 "draft":[
-{"id":"es-d1","file":"es/01-solicitud-reunion-alcazar.eml","register":"formal","instruction":"aceptar la reunión y preguntar si hay aparcamiento cerca","accept_lang":["es"],"formal_markers":["usted","le ","su ","Estimada","saludo"],"informal_markers":["tú","te ","tu ","contigo","¡Hola"],"note":"Trato de usted; saludo 'Estimada Sra. Castillo:' / 'Estimada María José:' with colon; closing 'Un cordial saludo'."},
-{"id":"es-d2","file":"es/02-cumple-lucia-sabado.eml","register":"informal","instruction":"","accept_lang":["es"],"formal_markers":["usted","Estimado","le saluda"],"informal_markers":["tú","te ","tu ","contigo","¡Hola","¡","Iñaki"],"note":"Friend, tuteo; should answer whether Sam comes on 21/11 and about the 25 € gift contribution."},
-{"id":"es-d3","file":"es/06-re-cotizacion-embarque.eml","register":"formal","instruction":"dar la dirección de entrega: Lumen Pfad Iberia, C/ de la Ribera, 15, 46980 Paterna (Valencia); recibe Marta Llorens","accept_lang":["es"],"formal_markers":["usted","le ","su ","Estimada","saludo"],"informal_markers":["tú","te ","tu ","contigo","¡Hola"],"note":"Formal business thread (usted) with a Mexican supplier; reply to Ricardo's latest message. Spain-Spanish reply is fine."}
+{"id":"es-d1","file":"es/01-solicitud-reunion-alcazar.eml","register":"formal","instruction":"aceptar la reunión y preguntar si hay aparcamiento cerca","accept_lang":["es"],"formal_markers":["usted","le ","su ","Estimada","saludo"],"informal_markers":["tú","te ","tu ","contigo","¡Hola"]},
+{"id":"es-d2","file":"es/02-cumple-lucia-sabado.eml","register":"informal","instruction":"","accept_lang":["es"],"formal_markers":["usted","Estimado","le saluda"],"informal_markers":["tú","te ","tu ","contigo","¡Hola","¡","Iñaki"]},
+{"id":"es-d3","file":"es/06-re-cotizacion-embarque.eml","register":"formal","instruction":"dar la dirección de entrega: Lumen Pfad Iberia, C/ de la Ribera, 15, 46980 Paterna (Valencia); recibe Marta Llorens","accept_lang":["es"],"formal_markers":["usted","le ","su ","Estimada","saludo"],"informal_markers":["tú","te ","tu ","contigo","¡Hola"]}
 ],
 "extract":{
 "people":[
@@ -63,7 +62,7 @@
 {"file":"es/01-solicitud-reunion-alcazar.eml","expect":"event","date":"2026-11-18","time":"11:00"},
 {"file":"es/02-cumple-lucia-sabado.eml","expect":"reply_needed","due":"2026-11-05","who":"Iñaki Etxeberria"},
 {"file":"es/03-factura-reformas-penalver.eml","expect":"payment_due","due":"2026-11-20","amount":"1.452,00 €"},
-{"file":"es/04-informe-trimestral-viernes-13.eml","expect":"commitment","due":"2026-11-13","who":"Rocío Gutiérrez","what":"informe de resultados T3 zona centro + diapositiva de desviaciones"},
-{"file":"es/06-re-cotizacion-embarque.eml","expect":"commitment","due":"2026-11-04","who":"Ricardo Salinas Ortega","what":"confirmar dirección de entrega y persona que recibe PED-4471"}
+{"file":"es/04-informe-trimestral-viernes-13.eml","expect":"commitment","due":"2026-11-13","who":"Rocío Gutiérrez"},
+{"file":"es/06-re-cotizacion-embarque.eml","expect":"commitment","due":"2026-11-04","who":"Ricardo Salinas Ortega"}
 ]
 }

@@ -1,16 +1,16 @@
 {
 "lang":"mixed",
 "search":[
-{"id":"mixed-s1","query":"Speicherstraße","expect":["mixed/01-de-en-workshop-thread.eml"],"kind":"exact","why":"German street name in the body and signature of the German/English thread"},
-{"id":"mixed-s2","query":"rate limit","expect":["mixed/06-ja-en-release-review.eml"],"kind":"exact","why":"English tech term embedded in Japanese text"},
-{"id":"mixed-s3","query":"Creme Hydratante","expect":["mixed/05-ar-fr-en-order-confirmation.eml"],"kind":"no_diacritics","why":"French product name 'Crème Hydratante Douce' inside an Arabic mail, typed without the accent"},
-{"id":"mixed-s4","query":"Valeria Dominguez","expect":["mixed/02-es-en-spanglish-demo.eml"],"kind":"name","why":"sender name, query without the accent on Domínguez"},
-{"id":"mixed-s5","query":"佐藤 健太","expect":["mixed/06-ja-en-release-review.eml"],"kind":"name","why":"Japanese sender name in native script"},
-{"id":"mixed-s6","query":"प्रिया शर्मा","expect":["mixed/04-hi-en-invoice-gst.eml"],"kind":"name","why":"Hindi sender name in Devanagari (From display name and signature)"},
-{"id":"mixed-s7","query":"invoice from the textile supplier in Jaipur","expect":["mixed/04-hi-en-invoice-gst.eml"],"kind":"cross_lingual","why":"English query for a mostly Hindi (Devanagari) invoice mail; 'Jaipur' and 'Invoice' do appear but the match should be semantic"},
-{"id":"mixed-s8","query":"supplier reconciliation meeting in Shanghai","expect":["mixed/07-zh-supplier-meeting.ics"],"kind":"cross_lingual","why":"English query for the Chinese calendar invite (供应商对账会议, 上海市)"},
-{"id":"mixed-s9","query":"skincare order quantities to confirm","expect":["mixed/05-ar-fr-en-order-confirmation.eml"],"kind":"cross_lingual","why":"English query for the Arabic order-confirmation mail (تأكيد الكميات)"},
-{"id":"mixed-s10","query":"evening meal with colleagues at the weekend","expect":["mixed/03-hinglish-team-dinner.eml"],"kind":"semantic","why":"paraphrase of the Hinglish 'Saturday team dinner' with no shared words"}
+{"id":"mixed-s1","query":"Speicherstraße","expect":["mixed/01-de-en-workshop-thread.eml"],"kind":"exact"},
+{"id":"mixed-s2","query":"rate limit","expect":["mixed/06-ja-en-release-review.eml"],"kind":"exact"},
+{"id":"mixed-s3","query":"Creme Hydratante","expect":["mixed/05-ar-fr-en-order-confirmation.eml"],"kind":"no_diacritics"},
+{"id":"mixed-s4","query":"Valeria Dominguez","expect":["mixed/02-es-en-spanglish-demo.eml"],"kind":"name"},
+{"id":"mixed-s5","query":"佐藤 健太","expect":["mixed/06-ja-en-release-review.eml"],"kind":"name"},
+{"id":"mixed-s6","query":"प्रिया शर्मा","expect":["mixed/04-hi-en-invoice-gst.eml"],"kind":"name"},
+{"id":"mixed-s7","query":"invoice from the textile supplier in Jaipur","expect":["mixed/04-hi-en-invoice-gst.eml"],"kind":"cross_lingual"},
+{"id":"mixed-s8","query":"supplier reconciliation meeting in Shanghai","expect":["mixed/07-zh-supplier-meeting.ics"],"kind":"cross_lingual"},
+{"id":"mixed-s9","query":"skincare order quantities to confirm","expect":["mixed/05-ar-fr-en-order-confirmation.eml"],"kind":"cross_lingual"},
+{"id":"mixed-s10","query":"evening meal with colleagues at the weekend","expect":["mixed/03-hinglish-team-dinner.eml"],"kind":"semantic"}
 ],
 "ask":[
 {"id":"mixed-a1","question_lang":"de","question":"Wann und wo findet der Workshop mit dem Lissabon-Team statt?","facts":[["11. November","11.11.","11.11.2026","2026-11-11"],["14:00","14 Uhr"],["Elbe","Speicherstraße 14"]],"cite":["mixed/01-de-en-workshop-thread.eml"]},
@@ -22,12 +22,12 @@
 {"id":"mixed-a7","question_lang":"en","question":"When and where is the supplier reconciliation meeting in Shanghai?","facts":[["17 November","November 17","Nov 17","2026-11-17","11月17日"],["14:30","2:30"],["Hongqiao","虹桥路","1288"]],"cite":["mixed/07-zh-supplier-meeting.ics"]}
 ],
 "draft":[
-{"id":"mixed-d1","file":"mixed/01-de-en-workshop-thread.eml","register":"informal","instruction":"confirm the 11th and say the slides will come by Monday","accept_lang":["de"],"formal_markers":["Sie ","Ihnen","Ihr "],"informal_markers":["du ","dir","dich","dein"],"note":"The thread started in English (Sam's quoted mail), but Jonas's latest message is entirely in German and uses 'du'. A natural reply follows the latest message: German, informal du-register. English would be tolerable between these two but is not the expected answer."},
-{"id":"mixed-d2","file":"mixed/02-es-en-spanglish-demo.eml","register":"informal","instruction":"","accept_lang":["es","en"],"informal_markers":["tú","te ","Vale"],"formal_markers":["usted"],"note":"Valeria writes Slack-style Spanglish, Spanish-based with English tech/filler words. A reply in Spanish, in English, or in the same Spanish/English mix is natural; tú-register (never usted). Mixed replies should be classified as es or en, both accepted."},
-{"id":"mixed-d3","file":"mixed/03-hinglish-team-dinner.eml","register":"informal","instruction":"","accept_lang":["hi-Latn","en"],"informal_markers":["yaar","tu ","tera","bhai"],"formal_markers":["aap","aapka"],"note":"Rohan writes romanized Hinglish to a close colleague. The natural reply is Hinglish in Latin script or plain English. Switching to Devanagari Hindi would be unnatural and should be counted as wrong-language; the reply must keep Latin script."},
-{"id":"mixed-d4","file":"mixed/04-hi-en-invoice-gst.eml","register":"formal","instruction":"say the PO copy and GSTIN confirmation will be sent by 6 November","accept_lang":["hi","en"],"formal_markers":["आप","जी","कृपया","धन्यवाद"],"informal_markers":["तुम","तू","तेरा"],"note":"Business mail in Devanagari Hindi with English business terms (invoice, PO, GSTIN). The natural reply is formal Hindi with the same English terms kept in Latin script (आप register); a formal English reply is also common in Indian business correspondence and is accepted. Romanized Hinglish would be too casual here."},
-{"id":"mixed-d5","file":"mixed/05-ar-fr-en-order-confirmation.eml","register":"formal","instruction":"","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترمة","تحية طيبة","نشكركم","مع خالص"],"informal_markers":["إنتي","شو","يلا"],"note":"The mail is formal Modern Standard Arabic; product names are French/English and digits are Latin. The reply should be formal Arabic, keeping the product names exactly as written in Latin script (not translated or transliterated) and Latin digits for quantities and the order number."},
-{"id":"mixed-d6","file":"mixed/06-ja-en-release-review.eml","register":"formal","instruction":"","accept_lang":["ja"],"formal_markers":["です","ます","いたします","よろしくお願い"],"informal_markers":["だよ","じゃん","だね"],"note":"Japanese business mail sprinkled with English tech terms (staging, deploy, rate limit, Kubernetes). The reply should be polite Japanese (です/ます, お疲れさまです opening) and may keep the English terms in Latin script; an English reply is not expected."}
+{"id":"mixed-d1","file":"mixed/01-de-en-workshop-thread.eml","register":"informal","instruction":"confirm the 11th and say the slides will come by Monday","accept_lang":["de"],"formal_markers":["Sie ","Ihnen","Ihr "],"informal_markers":["du ","dir","dich","dein"]},
+{"id":"mixed-d2","file":"mixed/02-es-en-spanglish-demo.eml","register":"informal","instruction":"","accept_lang":["es","en"],"informal_markers":["tú","te ","Vale"],"formal_markers":["usted"]},
+{"id":"mixed-d3","file":"mixed/03-hinglish-team-dinner.eml","register":"informal","instruction":"","accept_lang":["hi-Latn","en"],"informal_markers":["yaar","tu ","tera","bhai"],"formal_markers":["aap","aapka"]},
+{"id":"mixed-d4","file":"mixed/04-hi-en-invoice-gst.eml","register":"formal","instruction":"say the PO copy and GSTIN confirmation will be sent by 6 November","accept_lang":["hi","en"],"formal_markers":["आप","जी","कृपया","धन्यवाद"],"informal_markers":["तुम","तू","तेरा"]},
+{"id":"mixed-d5","file":"mixed/05-ar-fr-en-order-confirmation.eml","register":"formal","instruction":"","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترمة","تحية طيبة","نشكركم","مع خالص"],"informal_markers":["إنتي","شو","يلا"]},
+{"id":"mixed-d6","file":"mixed/06-ja-en-release-review.eml","register":"formal","instruction":"","accept_lang":["ja"],"formal_markers":["です","ます","いたします","よろしくお願い"],"informal_markers":["だよ","じゃん","だね"]}
 ],
 "extract":{
 "people":[
@@ -85,16 +85,16 @@
 ]
 },
 "proactive":[
-{"file":"mixed/01-de-en-workshop-thread.eml","expect":"commitment","due":"2026-11-09","who":"Jonas Becker","what":"Roadmap slides"},
+{"file":"mixed/01-de-en-workshop-thread.eml","expect":"commitment","due":"2026-11-09","who":"Jonas Becker"},
 {"file":"mixed/01-de-en-workshop-thread.eml","expect":"event","date":"2026-11-11","time":"14:00"},
-{"file":"mixed/02-es-en-spanglish-demo.eml","expect":"commitment","due":"2026-11-10","who":"Valeria Domínguez","what":"review PR #482"},
+{"file":"mixed/02-es-en-spanglish-demo.eml","expect":"commitment","due":"2026-11-10","who":"Valeria Domínguez"},
 {"file":"mixed/02-es-en-spanglish-demo.eml","expect":"reply_needed"},
 {"file":"mixed/03-hinglish-team-dinner.eml","expect":"reply_needed","due":"2026-11-04","who":"Rohan Mehta"},
-{"file":"mixed/04-hi-en-invoice-gst.eml","expect":"commitment","due":"2026-11-06","who":"प्रिया शर्मा","what":"PO copy + GSTIN confirmation"},
+{"file":"mixed/04-hi-en-invoice-gst.eml","expect":"commitment","due":"2026-11-06","who":"प्रिया शर्मा"},
 {"file":"mixed/04-hi-en-invoice-gst.eml","expect":"payment_due","due":"2026-11-20","amount":"₹ 2,45,600"},
-{"file":"mixed/05-ar-fr-en-order-confirmation.eml","expect":"commitment","due":"2026-11-03","who":"ليلى حداد","what":"confirm quantities for ORD-2026-5531"},
-{"file":"mixed/06-ja-en-release-review.eml","expect":"commitment","due":"2026-11-06","who":"佐藤 健太","what":"feedback on v2.4 release notes and rate limit"},
+{"file":"mixed/05-ar-fr-en-order-confirmation.eml","expect":"commitment","due":"2026-11-03","who":"ليلى حداد"},
+{"file":"mixed/06-ja-en-release-review.eml","expect":"commitment","due":"2026-11-06","who":"佐藤 健太"},
 {"file":"mixed/07-zh-supplier-meeting.ics","expect":"event","date":"2026-11-17","time":"14:30","tz":"Asia/Shanghai"},
-{"file":"mixed/07-zh-supplier-meeting.ics","expect":"commitment","due":"2026-11-13","who":"王丽娜","what":"send reconciliation statement DZ-2026-1107"}
+{"file":"mixed/07-zh-supplier-meeting.ics","expect":"commitment","due":"2026-11-13","who":"王丽娜"}
 ]
 }

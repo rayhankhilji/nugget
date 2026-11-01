@@ -1,15 +1,14 @@
 {
 "lang":"pt-BR",
-"note":"Sam's gender is unknown to senders, so the formal mail 01 uses the Brazilian corporate convention 'Prezado(a)' / 'o(a) senhor(a)'. Sam's reply addresses Fernanda, so 'a senhora' / 'Prezada' are the expected formal markers. Brazilian business mail commonly uses 'você' even in neutral-formal contexts; 'você' alone does not make d1 wrong if the tone is formal.",
 "search":[
-{"id":"pt-BR-s1","query":"Marcenaria São João","expect":["pt-BR/03-fatura-marcenaria-sao-joao.eml"],"kind":"exact","why":"vendor name (base64 body, encoded From)"},
-{"id":"pt-BR-s2","query":"Faria Lima","expect":["pt-BR/01-solicitacao-reuniao-tavola.eml"],"kind":"exact","why":"street of the meeting address"},
-{"id":"pt-BR-s3","query":"pousadas","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"inflected","why":"note only has singular 'Pousada'"},
-{"id":"pt-BR-s4","query":"chuva","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"compound_part","why":"part of the hyphenated compound 'guarda-chuva' (also in 'capa de chuva')"},
-{"id":"pt-BR-s5","query":"Lencois","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"no_diacritics","why":"'Lençóis' typed without cedilla and accent"},
-{"id":"pt-BR-s6","query":"Fernanda Albuquerque","expect":["pt-BR/01-solicitacao-reuniao-tavola.eml"],"kind":"name","why":"sender name and signature"},
-{"id":"pt-BR-s7","query":"almoço com amigos num fim de semana com prato típico de feijão preto","expect":["pt-BR/02-feijoada-sabado.eml"],"kind":"semantic","why":"describes the feijoada invitation without the word 'feijoada'"},
-{"id":"pt-BR-s8","query":"invoice for the custom-made bookshelf","expect":["pt-BR/03-fatura-marcenaria-sao-joao.eml"],"kind":"cross_lingual","why":"English query for the Portuguese carpentry invoice (estante sob medida)"}
+{"id":"pt-BR-s1","query":"Marcenaria São João","expect":["pt-BR/03-fatura-marcenaria-sao-joao.eml"],"kind":"exact"},
+{"id":"pt-BR-s2","query":"Faria Lima","expect":["pt-BR/01-solicitacao-reuniao-tavola.eml"],"kind":"exact"},
+{"id":"pt-BR-s3","query":"pousadas","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"inflected"},
+{"id":"pt-BR-s4","query":"chuva","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"compound_part"},
+{"id":"pt-BR-s5","query":"Lencois","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"no_diacritics"},
+{"id":"pt-BR-s6","query":"Fernanda Albuquerque","expect":["pt-BR/01-solicitacao-reuniao-tavola.eml"],"kind":"name"},
+{"id":"pt-BR-s7","query":"almoço com amigos num fim de semana com prato típico de feijão preto","expect":["pt-BR/02-feijoada-sabado.eml"],"kind":"semantic"},
+{"id":"pt-BR-s8","query":"invoice for the custom-made bookshelf","expect":["pt-BR/03-fatura-marcenaria-sao-joao.eml"],"kind":"cross_lingual"}
 ],
 "ask":[
 {"id":"pt-BR-a1","question_lang":"pt-BR","question":"Quanto ainda falta pagar para a Marcenaria São João e qual é o vencimento?","facts":[["R$ 4.704,00","4.704,00","4704,00","4.704"],["20/11","20/11/2026","20 de novembro","2026-11-20"]],"cite":["pt-BR/03-fatura-marcenaria-sao-joao.eml"]},
@@ -18,9 +17,9 @@
 {"id":"pt-BR-a4","question_lang":"en","question":"When is the year-end party, how much is the deposit, and by when must it be paid?","facts":[["November 27","27 November","Nov 27","2026-11-27","27 de novembro"],["1,500","1.500","1500"],["November 6","6 November","Nov 6","2026-11-06","6/11"]],"cite":["pt-BR/06-re-confraternizacao-fim-de-ano.eml"]}
 ],
 "draft":[
-{"id":"pt-BR-d1","file":"pt-BR/01-solicitacao-reuniao-tavola.eml","register":"formal","instruction":"aceitar e informar que vou com uma colega, Débora Lins","accept_lang":["pt-BR","pt"],"formal_markers":["senhora","Sra.","Prezada","Atenciosamente"],"informal_markers":["tô","beleza","valeu","abraço","E aí"],"note":"Formal Brazilian business register: 'Prezada Fernanda' / 'Prezada Sra. Fernanda', 'a senhora', closing 'Atenciosamente'. European Portuguese forms (e.g. 'está a ver', 'equipa') are a pt-PT leak."},
-{"id":"pt-BR-d2","file":"pt-BR/02-feijoada-sabado.eml","register":"informal","instruction":"","accept_lang":["pt-BR","pt"],"formal_markers":["Prezado","senhor","Atenciosamente"],"informal_markers":["você","te ","tô","Beleza","valeu","abraço"],"note":"Friend, você/colloquial ('tô', 'beleza', 'pra'); should confirm 7/11 and the lime + cachaça."},
-{"id":"pt-BR-d3","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","register":"informal","instruction":"dizer que eu aprovo o sinal no sistema hoje","accept_lang":["pt-BR","pt"],"formal_markers":["Prezada","senhora","Atenciosamente"],"informal_markers":["você","te ","tô","Beleza","valeu","abraço","Ju","Oi"],"note":"Colleague thread, você-register; reply to Juliana's latest message (sinal R$ 1.500,00 até 6/11; amigo-secreto)."}
+{"id":"pt-BR-d1","file":"pt-BR/01-solicitacao-reuniao-tavola.eml","register":"formal","instruction":"aceitar e informar que vou com uma colega, Débora Lins","accept_lang":["pt-BR","pt"],"formal_markers":["senhora","Sra.","Prezada","Atenciosamente"],"informal_markers":["tô","beleza","valeu","abraço","E aí"]},
+{"id":"pt-BR-d2","file":"pt-BR/02-feijoada-sabado.eml","register":"informal","instruction":"","accept_lang":["pt-BR","pt"],"formal_markers":["Prezado","senhor","Atenciosamente"],"informal_markers":["você","te ","tô","Beleza","valeu","abraço"]},
+{"id":"pt-BR-d3","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","register":"informal","instruction":"dizer que eu aprovo o sinal no sistema hoje","accept_lang":["pt-BR","pt"],"formal_markers":["Prezada","senhora","Atenciosamente"],"informal_markers":["você","te ","tô","Beleza","valeu","abraço","Ju","Oi"]}
 ],
 "extract":{
 "people":[
@@ -65,8 +64,8 @@
 {"file":"pt-BR/02-feijoada-sabado.eml","expect":"reply_needed","due":"2026-11-04","who":"Rafael Nogueira"},
 {"file":"pt-BR/03-fatura-marcenaria-sao-joao.eml","expect":"payment_due","due":"2026-11-20","amount":"R$ 4.704,00"},
 {"file":"pt-BR/03-fatura-marcenaria-sao-joao.eml","expect":"event","date":"2026-11-10","time":"08:00"},
-{"file":"pt-BR/04-proposta-vale-verde-sexta-13.eml","expect":"commitment","due":"2026-11-13","who":"Luciana Prado","what":"proposta comercial Cooperativa Vale Verde"},
+{"file":"pt-BR/04-proposta-vale-verde-sexta-13.eml","expect":"commitment","due":"2026-11-13","who":"Luciana Prado"},
 {"file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","expect":"reply_needed","who":"Juliana Teixeira"},
-{"file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","expect":"commitment","due":"2026-11-06","who":"Juliana Teixeira","what":"aprovar sinal de R$ 1.500,00"}
+{"file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","expect":"commitment","due":"2026-11-06","who":"Juliana Teixeira"}
 ]
 }

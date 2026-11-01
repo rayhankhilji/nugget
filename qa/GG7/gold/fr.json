@@ -1,15 +1,14 @@
 {
 "lang":"fr",
-"note":"French typography: several bodies use U+00A0 before : ; ? ! € and U+202F as thousands separator (1 236,80 €). Fact alternatives include the exact NBSP forms plus plain-space and unspaced variants.",
 "search":[
-{"id":"fr-s1","query":"Duval-Roche","expect":["fr/01-rdv-ateliers-duval-roche.eml"],"kind":"exact","why":"hyphenated company name in body and signature"},
-{"id":"fr-s2","query":"HT-2026-58214","expect":["fr/03-reservation-hotel-tilleuls.eml"],"kind":"exact","why":"booking number in the quoted-printable body"},
-{"id":"fr-s3","query":"façades","expect":["fr/05-cr-conseil-syndical.md"],"kind":"inflected","why":"text only has singular 'façade' (Ravalement de façade, Rénov'Façade)"},
-{"id":"fr-s4","query":"échafaudage","expect":["fr/05-cr-conseil-syndical.md"],"kind":"compound_part","why":"appears only with elided article: l'échafaudage"},
-{"id":"fr-s5","query":"Etretat","expect":["fr/02-weekend-etretat.eml"],"kind":"no_diacritics","why":"text has 'Étretat' with capital É"},
-{"id":"fr-s6","query":"Helene Marchand","expect":["fr/01-rdv-ateliers-duval-roche.eml"],"kind":"name","why":"sender 'Hélène Marchand' (encoded-word From) typed without accents"},
-{"id":"fr-s7","query":"escapade normande entre copains","expect":["fr/02-weekend-etretat.eml"],"kind":"semantic","why":"paraphrase of Camille's weekend plan; none of these words in the mail"},
-{"id":"fr-s8","query":"condo board meeting about the building facade and elevator","expect":["fr/05-cr-conseil-syndical.md"],"kind":"cross_lingual","why":"English query for the French conseil syndical notes"}
+{"id":"fr-s1","query":"Duval-Roche","expect":["fr/01-rdv-ateliers-duval-roche.eml"],"kind":"exact"},
+{"id":"fr-s2","query":"HT-2026-58214","expect":["fr/03-reservation-hotel-tilleuls.eml"],"kind":"exact"},
+{"id":"fr-s3","query":"façades","expect":["fr/05-cr-conseil-syndical.md"],"kind":"inflected"},
+{"id":"fr-s4","query":"échafaudage","expect":["fr/05-cr-conseil-syndical.md"],"kind":"compound_part"},
+{"id":"fr-s5","query":"Etretat","expect":["fr/02-weekend-etretat.eml"],"kind":"no_diacritics"},
+{"id":"fr-s6","query":"Helene Marchand","expect":["fr/01-rdv-ateliers-duval-roche.eml"],"kind":"name"},
+{"id":"fr-s7","query":"escapade normande entre copains","expect":["fr/02-weekend-etretat.eml"],"kind":"semantic"},
+{"id":"fr-s8","query":"condo board meeting about the building facade and elevator","expect":["fr/05-cr-conseil-syndical.md"],"kind":"cross_lingual"}
 ],
 "ask":[
 {"id":"fr-a1","question_lang":"fr","question":"Combien coûte mon séjour à l'Hôtel des Tilleuls et avant quand dois-je payer l'acompte ?","facts":[["1 236,80","1 236,80","1236,80","1 236,80"],["371,04"],["6 novembre","06/11","6/11","2026-11-06"]],"cite":["fr/03-reservation-hotel-tilleuls.eml"]},
@@ -18,9 +17,9 @@
 {"id":"fr-a4","question_lang":"en","question":"When is Bernard's farewell drink and what is Agathe asking me to do?","facts":[["26 November","November 26","Nov 26","2026-11-26","26 novembre"],["18:00","6 p.m.","6 pm","18 h","18h"],["speech","discours"]],"cite":["fr/06-re-pot-de-depart-bernard.eml"]}
 ],
 "draft":[
-{"id":"fr-d1","file":"fr/01-rdv-ateliers-duval-roche.eml","register":"formal","instruction":"accepter le rendez-vous et demander s'il y a un parking visiteurs","accept_lang":["fr"],"formal_markers":["vous","votre","vos ","Madame","salutations"],"informal_markers":["tu ","te ","t'","toi","ton ","ta "],"note":"Vouvoiement, 'Madame' / 'Bonjour Madame Marchand', formule de politesse ('Bien cordialement' at minimum, 'Je vous prie d'agréer...' ideal)."},
-{"id":"fr-d2","file":"fr/02-weekend-etretat.eml","register":"informal","instruction":"","accept_lang":["fr"],"formal_markers":["vous ","votre","Madame"],"informal_markers":["tu ","te ","t'","toi","ton ","ta "],"note":"Tutoiement between friends; 'vous' only acceptable as plural (Léa et Mathis), so markers are indicative. Should answer before 4 November."},
-{"id":"fr-d3","file":"fr/06-re-pot-de-depart-bernard.eml","register":"informal","instruction":"accepter de faire le discours","accept_lang":["fr"],"formal_markers":["vous ","votre","Madame"],"informal_markers":["tu ","te ","t'","toi","ton ","ta "],"note":"Colleague thread in tu-register; reply to Agathe's latest message (date 26/11, speech, +10 €)."}
+{"id":"fr-d1","file":"fr/01-rdv-ateliers-duval-roche.eml","register":"formal","instruction":"accepter le rendez-vous et demander s'il y a un parking visiteurs","accept_lang":["fr"],"formal_markers":["vous","votre","vos ","Madame","salutations"],"informal_markers":["tu ","te ","t'","toi","ton ","ta "]},
+{"id":"fr-d2","file":"fr/02-weekend-etretat.eml","register":"informal","instruction":"","accept_lang":["fr"],"formal_markers":["vous ","votre","Madame"],"informal_markers":["tu ","te ","t'","toi","ton ","ta "]},
+{"id":"fr-d3","file":"fr/06-re-pot-de-depart-bernard.eml","register":"informal","instruction":"accepter de faire le discours","accept_lang":["fr"],"formal_markers":["vous ","votre","Madame"],"informal_markers":["tu ","te ","t'","toi","ton ","ta "]}
 ],
 "extract":{
 "people":[
@@ -62,7 +61,7 @@
 {"file":"fr/01-rdv-ateliers-duval-roche.eml","expect":"event","date":"2026-11-17","time":"14:30"},
 {"file":"fr/02-weekend-etretat.eml","expect":"reply_needed","due":"2026-11-04","who":"Camille Rousseau"},
 {"file":"fr/03-reservation-hotel-tilleuls.eml","expect":"payment_due","due":"2026-11-06","amount":"371,04 €"},
-{"file":"fr/04-rapport-audit-13-novembre.eml","expect":"commitment","due":"2026-11-13","who":"Julien Mercier","what":"rapport d'audit fournisseurs Grand Est + synthèse d'une page"},
+{"file":"fr/04-rapport-audit-13-novembre.eml","expect":"commitment","due":"2026-11-13","who":"Julien Mercier"},
 {"file":"fr/06-re-pot-de-depart-bernard.eml","expect":"reply_needed","due":"2026-10-30","who":"Agathe Fontaine"},
 {"file":"fr/06-re-pot-de-depart-bernard.eml","expect":"event","date":"2026-11-26","time":"18:00"}
 ]

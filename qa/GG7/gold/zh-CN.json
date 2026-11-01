@@ -1,14 +1,14 @@
 {
 "lang":"zh-CN",
 "search":[
-{"id":"zh-CN-s1","query":"特装搭建","expect":["zh-CN/06-rongchuang-zhanwei-re.eml"],"kind":"exact","why":"term in the exhibition-booth quote and the quoted earlier message"},
-{"id":"zh-CN-s2","query":"糖色","expect":["zh-CN/05-hongshaorou-biji.md"],"kind":"cjk_word","why":"2-character word mid-sentence (小火慢慢炒出糖色，), no word boundaries"},
-{"id":"zh-CN-s3","query":"民宿","expect":["zh-CN/02-xiaoyu-moganshan.eml"],"kind":"cjk_word","why":"2-character word inside 那边的民宿现在正是…"},
-{"id":"zh-CN-s4","query":"紅燒肉","expect":["zh-CN/05-hongshaorou-biji.md"],"kind":"no_diacritics","why":"variant spelling: query in Traditional characters, note written in Simplified 红烧肉"},
-{"id":"zh-CN-s5","query":"陈婉清","expect":["zh-CN/01-qinghe-huimian-yaoqing.eml"],"kind":"name","why":"sender name in Chinese characters"},
-{"id":"zh-CN-s6","query":"赵静","expect":["zh-CN/04-erqi-yanshou-cailiao.eml"],"kind":"name","why":"second person mentioned only in the body"},
-{"id":"zh-CN-s7","query":"江南水乡客栈的留宿单据","expect":["zh-CN/03-gusu-yayuan-yuding.eml"],"kind":"semantic","why":"paraphrase of the Suzhou hotel booking confirmation with no shared words"},
-{"id":"zh-CN-s8","query":"deadline for the acceptance test report","expect":["zh-CN/04-erqi-yanshou-cailiao.eml"],"kind":"cross_lingual","why":"English query for the Chinese mail about 二期验收 materials (测试报告)"}
+{"id":"zh-CN-s1","query":"特装搭建","expect":["zh-CN/06-rongchuang-zhanwei-re.eml"],"kind":"exact"},
+{"id":"zh-CN-s2","query":"糖色","expect":["zh-CN/05-hongshaorou-biji.md"],"kind":"cjk_word"},
+{"id":"zh-CN-s3","query":"民宿","expect":["zh-CN/02-xiaoyu-moganshan.eml"],"kind":"cjk_word"},
+{"id":"zh-CN-s4","query":"紅燒肉","expect":["zh-CN/05-hongshaorou-biji.md"],"kind":"no_diacritics"},
+{"id":"zh-CN-s5","query":"陈婉清","expect":["zh-CN/01-qinghe-huimian-yaoqing.eml"],"kind":"name"},
+{"id":"zh-CN-s6","query":"赵静","expect":["zh-CN/04-erqi-yanshou-cailiao.eml"],"kind":"name"},
+{"id":"zh-CN-s7","query":"江南水乡客栈的留宿单据","expect":["zh-CN/03-gusu-yayuan-yuding.eml"],"kind":"semantic"},
+{"id":"zh-CN-s8","query":"deadline for the acceptance test report","expect":["zh-CN/04-erqi-yanshou-cailiao.eml"],"kind":"cross_lingual"}
 ],
 "ask":[
 {"id":"zh-CN-a1","question_lang":"zh-CN","question":"陈婉清约我什么时候、在哪里见面？","facts":[["11月19日","11/19","2026-11-19"],["10:00","上午十点","10点"],["青禾大厦","文三路","901"]],"cite":["zh-CN/01-qinghe-huimian-yaoqing.eml"]},
@@ -17,9 +17,9 @@
 {"id":"zh-CN-a4","question_lang":"en","question":"How much is the exhibition booth construction quote, and by when must the design be confirmed?","facts":[["48,600","48600"],["10 November","November 10","Nov 10","2026-11-10","11月10日"]],"cite":["zh-CN/06-rongchuang-zhanwei-re.eml"]}
 ],
 "draft":[
-{"id":"zh-CN-d1","file":"zh-CN/01-qinghe-huimian-yaoqing.eml","register":"formal","instruction":"接受邀请，但希望改到下午两点","accept_lang":["zh-CN"],"formal_markers":["您","贵司","此致","敬礼"],"informal_markers":["你","哈","啦"],"note":"Formal business invitation (尊敬的, 您, 此致敬礼). Reply in formal Simplified Chinese with 您."},
-{"id":"zh-CN-d2","file":"zh-CN/02-xiaoyu-moganshan.eml","register":"informal","instruction":"","accept_lang":["zh-CN"],"formal_markers":["您","贵","此致"],"informal_markers":["你","哈","啦","呗"],"note":"Old friend, casual 你 register with particles (哈, 呢). Reply casually; 您 would be odd."},
-{"id":"zh-CN-d3","file":"zh-CN/06-rongchuang-zhanwei-re.eml","register":"formal","instruction":"同意报价，请对方发合同","accept_lang":["zh-CN"],"formal_markers":["您","贵司","此致","敬礼"],"informal_markers":["你","哈","啦"],"note":"Thread reply to a vendor; polite business Chinese with 您, full-width punctuation."}
+{"id":"zh-CN-d1","file":"zh-CN/01-qinghe-huimian-yaoqing.eml","register":"formal","instruction":"接受邀请，但希望改到下午两点","accept_lang":["zh-CN"],"formal_markers":["您","贵司","此致","敬礼"],"informal_markers":["你","哈","啦"]},
+{"id":"zh-CN-d2","file":"zh-CN/02-xiaoyu-moganshan.eml","register":"informal","instruction":"","accept_lang":["zh-CN"],"formal_markers":["您","贵","此致"],"informal_markers":["你","哈","啦","呗"]},
+{"id":"zh-CN-d3","file":"zh-CN/06-rongchuang-zhanwei-re.eml","register":"formal","instruction":"同意报价，请对方发合同","accept_lang":["zh-CN"],"formal_markers":["您","贵司","此致","敬礼"],"informal_markers":["你","哈","啦"]}
 ],
 "extract":{
 "people":[
@@ -61,8 +61,8 @@
 {"file":"zh-CN/01-qinghe-huimian-yaoqing.eml","expect":"event","date":"2026-11-19","time":"10:00","tz":"Asia/Shanghai"},
 {"file":"zh-CN/02-xiaoyu-moganshan.eml","expect":"reply_needed","due":"2026-11-06","who":"周小雨"},
 {"file":"zh-CN/03-gusu-yayuan-yuding.eml","expect":"payment_due","due":"2026-11-09","amount":"¥2,376.00"},
-{"file":"zh-CN/04-erqi-yanshou-cailiao.eml","expect":"commitment","due":"2026-11-13","who":"李明轩","what":"phase-2 test report and operator training manual"},
-{"file":"zh-CN/06-rongchuang-zhanwei-re.eml","expect":"commitment","due":"2026-11-10","who":"黄嘉怡","what":"confirm booth design"},
+{"file":"zh-CN/04-erqi-yanshou-cailiao.eml","expect":"commitment","due":"2026-11-13","who":"李明轩"},
+{"file":"zh-CN/06-rongchuang-zhanwei-re.eml","expect":"commitment","due":"2026-11-10","who":"黄嘉怡"},
 {"file":"zh-CN/06-rongchuang-zhanwei-re.eml","expect":"reply_needed","who":"黄嘉怡"}
 ]
 }

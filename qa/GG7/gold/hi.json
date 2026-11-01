@@ -1,14 +1,14 @@
 {
 "lang":"hi",
 "search":[
-{"id":"hi-s1","query":"चालान","expect":["hi/03-kamalvan-chalan.eml"],"kind":"exact","why":"Hindi word for invoice, in the base64 body"},
-{"id":"hi-s2","query":"हवेली","expect":["hi/05-jaisalmer-yatra-yojana.md"],"kind":"inflected","why":"singular direct form; the note has only the plural forms हवेलियाँ / हवेलियों"},
-{"id":"hi-s3","query":"गाड़ी","expect":["hi/02-karan-rishikesh-plan.eml"],"kind":"compound_part","why":"part of the compound रेलगाड़ी (train) in Karan's mail"},
-{"id":"hi-s4","query":"ऊंट सफारी","expect":["hi/05-jaisalmer-yatra-yojana.md"],"kind":"no_diacritics","why":"typed with anusvara instead of chandrabindu and without nukta; the note has ऊँट-सफ़ारी"},
-{"id":"hi-s5","query":"मंज़िल","expect":["hi/01-gomti-edtech-baithak.eml"],"kind":"no_diacritics","why":"NFD query (U+091C U+093C); 01's body uses precomposed nukta letters (U+0958-095F), so search must normalize"},
-{"id":"hi-s6","query":"नसरीन फ़ारूक़ी","expect":["hi/04-timahi-report-masauda.eml"],"kind":"name","why":"sender name in Devanagari (with nukta letters) in From and signature"},
-{"id":"hi-s7","query":"पर्वतीय सैर-सपाटे का न्योता","expect":["hi/02-karan-rishikesh-plan.eml"],"kind":"semantic","why":"paraphrase (mountain outing invitation) of the Rishikesh trip mail with no shared words"},
-{"id":"hi-s8","query":"printing quote for 2000 brochures","expect":["hi/06-pragati-brochure-re.eml"],"kind":"cross_lingual","why":"English query for the Hindi brochure-printing reply (ब्रोशर की छपाई, 2,000 प्रतियाँ)"}
+{"id":"hi-s1","query":"चालान","expect":["hi/03-kamalvan-chalan.eml"],"kind":"exact"},
+{"id":"hi-s2","query":"हवेली","expect":["hi/05-jaisalmer-yatra-yojana.md"],"kind":"inflected"},
+{"id":"hi-s3","query":"गाड़ी","expect":["hi/02-karan-rishikesh-plan.eml"],"kind":"compound_part"},
+{"id":"hi-s4","query":"ऊंट सफारी","expect":["hi/05-jaisalmer-yatra-yojana.md"],"kind":"no_diacritics"},
+{"id":"hi-s5","query":"मंज़िल","expect":["hi/01-gomti-edtech-baithak.eml"],"kind":"no_diacritics"},
+{"id":"hi-s6","query":"नसरीन फ़ारूक़ी","expect":["hi/04-timahi-report-masauda.eml"],"kind":"name"},
+{"id":"hi-s7","query":"पर्वतीय सैर-सपाटे का न्योता","expect":["hi/02-karan-rishikesh-plan.eml"],"kind":"semantic"},
+{"id":"hi-s8","query":"printing quote for 2000 brochures","expect":["hi/06-pragati-brochure-re.eml"],"kind":"cross_lingual"}
 ],
 "ask":[
 {"id":"hi-a1","question_lang":"hi","question":"कमलवन बैंक्वेट्स के चालान की कुल राशि कितनी है और भुगतान की आख़िरी तारीख़ क्या है?","facts":[["1,24,500","124500","124,500","1.245 लाख"],["20 नवंबर","20/11","2026-11-20"]],"cite":["hi/03-kamalvan-chalan.eml"]},
@@ -17,9 +17,9 @@
 {"id":"hi-a4","question_lang":"en","question":"What does Nasreen Farooqui need from me, by when, and who has the survey data?","facts":[["quarterly report","report draft","draft","मसौदा"],["13 November","November 13","Nov 13","13 Nov","2026-11-13","13 नवंबर"],["Vivek Zaidi","Vivek","Zaidi","विवेक ज़ैदी"]],"cite":["hi/04-timahi-report-masauda.eml"]}
 ],
 "draft":[
-{"id":"hi-d1","file":"hi/01-gomti-edtech-baithak.eml","register":"formal","instruction":"बैठक स्वीकार करें, लेकिन सुबह 11 बजे की जगह दोपहर 2 बजे का समय सुझाएँ","accept_lang":["hi"],"formal_markers":["आप","जी","कृपया","धन्यवाद","सादर"],"informal_markers":["तुम","तुम्हें","तुम्हारा","तू","यार"],"note":"Formal Devanagari Hindi business mail (आप, आदरणीय, सादर). The reply should be formal Hindi in Devanagari; not Hinglish, not तुम."},
-{"id":"hi-d2","file":"hi/02-karan-rishikesh-plan.eml","register":"informal","instruction":"","accept_lang":["hi"],"formal_markers":["आप","आपका","आपको","जी,"],"informal_markers":["तुम","तुम्हें","तुम्हारा","तू","यार","भाई"],"note":"Close friend writing in casual तुम-register Hindi. The reply should stay in Devanagari Hindi with तुम (not आप)."},
-{"id":"hi-d3","file":"hi/06-pragati-brochure-re.eml","register":"formal","instruction":"कवर वाला विकल्प चाहिए; फ़ाइल 5 नवंबर तक भेज देंगे","accept_lang":["hi"],"formal_markers":["आप","जी","कृपया","धन्यवाद","सादर"],"informal_markers":["तुम","तुम्हें","तुम्हारा","तू","यार"],"note":"Reply in the thread with the printer; polite आप-register Hindi."}
+{"id":"hi-d1","file":"hi/01-gomti-edtech-baithak.eml","register":"formal","instruction":"बैठक स्वीकार करें, लेकिन सुबह 11 बजे की जगह दोपहर 2 बजे का समय सुझाएँ","accept_lang":["hi"],"formal_markers":["आप","जी","कृपया","धन्यवाद","सादर"],"informal_markers":["तुम","तुम्हें","तुम्हारा","तू","यार"]},
+{"id":"hi-d2","file":"hi/02-karan-rishikesh-plan.eml","register":"informal","instruction":"","accept_lang":["hi"],"formal_markers":["आप","आपका","आपको","जी,"],"informal_markers":["तुम","तुम्हें","तुम्हारा","तू","यार","भाई"]},
+{"id":"hi-d3","file":"hi/06-pragati-brochure-re.eml","register":"formal","instruction":"कवर वाला विकल्प चाहिए; फ़ाइल 5 नवंबर तक भेज देंगे","accept_lang":["hi"],"formal_markers":["आप","जी","कृपया","धन्यवाद","सादर"],"informal_markers":["तुम","तुम्हें","तुम्हारा","तू","यार"]}
 ],
 "extract":{
 "people":[
@@ -60,8 +60,8 @@
 {"file":"hi/01-gomti-edtech-baithak.eml","expect":"event","date":"2026-11-11","time":"11:00","tz":"Asia/Kolkata"},
 {"file":"hi/02-karan-rishikesh-plan.eml","expect":"reply_needed","due":"2026-11-02","who":"करण मल्होत्रा"},
 {"file":"hi/03-kamalvan-chalan.eml","expect":"payment_due","due":"2026-11-20","amount":"₹ 1,24,500"},
-{"file":"hi/04-timahi-report-masauda.eml","expect":"commitment","due":"2026-11-13","who":"नसरीन फ़ारूक़ी","what":"quarterly customer-satisfaction report draft"},
-{"file":"hi/06-pragati-brochure-re.eml","expect":"commitment","due":"2026-11-05","who":"सुधीर त्रिपाठी","what":"final brochure design PDF with bleed"},
+{"file":"hi/04-timahi-report-masauda.eml","expect":"commitment","due":"2026-11-13","who":"नसरीन फ़ारूक़ी"},
+{"file":"hi/06-pragati-brochure-re.eml","expect":"commitment","due":"2026-11-05","who":"सुधीर त्रिपाठी"},
 {"file":"hi/06-pragati-brochure-re.eml","expect":"reply_needed","who":"सुधीर त्रिपाठी"}
 ]
 }
