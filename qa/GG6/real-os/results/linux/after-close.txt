@@ -1,0 +1,2 @@
+--- still running after the window was closed:
+   4554 43132 nuggetd
