@@ -1,0 +1,334 @@
+[
+ {
+  "at": "2026-11-01T10:17:58.621911209Z",
+  "bytes_received": 17202,
+  "bytes_sent": 72,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:58.603313325Z",
+  "bytes_received": 17202,
+  "bytes_sent": 72,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:58.536541814Z",
+  "bytes_received": 17016,
+  "bytes_sent": 84,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:58.471031823Z",
+  "bytes_received": 17016,
+  "bytes_sent": 84,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:58.449792362Z",
+  "bytes_received": 17094,
+  "bytes_sent": 83,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:58.428843604Z",
+  "bytes_received": 17094,
+  "bytes_sent": 83,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:58.360864618Z",
+  "bytes_received": 17081,
+  "bytes_sent": 86,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:58.283923235Z",
+  "bytes_received": 17081,
+  "bytes_sent": 86,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:13.252084045Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:17:03.66086041Z",
+  "bytes_received": 17049,
+  "bytes_sent": 343,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": [
+   {
+    "key": "0:acme-renewal.md",
+    "source": "files-1"
+   }
+  ]
+ },
+ {
+  "at": "2026-11-01T10:17:03.21161527Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:16:53.175184848Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:16:43.146146034Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:16:33.120466074Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:16:23.092405275Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:16:13.061528267Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:16:03.028152844Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:15:52.998244225Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:15:42.972900397Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:15:32.941493081Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:15:22.91328007Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:15:12.86203569Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:15:02.820167588Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:14:52.774041094Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:14:42.654403258Z",
+  "bytes_received": 17084,
+  "bytes_sent": 92,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:13:20.836582793Z",
+  "bytes_received": 17098,
+  "bytes_sent": 266,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": [
+   {
+    "key": "0:03-meeting.eml",
+    "source": "files-2"
+   }
+  ]
+ },
+ {
+  "at": "2026-11-01T10:11:58.560631291Z",
+  "bytes_received": 17097,
+  "bytes_sent": 282,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": [
+   {
+    "key": "0:01-renewal-question.eml",
+    "source": "files-2"
+   }
+  ]
+ },
+ {
+  "at": "2026-11-01T10:11:08.366611965Z",
+  "bytes_received": 17150,
+  "bytes_sent": 235,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": [
+   {
+    "key": "0:lisbon-trip.md",
+    "source": "files-1"
+   }
+  ]
+ },
+ {
+  "at": "2026-11-01T10:04:42.241885306Z",
+  "bytes_received": 1187,
+  "bytes_sent": 427,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.241177726Z",
+  "bytes_received": 802,
+  "bytes_sent": 490,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.234648992Z",
+  "bytes_received": 1053,
+  "bytes_sent": 1076,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.220740391Z",
+  "bytes_received": 785,
+  "bytes_sent": 155,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.169768709Z",
+  "bytes_received": 511,
+  "bytes_sent": 145,
+  "feature": "probe",
+  "host": "api.anthropic.com",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.107997031Z",
+  "bytes_received": 33929,
+  "bytes_sent": 126,
+  "feature": "embed",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.107456064Z",
+  "bytes_received": 1184,
+  "bytes_sent": 478,
+  "feature": "probe",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.106790114Z",
+  "bytes_received": 1015,
+  "bytes_sent": 504,
+  "feature": "probe",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.10594991Z",
+  "bytes_received": 1015,
+  "bytes_sent": 1098,
+  "feature": "probe",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.099572644Z",
+  "bytes_received": 677,
+  "bytes_sent": 169,
+  "feature": "probe",
+  "host": "api.cloudllm.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T10:04:42.014135861Z",
+  "bytes_received": 341,
+  "bytes_sent": 159,
+  "feature": "probe",
+  "host": "api.cloudllm.test",
+  "items": []
+ }
+]

@@ -1,0 +1,224 @@
+{
+ "scenario": "r01_local_new_features",
+ "mode": "sinkhole",
+ "dns_names": [],
+ "flows_off_namespace": [],
+ "observed_hosts": {},
+ "ledger_hosts": {},
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "file tg/ChatExport_2026-10-01/result.json",
+   "canary": "GG8CANARY-TG-1",
+   "count": 1
+  },
+  {
+   "where": "file tg/ChatExport_2026-10-01/result.json",
+   "canary": "GG8CANARY-TG-2",
+   "count": 1
+  },
+  {
+   "where": "file wa/WhatsApp Chat with Sam Ortega.txt",
+   "canary": "GG8CANARY-WA-1",
+   "count": 1
+  },
+  {
+   "where": "file wa/WhatsApp Chat with Sam Ortega.txt",
+   "canary": "GG8CANARY-WA-2",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "imports.added",
+   "ok": true,
+   "detail": [
+    true,
+    true
+   ],
+   "severity": null,
+   "t": 1793525456.4415672
+  },
+  {
+   "id": "search.finds_chats",
+   "ok": true,
+   "detail": [
+    "Sam Ortega \u2014 October 2026",
+    "lisbon-trip",
+    "acme-renewal",
+    "acme-deploy-key",
+    "Dana Kim \u2014 October 2026",
+    "hr-ssn",
+    "weekly-notes",
+    "iban",
+    "acme-payment"
+   ],
+   "severity": null,
+   "t": 1793525457.456893
+  },
+  {
+   "id": "faceted.chats_marked_sensitive",
+   "ok": true,
+   "detail": [
+    [
+     "acme-renewal",
+     true
+    ],
+    [
+     "acme-payment",
+     true
+    ],
+    [
+     "acme-deploy-key",
+     true
+    ],
+    [
+     "Dana Kim \u2014 October 2026",
+     true
+    ],
+    [
+     "Sam Ortega \u2014 October 2026",
+     true
+    ],
+    [
+     "hr-ssn",
+     true
+    ],
+    [
+     "lisbon-trip",
+     true
+    ],
+    [
+     "weekly-notes",
+     true
+    ],
+    [
+     "iban",
+     true
+    ]
+   ],
+   "severity": null,
+   "t": 1793525457.467997
+  },
+  {
+   "id": "ledger.empty",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793525638.0716288
+  },
+  {
+   "id": "no_dns",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793525638.0717425
+  },
+  {
+   "id": "no_requests",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793525638.0717785
+  },
+  {
+   "id": "no_packets_off_namespace",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793525638.0791855
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793525455.9071035,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793525456.4107385,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793525456.437271,
+   "note": "sources.add: ok {\"chunks\": 0, \"enabled\": true, \"health\": {\"code\": \"ok\", \"fix\": \"\", \"item_errors\": 0, \"reason\": \"Up to date.\"}, \"id\": \"whatsapp-1\", \"items\": 0, \"kind\": \"whatsapp\", \"last_error\": null, \"last_sync\": null"
+  },
+  {
+   "t": 1793525456.4415607,
+   "note": "sources.add: ok {\"chunks\": 0, \"enabled\": true, \"health\": {\"code\": \"syncing\", \"fix\": \"\", \"item_errors\": 0, \"reason\": \"Syncing now.\"}, \"id\": \"telegram-1\", \"items\": 0, \"kind\": \"telegram\", \"last_error\": null, \"last_sync\""
+  },
+  {
+   "t": 1793525457.4475222,
+   "note": "sources [[\"files-1\", \"files\", 7, \"watching\", null], [\"telegram-1\", \"telegram\", 1, \"watching\", null], [\"whatsapp-1\", \"whatsapp\", 1, \"watching\", null]]"
+  },
+  {
+   "t": 1793525457.4679718,
+   "note": "search.faceted: ok {\"facets\": {\"kinds\": [{\"count\": 7, \"value\": \"file\"}, {\"count\": 2, \"value\": \"chat\"}], \"months\": [{\"count\": 9, \"value\": \"2026-10\"}], \"people\": [], \"sources\": [{\"count\": 7, \"value\": \"files-1\"}, {\"count\":"
+  },
+  {
+   "t": 1793525457.467988,
+   "note": "faceted sensitive flags [[\"acme-renewal\", true], [\"acme-payment\", true], [\"acme-deploy-key\", true], [\"Dana Kim \\u2014 October 2026\", true], [\"Sam Ortega \\u2014 October 2026\", true], [\"hr-ssn\", true], [\"lisbon-trip\", true], [\"weekly-notes\", true], [\"iban\", true]]"
+  },
+  {
+   "t": 1793525457.4688609,
+   "note": "draft.check_sensitive: ok {\"sensitive\": true}"
+  },
+  {
+   "t": 1793525457.4700613,
+   "note": "plugins.catalog: ok {\"dirs\": [\"/tmp/gg8/r01_local_new_features/data/plugin-catalog\"], \"entries\": [], \"truncated\": false}"
+  },
+  {
+   "t": 1793525457.472431,
+   "note": "knowledge.graph: ok {\"edges\": [], \"nodes\": [], \"truncated\": false}"
+  },
+  {
+   "t": 1793525457.4861715,
+   "note": "knowledge.status: ok {\"claims\": 0, \"entities\": 0, \"extractor_provider\": null, \"last_run\": \"2026-11-01T09:30:56.075462741Z\", \"mentions\": 0, \"pending_items\": 9, \"running\": false, \"vault\": {\"conflicts\": [], \"invalid\": [], \"l"
+  },
+  {
+   "t": 1793525457.4875157,
+   "note": "cards.list: ok {\"cards\": [], \"enabled\": true, \"last_refresh\": null}"
+  },
+  {
+   "t": 1793525457.491142,
+   "note": "proactive.refresh: ok {\"created\": 0, \"open\": 0, \"reason\": \"refresh\", \"resolved\": 0}"
+  },
+  {
+   "t": 1793525457.4935303,
+   "note": "brief.get: ok {\"date\": \"2026-11-01\", \"generated_at\": \"2026-11-01T09:30:57.491723874Z\", \"meetings\": [], \"open_cards\": 0, \"overdue\": [], \"renewals\": [], \"top\": []}"
+  },
+  {
+   "t": 1793525457.4947748,
+   "note": "models.list: ok [{\"family\": \"qwen3\", \"id\": \"qwen3-4b-q4km\", \"installed\": false, \"license\": \"Apache-2.0\", \"recommended\": true, \"revision\": \"bc640142c66e1fdd12af0bd68f40445458f3869b\", \"size_bytes\": 2497280256, \"tiers\":"
+  },
+  {
+   "t": 1793525457.4957452,
+   "note": "runtime.status: ok [{\"error\": null, \"model_id\": \"qwen3-4b-q4km\", \"provider\": \"local-chat\", \"role\": \"chat\", \"state\": \"not_installed\"}, {\"error\": null, \"model_id\": \"nomic-embed-text-v1.5-q8\", \"provider\": \"local-embedding\""
+  },
+  {
+   "t": 1793525457.496619,
+   "note": "status: ok {\"audit_chain_ok\": true, \"chunks\": 9, \"disk\": {\"free_bytes\": 25567068160, \"level\": \"ok\", \"recent_full_error\": false}, \"items\": 9, \"protocol\": 1, \"providers\": [], \"uptime_secs\": 1, \"version\": \"0.0.1\"}"
+  },
+  {
+   "t": 1793525457.4966226,
+   "label": "idle"
+  },
+  {
+   "t": 1793525577.50073,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793525577.5647414,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793525578.0670607,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793525638.0811327,
+   "label": "daemon.stop"
+  }
+ ]
+}

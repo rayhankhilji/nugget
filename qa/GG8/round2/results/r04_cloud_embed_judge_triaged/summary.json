@@ -1,0 +1,318 @@
+{
+ "scenario": "r04_cloud_embed_judge_triaged",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com",
+  "api.cloudllm.test"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.2",
+   "dst": "203.0.113.10",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 248
+  },
+  {
+   "src": "203.0.113.2",
+   "dst": "203.0.113.10",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 36
+  }
+ ],
+ "observed_hosts": {
+  "api.cloudllm.test": {
+   "requests": 34,
+   "bytes_in": 5782,
+   "paths": [
+    "POST /v1/chat/completions",
+    "POST /v1/embeddings"
+   ]
+  },
+  "api.anthropic.com": {
+   "requests": 5,
+   "bytes_in": 2293,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.cloudllm.test": {
+   "rows": 34,
+   "bytes_sent": 5782,
+   "features": [
+    "embed",
+    "probe"
+   ]
+  },
+  "api.anthropic.com": {
+   "rows": 5,
+   "bytes_sent": 2293,
+   "features": [
+    "probe"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "file Mail/01-renewal-question.eml",
+   "canary": "GG8CANARY-MAILNORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "file Mail/02-card-request.eml",
+   "canary": "GG8CANARY-MAILSENS-1",
+   "count": 1
+  },
+  {
+   "where": "file Mail/03-meeting.eml",
+   "canary": "GG8CANARY-MAILNORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "file Mail/04-api-key.eml",
+   "canary": "GG8CANARY-MAILSENS-2",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/README.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_2tje73l5qpfat2uu.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/.nugget/base/entities/ent_g5lnljd7y5xidruf.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/.nugget/state.json",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "file data/vault/Person/GG8CANARY-NORMAL-1 (ent_2tje73l5qpfat2uu).md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "file data/vault/Project/Acme renewal notes (ent_g5lnljd7y5xidruf).md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 5
+  },
+  {
+   "where": "file data/vault/README.md",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 2
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-r04",
+   "count": 5
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/chat/completions",
+   "canary": "GG8CANARY-APIKEY-cloudllm",
+   "count": 5
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-APIKEY-cloudllm",
+   "count": 29
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-MAILNORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-MAILNORMAL-2",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-NORMAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.cloudllm.test/v1/embeddings",
+   "canary": "GG8CANARY-NORMAL-2",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "triage.sorted",
+   "ok": true,
+   "detail": {
+    "lisbon-trip": false,
+    "Acme renewal: can you confirm by Friday?": false,
+    "acme-renewal": false,
+    "Kickoff in Lisbon on 3 December?": false,
+    "acme-deploy-key": true,
+    "acme-payment": true,
+    "hr-ssn": true,
+    "iban": true,
+    "weekly-notes": true,
+    "Acme renewal deposit: please confirm the card on file": true,
+    "Your new integration key, please confirm receipt": true
+   },
+   "severity": null,
+   "t": 1793528233.28196
+  },
+  {
+   "id": "embed.cloud_used",
+   "ok": true,
+   "detail": 29,
+   "severity": null,
+   "t": 1793528283.6429696
+  },
+  {
+   "id": "embed.no_sensitive_ever",
+   "ok": true,
+   "detail": {
+    "leaks": [],
+    "requests": 29
+   },
+   "severity": null,
+   "t": 1793528283.6450388
+  },
+  {
+   "id": "embed.search_time.no_sensitive",
+   "ok": true,
+   "detail": {
+    "leaks": []
+   },
+   "severity": null,
+   "t": 1793528283.6450684
+  },
+  {
+   "id": "judge.no_sensitive",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793528303.6591885
+  },
+  {
+   "id": "ledger.embed.items_listed",
+   "ok": true,
+   "detail": [
+    [
+     72,
+     0
+    ],
+    [
+     72,
+     0
+    ],
+    [
+     84,
+     0
+    ],
+    [
+     84,
+     0
+    ],
+    [
+     83,
+     0
+    ],
+    [
+     83,
+     0
+    ],
+    [
+     86,
+     0
+    ],
+    [
+     86,
+     0
+    ],
+    [
+     92,
+     0
+    ],
+    [
+     343,
+     1
+    ],
+    [
+     92,
+     0
+    ],
+    [
+     92,
+     0
+    ]
+   ],
+   "severity": null,
+   "t": 1793528303.6618848
+  },
+  {
+   "id": "ledger.proactive_judge.items_listed",
+   "ok": false,
+   "detail": [],
+   "severity": null,
+   "t": 1793528303.6619062
+  },
+  {
+   "id": "ledger.row_per_request",
+   "ok": true,
+   "detail": {
+    "requests": 39,
+    "rows": 39
+   },
+   "severity": null,
+   "t": 1793528303.6623144
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793527481.5098963,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793527482.013364,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793527482.1686413,
+   "note": "probe cloudembed: {\"context_tokens\": null, \"embeddings\": true, \"json_schema\": true, \"streaming\": true, \"tools\": false, \"vision\": false}"
+  },
+  {
+   "t": 1793527482.325293,
+   "note": "probe anthropic: {\"context_tokens\": null, \"embeddings\": false, \"json_schema\": true, \"streaming\": true, \"tools\": true, \"vision\": false}"
+  },
+  {
+   "t": 1793528082.6532042,
+   "note": "runtime [{\"error\": null, \"model_id\": \"qwen3-1.7b-q8\", \"provider\": \"local-chat\", \"role\": \"chat\", \"state\": \"ready\", \"state_ms\": 593546}, {\"error\": null, \"model_id\": \"nomic-embed-text-v1.5-q8\", \"provider\": \"local-embedding\", \"role\": \"embedding\", \"state\": \"not_installed\"}]"
+  },
+  {
+   "t": 1793528233.2819304,
+   "note": "sensitivity {\"lisbon-trip\": false, \"Acme renewal: can you confirm by Friday?\": false, \"acme-renewal\": false, \"Kickoff in Lisbon on 3 December?\": false, \"acme-deploy-key\": true, \"acme-payment\": true, \"hr-ssn\": true, \"iban\": true, \"weekly-notes\": true, \"Acme renewal deposit: please confirm the card on file\": true, \"Your new integration key, please confirm receipt\": true}"
+  },
+  {
+   "t": 1793528283.645139,
+   "note": "embed canaries [\"GG8CANARY-MAILNORMAL-1\", \"GG8CANARY-MAILNORMAL-2\", \"GG8CANARY-NORMAL-1\", \"GG8CANARY-NORMAL-2\"]"
+  },
+  {
+   "t": 1793528303.6591823,
+   "note": "cards ['Reply to Priya Raman: Acme renewal: can you confirm by Friday?', 'Reply to Marta Sousa: Kickoff in Lisbon on 3 December?', 'Reply to DevOps: Your new integration key, please confirm receipt']; judge requests 0"
+  },
+  {
+   "t": 1793528303.6646519,
+   "label": "daemon.stop"
+  }
+ ]
+}
