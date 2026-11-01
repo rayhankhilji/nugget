@@ -128,7 +128,7 @@ async fn transient_errors_are_retried_and_drops_resume_mid_part() {
             *n += 1;
             match n {
                 1 => Action::Status(503),
-                2 => Action::DropAfter(((e - s + 1) / 2) as usize),
+                2 => Action::DropAfter(((e - s + 1) >> 1) as usize),
                 _ => Action::Serve,
             }
         }

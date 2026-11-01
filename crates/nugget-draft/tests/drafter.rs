@@ -1,5 +1,7 @@
 //! `Drafter` end to end: scripted providers, a recording warmer, an in-memory store. No network.
 
+#![allow(clippy::cloned_ref_to_slice_refs)]
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

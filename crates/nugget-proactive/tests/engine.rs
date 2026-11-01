@@ -397,7 +397,8 @@ async fn archiving_always_needs_confirmation() {
 
     // A policy denial still wins over the user's confirmation.
     *policy.decision.lock().unwrap() = Some(Decision::Deny("no mailbox edits".into()));
-    let run = || p.run_action(&r, &archive, &archive.approve(true), now());
+    let yes = archive.approve(true);
+    let run = || p.run_action(&r, &archive, &yes, now());
     assert_eq!(
         run().await.unwrap(),
         ExecOutcome::Denied("no mailbox edits".into())
