@@ -31,7 +31,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use nugget_agent::{
-    Agent, AgentConfig, AgentEvent, AgentRun, Budgets, ChainedLog, ConfirmationRequest,
+    Agent, AgentConfig, AgentEvent, AgentRun, Answered, Budgets, ChainedLog, ConfirmationRequest,
     Confirmations, EventSink, LogEntry, MemoryLedger, Model, Outcome, Record, RunState, Task,
     ToolRegistry, Verification,
 };
@@ -576,13 +576,18 @@ impl AgentFeature {
                 true
             }
         };
-        if !confirmations.answer(&c.request_id, approve) {
-            return Err(Error::NotFound(format!(
+        // The kill can land while this approval is on its way: checked again while the request
+        // is held, so an approval after the kill is a denial, never acknowledged (MM1-4).
+        match confirmations.answer_unless_halted(&c.request_id, approve, || engine.halted()) {
+            Answered::Yes => Ok(()),
+            Answered::Halted => Err(Error::Invalid(
+                "all agents are stopped; the approval was not accepted. Resume first.".into(),
+            )),
+            Answered::Unknown => Err(Error::NotFound(format!(
                 "confirmation {} is no longer open",
                 c.request_id
-            )));
+            ))),
         }
-        Ok(())
     }
 
     fn answer(&self, task_id: &str, answer: &str) -> Result<()> {
