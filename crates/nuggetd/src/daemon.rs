@@ -785,11 +785,10 @@ impl Daemon {
         let _ = tokio::time::timeout(KNOWLEDGE_GRACE, state.knowledge.knowledge.idle()).await;
         let store = state.store.clone();
         let _ = blocking(move || {
-            store.flush_egress();
-            // Writers are done: leave no write-ahead log for the next start (GG6-24).
-            if let Err(e) = store.checkpoint_wal() {
-                tracing::warn!(error = %e, "cannot checkpoint the write-ahead log at stop");
-            }
+            // Flushes the ledger, truncates the WAL and releases the owner lock: the process
+            // exits without dropping the store, which would otherwise read as a crash at the
+            // next start (and cost a full page check, ~5 s per GB; II5).
+            store.close_cleanly();
             Ok(())
         })
         .await;

@@ -265,6 +265,16 @@ impl EgressWriter {
         }
     }
 
+    /// Unlock and remove this handle's owner lock file (a clean exit).
+    pub(crate) fn release_lock(&self) {
+        let lock = self
+            .lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        drop(lock);
+    }
+
     /// Tests: let go of the owner lock as a crashed process would (the lock file stays behind,
     /// unlocked), while this handle keeps running.
     #[cfg(test)]
@@ -480,6 +490,53 @@ fn mark_interrupted(db: &Db, path: Option<&Path>, me: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether a handle on the database at `db` may have ended without closing: a lock file is
+/// left beside it whose owner is gone (a crash or a kill leaves its file behind; a clean close
+/// removes it). Read-only: unlike opening a store, this removes nothing. When in doubt (the
+/// directory or a lock file cannot be read), yes: the cost is one slower start.
+pub(crate) fn unclean_close_left(db: &Path) -> bool {
+    let (Some(dir), Some(name)) = (db.parent(), db.file_name()) else {
+        return true;
+    };
+    let mut prefix = name.to_owned();
+    prefix.push(LOCK_INFIX);
+    let Some(prefix) = prefix.to_str().map(str::to_owned) else {
+        return true;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return true;
+    };
+    entries.flatten().any(|entry| {
+        let file_name = entry.file_name();
+        let owned = file_name
+            .to_str()
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|n| n.strip_suffix(LOCK_SUFFIX))
+            .is_some_and(valid_owner);
+        owned && lock_left_behind(&entry.path())
+    })
+}
+
+/// Whether the lock file at `path` was left behind by an owner that is gone: it exists and
+/// nobody holds its lock. No side effects. An I/O error (a file another user owns, a Windows
+/// delete-pending file) counts as left behind.
+fn lock_left_behind(path: &Path) -> bool {
+    let file = match OpenOptions::new().write(true).open(path) {
+        Ok(f) => f,
+        // Removed meanwhile: its owner closed cleanly.
+        Err(e) if e.kind() == ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    };
+    match fs4::FileExt::try_lock(&file) {
+        Ok(()) => {
+            let _ = fs4::FileExt::unlock(&file);
+            true
+        }
+        Err(fs4::TryLockError::WouldBlock) => false,
+        Err(fs4::TryLockError::Error(_)) => true,
+    }
+}
+
 /// Remove lock files of owners that are gone (a crash leaves its file behind). Best effort.
 fn sweep_stale_locks(db: &Path, me: &str) {
     let (Some(dir), Some(name)) = (db.parent(), db.file_name()) else {
@@ -560,6 +617,29 @@ impl Store {
     /// Wait until every egress event recorded so far is written to the database.
     pub fn flush_egress(&self) {
         self.egress_writer().flush();
+    }
+
+    /// End this handle cleanly before the process exits (a daemon that stops without dropping
+    /// its store): flush the ledger, fold the write-ahead log into the database and truncate it
+    /// (so the next open has no log to scan or replay), then release this handle's owner lock.
+    /// Without this, an exit reads like a crash to the next open (its lock file is left behind
+    /// unlocked), which then runs SQLite's full check before opening (see
+    /// [`crate::check_file_on_open`]). Best effort; the handle stays usable, but egress rows it
+    /// records afterwards count as an exited owner's.
+    pub fn close_cleanly(&self) {
+        self.flush_egress();
+        let checkpoint = self.db().with_conn(|c| {
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .db("checkpoint")
+        });
+        match checkpoint {
+            Ok(0) => {}
+            Ok(_) => tracing::debug!("checkpoint at close was busy; the log stays"),
+            Err(e) => tracing::warn!(error = %e, "checkpoint at close failed"),
+        }
+        self.egress_writer().release_lock();
     }
 
     /// The most recent egress events, newest first. Includes every event recorded before the

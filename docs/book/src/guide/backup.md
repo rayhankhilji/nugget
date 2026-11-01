@@ -117,9 +117,15 @@ and delete it when you are done.
 
 ## If the database is damaged
 
-At every start Nugget checks the database before using it. If the check fails (for example after a
-disk error), or this computer's key cannot open it (a damaged first page looks the same as a
-database from another install), Nugget:
+At every start Nugget checks the database before using it: its header, that it is whole pages, its
+write-ahead log, and that this computer's key opens it. Reading every page takes about 5 seconds per
+gigabyte, so that full check runs before opening only after Nugget did not shut down cleanly (a
+crash, a forced quit, a power cut) or when the last full check found a problem. Otherwise it runs in
+the background, at most once a day, 20 seconds after Nugget starts; if it finds damage, Nugget logs
+it and the next start refuses the file as below.
+
+If the check fails (for example after a disk error), or this computer's key cannot open it (a
+damaged first page looks the same as a database from another install), Nugget:
 
 1. **does not write to it**: it starts with an empty, temporary store so the app still opens;
 2. **keeps the file exactly as it was**, so nothing more is lost;

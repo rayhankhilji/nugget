@@ -53,6 +53,9 @@ pub(crate) struct Db {
     /// Held while the approximate vector index is built or dropped (see `vector::build_ann`),
     /// so one runs at a time. Shared with the build thread, which holds `Db` only weakly.
     pub(crate) ann_build: Arc<Mutex<()>>,
+    /// The knowledge graph's counts, with the writer connection's `total_changes()` and the
+    /// time they were computed at (see `graph::counts`).
+    pub(crate) graph_counts: Mutex<Option<(u64, std::time::Instant, [u64; 3])>>,
 }
 
 impl Db {
@@ -193,6 +196,7 @@ impl Store {
             encrypted: file.is_some(),
             file: file.map(|(path, key)| (path.to_path_buf(), key.clone())),
             ann_build: Arc::default(),
+            graph_counts: Mutex::new(None),
         });
         let egress = EgressWriter::spawn(db.clone())?;
         let audit = crate::audit::AuditState::ephemeral()?;
@@ -294,7 +298,10 @@ impl Store {
         self.with_read_conn(|c| {
             let (items, chunks): (i64, i64) = c
                 .query_row(
-                    "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM chunks)",
+                    // The trigger-maintained per-source totals (schema v10): a handful of
+                    // rows, where `count(*)` scanned every item and chunk (tens of ms at 500k).
+                    "SELECT coalesce(sum(max(items, 0)), 0), coalesce(sum(max(chunks, 0)), 0)
+                     FROM source_stats",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )

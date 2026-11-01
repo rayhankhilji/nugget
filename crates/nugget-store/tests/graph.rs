@@ -865,3 +865,36 @@ fn assertion_time_is_kept() {
     assert!(g.get_claim(id).unwrap().unwrap().updated_at > at);
     assert_eq!(g.asserted_at(id).unwrap(), Some(at));
 }
+
+/// II5: `counts` is cached between commits, and every write path invalidates it.
+#[test]
+fn counts_follow_every_write_through_the_cache() {
+    let store = Store::open_in_memory().unwrap();
+    let g = store.graph();
+    let body = "Acme met Bea";
+    store
+        .upsert_item_with_chunks(
+            &NewItem::new("s", "1", content_hash(body)).with_text(body),
+            &[NewChunk::text(body)],
+        )
+        .unwrap();
+    assert_eq!(g.counts().unwrap().entities, 0);
+    let a = g
+        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
+        .unwrap();
+    let c = g.counts().unwrap();
+    assert_eq!((c.entities, c.mentions), (1, 0));
+    // Repeated reads without a write come from the cache and agree.
+    assert_eq!(g.counts().unwrap(), c);
+    g.add_mention(&mention(&a, "s", "1", "Acme")).unwrap();
+    assert_eq!(g.counts().unwrap().mentions, 1);
+    // A store write outside the graph API (an item delete retracts its mentions).
+    assert!(store.delete_item(&iref("s", "1")).unwrap());
+    assert_eq!(g.counts().unwrap().mentions, 0);
+    // A clone of the store shares the cache and sees the same writes.
+    let other = store.clone().graph();
+    other
+        .create_entity(&NewEntity::new(EntityKind::Person, "Bea"))
+        .unwrap();
+    assert_eq!(g.counts().unwrap().entities, 2);
+}

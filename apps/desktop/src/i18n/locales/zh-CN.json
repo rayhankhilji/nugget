@@ -61,6 +61,7 @@
   "common.next": "下一步",
   "common.done": "完成",
   "common.loading": "正在加载",
+  "list.loadingMore": "正在加载更多…",
   "common.details": "详细信息",
   "common.offlineHint": "暂时无法连接到 Nugget。",
   "common.errorCode": "（代码 {code}）",

@@ -88,6 +88,8 @@ pub struct RunConfig {
     pub memory: suites::memory::MemoryOptions,
     /// `ask` suite options (answer prompt arms, judge, question count).
     pub ask: suites::ask::AskOptions,
+    /// `perf --backend real` options (item count, size mix, phases).
+    pub perf: suites::perf::PerfOptions,
 }
 
 impl Default for RunConfig {
@@ -105,6 +107,7 @@ impl Default for RunConfig {
             energy: suites::energy::EnergyOptions::default(),
             memory: suites::memory::MemoryOptions::default(),
             ask: suites::ask::AskOptions::default(),
+            perf: suites::perf::PerfOptions::default(),
         }
     }
 }

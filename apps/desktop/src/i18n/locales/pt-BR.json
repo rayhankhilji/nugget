@@ -61,6 +61,7 @@
   "common.next": "Avançar",
   "common.done": "Concluído",
   "common.loading": "Carregando",
+  "list.loadingMore": "Carregando mais…",
   "common.details": "Detalhes",
   "common.offlineHint": "Não é possível acessar o Nugget no momento.",
   "common.errorCode": "(código {code})",
