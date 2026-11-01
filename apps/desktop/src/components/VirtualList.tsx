@@ -1,5 +1,5 @@
 /**
- * Windowed rendering for long lists (II5): only the rows near the visible part of the page are in
+ * Windowed rendering for long lists: only the rows near the visible part of the page are in
  * the DOM, so a list of 50,000 rows costs about as much as one of 50.
  *
  * - The list scrolls with its nearest scrolling ancestor (`<main>` in the app, else the window):

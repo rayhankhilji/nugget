@@ -1,5 +1,5 @@
 /**
- * What the user's own feedback taught the card ranking (BB2): the per-card "why" lines and the
+ * What the user's own feedback taught the card ranking: the per-card "why" lines and the
  * "What Nugget has learned" panel with Forget / Reset all. Learning only changes ranking and
  * suppression; resetting it is audited by the daemon, which then emits `cards.changed`.
  *

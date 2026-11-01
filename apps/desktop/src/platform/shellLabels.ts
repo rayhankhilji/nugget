@@ -1,5 +1,5 @@
 /**
- * II4: the strings the Rust shell draws itself (tray menu, OS notifications), sent in the current
+ * The strings the Rust shell draws itself (tray menu, OS notifications), sent in the current
  * language whenever it changes (`shell_labels_set`; see `src-tauri/src/platform.rs`, whose
  * `LABELS` lists the same keys with English defaults).
  */

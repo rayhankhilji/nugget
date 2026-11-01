@@ -184,7 +184,7 @@ function EntityBrowser({
   const [text, setText] = useState("");
   const query = useDebounced(text.trim(), 250);
   const [kind, setKind] = useState<EntityKind | null>(null);
-  // Pages load as the list scrolls (II5); a new filter or a merge starts over from the top.
+  // Pages load as the list scrolls; a new filter or a merge starts over from the top.
   const fetchPage = useCallback(
     (offset: number, limit: number) => api.knowledgeEntities({ text: query || null, kind, limit, offset }),
     [query, kind],

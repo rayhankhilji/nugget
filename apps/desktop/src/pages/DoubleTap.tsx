@@ -754,7 +754,7 @@ function PermissionsCard({
 }
 
 /**
- * GG6-19: macOS shows the Accessibility prompt only once. After a "Don't Allow" the only way back
+ * macOS shows the Accessibility prompt only once. After a "Don't Allow" the only way back
  * is System Settings, so say exactly where, and open that pane.
  */
 export function MacPermissionRecovery({ onCheck }: { onCheck: () => void }) {

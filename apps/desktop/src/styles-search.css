@@ -1,4 +1,4 @@
-/* II2: faceted search, timelines, previews. Logical properties only (RTL-safe). */
+/* Faceted search, timelines, previews. Logical properties only (RTL-safe). */
 
 /* ---- layout: filters | results | preview; stacked in narrow windows ---- */
 
@@ -111,7 +111,7 @@
   flex: 1 1 auto;
 }
 
-/* JJ2: the row never grows past the filter column; the name gives way, the timeline icon doesn't. */
+/* The row never grows past the filter column; the name gives way, the timeline icon doesn't. */
 .sr-facet-row {
   min-inline-size: 0;
 }

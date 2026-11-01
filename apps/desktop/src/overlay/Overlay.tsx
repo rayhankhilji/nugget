@@ -304,7 +304,7 @@ export function Overlay() {
 
   return (
     <main ref={mainRef} tabIndex={-1} className={`overlay overlay-${view.phase}`} aria-label={t("doubletap.title")}>
-      {/* LL2: the window's one heading, for screen readers' heading navigation. */}
+      {/* The window's one heading, for screen readers' heading navigation. */}
       <h1 className="visually-hidden">{t("doubletap.title")}</h1>
       <div className="visually-hidden" aria-live="polite" aria-atomic="true">
         {saying}

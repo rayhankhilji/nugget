@@ -9,7 +9,7 @@ import type { ModelFit } from "../api";
 import { ByokForm } from "./ByokForm";
 import { detectAiSetup, isSearchModel, sortModels } from "./detect";
 import { FitNotes, loadFit, MachineLine } from "./ModelFit";
-import { DownloadFailureNote, isCancelled } from "./DownloadFailure";
+import { DownloadFailureNote, isCancelled, useInstallFocus } from "./DownloadFailure";
 import { detectOs, type Os } from "./platform";
 import { CommandSnippet, OfflineNote, StepHeading, type StepProps } from "./steps";
 
@@ -23,7 +23,7 @@ export function AiStep({ headingRef, state, dispatch, connected }: StepProps) {
   const t = useT();
   const name = useId();
   const choice = state.ai;
-  // GG6-31: the option badged "Recommended" starts selected; the user can still pick another.
+  // The option badged "Recommended" starts selected; the user can still pick another.
   useEffect(() => {
     if (state.ai === null) dispatch({ type: "chooseAi", ai: "local" });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -220,34 +220,8 @@ function ModelRow({
   const busy = progress?.phase === "downloading" || progress?.phase === "verifying";
   const failed = progress?.phase === "failed";
   const cancelled = isCancelled(progress);
-  // After Cancel the button goes away: move focus to Resume so keyboard users keep their place.
-  const [cancelling, setCancelling] = useState(false);
-  const actionRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!busy && cancelling) {
-      setCancelling(false);
-      actionRef.current?.focus();
-    }
-  }, [busy, cancelling]);
   const installed = model.installed || progress?.phase === "installed";
-  // LL2: Install turns into Cancel, and Cancel goes away once installed: keep keyboard focus in
-  // the card (on Cancel, then on the model's name or Retry install) instead of dropping it to the page.
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  const titleRef = useRef<HTMLElement>(null);
-  const focusIn = useRef<"cancel" | "title" | null>(null);
-  useEffect(() => {
-    if (busy) {
-      if (focusIn.current === "cancel") cancelRef.current?.focus();
-      // Remembered while it lasts: Cancel unmounts without a blur event.
-      focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
-    } else if (focusIn.current === "title") {
-      // Installed: the name; failed (the request or the download): its Retry install. Only when
-      // focus went with Cancel, never from wherever the user moved to meanwhile.
-      focusIn.current = null;
-      const at = document.activeElement;
-      if (!at || at === document.body || !at.isConnected) (installed ? titleRef.current : actionRef.current)?.focus();
-    }
-  });
+  const focus = useInstallFocus(busy, installed);
   const total = progress?.total || model.size_bytes;
   const pct = progress ? percent(progress.downloaded, total) : 0;
   const labelId = `ob-model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -258,7 +232,7 @@ function ModelRow({
   return (
     <li className={best ? "card ob-model-best" : "card"} aria-labelledby={labelId}>
       <div className="card-head">
-        <bdi id={labelId} ref={titleRef} className="card-title" tabIndex={-1}>
+        <bdi id={labelId} ref={focus.titleRef} className="card-title" tabIndex={-1}>
           {model.id}
         </bdi>
         <span className="badges">
@@ -298,17 +272,7 @@ function ModelRow({
             {left !== null && progress.phase === "downloading" && <> · {t("onboarding.models.left", { time: etaText(t, left) })}</>}
           </span>
           <div className="card-actions">
-            <button
-              ref={cancelRef}
-              type="button"
-              className="btn btn-ghost"
-              aria-label={t("models.cancelLabel", { model: model.id })}
-              disabled={cancelling}
-              onClick={() => {
-                setCancelling(true);
-                void onCancel().then((ok) => ok || setCancelling(false));
-              }}
-            >
+            <button type="button" className="btn btn-ghost" aria-label={t("models.cancelLabel", { model: model.id })} {...focus.cancelProps(onCancel)}>
               {t("models.cancel")}
             </button>
           </div>
@@ -318,11 +282,11 @@ function ModelRow({
       {!installed && !busy && (
         <div className="card-actions">
           <button
-            ref={actionRef}
+            ref={focus.actionRef}
             type="button"
             className={best ? "btn btn-primary" : "btn"}
             onClick={(e) => {
-              if (document.activeElement === e.currentTarget) focusIn.current = "cancel";
+              focus.onInstallClick(e);
               onInstall();
             }}
           >
@@ -334,7 +298,7 @@ function ModelRow({
   );
 }
 
-// ---- download time (GG6-16) ----
+// ---- download time ----
 
 /** Typical fast and slow home connections, in megabits per second, for the estimate before a download. */
 export const FAST_MBPS = 100;

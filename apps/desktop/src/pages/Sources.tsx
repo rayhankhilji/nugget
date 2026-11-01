@@ -20,7 +20,7 @@ import { Dialog } from "../components/Dialog";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, ProgressBar, Spinner } from "../components/ui";
 import { DeviceSignInDialog } from "../sources/auth";
 import { connectMode, isGoogleKind, isSaasKind } from "../sources/kinds";
-import { KindIcon } from "../sources/KindIcon";
+import { SourceIcon } from "../components/SourceIcon";
 import { FullDiskAccessSteps } from "../sources/MessagingForm";
 import { TOKEN_LABEL } from "../sources/SaasForm";
 
@@ -205,7 +205,7 @@ export function SourcesPage() {
   );
 }
 
-/** KK2 (GG6-2): a folder that holds nothing indexable, can't be opened, or isn't there. */
+/** A folder that holds nothing indexable, can't be opened, or isn't there. */
 const SCAN_PROBLEM: IndexPhase[] = ["empty", "denied", "missing"];
 const SCAN_PROBLEM_KEY: Partial<Record<IndexPhase, MessageKey>> = {
   empty: "onboarding.source.empty",
@@ -240,7 +240,7 @@ function healthText(s: SourceInfo, t: TFunction): { reason: string; fix: string 
     case "disabled":
     case "error":
     case "item_errors":
-    // KK2: shown with the scan's details below, not as an error.
+    // Shown with the scan's details below, not as an error.
     case "nothing_indexable":
     case "unreadable":
       return null;
@@ -337,7 +337,7 @@ function SourceRow({
   return (
     <li className="source">
       <div className="source-icon-wrap">
-        <KindIcon kind={s.kind} />
+        <SourceIcon kind={s.kind} />
       </div>
       <div className="source-body">
         <div className="source-head">

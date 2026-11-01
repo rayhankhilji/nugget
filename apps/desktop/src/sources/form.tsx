@@ -78,7 +78,7 @@ export function FormError({ error }: { error: unknown }) {
         ? t("common.notAvailableSentence")
         : e.isOffline
           ? t("common.offlineHint")
-          : // LL2: the daemon's own sentence, else a plain one, never a shell's raw text.
+          : // The daemon's own sentence, else a plain one, never a shell's raw text.
             error instanceof Error && !(error instanceof ApiError) && error.name === "Error"
             ? e.message
             : describeError(e, t).headline}
@@ -103,7 +103,7 @@ export function Actions({ onBack, busy, submitLabel, blocked }: { onBack: () => 
       <button type="button" className="btn" onClick={onBack} disabled={busy}>
         {t("common.back")}
       </button>
-      {/* LL2: busy is aria-disabled too (a disabled button would drop keyboard focus to the page
+      {/* Busy is aria-disabled too (a disabled button would drop keyboard focus to the page
           while saving); the click, also the one Enter in a field makes, is cancelled instead. */}
       <button
         type="submit"

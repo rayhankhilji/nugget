@@ -1,24 +1,15 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import {
-  api,
-  ApiError,
-  errorMessage,
-  events,
-  sourcesFromChange,
-  type ConnectorKind,
-  type SourceInfo,
-  type SourceKind,
-  type SourceSettings,
-} from "../api";
-import { useEvent } from "../hooks";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { api, errorMessage, type ConnectorKind, type SourceInfo, type SourceKind, type SourceSettings } from "../api";
 import { t as tGlobal, Trans, useT, type MessageKey, type TagRenderer } from "../i18n";
 import { baseName, sourceKindLabel, splitList } from "../format";
 import { KindPicker } from "../sources/KindPicker";
 import { NEW_KIND_TITLE, NewKindForm, isNewKind } from "../sources/forms";
-import { Check } from "../sources/form";
+import { Actions, Check, Done, Field, FormError, NameField, useAutofocus, useSaveSource, type FormProps as BaseFormProps } from "../sources/form";
+import { ConnectWait, useAuthWait } from "../sources/auth";
 import { EMPTY_GOOGLE, GDRIVE_SCOPE, GOOGLE_API, googleSettings, type GoogleKind } from "../sources/kinds";
 import { Dialog } from "./Dialog";
-import { describeError, Spinner } from "./ui";
+
+type FormProps = BaseFormProps<SourceKind>;
 
 const KIND_BLURB: Record<SourceKind, MessageKey> = {
   files: "addSource.blurb.files",
@@ -75,22 +66,7 @@ const ADD_TITLE: Record<SourceKind, MessageKey> = {
   caldav: "addSource.addTitle.caldav",
 };
 
-function useAutofocus<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  useEffect(() => {
-    ref.current?.focus();
-  }, []);
-  return ref;
-}
-
 // ---- step 2: settings ----
-
-interface FormProps {
-  kind: SourceKind;
-  onBack: () => void;
-  onClose: () => void;
-  onAdded: (s: SourceInfo) => void;
-}
 
 function KindForm(props: FormProps) {
   switch (props.kind) {
@@ -109,141 +85,7 @@ function KindForm(props: FormProps) {
   }
 }
 
-/**
- * `sources.add` once; later attempts (after a failed password or auth step) update the source
- * that was already created instead of adding a duplicate.
- */
-function useSaveSource(kind: SourceKind) {
-  const created = useRef<SourceInfo | null>(null);
-  return async (name: string, settings: SourceSettings): Promise<SourceInfo> => {
-    const s = created.current
-      ? await api.sourcesUpdate({ id: created.current.id, name, settings })
-      : await api.sourcesAdd({ id: null, kind, name, settings });
-    created.current = s;
-    return s;
-  };
-}
-
-/** Label + control + hint + error, wired with `aria-describedby` / `aria-invalid`. */
-function Field({
-  label,
-  hint,
-  error,
-  optional,
-  children,
-}: {
-  label: string;
-  hint?: ReactNode;
-  error?: string | null;
-  optional?: boolean;
-  children: (a: { id: string; "aria-describedby"?: string; "aria-invalid"?: true }) => ReactNode;
-}) {
-  const t = useT();
-  const id = useId();
-  const hintId = `${id}-hint`;
-  const errId = `${id}-err`;
-  const describedBy = [hint ? hintId : "", error ? errId : ""].filter(Boolean).join(" ") || undefined;
-  return (
-    <div className="field">
-      <label htmlFor={id}>
-        {label}
-        {optional && <span className="muted small"> {t("addSource.optional")}</span>}
-      </label>
-      {children({ id, "aria-describedby": describedBy, "aria-invalid": error ? true : undefined })}
-      {hint && (
-        <p id={hintId} className="muted small field-hint">
-          {hint}
-        </p>
-      )}
-      {error && (
-        <p id={errId} className="field-error small">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function FormError({ error }: { error: unknown }) {
-  const t = useT();
-  if (!error) return null;
-  const e = ApiError.from(error);
-  return (
-    <p className="note note-error" role="alert">
-      {e.isMethodNotFound
-        ? t("common.notAvailableSentence")
-        : e.isOffline
-          ? t("common.offlineHint")
-          : // LL2: the daemon's own sentence (a duplicate folder, a bad path), else a plain one, never a shell's raw text.
-            error instanceof Error && !(error instanceof ApiError) && error.name === "Error"
-            ? e.message
-            : describeError(e, t).headline}
-    </p>
-  );
-}
-
-/**
- * Back and submit. `blocked` says why submitting can't work yet: the submit stays focusable
- * (aria-disabled, so pressing it explains) and the reason is shown next to it.
- */
-function Actions({ onBack, busy, submitLabel, blocked }: { onBack: () => void; busy: boolean; submitLabel: string; blocked?: string | null }) {
-  const t = useT();
-  const hintId = useId();
-  return (
-    <div className="dialog-actions">
-      {blocked && (
-        <p id={hintId} className="muted small dialog-actions-hint">
-          {blocked}
-        </p>
-      )}
-      <button type="button" className="btn" onClick={onBack} disabled={busy}>
-        {t("common.back")}
-      </button>
-      {/* LL2: busy is aria-disabled too (a disabled button would drop keyboard focus to the page
-          while saving); the click, also the one Enter in a field makes, is cancelled instead. */}
-      <button
-        type="submit"
-        className="btn btn-primary"
-        aria-disabled={blocked || busy ? true : undefined}
-        aria-busy={busy || undefined}
-        aria-describedby={blocked ? hintId : undefined}
-        onClick={(e) => {
-          if (busy) e.preventDefault();
-        }}
-      >
-        {busy ? (
-          <>
-            <Spinner label={t("addSource.working")} /> {submitLabel}
-          </>
-        ) : (
-          submitLabel
-        )}
-      </button>
-    </div>
-  );
-}
-
-/** `fallback` is the name used when the field is left empty (said in the hint, not as a placeholder that looks filled in). */
-function NameField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  const t = useT();
-  return (
-    <Field label={t("addSource.name")} optional hint={t("addSource.nameHintDefault", { name: placeholder })}>
-      {(a) => (
-        <input
-          {...a}
-          type="text"
-          dir="auto"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={t("addSource.namePlaceholder")}
-          autoComplete="off"
-        />
-      )}
-    </Field>
-  );
-}
-
-// `~` and `~/…` are the home folder (the daemon expands them, GG6-22); `~name` is not supported.
+// `~` and `~/…` are the home folder (the daemon expands them); `~name` is not supported.
 const isAbsolutePath = (p: string) =>
   p.startsWith("/") || p === "~" || p.startsWith("~/") || p.startsWith("~\\") || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("\\\\");
 
@@ -270,7 +112,7 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
   const [busy, setBusy] = useState(false);
   const save = useSaveSource(kind);
   const browseRef = useAutofocus<HTMLButtonElement>();
-  // LL2: a removed folder takes its Remove button with it: focus the next folder's Remove (or
+  // A removed folder takes its Remove button with it: focus the next folder's Remove (or
   // the one before it), else Choose folder.
   const listRef = useRef<HTMLUListElement>(null);
   const focusAfterRemove = useRef<number | null>(null);
@@ -475,8 +317,6 @@ function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
 
 // -- Google (Gmail, Calendar, Drive) --
 
-type AuthPhase = "form" | "waiting" | "done";
-
 function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> & { kind: GoogleKind }) {
   const t = useT();
   const label = sourceKindLabel(kind);
@@ -489,23 +329,11 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> 
   const [secretSaved, setSecretSaved] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const [phase, setPhase] = useState<AuthPhase>("form");
-  const [source, setSource] = useState<SourceInfo | null>(null);
-  const [authUrl, setAuthUrl] = useState<string | null>(null);
-  const [authNote, setAuthNote] = useState<string | null>(null);
+  const auth = useAuthWait(onAdded);
   // Uncontrolled: the secret never enters React state, and the field is cleared once sent.
   const secretRef = useRef<HTMLInputElement>(null);
   const clientIdRef = useAutofocus<HTMLInputElement>();
   const save = useSaveSource(kind);
-
-  const openAuth = async (url: string) => {
-    try {
-      await api.openUrl(url);
-      setAuthNote(null);
-    } catch (e) {
-      setAuthNote(t("addSource.google.browserFailed", { error: errorMessage(e) }));
-    }
-  };
 
   const connect = async (e: FormEvent) => {
     e.preventDefault();
@@ -522,16 +350,12 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> 
     setError(null);
     try {
       const s = await save(name.trim() || label, googleSettings(kind, { clientId: id, includeSharedWithMe, includeSharedDrives }));
-      setSource(s);
       if (secret) {
         await api.sourcesSecretSet({ id: s.id, secret });
         if (secretRef.current) secretRef.current.value = "";
         setSecretSaved(true);
       }
-      const { url } = await api.sourcesAuthBegin({ id: s.id });
-      setAuthUrl(url);
-      setPhase("waiting");
-      await openAuth(url);
+      await auth.begin(s);
     } catch (err) {
       setError(err);
     } finally {
@@ -539,45 +363,16 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> 
     }
   };
 
-  // While waiting: `sources.changed` (plus a slow poll as a safety net) tells us when the
-  // daemon has received the redirect.
-  const check = async (fromEvent?: unknown) => {
-    if (!source) return;
-    let latest = sourcesFromChange(fromEvent)?.find((s) => s.id === source.id);
-    if (!latest) {
-      try {
-        latest = (await api.sourcesList()).find((s) => s.id === source.id);
-      } catch {
-        return;
-      }
-    }
-    if (!latest) return;
-    setSource(latest);
-    if (latest.state !== "needs_auth" && latest.state !== "error") {
-      setPhase("done");
-      onAdded(latest);
-    }
-  };
-
-  const checkRef = useRef(check);
-  checkRef.current = check;
-  useEvent(events.onSourcesChanged, (p) => {
-    if (phase === "waiting") void check(p);
-  });
-  useEffect(() => {
-    if (phase !== "waiting") return;
-    const timer = window.setInterval(() => void checkRef.current(), 5000);
-    return () => window.clearInterval(timer);
-  }, [phase]);
-
+  const { phase, source } = auth;
   if (phase === "waiting" && source) {
     return (
-      <WaitingForAuth
+      <ConnectWait
         label={label}
+        text={t("addSource.wait.text", { label })}
         source={source}
-        url={authUrl}
-        note={authNote}
-        onReopen={() => authUrl && void openAuth(authUrl)}
+        flow={auth.flow}
+        note={auth.note}
+        onOpen={(url) => void auth.open(url)}
         onClose={() => {
           onAdded(source);
           onClose();
@@ -659,139 +454,43 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> 
   );
 }
 
-function WaitingForAuth({
-  label,
-  source,
-  url,
-  note,
-  onReopen,
-  onClose,
-}: {
-  label: string;
-  source: SourceInfo;
-  url: string | null;
-  note: string | null;
-  onReopen: () => void;
-  onClose: () => void;
-}) {
-  const t = useT();
-  const reopenRef = useAutofocus<HTMLButtonElement>();
-  return (
-    <div className="auth-wait">
-      <p role="status">
-        <Spinner label={t("addSource.wait.waiting")} /> {t("addSource.wait.text", { label })}
-      </p>
-      {source.state === "error" && source.last_error && (
-        <p className="note note-error" role="alert">
-          {source.last_error}
-        </p>
-      )}
-      {note && (
-        <p className="note" role="alert">
-          {note}
-        </p>
-      )}
-      {url && note && (
-        <p className="small">
-          <code className="selectable">{url}</code>
-        </p>
-      )}
-      <div className="dialog-actions">
-        <button type="button" className="btn" onClick={onClose}>
-          {t("addSource.wait.later")}
-        </button>
-        <button ref={reopenRef} type="button" className="btn btn-primary" onClick={onReopen} disabled={!url}>
-          {t("addSource.wait.reopen")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Done({ text, onClose }: { text: string; onClose: () => void }) {
-  const t = useT();
-  const ref = useAutofocus<HTMLButtonElement>();
-  return (
-    <div>
-      <p role="status">{text}</p>
-      <div className="dialog-actions">
-        <button ref={ref} type="button" className="btn btn-primary" onClick={onClose}>
-          {t("common.done")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // -- password-based (IMAP, CalDAV) --
 
-/** Shared tail of the IMAP and CalDAV forms: save, send the password, clear it, start a sync. */
-async function saveWithPassword(
-  save: (name: string, settings: SourceSettings) => Promise<SourceInfo>,
-  name: string,
-  settings: SourceSettings,
-  passwordInput: HTMLInputElement | null,
-): Promise<SourceInfo> {
-  const s = await save(name, settings);
-  const secret = passwordInput?.value ?? "";
-  if (secret) {
-    await api.sourcesSecretSet({ id: s.id, secret });
-    if (passwordInput) passwordInput.value = "";
-    // The first pass may have run before the password arrived.
-    await api.sourcesSync({ id: s.id }).catch(() => {});
-  }
-  return s;
-}
-
-type TlsMode = "implicit" | "starttls";
-const TLS_PORT: Record<TlsMode, number> = { implicit: 993, starttls: 143 };
-
-function ImapForm({ kind, onBack, onClose, onAdded }: FormProps) {
+/**
+ * Shared state of the IMAP and CalDAV forms. `submit` validates (`check` adds field errors),
+ * saves, sends the password (then clears the field) and starts a sync.
+ */
+function usePasswordForm({ kind, onClose, onAdded }: FormProps) {
   const t = useT();
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("993");
-  const [tls, setTls] = useState<TlsMode>("implicit");
   const [username, setUsername] = useState("");
-  const [folders, setFolders] = useState("INBOX");
   const [name, setName] = useState("");
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [passwordSaved, setPasswordSaved] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const hostRef = useAutofocus<HTMLInputElement>();
   const save = useSaveSource(kind);
 
-  const changeTls = (mode: TlsMode) => {
-    // Follow the mode's standard port unless the user typed their own.
-    if (port === String(TLS_PORT[tls])) setPort(String(TLS_PORT[mode]));
-    setTls(mode);
-  };
-
-  const defaultName = username.trim() || host.trim() || t("addSource.imap.defaultName");
-
-  const submit = async (e: FormEvent) => {
+  const submit = async (e: FormEvent, check: (next: Record<string, string>) => void, defaultName: string, settings: () => SourceSettings) => {
     e.preventDefault();
-    const p = Number(port);
     const next: Record<string, string> = {};
-    if (!host.trim()) next.host = t("addSource.imap.hostMissing");
-    else if (/[\s/:]/.test(host.trim())) next.host = t("addSource.imap.hostInvalid");
-    if (!Number.isInteger(p) || p < 1 || p > 65535) next.port = t("addSource.imap.portInvalid");
-    if (!username.trim()) next.username = t("addSource.imap.usernameMissing");
+    check(next);
     if (!passwordRef.current?.value && !passwordSaved) next.password = t("addSource.passwordMissing");
-    if (splitList(folders).length === 0) next.folders = t("addSource.imap.foldersMissing");
     setErrs(next);
     if (Object.keys(next).length > 0) return;
 
     setBusy(true);
     setError(null);
     try {
-      const s = await saveWithPassword(
-        save,
-        name.trim() || defaultName,
-        { host: host.trim(), port: p, tls, username: username.trim(), folders: splitList(folders) },
-        passwordRef.current,
-      );
+      const s = await save(name.trim() || defaultName, settings());
+      const input = passwordRef.current;
+      const secret = input?.value ?? "";
+      if (secret) {
+        await api.sourcesSecretSet({ id: s.id, secret });
+        if (input) input.value = "";
+        // The first pass may have run before the password arrived.
+        await api.sourcesSync({ id: s.id }).catch(() => {});
+      }
       setPasswordSaved(true);
       onAdded(s);
       onClose();
@@ -802,10 +501,66 @@ function ImapForm({ kind, onBack, onClose, onAdded }: FormProps) {
     }
   };
 
+  const credentials = (
+    <>
+      <Field label={t("addSource.username")} error={errs.username}>
+        {(a) => (
+          <input {...a} type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" spellCheck={false} />
+        )}
+      </Field>
+      <Field
+        label={t("addSource.password")}
+        error={errs.password}
+        optional={passwordSaved}
+        hint={passwordSaved ? t("addSource.savedKeepIt") : t("addSource.passwordHint")}
+      >
+        {(a) => <input {...a} ref={passwordRef} type="password" autoComplete="current-password" />}
+      </Field>
+    </>
+  );
+
+  return { username, name, setName, errs, error, busy, submit, credentials };
+}
+
+type TlsMode = "implicit" | "starttls";
+const TLS_PORT: Record<TlsMode, number> = { implicit: 993, starttls: 143 };
+
+function ImapForm(props: FormProps) {
+  const t = useT();
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("993");
+  const [tls, setTls] = useState<TlsMode>("implicit");
+  const [folders, setFolders] = useState("INBOX");
+  const f = usePasswordForm(props);
+  const hostRef = useAutofocus<HTMLInputElement>();
+
+  const changeTls = (mode: TlsMode) => {
+    // Follow the mode's standard port unless the user typed their own.
+    if (port === String(TLS_PORT[tls])) setPort(String(TLS_PORT[mode]));
+    setTls(mode);
+  };
+
+  const defaultName = f.username.trim() || host.trim() || t("addSource.imap.defaultName");
+
+  const submit = (e: FormEvent) =>
+    f.submit(
+      e,
+      (next) => {
+        if (!host.trim()) next.host = t("addSource.imap.hostMissing");
+        else if (/[\s/:]/.test(host.trim())) next.host = t("addSource.imap.hostInvalid");
+        const p = Number(port);
+        if (!Number.isInteger(p) || p < 1 || p > 65535) next.port = t("addSource.imap.portInvalid");
+        if (!f.username.trim()) next.username = t("addSource.imap.usernameMissing");
+        if (splitList(folders).length === 0) next.folders = t("addSource.imap.foldersMissing");
+      },
+      defaultName,
+      () => ({ host: host.trim(), port: Number(port), tls, username: f.username.trim(), folders: splitList(folders) }),
+    );
+
   return (
     <form onSubmit={submit} noValidate>
       <div className="field-grid">
-        <Field label={t("addSource.imap.server")} error={errs.host}>
+        <Field label={t("addSource.imap.server")} error={f.errs.host}>
           {(a) => (
             <input
               {...a}
@@ -821,7 +576,7 @@ function ImapForm({ kind, onBack, onClose, onAdded }: FormProps) {
             />
           )}
         </Field>
-        <Field label={t("addSource.imap.port")} error={errs.port}>
+        <Field label={t("addSource.imap.port")} error={f.errs.port}>
           {(a) => <input {...a} type="number" inputMode="numeric" min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} />}
         </Field>
         <Field label={t("addSource.imap.security")}>
@@ -833,25 +588,13 @@ function ImapForm({ kind, onBack, onClose, onAdded }: FormProps) {
           )}
         </Field>
       </div>
-      <Field label={t("addSource.username")} error={errs.username}>
-        {(a) => (
-          <input {...a} type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" spellCheck={false} />
-        )}
-      </Field>
-      <Field
-        label={t("addSource.password")}
-        error={errs.password}
-        optional={passwordSaved}
-        hint={passwordSaved ? t("addSource.savedKeepIt") : t("addSource.passwordHint")}
-      >
-        {(a) => <input {...a} ref={passwordRef} type="password" autoComplete="current-password" />}
-      </Field>
-      <Field label={t("addSource.imap.folders")} error={errs.folders} hint={t("addSource.imap.foldersHint")}>
+      {f.credentials}
+      <Field label={t("addSource.imap.folders")} error={f.errs.folders} hint={t("addSource.imap.foldersHint")}>
         {(a) => <input {...a} type="text" value={folders} onChange={(e) => setFolders(e.target.value)} autoComplete="off" spellCheck={false} />}
       </Field>
-      <NameField value={name} onChange={setName} placeholder={defaultName} />
-      <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.imap.submit")} />
+      <NameField value={f.name} onChange={f.setName} placeholder={defaultName} />
+      <FormError error={f.error} />
+      <Actions onBack={props.onBack} busy={f.busy} submitLabel={t("addSource.imap.submit")} />
     </form>
   );
 }
@@ -867,18 +610,11 @@ export function isCaldavUrl(raw: string): boolean {
   }
 }
 
-function CaldavForm({ kind, onBack, onClose, onAdded }: FormProps) {
+function CaldavForm(props: FormProps) {
   const t = useT();
   const [url, setUrl] = useState("");
-  const [username, setUsername] = useState("");
-  const [name, setName] = useState("");
-  const [errs, setErrs] = useState<Record<string, string>>({});
-  const [error, setError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
-  const [passwordSaved, setPasswordSaved] = useState(false);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const f = usePasswordForm(props);
   const urlRef = useAutofocus<HTMLInputElement>();
-  const save = useSaveSource(kind);
 
   let defaultName = t("addSource.caldav.defaultName");
   try {
@@ -887,32 +623,20 @@ function CaldavForm({ kind, onBack, onClose, onAdded }: FormProps) {
     /* keep the default */
   }
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    const next: Record<string, string> = {};
-    if (!isCaldavUrl(url.trim())) next.url = t("addSource.caldav.urlInvalid");
-    if (!username.trim()) next.username = t("addSource.caldav.usernameMissing");
-    if (!passwordRef.current?.value && !passwordSaved) next.password = t("addSource.passwordMissing");
-    setErrs(next);
-    if (Object.keys(next).length > 0) return;
-
-    setBusy(true);
-    setError(null);
-    try {
-      const s = await saveWithPassword(save, name.trim() || defaultName, { url: url.trim(), username: username.trim() }, passwordRef.current);
-      setPasswordSaved(true);
-      onAdded(s);
-      onClose();
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const submit = (e: FormEvent) =>
+    f.submit(
+      e,
+      (next) => {
+        if (!isCaldavUrl(url.trim())) next.url = t("addSource.caldav.urlInvalid");
+        if (!f.username.trim()) next.username = t("addSource.caldav.usernameMissing");
+      },
+      defaultName,
+      () => ({ url: url.trim(), username: f.username.trim() }),
+    );
 
   return (
     <form onSubmit={submit} noValidate>
-      <Field label={t("addSource.caldav.url")} error={errs.url} hint={t("addSource.caldav.urlHint")}>
+      <Field label={t("addSource.caldav.url")} error={f.errs.url} hint={t("addSource.caldav.urlHint")}>
         {(a) => (
           <input
             {...a}
@@ -928,22 +652,10 @@ function CaldavForm({ kind, onBack, onClose, onAdded }: FormProps) {
           />
         )}
       </Field>
-      <Field label={t("addSource.username")} error={errs.username}>
-        {(a) => (
-          <input {...a} type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" spellCheck={false} />
-        )}
-      </Field>
-      <Field
-        label={t("addSource.password")}
-        error={errs.password}
-        optional={passwordSaved}
-        hint={passwordSaved ? t("addSource.savedKeepIt") : t("addSource.passwordHint")}
-      >
-        {(a) => <input {...a} ref={passwordRef} type="password" autoComplete="current-password" />}
-      </Field>
-      <NameField value={name} onChange={setName} placeholder={defaultName} />
-      <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.caldav.submit")} />
+      {f.credentials}
+      <NameField value={f.name} onChange={f.setName} placeholder={defaultName} />
+      <FormError error={f.error} />
+      <Actions onBack={props.onBack} busy={f.busy} submitLabel={t("addSource.caldav.submit")} />
     </form>
   );
 }
