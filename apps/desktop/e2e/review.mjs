@@ -339,7 +339,7 @@ async function main() {
                 }
                 await snap(page, dir, `onboarding-${i + 1}-${s}`);
                 if (s === "source") {
-                  await page.getByRole("button", { name: exactName("onboarding.source.addFolder") }).click();
+                  await page.getByRole("button", { name: new RegExp(`^(${escapeRe(t("onboarding.source.addFolder"))}|${escapeRe(t("onboarding.source.addAnother"))})$`) }).click();
                   await page.locator("dialog[open]").waitFor();
                   await snap(page, dir, `onboarding-3-source-folder`, { full: false });
                   await page.keyboard.press("Escape");

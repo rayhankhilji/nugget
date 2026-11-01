@@ -42,7 +42,10 @@ async fn mock_provider() -> MockServer {
         .await;
     Mock::given(http_method("GET"))
         .and(path("/v1/models"))
-        .and(header("authorization", format!("Bearer {ROTATED}").as_str()))
+        .and(header(
+            "authorization",
+            format!("Bearer {ROTATED}").as_str(),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "object": "list",
             "data": [{"id": "e2e-model"}],
@@ -201,7 +204,10 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     )
     .await
     .unwrap();
-    assert_eq!((r["saved"].clone(), r["reason"].clone()), (json!(false), json!("bad_key")));
+    assert_eq!(
+        (r["saved"].clone(), r["reason"].clone()),
+        (json!(false), json!("bad_key"))
+    );
     assert_eq!(
         secrets.get(&provider_account("custom")).unwrap().as_deref(),
         Some(GOOD)
@@ -219,15 +225,27 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
         secrets.get(&provider_account("custom")).unwrap().as_deref(),
         Some(ROTATED)
     );
-    assert_eq!(std::fs::read_to_string(paths.config_file()).unwrap(), config);
+    assert_eq!(
+        std::fs::read_to_string(paths.config_file()).unwrap(),
+        config
+    );
     assert!(provider_ids(&client).await.contains(&"custom".to_owned()));
     // Unknown ids are refused.
-    let r = call(&client, "ai.key.update", json!({"id": "nope", "api_key": GOOD}))
+    let r = call(
+        &client,
+        "ai.key.update",
+        json!({"id": "nope", "api_key": GOOD}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r["reason"], "not_found", "{r}");
+    let r = call(&client, "ai.key.remove", json!({"id": "nope"}))
         .await
         .unwrap();
-    assert_eq!(r["reason"], "not_found", "{r}");
-    let r = call(&client, "ai.key.remove", json!({"id": "nope"})).await.unwrap();
-    assert_eq!((r["removed"].clone(), r["reason"].clone()), (json!(false), json!("not_found")));
+    assert_eq!(
+        (r["removed"].clone(), r["reason"].clone()),
+        (json!(false), json!("not_found"))
+    );
 
     // An env: reference to a variable the daemon does not have is explained, not saved.
     let r = call(
@@ -240,7 +258,10 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     )
     .await
     .unwrap();
-    assert_eq!((r["saved"].clone(), r["reason"].clone()), (json!(false), json!("env_missing")));
+    assert_eq!(
+        (r["saved"].clone(), r["reason"].clone()),
+        (json!(false), json!("env_missing"))
+    );
     let err = call(
         &client,
         "ai.key.save",
@@ -252,7 +273,9 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
 
     // Remove: gone from the router, config.toml (byte for byte as before the save) and the
     // secret store.
-    let r = call(&client, "ai.key.remove", json!({"id": "custom"})).await.unwrap();
+    let r = call(&client, "ai.key.remove", json!({"id": "custom"}))
+        .await
+        .unwrap();
     assert_eq!(r["removed"], true, "{r}");
     assert!(!provider_ids(&client).await.contains(&"custom".to_owned()));
     assert_eq!(
@@ -272,7 +295,9 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
 }
 
 async fn provider_ids(client: &Client) -> Vec<String> {
-    let list = call(client, method::PROVIDERS_LIST, json!({})).await.unwrap();
+    let list = call(client, method::PROVIDERS_LIST, json!({}))
+        .await
+        .unwrap();
     list.as_array()
         .unwrap()
         .iter()
@@ -332,8 +357,15 @@ async fn without_a_keychain_the_save_explains_and_writes_nothing() {
     let msg = r["message"].as_str().unwrap();
     assert!(msg.contains("environment variable"), "{msg}");
     assert!(!msg.contains("dbus") && !msg.contains(GOOD), "{msg}");
-    assert_eq!(std::fs::read_to_string(paths.config_file()).unwrap(), before);
-    assert!(!provider_ids(&client).await.contains(&"my-openai".to_owned()));
+    assert_eq!(
+        std::fs::read_to_string(paths.config_file()).unwrap(),
+        before
+    );
+    assert!(
+        !provider_ids(&client)
+            .await
+            .contains(&"my-openai".to_owned())
+    );
 
     let _ = tx.send(());
     tokio::time::timeout(WAIT, server)

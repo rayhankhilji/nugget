@@ -503,10 +503,9 @@ impl AiKeys {
             new: new_ref.clone(),
             base_url: req.base_url.as_ref().map(|_| base_url.clone()),
         };
-        let written = blocking(move || {
-            replace_key(&path, &*secrets, &name, &change, key.trim().to_owned())
-        })
-        .await?;
+        let written =
+            blocking(move || replace_key(&path, &*secrets, &name, &change, key.trim().to_owned()))
+                .await?;
         if written == Written::NoKeychain {
             return Ok(no_keychain_result(&req.name));
         }
@@ -659,7 +658,9 @@ impl SecretResolver for StoreResolver {
 fn exists_result(name: &str) -> KeySaveResult {
     KeySaveResult::fail(
         Reason::Exists,
-        format!("A provider named \"{name}\" is already set up. Replace its key or pick another name."),
+        format!(
+            "A provider named \"{name}\" is already set up. Replace its key or pick another name."
+        ),
     )
 }
 
@@ -740,7 +741,8 @@ fn validate_save(req: &KeySaveRequest) -> std::result::Result<(), String> {
 fn valid_env_name(v: &str) -> bool {
     let mut b = v.bytes();
     v.len() <= 128
-        && b.next().is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
+        && b.next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
         && b.all(|c| c.is_ascii_alphanumeric() || c == b'_')
 }
 
@@ -780,7 +782,10 @@ impl KeyRef {
 
 impl KeySpec {
     /// The key itself, or why it cannot be read.
-    fn read(&self, env: &dyn Fn(&str) -> Option<String>) -> std::result::Result<String, KeyTestResult> {
+    fn read(
+        &self,
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> std::result::Result<String, KeyTestResult> {
         match self {
             KeySpec::Typed(k) => Ok(k.0.clone()),
             KeySpec::Env(var) => match env(var) {
@@ -917,11 +922,7 @@ impl std::fmt::Debug for Check {
 
 /// Ask the provider for its models with the key and classify the answer. Never fails: every
 /// outcome is a [`KeyTestResult`].
-pub(crate) async fn check_key(
-    http: &MeteredHttp,
-    req: &Check,
-    timeout: Duration,
-) -> KeyTestResult {
+pub(crate) async fn check_key(http: &MeteredHttp, req: &Check, timeout: Duration) -> KeyTestResult {
     let key = req.key.trim();
     if key.is_empty() {
         return KeyTestResult::fail(Reason::BadKey, "Enter an API key.");
@@ -1370,7 +1371,12 @@ fn provider_spans(text: &str) -> Vec<Span> {
         s.id = toml::from_str::<toml::Table>(&text[s.start..s.end])
             .ok()
             .and_then(|t| {
-                t.get("providers")?.as_array()?.first()?.get("id")?.as_str().map(str::to_owned)
+                t.get("providers")?
+                    .as_array()?
+                    .first()?
+                    .get("id")?
+                    .as_str()
+                    .map(str::to_owned)
             });
     }
     spans
@@ -1750,8 +1756,18 @@ mod tests {
             key_spec(None, Some(" env: NUGGET_OPENAI_KEY ")),
             Ok(KeySpec::Env(v)) if v == "NUGGET_OPENAI_KEY"
         ));
-        assert!(matches!(key_spec(None, Some("env:_x1")), Ok(KeySpec::Env(_))));
-        for bad in ["env:", "env:1ABC", "env:A-B", "env:A B", "keychain:x", "NAME"] {
+        assert!(matches!(
+            key_spec(None, Some("env:_x1")),
+            Ok(KeySpec::Env(_))
+        ));
+        for bad in [
+            "env:",
+            "env:1ABC",
+            "env:A-B",
+            "env:A B",
+            "keychain:x",
+            "NAME",
+        ] {
             assert!(key_spec(None, Some(bad)).is_err(), "{bad}");
         }
         assert!(key_spec(Some(&k), Some("env:A")).is_err(), "both");
@@ -1882,8 +1898,14 @@ mod tests {
             Written::Saved
         );
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("api_key = \"env:NUGGET_CUSTOM_KEY\""), "{text}");
-        assert!(text.contains("environment variable NUGGET_CUSTOM_KEY"), "{text}");
+        assert!(
+            text.contains("api_key = \"env:NUGGET_CUSTOM_KEY\""),
+            "{text}"
+        );
+        assert!(
+            text.contains("environment variable NUGGET_CUSTOM_KEY"),
+            "{text}"
+        );
         assert!(!text.contains(GOOD));
 
         // Replacing with a typed key still needs the keyring; removing works without one.
@@ -2018,7 +2040,10 @@ tiers = ["synthesis"]
     fn only_key_backed_providers_are_editable() {
         let cfg = Config::parse(HAND_WRITTEN).unwrap();
         let find = |id: &str| cfg.providers.iter().find(|p| p.id.as_str() == id);
-        assert_eq!(editable(find("nope"), "nope").unwrap_err(), Reason::NotFound);
+        assert_eq!(
+            editable(find("nope"), "nope").unwrap_err(),
+            Reason::NotFound
+        );
         assert_eq!(
             editable(find("ollama"), "ollama").unwrap_err(),
             Reason::NotEditable
@@ -2035,7 +2060,9 @@ tiers = ["synthesis"]
     #[test]
     fn the_store_resolver_reads_the_secret_store_and_environment() {
         let secrets = Arc::new(MemorySecrets::new());
-        secrets.set(&provider_account("custom"), " sk-x \n").unwrap();
+        secrets
+            .set(&provider_account("custom"), " sk-x \n")
+            .unwrap();
         let r = StoreResolver {
             secrets: secrets.clone(),
             env: Arc::new(|v| (v == "SET").then(|| "sk-env".to_owned())),

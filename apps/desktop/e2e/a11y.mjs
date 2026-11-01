@@ -435,7 +435,7 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
           }
           await cont();
           await step("onboarding.source.heading", "source");
-          await page.getByRole("button", { name: exactName("onboarding.source.addFolder") }).click();
+          await page.getByRole("button", { name: new RegExp(`^(${escapeRe(t("onboarding.source.addFolder"))}|${escapeRe(t("onboarding.source.addAnother"))})$`) }).click();
           await dialog(page)
             .getByRole("button", { name: exactName("addSource.folder.choose") })
             .waitFor();
