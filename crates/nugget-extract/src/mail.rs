@@ -295,29 +295,163 @@ const ATTRIBUTION_ENDINGS: &[&str] = &[
     "skrev:",
     "schreef:",
     "napisał:",
+    "ने लिखा:",
+    "写道:",
+    "写道：",
+    "寫道:",
+    "寫道：",
+    "كتب:",
+];
+
+/// The verb of a localised attribution whose line ends with the sender (`… <a@b>:`) instead:
+/// `Am 27.10.2026 um 16:05 schrieb Paul <p@x>:`, `في … كتب Sam <s@x>:`.
+const ATTRIBUTION_VERBS: &[&str] = &[
+    " wrote ",
+    " schrieb ",
+    " a écrit ",
+    " escribió ",
+    " escreveu ",
+    " scrisse ",
+    " schreef ",
+    " skrev ",
+    " napisał ",
+    "ने लिखा",
+    "写道",
+    "寫道",
+    "كتب ",
 ];
 
 fn is_attribution(line: &str) -> bool {
     let t = line.trim();
-    t.len() < 400 && ATTRIBUTION_ENDINGS.iter().any(|e| t.ends_with(e))
+    if t.len() >= 400 {
+        return false;
+    }
+    if ATTRIBUTION_ENDINGS.iter().any(|e| t.ends_with(e)) {
+        return true;
+    }
+    // `… Name <address>:` (or `：`): a localised header that ends with the sender. It needs the
+    // verb, or a leading date as Japanese Gmail writes it (`2026年10月28日(水) 14:03 Sam <s@x>:`).
+    let Some(head) = t.strip_suffix(':').or_else(|| t.strip_suffix('：')) else {
+        return false;
+    };
+    let head = head.trim_end();
+    if !(head.ends_with('>') && head.contains('@') && head.contains('<')) {
+        return false;
+    }
+    ATTRIBUTION_VERBS.iter().any(|v| head.contains(v))
+        || (head.starts_with(|c: char| c.is_ascii_digit()) && head.contains('年'))
 }
 
 /// `-----Original Message-----` and friends: everything after is quoted.
 fn is_original_marker(line: &str, next: Option<&str>) -> bool {
     let t = line.trim();
     let lower = t.to_lowercase();
-    if t.starts_with("--")
-        && (lower.contains("original message")
-            || lower.contains("ursprüngliche nachricht")
-            || lower.contains("message d'origine")
-            || lower.contains("mensaje original"))
-    {
+    if t.starts_with("--") && ORIGINAL_MESSAGE.iter().any(|m| lower.contains(m)) {
         return true;
     }
-    // Outlook: a line of underscores followed by a `From:` header block.
-    t.len() >= 20
-        && t.chars().all(|c| c == '_')
-        && next.is_some_and(|n| n.trim_start().starts_with("From:"))
+    // Outlook: a line of underscores followed by a (localised) `From:` header block.
+    t.len() >= 20 && t.chars().all(|c| c == '_') && next.is_some_and(is_from_header)
+}
+
+/// `-----Original Message-----` in the languages mail clients write it in.
+const ORIGINAL_MESSAGE: &[&str] = &[
+    "original message",
+    "ursprüngliche nachricht",
+    "message d'origine",
+    "message d’origine",
+    "mensaje original",
+    "mensagem original",
+    "messaggio originale",
+    "oorspronkelijk bericht",
+    "原始邮件",
+    "原始郵件",
+    "元のメッセージ",
+    "الرسالة الأصلية",
+    "मूल संदेश",
+];
+
+/// The `From:` line of a quoted header block, in the languages Outlook writes it in.
+const FROM_HEADERS: &[&str] = &[
+    "From:",
+    "Von:",
+    "De :",
+    "De:",
+    "Da:",
+    "Van:",
+    "Från:",
+    "Od:",
+    "发件人:",
+    "发件人：",
+    "寄件者:",
+    "寄件者：",
+    "差出人:",
+    "差出人：",
+    "من:",
+    "प्रेषक:",
+];
+
+/// The `Sent:`/`Date:` line that follows a quoted `From:` line.
+const SENT_HEADERS: &[&str] = &[
+    "Sent:",
+    "Date:",
+    "Gesendet:",
+    "Datum:",
+    "Envoyé :",
+    "Envoyé:",
+    "Date :",
+    "Enviado:",
+    "Enviado el:",
+    "Fecha:",
+    "Data:",
+    "Inviato:",
+    "Verzonden:",
+    "Skickat:",
+    "发送时间:",
+    "发送时间：",
+    "日期:",
+    "日期：",
+    "送信日時:",
+    "送信日時：",
+    "تاريخ الإرسال:",
+    "التاريخ:",
+    "भेजा गया:",
+    "दिनांक:",
+];
+
+fn is_from_header(line: &str) -> bool {
+    let t = line.trim_start();
+    FROM_HEADERS.iter().any(|h| t.starts_with(h))
+}
+
+/// Outlook's plain-text reply block without a separator: a `From:` line, then `Sent:` (localised),
+/// once the reply has new text above it. A forwarded message's header block is not a quote: its
+/// text is what the user forwarded.
+fn is_header_block(line: &str, next: Option<&str>, above: Option<&str>) -> bool {
+    is_from_header(line)
+        && next.is_some_and(|n| SENT_HEADERS.iter().any(|h| n.trim_start().starts_with(h)))
+        && !above.is_some_and(is_forward_marker)
+}
+
+/// `---------- Forwarded message ---------` and its translations.
+fn is_forward_marker(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    [
+        "forward",
+        "weitergeleitet",
+        "transféré",
+        "reenviado",
+        "encaminhad",
+        "inoltrat",
+        "doorgestuurd",
+        "转发",
+        "轉寄",
+        "転送",
+        "توجيه",
+        "अग्रेषित",
+        "फ़ॉरवर्ड",
+    ]
+    .iter()
+    .any(|m| lower.contains(m))
 }
 
 fn is_mobile_signature(line: &str) -> bool {
@@ -338,7 +472,14 @@ pub(crate) fn split_reply(body: &str) -> Split {
     while i < lines.len() {
         let line = lines[i];
         let next = lines.get(i + 1).copied();
-        if !main.iter().all(|l| l.trim().is_empty()) && is_original_marker(line, next) {
+        if !main.iter().all(|l| l.trim().is_empty())
+            && (is_original_marker(line, next)
+                || is_header_block(
+                    line,
+                    next,
+                    main.iter().rev().find(|l| !l.trim().is_empty()).copied(),
+                ))
+        {
             quoted.extend(lines[i..].iter().map(|l| (*l).to_owned()));
             break;
         }
@@ -414,6 +555,105 @@ fn collapse_blank_lines<S: AsRef<str>>(lines: &[S]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// LL2 (GG7-9): the reply headers mail clients write in the nine UI languages, as in QA
+    /// GG7's corpus, mark the quote below them.
+    #[test]
+    fn localised_attributions() {
+        let headers = [
+            "On Tue, Oct 27, 2026 at 3:12 PM Sam Okafor <sam.okafor@example.net> wrote:",
+            "Am 27.10.2026 um 16:05 schrieb Sam Okafor <sam.okafor@example.net>:",
+            "Le mar. 27 oct. 2026 à 15:42, Sam Okafor <sam.okafor@example.net> a écrit :",
+            "El mar, 28 oct 2026 a las 14:03, Sam Okafor (<sam@example.net>) escribió:",
+            "Em ter., 27 de out. de 2026 às 14:03, Sam Okafor <sam.okafor@example.net> escreveu:",
+            "बुध, 28 अक्तू॰ 2026, 4:12 pm को Sam Okafor <sam.okafor@example.net> ने लिखा:",
+            "2026年10月28日(水) 14:03 Sam Okafor <sam.okafor@example.net>:",
+            "在 2026年10月27日 星期二 15:20，Sam Okafor <sam.okafor@example.net> 写道：",
+            "في الثلاثاء ٢٧ أكتوبر ٢٠٢٦ الساعة ٣:١٥ م، كتب Sam Okafor <sam.okafor@example.net>:",
+        ];
+        for h in headers {
+            let s = split_reply(&format!(
+                "Danke, erledigt.\n\n{h}\n> Können Sie mir das Formular schicken?\n"
+            ));
+            assert_eq!(s.main, "Danke, erledigt.", "{h}");
+            assert!(s.quoted.starts_with(h.trim()), "{h}: {:?}", s.quoted);
+            assert!(s.quoted.ends_with("Formular schicken?"), "{h}");
+        }
+        // Not attributions: a colon line naming someone, a list lead-in, a date without a sender.
+        for line in [
+            "Contact Sam Okafor <sam@example.net>:",
+            "尊敬的 Sam Okafor：",
+            "Am 27.10.2026 um 16:05:",
+            "رجاءً أرسل الملف إلى Sam <sam@example.net>:",
+        ] {
+            let s = split_reply(&format!("Hi\n{line}\n> x\n"));
+            assert!(s.main.contains(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn localised_outlook_blocks() {
+        for (marker, from, sent) in [
+            (
+                "-----Ursprüngliche Nachricht-----",
+                "Von: Paul",
+                "Gesendet: Dienstag, 27. Oktober 2026 16:05",
+            ),
+            (
+                "-----Message d'origine-----",
+                "De : Paul",
+                "Envoyé : mardi 27 octobre 2026 16:05",
+            ),
+            (
+                "-----Mensagem original-----",
+                "De: Paul",
+                "Enviada em: terça-feira",
+            ),
+            (
+                "-----原始邮件-----",
+                "发件人: Paul",
+                "发送时间: 2026年10月27日 16:05",
+            ),
+            (
+                "-----元のメッセージ-----",
+                "差出人: Paul",
+                "送信日時: 2026年10月27日 16:05",
+            ),
+        ] {
+            let s = split_reply(&format!(
+                "Erledigt.\n\n{marker}\n{from}\n{sent}\nold question?"
+            ));
+            assert_eq!(s.main, "Erledigt.", "{marker}");
+            assert!(s.quoted.ends_with("old question?"), "{marker}");
+        }
+        // Underscores, then a localised `From:`.
+        let s = split_reply(&format!(
+            "Ok\n{}\nVon: Paul\nGesendet: heute\nalt",
+            "_".repeat(32)
+        ));
+        assert_eq!(s.main, "Ok");
+        // No separator: `From:` then `Sent:` in any language.
+        for (from, sent) in [
+            ("From: Paul", "Sent: Tuesday"),
+            ("Von: Paul", "Gesendet: Dienstag"),
+            ("من: بول", "تاريخ الإرسال: الثلاثاء"),
+        ] {
+            let s = split_reply(&format!("Ok\n\n{from}\n{sent}\nalt"));
+            assert_eq!(s.main, "Ok", "{from}");
+            assert!(s.quoted.ends_with("alt"), "{from}");
+        }
+        // A forwarded message's header block stays: it is what the user forwarded.
+        for fwd in [
+            "---------- Forwarded message ---------",
+            "---------- Weitergeleitete Nachricht ----------",
+        ] {
+            let s = split_reply(&format!("FYI\n\n{fwd}\nFrom: Paul\nDate: Tue\nthe invoice"));
+            assert!(s.main.ends_with("the invoice"), "{fwd}");
+        }
+        // The block opens the mail: nothing above it, so it is the mail itself.
+        let s = split_reply("Von: Paul\nGesendet: heute\nText");
+        assert!(s.main.ends_with("Text"));
+    }
 
     #[test]
     fn splits_quotes_and_signature() {

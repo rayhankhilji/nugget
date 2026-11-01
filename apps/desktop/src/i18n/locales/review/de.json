@@ -833,6 +833,10 @@
     "models.cancel",
     "models.cancelLabel",
     "models.resume",
-    "list.loadingMore"
+    "list.loadingMore",
+    "chat.retry",
+    "chat.retryAnnounce",
+    "chat.statusDetails",
+    "chat.failed"
   ]
 }

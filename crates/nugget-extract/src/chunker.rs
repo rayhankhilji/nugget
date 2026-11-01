@@ -231,8 +231,13 @@ fn sentences(text: &str, a: usize, b: usize, out: &mut Vec<(usize, usize)>) {
     while let Some((i, c)) = it.next() {
         let end = i + c.len_utf8();
         let boundary = match c {
-            '\n' | '。' | '！' | '？' | '；' => true,
-            '.' | '!' | '?' => it.peek().is_some_and(|&(_, n)| n.is_whitespace()),
+            // CJK full-width stops, the half-width `｡`, Devanagari danda and double danda end a
+            // sentence wherever they stand (no space follows them in those scripts).
+            '\n' | '。' | '｡' | '！' | '？' | '；' | '।' | '॥' => true,
+            // Arabic question mark and semicolon, Urdu full stop: like `?` and `.`, before a space.
+            '.' | '!' | '?' | '؟' | '؛' | '۔' => {
+                it.peek().is_some_and(|&(_, n)| n.is_whitespace())
+            }
             _ => false,
         };
         if boundary {
@@ -422,6 +427,37 @@ fn starts_with_heading(body: &str, heading: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sentences_of(text: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        sentences(text, 0, text.len(), &mut out);
+        out.into_iter().map(|(a, b)| &text[a..b]).collect()
+    }
+
+    /// LL2 (GG7-8): Arabic, CJK and Devanagari sentence ends.
+    #[test]
+    fn sentence_ends_in_other_scripts() {
+        assert_eq!(
+            sentences_of("هل يناسبك الموعد؟ أرسل الملف."),
+            ["هل يناسبك الموعد؟", "أرسل الملف."]
+        );
+        assert_eq!(
+            sentences_of("你那个周末有空吗？我得在11月6日之前订房。好"),
+            ["你那个周末有空吗？", "我得在11月6日之前订房。", "好"]
+        );
+        assert_eq!(
+            sentences_of("週末は空いていますか？よろしく｡はい"),
+            ["週末は空いていますか？", "よろしく｡", "はい"]
+        );
+        assert_eq!(
+            sentences_of("कृपया रिपोर्ट भेजें। धन्यवाद॥ ठीक"),
+            ["कृपया रिपोर्ट भेजें।", "धन्यवाद॥", "ठीक"]
+        );
+        assert_eq!(sentences_of("أولاً؛ ثانياً"), ["أولاً؛", "ثانياً"]);
+        // Not inside a word or number: `؟` with no space after, full-width digits with `．`.
+        assert_eq!(sentences_of("v1.2 is out"), ["v1.2 is out"]);
+        assert_eq!(sentences_of("３．５ポイント"), ["３．５ポイント"]);
+    }
 
     #[test]
     fn cjk_estimate() {
