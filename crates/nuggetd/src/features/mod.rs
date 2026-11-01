@@ -33,6 +33,7 @@ mod model_fit;
 pub(crate) mod plugins;
 mod policy;
 mod proactive;
+mod search_ui;
 
 /// One wired-in subsystem.
 #[async_trait]
@@ -129,6 +130,7 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     start(&mut list, "ai_keys", ai_keys::start(cx)); // Z3: bring your own key
     start(&mut list, "model_fit", model_fit::start(cx)); // Z3: explained recommendation
     start(&mut list, "backup", backup::start(cx)); // FF1: backup, restore, export
+    start(&mut list, "search_ui", search_ui::start(cx)); // II2: faceted search, timelines, previews
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features

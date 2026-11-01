@@ -31,7 +31,7 @@ pub struct AutostartStatus {
 
 /// True when this launch came from the login entry.
 pub fn launched_hidden() -> bool {
-    std::env::args().skip(1).any(|a| a == HIDDEN_ARG)
+    std::env::args_os().skip(1).any(|a| a == HIDDEN_ARG)
 }
 
 /// The program the entry should start.
@@ -319,6 +319,30 @@ mod tests {
         assert!(entry.starts_with("[Desktop Entry]\n"));
         assert!(entry.contains("\nExec=\"/opt/Nugget/nugget\" --minimized\n"));
         assert!(!entry.contains("Hidden=true"));
+    }
+
+    /// Real OS (run by `.github/workflows/real-os.yml`, job `platform`): writes and removes the
+    /// actual login entry (LaunchAgent plist, `HKCU\...\Run` value, XDG autostart file) for this
+    /// test binary, and checks the OS sees it. Restores the previous state.
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+    #[test]
+    #[ignore = "writes the real login entry (NUGGET_REAL_PLATFORM=1, real-os.yml)"]
+    fn real_platform_login_entry_round_trip() {
+        if std::env::var("NUGGET_REAL_PLATFORM").ok().as_deref() != Some("1") {
+            eprintln!("SKIPPED: set NUGGET_REAL_PLATFORM=1 (writes the real login entry)");
+            return;
+        }
+        let before = status().enabled;
+        apply(true).expect("enable");
+        assert!(status().enabled, "the OS entry exists");
+        apply(true).expect("enabling twice is fine");
+        apply(false).expect("disable");
+        assert!(!status().enabled, "the OS entry is gone");
+        apply(false).expect("disabling twice is fine");
+        if before {
+            apply(true).expect("restore");
+        }
+        eprintln!("NUGGET_LOGIN_ENTRY_OK");
     }
 
     #[test]

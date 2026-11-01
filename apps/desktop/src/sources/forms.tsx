@@ -1,14 +1,15 @@
-/** Entry points the Add source wizard delegates to for the Microsoft 365 and SaaS kinds. */
-import type { ConnectorKind, MicrosoftKind, SaasKind } from "../api";
+/** Entry points the Add source wizard delegates to for the Microsoft 365, SaaS and messaging kinds. */
+import type { ConnectorKind, MessagingKind, MicrosoftKind, SaasKind } from "../api";
 import type { MessageKey } from "../i18n";
 import type { FormProps } from "./form";
-import { isMicrosoftKind, isSaasKind } from "./kinds";
+import { isMessagingKind, isMicrosoftKind, isSaasKind } from "./kinds";
+import { MessagingForm } from "./MessagingForm";
 import { MicrosoftForm } from "./MicrosoftForm";
 import { SaasForm } from "./SaasForm";
 
-export type NewKind = MicrosoftKind | SaasKind;
+export type NewKind = MicrosoftKind | SaasKind | MessagingKind;
 
-export const isNewKind = (k: ConnectorKind): k is NewKind => isMicrosoftKind(k) || isSaasKind(k);
+export const isNewKind = (k: ConnectorKind): k is NewKind => isMicrosoftKind(k) || isSaasKind(k) || isMessagingKind(k);
 
 export const NEW_KIND_TITLE: Record<NewKind, MessageKey> = {
   outlook: "addSource.addTitle.outlook",
@@ -18,6 +19,9 @@ export const NEW_KIND_TITLE: Record<NewKind, MessageKey> = {
   notion: "addSource.addTitle.notion",
   github: "addSource.addTitle.github",
   linear: "addSource.addTitle.linear",
+  imessage: "addSource.addTitle.imessage",
+  whatsapp: "addSource.addTitle.whatsapp",
+  telegram: "addSource.addTitle.telegram",
 };
 
 export const NEW_KIND_BLURB: Record<NewKind, MessageKey> = {
@@ -28,8 +32,12 @@ export const NEW_KIND_BLURB: Record<NewKind, MessageKey> = {
   notion: "addSource.blurb.notion",
   github: "addSource.blurb.github",
   linear: "addSource.blurb.linear",
+  imessage: "addSource.blurb.imessage",
+  whatsapp: "addSource.blurb.whatsapp",
+  telegram: "addSource.blurb.telegram",
 };
 
 export function NewKindForm({ kind, ...rest }: FormProps<NewKind>) {
+  if (isMessagingKind(kind)) return <MessagingForm kind={kind} {...rest} />;
   return isMicrosoftKind(kind) ? <MicrosoftForm kind={kind} {...rest} /> : <SaasForm kind={kind} {...rest} />;
 }

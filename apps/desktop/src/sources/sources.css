@@ -33,3 +33,43 @@
   font-weight: 700;
   letter-spacing: 0.12em;
 }
+
+/* II1: messaging imports (iMessage, WhatsApp, Telegram). */
+
+.kind-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-inline-start: 4px;
+}
+
+.messaging-fda p {
+  margin: 0;
+}
+
+.messaging-error {
+  display: block;
+}
+
+.messaging-error > p {
+  margin-block: 0 6px;
+}
+
+.messaging-error ol {
+  margin-block: 6px 0;
+  padding-inline-start: 20px;
+}
+
+.messaging-options .messaging-checks {
+  display: grid;
+  gap: 8px;
+  margin-block-end: 10px;
+}
+
+.messaging-since {
+  max-inline-size: 10ch;
+}
+
+/* The steps under a failed iMessage source take a line of their own in flex notes. */
+.note .messaging-fda {
+  flex-basis: 100%;
+}

@@ -55,7 +55,10 @@ impl Harness {
         std::fs::write(
             paths.config_file(),
             format!(
-                "[runtime]\nenabled = false\n\n[knowledge]\ninterval_minutes = 0\n\n\
+                // No local model: let unflagged items count as not sensitive (GG5-2 opt-out), or
+                // the default-scoped clients here would see nothing.
+                "[runtime]\nenabled = false\n\n[ingest]\nassume_unflagged_safe = true\n\n\
+                 [knowledge]\ninterval_minutes = 0\n\n\
                  [mcp]\nport = {mcp_port}\n"
             ),
         )

@@ -20,6 +20,7 @@ import {
   type PluginSignature,
 } from "../api";
 import { useAsync, useNow } from "../hooks";
+import { usePendingPluginInstall } from "../hooks.nav";
 import { formatBytes, formatRelative, formatTime } from "../format";
 import { useT, type MessageKey, type TFunction } from "../i18n";
 import { Dialog } from "../components/Dialog";
@@ -102,6 +103,8 @@ export function PluginsPage() {
   };
   const installFromFile = () => installFrom(pickPluginFile);
   const installFromCatalog = (entry: PluginCatalogEntry) => installFrom(async () => entry.path);
+  // II4: a `.nuggetplugin` file opened from the OS, after the user confirmed (platform/DeepLinks.tsx).
+  usePendingPluginInstall((path) => void installFrom(async () => path));
 
   const unavailable = isMethodNotFound(loaded.error);
   const list = [...(plugins ?? [])].sort((a, b) => a.name.localeCompare(b.name));

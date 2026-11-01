@@ -1,6 +1,6 @@
 import { SourceIcon } from "../components/SourceIcon";
 
-/** Like `SourceIcon` (inline, decorative), with generic marks for the M6 connector kinds. */
+/** Like `SourceIcon` (inline, decorative), with generic marks for the M6 connector kinds and the messaging kinds. */
 export function KindIcon({ kind, size = 20 }: { kind: string; size?: number }) {
   const common = {
     width: size,
@@ -53,6 +53,29 @@ export function KindIcon({ kind, size = 20 }: { kind: string; size?: number }) {
         <svg {...common}>
           <circle cx="12" cy="12" r="8.5" />
           <path d="m5.5 13.5 5 5M4 10l10 10M6.5 6.5l11 11" />
+        </svg>
+      );
+    case "imessage":
+      // A rounded speech bubble with a tail.
+      return (
+        <svg {...common}>
+          <path d="M12 4.5c4.7 0 8.5 3 8.5 6.8s-3.8 6.8-8.5 6.8c-1 0-2-.1-2.9-.4L5 19.5l1.1-3.4C4.4 14.9 3.5 13.2 3.5 11.3c0-3.8 3.8-6.8 8.5-6.8z" />
+        </svg>
+      );
+    case "whatsapp":
+      // A round bubble with a tail at the bottom left and a handset-like stroke inside.
+      return (
+        <svg {...common}>
+          <path d="M4.5 19.5l1.2-3.6A8.5 8.5 0 1 1 8.4 18.6z" />
+          <path d="M9 8.8c0 3 2.2 5.6 5.4 6.2l1-1.4-1.9-1-.9.9c-1-.5-1.8-1.3-2.3-2.3l.9-.9-1-1.9z" />
+        </svg>
+      );
+    case "telegram":
+      // A paper plane.
+      return (
+        <svg {...common}>
+          <path d="M20.5 4 3.5 11l5.5 2 2 6 3-4 4.5 3.5z" />
+          <path d="m9 13 8-6.5" />
         </svg>
       );
     default:

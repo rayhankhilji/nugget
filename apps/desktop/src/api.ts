@@ -252,6 +252,17 @@ export interface IngestStatus {
   embedding_provider?: string | null;
   triage_provider?: string | null;
   sources: SourceInfo[];
+  /** HH2: background triage progress (items are searchable before triage). */
+  triage?: TriageProgress | null;
+}
+
+/** HH2: background triage (junk / sensitive labels) progress. */
+export interface TriageProgress {
+  state: "off" | "idle" | "running" | "yielding" | "paused";
+  pending: number;
+  done: number;
+  skipped?: number;
+  failed?: number;
 }
 
 // ---- retrieval ----
@@ -1027,6 +1038,11 @@ export const api = {
   openUrl: (url: string) => call<OpenResult>("open_url", { url }),
   /** Native folder picker; `[]` when cancelled. */
   pickFolders: (multiple: boolean) => call<string[]>("pick_folders", { multiple }),
+
+  // II2 (types and notes in the II2 block at the end of this file).
+  searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { utc_offset_minutes: utcOffsetMinutes(), ...request } }),
+  searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { utc_offset_minutes: utcOffsetMinutes(), ...request } }),
+  searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request }),
 };
 
 /** `revealed`: the file could run code, so its folder was shown instead of opening it. */
@@ -1462,8 +1478,9 @@ export type SaasKind = "slack" | "notion" | "github" | "linear";
 export const SAAS_KINDS: readonly SaasKind[] = ["slack", "notion", "github", "linear"];
 
 /** Every kind the Add source wizard offers. */
-export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind;
-export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS];
+export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind | MessagingKind;
+// The messaging kinds are spelled out (MESSAGING_KINDS is declared at the end of the file).
+export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS, "imessage", "whatsapp", "telegram"];
 
 export function isConnectorKind(v: unknown): v is ConnectorKind {
   return typeof v === "string" && (CONNECTOR_KINDS as readonly string[]).includes(v);
@@ -2551,4 +2568,195 @@ export async function restoreAndRestart(
   if (!conn.connected) throw new ApiError({ kind: "spawn", message: conn.error ?? t("backup.restore.didNotStart") });
   onPhase("done");
   return conn;
+}
+
+// ---- II4: quick ask ----
+
+/** `quickask.json` (see `src-tauri/src/quickask.rs`). */
+export interface QuickAskSettings {
+  enabled: boolean;
+  /** An accelerator such as `Ctrl+Shift+Space`. */
+  shortcut: string;
+}
+
+export type QuickAskState = "listening" | "off" | "error" | "unsupported_wayland";
+
+export interface QuickAskStatus {
+  listening: boolean;
+  error: string | null;
+  /** Wayland: no shortcut is registered; bind a desktop key to {@link QUICK_ASK_COMMAND}. */
+  wayland_fallback: boolean;
+  state?: QuickAskState;
+}
+
+export interface QuickAskView {
+  settings: QuickAskSettings;
+  status: QuickAskStatus;
+}
+
+/** Pages the quick-ask window can open in the main window. */
+export type QuickAskPage = Extract<PageId, "chat" | "search">;
+
+/** The command a desktop key binding runs to toggle quick ask where Nugget can't register one. */
+export const QUICK_ASK_COMMAND = "nugget-desktop --quick-ask";
+/** Text for the question field, sent by the shell; never submitted by itself. */
+export const QUICK_ASK_PREFILL_EVENT = "quickask:prefill";
+
+export const quickAskApi = {
+  settingsGet: () => call<QuickAskView>("quickask_settings_get"),
+  settingsSet: (settings: QuickAskSettings) => call<QuickAskView>("quickask_settings_set", { settings }),
+  hide: () => call<null>("quickask_hide"),
+  openMain: (page: QuickAskPage) => call<null>("quickask_open_main", { page }),
+  /** II4: a prefill sent before this window subscribed, once. */
+  takePrefill: () => call<string | null>("quickask_prefill_take"),
+  onPrefill: (h: (text: string) => void) =>
+    on<unknown>(QUICK_ASK_PREFILL_EVENT, (p) => {
+      if (typeof p === "string") h(p);
+    }),
+};
+
+// ---- II4: platform integration (tray labels, notifications, quit, deep links) ----
+
+/** Quiet hours, in minutes after local midnight; an end before the start spans midnight. */
+export interface QuietHours {
+  start: number;
+  end: number;
+}
+
+/** OS notifications (see `src-tauri/src/notify.rs`). Off until the user opts in. */
+export interface NotifySettings {
+  enabled: boolean;
+  /** The morning brief and due reminders. */
+  brief: boolean;
+  /** An agent waiting for a confirmation or an answer. */
+  agent: boolean;
+  quiet: QuietHours | null;
+}
+
+/** `platform.json` (see `src-tauri/src/platform.rs`). */
+export interface PlatformSettings {
+  notifications: NotifySettings;
+  /** Quitting Nugget also stops a background service the app started. */
+  quit_stops_daemon: boolean;
+  /** Sources the tray's "Pause indexing" turned off (read-only here). */
+  paused_sources: string[];
+}
+
+/** A validated `nugget://` link or opened `.nuggetplugin` file (see `src-tauri/src/deeplink.rs`). */
+export type DeepLink =
+  | { kind: "page"; page: PageId }
+  | { kind: "search"; query: string }
+  | { kind: "item"; source: string; key: string }
+  | { kind: "ask"; question: string }
+  | { kind: "plugin"; path: string };
+
+/** No payload: a link is waiting; take it with {@link platformApi.takeDeepLink}. */
+export const DEEPLINK_EVENT = "nugget:deeplink";
+/** Emitted after the computer wakes from sleep. */
+export const RESUMED_EVENT = "nugget:resumed";
+
+export const platformApi = {
+  settingsGet: () => call<PlatformSettings>("platform_settings_get"),
+  settingsSet: (settings: PlatformSettings) => call<PlatformSettings>("platform_settings_set", { settings }),
+  /** The current locale's strings for the tray and OS notifications (`shell.*` keys). */
+  setShellLabels: (labels: Record<string, string>) => call<number>("shell_labels_set", { labels }),
+  takeDeepLink: () => call<DeepLink | null>("deeplink_take"),
+  onDeepLink: (h: (payload: unknown) => void) => on<unknown>(DEEPLINK_EVENT, h),
+  onResumed: (h: (payload: unknown) => void) => on<unknown>(RESUMED_EVENT, h),
+};
+
+// ---- II1: messaging imports ----
+// Kinds of `crates/nugget-connector-messaging`; settings keys mirror that crate's `lib.rs`.
+
+/** Local message history: the macOS Messages database, WhatsApp chat exports, Telegram Desktop exports. */
+export type MessagingKind = "imessage" | "whatsapp" | "telegram";
+export const MESSAGING_KINDS: readonly MessagingKind[] = ["imessage", "whatsapp", "telegram"];
+
+/** `sources.add` settings of the messaging kinds. Absent keys take the connector's defaults. */
+export interface MessagingSettings {
+  /** Default `true`: documents are marked sensitive (kept away from cloud models and embeddings). */
+  private?: boolean;
+  /** Only messages newer than this many days (≥ 1). Absent: everything. */
+  since_days?: number;
+  /** Default `true`. */
+  include_groups?: boolean;
+  /** iMessage: default `~/Library/Messages/chat.db`. */
+  db_path?: string;
+  /** iMessage: names from the macOS address book (default `true`). */
+  contacts?: boolean;
+  /** WhatsApp: the folder watched for "Export chat" files. */
+  folder?: string;
+  /** WhatsApp: the user's own name as it appears in the exports. */
+  me?: string;
+  /** Telegram: an export folder or its `result.json`. */
+  path?: string;
+}
+
+/** The daemon's error when macOS keeps the Messages database from Nugget (Full Disk Access is off). */
+export const needsFullDiskAccess = (message: string | null | undefined): boolean => /full disk access/i.test(message ?? "");
+
+// ---- II2: faceted search, timelines, previews ----
+// Served by the daemon's `search_ui` feature (`search.faceted`, `search.timeline`,
+// `search.preview`). Older daemons answer "method not found": callers fall back (see
+// `isCommandMissing`). Everything stays on this device.
+
+export type ItemKind = "mail" | "event" | "chat" | "file";
+export const ITEM_KINDS: readonly ItemKind[] = ["mail", "event", "chat", "file"];
+export type EntityRefView = { id: string; name: string; kind: string };
+export type FacetedFilters = { sources?: string[]; kinds?: ItemKind[]; people?: string[]; from?: string | null; to?: string | null };
+export type FacetedRequest = { query: string; limit?: number; offset?: number; filters?: FacetedFilters; utc_offset_minutes?: number };
+export type FacetedHit = SearchHit & {
+  date: string | null;
+  date_source: "extracted" | "modified" | "indexed";
+  kind: ItemKind;
+  sensitive: boolean;
+  people: EntityRefView[];
+};
+export type FacetCount = { value: string; count: number };
+export type PersonFacet = FacetCount & { name: string; kind: string };
+export type FacetedResult = {
+  query: string;
+  hits: FacetedHit[];
+  total: number;
+  pool: number;
+  pool_limited: boolean;
+  facets: { sources: FacetCount[]; kinds: FacetCount[]; people: PersonFacet[]; months: FacetCount[] };
+};
+export type TimelineRequest = { entity: string; from?: string | null; to?: string | null; limit?: number; utc_offset_minutes?: number };
+export type TimelineEvent =
+  | { type: "item"; at: string | null; date_source: string; item: ItemRef; title: string | null; snippet: string; kind: ItemKind; url: string | null; sensitive: boolean }
+  | {
+      type: "fact";
+      at: string | null;
+      date_source: string;
+      claim: {
+        id: number;
+        predicate: string;
+        text: string;
+        status: string;
+        confidence: number;
+        evidence: { item: ItemRef; title: string | null; quote: string | null }[];
+      };
+    };
+export type Timeline = { entity: EntityRefView; events: TimelineEvent[]; months: FacetCount[]; total: number; truncated: boolean };
+export type PreviewRequest = { item: ItemRef; chunk_id?: number | null };
+export type ItemPreview = {
+  item: ItemRef;
+  title: string | null;
+  kind: ItemKind;
+  mime: string | null;
+  url: string | null;
+  date: string | null;
+  date_source: string;
+  sensitive: boolean;
+  text: string;
+  truncated: boolean;
+  passage: string | null;
+  people: EntityRefView[];
+  facts: { id: number; subject: EntityRefView; predicate: string; text: string; status: string; confidence: number; quote: string | null }[];
+};
+
+/** The local UTC offset in minutes (east positive), for the daemon's date filters and months. */
+export function utcOffsetMinutes(d: Date = new Date()): number {
+  return -d.getTimezoneOffset();
 }

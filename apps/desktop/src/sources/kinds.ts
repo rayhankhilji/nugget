@@ -3,12 +3,22 @@
  * for the `settings` each kind sends with `sources.add`. Blank optional fields are left out
  * (the daemon's defaults apply), never sent as "" or [].
  */
-import { MICROSOFT_KINDS, SAAS_KINDS, type ConnectorKind, type MicrosoftKind, type SaasKind, type SourceSettings } from "../api";
+import {
+  MESSAGING_KINDS,
+  MICROSOFT_KINDS,
+  SAAS_KINDS,
+  type ConnectorKind,
+  type MessagingKind,
+  type MessagingSettings,
+  type MicrosoftKind,
+  type SaasKind,
+  type SourceSettings,
+} from "../api";
 import { splitList } from "../format";
 import type { MessageKey } from "../i18n";
 
 export interface KindGroup {
-  id: "local" | "google" | "microsoft" | "standard" | "work";
+  id: "local" | "google" | "microsoft" | "standard" | "work" | "messages";
   label: MessageKey;
   kinds: readonly ConnectorKind[];
 }
@@ -19,10 +29,12 @@ export const KIND_GROUPS: readonly KindGroup[] = [
   { id: "microsoft", label: "addSource.group.microsoft", kinds: MICROSOFT_KINDS },
   { id: "standard", label: "addSource.group.standard", kinds: ["imap", "caldav"] },
   { id: "work", label: "addSource.group.work", kinds: SAAS_KINDS },
+  { id: "messages", label: "addSource.group.messages", kinds: MESSAGING_KINDS },
 ];
 
 export const isMicrosoftKind = (k: string): k is MicrosoftKind => (MICROSOFT_KINDS as readonly string[]).includes(k);
 export const isSaasKind = (k: string): k is SaasKind => (SAAS_KINDS as readonly string[]).includes(k);
+export const isMessagingKind = (k: string): k is MessagingKind => (MESSAGING_KINDS as readonly string[]).includes(k);
 export const isGoogleKind = (k: string): k is GoogleKind => (GOOGLE_KINDS as readonly string[]).includes(k);
 
 /**
@@ -32,7 +44,7 @@ export const isGoogleKind = (k: string): k is GoogleKind => (GOOGLE_KINDS as rea
  * - `password`: a password through `sources.secret.set` (IMAP, CalDAV)
  * - `token`: a pasted API token through `sources.secret.set` (Slack, Notion, GitHub, Linear)
  * - `env`: the token comes from an environment variable (`token_env`); nothing to do here
- * - `none`: local sources
+ * - `none`: local sources (folders, vaults, iMessage, WhatsApp and Telegram exports)
  */
 export type ConnectMode = "browser" | "device" | "password" | "token" | "env" | "none";
 
@@ -286,5 +298,70 @@ export function saasErrors(kind: SaasKind, f: SaasForm, token: string, tokenSave
       if (!splitList(f.teams).every(isTeamKey)) e.teams = "addSource.linear.teamsInvalid";
       break;
   }
+  return e;
+}
+
+// ---- Messages (iMessage, WhatsApp, Telegram) ----
+
+export interface MessagingForm {
+  /** WhatsApp: the export folder; Telegram: the export folder or `result.json`. Unused for iMessage. */
+  path: string;
+  /** WhatsApp: your name as it appears in the exports. */
+  me: string;
+  /** Whole days, as typed; blank means all history. */
+  sinceDays: string;
+  includeGroups: boolean;
+  /** iMessage: names from Contacts. */
+  contacts: boolean;
+  private: boolean;
+}
+
+export const EMPTY_MESSAGING: MessagingForm = { path: "", me: "", sinceDays: "", includeGroups: true, contacts: true, private: true };
+
+/** A typed path that names a place on this computer (not relative to somewhere unknown). */
+export const isAbsolutePath = (p: string) => p.startsWith("/") || p.startsWith("~") || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("\\\\");
+
+/** `since_days` must be a whole number of days, at least 1. */
+export const parseSinceDays = (raw: string): number | null => {
+  const t = raw.trim();
+  if (!/^\d{1,6}$/.test(t)) return null;
+  const n = Number(t);
+  return n >= 1 ? n : null;
+};
+
+/**
+ * `private` and `include_groups` are always sent (so the saved config says what was chosen);
+ * blank optional fields (`since_days`, `me`) are left out; `contacts` only for iMessage, the
+ * path key only for the kind that uses it.
+ */
+export function messagingSettings(kind: MessagingKind, f: MessagingForm): SourceSettings {
+  const out: MessagingSettings = { private: f.private, include_groups: f.includeGroups };
+  const since = parseSinceDays(f.sinceDays);
+  if (since !== null) out.since_days = since;
+  switch (kind) {
+    case "imessage":
+      out.contacts = f.contacts;
+      break;
+    case "whatsapp":
+      out.folder = f.path.trim();
+      if (f.me.trim()) out.me = f.me.trim();
+      break;
+    case "telegram":
+      out.path = f.path.trim();
+      break;
+  }
+  return { ...out };
+}
+
+export type MessagingErrors = Partial<Record<"path" | "sinceDays", MessageKey>>;
+
+export function messagingErrors(kind: MessagingKind, f: MessagingForm): MessagingErrors {
+  const e: MessagingErrors = {};
+  if (kind !== "imessage") {
+    const p = f.path.trim();
+    if (!p) e.path = kind === "whatsapp" ? "addSource.messages.whatsappFolderMissing" : "addSource.messages.telegramPathMissing";
+    else if (!isAbsolutePath(p)) e.path = "addSource.messages.fullPath";
+  }
+  if (f.sinceDays.trim() && parseSinceDays(f.sinceDays) === null) e.sinceDays = "addSource.messages.sinceInvalid";
   return e;
 }
