@@ -1122,6 +1122,18 @@ export const api = {
   searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { ...localZone(), ...request } }),
   searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { ...localZone(), ...request } }),
   searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request: { ...localZone(), ...request } }),
+
+  // The multilingual search upgrade; each answers the current status.
+  searchUpgradeStatus: () => call<SearchUpgradeStatus>("search_upgrade_status", { request: {} }),
+  searchUpgradeStart: () => call<SearchUpgradeStatus>("search_upgrade_start", { request: {} }),
+  /** Hides the offer for good, cancelling a running upgrade (the old index stays). */
+  searchUpgradeDismiss: () => call<SearchUpgradeStatus>("search_upgrade_dismiss", { request: {} }),
+};
+
+/** `offer` is null unless the upgrade applies. `done`/`total`: bytes while downloading, chunks while embedding. */
+export type SearchUpgradeStatus = {
+  offer: { from: string; to: string; download_bytes: number } | null;
+  job: { to: string; phase: "downloading" | "embedding"; done: number; total: number; error: string | null } | null;
 };
 
 /** `revealed`: the file could run code, so its folder was shown instead of opening it. */

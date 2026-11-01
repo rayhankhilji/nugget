@@ -1,5 +1,6 @@
 //! The re-embed job: gives vectors to items that were indexed text-only (no embedder was routable,
-//! or embedding failed).
+//! or embedding failed), and runs a re-index to another embedding model when one was started
+//! ([`Reindex`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,13 +48,34 @@ pub(crate) struct ReembedState {
     pub skip: HashMap<ItemRef, (String, u32)>,
 }
 
+/// Called with the target once the index switched to the re-indexed vectors.
+pub type OnReindexed = Arc<dyn Fn(nugget_store::ReindexTarget) + Send + Sync>;
+
+/// A re-index in progress: the new model's embedder and what to do once switched.
+pub struct Reindex {
+    provider: Arc<dyn nugget_infer::Provider>,
+    on_done: OnReindexed,
+    /// The last failure (the pass then waits for the next run).
+    pub error: Option<String>,
+}
+
+impl Reindex {
+    pub(crate) fn new(provider: Arc<dyn nugget_infer::Provider>, on_done: OnReindexed) -> Self {
+        Self {
+            provider,
+            on_done,
+            error: None,
+        }
+    }
+}
+
 /// The job loop; ends on shutdown.
 pub(crate) async fn run(inner: Arc<Inner>) {
     loop {
         tokio::select! {
             biased;
             _ = inner.shutdown.cancelled() => return,
-            _ = run_once(&inner) => {}
+            _ = async { run_once(&inner).await; reindex_once(&inner).await } => {}
         }
         let interval = inner.cfg.reembed_interval_ms;
         tokio::select! {
@@ -149,6 +171,107 @@ async fn run_once(inner: &Arc<Inner>) {
     }
 }
 
+/// Chunks re-indexed per batch.
+const REINDEX_BATCH: usize = 16;
+
+/// One re-index pass, at the lowest priority: off on low power, waiting out interactive model
+/// use before each batch, stopping when the re-index is stopped. Switches when nothing is pending.
+async fn reindex_once(inner: &Arc<Inner>) {
+    let current = || {
+        lock(&inner.reindex)
+            .as_ref()
+            .map(|r| (r.provider.clone(), r.on_done.clone()))
+    };
+    let Some((provider, on_done)) = current() else {
+        return;
+    };
+    let same =
+        |p: &Arc<dyn nugget_infer::Provider>| current().is_some_and(|(c, _)| Arc::ptr_eq(&c, p));
+    let fail = |msg: String| {
+        tracing::warn!(error = %msg, "re-indexing paused");
+        if let Some(r) = lock(&inner.reindex).as_mut() {
+            r.error = Some(cap_error(msg));
+        }
+    };
+    let mut after = 0;
+    loop {
+        if inner.power.constrained() {
+            tracing::debug!("re-indexing deferred: low power");
+            return;
+        }
+        if inner.foreground.busy() {
+            inner.foreground.idle().await;
+        }
+        if !same(&provider) {
+            return;
+        }
+        let store = inner.store.clone();
+        let page = tokio::task::spawn_blocking(move || -> Result<_> {
+            let target = store.reindex_target()?;
+            Ok((target, store.reindex_pending(after, REINDEX_BATCH)?))
+        })
+        .await
+        .map_err(join_err)
+        .and_then(|r| r);
+        let (target, page) = match page {
+            Ok((Some(t), p)) => (t, p),
+            Ok((None, _)) => return,
+            Err(e) => return fail(format!("read chunks: {e}")),
+        };
+        let Some(&(last, _)) = page.last() else {
+            // Nothing pending past `after`; a full sweep from the start decides.
+            if after > 0 {
+                after = 0;
+                continue;
+            }
+            let switched = {
+                // Under the write lock: writes check the index's model before they store vectors.
+                let me = inner.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _w = lock(&me.write_lock);
+                    me.store.finish_reindex()
+                })
+                .await
+                .map_err(join_err)
+                .and_then(|r| r)
+            };
+            match switched {
+                Ok(Some(t)) if same(&provider) => {
+                    tracing::info!(model = %t.model, "search index switched to the new embedding model");
+                    lock(&inner.reindex).take();
+                    on_done(t);
+                }
+                Ok(_) => {}
+                Err(e) => fail(format!("switch: {e}")),
+            }
+            return;
+        };
+        after = last;
+        let texts: Vec<String> = page.iter().map(|(_, t)| t.clone()).collect();
+        let texts = if target.document_prefix.is_empty() {
+            texts
+        } else {
+            nugget_infer::with_prefix(&target.document_prefix, &texts)
+        };
+        let vectors =
+            match tokio::time::timeout(inner.cfg.embed_timeout(), provider.embed(&texts)).await {
+                Ok(Ok(v)) if v.len() == page.len() => v,
+                Ok(Ok(v)) => return fail(format!("{} vectors for {} inputs", v.len(), page.len())),
+                Ok(Err(e)) => return fail(e.to_string()),
+                Err(_) => return fail("embedding timed out".into()),
+            };
+        let staged: Vec<_> = page.iter().map(|(id, _)| *id).zip(vectors).collect();
+        let store = inner.store.clone();
+        let put = tokio::task::spawn_blocking(move || store.put_reindexed(&staged)).await;
+        if let Err(e) = put.map_err(join_err).and_then(|r| r) {
+            return fail(format!("store: {e}"));
+        }
+        if let Some(r) = lock(&inner.reindex).as_mut() {
+            r.error = None;
+        }
+    }
+}
+
 fn record_failure(inner: &Inner, item: Option<&ItemRef>, msg: String) {
     let mut st = lock(&inner.reembed_state);
     st.stats.failed += 1;
@@ -230,7 +353,7 @@ async fn reembed_item(
     if providers.is_empty() {
         return Outcome::Skipped;
     }
-    let (provider, vectors) = match ai::embed(
+    let (provider, model, vectors) = match ai::embed(
         &inner.store,
         router,
         &providers,
@@ -249,7 +372,14 @@ async fn reembed_item(
     let me = inner.clone();
     let item_ref = item.clone();
     let res = tokio::task::spawn_blocking(move || {
-        write_back(&me, &item_ref, &stored, &texts, &provider, vectors)
+        write_back(
+            &me,
+            &item_ref,
+            &stored,
+            &texts,
+            (&provider, &model),
+            vectors,
+        )
     })
     .await
     .map_err(join_err)
@@ -275,7 +405,7 @@ fn write_back(
     item: &ItemRef,
     stored: &Item,
     texts: &[String],
-    provider: &ProviderId,
+    (provider, model): (&ProviderId, &str),
     vectors: Vec<Vec<f32>>,
 ) -> Result<bool> {
     let store = &inner.store;
@@ -288,6 +418,10 @@ fn write_back(
         )));
     }
     let _w = lock(&inner.write_lock);
+    // The index switched embedding models meanwhile: try again with the new one later.
+    if store.embedding_model()?.is_some_and(|m| m != model) {
+        return Ok(false);
+    }
     let Some(now) = store.get_item(item)? else {
         return Ok(false);
     };

@@ -735,6 +735,20 @@ impl Runtime {
         })
     }
 
+    /// A separate supervisor with these settings whose servers keep their logs, sockets and pid
+    /// files under `data/<name>`: a second server for a role, e.g. the new embedding model while
+    /// the search index is re-built with it.
+    pub fn sibling(&self, name: &str) -> Result<Self> {
+        let mut paths = self.cfg.paths.clone();
+        paths.data = paths.data.join(name);
+        let mut rt = Self::new(&paths, self.cfg.store.clone(), self.cfg.egress.clone())?;
+        rt.cfg = Arc::new(Config {
+            paths,
+            ..(*self.cfg).clone()
+        });
+        Ok(rt)
+    }
+
     /// Replace the supervisor options. Configure before the first [`Runtime::ensure`].
     pub fn with_options(mut self, opts: RuntimeOptions) -> Self {
         Arc::make_mut(&mut self.cfg).opts = opts;

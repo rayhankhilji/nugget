@@ -2255,5 +2255,15 @@
   "models.fail.kept": "Os {done} já baixados são mantidos: a próxima tentativa continua de onde parou.",
   "models.cancel": "Cancelar",
   "models.cancelLabel": "Cancelar o download de {model}",
-  "models.resume": "Retomar download"
+  "models.resume": "Retomar download",
+  "models.searchUpgrade.title": "Atualizar a busca para multilíngue",
+  "models.searchUpgrade.body": "Reindexa em segundo plano.",
+  "models.searchUpgrade.bodyDownload": "Baixa {size} e depois reindexa em segundo plano.",
+  "models.searchUpgrade.upgrade": "Atualizar",
+  "models.searchUpgrade.notNow": "Agora não",
+  "models.searchUpgrade.phase.downloading": "Baixando o modelo de busca",
+  "models.searchUpgrade.phase.embedding": "Reindexando",
+  "models.searchUpgrade.keepsWorking": "A busca continua funcionando enquanto isso.",
+  "models.searchUpgrade.failed": "A atualização não terminou. A busca continua usando o índice atual.",
+  "models.searchUpgrade.retry": "Tentar novamente"
 }

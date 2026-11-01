@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { aiKeysApi, api, errorMessage, events, isMethodNotFound, modelsCancel, type FitReport, type ModelFit, type ModelInfo, type ModelProgress, type SavedKeyProvider } from "../api";
+import { aiKeysApi, api, errorMessage, events, isMethodNotFound, modelsCancel, type FitReport, type ModelFit, type ModelInfo, type ModelProgress, type SavedKeyProvider, type SearchUpgradeStatus } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
@@ -174,6 +174,7 @@ export function ModelsPage() {
         }
       />
       {fit.data && <MachineLine report={fit.data} />}
+      <SearchUpgrade />
       <ErrorNote error={models.error} onRetry={models.reload} />
       {models.loading && !models.data && (
         <>
@@ -222,6 +223,94 @@ export function ModelsPage() {
       )}
       <YourProviders />
     </div>
+  );
+}
+
+// ---- multilingual search upgrade ----
+
+/**
+ * The one-time offer to re-embed search with the multilingual model, then its progress.
+ * Renders whatever `search.upgrade.status` answers; nothing on an older daemon.
+ */
+export function SearchUpgrade() {
+  const t = useT();
+  const titleId = useId();
+  const [status, setStatus] = useState<SearchUpgradeStatus | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const job = status?.job;
+  const running = !!job && !job.error;
+
+  useEffect(() => {
+    void api.searchUpgradeStatus().then(setStatus, () => {});
+  }, []);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => void api.searchUpgradeStatus().then(setStatus, () => {}), 3000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  const act = async (call: () => Promise<SearchUpgradeStatus>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await call());
+    } catch (err) {
+      setError(err);
+    }
+    setBusy(false);
+  };
+
+  if (!status || (!status.offer && !job)) return null;
+  const offer = status.offer;
+  const phase = job ? t(job.phase === "downloading" ? "models.searchUpgrade.phase.downloading" : "models.searchUpgrade.phase.embedding") : "";
+  const pct = job ? percent(job.done, job.total) : 0;
+
+  return (
+    <section className="card model-card" aria-labelledby={titleId}>
+      <h2 id={titleId} className="card-title">
+        {t("models.searchUpgrade.title")}
+      </h2>
+      {job ? (
+        <>
+          {!job.error && (
+            <div className="progress">
+              <progress max={100} value={pct} aria-labelledby={titleId} aria-valuetext={t("models.progressValueText", { phase, pct })} />
+              <span className="small muted">{t("models.progressValueText", { phase, pct })}</span>
+              <p className="small muted">{t("models.searchUpgrade.keepsWorking")}</p>
+            </div>
+          )}
+          {job.error && (
+            <div className="note note-error small" role="alert">
+              <p>{t("models.searchUpgrade.failed")}</p>
+              <details className="note-details">
+                <summary>{t("common.details")}</summary>
+                <p className="muted" dir="auto">
+                  {job.error}
+                </p>
+              </details>
+            </div>
+          )}
+        </>
+      ) : (
+        offer && (
+          <p className="small">
+            {offer.download_bytes > 0 ? t("models.searchUpgrade.bodyDownload", { size: formatBytes(offer.download_bytes) }) : t("models.searchUpgrade.body")}
+          </p>
+        )
+      )}
+      <ErrorNote error={error} />
+      <div className="card-actions" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+        {(!job || job.error) && (
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act(api.searchUpgradeStart)}>
+            {job ? t("models.searchUpgrade.retry") : t("models.searchUpgrade.upgrade")}
+          </button>
+        )}
+        <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void act(api.searchUpgradeDismiss)}>
+          {job ? t("common.cancel") : t("models.searchUpgrade.notNow")}
+        </button>
+      </div>
+    </section>
   );
 }
 

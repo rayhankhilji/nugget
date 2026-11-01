@@ -2255,5 +2255,15 @@
   "models.fail.kept": "يُحتفظ بما نُزِّل حتى الآن ({done}): ستتابع المحاولة التالية من هناك.",
   "models.cancel": "إلغاء",
   "models.cancelLabel": "إلغاء تنزيل {model}",
-  "models.resume": "استئناف التنزيل"
+  "models.resume": "استئناف التنزيل",
+  "models.searchUpgrade.title": "ترقية البحث إلى متعدد اللغات",
+  "models.searchUpgrade.body": "تتم إعادة الفهرسة في الخلفية.",
+  "models.searchUpgrade.bodyDownload": "يُنزّل {size} ثم يعيد الفهرسة في الخلفية.",
+  "models.searchUpgrade.upgrade": "ترقية",
+  "models.searchUpgrade.notNow": "ليس الآن",
+  "models.searchUpgrade.phase.downloading": "جارٍ تنزيل نموذج البحث",
+  "models.searchUpgrade.phase.embedding": "جارٍ إعادة الفهرسة",
+  "models.searchUpgrade.keepsWorking": "يظل البحث يعمل في هذه الأثناء.",
+  "models.searchUpgrade.failed": "لم تكتمل الترقية. لا يزال البحث يستخدم الفهرس الحالي.",
+  "models.searchUpgrade.retry": "حاول مرة أخرى"
 }

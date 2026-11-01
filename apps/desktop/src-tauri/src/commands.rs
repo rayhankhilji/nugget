@@ -158,6 +158,9 @@ request_commands! {
     search_faceted(Value) -> Value = "search.faceted";
     search_timeline(Value) -> Value = "search.timeline";
     search_preview(Value) -> Value = "search.preview";
+    search_upgrade_status(Value) -> Value = "search.upgrade.status";
+    search_upgrade_start(Value) -> Value = "search.upgrade.start";
+    search_upgrade_dismiss(Value) -> Value = "search.upgrade.dismiss";
     agent_run(AgentRunRequest) -> AgentStarted = agent_method::AGENT_RUN, check_agent_run;
     agent_list(AgentListRequest) -> Vec<AgentTaskSummary> = agent_method::AGENT_LIST;
     agent_get(AgentTaskRef) -> AgentTaskDetail = agent_method::AGENT_GET;
