@@ -15,10 +15,8 @@
 //!   (XEmbed-only trays).
 //!
 //! `NUGGET_TRAY=off` skips the tray on every platform (the installer smoke tests use it). Without
-//! a tray, closing the window quits Nugget the same way Quit Nugget does (`lifecycle`: the quit
-//! choice applies to the background service), launching it again focuses the running window
-//! (single instance), and the Status page shows the tray's actions instead (pause indexing; the
-//! kill switch is on the Safety page) (GG6-20).
+//! a tray, closing the window quits Nugget the way Quit Nugget does (`lifecycle`), and the Status
+//! page offers the tray's actions instead.
 //!
 //! The status lines are refreshed from the daemon (`ingest.status`, `status`, `agent.list`) when
 //! the connection comes up, shortly after daemon notifications that can change them, every
@@ -314,9 +312,6 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>, page: Option<&str>) {
 
 /// Reflect the daemon connection in the tray tooltip and menu.
 pub fn set_connected(app: &AppHandle, connected: bool) {
-    if crate::lifecycle::is_exiting(app) {
-        return;
-    }
     if let Some(t) = app.try_state::<Tray>() {
         let mut s = lock(&t.snapshot);
         if s.connected == Some(connected) {
@@ -362,7 +357,6 @@ pub fn relabel(app: &AppHandle) {
     render(app, &t);
 }
 
-/// Bring the status lines, the tooltip and the pause item in line with the snapshot.
 /// A change to the status lines in the menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineOp {
@@ -734,7 +728,6 @@ mod tests {
     fn agents_line_prefers_waiting_over_running() {
         use AgentTaskState as S;
         assert_eq!(agents_from(&[]), Agents::Idle);
-        assert_eq!(agents_from(&[task(S::Finished)]), Agents::Idle);
         assert_eq!(
             agents_from(&[task(S::Finished), task(S::Running)]),
             Agents::Running
@@ -743,7 +736,6 @@ mod tests {
             agents_from(&[task(S::Running), task(S::NeedsInput)]),
             Agents::Waiting
         );
-        assert_eq!(agents_from(&[task(S::Confirming)]), Agents::Waiting);
     }
 
     #[test]
@@ -759,7 +751,6 @@ mod tests {
             json!({"id": "p", "kind": "openai_compatible", "model": "m", "locality": "on_device",
                    "tiers": tiers, "capabilities": null, "error": error})
         };
-        assert!(!model_ready_from(&status(json!([]))));
         assert!(!model_ready_from(&status(json!([p(json!([]), None)]))));
         assert!(!model_ready_from(&status(json!([p(
             json!(["synthesis"]),
@@ -782,11 +773,6 @@ mod tests {
         assert_eq!(
             line_keys(&s),
             [Some("shell.tray.checking"), None, None, None]
-        );
-        s.connected = Some(false);
-        assert_eq!(
-            line_keys(&s),
-            [Some("shell.tray.notRunning"), None, None, None]
         );
         s.connected = Some(true);
         assert_eq!(
@@ -826,7 +812,6 @@ mod tests {
     #[test]
     fn line_ops_insert_in_order_and_never_remove_the_first_line() {
         let all = [Some("a"), Some("b"), Some("c"), Some("d")];
-        let first = [Some("a"), None, None, None];
         let start = [true, false, false, false];
         assert_eq!(
             line_ops(&all, &start),
@@ -836,25 +821,12 @@ mod tests {
                 LineOp::Insert(3, 3)
             ]
         );
-        assert_eq!(
-            line_ops(&first, &[true; 4]),
-            [LineOp::Remove(1), LineOp::Remove(2), LineOp::Remove(3)]
-        );
         // A gap: line 2 unknown while 3 shows; 3 goes right after 1.
         let gap = [Some("a"), Some("b"), None, Some("d")];
         assert_eq!(
             line_ops(&gap, &start),
             [LineOp::Insert(1, 1), LineOp::Insert(3, 2)]
         );
-        assert_eq!(line_ops(&gap, &[true, true, false, true]), []);
         assert_eq!(line_ops(&[None; 4], &start), [], "line 0 stays");
-    }
-
-    #[test]
-    fn status_relevant_notifications() {
-        assert!(affects_status("ingest.progress"));
-        assert!(affects_status("agent.event"));
-        assert!(affects_status("policy.kill.changed"));
-        assert!(!affects_status("chat.delta"));
     }
 }

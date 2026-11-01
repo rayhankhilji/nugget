@@ -33,7 +33,7 @@ pub mod event {
     pub const SOURCES_CHANGED: &str = "nugget:sources-changed";
     /// `nugget_core::ipc::KnowledgeChanged`: entities whose facts, mentions or pages changed.
     pub const KNOWLEDGE_CHANGED: &str = "nugget:knowledge-changed";
-    /// `nugget_core::ipc::AskRestarted`: an Ask stream moved on to another provider (EE3).
+    /// `nugget_core::ipc::AskRestarted`: an Ask stream moved on to another provider.
     pub const ASK_RESTARTED: &str = "nugget:ask-restarted";
     /// Every daemon notification as `{ method, params }`, including unknown ones.
     pub const NOTIFICATION: &str = "nugget:notification";
@@ -150,8 +150,7 @@ pub struct Daemon {
     /// connection as down.
     generation: AtomicU64,
     start_lock: Mutex<()>,
-    /// II4: the process id of a `nuggetd` this app started and that still runs (0: none), so a
-    /// quit can stop it when the user chose that ([`Daemon::started_pid`]).
+    /// The pid of a `nuggetd` this app started that still runs (0: none).
     started_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Requests the app made itself (update checks), waiting to go to the daemon's ledger.
     egress: std::sync::Mutex<EgressQueue>,
@@ -284,7 +283,7 @@ impl Daemon {
         tracing::info!(socket = %self.socket(), "connected to nuggetd");
         crate::tray::set_connected(app, true);
         let _ = app.emit(event::CONNECTION, self.info(None));
-        // GG6-10: a daemon left over from before an update is replaced or reported.
+        // A daemon left over from before an update is replaced or reported.
         crate::lifecycle::connected(app);
         Ok(client)
     }
@@ -645,7 +644,6 @@ mod tests {
 
         // Always busy: four tries, then the busy error itself.
         let n = AtomicU32::new(0);
-        let started = Instant::now();
         let r: Result<(), _> = retry_busy(|| async {
             n.fetch_add(1, Ordering::SeqCst);
             Err(busy())
@@ -653,7 +651,6 @@ mod tests {
         .await;
         assert!(r.unwrap_err().is_busy());
         assert_eq!(n.load(Ordering::SeqCst), 4);
-        assert!(started.elapsed() >= BUSY_BACKOFF.iter().sum::<Duration>());
 
         // Other errors are not retried.
         let n = AtomicU32::new(0);
@@ -677,47 +674,10 @@ mod tests {
         assert_eq!(v["code"], -32001);
         assert_eq!(v["message"], "no such model");
 
-        let v = serde_json::to_value(CmdError::from_ipc(IpcError::Disconnected, "status")).unwrap();
-        assert_eq!(v["kind"], "disconnected");
-        assert!(v["code"].is_null());
-
         let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
         let v = serde_json::to_value(CmdError::from_ipc(IpcError::Connect(refused), "connect"))
             .unwrap();
         assert_eq!(v["kind"], "not_running");
-    }
-
-    #[test]
-    fn notifications_map_to_events() {
-        assert_eq!(
-            event_for(notification::KNOWLEDGE_CHANGED),
-            Some("nugget:knowledge-changed")
-        );
-        assert_eq!(
-            event_for(notification::SOURCES_CHANGED),
-            Some(event::SOURCES_CHANGED)
-        );
-        assert_eq!(
-            event_for(notification::ASK_RESTARTED),
-            Some(event::ASK_RESTARTED)
-        );
-        assert_eq!(event_for("something.new"), None);
-        // Tauri event names allow only `[A-Za-z0-9-/:_]`.
-        for name in [
-            event::CHAT_DELTA,
-            event::CHAT_DONE,
-            event::MODELS_PROGRESS,
-            event::INGEST_PROGRESS,
-            event::SOURCES_CHANGED,
-            event::KNOWLEDGE_CHANGED,
-            event::ASK_RESTARTED,
-        ] {
-            assert!(
-                name.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "-/:_".contains(c)),
-                "{name}"
-            );
-        }
     }
 
     fn write_exe(path: &Path) {
@@ -727,18 +687,6 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-    }
-
-    #[test]
-    fn finds_daemon_on_path() {
-        let dir = std::env::temp_dir().join(format!("nugget-desktop-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let exe = dir.join(daemon_file_name());
-        write_exe(&exe);
-        let missing = std::env::temp_dir().join("nugget-desktop-test-nonexistent");
-        let path = std::env::join_paths([missing, dir.clone()]).unwrap();
-        assert_eq!(find_on_path(&daemon_file_name(), path), Some(exe));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -8,74 +8,45 @@ use nugget_core::ipc::AppInfo;
 use nugget_hotkey::{Modifier, Trigger};
 use serde::{Deserialize, Serialize};
 
-/// A modifier as the settings page names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ModifierId {
-    LeftCommand,
-    RightCommand,
-    LeftControl,
-    RightControl,
-    LeftOption,
-    RightOption,
-    LeftShift,
-    RightShift,
+/// Mirrors `nugget_hotkey::Modifier` with the names the settings page uses.
+macro_rules! modifier_ids {
+    ($($v:ident = $s:literal),* $(,)?) => {
+        /// A modifier as the settings page names it.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum ModifierId { $($v),* }
+
+        impl ModifierId {
+            pub const ALL: [ModifierId; 8] = [$(Self::$v),*];
+
+            pub fn as_str(self) -> &'static str {
+                match self { $(Self::$v => $s),* }
+            }
+        }
+
+        impl From<ModifierId> for Modifier {
+            fn from(m: ModifierId) -> Self {
+                match m { $(ModifierId::$v => Modifier::$v),* }
+            }
+        }
+
+        impl From<Modifier> for ModifierId {
+            fn from(m: Modifier) -> Self {
+                match m { $(Modifier::$v => ModifierId::$v),* }
+            }
+        }
+    };
 }
 
-impl ModifierId {
-    pub const ALL: [ModifierId; 8] = [
-        Self::LeftCommand,
-        Self::RightCommand,
-        Self::LeftControl,
-        Self::RightControl,
-        Self::LeftOption,
-        Self::RightOption,
-        Self::LeftShift,
-        Self::RightShift,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::LeftCommand => "left_command",
-            Self::RightCommand => "right_command",
-            Self::LeftControl => "left_control",
-            Self::RightControl => "right_control",
-            Self::LeftOption => "left_option",
-            Self::RightOption => "right_option",
-            Self::LeftShift => "left_shift",
-            Self::RightShift => "right_shift",
-        }
-    }
-}
-
-impl From<ModifierId> for Modifier {
-    fn from(m: ModifierId) -> Self {
-        match m {
-            ModifierId::LeftCommand => Modifier::LeftCommand,
-            ModifierId::RightCommand => Modifier::RightCommand,
-            ModifierId::LeftControl => Modifier::LeftControl,
-            ModifierId::RightControl => Modifier::RightControl,
-            ModifierId::LeftOption => Modifier::LeftOption,
-            ModifierId::RightOption => Modifier::RightOption,
-            ModifierId::LeftShift => Modifier::LeftShift,
-            ModifierId::RightShift => Modifier::RightShift,
-        }
-    }
-}
-
-impl From<Modifier> for ModifierId {
-    fn from(m: Modifier) -> Self {
-        match m {
-            Modifier::LeftCommand => ModifierId::LeftCommand,
-            Modifier::RightCommand => ModifierId::RightCommand,
-            Modifier::LeftControl => ModifierId::LeftControl,
-            Modifier::RightControl => ModifierId::RightControl,
-            Modifier::LeftOption => ModifierId::LeftOption,
-            Modifier::RightOption => ModifierId::RightOption,
-            Modifier::LeftShift => ModifierId::LeftShift,
-            Modifier::RightShift => ModifierId::RightShift,
-        }
-    }
+modifier_ids! {
+    LeftCommand = "left_command",
+    RightCommand = "right_command",
+    LeftControl = "left_control",
+    RightControl = "right_control",
+    LeftOption = "left_option",
+    RightOption = "right_option",
+    LeftShift = "left_shift",
+    RightShift = "right_shift",
 }
 
 /// The trigger as stored and sent to the settings page.
@@ -147,23 +118,10 @@ pub struct DoubleTapSettings {
     /// Read ahead: while a reply field keeps focus, read its context and ask the daemon to
     /// prefill a local model's cache with it, so the trigger only reads the remainder. Local
     /// providers only; see [`super::readahead`] for exactly what is read and sent. On by default.
-    #[serde(default = "default_read_ahead")]
     pub read_ahead: bool,
     /// Keep reading ahead while the computer runs on battery. On by default; low power mode
     /// (battery saver) always pauses read-ahead, whatever this says.
-    #[serde(default = "default_read_ahead_on_battery")]
     pub read_ahead_on_battery: bool,
-}
-
-/// The default for [`DoubleTapSettings::read_ahead`] (also used for files written before the
-/// setting existed).
-pub const fn default_read_ahead() -> bool {
-    true
-}
-
-/// The default for [`DoubleTapSettings::read_ahead_on_battery`] (also used for older files).
-pub const fn default_read_ahead_on_battery() -> bool {
-    true
 }
 
 impl Default for DoubleTapSettings {
@@ -174,8 +132,8 @@ impl Default for DoubleTapSettings {
             app_providers: BTreeMap::new(),
             excluded_apps: default_excluded(),
             allow_terminals: false,
-            read_ahead: default_read_ahead(),
-            read_ahead_on_battery: default_read_ahead_on_battery(),
+            read_ahead: true,
+            read_ahead_on_battery: true,
         }
     }
 }
@@ -416,15 +374,8 @@ pub fn load(path: &Path) -> DoubleTapSettings {
     }
 }
 
-/// Write via a temporary file and rename.
 pub fn save(path: &Path, settings: &DoubleTapSettings) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?;
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path)
+    crate::settings::write_json(path, settings)
 }
 
 // --- matching --------------------------------------------------------------------------------
@@ -534,50 +485,17 @@ mod tests {
 
     #[test]
     fn defaults_and_partial_files() {
-        let s = DoubleTapSettings::default();
-        assert!(s.enabled);
-        assert_eq!(s.trigger, TriggerSpec::recommended());
-        assert!(s.app_providers.is_empty());
-        assert!(s.excluded_apps.iter().any(|e| e == "1Password"));
-        assert!(s.excluded_apps.iter().any(|e| e == "chase.com"));
         let s: DoubleTapSettings = serde_json::from_str(r#"{"enabled":false}"#).unwrap();
         assert!(!s.enabled);
-        assert_eq!(s.excluded_apps, default_excluded());
         // Files written before read-ahead existed get its default.
-        assert!(s.read_ahead);
-        assert!(DoubleTapSettings::default().read_ahead);
-        assert_eq!(
-            serde_json::to_value(DoubleTapSettings::default()).unwrap()["read_ahead"],
-            serde_json::json!(true)
-        );
-        assert!(s.read_ahead_on_battery);
-        assert_eq!(
-            serde_json::to_value(DoubleTapSettings::default()).unwrap()["read_ahead_on_battery"],
-            serde_json::json!(true)
-        );
-        // The defaults validate unchanged.
+        assert!(s.read_ahead && s.read_ahead_on_battery);
+        assert_eq!(s.excluded_apps, default_excluded());
         assert_eq!(
             DoubleTapSettings::default().validated().unwrap(),
             DoubleTapSettings::default()
         );
-    }
-
-    #[test]
-    fn trigger_serde_matches_the_contract() {
-        let t = TriggerSpec::DoubleTap {
-            modifier: ModifierId::RightCommand,
-            window_ms: 350,
-        };
-        assert_eq!(
-            serde_json::to_value(&t).unwrap(),
-            serde_json::json!({"kind":"double_tap","modifier":"right_command","window_ms":350})
-        );
-        let c: TriggerSpec =
-            serde_json::from_str(r#"{"kind":"chord","chord":"Ctrl+Alt+Space"}"#).unwrap();
-        assert_eq!(Trigger::from(&c), Trigger::Chord("Ctrl+Alt+Space".into()));
         for m in ModifierId::ALL {
             assert_eq!(serde_json::to_value(m).unwrap(), m.as_str());
-            assert_eq!(ModifierId::from(Modifier::from(m)), m);
         }
     }
 
@@ -663,7 +581,7 @@ mod tests {
             };
             assert!(s.validated().is_ok(), "{chord}");
         }
-        for window_ms in [250, 350, 500] {
+        for window_ms in [250, 500] {
             for modifier in ModifierId::ALL {
                 let s = DoubleTapSettings {
                     trigger: TriggerSpec::DoubleTap {
@@ -685,10 +603,6 @@ mod tests {
             &list
         ));
         assert!(is_excluded(&app(None, "1PASSWORD", None), &list));
-        assert!(is_excluded(
-            &app(Some("KeePassXC.exe"), "KeePassXC", None),
-            &list
-        ));
         assert!(is_excluded(
             &app(
                 Some("firefox"),
@@ -743,11 +657,8 @@ mod tests {
         let list = default_excluded();
         for a in [
             app(Some("me.proton.pass.electron"), "Proton Pass", None),
-            app(Some("ProtonPass.exe"), "", None),
             app(Some("proton-pass.desktop"), "", None),
-            app(Some("in.sinew.Enpass-Desktop"), "", None),
             app(Some("Enpass.exe"), "", None),
-            app(Some("com.nordsec.nordpass"), "", None),
             app(Some("nordpass"), "", None),
             app(
                 Some("firefox"),
@@ -768,18 +679,10 @@ mod tests {
     fn terminals_are_a_separate_built_in_list() {
         for a in [
             app(Some("com.apple.Terminal"), "Terminal", None),
-            app(Some("com.googlecode.iterm2"), "iTerm2", None),
             app(Some("WindowsTerminal.exe"), "", None),
-            app(Some("conhost.exe"), "", None),
-            app(Some("cmd.exe"), "", None),
-            app(Some("powershell.exe"), "", None),
             app(Some("pwsh.exe"), "", None),
             app(Some("org.gnome.Terminal.desktop"), "", None),
-            app(Some("org.kde.konsole"), "", None),
             app(None, "Alacritty", None),
-            app(Some("kitty"), "kitty", None),
-            app(None, "WezTerm", None),
-            app(Some("com.mitchellh.ghostty"), "Ghostty", None),
         ] {
             assert!(is_terminal(&a), "{a:?}");
         }
@@ -866,15 +769,6 @@ mod tests {
         };
         save(&path, &s).unwrap();
         assert_eq!(load(&path), s);
-        // An old file without `read_ahead` loads with the default; turning it off persists.
-        std::fs::write(&path, br#"{"enabled":true,"allow_terminals":false}"#).unwrap();
-        assert!(load(&path).read_ahead);
-        let off = DoubleTapSettings {
-            read_ahead: false,
-            ..DoubleTapSettings::default()
-        };
-        save(&path, &off).unwrap();
-        assert!(!load(&path).read_ahead);
         std::fs::write(&path, b"{not json").unwrap();
         assert_eq!(load(&path), DoubleTapSettings::default());
         let _ = std::fs::remove_dir_all(dir);

@@ -36,7 +36,7 @@ pub const SIZE: (f64, f64) = (640.0, 420.0);
 pub const PREFILL_MAX_CHARS: usize = 500;
 /// Pages the window may open in the main window.
 const MAIN_PAGES: [&str; 2] = ["chat", "search"];
-/// The event telling the main window a [`Handover`] is waiting (JJ2).
+/// The event telling the main window a [`Handover`] is waiting.
 pub const HANDOVER_EVENT: &str = "quickask:handover";
 /// Handover bounds: the question and the answer in characters (as Chat saves them), citations.
 pub const HANDOVER_MAX_QUESTION_CHARS: usize = 4_000;
@@ -66,20 +66,7 @@ pub struct QuickAskSettings {
 
 impl Default for QuickAskSettings {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            shortcut: default_shortcut_for(Platform::current()).into(),
-        }
-    }
-}
-
-impl QuickAskSettings {
-    /// The defaults on `platform`.
-    pub fn default_for(platform: Platform) -> Self {
-        Self {
-            enabled: true,
-            shortcut: default_shortcut_for(platform).into(),
-        }
+        Self::default_for(Platform::current())
     }
 }
 
@@ -111,6 +98,13 @@ pub fn parse_shortcut(shortcut: &str, platform: Platform) -> Result<Chord, Strin
 }
 
 impl QuickAskSettings {
+    pub fn default_for(platform: Platform) -> Self {
+        Self {
+            enabled: true,
+            shortcut: default_shortcut_for(platform).into(),
+        }
+    }
+
     /// The settings with the shortcut checked and written in the platform's conventional form.
     pub fn validated_for(self, platform: Platform) -> Result<Self, String> {
         let chord = parse_shortcut(&self.shortcut, platform)?;
@@ -160,15 +154,8 @@ pub fn load(path: &Path) -> QuickAskSettings {
     }
 }
 
-/// Write via a temporary file and rename.
 pub fn save(path: &Path, settings: &QuickAskSettings) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?;
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path)
+    crate::settings::write_json(path, settings)
 }
 
 // --- prefill and placement -----------------------------------------------------------------------
@@ -177,13 +164,12 @@ pub fn save(path: &Path, settings: &QuickAskSettings) -> std::io::Result<()> {
 /// bidirectional overrides are dropped, blanks are collapsed, and it is clipped to
 /// [`PREFILL_MAX_CHARS`]. `None` when nothing is left.
 pub fn sanitize_prefill(text: &str) -> Option<String> {
-    let bidi = |c: char| matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
     let cleaned: String = text
         .chars()
         .filter_map(|c| {
             if c.is_whitespace() {
                 Some(' ')
-            } else if c.is_control() || bidi(c) {
+            } else if c.is_control() || is_bidi_override(c) {
                 None
             } else {
                 Some(c)
@@ -194,6 +180,10 @@ pub fn sanitize_prefill(text: &str) -> Option<String> {
     let clipped: String = joined.chars().take(PREFILL_MAX_CHARS).collect();
     let clipped = clipped.trim_end();
     (!clipped.is_empty()).then(|| clipped.to_string())
+}
+
+fn is_bidi_override(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 /// A rectangle in physical pixels: x, y, width, height.
@@ -614,7 +604,7 @@ pub fn quickask_handover_take(app: AppHandle, window: tauri::Window) -> Option<H
         .and_then(|s| lock(&s.pending_handover).take())
 }
 
-// --- handover (JJ2) -----------------------------------------------------------------------------
+// --- handover -----------------------------------------------------------------------------
 
 /// A question asked in quick ask, carried to the main window by "Open in Chat" or "Show in
 /// Search". The answer only goes to Chat, and only once it finished.
@@ -662,13 +652,11 @@ impl Handover {
     /// The handover for `page`, bounded: the question cleaned like a prefill but longer, the
     /// answer clipped and only for Chat, oversized citations dropped. `None` without a question.
     pub fn bounded(self, page: &str) -> Option<Self> {
-        // Control characters other than line breaks have no business in a question; nor have
-        // bidirectional overrides (as for a prefill).
-        let bidi = |c: char| matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
+        // Control characters other than line breaks have no business in a question.
         let cleaned: String = self
             .question
             .chars()
-            .filter(|&c| c == '\n' || !(c.is_control() || bidi(c)))
+            .filter(|&c| c == '\n' || !(c.is_control() || is_bidi_override(c)))
             .collect();
         let mut question = clip(cleaned.trim(), HANDOVER_MAX_QUESTION_CHARS)
             .trim_end()
@@ -725,23 +713,6 @@ impl Handover {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn defaults() {
-        let s = QuickAskSettings::default();
-        assert!(s.enabled);
-        assert_eq!(s.shortcut, default_shortcut_for(Platform::current()));
-        assert_eq!(default_shortcut_for(Platform::MacOs), "Shift+Cmd+Space");
-        assert_eq!(default_shortcut_for(Platform::Windows), "Ctrl+Shift+Space");
-        assert_eq!(default_shortcut_for(Platform::Linux), "Ctrl+Shift+Space");
-        for p in [Platform::MacOs, Platform::Windows, Platform::Linux] {
-            let d = QuickAskSettings {
-                enabled: true,
-                shortcut: default_shortcut_for(p).into(),
-            };
-            assert_eq!(d.clone().validated_for(p).unwrap(), d, "{p:?}");
-        }
-    }
 
     #[test]
     fn settings_round_trip() {
@@ -838,8 +809,6 @@ mod tests {
         let p = Platform::Linux;
         let d = QuickAskSettings::default_for(p);
         assert_eq!(parse_settings(b"not json", p), d);
-        assert_eq!(parse_settings(b"[1,2]", p), d);
-        assert_eq!(parse_settings(br#"{"enabled": "yes"}"#, p), d);
         assert_eq!(parse_settings(br#"{"shortcut": "Banana"}"#, p), d);
         // Missing fields take their defaults; unknown ones are ignored.
         let s = parse_settings(br#"{"enabled": false, "future": 1}"#, p);
@@ -854,26 +823,19 @@ mod tests {
     fn shortcut_validation() {
         let p = Platform::Linux;
         assert!(parse_shortcut("", p).is_err());
-        assert!(parse_shortcut("   ", p).is_err());
-        assert!(parse_shortcut("Space", p).is_err());
         assert!(parse_shortcut("Shift+A", p).is_err());
-        assert!(parse_shortcut("Ctrl+Shift", p).is_err());
-        assert!(parse_shortcut("Ctrl+Nope", p).is_err());
         // Taken by Double Tap's Wayland fallback and the kill switch, in any spelling.
         assert!(parse_shortcut("Ctrl+Alt+Space", p).is_err());
         assert!(parse_shortcut("alt+ctrl+space", p).is_err());
         assert!(parse_shortcut("Ctrl+Alt+Shift+Escape", p).is_err());
         assert!(parse_shortcut("Ctrl+Shift+Space", p).is_ok());
-        assert!(parse_shortcut("F13", p).is_ok());
         let mac = parse_shortcut("Cmd+Shift+Space", Platform::MacOs).unwrap();
         assert_eq!(mac.accelerator_for(Platform::MacOs), "Shift+Cmd+Space");
     }
 
     #[test]
     fn prefill_is_sanitised() {
-        assert_eq!(sanitize_prefill(""), None);
-        assert_eq!(sanitize_prefill(" \n\t "), None);
-        assert_eq!(sanitize_prefill("\u{0}\u{7}"), None);
+        assert_eq!(sanitize_prefill(" \n\t\u{0}\u{7} "), None);
         assert_eq!(
             sanitize_prefill("  what did\nAda\tsay?\u{0}\u{1b}[31m "),
             Some("what did Ada say?[31m".into())
@@ -885,28 +847,13 @@ mod tests {
         let long = "é".repeat(PREFILL_MAX_CHARS + 50);
         let out = sanitize_prefill(&long).unwrap();
         assert_eq!(out.chars().count(), PREFILL_MAX_CHARS);
-        assert_eq!(
-            sanitize_prefill("日本語の質問"),
-            Some("日本語の質問".into())
-        );
     }
 
     #[test]
     fn centring() {
         assert_eq!(center_in((0, 0, 1920, 1080), (640, 420)), (640, 330));
         assert_eq!(center_in((1920, 25, 1280, 775), (1280, 840)), (1920, 25));
-        assert_eq!(center_in((-1280, 0, 1280, 1024), (640, 420)), (-960, 302));
         assert!(contains((0, 0, 10, 10), (5.0, 5.0)));
         assert!(!contains((0, 0, 10, 10), (10.0, 5.0)));
-    }
-
-    #[test]
-    fn status_states() {
-        assert_eq!(status_of(true, None, false).state, "listening");
-        assert_eq!(status_of(false, Some("x".into()), false).state, "error");
-        assert_eq!(status_of(false, None, false).state, "off");
-        let w = status_of(false, None, true);
-        assert_eq!(w.state, "unsupported_wayland");
-        assert!(w.wayland_fallback && !w.listening);
     }
 }

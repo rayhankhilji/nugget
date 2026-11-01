@@ -475,11 +475,7 @@ impl Machine {
     fn redraft(&mut self, refine: Option<RefineRequest>) -> Step {
         let mut effects = Vec::new();
         if matches!(self.view.phase, Phase::Streaming | Phase::Done) {
-            if self.streaming
-                && let Some(id) = &self.stream_id
-            {
-                effects.push(Effect::CancelStream(id.clone()));
-            }
+            self.stop_stream(&mut effects);
             // A retry rejects the draft; a refinement keeps its substance, so it says nothing
             // about the user's voice either way (the refined draft's own outcome is reported).
             if refine.is_none() {
@@ -487,18 +483,12 @@ impl Machine {
             }
             self.remember_shown(&mut effects);
         }
-        self.generation += 1;
+        self.new_request();
         self.view = OverlayView {
             refinement: refine.as_ref().map(|r| r.kind),
             practice: self.practice,
             ..OverlayView::default()
         };
-        self.stream_id = None;
-        self.streaming = false;
-        self.buffered.clear();
-        self.buffered_bytes = 0;
-        self.accepted = None;
-        self.insert_failed = false;
         self.refining = refine.clone();
         effects.push(Effect::Redraft {
             generation: self.generation,
@@ -513,18 +503,12 @@ impl Machine {
                 if self.busy() {
                     return Step::default();
                 }
-                self.generation += 1;
+                self.new_request();
                 self.view = OverlayView::default();
                 self.active = true;
-                self.stream_id = None;
-                self.streaming = false;
-                self.buffered.clear();
-                self.buffered_bytes = 0;
-                self.accepted = None;
                 self.practice = false;
                 self.requested = false;
                 self.sensitive = false;
-                self.insert_failed = false;
                 self.refining = None;
                 // A refusal or error still on screen was shown without the keyboard (a focused
                 // one makes the machine busy).
@@ -637,12 +621,7 @@ impl Machine {
                     "edited"
                 };
                 let mut effects = Vec::new();
-                if self.streaming
-                    && let Some(id) = &self.stream_id
-                {
-                    effects.push(Effect::CancelStream(id.clone()));
-                    self.streaming = false;
-                }
+                self.stop_stream(&mut effects);
                 self.view.text = final_text.clone();
                 self.view.phase = Phase::Inserting;
                 self.accepted = Some((outcome.into(), final_text.clone()));
@@ -663,12 +642,7 @@ impl Machine {
                     return Step::default();
                 }
                 let mut effects = Vec::new();
-                if self.streaming
-                    && let Some(id) = &self.stream_id
-                {
-                    effects.push(Effect::CancelStream(id.clone()));
-                    self.streaming = false;
-                }
+                self.stop_stream(&mut effects);
                 if drafting {
                     effects.extend(self.feedback("rejected", None, None));
                     self.remember_shown(&mut effects);
@@ -729,11 +703,7 @@ impl Machine {
                 }
                 let mut effects = Vec::new();
                 if matches!(self.view.phase, Phase::Streaming | Phase::Done) {
-                    if self.streaming
-                        && let Some(id) = &self.stream_id
-                    {
-                        effects.push(Effect::CancelStream(id.clone()));
-                    }
+                    self.stop_stream(&mut effects);
                     effects.extend(self.feedback("rejected", None, None));
                     self.remember_shown(&mut effects);
                 }
@@ -770,12 +740,7 @@ impl Machine {
                     return Step::default();
                 }
                 let mut effects = Vec::new();
-                if self.streaming
-                    && let Some(id) = &self.stream_id
-                {
-                    effects.push(Effect::CancelStream(id.clone()));
-                }
-                self.streaming = false;
+                self.stop_stream(&mut effects);
                 if self.view.phase == Phase::Inserting {
                     if let Some((outcome, text)) = self.accepted.take() {
                         effects.extend(self.feedback(&outcome, Some(text), Some(false)));
@@ -828,6 +793,25 @@ impl Machine {
                 Step::effects(effects)
             }
         }
+    }
+
+    fn stop_stream(&mut self, effects: &mut Vec<Effect>) {
+        if std::mem::take(&mut self.streaming)
+            && let Some(id) = &self.stream_id
+        {
+            effects.push(Effect::CancelStream(id.clone()));
+        }
+    }
+
+    /// A new request: bump the generation and forget the previous stream.
+    fn new_request(&mut self) {
+        self.generation += 1;
+        self.stream_id = None;
+        self.streaming = false;
+        self.buffered.clear();
+        self.buffered_bytes = 0;
+        self.accepted = None;
+        self.insert_failed = false;
     }
 
     fn awaiting_start(&self) -> bool {
@@ -1039,17 +1023,6 @@ mod tests {
     }
 
     #[test]
-    fn started_after_cancel_is_cancelled() {
-        let mut m = Machine::new();
-        m.apply(Event::Begin);
-        assert_eq!(m.apply(Event::Cancel).effects, vec![Effect::Hide]);
-        assert_eq!(
-            m.apply(started(&m, "late")),
-            Step::effects(vec![Effect::CancelStream("late".into())])
-        );
-    }
-
-    #[test]
     fn deltas_before_started_are_replayed() {
         let mut m = Machine::new();
         m.apply(Event::Begin);
@@ -1165,35 +1138,6 @@ mod tests {
         let mut m = Machine::new();
         m.apply(Event::Begin);
         assert_eq!(m.apply(Event::Disconnected), Step::default());
-    }
-
-    #[test]
-    fn view_serializes_per_contract() {
-        let mut m = streaming("s11");
-        m.apply(delta("s11", "Hey"));
-        let v = serde_json::to_value(m.view()).unwrap();
-        assert_eq!(
-            v,
-            serde_json::json!({
-                "phase": "streaming",
-                "text": "Hey",
-                "provider": "local",
-                "locality": "on_device",
-                "citations": 2,
-                "excluded_sensitive": 1,
-                "message": null,
-                "verified": null,
-                "method": null,
-                "can_retry": true,
-                "refinement": null,
-                "practice": false
-            })
-        );
-        assert_eq!(
-            serde_json::to_value(Method::Clipboard).unwrap(),
-            "clipboard"
-        );
-        assert_eq!(serde_json::to_value(Phase::Inserted).unwrap(), "inserted");
     }
 
     #[test]

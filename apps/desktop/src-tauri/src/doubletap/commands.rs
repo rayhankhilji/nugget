@@ -122,7 +122,7 @@ pub async fn doubletap_request_permissions(
     Ok(status(&app).await)
 }
 
-/// macOS Privacy & Security panes Double Tap may open (GG6-19). The URLs are fixed here and
+/// macOS Privacy & Security panes Double Tap may open. The URLs are fixed here and
 /// never built from input, so the general URL allowlist (which refuses
 /// `x-apple.systempreferences:`) stays as strict as it is.
 pub(crate) fn privacy_pane_url(pane: &str) -> Option<&'static str> {

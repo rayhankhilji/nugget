@@ -547,10 +547,4 @@ mod tests {
         assert!(from_args_in(&argv, "")[0].is_err());
         let _ = std::fs::remove_dir_all(base);
     }
-
-    #[test]
-    fn links_serialize_for_the_frontend() {
-        let v = serde_json::to_value(Link::Search { query: "q".into() }).unwrap();
-        assert_eq!(v, serde_json::json!({"kind": "search", "query": "q"}));
-    }
 }

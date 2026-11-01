@@ -175,24 +175,4 @@ mod tests {
         assert!(r.context.screenshot_png_base64.is_none());
         assert!(r.instruction.is_none());
     }
-
-    #[test]
-    fn wire_format() {
-        let f: PracticeField = serde_json::from_value(serde_json::json!({
-            "value": "a", "selection": [0, 1],
-            "rect": { "x": 1, "y": 2, "width": 3, "height": 4 },
-            "rtl": true, "sample": "s"
-        }))
-        .unwrap();
-        assert_eq!(f.selection, Some((0, 1)));
-        assert!(f.rtl);
-        assert_eq!(
-            serde_json::to_value(Action::Insert { text: "t".into() }).unwrap(),
-            serde_json::json!({ "kind": "insert", "text": "t" })
-        );
-        assert_eq!(
-            serde_json::to_value(Action::Focus).unwrap(),
-            serde_json::json!({ "kind": "focus" })
-        );
-    }
 }

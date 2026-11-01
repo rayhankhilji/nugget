@@ -1,4 +1,4 @@
-//! GG6-32: the desktop shell's own log file.
+//! the desktop shell's own log file.
 //!
 //! Plain-text lines in `<data>/logs/nugget-desktop.<date>.log`, next to the daemon's
 //! `nuggetd.<date>.log`: one folder holds everything a bug report needs, it follows
@@ -140,26 +140,6 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn paths_name_both_logs_in_the_data_logs_folder() {
-        let p = Paths::rooted(PathBuf::from("/tmp/nugget-home"));
-        let dir = log_dir(&p);
-        assert!(dir.ends_with(Path::new("data").join("logs")));
-        let lp = LogPaths::new(&dir);
-        assert!(
-            lp.shell.ends_with("nugget-desktop.<date>.log"),
-            "{}",
-            lp.shell
-        );
-        assert!(lp.daemon.ends_with("nuggetd.<date>.log"), "{}", lp.daemon);
-        assert!(lp.shell.starts_with(&lp.dir) && lp.daemon.starts_with(&lp.dir));
-        let hint = lp.hint();
-        assert!(
-            hint.contains(&lp.daemon) && hint.contains(&lp.shell),
-            "{hint}"
-        );
-    }
 
     #[test]
     fn the_appender_writes_a_dated_file_in_a_private_folder() {

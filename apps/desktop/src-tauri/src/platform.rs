@@ -1,4 +1,4 @@
-//! Desktop-integration preferences and shell strings (II4): notifications, quit behaviour,
+//! Desktop-integration preferences and shell strings: notifications, quit behaviour,
 //! paused indexing, the tray's and notifications' localized labels, and sleep/resume detection.
 //!
 //! The preferences live in `platform.json` under the app's config directory, next to the
@@ -71,7 +71,7 @@ impl Default for NotifySettings {
     }
 }
 
-/// GG6-8: what quitting Nugget does to the `nuggetd` this app started (never to one run as a
+/// what quitting Nugget does to the `nuggetd` this app started (never to one run as a
 /// login service or started by hand, see `lifecycle`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -94,14 +94,14 @@ pub struct PlatformSettings {
     pub quit_daemon: QuitChoice,
     /// Sources the tray's "Pause indexing" turned off, turned back on by "Resume indexing".
     pub paused_sources: Vec<String>,
-    /// II4's switch, only read from older files: `true` (the user turned it on) becomes
+    /// the old switch, only read from older files: `true` (the user turned it on) becomes
     /// [`QuitChoice::Stop`]; `false` was the default, not an answer, so it stays [`QuitChoice::Ask`].
     #[serde(skip_serializing)]
     pub quit_stops_daemon: Option<bool>,
 }
 
 impl PlatformSettings {
-    /// Fold II4's `quit_stops_daemon` into [`Self::quit_daemon`].
+    /// Fold the old `quit_stops_daemon` into [`Self::quit_daemon`].
     fn migrated(mut self) -> Self {
         if self.quit_stops_daemon.take() == Some(true) && self.quit_daemon == QuitChoice::Ask {
             self.quit_daemon = QuitChoice::Stop;
@@ -133,15 +133,8 @@ pub fn load(path: &Path) -> PlatformSettings {
     }
 }
 
-/// Write via a temporary file and rename, so a crash never leaves half a file.
 pub fn save(path: &Path, settings: &PlatformSettings) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?;
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path)
+    crate::settings::write_json(path, settings)
 }
 
 // ---- labels ----
@@ -440,7 +433,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("nugget-platform-q-{}", std::process::id()));
         let path = dir.join("platform.json");
         std::fs::create_dir_all(&dir).unwrap();
-        // The user turned II4's switch on: that was an answer.
+        // The user turned the old switch on: that was an answer.
         std::fs::write(&path, br#"{"quit_stops_daemon":true}"#).unwrap();
         assert_eq!(load(&path).quit_daemon, QuitChoice::Stop);
         // Off was the default, not an answer: ask.

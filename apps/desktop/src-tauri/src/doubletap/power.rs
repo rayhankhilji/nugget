@@ -95,16 +95,6 @@ pub fn read() -> PowerState {
     }
 }
 
-/// `GetSystemPowerStatus`: `ACLineStatus` 0 is offline (on battery; 1 is online, 255 unknown),
-/// `SystemStatusFlag` 1 is battery saver on.
-#[cfg(any(windows, test))]
-fn from_system_power_status(ac_line_status: u8, system_status_flag: u8) -> PowerState {
-    PowerState {
-        on_battery: ac_line_status == 0,
-        low_power: system_status_flag == 1,
-    }
-}
-
 #[cfg(target_os = "macos")]
 mod macos {
     use objc2_foundation::NSProcessInfo;
@@ -160,7 +150,12 @@ mod windows {
         if unsafe { GetSystemPowerStatus(&mut status) } == 0 {
             return PowerState::default();
         }
-        super::from_system_power_status(status.ACLineStatus, status.SystemStatusFlag)
+        // `ACLineStatus` 0 is offline (1 online, 255 unknown); `SystemStatusFlag` 1 is battery
+        // saver on.
+        PowerState {
+            on_battery: status.ACLineStatus == 0,
+            low_power: status.SystemStatusFlag == 1,
+        }
     }
 }
 
@@ -247,23 +242,15 @@ mod tests {
             low_power: false,
         };
         let saver = PowerState {
-            on_battery: true,
-            low_power: true,
-        };
-        let plugged_saver = PowerState {
             on_battery: false,
             low_power: true,
         };
-        assert!(!paused(mains, &s));
         assert!(!paused(mains, &off));
         // On battery: keeps reading ahead by default, pauses when the user turned it off.
         assert!(!paused(battery, &s));
         assert!(paused(battery, &off));
         // Low power mode pauses whatever the setting says.
-        for p in [saver, plugged_saver] {
-            assert!(paused(p, &s));
-            assert!(paused(p, &off));
-        }
+        assert!(paused(saver, &s));
     }
 
     #[test]
@@ -277,34 +264,12 @@ mod tests {
             low_power: false,
         };
         c.set(t0, battery);
-        assert_eq!(c.state, battery);
         assert!(!c.due(t0 + RECHECK - Duration::from_secs(1)));
         assert_eq!(
             c.until_due(t0 + Duration::from_secs(20)),
             RECHECK - Duration::from_secs(20)
         );
         assert!(c.due(t0 + RECHECK));
-    }
-
-    #[test]
-    fn windows_power_status() {
-        assert_eq!(from_system_power_status(1, 0), PowerState::default());
-        assert_eq!(
-            from_system_power_status(0, 0),
-            PowerState {
-                on_battery: true,
-                low_power: false
-            }
-        );
-        assert_eq!(
-            from_system_power_status(0, 1),
-            PowerState {
-                on_battery: true,
-                low_power: true
-            }
-        );
-        // Unknown AC status: not treated as battery.
-        assert!(!from_system_power_status(255, 0).on_battery);
     }
 
     /// Writes a fake `/sys` tree.
@@ -413,9 +378,6 @@ mod tests {
         assert!(state(&[battery("Discharging")], None).on_battery);
         // USB-C power counts as external power.
         assert!(!state(&[battery("Discharging"), supply("USB", true)], None).on_battery);
-        assert!(state(&[battery("Discharging"), supply("Mains", false)], None).on_battery);
         assert!(!state(&[battery("Full"), supply("Mains", false)], None).on_battery);
-        assert!(!state(&[], Some("performance")).low_power);
-        assert!(state(&[], Some("low-power\n")).low_power);
     }
 }

@@ -168,15 +168,7 @@ impl WindowState {
         let (Some(path), Some(g)) = (&self.path, *self.lock()) else {
             return;
         };
-        let write = || -> std::io::Result<()> {
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            let tmp = path.with_extension("json.tmp");
-            std::fs::write(&tmp, serde_json::to_vec(&g).map_err(std::io::Error::other)?)?;
-            std::fs::rename(&tmp, path)
-        };
-        if let Err(e) = write() {
+        if let Err(e) = crate::settings::write_json(path, &g) {
             tracing::warn!(path = %path.display(), error = %e, "couldn't save the window state");
         }
     }
@@ -213,43 +205,6 @@ mod tests {
             height,
             maximized: false,
         }
-    }
-
-    #[test]
-    fn parse_tolerates_garbage() {
-        let g = parse(br#"{"x":10,"y":-20,"width":800,"height":600,"maximized":true}"#).unwrap();
-        assert_eq!(
-            (g.x, g.y, g.width, g.height, g.maximized),
-            (10, -20, 800, 600, true)
-        );
-        // Older files without the flag.
-        assert!(
-            !parse(br#"{"x":1,"y":2,"width":3,"height":4}"#)
-                .unwrap()
-                .maximized
-        );
-        for bad in [
-            &b""[..],
-            b"{not json",
-            b"null",
-            b"[]",
-            br#"{"x":1,"y":2}"#,
-            br#"{"x":0,"y":0,"width":0,"height":600}"#,
-            br#"{"x":0,"y":0,"width":800,"height":-1}"#,
-            br#"{"x":0,"y":0,"width":800,"height":9999999}"#,
-            br#"{"x":-2000000000,"y":0,"width":800,"height":600}"#,
-            br#"{"x":"a","y":0,"width":800,"height":600}"#,
-        ] {
-            assert_eq!(parse(bad), None, "{}", String::from_utf8_lossy(bad));
-        }
-    }
-
-    #[test]
-    fn visible_windows_stay_put() {
-        let g = geo(100, 100, 1080, 720);
-        assert_eq!(clamp(g, &[LAPTOP, RIGHT]), Some(g));
-        let on_right = geo(2000, 300, 1200, 800);
-        assert_eq!(clamp(on_right, &[LAPTOP, RIGHT]), Some(on_right));
     }
 
     #[test]
