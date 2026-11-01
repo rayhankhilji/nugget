@@ -345,7 +345,7 @@ pub(crate) fn overview(
         Some(src) => Some(graph.entities_supported_by(src)?.into_iter().collect()),
         None => None,
     };
-    let page = limit.saturating_mul(2).max(OVERVIEW_PAGE);
+    let mut page = limit.saturating_mul(2).max(OVERVIEW_PAGE);
     let mut kept = Vec::with_capacity(limit.min(page));
     let mut seen = HashSet::new();
     let mut cut = false;
@@ -376,6 +376,10 @@ pub(crate) fn overview(
         if n < page {
             break;
         }
+        // Each page is an OFFSET read that re-walks the rows before it: grow the pages, so
+        // walking far (a selective source or kind filter, a mostly sensitive graph) takes a
+        // few reads instead of one per hundred entities.
+        page = page.saturating_mul(4);
     }
     overview_view(graph, kept, cut, source, sens, include_sensitive)
 }

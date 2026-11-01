@@ -322,8 +322,14 @@ impl Worker {
                 _ = sleep_until(deadline), if deadline.is_some() => self.flush().await,
             }
             // Write the batch once it is full or nothing more is coming right now.
+            // (The deadline is checked here too: a long run of version-skipped changes keeps
+            // the queue arm ready, so the timer arm above might never be polled.)
             if self.pending.len() >= BATCH_MAX
                 || (!self.pending.is_empty() && self.inflight.is_empty() && self.rx.is_empty())
+                || self
+                    .pending
+                    .first()
+                    .is_some_and(|p| p.since.elapsed() >= BATCH_MAX_WAIT)
             {
                 self.flush().await;
             }
