@@ -646,6 +646,9 @@
     "status.triageYielding",
     "status.triagePaused",
     "status.triageIdle",
-    "status.triageFailed"
+    "status.triageFailed",
+    "doubletap.overlay.refineMissed",
+    "doubletap.error.field_changed",
+    "doubletap.error.field_changed_no_copy"
   ]
 }

@@ -2141,5 +2141,8 @@
   "searchui.nameTaken": "Ya hay otra búsqueda guardada llamada «{name}».",
   "searchui.recentCleared": "Búsquedas recientes borradas",
   "searchui.recentWithFilters": "{query} · {n, plural, one {# filtro} other {# filtros}}",
-  "searchui.resultsFiltered": "{n, plural, one {# resultado} other {# resultados}} para «{query}» con {filters, plural, one {# filtro} other {# filtros}}"
+  "searchui.resultsFiltered": "{n, plural, one {# resultado} other {# resultados}} para «{query}» con {filters, plural, one {# filtro} other {# filtros}}",
+  "doubletap.overlay.refineMissed": "Esta vez no se pudo hacer ese cambio. Este es el borrador más cercano.",
+  "doubletap.error.field_changed": "El cursor pasó a otro campo, así que no se insertó nada. El borrador está en el portapapeles.",
+  "doubletap.error.field_changed_no_copy": "El cursor pasó a otro campo, así que no se insertó nada. Encontrarás el borrador en Borradores recientes, en la página de Double Tap."
 }

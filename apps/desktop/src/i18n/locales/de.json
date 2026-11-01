@@ -2141,5 +2141,8 @@
   "searchui.nameTaken": "Eine andere gespeicherte Suche heißt bereits „{name}“.",
   "searchui.recentCleared": "Letzte Suchen gelöscht",
   "searchui.recentWithFilters": "{query} · {n, plural, one {# Filter} other {# Filter}}",
-  "searchui.resultsFiltered": "{n, plural, one {# Ergebnis} other {# Ergebnisse}} für „{query}“ mit {filters, plural, one {# Filter} other {# Filtern}}"
+  "searchui.resultsFiltered": "{n, plural, one {# Ergebnis} other {# Ergebnisse}} für „{query}“ mit {filters, plural, one {# Filter} other {# Filtern}}",
+  "doubletap.overlay.refineMissed": "Diese Änderung hat diesmal nicht geklappt. Das ist der nächstliegende Entwurf.",
+  "doubletap.error.field_changed": "Der Cursor ist in ein anderes Feld gewechselt, daher wurde nichts eingefügt. Der Entwurf ist in der Zwischenablage.",
+  "doubletap.error.field_changed_no_copy": "Der Cursor ist in ein anderes Feld gewechselt, daher wurde nichts eingefügt. Den Entwurf finden Sie unter „Letzte Entwürfe“ auf der Double-Tap-Seite."
 }

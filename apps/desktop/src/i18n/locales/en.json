@@ -2141,5 +2141,8 @@
   "searchui.nameTaken": "Another saved search is already called “{name}”.",
   "searchui.recentCleared": "Recent searches cleared",
   "searchui.recentWithFilters": "{query} · {n, plural, one {# filter} other {# filters}}",
-  "searchui.resultsFiltered": "{n, plural, one {# result} other {# results}} for “{query}” with {filters, plural, one {# filter} other {# filters}}"
+  "searchui.resultsFiltered": "{n, plural, one {# result} other {# results}} for “{query}” with {filters, plural, one {# filter} other {# filters}}",
+  "doubletap.overlay.refineMissed": "Couldn't make that change this time. This is the closest draft.",
+  "doubletap.error.field_changed": "The cursor moved to another field, so nothing was inserted. The draft is on the clipboard.",
+  "doubletap.error.field_changed_no_copy": "The cursor moved to another field, so nothing was inserted. Find the draft in Recent drafts on the Double Tap page."
 }
