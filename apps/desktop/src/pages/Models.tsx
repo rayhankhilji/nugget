@@ -258,6 +258,7 @@ export function YourProviders() {
       </h2>
       <p className="muted small">{t("models.providers.hint")}</p>
       <ErrorNote error={saved.error} onRetry={saved.reload} />
+      {saved.loading && !saved.data && !saved.error && <Loading label={t("models.providers.loading")} lines={1} />}
       {saved.data && list.length === 0 && <p className="muted">{t("models.providers.empty")}</p>}
       {list.length > 0 && (
         <ul className="cards" aria-label={t("models.providers.title")} aria-busy={saved.loading}>
@@ -332,10 +333,23 @@ function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: Sav
       <p className="small muted">
         {p.key === "env" && p.env_var ? t("models.providers.keyEnv", { name: p.env_var }) : t("models.providers.keyKeychain")}
       </p>
-      {!p.available && p.error && (
-        <p className="small muted" dir="auto">
-          {p.error}
-        </p>
+      {/* LL2: why it isn't in use, in plain words; the daemon's own line stays under Details. */}
+      {!p.available && (
+        <div className="small">
+          <p>
+            {p.key === "env" && p.env_var && (!p.error || /not set|missing|empty/i.test(p.error))
+              ? t("models.providers.envMissing", { name: p.env_var })
+              : t("models.providers.unavailable")}
+          </p>
+          {p.error && (
+            <details className="note-details">
+              <summary>{t("common.details")}</summary>
+              <p className="muted" dir="auto">
+                {p.error}
+              </p>
+            </details>
+          )}
+        </div>
       )}
       <div className="card-actions" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
         <button type="button" className="btn" onClick={onReplace} aria-label={t("models.providers.replaceLabel", { name: p.id })}>
@@ -438,6 +452,22 @@ function ModelCard({
     }
   }, [busy, cancelling]);
   const installed = model.installed || progress?.phase === "installed";
+  // LL2: Install turns into Cancel, and Cancel goes away once installed: keep keyboard focus in
+  // the card (on Cancel, then on the card's title or Retry install) instead of dropping it to the page.
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const focusIn = useRef<"cancel" | "title" | null>(null);
+  useEffect(() => {
+    if (busy) {
+      if (focusIn.current === "cancel") cancelRef.current?.focus();
+      // Remembered while it lasts: Cancel unmounts without a blur event.
+      focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
+    } else if (focusIn.current === "title") {
+      // Installed: the name; failed (the request or the download): its Retry install.
+      focusIn.current = null;
+      (installed ? titleRef.current : actionRef.current)?.focus();
+    }
+  });
   const pct = progress ? percent(progress.downloaded, progress.total || model.size_bytes) : 0;
   const labelId = `model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   const modelFit = fit?.models.find((f) => f.id === model.id);
@@ -446,7 +476,7 @@ function ModelCard({
     <li className="card model-card" aria-labelledby={labelId} data-model-id={model.id}>
       <div className="card-head">
         <span className="model-title">
-          <span id={labelId} className="card-title">
+          <span id={labelId} ref={titleRef} className="card-title" tabIndex={-1}>
             {name}
           </span>
           <bdi dir="ltr" className="model-id">
@@ -480,6 +510,7 @@ function ModelCard({
           </span>
           <div className="card-actions">
             <button
+              ref={cancelRef}
               type="button"
               className="btn btn-ghost"
               aria-label={t("models.cancelLabel", { model: name })}
@@ -495,10 +526,22 @@ function ModelCard({
         </div>
       )}
       <DownloadFailureNote t={t} progress={progress} error={error} fallback={t("models.installFailed")} />
+      {/* LL2: an install that finishes while the page is open is said once. */}
+      <span className="visually-hidden" role="status">
+        {progress?.phase === "installed" ? t("models.installedAnnounce", { model: name }) : ""}
+      </span>
 
       {!installed && !busy && (
         <div className="card-actions">
-          <button ref={actionRef} type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
+          <button
+            ref={actionRef}
+            type="button"
+            className={best ? "btn btn-primary" : "btn"}
+            onClick={(e) => {
+              if (document.activeElement === e.currentTarget) focusIn.current = "cancel";
+              onInstall();
+            }}
+          >
             {cancelled ? t("models.resume") : failed || error ? t("models.retryInstall") : t("models.install")}
           </button>
         </div>

@@ -31,12 +31,15 @@ export function fromTime(value: string): number | null {
 export function Switch({
   checked,
   disabled,
+  busy = false,
   onChange,
   describedBy,
   children,
 }: {
   checked: boolean;
   disabled?: boolean;
+  /** Saving: the switch stays focusable (aria-disabled) and ignores changes until done (LL2). */
+  busy?: boolean;
   onChange: (on: boolean) => void;
   describedBy?: string;
   children: ReactNode;
@@ -48,8 +51,9 @@ export function Switch({
         role="switch"
         checked={checked}
         disabled={disabled}
+        aria-disabled={busy || undefined}
         aria-describedby={describedBy}
-        onChange={(e) => onChange(e.target.checked)}
+        onChange={(e) => busy || onChange(e.target.checked)}
       />
       <span className="switch-track" aria-hidden="true" />
       <span>{children}</span>
@@ -95,7 +99,7 @@ export function AppSettings() {
         error ? null : <Spinner />
       ) : status.supported ? (
         <>
-          <Switch checked={status.enabled} disabled={busy} describedBy={hintId} onChange={(on) => void toggle(on)}>
+          <Switch checked={status.enabled} busy={busy} describedBy={hintId} onChange={(on) => void toggle(on)}>
             {t("appSettings.autostart")}
           </Switch>
           {busy && <Spinner label={t("updates.working")} />}

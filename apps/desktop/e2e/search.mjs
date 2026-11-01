@@ -161,7 +161,15 @@ export async function searchScenario({ browser, socket, onboarded }) {
         const id = `timeline-month-${target}`;
         await until(`focus moves to ${target}`, async () => [await page.evaluate((id) => document.activeElement?.id === id, id), null]);
       }
-      out.timeline = { ...events, months };
+      // LL2: Escape leaves the timeline for the Search page, with focus on it (not lost to <body>).
+      await page.keyboard.press("Escape");
+      await h.waitFor({ state: "detached" });
+      const focused = await page.evaluate(() => {
+        const a = document.activeElement;
+        return a && a !== document.body && !!a.closest("main") ? `${a.tagName.toLowerCase()}#${a.id}` : null;
+      });
+      expect(focused !== null, "focus was lost after Escape closed the timeline");
+      out.timeline = { ...events, months, escape_focus: focused };
     });
 
     await check("search: every search command reached the daemon and was accepted", async () => {

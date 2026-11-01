@@ -47,7 +47,7 @@ describe("Your providers (Models page)", () => {
     expect(items[1]!.textContent).toContain("Not in use");
     expect(items[1]!.textContent).toContain("Key read from the environment variable WORK_KEY");
     expect(items[1]!.textContent).toContain("WORK_KEY is not set");
-    expect(items[0]!.querySelector('button[aria-label="Replace the key of custom"]')?.textContent).toBe("Replace key");
+    expect(items[0]!.querySelector('button[aria-label="Replace key: custom"]')?.textContent).toBe("Replace key");
     expect(items[0]!.querySelector('button[aria-label="Remove custom"]')?.textContent).toBe("Remove");
     // No restart instructions anywhere.
     expect(container.textContent).not.toMatch(/restart/i);
@@ -99,7 +99,7 @@ describe("Your providers (Models page)", () => {
       },
     });
     const { container } = await render(<YourProviders />);
-    await click(container.querySelector('button[aria-label="Replace the key of custom"]'));
+    await click(container.querySelector('button[aria-label="Replace key: custom"]'));
     const dialog = document.querySelector("dialog")!;
     expect(dialog.querySelector("h2")?.textContent).toBe("Replace the key of custom");
     const label = byText(dialog, "label", "API key") as HTMLLabelElement;

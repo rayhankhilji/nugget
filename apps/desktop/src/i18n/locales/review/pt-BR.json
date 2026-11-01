@@ -746,6 +746,14 @@
     "chat.retry",
     "chat.retryAnnounce",
     "chat.statusDetails",
-    "chat.failed"
+    "chat.failed",
+    "status.runtime.retryLabel",
+    "status.runtime.announce",
+    "models.providers.loading",
+    "models.installedAnnounce",
+    "models.providers.envMissing",
+    "models.providers.unavailable",
+    "searchui.openInAppTitle",
+    "quickAsk.noProvider"
   ]
 }

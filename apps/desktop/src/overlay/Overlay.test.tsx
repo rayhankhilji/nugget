@@ -418,6 +418,15 @@ describe("overlay", () => {
     result = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(result.violations.map((v) => v.id)).toEqual([]);
   });
+  it("has one heading naming the window, for heading navigation (LL2)", async () => {
+    setup(ready);
+    const { container } = await render(<Overlay />);
+    await flush(5);
+    const result = await axe.run(document.documentElement, { runOnly: { type: "rule", values: ["page-has-heading-one"] } });
+    expect(result.violations).toEqual([]);
+    expect(Array.from(container.querySelectorAll("h1")).map((h) => h.textContent)).toEqual(["Double Tap"]);
+  });
+
   it("says when a refinement missed after its second try, with the draft", async () => {
     setup({ ...streaming, phase: "done", can_retry: true, message: "doubletap.overlay.refineMissed" });
     const { container } = await render(<Overlay />);
