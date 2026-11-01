@@ -42,6 +42,8 @@ pub const HANDOVER_EVENT: &str = "quickask:handover";
 pub const HANDOVER_MAX_QUESTION_CHARS: usize = 4_000;
 pub const HANDOVER_MAX_ANSWER_CHARS: usize = 60_000;
 pub const HANDOVER_MAX_CITATIONS: usize = 200;
+/// The longest question Search takes, in bytes (`search.faceted`'s `MAX_QUERY_LEN`).
+pub const HANDOVER_MAX_SEARCH_BYTES: usize = 4096;
 /// A citation's JSON size limit; larger ones are dropped.
 const HANDOVER_MAX_CITATION_BYTES: usize = 8 * 1024;
 /// Focus lost this soon after showing is the show itself settling (some window managers hand
@@ -624,6 +626,15 @@ fn clip(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 
+/// At most `max` bytes of `text`, cut on a character boundary.
+fn clip_bytes(text: &str, max: usize) -> &str {
+    let mut end = text.len().min(max);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 impl Handover {
     /// The handover for `page`, bounded: the question cleaned like a prefill but longer, the
     /// answer clipped and only for Chat, oversized citations dropped. `None` without a question.
@@ -636,17 +647,26 @@ impl Handover {
             .chars()
             .filter(|&c| c == '\n' || !(c.is_control() || bidi(c)))
             .collect();
-        let question = clip(cleaned.trim(), HANDOVER_MAX_QUESTION_CHARS)
+        let mut question = clip(cleaned.trim(), HANDOVER_MAX_QUESTION_CHARS)
             .trim_end()
             .to_string();
+        if page == "search" {
+            // Search refuses longer queries (`search.faceted`'s byte limit).
+            question = clip_bytes(&question, HANDOVER_MAX_SEARCH_BYTES)
+                .trim_end()
+                .to_string();
+        }
         if question.is_empty() {
             return None;
         }
         let answer = self.answer.filter(|_| page == "chat").and_then(|a| {
-            let text = clip(&a.text, HANDOVER_MAX_ANSWER_CHARS);
-            if text.trim().is_empty() {
+            // An answer too long to keep whole goes no further: a clipped one would no longer be
+            // recognised as the answer it is (the daemon finds which items an earlier answer came
+            // from by its exact text, to keep sensitive ones from cloud models).
+            if a.text.trim().is_empty() || a.text.chars().count() > HANDOVER_MAX_ANSWER_CHARS {
                 return None;
             }
+            let text = a.text;
             let fits = |v: &serde_json::Value| {
                 v.is_object()
                     && serde_json::to_vec(v).is_ok_and(|b| b.len() <= HANDOVER_MAX_CITATION_BYTES)
@@ -654,12 +674,19 @@ impl Handover {
             Some(HandoverAnswer {
                 text,
                 provider: a.provider.map(|p| clip(&p, 200)),
-                citations: a
-                    .citations
-                    .into_iter()
-                    .filter(fits)
-                    .take(HANDOVER_MAX_CITATIONS)
-                    .collect(),
+                citations: {
+                    // Within what Chat history saves for one message (all citations together).
+                    let mut total = 2usize;
+                    a.citations
+                        .into_iter()
+                        .filter(fits)
+                        .take(HANDOVER_MAX_CITATIONS)
+                        .take_while(|c| {
+                            total += serde_json::to_vec(c).map_or(usize::MAX, |b| b.len()) + 1;
+                            total <= crate::history::MAX_MESSAGE_BYTES
+                        })
+                        .collect()
+                },
                 general: a.general,
                 date: a.date.filter(|d| d.is_object() && fits(d)),
             })
@@ -742,14 +769,20 @@ mod tests {
         assert_eq!(a.citations[0]["partial"], serde_json::json!(true));
         assert_eq!(a.date.unwrap()["phrase"], "last week");
 
+        // Too long a question is cut; too long an answer is not handed over at all.
         let long = handover(&"q".repeat(10_000), &"a".repeat(100_000))
             .bounded("chat")
             .unwrap();
         assert_eq!(long.question.chars().count(), HANDOVER_MAX_QUESTION_CHARS);
-        assert_eq!(
-            long.answer.unwrap().text.chars().count(),
-            HANDOVER_MAX_ANSWER_CHARS
-        );
+        assert_eq!(long.answer, None);
+
+        // Citations stay within what history saves for one message.
+        let mut many = handover("q", "a");
+        many.answer.as_mut().unwrap().citations =
+            vec![serde_json::json!({"n": 1, "title": "t".repeat(7_000)}); 200];
+        let kept = many.bounded("chat").unwrap().answer.unwrap().citations;
+        assert!(!kept.is_empty() && kept.len() < 200);
+        assert!(serde_json::to_vec(&kept).unwrap().len() <= crate::history::MAX_MESSAGE_BYTES);
     }
 
     #[test]
@@ -760,6 +793,11 @@ mod tests {
         assert_eq!(h.page, "search");
         assert_eq!(h.question, "herons");
         assert_eq!(h.answer, None);
+        // Search takes at most 4096 bytes: a long question in a script of 3-byte characters
+        // is cut on a character boundary.
+        let jp = handover(&"日".repeat(3_000), "").bounded("search").unwrap();
+        assert!(jp.question.len() <= HANDOVER_MAX_SEARCH_BYTES);
+        assert_eq!(jp.question.chars().count(), HANDOVER_MAX_SEARCH_BYTES / 3);
         // Nothing to carry without a question; an empty answer is no answer.
         assert_eq!(handover(" \u{7} ", "x").bounded("chat"), None);
         assert_eq!(handover("q", "  ").bounded("chat").unwrap().answer, None);

@@ -2631,6 +2631,8 @@ export interface QuickAskHandover {
   page?: QuickAskPage | "";
   question: string;
   answer?: QuickAskHandoverAnswer | null;
+  /** Set by the main window when it took the handover (ms since the epoch). */
+  received?: number;
 }
 
 export interface QuickAskHandoverAnswer {

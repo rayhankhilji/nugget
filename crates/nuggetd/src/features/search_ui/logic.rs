@@ -213,9 +213,10 @@ fn parse_ymd(s: &str) -> Option<Date> {
 /// those it came from. Event starts report `extracted` (the contract's value for "the item says
 /// when it happened").
 pub(crate) fn own_date(d: &ItemDates, zone: &Zone) -> (OffsetDateTime, DateSource) {
-    // A floating date ("2024-03-31") is read at the zone's offset on that date: found by
-    // dating it at UTC first (off by at most a day, which only matters on the changeover).
-    let offset = zone.offset_at(nugget_retrieve::dates::item_date(d, UtcOffset::UTC));
+    // A floating date ("2024-03-31") is read at the offset in force at local midnight of that
+    // day: dated at UTC first, it is that day's UTC midnight (a timestamp ignores the offset).
+    let probe = nugget_retrieve::dates::item_date(d, UtcOffset::UTC);
+    let offset = zone.offset_at(zone.midnight(probe.date()));
     let at = nugget_retrieve::dates::item_date(d, offset);
     let fallback = d.source_modified_at.unwrap_or(d.updated_at);
     let source = if (d.event_start.is_some() || d.extracted_date.is_some()) && at != fallback {
@@ -1133,6 +1134,19 @@ mod tests {
             own_date(&dates(Some("2024-07-15"), None, None, u), &berlin).0,
             dt("2024-07-14T22:00:00Z")
         );
+    }
+
+    #[test]
+    fn floating_dates_east_of_utc_keep_their_day_on_the_changeover() {
+        // Sydney goes to summer time at 02:00 local on 6 October 2024 (15:00 UTC on the 5th):
+        // an item dated that day starts at local midnight, +10, not at the later +11.
+        let sydney = Zone::named("Australia/Sydney").unwrap();
+        let u = "2024-12-01T00:00:00Z";
+        let (at, _) = own_date(&dates(Some("2024-10-06"), None, None, u), &sydney);
+        assert_eq!(at, dt("2024-10-05T14:00:00Z"));
+        let r = day_range("", Some("2024-10-06"), Some("2024-10-06"), &sydney).unwrap();
+        assert!(r.contains(at));
+        assert_eq!(month_of(at, &sydney), "2024-10");
     }
 
     #[test]

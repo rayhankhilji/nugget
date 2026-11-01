@@ -557,7 +557,8 @@ impl RpcHandler {
             excluded_sensitive: ctx.excluded_sensitive,
             query_rewrite: rewritten.then_some(search_query),
             general,
-            date: date.map(ask_date_filter),
+            date: date
+                .map(|d| ask_date_filter(d, self.state.retriever.config().date_utc_offset_minutes)),
             partial: passages.iter().filter(|p| p.partial).map(|p| p.n).collect(),
         };
         self.spawn_stream(provider, stream, stream_id, notify, filter);
@@ -970,22 +971,25 @@ fn to_infer_request(messages: Vec<ipc::ChatMessage>) -> Result<ChatRequest, RpcE
     Ok(req)
 }
 
-/// The earlier turns of a `retrieve.ask` conversation that are sent on: the client's text is
-/// untrusted, so `System` entries are dropped (only the daemon writes the system prompt), as
-/// are empty ones; long turns are cut, then the newest turns within
-/// [`MAX_ASK_HISTORY_MESSAGES`] and [`MAX_ASK_HISTORY_CHARS`] are kept, starting with a user
-/// turn.
-/// The retriever's date filter as Ask reports it to clients.
-fn ask_date_filter(d: nugget_retrieve::DateFilter) -> ipc::AskDateFilter {
+/// The retriever's date filter as Ask reports it to clients, its bounds at the offset the
+/// phrase was read with (the retriever keeps them in UTC), so their dates are the user's days.
+fn ask_date_filter(d: nugget_retrieve::DateFilter, offset_minutes: i32) -> ipc::AskDateFilter {
+    let offset = time::UtcOffset::from_whole_seconds(offset_minutes.clamp(-18 * 60, 18 * 60) * 60)
+        .unwrap_or(time::UtcOffset::UTC);
     ipc::AskDateFilter {
         phrase: d.phrase,
-        start: d.range.start,
-        end: d.range.end,
+        start: d.range.start.to_offset(offset),
+        end: d.range.end.to_offset(offset),
         applied: d.applied,
         listed: d.listed,
     }
 }
 
+/// The earlier turns of a `retrieve.ask` conversation that are sent on: the client's text is
+/// untrusted, so `System` entries are dropped (only the daemon writes the system prompt), as
+/// are empty ones; long turns are cut, then the newest turns within
+/// [`MAX_ASK_HISTORY_MESSAGES`] and [`MAX_ASK_HISTORY_CHARS`] are kept, starting with a user
+/// turn.
 fn ask_history(history: Vec<ipc::ChatMessage>) -> Vec<ipc::ChatMessage> {
     let mut kept: Vec<ipc::ChatMessage> = Vec::new();
     let mut chars = 0usize;
@@ -1596,6 +1600,27 @@ mod tests {
         assert!(!is_provider_failure(&Error::Invalid("x".into())));
         assert!(!is_provider_failure(&Error::Cancelled));
     }
+    #[test]
+    fn ask_date_filter_is_written_at_the_phrase_offset() {
+        use time::format_description::well_known::Rfc3339;
+        let at = |s: &str| time::OffsetDateTime::parse(s, &Rfc3339).unwrap();
+        // "last week" read at +01:00: the retriever keeps 26 Oct–2 Nov local midnights in UTC.
+        let d = nugget_retrieve::DateFilter {
+            phrase: "last week".into(),
+            range: nugget_retrieve::DateRange {
+                start: at("2026-10-25T23:00:00Z"),
+                end: at("2026-11-01T23:00:00Z"),
+            },
+            applied: true,
+            listed: false,
+        };
+        let f = ask_date_filter(d, 60);
+        let json = serde_json::to_value(&f).unwrap();
+        assert_eq!(json["start"], "2026-10-26T00:00:00+01:00");
+        assert_eq!(json["end"], "2026-11-02T00:00:00+01:00");
+        assert!(f.applied && !f.listed);
+    }
+
     #[test]
     fn ask_history_drops_system_and_keeps_the_newest_turns() {
         let h = ask_history(vec![

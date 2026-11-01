@@ -16,13 +16,14 @@ import {
   type ChatMessage,
   type Citation,
   type ProviderInfo,
+  type QuickAskHandover,
   type StoredChatMessage,
   type StoredConversation,
   type Tier,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
 import { usePendingChatHandover, usePendingNewChat } from "../hooks.nav";
-import { handoverCitations } from "../quickask/handover";
+import { handoverCitations, handoverExpired } from "../quickask/handover";
 import { localityLabel, tierLabel } from "../format";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
@@ -451,13 +452,11 @@ export function ChatPage() {
 
   // JJ2: quick ask's "Open in Chat": a new conversation with its question and finished answer
   // (saved like any other), or with the question in the composer when there was no answer yet.
-  usePendingChatHandover((h) => {
+  // While a reply streams it waits for it to end; a draft in the composer is never replaced.
+  const queuedHandover = useRef<QuickAskHandover | null>(null);
+  const applyHandover = (h: QuickAskHandover) => {
     const question = h.question.trim();
     if (!question) return;
-    if (active) {
-      setInput(question);
-      return;
-    }
     freshChat.current = true;
     setConvId(newConversationId());
     setConfirmClear(false);
@@ -478,13 +477,25 @@ export function ChatPage() {
           dateFilter: a.date ?? undefined,
         },
       ]);
-      setInput("");
     } else {
       setTurns([]);
-      setInput(question);
+      setInput((draft) => (draft.trim() ? draft : question));
     }
     inputRef.current?.focus();
+  };
+  usePendingChatHandover((h) => {
+    if (handoverExpired(h)) return;
+    if (active) queuedHandover.current = h;
+    else applyHandover(h);
   });
+  useEffect(() => {
+    const h = queuedHandover.current;
+    if (active || !h) return;
+    queuedHandover.current = null;
+    applyHandover(h);
+    // Once the reply that held it back has ended.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   const open = (c: StoredConversation) => {
     if (active || c.id === convId) return;

@@ -7,11 +7,19 @@ import { useEffect } from "react";
 import { quickAskApi, type Citation, type QuickAskHandover } from "../api";
 import { requestChatHandover, requestSearch } from "../hooks.nav";
 
+/** How long a handover may wait for its page (e.g. behind onboarding) before it is dropped. */
+export const HANDOVER_TTL_MS = 60_000;
+
 /** Pass a handover to its page (the shell has already navigated there). */
-export function deliverHandover(h: QuickAskHandover | null | undefined): void {
+export function deliverHandover(h: QuickAskHandover | null | undefined, now: number = Date.now()): void {
   if (!h || typeof h.question !== "string" || !h.question.trim()) return;
   if (h.page === "search") requestSearch(h.question);
-  else if (h.page === "chat") requestChatHandover(h);
+  else if (h.page === "chat") requestChatHandover({ ...h, received: now });
+}
+
+/** A handover that waited too long for Chat: opening Chat hours later must not replace a conversation. */
+export function handoverExpired(h: QuickAskHandover, now: number = Date.now()): boolean {
+  return typeof h.received === "number" && now - h.received > HANDOVER_TTL_MS;
 }
 
 /** Take a waiting handover now (one may have been left before this window loaded) and on each event. */
