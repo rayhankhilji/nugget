@@ -1,0 +1,34 @@
+# ks-probe (B adapted: killswitch-mm1/ks-probe-B.diff), KS_REPEAT=3
+A#1 timeline:
+         4 ms OS key_input START (24 chars)
+       306 ms KILL SWITCH ENGAGED
+       356 ms run returned: Halted
+      1504 ms OS key_input END (all text typed)
+A#1 log: ["run_started", "model_turn", "decision(type_text):\"allowed\"", "executed(type_text):INTERRUPTED[interrupted (halted): the action had already started and may have completed]", "finished:\"halted\""]
+B#1: approvals accepted after kill: 20/20; OS actions after kill: 0
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    e.g. accepted: accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+A#2 timeline:
+         1 ms OS key_input START (24 chars)
+       305 ms KILL SWITCH ENGAGED
+       352 ms run returned: Halted
+      1501 ms OS key_input END (all text typed)
+A#2 log: ["run_started", "model_turn", "decision(type_text):\"allowed\"", "executed(type_text):INTERRUPTED[interrupted (halted): the action had already started and may have completed]", "finished:\"halted\""]
+B#2: approvals accepted after kill: 20/20; OS actions after kill: 0
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    e.g. accepted: accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+A#3 timeline:
+         1 ms OS key_input START (24 chars)
+       305 ms KILL SWITCH ENGAGED
+       353 ms run returned: Halted
+      1501 ms OS key_input END (all text typed)
+A#3 log: ["run_started", "model_turn", "decision(type_text):\"allowed\"", "executed(type_text):INTERRUPTED[interrupted (halted): the action had already started and may have completed]", "finished:\"halted\""]
+B#3: approvals accepted after kill: 20/20; OS actions after kill: 0
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]
+    e.g. accepted: accepted=true outcome=Halted log=["model_turn", "decision(press_key):\"denied\"", "finished:\"halted\""]

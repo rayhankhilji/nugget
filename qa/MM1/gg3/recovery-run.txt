@@ -1,0 +1,101 @@
+# gg3-recovery (scratch copy of qa/GG3/recovery/probe, root Cargo.lock), all scenarios
+== dump-mail-two-priya
+   outcome "failed: script ended" steps 2 (12 ms)
+== dump-files-receipts
+   outcome "failed: script ended" steps 4 (24 ms)
+== dump-calendar-thursday
+   outcome "failed: script ended" steps 2 (11 ms)
+== dump-forms
+   outcome "failed: script ended" steps 2 (5 ms)
+== dump-settings
+   outcome "failed: script ended" steps 2 (8 ms)
+== dump-mail-compose
+   outcome "failed: script ended" steps 3 (10 ms)
+== dump-mail-open
+   outcome "needs_input: Your request says “Priya”, and I see more than one: Priya Shah: Lunch Thursday?, Priya Shah: Offsite photos. Which one did you mean?" steps 2 (3 ms)
+== unknown-id-approve
+   outcome "needs_input: Your request says “Priya”, and I see more than one: Priya Shah: Lunch Thursday?, Priya Shah: Offsite photos. Which one did you mean?" steps 2 (6 ms)
+== unknown-id-deny
+   outcome "needs_input: Your request says “Priya”, and I see more than one: Priya Shah: Lunch Thursday?, Priya Shah: Offsite photos. Which one did you mean?" steps 2 (7 ms)
+== name-not-id
+   outcome "needs_input: Your request says “Priya”, and I see more than one: Priya Shah: Lunch Thursday?, Priya Shah: Offsite photos. Which one did you mean?" steps 2 (6 ms)
+== relayout-stale-id
+   outcome "failed: script ended" steps 4 (18 ms)
+== relayout-stale-id-no-refresh
+   outcome "failed: script ended" steps 3 (6 ms)
+== app-refuses-x3
+   outcome "failed: verification failed 3 times in a row (last: click: click: no visible effect)" steps 7 (32 ms)
+== disabled-loop
+   outcome "failed: no progress: `click` failed the same way 3 times in a row" steps 4 (20 ms)
+== stale-loop
+   outcome "needs_input: Your request says “Priya”, and I see more than one: Priya Shah: Lunch Thursday?, Priya Shah: Offsite photos. Which one did you mean?" steps 2 (5 ms)
+== declined-loop
+   outcome "failed: the user declined click “Send”; stopped instead of asking again" steps 8 (19 ms)
+== timeout-loop
+   outcome "failed: the user declined click “Send”; stopped instead of asking again" steps 6 (316 ms)
+== observe-loop
+   outcome "budget_exhausted: step limit (8)" steps 8 (24 ms)
+== text-loop
+   outcome "failed: script ended" steps 4 (0 ms)
+== loading-act
+   outcome "failed: script ended" steps 5 (10 ms)
+== loading-wait-for
+   outcome "failed: script ended" steps 7 (3038 ms)
+== harness-slow-observes
+   outcome "failed: script ended" steps 5 (18 ms)
+== harness-slow-observes-2
+   outcome "failed: script ended" steps 5 (25 ms)
+== wait-for-timeouts
+   outcome "failed: script ended" steps 6 (1509 ms)
+== wait-for-vs-deadline
+   outcome "budget_exhausted: deadline (2000 ms)" steps 1 (2001 ms)
+== modal-blocks
+   outcome "failed: no progress: `click` failed the same way 3 times in a row" steps 7 (28 ms)
+== modal-dismiss
+   outcome "failed: script ended" steps 4 (25 ms)
+== session-step-budget
+   outcome "failed: script ended" steps 5 (17 ms)
+== deadline-in-confirm
+   outcome "budget_exhausted: deadline (2000 ms)" steps 4 (2001 ms)
+== kill-mid-run
+   outcome "halted" steps 3 (909 ms)
+== malformed
+   outcome "needs_input: Your request says “Priya”, and I see more than one: Priya Shah: Lunch Thursday?, Priya Shah: Offsite photos. Which one did you mean?" steps 7 (4 ms)
+== ambiguous-wait-for
+   outcome "failed: script ended" steps 3 (7 ms)
+== ambiguous-guess-delete
+   outcome "needs_input: Your request says “Priya”, and I see more than one: Priya Shah: Lunch Thursday?, Priya Shah: Offsite photos. Which one did you mean?" steps 2 (3 ms)
+== ask-resume
+   outcome "needs_input: Which of Priya's emails: 'Lunch Thursday?' or 'Offsite photos'?" steps 2 (8 ms)
+   outcome "failed: not done: click (destroy) was declined by the user" steps 5 (17 ms)
+== ask-resume-screen-changed
+   outcome "needs_input: Which Priya email?" steps 2 (5 ms)
+   outcome "failed: script ended" steps 4 (7 ms)
+== ask-then-kill
+   outcome "needs_input: Which Priya email?" steps 2 (8 ms)
+   outcome "halted" steps 2 (8 ms)
+== ask-kill-then-release
+   outcome "needs_input: Which Priya email?" steps 2 (3 ms)
+   outcome "failed: script ended" steps 5 (15 ms)
+== ask-with-sibling-call
+   outcome "needs_input: Which?" steps 1 (0 ms)
+   outcome "failed: script ended" steps 3 (4 ms)
+== ask-empty-question
+   outcome "failed: script ended" steps 2 (0 ms)
+== ask-loop
+   outcome "needs_input: Which?" steps 1 (0 ms)
+   outcome "needs_input: Which, again?" steps 2 (0 ms)
+   outcome "needs_input: And again?" steps 3 (0 ms)
+== cycle-fail
+   outcome "failed: verification failed 3 times in a row (last: click: click: no visible effect)" steps 10 (36 ms)
+== declined-then-done
+   outcome "failed: not done: click (send) was declined by the user" steps 5 (15 ms)
+== timedout-then-done
+   outcome "failed: not done: click (send) was not confirmed in time" steps 5 (319 ms)
+== refused-then-done
+   outcome "unverified: 1 change(s) could not be verified (click)" steps 3 (14 ms)
+== nothing-then-done
+   outcome "succeeded" steps 2 (8 ms)
+== stale-error-then-done
+   outcome "failed: the model reported success, but the request asks to send something and no such action was done" steps 4 (39 ms)
+wrote /tmp/claude-0/-home-user-nugget/2ea50096-6b1f-533b-bfde-bcd3d5b26052/scratchpad/recovery-out.json

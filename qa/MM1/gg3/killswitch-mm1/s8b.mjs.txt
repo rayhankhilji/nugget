@@ -1,0 +1,28 @@
+  // MM1 adaptation of s8 (GG3-13 changed the premise: an id never observed no longer asks).
+  // Same script; records whether a confirmation was raised, what the click and observe returned
+  // (GG3-13, GG3-24 wording), and that nothing ran after a kill.
+  async s8b_computer_use_linux_noask(rep) {
+    await ensureResumed();
+    const script = [
+      { calls: [{ name: "click", args: { element: "e7" } }] },
+      { calls: [{ name: "observe", args: {} }] },
+      { calls: [{ name: "finish", args: { outcome: "cannot", summary: "no desktop" } }] },
+    ];
+    const r = await startTask(script, "Click the Send button in the mail app (synthetic)");
+    const id = r.result.task_id;
+    const fin = await finishedOf(id, 30000);
+    const evs = agentEvents(env.ipc, id);
+    const results = evs
+      .filter((e) => e.event === "action_done" || e.event === "action_denied")
+      .map((e) => `${e.tool}: ${e.summary ?? e.reason}`.slice(0, 400));
+    const asked = evs.filter((e) => e.event === "confirmation_needed").length;
+    const a11yPermWording = results.some((s) => /permission is not granted/i.test(s));
+    return {
+      tools_offered: r.result.tools.filter((t) => !t.startsWith("browser_")),
+      confirmations: asked,
+      results,
+      finished: fin?.params.event.outcome,
+      a11y_permission_wording: a11yPermWording,
+      ok: asked === 0 && !a11yPermWording,
+    };
+  },

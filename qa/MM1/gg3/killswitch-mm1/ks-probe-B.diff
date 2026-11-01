@@ -1,0 +1,38 @@
+--- a/qa/GG3/killswitch/rust/src/main.rs
++++ b/(scratch copy)/rust/src/main.rs
+@@ -171,15 +171,17 @@
+         let mut acts_after_kill = 0;
+         let mut logs = Vec::new();
+         for _ in 0..20 {
+-            let (a, cu, kill, log, mut rx) = agent(vec![("click", json!({"element": "e7"}))], Duration::from_millis(10));
++            // MM1: GG3-13 made a click on a never-observed id fail "not on screen" without asking, so B
++            // now uses a Send-class key chord (ctrl+enter) to reach a pending confirmation.
++            let (a, cu, kill, log, mut rx) = agent(vec![("press_key", json!({"keys": "ctrl+enter"}))], Duration::from_millis(10));
+             let a = Arc::new(a);
+             let a2 = a.clone();
+             let run = tokio::spawn(async move { a2.run(Task::new("B", "click send"), AgentConfig::default()).await });
+             let req = loop {
+-                match rx.recv().await {
+-                    Some(AgentEvent::ConfirmationNeeded { request, .. }) => break request,
+-                    Some(_) => continue,
+-                    None => panic!("no confirmation"),
++                match tokio::time::timeout(Duration::from_secs(10), rx.recv()).await {
++                    Ok(Some(AgentEvent::ConfirmationNeeded { request, .. })) => break request,
++                    Ok(Some(_)) => continue,
++                    _ => panic!("no confirmation within 10 s"),
+                 }
+             };
+             kill.halt();
+@@ -191,10 +193,10 @@
+             if ok {
+                 accepted_after_kill += 1;
+             }
+-            acts_after_kill += calls[kill_idx..].iter().filter(|c| c.contains("OS act START")).count();
++            acts_after_kill += calls[kill_idx..].iter().filter(|c| c.contains("OS act START") || c.contains("key_input START")).count();
+             logs.push(format!("accepted={ok} outcome={:?} log={:?}", r.outcome, records(&log).into_iter().rev().take(3).rev().collect::<Vec<_>>()));
+         }
+-        println!("B#{rep}: approvals accepted after kill: {accepted_after_kill}/20; OS clicks after kill: {acts_after_kill}");
++        println!("B#{rep}: approvals accepted after kill: {accepted_after_kill}/20; OS actions after kill: {acts_after_kill}");
+         for l in logs.iter().take(3) {
+             println!("    {l}");
+         }
