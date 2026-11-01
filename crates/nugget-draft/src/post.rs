@@ -29,6 +29,9 @@ pub struct PostOptions {
     pub strip_signoff: bool,
     /// Cut the draft at a sentence end once it passes this many words.
     pub max_words: Option<usize>,
+    /// The end of the line the user is typing (before the caret): a draft that starts by
+    /// repeating it has the repeat dropped (QA GG1-22).
+    pub typed: String,
 }
 
 /// Output of one [`PostProcessor::push`].
@@ -57,6 +60,8 @@ pub struct PostProcessor {
     quote: Option<char>,
     emitted: String,
     finished: bool,
+    /// The draft's first word continues the word the user is typing ("Thurs" + "day").
+    continues_word: bool,
 }
 
 impl PostProcessor {
@@ -69,7 +74,13 @@ impl PostProcessor {
             quote: None,
             emitted: String::new(),
             finished: false,
+            continues_word: false,
         }
+    }
+
+    /// Whether the draft's first word continues the word before the caret (no space between).
+    pub fn continues_word(&self) -> bool {
+        self.continues_word
     }
 
     /// Everything emitted so far.
@@ -112,6 +123,7 @@ impl PostProcessor {
     }
 
     fn apply_head(&mut self, head: Head) {
+        self.continues_word = head.continues_word;
         self.skip = Some(head.pos);
         self.fence = head.fence;
         self.quote = head.quote;
@@ -188,8 +200,14 @@ impl PostProcessor {
             if !complete && could_be_preamble(&lower) {
                 return None;
             }
-            match preamble_len(&lower, complete) {
+            // A whole line is a preamble only when the draft goes on after it: "Sure, I'll
+            // email you the slides tomorrow." on its own is the reply (QA JJ1-4).
+            let more = !rest[line.len()..].trim().is_empty();
+            match preamble_len(&lower, complete, more) {
                 Some(k) => pos = skip_ws(raw, pos + k),
+                None if !last && !more && preamble_len(&lower, complete, true).is_some() => {
+                    return None;
+                }
                 None => break,
             }
         }
@@ -215,16 +233,23 @@ impl PostProcessor {
         if self.opts.strip_greeting {
             let rest = &raw[head.pos..];
             let line = first_line(rest);
-            let lower = line.to_ascii_lowercase();
-            let complete = last
-                || rest.contains('\n')
-                || rest.len() >= HEAD_WINDOW
-                || line.contains([',', '!', '.']);
-            if !complete && could_be_greeting(&lower) {
-                return None;
+            let done = last || rest.contains('\n') || rest.len() >= HEAD_WINDOW;
+            match greeting_len(line, done) {
+                Greeting::NeedMore => return None,
+                Greeting::Len(k) => head.pos = skip_ws(raw, head.pos + k),
+                Greeting::No => {}
             }
-            if let Some(k) = greeting_len(&lower, rest.contains('\n') || last) {
-                head.pos = skip_ws(raw, head.pos + k);
+        }
+        if !self.opts.typed.is_empty() {
+            let rest = &raw[head.pos..];
+            match typed_overlap(&self.opts.typed, rest, last) {
+                Overlap::NeedMore => return None,
+                Overlap::Len(k) => {
+                    head.continues_word = rest[k..].starts_with(char::is_alphanumeric)
+                        && self.opts.typed.ends_with(char::is_alphanumeric);
+                    head.pos = skip_ws(raw, head.pos + k);
+                }
+                Overlap::No => {}
             }
         }
         Some(head)
@@ -236,15 +261,56 @@ struct Head {
     pos: usize,
     fence: bool,
     quote: Option<char>,
+    continues_word: bool,
 }
 
 impl Head {
     fn at(pos: usize) -> Self {
         Self {
             pos,
-            fence: false,
-            quote: None,
+            ..Default::default()
         }
+    }
+}
+
+enum Overlap {
+    No,
+    NeedMore,
+    /// Bytes of the draft that repeat the typed text.
+    Len(usize),
+}
+
+/// The longest end of `typed` (from a word start, at least three characters) that `rest`
+/// starts with, ignoring ASCII case: "i'd hold off until" + "i'd hold off until the…", or the
+/// partial word "Thurs" + "Thursday".
+fn typed_overlap(typed: &str, rest: &str, last: bool) -> Overlap {
+    let mut need_more = false;
+    let starts = typed.char_indices().filter(|(i, c)| {
+        !c.is_whitespace() && (*i == 0 || typed[..*i].ends_with(char::is_whitespace))
+    });
+    for (i, _) in starts {
+        let tail = &typed[i..];
+        if tail.chars().count() < 3 {
+            continue;
+        }
+        let n = tail.len().min(rest.len());
+        if rest.is_char_boundary(n) && tail.is_char_boundary(n) {
+            if rest.len() >= tail.len() && rest[..n].eq_ignore_ascii_case(tail) {
+                // What follows tells whether the draft continues the word.
+                if rest.len() == n && !last {
+                    return Overlap::NeedMore;
+                }
+                return Overlap::Len(n);
+            }
+            if rest.len() < tail.len() && tail[..n].eq_ignore_ascii_case(&rest[..n]) && !last {
+                need_more = true;
+            }
+        }
+    }
+    if need_more {
+        Overlap::NeedMore
+    } else {
+        Overlap::No
     }
 }
 
@@ -321,7 +387,7 @@ fn could_be_preamble(lower: &str) -> bool {
 
 /// Length in bytes of a preamble at the start of this lower-cased first line, if it is one.
 /// Lower-casing is ASCII-only, so offsets match the original.
-fn preamble_len(lower: &str, complete: bool) -> Option<usize> {
+fn preamble_len(lower: &str, complete: bool, more: bool) -> Option<usize> {
     if !PREAMBLE_STARTS.iter().any(|s| lower.starts_with(s)) {
         return None;
     }
@@ -337,7 +403,7 @@ fn preamble_len(lower: &str, complete: bool) -> Option<usize> {
         return Some(c + 1);
     }
     let t = lower.trim_end();
-    if complete && t.len() <= 120 && has_meta(t) && t.ends_with([':', '.', '!']) {
+    if complete && more && t.len() <= 120 && has_meta(t) && t.ends_with([':', '.', '!']) {
         return Some(lower.len());
     }
     None
@@ -361,6 +427,44 @@ const GREETINGS: &[&str] = &[
     "hola",
     "bonjour",
     "hallo",
+    // The UI languages (QA GG1-29).
+    "sehr geehrte",
+    "sehr geehrter",
+    "guten tag",
+    "guten morgen",
+    "liebe",
+    "lieber",
+    "moin",
+    "servus",
+    "estimado",
+    "estimada",
+    "estimados",
+    "buenos días",
+    "buenas tardes",
+    "buenas",
+    "querido",
+    "querida",
+    "bonsoir",
+    "cher",
+    "chère",
+    "salut",
+    "olá",
+    "ola",
+    "prezado",
+    "prezada",
+    "bom dia",
+    "boa tarde",
+    "नमस्ते",
+    "मरहबा",
+    "مرحبا",
+    "السلام عليكم",
+    "عزيزي",
+    "عزيزتي",
+    "こんにちは",
+    "お疲れ様です",
+    "お世話になっております",
+    "您好",
+    "你好",
 ];
 
 fn greeting_word(lower: &str) -> Option<&'static str> {
@@ -382,18 +486,62 @@ fn could_be_greeting(lower: &str) -> bool {
     l.is_empty() || greeting_word(l).is_some() || GREETINGS.iter().any(|g| g.starts_with(l))
 }
 
-/// Length of a greeting at the start of this lower-cased text: a whole short line ("Hi Sam,")
-/// or an inline salutation ending at the first comma or exclamation mark ("Hey Sam, thanks").
-fn greeting_len(lower: &str, line_complete: bool) -> Option<usize> {
-    let g = greeting_word(lower)?;
-    let line = first_line(lower);
-    if line_complete && line.len() <= 40 && line.split_whitespace().count() <= 5 {
-        return Some(line.len());
+enum Greeting {
+    No,
+    NeedMore,
+    /// The greeting's length in bytes.
+    Len(usize),
+}
+
+/// Ends a salutation ("Hi Sam," / "Hola, Ana:" / "こんにちは、").
+const SALUTATION_ENDS: [char; 7] = [',', '!', '.', '—', ':', '、', '،'];
+
+/// A greeting at the start of this first line (`done`: the line is complete): the whole short
+/// line ("Hi Sam,"), or an inline salutation ending at its punctuation ("Hey Sam, thanks"). When
+/// the punctuation comes right after the greeting word ("Hola, Ana:"), a short capitalised name
+/// up to the next `,`/`:`/`!` belongs to it too (QA GG1-30).
+fn greeting_len(line: &str, done: bool) -> Greeting {
+    let lower = line.to_ascii_lowercase();
+    let Some(g) = greeting_word(&lower) else {
+        return if !done && could_be_greeting(&lower) {
+            Greeting::NeedMore
+        } else {
+            Greeting::No
+        };
+    };
+    if done && line.len() <= 40 && line.split_whitespace().count() <= 5 {
+        return Greeting::Len(line.len());
     }
     let after = &line[g.len()..];
-    let end = after.find([',', '!', '.', '—'])?;
-    let salutation = &after[..end];
-    (salutation.split_whitespace().count() <= 3 && end <= 30).then(|| g.len() + end + 1)
+    let Some(p1) = after.find(SALUTATION_ENDS) else {
+        return if done || after.len() > 30 {
+            Greeting::No
+        } else {
+            Greeting::NeedMore
+        };
+    };
+    let p1_end = g.len() + p1 + after[p1..].chars().next().map_or(1, char::len_utf8);
+    let salutation = &after[..p1];
+    if !salutation.trim().is_empty() {
+        return if salutation.split_whitespace().count() <= 3 && p1 <= 30 {
+            Greeting::Len(p1_end)
+        } else {
+            Greeting::No
+        };
+    }
+    // "Hola, Ana:": a name after the punctuation.
+    let rest = &line[p1_end..];
+    match rest.find([',', ':', '!']) {
+        Some(p2) => {
+            let name = rest[..p2].trim();
+            let is_name = !name.is_empty()
+                && name.split_whitespace().count() <= 3
+                && name.chars().next().is_some_and(char::is_uppercase);
+            Greeting::Len(if is_name { p1_end + p2 + 1 } else { p1_end })
+        }
+        None if !done && rest.len() <= 30 && !rest.contains('.') => Greeting::NeedMore,
+        None => Greeting::Len(p1_end),
+    }
 }
 
 /// The longest prefix of `body` that is safe to clean and emit now: trailing whitespace, a
@@ -413,6 +561,21 @@ fn safe_end(body: &str) -> usize {
                 .all(|c| c.is_ascii_digit() || c == ',' || c == ' ')
         {
             end = i;
+            continue;
+        }
+        // A partial `{my_name}` placeholder, a complete one at the end (its comma goes with it
+        // when punctuation follows), and a comma that may come before one.
+        if let Some(i) = s.rfind('{')
+            && (s[i + 1..]
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '_')
+                || placeholder_len(&s[i..]) == Some(s.len() - i))
+        {
+            end = i;
+            continue;
+        }
+        if s.ends_with(',') {
+            end -= 1;
             continue;
         }
         let t = s.trim_end_matches(['*', '_', '`', '~']);
@@ -450,6 +613,16 @@ fn citation_len(s: &str) -> Option<usize> {
     None
 }
 
+/// A voice placeholder the model copied (`{first_name}`, `{my_name}`) at `s[..]`: its byte
+/// length (QA GG1-23).
+fn placeholder_len(s: &str) -> Option<usize> {
+    let inner = s.strip_prefix('{')?;
+    let close = inner.find('}')?;
+    let name = &inner[..close];
+    (name.ends_with("name") && name.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+        .then_some(close + 2)
+}
+
 /// Remove citation markers (always) and markdown (in plain-text mode); fold newlines in
 /// single-line fields. Local rewrites only, so a clean of a prefix is a prefix of the clean of
 /// the whole (given [`safe_end`]).
@@ -460,6 +633,16 @@ fn token_clean(s: &str, opts: &PostOptions) -> String {
         let rest = &s[i..];
         if let Some(n) = citation_len(rest) {
             if out.ends_with(' ') {
+                out.pop();
+            }
+            i += n;
+            continue;
+        }
+        if let Some(n) = placeholder_len(rest) {
+            if out.ends_with(' ') {
+                out.pop();
+            }
+            if out.ends_with(',') && rest[n..].starts_with(['!', '.', '?', ',']) {
                 out.pop();
             }
             i += n;
@@ -483,6 +666,11 @@ fn token_clean(s: &str, opts: &PostOptions) -> String {
             }
         }
         let c = rest.chars().next().unwrap_or(' ');
+        if c == '‸' {
+            // The prompt's caret marker, copied by a small model (QA GG1-56).
+            i += c.len_utf8();
+            continue;
+        }
         if opts.single_line && (c == '\n' || c == '\r') {
             if !out.is_empty() && !out.ends_with(' ') {
                 out.push(' ');
@@ -574,6 +762,41 @@ const SIGNOFFS: &[&str] = &[
     "take care",
     "br",
     "thx",
+    // The UI languages (QA GG1-29).
+    "mit freundlichen grüßen",
+    "freundliche grüße",
+    "viele grüße",
+    "beste grüße",
+    "liebe grüße",
+    "grüße",
+    "gruß",
+    "lg",
+    "vg",
+    "atentamente",
+    "saludos",
+    "un saludo",
+    "cordialmente",
+    "abrazos",
+    "cordialement",
+    "bien à vous",
+    "bien cordialement",
+    "bisous",
+    "amitiés",
+    "atenciosamente",
+    "abraços",
+    "abraço",
+    "obrigado",
+    "obrigada",
+    "धन्यवाद",
+    "सादर",
+    "مع خالص التحية",
+    "تحياتي",
+    "شكرا",
+    "よろしくお願いいたします",
+    "よろしくお願いします",
+    "此致敬礼",
+    "谢谢",
+    "祝好",
     "--",
     "-",
     "—",
@@ -582,7 +805,7 @@ const SIGNOFFS: &[&str] = &[
 /// Whether a line is a bare sign-off ("Best," / "Thanks!" / "--").
 pub(crate) fn is_signoff(line: &str) -> bool {
     let l = line.trim().to_lowercase();
-    let l = l.trim_end_matches([',', '!', '.', ' ']);
+    let l = l.trim_end_matches([',', '!', '.', ' ', '。', '、', '،']);
     !line.trim().is_empty() && (SIGNOFFS.contains(&l) || (line.trim() == "--"))
 }
 
@@ -624,9 +847,15 @@ fn strip_signoff(t: &mut String) {
 /// Byte offset just past the last sentence end (`.`, `!`, `?` followed by whitespace, or a
 /// newline).
 fn last_sentence_end(s: &str) -> Option<usize> {
+    sentence_ends(s).next_back()
+}
+
+/// Byte offsets just after each sentence end: a line break, `.`/`!`/`?` before whitespace, or a
+/// CJK full stop, exclamation or question mark.
+fn sentence_ends(s: &str) -> impl DoubleEndedIterator<Item = usize> + '_ {
     s.char_indices()
         .filter(|(i, c)| {
-            *c == '\n'
+            matches!(c, '\n' | '。' | '！' | '？')
                 || (matches!(c, '.' | '!' | '?')
                     && s[i + c.len_utf8()..]
                         .chars()
@@ -634,37 +863,24 @@ fn last_sentence_end(s: &str) -> Option<usize> {
                         .is_some_and(char::is_whitespace))
         })
         .map(|(i, c)| i + c.len_utf8())
-        .next_back()
 }
 
+/// Length in words, counting Chinese, Japanese and Thai by characters (QA GG1-8).
 pub(crate) fn count_words(s: &str) -> usize {
-    s.split_whitespace().count()
+    nugget_voice::word_units(s)
 }
 
 /// Cut `s` to at most `max` words, at the last sentence end inside the limit when there is one
 /// past the half-way mark; never shorter than `min_len` bytes (already emitted).
 fn cut_to_words(s: &str, max: usize, min_len: usize) -> String {
-    let mut limit = s.len();
-    for (n, (i, _)) in s
-        .char_indices()
-        .filter(|(i, c)| !c.is_whitespace() && (*i == 0 || s[..*i].ends_with(char::is_whitespace)))
-        .enumerate()
-    {
-        if n == max {
-            limit = i;
-            break;
-        }
-    }
-    let window = &s[..limit];
-    let half = s
-        .char_indices()
-        .filter(|(i, c)| !c.is_whitespace() && (*i == 0 || s[..*i].ends_with(char::is_whitespace)))
-        .nth(max / 2)
-        .map_or(0, |(i, _)| i);
-    let sentence_end = window
-        .char_indices()
-        .filter(|(i, c)| matches!(c, '.' | '!' | '?' | '\n') && *i >= half)
-        .map(|(i, c)| i + c.len_utf8())
+    let limit = nugget_voice::word_units_until(s, max as f32)
+        .0
+        .unwrap_or(s.len());
+    let half = nugget_voice::word_units_until(s, (max / 2) as f32)
+        .0
+        .unwrap_or(0);
+    let sentence_end = sentence_ends(&s[..limit])
+        .filter(|e| *e > half)
         .rfind(|e| *e >= min_len);
     let end = sentence_end.unwrap_or(limit).max(min_len).min(s.len());
     s[..end].trim_end().to_owned()
@@ -721,6 +937,8 @@ mod tests {
             "r|```text\nSounds good, thanks!\n```\n|Sounds good, thanks!",
             "p|The launch moved to May 3 [1] and the budget is fixed [2][3].|The launch moved to May 3 and the budget is fixed.",
             "p|See [1, 2].|See.",
+            "p|I can do Thursday‸|I can do Thursday",
+            "p|Thanks, {first_name}!\n\nKind regards, {my_name}|Thanks!\n\nKind regards,",
             "p|Use [draft] mode [x1].|Use [draft] mode [x1].",
             "p|**Yes** — I'll bring the `slides` and ~~cake~~ snacks.|Yes — I'll bring the slides and cake snacks.",
             "p|# Notes\nAll good|Notes\nAll good",
@@ -735,6 +953,15 @@ mod tests {
             "p|Thursday works for me.\n\nBest,\nTanuj|Thursday works for me.\n\nBest,\nTanuj",
             "p|Thursday works for me.\n\nLet me know if you'd like any changes!|Thursday works for me.",
             "b|Sure! Here's a draft:\n\n\"Hi Sam,\n\nThursday [1] works.\n\nBest,\nT\"\n\nLet me know if that works!|Thursday works.",
+            // QA GG1-29 and GG1-30: greetings and sign-offs in other languages, and a name
+            // after the greeting's comma.
+            "g|Sehr geehrte Frau Weber,\n\ndie Lieferung kommt Montag.|die Lieferung kommt Montag.",
+            "g|Hola, Ana:\n\nPide 40 cajas, por favor.|Pide 40 cajas, por favor.",
+            "g|Hi, thanks for the update.|thanks for the update.",
+            "s|Die Lieferung kommt Montag.\n\nMit freundlichen Grüßen\nKlara Brandt|Die Lieferung kommt Montag.",
+            // QA JJ1-4: a complete one-line reply is not a preamble.
+            "p|Sure, I'll email you the slides tomorrow.|Sure, I'll email you the slides tomorrow.",
+            "p|Great, the new version looks good to me!|Great, the new version looks good to me!",
         ];
         for case in cases {
             let [o, text, want] = case.splitn(3, '|').collect::<Vec<_>>()[..] else {
@@ -746,9 +973,62 @@ mod tests {
                 strip_greeting: o == "g" || o == "b",
                 strip_signoff: o == "s" || o == "b",
                 max_words: None,
+                typed: String::new(),
             };
             assert_eq!(by_char(opts, text), want, "{text:?}");
         }
+    }
+
+    /// QA GG1-22: a draft that starts by repeating the typed text has the repeat dropped.
+    #[test]
+    fn typed_text_is_not_repeated() {
+        for (typed, draft, want, joined) in [
+            (
+                "i'd hold off until",
+                "i'd hold off until the flake is fixed.",
+                "the flake is fixed.",
+                false,
+            ),
+            (
+                "I can do Thurs",
+                "Thursday at 3 works.",
+                "day at 3 works.",
+                true,
+            ),
+            (
+                "Sounds good,",
+                "Great, see you then.",
+                "Great, see you then.",
+                false,
+            ),
+        ] {
+            let mut p = PostProcessor::new(PostOptions {
+                plain_text: true,
+                typed: typed.into(),
+                ..Default::default()
+            });
+            let mut out: String = draft.chars().map(|c| p.push(&c.to_string()).text).collect();
+            out.push_str(&p.finish());
+            assert_eq!(
+                (out.as_str(), p.continues_word()),
+                (want, joined),
+                "{typed}"
+            );
+        }
+    }
+
+    /// QA GG1-8: Japanese is measured in characters, and `。` ends a sentence.
+    #[test]
+    fn cjk_drafts_are_measured_and_cut_by_characters() {
+        assert_eq!(count_words("今日は良い天気です"), 5);
+        let opts = PostOptions {
+            plain_text: true,
+            max_words: Some(10),
+            ..Default::default()
+        };
+        let long =
+            "了解です。明日の会議は十時からです。資料は私が準備します。よろしくお願いします。";
+        assert_eq!(by_char(opts, long), "了解です。明日の会議は十時からです。");
     }
 
     #[test]

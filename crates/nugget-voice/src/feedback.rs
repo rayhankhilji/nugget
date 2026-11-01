@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use crate::Channel;
 
 /// Source id of feedback items in the store.
-pub const FEEDBACK_SOURCE: &str = "nugget-voice";
+pub const FEEDBACK_SOURCE: &str = nugget_core::ids::VOICE_SAMPLES_SOURCE;
 /// `metadata.kind` of feedback items.
 pub const FEEDBACK_KIND: &str = "voice_feedback";
 /// Longest final text kept (characters).
@@ -89,7 +89,14 @@ impl FeedbackSink for StoreFeedbackSink {
             "recipients": ctx.recipients,
             "outcome": feedback.outcome,
             "insert_verified": feedback.insert_verified,
-            "sensitive": ctx.sensitive,
+            // Like every item nothing has judged yet, a sent text counts as sensitive until local
+            // triage clears it (QA GG8 R2-1); one drawn from sensitive context stays sensitive.
+            "sensitive": true,
+            "triage": if ctx.sensitive {
+                json!({"state": "skipped", "reason": "draft"})
+            } else {
+                json!({"state": "pending"})
+            },
             "junk": false,
         }));
         if let Some(s) = ctx.subject.as_deref().filter(|s| !s.trim().is_empty()) {

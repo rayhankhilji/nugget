@@ -116,17 +116,24 @@ cmd, powershell, powershell_ise, pwsh, org.gnome.terminal, gnome-terminal, \
 gnome-terminal-server, org.gnome.console, kgx, org.kde.konsole, konsole, alacritty, kitty, \
 wezterm, wezterm-gui, org.wezfurlong.wezterm, ghostty, xterm, uxterm, dev.warp.warp-stable, \
 dev.warp.warp, warp, com.gexperts.tilix, tilix, org.gnome.ptyxis, ptyxis, terminator, foot, \
-footclient, rxvt, urxvt, co.zeit.hyper, hyper, org.tabby, tabby";
+footclient, rxvt, urxvt, co.zeit.hyper, hyper, org.tabby, tabby, putty, kitty.exe, mintty, \
+mobaxterm, termius, com.termius-dmg.mac, securecrt, com.vandyke.securecrt, guake, tilda, \
+yakuake, cool-retro-term, terminus, contour, rio, com.raphaelamorim.rio";
 
 /// Whether the focused app is a terminal emulator ([`DEFAULT_TERMINAL_APPS`]).
 /// Also any app whose id contains `terminal` (`xfce4-terminal`, `mate-terminal`), or whose name
-/// has the word "Terminal".
+/// has the word "Terminal". Also a terminal inside another app (QA GG1-3): an accessibility role
+/// `terminal`, or a field whose label starts with "Terminal" (VS Code's integrated terminal is
+/// an xterm.js textarea labelled "Terminal 1, bash") or names xterm.
 pub fn is_terminal(ctx: &DraftContext) -> bool {
     let s = Signals::of(ctx);
     (!s.app_id.is_empty()
         && (listed(DEFAULT_TERMINAL_APPS).any(|t| s.app_id == t || s.app_id_raw == t)
             || s.app_id.contains("terminal")))
         || words(&s.app_name).any(|w| w == "terminal")
+        || s.role == "terminal"
+        || words(&s.text).next() == Some("terminal")
+        || s.text.contains("xterm")
 }
 
 /// Refuse secure fields, excluded apps and terminals, then classify. `excluded` holds app ids
@@ -184,29 +191,112 @@ pub fn is_secure(ctx: &DraftContext) -> bool {
     if role.contains("secure") || role.contains("password") {
         return true;
     }
+    // A multi-line field labelled "Message #it-password-help" is a chat, not a credential field
+    // (QA GG1-26): the label rule applies to single-line and unknown fields only.
+    if matches!(role.as_str(), "text_area" | "document" | "web_area") {
+        return false;
+    }
     let text = field_text(ctx);
-    const PHRASES: &[&str] = &[
-        "password",
-        "passwort",
-        "passphrase",
-        "passcode",
-        "one-time code",
-        "one time code",
-        "verification code",
-        "security code",
-        "authentication code",
-        "2fa code",
-        "card number",
-        "credit card",
-        "social security",
-        "recovery key",
-        "secret key",
-        "private key",
-        "api key",
-    ];
-    const WORDS: &[&str] = &["pin", "otp", "cvv", "cvc", "ssn", "mfa", "totp", "iban"];
-    PHRASES.iter().any(|p| text.contains(p)) || words(&text).any(|w| WORDS.contains(&w))
+    SECURE_PHRASES.iter().any(|p| text.contains(p))
+        || words(&text).any(|w| {
+            SECURE_WORDS.contains(&w)
+                // "cvv2", "cvc2", "cvn".
+                || ["cvv", "cvc", "cvn"].iter().any(|p| w.starts_with(p))
+        })
 }
+
+/// Label and placeholder phrases (lower case) that name a credential, in the UI languages
+/// (English, Arabic, German, Spanish, French, Hindi, Japanese, Portuguese, Chinese).
+const SECURE_PHRASES: &[&str] = &[
+    // Passwords.
+    "password",
+    "passphrase",
+    "passcode",
+    "passwort",
+    "kennwort",
+    "contraseña",
+    "contrasena",
+    "mot de passe",
+    "senha",
+    "palavra-passe",
+    "كلمة المرور",
+    "كلمة السر",
+    "पासवर्ड",
+    "パスワード",
+    "暗証番号",
+    "密码",
+    "口令",
+    // One-time and verification codes.
+    "one-time code",
+    "one time code",
+    "verification code",
+    "security code",
+    "authentication code",
+    "2fa code",
+    "digit code",
+    "code we sent",
+    "code we texted",
+    "code we emailed",
+    "code that we sent",
+    "enter the code",
+    "enter code",
+    "bestätigungscode",
+    "verifizierungscode",
+    "sicherheitscode",
+    "einmalcode",
+    "código de verificación",
+    "código de seguridad",
+    "código de verificação",
+    "código de segurança",
+    "code de vérification",
+    "code de sécurité",
+    "code à usage unique",
+    "رمز التحقق",
+    "رمز الأمان",
+    "كود التحقق",
+    "सत्यापन कोड",
+    "ओटीपी",
+    "認証コード",
+    "確認コード",
+    "ワンタイム",
+    "セキュリティコード",
+    "验证码",
+    "校验码",
+    "安全码",
+    // Cards, accounts and identity numbers.
+    "card number",
+    "credit card",
+    "kartennummer",
+    "kreditkarte",
+    "número de tarjeta",
+    "numero de tarjeta",
+    "numéro de carte",
+    "número do cartão",
+    "رقم البطاقة",
+    "कार्ड नंबर",
+    "カード番号",
+    "卡号",
+    "信用卡",
+    "social security",
+    // Keys.
+    "recovery key",
+    "secret key",
+    "private key",
+    "api key",
+];
+
+/// Whole label words (lower case) that name a credential.
+const SECURE_WORDS: &[&str] = &[
+    "pin",
+    "otp",
+    "ssn",
+    "mfa",
+    "totp",
+    "iban",
+    "geheimzahl",
+    "nip",
+    "पिन",
+];
 
 /// Lower-cased app id with platform suffixes removed: `Slack.exe` → `slack`,
 /// `org.gnome.Evolution.desktop` → `org.gnome.evolution`.
@@ -505,7 +595,29 @@ fn is_search(s: &Signals) -> bool {
         "search for",
         "quick find",
     ];
-    STARTS.iter().any(|p| t.starts_with(p)) || CONTAINS.iter().any(|p| t.contains(p))
+    // The UI languages (QA GG1-14): "In E-Mails suchen", "Buscar", "Rechercher"...
+    const LOCAL: &[&str] = &[
+        "suchen",
+        "suche",
+        "buscar",
+        "búsqueda",
+        "rechercher",
+        "recherche",
+        "pesquisar",
+        "procurar",
+        "zoeken",
+        "cerca",
+        "بحث",
+        "ابحث",
+        "खोज",
+        "検索",
+        "搜索",
+        "查找",
+    ];
+    STARTS.iter().any(|p| t.starts_with(p))
+        || CONTAINS.iter().any(|p| t.contains(p))
+        || ((s.single_line() || s.role.is_empty()) && words(t).any(|w| LOCAL.contains(&w)))
+        || LOCAL.iter().any(|p| !p.is_ascii() && t.starts_with(p))
 }
 
 /// Strong label/placeholder signals, independent of the app.
@@ -595,7 +707,13 @@ fn is_header_field(s: &Signals) -> bool {
         "issue title",
         "summary",
     ];
-    HEADERS.contains(&t) || t.starts_with("subject") || t.starts_with("title")
+    // "To recipients", "Add a subject" (QA GG1-25).
+    let first = words(t).next().unwrap_or("");
+    HEADERS.contains(&t)
+        || t.starts_with("subject")
+        || t.starts_with("title")
+        || matches!(first, "to" | "cc" | "bcc" | "recipients")
+        || t.starts_with("add a subject")
 }
 
 /// Labels that mark a plain form input (name, email, phone, address...).
@@ -745,7 +863,11 @@ com.raycast.macos||||search
 |https://forum.example.com/t/1||Write a comment|comment
 ||||unknown
 ||document||document
-com.tinyspeck.slackmacgap|||Message body|email_body";
+com.tinyspeck.slackmacgap|||Message body|email_body
+|https://mail.google.com/mail/u/0/|text_field|In E-Mails suchen|search
+|https://outlook.office.com/mail/inbox|text_field|Buscar|search
+|https://mail.google.com/mail/u/0/|combo_box|To recipients|form_field
+|https://outlook.office.com/mail/inbox|text_field|Add a subject|form_field";
 
     #[test]
     fn classify_table() {
@@ -800,12 +922,32 @@ com.tinyspeck.slackmacgap|||Message body|email_body";
             ("text_field", "Card number"),
             ("text_field", "CVV"),
             ("text_field", "One-time code"),
+            // QA GG1-2 and GG1-10: the UI languages, and common real labels.
+            ("text_field", "Contraseña"),
+            ("text_field", "Mot de passe"),
+            ("text_field", "Kennwort"),
+            ("text_field", "Senha"),
+            ("text_field", "كلمة المرور"),
+            ("text_field", "पासवर्ड"),
+            ("text_field", "パスワード"),
+            ("text_field", "密码"),
+            ("text_field", "Enter the 6-digit code we texted you"),
+            ("text_field", "CVV2"),
+            ("text_field", "Kartennummer"),
+            ("text_field", "Código de verificación"),
+            ("text_field", "رمز التحقق"),
+            ("text_field", "認証コード"),
+            ("text_field", "验证码"),
+            ("combo_box", "Numéro de carte"),
         ] {
             let c = ctx("", "", role, label);
             assert_eq!(gate(&c, &[]), Err(Refusal::SecureField), "{role} {label}");
         }
         // "Pinned messages" is not a PIN.
         let c = ctx("slack", "", "", "Pinned messages note");
+        assert_eq!(gate(&c, &[]), Ok(FieldKind::ChatMessage));
+        // QA GG1-26: a chat named after a credential word is a chat.
+        let c = ctx("slack", "", "text_area", "Message #it-password-help");
         assert_eq!(gate(&c, &[]), Ok(FieldKind::ChatMessage));
     }
 
@@ -879,6 +1021,7 @@ com.tinyspeck.slackmacgap|||Message body|email_body";
             "xfce4-terminal",
             "mate-terminal",
             "xterm",
+            "putty.exe",
         ] {
             let mut c = ctx(id, "", "", "");
             c.app.name = "Term".into();
@@ -894,6 +1037,9 @@ com.tinyspeck.slackmacgap|||Message body|email_body";
         c.app.name = "Terminally Online Notes".into();
         assert!(!is_terminal(&c));
         assert!(!is_terminal(&ctx("com.tinyspeck.slackmacgap", "", "", "")));
+        // QA GG1-3: VS Code's integrated terminal.
+        let c = ctx("com.microsoft.VSCode", "", "text_area", "Terminal 1, bash");
+        assert!(is_terminal(&c));
         // Secure fields stay refused even where terminals are allowed.
         let mut c = ctx("com.apple.Terminal", "", "", "");
         c.field.secure = true;

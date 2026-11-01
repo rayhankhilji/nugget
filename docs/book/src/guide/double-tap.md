@@ -95,10 +95,14 @@ falls back to the chat model.
 - **Read secure fields or excluded apps** (by default password managers, banking and payment apps
   and sites, and system settings; you can add more).
 - **Send by itself.** You press Send.
-- **Copy secrets into a draft.** A check stops a draft that would write out a credential from a
-  sensitive item, and drafts stick to dated facts from your items. `[draft] grounding = false` turns
-  this off; `grounding_check = "sentences"` is stricter but delays the first character by a few
-  seconds (see [Configuration](../reference/config.md#draft)).
+- **Copy secrets, or follow instructions planted in your items.** Retrieved notes and mail are
+  data: a sentence in them that tells an AI what to do is removed before the prompt. A check drops
+  any sentence of the draft that writes out a credential from a sensitive item, a link, email
+  address, phone, account or card number that neither the thread nor your own text has, or an
+  amount or date the thread and your items don't support. `[draft] grounding = false` keeps the
+  credential and link checks but stops checking values; `grounding_check = "sentences"` is
+  stricter but delays the first character by a few seconds (see
+  [Configuration](../reference/config.md#draft)).
 - **Record keystrokes.** For a double tap only modifier presses are observed; a chord is registered
   with the OS. No key or text is logged.
 
