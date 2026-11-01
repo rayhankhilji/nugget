@@ -122,7 +122,7 @@ Briefs in `docs/waves/wave-ee/`. Each lead runs a build layer and an independent
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| EE1 | `ee/entity-resolution` | session_01CTjRSqYumRoCNPsSqWU2cj | knowledge entity resolution (nicknames, job changes) to entity F1 ≥ 0.8 |
+| EE1 | `ee/entity-resolution` | session_01CTjRSqYumRoCNPsSqWU2cj | knowledge entity resolution (nicknames, job changes) to entity F1 ≥ 0.8 (merged); GG5 package incl. the GG5-1 Blocker (merged) |
 | EE2 | `ee/draft-recall` | session_01CTjRSt5sQsEtmsjpgvdjDp | draft fact recall ≥ 0.8, no invented attachments, read-ahead latency kept |
 | EE3 | `ee/ask-quality` | session_01CTjRSuP6na1rnf1rpacnuU | Ask answer-quality suite with real models (correctness, citations, abstention) and fixes (merged) |
 | EE4 | `ee/security-review-2` | session_01CTjRSrVUg4uRkQ2yhjxPSi | security review of AA, BB, CC and manifest v4; fixes with regression tests (merged) |
@@ -150,7 +150,7 @@ Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every 
 | GG4 | `qa/proactive` | session_01CTjRSs4jvVBSuALYkXyaPB | proactive cards and morning brief over two simulated weeks (merged) |
 | GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases (merged) |
 | GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux (merged) |
-| GG7 | `qa/multilingual` | session_01CTjRSuVMK4RoFUCfw3YT7S | AI features in all 9 UI languages |
+| GG7 | `qa/multilingual` | session_01CTjRSuVMK4RoFUCfw3YT7S | AI features in all 9 UI languages (merged) |
 | GG8 | `qa/privacy` | session_01CTjRSt3BBwCh15spCoLbbe | privacy and egress verified from captured network traffic (merged) |
 
 ## Wave HH (fixes from QA): cloud sessions from the integration branch
@@ -158,9 +158,9 @@ Each package comes from a QA report and is briefed in its session's first messag
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| HH1 | `hh/agent-safety` | session_01CTjRSqmXYyfpHJMkM85Dkm | agent safety controls from GG3: ambiguous targets, destructive actions, honest success judging, Send confirmation, key presses |
+| HH1 | `hh/agent-safety` | session_01CTjRSqmXYyfpHJMkM85Dkm | agent safety controls from GG3: ambiguous targets, destructive actions, honest success judging, Send confirmation, key presses (merged) |
 | HH2 | `hh/ingest-triage` | session_01CTjRSuENAr49jmyhRicJfp | fast, accurate ingest triage from GG2, plus GG4-6 and GG5-2 (merged) |
-| HH3 | `hh/vault-worker` | session_01CTjRSrrQ23MtSpaPTRSLsG | vault merge-back, sensitivity and the knowledge worker from GG5 |
+| HH3 | `hh/vault-worker` | session_01CTjRSrrQ23MtSpaPTRSLsG | vault merge-back, sensitivity and the knowledge worker from GG5 (merged) |
 
 ## Wave II (new features alongside the fix waves): cloud sessions from fd101a3
 Briefs in `docs/waves/wave-ii/`. Each lead runs a build layer and a review layer with at most 2 subagents.
@@ -171,7 +171,7 @@ Briefs in `docs/waves/wave-ii/`. Each lead runs a build layer and a review layer
 | II2 | `ii/search-timeline` | session_01CTjRSu5FjmNFwghuCH6zXU | search facets, saved and recent searches, timeline view, previews (merged) |
 | II3 | `ii/doubletap-overlay` | session_01CTjRSssSYSW1zounPmKgQR | Double Tap overlay: edit before insert, retry, refine, practice field, draft history, accessibility (merged) |
 | II4 | `ii/platform-integration` | session_01CTjRSqcYoFMkRXF5giqCX2 | tray, launch at login, notifications, `nugget://` links, plugin file association, quick-ask window, single instance (merged) |
-| II5 | `ii/scale` | session_01CTjRSqY1SocQ9DVnvje1WF | 500k-item bench and fixes, virtualised lists, README Scale section |
+| II5 | `ii/scale` | session_01CTjRSqY1SocQ9DVnvje1WF | 500k-item bench and fixes, virtualised lists, README Scale section (merged) |
 
 ## Wave JJ (in the slots II1–II4 and HH2 freed): cloud sessions from efebc0c
 Briefs in `docs/waves/wave-jj/`.
@@ -186,7 +186,17 @@ Briefs in `docs/waves/wave-kk/`.
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| KK1 | `kk/local-runtime` | session_01CTjRSqn9kQoQWcX9bBPsQ4 | the local model runtime never leaves the user stuck: hang watchdog, start/crash errors with Retry, robust downloads, warm-up state, config migration |
-| KK2 | `kk/first-run` | session_01CTjRSteVTsZBRrsJbRacvb | first run, sources and keys: folders with nothing to index, change/remove API keys, onboarding memory, duplicate sources, Ask with no AI |
+| KK1 | `kk/local-runtime` | session_01CTjRSqn9kQoQWcX9bBPsQ4 | the local model runtime never leaves the user stuck: hang watchdog, start/crash errors with Retry, robust downloads, warm-up state, config migration (merged) |
+| KK2 | `kk/first-run` | session_01CTjRSteVTsZBRrsJbRacvb | first run, sources and keys: folders with nothing to index, change/remove API keys, onboarding memory, duplicate sources, Ask with no AI (merged) |
 
 Follow-ups sent to finished leads: EE5 (GG6 lifecycle: quit, uninstall, update, shell log), HH2 (Ask during sync, GG6-1 re-verification, JJ1-1 multilingual sensitivity), II3 (JJ1 overlay fixes, merged), II1 (JJ1 connector fixes), HH3 (confirmed vs unsorted sensitivity; knowledge without a model).
+
+## Wave LL (local work while GitHub Actions is unavailable): cloud sessions from e0d44e65
+Briefs in `docs/waves/wave-ll/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| LL1 | `ll/scale-2` | session_01CTjRStCGdkzoNYFkwUbY7a | ingest batching, search tail at 500k, paging for search and the privacy ledger, graph overview top-N, incremental proactive |
+| LL2 | `ll/polish` | session_01CTjRSuFnF7QT7GVZZVgLcG | Chat Retry, RTL and locale details from GG7, accessibility of every new screen, empty/loading/error states |
+
+Also running: EE4 security review 3 (`ee/security-review-3`), GG8 privacy round 2 (`qa/privacy-2`), DD4 GG7 retrieval (merged), HH2 JJ1-1 model side (merged), EE5 GG6 lifecycle (merged).
