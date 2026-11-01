@@ -451,11 +451,26 @@ pub enum StopOutcome {
 /// A connection of its own for stopping: closing it as the daemon goes away never reaches the
 /// shared connection's listeners (the tray, the windows).
 async fn own_client(app: &AppHandle) -> Option<nugget_ipc::Client> {
-    let paths = app.state::<Daemon>().paths_opt()?.clone();
-    tokio::time::timeout(CALL_TIMEOUT, nugget_ipc::Client::connect(&paths))
-        .await
-        .ok()?
-        .ok()
+    let daemon = app.state::<Daemon>();
+    let paths = daemon.paths_opt()?.clone();
+    // A second connection can be refused for a moment (on Windows a named pipe answers "busy"
+    // until the server has opened its next instance), so retry briefly before giving up.
+    let mut last = String::new();
+    for attempt in 0..10u32 {
+        match tokio::time::timeout(CALL_TIMEOUT, nugget_ipc::Client::connect(&paths)).await {
+            Ok(Ok(c)) => return Some(c),
+            Ok(Err(e)) => last = e.to_string(),
+            Err(_) => last = "timed out".into(),
+        }
+        if attempt < 9 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    }
+    // Fall back to the app's own connection: the tray and windows no longer react to it closing
+    // once quitting has begun.
+    let shared = daemon.existing_client().await;
+    tracing::info!(error = %last, fallback = shared.is_some(), "no separate connection to nuggetd");
+    shared
 }
 
 /// Stop the daemon the app owns, gracefully when it can (module docs). `reason` goes to the
@@ -499,19 +514,27 @@ async fn stop_owned_locked(app: &AppHandle, reason: &str) -> StopOutcome {
     let (pid, start) = target;
     tracing::info!(pid, reason, "stopping the nuggetd this app started");
     let graceful = match &client {
-        Some(c) => matches!(
-            tokio::time::timeout(
-                CALL_TIMEOUT,
-                c.call::<_, DaemonShutdownResponse>(
-                    method::DAEMON_SHUTDOWN,
-                    &DaemonShutdownRequest {
-                        reason: Some(reason.into()),
-                    },
-                ),
-            )
-            .await,
-            Ok(Ok(_))
-        ),
+        Some(c) => match tokio::time::timeout(
+            CALL_TIMEOUT,
+            c.call::<_, DaemonShutdownResponse>(
+                method::DAEMON_SHUTDOWN,
+                &DaemonShutdownRequest {
+                    reason: Some(reason.into()),
+                },
+            ),
+        )
+        .await
+        {
+            Ok(Ok(_)) => true,
+            Ok(Err(e)) => {
+                tracing::info!(error = %e, "daemon.shutdown failed");
+                false
+            }
+            Err(_) => {
+                tracing::info!("daemon.shutdown timed out");
+                false
+            }
+        },
         None => false,
     };
     drop(client);

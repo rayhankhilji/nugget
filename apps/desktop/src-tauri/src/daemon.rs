@@ -245,6 +245,16 @@ impl Daemon {
             .unwrap_or_default()
     }
 
+    /// The live client, if the app is connected now (never connects).
+    pub async fn existing_client(&self) -> Option<Client> {
+        self.client
+            .lock()
+            .await
+            .as_ref()
+            .filter(|c| !c.is_closed())
+            .cloned()
+    }
+
     /// The live client, connecting first if needed.
     pub async fn client(&self, app: &AppHandle) -> Result<Client, CmdError> {
         let mut slot = self.client.lock().await;
