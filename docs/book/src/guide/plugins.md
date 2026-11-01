@@ -26,8 +26,7 @@ in the daemon's `NUGGET_PLUGIN_CATALOG` variable (separated like `PATH`):
 catalog_dirs = ["/opt/nugget/plugins", "/home/me/plugins"]  # absolute paths
 ```
 
-Only files directly in a folder are listed (at most 64). Unreadable, unsigned or untrusted packages
-are shown with the reason and no install button.
+Unsigned or untrusted packages are listed with the reason and no install button.
 
 ## What a plugin can ask for
 
@@ -43,8 +42,7 @@ Nothing else: no other files, sockets, environment, other plugins or your store.
 `GET` and `HEAD` requests. On an update, new access is marked **New**; an update that asks for
 nothing new installs without asking.
 
-Each call runs in a fresh instance limited to 64 MiB of memory, 15 s per tool call, 30 minutes per
-sync, 32 HTTP requests per tool call and 16 MiB per response.
+Each call runs in a fresh, memory- and time-limited instance.
 
 ## Signatures and trust
 

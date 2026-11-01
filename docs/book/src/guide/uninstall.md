@@ -17,9 +17,8 @@ tray when I log in**, then quit Nugget. Or run:
 nuggetd uninstall-service
 ```
 
-(`nuggetd` is in `/Applications/Nugget.app/Contents/MacOS/` on macOS, `/usr/bin/` on Linux and
-`C:\Program Files\Nugget\` for the `.msi`.) The `setup.exe` uninstaller does this for you. If the
-app is already gone, see [login entries left behind](#login-entries-left-behind).
+The `setup.exe` uninstaller does this for you. If the app is already gone, see
+[login entries left behind](#login-entries-left-behind).
 
 ## 2. Remove the app
 

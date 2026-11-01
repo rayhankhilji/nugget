@@ -36,8 +36,8 @@ recorded; requests to your local network are.
 
 **Limits:** the ledger covers Nugget's own traffic, not what an [MCP](mcp.md) app or your browser
 does with your data. A crash mid-request can leave no row. Update rows come from the desktop app and
-can be lost if it quits while the daemon is stopped. A "local" server that forwards to the cloud (such as Ollama's `-cloud` models) looks local. Mark
-it `locality = "cloud"` in [`config.toml`](../reference/config.md#providers).
+can be lost if it quits while the daemon is stopped. A "local" server that forwards to the cloud
+(such as Ollama's `-cloud` models) looks local: mark it `locality = "cloud"` in [`config.toml`](../reference/config.md#providers).
 
 ## Sensitive items
 

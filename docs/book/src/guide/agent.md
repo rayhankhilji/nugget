@@ -25,9 +25,8 @@ you when the daemon stopped is not resumed; it shows as interrupted.
 | Computer use | Act on desktop apps through the accessibility APIs (elements, never screen coordinates). On by default; `computer_use = false` under `[agent]` turns it off |
 | Plugins | Read-only tools from installed [plugins](plugins.md) |
 
-**The browser extension** (Chrome, Chromium, Edge, Firefox 128+) has no network access of its own
-and talks to the daemon only through a local native-messaging host. You allow sites one at a time
-from its popup. While it acts, your browser shows an overlay with a **Stop** button.
+**The browser extension** (Chrome, Chromium, Edge, Firefox 128+) talks only to the local daemon. You
+allow sites one at a time from its popup; while it acts, a **Stop** button overlays the page.
 
 ## Confirmations
 
@@ -46,8 +45,8 @@ No answer within 2 minutes counts as a denial.
 A task stops at 30 steps, 10 minutes, 500 000 model tokens or 3 failed verifications in a row,
 whichever comes first, plus per-class limits (see [Safety](safety.md#rate-limits)).
 
-Every change the agent makes is checked afterwards. A task is **succeeded** only when every change
-verified; otherwise it is **unverified** or **failed**, and the timeline shows which step.
+A task is **succeeded** only when every change it made was verified afterwards; otherwise it is
+**unverified** or **failed**, and the timeline shows which step.
 
 ## Prompt injection
 

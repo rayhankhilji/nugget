@@ -29,28 +29,24 @@ the key ceremony. Commands assume `R=rayhankhilji/nugget`, run from a repository
 
 ## Step 1. GitHub repository setup
 
-- [ ] **Environment `release-build`**: only `v*` tags, no reviewers. Holds the Apple secrets and
-  Windows signing variables.
+- [ ] **Environments.** `release-build` (only `v*` tags, no reviewers; holds Apple secrets and
+  Windows variables) and `release` (only `v*` tags, at least two required reviewers, *Prevent
+  self-review*; holds the updater key):
 
   ```sh
   R=rayhankhilji/nugget
   gh api -X PUT repos/$R/environments/release-build --input - <<'EOF'
   {"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
   EOF
-  gh api -X POST repos/$R/environments/release-build/deployment-branch-policies -f name='v*' -f type=tag
-  ```
-
-- [ ] **Environment `release`**: only `v*` tags, at least two required reviewers, *Prevent
-  self-review* on. Holds the updater private key.
-
-  ```sh
-  gh api users/<maintainer-login> -q .id          # once per reviewer
+  gh api users/<maintainer-login> -q .id          # reviewer ids, once per reviewer
   gh api -X PUT repos/$R/environments/release --input - <<'EOF'
   {"prevent_self_review": true,
    "reviewers": [{"type": "User", "id": 1111111}, {"type": "User", "id": 2222222}],
    "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
   EOF
-  gh api -X POST repos/$R/environments/release/deployment-branch-policies -f name='v*' -f type=tag
+  for e in release-build release; do
+    gh api -X POST repos/$R/environments/$e/deployment-branch-policies -f name='v*' -f type=tag
+  done
   ```
 
 - [ ] **Tag ruleset** (Settings → Rules → Rulesets → *New tag ruleset*): tags `v*`, *Active*,
@@ -65,22 +61,15 @@ the key ceremony. Commands assume `R=rayhankhilji/nugget`, run from a repository
 Without these the macOS app is ad-hoc signed, not notarized, and Gatekeeper blocks it (the build
 still succeeds, with a warning).
 
-- [ ] **Developer ID Application certificate** (Account Holder role). Create a CSR in Keychain
-  Access, create the certificate on developer.apple.com, install it, then export it **with its
-  private key** as `.p12`.
+- [ ] Create a **Developer ID Application** certificate (Account Holder role; CSR from Keychain
+  Access) and export it **with its private key** as `.p12`. Create an **App Store Connect API
+  key** (Users and Access → Integrations → Team Keys, access *Developer*); the `.p8` downloads once.
 
   ```sh
   base64 -i DeveloperID.p12 | gh secret set APPLE_CERTIFICATE --env release-build -R $R
   gh secret set APPLE_CERTIFICATE_PASSWORD --env release-build -R $R      # the .p12 password
   security find-identity -v -p codesigning
-  gh secret set APPLE_SIGNING_IDENTITY --env release-build -R $R \
-    --body 'Developer ID Application: <Name> (<TEAMID>)'
-  ```
-
-- [ ] **App Store Connect API key** (Users and Access → Integrations → Team Keys, access
-  *Developer*). Note Issuer ID and Key ID; the `.p8` downloads once.
-
-  ```sh
+  gh secret set APPLE_SIGNING_IDENTITY --env release-build -R $R --body 'Developer ID Application: <Name> (<TEAMID>)'
   gh secret set APPLE_API_ISSUER --env release-build -R $R --body '<issuer-uuid>'
   gh secret set APPLE_API_KEY_ID --env release-build -R $R --body '<key-id>'
   gh secret set APPLE_API_KEY_P8 --env release-build -R $R < AuthKey_<key-id>.p8   # plain PEM
@@ -101,7 +90,9 @@ is stored. Without this (or a `.pfx`) installers are unsigned and SmartScreen wa
   *Identity validation* → *New* → *Public*. Can take days; eligibility is limited. The validated
   name is the publisher users see.
 - [ ] **Certificate profile**: *Public Trust*, linked to the validated identity.
-- [ ] **Entra app and federated credential** (CI's identity):
+- [ ] **Entra app, federated credential, Signer role on the one profile only, and the five
+  `release-build` variables** (all or none; a partial set fails the build). If the repository's
+  OIDC subject template is customised, match it.
 
   ```sh
   az ad app create --display-name nugget-release-signing --query appId -o tsv   # = AZURE_CLIENT_ID
@@ -112,20 +103,9 @@ is stored. Without this (or a `.pfx`) installers are unsigned and SmartScreen wa
     "issuer": "https://token.actions.githubusercontent.com",
     "subject": "repo:rayhankhilji/nugget:environment:release-build",
     "audiences": ["api://AzureADTokenExchange"]}'
-  ```
-
-  If the repository's OIDC subject template is customised, match it instead.
-- [ ] **Signer role on the one profile only** (not account or subscription):
-
-  ```sh
   az role assignment create --assignee <appId> \
     --role "Trusted Signing Certificate Profile Signer" \
     --scope "/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.CodeSigning/codeSigningAccounts/<account>/certificateProfiles/<profile>"
-  ```
-
-- [ ] **Variables in `release-build`** (all five or none; a partial set fails the build):
-
-  ```sh
   gh variable set AZURE_TRUSTED_SIGNING_ENDPOINT --env release-build -R $R --body 'https://eus.codesigning.azure.net'
   gh variable set AZURE_TRUSTED_SIGNING_ACCOUNT  --env release-build -R $R --body '<account>'
   gh variable set AZURE_TRUSTED_SIGNING_PROFILE  --env release-build -R $R --body '<profile>'
@@ -133,18 +113,13 @@ is stored. Without this (or a `.pfx`) installers are unsigned and SmartScreen wa
   gh variable set AZURE_TENANT_ID                --env release-build -R $R --body '<tenantId>'
   ```
 
-- [ ] Optional manual test on Windows (your own `az login`, which also needs the Signer role):
-  `pwsh packaging/windows/sign.ps1 -InstallDlib <dir>` prints the plugin path for
-  `AZURE_TRUSTED_SIGNING_DLIB`; set the endpoint, account and profile variables, then
-  `pwsh packaging/windows/sign.ps1 test.exe` and `Get-AuthenticodeSignature test.exe`.
+- [ ] Optional manual test on Windows with your own `az login` (needs the Signer role too):
+  `sign.ps1 -InstallDlib <dir>` prints the plugin path for `AZURE_TRUSTED_SIGNING_DLIB`; set the
+  endpoint, account and profile, then `pwsh packaging/windows/sign.ps1 test.exe`.
 
-**Alternative: exportable `.pfx`** (rare since CAs moved keys to hardware). Trusted Signing wins
-if both are set.
-
-```sh
-base64 -w0 cert.pfx | gh secret set WINDOWS_CERTIFICATE --env release-build -R $R
-gh secret set WINDOWS_CERTIFICATE_PASSWORD --env release-build -R $R
-```
+**Alternative: exportable `.pfx`** (rare now; Trusted Signing wins if both are set):
+`base64 -w0 cert.pfx | gh secret set WINDOWS_CERTIFICATE --env release-build -R $R` and
+`gh secret set WINDOWS_CERTIFICATE_PASSWORD --env release-build -R $R`.
 
 ## Step 4. Key ceremony: updater key
 
@@ -152,28 +127,19 @@ The updater key signs every payload and the feed. Apps trust exactly the built-i
 losing the private key ends updates, leaking it lets anyone ship one. Two maintainers present; do
 Step 5 in the same session.
 
-- [ ] **Online, prepare the throwaway machine**: Node 22 + pnpm, `gh`, `gfshare`
-  (`libgfshare-bin`), Rust and a repository clone:
+- [ ] Prepare the throwaway machine **online** (Node 22 + pnpm, `gh`, `gfshare` from
+  `libgfshare-bin`, Rust, a clone), generate **offline** with a strong password, split key and
+  password 2-of-3 (one share per maintainer, offline; `ssss-split` can't take the key file), then
+  store it **online**:
 
   ```sh
-  pnpm dlx @tauri-apps/cli@2.11.5 --version          # caches the pinned CLI
+  pnpm dlx @tauri-apps/cli@2.11.5 --version          # online: caches the pinned CLI
   cargo build --locked -p nugget-models --example sign-manifest
-  ```
-
-- [ ] **Offline**, generate the key with a strong password, and split key and password 2-of-3
-  (one share per maintainer, stored offline; `ssss-split` can't take the key file):
-
-  ```sh
-  pnpm dlx @tauri-apps/cli@2.11.5 signer generate -w ./nugget-updater.key
+  pnpm dlx @tauri-apps/cli@2.11.5 signer generate -w ./nugget-updater.key   # offline
   gfsplit -n 2 -m 3 nugget-updater.key              # nugget-updater.key.NNN ×3
   printf '%s' '<password>' > updater-password.txt && gfsplit -n 2 -m 3 updater-password.txt
   gfcombine -o check.key nugget-updater.key.<a> nugget-updater.key.<b> && cmp check.key nugget-updater.key
-  ```
-
-- [ ] **Online**, store it:
-
-  ```sh
-  gh secret set TAURI_SIGNING_PRIVATE_KEY --env release -R $R < ./nugget-updater.key
+  gh secret set TAURI_SIGNING_PRIVATE_KEY --env release -R $R < ./nugget-updater.key   # online
   gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --env release -R $R
   gh variable set NUGGET_UPDATER_PUBKEY -R $R < ./nugget-updater.key.pub
   ```
@@ -187,7 +153,7 @@ Step 5 in the same session.
 key (§4). **Release builds trust only this key**, so until the manifest carries a release
 signature a released `nuggetd` offers no model downloads.
 
-- [ ] On the same offline machine:
+- [ ] On the same offline machine, then (with the public `.sig` copied off) online:
 
   ```sh
   SM=target/debug/examples/sign-manifest
@@ -196,12 +162,7 @@ signature a released `nuggetd` offers no model downloads.
   $SM --verify manifests/default.json --pubkey <64-hex-public-key>   # always pass --pubkey here
   grep -c . manifests/default.json.sig               # 2: dev + release signature
   gfsplit -n 2 -m 3 manifest-release.key
-  ```
-
-- [ ] Copy `manifests/default.json.sig` off the machine (public), then online:
-
-  ```sh
-  gh variable set NUGGET_MANIFEST_RELEASE_PUBKEY -R $R --body '<64-hex-public-key>'
+  gh variable set NUGGET_MANIFEST_RELEASE_PUBKEY -R $R --body '<64-hex-public-key>'   # online
   ```
 
 - [ ] Commit the two-line `.sig` and add the key to [Public keys](#public-keys) in one PR. Check:
@@ -260,19 +221,14 @@ the beta channel receives.
 - [ ] **Contents**: every installer of §1 (arm64 may be missing), a `.sig` per updater payload,
   `latest.json` + `.sig`, `SHA256SUMS`, three SBOMs; no bundle reports or smoke logs.
 - [ ] `sha256sum -c SHA256SUMS` and `gh attestation verify Nugget_1.0.0-rc.1_amd64.AppImage -R $R`.
-- [ ] **Updater signatures** (the `sign` job already checks these with
-  `packaging/scripts/check_release_keys.py`):
+- [ ] **Updater signatures** (the `sign` job already checks them with
+  `packaging/scripts/check_release_keys.py`) and **macOS** (both architectures):
 
   ```sh
   gh variable get NUGGET_UPDATER_PUBKEY -R $R | base64 -d > updater.pub
   base64 -d Nugget_1.0.0-rc.1_amd64.AppImage.sig > appimage.minisig
   minisign -V -p updater.pub -m Nugget_1.0.0-rc.1_amd64.AppImage -x appimage.minisig
   base64 -d latest.json.sig > latest.minisig && minisign -V -p updater.pub -m latest.json -x latest.minisig
-  ```
-
-- [ ] **macOS** (both architectures):
-
-  ```sh
   codesign --verify --deep --strict --verbose=2 /Applications/Nugget.app
   codesign -dv --verbose=4 /Applications/Nugget.app/Contents/MacOS/nuggetd   # Authority=Developer ID Application: …
   spctl -a -vv /Applications/Nugget.app                                      # source=Notarized Developer ID
@@ -399,24 +355,19 @@ job summary (`bundle-report-<target>`):
 `release.yml` has top-level `permissions: {}`; each job asks only for what it needs; actions are
 pinned to commit SHAs.
 
-1. **Tag** `vX.Y.Z` or `vX.Y.Z-…`, annotated and signed; the message is the release notes. Fails
-   if it differs from the `tauri.conf.json` version.
-2. **`build`** (matrix; `release-build` environment on real releases). Stages the sidecar and runs
-   `tauri build`, signing when configured: macOS with hardened runtime, notarized and stapled
-   when the API key exists; Windows through `sign.ps1` (Azure, per-file OIDC token) or the `.pfx`
-   by thumbprint. A real release then runs `signtool verify /pa /all` on the setup exe, MSI and
-   their binaries and fails if any is unsigned. **The updater private key is never in this job**
-   (third-party build scripts run there); it gets only the public updater and manifest keys.
-   Uploads `bundle-<target>`, `bundle-report-<target>` and `smoke-<target>`.
-3. **`sbom`**: CycloneDX for `nuggetd`, `nugget-desktop` (`cargo-cyclonedx`) and the frontend (`cdxgen`).
-4. **`sign`** (`release` environment, waits for a reviewer): downloads only `bundle-<target>` and
-   SBOMs; signs each payload with `tauri signer sign` (locked CLI, `--ignore-scripts`); writes
-   `latest.json` and signs it as a whole (`latest.json.sig`); writes `SHA256SUMS` over every asset;
-   records SLSA provenance (`gh attestation verify <file> -R rayhankhilji/nugget`); creates a
-   **draft** release (prerelease if the tag has a hyphen).
-5. **Publish** (a maintainer, after Step 8).
-6. **`channels`** (on publish, no secrets): copies `latest.json` + `.sig` byte for byte to the
-   `updater-feed` release as `beta.json` and, unless a prerelease, `stable.json` (see below).
+1. **Tag** (annotated, signed; must match the `tauri.conf.json` version).
+2. **`build`** (matrix; `release-build` env on real releases): stages the sidecar, runs
+   `tauri build`, signs macOS (hardened runtime, notarized and stapled with the API key) and
+   Windows (`sign.ps1` or the `.pfx`); a real release fails if `signtool verify /pa /all` finds an
+   unsigned file. **The updater private key is never here** (third-party build scripts run), only
+   public keys. Uploads `bundle-`, `bundle-report-` and `smoke-<target>`.
+3. **`sbom`**: CycloneDX via `cargo-cyclonedx` and `cdxgen`.
+4. **`sign`** (`release` env, waits for approval): signs each payload with `tauri signer sign`
+   (locked CLI, `--ignore-scripts`), writes and signs `latest.json`, writes `SHA256SUMS`, records
+   SLSA provenance, and creates a **draft** release (prerelease if the tag has a hyphen).
+5. **Publish** by a maintainer after Step 8.
+6. **`channels`** (on publish, no secrets): copies `latest.json` + `.sig` to the `updater-feed`
+   release as `beta.json` and, unless a prerelease, `stable.json` (§5).
 
 ### Dry run
 
