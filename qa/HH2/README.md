@@ -95,3 +95,36 @@ copied into this branch.
   now."). The table also gives the item count from that text (or the last text seen, on a
   timeout), GG6's other onboarding steps, the day 1 chat timings, failed checks and the CPU from
   `lscpu`. Everything is uploaded as `hh2-gg6-<run id>`.
+
+## JJ1-1 re-check: sensitive labels after real 4B triage (`hh2-jj1.yml`)
+
+QA JJ1 (`docs/qa/JJ1.md` on `qa/wave-ii`, JJ1-1) found that after real 4B triage only 9 of 22
+planted sensitive mails stayed sensitive: the model's single "sensitive" answer cleared every
+health, money and legal mail, and the rules missed most non-English ones. Commit 8f606a20 adds
+multilingual rules and asks the model per category. `.github/workflows/hh2-jj1.yml` reruns JJ1's
+own measurement before and after on one `ubuntu-latest` runner. The harness (`qa/JJ1/harness`,
+`qa/JJ1/triage`) is extracted at run time from QA commit `2cfd682` with `git archive`, and it is
+not copied into this branch. Until the workflow is on the default branch, a push that changes the
+workflow file runs it with the defaults (a temporary trigger).
+
+- **Builds:** `nuggetd --release` (with the dev manifest key trusted, as in `qa-JJ1.yml`) is built
+  twice. BEFORE comes from a `git worktree` of `before_ref` (default `fae923d`) with its own
+  `--target-dir`, and AFTER comes from the pushed head. The job fails if the two binaries are
+  identical. `fae923d` also predates 079122f8 (bounded triage prefill) and 8a417132 (interactive
+  chats first), so timings and Ask during the sync move for those reasons too. Pass
+  `before_ref` = `8f606a20^` to isolate the JJ1-1 change.
+- **Runs:** BEFORE, then AFTER, each with a fresh home and JJ1's exact invocation:
+  `realmodel.py --nuggetd BIN --home H --out O --part triage --chat-model qwen3-4b-q4km
+  --models-cache $RUNNER_TEMP/models-cache`. This uses 1200 mails (`gen_corpus.py`, seed 7) and
+  the default config with the 4B and nomic embedder, waits up to 7200 s for triage, and reads the
+  labels through `export.run`. One run took 74 min on JJ1's runner. Models are cached like
+  `qa-JJ1.yml`. Leftover `nuggetd`/`llama-server` processes are killed between runs.
+- **Result:** `jj1_compare.py BEFORE_OUT AFTER_OUT [--hardware F] [--labels B A] [--out F]
+  [--labels-dir D]` writes the table to the job summary. It shows the 22 planted mails that stay
+  sensitive (overall, per language and per kind), what the model said (`triage.sensitive`)
+  against the rules (`sensitive_rule`), and normal and junk mails that end sensitive. Those are
+  split by cause (rule, model kept it, or triage not done, since pending and unknown count as
+  sensitive) and given with triage state counts. It also shows junk labelled and still
+  searchable, the full-triage time, first search, Ask during the sync and when idle, and the CPU
+  from `lscpu`. Everything goes in the `hh2-jj1-<run id>` artifact, with the export reduced to
+  `labels-before.jsonl` and `labels-after.jsonl`.
