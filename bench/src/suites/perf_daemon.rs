@@ -294,7 +294,7 @@ fn seed_chunks(text: &str, embedder: &HashEmbedder) -> Vec<NewChunk> {
         .collect()
 }
 
-/// Key file, config and the seeded store (an empty corpus gives an empty store).
+/// Key file, config and the seeded store (an empty corpus gives no store: the daemon makes it).
 pub(crate) fn seed_home(
     paths: &Paths,
     corpus: &Corpus,
@@ -312,6 +312,10 @@ pub(crate) fn seed_home(
     std::fs::write(paths.data.join("store.key"), hex(&key))?;
 
     let n = corpus.docs.len();
+    if n == 0 {
+        // The daemon creates its own store, so a daemon of another schema version can run.
+        return Ok(());
+    }
     let projects = (n / 100).max(3);
     let people = (n / 50).max(5);
     let embedder = HashEmbedder::new(dim, &[]);
