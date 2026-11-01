@@ -22,6 +22,10 @@ export function AiStep({ headingRef, state, dispatch, connected }: StepProps) {
   const t = useT();
   const name = useId();
   const choice = state.ai;
+  // GG6-31: the option badged "Recommended" starts selected; the user can still pick another.
+  useEffect(() => {
+    if (state.ai === null) dispatch({ type: "chooseAi", ai: "local" });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Picking a choice reveals its section below the cards: bring that section's heading into view.
   const picked = useRef(false);
   useEffect(() => {
@@ -205,6 +209,7 @@ function ModelRow({
   const labelId = `ob-model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   const phase = progress ? t(PHASE[progress.phase]) : "";
   const modelFit = fit?.models.find((f) => f.id === model.id);
+  const left = useEta(progress, total);
 
   return (
     <li className={best ? "card ob-model-best" : "card"} aria-labelledby={labelId}>
@@ -222,6 +227,14 @@ function ModelRow({
         {/* FSI…PDI: the license id keeps its own direction inside right-to-left text. */}
         {model.license && <> · {t("onboarding.models.license", { license: `\u2068${model.license}\u2069` })}</>}
       </p>
+      {!installed && !busy && model.size_bytes > 0 && (
+        <p className="muted small ob-model-estimate">
+          {t("onboarding.models.estimate", {
+            fast: etaText(t, downloadSeconds(model.size_bytes, FAST_MBPS)),
+            slow: etaText(t, downloadSeconds(model.size_bytes, SLOW_MBPS)),
+          })}
+        </p>
+      )}
       {modelFit && <FitNotes fit={modelFit} freeDisk={fit?.free_disk_bytes ?? null} installed={installed} why={best} />}
       {busy && progress && (
         <div className="progress">
@@ -238,6 +251,7 @@ function ModelRow({
               done: formatBytes(progress.downloaded),
               total: formatBytes(total),
             })}
+            {left !== null && progress.phase === "downloading" && <> · {t("onboarding.models.left", { time: etaText(t, left) })}</>}
           </span>
         </div>
       )}
@@ -255,6 +269,61 @@ function ModelRow({
       )}
     </li>
   );
+}
+
+// ---- download time (GG6-16) ----
+
+/** Typical fast and slow home connections, in megabits per second, for the estimate before a download. */
+export const FAST_MBPS = 100;
+export const SLOW_MBPS = 10;
+
+/** Seconds to download `bytes` at `mbps` megabits per second. */
+export function downloadSeconds(bytes: number, mbps: number): number {
+  return (bytes * 8) / (mbps * 1_000_000);
+}
+
+/** "less than a minute", "about 4 minutes", "about 2 hours". */
+export function etaText(t: ReturnType<typeof useT>, secs: number): string {
+  if (secs < 60) return t("onboarding.models.etaUnderMinute");
+  const min = Math.ceil(secs / 60);
+  if (min < 90) return t("onboarding.models.etaMinutes", { count: min });
+  return t("onboarding.models.etaHours", { count: Math.round(min / 60) });
+}
+
+/**
+ * Time left for a download, from the throughput measured over the last half minute (null until
+ * there are a few seconds of samples, so the first burst doesn't promise too much).
+ */
+export function useEta(progress: ModelProgress | undefined, total: number): number | null {
+  const samples = useRef<{ at: number; bytes: number }[]>([]);
+  const [left, setLeft] = useState<number | null>(null);
+  const downloaded = progress?.phase === "downloading" ? progress.downloaded : null;
+  useEffect(() => {
+    if (downloaded === null) {
+      samples.current = [];
+      setLeft(null);
+      return;
+    }
+    const now = Date.now();
+    const list = samples.current;
+    // A restarted download starts the measurement again.
+    if (list.length > 0 && downloaded < list[list.length - 1]!.bytes) list.length = 0;
+    list.push({ at: now, bytes: downloaded });
+    while (list.length > 2 && now - list[0]!.at > 30_000) list.shift();
+    setLeft(estimateLeft(list, total));
+  }, [downloaded, total]);
+  return left;
+}
+
+/** Seconds left from (time, bytes) samples, or null when they span under 3 s or show no progress. */
+export function estimateLeft(samples: readonly { at: number; bytes: number }[], total: number): number | null {
+  if (samples.length < 2 || total <= 0) return null;
+  const first = samples[0]!;
+  const last = samples[samples.length - 1]!;
+  const ms = last.at - first.at;
+  const bytes = last.bytes - first.bytes;
+  if (ms < 3000 || bytes <= 0) return null;
+  return Math.max(0, total - last.bytes) / (bytes / (ms / 1000));
 }
 
 // ---- bring your own key ----

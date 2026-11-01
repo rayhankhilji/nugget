@@ -32,6 +32,7 @@ import { backupScenario } from "./backup.mjs";
 import { messagingScenario } from "./messaging.mjs";
 import { visualScenario } from "./visual.mjs";
 import { searchScenario } from "./search.mjs";
+import { sourcesSetupScenario } from "./sources-setup.mjs";
 import {
   check,
   DESKTOP,
@@ -60,7 +61,7 @@ import {
  * bring-your-own-key, the accessibility audit, display preferences, keyboard-only use,
  * screenshots compared with baselines, and backup, export and restore into a wiped home.
  */
-const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard", "visual", "backup", "messaging", "search"];
+const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard", "visual", "backup", "messaging", "search", "sources-setup"];
 /** Scenarios that use the shared indexed home. */
 const INDEXED = ["pages", "i18n", "a11y", "prefs", "visual", "search"];
 
@@ -419,6 +420,7 @@ async function main() {
           summary.visual = await visualScenario({ browser, socket, pages: pageRegistry(), onboarded: ONBOARDED });
         } else if (name === "backup") summary.backup = await backupScenario({ browser, bin });
         else if (name === "messaging") summary.messaging = await messagingScenario({ browser, bin });
+        else if (name === "sources-setup") summary.sources_setup = await sourcesSetupScenario({ browser, bin });
         else if (name === "search") {
           const { daemon } = await indexedHome(bin);
           summary.search = await searchScenario({ browser, socket: daemon.socket, onboarded: ONBOARDED });

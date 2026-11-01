@@ -24,6 +24,11 @@ export interface OnboardingState {
   aiSetup?: { ai: AiChoice; what: string };
   /** Names of the sources there are (added in setup, or already there). Absent: none known. */
   sources?: string[];
+  /**
+   * A source has something searchable (at least one item indexed). Adding a folder that holds
+   * nothing Nugget can read does not finish the source step.
+   */
+  indexed?: boolean;
   /** The flow is over (finished or skipped as a whole); don't show it on launch. */
   finished: boolean;
 }
@@ -34,6 +39,8 @@ export type Action =
   | { type: "continue" }
   | { type: "aiSetUp"; ai: AiChoice; what: string }
   | { type: "sourcesFound"; names: string[] }
+  /** A source has at least one item indexed. */
+  | { type: "sourcesIndexed" }
   | { type: "back" }
   | { type: "skip" }
   | { type: "goto"; step: StepId }
@@ -69,12 +76,16 @@ function advance(step: StepId): StepId {
 
 /**
  * Whether a step's goal is met, so Continue can mark it done. The AI step needs a model installed
- * (or installing) or a key saved on the chosen path; the source step needs a source. The other
- * steps are done once seen.
+ * (or installing) or a key saved on the chosen path, or the choice to decide later (a decision,
+ * not a skipped step); the source step needs a source with something indexed. The other steps
+ * are done once seen.
  */
 export function stepGoalMet(state: OnboardingState, step: StepId = state.step): boolean {
-  if (step === "ai") return (state.ai === "local" || state.ai === "byok") && (state.aiSetup?.ai === state.ai || legacyDone(state, "ai"));
-  if (step === "source") return (state.sources?.length ?? 0) > 0 || legacyDone(state, "source");
+  if (step === "ai") {
+    if (state.ai === "later") return true;
+    return (state.ai === "local" || state.ai === "byok") && (state.aiSetup?.ai === state.ai || legacyDone(state, "ai"));
+  }
+  if (step === "source") return state.indexed === true || legacyDone(state, "source");
   return true;
 }
 
@@ -99,6 +110,8 @@ export function reduce(state: OnboardingState, action: Action): OnboardingState 
       const names = [...new Set([...(state.sources ?? []), ...action.names])];
       return names.length === (state.sources?.length ?? 0) ? state : { ...state, sources: names };
     }
+    case "sourcesIndexed":
+      return state.indexed ? state : { ...state, indexed: true };
     case "next": {
       if (state.step === "done") return { ...state, finished: true, completed: withStep(state.completed, "done") };
       return {
@@ -180,6 +193,7 @@ export function parseState(raw: string | null): OnboardingState | null {
     const names = o.sources.filter((x): x is string => typeof x === "string");
     if (names.length) out.sources = names;
   }
+  if (o.indexed === true) out.indexed = true;
   return out;
 }
 

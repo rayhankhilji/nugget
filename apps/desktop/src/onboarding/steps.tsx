@@ -8,6 +8,7 @@ import { Announce, useAnnouncer } from "../components/Announce";
 import { CopyButton } from "../components/CopyButton";
 import { UpdateQuestion } from "../components/UpdateChoice";
 import { legacyDone, pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
+import { indexPhase, isSettled, SkippedSummary, type IndexPhase } from "../sources/scan";
 import { detectOs, type Os } from "./platform";
 import { TriggerKeys } from "./TriggerStep";
 import { loadTrigger, readTrigger } from "./trigger";
@@ -78,28 +79,30 @@ export function WelcomeStep({ headingRef }: StepProps) {
 /** How often the source step re-reads `sources.list` while a new source indexes. */
 export const INDEX_POLL_MS = 1000;
 
-/** Where a just-added source is: not started, indexing, searchable, or failed. */
-export type IndexPhase = "waiting" | "indexing" | "ready" | "failed";
-
-export function indexPhase(s: Pick<SourceInfo, "state" | "items" | "last_error">): IndexPhase {
-  if (s.state === "error" || (s.last_error && s.items === 0)) return "failed";
-  if (s.state === "syncing") return s.items > 0 ? "indexing" : "waiting";
-  return s.items > 0 ? "ready" : "waiting";
-}
+export { indexPhase, type IndexPhase };
 
 export function SourceStep({ headingRef, connected, dispatch }: StepProps) {
   const t = useT();
   const [open, setOpen] = useState<ConnectorKind | "pick" | null>(null);
+  // Every source there is, not only those added on this visit: going Back, quitting and reopening,
+  // or running setup again shows the folder added before, with its progress (GG6-12).
   const [added, setAdded] = useState<SourceInfo[]>([]);
+  // Sources added on this visit: their progress is announced; earlier ones are just shown.
+  const [fresh, setFresh] = useState<string[]>([]);
   const [announcement, announce] = useAnnouncer();
 
-  // Sources set up before (running setup again) count too, so Continue marks the step done.
   useEffect(() => {
     if (!connected) return;
     let alive = true;
     api
       .sourcesList()
-      .then((list) => alive && list.length > 0 && dispatch({ type: "sourcesFound", names: list.map((s) => s.name) }))
+      .then((list) => {
+        if (!alive) return;
+        const shown = list.filter((s) => s.enabled);
+        setAdded((cur) => [...shown, ...cur.filter((c) => !shown.some((s) => s.id === c.id))]);
+        if (list.length > 0) dispatch({ type: "sourcesFound", names: list.map((s) => s.name) });
+        if (list.some((s) => s.items > 0)) dispatch({ type: "sourcesIndexed" });
+      })
       .catch(() => {
         /* unknown: adding one here still counts */
       });
@@ -125,7 +128,7 @@ export function SourceStep({ headingRef, connected, dispatch }: StepProps) {
       ) : (
         <OfflineNote />
       )}
-      {added.length > 0 && <IndexProgress added={added} announce={announce} />}
+      {added.length > 0 && <IndexProgress added={added} fresh={fresh} announce={announce} dispatch={dispatch} />}
       <p className="muted">{t("onboarding.source.later")}</p>
       <Announce message={announcement} />
       {open && (
@@ -134,6 +137,7 @@ export function SourceStep({ headingRef, connected, dispatch }: StepProps) {
           onClose={() => setOpen(null)}
           onAdded={(s) => {
             setAdded((list) => [...list.filter((x) => x.id !== s.id), s]);
+            setFresh((ids) => (ids.includes(s.id) ? ids : [...ids, s.id]));
             dispatch({ type: "sourcesFound", names: [s.name] });
             announce(t("onboarding.source.addedAnnounce", { name: s.name }));
           }}
@@ -148,26 +152,50 @@ const PHASE_KEY: Record<IndexPhase, MessageKey> = {
   indexing: "onboarding.source.indexing",
   ready: "onboarding.source.ready",
   failed: "onboarding.source.failed",
+  empty: "onboarding.source.empty",
+  denied: "onboarding.source.denied",
+  missing: "onboarding.source.missing",
 };
 
+/** The line for a source: its phase, with the scan's total when it is known (GG6-26). */
+function phaseText(t: ReturnType<typeof useT>, s: SourceInfo, phase: IndexPhase): string {
+  const total = s.scan?.finished ? s.scan.found : 0;
+  const args = { name: s.name, count: s.items, total, error: s.last_error ?? "" };
+  if (phase === "indexing" && total > 0) return t("onboarding.source.indexingOf", args);
+  if (phase === "ready" && total > s.items) return t("onboarding.source.readyPartial", args);
+  return t(PHASE_KEY[phase], args);
+}
+
 /**
- * Live indexing progress for the sources added in this step, so the first run shows that
- * something is happening and says when search starts to work. Polls `sources.list` (and
- * refreshes on `sources.changed`) until every added source is searchable or failed. The list is
- * not a live region (its counts change every second); each source's start and end are announced.
+ * Live indexing progress for the sources there are, so the first run shows that something is
+ * happening and says when search starts to work, or why it won't. Polls `sources.list` (and
+ * refreshes on `sources.changed`) until every source is settled. The list is not a live region
+ * (its counts change every second); each new source's start and end are announced.
  */
-function IndexProgress({ added, announce }: { added: SourceInfo[]; announce: (text: string) => void }) {
+function IndexProgress({
+  added,
+  fresh,
+  announce,
+  dispatch,
+}: {
+  added: SourceInfo[];
+  fresh: string[];
+  announce: (text: string) => void;
+  dispatch: Dispatch<Action>;
+}) {
   const t = useT();
   const [live, setLive] = useState<Record<string, SourceInfo>>({});
   const ids = added.map((s) => s.id).join("\u0000");
   const current = added.map((s) => live[s.id] ?? s);
-  const settled = current.every((s) => {
-    const p = indexPhase(s);
-    return p === "ready" || p === "failed";
-  });
+  const settled = current.every((s) => isSettled(indexPhase(s)));
+  const anyIndexed = current.some((s) => s.items > 0);
   const [tick, setTick] = useState(0);
 
   useEvent(events.onSourcesChanged, () => setTick((n) => n + 1));
+
+  useEffect(() => {
+    if (anyIndexed) dispatch({ type: "sourcesIndexed" });
+  }, [anyIndexed, dispatch]);
 
   useEffect(() => {
     let alive = true;
@@ -194,32 +222,42 @@ function IndexProgress({ added, announce }: { added: SourceInfo[]; announce: (te
   }, [ids, settled, tick]);
 
   // The last phase announced per source: "added" is said by the step, then indexing and the end.
+  // Sources from before this visit are not news: their phase is recorded without a word.
   const announced = useRef(new Map<string, IndexPhase>());
   useEffect(() => {
     for (const s of current) {
       const phase = indexPhase(s);
+      if (!fresh.includes(s.id)) {
+        announced.current.set(s.id, phase);
+        continue;
+      }
       const before = announced.current.get(s.id) ?? "waiting";
       // A later pass over a finished source is not news here.
       if (phase === before || phase === "waiting" || (phase === "indexing" && before !== "waiting")) continue;
       announced.current.set(s.id, phase);
-      const args = { name: s.name, count: s.items, error: s.last_error ?? "" };
-      announce(phase === "indexing" ? t("announce.indexing", args) : t(PHASE_KEY[phase], args));
+      announce(phase === "indexing" ? t("announce.indexing", { name: s.name }) : phaseText(t, s, phase));
     }
   });
 
+  const nothing = settled && current.every((s) => s.items === 0);
   return (
-    <ul className="ob-index" aria-busy={!settled}>
-      {current.map((s) => {
-        const phase = indexPhase(s);
-        return (
-          <li key={s.id} className={`note ob-index-${phase}${phase === "failed" ? " note-error" : ""}`} data-phase={phase}>
-            {phase !== "ready" && phase !== "failed" && <span className="spinner" aria-hidden="true" />}{" "}
-            {t(PHASE_KEY[phase], { name: s.name, count: s.items, error: s.last_error ?? "" })}
-            {phase === "failed" && s.kind === "imessage" && needsFullDiskAccess(s.last_error) && <FullDiskAccessSteps />}
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <ul className="ob-index" aria-busy={!settled}>
+        {current.map((s) => {
+          const phase = indexPhase(s);
+          const bad = phase === "failed" || phase === "empty" || phase === "denied" || phase === "missing";
+          return (
+            <li key={s.id} className={`note ob-index-${phase}${bad ? " note-error" : ""}`} data-phase={phase}>
+              {!isSettled(phase) && <span className="spinner" aria-hidden="true" />}{" "}
+              {phaseText(t, s, phase)}
+              {phase === "failed" && s.kind === "imessage" && needsFullDiskAccess(s.last_error) && <FullDiskAccessSteps />}
+              {(phase === "empty" || phase === "ready") && <SkippedSummary scan={s.scan} />}
+            </li>
+          );
+        })}
+      </ul>
+      {nothing && <p className="note">{t("onboarding.source.nothingNext")}</p>}
+    </>
   );
 }
 
@@ -353,22 +391,27 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
   // added earlier), not only what this run of setup recorded.
   const { ai: choice, aiSetup } = state;
   const knownSources = (state.sources?.length ?? 0) > 0;
+  const indexed = state.indexed === true;
   useEffect(() => {
     if (!connected) return;
     let alive = true;
     if ((choice === "local" || choice === "byok") && aiSetup?.ai !== choice) {
       void detectAiSetup(choice).then((what) => alive && what && dispatch({ type: "aiSetUp", ai: choice, what }));
     }
-    if (!knownSources) {
+    if (!knownSources || !indexed) {
       api
         .sourcesList()
-        .then((list) => alive && list.length > 0 && dispatch({ type: "sourcesFound", names: list.map((s) => s.name) }))
+        .then((list) => {
+          if (!alive) return;
+          if (list.length > 0) dispatch({ type: "sourcesFound", names: list.map((s) => s.name) });
+          if (list.some((s) => s.items > 0)) dispatch({ type: "sourcesIndexed" });
+        })
         .catch(() => {});
     }
     return () => {
       alive = false;
     };
-  }, [connected, choice, aiSetup?.ai, knownSources, dispatch]);
+  }, [connected, choice, aiSetup?.ai, knownSources, indexed, dispatch]);
 
   const aiReady = withAi && aiSetup?.ai === state.ai ? aiSetup : null;
   // Progress saved before setups were recorded: the step was completed, so it was set up.

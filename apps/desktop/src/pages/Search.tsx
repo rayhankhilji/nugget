@@ -16,7 +16,7 @@ import {
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
-import { usePendingSearch, usePendingSearchState } from "../hooks.nav";
+import { requestPage, usePendingSearch, usePendingSearchState } from "../hooks.nav";
 import { citedNumbers, splitCitations, withheldNotice } from "../citations";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
@@ -489,6 +489,24 @@ const NO_ANSWER: Omit<Answer, "error"> = {
   done: null,
 };
 
+/** The daemon's answer when no model can write (none configured, or the local one not installed). */
+export function isNoAiError(error: string | null | undefined): boolean {
+  return !!error && /no provider is available|is not installed/i.test(error);
+}
+
+/** "No AI is set up yet" with a button to set it up (GG6-14). */
+export function NoAiNote({ alert = false }: { alert?: boolean }) {
+  const t = useT();
+  return (
+    <div className="note note-warn" role={alert ? "alert" : undefined}>
+      <p>{t("search.noAi")}</p>
+      <button type="button" className="btn btn-small btn-primary" onClick={() => requestPage("models")}>
+        {t("search.setUpAi")}
+      </button>
+    </div>
+  );
+}
+
 function AskPanel({
   initialQuestion,
   byId,
@@ -506,6 +524,9 @@ function AskPanel({
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
+  // GG6-14: with no AI set up, say so up front and offer setup instead of a red internal error.
+  const providers = useAsync(api.providersList);
+  const noAi = (providers.data !== undefined && providers.data.length === 0) || isNoAiError(answer?.error);
   // Chat events can arrive before `chat` returns the stream id; buffer them by id.
   const streams = useRef(new Map<string, { text: string; done: ChatDone | null }>());
   const listRef = useRef<HTMLOListElement>(null);
@@ -643,12 +664,16 @@ function AskPanel({
               <CitationItem key={c.n} c={c} source={byId.get(c.item.source)} onOpen={onOpen} />
             ))}
           </ol>
-          <div className="ask-actions">
-            <button type="button" className="btn btn-primary" onClick={() => void ask()} disabled={streaming}>
-              {streaming ? <Spinner label={t("search.answering")} /> : answer ? t("search.askAgain") : t("search.askWithContext")}
-            </button>
-            <span className="muted small">{t("search.askNote")}</span>
-          </div>
+          {noAi && !answer ? (
+            <NoAiNote />
+          ) : (
+            <div className="ask-actions">
+              <button type="button" className="btn btn-primary" onClick={() => void ask()} disabled={streaming}>
+                {streaming ? <Spinner label={t("search.answering")} /> : answer ? t("search.askAgain") : t("search.askWithContext")}
+              </button>
+              <span className="muted small">{t("search.askNote")}</span>
+            </div>
+          )}
         </>
       )}
 
@@ -668,7 +693,9 @@ function AskPanel({
               {withheld}
             </p>
           )}
-          {answer.error ? (
+          {answer.error && noAi ? (
+            <NoAiNote alert />
+          ) : answer.error ? (
             <p className="note note-error" role="alert">
               {answer.error}
             </p>

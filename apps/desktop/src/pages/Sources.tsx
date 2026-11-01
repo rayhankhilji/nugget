@@ -12,7 +12,8 @@ import {
 } from "../api";
 import { useAsync, useEvent, useNow } from "../hooks";
 import { formatRelative, formatTime, sourceKindLabel, sourceStateLabel, SOURCE_STATE_TONE } from "../format";
-import { useT, type TFunction } from "../i18n";
+import { useT, type MessageKey, type TFunction } from "../i18n";
+import { indexPhase, SkippedSummary, type IndexPhase } from "../sources/scan";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Announce, useAnnouncer, useIngestAnnouncements } from "../components/Announce";
 import { Dialog } from "../components/Dialog";
@@ -204,6 +205,14 @@ export function SourcesPage() {
   );
 }
 
+/** KK2 (GG6-2): a folder that holds nothing indexable, can't be opened, or isn't there. */
+const SCAN_PROBLEM: IndexPhase[] = ["empty", "denied", "missing"];
+const SCAN_PROBLEM_KEY: Partial<Record<IndexPhase, MessageKey>> = {
+  empty: "onboarding.source.empty",
+  denied: "onboarding.source.denied",
+  missing: "onboarding.source.missing",
+};
+
 /** The last sync failed (an error state or a recorded error). Sign-in needs are shown separately. */
 function hasProblem(s: SourceInfo): boolean {
   return s.state === "error" || Boolean(s.last_error);
@@ -231,6 +240,9 @@ function healthText(s: SourceInfo, t: TFunction): { reason: string; fix: string 
     case "disabled":
     case "error":
     case "item_errors":
+    // KK2: shown with the scan's details below, not as an error.
+    case "nothing_indexable":
+    case "unreadable":
       return null;
     default:
       // A code this build has no translation for: the daemon's English text.
@@ -397,6 +409,13 @@ function SourceRow({
             )}
           </p>
         )}
+        {!hasProblem(s) && s.enabled && SCAN_PROBLEM.includes(indexPhase(s)) && (
+          <div className="note note-warn small source-scan" role="status">
+            <span>{t(SCAN_PROBLEM_KEY[indexPhase(s)]!, { name: s.name })}</span>
+            <SkippedSummary scan={s.scan} />
+          </div>
+        )}
+        {!hasProblem(s) && s.enabled && indexPhase(s) === "ready" && <SkippedSummary scan={s.scan} />}
         {s.state === "needs_auth" && !s.last_error && mode !== "none" && mode !== "env" && (
           <p className="note small">
             {signIn ? t("sources.needsSignIn") : mode === "token" ? t("sources.needsToken") : t("sources.needsPassword")}

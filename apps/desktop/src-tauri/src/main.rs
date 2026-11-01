@@ -172,6 +172,7 @@ fn main() {
             doubletap::commands::doubletap_settings_set,
             doubletap::commands::doubletap_status,
             doubletap::commands::doubletap_request_permissions,
+            doubletap::commands::doubletap_open_privacy_settings,
             doubletap::commands::doubletap_default_excluded,
             doubletap::commands::doubletap_fire,
             doubletap::commands::voice_status,

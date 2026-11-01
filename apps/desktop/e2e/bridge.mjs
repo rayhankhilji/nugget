@@ -124,6 +124,7 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     doubletap_settings_set: (a) => a?.settings ?? doubletapSettings,
     doubletap_status: () => doubletapStatus,
     doubletap_request_permissions: () => doubletapStatus,
+    doubletap_open_privacy_settings: () => false,
     doubletap_default_excluded: () => [],
     doubletap_fire: () => null,
     overlay_state: () => ({ phase: "done", text: "", provider: null, locality: null, citations: 0, excluded_sensitive: 0, message: null, verified: null, method: null }),
