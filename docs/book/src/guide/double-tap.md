@@ -55,10 +55,20 @@ for that screen.
 | **H** | Previous drafts: pick one to insert it instead. |
 | **Esc** | Cancel. The overlay closes and the keyboard goes back to the field you were typing in. |
 
+Clicking or switching away from an open draft closes it (it stays in your previous drafts), and
+pressing the trigger while a draft is on screen brings the overlay back with the keyboard, so
+Double Tap always answers. Before inserting, Nugget checks that the keyboard is back in the field
+the draft was written for (its role, label and placeholder, or the caret's position when it has
+neither). If another field has it, nothing is inserted: the draft goes to the clipboard and the
+overlay says so.
+
 Every action is also a button (Shift+Tab reaches them), and the letter keys work only outside the
 editor. Retry and the refinements are new requests to the same provider Double Tap chose for the
 app (your local model, or the cloud provider you picked for it), with the same privacy rules: they
-send nothing a first draft would not. If a draft fails, the overlay stays open with Retry instead of
+send nothing a first draft would not. A refinement asks for an explicit rewrite with a target length
+taken from the draft (for Shorter, at most about 60% of its words). A rewrite that comes back
+unchanged, or not shorter or longer as asked, is tried once more with a stricter instruction; if
+that misses too, the overlay shows the closest draft and says the change didn't work. If a draft fails, the overlay stays open with Retry instead of
 closing on its own.
 
 **Screen readers.** The overlay announces what it is doing (reading, drafting, rewriting, draft
@@ -69,7 +79,9 @@ labelled region you can read in full. Animations stop when the system asks for r
 again, from the overlay (**H**) or the **Recent drafts** list on the Double Tap page (copy, remove,
 clear all). They are kept in memory only, never written to disk, and are gone when Nugget quits.
 Drafts that drew on items marked sensitive, drafts for fields labelled as a password, PIN or code,
-and drafts that contain a card number or a long run of digits are never kept.
+and drafts the daemon's PII scan flags (card numbers, IBANs, social security numbers, API keys and
+other credentials: the same scan that marks your items sensitive) are never kept. When the daemon
+can't be asked, the draft is not kept.
 
 **Try your shortcut.** The Double Tap page has a practice field with a sample message to answer.
 Click into it and press your trigger: the real flow runs (the same overlay, the same provider), but

@@ -128,6 +128,8 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     indexing_pause_toggle: () => ({ has_tray: true, indexing_paused: false, logs: null }),
     deeplink_take: () => null,
     quickask_open_main: () => null,
+    // JJ2: no quick-ask handover is waiting for the main window.
+    quickask_handover_take: () => null,
     doubletap_settings_get: () => doubletapSettings,
     doubletap_settings_set: (a) => a?.settings ?? doubletapSettings,
     doubletap_status: () => doubletapStatus,

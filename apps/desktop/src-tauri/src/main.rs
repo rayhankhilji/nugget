@@ -238,6 +238,7 @@ fn main() {
             lifecycle::indexing_pause_toggle,
             deeplink::deeplink_take,
             quickask::quickask_prefill_take,
+            quickask::quickask_handover_take,
         ])
         .setup(|app| {
             app.manage(updater::Updates::new(app.handle()));

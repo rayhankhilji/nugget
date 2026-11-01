@@ -4606,6 +4606,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "hex",
+ "jiff",
  "nugget-agent",
  "nugget-browser",
  "nugget-computer",

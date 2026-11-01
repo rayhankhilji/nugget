@@ -85,9 +85,14 @@ export function Preview({
           <>
             <span className="badge">{kindLabel(t, data.kind)}</span>
             {data.date && <time dateTime={data.date}>{formatDate(data.date)}</time>}
-            {data.sensitive && (
+            {data.sensitive && !data.unsorted && (
               <span className="badge badge-warn" title={t("search.sensitiveTitle")}>
                 {t("search.sensitive")}
+              </span>
+            )}
+            {data.sensitive && data.unsorted && (
+              <span className="badge" title={t("search.unsortedTitle")}>
+                {t("search.unsorted")}
               </span>
             )}
           </>

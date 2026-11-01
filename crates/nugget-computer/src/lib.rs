@@ -23,14 +23,18 @@
 //!
 //! # Risk
 //!
-//! `declared_risk` is the worst case; `risk(args)` refines it from the cached element. Words
+//! `declared_risk` is the worst case; `risk(args)` refines it from the cached element.
+//! `Tool::observe` (which the agent loop runs before gating a mutating call, and again before
+//! acting) takes a fresh snapshot of the element's window, or of the focused window for keyboard
+//! tools without an `element`, and caches it, so `risk`, `describe` and `context` computed after
+//! it see the screen as it is: a relabelled control, or keys going to another app's field. Words
 //! match whole words of the element's name, description and placeholder, case-insensitively
 //! (lists in [`risk`], extendable through [`RiskKeywords`]); the highest matching class wins.
 //!
 //! | call | risk |
 //! |------|------|
 //! | `observe`, `scroll`, `wait_for` | Observe |
-//! | `click` on an element not in the last snapshot | **Send** (fail-safe: forces a confirmation) |
+//! | `click`, `type_text`, `set_value`, `press_key` with an `element` id not in the cached snapshot (unknown, stale or malformed) | Edit: `call` refuses it without acting ("not on screen; observe again"), so no confirmation names a control that does not exist |
 //! | `click`, label has send/submit/post/publish/share/invite ("Reply" and "Forward" only open a draft; its Send button is what sends) | Send |
 //! | `click`, label has delete/remove/discard/erase/archive/empty trash/unsubscribe/cancel subscription | Destroy |
 //! | `click` removing one line ("Remove", "Remove one Gel pen", "Delete") inside a shopping cart (a container, dialog or window title names cart/basket/trolley/shopping bag, [`risk::CART_WORDS`]); not "Remove payment method", "Delete account", "Remove all" | Edit |
@@ -40,7 +44,6 @@
 //! | any other `click` (fields, tabs, list items, links, ordinary buttons) | Edit |
 //! | `type_text` / `set_value` / `press_key` in a terminal emulator ([`risk::TERMINAL_APPS`], [`ComputerConfig::terminal_apps`], or a `terminal` raw role) | Security |
 //! | `type_text` / `set_value` into a secret-looking field (secure, or labelled password/PIN/OTP/…) | Security |
-//! | `type_text` / `set_value` with an `element` id not in the last snapshot | Send |
 //! | other `type_text` / `set_value` | Edit |
 //! | `press_key` `enter` (any modifiers) | Send; Edit when focus is a multi-line text area and no ctrl/cmd is held; at least the click risk when focus is a button |
 //! | `press_key` `delete`/`backspace` with shift or cmd, or outside a text field (or focus unknown) | Destroy |

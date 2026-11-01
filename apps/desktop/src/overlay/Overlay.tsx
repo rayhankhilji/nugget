@@ -90,8 +90,11 @@ function insertedText(view: OverlayView): string {
  */
 export function announcement(view: OverlayView): string {
   switch (view.phase) {
-    case "done":
-      return translate("doubletap.overlay.announceReady", { n: wordCount(view.text) });
+    case "done": {
+      const ready = translate("doubletap.overlay.announceReady", { n: wordCount(view.text) });
+      // A refinement that missed after its second try says so with the draft.
+      return view.message ? `${ready} ${keyOrText(view.message)}` : ready;
+    }
     case "inserted":
       return insertedText(view);
     case "refused":
@@ -336,6 +339,12 @@ export function Overlay() {
             {view.phase === "streaming" && <span className="caret" aria-hidden="true" />}
           </div>
         )
+      )}
+
+      {view.message && view.phase === "done" && (
+        <p className="overlay-hint muted small" dir="auto">
+          {keyOrText(view.message)}
+        </p>
       )}
 
       {view.message && (view.phase === "refused" || view.phase === "error") && (
