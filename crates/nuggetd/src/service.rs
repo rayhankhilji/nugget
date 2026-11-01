@@ -272,6 +272,50 @@ pub fn uninstall() -> Result<String> {
     imp::uninstall()
 }
 
+/// Restart the installed service, so it runs the binary its definition points at (the desktop
+/// app does this after an update replaced that binary, GG6-10). Fails if it is not installed.
+pub fn restart() -> Result<String> {
+    imp::restart()
+}
+
+/// Which service manager runs this process, if it can tell (`nugget_core::ipc::SERVICE_*`):
+/// systemd puts the unit's processes in its own cgroup, and launchd names the job in
+/// `XPC_SERVICE_NAME`. A process the app or a terminal started has neither (an app's
+/// `XPC_SERVICE_NAME` names the app, never our label). The Windows task leaves no trace: `None`.
+pub fn managed_by() -> Option<&'static str> {
+    static ONCE: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
+    *ONCE.get_or_init(|| {
+        let cgroup = if cfg!(target_os = "linux") {
+            std::fs::read_to_string("/proc/self/cgroup").ok()
+        } else {
+            None
+        };
+        let xpc = if cfg!(target_os = "macos") {
+            std::env::var("XPC_SERVICE_NAME").ok()
+        } else {
+            None
+        };
+        managed_by_from(cgroup.as_deref(), xpc.as_deref())
+    })
+}
+
+/// [`managed_by`] from `/proc/self/cgroup` and `XPC_SERVICE_NAME`.
+pub fn managed_by_from(cgroup: Option<&str>, xpc_service: Option<&str>) -> Option<&'static str> {
+    let in_unit = |line: &str| {
+        // `0::/user.slice/user-1000.slice/user@1000.service/app.slice/nuggetd.service`
+        line.rsplit(':')
+            .next()
+            .is_some_and(|path| path.trim_end().split('/').any(|seg| seg == SYSTEMD_UNIT))
+    };
+    if cgroup.is_some_and(|c| c.lines().any(in_unit)) {
+        return Some(nugget_core::ipc::SERVICE_SYSTEMD);
+    }
+    if xpc_service == Some(LAUNCHD_LABEL) {
+        return Some(nugget_core::ipc::SERVICE_LAUNCHD);
+    }
+    None
+}
+
 /// Run a command, returning stdout; a non-zero exit is an error carrying stderr.
 #[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 fn run(program: &str, args: &[&str]) -> Result<String> {
@@ -383,6 +427,21 @@ mod imp {
             format!("LaunchAgent {LAUNCHD_LABEL} was not installed")
         })
     }
+
+    pub(super) fn restart() -> Result<String> {
+        let uid = refuse_root()?;
+        if !plist_path()?.exists() {
+            return Err(Error::NotFound(format!(
+                "LaunchAgent {LAUNCHD_LABEL} is not installed"
+            )));
+        }
+        // `-k`: end a running instance first, then start it again.
+        run(
+            "launchctl",
+            &["kickstart", "-k", &format!("gui/{uid}/{LAUNCHD_LABEL}")],
+        )?;
+        Ok(format!("restarted LaunchAgent {LAUNCHD_LABEL}"))
+    }
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -429,6 +488,18 @@ mod imp {
         } else {
             format!("systemd user unit {SYSTEMD_UNIT} was not installed")
         })
+    }
+
+    pub(super) fn restart() -> Result<String> {
+        refuse_root()?;
+        if !unit_path()?.exists() {
+            return Err(Error::NotFound(format!(
+                "systemd user unit {SYSTEMD_UNIT} is not installed"
+            )));
+        }
+        // SIGTERM (`KillSignal`), then start: the daemon winds down as on any stop.
+        run("systemctl", &["--user", "restart", SYSTEMD_UNIT])?;
+        Ok(format!("restarted systemd user unit {SYSTEMD_UNIT}"))
     }
 }
 
@@ -482,6 +553,18 @@ mod imp {
             }
         }
     }
+
+    pub(super) fn restart() -> Result<String> {
+        if run("schtasks", &["/Query", "/TN", WINDOWS_TASK]).is_err() {
+            return Err(Error::NotFound(format!(
+                "scheduled task \"{WINDOWS_TASK}\" is not installed"
+            )));
+        }
+        // Ends the instance the task started (a no-op when it already stopped), then runs it.
+        let _ = run("schtasks", &["/End", "/TN", WINDOWS_TASK]);
+        run("schtasks", &["/Run", "/TN", WINDOWS_TASK])?;
+        Ok(format!("restarted scheduled task \"{WINDOWS_TASK}\""))
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -495,6 +578,12 @@ mod imp {
     }
 
     pub(super) fn uninstall() -> Result<String> {
+        Err(Error::Unsupported(
+            "service installation is not supported on this OS".into(),
+        ))
+    }
+
+    pub(super) fn restart() -> Result<String> {
         Err(Error::Unsupported(
             "service installation is not supported on this OS".into(),
         ))
@@ -587,6 +676,32 @@ mod tests {
 
         let no_home = ServiceSpec { home: None, ..s };
         assert!(!windows_task_xml(&no_home, "me").contains("<Arguments>"));
+    }
+
+    #[test]
+    fn detects_the_service_manager_from_cgroup_or_launchd_label() {
+        let unit = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/nuggetd.service\n";
+        assert_eq!(managed_by_from(Some(unit), None), Some("systemd"));
+        // cgroup v1 lines carry controllers; the path is after the last colon.
+        let v1 = "12:pids:/user.slice/user@1000.service/nuggetd.service\n1:name=systemd:/x\n";
+        assert_eq!(managed_by_from(Some(v1), None), Some("systemd"));
+        // Started by the app (in the desktop session's scope) or a terminal.
+        let app = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-nugget-4242.scope\n";
+        assert_eq!(managed_by_from(Some(app), None), None);
+        assert_eq!(
+            managed_by_from(Some("0::/x/nuggetd.service.d/other.scope"), None),
+            None
+        );
+        assert_eq!(
+            managed_by_from(None, Some("dev.nugget.nuggetd")),
+            Some("launchd")
+        );
+        // An app launched from the Dock passes its own job name on to its children.
+        assert_eq!(
+            managed_by_from(None, Some("application.dev.nugget.desktop.123.456")),
+            None
+        );
+        assert_eq!(managed_by_from(None, None), None);
     }
 
     #[test]

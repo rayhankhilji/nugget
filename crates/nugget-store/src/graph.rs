@@ -1782,7 +1782,7 @@ impl GraphStore for SqliteGraph {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<EntitySummary>> {
-        // `entity_stats` (schema v14) holds the counts, kept exact by triggers. Walking its
+        // `entity_stats` (schema v15) holds the counts, kept exact by triggers. Walking its
         // rank index from the top and joining each row to its entity (CROSS JOIN fixes that
         // order) reads about `offset + limit` rows plus ties: the name and id tie-breaks are
         // a partial sort of each (claims, mentions) group.
@@ -2690,7 +2690,7 @@ mod tests {
 
     /// `top_entities` against the scan-and-sort default at the 500k-item bench scale: 15k
     /// entities, 200k claims, 2M mentions (skewed: a few hubs), in an encrypted file store.
-    /// Also times the v14 backfill and the mention trigger's insert overhead. Run with
+    /// Also times the v15 backfill and the mention trigger's insert overhead. Run with
     ///
     /// ```text
     /// cargo test -p nugget-store --release --lib top_entities_at_scale -- --ignored --nocapture
@@ -2782,7 +2782,7 @@ mod tests {
         })
         .unwrap();
         println!(
-            "v14 migration (backfill): {:.0} ms",
+            "v15 migration (backfill): {:.0} ms",
             t.elapsed().as_secs_f64() * 1e3
         );
 

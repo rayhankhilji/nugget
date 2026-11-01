@@ -13,11 +13,18 @@ const CLOSE: &str = " -->";
 pub const CLAIM_MARK: &str = "<!-- c:";
 /// Predicate-group heading marker prefix: `### Works at <!-- p:works_at -->`.
 pub const PRED_MARK: &str = "<!-- p:";
+/// History-line claim marker prefix: `  - Worked at Acme (until 2026-10-05) [^2] <!-- h:7 -->`.
+/// A line carrying it renders a superseded claim; it is never an editable fact.
+pub const HIST_MARK: &str = "<!-- h:";
+/// The line that introduces the history sub-list of a predicate group.
+pub const HISTORY_INTRO: &str = "*Earlier:*";
 
 /// Region names, in page order.
 pub const R_HEADER: &str = "header";
 pub const R_FACTS: &str = "facts";
 pub const R_RELATED: &str = "related";
+/// Why other entities were merged into this one (only on pages with a merge log).
+pub const R_MERGED: &str = "merged";
 pub const R_SOURCES: &str = "sources";
 pub const R_REDIRECT: &str = "redirect";
 pub const R_INDEX: &str = "index";
@@ -308,6 +315,33 @@ pub fn parse_fact(line: &str) -> Option<(Option<ClaimId>, String)> {
     Some((claim, collapse_ws(rest)))
 }
 
+/// A history line: any line carrying a well-formed `<!-- h:N -->` marker (wherever it is, so a
+/// line the user appended text to is still recognised and restored). Returns the claim id;
+/// `None` for any other line (including a history marker whose id does not parse).
+pub fn parse_history(line: &str) -> Option<ClaimId> {
+    let at = line.find(HIST_MARK)?;
+    let rest = &line[at + HIST_MARK.len()..];
+    let end = rest.find("-->")?;
+    rest[..end].trim().parse().ok()
+}
+
+/// Whether a line carries a claim or history marker that does not parse (a broken marker).
+pub fn has_bad_marker(line: &str) -> bool {
+    if line.contains(HIST_MARK) && parse_history(line).is_none() {
+        return true;
+    }
+    let t = line.trim_end();
+    if let Some(at) = t.rfind(CLAIM_MARK) {
+        let ok = t[at + CLAIM_MARK.len()..]
+            .strip_suffix("-->")
+            .is_some_and(|id| id.trim().parse::<ClaimId>().is_ok());
+        if !ok || bullet_body(t.trim_start()).is_none() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Footnote labels referenced on a line (`[^1]` → `1`), excluding definitions.
 pub fn footnote_refs(line: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -470,6 +504,24 @@ mod tests {
             Some((None, "new fact".into()))
         );
         assert_eq!(parse_fact("  - nested"), None);
+        assert_eq!(
+            parse_history("  - Was at Acme (until 2026-10-05) [^2] <!-- h:7 -->"),
+            Some(7)
+        );
+        assert_eq!(parse_history("- de-indented [^2] <!-- h:7 -->"), Some(7));
+        assert_eq!(parse_history("- fact [^1] <!-- c:7 -->"), None);
+        assert_eq!(
+            parse_history("  - x [^1] <!-- h:7 --> and my words"),
+            Some(7)
+        );
+        assert!(!has_bad_marker("  - x [^1] <!-- h:7 --> and my words"));
+        assert!(has_bad_marker("  - x [^1] <!-- h:7 and my words"));
+        assert_eq!(parse_history("  - x <!-- h:abc -->"), None);
+        assert!(has_bad_marker("  - x <!-- h:abc -->"));
+        assert!(has_bad_marker("- x <!-- c: -->"));
+        assert!(!has_bad_marker("- x [^1] <!-- c:3 -->"));
+        assert!(!has_bad_marker("  - x [^1] <!-- h:3 -->"));
+        assert!(!has_bad_marker("plain text"));
         assert_eq!(parse_fact("text"), None);
         assert_eq!(footnote_refs("a [^1][^x2] b"), vec!["1", "x2"]);
         assert!(footnote_refs("[^1]: def").is_empty());

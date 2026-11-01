@@ -3,6 +3,7 @@
 //! - `nuggetd`: run the daemon in the foreground until SIGINT/SIGTERM (Ctrl+C on Windows).
 //! - `nuggetd status [--json]`: ask the running daemon for its status.
 //! - `nuggetd install-service` / `uninstall-service`: run at login as a per-user service.
+//! - `nuggetd restart-service`: restart that service (the desktop app does this after an update).
 //! - `nuggetd mcp --client <id>`: the stdio MCP bridge apps launch (token in `NUGGET_MCP_TOKEN`).
 //! - `nuggetd mcp install --client claude-desktop|claude-code|cursor`: set an app up.
 //! - `nuggetd backup [--to DIR]` / `nuggetd backup set-passphrase`: back up now, or set the
@@ -46,6 +47,8 @@ enum Command {
     InstallService,
     /// Stop and remove the user-level service.
     UninstallService,
+    /// Restart the user-level service (for example after an update replaced nuggetd).
+    RestartService,
     /// MCP: run the stdio bridge for a client (`--client <id>`, token in NUGGET_MCP_TOKEN), or
     /// set an app up (`install`).
     #[command(args_conflicts_with_subcommands = true)]
@@ -144,6 +147,10 @@ fn main() -> ExitCode {
         Some(Command::UninstallService) => {
             logging::init_cli();
             report(service::uninstall())
+        }
+        Some(Command::RestartService) => {
+            logging::init_cli();
+            report(service::restart())
         }
         Some(Command::Mcp {
             action:

@@ -21,8 +21,10 @@ pub struct KnowledgeConfig {
     /// Messages with more participants than this produce no `corresponded_with` claims for the
     /// recipients (mailing lists, announcements); the sender is still linked.
     pub max_correspondents: usize,
-    /// Predicates that hold one value at a time: a fresher claim supersedes older ones with a
-    /// different object. Replaces the built-in list when non-empty.
+    /// Predicates that hold one value at a time: the value seen most recently (and not said to
+    /// have ended) is current, the others are superseded history (see the crate docs, "Claim
+    /// lifecycle"). Replaces the built-in list ([`crate::SINGLE_VALUED_PREDICATES`]) when
+    /// non-empty.
     pub single_valued_predicates: Vec<String>,
     /// The optional LLM extractor.
     pub llm: LlmConfig,
@@ -92,7 +94,8 @@ pub struct LlmConfig {
     pub max_requests_per_item: usize,
     /// Output token cap per request.
     pub max_output_tokens: u32,
-    /// Per-request timeout in milliseconds.
+    /// Per-request timeout in milliseconds. For a local provider this is the floor: the
+    /// timeout is derived from the request size (see [`LlmConfig::request_timeout`]).
     pub timeout_ms: u64,
     /// Upper bound on the confidence of an LLM-extracted claim.
     pub max_confidence: f32,
@@ -126,6 +129,13 @@ pub struct LocalLlmLimits {
     pub max_entities_per_request: usize,
     /// Claims per request (the schema's `maxItems`).
     pub max_claims_per_request: usize,
+    /// Generation speed assumed when deriving a request's timeout (tokens per second;
+    /// conservative: a 4B model on a 4-core CPU).
+    pub output_tokens_per_second: f32,
+    /// Prompt-reading speed assumed when deriving a request's timeout (tokens per second).
+    pub prompt_tokens_per_second: f32,
+    /// Upper bound of a derived timeout in milliseconds (`timeout_ms` wins if larger).
+    pub max_timeout_ms: u64,
 }
 
 impl Default for LocalLlmLimits {
@@ -137,6 +147,9 @@ impl Default for LocalLlmLimits {
             max_output_tokens: 1_024,
             max_entities_per_request: 12,
             max_claims_per_request: 10,
+            output_tokens_per_second: 6.0,
+            prompt_tokens_per_second: 40.0,
+            max_timeout_ms: 300_000,
         }
     }
 }
@@ -159,9 +172,36 @@ impl Default for LlmConfig {
     }
 }
 
+/// Fixed allowance per local request (connection, queueing behind another request), in
+/// milliseconds.
+const LOCAL_OVERHEAD_MS: f64 = 10_000.0;
+
 impl LlmConfig {
     pub fn timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_ms.max(1))
+    }
+
+    /// The timeout of one extraction request (QA GG5-18). A cloud provider gets
+    /// [`timeout_ms`](Self::timeout_ms). A local one gets the time a slow CPU needs to read
+    /// the prompt (`prompt_chars` / 4 tokens at `local.prompt_tokens_per_second`) and to write
+    /// the whole output cap (`max_output_tokens` at `local.output_tokens_per_second`), plus a
+    /// fixed allowance; at least `timeout_ms`, at most `local.max_timeout_ms` (or `timeout_ms`
+    /// when that is larger). With the defaults: about 230 s for a full local request.
+    pub fn request_timeout(
+        &self,
+        local: bool,
+        prompt_chars: usize,
+        max_output_tokens: u32,
+    ) -> Duration {
+        let floor = self.timeout_ms.max(1);
+        if !local {
+            return Duration::from_millis(floor);
+        }
+        let l = &self.local;
+        let read = (prompt_chars as f64 / 4.0) / f64::from(l.prompt_tokens_per_second.max(0.1));
+        let write = f64::from(max_output_tokens) / f64::from(l.output_tokens_per_second.max(0.1));
+        let est = ((read + write) * 1000.0 + LOCAL_OVERHEAD_MS).ceil() as u64;
+        Duration::from_millis(est.clamp(floor, l.max_timeout_ms.max(floor)))
     }
 }
 

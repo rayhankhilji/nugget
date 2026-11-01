@@ -26,7 +26,7 @@ import {
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
-import { formatRelative, formatTime } from "../format";
+import { formatDatesInText, formatRelative, formatTime } from "../format";
 import { GoToPage } from "../components/GoToPage";
 import { SourceBadge } from "../components/Provenance";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
@@ -198,13 +198,13 @@ export function TodayPage() {
                 <CardItem
                   key={c.id}
                   card={c}
-                  onAccept={() => void feedback(c, { feedback: "accept" }, t("today.accepted", { title: c.title }))}
+                  onAccept={() => void feedback(c, { feedback: "accept" }, t("today.accepted", { title: formatDatesInText(c.title) }))}
                   onDismiss={(reason, text) =>
-                    void feedback(c, { feedback: "dismiss", reason, reason_text: reason === "other" ? text || null : null }, t("today.dismissed", { title: c.title }))
+                    void feedback(c, { feedback: "dismiss", reason, reason_text: reason === "other" ? text || null : null }, t("today.dismissed", { title: formatDatesInText(c.title) }))
                   }
                   onSnooze={(choice) => {
                     const until = snoozeUntil(choice);
-                    void feedback(c, { feedback: "snooze", until }, t("today.snoozed", { title: c.title, until: formatTime(until) }));
+                    void feedback(c, { feedback: "snooze", until }, t("today.snoozed", { title: formatDatesInText(c.title), until: formatTime(until) }));
                   }}
                   onAction={(a) => setAction({ card: c, action: a })}
                   onForget={forget}
@@ -320,11 +320,11 @@ function BriefList({ title, items }: { title: string; items: BriefCardView[] }) 
         {items.map((c) => (
           <li key={c.card_id}>
             <span className="today-brief-title" dir="auto">
-              {c.title}
+              {formatDatesInText(c.title)}
             </span>
             {c.summary && (
               <span className="muted small block" dir="auto">
-                {c.summary}
+                {formatDatesInText(c.summary)}
               </span>
             )}
             {c.due && (
@@ -350,7 +350,7 @@ function MeetingItem({ meeting: m }: { meeting: BriefMeetingView }) {
   return (
     <li>
       <span className="today-brief-title" dir="auto">
-        {m.title}
+        {formatDatesInText(m.title)}
       </span>
       <span className="muted small block">
         {when}
@@ -407,12 +407,14 @@ function CardItem({
   const why = topFactors(card.factors);
   const summary = card.summary?.trim();
   const people = card.people ?? [];
+  // LL2 (GG7-11): ISO dates inside the daemon's text, written for the reader's locale.
+  const title = formatDatesInText(card.title);
 
   return (
     <li className="card today-card" id={cardDomId(card.id)} tabIndex={-1} aria-labelledby={titleId}>
       <div className="card-head">
         <h3 id={titleId} className="card-title today-card-title" dir="auto">
-          {card.title}
+          {title}
         </h3>
         <span className="badges">
           <Badge>{cardKindLabel(card.kind)}</Badge>
@@ -422,12 +424,12 @@ function CardItem({
       </div>
       {summary && (
         <p className="today-card-summary" dir="auto">
-          {summary}
+          {formatDatesInText(summary)}
         </p>
       )}
       {card.detail && card.detail !== summary && (
         <p className="muted today-card-detail" dir="auto">
-          {card.detail}
+          {formatDatesInText(card.detail)}
         </p>
       )}
       <p className="muted small today-card-meta">
@@ -465,14 +467,14 @@ function CardItem({
             {t("today.evidence", { n: card.evidence.length })}
           </button>
           <div id={evidenceId} hidden={!showEvidence}>
-            {showEvidence && <EvidenceList evidence={card.evidence} label={t("today.evidenceLabel", { title: card.title })} />}
+            {showEvidence && <EvidenceList evidence={card.evidence} label={t("today.evidenceLabel", { title })} />}
           </div>
         </div>
       )}
 
       <div className="today-card-footer">
         {card.actions.length > 0 && (
-          <div className="today-proposed" role="group" aria-label={t("today.actionsLabel", { title: card.title })}>
+          <div className="today-proposed" role="group" aria-label={t("today.actionsLabel", { title })}>
             {card.actions.map((a) => {
               const short = ACTION_LABEL[a.kind];
               const label = short ? t(short) : a.label;
@@ -505,7 +507,7 @@ function CardItem({
             })}
           </div>
         )}
-        <button type="button" className="btn btn-small btn-primary" onClick={onAccept} aria-label={t("today.acceptLabel", { title: card.title })}>
+        <button type="button" className="btn btn-small btn-primary" onClick={onAccept} aria-label={t("today.acceptLabel", { title })}>
           {t("today.accept")}
         </button>
         <span className="today-card-footer-end">
@@ -514,7 +516,7 @@ function CardItem({
             className="btn btn-small btn-ghost"
             aria-expanded={panel === "snooze"}
             onClick={() => setPanel((p) => (p === "snooze" ? "none" : "snooze"))}
-            aria-label={t("today.snoozeLabel", { title: card.title })}
+            aria-label={t("today.snoozeLabel", { title })}
           >
             {t("today.snooze")}
           </button>
@@ -523,7 +525,7 @@ function CardItem({
             className="btn btn-small btn-danger-ghost"
             aria-expanded={panel === "dismiss"}
             onClick={() => setPanel((p) => (p === "dismiss" ? "none" : "dismiss"))}
-            aria-label={t("today.dismissLabel", { title: card.title })}
+            aria-label={t("today.dismissLabel", { title })}
           >
             {t("today.dismiss")}
           </button>

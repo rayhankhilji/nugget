@@ -186,6 +186,8 @@ mod tests {
                 Some(150_000_000),
                 false,
             )),
+            pid: None,
+            service: None,
         };
         let out = format_status(&s, "/tmp/sock");
         assert!(out.contains("disk:      FULL: 150 MB free"), "{out}");

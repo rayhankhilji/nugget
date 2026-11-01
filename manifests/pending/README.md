@@ -70,3 +70,12 @@ So `recommend` gives the same answer for every tier on every amount of RAM, and 
 named explicitly in `[draft.local] model`. The tiers are the chat tiers the 4B model serves
 (drafting routes by synthesis), so either model can also be named as `runtime.chat_model` for an
 experiment; neither is ever chosen on its own.
+
+## `multilingual-embed.json` (signed)
+
+`nomic-embed-text-v2-moe-q8`, the multilingual embedder for GG7-2, was signed into
+`default.json` (manifest version 5, dev key) after its revision, size, SHA-256 and licence were
+re-checked against the Hugging Face API. It is now the embedding pick for new stores; a store
+that already has vectors keeps the model that built them (`nomic-embed-text-v1.5-q8` for stores
+older than the `embedding_model` record), because two models' vectors are not comparable.
+Measurements: `bench/README.md`, "A multilingual embedder (GG7-2)".

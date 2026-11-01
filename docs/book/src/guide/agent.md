@@ -94,7 +94,8 @@ This reduces the risk; it does not remove it. Keep risky actions on **confirm**.
 
 - **Escape three times** (each press within half a second of the last) stops every agent at once.
   This is the [kill switch](safety.md#the-kill-switch).
-- **Stop all agents** in the tray menu does the same.
+- **Stop all agents** in the tray menu, or the kill switch on the **Safety** page, does the same.
+  Without a tray icon, use the **Safety** page.
 - **Cancel** on the Agent page stops one task.
 
 ## Privacy

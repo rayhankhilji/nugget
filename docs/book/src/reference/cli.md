@@ -16,6 +16,7 @@ it prints `nuggetd is already running (<socket>)` and exits with status 0.
 | `status` | Asks the running daemon for its status and prints it. Exits 1 if no daemon answers |
 | `install-service` | Registers `nuggetd` to start at login as a per-user service, and starts it |
 | `uninstall-service` | Stops and removes that service |
+| `restart-service` | Restarts that service, so it runs the `nuggetd` its definition points at (the desktop app does this after an update) |
 | `mcp` | `nuggetd mcp --client <id>`: the stdio MCP bridge an AI app launches. `nuggetd mcp install --client <app>`: sets an app up |
 | `backup` | `nuggetd backup [--to DIR]`: back up now, to the configured folder or `DIR`. `nuggetd backup set-passphrase`: set the backup passphrase, which seals the store key into every later backup. Goes through the daemon when it runs, works offline otherwise. See [Backup and export](../guide/backup.md) |
 | `restore` | `nuggetd restore --from DIR`: restore a backup (stop the daemon first). The current data is kept aside |

@@ -275,6 +275,9 @@ pub(crate) fn dates_of(item: &Item) -> ItemDates {
     let m = &item.metadata;
     ItemDates {
         extracted_date: text(&m["extracted"]["date"]),
+        frontmatter_date: text(&m["extracted"]["frontmatter"]["date"]),
+        frontmatter_created: text(&m["extracted"]["frontmatter"]["created"]),
+        title: item.title.clone(),
         event_start: text(&m["extracted"]["start"])
             .or_else(|| text(&m["start"]["date_time"]))
             .or_else(|| text(&m["start"]["date"])),
@@ -787,6 +790,9 @@ mod tests {
     ) -> ItemDates {
         ItemDates {
             extracted_date: extracted.map(str::to_owned),
+            frontmatter_date: None,
+            frontmatter_created: None,
+            title: None,
             event_start: event.map(str::to_owned),
             source_modified_at: modified.map(dt),
             created_at: dt("2020-01-01T00:00:00Z"),

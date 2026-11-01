@@ -127,6 +127,48 @@ describe("quick ask", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("no model");
   });
 
+  it("says a shell or connection failure in plain words, never its raw text (LL2)", async () => {
+    setup({
+      retrieve_ask: () => {
+        throw { kind: "io", message: "Broken pipe (os error 32) at src/ipc.rs:88" };
+      },
+    });
+    const { container } = await render(<QuickAsk />);
+    await typeQuestion(container, "q");
+    await submit(container);
+    const alert = container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("Couldn't answer");
+    expect(alert.textContent).not.toContain("os error");
+    const result = await axe.run(container, { rules: { "color-contrast": { enabled: false }, region: { enabled: false } } });
+    expect(result.violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it("says Nugget isn't reachable when the daemon is not running (LL2)", async () => {
+    setup({
+      retrieve_ask: () => {
+        throw { kind: "not_running", message: "connection refused" };
+      },
+    });
+    const { container } = await render(<QuickAsk />);
+    await typeQuestion(container, "q");
+    await submit(container);
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain("Nugget isn't reachable right now.");
+  });
+
+  it("says what to do when no AI model is set up, instead of the daemon's tier message (LL2)", async () => {
+    setup({
+      retrieve_ask: () => {
+        throw { kind: "rpc", message: "no provider is available for the synthesis tier", code: -32000 };
+      },
+    });
+    const { container } = await render(<QuickAsk />);
+    await typeQuestion(container, "q");
+    await submit(container);
+    const alert = container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("No AI model is set up yet");
+    expect(alert.textContent).not.toContain("tier");
+  });
+
   it("prefills without asking, hides on Escape and opens the main window", async () => {
     const { calls, asked, pages } = setup();
     const { container } = await render(<QuickAsk />);

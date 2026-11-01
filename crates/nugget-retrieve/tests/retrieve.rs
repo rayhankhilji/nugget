@@ -389,6 +389,48 @@ async fn embedding_failures_fall_back_to_text() {
     assert_eq!(keys(&res.items), ["boiler"]);
 }
 
+/// Vectors of two models are not comparable at the same dimension: a query is embedded only by
+/// a provider serving the model the index recorded, otherwise the search is text-only.
+#[tokio::test]
+async fn a_query_is_embedded_only_by_the_index_model() {
+    let local = embedder();
+    let store = corpus(Some(&local));
+    let emb = Arc::new(embedder());
+    let model = emb.meta().model;
+    store.adopt_embedding_model("another-model").unwrap();
+    let r = Retriever::new(
+        store.clone(),
+        Some(router(vec![emb.clone()], true)),
+        RetrieveConfig::default(),
+    );
+    let res = r.search("boiler", 3).await.unwrap();
+    match &res.mode {
+        RetrievalMode::TextOnly {
+            reason: TextOnlyReason::ModelMismatch(msg),
+        } => assert!(
+            msg.contains("another-model") && msg.contains(&model),
+            "{msg}"
+        ),
+        other => panic!("unexpected mode {other:?}"),
+    }
+    assert_eq!(keys(&res.items), ["boiler"]);
+
+    // The index's own model embeds the query.
+    let store = corpus(Some(&local));
+    store.adopt_embedding_model(&model).unwrap();
+    let r = Retriever::new(
+        store,
+        Some(router(vec![emb], true)),
+        RetrieveConfig::default(),
+    );
+    let res = r.search("boiler", 3).await.unwrap();
+    assert!(
+        matches!(res.mode, RetrievalMode::Hybrid { .. }),
+        "{:?}",
+        res.mode
+    );
+}
+
 #[tokio::test]
 async fn strategies() {
     let local = embedder();

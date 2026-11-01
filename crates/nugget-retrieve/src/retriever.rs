@@ -1038,6 +1038,26 @@ impl Retriever {
             Ok(_) => vec![query.to_owned()],
             Err(e) => return Err(TextOnlyReason::EmbeddingFailed(e.to_string())),
         };
+        // Vectors of another model are not comparable, whatever their dimension.
+        let providers = match self.store.embedding_model() {
+            Ok(Some(model)) => {
+                let (same, other): (Vec<_>, Vec<_>) =
+                    providers.into_iter().partition(|p| p.meta().model == model);
+                if same.is_empty() {
+                    return Err(TextOnlyReason::ModelMismatch(format!(
+                        "the index was built with `{model}`; the embedding providers serve {}",
+                        other
+                            .iter()
+                            .map(|p| format!("`{}`", p.meta().model))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )));
+                }
+                same
+            }
+            Ok(None) => providers,
+            Err(e) => return Err(TextOnlyReason::EmbeddingFailed(e.to_string())),
+        };
         let (p, mut vectors) = embed_first(router, &providers, &text)
             .await
             .map_err(TextOnlyReason::EmbeddingFailed)?;

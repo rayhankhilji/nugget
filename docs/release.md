@@ -467,11 +467,20 @@ rehearsal does.
 
 | Platform | Runner | Target | Installers | Updater payload |
 |---|---|---|---|---|
-| macOS Apple silicon | `macos-14` | `aarch64-apple-darwin` | `.app`, `.dmg` | `Nugget_<v>_aarch64.app.tar.gz` |
+| macOS Apple silicon | `macos-15` | `aarch64-apple-darwin` | `.app`, `.dmg` | `Nugget_<v>_aarch64.app.tar.gz` |
 | macOS Intel | `macos-15-intel` | `x86_64-apple-darwin` | `.app`, `.dmg` | `Nugget_<v>_x64.app.tar.gz` |
 | Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | NSIS `-setup.exe` (per-user), MSI | both installers |
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | AppImage, `.deb`, `.rpm` | all three |
 | Linux arm64 | `ubuntu-22.04-arm` | `aarch64-unknown-linux-gnu` | AppImage, `.deb`, `.rpm` | all three (job may fail without blocking the release) |
+
+The Apple silicon build runs on `macos-15`: on 2026-10-31 every `macos-14` job was cancelled
+before a runner was assigned (no log; GG6-27), while `macos-15` jobs built and passed the dmg
+smoke test (dry run 41270093195). GitHub is retiring the macOS 14 image. A job that never gets
+a runner (`runner_id` 0, cancelled or failed within seconds, no log) can also mean the account's
+Actions minutes or spending limit is reached: check Settings → Billing before suspecting the
+workflow. The
+runner version doesn't raise the app's floor: `bundle.macOS.minimumSystemVersion` (11.0) sets the
+deployment target.
 
 Linux builds use Ubuntu 22.04 so the packages need only glibc 2.35. The `.deb` and `.rpm` declare
 no extra dependencies beyond what Tauri computes (WebKitGTK 4.1, GTK 3, libayatana-appindicator).

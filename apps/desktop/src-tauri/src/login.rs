@@ -38,7 +38,20 @@ pub fn run(install: bool) -> Result<String, CmdError> {
     } else {
         "uninstall-service"
     };
-    let mut cmd = Command::new(&exe);
+    run_verb(&exe, verb)
+}
+
+/// GG6-10: `nuggetd restart-service` (systemd, launchd or the scheduled task), so a service
+/// still running the previous version starts the updated binary.
+pub fn restart_service() -> Result<String, CmdError> {
+    let exe = find_nuggetd().ok_or_else(|| {
+        CmdError::Spawn("Couldn't find nuggetd next to the app or on PATH.".into())
+    })?;
+    run_verb(&exe, "restart-service")
+}
+
+fn run_verb(exe: &Path, verb: &str) -> Result<String, CmdError> {
+    let mut cmd = Command::new(exe);
     cmd.arg(verb).stdin(Stdio::null());
     #[cfg(windows)]
     {

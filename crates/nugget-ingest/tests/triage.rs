@@ -1036,7 +1036,7 @@ async fn a_failed_item_is_retried_when_its_wait_is_over() {
 #[tokio::test]
 async fn requests_are_sized_by_the_measured_prefill_rate_and_long_items_go_in_parts() {
     // A model that takes 1 ms per prompt character before its first token, and a 200 ms target:
-    // after the first request, no request may carry much more than the 300-character floor,
+    // after the first request, no request may carry much more than the 1 000-character floor,
     // and a long item is labelled in parts (sensitive if any part is).
     let local = local_model();
     local
@@ -1054,7 +1054,7 @@ async fn requests_are_sized_by_the_measured_prefill_rate_and_long_items_go_in_pa
         ..Default::default()
     })
     .await;
-    let mut long = "an ordinary paragraph about the garden. ".repeat(40);
+    let mut long = "an ordinary paragraph about the garden. ".repeat(80);
     long.push_str("HUSHHUSH at the very end");
     let mut script: Vec<Step> = (0..6)
         .map(|i| {
@@ -1081,11 +1081,12 @@ async fn requests_are_sized_by_the_measured_prefill_rate_and_long_items_go_in_pa
     })
     .await;
     let chats = local.chats();
-    // Every request after the first fits the measured budget (document text plus markup).
+    // Every request after the first fits the measured budget (document text plus markup: the
+    // request's preamble naming its tag code, and each document's tags).
     for c in &chats[1..] {
         let docs = c.matches("<document n=").count();
         assert!(
-            c.chars().count() <= 300 + 120 * docs,
+            c.chars().count() <= 1_000 + 220 + 120 * docs,
             "{} chars: {c}",
             c.len()
         );

@@ -42,7 +42,7 @@ fn recommends_by_ram_and_tier_from_shipped_manifest() {
     );
     assert_eq!(
         pick(&m, 40, Tier::Embedding).as_deref(),
-        Some("nomic-embed-text-v1.5-q8")
+        Some("nomic-embed-text-v2-moe-q8")
     );
     assert_eq!(pick(&m, 20, Tier::Embedding), None);
 

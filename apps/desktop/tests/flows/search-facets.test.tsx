@@ -11,6 +11,7 @@ import { RECENT_KEY, SAVED_KEY } from "../../src/savedSearches";
 import {
   click,
   daemon,
+  errors,
   findByRole,
   findByText,
   getByRole,
@@ -308,7 +309,7 @@ describe("result preview", () => {
     expect(title.getAttribute("aria-expanded")).toBe("true");
     expect(await violations()).toEqual([]);
 
-    await click(within(panel).getByRole("button", { name: t("search.openTitle", { title: "Engine note 1" }) }));
+    await click(within(panel).getByRole("button", { name: t("searchui.openInAppTitle", { title: "Engine note 1" }) }));
     expect(d.callsTo("open_url")).toEqual([{ url: "file:///home/me/notes/n1.md" }]);
 
     await press(within(panel).getByRole("button", { name: t("searchui.closePreview") }), "Escape");
@@ -346,7 +347,40 @@ describe("timeline", () => {
 
     await click(getByRole("button", { name: t("searchui.backToResults") }));
     await findByText("Engine note 1");
-    expect(document.activeElement?.id).toBe("search-results-heading");
+    // Focus returns to the person chip the timeline was opened from.
+    const chip = within(main().querySelector("ol.results")!).getByRole("button", { name: t("searchui.timelineFor", { name: "Ada Lovelace" }) });
+    expect(document.activeElement).toBe(chip);
+  });
+
+  it("Escape closes the timeline and returns focus to its opener in the filters (LL2)", async () => {
+    daemon({ search_faceted: faceted([hit(1)]), search_timeline: timeline });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    const opener = within(filters()).getByRole("button", { name: t("searchui.timelineFor", { name: "Ada Lovelace" }) });
+    opener.focus();
+    await click(opener);
+    const heading = await findByRole("heading", { name: t("searchui.timelineTitle", { name: "Ada Lovelace" }) });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    await press(heading, "Escape");
+    await findByText("Engine note 1");
+    expect(queryByRole("heading", { name: t("searchui.timelineTitle", { name: "Ada Lovelace" }) })).toBeNull();
+    expect(document.activeElement).toBe(within(filters()).getByRole("button", { name: t("searchui.timelineFor", { name: "Ada Lovelace" }) }));
+  });
+
+  it("the timeline's loading and error states are named, never blank (LL2)", async () => {
+    const d = daemon({ search_faceted: faceted([hit(1)]) });
+    const pending = d.hang("search_timeline");
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    await click(within(main().querySelector("ol.results")!).getByRole("button", { name: t("searchui.timelineFor", { name: "Ada Lovelace" }) }));
+    await waitFor(() => expect(main().querySelector(".sr-timeline [role=status]")?.textContent).toContain(t("searchui.timelineLoading")));
+    expect(await violations()).toEqual([]);
+    await pending.reject(errors.rpc("entity not found", -32602));
+    await waitFor(() => expect(main().querySelector(".sr-timeline [role=alert]")?.textContent).toContain("entity not found"));
+    expect(getByRole("heading", { name: t("searchui.timeline") })).toBeTruthy();
+    expect(await violations()).toEqual([]);
   });
 
   it("refetches a window ending with a month outside a truncated timeline", async () => {

@@ -228,12 +228,18 @@ light and then dark. One check per theme and:
 
 | What | Audited |
 | --- | --- |
-| every page of the `PAGES` registry | the whole document; Search again with results, Knowledge with Ada Wexford's facts open and on the Graph tab, Connected apps with its connect dialog; in light also `treeChecks` from `a11y-tree.mjs` (landmarks, headings, names) |
-| Add source | the kind step and the folder step, opened from Sources |
+| every page of the `PAGES` registry | the whole document; Search again with results and its filters, with a Kind filter ticked, with a result's preview open and on a person's timeline (from the filters); Knowledge with Ada Wexford's facts open and on the Graph tab; Connected apps with its connect dialog; Models with "Add a provider" open; in light also `treeChecks` from `a11y-tree.mjs` (landmarks, headings, names) |
+| Add source | the kind step, the folder step and the WhatsApp (messaging) form, opened from Sources |
 | Merge and Split entity | from Ada Wexford on Knowledge: Merge as it opens and with a candidate picked (preview shown), Split with a fact ticked |
 | a Today card | its sources (expanded) and its action's review dialog (a dry-run preview) |
 | command palette | Ctrl+K, empty and filtered |
 | onboarding | every step walked with Continue, the AI step with each choice, and the folder form from the source step |
+| quick ask window | `quickask.html` empty, then after asking "Tidewater budget" (with no AI provider on this home, its plain "no AI model" alert); no raw text in the answer area |
+| Double Tap overlay | `overlay.html` with a finished draft (the shell's `overlay_state` answered by the test), then with the previous drafts list open (H) |
+
+States the e2e daemon can't reach (a local model warming up, failed or retried; a full disk; a
+model download failing or cancelled; a provider not in use) are covered by vitest axe tests
+instead: `src/pages/Status.a11y.test.tsx`, `src/pages/Models.a11y.test.tsx`.
 
 Dialogs are audited alone (`dialog[open]`, the page behind hidden), so page violations aren't
 counted twice. Before each run the viewport grows to the tallest scroll content, so text below the

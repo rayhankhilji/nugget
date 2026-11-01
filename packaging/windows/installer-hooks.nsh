@@ -5,6 +5,11 @@
 ; made in the app ("Start Nugget at login"), which runs `nuggetd install-service` and creates
 ; the per-user scheduled task "Nugget Daemon". These hooks only keep that task consistent with
 ; the files on disk.
+;
+; Uninstalling also offers to remove Nugget's data (models, store, settings, logs, saved keys) and,
+; separately, the vault: see uninstall-data.nsh, which adds that page. Updates never remove data.
+
+!include "${__FILEDIR__}\uninstall-data.nsh"
 
 !macro NSIS_HOOK_PREINSTALL
   ; A running nuggetd.exe locks its file, so an update could not replace it. Stop this user's
@@ -26,7 +31,32 @@
   ${If} $UpdateMode <> 1
     nsExec::Exec '"$INSTDIR\nuggetd.exe" uninstall-service'
     Pop $0
+    ; The app's own "Open Nugget in the tray when I log in" entry (autostart.rs). Tauri's
+    ; uninstaller only removes a Run value named after the product, "Nugget".
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "NuggetDesktop"
   ${EndIf}
   nsExec::Exec 'taskkill /F /IM nuggetd.exe'
   Pop $0
+
+  ; What to remove (uninstall-data.nsh). Updates: nothing, whatever was asked. No page shown
+  ; (silent /S, passive /P, or nothing found): only what /REMOVEDATA and /REMOVEVAULT ask for.
+  ${If} $UpdateMode = 1
+    StrCpy $NuggetRemoveData 0
+    StrCpy $NuggetRemoveVault 0
+  ${ElseIf} $NuggetPageShown <> 1
+    Call un.NuggetReadFlags
+  ${EndIf}
+  ; Removing Nugget's data includes the app's own dev.nugget.desktop folders, which is what
+  ; Tauri's "Delete the application data" box removes; turn it on so both agree.
+  ${If} $NuggetRemoveData = 1
+    StrCpy $DeleteAppDataCheckboxState 1
+  ${EndIf}
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  ; Runs after Tauri removed the app (and, when asked, the dev.nugget.desktop folders).
+  ${If} $UpdateMode <> 1
+  ${AndIf} $NuggetRemoveData = 1
+    Call un.NuggetRemoveAll
+  ${EndIf}
 !macroend

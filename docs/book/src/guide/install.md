@@ -206,26 +206,16 @@ update signing key* and can't update itself.
 
 ## Uninstall
 
-1. On the Status page, turn off **Start the Nugget background service at login** and **Open Nugget
-   in the tray when I log in**, then quit Nugget from the tray or menu bar. (Or run
-   `nuggetd uninstall-service`.)
-2. Remove the app:
-   - **macOS:** drag `/Applications/Nugget.app` to the Trash.
-   - **Windows:** **Settings → Apps → Installed apps → Nugget → Uninstall**. Uninstalling the NSIS
-     install also removes the login task.
-   - **Linux:** `sudo apt remove nugget`, `sudo dnf remove nugget` or `sudo zypper remove nugget`;
-     for an AppImage, delete the file.
-3. Your data stays until you delete it:
-   - the daemon's [data, config and cache directories](../reference/data-dir.md) and the vault
-     (`~/Nugget Vault` by default);
-   - the desktop app's own directory, `dev.nugget.desktop` (its settings, history and window
-     state): `~/.config/dev.nugget.desktop` and `~/.local/share/dev.nugget.desktop` on Linux,
-     `~/Library/Application Support/dev.nugget.desktop` on macOS, `%APPDATA%\dev.nugget.desktop` on
-     Windows. The webview keeps its data in directories of the same name (for example
-     `%LOCALAPPDATA%\dev.nugget.desktop` on Windows, `~/Library/WebKit/dev.nugget.desktop` and
-     `~/Library/Caches/dev.nugget.desktop` on macOS);
-   - your OS keychain: delete every entry under the service `dev.nugget.Nugget`. That holds the
-     store's encryption key, your API keys and your account tokens.
+1. Turn off **Start the Nugget background service at login** and **Open Nugget in the tray when I
+   log in** on the Status page (or run `nuggetd uninstall-service`), then quit Nugget.
+2. Remove the app: drag it to the Trash on macOS; **Settings → Apps → Installed apps → Nugget →
+   Uninstall** on Windows; `sudo apt remove nugget` (or `dnf`, `zypper`) on Linux, or delete the
+   AppImage.
+
+Your data stays: models, the encrypted store, settings, logs, the saved keys in your OS keychain
+and `~/Nugget Vault`. The Windows `setup.exe` uninstaller lists them and offers to remove them,
+with the vault as a separate choice; on macOS, Linux and with the `.msi`, remove them yourself.
+[Uninstall](uninstall.md) lists every location per OS, with the commands.
 
 ## Build from source
 
