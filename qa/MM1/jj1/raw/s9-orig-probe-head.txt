@@ -1,0 +1,20 @@
+0 read_ahead_loop {"running": true}
+2 listener {"error": null, "listening": true}
+2757 trigger null
+2758 view reading None 
+2909 view streaming None 
+2909 view streaming None Thanks,
+2911 show {"focused": false, "position": [0, 0], "scale": 1.0, "size": [0, 0], "visible": true}
+2967 view streaming None Thanks, see you
+3026 view streaming None Thanks, see you at noon
+3088 view streaming None Thanks, see you at noon in the
+3093 view streaming None Thanks, see you at noon in the lobby.
+3094 view done None Thanks, see you at noon in the lobby.
+5251 view inserting None Thanks, see you at noon in the lobby.
+5251 hide {"focused": true, "position": [37, 305], "scale": 1.0, "size": [440, 168], "visible": true}
+5382 insert {"ok": false}
+5383 view error doubletap.error.field_changed Thanks, see you at noon in the lobby.
+5384 show {"focused": false, "position": [37, 305], "scale": 1.0, "size": [440, 168], "visible": true}
+8835 trigger null
+8835 view reading None 
+9287 view streaming None 

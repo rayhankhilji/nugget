@@ -1,0 +1,123 @@
+{
+ "ipc": {
+  "save": {
+   "message": "Key checked and saved. You can use it now.",
+   "models": [
+    "qa-model"
+   ],
+   "ok": true,
+   "provider_id": "custom",
+   "reason": "ok",
+   "restart_required": false,
+   "saved": true
+  },
+  "chat_after_save": {
+   "provider": "custom",
+   "key_used": [
+    "sk-qa-old"
+   ]
+  },
+  "update_bad": {
+   "message": "The provider rejected this key. Check that you copied all of it.",
+   "models": [],
+   "ok": false,
+   "provider_id": null,
+   "reason": "bad_key",
+   "restart_required": false,
+   "saved": false
+  },
+  "chat_after_bad_update": {
+   "provider": "custom",
+   "key_used": [
+    "sk-qa-old"
+   ]
+  },
+  "update_new": {
+   "message": "Key checked and replaced. Nugget uses the new key now.",
+   "models": [
+    "qa-model"
+   ],
+   "ok": true,
+   "provider_id": "custom",
+   "reason": "ok",
+   "restart_required": false,
+   "saved": true
+  },
+  "chat_after_update": {
+   "provider": "custom",
+   "key_used": [
+    "sk-qa-new"
+   ]
+  },
+  "saved_list": {
+   "providers": [
+    {
+     "available": true,
+     "base_url": "http://127.0.0.1:43179/v1",
+     "env_var": null,
+     "error": null,
+     "id": "custom",
+     "key": "keychain",
+     "kind": "openai_compatible",
+     "model": "qa-model"
+    }
+   ]
+  },
+  "update_missing": {
+   "message": "There is no provider named \"nope\".",
+   "models": [],
+   "ok": false,
+   "provider_id": null,
+   "reason": "not_found",
+   "restart_required": false,
+   "saved": false
+  },
+  "remove": {
+   "message": "\"custom\" was removed and its key deleted.",
+   "ok": true,
+   "provider_id": "custom",
+   "reason": "ok",
+   "removed": true
+  },
+  "providers_after_remove": [],
+  "config_mentions_custom_after_remove": false,
+  "chat_after_remove": {
+   "error": "chat failed: provider `custom` is not configured or not available (code -32001)",
+   "key_used": []
+  },
+  "remove_again": {
+   "message": "There is no provider named \"custom\".",
+   "ok": false,
+   "provider_id": "custom",
+   "reason": "not_found",
+   "removed": false
+  }
+ },
+ "ui": {
+  "save": [
+   "Key checked and saved. You can use it now."
+  ],
+  "save_again": [
+   "A provider with this name is already set up. Replace its key, or choose another name."
+  ],
+  "replace_button_visible": true,
+  "after_replace": [
+   "Key checked and replaced. Nugget uses the new key now."
+  ],
+  "chat_after_ui_replace": {
+   "provider": "custom",
+   "key_used": [
+    "sk-qa-ui-"
+   ]
+  },
+  "models_card_text": "custom In use OpenAI-compatible (OpenRouter, Ollama, LM Studio…) · qa-model Key stored in your keychain Replace key Remove",
+  "models_after_remove": "Your providers AI providers you added with an API key. Changes take effect right away. You haven't added a provider with a key yet. custom was removed. Add a provider",
+  "providers_after_ui_remove": [],
+  "chat_after_ui_remove": {
+   "error": "chat failed: provider `custom` is not configured or not available (code -32001)",
+   "key_used": []
+  }
+ },
+ "keys_in_logs": [],
+ "keys_in_config": []
+}

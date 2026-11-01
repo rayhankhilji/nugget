@@ -1,0 +1,8 @@
+[13:43:03] first {"label":"first","ms":129,"provider":"local-chat","error":null,"text":"According to your notes, \"date unknown\" [1]."} {"error":null,"model_id":"e2e-chat-q4","provider":"local-chat","role":"chat","state":"ready","state_ms":14}
+[13:43:04] idle kill [{"ms":3,"state":"ready","error":null},{"ms":108,"state":"failed","error":"The on-device chat model stopped unexpectedly; restarting it."},{"ms":1332,"state":"starting","error":"The on-device chat model stopped unexpectedly; restarting it."},{"ms":1434,"state":"ready","error":null}] {"label":"after idle kill","ms":82,"provider":"local-chat","error":null,"text":"According to your notes, \"date unknown\" [1]."}
+[13:43:08] mid {"label":"mid-answer","ms":3896,"provider":"local-chat","error":null,"text":"According to your notes, \"date unknown\" [1]."} {"label":"after mid-answer kill","ms":46,"provider":"local-chat","error":null,"text":"According to your notes, \"date unknown\" [1]."}
+[13:43:14] chat mid {"label":"chat mid-answer","ms":5658,"rpc_error":"chat failed: The on-device chat model stopped unexpectedly; restarting it. Try again in a moment. (code -32003)"}
+[13:43:30] hung {"label":"hung server","ms":12955,"provider":"local-chat","error":"provider error: The on-device chat model stopped responding; restarting it. Try again in a moment.","text":""} {"error":"The on-device chat model stopped responding; restarting it.","model_id":"e2e-chat-q4","provider":"local-chat","retry_in_ms":7997,"role":"chat","state":"failed","state_ms":204}
+Error: kill ESRCH
+    at file:///tmp/claude-0/-home-user-nugget/2ea50096-6b1f-533b-bfde-bcd3d5b26052/scratchpad/m/qa/GG6/a3-days/s3-model-crash.mjs:118:9
+  code: 'ESRCH',
