@@ -72,6 +72,11 @@ def run(lab):
     json.dump(s, open(tmp, "w"), indent=2)
     os.replace(tmp, slots)  # break the hard link to the shared copy
     lab.start_daemon()
+    for prov in ("cloudembed", "anthropic"):
+        try:
+            lab.note(f"probe {prov}: " + json.dumps(lab.call("providers.probe", {"provider": prov}, timeout=120)))
+        except Exception as e:  # noqa: BLE001
+            lab.note(f"probe {prov}: {e}")
     import shutil
     shutil.copytree(f"{lab.fmt('{fixtures}')}/corpus", f"{lab.home}/Documents")
     shutil.copytree(f"{lab.fmt('{fixtures}')}/mail", f"{lab.home}/Mail")
