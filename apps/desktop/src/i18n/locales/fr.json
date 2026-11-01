@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "Clé lue dans la variable d’environnement {name}",
   "models.providers.envMissing": "Non utilisé : la variable d’environnement {name} n’est pas définie là où Nugget s’exécute.",
   "models.providers.unavailable": "Non utilisé : Nugget ne peut pas utiliser ce fournisseur avec ses réglages actuels. Remplacez sa clé ou supprimez-le.",
+  "models.providers.restart": "Pas encore utilisé : redémarrez Nugget pour commencer à utiliser ce fournisseur.",
   "models.providers.replace": "Remplacer la clé",
   "models.providers.replaceLabel": "Remplacer la clé : {name}",
   "models.providers.remove": "Retirer",

@@ -337,9 +337,11 @@ function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: Sav
       {!p.available && (
         <div className="small">
           <p>
-            {p.key === "env" && p.env_var && (!p.error || /not set|missing|empty/i.test(p.error))
-              ? t("models.providers.envMissing", { name: p.env_var })
-              : t("models.providers.unavailable")}
+            {p.error && /restart/i.test(p.error)
+              ? t("models.providers.restart")
+              : p.key === "env" && p.env_var && (!p.error || /environment variable|env:\S+ (?:is )?(?:not set|empty|missing)/i.test(p.error))
+                ? t("models.providers.envMissing", { name: p.env_var })
+                : t("models.providers.unavailable")}
           </p>
           {p.error && (
             <details className="note-details">
@@ -463,9 +465,11 @@ function ModelCard({
       // Remembered while it lasts: Cancel unmounts without a blur event.
       focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
     } else if (focusIn.current === "title") {
-      // Installed: the name; failed (the request or the download): its Retry install.
+      // Installed: the name; failed (the request or the download): its Retry install. Only when
+      // focus went with Cancel, never from wherever the user moved to meanwhile.
       focusIn.current = null;
-      (installed ? titleRef.current : actionRef.current)?.focus();
+      const at = document.activeElement;
+      if (!at || at === document.body || !at.isConnected) (installed ? titleRef.current : actionRef.current)?.focus();
     }
   });
   const pct = progress ? percent(progress.downloaded, progress.total || model.size_bytes) : 0;

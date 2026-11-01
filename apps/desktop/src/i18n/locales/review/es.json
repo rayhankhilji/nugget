@@ -752,6 +752,7 @@
     "models.providers.envMissing",
     "models.providers.unavailable",
     "searchui.openInAppTitle",
-    "quickAsk.noProvider"
+    "quickAsk.noProvider",
+    "models.providers.restart"
   ]
 }

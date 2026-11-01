@@ -86,6 +86,25 @@ describe("Models downloads (LL2)", () => {
     expect(container.querySelector('li.card .visually-hidden[role="status"]')!.textContent).toBe("Qwen3 4B is installed.");
     expect(await violations()).toEqual([]);
   });
+
+  it("leaves focus where the user moved it during the download", async () => {
+    let installed = false;
+    mockDaemon({ models_list: () => [{ ...MODEL, installed }], models_fit: noFit, models_install: null });
+    const { container } = await render(<ModelsPage />);
+    await flush();
+    const install = byText(container, "li.card button", "Install")!;
+    install.focus();
+    await click(install);
+    await send(progress({ downloaded: 100 }));
+    const elsewhere = document.createElement("button");
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    installed = true;
+    await send(progress({ phase: "installed", downloaded: 2_000_000_000 }));
+    await flush();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
 });
 
 const work: SavedKeyProvider = {
@@ -146,6 +165,24 @@ describe("Your providers states (LL2)", () => {
     expect(visible(otherCard!)).toContain("Nugget can't use this provider with its current settings.");
     expect(visible(otherCard!)).not.toContain("relative URL");
     expect(await violations()).toEqual([]);
+  });
+
+  it("says to restart when the daemon says so, and doesn't call a config error a missing variable", async () => {
+    mockDaemon({
+      ai_key_saved: {
+        providers: [
+          { ...work, error: "Not in use yet: restart Nugget." },
+          { ...work, id: "built", error: "provider built: model is empty" },
+        ],
+      },
+    });
+    const { container } = await render(<YourProviders />);
+    await flush();
+    const [restartCard, builtCard] = Array.from(container.querySelectorAll("li.card"));
+    expect(restartCard!.textContent).toContain("restart Nugget to start using this provider");
+    expect(restartCard!.textContent).not.toContain("Replace its key");
+    expect(builtCard!.textContent).not.toContain("isn't set where Nugget runs");
+    expect(builtCard!.textContent).toContain("Nugget can't use this provider with its current settings.");
   });
 });
 

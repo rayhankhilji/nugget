@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "يُقرأ المفتاح من متغير البيئة {name}",
   "models.providers.envMissing": "غير مستخدم: متغير البيئة {name} غير مُعيَّن حيث يعمل Nugget.",
   "models.providers.unavailable": "غير مستخدم: لا يستطيع Nugget استخدام هذا المزوّد بإعداداته الحالية. استبدل مفتاحه أو أزِله.",
+  "models.providers.restart": "غير مستخدم بعد: أعد تشغيل Nugget لبدء استخدام هذا المزوّد.",
   "models.providers.replace": "استبدال المفتاح",
   "models.providers.replaceLabel": "استبدال المفتاح: {name}",
   "models.providers.remove": "إزالة",

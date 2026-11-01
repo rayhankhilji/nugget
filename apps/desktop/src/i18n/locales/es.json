@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "Clave leída de la variable de entorno {name}",
   "models.providers.envMissing": "Sin usar: la variable de entorno {name} no está definida donde se ejecuta Nugget.",
   "models.providers.unavailable": "Sin usar: Nugget no puede usar este proveedor con su configuración actual. Sustituye su clave o quítalo.",
+  "models.providers.restart": "Aún no está en uso: reinicia Nugget para empezar a usar este proveedor.",
   "models.providers.replace": "Sustituir clave",
   "models.providers.replaceLabel": "Sustituir clave: {name}",
   "models.providers.remove": "Quitar",

@@ -455,7 +455,9 @@ function RuntimeStateNote({ r, rowId, onChanged }: { r: RuntimeInfo; rowId: stri
   useEffect(() => {
     if (r.state !== "failed" && hadFocus.current) {
       hadFocus.current = false;
-      document.getElementById(rowId)?.focus();
+      // Only when Retry took focus with it: never pull focus back from where the user went since.
+      const at = document.activeElement;
+      if (!at || at === document.body || !at.isConnected) document.getElementById(rowId)?.focus();
     }
   }, [r.state, rowId]);
   if (r.state === "starting") {
@@ -482,6 +484,8 @@ function RuntimeStateNote({ r, rowId, onChanged }: { r: RuntimeInfo; rowId: stri
     try {
       await runtimeRetry(r.role);
     } catch (e) {
+      // Retry stays on screen with the error: a later automatic restart moves no focus.
+      hadFocus.current = false;
       setErr(e);
     } finally {
       setBusy(false);
@@ -540,15 +544,26 @@ function RuntimeCard({
 }) {
   const t = useT();
   // LL2: say when a local model becomes ready or fails (the page polls; nothing else would).
+  // Ready, and the first failure since the model was last ready: a crash loop's restarts are
+  // shown on the card, not read out on every cycle.
   const seen = useRef<Map<string, RuntimeState> | null>(null);
+  const failedSaid = useRef(new Set<string>());
   useEffect(() => {
     if (!data) return;
     const before = seen.current;
-    seen.current = new Map(data.map((r) => [`${r.provider}\u0000${r.model_id}`, r.state]));
+    const key = (r: RuntimeInfo) => `${r.provider}\u0000${r.model_id}`;
+    seen.current = new Map(data.map((r) => [key(r), r.state]));
     if (!before) return;
     const changed = data.filter((r) => {
-      const was = before.get(`${r.provider}\u0000${r.model_id}`);
-      return was !== undefined && was !== r.state && (r.state === "ready" || r.state === "failed" || r.state === "starting");
+      const was = before.get(key(r));
+      if (was === undefined || was === r.state) return false;
+      if (r.state === "ready") {
+        failedSaid.current.delete(key(r));
+        return true;
+      }
+      if (r.state !== "failed" || failedSaid.current.has(key(r))) return false;
+      failedSaid.current.add(key(r));
+      return true;
     });
     if (changed.length > 0)
       announce(changed.map((r) => t("status.runtime.announce", { model: r.model_id, state: t(RUNTIME_STATE[r.state]!.label) })).join(" "));

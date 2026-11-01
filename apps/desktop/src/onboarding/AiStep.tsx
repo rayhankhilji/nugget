@@ -241,9 +241,11 @@ function ModelRow({
       // Remembered while it lasts: Cancel unmounts without a blur event.
       focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
     } else if (focusIn.current === "title") {
-      // Installed: the name; failed (the request or the download): its Retry install.
+      // Installed: the name; failed (the request or the download): its Retry install. Only when
+      // focus went with Cancel, never from wherever the user moved to meanwhile.
       focusIn.current = null;
-      (installed ? titleRef.current : actionRef.current)?.focus();
+      const at = document.activeElement;
+      if (!at || at === document.body || !at.isConnected) (installed ? titleRef.current : actionRef.current)?.focus();
     }
   });
   const total = progress?.total || model.size_bytes;

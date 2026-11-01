@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "कुंजी एनवायरनमेंट वेरिएबल {name} से पढ़ी जाती है",
   "models.providers.envMissing": "उपयोग में नहीं: जहाँ Nugget चलता है वहाँ एनवायरनमेंट वेरिएबल {name} सेट नहीं है।",
   "models.providers.unavailable": "उपयोग में नहीं: मौजूदा सेटिंग्स के साथ Nugget इस प्रोवाइडर का उपयोग नहीं कर सकता। इसकी कुंजी बदलें या इसे हटाएँ।",
+  "models.providers.restart": "अभी उपयोग में नहीं: इस प्रदाता का उपयोग शुरू करने के लिए Nugget को फिर से शुरू करें।",
   "models.providers.replace": "कुंजी बदलें",
   "models.providers.replaceLabel": "कुंजी बदलें: {name}",
   "models.providers.remove": "हटाएँ",

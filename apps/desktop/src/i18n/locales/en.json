@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "Key read from the environment variable {name}",
   "models.providers.envMissing": "Not in use: the environment variable {name} isn't set where Nugget runs.",
   "models.providers.unavailable": "Not in use: Nugget can't use this provider with its current settings. Replace its key or remove it.",
+  "models.providers.restart": "Not in use yet: restart Nugget to start using this provider.",
   "models.providers.replace": "Replace key",
   "models.providers.replaceLabel": "Replace key: {name}",
   "models.providers.remove": "Remove",

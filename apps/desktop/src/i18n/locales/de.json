@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "Schlüssel aus der Umgebungsvariable {name}",
   "models.providers.envMissing": "Nicht in Verwendung: Die Umgebungsvariable {name} ist dort, wo Nugget läuft, nicht gesetzt.",
   "models.providers.unavailable": "Nicht in Verwendung: Nugget kann diesen Anbieter mit den aktuellen Einstellungen nicht nutzen. Ersetzen Sie den Schlüssel oder entfernen Sie den Anbieter.",
+  "models.providers.restart": "Noch nicht in Verwendung: Starte Nugget neu, um diesen Anbieter zu nutzen.",
   "models.providers.replace": "Schlüssel ersetzen",
   "models.providers.replaceLabel": "Schlüssel ersetzen: {name}",
   "models.providers.remove": "Entfernen",

@@ -79,7 +79,8 @@ describe("Status accessibility (LL2)", () => {
     expect(document.activeElement).toBe(row);
     // The page's one announcer (shared with indexing announcements).
     const live = document.querySelector('[role="status"][aria-atomic="true"]')!;
-    expect(live.textContent).toBe("Local model local-chat-model: Starting");
+    // Starting is shown on the card, not read out (a crash loop would repeat it every cycle).
+    expect(live.textContent).toBe("");
     // Ready later: said once, not on every poll.
     state = { ...base, state: "ready" };
     await act(async () => {
@@ -87,6 +88,53 @@ describe("Status accessibility (LL2)", () => {
     });
     await flush();
     expect(live.textContent).toBe("Local model local-chat-model: Ready");
+  });
+
+  it("moves no focus when the user went elsewhere before the model restarted, and says a crash loop's failure once", async () => {
+    // A crash loop: failed with an automatic restart pending, so Status polls every second.
+    const looping: RuntimeInfo = { ...failed, gave_up: false, retry_in_ms: 4_000 };
+    let state: RuntimeInfo = looping;
+    let polls = 0;
+    mockDaemon({
+      runtime_status: () => {
+        polls++;
+        return [state];
+      },
+      runtime_retry: () => ({ started: true }),
+    });
+    await render(<StatusPage />);
+    await flush();
+    const retry = card().querySelector<HTMLButtonElement>('button[aria-label="Retry local-chat-model"]')!;
+    retry.focus();
+    await click(retry);
+    await flush();
+    // Still failed after the retry; the user moves on.
+    const elsewhere = document.createElement("button");
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    const tick = async () => {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 1_100));
+      });
+      await flush();
+    };
+    state = { ...base, state: "starting", state_ms: 0, expected_ms: 20_000 };
+    await tick();
+    expect(document.activeElement).toBe(elsewhere);
+    const live = document.querySelector('[role="status"][aria-atomic="true"]')!;
+    state = looping;
+    await tick();
+    const first = live.textContent;
+    expect(first).toContain("local-chat-model");
+    state = { ...base, state: "starting", state_ms: 0, expected_ms: 20_000 };
+    await tick();
+    live.textContent = "";
+    state = looping;
+    await tick();
+    // The second failure of the loop is not read out again.
+    expect(live.textContent).toBe("");
+    expect(polls).toBeGreaterThan(3);
+    elsewhere.remove();
   });
 
   it("a Retry that fails keeps focus on Retry and says why", async () => {

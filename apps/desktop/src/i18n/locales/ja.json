@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "キーは環境変数 {name} から読み取ります",
   "models.providers.envMissing": "未使用：Nugget の実行環境で環境変数 {name} が設定されていません。",
   "models.providers.unavailable": "未使用：現在の設定では Nugget はこのプロバイダを使えません。キーを置き換えるか、削除してください。",
+  "models.providers.restart": "まだ使用されていません。このプロバイダーを使うには Nugget を再起動してください。",
   "models.providers.replace": "キーを置き換える",
   "models.providers.replaceLabel": "キーを置き換える：{name}",
   "models.providers.remove": "削除",

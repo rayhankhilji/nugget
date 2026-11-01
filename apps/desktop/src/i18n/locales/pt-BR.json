@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "Chave lida da variável de ambiente {name}",
   "models.providers.envMissing": "Fora de uso: a variável de ambiente {name} não está definida onde o Nugget é executado.",
   "models.providers.unavailable": "Fora de uso: o Nugget não consegue usar este provedor com as configurações atuais. Substitua a chave ou remova-o.",
+  "models.providers.restart": "Ainda não está em uso: reinicie o Nugget para começar a usar este provedor.",
   "models.providers.replace": "Substituir chave",
   "models.providers.replaceLabel": "Substituir chave: {name}",
   "models.providers.remove": "Remover",

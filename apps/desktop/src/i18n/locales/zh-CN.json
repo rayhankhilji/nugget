@@ -753,6 +753,7 @@
   "models.providers.keyEnv": "密钥从环境变量 {name} 读取",
   "models.providers.envMissing": "未使用：Nugget 运行环境中没有设置环境变量 {name}。",
   "models.providers.unavailable": "未使用：按当前设置，Nugget 无法使用此提供商。请替换它的密钥或将其移除。",
+  "models.providers.restart": "尚未使用：重新启动 Nugget 即可开始使用此提供商。",
   "models.providers.replace": "替换密钥",
   "models.providers.replaceLabel": "替换密钥：{name}",
   "models.providers.remove": "移除",

@@ -143,6 +143,18 @@ describe("quick ask", () => {
     expect(result.violations.map((v) => v.id)).toEqual([]);
   });
 
+  it("says Nugget isn't reachable when the daemon is not running (LL2)", async () => {
+    setup({
+      retrieve_ask: () => {
+        throw { kind: "not_running", message: "connection refused" };
+      },
+    });
+    const { container } = await render(<QuickAsk />);
+    await typeQuestion(container, "q");
+    await submit(container);
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain("Nugget isn't reachable right now.");
+  });
+
   it("says what to do when no AI model is set up, instead of the daemon's tier message (LL2)", async () => {
     setup({
       retrieve_ask: () => {

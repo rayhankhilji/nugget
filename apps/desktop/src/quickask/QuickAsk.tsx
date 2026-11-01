@@ -159,6 +159,8 @@ export function QuickAsk() {
   const plainError = (err: unknown) => {
     const e = ApiError.from(err);
     if (e.kind === "rpc" && /no provider is available/i.test(e.message)) return t("quickAsk.noProvider");
+    // This window has no offline banner: say Nugget isn't reachable, not just that something failed.
+    if (e.isOffline) return t("quickAsk.failed", { error: t("common.offlineHint") });
     return t("quickAsk.failed", { error: describeError(e, t).headline });
   };
 
