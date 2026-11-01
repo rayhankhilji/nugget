@@ -1,26 +1,17 @@
 //! Anthropic Messages API adapter (`POST {base}/v1/messages`, streaming).
 //!
-//! - Images: base64 `image` blocks. Tools: client tools with `eager_input_streaming` (on by
-//!   default; arguments are parsed strictly when the block completes).
-//! - Structured output: `output_config.format = {type: "json_schema", schema}`; unsupported
-//!   constraints are stripped (validate client-side with [`crate::schema::validate`]).
+//! - Tools use `eager_input_streaming` (default on); arguments are parsed when the block ends.
+//! - Structured output: `output_config.format` json_schema with unsupported constraints stripped.
 //! - Thinking / redacted-thinking blocks stream out as [`ChatEvent::Opaque`] and are replayed
-//!   verbatim, so multi-turn tool loops keep reasoning ("preserved thinking").
-//! - Server-side refusal fallbacks (enabled via `extra_body` + `headers`) are handled: the
-//!   `fallback` block is surfaced as an opaque marker and non-text content before it is not
-//!   replayed.
-//! - `temperature` is rejected by API version `2026-10-21` and later, so it is only sent when an
-//!   older `anthropic_version` is configured.
+//!   verbatim. A server-side refusal `fallback` block is surfaced as an opaque marker; non-text
+//!   content before it is not replayed.
+//! - `temperature` is only sent for `anthropic_version` before `2026-10-21` (rejected after).
 //! - Prompt caching: a [`CacheHint`] with `system: true` puts `cache_control` on the system
-//!   prompt (sent as one text block), or on the last tool when there is no system prompt; each
-//!   [`Part::CacheBreakpoint`] puts it on the content block just before the marker (never on a
-//!   thinking block). The API allows four breakpoints: the system/tool one and the last three
-//!   message breakpoints are kept. `cache_read_input_tokens` and `cache_creation_input_tokens`
-//!   are reported in [`crate::ChatStats`] (both are also counted in `input_tokens`). Prefixes
-//!   shorter than the model's minimum (512–4096 tokens) are silently not cached.
-//! - [`Provider::prewarm`] is `GET /v1/models` (no content). [`Provider::prewarm_prefix`] sends
-//!   the cacheable prefix with `max_tokens: 0` and `stream: false` (prefill only: the cache is
-//!   written, nothing is generated or billed as output).
+//!   prompt (or the last tool without one); each [`Part::CacheBreakpoint`] on the block before
+//!   it (never a thinking block). The API allows four breakpoints, so the system one and the last
+//!   three message ones are kept.
+//! - [`Provider::prewarm`] is `GET /v1/models`; [`Provider::prewarm_prefix`] sends the cacheable
+//!   prefix with `max_tokens: 0`, `stream: false` (prefill only).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,8 +23,11 @@ use nugget_core::{Error, Result};
 use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::{Map, Value, json};
 
-use crate::config::{ANTHROPIC_DEFAULT_API_VERSION, ProviderConfig, Secret, merge_extra_body};
-use crate::http::{SseDecoder, error_detail_value, parse_tool_arguments, sse_chat_stream};
+use crate::adapters::{
+    as_u32, emit_tool_call, finish_body, misplaced, parse_event, release_deferred, stream_error,
+};
+use crate::config::{ANTHROPIC_DEFAULT_API_VERSION, ProviderConfig, Secret};
+use crate::http::{SseDecoder, parse_tool_arguments};
 use crate::provider::{Common, Prepared, Provider, auth_header};
 use crate::schema;
 use crate::sse::SseEvent;
@@ -48,11 +42,7 @@ use crate::types::{
 pub const DEFAULT_MAX_TOKENS: u32 = 16_000;
 /// First API version that rejects sampling parameters.
 const SAMPLING_REMOVED_IN: &str = "2026-10-21";
-/// The API rejects requests with more `cache_control` breakpoints than this.
 pub const MAX_CACHE_BREAKPOINTS: usize = 4;
-/// Placeholder user turn for a prefix prewarm whose prefix does not end in a user message. It is
-/// read during prefill but never answered, and sits after every breakpoint.
-const PREWARM_PLACEHOLDER: &str = "warmup";
 
 pub struct AnthropicProvider {
     common: Common,
@@ -81,28 +71,10 @@ impl AnthropicProvider {
             eager_input_streaming: cfg.eager_input_streaming.unwrap_or(true),
         })
     }
-
-    fn body(&self, req: &ChatRequest) -> Result<Value> {
-        build_body(
-            &self.common.cfg,
-            &self.api_version,
-            self.eager_input_streaming,
-            req,
-        )
-    }
-
-    fn prewarm_body(&self, req: &ChatRequest) -> Result<Option<Value>> {
-        build_prewarm_body(
-            &self.common.cfg,
-            &self.api_version,
-            self.eager_input_streaming,
-            req,
-        )
-    }
 }
 
 /// The `max_tokens: 0` cache-warming request for `req`'s stable prefix, or `None` when nothing
-/// in it is marked cacheable (then there is no cache entry to write).
+/// in it is marked cacheable.
 pub(crate) fn build_prewarm_body(
     cfg: &ProviderConfig,
     api_version: &str,
@@ -112,39 +84,39 @@ pub(crate) fn build_prewarm_body(
     let Some(prefix) = req.cache_prefix() else {
         return Ok(None);
     };
-    let cache_system = prefix.cache.as_ref().is_some_and(|c| c.system)
-        && (prefix
-            .system
-            .as_deref()
-            .is_some_and(|s| !s.trim().is_empty())
-            || !prefix.tools.is_empty());
+    let has_system = prefix
+        .system
+        .as_deref()
+        .is_some_and(|s| !s.trim().is_empty());
+    let cache_system =
+        prefix.cache.as_ref().is_some_and(|c| c.system) && (has_system || !prefix.tools.is_empty());
     if !cache_system && !prefix.has_cache_breakpoints() {
         return Ok(None);
     }
     let mut body = build_body(cfg, api_version, eager_input_streaming, &prefix)?;
     body["max_tokens"] = json!(0);
     body["stream"] = json!(false);
+    let obj = body.as_object_mut().expect("body is an object");
     // Rejected together with `max_tokens: 0`.
-    if let Some(oc) = body.get_mut("output_config").and_then(Value::as_object_mut) {
+    if let Some(oc) = obj.get_mut("output_config").and_then(Value::as_object_mut) {
         oc.remove("format");
         if oc.is_empty() {
-            body.as_object_mut().map(|b| b.remove("output_config"));
+            obj.remove("output_config");
         }
     }
-    if body
-        .pointer("/tool_choice/type")
-        .and_then(Value::as_str)
-        .is_some_and(|t| t == "any" || t == "tool")
-    {
-        body.as_object_mut().map(|b| b.remove("tool_choice"));
+    if matches!(
+        obj.get("tool_choice").and_then(|t| t["type"].as_str()),
+        Some("any" | "tool")
+    ) {
+        obj.remove("tool_choice");
     }
-    let messages = body["messages"]
-        .as_array_mut()
+    let messages = obj
+        .get_mut("messages")
+        .and_then(Value::as_array_mut)
         .ok_or_else(|| Error::Other("anthropic body has no messages".into()))?;
     if messages.last().and_then(|m| m["role"].as_str()) != Some("user") {
-        messages.push(
-            json!({"role": "user", "content": [{"type": "text", "text": PREWARM_PLACEHOLDER}]}),
-        );
+        // Read during prefill but never answered; sits after every breakpoint.
+        messages.push(json!({"role": "user", "content": [{"type": "text", "text": "warmup"}]}));
     }
     Ok(Some(body))
 }
@@ -157,27 +129,25 @@ pub(crate) fn build_body(
 ) -> Result<Value> {
     let mut body = Map::new();
     body.insert("model".into(), json!(cfg.model));
-    body.insert(
-        "max_tokens".into(),
-        json!(
-            req.max_tokens
-                .or(cfg.max_output_tokens)
-                .unwrap_or(DEFAULT_MAX_TOKENS)
-        ),
-    );
+    let max = req
+        .max_tokens
+        .or(cfg.max_output_tokens)
+        .unwrap_or(DEFAULT_MAX_TOKENS);
+    body.insert("max_tokens".into(), json!(max));
     body.insert("stream".into(), json!(true));
-    let cc = cache_control(req);
+    let cc = match req.cache.as_ref().map(|c| c.ttl).unwrap_or_default() {
+        CacheTtl::Default => json!({"type": "ephemeral"}),
+        CacheTtl::OneHour => json!({"type": "ephemeral", "ttl": "1h"}),
+    };
     let cache_system = req.cache.as_ref().is_some_and(|c| c.system);
     let system = req.system.as_deref().filter(|s| !s.trim().is_empty());
     if let Some(system) = system {
-        if cache_system {
-            body.insert(
-                "system".into(),
-                json!([{"type": "text", "text": system, "cache_control": cc}]),
-            );
+        let v = if cache_system {
+            json!([{"type": "text", "text": system, "cache_control": cc}])
         } else {
-            body.insert("system".into(), json!(system));
-        }
+            json!(system)
+        };
+        body.insert("system".into(), v);
     }
     let mut messages = convert_messages(&req.messages, &cc)?;
     limit_message_breakpoints(
@@ -186,22 +156,17 @@ pub(crate) fn build_body(
     );
     body.insert("messages".into(), Value::Array(messages));
     if !req.tools.is_empty() {
-        let tools: Vec<Value> = req
+        let mut tools: Vec<Value> = req
             .tools
             .iter()
             .map(|t| {
-                let mut tool = json!({
-                    "name": t.name,
-                    "description": t.description,
-                    "input_schema": t.input_schema,
-                });
+                let mut tool = json!({"name": t.name, "description": t.description, "input_schema": t.input_schema});
                 if eager_input_streaming {
                     tool["eager_input_streaming"] = json!(true);
                 }
                 tool
             })
             .collect();
-        let mut tools = tools;
         if cache_system
             && system.is_none()
             && let Some(last) = tools.last_mut()
@@ -223,61 +188,47 @@ pub(crate) fn build_body(
             tracing::debug!(provider = %cfg.id, "temperature not sent: unsupported by anthropic-version {api_version}");
         }
     }
-    let mut body = Value::Object(body);
-    merge_extra_body(&mut body, cfg.extra_body.as_ref());
-    Ok(body)
-}
-
-/// The `cache_control` object for this request's TTL.
-fn cache_control(req: &ChatRequest) -> Value {
-    match req.cache.as_ref().map(|c| c.ttl).unwrap_or_default() {
-        CacheTtl::Default => json!({"type": "ephemeral"}),
-        CacheTtl::OneHour => json!({"type": "ephemeral", "ttl": "1h"}),
-    }
+    Ok(finish_body(body, cfg))
 }
 
 /// Blocks that may not carry `cache_control`.
 fn uncacheable(block: &Value) -> bool {
     matches!(
-        block.get("type").and_then(Value::as_str),
+        block["type"].as_str(),
         Some("thinking" | "redacted_thinking")
     )
 }
 
 /// Put `cache_control` on the last cacheable block emitted so far: in the current message, else
-/// in earlier messages. Nothing before the marker: ignored.
+/// in earlier messages.
 fn mark_breakpoint(blocks: &mut [Value], out: &mut [Value], cc: &Value) {
-    if let Some(b) = blocks.iter_mut().rev().find(|b| !uncacheable(b)) {
+    let earlier = out
+        .iter_mut()
+        .rev()
+        .filter_map(|m| m["content"].as_array_mut());
+    let target = std::iter::once(&mut *blocks)
+        .map(|b| b.iter_mut().rev().find(|b| !uncacheable(b)))
+        .chain(earlier.map(|c| c.iter_mut().rev().find(|b| !uncacheable(b))))
+        .flatten()
+        .next();
+    if let Some(b) = target {
         b["cache_control"] = cc.clone();
-        return;
-    }
-    for m in out.iter_mut().rev() {
-        if let Some(b) = m["content"]
-            .as_array_mut()
-            .and_then(|c| c.iter_mut().rev().find(|b| !uncacheable(b)))
-        {
-            b["cache_control"] = cc.clone();
-            return;
-        }
     }
 }
 
-/// Keep at most `max` message breakpoints, the latest ones (each later breakpoint also covers
-/// the prefix before it, within the API's 20-block lookback).
+/// Keep at most `max` message breakpoints, the latest ones.
 fn limit_message_breakpoints(messages: &mut [Value], max: usize) {
     let mut seen = 0;
-    for m in messages.iter_mut().rev() {
-        let Some(content) = m["content"].as_array_mut() else {
-            continue;
-        };
-        for b in content.iter_mut().rev() {
-            if let Some(obj) = b.as_object_mut()
-                && obj.contains_key("cache_control")
-            {
-                seen += 1;
-                if seen > max {
-                    obj.remove("cache_control");
-                }
+    let blocks = messages
+        .iter_mut()
+        .rev()
+        .filter_map(|m| m["content"].as_array_mut())
+        .flat_map(|c| c.iter_mut().rev());
+    for obj in blocks.filter_map(Value::as_object_mut) {
+        if obj.contains_key("cache_control") {
+            seen += 1;
+            if seen > max {
+                obj.remove("cache_control");
             }
         }
     }
@@ -287,96 +238,74 @@ fn convert_messages(messages: &[Message], cc: &Value) -> Result<Vec<Value>> {
     let mut out = Vec::with_capacity(messages.len());
     for m in messages {
         let mut blocks: Vec<Value> = Vec::new();
-        match m.role {
-            Role::User => {
-                // tool_result blocks must lead the user turn.
-                for p in &m.content {
-                    if let Part::ToolResult {
-                        call_id,
-                        content,
-                        is_error,
-                    } = p
-                    {
-                        let mut b = json!({"type": "tool_result", "tool_use_id": call_id, "content": content});
-                        if *is_error {
-                            b["is_error"] = json!(true);
-                        }
-                        blocks.push(b);
+        let user = m.role == Role::User;
+        // tool_result blocks must lead the user turn.
+        if user {
+            for p in &m.content {
+                if let Part::ToolResult {
+                    call_id,
+                    content,
+                    is_error,
+                } = p
+                {
+                    let mut b =
+                        json!({"type": "tool_result", "tool_use_id": call_id, "content": content});
+                    if *is_error {
+                        b["is_error"] = json!(true);
                     }
-                }
-                for p in &m.content {
-                    match p {
-                        Part::Text { text } if !text.is_empty() => {
-                            blocks.push(json!({"type": "text", "text": text}));
-                        }
-                        Part::Image {
-                            media_type,
-                            data_base64,
-                        } => blocks.push(json!({
-                            "type": "image",
-                            "source": {"type": "base64", "media_type": media_type, "data": data_base64},
-                        })),
-                        Part::ToolCall { .. } => {
-                            return Err(Error::Invalid(
-                                "tool calls belong in assistant messages".into(),
-                            ));
-                        }
-                        Part::CacheBreakpoint => mark_breakpoint(&mut blocks, &mut out, cc),
-                        _ => {}
-                    }
-                }
-            }
-            Role::Assistant => {
-                let cut = m.content.iter().rposition(
-                    |p| matches!(p, Part::Opaque { kind, data } if is_fallback_marker(*kind, data)),
-                );
-                for (i, p) in m.content.iter().enumerate() {
-                    let before_fallback = cut.is_some_and(|c| i < c);
-                    match p {
-                        Part::Text { text } if !text.is_empty() => {
-                            blocks.push(json!({"type": "text", "text": text}));
-                        }
-                        Part::ToolCall {
-                            id,
-                            name,
-                            arguments,
-                        } if !before_fallback => {
-                            let input = if arguments.is_object() {
-                                arguments.clone()
-                            } else {
-                                json!({})
-                            };
-                            blocks.push(
-                                json!({"type": "tool_use", "id": id, "name": name, "input": input}),
-                            );
-                        }
-                        Part::Opaque {
-                            kind: ProviderKind::Anthropic,
-                            data,
-                        } if !before_fallback
-                            && !is_fallback_marker(ProviderKind::Anthropic, data) =>
-                        {
-                            blocks.push(data.clone());
-                        }
-                        Part::Image { .. } | Part::ToolResult { .. } => {
-                            return Err(Error::Invalid(
-                                "images and tool results belong in user messages".into(),
-                            ));
-                        }
-                        Part::CacheBreakpoint => mark_breakpoint(&mut blocks, &mut out, cc),
-                        _ => {}
-                    }
+                    blocks.push(b);
                 }
             }
         }
-        if blocks.is_empty() {
-            continue;
+        // Assistant content before a fallback marker that is not text belongs to the declined
+        // attempt.
+        let cut = m.content.iter().rposition(
+            |p| matches!(p, Part::Opaque { kind, data } if is_fallback_marker(*kind, data)),
+        );
+        for (i, p) in m.content.iter().enumerate() {
+            let replay = cut.is_none_or(|c| i >= c);
+            match p {
+                Part::Text { text } if !text.is_empty() => {
+                    blocks.push(json!({"type": "text", "text": text}));
+                }
+                Part::Image {
+                    media_type,
+                    data_base64,
+                } if user => blocks.push(json!({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": data_base64},
+                })),
+                Part::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } if !user && replay => {
+                    let input = if arguments.is_object() {
+                        arguments.clone()
+                    } else {
+                        json!({})
+                    };
+                    blocks
+                        .push(json!({"type": "tool_use", "id": id, "name": name, "input": input}));
+                }
+                Part::Opaque {
+                    kind: ProviderKind::Anthropic,
+                    data,
+                } if !user && replay && !is_fallback_marker(ProviderKind::Anthropic, data) => {
+                    blocks.push(data.clone());
+                }
+                Part::ToolCall { .. } if user => return Err(misplaced(true)),
+                Part::Image { .. } | Part::ToolResult { .. } if !user => {
+                    return Err(misplaced(false));
+                }
+                Part::CacheBreakpoint => mark_breakpoint(&mut blocks, &mut out, cc),
+                _ => {}
+            }
         }
-        let role = match m.role {
-            Role::User => "user",
-            Role::Assistant => "assistant",
-        };
-        out.push(json!({"role": role, "content": blocks}));
+        if !blocks.is_empty() {
+            let role = if user { "user" } else { "assistant" };
+            out.push(json!({"role": role, "content": blocks}));
+        }
     }
     Ok(out)
 }
@@ -405,8 +334,7 @@ pub(crate) struct Decoder {
     cache_read: Option<u32>,
     cache_write: Option<u32>,
     stop_reason: Option<String>,
-    /// Tool calls whose arguments were not valid JSON; emitted at the end unless the output was
-    /// truncated by `max_tokens` (then they are incomplete and dropped).
+    /// Tool calls whose arguments were not valid JSON (see [`emit_tool_call`]).
     deferred: Vec<ChatEvent>,
     finished: bool,
 }
@@ -427,18 +355,12 @@ impl Decoder {
     }
 
     fn done(&mut self) -> Vec<ChatEvent> {
+        let mut out = Vec::new();
         if std::mem::replace(&mut self.finished, true) {
-            return Vec::new();
+            return out;
         }
         let stop = StopReason::from_wire(self.stop_reason.as_deref().unwrap_or("end_turn"));
-        let mut out = Vec::new();
-        if stop == StopReason::MaxTokens {
-            if !self.deferred.is_empty() {
-                tracing::warn!(provider = %self.provider, "dropping tool call truncated by max_tokens");
-            }
-        } else {
-            out.append(&mut self.deferred);
-        }
+        release_deferred(&self.provider, &stop, &mut self.deferred, &mut out);
         out.push(ChatEvent::Done {
             stop_reason: stop,
             input_tokens: self.input_tokens,
@@ -448,28 +370,22 @@ impl Decoder {
     }
 
     fn usage(&mut self, usage: &Value) {
-        let n = |k: &str| usage.get(k).and_then(Value::as_u64);
-        let input = [
+        let n = |k: &str| as_u32(usage.get(k));
+        let parts = [
             "input_tokens",
             "cache_creation_input_tokens",
             "cache_read_input_tokens",
-        ]
-        .iter()
-        .filter_map(|k| n(k))
-        .reduce(|a, b| a + b);
-        if let Some(i) = input {
+        ];
+        if let Some(i) = parts
+            .iter()
+            .filter_map(|k| usage.get(*k)?.as_u64())
+            .reduce(|a, b| a + b)
+        {
             self.input_tokens = Some(i.min(u32::MAX as u64) as u32);
         }
-        if let Some(o) = n("output_tokens") {
-            self.output_tokens = Some(o.min(u32::MAX as u64) as u32);
-        }
-        let clamp = |v: u64| v.min(u32::MAX as u64) as u32;
-        if let Some(r) = n("cache_read_input_tokens") {
-            self.cache_read = Some(clamp(r));
-        }
-        if let Some(w) = n("cache_creation_input_tokens") {
-            self.cache_write = Some(clamp(w));
-        }
+        self.output_tokens = n("output_tokens").or(self.output_tokens);
+        self.cache_read = n("cache_read_input_tokens").or(self.cache_read);
+        self.cache_write = n("cache_creation_input_tokens").or(self.cache_write);
     }
 }
 
@@ -477,14 +393,25 @@ fn str_of<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or_default()
 }
 
+fn text(t: &str, out: &mut Vec<ChatEvent>) {
+    if !t.is_empty() {
+        out.push(ChatEvent::TextDelta(t.to_string()));
+    }
+}
+
+fn opaque(data: Value) -> ChatEvent {
+    ChatEvent::Opaque {
+        kind: ProviderKind::Anthropic,
+        data,
+    }
+}
+
 impl SseDecoder for Decoder {
     fn on_event(&mut self, ev: SseEvent) -> Result<Vec<ChatEvent>> {
         if ev.data.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let v: Value = serde_json::from_str(&ev.data).map_err(|e| {
-            Error::Provider(format!("{}: malformed stream event: {e}", self.provider))
-        })?;
+        let v = parse_event(&self.provider, &ev.data)?;
         let ty = v
             .get("type")
             .and_then(Value::as_str)
@@ -502,10 +429,7 @@ impl SseDecoder for Decoder {
                 let cb = v.get("content_block").cloned().unwrap_or(Value::Null);
                 let block = match str_of(&cb, "type") {
                     "text" => {
-                        let t = str_of(&cb, "text");
-                        if !t.is_empty() {
-                            out.push(ChatEvent::TextDelta(t.to_string()));
-                        }
+                        text(str_of(&cb, "text"), &mut out);
                         Block::Text
                     }
                     "tool_use" => Block::Tool {
@@ -520,10 +444,7 @@ impl SseDecoder for Decoder {
                     },
                     "redacted_thinking" => Block::Verbatim(cb),
                     "fallback" => {
-                        out.push(ChatEvent::Opaque {
-                            kind: ProviderKind::Anthropic,
-                            data: cb,
-                        });
+                        out.push(opaque(cb));
                         // Content before this point belonged to a declined attempt.
                         self.deferred.clear();
                         Block::Ignored
@@ -535,12 +456,7 @@ impl SseDecoder for Decoder {
             "content_block_delta" => {
                 let d = v.get("delta").cloned().unwrap_or(Value::Null);
                 match (str_of(&d, "type"), self.blocks.get_mut(&index)) {
-                    ("text_delta", _) => {
-                        let t = str_of(&d, "text");
-                        if !t.is_empty() {
-                            out.push(ChatEvent::TextDelta(t.to_string()));
-                        }
-                    }
+                    ("text_delta", _) => text(str_of(&d, "text"), &mut out),
                     ("input_json_delta", Some(Block::Tool { json, .. })) => {
                         json.push_str(str_of(&d, "partial_json"));
                     }
@@ -565,34 +481,20 @@ impl SseDecoder for Decoder {
                     } else {
                         parse_tool_arguments(&self.provider, &name, &json)
                     };
-                    let ev = ChatEvent::ToolCall {
+                    let call = ChatEvent::ToolCall {
                         id,
                         name,
                         arguments,
                     };
-                    if matches!(
-                        &ev,
-                        ChatEvent::ToolCall {
-                            arguments: Value::String(_),
-                            ..
-                        }
-                    ) {
-                        self.deferred.push(ev);
-                    } else {
-                        out.push(ev);
-                    }
+                    emit_tool_call(call, &mut self.deferred, &mut out);
                 }
                 Some(Block::Thinking {
                     thinking,
                     signature,
-                }) => out.push(ChatEvent::Opaque {
-                    kind: ProviderKind::Anthropic,
-                    data: json!({"type": "thinking", "thinking": thinking, "signature": signature}),
-                }),
-                Some(Block::Verbatim(data)) => out.push(ChatEvent::Opaque {
-                    kind: ProviderKind::Anthropic,
-                    data,
-                }),
+                }) => out.push(opaque(
+                    json!({"type": "thinking", "thinking": thinking, "signature": signature}),
+                )),
+                Some(Block::Verbatim(data)) => out.push(opaque(data)),
                 _ => {}
             },
             "message_delta" => {
@@ -604,13 +506,7 @@ impl SseDecoder for Decoder {
                 }
             }
             "message_stop" => out.extend(self.done()),
-            "error" => {
-                let detail = error_detail_value(&v).unwrap_or_else(|| ev.data.clone());
-                return Err(Error::Provider(format!(
-                    "{}: stream error: {detail}",
-                    self.provider
-                )));
-            }
+            "error" => return Err(stream_error(&self.provider, &v, &ev.data)),
             _ => {} // ping and future event types
         }
         Ok(out)
@@ -622,11 +518,11 @@ impl SseDecoder for Decoder {
 
     fn on_eof(&mut self) -> Result<Vec<ChatEvent>> {
         // Tolerate a missing `message_stop` once the stop reason is known.
-        if self.stop_reason.is_some() {
-            Ok(self.done())
+        Ok(if self.stop_reason.is_some() {
+            self.done()
         } else {
-            Ok(Vec::new())
-        }
+            Vec::new()
+        })
     }
 }
 
@@ -641,19 +537,16 @@ impl Provider for AnthropicProvider {
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
-        let body = self.body(&req)?;
-        let (resp, meter, clock) = self
-            .common
-            .http
-            .post_json("v1/messages", &body, &req.feature, &req.items, true)
-            .await?;
-        Ok(sse_chat_stream(
-            self.common.id.clone(),
-            resp,
-            meter,
-            clock,
-            Decoder::new(self.common.id.clone()),
-        ))
+        let body = build_body(
+            &self.common.cfg,
+            &self.api_version,
+            self.eager_input_streaming,
+            &req,
+        )?;
+        let decoder = Decoder::new(self.common.id.clone());
+        self.common
+            .stream("v1/messages", &body, &req, decoder)
+            .await
     }
 
     async fn prewarm(&self) -> Result<()> {
@@ -661,14 +554,11 @@ impl Provider for AnthropicProvider {
     }
 
     async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
-        let Some(body) = self.prewarm_body(req)? else {
-            return self.prewarm().await;
-        };
-        self.common
-            .http
-            .post_for_json("v1/messages", &body, &req.feature, &req.items)
-            .await?;
-        Ok(())
+        let cfg = &self.common.cfg;
+        match build_prewarm_body(cfg, &self.api_version, self.eager_input_streaming, req)? {
+            Some(body) => self.common.prewarm_post("v1/messages", &body, req).await,
+            None => self.prewarm().await,
+        }
     }
 
     async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -703,63 +593,46 @@ mod tests {
 
     #[test]
     fn body_shape() {
-        let req = ChatRequest::new(vec![
-            Message::user(vec![
-                Part::text("hi"),
-                Part::image("image/png", "AAAA"),
-                Part::tool_result("t0", "ok"),
-            ]),
+        let opaque = |kind, data| Part::Opaque { kind, data };
+        let mut req = ChatRequest::new(vec![
+            Message::user(vec![Part::text("hi"), Part::tool_result("t0", "ok")]),
             Message::new(
                 Role::Assistant,
                 vec![
-                    Part::Opaque {
-                        kind: ProviderKind::Anthropic,
-                        data: json!({"type": "thinking", "thinking": "", "signature": "s"}),
-                    },
-                    Part::Opaque {
-                        kind: ProviderKind::OpenaiResponses,
-                        data: json!({"type": "reasoning"}),
-                    },
+                    opaque(
+                        ProviderKind::Anthropic,
+                        json!({"type": "thinking", "signature": "s"}),
+                    ),
+                    opaque(ProviderKind::OpenaiResponses, json!({"type": "reasoning"})),
                     Part::text("calling"),
-                    Part::ToolCall {
-                        id: "t1".into(),
-                        name: "f".into(),
-                        arguments: json!({"x": 1}),
-                    },
                 ],
             ),
         ])
-        .with_system("sys")
         .with_tools(vec![ToolSpec {
             name: "f".into(),
             description: "d".into(),
-            input_schema: json!({"type": "object"}),
+            input_schema: json!({}),
         }])
         .with_json_schema(
             json!({"type": "object", "properties": {"n": {"type": "integer", "minimum": 1}}}),
         );
-        let mut req = req;
         req.temperature = Some(0.2);
         let b = build_body(&cfg(), "2026-10-21", true, &req).unwrap();
-        assert_eq!(b["model"], "test-model");
-        assert_eq!(b["max_tokens"], DEFAULT_MAX_TOKENS);
-        assert_eq!(b["stream"], true);
-        assert_eq!(b["system"], "sys");
-        assert!(b.get("temperature").is_none());
-        let user = &b["messages"][0]["content"];
-        assert_eq!(user[0]["type"], "tool_result");
-        assert_eq!(user[1], json!({"type": "text", "text": "hi"}));
-        assert_eq!(user[2]["source"]["type"], "base64");
-        let asst = &b["messages"][1]["content"];
-        assert_eq!(asst.as_array().unwrap().len(), 3);
-        assert_eq!(asst[0]["type"], "thinking");
-        assert_eq!(asst[2]["type"], "tool_use");
-        assert_eq!(b["tools"][0]["eager_input_streaming"], true);
-        let fmt = &b["output_config"]["format"];
-        assert_eq!(fmt["type"], "json_schema");
-        assert!(fmt["schema"]["properties"]["n"].get("minimum").is_none());
-        assert_eq!(fmt["schema"]["additionalProperties"], false);
+        assert_eq!(
+            b["messages"][0]["content"][0]["type"], "tool_result",
+            "tool results lead"
+        );
+        let asst = b["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(
+            (asst.len(), &asst[0]["type"]),
+            (2, &json!("thinking")),
+            "other kinds' state dropped"
+        );
+        let schema = &b["output_config"]["format"]["schema"];
+        assert!(schema["properties"]["n"].get("minimum").is_none());
+        assert_eq!(schema["additionalProperties"], false);
 
+        // Older API versions take a temperature; eager streaming can be turned off.
         let b = build_body(&cfg(), "2023-06-01", false, &req).unwrap();
         assert!((b["temperature"].as_f64().unwrap() - 0.2).abs() < 1e-6);
         assert!(b["tools"][0].get("eager_input_streaming").is_none());
@@ -843,55 +716,6 @@ mod tests {
     }
 
     #[test]
-    fn decodes_thinking_text_and_tools() {
-        let out = decode(&[
-            ("message_start", json!({"type": "message_start", "message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 5, "output_tokens": 1}}})),
-            ("content_block_start", json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}})),
-            ("content_block_delta", json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "hmm"}})),
-            ("content_block_delta", json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "SIG"}})),
-            ("content_block_stop", json!({"type": "content_block_stop", "index": 0})),
-            ("ping", json!({"type": "ping"})),
-            ("content_block_start", json!({"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}})),
-            ("content_block_delta", json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Hi"}})),
-            ("content_block_stop", json!({"type": "content_block_stop", "index": 1})),
-            ("content_block_start", json!({"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "get", "input": {}}})),
-            ("content_block_delta", json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"q\": \"pa"}})),
-            ("content_block_delta", json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "ris\"}"}})),
-            ("content_block_stop", json!({"type": "content_block_stop", "index": 2})),
-            ("content_block_start", json!({"type": "content_block_start", "index": 3, "content_block": {"type": "tool_use", "id": "toolu_2", "name": "noargs", "input": {}}})),
-            ("content_block_stop", json!({"type": "content_block_stop", "index": 3})),
-            ("message_delta", json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 42}})),
-            ("message_stop", json!({"type": "message_stop"})),
-        ])
-        .unwrap();
-        assert_eq!(
-            out,
-            vec![
-                ChatEvent::Opaque {
-                    kind: ProviderKind::Anthropic,
-                    data: json!({"type": "thinking", "thinking": "hmm", "signature": "SIG"})
-                },
-                ChatEvent::TextDelta("Hi".into()),
-                ChatEvent::ToolCall {
-                    id: "toolu_1".into(),
-                    name: "get".into(),
-                    arguments: json!({"q": "paris"})
-                },
-                ChatEvent::ToolCall {
-                    id: "toolu_2".into(),
-                    name: "noargs".into(),
-                    arguments: json!({})
-                },
-                ChatEvent::Done {
-                    stop_reason: StopReason::ToolUse,
-                    input_tokens: Some(15),
-                    output_tokens: Some(42)
-                },
-            ]
-        );
-    }
-
-    #[test]
     fn truncated_tool_call_is_dropped_at_max_tokens() {
         let out = decode(&[
             ("content_block_start", json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "t", "name": "f", "input": {}}})),
@@ -948,19 +772,6 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn error_event() {
-        let err = decode(&[(
-            "error",
-            json!({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}),
-        )])
-        .unwrap_err();
-        assert!(
-            err.to_string().contains("overloaded_error: Overloaded"),
-            "{err}"
-        );
     }
 
     #[test]

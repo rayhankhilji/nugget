@@ -1,22 +1,8 @@
-//! Prompt assembly.
-//!
-//! Layout, most stable first so provider prompt caching can reuse the prefix across drafts:
-//!
-//! 1. **System**: the fixed drafting rules (output format, untrusted-data handling), then the
-//!    user's **voice** (style stats, length band, exemplars). The voice block only changes when
-//!    the channel, recipient or profile changes.
-//! 2. **User message**: the field (kind, app), the retrieved **context** passages, the subject and
-//!    recipients, the **thread**, the field's **existing text**, the user's **instruction**, then a
-//!    closing reminder of the output format (after all untrusted data, so injected text is never
-//!    the last word).
-//!
-//! For non-cloud providers the engine uses [`PromptLimits::local`] (smaller caps and a terser voice
-//! block) and adds a [`CacheHint`] keyed by channel ([`cache_key`]); [`prefix_request`] is the
-//! system-only request the engine prewarms, byte-identical to the draft request's system prompt.
-//!
-//! Everything copied from apps and documents (thread, existing text, context, exemplars, names,
-//! subject) is untrusted: it is wrapped in tags, its angle brackets are replaced so it cannot
-//! close a tag, control characters are dropped, and it is size-capped.
+//! Prompt assembly, most stable first so providers can cache the prefix: the system prompt
+//! (fixed rules, then the user's voice), then one user message (field, context, subject,
+//! recipients, thread, existing text, instruction, and a closing format reminder after all
+//! untrusted data). Untrusted text is fenced in tags with angle brackets replaced, control and
+//! invisible characters dropped, and size-capped.
 
 use nugget_core::ipc::{ContextResponse, DraftContext};
 use nugget_infer::{CacheHint, ChatRequest, Message, Part};

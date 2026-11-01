@@ -1,14 +1,7 @@
-//! [`ChainedLog`]: the agent's [`ActionLog`] on top of the policy crate's hash-chained,
-//! tamper-evident log, so agent runs, policy decisions, confirmations and halts share one chain.
-//!
-//! Every agent [`LogEntry`] becomes one `LogEvent::External { source: "agent", kind, detail }`
-//! where `kind` is the record kind (`run_started`, `decision`, `executed`, ...) and `detail` is
-//! the entry's JSON. Arguments are already redacted by the tool; the action descriptor in a
-//! `decision` is redacted on the way in ([`RedactedAction`]: secure text replaced, digit runs
-//! masked, previews capped). Each executed action is also recorded with
-//! [`nugget_policy::ActionLog::record_execution`], so the policy view of the chain lists it like
-//! any other executor's action. The readers ([`ChainedLog::entries`], [`ChainedLog::for_task`])
-//! rebuild the agent entries from the chain and ignore everything else.
+//! [`ChainedLog`]: the agent's [`ActionLog`] on the policy crate's hash-chained log. Each
+//! [`LogEntry`] becomes a `LogEvent::External { source: "agent", kind, detail }` (`detail` is the
+//! entry's JSON; a decision's descriptor is redacted with [`RedactedAction`]), and each executed
+//! action is also recorded with [`nugget_policy::ActionLog::record_execution`].
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -243,18 +236,18 @@ mod tests {
     }
 
     #[test]
-    fn entries_round_trip_and_the_chain_verifies() {
-        let chain = Arc::new(nugget_policy::ActionLog::in_memory());
+    fn entries_round_trip_redacted_and_survive_reopening() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("actions.jsonl");
+        let chain = Arc::new(nugget_policy::ActionLog::open(&path).unwrap());
         let log = ChainedLog::new(chain.clone());
-        chain
-            .append(LogEvent::External {
-                source: "other".into(),
-                kind: "run_started".into(),
-                detail: json!({"task_id": "x"}),
-            })
-            .unwrap();
-        let a = run("a");
-        let b = run("b");
+        let other = LogEvent::External {
+            source: "other".into(),
+            kind: "run_started".into(),
+            detail: json!({"task_id": "x"}),
+        };
+        chain.append(other).unwrap();
+        let (a, b) = (run("a"), run("b"));
         for e in a.iter().zip(&b).flat_map(|(x, y)| [x, y]) {
             log.append(e).unwrap();
         }
@@ -269,15 +262,17 @@ mod tests {
                 assert_eq!(got, want);
             }
         }
-        let Record::Decision { action, .. } = &back[1].record else {
+        let Record::Decision {
+            action: Some(action),
+            ..
+        } = &back[1].record
+        else {
             panic!("not a decision: {:?}", back[1]);
         };
-        let action = action.as_ref().unwrap();
         assert_eq!(action.verb, "send");
         assert_ne!(action.text_preview.as_deref(), Some("hunter2"));
         assert!(crate::log::check_complete(&back).is_empty());
         assert_eq!(log.entries().len(), a.len() + b.len());
-
         // Kinds name the record; executed actions are recorded for the policy view too.
         let kinds: Vec<String> = chain
             .entries()
@@ -290,31 +285,15 @@ mod tests {
             })
             .collect();
         assert_eq!(&kinds[..2], ["run_started", "run_started"]);
-        let executions = chain
-            .entries()
-            .iter()
-            .filter(|e| matches!(&e.event, LogEvent::Executed { ok: true, .. }))
-            .count();
-        assert_eq!(executions, 2);
+        let executed =
+            |e: &&nugget_policy::LogEntry| matches!(&e.event, LogEvent::Executed { ok: true, .. });
+        assert_eq!(chain.entries().iter().filter(executed).count(), 2);
         assert!(!format!("{:?}", chain.entries()).contains("hunter2"));
-    }
+        drop((log, chain));
 
-    #[test]
-    fn a_persisted_chain_reads_back_after_reopening() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("actions.jsonl");
-        let a = run("a");
-        {
-            let log = ChainedLog::new(Arc::new(nugget_policy::ActionLog::open(&path).unwrap()));
-            for e in &a[..2] {
-                log.append(e).unwrap();
-            }
-        }
-        let reopened = Arc::new(nugget_policy::ActionLog::open(&path).unwrap());
-        let log = ChainedLog::new(reopened);
-        let back = log.for_task("a");
-        assert_eq!(back.len(), 2);
-        assert_eq!(back[0], a[0]);
-        assert!(log.for_task("b").is_empty());
+        let log = ChainedLog::new(Arc::new(nugget_policy::ActionLog::open(&path).unwrap()));
+        assert_eq!(log.for_task("a").len(), a.len());
+        assert_eq!(log.for_task("a")[0], a[0]);
+        assert!(log.for_task("c").is_empty());
     }
 }

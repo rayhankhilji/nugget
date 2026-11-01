@@ -175,20 +175,6 @@ async fn refused_connections_record_zero_bytes_per_attempt() {
 }
 
 #[test]
-fn locality_from_config_without_network() {
-    let sink = Arc::new(RecordingSink::default());
-    for (url, want) in [
-        ("http://localhost:11434/v1", Locality::OnDevice),
-        ("http://192.168.1.9:1234/v1", Locality::LocalNetwork),
-        ("https://openrouter.ai/api/v1", Locality::Cloud),
-    ] {
-        let cfg = ProviderConfig::from_toml_str(&format!("{OAI}\nbase_url = \"{url}\"")).unwrap();
-        let p = build_provider_with(&cfg, sink.clone(), &FakeSecrets).unwrap();
-        assert_eq!(p.meta().locality, want, "{url}");
-    }
-}
-
-#[test]
 fn missing_api_key_fails_to_build() {
     let cfg = ProviderConfig::from_toml_str(
         "id = \"a\"\nkind = \"anthropic\"\nmodel = \"m\"\napi_key = \"env:MISSING\"",

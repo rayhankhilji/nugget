@@ -107,59 +107,16 @@ pub const DEFAULT_EXCLUDED_APPS: &[&str] = &[
     "lastpass.com",
 ];
 
-/// Terminal emulators: refused by default (text typed into a shell can run as a command),
-/// unless `DraftConfig::allow_terminals`. App ids are matched like excluded apps (bundle ids,
-/// executables without `.exe`, desktop-file ids, all case-insensitive).
-pub const DEFAULT_TERMINAL_APPS: &[&str] = &[
-    // macOS.
-    "com.apple.terminal",
-    "com.googlecode.iterm2",
-    "com.mitchellh.ghostty",
-    "com.github.wez.wezterm",
-    "org.alacritty",
-    "io.alacritty",
-    "net.kovidgoyal.kitty",
-    // Windows.
-    "windowsterminal",
-    "openconsole",
-    "conhost",
-    "cmd",
-    "powershell",
-    "powershell_ise",
-    "pwsh",
-    // Linux.
-    "org.gnome.terminal",
-    "gnome-terminal",
-    "gnome-terminal-server",
-    "org.gnome.console",
-    "kgx",
-    "org.kde.konsole",
-    "konsole",
-    "alacritty",
-    "kitty",
-    "wezterm",
-    "wezterm-gui",
-    "org.wezfurlong.wezterm",
-    "ghostty",
-    "xterm",
-    "uxterm",
-    "dev.warp.warp-stable",
-    "dev.warp.warp",
-    "warp",
-    "com.gexperts.tilix",
-    "tilix",
-    "org.gnome.ptyxis",
-    "ptyxis",
-    "terminator",
-    "foot",
-    "footclient",
-    "rxvt",
-    "urxvt",
-    "co.zeit.hyper",
-    "hyper",
-    "org.tabby",
-    "tabby",
-];
+/// Terminal emulators (comma-separated app ids): refused by default, since text typed into a
+/// shell can run as a command, unless `DraftConfig::allow_terminals`.
+pub const DEFAULT_TERMINAL_APPS: &str = "\
+com.apple.terminal, com.googlecode.iterm2, com.mitchellh.ghostty, com.github.wez.wezterm, \
+org.alacritty, io.alacritty, net.kovidgoyal.kitty, windowsterminal, openconsole, conhost, \
+cmd, powershell, powershell_ise, pwsh, org.gnome.terminal, gnome-terminal, \
+gnome-terminal-server, org.gnome.console, kgx, org.kde.konsole, konsole, alacritty, kitty, \
+wezterm, wezterm-gui, org.wezfurlong.wezterm, ghostty, xterm, uxterm, dev.warp.warp-stable, \
+dev.warp.warp, warp, com.gexperts.tilix, tilix, org.gnome.ptyxis, ptyxis, terminator, foot, \
+footclient, rxvt, urxvt, co.zeit.hyper, hyper, org.tabby, tabby";
 
 /// Whether the focused app is a terminal emulator ([`DEFAULT_TERMINAL_APPS`]).
 /// Also any app whose id contains `terminal` (`xfce4-terminal`, `mate-terminal`), or whose name
@@ -167,9 +124,7 @@ pub const DEFAULT_TERMINAL_APPS: &[&str] = &[
 pub fn is_terminal(ctx: &DraftContext) -> bool {
     let s = Signals::of(ctx);
     (!s.app_id.is_empty()
-        && (DEFAULT_TERMINAL_APPS
-            .iter()
-            .any(|t| s.app_id == *t || s.app_id_raw == *t)
+        && (listed(DEFAULT_TERMINAL_APPS).any(|t| s.app_id == t || s.app_id_raw == t)
             || s.app_id.contains("terminal")))
         || words(&s.app_name).any(|w| w == "terminal")
 }
@@ -375,241 +330,95 @@ enum Family {
     Launcher,
 }
 
+/// The entries of a comma-separated list.
+fn listed(list: &str) -> impl Iterator<Item = &str> {
+    list.split(',').map(str::trim)
+}
+
 /// App ids (normalised) per family.
-const APP_IDS: &[(Family, &[&str])] = &[
+const APP_IDS: &[(Family, &str)] = &[
     (
         Family::Mail,
-        &[
-            "com.apple.mail",
-            "com.microsoft.outlook",
-            "outlook",
-            "olk",
-            "org.mozilla.thunderbird",
-            "thunderbird",
-            "net.thunderbird.thunderbird",
-            "org.gnome.evolution",
-            "evolution",
-            "org.gnome.geary",
-            "geary",
-            "com.readdle.smartemail-mac",
-            "com.readdle.spark",
-            "it.bloop.airmail2",
-            "com.mimestream.mimestream",
-            "com.superhuman.electron",
-            "superhuman",
-            "com.hey.app.desktop",
-            "com.getmailspring.mailspring",
-            "mailspring",
-            "mailclient",
-            "com.canary.mail",
-            "io.canarymail.mac",
-            "org.kde.kmail2",
-            "kmail",
-            "proton mail",
-            "ch.protonmail.desktop",
-        ],
+        "\
+com.apple.mail, com.microsoft.outlook, outlook, olk, org.mozilla.thunderbird, \
+thunderbird, net.thunderbird.thunderbird, org.gnome.evolution, evolution, \
+org.gnome.geary, geary, com.readdle.smartemail-mac, com.readdle.spark, \
+it.bloop.airmail2, com.mimestream.mimestream, com.superhuman.electron, superhuman, \
+com.hey.app.desktop, com.getmailspring.mailspring, mailspring, mailclient, \
+com.canary.mail, io.canarymail.mac, org.kde.kmail2, kmail, proton mail, \
+ch.protonmail.desktop",
     ),
     (
         Family::Chat,
-        &[
-            "com.tinyspeck.slackmacgap",
-            "com.slack.slack",
-            "slack",
-            "com.microsoft.teams",
-            "com.microsoft.teams2",
-            "teams",
-            "ms-teams",
-            "msteams",
-            "com.hnc.discord",
-            "com.discordapp.discord",
-            "discord",
-            "ru.keepcoder.telegram",
-            "org.telegram.desktop",
-            "telegramdesktop",
-            "telegram",
-            "net.whatsapp.whatsapp",
-            "whatsapp",
-            "desktop.whatsapp",
-            "org.whispersystems.signal-desktop",
-            "org.signal.signal",
-            "signal",
-            "com.apple.mobilesms",
-            "com.apple.ichat",
-            "com.facebook.archon",
-            "messenger",
-            "im.riot.riot",
-            "element",
-            "com.mattermost.desktop",
-            "mattermost",
-            "org.zulip.zulip-electron",
-            "zulip",
-            "com.tencent.xinwechat",
-            "wechat",
-            "jp.naver.line.mac",
-            "line",
-            "com.skype.skype",
-            "skype",
-            "us.zoom.xos",
-            "zoom",
-            "com.google.chat",
-            "com.rocket.chat",
-            "rocket.chat",
-            "beeper",
-            "com.automattic.beeper.desktop",
-        ],
+        "\
+com.tinyspeck.slackmacgap, com.slack.slack, slack, com.microsoft.teams, \
+com.microsoft.teams2, teams, ms-teams, msteams, com.hnc.discord, \
+com.discordapp.discord, discord, ru.keepcoder.telegram, org.telegram.desktop, \
+telegramdesktop, telegram, net.whatsapp.whatsapp, whatsapp, desktop.whatsapp, \
+org.whispersystems.signal-desktop, org.signal.signal, signal, com.apple.mobilesms, \
+com.apple.ichat, com.facebook.archon, messenger, im.riot.riot, element, \
+com.mattermost.desktop, mattermost, org.zulip.zulip-electron, zulip, \
+com.tencent.xinwechat, wechat, jp.naver.line.mac, line, com.skype.skype, skype, \
+us.zoom.xos, zoom, com.google.chat, com.rocket.chat, rocket.chat, beeper, \
+com.automattic.beeper.desktop",
     ),
     (
         Family::Comments,
-        &[
-            "com.linear",
-            "linear",
-            "com.atlassian.jira",
-            "com.asana.app",
-            "asana",
-            "com.figma.desktop",
-            "figma",
-            "com.clickup.desktop-app",
-        ],
+        "\
+com.linear, linear, com.atlassian.jira, com.asana.app, asana, com.figma.desktop, figma, \
+com.clickup.desktop-app",
     ),
     (
         Family::Docs,
-        &[
-            "com.microsoft.word",
-            "winword",
-            "com.apple.iwork.pages",
-            "notion.id",
-            "notion",
-            "md.obsidian",
-            "obsidian",
-            "com.apple.notes",
-            "net.shinyfrog.bear",
-            "com.apple.textedit",
-            "org.libreoffice.libreoffice",
-            "libreoffice-writer",
-            "soffice",
-            "swriter",
-            "notepad",
-            "org.gnome.texteditor",
-            "org.gnome.gedit",
-            "gedit",
-            "abnerworks.typora",
-            "typora",
-            "com.lukilabs.lukiapp",
-            "com.microsoft.onenote.mac",
-            "onenote",
-            "com.evernote.evernote",
-            "evernote",
-            "com.ulyssesapp.mac",
-            "com.coda.desktop",
-        ],
+        "\
+com.microsoft.word, winword, com.apple.iwork.pages, notion.id, notion, md.obsidian, \
+obsidian, com.apple.notes, net.shinyfrog.bear, com.apple.textedit, \
+org.libreoffice.libreoffice, libreoffice-writer, soffice, swriter, notepad, \
+org.gnome.texteditor, org.gnome.gedit, gedit, abnerworks.typora, typora, \
+com.lukilabs.lukiapp, com.microsoft.onenote.mac, onenote, com.evernote.evernote, \
+evernote, com.ulyssesapp.mac, com.coda.desktop",
     ),
     (
         Family::Launcher,
-        &[
-            "com.apple.spotlight",
-            "com.raycast.macos",
-            "com.runningwithcrayons.alfred",
-            "org.gnome.shell.extensions",
-            "krunner",
-            "powertoys.powerlauncher",
-        ],
+        "\
+com.apple.spotlight, com.raycast.macos, com.runningwithcrayons.alfred, \
+org.gnome.shell.extensions, krunner, powertoys.powerlauncher",
     ),
 ];
 
 /// Web hosts per family; a host matches with any subdomain. Paths refine a few hosts first (see
 /// [`web_family`]).
-const HOSTS: &[(Family, &[&str])] = &[
+const HOSTS: &[(Family, &str)] = &[
     (
         Family::Mail,
-        &[
-            "mail.google.com",
-            "inbox.google.com",
-            "outlook.live.com",
-            "outlook.office.com",
-            "outlook.office365.com",
-            "outlook.cloud.microsoft",
-            "mail.yahoo.com",
-            "mail.proton.me",
-            "mail.protonmail.com",
-            "app.fastmail.com",
-            "fastmail.com",
-            "app.hey.com",
-            "mail.superhuman.com",
-            "mail.zoho.com",
-            "mail.zoho.eu",
-            "mail.aol.com",
-            "mail.yandex.com",
-            "webmail.gandi.net",
-            "app.tuta.com",
-        ],
+        "\
+mail.google.com, inbox.google.com, outlook.live.com, outlook.office.com, \
+outlook.office365.com, outlook.cloud.microsoft, mail.yahoo.com, mail.proton.me, \
+mail.protonmail.com, app.fastmail.com, fastmail.com, app.hey.com, mail.superhuman.com, \
+mail.zoho.com, mail.zoho.eu, mail.aol.com, mail.yandex.com, webmail.gandi.net, \
+app.tuta.com",
     ),
     (
         Family::Chat,
-        &[
-            "slack.com",
-            "teams.microsoft.com",
-            "teams.live.com",
-            "teams.cloud.microsoft",
-            "discord.com",
-            "discordapp.com",
-            "web.whatsapp.com",
-            "web.telegram.org",
-            "messenger.com",
-            "chat.google.com",
-            "messages.google.com",
-            "app.element.io",
-            "zulipchat.com",
-            "app.beeper.com",
-            "web.skype.com",
-        ],
+        "\
+slack.com, teams.microsoft.com, teams.live.com, teams.cloud.microsoft, discord.com, \
+discordapp.com, web.whatsapp.com, web.telegram.org, messenger.com, chat.google.com, \
+messages.google.com, app.element.io, zulipchat.com, app.beeper.com, web.skype.com",
     ),
     (
         Family::Comments,
-        &[
-            "github.com",
-            "gitlab.com",
-            "bitbucket.org",
-            "linear.app",
-            "atlassian.net",
-            "app.asana.com",
-            "trello.com",
-            "reddit.com",
-            "news.ycombinator.com",
-            "figma.com",
-            "stackoverflow.com",
-            "stackexchange.com",
-            "superuser.com",
-            "youtube.com",
-            "app.clickup.com",
-            "app.shortcut.com",
-            "height.app",
-            "producthunt.com",
-            "x.com",
-            "twitter.com",
-            "linkedin.com",
-            "facebook.com",
-            "lobste.rs",
-        ],
+        "\
+github.com, gitlab.com, bitbucket.org, linear.app, atlassian.net, app.asana.com, \
+trello.com, reddit.com, news.ycombinator.com, figma.com, stackoverflow.com, \
+stackexchange.com, superuser.com, youtube.com, app.clickup.com, app.shortcut.com, \
+height.app, producthunt.com, x.com, twitter.com, linkedin.com, facebook.com, lobste.rs",
     ),
     (
         Family::Docs,
-        &[
-            "docs.google.com",
-            "notion.so",
-            "notion.site",
-            "coda.io",
-            "quip.com",
-            "paper.dropbox.com",
-            "officeapps.live.com",
-            "word.cloud.microsoft",
-            "hackmd.io",
-            "craft.do",
-            "dropbox.com",
-            "medium.com",
-            "substack.com",
-            "overleaf.com",
-            "confluence.com",
-        ],
+        "\
+docs.google.com, notion.so, notion.site, coda.io, quip.com, paper.dropbox.com, \
+officeapps.live.com, word.cloud.microsoft, hackmd.io, craft.do, dropbox.com, \
+medium.com, substack.com, overleaf.com, confluence.com",
     ),
 ];
 
@@ -619,7 +428,7 @@ fn app_family(s: &Signals) -> Option<Family> {
     }
     APP_IDS
         .iter()
-        .find(|(_, ids)| ids.contains(&s.app_id.as_str()) || ids.contains(&s.app_id_raw.as_str()))
+        .find(|(_, ids)| listed(ids).any(|id| id == s.app_id || id == s.app_id_raw))
         .map(|(f, _)| *f)
 }
 
@@ -648,61 +457,34 @@ fn web_family(s: &Signals) -> Option<Family> {
     }
     HOSTS
         .iter()
-        .find(|(_, hosts)| hosts.iter().any(|h| host_is(&s.host, h)))
+        .find(|(_, hosts)| listed(hosts).any(|h| host_is(&s.host, h)))
         .map(|(f, _)| *f)
 }
 
 /// App name fallbacks for when the platform gives no usable id.
 fn name_family(s: &Signals) -> Option<Family> {
-    const NAMES: &[(Family, &[&str])] = &[
+    const NAMES: &[(Family, &str)] = &[
         (
             Family::Mail,
-            &[
-                "mail",
-                "outlook",
-                "thunderbird",
-                "spark",
-                "mimestream",
-                "airmail",
-            ],
+            "mail, outlook, thunderbird, spark, mimestream, airmail",
         ),
         (
             Family::Chat,
-            &[
-                "slack",
-                "microsoft teams",
-                "teams",
-                "discord",
-                "telegram",
-                "whatsapp",
-                "signal",
-                "messages",
-                "messenger",
-                "element",
-                "mattermost",
-            ],
+            "slack, microsoft teams, teams, discord, telegram, whatsapp, signal, messages, messenger, element, mattermost",
         ),
-        (Family::Comments, &["linear", "jira"]),
+        (Family::Comments, "linear, jira"),
         (
             Family::Docs,
-            &[
-                "microsoft word",
-                "word",
-                "pages",
-                "notion",
-                "obsidian",
-                "notes",
-                "bear",
-            ],
+            "microsoft word, word, pages, notion, obsidian, notes, bear",
         ),
-        (Family::Launcher, &["spotlight", "raycast", "alfred"]),
+        (Family::Launcher, "spotlight, raycast, alfred"),
     ];
     if s.app_name.is_empty() {
         return None;
     }
     NAMES
         .iter()
-        .find(|(_, names)| names.contains(&s.app_name.as_str()))
+        .find(|(_, names)| listed(names).any(|n| n == s.app_name))
         .map(|(f, _)| *f)
 }
 
@@ -890,870 +672,191 @@ pub fn classify(ctx: &DraftContext) -> FieldKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nugget_core::ipc::{AppInfo, FieldInfo, ThreadMessage};
+    use nugget_core::ipc::ThreadMessage;
 
-    #[derive(Default)]
-    struct Case {
-        app_id: Option<&'static str>,
-        app_name: &'static str,
-        url: Option<&'static str>,
-        role: &'static str,
-        label: Option<&'static str>,
-        placeholder: Option<&'static str>,
-        subject: Option<&'static str>,
-        recipients: &'static [&'static str],
-        thread: bool,
+    /// A context from app id, page URL, role (default `text_area`) and label; "" means unset.
+    fn ctx(app_id: &str, url: &str, role: &str, label: &str) -> DraftContext {
+        let some = |s: &str| (!s.is_empty()).then(|| s.to_owned());
+        let mut c = DraftContext::default();
+        c.app.id = some(app_id);
+        c.app.url = some(url);
+        c.field.role = if role.is_empty() { "text_area" } else { role }.into();
+        c.field.label = some(label);
+        c
     }
 
-    impl Case {
-        fn ctx(&self) -> DraftContext {
-            DraftContext {
-                app: AppInfo {
-                    id: self.app_id.map(str::to_owned),
-                    name: self.app_name.to_owned(),
-                    window_title: None,
-                    url: self.url.map(str::to_owned),
-                },
-                field: FieldInfo {
-                    role: if self.role.is_empty() {
-                        "text_area"
-                    } else {
-                        self.role
-                    }
-                    .to_owned(),
-                    label: self.label.map(str::to_owned),
-                    placeholder: self.placeholder.map(str::to_owned),
-                    ..Default::default()
-                },
-                thread: if self.thread {
-                    vec![ThreadMessage {
-                        author: Some("Sam".into()),
-                        text: "Are we still on for Thursday?".into(),
-                        ..Default::default()
-                    }]
-                } else {
-                    Vec::new()
-                },
-                recipients: self.recipients.iter().map(|r| (*r).to_owned()).collect(),
-                subject: self.subject.map(str::to_owned),
-                screenshot_png_base64: None,
-            }
-        }
+    fn defaults() -> Vec<String> {
+        DEFAULT_EXCLUDED_APPS
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect()
     }
 
-    fn table() -> Vec<(&'static str, Case, FieldKind)> {
-        use FieldKind::*;
-        vec![
-            // --- mail clients ---
-            (
-                "apple mail body",
-                Case {
-                    app_id: Some("com.apple.mail"),
-                    app_name: "Mail",
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "apple mail subject",
-                Case {
-                    app_id: Some("com.apple.mail"),
-                    role: "text_field",
-                    label: Some("Subject:"),
-                    ..Default::default()
-                },
-                FormField,
-            ),
-            (
-                "apple mail to",
-                Case {
-                    app_id: Some("com.apple.mail"),
-                    role: "text_field",
-                    label: Some("To:"),
-                    ..Default::default()
-                },
-                FormField,
-            ),
-            (
-                "outlook mac",
-                Case {
-                    app_id: Some("com.microsoft.Outlook"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "outlook windows exe",
-                Case {
-                    app_id: Some("OUTLOOK.EXE"),
-                    role: "document",
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "new outlook windows",
-                Case {
-                    app_id: Some("olk.exe"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "thunderbird linux",
-                Case {
-                    app_id: Some("org.mozilla.Thunderbird.desktop"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "evolution",
-                Case {
-                    app_id: Some("org.gnome.Evolution"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "gmail web",
-                Case {
-                    app_id: Some("com.google.Chrome"),
-                    url: Some("https://mail.google.com/mail/u/0/#inbox/abc"),
-                    role: "web_area",
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "gmail message body label",
-                Case {
-                    url: Some("https://mail.google.com/mail/u/0/"),
-                    label: Some("Message Body"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "gmail subject",
-                Case {
-                    url: Some("https://mail.google.com/mail/u/0/"),
-                    role: "text_field",
-                    label: Some("Subject"),
-                    ..Default::default()
-                },
-                FormField,
-            ),
-            (
-                "gmail chat path",
-                Case {
-                    url: Some("https://mail.google.com/chat/u/0/#chat/space/x"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "outlook web",
-                Case {
-                    url: Some("https://outlook.office.com/mail/inbox"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "outlook live",
-                Case {
-                    url: Some("https://outlook.live.com/mail/0/"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "icloud mail path",
-                Case {
-                    url: Some("https://www.icloud.com/mail/"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "icloud notes is not mail",
-                Case {
-                    url: Some("https://www.icloud.com/notes/"),
-                    ..Default::default()
-                },
-                Unknown,
-            ),
-            (
-                "fastmail",
-                Case {
-                    url: Some("https://app.fastmail.com/mail/Inbox"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "proton mail",
-                Case {
-                    url: Some("https://mail.proton.me/u/0/inbox"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            // --- chat apps ---
-            (
-                "slack mac",
-                Case {
-                    app_id: Some("com.tinyspeck.slackmacgap"),
-                    label: Some("Message #general"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "slack no label",
-                Case {
-                    app_id: Some("com.tinyspeck.slackmacgap"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "slack windows",
-                Case {
-                    app_id: Some("slack.exe"),
-                    role: "text_field",
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "slack web",
-                Case {
-                    url: Some("https://app.slack.com/client/T1/C1"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "slack workspace subdomain",
-                Case {
-                    url: Some("https://acme.slack.com/archives/C1"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "slack thread reply label",
-                Case {
-                    app_id: Some("com.tinyspeck.slackmacgap"),
-                    placeholder: Some("Reply…"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "slack search",
-                Case {
-                    app_id: Some("com.tinyspeck.slackmacgap"),
-                    role: "text_field",
-                    placeholder: Some("Search Acme"),
-                    ..Default::default()
-                },
-                Search,
-            ),
-            (
-                "teams new",
-                Case {
-                    app_id: Some("com.microsoft.teams2"),
-                    placeholder: Some("Type a message"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "teams web with subject ignored",
-                Case {
-                    url: Some("https://teams.microsoft.com/v2/"),
-                    subject: Some("Standup"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "teams exe",
-                Case {
-                    app_id: Some("ms-teams.exe"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "discord",
-                Case {
-                    app_id: Some("com.hnc.Discord"),
-                    placeholder: Some("Message @sam"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "whatsapp web",
-                Case {
-                    url: Some("https://web.whatsapp.com/"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "telegram desktop linux",
-                Case {
-                    app_id: Some("org.telegram.desktop"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "signal",
-                Case {
-                    app_id: Some("org.whispersystems.signal-desktop"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "imessage",
-                Case {
-                    app_id: Some("com.apple.MobileSMS"),
-                    placeholder: Some("iMessage"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "linkedin messaging",
-                Case {
-                    url: Some("https://www.linkedin.com/messaging/thread/1/"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "x dms",
-                Case {
-                    url: Some("https://x.com/messages/123"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "chat app by name only",
-                Case {
-                    app_name: "Slack",
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            // --- comments ---
-            (
-                "github pr comment",
-                Case {
-                    url: Some("https://github.com/o/r/pull/12"),
-                    placeholder: Some("Leave a comment"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "github issue body no label",
-                Case {
-                    url: Some("https://github.com/o/r/issues/3"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "github issue title",
-                Case {
-                    url: Some("https://github.com/o/r/issues/new"),
-                    role: "text_field",
-                    label: Some("Title"),
-                    ..Default::default()
-                },
-                FormField,
-            ),
-            (
-                "github search",
-                Case {
-                    url: Some("https://github.com/o/r"),
-                    role: "text_field",
-                    placeholder: Some("Search or jump to..."),
-                    ..Default::default()
-                },
-                Search,
-            ),
-            (
-                "gitlab",
-                Case {
-                    url: Some("https://gitlab.com/g/p/-/merge_requests/9"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "linear web reply",
-                Case {
-                    url: Some("https://linear.app/acme/issue/ENG-1"),
-                    placeholder: Some("Leave a reply..."),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "linear description",
-                Case {
-                    url: Some("https://linear.app/acme/issue/ENG-1"),
-                    placeholder: Some("Add description…"),
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "linear desktop",
-                Case {
-                    app_id: Some("com.linear"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "jira cloud",
-                Case {
-                    url: Some("https://acme.atlassian.net/browse/ENG-1"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "confluence is docs",
-                Case {
-                    url: Some("https://acme.atlassian.net/wiki/spaces/ENG/pages/1"),
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "reddit",
-                Case {
-                    url: Some("https://www.reddit.com/r/rust/comments/x/"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "hacker news",
-                Case {
-                    url: Some("https://news.ycombinator.com/item?id=1"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "google docs comment box",
-                Case {
-                    url: Some("https://docs.google.com/document/d/1/edit"),
-                    placeholder: Some("Comment or add others with @"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            // --- documents ---
-            (
-                "google docs canvas",
-                Case {
-                    url: Some("https://docs.google.com/document/d/1/edit"),
-                    role: "document",
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "notion web",
-                Case {
-                    url: Some("https://www.notion.so/acme/Page-1"),
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "notion comment",
-                Case {
-                    app_id: Some("notion.id"),
-                    placeholder: Some("Add a comment…"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "word windows",
-                Case {
-                    app_id: Some("WINWORD.EXE"),
-                    role: "document",
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "pages",
-                Case {
-                    app_id: Some("com.apple.iWork.Pages"),
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "obsidian",
-                Case {
-                    app_id: Some("md.obsidian"),
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "apple notes",
-                Case {
-                    app_id: Some("com.apple.Notes"),
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "notion type slash",
-                Case {
-                    placeholder: Some("Press '/' for commands"),
-                    ..Default::default()
-                },
-                Document,
-            ),
-            // --- search ---
-            (
-                "search role",
-                Case {
-                    role: "search_field",
-                    ..Default::default()
-                },
-                Search,
-            ),
-            (
-                "search placeholder",
-                Case {
-                    role: "text_field",
-                    placeholder: Some("Search mail"),
-                    ..Default::default()
-                },
-                Search,
-            ),
-            (
-                "browser omnibox",
-                Case {
-                    app_id: Some("com.google.Chrome"),
-                    role: "text_field",
-                    label: Some("Address and search bar"),
-                    ..Default::default()
-                },
-                Search,
-            ),
-            (
-                "spotlight",
-                Case {
-                    app_id: Some("com.apple.Spotlight"),
-                    role: "text_field",
-                    ..Default::default()
-                },
-                Search,
-            ),
-            (
-                "raycast",
-                Case {
-                    app_id: Some("com.raycast.macos"),
-                    ..Default::default()
-                },
-                Search,
-            ),
-            // --- forms and context fallbacks ---
-            (
-                "generic single line",
-                Case {
-                    role: "text_field",
-                    ..Default::default()
-                },
-                FormField,
-            ),
-            (
-                "form email address",
-                Case {
-                    label: Some("Email address"),
-                    ..Default::default()
-                },
-                FormField,
-            ),
-            (
-                "form first name",
-                Case {
-                    role: "text_field",
-                    label: Some("First name"),
-                    ..Default::default()
-                },
-                FormField,
-            ),
-            (
-                "unknown app with subject",
-                Case {
-                    app_id: Some("com.example.crm"),
-                    subject: Some("Re: Invoice"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "unknown app with recipients",
-                Case {
-                    app_id: Some("com.example.crm"),
-                    recipients: &["sam@example.com"],
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-            (
-                "unknown app with thread",
-                Case {
-                    app_id: Some("com.example.support"),
-                    thread: true,
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "unknown web app type a message",
-                Case {
-                    url: Some("https://support.example.com/"),
-                    placeholder: Some("Type your message here"),
-                    ..Default::default()
-                },
-                ChatMessage,
-            ),
-            (
-                "unknown web app comment label",
-                Case {
-                    url: Some("https://forum.example.com/t/1"),
-                    label: Some("Write a comment"),
-                    ..Default::default()
-                },
-                Comment,
-            ),
-            (
-                "unknown text area",
-                Case {
-                    ..Default::default()
-                },
-                Unknown,
-            ),
-            (
-                "unknown document role",
-                Case {
-                    role: "document",
-                    ..Default::default()
-                },
-                Document,
-            ),
-            (
-                "message body label wins over chat family",
-                Case {
-                    app_id: Some("com.tinyspeck.slackmacgap"),
-                    label: Some("Message body"),
-                    ..Default::default()
-                },
-                EmailBody,
-            ),
-        ]
-    }
+    /// `app id | url | role | label | kind` per line; empty means unset.
+    const CASES: &str = "\
+com.apple.mail||||email_body
+com.apple.mail||text_field|Subject:|form_field
+com.apple.mail||text_field|To:|form_field
+OUTLOOK.EXE||document||email_body
+olk.exe||||email_body
+org.mozilla.Thunderbird.desktop||||email_body
+com.google.Chrome|https://mail.google.com/mail/u/0/#inbox/abc|web_area||email_body
+|https://mail.google.com/mail/u/0/||Message Body|email_body
+|https://mail.google.com/mail/u/0/|text_field|Subject|form_field
+|https://mail.google.com/chat/u/0/#chat/space/x|||chat_message
+|https://outlook.office.com/mail/inbox|||email_body
+|https://www.icloud.com/mail/|||email_body
+|https://www.icloud.com/notes/|||unknown
+|https://mail.proton.me/u/0/inbox|||email_body
+com.tinyspeck.slackmacgap|||Message #general|chat_message
+com.tinyspeck.slackmacgap||||chat_message
+slack.exe||text_field||chat_message
+|https://acme.slack.com/archives/C1|||chat_message
+com.tinyspeck.slackmacgap|||Reply…|chat_message
+com.tinyspeck.slackmacgap||text_field|Search Acme|search
+com.microsoft.teams2|||Type a message|chat_message
+ms-teams.exe||||chat_message
+com.hnc.Discord|||Message @sam|chat_message
+|https://web.whatsapp.com/|||chat_message
+com.apple.MobileSMS|||iMessage|chat_message
+|https://www.linkedin.com/messaging/thread/1/|||chat_message
+|https://x.com/messages/123|||chat_message
+|https://github.com/o/r/pull/12||Leave a comment|comment
+|https://github.com/o/r/issues/3|||comment
+|https://github.com/o/r/issues/new|text_field|Title|form_field
+|https://github.com/o/r|text_field|Search or jump to...|search
+|https://linear.app/acme/issue/ENG-1||Leave a reply...|comment
+|https://linear.app/acme/issue/ENG-1||Add description…|document
+|https://acme.atlassian.net/browse/ENG-1|||comment
+|https://acme.atlassian.net/wiki/spaces/ENG/pages/1|||document
+|https://docs.google.com/document/d/1/edit||Comment or add others with @|comment
+|https://docs.google.com/document/d/1/edit|document||document
+notion.id|||Add a comment…|comment
+WINWORD.EXE||document||document
+com.apple.Notes||||document
+|||Press '/' for commands|document
+||search_field||search
+||text_field|Search mail|search
+com.google.Chrome||text_field|Address and search bar|search
+com.raycast.macos||||search
+||text_field||form_field
+|||Email address|form_field
+|https://support.example.com/||Type your message here|chat_message
+|https://forum.example.com/t/1||Write a comment|comment
+||||unknown
+||document||document
+com.tinyspeck.slackmacgap|||Message body|email_body";
 
     #[test]
     fn classify_table() {
-        let cases = table();
-        assert!(cases.len() >= 40, "only {} cases", cases.len());
-        let mut failures = Vec::new();
-        for (name, case, want) in &cases {
-            let got = classify(&case.ctx());
-            if got != *want {
-                failures.push(format!("{name}: got {got:?}, want {want:?}"));
-            }
-        }
+        use FieldKind::*;
+        let kinds = [
+            EmailBody,
+            ChatMessage,
+            Comment,
+            Document,
+            FormField,
+            Search,
+            Unknown,
+        ];
+        let failures: Vec<String> = CASES
+            .lines()
+            .filter_map(|line| {
+                let f: Vec<&str> = line.split('|').collect();
+                let want = kinds.into_iter().find(|k| k.as_str() == f[4]).unwrap();
+                let got = classify(&ctx(f[0], f[1], f[2], f[3]));
+                (got != want).then(|| format!("{line}: got {got:?}"))
+            })
+            .collect();
         assert!(failures.is_empty(), "{}", failures.join("\n"));
-    }
 
-    #[test]
-    fn stub_semantics_are_kept() {
-        // The M3 contract stub's decisions still hold for the inputs it understood.
-        let mut ctx = DraftContext::default();
-        ctx.field.role = "search_field".into();
-        assert_eq!(classify(&ctx), FieldKind::Search);
-        ctx.field.role = "text_area".into();
-        assert_eq!(classify(&ctx), FieldKind::Unknown);
-        ctx.thread.push(ThreadMessage::default());
-        assert_eq!(classify(&ctx), FieldKind::ChatMessage);
-        ctx.subject = Some("Hi".into());
-        assert_eq!(classify(&ctx), FieldKind::EmailBody);
+        // Name only, conversation fallbacks, and a chat host ignoring a subject.
+        let mut c = ctx("", "", "", "");
+        c.app.name = "Slack".into();
+        assert_eq!(classify(&c), ChatMessage);
+        let mut c = ctx("", "https://teams.microsoft.com/v2/", "", "");
+        c.subject = Some("Standup".into());
+        assert_eq!(classify(&c), ChatMessage);
+        let mut c = ctx("com.example.crm", "", "", "");
+        c.thread.push(ThreadMessage::default());
+        assert_eq!(classify(&c), ChatMessage);
+        c.recipients = vec!["sam@example.com".into()];
+        assert_eq!(classify(&c), EmailBody);
+        c.recipients.clear();
+        c.subject = Some("Re: Invoice".into());
+        assert_eq!(classify(&c), EmailBody);
     }
 
     #[test]
     fn secure_fields_are_refused_before_classification() {
-        let excluded: Vec<String> = Vec::new();
-        let mut ctx = Case {
-            app_id: Some("com.tinyspeck.slackmacgap"),
-            ..Default::default()
-        }
-        .ctx();
-        ctx.field.secure = true;
-        assert_eq!(gate(&ctx, &excluded), Err(Refusal::SecureField));
+        let mut c = ctx("com.tinyspeck.slackmacgap", "", "", "");
+        c.field.secure = true;
+        assert_eq!(gate(&c, &[]), Err(Refusal::SecureField));
         for (role, label) in [
-            ("secure_text_field", None),
-            ("text_field", Some("Password")),
-            ("text_field", Some("Enter the 6-digit verification code")),
-            ("text_field", Some("PIN")),
-            ("text_field", Some("Card number")),
-            ("text_field", Some("CVV")),
-            ("text_field", Some("One-time code")),
+            ("secure_text_field", ""),
+            ("text_field", "Password"),
+            ("text_field", "Enter the 6-digit verification code"),
+            ("text_field", "PIN"),
+            ("text_field", "Card number"),
+            ("text_field", "CVV"),
+            ("text_field", "One-time code"),
         ] {
-            let mut ctx = Case::default().ctx();
-            ctx.field.role = role.into();
-            ctx.field.label = label.map(str::to_owned);
-            assert_eq!(
-                gate(&ctx, &excluded),
-                Err(Refusal::SecureField),
-                "{role} {label:?}"
-            );
+            let c = ctx("", "", role, label);
+            assert_eq!(gate(&c, &[]), Err(Refusal::SecureField), "{role} {label}");
         }
         // "Pinned messages" is not a PIN.
-        let mut ctx = Case {
-            app_id: Some("slack"),
-            ..Default::default()
-        }
-        .ctx();
-        ctx.field.label = Some("Pinned messages note".into());
-        assert_eq!(gate(&ctx, &excluded), Ok(FieldKind::ChatMessage));
+        let c = ctx("slack", "", "", "Pinned messages note");
+        assert_eq!(gate(&c, &[]), Ok(FieldKind::ChatMessage));
     }
 
     #[test]
     fn excluded_apps_and_hosts_are_refused() {
-        let excluded: Vec<String> = DEFAULT_EXCLUDED_APPS
-            .iter()
-            .map(|s| (*s).to_owned())
-            .collect();
-        let ctx = Case {
-            app_id: Some("com.1password.1password"),
-            app_name: "1Password",
-            ..Default::default()
-        }
-        .ctx();
+        let excluded = defaults();
+        let mut c = ctx("com.1password.1password", "", "", "");
+        c.app.name = "1Password".into();
         assert_eq!(
-            gate(&ctx, &excluded),
+            gate(&c, &excluded),
             Err(Refusal::ExcludedApp("1Password".into()))
         );
-        let ctx = Case {
-            app_id: Some("Bitwarden.exe"),
-            ..Default::default()
-        }
-        .ctx();
-        assert!(matches!(
-            gate(&ctx, &excluded),
-            Err(Refusal::ExcludedApp(_))
-        ));
-        let ctx = Case {
-            url: Some("https://vault.bitwarden.com/#/vault"),
-            ..Default::default()
-        }
-        .ctx();
-        assert!(matches!(
-            gate(&ctx, &excluded),
-            Err(Refusal::ExcludedApp(_))
-        ));
-        // A user-added bank host matches subdomains.
-        let ctx = Case {
-            url: Some("https://online.mybank.example/"),
-            ..Default::default()
-        }
-        .ctx();
-        assert!(matches!(
-            gate(&ctx, &["mybank.example".into()]),
-            Err(Refusal::ExcludedApp(_))
-        ));
-        // ...but not look-alike hosts.
-        let ctx = Case {
-            url: Some("https://notmybank.example/"),
-            thread: true,
-            ..Default::default()
-        }
-        .ctx();
-        assert_eq!(
-            gate(&ctx, &["mybank.example".into()]),
-            Ok(FieldKind::ChatMessage)
-        );
-    }
-
-    #[test]
-    fn more_password_managers_are_excluded() {
-        let excluded: Vec<String> = DEFAULT_EXCLUDED_APPS
-            .iter()
-            .map(|s| (*s).to_owned())
-            .collect();
-        for id in [
-            "me.proton.pass.electron",
-            "ProtonPass.exe",
-            "proton-pass",
-            "in.sinew.Enpass-Desktop",
-            "Enpass.exe",
-            "enpass.desktop",
-            "com.nordsec.nordpass",
-            "NordPass.exe",
-            "nordpass",
+        for (id, url) in [
+            ("Bitwarden.exe", ""),
+            ("", "https://vault.bitwarden.com/#/vault"),
+            ("me.proton.pass.electron", ""),
+            ("ProtonPass.exe", ""),
+            ("proton-pass", ""),
+            ("in.sinew.Enpass-Desktop", ""),
+            ("Enpass.exe", ""),
+            ("enpass.desktop", ""),
+            ("com.nordsec.nordpass", ""),
+            ("NordPass.exe", ""),
+            ("com.keepersecurity.passwordmanager", ""),
+            ("KeeperPasswordManager.exe", ""),
+            ("com.siber.RoboForm", ""),
+            ("RoboForm.exe", ""),
+            ("", "https://pass.proton.me/u/0"),
+            ("", "https://app.nordpass.com/vault"),
         ] {
-            let ctx = Case {
-                app_id: Some(id),
-                thread: true,
-                ..Default::default()
-            }
-            .ctx();
+            let mut c = ctx(id, url, "", "");
+            c.thread.push(ThreadMessage::default());
             assert!(
-                matches!(gate(&ctx, &excluded), Err(Refusal::ExcludedApp(_))),
-                "{id}"
-            );
-        }
-        for url in [
-            "https://pass.proton.me/u/0",
-            "https://app.nordpass.com/vault",
-        ] {
-            let ctx = Case {
-                url: Some(url),
-                thread: true,
-                ..Default::default()
-            }
-            .ctx();
-            assert!(
-                matches!(gate(&ctx, &excluded), Err(Refusal::ExcludedApp(_))),
-                "{url}"
+                matches!(gate(&c, &excluded), Err(Refusal::ExcludedApp(_))),
+                "{id}{url}"
             );
         }
         // Other Proton apps are not password managers.
-        let ctx = Case {
-            url: Some("https://mail.proton.me/u/0/inbox"),
-            thread: true,
-            ..Default::default()
-        }
-        .ctx();
-        assert!(gate(&ctx, &excluded).is_ok());
+        let mut c = ctx("", "https://mail.proton.me/u/0/inbox", "", "");
+        c.thread.push(ThreadMessage::default());
+        assert!(gate(&c, &excluded).is_ok());
+        // A user-added host matches subdomains, but not look-alikes.
+        let bank = ["mybank.example".to_owned()];
+        let c = ctx("", "https://online.mybank.example/", "", "");
+        assert!(matches!(gate(&c, &bank), Err(Refusal::ExcludedApp(_))));
+        let mut c = ctx("", "https://notmybank.example/", "", "");
+        c.thread.push(ThreadMessage::default());
+        assert_eq!(gate(&c, &bank), Ok(FieldKind::ChatMessage));
     }
 
+    /// Security review PA-5: terminals are refused unless allowed.
     #[test]
     fn terminals_are_refused_unless_allowed() {
         for id in [
@@ -1764,14 +867,12 @@ mod tests {
             "cmd.exe",
             "powershell.exe",
             "pwsh.exe",
-            "org.gnome.Terminal",
             "org.gnome.Terminal.desktop",
             "org.kde.konsole",
             "Alacritty",
             "kitty",
             "wezterm-gui.exe",
             "com.mitchellh.ghostty",
-            // Security review PA-5: the rest of the review's list.
             "dev.warp.Warp-Stable",
             "com.gexperts.Tilix",
             "org.gnome.Ptyxis.desktop",
@@ -1779,101 +880,38 @@ mod tests {
             "mate-terminal",
             "xterm",
         ] {
-            let ctx = Case {
-                app_id: Some(id),
-                app_name: "Term",
-                thread: true,
-                ..Default::default()
-            }
-            .ctx();
-            assert!(is_terminal(&ctx), "{id}");
-            assert_eq!(
-                gate(&ctx, &[]),
-                Err(Refusal::Terminal("Term".into())),
-                "{id}"
-            );
-            assert!(gate_with(&ctx, &[], true).is_ok(), "{id}");
+            let mut c = ctx(id, "", "", "");
+            c.app.name = "Term".into();
+            c.thread.push(ThreadMessage::default());
+            assert!(is_terminal(&c), "{id}");
+            assert_eq!(gate(&c, &[]), Err(Refusal::Terminal("Term".into())), "{id}");
+            assert!(gate_with(&c, &[], true).is_ok(), "{id}");
         }
+        // An unknown id named a terminal; but not a word that merely starts with it.
+        let mut c = ctx("com.example.shell", "", "", "");
+        c.app.name = "GNOME Terminal".into();
+        assert!(is_terminal(&c));
+        c.app.name = "Terminally Online Notes".into();
+        assert!(!is_terminal(&c));
+        assert!(!is_terminal(&ctx("com.tinyspeck.slackmacgap", "", "", "")));
         // Secure fields stay refused even where terminals are allowed.
-        let mut ctx = Case {
-            app_id: Some("com.apple.Terminal"),
-            ..Default::default()
-        }
-        .ctx();
-        ctx.field.secure = true;
-        assert_eq!(gate_with(&ctx, &[], true), Err(Refusal::SecureField));
-        // Not a terminal.
-        let ctx = Case {
-            app_id: Some("com.tinyspeck.slackmacgap"),
-            thread: true,
-            ..Default::default()
-        }
-        .ctx();
-        assert!(!is_terminal(&ctx));
-        let err: nugget_core::Error = Refusal::Terminal("Terminal".into()).into();
-        assert!(matches!(err, nugget_core::Error::Invalid(_)));
-    }
-
-    /// Security review PA-5 (inverted): terminals and the
-    /// password managers a11y names are refused by the default lists.
-    #[test]
-    fn pa5_terminals_and_other_password_managers_are_refused() {
-        let excluded: Vec<String> = DEFAULT_EXCLUDED_APPS
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        for (id, name) in [
-            ("com.apple.Terminal", "Terminal"),
-            ("com.googlecode.iterm2", "iTerm2"),
-            ("org.gnome.Terminal.desktop", "Terminal"),
-            ("WindowsTerminal.exe", "Windows Terminal"),
-            ("me.proton.pass.electron", "Proton Pass"),
-            ("in.sinew.Enpass-Desktop", "Enpass"),
-            ("com.nordsec.nordpass", "NordPass"),
-            (
-                "com.keepersecurity.passwordmanager",
-                "Keeper Password Manager",
-            ),
-            ("KeeperPasswordManager.exe", "Keeper"),
-            ("com.siber.RoboForm", "RoboForm"),
-            ("RoboForm.exe", "RoboForm"),
-            // Unknown id, but named a terminal.
-            ("com.example.shell", "GNOME Terminal"),
-        ] {
-            let ctx = Case {
-                app_id: Some(id),
-                app_name: name,
-                thread: true,
-                ..Default::default()
-            }
-            .ctx();
-            assert!(gate(&ctx, &excluded).is_err(), "{id}");
-        }
-        // The word, not a substring of another one.
-        let ctx = Case {
-            app_id: Some("com.example.notes"),
-            app_name: "Terminally Online Notes",
-            ..Default::default()
-        }
-        .ctx();
-        assert!(!is_terminal(&ctx));
+        let mut c = ctx("com.apple.Terminal", "", "", "");
+        c.field.secure = true;
+        assert_eq!(gate_with(&c, &[], true), Err(Refusal::SecureField));
     }
 
     #[test]
-    fn search_is_not_draftable() {
-        let ctx = Case {
-            role: "search_field",
-            ..Default::default()
-        }
-        .ctx();
-        assert_eq!(
-            gate(&ctx, &[]),
-            Err(Refusal::NotDraftable(FieldKind::Search))
-        );
+    fn search_is_not_draftable_and_refusals_map_to_errors() {
+        let c = ctx("", "", "search_field", "");
+        assert_eq!(gate(&c, &[]), Err(Refusal::NotDraftable(FieldKind::Search)));
         let err: nugget_core::Error = Refusal::NotDraftable(FieldKind::Search).into();
         assert!(matches!(err, nugget_core::Error::Unsupported(_)));
-        let err: nugget_core::Error = Refusal::SecureField.into();
-        assert!(matches!(err, nugget_core::Error::Invalid(_)));
+        for r in [Refusal::SecureField, Refusal::Terminal("T".into())] {
+            assert!(matches!(
+                nugget_core::Error::from(r),
+                nugget_core::Error::Invalid(_)
+            ));
+        }
     }
 
     #[test]

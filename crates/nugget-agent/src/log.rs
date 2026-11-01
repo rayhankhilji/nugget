@@ -1,13 +1,8 @@
 //! The append-only action log and the human-readable run report rendered from it.
 //!
-//! Every model turn, every policy decision and every executed action is one [`LogEntry`]. The
-//! loop stops (`Outcome::Error`) if an entry cannot be written: an action that cannot be audited
-//! is not taken. The daemon backs [`ActionLog`] with the store's hash-chained audit log; this
-//! crate ships [`MemoryLog`] and [`JsonlLog`].
-//!
-//! JSONL format: one entry per line, `{"task_id", "seq", "at_ms", "kind", ...fields}`, where
-//! `kind` is one of `run_started`, `resumed`, `model_turn`, `decision`, `executed`, `injection`,
-//! `suspended`, `finished`. `seq` counts from 0 per task and has no gaps.
+//! Every model turn, decision and executed action is one [`LogEntry`]; the loop stops if one
+//! cannot be written (no unaudited actions). JSONL: one `{"task_id", "seq", "at_ms", "kind", ...}`
+//! per line, `seq` from 0 per task with no gaps.
 
 use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};

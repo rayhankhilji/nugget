@@ -371,3 +371,71 @@ pub fn store(root: &Path, sink: Arc<VecSink>) -> ModelStore {
         .with_disk_space(Arc::new(FakeDisk(Some(u64::MAX / 2))))
         .with_download_options(fast_opts())
 }
+
+// ---- install fixtures ----
+
+pub const SIZE: usize = 64 * 1024;
+
+pub type Log = Arc<Mutex<Vec<nugget_models::Progress>>>;
+
+pub fn progress_log() -> (
+    Log,
+    impl Fn(nugget_models::Progress) + Send + Sync + 'static,
+) {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let l = log.clone();
+    (log, move |p| l.lock().unwrap().push(p))
+}
+
+pub fn last(log: &Log) -> nugget_models::Progress {
+    log.lock().unwrap().last().cloned().unwrap()
+}
+
+/// A served [`SIZE`]-byte model `m` and an empty store root.
+pub struct Fx {
+    pub tmp: tempfile::TempDir,
+    pub sink: Arc<VecSink>,
+    pub srv: TestServer,
+    pub bytes: Vec<u8>,
+    pub e: ModelEntry,
+}
+
+pub async fn fixture(seed: u64) -> Fx {
+    let srv = TestServer::start().await;
+    let bytes = data(SIZE, seed);
+    let e = signed(vec![entry("m", &srv.add("m", bytes.clone()), &bytes)])
+        .models
+        .remove(0);
+    Fx {
+        tmp: tempfile::tempdir().unwrap(),
+        sink: Arc::default(),
+        srv,
+        bytes,
+        e,
+    }
+}
+
+impl Fx {
+    pub fn store(&self) -> ModelStore {
+        store(self.tmp.path(), self.sink.clone())
+    }
+
+    pub fn store_with(&self, opts: DownloadOptions) -> Arc<ModelStore> {
+        Arc::new(self.store().with_download_options(opts))
+    }
+
+    /// The installed bytes of `m` are the served ones.
+    pub fn assert_installed(&self, st: &ModelStore) {
+        assert_eq!(std::fs::read(st.path("m").unwrap()).unwrap(), self.bytes);
+    }
+}
+
+/// Range starts of real part requests (excludes the 1-byte probe).
+pub fn part_starts(srv: &TestServer) -> Vec<u64> {
+    srv.requests()
+        .iter()
+        .filter_map(|r| r.range)
+        .filter(|&(s, e)| !(s == 0 && e == Some(0)))
+        .map(|(s, _)| s)
+        .collect()
+}

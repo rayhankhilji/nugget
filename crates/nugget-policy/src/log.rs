@@ -19,24 +19,8 @@
 //! Actions enter the log as [`RedactedAction`]s: secure-field text is replaced by `[redacted]`,
 //! card numbers and long digit runs are masked, previews are capped (see [`crate::redact`]).
 //!
-//! # Adapter for `nugget-agent`
-//! `nugget-agent` defines its own `ActionLog` trait and depends on this crate, so the adapter
-//! lives there. It wraps an `Arc<nugget_policy::ActionLog>` and forwards each record:
-//!
-//! ```ignore
-//! struct PolicyLog(Arc<nugget_policy::ActionLog>);
-//!
-//! impl nugget_agent::ActionLog for PolicyLog {
-//!     fn record(&self, step: &nugget_agent::StepRecord) -> nugget_core::Result<()> {
-//!         // Executed actions: keeps the redaction and the chain.
-//!         self.0
-//!             .record_execution(&step.action, &step.context, step.ok, step.detail.clone())
-//!             .map(|_| ())
-//!         // Anything else (plans, verifications, evidence hashes):
-//!         // self.0.append(LogEvent::External { source: "agent".into(), kind, detail })
-//!     }
-//! }
-//! ```
+//! `nugget-agent` adapts its own `ActionLog` trait to this one (`record_execution` for executed
+//! actions, [`LogEvent::External`] for the rest).
 //!
 //! Give the same `Arc` to [`crate::PolicyEngineBuilder::log`] so decisions, confirmations,
 //! halts and executions share one chain.
@@ -52,13 +36,34 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::broker::ConfirmOutcome;
 use crate::redact::RedactedAction;
 use crate::text::cap;
 use crate::{ActionContext, ActionDescriptor, Decision, RiskClass};
 
 /// `prev` of the first entry.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// How a user confirmation ended (kept for logs written by the former confirmation broker).
+/// Why a confirmation ended in deny.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DenyReason {
+    User,
+    Timeout,
+    Halted,
+    /// Approved, but the task's rate limit for the class was used up meanwhile.
+    RateLimited,
+    /// The broker went away before an answer arrived.
+    Dropped,
+}
+
+/// The executor's answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum ConfirmOutcome {
+    Approved { for_task: bool },
+    Denied { reason: DenyReason },
+}
 
 /// What happened.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

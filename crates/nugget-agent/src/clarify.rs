@@ -1,11 +1,6 @@
-//! Ask, don't guess: spot a goal that names a target the screen shows more than once.
-//!
-//! [`ambiguity`] matches the words of the user's goal against the items a tool saw on screen
-//! ([`ToolResult::targets`](crate::ToolResult)). When the best-matching items are two or more
-//! different things ("Reply to Sam's email" with Sam Lee and Sam Ortiz in the inbox), the loop
-//! asks the user which one before it acts ([`AgentConfig::clarify`](crate::AgentConfig)). Pure
-//! and deterministic: no model call. Target labels are untrusted screen text; they only ever
-//! reach the user, cleaned and cut, never the model.
+//! Ask, don't guess: spot a goal that names a target the screen shows more than once ("Reply to
+//! Sam" with Sam Lee and Sam Ortiz in the inbox). Pure, no model call. Target labels are untrusted
+//! screen text: they only reach the user, cleaned and cut, never the model.
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -80,15 +75,9 @@ const MANY_WORDS: &[&str] = &[
     "everybody", "multiple", "several",
 ];
 
-/// The ambiguous target in `goal` given what the screen shows, if any.
-///
-/// The goal is split into lowercase words (letters and digits; a possessive `'s` is dropped),
-/// minus [`STOP_WORDS`] and words shorter than two characters. Each target is matched word by
-/// word: a target word matches a goal word when they are equal or the target word is its plural
-/// (`report` → `reports`). Targets are grouped by the set of goal words they match; the groups
-/// matching the most goal words are the best fits, and a best group with two or more distinct
-/// items (by label, ignoring case and spacing) is ambiguous. Nothing is ambiguous when the goal
-/// asks for several items ([`MANY_WORDS`], or a plural goal word whose singular is on screen).
+/// The ambiguous target in `goal` given what the screen shows, if any: targets are grouped by
+/// the content words of the goal they match (singular or plural); a best-fitting group with two
+/// or more distinct items is ambiguous, unless the goal asks for several items.
 pub fn ambiguity(goal: &str, targets: &[String]) -> Option<Ambiguity> {
     // A whole name the goal spells out (`draft.txt`, `sam@ourco.example`) that one target shows
     // is that target.
@@ -377,21 +366,75 @@ mod tests {
         labels.iter().map(|s| s.to_string()).collect()
     }
 
+    #[rustfmt::skip]
     const INBOX: &[&str] = &[
-        "Sam Lee — Lunch on Friday?",
-        "Priya Shah — Q3 numbers",
-        "Sam Ortiz — Re: contract draft",
-        "Newsletter: Weekly digest",
-        "Newsletter: Product update",
+        "Sam Lee — Lunch on Friday?", "Priya Shah — Q3 numbers", "Sam Ortiz — Re: contract draft",
+        "Newsletter: Weekly digest", "Newsletter: Product update",
+    ];
+    const EVENTS: &[&str] = &[
+        "Team sync, Mon 10:00",
+        "Dentist, Tue 15:30",
+        "Team sync, Thu 10:00",
     ];
 
+    /// (goal, screen, the ambiguous term or `None`).
+    #[rustfmt::skip]
     #[test]
-    fn two_sams_are_ambiguous() {
+    fn ambiguity_cases() {
+        let files: &[&str] = &["Q3 report.docx — Documents", "Q3 report.docx — Desktop", "Q4 plan.xlsx — Documents"];
+        let finals: &[&str] = &["Q3 report.docx", "Q3 report final.docx"];
+        let drafts: &[&str] = &["File draft.txt", "File notes.txt", "Folder Projects"];
+        let week: &[&str] = &["Monday 09:00 Team standup", "Tuesday 11:00 Design review", "Thursday 13:00 Customer call"];
+        let thursday: &[&str] = &["Thursday 13:00 Customer call", "Thursday 14:00 1:1 with Sam"];
+        let cases: &[(&str, &[&str], Option<&str>)] = &[
+            ("reply to SAM’s message", INBOX, Some("SAM")),
+            // A full name, a single match, or more of the goal fitting one item.
+            ("Reply to Sam Lee's email", INBOX, None),
+            ("Tell Priya the numbers look fine", INBOX, None),
+            ("Reply to Sam about the contract", INBOX, None),
+            // Several items asked for; the singular is one item.
+            ("Delete all newsletters", INBOX, None),
+            ("Archive both newsletter emails", INBOX, None),
+            ("Delete the newsletters", INBOX, None),
+            ("Forward every Sam email to me", INBOX, None),
+            ("Delete the newsletter", INBOX, Some("newsletter")),
+            ("rename the Q3 report to Q3 final", files, Some("Q3 report")),
+            ("rename the Q3 report", finals, Some("Q3 report")),
+            ("rename Q3 report final", finals, None),
+            ("open the report", &["Reports 2024", "Reports 2023"], Some("report")),
+            ("Cancel the dentist", EVENTS, None),
+            // Duplicate labels, empty screens, nothing naming a target.
+            ("Reply to Sam", &["Sam Lee", "sam  lee", "Priya Shah"], None),
+            ("Reply to Sam", &[], None),
+            ("Reply to Sam", &["Sam Lee"], None),
+            ("", INBOX, None),
+            ("reply to the email", INBOX, None),
+            ("Reply to Alex", INBOX, None),
+            // A whole file name picks one; an extension alone never makes a term.
+            ("In Documents, rename draft.txt to final.txt.", drafts, None),
+            ("Rename the txt file to final.txt", drafts, None),
+            ("Delete the q3 report", &["File q3 report.txt", "File q3 report final.txt"], Some("q3 report")),
+            // Clock times are one word; a time still picks out its own event.
+            ("Block Wednesday 10:00 in my calendar as \"Focus time\".", week, None),
+            ("Move my Thursday 13:00 meeting", thursday, None),
+            ("Cancel my Thursday meeting", thursday, Some("Thursday")),
+            ("Delete the 2023 report", &["File report-2023.pdf", "File report-2024.pdf"], None),
+        ];
+        for (goal, screen, want) in cases {
+            let got = ambiguity(goal, &t(screen));
+            assert_eq!(got.as_ref().map(|a| a.term.as_str()), *want, "{goal}: {got:?}");
+            if let Some(a) = got {
+                assert!(a.candidates.len() >= 2, "{goal}: {a:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn candidates_and_question() {
         let a = ambiguity("Reply to Sam's email and say yes", &t(INBOX)).unwrap();
-        assert_eq!(a.term, "Sam");
         assert_eq!(
             a.candidates,
-            vec![
+            [
                 "Sam Lee — Lunch on Friday?",
                 "Sam Ortiz — Re: contract draft"
             ]
@@ -401,130 +444,35 @@ mod tests {
             "Your request says “Sam”, and I see more than one: Sam Lee — Lunch on Friday?, \
              Sam Ortiz — Re: contract draft. Which one did you mean?"
         );
-        // A curly apostrophe and other casing read the same.
-        let a = ambiguity("reply to SAM’s message", &t(INBOX)).unwrap();
-        assert_eq!(a.term, "SAM");
-        assert_eq!(a.candidates.len(), 2);
-    }
-
-    #[test]
-    fn a_full_name_or_a_single_match_is_not_ambiguous() {
-        assert_eq!(ambiguity("Reply to Sam Lee's email", &t(INBOX)), None);
-        assert_eq!(
-            ambiguity("Tell Priya the numbers look fine", &t(INBOX)),
-            None
-        );
-        // More of the goal fits one Sam than the other.
-        assert_eq!(
-            ambiguity("Reply to Sam about the contract", &t(INBOX)),
-            None
-        );
-    }
-
-    #[test]
-    fn asking_for_several_is_not_ambiguous() {
-        assert_eq!(ambiguity("Delete all newsletters", &t(INBOX)), None);
-        assert_eq!(ambiguity("Archive both newsletter emails", &t(INBOX)), None);
-        assert_eq!(ambiguity("Delete the newsletters", &t(INBOX)), None);
-        assert_eq!(ambiguity("Forward every Sam email to me", &t(INBOX)), None);
-        // The singular is a single item, so it is ambiguous.
-        let a = ambiguity("Delete the newsletter", &t(INBOX)).unwrap();
-        assert_eq!(a.term, "newsletter");
-    }
-
-    #[test]
-    fn files_with_the_same_name() {
-        let files = t(&[
-            "Q3 report.docx — Documents",
-            "Q3 report.docx — Desktop",
-            "Q4 plan.xlsx — Documents",
-        ]);
-        let a = ambiguity("rename the Q3 report to Q3 final", &files).unwrap();
-        assert_eq!(a.term, "Q3 report");
-        assert_eq!(a.candidates.len(), 2);
-
-        let files = t(&["Q3 report.docx", "Q3 report final.docx"]);
-        assert!(ambiguity("rename the Q3 report", &files).is_some());
-        assert_eq!(ambiguity("rename Q3 report final", &files), None);
-        // A singular goal word matches a plural on screen.
-        let files = t(&["Reports 2024", "Reports 2023"]);
-        assert_eq!(ambiguity("open the report", &files).unwrap().term, "report");
-    }
-
-    #[test]
-    fn calendar_entries_with_the_same_title() {
-        let events = t(&[
-            "Team sync, Mon 10:00",
-            "Dentist, Tue 15:30",
-            "Team sync, Thu 10:00",
-        ]);
-        let a = ambiguity("Move the team sync meeting to 11am", &events).unwrap();
+        let a = ambiguity("Move the team sync meeting to 11am", &t(EVENTS)).unwrap();
         assert_eq!(a.term, "team sync");
         assert_eq!(
             a.candidates,
-            vec!["Team sync, Mon 10:00", "Team sync, Thu 10:00"]
+            ["Team sync, Mon 10:00", "Team sync, Thu 10:00"]
         );
-        assert_eq!(ambiguity("Cancel the dentist", &events), None);
-    }
-
-    #[test]
-    fn duplicate_labels_and_empty_screens() {
-        let same = t(&["Sam Lee", "sam  lee", "Priya Shah"]);
-        assert_eq!(ambiguity("Reply to Sam", &same), None);
-        assert_eq!(ambiguity("Reply to Sam", &[]), None);
-        assert_eq!(ambiguity("Reply to Sam", &t(&["Sam Lee"])), None);
-        assert_eq!(ambiguity("", &t(INBOX)), None);
-        // Only stop words left: nothing names a target.
-        assert_eq!(ambiguity("reply to the email", &t(INBOX)), None);
-        assert_eq!(ambiguity("Reply to Alex", &t(INBOX)), None);
-    }
-
-    #[test]
-    fn candidates_are_cleaned_capped_and_cut() {
-        let long = format!("Sam {}", "x".repeat(200));
-        let mut many = vec![long.clone(), "Sam\tLee\n<b>hi</b>".to_string()];
-        for i in 0..8 {
-            many.push(format!("Sam {i}"));
-        }
+        // Cleaned, capped and cut.
+        let mut many = vec![
+            format!("Sam {}", "x".repeat(200)),
+            "Sam\tLee\n<b>hi</b>".to_string(),
+        ];
+        many.extend((0..8).map(|i| format!("Sam {i}")));
         let a = ambiguity("call Sam", &many).unwrap();
         assert_eq!(a.candidates.len(), MAX_CANDIDATES);
         assert_eq!(a.candidates[0].chars().count(), CANDIDATE_MAX + 1);
         assert!(a.candidates[0].ends_with('…'));
         assert_eq!(a.candidates[1], "Sam Lee <b>hi</b>");
         assert!(!a.question().contains('\n'));
-    }
-
-    #[test]
-    fn words_strip_possessives_and_apostrophes() {
         let w: Vec<String> = words("Sam's  Q3-report, O'Brien’s don't")
             .into_iter()
             .map(|(w, _)| w)
             .collect();
-        assert_eq!(w, vec!["Sam", "Q3", "report", "OBrien", "dont"]);
+        assert_eq!(w, ["Sam", "Q3", "report", "OBrien", "dont"]);
     }
 
     #[test]
-    fn a_whole_file_name_is_not_ambiguous() {
-        let files = t(&["File draft.txt", "File notes.txt", "Folder Projects"]);
-        assert_eq!(
-            ambiguity("In Documents, rename draft.txt to final.txt.", &files),
-            None
-        );
-        // The extension alone never makes a term.
-        assert_eq!(ambiguity("Rename the txt file to final.txt", &files), None);
-        let two = t(&["File q3 report.txt", "File q3 report final.txt"]);
-        assert_eq!(
-            ambiguity("Delete the q3 report", &two).map(|a| a.term),
-            Some("q3 report".into())
-        );
-    }
-
-    #[test]
-    fn goal_objects_and_whether_the_screen_shows_them() {
-        assert_eq!(
-            goal_object("Delete the annual report in Documents").as_deref(),
-            Some("annual report")
-        );
+    fn goal_objects_irreversible_steps_and_required_risk() {
+        let report = "Delete the annual report in Documents";
+        assert_eq!(goal_object(report).as_deref(), Some("annual report"));
         assert_eq!(goal_object("Delete all the newsletters"), None);
         assert_eq!(goal_object("Empty the trash"), None);
         assert_eq!(
@@ -532,78 +480,44 @@ mod tests {
             Some("spam Prize Center")
         );
         let folders = t(&["Folder Documents", "Folder Downloads"]);
-        assert!(!shows_object(
-            "Delete the annual report in Documents",
-            &folders
-        ));
-        let files = t(&["File annual-report-2023.pdf", "File notes.txt"]);
+        assert!(!shows_object(report, &folders));
         assert!(shows_object(
-            "Delete the annual report in Documents",
-            &files
+            report,
+            &t(&["File annual-report-2023.pdf", "File notes.txt"])
         ));
         assert!(shows_object("Empty the trash", &folders));
-    }
 
-    #[test]
-    fn irreversible_steps_need_asking_for() {
-        let goal = "Delete backup.zip from Downloads";
-        assert_eq!(unrequested_irreversible(goal, "Empty Trash"), Some("empty"));
-        assert_eq!(unrequested_irreversible(goal, "Move to Trash"), None);
-        assert_eq!(
-            unrequested_irreversible("Empty the trash", "Empty Trash"),
-            None
-        );
-        assert_eq!(
-            unrequested_irreversible("Erase this laptop before I sell it", "Erase all content"),
-            None
-        );
-        assert_eq!(
-            unrequested_irreversible("Permanently delete old.txt", "Empty Trash"),
-            None
-        );
-    }
-
-    #[test]
-    fn required_risk_follows_the_verb() {
-        assert_eq!(
-            required_risk("Reply to Sam and tell him yes"),
-            Some(RiskClass::Send)
-        );
-        assert_eq!(required_risk("Email Bob about Q3"), Some(RiskClass::Send));
-        assert_eq!(
-            required_risk("Delete the old newsletter email"),
-            Some(RiskClass::Destroy)
-        );
-        assert_eq!(required_risk("Buy a USB-C cable"), Some(RiskClass::Spend));
-        assert_eq!(
-            required_risk("Draft a reply to Sam but don't send it"),
-            None
-        );
-        assert_eq!(required_risk("Turn on dark mode"), None);
-    }
-
-    #[test]
-    fn clock_times_do_not_make_a_calendar_ambiguous() {
-        let week = t(&[
-            "Monday 09:00 Team standup",
-            "Tuesday 11:00 Design review",
-            "Thursday 13:00 Customer call",
-        ]);
-        assert_eq!(
-            ambiguity(
-                "Block Wednesday 10:00 in my calendar as \"Focus time\".",
-                &week
+        for (goal, label, want) in [
+            (
+                "Delete backup.zip from Downloads",
+                "Empty Trash",
+                Some("empty"),
             ),
-            None
-        );
-        // The time still picks out its own event.
-        let thursday = t(&[
-            "Thursday 13:00 Customer call",
-            "Thursday 14:00 1:1 with Sam",
-        ]);
-        assert_eq!(ambiguity("Move my Thursday 13:00 meeting", &thursday), None);
-        assert!(ambiguity("Cancel my Thursday meeting", &thursday).is_some());
-        let reports = t(&["File report-2023.pdf", "File report-2024.pdf"]);
-        assert_eq!(ambiguity("Delete the 2023 report", &reports), None);
+            ("Delete backup.zip from Downloads", "Move to Trash", None),
+            ("Empty the trash", "Empty Trash", None),
+            (
+                "Erase this laptop before I sell it",
+                "Erase all content",
+                None,
+            ),
+            ("Permanently delete old.txt", "Empty Trash", None),
+        ] {
+            assert_eq!(
+                unrequested_irreversible(goal, label),
+                want,
+                "{goal} / {label}"
+            );
+        }
+
+        for (goal, want) in [
+            ("Reply to Sam and tell him yes", Some(RiskClass::Send)),
+            ("Email Bob about Q3", Some(RiskClass::Send)),
+            ("Delete the old newsletter email", Some(RiskClass::Destroy)),
+            ("Buy a USB-C cable", Some(RiskClass::Spend)),
+            ("Draft a reply to Sam but don't send it", None),
+            ("Turn on dark mode", None),
+        ] {
+            assert_eq!(required_risk(goal), want, "{goal}");
+        }
     }
 }

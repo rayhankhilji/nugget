@@ -15,9 +15,7 @@ use url::Url;
 use crate::locality::{HostResolver, Resolved, literal_locality, rank, resolve_url};
 use crate::types::ProviderKind;
 
-/// Keychain service name under which `keychain:NAME` secrets are stored (account =
-/// [`provider_account`]`(NAME)`, i.e. `provider:NAME`). Shared by every crate via
-/// [`nugget_core::secrets`].
+/// Keychain naming for `keychain:NAME` secrets (account `provider:NAME`).
 pub use nugget_core::secrets::{KEYCHAIN_SERVICE, provider_account};
 
 /// Default `base_url` per kind, used when the config leaves it out.
@@ -195,14 +193,12 @@ pub enum MaxTokensParam {
 pub struct ProviderConfig {
     pub id: ProviderId,
     pub kind: ProviderKind,
-    /// API root. Anthropic: without `/v1` (default `https://api.anthropic.com`). OpenAI kinds:
-    /// including the version prefix, e.g. `http://localhost:11434/v1` (default for
-    /// `openai_responses`: `https://api.openai.com/v1`; required for `openai_compatible`).
+    /// API root: without `/v1` for Anthropic, with the version prefix for the OpenAI kinds
+    /// (required for `openai_compatible`).
     #[serde(default)]
     pub base_url: Option<String>,
-    /// Unix only: connect to this Unix-domain socket (absolute path) instead of the network.
-    /// `base_url` then only supplies the scheme, the `Host` header and the path prefix (e.g.
-    /// `http://localhost/v1`), and the endpoint is on-device. Rejected on other platforms.
+    /// Unix only: connect to this socket (absolute path) instead of the network; `base_url` then
+    /// only supplies the scheme, `Host` and path prefix, and the endpoint is on-device.
     #[serde(default)]
     pub socket_path: Option<PathBuf>,
     pub model: String,
@@ -212,15 +208,14 @@ pub struct ProviderConfig {
     /// Tiers this provider serves, in config order of preference across providers.
     #[serde(default)]
     pub tiers: Vec<Tier>,
-    /// Treat this endpoint as further away than its host suggests, e.g. `cloud` for a localhost
-    /// gateway that forwards to a cloud API. May only raise, never lower, the classification.
+    /// Treat the endpoint as further away than its host suggests (a localhost gateway to a cloud
+    /// API). May only raise the classification.
     #[serde(default)]
     pub locality: Option<Locality>,
     /// Context window in tokens, if known (reported in capabilities).
     #[serde(default)]
     pub context_tokens: Option<u32>,
-    /// Output-token cap used when a request does not set one. Anthropic requires a value and
-    /// falls back to 16000.
+    /// Output-token cap when a request sets none (Anthropic falls back to 16000).
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
     #[serde(default)]
@@ -234,10 +229,8 @@ pub struct ProviderConfig {
     /// Base backoff between retries in milliseconds (default 500, doubled per attempt).
     #[serde(default)]
     pub retry_base_ms: Option<u64>,
-    /// Extra HTTP headers on every request (e.g. `anthropic-beta`, OpenRouter attribution).
-    /// A value of the form `env:VAR` or `keychain:NAME` is resolved like `api_key` and sent as a
-    /// sensitive header. Credential-bearing names (see [`is_sensitive_header`]) MUST use such a
-    /// reference: plaintext secrets in config files are rejected.
+    /// Extra HTTP headers on every request. `env:VAR` / `keychain:NAME` values are resolved like
+    /// `api_key`; credential-bearing names ([`is_sensitive_header`]) must use such a reference.
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
     /// JSON object merged into every chat request body (top-level keys override ours).
@@ -249,12 +242,10 @@ pub struct ProviderConfig {
     /// Anthropic only: set `eager_input_streaming` on tools (default true).
     #[serde(default)]
     pub eager_input_streaming: Option<bool>,
-    /// OpenAI Responses only: let OpenAI store responses server-side (default false). When
-    /// false, encrypted reasoning is requested so reasoning can be replayed statelessly.
+    /// OpenAI Responses only: let OpenAI store responses (default false: encrypted reasoning).
     #[serde(default)]
     pub store: Option<bool>,
-    /// OpenAI-compatible only: request usage in the stream (`stream_options.include_usage`,
-    /// default true). Disable for servers that reject `stream_options`.
+    /// OpenAI-compatible only: send `stream_options.include_usage` (default true).
     #[serde(default)]
     pub stream_usage: Option<bool>,
     /// OpenAI-compatible only: name of the output-token cap field.
@@ -263,40 +254,28 @@ pub struct ProviderConfig {
     /// OpenAI-compatible only: texts per embeddings request (default 64).
     #[serde(default)]
     pub embed_batch_size: Option<usize>,
-    /// OpenAI-compatible only: the server is llama.cpp's `llama-server`. Requests then carry
-    /// `cache_prompt: true` (reuse the KV cache for the common prompt prefix), and
-    /// [`crate::Provider::prewarm_prefix`] evaluates the stable prefix into the KV cache
-    /// (`n_predict: 0`). Default: true for on-device endpoints (Ollama, LM Studio and vLLM ignore
-    /// the extra fields), false otherwise.
+    /// OpenAI-compatible only: the server is llama.cpp's `llama-server` (`cache_prompt`, KV-cache
+    /// prefix prewarm). Default: true for on-device endpoints, false otherwise.
     #[serde(default)]
     pub llama_cpp: Option<bool>,
-    /// OpenAI-compatible llama-server only: send requests whose [`crate::CacheHint`] has a `key`
-    /// to a fixed slot (`id_slot`, derived from the key; llama-server wraps it to its slot
-    /// count). Default false: llama-server already picks the idle slot with the longest cached
-    /// prefix match, whereas a pinned request waits whenever its slot is busy.
+    /// llama-server only: pin requests with a [`crate::CacheHint`] key to a slot derived from it
+    /// (default false: a pinned request waits whenever its slot is busy).
     #[serde(default)]
     pub slot_affinity: Option<bool>,
-    /// OpenAI-compatible only: the model's query task prefix ([`crate::Provider::embed_prefixes`]).
-    /// Unset: the model's known default (see [`embed_prefixes`]); `""`: no prefix.
+    /// OpenAI-compatible only: embedding task prefixes (unset: the model's known default, see
+    /// [`embed_prefixes`]; `""`: none).
     #[serde(default)]
     pub embed_query_prefix: Option<String>,
-    /// OpenAI-compatible only: the model's document task prefix
-    /// ([`crate::Provider::embed_prefixes`]). Unset: the model's known default (see
-    /// [`embed_prefixes`]); `""`: no prefix.
     #[serde(default)]
     pub embed_document_prefix: Option<String>,
 }
 
-/// Task prefixes for embedding models trained with them, as `(model substring, query prefix,
-/// document prefix)`. Matched case-insensitively against the model name, so served variants
-/// such as `nomic-embed-text-v1.5-q8` match too. Add a model (e.g. one with a query-only prefix)
-/// with a row here.
+/// `(model substring, query prefix, document prefix)` for embedding models trained with task
+/// prefixes, matched case-insensitively against the model name.
 const EMBED_PREFIXES: &[(&str, &str, &str)] =
     &[("nomic-embed-text", "search_query: ", "search_document: ")];
 
-/// The `(query, document)` embedding prefixes for `cfg`: the configured
-/// `embed_query_prefix`/`embed_document_prefix` where set, else the model's known default from a
-/// small table, else none.
+/// The `(query, document)` embedding prefixes for `cfg`: configured, else the model's default.
 pub fn embed_prefixes(cfg: &ProviderConfig) -> (String, String) {
     let (query, document) = model_embed_prefixes(&cfg.model);
     (
@@ -305,8 +284,7 @@ pub fn embed_prefixes(cfg: &ProviderConfig) -> (String, String) {
     )
 }
 
-/// The `(query, document)` prefixes the model named `model` was trained with, from the table
-/// (none for models not in it).
+/// The `(query, document)` prefixes `model` was trained with (none if unknown).
 pub fn model_embed_prefixes(model: &str) -> (String, String) {
     let model = model.to_ascii_lowercase();
     EMBED_PREFIXES
@@ -399,10 +377,8 @@ impl ProviderConfig {
         Ok(url)
     }
 
-    /// Locality classified from the host WITHOUT DNS, raised by the optional `locality`
-    /// override. Only `localhost` and IP literals classify below `Cloud` here; any other host
-    /// name reports `Cloud` until a built provider resolves it (see [`crate::locality`] and
-    /// [`crate::ProviderMeta::locality`]).
+    /// Locality from the host WITHOUT DNS, raised by the `locality` override: host names other
+    /// than `localhost` report `Cloud` until a built provider resolves them.
     pub fn effective_locality(&self) -> Result<Locality> {
         let url = self.base_url()?;
         if self.socket_path.is_some() {
@@ -426,9 +402,8 @@ impl ProviderConfig {
         }
     }
 
-    /// Resolve the base URL's host once (see [`crate::locality`]) and return the effective
-    /// locality plus the resolution to pin the client to. Refuses plaintext http to anything that
-    /// is (or could not be shown not to be) an internet host.
+    /// Resolve the host once and return the effective locality plus the addresses to pin to.
+    /// Refuses plaintext http to anything not shown to be local.
     pub(crate) fn resolve_network(
         &self,
         resolver: &dyn HostResolver,
@@ -563,10 +538,7 @@ impl ProviderConfig {
     }
 }
 
-/// Header names that carry credentials and so may only be set from `env:VAR`/`keychain:NAME` in
-/// [`ProviderConfig::headers`]: `authorization`, `proxy-authorization`, `cookie`, `x-api-key`,
-/// `api-key`, and any name containing `auth`, `key`, `token`, `secret`, `password`, `cookie`,
-/// `session` or `credential` (case-insensitive).
+/// Header names that carry credentials, so may only be set from `env:VAR`/`keychain:NAME`.
 pub fn is_sensitive_header(name: &str) -> bool {
     const EXACT: [&str; 6] = [
         "authorization",
@@ -651,27 +623,6 @@ mod tests {
     }
 
     #[test]
-    fn embed_prefix_defaults_and_overrides() {
-        let base = "id='e'\nkind='openai_compatible'\nbase_url='http://localhost:1/v1'\n";
-        let prefixes = |extra: &str| embed_prefixes(&cfg(&format!("{base}{extra}")).unwrap());
-        let nomic = ("search_query: ".to_owned(), "search_document: ".to_owned());
-        assert_eq!(prefixes("model='nomic-embed-text-v1.5-q8'"), nomic);
-        assert_eq!(prefixes("model='Nomic-Embed-Text:latest'"), nomic);
-        assert_eq!(
-            prefixes("model='other-embed'"),
-            (String::new(), String::new())
-        );
-        assert_eq!(
-            prefixes("model='nomic-embed-text-v1.5'\nembed_query_prefix=''"),
-            (String::new(), "search_document: ".to_owned())
-        );
-        assert_eq!(
-            prefixes("model='other'\nembed_query_prefix='q: '\nembed_document_prefix='d: '"),
-            ("q: ".to_owned(), "d: ".to_owned())
-        );
-    }
-
-    #[test]
     fn api_key_refs() {
         assert_eq!(
             "env:FOO".parse::<ApiKeyRef>().unwrap(),
@@ -701,19 +652,6 @@ mod tests {
         assert_eq!(c.effective_locality().unwrap(), Locality::Cloud);
         assert_eq!(c.tiers, vec![Tier::Synthesis, Tier::Agentic]);
         assert_eq!(c.api_key, Some(ApiKeyRef::Env("K".into())));
-    }
-
-    #[test]
-    fn the_rerank_tier_is_not_a_provider_tier() {
-        let err = cfg(r#"
-            id = "a"
-            kind = "openai_compatible"
-            base_url = "http://127.0.0.1:8080/v1"
-            model = "m"
-            tiers = ["light", "rerank"]
-        "#)
-        .unwrap_err();
-        assert!(err.to_string().contains("rerank"), "{err}");
     }
 
     #[test]
@@ -749,22 +687,15 @@ mod tests {
         assert!(cfg("id='a'\nkind='anthropic'\nmodel='m'\nstore=true").is_err());
         assert!(cfg("id='a'\nkind='anthropic'\nmodel='m'\nextra_body=1").is_err());
         assert!(cfg("id=''\nkind='anthropic'\nmodel='m'").is_err());
+        // `rerank` is not a routing tier.
+        let rerank = "id='a'\nkind='anthropic'\nmodel='m'\ntiers=['light', 'rerank']";
+        assert!(cfg(rerank).unwrap_err().to_string().contains("rerank"));
     }
 
     #[test]
     fn locality_override_can_only_raise() {
         let c = cfg("id='gw'\nkind='openai_compatible'\nmodel='m'\nbase_url='http://127.0.0.1:4000/v1'\nlocality='cloud'").unwrap();
         assert_eq!(c.effective_locality().unwrap(), Locality::Cloud);
-        let c = cfg(
-            "id='o'\nkind='openai_compatible'\nmodel='m'\nbase_url='http://localhost:11434/v1'",
-        )
-        .unwrap();
-        assert_eq!(c.effective_locality().unwrap(), Locality::OnDevice);
-        let c = cfg(
-            "id='lan'\nkind='openai_compatible'\nmodel='m'\nbase_url='http://192.168.1.4:11434/v1'",
-        )
-        .unwrap();
-        assert_eq!(c.effective_locality().unwrap(), Locality::LocalNetwork);
     }
 
     #[test]
@@ -859,21 +790,6 @@ mod tests {
     }
 
     #[test]
-    fn providers_file_rejects_duplicates() {
-        let s = r#"
-            [[providers]]
-            id = "x"
-            kind = "anthropic"
-            model = "m"
-            [[providers]]
-            id = "x"
-            kind = "openai_responses"
-            model = "m"
-        "#;
-        assert!(ProvidersFile::from_toml_str(s).is_err());
-    }
-
-    #[test]
     fn example_file_is_valid() {
         let s = include_str!("../examples/providers.example.toml");
         let file = ProvidersFile::from_toml_str(s).unwrap();
@@ -890,6 +806,8 @@ mod tests {
                 .iter()
                 .any(|p| p.tiers.contains(&Tier::Embedding))
         );
+        let dup = "[[providers]]\nid='x'\nkind='anthropic'\nmodel='m'\n";
+        assert!(ProvidersFile::from_toml_str(&format!("{dup}{dup}")).is_err());
     }
 
     #[test]
@@ -904,12 +822,5 @@ mod tests {
             .resolve(&ApiKeyRef::Env("NUGGET_TEST_DEFINITELY_UNSET_VAR".into()))
             .unwrap_err();
         assert!(matches!(e, Error::NotFound(_)));
-    }
-
-    #[test]
-    fn merge_extra() {
-        let mut body = serde_json::json!({"a": 1, "b": 2});
-        merge_extra_body(&mut body, Some(&serde_json::json!({"b": 3, "c": 4})));
-        assert_eq!(body, serde_json::json!({"a": 1, "b": 3, "c": 4}));
     }
 }

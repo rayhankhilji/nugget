@@ -1,17 +1,7 @@
-//! The grounded facts block: retrieved passages as dated facts, newest first, with superseded
-//! facts marked.
-//!
-//! [`ContextResponse::text`] holds passages under `[n] Title (source)` headers (see
-//! `nugget_retrieve`'s packer) and each [`Citation`](nugget_core::ipc::Citation) may carry the
-//! item's date. [`facts`] turns them into [`Fact`]s with ids `F1`, `F2`, … (newest first, undated
-//! last) and marks a fact **superseded** when a newer fact is on the same subject, is a decision
-//! (or final, approved, ...) where the older one was a draft or proposal, and states a different
-//! value of a type both state (money, number, percentage, date). The check is conservative: both
-//! facts must be dated, share distinctive title terms, change status and conflict, so two notes
-//! on related subjects (a September recap, a November plan) both stay current.
-//!
-//! [`facts_section`] renders the block for the user message, wrapped in `<context>` tags and
-//! fenced like all untrusted text, followed by the rules for using it.
+//! The grounded facts block: retrieved passages as dated facts (`F1`, `F2`, ... newest first)
+//! with superseded facts marked. A fact is superseded only conservatively: a newer dated fact on
+//! the same subject that settles (decision, final, approved) what the older one proposed, with a
+//! conflicting value of the same type.
 
 use std::collections::HashSet;
 
@@ -51,151 +41,23 @@ How to use facts: state only facts that are in the thread, and only the ones the
 If a fact the reply needs is missing, leave it out rather than guess.";
 
 /// Words that mark an earlier, unsettled version.
-const OLD_MARKERS: &[&str] = &[
-    "draft",
-    "drafted",
-    "proposal",
-    "proposed",
-    "propose",
-    "proposing",
-    "earlier",
-    "old",
-    "tentative",
-    "preliminary",
-    "initial",
-    "estimate",
-    "estimated",
-    "previous",
-    "outdated",
-    "rough",
-    "pending",
-];
+const OLD_MARKERS: &str = "\
+draft drafted proposal proposed propose proposing earlier old tentative preliminary \
+initial estimate estimated previous outdated rough pending";
 
 /// Words that mark a settled version.
-const NEW_MARKERS: &[&str] = &[
-    "decision",
-    "decided",
-    "final",
-    "finalised",
-    "finalized",
-    "approved",
-    "agreed",
-    "confirmed",
-    "signed",
-    "updated",
-    "revised",
-    "official",
-];
+const NEW_MARKERS: &str = "\
+decision decided final finalised finalized approved agreed confirmed signed updated \
+revised official";
 
 /// Words too common to tell two subjects apart.
-const STOPWORDS: &[&str] = &[
-    "the",
-    "and",
-    "for",
-    "with",
-    "from",
-    "about",
-    "this",
-    "that",
-    "these",
-    "those",
-    "was",
-    "were",
-    "are",
-    "has",
-    "have",
-    "had",
-    "will",
-    "would",
-    "can",
-    "could",
-    "should",
-    "our",
-    "your",
-    "their",
-    "his",
-    "her",
-    "its",
-    "who",
-    "what",
-    "when",
-    "where",
-    "which",
-    "why",
-    "how",
-    "all",
-    "any",
-    "but",
-    "not",
-    "per",
-    "into",
-    "onto",
-    "over",
-    "under",
-    "than",
-    "then",
-    "there",
-    "here",
-    "also",
-    "just",
-    "only",
-    "each",
-    "every",
-    "some",
-    "more",
-    "most",
-    "less",
-    "via",
-    "out",
-    "off",
-    "too",
-    "very",
-    "new",
-    "call",
-    "meeting",
-    "notes",
-    "note",
-    "doc",
-    "document",
-    "email",
-    "mail",
-    "re",
-    "fwd",
-    "plan",
-    "planning",
-    "update",
-    "summary",
-    "week",
-    "weekly",
-    "month",
-    "year",
-    "day",
-    "today",
-    "including",
-    "includes",
-    "include",
-    "is",
-    "be",
-    "been",
-    "being",
-    "they",
-    "them",
-    "we",
-    "you",
-    "she",
-    "he",
-    "it",
-    "of",
-    "to",
-    "in",
-    "on",
-    "at",
-    "by",
-    "or",
-    "an",
-    "a",
-    "as",
-];
+const STOPWORDS: &str = "\
+the and for with from about this that these those was were are has have had will would can \
+could should our your their his her its who what when where which why how all any but not \
+per into onto over under than then there here also just only each every some more most \
+less via out off too very new call meeting notes note doc document email mail re fwd plan \
+planning update summary week weekly month year day today including includes include is be \
+been being they them we you she he it of to in on at by or an a as";
 
 /// The facts in `context`, newest first, with superseded facts marked.
 pub fn facts(context: &ContextResponse) -> Vec<Fact> {
@@ -443,7 +305,7 @@ impl Profile {
         let title = terms(&f.title);
         let body = terms(&f.body);
         let words: HashSet<String> = lower_words(&format!("{} {}", f.title, f.body)).collect();
-        let marked = |list: &[&str]| list.iter().any(|w| words.contains(*w));
+        let marked = |list: &str| list.split_whitespace().any(|w| words.contains(w));
         Self {
             all: title.union(&body).cloned().collect(),
             title,
@@ -471,6 +333,11 @@ fn comparable(kind: ValueKind) -> ValueKind {
     }
 }
 
+/// Whether the whitespace-separated `list` holds `w`.
+fn has(list: &str, w: &str) -> bool {
+    list.split_whitespace().any(|x| x == w)
+}
+
 fn lower_words(text: &str) -> impl Iterator<Item = String> + '_ {
     text.split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
@@ -485,9 +352,9 @@ fn terms(text: &str) -> HashSet<String> {
             let digit = w.chars().any(|c| c.is_ascii_digit());
             let alpha = w.chars().any(char::is_alphabetic);
             ((digit && alpha) || (!digit && w.chars().count() >= 3))
-                && !STOPWORDS.contains(&w.as_str())
-                && !OLD_MARKERS.contains(&w.as_str())
-                && !NEW_MARKERS.contains(&w.as_str())
+                && !has(STOPWORDS, w)
+                && !has(OLD_MARKERS, w)
+                && !has(NEW_MARKERS, w)
         })
         .collect()
 }

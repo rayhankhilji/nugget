@@ -1,22 +1,11 @@
 //! Safety policy for actions Nugget takes on the user's behalf (computer use, sending, booking).
+//! Every executor asks a [`PolicyGate`] ([`PolicyEngine`]) before acting.
 //!
-//! **Contract (M4):** [`ActionDescriptor`], [`RiskClass`], [`Decision`] and [`PolicyGate`]. Work
-//! package M4-B implements the policy engine (allow/deny lists per app and site, a risk classifier,
-//! confirmation requirements, the kill switch and the tamper-evident action log). Every executor
-//! (computer use, browser, proactive actions) asks a [`PolicyGate`] before acting.
-//!
-//! # Pieces
-//! - [`PolicyEngine`]: the [`PolicyGate`] implementation. Rules per app and site ([`Rule`]), the
-//!   built-in defaults ([`default_rules`]), per-task approvals, rate limits per risk class and the
-//!   kill switch. Configuration persists through a [`PolicyStore`] ([`JsonFilePolicyStore`],
-//!   [`MemoryPolicyStore`]).
+//! - [`PolicyEngine`]: rules per app and site ([`Rule`], [`default_rules`]), per-task approvals,
+//!   rate limits per risk class and the kill switch; configuration persists in a [`PolicyStore`].
 //! - [`RiskClassifier`]: deterministic heuristics that can only *raise* the declared risk.
-//! - [`KillSwitch`]: process-wide halt, one atomic load to check. [`KillSwitch::trigger_hook`]
-//!   plugs straight into `nugget_hotkey::start`.
-//! - [`ConfirmationBroker`]: executors await a user decision on a [`Decision::Confirm`]; a timeout
-//!   or the kill switch counts as deny.
-//! - [`ActionLog`]: append-only, SHA-256 hash-chained, exportable as JSONL. See [`log`] for the
-//!   adapter `nugget-agent` can use.
+//! - [`KillSwitch`]: process-wide halt, one atomic load to check.
+//! - [`ActionLog`]: append-only, SHA-256 hash-chained, exportable as JSONL.
 //!
 //! # Precedence (what [`PolicyEngine::assess`] does)
 //! 1. Kill switch engaged → `Deny`.
@@ -28,12 +17,10 @@
 //! 7. Nothing matched: `Confirm` for Send and above, `Allow` otherwise.
 //! 8. The rate limit for the risk class is exhausted for this task → `Deny`.
 //!
-//! An `Allow` rule that names no risk classes only covers Observe and Edit: allowing Send,
-//! Destroy, Spend or Security needs the class named explicitly.
+//! An `Allow` rule that names no risk classes only covers Observe and Edit.
 
 use serde::{Deserialize, Serialize};
 
-pub mod broker;
 pub mod classify;
 pub mod engine;
 mod glob;
@@ -45,17 +32,14 @@ pub mod rules;
 pub mod store;
 mod text;
 
-pub use broker::{
-    ConfirmOutcome, ConfirmationBroker, ConfirmationRequest, DenyReason, UserDecision,
-};
 pub use classify::{Classification, RiskClassifier};
 pub use engine::{Assessment, PolicyEngine, PolicyEngineBuilder, RecheckGate, TaskApproval};
 pub use glob::glob_match;
 pub use kill::KillSwitch;
-pub use log::{ActionLog, ChainError, LogEntry, LogEvent};
+pub use log::{ActionLog, ChainError, ConfirmOutcome, DenyReason, LogEntry, LogEvent};
 pub use redact::RedactedAction;
 pub use rules::{Effect, PolicyConfig, Rule, default_rules};
-pub use store::{JsonFilePolicyStore, MemoryPolicyStore, PolicyStore};
+pub use store::{JsonFilePolicyStore, PolicyStore};
 pub use text::{
     fold_confusables, is_invisible, normalize as normalize_text,
     normalize_spaced as normalize_text_spaced, strip_marks as strip_text_marks,

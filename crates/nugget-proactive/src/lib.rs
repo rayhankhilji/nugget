@@ -1,38 +1,13 @@
-//! Proactive cards and the morning brief (M5).
+//! Proactive cards and the morning brief.
 //!
-//! Pipeline of [`Proactive::refresh`]:
-//! 1. **Corpus.** Mail and calendar items are read from the encrypted store and normalised
-//!    across connectors ([`corpus`]), with threads computed.
-//! 2. **Deterministic generators** ([`generators`]): unanswered threads, graph commitments,
-//!    meetings to prepare, renewals and trials, promised follow-ups. Each [`Candidate`] carries
-//!    evidence (item refs and quotes) and a stable dedup key.
-//! 3. **Scoring** ([`score`]): an online logistic model over urgency, importance (relationship
-//!    strength from the graph and mail history), freshness and kind; updated from accept,
-//!    dismiss and snooze; explainable (top factors on every card). On top of it, the
-//!    [`feedback`] layer learns from the user's own feedback per sender, domain, kind and thread
-//!    (reason-aware, decaying with a 30-day half-life, bounded) and adds to the log-odds; a
-//!    thread dismissed as already handled is suppressed until something new happens in it. Each
-//!    card lists these effects (`Card::learned`) with the counts behind them, and
-//!    [`Proactive::reset_learning`] forgets them. Learning changes ranking and suppression only,
-//!    never what an action does or whether it needs approval.
-//! 4. **Optional LLM judge** ([`judge`]): enriches the top candidates (summary, suggested action,
-//!    confidence). Local by default; cloud only when allowed and never for sensitive evidence. It
-//!    cannot add candidates and only nudges the rank (20 % weight next to the model's 80 %).
-//! 5. **Cards** ([`cards`]): merged by dedup key into the persisted card set with a state machine
-//!    (new, seen, snoozed, accepted, dismissed, done, expired). Dismissed, done and expired cards
-//!    are tombstones: the same situation never returns as a new card. Open cards whose situation
-//!    disappeared (thread answered, meeting started) are resolved.
-//!
-//! **Actions** ([`actions`]) are typed (`DraftReply`, `CreateEvent`, `Reminder`,
-//! `ArchiveThread`, `ResearchNote`), render a dry-run diff, declare a `RiskClass`, and run
-//! through [`ActionRunner`] only with an [`Approval`] bound to the previewed digest and after
-//! the [`PolicyGate`](nugget_policy::PolicyGate) agrees.
-//!
-//! The **morning brief** ([`brief`]) and **metrics** ([`Metrics`]: precision = accepted / shown,
-//! time to action, dismiss reasons) are computed from the same state.
-//!
-//! The API is mostly synchronous over the store; async callers should run [`Proactive`] calls
-//! other than `refresh` and `run_action` on a blocking thread.
+//! [`Proactive::refresh`] reads mail and calendar into a [`corpus`], runs the deterministic
+//! [`generators`], scores candidates ([`score`], plus the per-sender/domain/kind/thread
+//! [`feedback`] layer), optionally enriches the top ones with an LLM [`judge`] (local by
+//! default, never for sensitive evidence, cannot add candidates), and merges them by dedup key
+//! into persisted [`cards`] with a state machine; terminal cards are tombstones. Typed
+//! [`actions`] render a dry-run diff and run only with an [`Approval`] bound to the previewed
+//! digest and after the policy gate agrees. The [`brief`] and [`Metrics`] come from the same
+//! state.
 
 pub mod actions;
 pub mod brief;

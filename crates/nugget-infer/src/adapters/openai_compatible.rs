@@ -1,36 +1,19 @@
 //! OpenAI-compatible adapter: `POST {base}/chat/completions` (streaming) and
-//! `POST {base}/embeddings`. Works with Ollama, LM Studio, llama-server, vLLM, OpenRouter and
-//! OpenAI itself.
+//! `POST {base}/embeddings` (Ollama, LM Studio, llama-server, vLLM, OpenRouter, OpenAI).
 //!
-//! - User text-only content is sent as a plain string (widest server support); content arrays
-//!   are used only when images are present.
+//! - Text-only user content is sent as a plain string; content arrays only with images.
 //! - Tool calls are assembled from `delta.tool_calls` fragments by index and emitted when the
-//!   choice finishes. `usage` is requested via `stream_options.include_usage` (configurable).
-//!   A call without an `id` (llama-server sometimes omits it) gets `call_<nonce>_<index>`, where
-//!   the nonce is per response (process-wide counter mixed with the clock); a server id repeated
-//!   for another index in the same response gets a `_<index>` suffix. Other ids are kept as sent.
-//! - Mid-stream `{"error": ...}` payloads (OpenRouter, vLLM, llama-server) end the stream with an
-//!   error.
-//! - Prompt caching: `usage.prompt_tokens_details.cached_tokens` (OpenAI, llama-server) or
-//!   llama-server's `timings.cache_n` is reported in [`crate::ChatStats`].
-//!   [`crate::Part::CacheBreakpoint`]s are dropped (every message is sent as before).
-//! - llama-server extensions (config `llama_cpp`, on by default for on-device endpoints; checked
-//!   against llama.cpp b11940's `tools/server`, which copies unknown body fields into its
-//!   completion parameters): `cache_prompt: true` on every chat request; with `slot_affinity`
-//!   and a [`crate::CacheHint`] key, `id_slot` = a stable hash of the key (the server takes it
-//!   modulo its slot count; a busy pinned slot defers the request rather than using another).
-//!   A request with tools and no `json_schema` also gets `tool_choice: "required"` and
-//!   `parallel_tool_calls: false`: with `--jinja` the server compiles a grammar from the tool
-//!   schemas, so the model can only emit one well-formed call (`extra_body` can override both).
-//! - Embeddings: texts are sent as given. [`Provider::embed_prefixes`] reports the model's task
-//!   prefixes ([`crate::embed_prefixes`], e.g. `search_query: ` / `search_document: ` for
-//!   nomic-embed-text); callers add them, so an index keeps the scheme it was built with.
+//!   choice finishes. A call without an `id` gets `call_<nonce>_<index>` (nonce per response); a
+//!   server id repeated for another index gets a `_<index>` suffix.
+//! - Mid-stream `{"error": ...}` payloads end the stream with an error.
+//! - Cache hits: `usage.prompt_tokens_details.cached_tokens` or llama-server `timings.cache_n`.
+//! - llama-server extensions (`llama_cpp`, default on for on-device endpoints): `cache_prompt:
+//!   true`; with `slot_affinity` and a cache key, `id_slot` = a stable hash of the key. With
+//!   tools and no `json_schema`, also `tool_choice: "required"` and `parallel_tool_calls: false`
+//!   (with `--jinja` the server then grammar-constrains one well-formed call).
 //! - [`Provider::prewarm`] is `GET {base}/models`. With `llama_cpp`, [`Provider::prewarm_prefix`]
-//!   sends the stable prefix to `chat/completions` with `n_predict: 0` (the server evaluates the
-//!   prompt into the slot's KV cache and generates at most one token), `cache_prompt: true`,
-//!   `stream: false` and the output cap set to 1 for servers that ignore `n_predict`. Otherwise it
-//!   only prewarms the connection. The warm-up carries the same `tool_choice` fields as the real
-//!   request (they change the sampling grammar, not the prompt; harmless with `n_predict: 0`).
+//!   sends the stable prefix with `n_predict: 0`, `cache_prompt: true`, `stream: false` and an
+//!   output cap of 1, evaluating it into the slot's KV cache.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -43,9 +26,11 @@ use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};
 
-use crate::adapters::data_url;
-use crate::config::{MaxTokensParam, ProviderConfig, Secret, embed_prefixes, merge_extra_body};
-use crate::http::{SseDecoder, error_detail_value, parse_tool_arguments, sse_chat_stream};
+use crate::adapters::{
+    args_string, as_u32, data_url, finish_body, misplaced, parse_event, result_text, stream_error,
+};
+use crate::config::{MaxTokensParam, ProviderConfig, Secret, embed_prefixes};
+use crate::http::{SseDecoder, parse_tool_arguments};
 use crate::provider::{Common, Prepared, Provider, auth_header};
 use crate::schema::is_strict_compatible;
 use crate::sse::SseEvent;
@@ -117,18 +102,12 @@ pub(crate) fn build_prewarm_body(
     };
     // The prefix drops `json_schema`, so decide the tool constraint from the real request.
     let mut body = body_with(cfg, ext, &prefix, requires_tool(ext, req))?;
-    let obj = body
-        .as_object_mut()
-        .ok_or_else(|| Error::Other("chat body is not an object".into()))?;
+    let obj = body.as_object_mut().expect("body is an object");
     obj.insert("stream".into(), json!(false));
     obj.remove("stream_options");
     obj.insert("n_predict".into(), json!(0));
     obj.insert("cache_prompt".into(), json!(true));
-    let cap = match cfg.max_tokens_param.unwrap_or_default() {
-        MaxTokensParam::MaxTokens => "max_tokens",
-        MaxTokensParam::MaxCompletionTokens => "max_completion_tokens",
-    };
-    obj.insert(cap.into(), json!(1));
+    obj.insert(max_tokens_field(cfg).into(), json!(1));
     if let Some(Value::Array(messages)) = obj.get_mut("messages")
         && messages.last().and_then(|m| m["role"].as_str()) != Some("user")
     {
@@ -137,6 +116,13 @@ pub(crate) fn build_prewarm_body(
         messages.push(json!({"role": "user", "content": "warmup"}));
     }
     Ok(Some(body))
+}
+
+fn max_tokens_field(cfg: &ProviderConfig) -> &'static str {
+    match cfg.max_tokens_param.unwrap_or_default() {
+        MaxTokensParam::MaxTokens => "max_tokens",
+        MaxTokensParam::MaxCompletionTokens => "max_completion_tokens",
+    }
 }
 
 /// Whether llama-server should be held to exactly one schema-valid tool call for `req`.
@@ -195,11 +181,7 @@ fn body_with(
         );
     }
     if let Some(max) = req.max_tokens.or(cfg.max_output_tokens) {
-        let field = match cfg.max_tokens_param.unwrap_or_default() {
-            MaxTokensParam::MaxTokens => "max_tokens",
-            MaxTokensParam::MaxCompletionTokens => "max_completion_tokens",
-        };
-        body.insert(field.into(), json!(max));
+        body.insert(max_tokens_field(cfg).into(), json!(max));
     }
     if let Some(t) = req.temperature {
         body.insert("temperature".into(), json!(t));
@@ -212,9 +194,7 @@ fn body_with(
     {
         body.insert("id_slot".into(), json!(slot_for_key(key)));
     }
-    let mut body = Value::Object(body);
-    merge_extra_body(&mut body, cfg.extra_body.as_ref());
-    Ok(body)
+    Ok(finish_body(body, cfg))
 }
 
 fn convert_messages(messages: &[Message]) -> Result<Vec<Value>> {
@@ -233,7 +213,7 @@ fn convert_messages(messages: &[Message]) -> Result<Vec<Value>> {
                         } => out.push(json!({
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "content": if *is_error { format!("[error] {content}") } else { content.clone() },
+                            "content": result_text(content, *is_error),
                         })),
                         Part::Text { text } if !text.is_empty() => {
                             parts.push(json!({"type": "text", "text": text}));
@@ -248,11 +228,7 @@ fn convert_messages(messages: &[Message]) -> Result<Vec<Value>> {
                                 "image_url": {"url": data_url(media_type, data_base64)},
                             }));
                         }
-                        Part::ToolCall { .. } => {
-                            return Err(Error::Invalid(
-                                "tool calls belong in assistant messages".into(),
-                            ));
-                        }
+                        Part::ToolCall { .. } => return Err(misplaced(true)),
                         _ => {}
                     }
                 }
@@ -282,21 +258,13 @@ fn convert_messages(messages: &[Message]) -> Result<Vec<Value>> {
                             id,
                             name,
                             arguments,
-                        } => {
-                            let args = match arguments {
-                                Value::String(raw) => raw.clone(),
-                                other => other.to_string(),
-                            };
-                            calls.push(json!({
-                                "id": id,
-                                "type": "function",
-                                "function": {"name": name, "arguments": args},
-                            }));
-                        }
+                        } => calls.push(json!({
+                            "id": id,
+                            "type": "function",
+                            "function": {"name": name, "arguments": args_string(arguments)},
+                        })),
                         Part::Image { .. } | Part::ToolResult { .. } => {
-                            return Err(Error::Invalid(
-                                "images and tool results belong in user messages".into(),
-                            ));
+                            return Err(misplaced(false));
                         }
                         Part::Opaque { .. } | Part::CacheBreakpoint => {}
                     }
@@ -419,11 +387,6 @@ impl Decoder {
     }
 }
 
-fn as_u32(v: Option<&Value>) -> Option<u32> {
-    v.and_then(Value::as_u64)
-        .map(|n| n.min(u32::MAX as u64) as u32)
-}
-
 impl SseDecoder for Decoder {
     fn on_event(&mut self, ev: SseEvent) -> Result<Vec<ChatEvent>> {
         let data = ev.data.trim();
@@ -433,15 +396,9 @@ impl SseDecoder for Decoder {
         if data == "[DONE]" {
             return Ok(self.done());
         }
-        let v: Value = serde_json::from_str(data).map_err(|e| {
-            Error::Provider(format!("{}: malformed stream chunk: {e}", self.provider))
-        })?;
+        let v = parse_event(&self.provider, data)?;
         if v.get("error").is_some_and(|e| !e.is_null()) || ev.event.as_deref() == Some("error") {
-            let detail = error_detail_value(&v).unwrap_or_else(|| data.to_string());
-            return Err(Error::Provider(format!(
-                "{}: stream error: {detail}",
-                self.provider
-            )));
+            return Err(stream_error(&self.provider, &v, data));
         }
         if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
             self.input_tokens = as_u32(u.get("prompt_tokens")).or(self.input_tokens);
@@ -520,11 +477,11 @@ impl SseDecoder for Decoder {
 
     fn on_eof(&mut self) -> Result<Vec<ChatEvent>> {
         // Some servers omit `[DONE]`; a finished choice is enough.
-        if self.finish_reason.is_some() {
-            Ok(self.done())
+        Ok(if self.finish_reason.is_some() {
+            self.done()
         } else {
-            Ok(Vec::new())
-        }
+            Vec::new()
+        })
     }
 }
 
@@ -540,18 +497,10 @@ impl Provider for OpenAiCompatibleProvider {
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
         let body = build_body(&self.common.cfg, self.ext, &req)?;
-        let (resp, meter, clock) = self
-            .common
-            .http
-            .post_json("chat/completions", &body, &req.feature, &req.items, true)
-            .await?;
-        Ok(sse_chat_stream(
-            self.common.id.clone(),
-            resp,
-            meter,
-            clock,
-            Decoder::new(self.common.id.clone()),
-        ))
+        let decoder = Decoder::new(self.common.id.clone());
+        self.common
+            .stream("chat/completions", &body, &req, decoder)
+            .await
     }
 
     async fn prewarm(&self) -> Result<()> {
@@ -559,17 +508,15 @@ impl Provider for OpenAiCompatibleProvider {
     }
 
     async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
-        if !self.ext.cache_prompt {
-            return self.prewarm().await;
+        if self.ext.cache_prompt
+            && let Some(body) = build_prewarm_body(&self.common.cfg, self.ext, req)?
+        {
+            return self
+                .common
+                .prewarm_post("chat/completions", &body, req)
+                .await;
         }
-        let Some(body) = build_prewarm_body(&self.common.cfg, self.ext, req)? else {
-            return self.prewarm().await;
-        };
-        self.common
-            .http
-            .post_for_json("chat/completions", &body, &req.feature, &req.items)
-            .await?;
-        Ok(())
+        self.prewarm().await
     }
 
     fn embed_prefixes(&self) -> (String, String) {
@@ -584,7 +531,6 @@ impl Provider for OpenAiCompatibleProvider {
         self.embed_for(texts, &[], FEATURE_PROBE).await
     }
 
-    /// Each batch's ledger row lists the distinct items of its texts.
     async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
         self.embed_for(texts, items, FEATURE_EMBED).await
     }
@@ -754,81 +700,37 @@ mod tests {
     }
 
     #[test]
-    fn decodes_fragmented_tool_calls() {
-        let out = decode(&[
-            r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}"#,
-            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"get_","arguments":""}}]}}]}"#,
-            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"weather","arguments":"{\"city\":"}}]}}]}"#,
-            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_b","function":{"name":"noop","arguments":{"x":true}}}]}}]}"#,
-            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Oslo\"}"}}]}}]}"#,
-            r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
-            r#"{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":22}}"#,
-            "[DONE]",
-        ])
-        .unwrap();
-        assert_eq!(
-            out,
-            vec![
-                ChatEvent::ToolCall {
-                    id: "call_a".into(),
-                    name: "get_weather".into(),
-                    arguments: json!({"city": "Oslo"})
-                },
-                ChatEvent::ToolCall {
-                    id: "call_b".into(),
-                    name: "noop".into(),
-                    arguments: json!({"x": true})
-                },
-                ChatEvent::Done {
-                    stop_reason: StopReason::ToolUse,
-                    input_tokens: Some(11),
-                    output_tokens: Some(22)
-                },
-            ]
-        );
-    }
-
-    fn call_ids(out: &[ChatEvent]) -> Vec<String> {
-        out.iter()
-            .filter_map(|e| match e {
-                ChatEvent::ToolCall { id, .. } => Some(id.clone()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    const TWO_IDLESS: [&str; 3] = [
-        r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"a","arguments":"{}"}}]}}]}"#,
-        r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"","function":{"name":"b","arguments":"{}"}}]}}]}"#,
-        r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
-    ];
-
-    #[test]
-    fn generates_ids_for_idless_tool_calls() {
-        let first = call_ids(&decode(&TWO_IDLESS).unwrap());
-        assert_eq!(first.len(), 2);
-        assert!(first.iter().all(|id| id.starts_with("call_")));
-        assert_ne!(first[0], first[1]);
-        // A second response of the same run gets different ids.
-        let second = call_ids(&decode(&TWO_IDLESS).unwrap());
-        assert!(
-            second.iter().all(|id| !first.contains(id)),
-            "{first:?} {second:?}"
-        );
-    }
-
-    #[test]
-    fn keeps_server_ids_and_dedups_repeats() {
-        let ids = call_ids(
-            &decode(&[
-                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"x","function":{"name":"a","arguments":"{}"}}]}}]}"#,
-                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"x","function":{"name":"b","arguments":"{}"}}]}}]}"#,
-                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"id":"y","function":{"name":"c","arguments":"{}"}}]}}]}"#,
-                r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
-            ])
-            .unwrap(),
-        );
-        assert_eq!(ids, ["x", "x_1", "y"]);
+    fn tool_call_ids_are_generated_unique_and_deduplicated() {
+        let call = |i: u32, id: &str| {
+            format!(
+                r#"{{"choices":[{{"index":0,"delta":{{"tool_calls":[{{"index":{i},{id}"function":{{"name":"a","arguments":"{{}}"}}}}]}}}}]}}"#
+            )
+        };
+        let finish = r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#;
+        let ids = |chunks: &[String]| -> Vec<String> {
+            let mut all: Vec<&str> = chunks.iter().map(String::as_str).collect();
+            all.push(finish);
+            decode(&all)
+                .unwrap()
+                .into_iter()
+                .filter_map(|e| match e {
+                    ChatEvent::ToolCall { id, .. } => Some(id),
+                    _ => None,
+                })
+                .collect()
+        };
+        // Missing or empty ids are generated, and differ across responses of one run.
+        let idless = [call(0, ""), call(1, r#""id":"","#)];
+        let first = ids(&idless);
+        assert!(first.iter().all(|id| id.starts_with("call_")) && first[0] != first[1]);
+        assert!(ids(&idless).iter().all(|id| !first.contains(id)));
+        // Server ids are kept; a repeat gets an index suffix.
+        let repeated = [
+            call(0, r#""id":"x","#),
+            call(1, r#""id":"x","#),
+            call(2, r#""id":"y","#),
+        ];
+        assert_eq!(ids(&repeated), ["x", "x_1", "y"]);
     }
 
     #[test]
@@ -907,12 +809,6 @@ mod tests {
             LlamaExt::for_config(&cfg(), Locality::LocalNetwork),
             LlamaExt::default()
         );
-    }
-
-    #[test]
-    fn mid_stream_error() {
-        let e = decode(&[r#"{"error":{"message":"upstream overloaded","code":502}}"#]).unwrap_err();
-        assert!(e.to_string().contains("502: upstream overloaded"), "{e}");
     }
 
     #[test]

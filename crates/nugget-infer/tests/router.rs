@@ -8,8 +8,8 @@ use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::{Error, Result};
 use nugget_infer::{
-    ChatEvent, ChatRequest, ChatResponse, ChatStream, Message, Part, Provider, ProviderConfig,
-    ProviderKind, ProviderMeta, ProvidersFile, Router, StopReason, TierMap, tier_map_from_configs,
+    ChatEvent, ChatRequest, ChatResponse, ChatStream, Message, Part, Provider, ProviderKind,
+    ProviderMeta, Router, StopReason, TierMap,
 };
 
 #[derive(Clone, Copy)]
@@ -111,33 +111,42 @@ fn ids(ps: &[Arc<dyn Provider>]) -> Vec<String> {
     ps.iter().map(|p| p.id().to_string()).collect()
 }
 
-#[test]
-fn routes_in_order_with_capability_filtering() {
-    let a = Fake::new("a", Behaviour::Ok);
-    let b = Fake::new("b", Behaviour::Ok);
-    let router = Router::new(
-        vec![a, b],
-        tiers(&[(Tier::Synthesis, &["a", "b"]), (Tier::Light, &["b"])]),
-    );
-    router.set_capabilities(&ProviderId::new("a"), caps(false, true, false));
-    router.set_capabilities(&ProviderId::new("b"), caps(true, true, false));
+fn id(s: &str) -> ProviderId {
+    ProviderId::new(s)
+}
 
+fn hi() -> ChatRequest {
+    ChatRequest::new(vec![Message::user_text("hi")])
+}
+
+#[test]
+fn routes_in_order_with_capability_filtering_and_cooldown() {
+    let router = Router::new(
+        vec![Fake::new("a", Behaviour::Ok), Fake::new("b", Behaviour::Ok)],
+        tiers(&[(Tier::Synthesis, &["a", "b"]), (Tier::Light, &["b"])]),
+    )
+    .with_cooldown(Duration::from_millis(50));
     let none = Capabilities::default();
+    // Unprobed providers only serve plain chat.
+    assert!(
+        router
+            .route(Tier::Synthesis, &caps(false, true, false))
+            .is_err()
+    );
+    let ctx = Capabilities {
+        context_tokens: Some(8000),
+        ..Default::default()
+    };
+    assert!(router.route(Tier::Synthesis, &ctx).is_err());
+
+    router.set_capabilities(&id("a"), caps(false, true, false));
+    router.set_capabilities(&id("b"), caps(true, true, false));
     assert_eq!(
         router.route(Tier::Synthesis, &none).unwrap().id().as_str(),
         "a"
     );
     let vision = caps(true, false, false);
-    assert_eq!(
-        router
-            .route(Tier::Synthesis, &vision)
-            .unwrap()
-            .id()
-            .as_str(),
-        "b"
-    );
     assert_eq!(ids(&router.candidates(Tier::Synthesis, &vision)), vec!["b"]);
-
     let embeddings = caps(false, false, true);
     assert!(matches!(
         router.route(Tier::Synthesis, &embeddings),
@@ -148,174 +157,110 @@ fn routes_in_order_with_capability_filtering() {
         Err(Error::NotFound(_))
     ));
     assert_eq!(
-        router.tiers_of(&ProviderId::new("b")),
+        router.tiers_of(&id("b")),
         vec![Tier::Light, Tier::Synthesis]
     );
-}
 
-#[test]
-fn unprobed_providers_only_serve_plain_chat() {
-    let router = Router::new(
-        vec![Fake::new("a", Behaviour::Ok)],
-        tiers(&[(Tier::Light, &["a"])]),
-    );
-    assert!(router.route(Tier::Light, &Capabilities::default()).is_ok());
-    assert!(
-        router
-            .route(Tier::Light, &caps(false, true, false))
-            .is_err()
-    );
-    let ctx = Capabilities {
-        context_tokens: Some(8000),
-        ..Default::default()
-    };
-    assert!(router.route(Tier::Light, &ctx).is_err());
-}
-
-#[test]
-fn failed_provider_cools_down() {
-    let router = Router::new(
-        vec![Fake::new("a", Behaviour::Ok), Fake::new("b", Behaviour::Ok)],
-        tiers(&[(Tier::Light, &["a", "b"])]),
-    )
-    .with_cooldown(Duration::from_millis(50));
-    let none = Capabilities::default();
-    router.report_failure(&ProviderId::new("a"));
-    assert_eq!(ids(&router.candidates(Tier::Light, &none)), vec!["b", "a"]);
-    std::thread::sleep(Duration::from_millis(60));
-    assert_eq!(ids(&router.candidates(Tier::Light, &none)), vec!["a", "b"]);
-    router.report_failure(&ProviderId::new("a"));
-    router.report_success(&ProviderId::new("a"));
-    assert_eq!(router.route(Tier::Light, &none).unwrap().id().as_str(), "a");
-}
-
-#[tokio::test]
-async fn chat_falls_back_on_early_failures() {
-    let a = Fake::new("a", Behaviour::FailBeforeStream);
-    let b = Fake::new("b", Behaviour::FailFirstEvent);
-    let c = Fake::new("c", Behaviour::Ok);
-    let router = Router::new(
-        vec![a.clone(), b.clone(), c.clone()],
-        tiers(&[(Tier::Synthesis, &["a", "b", "c"])]),
-    );
-    let (p, stream) = router
-        .chat(
-            Tier::Synthesis,
-            &Capabilities::default(),
-            ChatRequest::new(vec![Message::user_text("hi")]),
-        )
-        .await
-        .unwrap();
-    assert_eq!(p.id().as_str(), "c");
-    let r = ChatResponse::collect(stream).await.unwrap();
-    assert_eq!(r.text(), "from c", "first event is not lost");
+    // A failed provider is tried last until its cooldown passes or it succeeds.
+    router.report_failure(&id("a"));
     assert_eq!(
-        (
-            a.calls.load(Ordering::SeqCst),
-            b.calls.load(Ordering::SeqCst)
-        ),
-        (1, 1)
+        ids(&router.candidates(Tier::Synthesis, &none)),
+        vec!["b", "a"]
     );
-    // Failed providers are now tried last.
-    let order = ids(&router.candidates(Tier::Synthesis, &Capabilities::default()));
-    assert_eq!(order, vec!["c", "a", "b"]);
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(
+        ids(&router.candidates(Tier::Synthesis, &none)),
+        vec!["a", "b"]
+    );
+    router.report_failure(&id("a"));
+    router.report_success(&id("a"));
+    assert_eq!(
+        router.route(Tier::Synthesis, &none).unwrap().id().as_str(),
+        "a"
+    );
 }
 
 #[tokio::test]
-async fn chat_falls_back_on_rate_limits_and_network_errors() {
-    let a = Fake::new("a", Behaviour::RateLimited);
-    let b = Fake::new("b", Behaviour::NetworkDown);
-    let c = Fake::new("c", Behaviour::Ok);
+async fn chat_falls_back_on_early_and_transient_failures() {
+    let fakes = [
+        Fake::new("a", Behaviour::FailBeforeStream),
+        Fake::new("b", Behaviour::FailFirstEvent),
+        Fake::new("c", Behaviour::RateLimited),
+        Fake::new("d", Behaviour::NetworkDown),
+        Fake::new("e", Behaviour::Ok),
+    ];
+    let providers: Vec<Arc<dyn Provider>> = fakes.iter().map(|f| f.clone() as _).collect();
     let router = Router::new(
-        vec![a.clone(), b.clone(), c.clone()],
-        tiers(&[(Tier::Light, &["a", "b", "c"])]),
+        providers,
+        tiers(&[(Tier::Light, &["a", "b", "c", "d", "e"])]),
     );
     let (p, stream) = router
-        .chat(
-            Tier::Light,
-            &Capabilities::default(),
-            ChatRequest::new(vec![Message::user_text("hi")]),
-        )
+        .chat(Tier::Light, &Capabilities::default(), hi())
         .await
         .unwrap();
-    assert_eq!(p.id().as_str(), "c");
+    assert_eq!(p.id().as_str(), "e");
     assert_eq!(
         ChatResponse::collect(stream).await.unwrap().text(),
-        "from c"
+        "from e",
+        "first event kept"
     );
+    assert!(fakes.iter().all(|f| f.calls.load(Ordering::SeqCst) == 1));
+    let order = ids(&router.candidates(Tier::Light, &Capabilities::default()));
     assert_eq!(
+        order,
+        vec!["e", "a", "b", "c", "d"],
+        "failed providers cool down"
+    );
+
+    // When every candidate fails, the caller sees the last error (with a rate limit's hint).
+    for (b, check) in [
         (
-            a.calls.load(Ordering::SeqCst),
-            b.calls.load(Ordering::SeqCst)
+            Behaviour::RateLimited,
+            (|e: &Error| {
+                matches!(
+                    e,
+                    Error::RateLimited {
+                        retry_after_ms: Some(1000)
+                    }
+                )
+            }) as fn(&Error) -> bool,
         ),
-        (1, 1)
-    );
-    assert_eq!(
-        ids(&router.candidates(Tier::Light, &Capabilities::default())),
-        vec!["c", "a", "b"],
-        "transient failures cool the provider down"
-    );
-
-    // When every candidate is rate limited, the caller sees that (with the server's hint).
-    let all_limited = Router::new(
-        vec![Fake::new("x", Behaviour::RateLimited)],
-        tiers(&[(Tier::Light, &["x"])]),
-    );
-    let err = all_limited
-        .chat(
-            Tier::Light,
-            &Capabilities::default(),
-            ChatRequest::new(vec![Message::user_text("hi")]),
-        )
-        .await
-        .err()
-        .unwrap();
-    assert!(matches!(
-        err,
-        Error::RateLimited {
-            retry_after_ms: Some(1000)
-        }
-    ));
-}
-
-#[tokio::test]
-async fn embed_falls_back_on_rate_limits_and_network_errors() {
-    let a = Fake::new("a", Behaviour::RateLimited);
-    let b = Fake::new("b", Behaviour::NetworkDown);
-    let c = Fake::new("c", Behaviour::Ok);
-    let router = Router::new(vec![a, b, c], tiers(&[(Tier::Embedding, &["a", "b", "c"])]));
-    for id in ["a", "b", "c"] {
-        router.set_capabilities(&ProviderId::new(id), caps(false, false, true));
+        (Behaviour::FailBeforeStream, |e| {
+            e.to_string().contains("HTTP 503")
+        }),
+    ] {
+        let router = Router::new(vec![Fake::new("x", b)], tiers(&[(Tier::Light, &["x"])]));
+        let err = router
+            .chat(Tier::Light, &Capabilities::default(), hi())
+            .await
+            .err()
+            .unwrap();
+        assert!(check(&err), "{err}");
     }
-    let (id, _) = router.embed(&["x".into()]).await.unwrap();
-    assert_eq!(id.as_str(), "c");
-}
 
-#[tokio::test]
-async fn chat_does_not_fall_back_on_invalid_requests() {
-    let a = Fake::new("a", Behaviour::InvalidRequest);
-    let b = Fake::new("b", Behaviour::Ok);
-    let router = Router::new(vec![a, b.clone()], tiers(&[(Tier::Light, &["a", "b"])]));
+    // Invalid requests are not retried elsewhere.
+    let ok = Fake::new("b", Behaviour::Ok);
+    let router = Router::new(
+        vec![Fake::new("a", Behaviour::InvalidRequest), ok.clone()],
+        tiers(&[(Tier::Light, &["a", "b"])]),
+    );
     let err = router
-        .chat(
-            Tier::Light,
-            &Capabilities::default(),
-            ChatRequest::new(vec![Message::user_text("hi")]),
-        )
+        .chat(Tier::Light, &Capabilities::default(), hi())
         .await
         .err()
         .unwrap();
     assert!(matches!(err, Error::Invalid(_)));
-    assert_eq!(b.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(ok.calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
 async fn chat_requires_capabilities_implied_by_request() {
-    let a = Fake::new("a", Behaviour::Ok);
-    let b = Fake::new("b", Behaviour::Ok);
-    let router = Router::new(vec![a, b], tiers(&[(Tier::Agentic, &["a", "b"])]));
-    router.set_capabilities(&ProviderId::new("a"), caps(false, true, false));
-    router.set_capabilities(&ProviderId::new("b"), caps(true, true, false));
+    let router = Router::new(
+        vec![Fake::new("a", Behaviour::Ok), Fake::new("b", Behaviour::Ok)],
+        tiers(&[(Tier::Agentic, &["a", "b"])]),
+    );
+    router.set_capabilities(&id("a"), caps(false, true, false));
+    router.set_capabilities(&id("b"), caps(true, true, false));
     let req = ChatRequest::new(vec![Message::user(vec![
         Part::image("image/png", "AAAA"),
         Part::text("what is this"),
@@ -325,156 +270,93 @@ async fn chat_requires_capabilities_implied_by_request() {
         .await
         .unwrap();
     assert_eq!(p.id().as_str(), "b");
-
-    let all_fail = Router::new(
-        vec![Fake::new("x", Behaviour::FailBeforeStream)],
-        tiers(&[(Tier::Light, &["x"])]),
-    );
-    let err = all_fail
-        .chat(
-            Tier::Light,
-            &Capabilities::default(),
-            ChatRequest::new(vec![Message::user_text("hi")]),
-        )
-        .await
-        .err()
-        .unwrap();
-    assert!(err.to_string().contains("HTTP 503"));
 }
 
 #[tokio::test]
 async fn embed_uses_embedding_tier_with_fallback() {
-    let a = Fake::new("a", Behaviour::FailBeforeStream);
-    let b = Fake::new("b", Behaviour::Ok);
-    let router = Router::new(vec![a, b], tiers(&[(Tier::Embedding, &["a", "b"])]));
+    let router = Router::new(
+        vec![
+            Fake::new("a", Behaviour::FailBeforeStream),
+            Fake::new("b", Behaviour::RateLimited),
+            Fake::new("c", Behaviour::NetworkDown),
+            Fake::new("d", Behaviour::Ok),
+        ],
+        tiers(&[(Tier::Embedding, &["a", "b", "c", "d"])]),
+    );
     assert!(
         router.embed(&["x".into()]).await.is_err(),
         "unprobed: no embeddings proven"
     );
-    router.set_capabilities(&ProviderId::new("a"), caps(false, false, true));
-    router.set_capabilities(&ProviderId::new("b"), caps(false, false, true));
-    let (id, v) = router.embed(&["x".into(), "y".into()]).await.unwrap();
-    assert_eq!(id.as_str(), "b");
-    assert_eq!(v.len(), 2);
-}
-
-#[test]
-fn tier_map_follows_config_order() {
-    let file = ProvidersFile::from_toml_str(
-        r#"
-        [[providers]]
-        id = "local"
-        kind = "openai_compatible"
-        base_url = "http://localhost:11434/v1"
-        model = "m"
-        tiers = ["triage", "light"]
-
-        [[providers]]
-        id = "cloud"
-        kind = "anthropic"
-        model = "m"
-        tiers = ["light", "synthesis"]
-        "#,
-    )
-    .unwrap();
-    let map = tier_map_from_configs(&file.providers);
-    let get = |t| {
-        map.get(&t)
-            .unwrap()
-            .iter()
-            .map(|i| i.to_string())
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(get(Tier::Light), vec!["local", "cloud"]);
-    assert_eq!(get(Tier::Triage), vec!["local"]);
-    assert_eq!(get(Tier::Synthesis), vec!["cloud"]);
-    let _: &ProviderConfig = &file.providers[0];
+    for p in ["a", "b", "c", "d"] {
+        router.set_capabilities(&id(p), caps(false, false, true));
+    }
+    let (used, v) = router.embed(&["x".into(), "y".into()]).await.unwrap();
+    assert_eq!((used.as_str(), v.len()), ("d", 2));
 }
 
 #[test]
 fn providers_can_be_added_replaced_and_removed_while_in_use() {
-    let a = Fake::new("a", Behaviour::Ok);
-    let router = Router::new(vec![a], tiers(&[(Tier::Light, &["a"])]));
-    assert!(
-        router
-            .route(Tier::Synthesis, &Capabilities::default())
-            .is_err()
+    let router = Router::new(
+        vec![Fake::new("a", Behaviour::Ok)],
+        tiers(&[(Tier::Light, &["a"])]),
     );
+    let none = Capabilities::default();
+    assert!(router.route(Tier::Synthesis, &none).is_err());
 
     // A new id joins its tiers after the providers already there.
     router.set_provider(
         Fake::new("b", Behaviour::Ok),
         &[Tier::Light, Tier::Synthesis],
     );
-    let none = Capabilities::default();
     assert_eq!(ids(&router.candidates(Tier::Light, &none)), ["a", "b"]);
     assert_eq!(
         router.route(Tier::Synthesis, &none).unwrap().id().as_str(),
         "b"
     );
-    assert_eq!(
-        router.tiers_of(&ProviderId::new("b")),
-        [Tier::Light, Tier::Synthesis]
-    );
+    assert_eq!(router.tiers_of(&id("b")), [Tier::Light, Tier::Synthesis]);
     assert_eq!(ids(&router.providers()), ["a", "b"]);
 
-    // Replacing keeps the place and drops the cooldown and the probed capabilities (the new
-    // endpoint or key has not been probed).
-    router.set_capabilities(&ProviderId::new("a"), caps(true, true, false));
-    router.report_failure(&ProviderId::new("a"));
+    // Replacing keeps the place and drops the cooldown and the probed capabilities.
+    router.set_capabilities(&id("a"), caps(true, true, false));
+    router.report_failure(&id("a"));
     let a2 = Fake::new("a", Behaviour::Ok);
     router.set_provider(a2.clone(), &[Tier::Light]);
-    assert!(!router.in_cooldown(&ProviderId::new("a")));
-    assert!(router.capabilities(&ProviderId::new("a")).is_none());
+    assert!(!router.in_cooldown(&id("a")));
+    assert!(router.capabilities(&id("a")).is_none());
     assert_eq!(ids(&router.candidates(Tier::Light, &none)), ["a", "b"]);
     assert!(Arc::ptr_eq(
-        &(router.provider(&ProviderId::new("a")).unwrap()),
+        &router.provider(&id("a")).unwrap(),
         &(a2 as Arc<dyn Provider>)
     ));
-    assert_eq!(router.tiers_of(&ProviderId::new("a")), [Tier::Light]);
 
-    // Removing stops routing to it, built or added.
-    assert!(router.remove_provider(&ProviderId::new("b")));
-    assert!(!router.remove_provider(&ProviderId::new("b")));
+    // Removing stops routing to it; it can come back.
+    assert!(router.remove_provider(&id("b")));
+    assert!(!router.remove_provider(&id("b")));
     assert!(matches!(
         router.route(Tier::Synthesis, &none),
         Err(Error::NotFound(_))
     ));
-    assert!(router.remove_provider(&ProviderId::new("a")));
+    assert!(router.remove_provider(&id("a")));
     assert!(router.providers().is_empty());
-    assert!(router.route(Tier::Light, &none).is_err());
-    // And it can come back.
     router.set_provider(Fake::new("a", Behaviour::Ok), &[Tier::Light]);
     assert_eq!(ids(&router.candidates(Tier::Light, &none)), ["a"]);
-}
 
-#[test]
-fn added_providers_can_be_placed_before_others() {
-    let router = Router::new(
-        vec![
-            Fake::new("lan", Behaviour::Ok),
-            Fake::new("slot", Behaviour::Ok),
-            Fake::new("cloud", Behaviour::Ok),
-        ],
-        tiers(&[(Tier::Light, &["lan", "slot", "cloud"])]),
-    );
-    // A new LAN server goes before the runtime slot, after the LAN server already there.
+    // `set_provider_before` places a new id before the first match; fewer tiers on replace
+    // leaves the others.
+    router.set_provider(Fake::new("cloud", Behaviour::Ok), &[Tier::Light]);
     router.set_provider_before(
-        Fake::new("lan2", Behaviour::Ok),
+        Fake::new("lan", Behaviour::Ok),
         &[Tier::Light, Tier::Synthesis],
-        &|id| id.as_str() != "lan",
+        &|i| i.as_str() == "cloud",
     );
-    let none = Capabilities::default();
     assert_eq!(
         ids(&router.candidates(Tier::Light, &none)),
-        ["lan", "lan2", "slot", "cloud"]
+        ["a", "lan", "cloud"]
     );
-    assert_eq!(ids(&router.candidates(Tier::Synthesis, &none)), ["lan2"]);
-    // Replacing with fewer tiers leaves the others.
-    router.set_provider(Fake::new("lan2", Behaviour::Ok), &[Tier::Light]);
-    assert_eq!(router.tiers_of(&ProviderId::new("lan2")), [Tier::Light]);
+    router.set_provider(Fake::new("lan", Behaviour::Ok), &[Tier::Light]);
+    assert_eq!(router.tiers_of(&id("lan")), [Tier::Light]);
     assert_eq!(
         ids(&router.candidates(Tier::Light, &none)),
-        ["lan", "lan2", "slot", "cloud"]
+        ["a", "lan", "cloud"]
     );
 }

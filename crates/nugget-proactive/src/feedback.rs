@@ -1,45 +1,11 @@
-//! Learning from the user's own feedback (BB2): per sender, domain, kind and thread, with decay.
-//!
-//! Every accept and dismiss adds to decayed counts on up to four entries: the card's sender
-//! (lowercased address), the sender's domain (not for personal mailbox domains such as
-//! `gmail.com`, where unrelated people share a domain), the card kind, and the mail thread. Each
-//! entry keeps how many accepts and dismissals it saw (for the explanation) and a weighted
-//! `penalty` (how strongly those dismissals count, by reason). Its adjustment to a card's
-//! log-odds is
-//!
-//! ```text
-//!   weight × (accepted − penalty) / (prior + accepted + penalty)
-//! ```
-//!
-//! with per-scope `weight` and `prior` ([`params`]): monotone in both, zero with no feedback,
-//! and bounded by `±weight` however much feedback piles up. Everything decays with a half-life of
-//! [`HALF_LIFE_DAYS`], so old feedback fades and [`Learned::prune`] eventually forgets it.
-//!
-//! The dismiss reason decides what a dismissal teaches ([`dismiss_weights`], penalty per scope):
-//!
-//! | reason            | sender | domain | kind | thread                       |
-//! |-------------------|--------|--------|------|------------------------------|
-//! | `not_important`   | 3      | 3      | 1    | 1                            |
-//! | `not_relevant`    | 1      | 1      | 0.5  | 1                            |
-//! | `other`           | 0.6    | 0.6    | 0.3  | 0.6                          |
-//! | `wrong_info`      | 0.25   | 0      | 0.25 | 0                            |
-//! | `already_handled` | 0      | 0      | 0    | hides the thread (see below) |
-//!
-//! "Not important" is the user saying who does not matter, so it is the strongest: one such
-//! dismissal puts a sender at −2.25 log-odds. An accept counts 1 on every scope. A kind the user
-//! likes does not lift a card whose sender or domain they turned down. A snooze is "not now",
-//! not "never": it teaches the layer nothing (the shared scoring model still takes it as a weak
-//! negative label).
-//!
-//! **Already handled** suppresses the thread instead of penalising anyone: conversation cards
-//! from that thread (unanswered messages, questions awaiting an answer) whose latest activity
-//! ([`Features::activity_at`]) is not newer than what the dismissed card was about are hidden
-//! ([`Direction::Hidden`]) for [`SUPPRESS_DAYS`]. A genuinely new message in the thread surfaces
-//! again, and the user's own promises in the thread are never hidden: a handled conversation does
-//! not discharge a commitment.
-//!
-//! Deterministic and explainable: no model calls, nothing leaves the device, and every effect on
-//! a card carries the counts behind it.
+//! Learning from the user's own feedback: decayed accept/dismiss counts per sender, domain (not
+//! for personal or free-signup mail domains), kind and thread. An entry's log-odds adjustment is
+//! `weight × (accepted − penalty) / (prior + accepted + penalty)` ([`params`]): monotone, zero
+//! with no feedback, bounded by `±weight`, halving every [`HALF_LIFE_DAYS`]. The dismiss reason
+//! sets the penalty per scope ([`dismiss_weights`]); "not important" is strongest, snoozes teach
+//! nothing. "Already handled" instead hides the thread's conversation cards
+//! ([`Direction::Hidden`]) for [`SUPPRESS_DAYS`] unless something newer arrives; the user's own
+//! promises are never hidden. Deterministic, local and explainable.
 
 use std::collections::BTreeMap;
 
@@ -728,6 +694,10 @@ mod tests {
 
     const K: CandidateKind = CandidateKind::UnansweredThread;
 
+    fn dismiss(l: &mut Learned, f: &Features, r: DismissReason, label: &str, at: OffsetDateTime) {
+        l.record(K, f, Feedback::Dismissed, Some(&r), label, at);
+    }
+
     fn adj(l: &Learned, f: &Features, now: OffsetDateTime) -> f64 {
         l.effects(K, f, now).iter().map(|e| e.contribution).sum()
     }
@@ -740,14 +710,7 @@ mod tests {
     fn decay_halves_after_a_half_life() {
         let mut l = Learned::default();
         let f = mail("a@acme.io", "t1", t0());
-        l.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::NotImportant),
-            "x",
-            t0(),
-        );
+        dismiss(&mut l, &f, DismissReason::NotImportant, "x", t0());
         let e0 = &l.list(t0())[0];
         let later = t0() + Duration::days(HALF_LIFE_DAYS as i64);
         let e1 = l
@@ -758,14 +721,7 @@ mod tests {
         assert!((e1.dismissed - e0.dismissed / 2.0).abs() < 1e-9);
         assert!(e1.adjustment.abs() < e0.adjustment.abs());
         // Recording later decays the old counts first.
-        l.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::NotImportant),
-            "x",
-            later,
-        );
+        dismiss(&mut l, &f, DismissReason::NotImportant, "x", later);
         let s = &l.entries["sender:a@acme.io"];
         assert!((s.dismissed - 1.5).abs() < 1e-9);
         assert_eq!(s.at, later);
@@ -776,14 +732,7 @@ mod tests {
         let mut l = Learned::default();
         let now = t0();
         let f = mail("Pitch@Vendor.test", "t1", now);
-        l.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::NotImportant),
-            "x",
-            now,
-        );
+        dismiss(&mut l, &f, DismissReason::NotImportant, "x", now);
         // Another card from the same sender, other thread.
         let g = mail("pitch@vendor.test", "t2", now);
         let s = effect(&l, &g, Scope::Sender, now).unwrap();
@@ -811,37 +760,16 @@ mod tests {
         let now = t0();
         let f = mail("x@corp.test", "t1", now);
         let mut a = Learned::default();
-        a.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::NotImportant),
-            "",
-            now,
-        );
+        dismiss(&mut a, &f, DismissReason::NotImportant, "", now);
         let mut b = Learned::default();
-        b.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::NotRelevant),
-            "",
-            now,
-        );
+        dismiss(&mut b, &f, DismissReason::NotRelevant, "", now);
         let kind = |l: &Learned| effect(l, &f, Scope::Kind, now).unwrap().contribution;
         assert!(kind(&b) > kind(&a));
         let sender = |l: &Learned| effect(l, &f, Scope::Sender, now).unwrap().contribution;
         assert!(sender(&a) < sender(&b) && sender(&b) < 0.0);
         // wrong_info only weakly.
         let mut c = Learned::default();
-        c.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::WrongInfo),
-            "",
-            now,
-        );
+        dismiss(&mut c, &f, DismissReason::WrongInfo, "", now);
         assert!(sender(&c) > sender(&b) && sender(&c) < 0.0);
         assert!(effect(&c, &f, Scope::Domain, now).is_none());
     }
@@ -851,11 +779,10 @@ mod tests {
         let mut l = Learned::default();
         let now = t0();
         let f = mail("ana@acme.io", "t1", now - Duration::days(2));
-        l.record(
-            K,
+        dismiss(
+            &mut l,
             &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::AlreadyHandled),
+            DismissReason::AlreadyHandled,
             "Reply to Ana: Pricing",
             now,
         );
@@ -888,14 +815,7 @@ mod tests {
         let mut l = Learned::default();
         let now = t0();
         let q = mail("ana@acme.io", "t1", now - Duration::days(1));
-        l.record(
-            K,
-            &q,
-            Feedback::Dismissed,
-            Some(&DismissReason::AlreadyHandled),
-            "",
-            now,
-        );
+        dismiss(&mut l, &q, DismissReason::AlreadyHandled, "", now);
         // A promise the user made earlier in the thread (no counterpart sender) still shows.
         let promise = Features {
             kind: Some(CandidateKind::FollowUp),
@@ -927,14 +847,7 @@ mod tests {
             l.record(K, &f, Feedback::Accepted, None, "", now);
         }
         let bulk = mail("news@bulk.test", "tb", now);
-        l.record(
-            K,
-            &bulk,
-            Feedback::Dismissed,
-            Some(&DismissReason::NotImportant),
-            "",
-            now,
-        );
+        dismiss(&mut l, &bulk, DismissReason::NotImportant, "", now);
         let next = mail("news@bulk.test", "tc", now);
         let e = l.effects(K, &next, now);
         assert!(e.iter().all(|e| e.contribution <= 0.0), "{e:?}");
@@ -979,14 +892,7 @@ mod tests {
         let mut l = Learned::default();
         let f = mail("x@corp.test", "t1", t0());
         for _ in 0..200 {
-            l.record(
-                K,
-                &f,
-                Feedback::Dismissed,
-                Some(&DismissReason::NotImportant),
-                "",
-                t0(),
-            );
+            dismiss(&mut l, &f, DismissReason::NotImportant, "", t0());
         }
         assert!((adj(&l, &f, t0()) + TOTAL_CAP).abs() < 1e-9);
     }
@@ -998,14 +904,7 @@ mod tests {
         assert_eq!(sender_domain("a@mail.acme.io").as_deref(), Some("acme.io"));
         let mut l = Learned::default();
         let f = mail("friend@gmail.com", "t1", t0());
-        l.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::NotImportant),
-            "",
-            t0(),
-        );
+        dismiss(&mut l, &f, DismissReason::NotImportant, "", t0());
         assert!(!l.entries.keys().any(|k| k.starts_with("domain:")));
         assert!(l.entries.contains_key("sender:friend@gmail.com"));
         assert!(
@@ -1063,14 +962,7 @@ mod tests {
         let mut l = Learned::default();
         let now = t0();
         let f = mail("a@acme.io", "t1", now);
-        l.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::NotImportant),
-            "",
-            now,
-        );
+        dismiss(&mut l, &f, DismissReason::NotImportant, "", now);
         let n = l.entries.len();
         assert_eq!(n, 4);
         assert_eq!(
@@ -1126,14 +1018,7 @@ mod tests {
     fn serde_round_trip_and_old_state() {
         let mut l = Learned::default();
         let f = mail("a@acme.io", "t1", t0());
-        l.record(
-            K,
-            &f,
-            Feedback::Dismissed,
-            Some(&DismissReason::AlreadyHandled),
-            "T",
-            t0(),
-        );
+        dismiss(&mut l, &f, DismissReason::AlreadyHandled, "T", t0());
         l.record(K, &f, Feedback::Accepted, None, "T", t0());
         let v = serde_json::to_value(&l).unwrap();
         assert_eq!(serde_json::from_value::<Learned>(v).unwrap(), l);

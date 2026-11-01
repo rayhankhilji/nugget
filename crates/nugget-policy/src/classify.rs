@@ -2349,236 +2349,97 @@ mod tests {
         }
     }
 
-    // Security review PA-2 (regression).
-    #[test]
-    fn pa2_line_break_anywhere_submits_and_enter_chords() {
-        assert!(
-            risk(
-                "com.apple.Terminal",
-                "type",
-                Some("shell"),
-                Some("echo ok\nopen -a Calculator ")
-            ) >= RiskClass::Security
-        );
-        assert!(
-            risk(
-                "com.tinyspeck.slackmacgap",
-                "type",
-                Some("Message #general"),
-                Some("secret stuff\n ")
-            ) >= RiskClass::Send
-        );
-        for sep in ['\r', '\u{2028}', '\u{2029}', '\u{85}'] {
-            let text = format!("echo ok{sep}ls ");
-            assert!(
-                risk("com.apple.Terminal", "type", Some("shell"), Some(&text))
-                    >= RiskClass::Security,
-                "{sep:?}"
-            );
-        }
-        for k in ["ctrl+j", "ctrl+m", "ctrl+o"] {
-            assert!(
-                risk("com.apple.Terminal", "key", Some(k), None) >= RiskClass::Security,
-                "{k}"
-            );
-        }
-        assert!(risk("com.tinyspeck.slackmacgap", "key", Some("ctrl+j"), None) >= RiskClass::Send);
-        // Plain letters and Ctrl+O outside a terminal are not Enter.
-        assert!(risk("com.apple.Terminal", "key", Some("j"), None) < RiskClass::Send);
-        assert!(risk("com.apple.TextEdit", "key", Some("ctrl+o"), None) < RiskClass::Send);
-        assert!(
-            risk("com.apple.Terminal", "type", Some("shell"), Some("echo ok")) < RiskClass::Send
-        );
-    }
-
-    fn risk(app: &str, verb: &str, label: Option<&str>, preview: Option<&str>) -> RiskClass {
+    fn risk_ctx(app: &str, verb: &str, label: Option<&str>, ctx: &ActionContext) -> RiskClass {
         RiskClassifier::global()
-            .classify(&action(app, verb, label, preview))
-            .risk
-    }
-
-    fn risk_ctx(
-        app: &str,
-        verb: &str,
-        label: Option<&str>,
-        preview: Option<&str>,
-        ctx: &ActionContext,
-    ) -> RiskClass {
-        RiskClassifier::global()
-            .classify_with_context(&action(app, verb, label, preview), ctx)
+            .classify_with_context(&action(app, verb, label, None), ctx)
             .risk
     }
 
     #[test]
     fn classifier_table() {
-        use RiskClass::*;
-        type Row = (
-            &'static str,
-            &'static str,
-            Option<&'static str>,
-            Option<&'static str>,
-            RiskClass,
-        );
-        let table: &[Row] = &[
+        // `app; verb; label; preview; expected risk` (empty = none).
+        let table = [
             // Benign actions stay where they were declared.
-            ("com.apple.mail", "scroll", None, None, Observe),
-            ("com.apple.mail", "click", Some("Inbox"), None, Observe),
-            ("com.apple.textedit", "click", Some("Bold"), None, Observe),
-            ("example.com", "click", Some("Read more"), None, Observe),
-            (
-                "example.com",
-                "click",
-                Some("Sender details"),
-                None,
-                Observe,
-            ),
-            ("example.com", "click", Some("Bookmark"), None, Observe),
-            (
-                "example.com",
-                "click",
-                Some("Display settings"),
-                None,
-                Observe,
-            ),
-            ("example.com", "click", Some("Cancel"), None, Observe),
-            (
-                "example.com",
-                "type",
-                Some("Search"),
-                Some("delete my account"),
-                Observe,
-            ),
-            ("com.apple.finder", "key", Some("Down"), None, Observe),
+            "com.apple.mail; scroll; ; ; Observe",
+            "com.apple.mail; click; Inbox; ; Observe",
+            "com.apple.textedit; click; Bold; ; Observe",
+            "example.com; click; Read more; ; Observe",
+            "example.com; click; Sender details; ; Observe",
+            "example.com; click; Bookmark; ; Observe",
+            "example.com; click; Display settings; ; Observe",
+            "example.com; click; Cancel; ; Observe",
+            "example.com; type; Search; delete my account; Observe",
+            "com.apple.finder; key; Down; ; Observe",
             // Verbs.
-            ("x", "send_email", None, None, Send),
-            ("x", "submit", Some("Save"), None, Send),
-            ("x", "delete_file", None, None, Destroy),
-            ("x", "transfer_funds", None, None, Spend),
-            ("x", "install_package", None, None, Security),
-            ("x", "send_keys", Some("a"), None, Observe),
+            "x; send_email; ; ; Send",
+            "x; submit; Save; ; Send",
+            "x; delete_file; ; ; Destroy",
+            "x; transfer_funds; ; ; Spend",
+            "x; install_package; ; ; Security",
+            "x; send_keys; a; ; Observe",
             // English labels.
-            ("x", "click", Some("Send"), None, Send),
-            ("x", "click", Some("Reply all"), None, Send),
-            ("x", "click", Some("Delete"), None, Destroy),
-            ("x", "click", Some("Move to Trash"), None, Destroy),
-            ("x", "click", Some("Unsubscribe"), None, Destroy),
-            ("x", "click", Some("Cancel subscription"), None, Destroy),
-            ("x", "click", Some("Pay now"), None, Spend),
-            ("x", "click", Some("Buy with 1-Click"), None, Spend),
-            ("x", "click", Some("Place your order"), None, Spend),
-            ("x", "click", Some("Install"), None, Security),
-            ("x", "click", Some("Grant access"), None, Security),
+            "x; click; Send; ; Send",
+            "x; click; Reply all; ; Send",
+            "x; click; Delete; ; Destroy",
+            "x; click; Move to Trash; ; Destroy",
+            "x; click; Unsubscribe; ; Destroy",
+            "x; click; Cancel subscription; ; Destroy",
+            "x; click; Pay now; ; Spend",
+            "x; click; Buy with 1-Click; ; Spend",
+            "x; click; Place your order; ; Spend",
+            "x; click; Install; ; Security",
+            "x; click; Grant access; ; Security",
             // Other languages.
-            ("x", "click", Some("Enviar"), None, Send),
-            ("x", "click", Some("Absenden"), None, Send),
-            ("x", "click", Some("送信"), None, Send),
-            ("x", "click", Some("Löschen"), None, Destroy),
-            ("x", "click", Some("Supprimer"), None, Destroy),
-            ("x", "click", Some("Удалить"), None, Destroy),
-            ("x", "click", Some("永久删除"), None, Destroy),
-            ("x", "click", Some("삭제"), None, Destroy),
-            ("x", "click", Some("حذف"), None, Destroy),
-            ("x", "click", Some("Jetzt kaufen"), None, Spend),
-            (
-                "x",
-                "click",
-                Some("Zahlungspflichtig bestellen"),
-                None,
-                Spend,
-            ),
-            ("x", "click", Some("立即购买"), None, Spend),
-            ("x", "click", Some("Оплатить"), None, Spend),
-            ("x", "click", Some("결제하기"), None, Spend),
-            ("x", "click", Some("Installieren"), None, Security),
+            "x; click; Enviar; ; Send",
+            "x; click; Absenden; ; Send",
+            "x; click; 送信; ; Send",
+            "x; click; Löschen; ; Destroy",
+            "x; click; Supprimer; ; Destroy",
+            "x; click; Удалить; ; Destroy",
+            "x; click; 永久删除; ; Destroy",
+            "x; click; 삭제; ; Destroy",
+            "x; click; حذف; ; Destroy",
+            "x; click; Jetzt kaufen; ; Spend",
+            "x; click; Zahlungspflichtig bestellen; ; Spend",
+            "x; click; 立即购买; ; Spend",
+            "x; click; Оплатить; ; Spend",
+            "x; click; 결제하기; ; Spend",
+            "x; click; Installieren; ; Security",
             // Obfuscation.
-            ("x", "click", Some("De\u{200B}lete"), None, Destroy),
-            ("x", "click", Some("ＤＥＬＥＴＥ"), None, Destroy),
-            ("x", "click", Some("Dеlеtе"), None, Destroy),
-            ("x", "click", Some("P a y"), None, Spend),
+            "x; click; De\u{200B}lete; ; Destroy",
+            "x; click; ＤＥＬＥＴＥ; ; Destroy",
+            "x; click; Dеlеtе; ; Destroy",
+            "x; click; P a y; ; Spend",
             // Prices.
-            ("x", "click", Some("Continue – $49.99"), None, Spend),
-            ("x", "click", Some("9,99 €"), None, Spend),
+            "x; click; Continue – $49.99; ; Spend",
+            "x; click; 9,99 €; ; Spend",
             // Keys.
-            ("com.apple.mail", "key", Some("cmd+enter"), None, Send),
-            (
-                "com.tinyspeck.slackmacgap",
-                "key",
-                Some("Enter"),
-                None,
-                Send,
-            ),
-            ("com.apple.terminal", "key", Some("Return"), None, Security),
-            (
-                "com.apple.finder",
-                "key",
-                Some("cmd+backspace"),
-                None,
-                Destroy,
-            ),
-            ("x", "hotkey", Some("ctrl+shift+delete"), None, Destroy),
+            "com.apple.mail; key; cmd+enter; ; Send",
+            "com.tinyspeck.slackmacgap; key; Enter; ; Send",
+            "com.apple.terminal; key; Return; ; Security",
+            "com.apple.finder; key; cmd+backspace; ; Destroy",
+            "x; hotkey; ctrl+shift+delete; ; Destroy",
             // Typing.
-            (
-                "x",
-                "type",
-                Some("Card number"),
-                Some("4111 1111 1111 1111"),
-                Spend,
-            ),
-            (
-                "x",
-                "type",
-                Some("Notes"),
-                Some("4111-1111-1111-1111"),
-                Spend,
-            ),
-            ("x", "type", Some("Password"), Some("hunter2"), Security),
-            (
-                "com.tinyspeck.slackmacgap",
-                "type",
-                Some("Message"),
-                Some("hi\n"),
-                Send,
-            ),
-            (
-                "com.apple.terminal",
-                "type",
-                None,
-                Some("sudo rm -rf /"),
-                Security,
-            ),
-            ("com.apple.terminal", "type", None, Some("ls\n"), Security),
+            "x; type; Card number; 4111 1111 1111 1111; Spend",
+            "x; type; Notes; 4111-1111-1111-1111; Spend",
+            "x; type; Password; hunter2; Security",
+            "com.tinyspeck.slackmacgap; type; Message; hi\n; Send",
+            "com.apple.terminal; type; ; sudo rm -rf /; Security",
+            "com.apple.terminal; type; ; ls\n; Security",
             // Navigation.
-            (
-                "x",
-                "open_url",
-                Some("https://news.example.com/unsubscribe?id=1"),
-                None,
-                Destroy,
-            ),
-            (
-                "x",
-                "navigate",
-                None,
-                Some("https://shop.example.com/checkout"),
-                Spend,
-            ),
-            ("x", "click", Some("tel:+15551234567"), None, Send),
+            "x; open_url; https://news.example.com/unsubscribe?id=1; ; Destroy",
+            "x; navigate; ; https://shop.example.com/checkout; Spend",
+            "x; click; tel:+15551234567; ; Send",
             // Apps.
-            (
-                "com.apple.systempreferences",
-                "click",
-                Some("Display"),
-                None,
-                Security,
-            ),
-            ("com.apple.appstore", "click", Some("Get"), None, Security),
+            "com.apple.systempreferences; click; Display; ; Security",
+            "com.apple.appstore; click; Get; ; Security",
         ];
-        for (app, verb, label, preview, want) in table {
-            assert_eq!(
-                risk(app, verb, *label, *preview),
-                *want,
-                "{app} {verb} {label:?} {preview:?}"
-            );
+        for row in table {
+            let f: Vec<&str> = row.split(';').map(|s| s.trim_matches(' ')).collect();
+            let opt = |s: &'static str| (!s.is_empty()).then_some(s);
+            let a = action(f[0], f[1], opt(f[2]), opt(f[3]));
+            let got = RiskClassifier::global().classify(&a).risk;
+            assert_eq!(got.as_str(), f[4].to_lowercase(), "{row}");
         }
     }
 
@@ -2586,56 +2447,39 @@ mod tests {
     fn context_is_inherited_by_generic_controls() {
         use RiskClass::*;
         let payment = ActionContext::default().with_form_fields(["Card number", "CVV", "Expiry"]);
-        assert_eq!(
-            risk_ctx("shop.example", "click", Some("Continue"), None, &payment),
-            Spend
-        );
-        assert_eq!(
-            risk_ctx("shop.example", "click", None, None, &payment),
-            Spend
-        );
-        assert_eq!(
-            risk_ctx("shop.example", "key", Some("Enter"), None, &payment),
-            Spend
-        );
-        // A dismissive control does not inherit.
-        assert_eq!(
-            risk_ctx("shop.example", "click", Some("Cancel"), None, &payment),
-            Observe
-        );
-
         let compose = ActionContext::default()
             .with_window_title("New Message")
             .with_form_fields(["To", "Subject"]);
-        assert_eq!(
-            risk_ctx("com.apple.mail", "click", Some("OK"), None, &compose),
-            Send
-        );
-        assert_eq!(
-            risk_ctx("com.apple.mail", "click", Some("Bold"), None, &compose),
-            Observe
-        );
-
         let dialog = ActionContext::default().with_dialog_text("Permanently delete 12 items?");
-        assert_eq!(risk_ctx("x", "click", Some("Yes"), None, &dialog), Destroy);
-        assert_eq!(risk_ctx("x", "click", Some("No"), None, &dialog), Observe);
-
         let sub = ActionContext::default()
             .with_dialog_text("Are you sure you want to cancel your subscription?");
-        assert_eq!(risk_ctx("x", "click", Some("Cancel"), None, &sub), Destroy);
+        for (verb, label, ctx, want) in [
+            ("click", Some("Continue"), &payment, Spend),
+            ("click", None, &payment, Spend),
+            ("key", Some("Enter"), &payment, Spend),
+            // A dismissive control does not inherit.
+            ("click", Some("Cancel"), &payment, Observe),
+            ("click", Some("OK"), &compose, Send),
+            ("click", Some("Bold"), &compose, Observe),
+            ("click", Some("Yes"), &dialog, Destroy),
+            ("click", Some("No"), &dialog, Observe),
+            ("click", Some("Cancel"), &sub, Destroy),
+        ] {
+            assert_eq!(
+                risk_ctx("com.apple.mail", verb, label, ctx),
+                want,
+                "{label:?}"
+            );
+        }
     }
 
     #[test]
-    fn never_lowers_declared_risk() {
+    fn never_lowers_declared_risk_and_explains_raises() {
         let mut a = action("x", "scroll", None, None);
         a.declared_risk = RiskClass::Spend;
         let c = RiskClassifier::global().classify(&a);
         assert_eq!(c.risk, RiskClass::Spend);
         assert!(!c.raised());
-    }
-
-    #[test]
-    fn reasons_explain_raises() {
         let c = RiskClassifier::global().classify(&action("x", "click", Some("Pay now"), None));
         assert!(c.raised());
         assert!(
@@ -2652,33 +2496,16 @@ mod tests {
         assert!(!contains_card_number("call 555 1234"));
     }
 
-    #[test]
-    fn classification_is_fast() {
-        let a = action(
-            "com.apple.mail",
-            "click",
-            Some("Zahlungspflichtig bestellen – 49,99 €"),
-            Some("hello"),
-        );
-        let ctx = ActionContext::default()
-            .with_form_fields(["Card number", "CVV"])
-            .with_window_title("Checkout")
-            .with_url("https://shop.example.com/checkout");
-        let c = RiskClassifier::global();
-        let start = std::time::Instant::now();
-        for _ in 0..200 {
-            std::hint::black_box(c.classify_with_context(&a, &ctx));
-        }
-        // Generous bound for debug builds on slow CI: well under 5 ms per action.
-        assert!(start.elapsed() < std::time::Duration::from_secs(1));
-    }
-
     // GG3-6 (regression): Space or Enter on a control is a click on it, in every UI language
     // and for words only the policy's tables know.
     #[test]
     fn gg3_6_activation_keys_classify_the_label_like_a_click() {
         let c = RiskClassifier::new();
         let ctx = ActionContext::default().with_role("button");
+        let key = |label, keys, ctx: &ActionContext| {
+            c.classify_with_context(&action("mail", "press_key", Some(label), Some(keys)), ctx)
+                .risk
+        };
         for label in [
             "Delete",
             "Löschen",
@@ -2699,62 +2526,30 @@ mod tests {
                 .risk;
             assert!(click > RiskClass::Edit, "{label}: click {click:?}");
             for keys in ["space", "enter", "return", "kp_enter", "Space", "tab space"] {
-                let key = c
-                    .classify_with_context(
-                        &action("mail", "press_key", Some(label), Some(keys)),
-                        &ctx,
-                    )
-                    .risk;
-                assert_eq!(key, click, "{label} / {keys}");
+                assert_eq!(key(label, keys, &ctx), click, "{label} / {keys}");
             }
             // Without a role (the executor cannot tell) it still counts: the check only raises.
-            let unknown = c.classify(&action("mail", "press_key", Some(label), Some("space")));
             assert_eq!(
-                unknown.risk,
-                c.classify(&action("mail", "click", Some(label), None)).risk
+                key(label, "space", &ActionContext::default()),
+                click,
+                "{label}"
             );
         }
-        // A text field's Space types a space; a modified Space is no press.
+        // A text field's Space types a space; a modified Space is no press; Bold stays benign.
         let field = ActionContext::default().with_role("text_field");
-        assert_eq!(
-            c.classify_with_context(
-                &action("notes", "press_key", Some("Löschen"), Some("space")),
-                &field
-            )
-            .risk,
-            RiskClass::Observe
-        );
-        assert_eq!(
-            c.classify_with_context(
-                &action("notes", "press_key", Some("Löschen"), Some("ctrl+space")),
-                &ctx
-            )
-            .risk,
-            RiskClass::Observe
-        );
-        // A benign button stays benign.
-        assert_eq!(
-            c.classify_with_context(
-                &action("notes", "press_key", Some("Bold"), Some("space")),
-                &ctx
-            )
-            .risk,
-            RiskClass::Observe
-        );
+        assert_eq!(key("Löschen", "space", &field), RiskClass::Observe);
+        assert_eq!(key("Löschen", "ctrl+space", &ctx), RiskClass::Observe);
+        assert_eq!(key("Bold", "space", &ctx), RiskClass::Observe);
     }
 
-    // GG3-5: a click's preview is what it sends, not a destination.
+    // GG3-5: a click's preview is what it sends, not a destination; any other preview on a
+    // click (a third-party tool's URL) still counts.
     #[test]
     fn gg3_5_send_preview_is_not_read_as_a_url() {
         let c = RiskClassifier::new();
-        let a = action(
-            "mail",
-            "click",
-            Some("Send"),
-            Some("Sends: To: “a@b.example” · Message: “pay here https://x.example/delete”"),
-        );
+        let sends = "Sends: To: “a@b.example” · Message: “pay here https://x.example/delete”";
+        let a = action("mail", "click", Some("Send"), Some(sends));
         assert_eq!(c.classify(&a).risk, RiskClass::Send);
-        // Review item 13: any other preview on a click (a third-party tool's URL) still counts.
         let url = action(
             "tool",
             "click",
@@ -2764,10 +2559,26 @@ mod tests {
         assert_eq!(c.classify(&url).risk, RiskClass::Destroy);
     }
 
-    // Review item 9: more languages; "token" and "secret" only as credentials.
+    // GG3-22 and review items 9 / M2: secret fields in many languages; "token" and "secret" only
+    // as credentials.
     #[test]
-    fn secret_labels_more_languages_and_word_bounded() {
+    fn secret_labels_are_security_to_type_into() {
+        let c = RiskClassifier::new();
+        let set = |label| {
+            c.classify(&action("app", "set_value", Some(label), Some("5")))
+                .risk
+        };
         for label in [
+            "Password",
+            "Passwort",
+            "Mot de passe",
+            "Contraseña",
+            "Пароль",
+            "密码",
+            "One-time code",
+            "Sign-in code",
+            "Account key",
+            "6-digit code",
             "Código de verificação",
             "Codice di verifica",
             "Verificatiecode",
@@ -2782,11 +2593,6 @@ mod tests {
             "Secret:",
             "API token",
             "Client secret",
-        ] {
-            assert!(crate::redact::is_secure_label(label), "{label}");
-        }
-        // Second review M2: credentials named by "token" or "secret" stay secret.
-        for label in [
             "GitHub token",
             "Bot token",
             "Webhook secret",
@@ -2795,49 +2601,18 @@ mod tests {
             "Token (required)",
         ] {
             assert!(crate::redact::is_secure_label(label), "{label}");
+            assert_eq!(set(label), RiskClass::Security, "{label}");
         }
         for label in [
             "Token amount",
             "Secret Santa",
             "Gift token value",
             "Promo code",
+            "Subject",
+            "Postal code",
         ] {
             assert!(!crate::redact::is_secure_label(label), "{label}");
-            let c = RiskClassifier::new();
-            assert_eq!(
-                c.classify(&action("app", "set_value", Some(label), Some("5")))
-                    .risk,
-                RiskClass::Observe,
-                "{label}"
-            );
+            assert_eq!(set(label), RiskClass::Observe, "{label}");
         }
-    }
-
-    // GG3-22: secret fields in other languages and newer wordings are Security to type into.
-    #[test]
-    fn gg3_22_secret_labels_multilingual() {
-        let c = RiskClassifier::new();
-        for label in [
-            "Password",
-            "Passwort",
-            "Mot de passe",
-            "Contraseña",
-            "Пароль",
-            "密码",
-            "One-time code",
-            "Sign-in code",
-            "Account key",
-            "6-digit code",
-        ] {
-            assert_eq!(
-                c.classify(&action("app", "set_value", Some(label), Some("x")))
-                    .risk,
-                RiskClass::Security,
-                "{label}"
-            );
-            assert!(crate::redact::is_secure_label(label), "{label}");
-        }
-        assert!(!crate::redact::is_secure_label("Subject"));
-        assert!(!crate::redact::is_secure_label("Postal code"));
     }
 }

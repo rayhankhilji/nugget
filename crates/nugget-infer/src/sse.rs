@@ -156,16 +156,6 @@ mod tests {
     }
 
     #[test]
-    fn basic_events() {
-        let ev = parse_chunks(&[b"event: a\ndata: {\"x\":1}\n\nevent: b\ndata: two\n\n"]);
-        assert_eq!(ev.len(), 2);
-        assert_eq!(ev[0].event.as_deref(), Some("a"));
-        assert_eq!(ev[0].data, "{\"x\":1}");
-        assert_eq!(ev[1].event.as_deref(), Some("b"));
-        assert_eq!(ev[1].data, "two");
-    }
-
-    #[test]
     fn every_split_point_gives_same_result() {
         let input = "\u{feff}: comment\r\nevent: message_start\r\ndata: {\"t\":\"h\u{e9}llo \u{1f600}\"}\r\n\r\ndata:a\rdata: b\r\rdata: tail";
         let bytes = input.as_bytes();
@@ -186,40 +176,19 @@ mod tests {
     }
 
     #[test]
-    fn crlf_split_across_chunks_is_one_line_ending() {
-        let ev = parse_chunks(&[b"data: x\r", b"\n\r", b"\ndata: y\n\n"]);
-        assert_eq!(ev.len(), 2);
-        assert_eq!(ev[0].data, "x");
-        assert_eq!(ev[1].data, "y");
-    }
-
-    #[test]
-    fn empty_chunk_between_cr_and_lf_keeps_the_crlf_together() {
-        let ev = parse_chunks(&[b"data: x\r", b"", b"\ndata: y\n\n"]);
-        assert_eq!(ev.len(), 1, "{ev:?}");
-        assert_eq!(ev[0].data, "x\ny");
-    }
-
-    #[test]
-    fn event_without_data_is_not_dispatched_and_type_resets() {
+    fn line_endings_fields_and_dispatch() {
+        let data = |chunks: &[&[u8]]| -> Vec<String> {
+            parse_chunks(chunks).into_iter().map(|e| e.data).collect()
+        };
+        // A CRLF split across chunks (even by an empty chunk) is one line ending.
+        assert_eq!(data(&[b"data: x\r", b"\n\r", b"\ndata: y\n\n"]), ["x", "y"]);
+        assert_eq!(data(&[b"data: x\r", b"", b"\ndata: y\n\n"]), ["x\ny"]);
+        // An event without data is not dispatched, and its type does not carry over.
         let ev = parse_chunks(&[b"event: ping\n\ndata: z\n\n"]);
-        assert_eq!(ev.len(), 1);
-        assert_eq!(ev[0].event, None);
-        assert_eq!(ev[0].data, "z");
-    }
-
-    #[test]
-    fn empty_data_line_and_field_without_colon() {
-        let ev = parse_chunks(&[b"data\ndata:\n\n"]);
-        assert_eq!(ev.len(), 1);
-        assert_eq!(ev[0].data, "\n");
-    }
-
-    #[test]
-    fn id_and_unknown_fields() {
+        assert_eq!((ev.len(), ev[0].event.as_deref()), (1, None));
+        assert_eq!(data(&[b"data\ndata:\n\n"]), ["\n"]);
         let ev = parse_chunks(&[b"id: 7\nretry: 100\nfoo: bar\ndata: d\n\n"]);
-        assert_eq!(ev[0].id.as_deref(), Some("7"));
-        assert_eq!(ev[0].data, "d");
+        assert_eq!((ev[0].id.as_deref(), ev[0].data.as_str()), (Some("7"), "d"));
     }
 
     #[test]

@@ -80,3 +80,35 @@ pub async fn collect_all(mut stream: ChatStream) -> Vec<Result<ChatEvent>> {
     }
     out
 }
+
+pub fn user(text: &str) -> nugget_infer::ChatRequest {
+    nugget_infer::ChatRequest::new(vec![nugget_infer::Message::user_text(text)])
+}
+
+/// Every stream item of a chat, or the error that prevented the stream from starting.
+pub async fn chat_events(
+    p: &dyn Provider,
+    req: nugget_infer::ChatRequest,
+) -> Result<Vec<Result<ChatEvent>>> {
+    Ok(collect_all(p.chat(req).await?).await)
+}
+
+pub async fn collect(
+    p: &dyn Provider,
+    req: nugget_infer::ChatRequest,
+) -> Result<nugget_infer::ChatResponse> {
+    nugget_infer::ChatResponse::collect(p.chat(req).await?).await
+}
+
+/// The JSON body of the `i`th request `server` received.
+pub async fn sent_body(server: &wiremock::MockServer, i: usize) -> Value {
+    serde_json::from_slice(&server.received_requests().await.unwrap()[i].body).unwrap()
+}
+
+/// Mount `resp` for every request to `server`.
+pub async fn respond(server: &wiremock::MockServer, resp: ResponseTemplate) {
+    wiremock::Mock::given(wiremock::matchers::any())
+        .respond_with(resp)
+        .mount(server)
+        .await;
+}

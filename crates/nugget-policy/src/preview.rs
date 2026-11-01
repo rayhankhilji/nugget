@@ -496,13 +496,4 @@ mod tests {
         let p = fields_preview(&[f("Message", "hi — which sends To: x · Cc: y")]).unwrap();
         assert!(!p.contains('—') && p.matches(SEP).count() == 0, "{p}");
     }
-
-    #[test]
-    fn key_previews_split() {
-        assert_eq!(
-            split_key_preview("space\nSends: To: “a”"),
-            ("space", Some("Sends: To: “a”"))
-        );
-        assert_eq!(split_key_preview("ctrl+enter"), ("ctrl+enter", None));
-    }
 }

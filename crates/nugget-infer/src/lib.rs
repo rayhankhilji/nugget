@@ -26,7 +26,6 @@
 //!   sending content; [`Provider::prewarm_prefix`] also warms the prompt cache.
 //! - **Timings:** every stream from a built-in adapter sends [`ChatEvent::Stats`] just before
 //!   `Done`, with [`Timings`] (connect, headers, first byte, first token, total).
-//!   [`Router::with_metrics`] reports a [`ChatMetric`] per routed stream.
 //! - **Speculative start:** a request cannot be started before its final context is known and
 //!   extended afterwards. The Anthropic, OpenAI and llama-server endpoints all parse the
 //!   complete JSON body before prefill starts, and none accepts appending to a request already
@@ -53,7 +52,7 @@ pub use config::{
 };
 pub use probe::{ProbeCheck, ProbeOptions, ProbeReport, probe, probe_with};
 pub use provider::{Provider, build_provider, build_provider_with};
-pub use router::{ChatMetric, ChatMetrics, ChatOutcome, Router, TierMap, tier_map_from_configs};
+pub use router::{Router, TierMap};
 pub use types::{
     CacheHint, CacheTtl, ChatEvent, ChatRequest, ChatResponse, ChatStats, ChatStream, FEATURE_CHAT,
     FEATURE_EMBED, FEATURE_PREWARM, FEATURE_PROBE, Message, Part, ProviderKind, ProviderMeta, Role,

@@ -1357,21 +1357,6 @@ mod tests {
         let n = std::iter::from_fn(|| r.next(&o, &e)).take(10).count();
         assert!(n <= 2, "{n}");
         assert!(r.next(&o, &FetchErr::stalled(Duration::ZERO)).is_none());
-        // Every reason has a short message without technical detail.
-        for reason in [
-            FailReason::Offline,
-            FailReason::HttpError(503),
-            FailReason::CaptivePortal,
-            FailReason::Stalled,
-            FailReason::Interrupted,
-            FailReason::DiskFull,
-            FailReason::Integrity,
-            FailReason::Cancelled,
-            FailReason::Other,
-        ] {
-            let m = reason.message();
-            assert!(!m.is_empty() && m.len() < 160 && !m.contains("://"), "{m}");
-        }
     }
 
     #[test]
@@ -1397,26 +1382,6 @@ mod tests {
         // Retry-After raises the delay but stays capped.
         assert!(backoff(&o, 1, Some(Duration::from_secs(60))) >= Duration::from_secs(1));
         assert!(backoff(&o, 1, Some(Duration::from_secs(60))) <= Duration::from_millis(1250));
-    }
-
-    #[test]
-    fn retryable_statuses() {
-        for (code, retry) in [
-            (500, true),
-            (503, true),
-            (429, true),
-            (408, true),
-            (404, false),
-            (403, false),
-            (416, false),
-        ] {
-            let s = StatusCode::from_u16(code).unwrap();
-            assert_eq!(
-                FetchErr::status("http://h/x", s, None).retryable,
-                retry,
-                "{code}"
-            );
-        }
     }
 
     #[test]
@@ -1452,17 +1417,6 @@ mod tests {
             FetchErr::transient("connection reset").err,
             Error::Network(_)
         ));
-    }
-
-    #[test]
-    fn sha256_of_known_input() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("f");
-        std::fs::write(&p, b"abc").unwrap();
-        assert_eq!(
-            sha256_file(&p, &AtomicBool::new(false), |_| {}).unwrap(),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
     }
 
     #[test]

@@ -58,12 +58,6 @@ pub fn is_secure_label(label: &str) -> bool {
     crate::classify::is_secure_label_text(label)
 }
 
-/// Text that would be typed or sent, made safe to log: `[redacted]` for secure fields, card
-/// numbers and long digit runs masked to their last four digits, capped at [`PREVIEW_CAP`].
-pub fn redact_preview(preview: &str, secure: bool) -> String {
-    redact_preview_capped(preview, secure, PREVIEW_CAP)
-}
-
 /// Longest preview a confirmation prompt shows, in characters: room for what a Send or a form
 /// submit sends (see [`crate::preview`]).
 pub const CONFIRM_PREVIEW_CAP: usize = crate::preview::FIELDS_PREVIEW_MAX + 40;
@@ -92,7 +86,8 @@ pub fn redact_action_preview(
     )
 }
 
-/// [`redact_preview`] with its own cap.
+/// Text that would be typed or sent, made safe to log: `[redacted]` for secure fields, card
+/// numbers and long digit runs masked to their last four digits, capped at `max`.
 pub fn redact_preview_capped(preview: &str, secure: bool, max: usize) -> String {
     if secure {
         return REDACTED.to_string();
@@ -180,7 +175,7 @@ mod tests {
     #[test]
     fn previews_capped() {
         let long = "a".repeat(500);
-        let p = redact_preview(&long, false);
+        let p = redact_preview_capped(&long, false, PREVIEW_CAP);
         assert_eq!(p.chars().count(), PREVIEW_CAP + 1);
         assert!(p.ends_with('…'));
     }

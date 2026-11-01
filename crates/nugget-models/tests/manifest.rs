@@ -26,67 +26,35 @@ fn sample() -> Vec<u8> {
 }
 
 #[test]
-fn accepts_valid_signature() {
+fn signature_covers_the_exact_bytes() {
     let bytes = sample();
     let key = test_key();
+    let other = SigningKey::from_bytes(&[9u8; 32]);
     let sig = sign_manifest(&bytes, &key);
     let m = verify_manifest(&bytes, sig.as_bytes(), &[key.verifying_key()]).unwrap();
-    assert_eq!(m.version, 3);
-    assert_eq!(m.models[0].id, "small");
-    assert_eq!(m.get("small").unwrap().size, 5);
-}
-
-#[test]
-fn accepts_raw_signature_and_any_trusted_key() {
-    let bytes = sample();
-    let key = test_key();
-    let other = SigningKey::from_bytes(&[9u8; 32]);
-    let raw = hex::decode(sign_manifest(&bytes, &key)).unwrap();
-    assert_eq!(raw.len(), 64);
+    assert_eq!((m.version, m.get("small").unwrap().size), (3, 5));
+    // A raw 64-byte signature works too, against any trusted key.
+    let raw = hex::decode(&sig).unwrap();
     verify_manifest(&bytes, &raw, &[other.verifying_key(), key.verifying_key()]).unwrap();
-}
 
-#[test]
-fn rejects_wrong_key() {
-    let bytes = sample();
-    let sig = sign_manifest(&bytes, &test_key());
-    let other = SigningKey::from_bytes(&[9u8; 32]);
-    let err = verify_manifest(&bytes, sig.as_bytes(), &[other.verifying_key()]).unwrap_err();
-    assert!(matches!(err, Error::Integrity(_)), "{err}");
-}
-
-#[test]
-fn rejects_tampered_manifest() {
-    let bytes = sample();
-    let key = test_key();
-    let sig = sign_manifest(&bytes, &key);
-    // Change the size by one digit; still valid JSON, still a plausible manifest.
+    let integrity = |bytes: &[u8], sig: &[u8], keys: &[nugget_models::VerifyingKey]| {
+        let err = verify_manifest(bytes, sig, keys).unwrap_err();
+        assert!(matches!(err, Error::Integrity(_)), "{err}");
+    };
+    integrity(&bytes, sig.as_bytes(), &[other.verifying_key()]);
+    integrity(&bytes, sig.as_bytes(), &[]);
+    for bad in [&b""[..], b"zz", b"not a signature at all"] {
+        integrity(&bytes, bad, &[key.verifying_key()]);
+    }
+    // A changed size is still valid JSON and a plausible manifest; even whitespace is refused.
     let tampered = String::from_utf8(bytes.clone())
         .unwrap()
-        .replace("\"size\": 5", "\"size\": 6")
-        .into_bytes();
-    assert_ne!(tampered, bytes);
-    let err = verify_manifest(&tampered, sig.as_bytes(), &[key.verifying_key()]).unwrap_err();
-    assert!(matches!(err, Error::Integrity(_)), "{err}");
-    // Even whitespace changes are rejected: the signature covers exact bytes.
+        .replace("\"size\": 5", "\"size\": 6");
+    assert_ne!(tampered.as_bytes(), bytes);
+    integrity(tampered.as_bytes(), sig.as_bytes(), &[key.verifying_key()]);
     let mut ws = bytes.clone();
     ws.push(b'\n');
-    assert!(verify_manifest(&ws, sig.as_bytes(), &[key.verifying_key()]).is_err());
-}
-
-#[test]
-fn rejects_malformed_signature_and_empty_keyring() {
-    let bytes = sample();
-    let key = test_key();
-    for bad in [&b""[..], b"zz", b"not a signature at all"] {
-        let err = verify_manifest(&bytes, bad, &[key.verifying_key()]).unwrap_err();
-        assert!(matches!(err, Error::Integrity(_)), "{err}");
-    }
-    let sig = sign_manifest(&bytes, &key);
-    assert!(matches!(
-        verify_manifest(&bytes, sig.as_bytes(), &[]).unwrap_err(),
-        Error::Integrity(_)
-    ));
+    integrity(&ws, sig.as_bytes(), &[key.verifying_key()]);
 }
 
 /// A correctly signed manifest is still rejected if an entry breaks the rules.

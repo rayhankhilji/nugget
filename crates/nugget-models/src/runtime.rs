@@ -301,8 +301,12 @@ mod tests {
     }
 
     #[test]
-    fn valid_entry_passes() {
+    fn valid_entries_pass() {
         entry().validate().unwrap();
+        // Loopback http is allowed for tests.
+        let mut e = entry();
+        e.url = "http://127.0.0.1:1234/b100/rt.tar.gz".into();
+        e.validate().unwrap();
     }
 
     type Mutation = Box<dyn Fn(&mut RuntimeEntry)>;
@@ -337,13 +341,6 @@ mod tests {
             f(&mut e);
             assert!(e.validate().is_err(), "case {i} should fail: {e:?}");
         }
-    }
-
-    #[test]
-    fn loopback_http_allowed_for_tests() {
-        let mut e = entry();
-        e.url = "http://127.0.0.1:1234/b100/rt.tar.gz".into();
-        e.validate().unwrap();
     }
 
     #[test]

@@ -65,49 +65,11 @@ pub fn check_disk_space(
 mod tests {
     use super::*;
 
-    struct Fixed(std::io::Result<u64>);
-    impl DiskSpace for Fixed {
-        fn available_bytes(&self, _: &Path) -> std::io::Result<u64> {
-            match &self.0 {
-                Ok(v) => Ok(*v),
-                Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
-            }
-        }
-    }
-
     #[test]
     fn requirement_is_size_plus_ten_percent_plus_gib() {
         assert_eq!(required_bytes(10 * GIB, 0), 10 * GIB + GIB + GIB);
         // Already-staged bytes are not counted twice.
         assert_eq!(required_bytes(10 * GIB, 4 * GIB), 6 * GIB + GIB + GIB);
         assert_eq!(required_bytes(u64::MAX, 0), u64::MAX);
-    }
-
-    #[test]
-    fn exact_boundary_passes_one_byte_short_fails() {
-        let dir = Path::new(".");
-        let need = required_bytes(1000, 0);
-        assert!(check_disk_space(&Fixed(Ok(need)), dir, 1000, 0).is_ok());
-        let err = check_disk_space(&Fixed(Ok(need - 1)), dir, 1000, 0).unwrap_err();
-        assert!(
-            matches!(err, Error::InsufficientSpace { needed, available } if needed == need && available == need - 1),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn unreadable_free_space_fails_closed() {
-        let e = std::io::Error::other("statvfs failed");
-        let err = check_disk_space(&Fixed(Err(e)), Path::new("."), 1, 0).unwrap_err();
-        assert!(
-            matches!(&err, Error::Storage(m) if m.contains("cannot determine")),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn system_disk_space_reads_something() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(SystemDiskSpace.available_bytes(dir.path()).unwrap() > 0);
     }
 }

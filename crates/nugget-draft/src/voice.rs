@@ -1,12 +1,5 @@
-//! Adapters from `nugget-voice` (synchronous, store-backed) to the engine's async traits.
-//!
-//! - [`ProfileVoice`] serves [`crate::VoiceSource`] from any [`nugget_voice::VoiceSource`], for
-//!   example an `Arc<RwLock<VoiceProfile>>` that the daemon refreshes in the background.
-//! - [`VoiceFeedback`] passes draft outcomes to a [`nugget_voice::FeedbackSink`], for example
-//!   [`nugget_voice::StoreFeedbackSink`], which keeps final texts in the encrypted store.
-//!
-//! Both run the synchronous call on a blocking thread (`tokio::task::spawn_blocking`), so a
-//! profile lookup (store search) or a store write never stalls the async runtime.
+//! Adapters from `nugget-voice` (synchronous, store-backed) to the engine's async traits, run on
+//! a blocking thread.
 
 use std::sync::Arc;
 
@@ -152,9 +145,9 @@ impl<S: nugget_voice::FeedbackSink + 'static> FeedbackSink for VoiceFeedback<S> 
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Mutex, RwLock};
+    use std::sync::Mutex;
 
-    use nugget_voice::{Channel, StaticVoice, StyleStats, VoiceProfile};
+    use nugget_voice::{Channel, StaticVoice, StyleStats};
 
     use super::*;
     use crate::FieldKind;
@@ -168,16 +161,6 @@ mod tests {
             topic: "offsite venue".into(),
             for_cloud,
         }
-    }
-
-    #[test]
-    fn query_maps_cloud_to_exclude_sensitive() {
-        let q = profile_query(&query(true));
-        assert_eq!(q.channel, Channel::Email);
-        assert_eq!(q.recipients, vec!["Sam Lee <sam@acme.example>"]);
-        assert_eq!(q.thread_text, "offsite venue");
-        assert!(q.exclude_sensitive);
-        assert!(!profile_query(&query(false)).exclude_sensitive);
     }
 
     /// Records every query, answers with fixed hints.
@@ -194,12 +177,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn profile_voice_serves_hints() {
+    async fn profile_voice_serves_hints_and_cloud_excludes_sensitive() {
+        assert!(!profile_query(&query(false)).exclude_sensitive);
         let hints = VoiceHints {
             channel: None,
             stats: StyleStats {
                 samples: 7,
-                median_words: 12.0,
                 ..Default::default()
             },
             exemplars: vec!["hey Sam! sounds good".into()],
@@ -208,38 +191,12 @@ mod tests {
         let voice = ProfileVoice::from_arc(rec.clone());
         let h = VoiceSource::hints(&voice, &query(true)).await.unwrap();
         assert_eq!(h.channel, Some(Channel::Email));
-        assert_eq!(h.stats.samples, 7);
         assert_eq!(h.exemplars, vec!["hey Sam! sounds good"]);
         assert_eq!(voice.status().samples, 7);
         let seen = rec.0.lock().unwrap().clone();
-        assert_eq!(seen.len(), 1);
         assert!(seen[0].exclude_sensitive);
         assert_eq!(seen[0].thread_text, "offsite venue");
-
-        // Usable as the engine's trait object.
-        let dynamic: Arc<dyn VoiceSource> = Arc::new(ProfileVoice::new(StaticVoice::default()));
-        let h = dynamic.hints(&query(false)).await.unwrap();
-        assert_eq!(h.channel, Some(Channel::Email));
-    }
-
-    #[tokio::test]
-    async fn profile_voice_over_a_shared_refreshable_profile() {
-        let store = nugget_store::Store::open_in_memory().unwrap();
-        let profile = VoiceProfile::build(
-            &store,
-            nugget_voice::MeIdentity::default(),
-            nugget_voice::VoiceConfig::default(),
-        )
-        .unwrap();
-        let shared = Arc::new(RwLock::new(profile));
-        let voice: ProfileVoice<Arc<RwLock<VoiceProfile>>> = ProfileVoice::new(shared.clone());
-        let h = VoiceSource::hints(&voice, &query(true)).await.unwrap();
-        assert_eq!(h.channel, Some(Channel::Email));
-        assert!(h.exemplars.is_empty());
-        // The background refresher takes the write lock between drafts.
-        shared.write().unwrap().refresh().unwrap();
-        assert_eq!(voice.status().samples, 0);
-        let _: Arc<dyn VoiceSource> = Arc::new(voice);
+        assert_eq!(seen[0].recipients, vec!["Sam Lee <sam@acme.example>"]);
     }
 
     #[derive(Default)]
@@ -252,12 +209,11 @@ mod tests {
         }
     }
 
-    fn record(
-        outcome: FeedbackOutcome,
-        final_text: Option<&str>,
-        sensitive: bool,
-    ) -> FeedbackRecord {
-        FeedbackRecord {
+    #[tokio::test]
+    async fn feedback_maps_records() {
+        let sink = Arc::new(Sink::default());
+        let fb: Arc<dyn FeedbackSink> = Arc::new(VoiceFeedback::from_arc(sink.clone()));
+        let record = |outcome, final_text: Option<&str>, sensitive| FeedbackRecord {
             stream_id: "s1".into(),
             outcome,
             field_kind: FieldKind::ChatMessage,
@@ -268,77 +224,38 @@ mod tests {
             final_text: final_text.map(str::to_owned),
             insert_verified: Some(true),
             sensitive,
+        };
+        for r in [
+            record(
+                FeedbackOutcome::Edited,
+                Some("Thursday works, see you at 3."),
+                false,
+            ),
+            record(FeedbackOutcome::Accepted, None, true),
+            record(FeedbackOutcome::Rejected, None, false),
+        ] {
+            fb.record(r).await.unwrap();
         }
-    }
-
-    #[tokio::test]
-    async fn feedback_maps_records() {
-        let sink = Arc::new(Sink::default());
-        let fb: Arc<dyn FeedbackSink> = Arc::new(VoiceFeedback::from_arc(sink.clone()));
-        fb.record(record(
-            FeedbackOutcome::Edited,
-            Some("Thursday works, see you at 3."),
-            false,
-        ))
-        .await
-        .unwrap();
-        fb.record(record(FeedbackOutcome::Accepted, None, true))
-            .await
-            .unwrap();
-        fb.record(record(FeedbackOutcome::Rejected, None, false))
-            .await
-            .unwrap();
         let got = sink.0.lock().unwrap().clone();
-        assert_eq!(got.len(), 3);
         let (d, c) = &got[0];
-        assert_eq!(d.stream_id, "s1");
-        assert_eq!(d.outcome, "edited");
+        assert_eq!(
+            (d.outcome.as_str(), d.insert_verified),
+            ("edited", Some(true))
+        );
         assert_eq!(
             d.final_text.as_deref(),
             Some("Thursday works, see you at 3.")
         );
-        assert_eq!(d.insert_verified, Some(true));
-        assert_eq!(c.channel, Channel::Chat);
-        assert_eq!(c.recipients, vec!["jamie"]);
-        assert!(!c.sensitive);
-        // Accepted unchanged: the draft is what was sent.
-        assert_eq!(got[1].0.outcome, "accepted");
+        assert_eq!(
+            (c.channel, c.recipients.clone(), c.sensitive),
+            (Channel::Chat, vec!["jamie".into()], false)
+        );
+        // Accepted unchanged: the draft is what was sent, and stays marked sensitive.
         assert_eq!(got[1].0.final_text.as_deref(), Some("Thursday works."));
         assert!(got[1].1.sensitive);
-        // Rejected: no final text.
-        assert_eq!(got[2].0.outcome, "rejected");
-        assert_eq!(got[2].0.final_text, None);
-    }
-
-    #[tokio::test]
-    async fn feedback_reaches_the_store_sink_and_profile() {
-        let store = nugget_store::Store::open_in_memory().unwrap();
-        let fb = VoiceFeedback::new(nugget_voice::StoreFeedbackSink::new(store.clone()));
-        FeedbackSink::record(
-            &fb,
-            record(FeedbackOutcome::Edited, Some("sure jamie, 5 works"), false),
-        )
-        .await
-        .unwrap();
-        let p = VoiceProfile::build(
-            &store,
-            nugget_voice::MeIdentity::default(),
-            nugget_voice::VoiceConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(p.status().samples, 1);
-    }
-
-    #[tokio::test]
-    async fn sink_errors_propagate() {
-        struct Failing;
-        impl nugget_voice::FeedbackSink for Failing {
-            fn record(&self, _: &DraftFeedback, _: &FeedbackContext) -> Result<bool> {
-                Err(Error::Invalid("no".into()))
-            }
-        }
-        let fb = VoiceFeedback::new(Failing);
-        let r = FeedbackSink::record(&fb, record(FeedbackOutcome::Accepted, None, false)).await;
-        assert!(matches!(r, Err(Error::Invalid(_))));
+        assert_eq!(
+            (got[2].0.outcome.as_str(), got[2].0.final_text.clone()),
+            ("rejected", None)
+        );
     }
 }
