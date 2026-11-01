@@ -1,0 +1,167 @@
+== phase1: 30 entities, 36 claims, extractor None, vault {'pages': 22, 'conflicts': [], 'invalid': [], 'files': 23}
+   entities resolved 1:1 12/19; wrong merges 0; split surfaces 0
+     - priyanka_rao: [] kinds []
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_fgls2toi7chqzyan', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_7zwpqmqhql272i6j', 'harbor', None), ('ent_tpgz4vkvtedqgq5b', 'Harbor', None)] kinds ['project', 'topic']
+     - halden_bay: [] kinds []
+     - port_ellery: [] kinds []
+   gold facts current 4/18; stale shown as current 0; forbidden current 0
+     - missing F3 mara_okafor works_at brightwell found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 36; uncited 0; quote not in source 20
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 8
+== phase2: 44 entities, 56 claims, extractor None, vault {'pages': 34, 'conflicts': [], 'invalid': [], 'files': 37}
+   entities resolved 1:1 13/20; wrong merges 0; split surfaces 0
+     - lumenfold: [('ent_bndxhvdwy3hwzkea', 'Lumenfold', None), ('ent_rkfkgaitau6nqxhh', 'Tessellate', None)] kinds ['organization']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_fgls2toi7chqzyan', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_7zwpqmqhql272i6j', 'harbor', None), ('ent_tpgz4vkvtedqgq5b', 'Harbor', None)] kinds ['project', 'topic']
+     - halden_bay: [] kinds []
+     - port_ellery: [] kinds []
+   gold facts current 7/25; stale shown as current 0; forbidden current 0
+     - missing F2 dana_whitfield has_title Head of Product found=[]
+     - missing F3 mara_okafor works_at brightwell found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F18 harbor due_on 2026-12-03 found=[]
+     - missing F19 priyanka_rao has_title HR Business Partner found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F24 dana_whitfield friend_of mara_okafor found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 56; uncited 0; quote not in source 35
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 10
+== edits: 44 entities, 55 claims, extractor None, vault {'pages': 34, 'conflicts': [], 'invalid': [], 'files': 37}
+   entities resolved 1:1 13/20; wrong merges 0; split surfaces 0
+     - lumenfold: [('ent_bndxhvdwy3hwzkea', 'Lumenfold', None), ('ent_rkfkgaitau6nqxhh', 'Tessellate', None)] kinds ['organization']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_fgls2toi7chqzyan', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_7zwpqmqhql272i6j', 'harbor', None), ('ent_tpgz4vkvtedqgq5b', 'Harbor', None)] kinds ['project', 'topic']
+     - halden_bay: [] kinds []
+     - port_ellery: [] kinds []
+   gold facts current 7/25; stale shown as current 0; forbidden current 0
+     - missing F2 dana_whitfield has_title Head of Product found=[]
+     - missing F3 mara_okafor works_at brightwell found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F18 harbor due_on 2026-12-03 found=[]
+     - missing F19 priyanka_rao has_title HR Business Partner found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F24 dana_whitfield friend_of mara_okafor found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 54; uncited 0; quote not in source 34
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 10
+== reextract: 44 entities, 55 claims, extractor None, vault {'pages': 34, 'conflicts': [], 'invalid': [], 'files': 37}
+   entities resolved 1:1 13/20; wrong merges 0; split surfaces 0
+     - lumenfold: [('ent_bndxhvdwy3hwzkea', 'Lumenfold', None), ('ent_rkfkgaitau6nqxhh', 'Tessellate', None)] kinds ['organization']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_fgls2toi7chqzyan', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_7zwpqmqhql272i6j', 'harbor', None), ('ent_tpgz4vkvtedqgq5b', 'Harbor', None)] kinds ['project', 'topic']
+     - halden_bay: [] kinds []
+     - port_ellery: [] kinds []
+   gold facts current 7/25; stale shown as current 0; forbidden current 0
+     - missing F2 dana_whitfield has_title Head of Product found=[]
+     - missing F3 mara_okafor works_at brightwell found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F18 harbor due_on 2026-12-03 found=[]
+     - missing F19 priyanka_rao has_title HR Business Partner found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F24 dana_whitfield friend_of mara_okafor found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 54; uncited 0; quote not in source 34
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 10
+== restart: 44 entities, 55 claims, extractor None, vault {'pages': 34, 'conflicts': [], 'invalid': [], 'files': 37}
+   entities resolved 1:1 13/20; wrong merges 0; split surfaces 0
+     - lumenfold: [('ent_bndxhvdwy3hwzkea', 'Lumenfold', None), ('ent_rkfkgaitau6nqxhh', 'Tessellate', None)] kinds ['organization']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_fgls2toi7chqzyan', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_7zwpqmqhql272i6j', 'harbor', None), ('ent_tpgz4vkvtedqgq5b', 'Harbor', None)] kinds ['project', 'topic']
+     - halden_bay: [] kinds []
+     - port_ellery: [] kinds []
+   gold facts current 7/25; stale shown as current 0; forbidden current 0
+     - missing F2 dana_whitfield has_title Head of Product found=[]
+     - missing F3 mara_okafor works_at brightwell found=[]
+     - missing F4 mara_okafor has_title Staff Engineer found=[]
+     - missing F5 mara_okafor reports_to robert_chen found=[]
+     - missing F6 robert_chen has_title VP Engineering found=[]
+     - missing F11 sam_okonkwo member_of halden_bay_bouldering found=[]
+     - missing F12 sam_okonkwo friend_of mara_okafor found=[]
+     - missing F13 ife_okafor sibling_of mara_okafor found=[]
+     - missing F14 ife_okafor has_title Nurse found=[]
+     - missing F15 ife_okafor lives_in port_ellery found=[]
+     - missing F17 gus_ferreira has_title Account Manager found=[]
+     - missing F18 harbor due_on 2026-12-03 found=[]
+     - missing F19 priyanka_rao has_title HR Business Partner found=[]
+     - missing F21 mara_okafor lives_in halden_bay found=[]
+     - missing F22 brightwell client_of lumenfold found=[]
+     - missing F23 mara_okafor member_of halden_bay_bouldering found=[]
+     - missing F24 dana_whitfield friend_of mara_okafor found=[]
+     - missing F25 lena_brandt works_at halden_bay_medical_practice found=[]
+   active claims 54; uncited 0; quote not in source 34
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 10
+== edit E2 delete first fact line (Robert Chen) (Person/Robert Chen (ent_oc7xtkt4qnvktgpu).md)
+   edits: {"claim 44": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+   reextract: {"claim 44": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+   restart: {"claim 44": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+== edit E3 add fact + note (Sam Okonkwo) (Person/Sam Okonkwo (ent_oxncdxepwc2yiqvz).md)
+   edits: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+   reextract: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+   restart: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+== edit E4 add alias Bobby (Robert Chen) (Person/Robert Chen (ent_oc7xtkt4qnvktgpu).md)
+   edits: {"added_lines_still_on_page": [], "removed_lines_back_on_page": [], "robert_aliases": ["Bobby", "R. Chen"]}
+   reextract: {"added_lines_still_on_page": [], "removed_lines_back_on_page": [], "robert_aliases": ["Bobby", "R. Chen"]}
+   restart: {"added_lines_still_on_page": [], "removed_lines_back_on_page": [], "robert_aliases": ["Bobby", "R. Chen"]}
+== edit E5 delete a fact line naming Theo (Mara Okafor) (Person/Mara Okafor (ent_kqawhnh4mgzizk7i).md)
+   edits: {"claim 27": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+   reextract: {"claim 27": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+   restart: {"claim 27": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}

@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/user/nugget/qa/GG5/scenarios/truth-sensitive/s2_flagged_item_in_vault.py", line 68, in <module>
+    main()
+    ~~~~^^
+  File "/home/user/nugget/qa/GG5/scenarios/truth-sensitive/s2_flagged_item_in_vault.py", line 60, in main
+    rep["vault_jonas"] = nugget_qa.find_page(d.vault, "Jonas Albers").read_text()
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'read_text'

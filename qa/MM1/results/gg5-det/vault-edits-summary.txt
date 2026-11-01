@@ -1,0 +1,61 @@
+== after_edit conflicts []
+  S1_fix_multi       page_has={'fixed by me': True, 'Harbor is part of': False} claims={'36': 'superseded'}
+  S2_delete          page_has={'one-on-one]]': False} claims={'28': 'rejected'}
+  S3_add             page_has={'added under heading': True, 'added outside headings': True} claims={}
+  S5_notes           page_has={'My private Harbor note': True} claims={}
+  S1b_fix_single     page_has={'fixed by me': True, 'works at [[': False} claims={'51': 'superseded'}
+  S4_alias_spaced    page_has={'aliases:': True} claims={}
+  S4_alias_compact   page_has={'aliases:': True} claims={}
+  S8a_atomic         page_has={'atomic save by me': True, 'Note saved atomically': True} claims={}
+  S8b_retype         page_has={'retyped by me': True, 'c:55 -->': True} claims={'55': 'user_asserted'}
+  S9a_rename         page_has={'# Theo': True} claims={}
+  S6_quick           page_has={'aliases:': True} claims={'49': 'rejected'}
+== after_reextract conflicts []
+  S1_fix_multi       page_has={'fixed by me': True, 'Harbor is part of': False} claims={'36': 'superseded'}
+  S2_delete          page_has={'one-on-one]]': False} claims={'28': 'rejected'}
+  S3_add             page_has={'added under heading': True, 'added outside headings': True} claims={}
+  S5_notes           page_has={'My private Harbor note': True} claims={}
+  S1b_fix_single     page_has={'fixed by me': True, 'works at [[': False} claims={'51': 'superseded'}
+  S4_alias_spaced    page_has={'aliases:': True} claims={}
+  S4_alias_compact   page_has={'aliases:': True} claims={}
+  S8a_atomic         page_has={'atomic save by me': True, 'Note saved atomically': True} claims={}
+  S8b_retype         page_has={'retyped by me': True, 'c:55 -->': True} claims={'55': 'user_asserted'}
+  S9a_rename         page_has={'# Theo': True} claims={}
+  S6_quick           page_has={'aliases:': True} claims={'49': 'rejected'}
+== after_newer_source conflicts []
+  S1_fix_multi       page_has={'fixed by me': True, 'Harbor is part of': False} claims={'36': 'superseded'}
+  S2_delete          page_has={'one-on-one]]': False} claims={'28': 'rejected'}
+  S3_add             page_has={'added under heading': True, 'added outside headings': True} claims={}
+  S5_notes           page_has={'My private Harbor note': True} claims={}
+  S1b_fix_single     page_has={'fixed by me': True, 'works at [[': False} claims={'51': 'superseded'}
+  S4_alias_spaced    page_has={'aliases:': True} claims={}
+  S4_alias_compact   page_has={'aliases:': True} claims={}
+  S8a_atomic         page_has={'atomic save by me': True, 'Note saved atomically': True} claims={}
+  S8b_retype         page_has={'retyped by me': True, 'c:55 -->': True} claims={'55': 'user_asserted'}
+  S9a_rename         page_has={'# Theo': True} claims={}
+  S6_quick           page_has={'aliases:': True} claims={'49': 'rejected'}
+== after_restart conflicts []
+  S1_fix_multi       page_has={'fixed by me': True, 'Harbor is part of': False} claims={'36': 'superseded'}
+  S2_delete          page_has={'one-on-one]]': False} claims={'28': 'rejected'}
+  S3_add             page_has={'added under heading': True, 'added outside headings': True} claims={}
+  S5_notes           page_has={'My private Harbor note': True} claims={}
+  S1b_fix_single     page_has={'fixed by me': True, 'works at [[': False} claims={'51': 'superseded'}
+  S4_alias_spaced    page_has={'aliases:': True} claims={}
+  S4_alias_compact   page_has={'aliases:': True} claims={}
+  S8a_atomic         page_has={'atomic save by me': True, 'Note saved atomically': True} claims={}
+  S8b_retype         page_has={'retyped by me': True, 'c:55 -->': True} claims={'55': 'user_asserted'}
+  S9a_rename         page_has={'# Theo': True} claims={}
+  S6_quick           page_has={'aliases:': True} claims={'49': 'rejected'}
+== after_offline_start conflicts []
+  S1_fix_multi       page_has={'fixed by me': True, 'Harbor is part of': False} claims={'36': 'superseded'}
+  S2_delete          page_has={'one-on-one]]': False} claims={'28': 'rejected'}
+  S3_add             page_has={'added under heading': True, 'added outside headings': True} claims={}
+  S5_notes           page_has={'My private Harbor note': True} claims={}
+  S1b_fix_single     page_has={'fixed by me': True, 'works at [[': False} claims={'51': 'superseded'}
+  S4_alias_spaced    page_has={'aliases:': True} claims={}
+  S4_alias_compact   page_has={'aliases:': True} claims={}
+  S8a_atomic         page_has={'atomic save by me': True, 'Note saved atomically': True} claims={}
+  S8b_retype         page_has={'retyped by me': True, 'c:55 -->': True} claims={'55': 'user_asserted'}
+  S9a_rename         page_has={'# Theo': True} claims={}
+  S6_quick           page_has={'aliases:': True} claims={'49': 'rejected'}
+  S7_offline         page_has={'fixed offline': True, 'Offline note': True} claims={'8': 'superseded'}

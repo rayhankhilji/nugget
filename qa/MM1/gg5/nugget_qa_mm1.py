@@ -236,7 +236,7 @@ class Daemon:
             tri = ing.get("triage") or {}
             # MM1: background triage (HH2, 08a0cce) runs before LLM extraction of an item; GG5's
             # harness predates it and settled while items still waited for triage.
-            tri_busy = (bool(tri) and tri.get("state") not in (None, "off", "idle")) or (tri.get("pending") or 0) > 0
+            tri_busy = bool(tri) and tri.get("state") != "off" and (tri.get("state") != "idle" or (tri.get("pending") or 0) > 0)
             sig = (tri.get("pending"), tri.get("done"), ing.get("queue_depth"), ks.get("pending_items"), ks.get("entities"), ks.get("claims"), ks.get("last_run"), ks["vault"].get("last_render"), busy)
             idle = (ing.get("queue_depth") or 0) == 0 and (ks.get("pending_items") or 0) == 0 and not busy and not tri_busy and ks.get("last_run")
             if idle and sig == last_sig:
