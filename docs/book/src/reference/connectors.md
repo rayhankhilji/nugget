@@ -294,6 +294,71 @@ and `discussion/<owner>/<repo>/<number>`.
 Sync: GraphQL `issues` with `updatedAt` filters every 5 minutes (archived issues included, so they
 become deletes), and an ids-only listing every 6 hours. Item keys are `issue/<uuid>`.
 
+## Messaging kinds
+
+Local chat history; none signs in or makes network requests. See
+[iMessage, WhatsApp and Telegram](../guide/sources-messaging.md).
+
+<!-- check-refs: connector.kinds -->
+| Kind | Display name | Sign-in | Keychain accounts |
+|---|---|---|---|
+| `imessage` | iMessage | none | none |
+| `whatsapp` | WhatsApp exports | none | none |
+| `telegram` | Telegram export | none | none |
+
+Every messaging kind also takes these settings:
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `private` | bool | `true` | Mark every conversation sensitive (kept from cloud models and cloud embeddings) |
+| `since_days` | integer, at least 1 | none (everything) | Only messages newer than this many days |
+| `include_groups` | bool | `true` | Also index group chats |
+
+Paths may start with `~`. Each conversation becomes one item per calendar month (split into parts when
+a month is very large), keyed `<conversation id>/<YYYY-MM>` (`<conversation id>/<YYYY-MM>.<part>` from
+the second part), with `im:<chat guid>`, `wa:<chat name slug>` and `tg:<chat id>` conversation ids.
+
+## `imessage`
+
+<!-- check-refs: connector.imessage -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `private` | bool | `true` | As above |
+| `since_days` | integer, at least 1 | none | As above |
+| `include_groups` | bool | `true` | As above |
+| `db_path` | path | `~/Library/Messages/chat.db` | The Messages database. Required off macOS, where there is no default |
+| `contacts` | bool | `true` | Show names from the macOS address book instead of phone numbers and addresses |
+| `contacts_dir` | path | `~/Library/Application Support/AddressBook` | Advanced: folder searched for `AddressBook-v22.abcddb` files (also in its `Sources/*/`). Setting it enables contacts off macOS too |
+
+Needs Full Disk Access on macOS. The database is copied to a private temp folder for each pass and
+the copy removed afterwards; the live file is never opened. Polled every 2 minutes.
+
+## `whatsapp`
+
+<!-- check-refs: connector.whatsapp -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `private` | bool | `true` | As above |
+| `since_days` | integer, at least 1 | none | As above |
+| `include_groups` | bool | `true` | As above |
+| `folder` | path | required | Folder of "Export chat" files (`.zip` or `.txt`, also one subfolder level deep). Symlinks leading out of it are skipped |
+| `me` | string | none | Your WhatsApp profile name as it appears in the exports, so your messages are shown as "Me" |
+
+Watched, plus a check every 5 minutes.
+
+## `telegram`
+
+<!-- check-refs: connector.telegram -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `private` | bool | `true` | As above |
+| `since_days` | integer, at least 1 | none | As above |
+| `include_groups` | bool | `true` | As above |
+| `path` | path | required | A Telegram Desktop JSON export: its `result.json`, its folder, or a parent folder holding `ChatExport_*` / `DataExport_*` folders. Inside a folder, symlinks leading out of it are skipped |
+
+Watched, plus a check every 5 minutes. A message found in several exports is imported once, in its
+newest version.
+
 ## `plugin:<plugin id>`
 
 A plugin connector's settings are whatever JSON object its manifest's `settings_schema` describes
