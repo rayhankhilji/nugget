@@ -461,6 +461,17 @@ async fn unchanged_polls_keep_everything_and_changes_still_arrive() {
     settle(&db.path);
     let sink = ReplicaSink::new(replica.clone()).crash_at_send(0);
     assert!(run_pass(&*conn, None, &sink).await.is_err());
+    // A pass whose changes were sent (queued) but could not be stored: the checkpoint at the
+    // end of `sync` fails, and the store does not have them.
+    let before = replica.snapshot();
+    let sink = ReplicaSink::new(replica.clone()).crash_at_checkpoint(0);
+    assert!(
+        conn.sync(None, &sink, &nugget_connector::CancellationToken::new())
+            .await
+            .is_err()
+    );
+    assert_eq!(sink.sends(), 1, "the change was sent");
+    replica.restore(before);
     let sink = ReplicaSink::new(replica.clone());
     run_pass(&*conn, None, &sink).await.unwrap();
     let june = doc(&sink, "im:iMessage;-;+15551234567/2024-06");
