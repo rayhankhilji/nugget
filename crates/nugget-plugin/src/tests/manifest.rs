@@ -23,13 +23,6 @@ fn parses_a_valid_manifest() {
 }
 
 #[test]
-fn the_example_manifest_is_valid() {
-    let text = include_str!("../../sdk/examples/feed-reader/nugget-plugin.toml");
-    let m = parse(text).unwrap();
-    assert!(m.connector.unwrap().settings_schema.unwrap().is_object());
-}
-
-#[test]
 fn malicious_manifests_are_rejected() {
     let ok = |caps: &str| manifest_toml("dev.nugget.test", "1.0.0", "[\"tool\"]", caps);
     let cases = [

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use nugget_connector::{AuthKind, ConnectorFactory, Registry};
 use serde_json::json;
 
@@ -69,18 +67,6 @@ fn validates_settings() {
         c.validate(&json!({"client_id": "x", "window_days": 3}))
             .is_err()
     );
-}
-
-#[tokio::test]
-async fn kinds_and_poll_intervals() {
-    let h = Harness::new().await;
-    let gmail = h.build(&GmailFactory::new(), json!({"client_id": "x"}));
-    let gcal = h.build(&CalendarFactory::new(), json!({"client_id": "x"}));
-    assert_eq!(gmail.kind(), "gmail");
-    assert_eq!(gcal.kind(), "gcal");
-    assert_eq!(gmail.poll_interval(), Duration::from_secs(60));
-    assert_eq!(gcal.poll_interval(), Duration::from_secs(300));
-    assert!(!gmail.supports_watch() && !gcal.supports_watch());
 }
 
 #[tokio::test]

@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use nugget_connector::http::{MeteredHttp, Response};
-use nugget_connector::retry::{self, Backoff};
+use nugget_connector::retry::{self, RetryPolicy};
 use nugget_connector::{
     AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, ConnectorFactory,
     Content, Document, KindInfo,
@@ -79,26 +79,6 @@ impl Default for Limits {
     }
 }
 
-/// Inline retries of throttled or failing requests (429, 408, 500, 502-504): exponential
-/// backoff with jitter, a server `Retry-After` as the floor. A hint longer than `max` is not
-/// waited out here: the error goes to ingest, which schedules the next pass.
-#[derive(Debug, Clone, Copy)]
-struct RetryPolicy {
-    attempts: u32,
-    base: Duration,
-    max: Duration,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            attempts: 4,
-            base: Duration::from_secs(1),
-            max: Duration::from_secs(60),
-        }
-    }
-}
-
 /// Error for a transient status after retries: throttling (or a 5xx with a hint) is
 /// `RateLimited`, the rest `Network`. Never `Unauthorized`.
 fn transient_error(resp: &Response, hint: Option<Duration>) -> Error {
@@ -109,6 +89,20 @@ fn transient_error(resp: &Response, hint: Option<Duration>) -> Error {
         },
         _ => Error::Network(format!("CalDAV server: HTTP {}", resp.status)),
     }
+}
+
+/// Whether a calendar's `supported-calendar-component-set` is absent, empty, or names one of
+/// `comps`.
+fn holds(r: &DavResponse, comps: &[&str]) -> bool {
+    let Some(set) = r.prop(CALDAV, "supported-calendar-component-set") else {
+        return true;
+    };
+    let mut listed = set.children(CALDAV, "comp").peekable();
+    listed.peek().is_none()
+        || listed.any(|c| {
+            c.attr("name")
+                .is_some_and(|n| comps.iter().any(|w| n.eq_ignore_ascii_case(w)))
+        })
 }
 
 /// A member's `getcontentlength`, if listed.
@@ -189,10 +183,6 @@ fn strip_inline_attachments(ics: &str) -> String {
     }
     out
 }
-
-// ---------------------------------------------------------------------------------------------
-// Settings
-// ---------------------------------------------------------------------------------------------
 
 /// Settings of a `caldav` source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,10 +281,6 @@ fn settings_schema() -> Value {
     })
 }
 
-// ---------------------------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------------------------
-
 /// Factory for `caldav` sources.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CalDavFactory;
@@ -326,10 +312,6 @@ impl ConnectorFactory for CalDavFactory {
         )?))
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// Cursor
-// ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Cursor {
@@ -372,10 +354,6 @@ impl Cursor {
         serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// Connector
-// ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 struct Calendar {
@@ -446,9 +424,8 @@ fn sync_collection_body(token: &str) -> String {
     )
 }
 
-fn multiget_body(paths: &[String]) -> String {
+fn multiget_body<'a>(paths: impl Iterator<Item = &'a str>) -> String {
     let hrefs: String = paths
-        .iter()
         .map(|p| format!("  <D:href>{}</D:href>\n", xml::escape(p)))
         .collect();
     format!(
@@ -496,22 +473,12 @@ impl CalDavConnector {
             ctx,
             http,
             limits,
-            retry: RetryPolicy::default(),
+            // Inline retries of 408, 429, 500 and 502-504; four attempts in all.
+            retry: RetryPolicy {
+                max_retries: 3,
+                ..RetryPolicy::default()
+            },
         })
-    }
-
-    #[cfg(test)]
-    fn with_limits(mut self, limits: Limits) -> Result<Self> {
-        self.http =
-            MeteredHttp::new(self.ctx.egress.clone(), FEATURE)?.with_max_body(limits.max_body);
-        self.limits = limits;
-        Ok(self)
-    }
-
-    #[cfg(test)]
-    fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
     }
 
     fn password(&self) -> Result<String> {
@@ -577,10 +544,6 @@ impl CalDavConnector {
         self.check_url(url)?;
         let m = Method::from_bytes(method.as_bytes())
             .map_err(|e| Error::Invalid(format!("http method: {e}")))?;
-        let backoff = Backoff {
-            base: self.retry.base,
-            max: self.retry.max,
-        };
         let mut attempt = 0;
         loop {
             let mut req = self
@@ -613,17 +576,13 @@ impl CalDavConnector {
             if !matches!(resp.status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504) {
                 return Ok(resp);
             }
-            let hint = retry::retry_after(&resp.headers);
+            let err = transient_error(&resp, retry::retry_after(&resp.headers));
+            let Some(delay) = self.retry.pause(attempt, &err) else {
+                return Err(err);
+            };
             attempt += 1;
-            if attempt >= self.retry.attempts || hint.is_some_and(|h| h > self.retry.max) {
-                return Err(transient_error(&resp, hint));
-            }
-            let delay = backoff.delay(attempt - 1, hint);
             tracing::debug!(status = %resp.status, ?delay, attempt, "CalDAV request throttled or failed; retrying");
-            tokio::select! {
-                _ = tokio::time::sleep(delay) => {}
-                _ = cancel.cancelled() => return Err(Error::Cancelled),
-            }
+            retry::sleep(delay, cancel).await?;
         }
     }
 
@@ -666,20 +625,8 @@ impl CalDavConnector {
             name: r.prop_text(DAV, "displayname"),
             ctag: r.prop_text(CS, "getctag"),
             sync_token: r.prop_text(DAV, "sync-token"),
-            events: Self::holds_events(r),
+            events: holds(r, &["VEVENT"]),
         }
-    }
-
-    fn holds_events(r: &DavResponse) -> bool {
-        let Some(set) = r.prop(CALDAV, "supported-calendar-component-set") else {
-            return true;
-        };
-        let mut comps = set.children(CALDAV, "comp").peekable();
-        comps.peek().is_none()
-            || comps.any(|c| {
-                c.attr("name")
-                    .is_some_and(|n| n.eq_ignore_ascii_case("VEVENT"))
-            })
     }
 
     /// Create an event: `PUT` the iCalendar object `ics` as `<resource>` (e.g. `<uuid>.ics`;
@@ -733,20 +680,6 @@ impl CalDavConnector {
         Ok(url.to_string())
     }
 
-    fn holds_items(r: &DavResponse) -> bool {
-        let Some(set) = r.prop(CALDAV, "supported-calendar-component-set") else {
-            return true;
-        };
-        let comps: Vec<String> = set
-            .children(CALDAV, "comp")
-            .filter_map(|c| c.attr("name").map(str::to_ascii_uppercase))
-            .collect();
-        comps.is_empty()
-            || comps
-                .iter()
-                .any(|c| matches!(c.as_str(), "VEVENT" | "VTODO" | "VJOURNAL"))
-    }
-
     async fn discover(&self, password: &str, cancel: &CancellationToken) -> Result<Vec<Calendar>> {
         let base = &self.base;
         let ms = self
@@ -780,7 +713,7 @@ impl CalDavConnector {
             .await?;
         let mut cals = Vec::new();
         for r in &ms.responses {
-            if !r.is_calendar() || !Self::holds_items(r) {
+            if !r.is_calendar() || !holds(r, &["VEVENT", "VTODO", "VJOURNAL"]) {
                 continue;
             }
             let url = self.resolve(&home, &r.href)?;
@@ -964,7 +897,7 @@ impl CalDavConnector {
                 }
                 fetch.push((key, etag));
             }
-            self.multiget_recording(password, cal, &fetch, known, &mut skipped, sink, cancel)
+            self.multiget(password, cal, &fetch, known, &mut skipped, sink, cancel)
                 .await?;
             let next = ms.sync_token.clone().ok_or_else(|| {
                 Error::Network("sync-collection response without a sync-token".into())
@@ -1029,32 +962,6 @@ impl CalDavConnector {
         false
     }
 
-    /// [`multiget`](Self::multiget), remembering skipped objects by their listed ETag.
-    #[allow(clippy::too_many_arguments)]
-    async fn multiget_recording(
-        &self,
-        password: &str,
-        cal: &Calendar,
-        fetch: &[(String, Option<String>)],
-        known: &mut KnownMap,
-        skipped: &mut BTreeMap<String, Option<String>>,
-        sink: &dyn ChangeSink,
-        cancel: &CancellationToken,
-    ) -> Result<()> {
-        let keys: Vec<String> = fetch.iter().map(|(k, _)| k.clone()).collect();
-        let too_big = self
-            .multiget(password, cal, &keys, known, sink, cancel)
-            .await?;
-        for k in too_big {
-            let etag = fetch
-                .iter()
-                .find(|(f, _)| *f == k)
-                .and_then(|(_, e)| e.clone());
-            skipped.insert(k, etag);
-        }
-        Ok(())
-    }
-
     /// Fallback without `sync-collection`: compare `getctag`, then list ETags.
     async fn etag_sync(
         &self,
@@ -1110,7 +1017,7 @@ impl CalDavConnector {
             fetch.push((k.clone(), etag.clone()));
         }
         fetch.sort();
-        self.multiget_recording(password, cal, &fetch, known, &mut skipped, sink, cancel)
+        self.multiget(password, cal, &fetch, known, &mut skipped, sink, cancel)
             .await?;
         Ok(CalCursor {
             sync_token: None,
@@ -1131,19 +1038,23 @@ impl CalDavConnector {
         }
     }
 
+    /// Download `fetch` (key, listed ETag) in batches. Objects too large are skipped and
+    /// remembered in `skipped` by their listed ETag.
+    #[allow(clippy::too_many_arguments)]
     async fn multiget(
         &self,
         password: &str,
         cal: &Calendar,
-        keys: &[String],
+        fetch: &[(String, Option<String>)],
         known: &mut KnownMap,
+        skipped: &mut BTreeMap<String, Option<String>>,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
-    ) -> Result<Vec<String>> {
-        let mut too_big = Vec::new();
+    ) -> Result<()> {
         // Batches, in order; a response over the size cap is split until the culprit stands
         // alone, and a single object too big to download is skipped.
-        let mut pending: Vec<&[String]> = keys.chunks(MULTIGET_BATCH).rev().collect();
+        let mut pending: Vec<&[(String, Option<String>)]> =
+            fetch.chunks(MULTIGET_BATCH).rev().collect();
         while let Some(chunk) = pending.pop() {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -1154,7 +1065,7 @@ impl CalDavConnector {
                     "REPORT",
                     &cal.url,
                     Some("1"),
-                    multiget_body(chunk),
+                    multiget_body(chunk.iter().map(|f| f.0.as_str())),
                     cancel,
                 )
                 .await
@@ -1166,22 +1077,22 @@ impl CalDavConnector {
                     continue;
                 }
                 Err(e) if is_body_cap(&e) => {
-                    tracing::warn!(href = %chunk[0], limit = self.limits.max_body, "calendar object too large to download; skipping");
-                    too_big.push(chunk[0].clone());
+                    tracing::warn!(href = %chunk[0].0, limit = self.limits.max_body, "calendar object too large to download; skipping");
+                    skipped.insert(chunk[0].0.clone(), chunk[0].1.clone());
                     continue;
                 }
                 r => r?.error_for_status()?,
             };
             // Requested key by decoded href: servers may spell an href differently than in
             // their own sync-collection or listing (`%40` vs `@`).
-            let wanted: HashMap<Vec<u8>, &String> =
-                chunk.iter().map(|k| (href_bytes(k), k)).collect();
+            let wanted: HashMap<Vec<u8>, &(String, Option<String>)> =
+                chunk.iter().map(|f| (href_bytes(&f.0), f)).collect();
             let ms = xml::multistatus(&resp.body)?;
             for r in &ms.responses {
                 let Some(url) = self.member_url(cal, &r.href) else {
                     continue;
                 };
-                let Some(&key) = wanted.get(&href_bytes(url.path())) else {
+                let Some(&(key, listed)) = wanted.get(&href_bytes(url.path())) else {
                     continue;
                 };
                 let key = key.clone();
@@ -1201,7 +1112,7 @@ impl CalDavConnector {
                 }
                 if data.len() > self.limits.max_event {
                     tracing::warn!(href = %key, size = data.len(), limit = self.limits.max_event, "calendar object too large; skipping");
-                    too_big.push(key);
+                    skipped.insert(key, listed.clone());
                     continue;
                 }
                 let etag = r.prop_text(DAV, "getetag");
@@ -1222,7 +1133,7 @@ impl CalDavConnector {
                 known.insert(key, etag);
             }
         }
-        Ok(too_big)
+        Ok(())
     }
 }
 
@@ -1242,7 +1153,5 @@ impl Connector for CalDavConnector {
     }
 }
 
-#[cfg(test)]
-mod conformance;
 #[cfg(test)]
 mod tests;

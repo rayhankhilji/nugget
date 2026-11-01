@@ -37,8 +37,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_connector::http::{MeteredHttp, Response};
 use nugget_connector::{
-    AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, ConnectorFactory,
-    Content, Document, KindInfo,
+    CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
@@ -47,6 +46,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
 
+use crate::SLACK_KIND;
 use crate::api::{self, Api, ItemFailures, Outcome, classify_common, retry_after_ms};
 use crate::auth::{Credential, Token};
 use crate::settings::{self, MAX_WINDOW_DAYS};
@@ -54,7 +54,6 @@ use crate::text::{
     DAY_SECS, clean, clock, date, day_start, hash_hex, now_unix, one_line, parse_date, safe_id,
     truncate_chars,
 };
-use crate::{Endpoints, RetryPolicy, SLACK_KIND};
 
 const FEATURE: &str = "sync:slack";
 const SERVICE: &str = "Slack";
@@ -227,45 +226,16 @@ impl Cursor {
     }
 }
 
-/// Factory for `slack` sources.
-#[derive(Debug, Clone, Default)]
-pub struct SlackFactory {
-    endpoints: Endpoints,
-    retry: RetryPolicy,
-}
+factory!(
+    SlackFactory,
+    SlackConnector,
+    SLACK_KIND,
+    "Slack",
+    SlackSettings
+);
 
 impl SlackFactory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_endpoints(mut self, endpoints: Endpoints) -> Self {
-        self.endpoints = endpoints;
-        self
-    }
-
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
-    }
-}
-
-impl ConnectorFactory for SlackFactory {
-    fn info(&self) -> KindInfo {
-        KindInfo {
-            kind: SLACK_KIND,
-            display_name: "Slack",
-            auth: AuthKind::Password,
-            settings_schema: SlackSettings::schema(),
-        }
-    }
-
-    fn validate(&self, settings: &Value) -> Result<()> {
-        SlackSettings::parse(settings).map(|_| ())
-    }
-
-    fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
-        let settings = SlackSettings::parse(settings)?;
+    fn make(&self, settings: SlackSettings, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
         let http = api::metered(ctx.egress.clone(), FEATURE)?;
         let cred = Arc::new(Credential::new(
             SERVICE,
@@ -292,14 +262,6 @@ pub struct SlackConnector {
     ctx: ConnectorContext,
     /// User id → display name, kept across passes.
     users: Mutex<HashMap<String, String>>,
-}
-
-impl std::fmt::Debug for SlackConnector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SlackConnector")
-            .field("source", &self.ctx.source)
-            .finish_non_exhaustive()
-    }
 }
 
 // ---- API types ----

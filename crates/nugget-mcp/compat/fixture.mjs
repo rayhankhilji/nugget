@@ -12,7 +12,7 @@
 // launch the stdio bridge from the `claude-desktop` snippet (the `mcpServers` JSON shared by
 // Claude Desktop and Cursor) and connect over HTTP with the `generic-http` snippet's URL and
 // header, so CI exercises the same command, args, env and header shape the docs tell users to
-// paste (`docs/book/src/guide/mcp.md`, kept in step by `crates/nugget-mcp/tests/docs.rs`).
+// paste (`docs/book/src/guide/mcp.md`).
 //
 // `NUGGETD` points at a built nuggetd; otherwise `cargo build --locked -p nuggetd` runs first.
 import { spawn } from "node:child_process";

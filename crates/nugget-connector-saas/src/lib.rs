@@ -13,8 +13,8 @@
 //! pastes a token through `sources.secret.set`, stored in the OS keychain under
 //! `password:<source>`. `token_env` in settings names an environment variable instead (headless
 //! use). GitHub (device flow) and Linear (PKCE) can also be connected interactively through
-//! `begin_auth` when settings carry a `client_id`; those tokens live under `oauth:<source>`.
-//! See [`auth`] for the lookup order.
+//! `begin_auth` when settings carry a `client_id`; those tokens live under `oauth:<source>`
+//! (lookup order in `auth`).
 //!
 //! **Egress.** All HTTP goes through [`MeteredHttp`](nugget_connector::http::MeteredHttp) with
 //! feature `sync:<kind>`, so every exchange is in the egress ledger and no redirect is followed.
@@ -24,8 +24,80 @@
 //! where it applies, `my_message_count` in its metadata, plus the user's handle under `me`, so
 //! the voice profile can pick out what the user wrote.
 
+/// A kind's factory (endpoints and retry policy injectable for tests, plus `$field`s) and the
+/// connector's `Debug`. The file implements `make` with the parsed settings.
+macro_rules! factory {
+    ($factory:ident, $conn:ident, $kind:expr, $display:literal, $settings:ty
+     $(, $field:ident: $ty:ty = $default:expr)*) => {
+        #[doc = concat!("Factory for `", $display, "` sources.")]
+        #[derive(Debug, Clone)]
+        pub struct $factory {
+            endpoints: crate::Endpoints,
+            retry: crate::RetryPolicy,
+            $($field: $ty,)*
+        }
+
+        impl Default for $factory {
+            fn default() -> Self {
+                Self {
+                    endpoints: Default::default(),
+                    retry: Default::default(),
+                    $($field: $default,)*
+                }
+            }
+        }
+
+        impl $factory {
+            pub fn new() -> Self {
+                Self::default()
+            }
+
+            pub fn with_endpoints(mut self, endpoints: crate::Endpoints) -> Self {
+                self.endpoints = endpoints;
+                self
+            }
+
+            pub fn with_retry(mut self, retry: crate::RetryPolicy) -> Self {
+                self.retry = retry;
+                self
+            }
+        }
+
+        impl nugget_connector::ConnectorFactory for $factory {
+            fn info(&self) -> nugget_connector::KindInfo {
+                nugget_connector::KindInfo {
+                    kind: $kind,
+                    display_name: $display,
+                    auth: nugget_connector::AuthKind::Password,
+                    settings_schema: <$settings>::schema(),
+                }
+            }
+
+            fn validate(&self, settings: &serde_json::Value) -> nugget_core::Result<()> {
+                <$settings>::parse(settings).map(|_| ())
+            }
+
+            fn build(
+                &self,
+                settings: &serde_json::Value,
+                ctx: nugget_connector::ConnectorContext,
+            ) -> nugget_core::Result<std::sync::Arc<dyn nugget_connector::Connector>> {
+                self.make(<$settings>::parse(settings)?, ctx)
+            }
+        }
+
+        impl std::fmt::Debug for $conn {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($conn))
+                    .field("source", &self.ctx.source)
+                    .finish_non_exhaustive()
+            }
+        }
+    };
+}
+
 mod api;
-pub mod auth;
+mod auth;
 mod github;
 mod linear;
 mod notion;
@@ -34,7 +106,6 @@ mod slack;
 mod text;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use nugget_connector::Registry;
 
@@ -97,25 +168,7 @@ impl Endpoints {
     }
 }
 
-/// In-pass retries for rate limits and transient failures. A `Retry-After` longer than
-/// `max_delay` is not slept on: the pass returns `RateLimited { retry_after_ms }` at once and
-/// the ingest supervisor backs off; progress up to the last checkpoint is kept.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RetryPolicy {
-    pub max_retries: u32,
-    pub base_delay: Duration,
-    pub max_delay: Duration,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            max_retries: 4,
-            base_delay: Duration::from_secs(1),
-            max_delay: Duration::from_secs(60),
-        }
-    }
-}
+pub use nugget_connector::retry::RetryPolicy;
 
 /// Register the `slack`, `notion`, `github` and `linear` kinds with production endpoints.
 pub fn register(registry: &mut Registry) {

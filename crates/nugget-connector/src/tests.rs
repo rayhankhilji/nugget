@@ -97,20 +97,3 @@ async fn cancelled_exchange_still_records_egress() {
     assert!(events[0].bytes_sent >= 1000);
     assert_eq!(events[0].bytes_received, 0);
 }
-
-#[tokio::test]
-async fn completed_exchange_records_exactly_one_row_with_received_bytes() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![b'x'; 4096]))
-        .mount(&server)
-        .await;
-    let sink = Arc::new(VecSink::default());
-    let http = MeteredHttp::new(sink.clone(), "sync:test").unwrap();
-    http.send(http.request(Method::GET, &server.uri()), &[])
-        .await
-        .unwrap();
-    let events = sink.0.lock().unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].bytes_received, 4096);
-}

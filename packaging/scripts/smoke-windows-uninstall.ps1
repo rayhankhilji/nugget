@@ -1,4 +1,4 @@
-# Check what the NSIS uninstaller removes (GG6-9), without a UI: seed Nugget's default data folders,
+# Check what the NSIS uninstaller removes, without a UI: seed Nugget's default data folders,
 # a vault and a saved key, then uninstall silently with each command-line choice and look at what
 # is left.
 #

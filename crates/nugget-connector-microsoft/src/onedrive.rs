@@ -38,8 +38,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_connector::http::MeteredHttp;
 use nugget_connector::{
-    AuthFlow, AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext,
-    ConnectorFactory, Content, Document, KindInfo,
+    AuthFlow, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
@@ -51,13 +50,11 @@ use time::format_description::well_known::Rfc3339;
 use url::Url;
 
 use crate::graph::{
-    DeltaPage, Get, GraphApi, ItemGet, RetryItem, Skips, backoff, needs_resync, retry_after_ms,
-    status_error,
+    DeltaPage, Get, GraphApi, ItemGet, RetryItem, Skips, needs_resync, retry_after_ms, status_error,
 };
 use crate::oauth::{SCOPE_FILES_READ, SCOPE_OFFLINE_ACCESS, SCOPE_USER_READ};
 use crate::settings::OneDriveSettings;
 use crate::text::clean_line;
-use crate::{MicrosoftEndpoints, RetryPolicy};
 
 pub(crate) const KIND: &str = "onedrive";
 const FEATURE: &str = "sync:onedrive";
@@ -147,72 +144,32 @@ impl Cursor {
     }
 }
 
-/// Factory for `onedrive` sources.
-#[derive(Debug, Clone, Default)]
-pub struct OneDriveFactory {
-    endpoints: MicrosoftEndpoints,
-    retry: RetryPolicy,
-}
-
-impl OneDriveFactory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_endpoints(mut self, endpoints: MicrosoftEndpoints) -> Self {
-        self.endpoints = endpoints;
-        self
-    }
-
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
-    }
-}
-
-impl ConnectorFactory for OneDriveFactory {
-    fn info(&self) -> KindInfo {
-        KindInfo {
-            kind: KIND,
-            display_name: "OneDrive",
-            auth: AuthKind::OAuth,
-            settings_schema: OneDriveSettings::schema(),
-        }
-    }
-
-    fn validate(&self, settings: &Value) -> Result<()> {
-        OneDriveSettings::parse(settings).map(|_| ())
-    }
-
-    fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
-        let settings = OneDriveSettings::parse(settings)?;
-        let api = GraphApi::new(
-            FEATURE,
-            SCOPES,
-            &settings.common(),
-            &self.endpoints,
-            self.retry,
-            ctx.clone(),
-        )?;
+graph_factory!(
+    OneDriveFactory,
+    OneDriveConnector,
+    KIND,
+    "OneDrive",
+    OneDriveSettings,
+    |f, settings, api, ctx| {
         // A separate client for the pre-authenticated download URLs: it never sees the token.
         let download = MeteredHttp::new(ctx.egress.clone(), FEATURE)?
             .with_max_body(usize::try_from(settings.max_bytes()).unwrap_or(usize::MAX));
         Ok(Arc::new(OneDriveConnector {
             api,
             download,
-            hosts: self
+            hosts: f
                 .endpoints
                 .download_hosts
                 .iter()
                 .map(|h| h.trim().trim_start_matches('.').to_ascii_lowercase())
                 .filter(|h| !h.is_empty())
                 .collect(),
-            allow_http: self.endpoints.allow_http_downloads,
+            allow_http: f.endpoints.allow_http_downloads,
             settings,
             ctx,
         }))
     }
-}
+);
 
 /// One account's OneDrive.
 pub struct OneDriveConnector {
@@ -222,14 +179,6 @@ pub struct OneDriveConnector {
     allow_http: bool,
     settings: OneDriveSettings,
     ctx: ConnectorContext,
-}
-
-impl std::fmt::Debug for OneDriveConnector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OneDriveConnector")
-            .field("source", &self.ctx.source)
-            .finish_non_exhaustive()
-    }
 }
 
 #[derive(Deserialize, Default)]
@@ -247,6 +196,7 @@ struct FileFacet {
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
+#[serde(rename_all = "camelCase")]
 struct DriveItem {
     id: String,
     name: Option<String>,
@@ -259,14 +209,12 @@ struct DriveItem {
     last_modified: Option<String>,
     #[serde(rename = "createdDateTime")]
     created: Option<String>,
-    #[serde(rename = "webUrl")]
     web_url: Option<String>,
     file: Option<FileFacet>,
     folder: Option<Value>,
     package: Option<Value>,
     root: Option<Value>,
     deleted: Option<Value>,
-    #[serde(rename = "remoteItem")]
     remote_item: Option<Value>,
     #[serde(rename = "parentReference")]
     parent: Option<ParentRef>,
@@ -803,20 +751,14 @@ impl OneDriveConnector {
                 Err(e @ Error::Network(_)) => (e, false),
                 Err(e) => return Err(e),
             };
-            let delay = (attempt < retry.max_retries)
-                .then(|| backoff(&retry, attempt, &err))
-                .flatten();
-            let Some(delay) = delay else {
+            let Some(delay) = retry.pause(attempt, &err) else {
                 return match err {
                     Error::Network(m) if server => Ok(UrlFetch::Failed(m)),
                     e => Err(e),
                 };
             };
             attempt += 1;
-            tokio::select! {
-                _ = tokio::time::sleep(delay) => {}
-                _ = cancel.cancelled() => return Err(Error::Cancelled),
-            }
+            nugget_connector::retry::sleep(delay, cancel).await?;
         }
     }
 }

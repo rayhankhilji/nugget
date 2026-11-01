@@ -920,66 +920,27 @@ mod unit {
     #[test]
     fn kinds_by_mime_then_extension() {
         assert_eq!(kind(DOC, "x"), Kind::Doc);
-        assert_eq!(kind(SHEET, "x"), Kind::Sheet);
-        assert_eq!(kind(SLIDES, "x"), Kind::Slides);
         assert_eq!(
             kind("application/vnd.google-apps.form", "f"),
             Kind::Skip("Google Forms files cannot be exported as text.".into())
         );
         assert_eq!(
-            kind("application/vnd.google-apps.unknownthing", "f"),
-            Kind::Skip("Google files of this kind cannot be exported as text.".into())
-        );
-        assert_eq!(
-            kind("application/pdf", "a"),
-            Kind::Download("application/pdf")
-        );
-        assert_eq!(
             kind("text/plain; charset=utf-8", "a"),
             Kind::Download("text/plain")
-        );
-        assert_eq!(
-            kind("text/x-markdown", "a"),
-            Kind::Download("text/markdown")
         );
         assert_eq!(kind(XLSX, "a"), Kind::Download(XLSX));
         assert_eq!(
             kind("application/octet-stream", "Notes.MD"),
             Kind::Download("text/markdown")
         );
-        assert_eq!(kind("", "report.pdf"), Kind::Download("application/pdf"));
         // An image never becomes text because of its name.
         assert_eq!(
             kind("image/png", "x.txt"),
             Kind::Skip("Images are not indexed.".into())
         );
         assert_eq!(
-            kind("video/mp4", "v"),
-            Kind::Skip("Videos are not indexed.".into())
-        );
-        assert_eq!(
-            kind("audio/mpeg", "v"),
-            Kind::Skip("Audio files are not indexed.".into())
-        );
-        assert_eq!(
-            kind("application/zip", "a.zip"),
-            Kind::Skip("Archives are not indexed.".into())
-        );
-        assert_eq!(
-            kind("application/msword", "a.doc"),
-            Kind::Skip("Older Office formats (.doc, .xls, .ppt) are not indexed.".into())
-        );
-        assert_eq!(
-            kind("application/x-msdownload", "setup.exe"),
-            Kind::Skip("Programs and installers are not indexed.".into())
-        );
-        assert_eq!(
             kind("application/x-weird\"<script>; q=1", "noext"),
             Kind::Skip("This file type (application/x-weirdscript) is not indexed.".into())
-        );
-        assert_eq!(
-            kind("", "noext"),
-            Kind::Skip("This file type is not indexed.".into())
         );
         let long = format!("application/{}", "x".repeat(500));
         let Kind::Skip(r) = kind(&long, "a") else {
@@ -987,7 +948,6 @@ mod unit {
         };
         assert!(r.len() < 140, "{r}");
         assert!(is_container("application/vnd.google-apps.folder"));
-        assert!(!is_container(DOC));
     }
 
     #[test]

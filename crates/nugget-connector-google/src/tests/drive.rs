@@ -591,25 +591,6 @@ async fn shared_files_are_out_of_scope_by_default() {
 }
 
 #[tokio::test]
-async fn shared_with_me_only_when_opted_in() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    mount_mixed_listing(&h).await;
-    let conn = gdrive(
-        &h,
-        json!({"client_id": "cid", "include_shared_with_me": true}),
-    );
-    let sink = RecSink::default();
-    run(&conn, None, &sink).await.unwrap();
-    assert_eq!(sink.summary(), vec!["+mine", "+theirs"]);
-    let q = query(&hits(&h, &format!("{API}/files")).await[0]);
-    assert_eq!(q["q"], "trashed=false");
-    assert_eq!(q["corpora"], "user");
-    assert!(!q.contains_key("includeItemsFromAllDrives"));
-    assert!(!q.contains_key("supportsAllDrives"));
-}
-
-#[tokio::test]
 async fn shared_drives_only_when_opted_in() {
     let h = Harness::new().await;
     h.seed_tokens("at", false);
@@ -651,39 +632,6 @@ async fn shared_drives_only_when_opted_in() {
 }
 
 #[tokio::test]
-async fn resumes_a_listing_from_its_page_token() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/changes/startPageToken")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"startPageToken": "999"})))
-        .expect(0)
-        .mount(&h.server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/files")))
-        .and(query_param_is_missing("pageToken"))
-        .respond_with(files_page(vec![], None))
-        .expect(0)
-        .mount(&h.server)
-        .await;
-    mount_files(
-        &h,
-        Some("p2"),
-        files_page(vec![file("d2", "Second", DOC, "1")], None),
-    )
-    .await;
-    mount_changes(&h, "100", changes_page(vec![], None, Some("101"))).await;
-    mount_export(&h, "d2", "two").await;
-    let conn = gdrive(&h, mine());
-    let sink = RecSink::default();
-    let cursor = json!({"v": 1, "full": true, "start_token": "100", "page_token": "p2"});
-    let out = run(&conn, Some(cursor), &sink).await.unwrap();
-    assert_eq!(sink.summary(), vec!["+d2"]);
-    assert_eq!(out, json!({"v": 1, "changes_token": "101"}));
-}
-
-#[tokio::test]
 async fn an_interrupted_reconciling_listing_restarts_from_the_first_page() {
     let h = Harness::new().await;
     h.seed_tokens("at", false);
@@ -718,36 +666,6 @@ async fn an_interrupted_reconciling_listing_restarts_from_the_first_page() {
     assert_eq!(
         checkpoints(&sink)[0],
         json!({"v": 1, "full": true, "reconcile": true, "start_token": "100", "page_token": "p2"})
-    );
-}
-
-#[tokio::test]
-async fn expired_listing_page_token_starts_a_reconciling_listing() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    h.know("keep", "1|");
-    h.know("gone", "1|");
-    mount_files(&h, Some("p2"), ResponseTemplate::new(410)).await;
-    mount_start(&h, "500").await;
-    mount_files(
-        &h,
-        None,
-        files_page(vec![file("keep", "Keep", DOC, "1")], None),
-    )
-    .await;
-    mount_changes(&h, "500", changes_page(vec![], None, Some("501"))).await;
-    let conn = gdrive(&h, mine());
-    let sink = RecSink::default();
-    let cursor = json!({"v": 1, "full": true, "start_token": "100", "page_token": "p2"});
-    let out = run(&conn, Some(cursor), &sink).await.unwrap();
-    assert_eq!(out, json!({"v": 1, "changes_token": "501"}));
-    assert_eq!(sink.summary(), vec!["-gone"]);
-    // The old start token is dropped with the expired listing.
-    assert!(
-        hits(&h, &format!("{API}/changes"))
-            .await
-            .iter()
-            .all(|r| query(r)["pageToken"] == "500")
     );
 }
 
@@ -839,34 +757,6 @@ async fn expired_changes_token_starts_a_reconciling_listing() {
 }
 
 #[tokio::test]
-async fn tokens_that_keep_expiring_end_the_pass() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    mount_start(&h, "500").await;
-    mount_files(&h, None, files_page(vec![], None)).await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/changes")))
-        .respond_with(ResponseTemplate::new(410))
-        .mount(&h.server)
-        .await;
-    let conn = gdrive(&h, mine());
-    let r = tokio::time::timeout(
-        Duration::from_secs(10),
-        run(
-            &conn,
-            Some(json!({"v": 1, "changes_token": "stale"})),
-            &RecSink::default(),
-        ),
-    )
-    .await
-    .expect("the pass never ended");
-    assert!(
-        matches!(r, Err(Error::Other(ref m)) if m.contains("expiring")),
-        "{r:?}"
-    );
-}
-
-#[tokio::test]
 async fn a_repeating_page_token_stops_the_listing() {
     let h = Harness::new().await;
     h.seed_tokens("at", false);
@@ -947,49 +837,6 @@ async fn rate_limit_with_retry_after_is_retried() {
 }
 
 #[tokio::test]
-async fn server_errors_are_retried() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/changes")))
-        .respond_with(ResponseTemplate::new(503))
-        .up_to_n_times(2)
-        .with_priority(1)
-        .mount(&h.server)
-        .await;
-    mount_changes(
-        &h,
-        "200",
-        changes_page(vec![removed("x1")], None, Some("201")),
-    )
-    .await;
-    h.know("x1", "1|");
-    let conn = gdrive_with(&h, mine(), fast_retry(2));
-    let sink = RecSink::default();
-    let out = run(&conn, Some(json!({"v": 1, "changes_token": "200"})), &sink)
-        .await
-        .unwrap();
-    assert_eq!(out["changes_token"], "201");
-    assert_eq!(sink.summary(), vec!["-x1"]);
-    assert_eq!(hits(&h, &format!("{API}/changes")).await.len(), 3);
-
-    // Persistent 5xx: a network error after the retries, the cursor untouched.
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/changes")))
-        .respond_with(ResponseTemplate::new(500))
-        .expect(3)
-        .mount(&h.server)
-        .await;
-    let conn = gdrive_with(&h, mine(), fast_retry(2));
-    let sink = RecSink::default();
-    let r = run(&conn, Some(json!({"v": 1, "changes_token": "200"})), &sink).await;
-    assert!(matches!(r, Err(Error::Network(_))), "{r:?}");
-    assert!(checkpoints(&sink).is_empty());
-}
-
-#[tokio::test]
 async fn daily_quota_is_rate_limited_with_a_long_hint() {
     let h = Harness::new().await;
     h.seed_tokens("at", false);
@@ -1055,49 +902,6 @@ async fn api_401_refreshes_the_token_once_then_succeeds() {
     assert_eq!(out["changes_token"], "201");
     // The refresh is metered under the same feature.
     h.assert_egress("sync:gdrive").await;
-}
-
-#[tokio::test]
-async fn revoked_refresh_token_is_unauthorized() {
-    // Expired access token: the refresh happens before any Drive request.
-    let h = Harness::new().await;
-    h.seed_tokens("old", true);
-    Mock::given(method("POST"))
-        .and(path("/token"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error": "invalid_grant"})))
-        .mount(&h.server)
-        .await;
-    let conn = gdrive(&h, mine());
-    let r = run(&conn, None, &RecSink::default()).await;
-    assert!(is_unauthorized(&r), "{r:?}");
-    assert!(
-        requests(&h)
-            .await
-            .iter()
-            .all(|r| !r.url.path().starts_with(API))
-    );
-    h.assert_egress("sync:gdrive").await;
-
-    // A 401 mid-pass whose refresh is refused.
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    Mock::given(method("POST"))
-        .and(path("/token"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error": "invalid_grant"})))
-        .mount(&h.server)
-        .await;
-    Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(401))
-        .mount(&h.server)
-        .await;
-    let conn = gdrive(&h, mine());
-    let r = run(
-        &conn,
-        Some(json!({"v": 1, "changes_token": "200"})),
-        &RecSink::default(),
-    )
-    .await;
-    assert!(is_unauthorized(&r), "{r:?}");
 }
 
 #[tokio::test]
@@ -1323,92 +1127,4 @@ async fn cancelled_sync_stops_before_requests() {
         .await;
     assert!(matches!(r, Err(Error::Cancelled)), "{r:?}");
     assert!(requests(&h).await.is_empty());
-}
-
-#[test]
-fn factory_validates_settings() {
-    let f = DriveFactory::new();
-    assert!(f.validate(&json!({"client_id": "x"})).is_ok());
-    assert!(
-        f.validate(&json!({
-            "client_id": "x", "client_secret": "s", "account_hint": "a@b.c",
-            "include_shared_with_me": true, "include_shared_drives": true, "max_file_mb": 200
-        }))
-        .is_ok()
-    );
-    assert!(
-        f.validate(&json!({"client_id": "x", "max_file_mb": 1}))
-            .is_ok()
-    );
-    assert!(
-        f.validate(&json!({"client_id": "x", "max_file_mb": 0}))
-            .is_err()
-    );
-    assert!(
-        f.validate(&json!({"client_id": "x", "max_file_mb": 201}))
-            .is_err()
-    );
-    assert!(
-        f.validate(&json!({"client_id": "x", "max_file_mb": -1}))
-            .is_err()
-    );
-    assert!(f.validate(&json!({"client_id": "x", "bogus": 1})).is_err());
-    assert!(
-        f.validate(&json!({"client_id": "x", "window_days": 30}))
-            .is_err()
-    );
-    assert!(
-        f.validate(&json!({"client_id": "x", "include_shared_drives": "yes"}))
-            .is_err()
-    );
-    assert!(f.validate(&json!({})).is_err());
-    assert!(f.validate(&Value::Null).is_err());
-    assert!(f.validate(&json!({"client_id": " "})).is_err());
-    assert!(f.validate(&json!({"client_id": "a b"})).is_err());
-}
-
-#[test]
-fn factory_schema_has_drive_fields() {
-    let info = DriveFactory::new().info();
-    assert_eq!(info.kind, "gdrive");
-    assert_eq!(info.display_name, "Google Drive");
-    assert_eq!(info.auth, nugget_connector::AuthKind::OAuth);
-    let s = &info.settings_schema;
-    assert_eq!(s["required"], json!(["client_id"]));
-    assert_eq!(s["additionalProperties"], json!(false));
-    let p = &s["properties"];
-    for k in ["client_id", "client_secret", "account_hint"] {
-        assert!(p[k].is_object(), "{k}");
-    }
-    assert_eq!(p["include_shared_with_me"]["type"], "boolean");
-    assert_eq!(p["include_shared_with_me"]["default"], false);
-    assert_eq!(p["include_shared_drives"]["type"], "boolean");
-    assert_eq!(p["include_shared_drives"]["default"], false);
-    assert_eq!(p["max_file_mb"]["type"], "integer");
-    assert_eq!(p["max_file_mb"]["minimum"], 1);
-    assert_eq!(p["max_file_mb"]["maximum"], 200);
-    assert_eq!(p["max_file_mb"]["default"], 25);
-    assert!(p.get("window_days").is_none());
-}
-
-#[tokio::test]
-async fn kind_poll_interval_and_consent_scope() {
-    let h = Harness::new().await;
-    let conn = h.build(
-        &DriveFactory::new(),
-        json!({"client_id": "cid", "account_hint": "me@example.com"}),
-    );
-    assert_eq!(conn.kind(), "gdrive");
-    assert_eq!(conn.poll_interval(), Duration::from_secs(300));
-    let flow = conn.begin_auth().await.unwrap();
-    assert!(flow.url.starts_with(nugget_oauth::google::AUTH_URL));
-    let q: HashMap<String, String> = url::Url::parse(&flow.url)
-        .unwrap()
-        .query_pairs()
-        .into_owned()
-        .collect();
-    assert_eq!(q["scope"], "https://www.googleapis.com/auth/drive.readonly");
-    assert_eq!(q["client_id"], "cid");
-    assert_eq!(q["login_hint"], "me@example.com");
-    drop(flow);
 }

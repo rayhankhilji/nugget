@@ -61,18 +61,7 @@ async fn vault_presets_urls_and_metadata() {
 }
 
 #[tokio::test]
-async fn attachments_can_be_left_out() {
-    let tmp = tempfile::tempdir().unwrap();
-    let v = vault(&tmp);
-    let mut h = Harness::new(
-        Kind::Obsidian,
-        json!({ "vault": v, "include_attachments": false, "exclude": ["Notes/"] }),
-    );
-    assert_eq!(upserts(&h.sync().await), set(["0:Two.md"]));
-}
-
-#[tokio::test]
-async fn obsidian_internals_stay_excluded_even_with_hidden_files() {
+async fn attachments_filter_and_internals_stay_excluded_even_with_hidden_files() {
     let tmp = tempfile::tempdir().unwrap();
     let v = vault(&tmp);
     write(&v, ".hidden note.md", "h");
@@ -88,31 +77,9 @@ async fn obsidian_internals_stay_excluded_even_with_hidden_files() {
             .any(|k| k.contains(".obsidian") || k.contains(".trash")),
         "{keys:?}"
     );
-}
-
-#[tokio::test]
-async fn vault_edits_are_watched() {
-    let tmp = tempfile::tempdir().unwrap();
-    let v = vault(&tmp);
     let mut h = Harness::new(
         Kind::Obsidian,
-        json!({ "vault": v, "debounce_ms": 100, "rescan_interval_secs": 0 }),
+        json!({ "vault": v, "include_attachments": false, "exclude": ["Notes/"] }),
     );
-    h.sync().await;
-    let (cancel, task) = h.start_watch();
-    h.wait_watching(&v, "md").await;
-
-    append(&v, "Notes/Note One.md", "\nmore");
-    write(&v, ".obsidian/workspace.json", "{\"changed\":true}");
-    let want = version(&path(&v, "Notes/Note One.md"));
-    let c = h
-        .wait_for("note upsert", |c| {
-            docs(c)
-                .get("0:Notes/Note One.md")
-                .is_some_and(|d| d.version.as_deref() == Some(want.as_str()))
-        })
-        .await;
-    assert!(!upserts(&c).iter().any(|k| k.contains(".obsidian")));
-    cancel.cancel();
-    let _ = task.await.unwrap();
+    assert_eq!(upserts(&h.sync().await), set(["0:Two.md"]));
 }

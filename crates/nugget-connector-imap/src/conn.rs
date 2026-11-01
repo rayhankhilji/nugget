@@ -43,10 +43,6 @@ pub(crate) const LITERAL_SLACK: u64 = 1024 * 1024;
 /// Longest server-supplied text kept in an error message.
 const MAX_ERROR_TEXT: usize = 200;
 
-// ---------------------------------------------------------------------------------------------
-// Byte metering
-// ---------------------------------------------------------------------------------------------
-
 /// Bytes moved over one connection (wire bytes, TLS records included).
 #[derive(Debug, Default)]
 pub(crate) struct Counters {
@@ -187,10 +183,6 @@ impl Drop for EgressMeter {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Connecting
-// ---------------------------------------------------------------------------------------------
-
 pub(crate) type Stream = Guarded<tokio_rustls::client::TlsStream<Metered<TcpStream>>>;
 
 /// Where and how to connect.
@@ -320,6 +312,7 @@ pub(crate) enum Special {
     Trash,
     Junk,
     All,
+    Archive,
     Drafts,
     Other,
 }
@@ -598,7 +591,7 @@ impl Imap {
                             special = special.or(Some(Special::Other));
                             virtual_view = true;
                         }
-                        NameAttribute::Archive => special = special.or(Some(Special::Other)),
+                        NameAttribute::Archive => special = special.or(Some(Special::Archive)),
                         _ => {}
                     }
                 }
@@ -616,15 +609,21 @@ impl Imap {
         Ok(out)
     }
 
-    /// EXAMINE (read-only: the server never changes flags for us). `None` when the server says
-    /// NO (missing or inaccessible mailbox).
-    pub(crate) async fn examine(&mut self, mailbox: &str) -> Result<Option<Selected>> {
+    /// EXAMINE (`read_only`: the server never changes flags for us) or SELECT (for
+    /// [`uid_move`](Self::uid_move)). `None` when the server says NO (missing or inaccessible).
+    pub(crate) async fn open(
+        &mut self,
+        mailbox: &str,
+        read_only: bool,
+    ) -> Result<Option<Selected>> {
         let mut sel = Selected::default();
-        let cmd = if self.condstore {
-            format!("EXAMINE {} (CONDSTORE)", quote(mailbox)?)
+        let verb = if read_only { "EXAMINE" } else { "SELECT" };
+        let condstore = if read_only && self.condstore {
+            " (CONDSTORE)"
         } else {
-            format!("EXAMINE {}", quote(mailbox)?)
+            ""
         };
+        let cmd = format!("{verb} {}{condstore}", quote(mailbox)?);
         let done = self
             .exec(&cmd, |r| {
                 match r {
@@ -646,40 +645,10 @@ impl Imap {
         match done {
             Done::Ok => Ok(Some(sel)),
             Done::No(m) => {
-                tracing::warn!(mailbox, "IMAP EXAMINE refused: {m}");
+                tracing::warn!(mailbox, "IMAP {verb} refused: {m}");
                 Ok(None)
             }
-            Done::Bad(m) => Err(net(format!("IMAP EXAMINE failed: {m}"))),
-        }
-    }
-
-    /// SELECT (read-write, for [`uid_move`](Self::uid_move)). `None` when the server says NO.
-    pub(crate) async fn select(&mut self, mailbox: &str) -> Result<Option<Selected>> {
-        let mut sel = Selected::default();
-        let done = self
-            .exec(&format!("SELECT {}", quote(mailbox)?), |r| {
-                match r {
-                    Response::Data {
-                        status: Status::Ok,
-                        outcome,
-                    } => {
-                        if let Some(ResponseCode::UidValidity(v)) = &outcome.code {
-                            sel.uidvalidity = Some(*v);
-                        }
-                    }
-                    Response::MailboxData(MailboxDatum::Exists(n)) => sel.exists = Some(*n),
-                    _ => {}
-                }
-                Ok(())
-            })
-            .await?;
-        match done {
-            Done::Ok => Ok(Some(sel)),
-            Done::No(m) => {
-                tracing::warn!(mailbox, "IMAP SELECT refused: {m}");
-                Ok(None)
-            }
-            Done::Bad(m) => Err(net(format!("IMAP SELECT failed: {m}"))),
+            Done::Bad(m) => Err(net(format!("IMAP {verb} failed: {m}"))),
         }
     }
 
@@ -693,32 +662,13 @@ impl Imap {
     /// "All Mail", where moving out of the inbox only drops the Inbox label), else a mailbox
     /// named `Archive`.
     pub(crate) async fn archive_mailbox(&mut self) -> Result<Option<String>> {
-        let (mut archive, mut all, mut named) = (None, None, None);
-        self.exec_ok("LIST \"\" \"*\"", |r| {
-            if let Response::MailboxData(MailboxDatum::List(l)) = r {
-                let noselect = l.name_attributes.iter().any(|a| {
-                    matches!(a, NameAttribute::NoSelect)
-                        || matches!(a, NameAttribute::Extension(e) if e.eq_ignore_ascii_case("\\NonExistent"))
-                });
-                if noselect {
-                    return Ok(());
-                }
-                let name = l.name.to_string();
-                for a in &l.name_attributes {
-                    match a {
-                        NameAttribute::Archive if archive.is_none() => archive = Some(name.clone()),
-                        NameAttribute::All if all.is_none() => all = Some(name.clone()),
-                        _ => {}
-                    }
-                }
-                if named.is_none() && name.eq_ignore_ascii_case("Archive") {
-                    named = Some(name);
-                }
-            }
-            Ok(())
-        })
-        .await?;
-        Ok(archive.or(all).or(named))
+        let list = self.list_all().await?;
+        let usable = || list.iter().filter(|m| !m.noselect);
+        let found = usable()
+            .find(|m| m.special == Some(Special::Archive))
+            .or_else(|| usable().find(|m| m.special == Some(Special::All)))
+            .or_else(|| usable().find(|m| m.name.eq_ignore_ascii_case("Archive")));
+        Ok(found.map(|m| m.name.clone()))
     }
 
     pub(crate) async fn uid_search(&mut self, criteria: &str) -> Result<Vec<u32>> {
@@ -735,42 +685,26 @@ impl Imap {
         Ok(uids)
     }
 
-    /// Flags, size, date (and MODSEQ under CONDSTORE) for a UID set.
-    pub(crate) async fn fetch_meta(&mut self, set: &str) -> Result<Vec<MessageMeta>> {
-        let items = if self.condstore {
-            "(UID FLAGS RFC822.SIZE INTERNALDATE MODSEQ)"
+    /// Flags (and MODSEQ under CONDSTORE) for a UID set, plus size and date when `full`.
+    pub(crate) async fn fetch_meta(&mut self, set: &str, full: bool) -> Result<Vec<MessageMeta>> {
+        let extra = if full {
+            " RFC822.SIZE INTERNALDATE"
         } else {
-            "(UID FLAGS RFC822.SIZE INTERNALDATE)"
+            ""
         };
+        let modseq = if self.condstore { " MODSEQ" } else { "" };
         let mut out = Vec::new();
-        self.exec_ok(&format!("UID FETCH {set} {items}"), |r| {
-            if let Response::Fetch(_, attrs) = r
-                && let Some(m) = meta_from(attrs)
-            {
-                out.push(m);
-            }
-            Ok(())
-        })
-        .await?;
-        Ok(out)
-    }
-
-    /// Flags (and MODSEQ under CONDSTORE) only.
-    pub(crate) async fn fetch_flags(&mut self, set: &str) -> Result<Vec<MessageMeta>> {
-        let items = if self.condstore {
-            "(UID FLAGS MODSEQ)"
-        } else {
-            "(UID FLAGS)"
-        };
-        let mut out = Vec::new();
-        self.exec_ok(&format!("UID FETCH {set} {items}"), |r| {
-            if let Response::Fetch(_, attrs) = r
-                && let Some(m) = meta_from(attrs)
-            {
-                out.push(m);
-            }
-            Ok(())
-        })
+        self.exec_ok(
+            &format!("UID FETCH {set} (UID FLAGS{extra}{modseq})"),
+            |r| {
+                if let Response::Fetch(_, attrs) = r
+                    && let Some(m) = meta_from(attrs)
+                {
+                    out.push(m);
+                }
+                Ok(())
+            },
+        )
         .await?;
         Ok(out)
     }

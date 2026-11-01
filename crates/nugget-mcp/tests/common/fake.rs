@@ -1,4 +1,4 @@
-//! An in-memory [`KnowledgeBackend`] for tests (here, in `nuggetd` and in `bench`).
+//! An in-memory [`KnowledgeBackend`] for the tests.
 
 use std::sync::Mutex;
 
@@ -7,11 +7,11 @@ use nugget_core::Result;
 use nugget_core::ids::{EntityId, ItemRef};
 use time::OffsetDateTime;
 
-use crate::backend::{
-    ContextPack, ContextPassage, EntityRecord, EntitySummaryRecord, ItemRecord, ItemSummaryRecord,
-    KnowledgeBackend, NeighbourhoodRecord, RecentChanges, SearchRecord,
+use nugget_mcp::{
+    ContextPack, ContextPassage, DetailOrigins, EntityRecord, EntitySummaryRecord, ItemRecord,
+    ItemSummaryRecord, KnowledgeBackend, NeighbourhoodRecord, RecentChanges, ScopeFilter,
+    SearchRecord,
 };
-use crate::scope::{DetailOrigins, ScopeFilter};
 
 /// Holds items, entities and graph views. Search matches items whose title or text contains any
 /// query word (case-insensitive), scored by matching words.
@@ -25,7 +25,6 @@ pub struct FakeBackend {
     graphs: Mutex<Vec<(EntityId, NeighbourhoodRecord)>>,
     details: Mutex<Vec<(EntityId, DetailOrigins)>>,
     ignore_filter: bool,
-    calls: Mutex<Vec<String>>,
     delay: Mutex<std::time::Duration>,
 }
 
@@ -78,15 +77,6 @@ impl FakeBackend {
         let mut g = lock(&self.graphs);
         g.retain(|(c, _)| c != &center);
         g.push((center, view));
-    }
-
-    /// Backend methods called so far, in order.
-    pub fn calls(&self) -> Vec<String> {
-        lock(&self.calls).clone()
-    }
-
-    fn log(&self, call: &str) {
-        lock(&self.calls).push(call.to_owned());
     }
 
     fn pass(&self, f: &ScopeFilter, source: &nugget_core::ids::SourceId, sensitive: bool) -> bool {
@@ -145,7 +135,6 @@ impl KnowledgeBackend for FakeBackend {
         limit: usize,
         f: &ScopeFilter,
     ) -> Result<Vec<SearchRecord>> {
-        self.log("search");
         self.pause().await;
         Ok(self
             .ranked(query, f)
@@ -169,7 +158,6 @@ impl KnowledgeBackend for FakeBackend {
         budget_tokens: u32,
         f: &ScopeFilter,
     ) -> Result<ContextPack> {
-        self.log("context");
         self.pause().await;
         let mut excluded = 0;
         if !self.ignore_filter && !f.include_sensitive {
@@ -220,7 +208,6 @@ impl KnowledgeBackend for FakeBackend {
         offset: usize,
         f: &ScopeFilter,
     ) -> Result<Vec<EntitySummaryRecord>> {
-        self.log("find_entities");
         let needle = text.map(str::to_lowercase);
         let mut v: Vec<_> = lock(&self.entities)
             .iter()
@@ -254,7 +241,6 @@ impl KnowledgeBackend for FakeBackend {
     }
 
     async fn get_entity(&self, id: &EntityId, _f: &ScopeFilter) -> Result<Option<EntityRecord>> {
-        self.log("get_entity");
         // Returns everything: per-fact filtering is the MCP layer's job.
         Ok(lock(&self.entities).iter().find(|e| &e.id == id).cloned())
     }
@@ -266,7 +252,6 @@ impl KnowledgeBackend for FakeBackend {
         _limit: usize,
         _f: &ScopeFilter,
     ) -> Result<NeighbourhoodRecord> {
-        self.log("neighbourhood");
         Ok(lock(&self.graphs)
             .iter()
             .find(|(c, _)| c == id)
@@ -275,7 +260,6 @@ impl KnowledgeBackend for FakeBackend {
     }
 
     async fn get_item(&self, item: &ItemRef, f: &ScopeFilter) -> Result<Option<ItemRecord>> {
-        self.log("get_item");
         Ok(lock(&self.items)
             .iter()
             .find(|i| &i.item == item && self.pass(f, &i.item.source, i.sensitive))
@@ -288,7 +272,6 @@ impl KnowledgeBackend for FakeBackend {
         limit: usize,
         f: &ScopeFilter,
     ) -> Result<RecentChanges> {
-        self.log("recent_changes");
         let mut entities: Vec<_> = lock(&self.entities)
             .iter()
             .filter(|e| e.updated_at > since)

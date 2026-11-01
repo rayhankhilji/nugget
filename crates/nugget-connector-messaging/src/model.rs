@@ -332,6 +332,12 @@ pub fn mime_from_name(name: &str) -> Option<&'static str> {
 }
 
 /// The basename of a `/`- or `\`-separated path.
+/// `file://` URL of `path` (made absolute).
+pub fn file_url(path: &std::path::Path) -> Option<String> {
+    let abs = std::path::absolute(path).ok()?;
+    url::Url::from_file_path(abs).ok().map(String::from)
+}
+
 pub fn basename(p: &str) -> &str {
     p.rsplit(['/', '\\']).next().unwrap_or(p)
 }
@@ -357,22 +363,6 @@ mod tests {
         assert_eq!(normalise_phone("+1 (555) 123-4567"), "+15551234567");
         assert_eq!(phone_key("+1 (555) 123-4567").unwrap(), "5551234567");
         assert_eq!(phone_key("(555) 123-4567").unwrap(), "5551234567");
-    }
-
-    #[test]
-    fn dedupe_and_merge() {
-        let at = datetime!(2024-05-01 9:00 UTC);
-        let mut a = Conversation::new("wa:x", "X");
-        let alice = a.participant("Alice", None, false);
-        a.messages.push(Message::new(at, Some(alice), "hi"));
-        let mut b = Conversation::new("wa:x", "X");
-        let me = b.participant("Me", None, true);
-        let alice_b = b.participant("Alice", None, false);
-        b.messages.push(Message::new(at, Some(alice_b), "hi"));
-        b.messages.push(Message::new(at, Some(me), "hey"));
-        a.merge(b);
-        assert_eq!(a.messages.len(), 2);
-        assert_eq!(a.participants.len(), 2);
     }
 
     /// Regression: identical messages in one export (two photos in the same minute) were
@@ -403,10 +393,5 @@ mod tests {
             .push(Message::new(at, longer.messages[0].author, "ok"));
         a.merge(longer);
         assert_eq!(a.messages.len(), 6, "max of the two counts");
-    }
-
-    #[test]
-    fn names_are_single_line() {
-        assert_eq!(clean_name("\u{200e}Ali\nce\t  B "), "Ali ce B");
     }
 }

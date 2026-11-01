@@ -94,6 +94,58 @@ impl Backoff {
     }
 }
 
+/// In-pass retries for throttled or transient failures. After `max_retries`, or when the server
+/// asks for a longer wait than `max_delay`, the error goes to the ingest supervisor, which backs
+/// off; progress up to the last checkpoint is kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryPolicy {
+    pub max_retries: u32,
+    pub base_delay: Duration,
+    pub max_delay: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: 4,
+            base_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(60),
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// The pause before retry `attempt` after `err`: [`Backoff`] with a `RateLimited` hint as the
+    /// floor. `None` when retries are spent or the hint exceeds `max_delay`.
+    pub fn pause(&self, attempt: u32, err: &nugget_core::Error) -> Option<Duration> {
+        let hint = match err {
+            nugget_core::Error::RateLimited {
+                retry_after_ms: Some(ms),
+            } => Some(Duration::from_millis(*ms)),
+            _ => None,
+        };
+        if attempt >= self.max_retries || hint.is_some_and(|h| h > self.max_delay) {
+            return None;
+        }
+        let b = Backoff {
+            base: self.base_delay,
+            max: self.max_delay,
+        };
+        Some(b.delay(attempt, hint))
+    }
+}
+
+/// Sleep for `d`, or return `Err(Cancelled)` as soon as `cancel` fires.
+pub async fn sleep(
+    d: Duration,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> nugget_core::Result<()> {
+    tokio::select! {
+        _ = tokio::time::sleep(d) => Ok(()),
+        _ = cancel.cancelled() => Err(nugget_core::Error::Cancelled),
+    }
+}
+
 /// Cheap, non-cryptographic jitter source (no RNG dependency).
 fn jitter_seed() -> u64 {
     use std::hash::{BuildHasher, Hasher};
@@ -185,6 +237,19 @@ mod tests {
             retry_after(&h(&[(RETRY_AFTER, "Sunday, 06-Nov-94 08:49:37 GMT")])),
             None
         );
+        // A policy pauses at least as long as the hint, and refuses hints over its cap and
+        // attempts past its budget.
+        let p = RetryPolicy {
+            max_retries: 2,
+            base_delay: Duration::from_millis(10),
+            max_delay: Duration::from_secs(2),
+        };
+        let hint = |ms| nugget_core::Error::RateLimited {
+            retry_after_ms: Some(ms),
+        };
+        assert!(p.pause(0, &hint(1_500)).unwrap() >= Duration::from_millis(1_500));
+        assert_eq!(p.pause(0, &hint(60_000)), None);
+        assert_eq!(p.pause(2, &nugget_core::Error::Network("x".into())), None);
         let headers = h(&[
             (DATE, "yesterday"),
             (RETRY_AFTER, "Wed, 21 Oct 2026 07:28:30 GMT"),

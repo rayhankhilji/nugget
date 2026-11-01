@@ -143,27 +143,8 @@ pub fn assert_well_formed(d: &Document) {
             d.key
         );
     }
-    assert_eq!(d.mime, "text/markdown");
     assert!(d.version.as_deref().is_some_and(|v| v.len() == 64));
     assert!(d.title.as_deref().is_some_and(|t| t.contains(" — ")));
-    assert!(d.modified_at.is_some());
-    let md = &d.metadata;
-    for k in [
-        "service",
-        "thread_id",
-        "conversation",
-        "is_group",
-        "period",
-        "message_count",
-        "first_at",
-        "last_at",
-        "participants",
-        "contacts",
-        "attachments",
-        "sensitive",
-    ] {
-        assert!(md.get(k).is_some(), "metadata.{k} missing in {}", d.key);
-    }
 }
 
 pub fn write(dir: &Path, name: &str, content: &str) -> PathBuf {

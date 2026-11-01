@@ -40,8 +40,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_connector::http::{MeteredHttp, Response};
 use nugget_connector::{
-    AuthFlow, AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext,
-    ConnectorFactory, Content, Document, KindInfo,
+    AuthFlow, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
@@ -51,6 +50,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::GITHUB_KIND;
 use crate::api::{
     self, Api, ItemFailures, Outcome, classify_common, header_u64, retry_after_ms, server_now,
 };
@@ -59,7 +59,6 @@ use crate::settings::{self, MAX_WINDOW_DAYS};
 use crate::text::{
     DAY_SECS, clean, date, now_unix, one_line, parse_rfc3339, rfc3339, truncate_chars,
 };
-use crate::{Endpoints, GITHUB_KIND, RetryPolicy};
 
 const FEATURE: &str = "sync:github";
 const SERVICE: &str = "GitHub";
@@ -218,62 +217,23 @@ impl Cursor {
     }
 }
 
-/// Factory for `github` sources.
-#[derive(Debug, Clone)]
-pub struct GitHubFactory {
-    endpoints: Endpoints,
-    retry: RetryPolicy,
-    device_poll: Duration,
-}
-
-impl Default for GitHubFactory {
-    fn default() -> Self {
-        Self {
-            endpoints: Endpoints::default(),
-            retry: RetryPolicy::default(),
-            device_poll: Duration::from_secs(5),
-        }
-    }
-}
+factory!(
+    GitHubFactory,
+    GitHubConnector,
+    GITHUB_KIND,
+    "GitHub",
+    GitHubSettings,
+    device_poll: Duration = Duration::from_secs(5)
+);
 
 impl GitHubFactory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_endpoints(mut self, endpoints: Endpoints) -> Self {
-        self.endpoints = endpoints;
-        self
-    }
-
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
-    }
-
     /// Shortest wait between device-flow polls (GitHub's `interval` wins when longer). Tests.
     pub fn with_device_poll_interval(mut self, d: Duration) -> Self {
         self.device_poll = d;
         self
     }
-}
 
-impl ConnectorFactory for GitHubFactory {
-    fn info(&self) -> KindInfo {
-        KindInfo {
-            kind: GITHUB_KIND,
-            display_name: "GitHub",
-            auth: AuthKind::Password,
-            settings_schema: GitHubSettings::schema(),
-        }
-    }
-
-    fn validate(&self, settings: &Value) -> Result<()> {
-        GitHubSettings::parse(settings).map(|_| ())
-    }
-
-    fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
-        let settings = GitHubSettings::parse(settings)?;
+    fn make(&self, settings: GitHubSettings, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
         let http = api::metered(ctx.egress.clone(), FEATURE)?;
         let tokens = match &settings.client_id {
             Some(id) => Some(auth::token_source(
@@ -318,14 +278,6 @@ pub struct GitHubConnector {
     tokens: Option<Arc<TokenSource>>,
     settings: GitHubSettings,
     ctx: ConnectorContext,
-}
-
-impl std::fmt::Debug for GitHubConnector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GitHubConnector")
-            .field("source", &self.ctx.source)
-            .finish_non_exhaustive()
-    }
 }
 
 fn classify(resp: Response) -> Outcome {
@@ -548,24 +500,13 @@ impl GitHubConnector {
             .await?;
         let v: Value = api::json(&resp, "github graphql")?;
         let server_clock = server_now(&resp.headers);
-        if let Some(errors) = v["errors"].as_array().filter(|e| !e.is_empty()) {
-            if v["data"].is_null()
-                || v["data"]
-                    .as_object()
-                    .is_some_and(|d| d.values().all(Value::is_null))
-            {
-                let msg = errors[0]["message"]
-                    .as_str()
-                    .map(|m| one_line(m, 200))
-                    .unwrap_or_default();
-                return Err(match errors[0]["type"].as_str() {
-                    Some("FORBIDDEN" | "INSUFFICIENT_SCOPES") => {
-                        Error::Unauthorized(format!("GitHub: {msg}"))
-                    }
-                    _ => Error::Other(format!("GitHub GraphQL error: {msg}")),
-                });
-            }
-            tracing::debug!(source = %self.ctx.source, "github graphql returned partial errors");
+        if let Some((err, msg)) = api::graphql_failure(&v) {
+            return Err(match err["type"].as_str() {
+                Some("FORBIDDEN" | "INSUFFICIENT_SCOPES") => {
+                    Error::Unauthorized(format!("GitHub: {msg}"))
+                }
+                _ => Error::Other(format!("GitHub GraphQL error: {msg}")),
+            });
         }
         let remaining = v["data"]["rateLimit"]["remaining"].as_i64();
         if remaining.is_some_and(|r| r < MIN_POINTS) {
@@ -762,33 +703,13 @@ impl GitHubConnector {
     }
 
     async fn more_comments(&self, node: &Value, cancel: &CancellationToken) -> Result<Vec<Value>> {
-        let mut out = Vec::new();
-        let Some(id) = node["id"].as_str() else {
-            return Ok(out);
-        };
-        let mut after = node["comments"]["pageInfo"]["endCursor"]
-            .as_str()
-            .map(str::to_string);
-        let mut fetched = node["comments"]["nodes"].as_array().map_or(0, Vec::len);
-        while let Some(a) = after.take() {
-            if fetched >= MAX_COMMENTS {
-                break;
-            }
-            let v = self
-                .graphql(MORE_COMMENTS, json!({"id": id, "after": a}), cancel)
+        api::more_comments(node, MAX_COMMENTS, |id, after| async move {
+            let mut v = self
+                .graphql(MORE_COMMENTS, json!({"id": id, "after": after}), cancel)
                 .await?;
-            let c = &v["data"]["node"]["comments"];
-            let nodes = c["nodes"].as_array().cloned().unwrap_or_default();
-            if nodes.is_empty() {
-                break;
-            }
-            fetched += nodes.len();
-            out.extend(nodes);
-            if c["pageInfo"]["hasNextPage"].as_bool() == Some(true) {
-                after = c["pageInfo"]["endCursor"].as_str().map(str::to_string);
-            }
-        }
-        Ok(out)
+            Ok(v["data"]["node"]["comments"].take())
+        })
+        .await
     }
 
     async fn document(

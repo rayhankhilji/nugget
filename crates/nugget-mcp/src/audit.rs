@@ -1,20 +1,13 @@
-//! Audit entries for MCP calls and the egress rule.
+//! Audit entries for MCP calls.
 //!
-//! Every `tools/call` and `resources/read` that reaches a tool produces one [`AuditEntry`] through
-//! the server's audit callback. Calls refused before they run (rate limited, revoked client) are
-//! audited too, coalesced to at most one entry per client and outcome per minute, carrying the
-//! number of refusals coalesced since the previous one (`refused_since_last_entry`). Over HTTP a
-//! rate-limited request is refused before its body (and so its method) is read, and is recorded
-//! as [`ACTION_REFUSED`]; an HTTP request with a missing, wrong or revoked token names no client
-//! and is not audited (it is answered 401). The daemon appends entries to the store's
-//! hash-chained audit log. An entry names the
-//! client, the tool, a **summary** of the arguments, the outcome and which items were returned
-//! (references only). It never contains returned content, and never free text the client sent:
-//! a query is kept as its length and a keyed hash (see [`summarize_args`]).
-//!
-//! Egress: a call from a remote client would also record an `EgressEvent` listing the returned
-//! items. In M2 MCP is loopback/stdio only ([`Transport`] has no remote variant), so entries say
-//! `"locality": "local"` and nothing is recorded in the egress ledger.
+//! Every `tools/call` and `resources/read` that reaches a tool produces one [`AuditEntry`]. Calls
+//! refused before they run (rate limited, revoked) are audited coalesced: at most one entry per
+//! client and outcome per minute, carrying `refused_since_last_entry`. Over HTTP a rate-limited
+//! request is refused before its body is read and recorded as [`ACTION_REFUSED`]; a request with
+//! a missing, wrong or revoked token names no client and is not audited (401). Entries hold
+//! argument summaries and item references, never returned content or free text the client sent
+//! (see [`summarize_args`]). MCP is loopback/stdio only, so entries say `"locality": "local"` and
+//! nothing reaches the egress ledger.
 
 use std::sync::Arc;
 
@@ -23,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::auth::ServerKey;
+use crate::render::inline;
 
 /// One audit-log entry. Field for field the same as `nugget_store::AuditEntry` (which this crate
 /// does not depend on), so the daemon converts it with a struct literal.
@@ -54,7 +48,7 @@ const MAX_ARG_CHARS: usize = 80;
 const SCOPE_ARGS: &[&str] = &["kind", "source", "key", "since"];
 const MAX_AUDITED_ITEMS: usize = 50;
 
-/// How a client is connected. M2 has no remote transport.
+/// How a client is connected (local transports only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
@@ -70,12 +64,6 @@ impl Transport {
             Self::Stdio => "stdio",
             Self::LoopbackHttp => "loopback_http",
         }
-    }
-
-    /// Whether results leave the device (and must be recorded in the egress ledger). Always
-    /// `false` in M2.
-    pub fn is_remote(self) -> bool {
-        false
     }
 }
 
@@ -136,12 +124,12 @@ impl CallRecord<'_> {
         AuditEntry {
             actor: format!("mcp:{}", self.client_id),
             action: self.action.to_owned(),
-            target: clip(self.target, 200),
+            target: inline(self.target, 200),
             detail: json!({
                 "client_id": self.client_id,
                 "client_name": self.client_name,
                 "transport": self.transport.as_str(),
-                "locality": if self.transport.is_remote() { "remote" } else { "local" },
+                "locality": "local",
                 "args": self.args.map(|a| summarize_args(a, key)).unwrap_or(Value::Null),
                 "outcome": self.outcome.as_str(),
                 "results": self.results,
@@ -160,7 +148,7 @@ pub fn summarize_args(args: &Map<String, Value>, key: Option<&ServerKey>) -> Val
     for (k, v) in args.iter().take(16) {
         let s = match v {
             Value::String(s) if SCOPE_ARGS.contains(&k.as_str()) => {
-                Value::String(clip(s, MAX_ARG_CHARS))
+                Value::String(inline(s, MAX_ARG_CHARS))
             }
             Value::String(s) => {
                 let mut o = Map::new();
@@ -174,24 +162,9 @@ pub fn summarize_args(args: &Map<String, Value>, key: Option<&ServerKey>) -> Val
             Value::Array(_) => Value::String("<array>".into()),
             Value::Object(_) => Value::String("<object>".into()),
         };
-        out.insert(clip(k, 40), s);
+        out.insert(inline(k, 40), s);
     }
     Value::Object(out)
-}
-
-fn clip(s: &str, max: usize) -> String {
-    let cleaned: String = s
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .take(max + 1)
-        .collect();
-    if cleaned.chars().count() > max {
-        let mut t: String = cleaned.chars().take(max).collect();
-        t.push('…');
-        t
-    } else {
-        cleaned
-    }
 }
 
 #[cfg(test)]

@@ -7,9 +7,7 @@
 //! [`accept_bridge`] and serves MCP on the socket with [`McpServer::serve_io`], so scopes,
 //! revocation, rate limits and audit are enforced in the daemon, never in the launched process.
 
-use std::sync::Arc;
-
-use nugget_core::ipc::{McpClientInfo, McpScopes};
+use nugget_core::ipc::McpClientInfo;
 use nugget_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::{
@@ -18,7 +16,6 @@ use tokio::io::{
 
 use crate::audit::Transport;
 use crate::auth::ClientRegistry;
-use crate::backend::KnowledgeBackend;
 use crate::server::McpServer;
 
 /// Environment variable holding the client token for `nuggetd mcp --client <id>`.
@@ -48,36 +45,6 @@ impl McpServer {
             .map_err(|e| Error::Other(format!("mcp session ended abnormally: {e}")))?;
         Ok(())
     }
-
-    /// Serve MCP on this process's stdin/stdout for one authenticated client.
-    pub async fn serve_stdio(&self, client: McpClientInfo) -> Result<()> {
-        self.serve_io(
-            client,
-            Transport::Stdio,
-            tokio::io::stdin(),
-            tokio::io::stdout(),
-        )
-        .await
-    }
-}
-
-/// Serve MCP on stdin/stdout with fixed scopes and no registry (single-user embedding, tests).
-/// The daemon's bridge uses [`McpServer::serve_io`] with a registry instead, so revocation applies.
-pub async fn serve_stdio(
-    backend: Arc<dyn KnowledgeBackend>,
-    client_scopes: McpScopes,
-) -> Result<()> {
-    let client = McpClientInfo {
-        id: "stdio".into(),
-        name: "stdio".into(),
-        scopes: client_scopes,
-        created_at: time::OffsetDateTime::now_utc(),
-        last_used: None,
-    };
-    McpServer::builder(backend)
-        .build()
-        .serve_stdio(client)
-        .await
 }
 
 /// First line the `nuggetd mcp` bridge sends to the daemon.

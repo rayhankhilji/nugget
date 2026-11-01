@@ -1,15 +1,14 @@
 //! Authenticated, metered, rate-limit-aware requests shared by the four connectors.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use nugget_connector::CancellationToken;
 use nugget_connector::http::{MeteredHttp, Response};
-use nugget_connector::retry::{self, Backoff};
+use nugget_connector::retry::{self, RetryPolicy};
 use nugget_core::{Error, Result};
 use reqwest::header::{DATE, HeaderMap};
+use serde_json::Value;
 
-use crate::RetryPolicy;
 use crate::auth::{Credential, Token};
 use crate::text::now_unix;
 
@@ -90,9 +89,10 @@ impl Api {
                         self.service
                     )));
                 }
-                Outcome::Retry(e) if attempt < self.retry.max_retries => {
-                    let Some(delay) = self.backoff(attempt, &e) else {
-                        // The server asked for a longer pause than we sleep inline.
+                Outcome::Retry(e) => {
+                    // `None`: retries spent, or the server asked for a longer pause than we
+                    // sleep inline.
+                    let Some(delay) = self.retry.pause(attempt, &e) else {
                         return Err(e);
                     };
                     tracing::debug!(
@@ -102,41 +102,15 @@ impl Api {
                         "retrying after {e}"
                     );
                     attempt += 1;
-                    tokio::select! {
-                        _ = tokio::time::sleep(delay) => {}
-                        _ = cancel.cancelled() => return Err(Error::Cancelled),
-                    }
+                    retry::sleep(delay, cancel).await?;
                 }
-                Outcome::Retry(e) | Outcome::Fatal(e) => return Err(e),
+                Outcome::Fatal(e) => return Err(e),
             }
         }
     }
-
-    /// The pause before retry `attempt`, or `None` when the server's hint exceeds `max_delay`.
-    /// Exponential with jitter ([`Backoff`]); a `Retry-After` hint is a floor.
-    fn backoff(&self, attempt: u32, err: &Error) -> Option<Duration> {
-        let hinted = match err {
-            Error::RateLimited {
-                retry_after_ms: Some(ms),
-            } => Some(Duration::from_millis(*ms)),
-            _ => None,
-        };
-        if hinted.is_some_and(|h| h > self.retry.max_delay) {
-            return None;
-        }
-        let b = Backoff {
-            base: self.retry.base_delay,
-            max: self.retry.max_delay,
-        };
-        Some(b.delay(attempt, hinted))
-    }
 }
 
-/// `Retry-After` in milliseconds: delta-seconds or an HTTP-date, the latter measured against
-/// the response's own `Date` header (clock-skew safe).
-pub(crate) fn retry_after_ms(h: &HeaderMap) -> Option<u64> {
-    retry::retry_after_ms(h)
-}
+pub(crate) use retry::retry_after_ms;
 
 /// The server's clock (its `Date` header) in Unix seconds, else the local clock. Reset times
 /// the server sends (`x-ratelimit-reset`, `resetAt`) are measured against it, so a local clock
@@ -286,46 +260,62 @@ pub(crate) fn note_item_failure(
     true
 }
 
+/// The first error of a GraphQL answer that carries no data (`None` for full or partial data),
+/// with its message cut to one short line.
+pub(crate) fn graphql_failure(v: &Value) -> Option<(&Value, String)> {
+    let errors = v["errors"].as_array().filter(|e| !e.is_empty())?;
+    if v["data"]
+        .as_object()
+        .is_some_and(|d| !d.values().all(Value::is_null))
+    {
+        return None;
+    }
+    let msg = errors[0]["message"]
+        .as_str()
+        .map(|m| crate::text::one_line(m, 200));
+    Some((&errors[0], msg.unwrap_or_default()))
+}
+
+/// The comments of a GraphQL `node` past the page it embedded, fetched with `page(id, after)`
+/// (which answers with the comments connection), until `max` comments in all.
+pub(crate) async fn more_comments<F, Fut>(
+    node: &Value,
+    max: usize,
+    mut page: F,
+) -> Result<Vec<Value>>
+where
+    F: FnMut(String, String) -> Fut,
+    Fut: std::future::Future<Output = Result<Value>>,
+{
+    let mut out = Vec::new();
+    let Some(id) = node["id"].as_str() else {
+        return Ok(out);
+    };
+    let mut after = node["comments"]["pageInfo"]["endCursor"]
+        .as_str()
+        .map(str::to_string);
+    let mut fetched = node["comments"]["nodes"].as_array().map_or(0, Vec::len);
+    while let Some(a) = after.take() {
+        if fetched >= max {
+            break;
+        }
+        let c = page(id.to_string(), a).await?;
+        let nodes = c["nodes"].as_array().cloned().unwrap_or_default();
+        if nodes.is_empty() {
+            break;
+        }
+        fetched += nodes.len();
+        out.extend(nodes);
+        if c["pageInfo"]["hasNextPage"].as_bool() == Some(true) {
+            after = c["pageInfo"]["endCursor"].as_str().map(str::to_string);
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod unit {
     use super::*;
-    use nugget_connector::testkit::VecEgress;
-
-    fn api(base_ms: u64, max_ms: u64) -> Api {
-        let egress = Arc::new(VecEgress::default());
-        let secrets = Arc::new(nugget_connector::testkit::MemSecrets::default());
-        Api::new(
-            metered(egress, "sync:test").unwrap(),
-            Arc::new(Credential::new("Test", secrets, "s", None, None)),
-            RetryPolicy {
-                max_retries: 8,
-                base_delay: Duration::from_millis(base_ms),
-                max_delay: Duration::from_millis(max_ms),
-            },
-            "Test",
-        )
-    }
-
-    /// Exponential growth, a cap, up to 25% jitter, and a server hint as a floor; a hint over
-    /// the cap is not slept on (the pass returns `RateLimited`).
-    #[test]
-    fn backoff_is_exponential_with_jitter_and_honours_hints() {
-        let a = api(100, 2_000);
-        let net = Error::Network("x".into());
-        for attempt in 0..10u32 {
-            let exp = Duration::from_millis(100 * (1u64 << attempt)).min(Duration::from_secs(2));
-            let d = a.backoff(attempt, &net).unwrap();
-            assert!(d >= exp && d <= exp + exp / 4, "attempt {attempt}: {d:?}");
-        }
-        let hinted = Error::RateLimited {
-            retry_after_ms: Some(1_500),
-        };
-        assert!(a.backoff(0, &hinted).unwrap() >= Duration::from_millis(1_500));
-        let too_long = Error::RateLimited {
-            retry_after_ms: Some(60_000),
-        };
-        assert_eq!(a.backoff(0, &too_long), None);
-    }
 
     #[test]
     fn only_item_errors_are_skippable_and_a_run_of_them_surfaces() {

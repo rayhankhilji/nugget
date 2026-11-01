@@ -45,10 +45,6 @@ impl RateLimiter {
         }
     }
 
-    pub fn limit(&self) -> RateLimit {
-        self.limit
-    }
-
     /// Take one token for `client`. `Err(retry_after)` when the bucket is empty.
     pub fn check(&self, client: &str) -> Result<(), Duration> {
         let burst = f64::from(self.limit.burst.max(1));

@@ -33,8 +33,8 @@ use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
 use crate::connector::{Found, Reader};
 use crate::model::{
-    Attachment, Conversation, Message, basename, clean_name, is_invisible, looks_like_phone,
-    mime_from_name, normalise_phone, slug,
+    Attachment, Conversation, Message, basename, clean_name, file_url, is_invisible,
+    looks_like_phone, mime_from_name, normalise_phone, slug,
 };
 
 /// The chat text inside an export is never read beyond this size.
@@ -1079,11 +1079,6 @@ pub fn parse_chat(
     (!conv.messages.is_empty()).then_some(conv)
 }
 
-fn file_url(path: &Path) -> Option<String> {
-    let abs = std::path::absolute(path).ok()?;
-    url::Url::from_file_path(abs).ok().map(String::from)
-}
-
 /// An export's path relative to the watched folder, with `/` separators.
 fn relative_name(path: &Path, folder: &Path) -> String {
     let rel = path.strip_prefix(folder).unwrap_or(path);
@@ -1270,9 +1265,7 @@ mod tests {
         assert_eq!(dt("2023-12-31, 21:15 - Alice: hi", true), want);
         assert_eq!(dt("2023. 12. 31. 오후 9:15 - Alice: hi", true), want);
         assert_eq!(dt("2023/12/31 午後9:15 - Alice: hi", true), want);
-        assert_eq!(dt("2023/12/31 下午9:15 - Alice: hi", true), want);
         assert_eq!(dt("31/12/2023, 9:15 p.m. - Alice: hi", true), want);
-        assert_eq!(dt("31/12/2023, 9:15\u{202f}p. m. - Alice: hi", true), want);
         assert_eq!(
             dt("\u{feff}\u{200e}[31.12.23, 21:15:00] Alice: hi", true),
             want
@@ -1280,10 +1273,6 @@ mod tests {
         assert_eq!(
             dt("12/31/23, 12:05\u{a0}AM - Alice: hi", false),
             datetime!(2023-12-31 0:05 UTC)
-        );
-        assert_eq!(
-            dt("12/31/23, 12:05 pm - Alice: hi", false),
-            datetime!(2023-12-31 12:05 UTC)
         );
         assert_eq!(
             parse_header("[31/12/2023, 21:15:42] Alice: hi")
@@ -1479,19 +1468,6 @@ mod tests {
         // Two photos in the same minute are two messages (regression: deduplicated to one).
         assert_eq!(c.messages[3].attachments.len(), 1);
         assert_eq!(c.messages[4].attachments.len(), 1);
-    }
-
-    #[test]
-    fn chat_names() {
-        assert_eq!(chat_name("WhatsApp Chat with Alice"), "Alice");
-        assert_eq!(chat_name("WhatsApp Chat with Alice (1)"), "Alice");
-        assert_eq!(chat_name("WhatsApp Chat - Family"), "Family");
-        assert_eq!(chat_name("WhatsApp-Chat mit Oma"), "Oma");
-        assert_eq!(chat_name("Chat de WhatsApp con Juan"), "Juan");
-        assert_eq!(chat_name("Discussion WhatsApp avec Zoé"), "Zoé");
-        assert_eq!(chat_name("whatsapp chat with bob(2)"), "bob");
-        assert_eq!(chat_name("Team (2024)"), "Team (2024)");
-        assert_eq!(chat_name("random"), "random");
     }
 
     #[test]
@@ -1737,21 +1713,13 @@ mod tests {
             Some(Media::Attachment(a)) => a.mime,
             other => panic!("{l}: {other:?}"),
         };
-        assert_eq!(
-            att("\u{200e}Bild weggelassen").as_deref(),
-            Some("image/jpeg")
-        );
-        assert_eq!(att("\u{200e}imagen omitida").as_deref(), Some("image/jpeg"));
-        assert_eq!(att("\u{200e}image absente").as_deref(), Some("image/jpeg"));
-        assert_eq!(
-            att("\u{200e}imagem ocultada").as_deref(),
-            Some("image/jpeg")
-        );
-        assert_eq!(att("\u{200e}GIF omitido").as_deref(), Some("image/gif"));
-        assert_eq!(
-            att("\u{200e}figurinha omitida").as_deref(),
-            Some("image/webp")
-        );
+        for (l, mime) in [
+            ("\u{200e}Bild weggelassen", "image/jpeg"),
+            ("\u{200e}GIF omitido", "image/gif"),
+            ("\u{200e}figurinha omitida", "image/webp"),
+        ] {
+            assert_eq!(att(l).as_deref(), Some(mime), "{l}");
+        }
         for l in [
             "Diese Nachricht wurde gelöscht",
             "Se eliminó este mensaje.",

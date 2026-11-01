@@ -48,7 +48,7 @@ pub use config::{
     expand_home, files_schema, obsidian_schema,
 };
 pub use connector::CHECKPOINT_EVERY;
-pub use key::{PathStyle, file_url, item_key, item_key_from_str, obsidian_url, parse_key};
+pub use key::item_key;
 
 use config::Config;
 use connector::FsConnector;

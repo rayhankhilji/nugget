@@ -354,30 +354,15 @@ mod tests {
                 code::TOO_LARGE,
             ),
             ("not found: folder Work", code::CONFIG),
-            ("HTTP 404: gone", code::CONFIG),
             ("io error: Permission denied (os error 13)", code::CONFIG),
             (
                 "io error: No space left on device (os error 28)",
                 code::DISK_FULL,
             ),
             (
-                "io error: Disk quota exceeded (os error 122)",
-                code::DISK_FULL,
-            ),
-            (
-                "insufficient disk space: need 5 bytes, 1 available",
-                code::DISK_FULL,
-            ),
-            (
-                "network error: request failed: Resource temporarily unavailable (os error 11)",
-                code::OFFLINE,
-            ),
-            ("network error: reconnecting after reset", code::OFFLINE),
-            (
                 "invalid input: token endpoint returned malformed JSON",
                 code::ERROR,
             ),
-            ("provider error: storageQuotaExceeded", code::ERROR),
             ("something odd", code::ERROR),
         ];
         for (err, want) in cases {

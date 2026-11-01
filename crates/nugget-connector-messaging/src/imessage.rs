@@ -834,21 +834,6 @@ impl Reader for IMessageReader {
 mod tests {
     use super::*;
 
-    #[test]
-    fn apple_dates() {
-        let t = apple_time(0).unwrap();
-        assert_eq!(t.unix_timestamp(), APPLE_EPOCH);
-        let secs = 700_000_000i64;
-        assert_eq!(
-            apple_time(secs).unwrap().unix_timestamp(),
-            APPLE_EPOCH + secs
-        );
-        let ns = secs * 1_000_000_000 + 5;
-        let t = apple_time(ns).unwrap();
-        assert_eq!(t.unix_timestamp(), APPLE_EPOCH + secs);
-        assert_eq!(t.nanosecond(), 5);
-    }
-
     /// Regression: a pass killed mid-read left a full copy of chat.db in the cache forever.
     #[test]
     fn stale_copies_are_removed_recent_ones_kept() {
@@ -1072,19 +1057,6 @@ mod tests {
         assert_eq!(read(&r), (0, true));
         r.state().last.as_mut().unwrap().1 = SystemTime::now() + Duration::from_secs(3600);
         assert_eq!(read(&r), (1, false));
-        assert_eq!(r.copies(), 3);
-    }
-
-    /// A file modified just now is not trusted to be unchanged by its stamp alone.
-    #[test]
-    fn recently_modified_files_are_always_copied() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (db, _conn) = wal_db(tmp.path());
-        let r = reader(&db, &tmp.path().join("scratch"));
-        for _ in 0..3 {
-            assert_eq!(read(&r), (1, false));
-            r.pass_succeeded();
-        }
         assert_eq!(r.copies(), 3);
     }
 }

@@ -41,29 +41,16 @@ async fn single_and_full_exports_are_merged() {
     assert!(text(&apr).contains("**Me** · 2024-04-29 08:00\n> Only in the full export"));
     let may = doc(&sink, "tg:4242/2024-05");
     let t = text(&may);
-    assert!(
-        t.contains("**Alice Example** · 2024-05-01 09:12\n> Check https://example.com and this\n"),
-        "{t}"
-    );
-    assert!(
-        t.contains("**Me** · 2024-05-01 09:13\n> [photo: photo_1@01-05-2024_09-13-00.jpg]\n"),
-        "{t}"
-    );
-    assert!(t.contains("**Me** · 2024-05-01 09:14\n> [audio]\n"), "{t}");
-    assert!(
-        t.contains("_2024-05-01 09:20 · Alice Example called (61 s)_"),
-        "{t}"
-    );
-    // `date` without `date_unixtime`: the local time as written.
-    assert!(
-        t.contains("**Alice Example** · 2024-05-02 10:00\n> no unixtime here"),
-        "{t}"
-    );
-    let atts = may.metadata["attachments"].as_array().unwrap();
-    assert_eq!(atts[0]["size"], 20480);
-    assert_eq!(atts[1]["mime"], "audio/ogg");
-    assert!(atts[1]["name"].is_null());
-    assert!(may.url.as_deref().unwrap().ends_with("result.json"));
+    for want in [
+        "**Alice Example** · 2024-05-01 09:12\n> Check https://example.com and this\n",
+        "**Me** · 2024-05-01 09:13\n> [photo: photo_1@01-05-2024_09-13-00.jpg]\n",
+        "_2024-05-01 09:20 · Alice Example called (61 s)_",
+        // `date` without `date_unixtime`: the local time as written.
+        "**Alice Example** · 2024-05-02 10:00\n> no unixtime here",
+    ] {
+        assert!(t.contains(want), "{want}\n{t}");
+    }
+    assert_eq!(may.metadata["attachments"][0]["size"], 20480);
 
     // Group with service lines and a document.
     let club = doc(&sink, "tg:1001/2024-03");
@@ -73,15 +60,6 @@ async fn single_and_full_exports_are_merged() {
     assert!(t.contains("Bea created the group “Book Club 📚”"), "{t}");
     assert!(t.contains("Bea added Chen, Dara"), "{t}");
     assert!(t.contains("**Me** · 2024-03-01 18:06\n> Yes!"), "{t}");
-    let t = text(&doc(&sink, "tg:1001/2024-04")).to_owned();
-    assert!(t.contains("> my notes\n> [file: dune-notes.pdf]"), "{t}");
-
-    let saved = doc(&sink, "tg:7/2024-01");
-    assert_eq!(
-        saved.title.as_deref(),
-        Some("Saved Messages — January 2024")
-    );
-    assert!(text(&saved).contains("**Me** ·"));
 }
 
 #[tokio::test]

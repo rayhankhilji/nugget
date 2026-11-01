@@ -73,6 +73,4 @@ impl std::fmt::Debug for ClientCredentials {
 }
 
 #[cfg(test)]
-mod conformance;
-#[cfg(test)]
 mod tests;

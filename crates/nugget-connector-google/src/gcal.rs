@@ -1,29 +1,18 @@
 //! `gcal`: Google Calendar over the REST API with `calendar.readonly`.
 //!
-//! Cursor (JSON): `{"v":1,"calendars":{"<calendarId>":<state>}}` where `<state>` is
-//! - `{"sync_token":"<tok>"}` once a calendar is in incremental mode, or
-//! - `{"time_min":"<rfc3339>","time_max":"<rfc3339>","page_token":"<tok>"|null,"resync":bool,"reconcile":bool}`
-//!   while a full (windowed) listing is in progress,
+//! Cursor: `{"v":1,"calendars":{"<id>":<state>},"verify":[...]}`; a state is `{"sync_token"}`
+//! when incremental, or `{"time_min","time_max","page_token","resync","reconcile"}` during a
+//! windowed full listing. `verify` holds unlisted indexed events still to check
+//! ([`MAX_VERIFY`] per pass).
 //!
-//! plus `"verify":["<key>",...]` (omitted when empty): indexed events a resync did not list and
-//! that are still to be checked, [`MAX_VERIFY`] per pass.
+//! Dropped calendars are found from the indexed keys (`<calendarId>/<eventId>`), so a reset
+//! cursor still removes them. A calendar with indexed events but no state gets a reconciling
+//! listing (unlisted events outside the window deleted, the rest checked); a 410 resync checks
+//! only in-window events. An interrupted resync restarts its listing. Versions are
+//! `<etag>#<start>:<end>`, so the window test needs no request.
 //!
-//! Calendars that are no longer synced are found from the indexed keys (`<calendarId>/<eventId>`),
-//! not only from the cursor, so a reset cursor still drops them. A calendar with indexed events
-//! but no cursor state (a settings update resets the cursor) gets a *reconciling* full listing:
-//! indexed events it does not return are deleted when they lie outside the (possibly new)
-//! window, and checked otherwise. A plain resync (410) checks only events inside the window;
-//! the others are expected to be missing and stay. A resync interrupted part-way
-//! restarts its listing, so no event is wrongly taken as missing.
-//!
-//! Versions are `<etag>#<start>:<end>` (Unix seconds), so the window test needs no request.
-//!
-//! Events are parsed one by one: a malformed entry never fails its page. Its `id` and
-//! `status` are still read, so a malformed cancellation is still a delete, and any other
-//! malformed event counts as listed (its indexed version is kept, never taken for missing).
-//! Existence checks read only `status`, and a check that fails for one event keeps it.
-//!
-//! Scopes: `calendar.readonly` only (list calendars and read events); nothing is ever written.
+//! Events parse one by one: a malformed entry never fails its page; its `id`/`status` are still
+//! read (a malformed cancellation is still a delete), otherwise it counts as listed.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -43,6 +32,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::api::{GoogleApi, OAuthSettings, PageGuard, api_url};
+use crate::carry::Missing;
 use crate::settings::CalendarSettings;
 use crate::text::{strip_html, truncate_chars};
 use crate::{GoogleEndpoints, RetryPolicy};
@@ -696,15 +686,8 @@ fn version_span(version: Option<&str>) -> Option<(i64, i64)> {
     Some((s.parse().ok()?, e.parse().ok()?))
 }
 
-/// Indexed events of one calendar a resync listing did not return.
-struct Missing {
-    /// Inside the window (or of unknown time): gone or cancelled unless a check says otherwise.
-    check: Vec<String>,
-    /// Known to lie outside the window: expected to be missing from the listing.
-    out_of_window: Vec<String>,
-}
-
-/// Google's window keeps events that end after `timeMin` and start before `timeMax`.
+/// Indexed events of `cal` missing from a resync listing. Google's window keeps events that
+/// end after `timeMin` and start before `timeMax`.
 fn missing_candidates(
     cal: &str,
     known: &HashMap<ItemKey, Option<String>>,
@@ -712,30 +695,15 @@ fn missing_candidates(
     window: Option<(i64, i64)>,
 ) -> Missing {
     let prefix = format!("{cal}/");
-    let mut check = Vec::new();
-    let mut out_of_window = Vec::new();
-    for (k, v) in known {
-        if !k.as_str().starts_with(&prefix) || seen.contains(k.as_str()) {
-            continue;
+    let mine = known
+        .iter()
+        .filter(|(k, _)| k.as_str().starts_with(&prefix));
+    Missing::split(mine, seen, |v| match (version_span(v), window) {
+        (Some((s, e)), Some((min, max))) => {
+            e > min - WINDOW_SLACK_SECS && s < max + WINDOW_SLACK_SECS
         }
-        let in_window = match (version_span(v.as_deref()), window) {
-            (Some((s, e)), Some((min, max))) => {
-                e > min - WINDOW_SLACK_SECS && s < max + WINDOW_SLACK_SECS
-            }
-            _ => true,
-        };
-        if in_window {
-            check.push(k.as_str().to_string());
-        } else {
-            out_of_window.push(k.as_str().to_string());
-        }
-    }
-    check.sort();
-    out_of_window.sort();
-    Missing {
-        check,
-        out_of_window,
-    }
+        _ => true,
+    })
 }
 
 fn valid_calendar_id(id: &str) -> bool {
@@ -1005,21 +973,5 @@ mod unit {
             "nope"
         );
         assert!(describe_when(None, None, None).is_none());
-    }
-
-    #[test]
-    fn cursor_shape() {
-        let mut c = Cursor::default();
-        c.calendars.insert(
-            "primary".into(),
-            CalState {
-                sync_token: Some("st".into()),
-                ..Default::default()
-            },
-        );
-        assert_eq!(
-            c.to_value(),
-            json!({"v": 1, "calendars": {"primary": {"sync_token": "st"}}})
-        );
     }
 }

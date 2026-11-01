@@ -189,7 +189,7 @@ function New-Case([string]$name) {
     # background, install at quit.
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
     [IO.File]::WriteAllText($settingsFile, '{"channel":"beta","auto_install":true}', (New-Object Text.UTF8Encoding($false)))
-    # Quitting stops the daemon the app started, without asking first (platform.json, GG6-8).
+    # Quitting stops the daemon the app started, without asking first (platform.json).
     [IO.File]::WriteAllText((Join-Path $configDir 'platform.json'), '{"quit_daemon":"stop"}', (New-Object Text.UTF8Encoding($false)))
 }
 

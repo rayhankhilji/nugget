@@ -8,9 +8,9 @@ use nugget_mcp::{ClientRegistry, ServerKey, SnippetOptions, setup_snippets};
 use std::sync::Arc;
 
 #[test]
-fn tokens_have_the_documented_shape_and_are_unique() {
+fn tokens_have_the_documented_shape_are_unique_and_redacted() {
     let (reg, _) = registry();
-    let (_, a) = reg.create("A", all_scopes()).unwrap();
+    let (info, a) = reg.create("A", all_scopes()).unwrap();
     let (_, b) = reg.create("B", all_scopes()).unwrap();
     for t in [&a, &b] {
         assert!(t.expose().starts_with("ngt_"));
@@ -19,6 +19,13 @@ fn tokens_have_the_documented_shape_and_are_unique() {
         assert_eq!(format!("{t:?}"), "ClientToken(<redacted>)");
     }
     assert_ne!(a.expose(), b.expose());
+    let created = nugget_mcp::client_created(info.clone(), &a, &SnippetOptions::default());
+    assert_eq!(
+        (&created.client, created.token.as_str()),
+        (&info, a.expose())
+    );
+    assert!(created.setup.len() >= 4);
+    assert!(!format!("{created:?}").contains(a.expose()));
 }
 
 #[test]
@@ -88,22 +95,13 @@ fn authenticate_list_revoke_and_last_used() {
 
 #[test]
 fn last_used_writes_are_throttled() {
-    let store = Arc::new(nugget_mcp::MemClientStore::new());
-    let reg = ClientRegistry::new(store.clone(), ServerKey::from_bytes([1; 32]));
+    let reg = ClientRegistry::new(
+        Arc::new(nugget_mcp::MemClientStore::new()),
+        ServerKey::from_bytes([1; 32]),
+    );
     let (_, token) = reg.create("A", all_scopes()).unwrap();
-    let first = reg
-        .authenticate(token.expose())
-        .unwrap()
-        .unwrap()
-        .last_used
-        .unwrap();
-    let second = reg
-        .authenticate(token.expose())
-        .unwrap()
-        .unwrap()
-        .last_used
-        .unwrap();
-    assert_eq!(first, second);
+    let used = || reg.authenticate(token.expose()).unwrap().unwrap().last_used;
+    assert_eq!(used(), used());
 }
 
 #[test]
@@ -216,24 +214,7 @@ fn snippets_cover_every_app_and_keep_the_token_out_of_paths_and_urls() {
 }
 
 #[test]
-fn paths_with_spaces_are_quoted_for_the_shell() {
-    let (reg, _) = registry();
-    let (info, token) = reg.create("Laptop", all_scopes()).unwrap();
-    let s = setup_snippets(
-        &info,
-        token.expose(),
-        &SnippetOptions {
-            nuggetd: "/opt/My Apps/nuggetd".into(),
-            http_port: None,
-            os: "linux".into(),
-            env: Vec::new(),
-        },
-    );
-    assert!(s[1].text.contains("-- '/opt/My Apps/nuggetd' mcp"));
-}
-
-#[test]
-fn env_extras_reach_every_stdio_snippet() {
+fn env_extras_reach_every_stdio_snippet_and_paths_are_shell_quoted() {
     let (reg, _) = registry();
     let (info, token) = reg.create("Laptop", all_scopes()).unwrap();
     let t = token.expose();
@@ -241,6 +222,7 @@ fn env_extras_reach_every_stdio_snippet() {
         &info,
         t,
         &SnippetOptions {
+            nuggetd: "/opt/My Apps/nuggetd".into(),
             os: "linux".into(),
             env: vec![
                 ("NUGGET_HOME".into(), "/my home".into()),
@@ -259,7 +241,8 @@ fn env_extras_reach_every_stdio_snippet() {
     }
     assert!(
         s[1].text.contains(&format!(
-            "--scope user --env NUGGET_HOME='/my home' --env NUGGET_MCP_TOKEN={t} nugget -- "
+            "--scope user --env NUGGET_HOME='/my home' --env NUGGET_MCP_TOKEN={t} nugget -- \
+             '/opt/My Apps/nuggetd' mcp"
         )),
         "{}",
         s[1].text
@@ -272,15 +255,4 @@ fn env_extras_reach_every_stdio_snippet() {
         "{}",
         s[3].text
     );
-}
-
-#[test]
-fn client_created_response_redacts_the_token_in_debug() {
-    let (reg, _) = registry();
-    let (info, token) = reg.create("Laptop", all_scopes()).unwrap();
-    let created = nugget_mcp::client_created(info.clone(), &token, &SnippetOptions::default());
-    assert_eq!(created.client, info);
-    assert_eq!(created.token, token.expose());
-    assert!(created.setup.len() >= 4);
-    assert!(!format!("{created:?}").contains(token.expose()));
 }

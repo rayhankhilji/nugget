@@ -35,8 +35,7 @@ use futures::StreamExt;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use nugget_connector::{
-    AuthFlow, AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext,
-    ConnectorFactory, Content, Document, KindInfo,
+    AuthFlow, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
@@ -49,7 +48,6 @@ use crate::graph::{DeltaPage, Get, GraphApi, is_removed, needs_resync, status_er
 use crate::oauth::{SCOPE_CALENDARS_READ, SCOPE_OFFLINE_ACCESS, SCOPE_USER_READ};
 use crate::settings::{CalendarSettings, valid_folder_id};
 use crate::text::{clean_line, plain_text, strip_html};
-use crate::{MicrosoftEndpoints, RetryPolicy};
 
 pub(crate) const KIND: &str = "outlook-calendar";
 const FEATURE: &str = "sync:outlook-calendar";
@@ -110,56 +108,14 @@ impl Cursor {
     }
 }
 
-/// Factory for `outlook-calendar` sources.
-#[derive(Debug, Clone, Default)]
-pub struct OutlookCalendarFactory {
-    endpoints: MicrosoftEndpoints,
-    retry: RetryPolicy,
-}
-
-impl OutlookCalendarFactory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_endpoints(mut self, endpoints: MicrosoftEndpoints) -> Self {
-        self.endpoints = endpoints;
-        self
-    }
-
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
-    }
-}
-
-impl ConnectorFactory for OutlookCalendarFactory {
-    fn info(&self) -> KindInfo {
-        KindInfo {
-            kind: KIND,
-            display_name: "Outlook calendar",
-            auth: AuthKind::OAuth,
-            settings_schema: CalendarSettings::schema(),
-        }
-    }
-
-    fn validate(&self, settings: &Value) -> Result<()> {
-        CalendarSettings::parse(settings).map(|_| ())
-    }
-
-    fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
-        let settings = CalendarSettings::parse(settings)?;
-        let api = GraphApi::new(
-            FEATURE,
-            SCOPES,
-            &settings.common(),
-            &self.endpoints,
-            self.retry,
-            ctx.clone(),
-        )?;
-        Ok(Arc::new(OutlookCalendarConnector { api, settings, ctx }))
-    }
-}
+graph_factory!(
+    OutlookCalendarFactory,
+    OutlookCalendarConnector,
+    KIND,
+    "Outlook calendar",
+    CalendarSettings,
+    |_, settings, api, ctx| Ok(Arc::new(OutlookCalendarConnector { api, settings, ctx }))
+);
 
 /// One account's default Outlook calendar.
 pub struct OutlookCalendarConnector {
@@ -168,20 +124,11 @@ pub struct OutlookCalendarConnector {
     ctx: ConnectorContext,
 }
 
-impl std::fmt::Debug for OutlookCalendarConnector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OutlookCalendarConnector")
-            .field("source", &self.ctx.source)
-            .finish_non_exhaustive()
-    }
-}
-
 #[derive(Deserialize, Default, Clone)]
 #[serde(default)]
+#[serde(rename_all = "camelCase")]
 struct DateTimeTz {
-    #[serde(rename = "dateTime")]
     date_time: Option<String>,
-    #[serde(rename = "timeZone")]
     time_zone: Option<String>,
 }
 
@@ -239,41 +186,31 @@ struct OnlineMeeting {
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
+#[serde(rename_all = "camelCase")]
 struct Event {
     id: String,
-    #[serde(rename = "changeKey")]
     change_key: Option<String>,
     subject: Option<String>,
     body: Option<Body>,
-    #[serde(rename = "bodyPreview")]
     body_preview: Option<String>,
     start: Option<DateTimeTz>,
     end: Option<DateTimeTz>,
-    #[serde(rename = "originalStartTimeZone")]
     original_start_time_zone: Option<String>,
-    #[serde(rename = "isAllDay")]
     is_all_day: Option<bool>,
-    #[serde(rename = "isCancelled")]
     is_cancelled: Option<bool>,
     location: Option<Location>,
     locations: Vec<Location>,
     organizer: Option<Recipient>,
     attendees: Vec<Attendee>,
-    #[serde(rename = "onlineMeeting")]
     online_meeting: Option<OnlineMeeting>,
-    #[serde(rename = "onlineMeetingUrl")]
     online_meeting_url: Option<String>,
-    #[serde(rename = "onlineMeetingProvider")]
     online_meeting_provider: Option<String>,
-    #[serde(rename = "webLink")]
     web_link: Option<String>,
     #[serde(rename = "type")]
     kind: Option<String>,
-    #[serde(rename = "seriesMasterId")]
     series_master_id: Option<String>,
     #[serde(rename = "iCalUId")]
     ical_uid: Option<String>,
-    #[serde(rename = "showAs")]
     show_as: Option<String>,
     sensitivity: Option<String>,
     categories: Vec<String>,

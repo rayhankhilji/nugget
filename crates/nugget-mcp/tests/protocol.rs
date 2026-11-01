@@ -4,32 +4,19 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use common::*;
-use nugget_mcp::{ClientRegistry, HttpConfig, McpConfig, McpServer, RateLimit, Transport};
-use rmcp::model::ProtocolVersion;
-use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ReadResourceRequestParams, ResourceContents,
-};
-use rmcp::service::{RoleClient, RunningService};
+use nugget_mcp::{ClientRegistry, HttpConfig, McpServer, Transport};
+use rmcp::model::{ProtocolVersion, ReadResourceRequestParams, ResourceContents};
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{ClientLifecycleMode, ClientServiceExt, ServiceExt};
 use serde_json::{Value, json};
 
-type Client = RunningService<RoleClient, ()>;
-
-fn text_of(r: &CallToolResult) -> String {
-    r.content
-        .iter()
-        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-async fn call(client: &Client, tool: &str, args: Value) -> CallToolResult {
+async fn call(client: &Client, tool: &str, args: Value) -> rmcp::model::CallToolResult {
     client
-        .call_tool(CallToolRequestParams::new(tool.to_owned()).with_arguments(obj(args)))
+        .call_tool(tool_call(tool, args))
         .await
         .unwrap_or_else(|e| panic!("{tool}: {e}"))
 }
@@ -124,7 +111,7 @@ async fn exercise(client: &Client, version: &ProtocolVersion) {
     // An unknown tool is a protocol error.
     assert!(
         client
-            .call_tool(CallToolRequestParams::new("delete_everything"))
+            .call_tool(rmcp::model::CallToolRequestParams::new("delete_everything"))
             .await
             .is_err()
     );
@@ -184,114 +171,18 @@ fn lifecycles() -> [(ClientLifecycleMode, ProtocolVersion); 2] {
     ]
 }
 
-async fn stdio_client_with(
-    server: &McpServer,
-    scopes: nugget_core::ipc::McpScopes,
-    mode: ClientLifecycleMode,
-) -> Client {
-    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
-    let (r, w) = tokio::io::split(server_io);
-    let s = server.clone();
-    tokio::spawn(async move { s.serve_io(client(scopes), Transport::Stdio, r, w).await });
-    ().serve_with_lifecycle(client_io, mode)
-        .await
-        .expect("client connects")
-}
-
-async fn stdio_client(server: &McpServer, scopes: nugget_core::ipc::McpScopes) -> Client {
-    stdio_client_with(server, scopes, ClientLifecycleMode::Initialize).await
-}
-
 #[tokio::test]
 async fn stdio_round_trip_with_sdk_client() {
     let log = AuditLog::default();
     let server = McpServer::builder(backend(false)).audit(log.sink()).build();
     for (mode, version) in lifecycles() {
-        let client = stdio_client_with(&server, all_scopes(), mode).await;
+        let client = stdio_client_with(&server, client(all_scopes()), mode).await;
         exercise(&client, &version).await;
         client.cancel().await.unwrap();
     }
     let entries = log.entries();
     assert!(entries.len() >= 20);
     assert!(entries.iter().all(|e| e.detail["transport"] == "stdio"));
-}
-
-#[tokio::test]
-async fn stdio_lists_only_allowed_tools() {
-    let server = McpServer::builder(backend(false)).build();
-    let client = stdio_client(&server, scopes(None, &["search", "get_entity"], false)).await;
-    let names: Vec<_> = client
-        .list_all_tools()
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|t| t.name.to_string())
-        .collect();
-    assert_eq!(names, ["search", "get_entity"]);
-    let r = call(
-        &client,
-        "get_item",
-        json!({"source": FILES, "key": "plan.md"}),
-    )
-    .await;
-    assert_eq!(r.is_error, Some(true));
-    assert!(text_of(&r).contains("not enabled"));
-    let templates = client.list_all_resource_templates().await.unwrap();
-    assert_eq!(templates.len(), 1);
-    client.cancel().await.unwrap();
-}
-
-#[tokio::test]
-async fn stdio_session_stops_working_when_revoked() {
-    let (reg, _) = registry();
-    let (info, _token) = reg.create("Claude Desktop", all_scopes()).unwrap();
-    let server = McpServer::builder(backend(false))
-        .registry(reg.clone())
-        .build();
-    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
-    let (r, w) = tokio::io::split(server_io);
-    let s = server.clone();
-    tokio::spawn(async move { s.serve_io(info, Transport::Stdio, r, w).await });
-    let client: Client = ().serve(client_io).await.unwrap();
-    call(&client, "search", json!({"query": "apollo"})).await;
-    assert!(
-        reg.list().unwrap()[0].last_used.is_some(),
-        "last_used tracked"
-    );
-    let id = reg.list().unwrap()[0].id.clone();
-    assert!(reg.revoke(&id).unwrap());
-    let err = client
-        .call_tool(
-            CallToolRequestParams::new("search").with_arguments(obj(json!({"query": "apollo"}))),
-        )
-        .await
-        .unwrap_err();
-    assert!(err.to_string().contains("revoked"), "{err}");
-    client.cancel().await.unwrap();
-}
-
-#[tokio::test]
-async fn stdio_rate_limit() {
-    let server = McpServer::builder(backend(false))
-        .config(McpConfig {
-            rate_limit: RateLimit {
-                burst: 3,
-                per_minute: 1,
-            },
-        })
-        .build();
-    let client = stdio_client(&server, all_scopes()).await;
-    for _ in 0..3 {
-        call(&client, "search", json!({"query": "apollo"})).await;
-    }
-    let err = client
-        .call_tool(
-            CallToolRequestParams::new("search").with_arguments(obj(json!({"query": "apollo"}))),
-        )
-        .await
-        .unwrap_err();
-    assert!(err.to_string().contains("rate limited"), "{err}");
-    client.cancel().await.unwrap();
 }
 
 #[tokio::test]
@@ -345,39 +236,27 @@ async fn bridge_handshake_authenticates_then_serves() {
 // ---- HTTP ----
 
 struct Http {
-    server: McpServer,
     reg: Arc<ClientRegistry>,
     handle: nugget_mcp::HttpHandle,
     log: AuditLog,
 }
 
-async fn http(rate: RateLimit, origins: Vec<String>) -> Http {
-    http_with(
-        rate,
-        HttpConfig {
-            port: 0,
-            allowed_origins: origins,
-            ..HttpConfig::default()
-        },
-    )
-    .await
+fn port0() -> HttpConfig {
+    HttpConfig {
+        port: 0,
+        ..HttpConfig::default()
+    }
 }
 
-async fn http_with(rate: RateLimit, config: HttpConfig) -> Http {
+async fn http(config: HttpConfig) -> Http {
     let (reg, _) = registry();
     let log = AuditLog::default();
     let server = McpServer::builder(backend(false))
         .registry(reg.clone())
         .audit(log.sink())
-        .config(McpConfig { rate_limit: rate })
         .build();
     let handle = server.serve_http(config).await.unwrap();
-    Http {
-        server,
-        reg,
-        handle,
-        log,
-    }
+    Http { reg, handle, log }
 }
 
 async fn http_client_with(
@@ -420,7 +299,7 @@ async fn post(url: &str, token: Option<&str>, extra: &[(&str, &str)]) -> reqwest
 
 #[tokio::test]
 async fn http_round_trip_with_sdk_client() {
-    let h = http(RateLimit::default(), vec![]).await;
+    let h = http(port0()).await;
     assert!(h.handle.local_addr().ip().is_loopback());
     let (_, token) = h.reg.create("Claude Code", all_scopes()).unwrap();
     for (mode, version) in lifecycles() {
@@ -438,13 +317,8 @@ async fn http_round_trip_with_sdk_client() {
             .all(|e| e.detail["transport"] == "loopback_http")
     );
     assert!(h.reg.list().unwrap()[0].last_used.is_some());
-    let _ = &h.server;
-    h.handle.shutdown().await;
-}
 
-#[tokio::test]
-async fn http_scopes_follow_the_token() {
-    let h = http(RateLimit::default(), vec![]).await;
+    // Scopes follow the token.
     let (_, narrow) = h
         .reg
         .create("Narrow", scopes(Some(&[FILES]), &["search"], false))
@@ -461,13 +335,22 @@ async fn http_scopes_follow_the_token() {
     let r = call(&client, "search", json!({"query": "apollo budget"})).await;
     assert!(!text_of(&r).contains("2M"));
     assert!(text_of(&r).contains("files:docs"));
+    let r = call(
+        &client,
+        "get_item",
+        json!({"source": FILES, "key": "plan.md"}),
+    )
+    .await;
+    assert_eq!(r.is_error, Some(true));
+    assert!(text_of(&r).contains("not enabled"));
+    assert_eq!(client.list_all_resource_templates().await.unwrap().len(), 0);
     client.cancel().await.unwrap();
     h.handle.shutdown().await;
 }
 
 #[tokio::test]
 async fn http_requires_a_valid_bearer_token() {
-    let h = http(RateLimit::default(), vec![]).await;
+    let h = http(port0()).await;
     let url = h.handle.url();
     let (info, token) = h.reg.create("App", all_scopes()).unwrap();
 
@@ -479,16 +362,15 @@ async fn http_requires_a_valid_bearer_token() {
             .unwrap()
             .starts_with("Bearer")
     );
-    assert_eq!(post(&url, Some("ngt_nope"), &[]).await.status(), 401);
     let forged = "ngt_".to_owned() + &"x".repeat(43);
-    assert_eq!(post(&url, Some(&forged), &[]).await.status(), 401);
-    let r = post(
-        &url,
-        None,
-        &[("authorization", &format!("Basic {}", token.expose()))],
-    )
-    .await;
-    assert_eq!(r.status(), 401);
+    let basic = format!("Basic {}", token.expose());
+    for (t, extra) in [
+        (Some("ngt_nope"), vec![]),
+        (Some(forged.as_str()), vec![]),
+        (None, vec![("authorization", basic.as_str())]),
+    ] {
+        assert_eq!(post(&url, t, &extra).await.status(), 401);
+    }
 
     let ok = post(&url, Some(token.expose()), &[]).await;
     assert_eq!(ok.status(), 200, "{:?}", ok.text().await);
@@ -511,41 +393,30 @@ async fn http_requires_a_valid_bearer_token() {
 
 #[tokio::test]
 async fn http_rejects_bad_host_and_origin_and_closes_cors() {
-    let h = http(RateLimit::default(), vec!["http://localhost:6274".into()]).await;
+    let h = http(HttpConfig {
+        allowed_origins: vec!["http://localhost:6274".into()],
+        ..port0()
+    })
+    .await;
     let url = h.handle.url();
     let (_, token) = h.reg.create("App", all_scopes()).unwrap();
     let t = token.expose();
-
-    // DNS rebinding: a foreign Host is refused even with a valid token.
-    assert_eq!(
-        post(&url, Some(t), &[("host", "evil.example:80")])
-            .await
-            .status(),
-        403
-    );
     let port = h.handle.local_addr().port();
-    let other_port = format!("127.0.0.1:{}", port.wrapping_add(1));
-    assert_eq!(
-        post(&url, Some(t), &[("host", &other_port)]).await.status(),
-        403
-    );
-    let localhost = format!("localhost:{port}");
-    assert_eq!(
-        post(&url, Some(t), &[("host", &localhost)]).await.status(),
-        200
-    );
 
-    // Browser origins: only the configured one.
-    let r = post(&url, Some(t), &[("origin", "https://evil.example")]).await;
-    assert_eq!(r.status(), 403);
-    assert!(r.headers().get("access-control-allow-origin").is_none());
-    assert_eq!(
-        post(&url, Some(t), &[("origin", "null")]).await.status(),
-        403
-    );
-    let r = post(&url, Some(t), &[("origin", "http://localhost:6274")]).await;
-    assert_eq!(r.status(), 200);
-    assert!(r.headers().get("access-control-allow-origin").is_none());
+    // DNS rebinding: a foreign Host is refused even with a valid token. Browser origins: only
+    // the configured one, and no CORS headers either way.
+    for (header, value, status) in [
+        ("host", "evil.example:80".to_owned(), 403),
+        ("host", format!("127.0.0.1:{}", port.wrapping_add(1)), 403),
+        ("host", format!("localhost:{port}"), 200),
+        ("origin", "https://evil.example".into(), 403),
+        ("origin", "null".into(), 403),
+        ("origin", "http://localhost:6274".into(), 200),
+    ] {
+        let r = post(&url, Some(t), &[(header, &value)]).await;
+        assert_eq!(r.status(), status, "{header}: {value}");
+        assert!(r.headers().get("access-control-allow-origin").is_none());
+    }
 
     // CORS preflight is refused.
     let r = raw()
@@ -571,70 +442,20 @@ async fn http_rejects_bad_host_and_origin_and_closes_cors() {
 }
 
 #[tokio::test]
-async fn http_rate_limit_is_per_client() {
-    let h = http(
-        RateLimit {
-            burst: 2,
-            per_minute: 1,
-        },
-        vec![],
-    )
-    .await;
-    let url = h.handle.url();
-    let (_, a) = h.reg.create("A", all_scopes()).unwrap();
-    let (_, b) = h.reg.create("B", all_scopes()).unwrap();
-    assert_eq!(post(&url, Some(a.expose()), &[]).await.status(), 200);
-    assert_eq!(post(&url, Some(a.expose()), &[]).await.status(), 200);
-    let r = post(&url, Some(a.expose()), &[]).await;
-    assert_eq!(r.status(), 429);
-    assert!(
-        r.headers()["retry-after"]
-            .to_str()
-            .unwrap()
-            .parse::<u64>()
-            .unwrap()
-            >= 1
-    );
-    assert_eq!(
-        post(&url, Some(b.expose()), &[]).await.status(),
-        200,
-        "other clients unaffected"
-    );
-    h.handle.shutdown().await;
-}
-
-#[tokio::test]
-async fn http_needs_a_registry() {
+async fn http_needs_a_registry_and_fails_closed_when_the_port_is_taken() {
     let server = McpServer::builder(backend(false)).build();
-    assert!(
-        server
-            .serve_http(HttpConfig {
-                port: 0,
-                ..HttpConfig::default()
-            })
-            .await
-            .is_err()
-    );
-}
-
-#[tokio::test]
-async fn http_fails_closed_when_the_port_is_taken() {
+    assert!(server.serve_http(port0()).await.is_err());
     // Someone else holds the port: no fallback port, an error.
     let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = squatter.local_addr().unwrap().port();
     let (reg, _) = registry();
     let server = McpServer::builder(backend(false)).registry(reg).build();
-    let r = server
-        .serve_http(HttpConfig {
-            port,
-            ..HttpConfig::default()
-        })
-        .await;
+    let r = server.serve_http(HttpConfig { port, ..port0() }).await;
     assert!(r.is_err(), "bound a port someone else holds");
 }
 
 /// Read from `s` until EOF (or `limit`), returning what arrived.
-async fn read_to_close(s: &mut tokio::net::TcpStream, limit: std::time::Duration) -> String {
+async fn read_to_close(s: &mut tokio::net::TcpStream, limit: Duration) -> String {
     use tokio::io::AsyncReadExt;
     let mut out = Vec::new();
     let _ = tokio::time::timeout(limit, s.read_to_end(&mut out)).await;
@@ -642,53 +463,25 @@ async fn read_to_close(s: &mut tokio::net::TcpStream, limit: std::time::Duration
 }
 
 #[tokio::test]
-async fn http_closes_connections_that_never_send_headers() {
-    let h = http_with(
-        RateLimit::default(),
-        HttpConfig {
-            port: 0,
-            header_timeout_ms: 200,
-            ..HttpConfig::default()
-        },
-    )
-    .await;
+async fn http_closes_slow_or_idle_connections_and_times_out_slow_bodies() {
     use tokio::io::AsyncWriteExt;
-    let mut s = tokio::net::TcpStream::connect(h.handle.local_addr())
-        .await
-        .unwrap();
-    s.write_all(b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n")
-        .await
-        .unwrap();
-    let started = std::time::Instant::now();
-    let _ = read_to_close(&mut s, std::time::Duration::from_secs(10)).await;
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(5),
-        "slow-header connection kept open"
-    );
-    // An idle connection that sends nothing is closed too.
-    let mut idle = tokio::net::TcpStream::connect(h.handle.local_addr())
-        .await
-        .unwrap();
-    let started = std::time::Instant::now();
-    let _ = read_to_close(&mut idle, std::time::Duration::from_secs(10)).await;
-    assert!(started.elapsed() < std::time::Duration::from_secs(5));
-    h.handle.shutdown().await;
-}
-
-#[tokio::test]
-async fn http_times_out_slow_bodies() {
-    let h = http_with(
-        RateLimit::default(),
-        HttpConfig {
-            port: 0,
-            body_timeout_ms: 200,
-            ..HttpConfig::default()
-        },
-    )
+    let h = http(HttpConfig {
+        header_timeout_ms: 200,
+        body_timeout_ms: 200,
+        ..port0()
+    })
     .await;
-    let (_, token) = h.reg.create("Slow", all_scopes()).unwrap();
-    use tokio::io::AsyncWriteExt;
     let addr = h.handle.local_addr();
+    // A partial head, and an idle connection that sends nothing: both closed.
+    for head in [&b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n"[..], b""] {
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        s.write_all(head).await.unwrap();
+        let started = std::time::Instant::now();
+        let _ = read_to_close(&mut s, Duration::from_secs(10)).await;
+        assert!(started.elapsed() < Duration::from_secs(5), "kept open");
+    }
+    // A body that never completes: 408.
+    let (_, token) = h.reg.create("Slow", all_scopes()).unwrap();
     let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
     let head = format!(
         "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {}\r\n\
@@ -698,22 +491,18 @@ async fn http_times_out_slow_bodies() {
         token.expose()
     );
     s.write_all(head.as_bytes()).await.unwrap();
-    let resp = read_to_close(&mut s, std::time::Duration::from_secs(5)).await;
+    let resp = read_to_close(&mut s, Duration::from_secs(5)).await;
     assert!(resp.starts_with("HTTP/1.1 408"), "{resp}");
     h.handle.shutdown().await;
 }
 
 #[tokio::test]
 async fn http_caps_open_connections() {
-    let h = http_with(
-        RateLimit::default(),
-        HttpConfig {
-            port: 0,
-            max_connections: 1,
-            header_timeout_ms: 60_000,
-            ..HttpConfig::default()
-        },
-    )
+    let h = http(HttpConfig {
+        max_connections: 1,
+        header_timeout_ms: 60_000,
+        ..port0()
+    })
     .await;
     let (_, token) = h.reg.create("Capped", all_scopes()).unwrap();
     let url = h.handle.url();
@@ -721,9 +510,9 @@ async fn http_caps_open_connections() {
     let hog = tokio::net::TcpStream::connect(h.handle.local_addr())
         .await
         .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let blocked = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
+        Duration::from_millis(500),
         post(&url, Some(token.expose()), &[]),
     )
     .await;
@@ -731,7 +520,7 @@ async fn http_caps_open_connections() {
     // Slot freed: served.
     drop(hog);
     let ok = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        Duration::from_secs(10),
         post(&url, Some(token.expose()), &[]),
     )
     .await

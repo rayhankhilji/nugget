@@ -227,7 +227,7 @@ fn build(
 }
 
 pub fn write(root: &Path, rel: &str, content: &str) -> PathBuf {
-    let p = rel.split('/').fold(root.to_path_buf(), |p, c| p.join(c));
+    let p = path(root, rel);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(&p, content).unwrap();
     p

@@ -146,7 +146,7 @@ new_case() { # name
   # the background, install at quit.
   mkdir -p "$XDG_CONFIG_HOME/dev.nugget.desktop"
   printf '{"channel":"beta","auto_install":true}\n' >"$XDG_CONFIG_HOME/dev.nugget.desktop/settings.json"
-  # Quitting stops the daemon the app started, without asking first (platform.json, GG6-8).
+  # Quitting stops the daemon the app started, without asking first (platform.json).
   printf '{"quit_daemon":"stop"}\n' >"$XDG_CONFIG_HOME/dev.nugget.desktop/platform.json"
   # Any temp files (the updater's backup of the running AppImage) stay in the case directory.
   export TMPDIR="$w/tmp"

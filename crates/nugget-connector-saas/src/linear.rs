@@ -29,8 +29,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_connector::http::{MeteredHttp, Response};
 use nugget_connector::{
-    AuthFlow, AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext,
-    ConnectorFactory, Content, Document, KindInfo,
+    AuthFlow, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
@@ -40,6 +39,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::LINEAR_KIND;
 use crate::api::{
     self, Api, ItemFailures, Outcome, classify_common, header_u64, retry_after_ms, server_now,
 };
@@ -48,7 +48,6 @@ use crate::settings::{self, MAX_WINDOW_DAYS};
 use crate::text::{
     DAY_SECS, clean, date, now_unix, one_line, parse_rfc3339, rfc3339, safe_id, truncate_chars,
 };
-use crate::{Endpoints, LINEAR_KIND, RetryPolicy};
 
 const FEATURE: &str = "sync:linear";
 const SERVICE: &str = "Linear";
@@ -185,45 +184,16 @@ impl Cursor {
     }
 }
 
-/// Factory for `linear` sources.
-#[derive(Debug, Clone, Default)]
-pub struct LinearFactory {
-    endpoints: Endpoints,
-    retry: RetryPolicy,
-}
+factory!(
+    LinearFactory,
+    LinearConnector,
+    LINEAR_KIND,
+    "Linear",
+    LinearSettings
+);
 
 impl LinearFactory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_endpoints(mut self, endpoints: Endpoints) -> Self {
-        self.endpoints = endpoints;
-        self
-    }
-
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
-    }
-}
-
-impl ConnectorFactory for LinearFactory {
-    fn info(&self) -> KindInfo {
-        KindInfo {
-            kind: LINEAR_KIND,
-            display_name: "Linear",
-            auth: AuthKind::Password,
-            settings_schema: LinearSettings::schema(),
-        }
-    }
-
-    fn validate(&self, settings: &Value) -> Result<()> {
-        LinearSettings::parse(settings).map(|_| ())
-    }
-
-    fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
-        let settings = LinearSettings::parse(settings)?;
+    fn make(&self, settings: LinearSettings, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
         let http = api::metered(ctx.egress.clone(), FEATURE)?;
         let tokens = match &settings.client_id {
             Some(id) => Some(auth::token_source(
@@ -267,14 +237,6 @@ pub struct LinearConnector {
     tokens: Option<Arc<TokenSource>>,
     settings: LinearSettings,
     ctx: ConnectorContext,
-}
-
-impl std::fmt::Debug for LinearConnector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LinearConnector")
-            .field("source", &self.ctx.source)
-            .finish_non_exhaustive()
-    }
 }
 
 fn error_codes(body: &Value) -> Vec<String> {
@@ -471,15 +433,7 @@ impl LinearConnector {
             })
             .await?;
         let v: Value = api::json(&resp, "linear graphql")?;
-        if let Some(errors) = v["errors"].as_array().filter(|e| !e.is_empty())
-            && v["data"]
-                .as_object()
-                .is_none_or(|d| d.values().all(Value::is_null))
-        {
-            let msg = errors[0]["message"]
-                .as_str()
-                .map(|m| one_line(m, 200))
-                .unwrap_or_default();
+        if let Some((_, msg)) = api::graphql_failure(&v) {
             return Err(Error::Other(format!("Linear GraphQL error: {msg}")));
         }
         Ok(v)
@@ -656,33 +610,13 @@ impl LinearConnector {
     }
 
     async fn more_comments(&self, n: &Value, cancel: &CancellationToken) -> Result<Vec<Value>> {
-        let mut out = Vec::new();
-        let Some(id) = n["id"].as_str() else {
-            return Ok(out);
-        };
-        let mut after = n["comments"]["pageInfo"]["endCursor"]
-            .as_str()
-            .map(str::to_string);
-        let mut fetched = n["comments"]["nodes"].as_array().map_or(0, Vec::len);
-        while let Some(a) = after.take() {
-            if fetched >= MAX_COMMENTS {
-                break;
-            }
-            let v = self
-                .graphql(MORE_COMMENTS, json!({"id": id, "after": a}), cancel)
+        api::more_comments(n, MAX_COMMENTS, |id, after| async move {
+            let mut v = self
+                .graphql(MORE_COMMENTS, json!({"id": id, "after": after}), cancel)
                 .await?;
-            let c = &v["data"]["issue"]["comments"];
-            let nodes = c["nodes"].as_array().cloned().unwrap_or_default();
-            if nodes.is_empty() {
-                break;
-            }
-            fetched += nodes.len();
-            out.extend(nodes);
-            if c["pageInfo"]["hasNextPage"].as_bool() == Some(true) {
-                after = c["pageInfo"]["endCursor"].as_str().map(str::to_string);
-            }
-        }
-        Ok(out)
+            Ok(v["data"]["issue"]["comments"].take())
+        })
+        .await
     }
 
     async fn document(

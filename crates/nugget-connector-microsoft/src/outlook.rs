@@ -42,8 +42,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use nugget_connector::{
-    AuthFlow, AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext,
-    ConnectorFactory, Content, Document, KindInfo,
+    AuthFlow, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
@@ -58,7 +57,6 @@ use crate::graph::{
 use crate::oauth::{SCOPE_MAIL_READ, SCOPE_OFFLINE_ACCESS, SCOPE_USER_READ};
 use crate::settings::{OutlookSettings, valid_folder_id};
 use crate::text::clean_line;
-use crate::{MicrosoftEndpoints, RetryPolicy};
 
 pub(crate) const KIND: &str = "outlook";
 const FEATURE: &str = "sync:outlook";
@@ -135,56 +133,14 @@ impl Cursor {
     }
 }
 
-/// Factory for `outlook` sources.
-#[derive(Debug, Clone, Default)]
-pub struct OutlookFactory {
-    endpoints: MicrosoftEndpoints,
-    retry: RetryPolicy,
-}
-
-impl OutlookFactory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_endpoints(mut self, endpoints: MicrosoftEndpoints) -> Self {
-        self.endpoints = endpoints;
-        self
-    }
-
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
-    }
-}
-
-impl ConnectorFactory for OutlookFactory {
-    fn info(&self) -> KindInfo {
-        KindInfo {
-            kind: KIND,
-            display_name: "Outlook mail",
-            auth: AuthKind::OAuth,
-            settings_schema: OutlookSettings::schema(),
-        }
-    }
-
-    fn validate(&self, settings: &Value) -> Result<()> {
-        OutlookSettings::parse(settings).map(|_| ())
-    }
-
-    fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
-        let settings = OutlookSettings::parse(settings)?;
-        let api = GraphApi::new(
-            FEATURE,
-            SCOPES,
-            &settings.common(),
-            &self.endpoints,
-            self.retry,
-            ctx.clone(),
-        )?;
-        Ok(Arc::new(OutlookConnector { api, settings, ctx }))
-    }
-}
+graph_factory!(
+    OutlookFactory,
+    OutlookConnector,
+    KIND,
+    "Outlook mail",
+    OutlookSettings,
+    |_, settings, api, ctx| Ok(Arc::new(OutlookConnector { api, settings, ctx }))
+);
 
 /// One Microsoft 365 / Outlook.com mailbox.
 pub struct OutlookConnector {
@@ -193,16 +149,9 @@ pub struct OutlookConnector {
     ctx: ConnectorContext,
 }
 
-impl std::fmt::Debug for OutlookConnector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OutlookConnector")
-            .field("source", &self.ctx.source)
-            .finish_non_exhaustive()
-    }
-}
-
 #[derive(Deserialize, Default)]
 #[serde(default)]
+#[serde(rename_all = "camelCase")]
 struct Message {
     id: String,
     #[serde(rename = "receivedDateTime")]
@@ -211,15 +160,10 @@ struct Message {
     last_modified: Option<String>,
     subject: Option<String>,
     from: Option<Recipient>,
-    #[serde(rename = "conversationId")]
     conversation_id: Option<String>,
-    #[serde(rename = "internetMessageId")]
     internet_message_id: Option<String>,
-    #[serde(rename = "isDraft")]
     is_draft: Option<bool>,
-    #[serde(rename = "webLink")]
     web_link: Option<String>,
-    #[serde(rename = "parentFolderId")]
     parent_folder_id: Option<String>,
 }
 

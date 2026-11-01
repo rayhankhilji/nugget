@@ -278,6 +278,9 @@ def connector_kinds() -> dict[str, str]:
         consts = shared | str_consts(text)
         for ident, display in re.findall(r'kind: (\w+),\s*display_name: "([^"]+)"', text):
             out[consts[ident]] = display
+        # nugget-connector-saas: `factory!(Factory, Connector, KIND, "Display", ...)`.
+        for ident, display in re.findall(r'factory!\(\s*\w+,\s*\w+,\s*(\w+),\s*"([^"]+)"', text):
+            out[consts[ident]] = display
     return out
 
 

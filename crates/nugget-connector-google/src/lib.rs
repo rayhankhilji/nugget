@@ -26,7 +26,6 @@ mod settings;
 mod text;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use nugget_connector::Registry;
 
@@ -85,25 +84,7 @@ impl GoogleEndpoints {
     }
 }
 
-/// In-pass retries for rate limits (429, `userRateLimitExceeded`) and transient failures.
-/// After `max_retries` the error (`RateLimited` / `Network`) is returned and the ingest
-/// supervisor backs off; progress up to the last checkpoint is kept.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RetryPolicy {
-    pub max_retries: u32,
-    pub base_delay: Duration,
-    pub max_delay: Duration,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            max_retries: 4,
-            base_delay: Duration::from_secs(1),
-            max_delay: Duration::from_secs(60),
-        }
-    }
-}
+pub use nugget_connector::retry::RetryPolicy;
 
 /// Register the `gmail`, `gcal` and `gdrive` kinds with production endpoints.
 pub fn register(registry: &mut Registry) {

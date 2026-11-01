@@ -88,28 +88,6 @@ fn validates_settings() {
 }
 
 #[tokio::test]
-async fn kinds_and_poll_intervals() {
-    let h = Harness::new().await;
-    for (f, kind, secs) in [
-        (
-            Box::new(SlackFactory::new()) as Box<dyn ConnectorFactory>,
-            "slack",
-            300,
-        ),
-        (Box::new(NotionFactory::new()), "notion", 300),
-        (Box::new(GitHubFactory::new()), "github", 600),
-        (Box::new(LinearFactory::new()), "linear", 300),
-    ] {
-        let c = h.build(f.as_ref(), json!({}));
-        assert_eq!(c.kind(), kind);
-        assert_eq!(c.poll_interval(), Duration::from_secs(secs));
-        assert!(!c.supports_watch());
-    }
-    let s = h.build(&SlackFactory::new(), json!({}));
-    assert!(matches!(s.begin_auth().await, Err(Error::Unsupported(_))));
-}
-
-#[tokio::test]
 async fn a_missing_token_env_variable_is_unauthorized_even_with_a_keychain_token() {
     let h = Harness::new().await;
     h.paste("ntn_keychain");

@@ -8,7 +8,7 @@
 //!   `recent_changes`. **Resources:** entity pages `nugget://entity/<id>` (Markdown) and items
 //!   `nugget://item/<source>/<key>`.
 //! - **Local only.** stdio (through the `nuggetd mcp --client <id>` bridge, see [`stdio`]) and
-//!   streamable HTTP bound to 127.0.0.1 ([`http`]). There is no remote transport in M2.
+//!   streamable HTTP bound to 127.0.0.1 ([`http`]). There is no remote transport.
 //! - **Per-client tokens** (`ngt_…`, stored only as a keyed hash), revocation and `last_used`
 //!   ([`auth`]); Host/Origin checks against DNS rebinding, closed CORS, bearer auth on every
 //!   request and no secrets in URLs; per-client rate limits ([`rate`]).
@@ -21,8 +21,8 @@
 //!   `<untrusted-content>` blocks that content cannot break out of, and every tool description
 //!   says to treat it as data ([`render`]).
 //!
-//! The daemon provides the data through the [`KnowledgeBackend`] trait; [`FakeBackend`] is an
-//! in-memory implementation for tests. Built on the official Rust SDK, `rmcp`.
+//! The daemon provides the data through the [`KnowledgeBackend`] trait. Built on the official
+//! Rust SDK, `rmcp`.
 //!
 //! ```no_run
 //! # async fn demo(backend: std::sync::Arc<dyn nugget_mcp::KnowledgeBackend>) -> nugget_core::Result<()> {
@@ -42,7 +42,6 @@
 pub mod audit;
 pub mod auth;
 pub mod backend;
-pub mod fake;
 pub mod http;
 pub mod rate;
 pub mod render;
@@ -55,13 +54,12 @@ pub mod tools;
 pub use audit::{AuditEntry, AuditSink, Transport};
 pub use auth::{ClientRecord, ClientRegistry, ClientStore, ClientToken, MemClientStore, ServerKey};
 pub use backend::*;
-pub use fake::FakeBackend;
 pub use http::{HttpConfig, HttpHandle};
 pub use rate::RateLimit;
 pub use scope::{DetailOrigins, Scope, ScopeFilter, VAULT_SOURCE};
 pub use server::{McpConfig, McpHandler, McpServer, McpServerBuilder};
 pub use snippets::{SnippetOptions, client_created, setup_snippets};
-pub use stdio::{TOKEN_ENV, accept_bridge, bridge_connect, serve_stdio};
+pub use stdio::{TOKEN_ENV, accept_bridge, bridge_connect};
 
 /// Re-export of the MCP SDK, for callers that drive [`McpHandler`] directly.
 pub use rmcp;

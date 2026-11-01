@@ -1,9 +1,9 @@
 //! The MCP server core and its `rmcp` handler.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
-use nugget_core::egress::EgressSink;
 use nugget_core::ids::ItemRef;
 use nugget_core::ipc::McpClientInfo;
 use rmcp::model::{
@@ -45,7 +45,6 @@ struct Inner {
     /// Keys the hashes of free-text arguments in audit entries: the registry's key, so they stay
     /// comparable across restarts, or a per-process one without a registry.
     audit_key: Option<ServerKey>,
-    egress: Option<Arc<dyn EgressSink>>,
     limiter: RateLimiter,
     refusals: RefusalLog,
 }
@@ -59,12 +58,8 @@ pub const REFUSAL_AUDIT_WINDOW: std::time::Duration = std::time::Duration::from_
 /// the number of refusals of that kind that were coalesced (not written) since the previous one.
 #[derive(Default)]
 struct RefusalLog {
-    windows: std::sync::Mutex<HashMap<(String, Outcome), RefusalWindow>>,
-}
-
-struct RefusalWindow {
-    opened: std::time::Instant,
-    coalesced: u64,
+    /// Per client and outcome: when the current window opened, and refusals coalesced in it.
+    windows: std::sync::Mutex<HashMap<(String, Outcome), (std::time::Instant, u64)>>,
 }
 
 impl RefusalLog {
@@ -73,31 +68,18 @@ impl RefusalLog {
         let now = std::time::Instant::now();
         let mut w = self.windows.lock().unwrap_or_else(|p| p.into_inner());
         if w.len() > 10_000 {
-            w.retain(|_, v| now.duration_since(v.opened) < REFUSAL_AUDIT_WINDOW);
+            w.retain(|_, v| now.duration_since(v.0) < REFUSAL_AUDIT_WINDOW);
         }
-        match w.get_mut(&(client.to_owned(), outcome)) {
-            Some(win) if now.duration_since(win.opened) < REFUSAL_AUDIT_WINDOW => {
-                win.coalesced += 1;
-                None
-            }
-            Some(win) => {
-                let n = win.coalesced;
-                *win = RefusalWindow {
-                    opened: now,
-                    coalesced: 0,
-                };
-                Some(n)
-            }
-            None => {
-                w.insert(
-                    (client.to_owned(), outcome),
-                    RefusalWindow {
-                        opened: now,
-                        coalesced: 0,
-                    },
-                );
+        match w.entry((client.to_owned(), outcome)) {
+            Entry::Vacant(v) => {
+                v.insert((now, 0));
                 Some(0)
             }
+            Entry::Occupied(mut o) if now.duration_since(o.get().0) < REFUSAL_AUDIT_WINDOW => {
+                o.get_mut().1 += 1;
+                None
+            }
+            Entry::Occupied(mut o) => Some(std::mem::replace(o.get_mut(), (now, 0)).1),
         }
     }
 }
@@ -119,7 +101,6 @@ pub struct McpServerBuilder {
     backend: Arc<dyn KnowledgeBackend>,
     registry: Option<Arc<ClientRegistry>>,
     audit: Option<AuditSink>,
-    egress: Option<Arc<dyn EgressSink>>,
     config: McpConfig,
 }
 
@@ -134,12 +115,6 @@ impl McpServerBuilder {
     /// Called with one [`AuditEntry`] per tool call and resource read.
     pub fn audit(mut self, sink: impl Fn(AuditEntry) + Send + Sync + 'static) -> Self {
         self.audit = Some(Arc::new(sink));
-        self
-    }
-
-    /// Egress ledger, used only for remote clients (none exist in M2).
-    pub fn egress(mut self, sink: Arc<dyn EgressSink>) -> Self {
-        self.egress = Some(sink);
         self
     }
 
@@ -159,7 +134,6 @@ impl McpServerBuilder {
                 registry: self.registry,
                 audit: self.audit,
                 audit_key,
-                egress: self.egress,
                 limiter: RateLimiter::new(self.config.rate_limit),
                 refusals: RefusalLog::default(),
             }),
@@ -183,7 +157,6 @@ impl McpServer {
             backend,
             registry: None,
             audit: None,
-            egress: None,
             config: McpConfig::default(),
         }
     }
@@ -240,20 +213,6 @@ impl McpServer {
     fn record(&self, rec: CallRecord<'_>) {
         if let Some(sink) = &self.inner.audit {
             sink(rec.to_entry(self.inner.audit_key.as_ref()));
-        }
-        if rec.transport.is_remote()
-            && rec.outcome == Outcome::Ok
-            && let Some(egress) = &self.inner.egress
-        {
-            // Unreachable in M2 (no remote transport); kept so the rule lives next to the audit.
-            egress.record(nugget_core::egress::EgressEvent {
-                at: time::OffsetDateTime::now_utc(),
-                host: "mcp-client".into(),
-                feature: "mcp".into(),
-                bytes_sent: 0,
-                bytes_received: 0,
-                items: rec.items.to_vec(),
-            });
         }
     }
 

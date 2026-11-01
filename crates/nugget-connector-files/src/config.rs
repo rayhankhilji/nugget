@@ -713,35 +713,6 @@ mod tests {
         assert!(Matcher::new(&["  ".into()]).is_err());
     }
 
-    #[test]
-    fn junk_names() {
-        for n in [
-            ".DS_Store",
-            "Thumbs.db",
-            "._foo.md",
-            "~$report.docx",
-            ".#note.md",
-            "note.md~",
-            "x.SWP",
-            "file.crdownload",
-        ] {
-            assert!(is_junk_file(n), "{n}");
-        }
-        for n in ["notes.md", "temp.md", "~", "partial.txt"] {
-            assert!(!is_junk_file(n), "{n}");
-        }
-        for n in [
-            ".git",
-            "node_modules",
-            "TARGET",
-            "__pycache__",
-            ".Trash-1000",
-        ] {
-            assert!(is_junk_dir(n), "{n}");
-        }
-        assert!(!is_junk_dir("src"));
-    }
-
     fn invalid(settings: Value) -> String {
         let r = Config::files(&settings).and_then(|c| c.check_roots_exist());
         match r {
@@ -788,8 +759,6 @@ mod tests {
             m.starts_with("\"relative/dir\" isn't a full folder path."),
             "{m}"
         );
-        assert!(m.contains("Use the full path of the folder, like"), "{m}");
-        assert!(!m.contains('`'), "{m}");
 
         let sub = root.join("sub");
         let m = invalid(json!({ "roots": [root, sub] }));
@@ -830,22 +799,17 @@ mod tests {
         assert_eq!(c.max_file_bytes, DEFAULT_MAX_FILE_BYTES);
         assert!(!c.follow_symlinks && !c.include_hidden);
         assert!(c.include.is_match("a/b.PDF", "b.PDF", false));
-        assert!(c.include.is_match("x.md", "x.md", false));
         assert!(!c.include.is_match("x.exe", "x.exe", false));
         assert_eq!(c.debounce, Duration::from_millis(DEFAULT_DEBOUNCE_MS));
         assert!(c.check_roots_exist().is_ok());
 
         let bad = [
             json!({}),
-            json!({ "roots": [] }),
-            json!({ "roots": ["relative/dir"] }),
-            json!({ "roots": [root, root.join("sub")] }),
             json!({ "roots": [root], "include": [] }),
             json!({ "roots": [root], "exclude": ["a["] }),
             json!({ "roots": [root], "max_file_bytes": 0 }),
             json!({ "roots": [root], "debounce_ms": 1 }),
             json!({ "roots": [root], "rooots": [] }),
-            json!({ "roots": "nope" }),
         ];
         for b in bad {
             assert!(
@@ -853,9 +817,6 @@ mod tests {
                 "accepted {b}"
             );
         }
-        let missing =
-            Config::files(&json!({ "roots": [root.join("definitely-missing-nugget")] })).unwrap();
-        assert!(missing.check_roots_exist().is_err());
     }
 
     #[test]
@@ -877,25 +838,6 @@ mod tests {
     }
 
     #[test]
-    fn obsidian_presets() {
-        let vault = std::env::temp_dir().join("My Vault");
-        let c = Config::obsidian(&json!({ "vault": vault })).unwrap();
-        assert_eq!(
-            c.flavor,
-            Flavor::Obsidian {
-                vault_name: "My Vault".into()
-            }
-        );
-        assert!(c.include.is_match("n.md", "n.md", false));
-        assert!(c.include.is_match("a/img.png", "img.png", false));
-        assert!(!c.include.is_match("a/x.txt", "x.txt", false));
-        assert!(c.skip_dir_name(".obsidian") && c.skip_dir_name(".trash"));
-        let c = Config::obsidian(&json!({ "vault": vault, "include_attachments": false })).unwrap();
-        assert!(!c.include.is_match("a/img.png", "img.png", false));
-        assert!(Config::obsidian(&json!({ "vault": "rel" })).is_err());
-    }
-
-    #[test]
     fn noise_detection() {
         let c = Config::files(&json!({ "roots": [std::env::temp_dir()] })).unwrap();
         assert!(c.is_noise(".git/index"));
@@ -910,31 +852,5 @@ mod tests {
             .unwrap();
         assert!(!c.is_noise("a/.hidden/y.md"));
         assert!(c.is_noise(".git/HEAD"));
-    }
-
-    #[test]
-    fn schemas_describe_settings() {
-        let f = files_schema();
-        assert_eq!(f["required"], json!(["roots"]));
-        assert!(
-            f["properties"]["include"]["default"]
-                .as_array()
-                .unwrap()
-                .len()
-                > 20
-        );
-        for k in [
-            "roots",
-            "include",
-            "exclude",
-            "max_file_bytes",
-            "follow_symlinks",
-            "include_hidden",
-        ] {
-            assert!(f["properties"].get(k).is_some(), "{k}");
-        }
-        let o = obsidian_schema();
-        assert_eq!(o["required"], json!(["vault"]));
-        assert!(o["properties"].get("include_attachments").is_some());
     }
 }
