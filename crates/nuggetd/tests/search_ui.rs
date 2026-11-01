@@ -39,6 +39,8 @@ fn iref(source: &str, key: &str) -> ItemRef {
 struct Harness {
     _tmp: tempfile::TempDir,
     client: Client,
+    /// To add items in a test.
+    store: Store,
     stop: Option<oneshot::Sender<()>>,
     server: Option<JoinHandle<nugget_core::Result<()>>>,
 }
@@ -74,7 +76,8 @@ impl Harness {
             Startup::Ready(d) => d,
             Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
         };
-        let seed = seed(&daemon.store());
+        let store = daemon.store();
+        let seed = seed(&store);
         let (tx, rx) = oneshot::channel::<()>();
         let server = tokio::spawn(daemon.run_until(async {
             let _ = rx.await;
@@ -84,6 +87,7 @@ impl Harness {
             Self {
                 _tmp: tmp,
                 client,
+                store,
                 stop: Some(tx),
                 server: Some(server),
             },
@@ -496,6 +500,30 @@ async fn faceted_search_filters_and_counts_disjunctively() {
         )
         .await;
     assert_eq!(keys(&r), ["e1", "m1"]);
+    // JJ2: with a time zone, each date at its own offset. A London client in winter sends +0,
+    // but 23:30 UTC on 31 March is already summer time there (00:30 on 1 April).
+    let r = h
+        .call(
+            "search.faceted",
+            json!({"query": "budget", "utc_offset_minutes": 0, "time_zone": "Europe/London",
+                   "filters": {"from": "2024-03-01", "to": "2024-03-31"}}),
+        )
+        .await;
+    assert_eq!(keys(&r), ["m1"]);
+    assert_eq!(
+        values(&r["facets"]["months"]),
+        pairs(&[("2023-11", 1), ("2024-03", 1), ("2024-04", 2)]),
+        "months bucket at each date's own offset"
+    );
+    // A zone the bundled database doesn't know falls back to the offset.
+    let r = h
+        .call(
+            "search.faceted",
+            json!({"query": "budget", "utc_offset_minutes": 0, "time_zone": "Mars/Olympus",
+                   "filters": {"from": "2024-03-01", "to": "2024-03-31"}}),
+        )
+        .await;
+    assert_eq!(keys(&r), ["e1", "m1"]);
     let r = h
         .call(
             "search.faceted",
@@ -770,5 +798,60 @@ async fn preview_shows_text_passage_people_and_facts() {
     assert_eq!(c, code::NOT_FOUND, "{msg}");
     let (c, _) = h.call_err("search.preview", json!({})).await;
     assert_eq!(c, code::INVALID_PARAMS);
+    h.stop().await;
+}
+
+/// QA JJ1-10 and JJ1-11: dates in the user's zone, whatever today's offset.
+#[tokio::test]
+async fn zoned_events_and_dst_dates_land_on_the_users_day() {
+    let (h, _) = Harness::start().await;
+    // JJ1-10: DTSTART;TZID=America/New_York:20260415T200000 is 00:00 UTC on 16 April.
+    put(
+        &h.store,
+        NewItem::new("cal", "ny", content_hash("ny"))
+            .with_title("Quarzite review")
+            .with_mime("text/calendar")
+            .with_metadata(json!({"sensitive": false,
+                                  "extracted": {"start": "2026-04-15T20:00:00",
+                                                "timezone": "America/New_York"}})),
+        "Quarzite review call.",
+    );
+    // JJ1-11: a Berlin mail sent at 23:30 CET on 15 January.
+    put(
+        &h.store,
+        NewItem::new("mail", "berlin", content_hash("berlin"))
+            .with_title("Quarzite invoice")
+            .with_metadata(json!({"sensitive": false,
+                                  "extracted": {"date": "2026-01-15T22:30:00Z"}})),
+        "Quarzite invoice attached.",
+    );
+    let day = |d: &str| json!({"from": d, "to": d});
+    let call = |filters: Value, offset: i32| {
+        json!({"query": "quarzite", "utc_offset_minutes": offset, "time_zone": "Europe/Berlin",
+               "filters": filters})
+    };
+    // A Berlin user in summer (+120) filtering 16 April finds the New York event, dated at its
+    // instant everywhere.
+    let r = h.call("search.faceted", call(day("2026-04-16"), 120)).await;
+    assert_eq!(keys(&r), ["ny"], "{r}");
+    assert_eq!(r["hits"][0]["date"], "2026-04-16T00:00:00Z");
+    let p = h
+        .call(
+            "search.preview",
+            json!({"item": {"source": "cal", "key": "ny"}, "time_zone": "Europe/Berlin"}),
+        )
+        .await;
+    assert_eq!(p["date"], "2026-04-16T00:00:00Z");
+    // The same user (sending today's +120) filtering 15 January still finds the winter mail.
+    let r = h.call("search.faceted", call(day("2026-01-15"), 120)).await;
+    assert_eq!(keys(&r), ["berlin"], "{r}");
+    let r = h.call("search.faceted", call(day("2026-01-16"), 120)).await;
+    assert!(keys(&r).is_empty(), "{r}");
+    // Months too: January and April.
+    let r = h.call("search.faceted", call(json!({}), 120)).await;
+    assert_eq!(
+        values(&r["facets"]["months"]),
+        pairs(&[("2026-01", 1), ("2026-04", 1)])
+    );
     h.stop().await;
 }

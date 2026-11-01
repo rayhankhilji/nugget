@@ -35,6 +35,10 @@
 //! - Once ready, the role's known capabilities are set (chat streams and follows JSON schemas
 //!   and knows its context size, embedding embeds) and stay set: after an idle stop the next
 //!   request starts the server again.
+//! - Interactive chats (not triage or other background work) on a slot, and on every configured
+//!   `OnDevice` or `LocalNetwork` provider ([`ForegroundAware`]), hold ingest's foreground guard
+//!   for the life of their stream, so background triage yields to them. Cloud providers are
+//!   not wrapped.
 //!
 //! **Routing order**, per tier: configured `LocalNetwork` providers and `OnDevice` ones with a
 //! stored successful probe (config order), then the runtime slot, then unprobed `OnDevice`
@@ -517,9 +521,7 @@ impl Provider for RuntimeSlot {
         // Interactive chats (Ask, Double Tap, agent, drafts) are marked for their whole stream
         // so background triage leaves the model alone; background work (knowledge, proactive
         // judge, probes, triage itself) is not (HH2).
-        let guard = nugget_ingest::is_interactive(&req.feature)
-            .then(|| self.foreground.get().map(|f| f.begin()))
-            .flatten();
+        let guard = interactive_guard(&self.foreground, &req);
         // In flight until the stream ends: the hang watchdog checks the server often meanwhile.
         let busy = self.runtime.request(self.role);
         let before = self.runtime.details(self.role);
@@ -599,6 +601,106 @@ impl Provider for RuntimeSlot {
     async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
         self.ready().await?.prewarm_prefix(req).await
     }
+}
+
+/// A [`nugget_ingest::ForegroundGuard`] for `req` if it is interactive and `fg` is set.
+fn interactive_guard(
+    fg: &OnceLock<Arc<nugget_ingest::Foreground>>,
+    req: &ChatRequest,
+) -> Option<nugget_ingest::ForegroundGuard> {
+    nugget_ingest::is_interactive(&req.feature)
+        .then(|| fg.get().map(|f| f.begin()))
+        .flatten()
+}
+
+/// Keep `guard` alive for as long as `stream` lives.
+fn hold_guard(stream: ChatStream, guard: Option<nugget_ingest::ForegroundGuard>) -> ChatStream {
+    match guard {
+        Some(g) => Box::pin(futures::StreamExt::map(stream, move |ev| {
+            let _held = &g;
+            ev
+        })),
+        None => stream,
+    }
+}
+
+/// Where the daemon publishes ingest's [`nugget_ingest::Foreground`] once ingest started (the
+/// router, and so every provider, is built before it).
+pub(crate) type ForegroundCell = Arc<OnceLock<Arc<nugget_ingest::Foreground>>>;
+
+/// A provider the user configured in `providers.toml` on this device or the LAN (Ollama, a LAN
+/// server): like a [`RuntimeSlot`], its interactive chats hold a foreground guard for the life
+/// of their stream, so background triage on the same server yields to Ask and Double Tap (HH2).
+/// Everything else is forwarded unchanged.
+pub(crate) struct ForegroundAware {
+    inner: Arc<dyn Provider>,
+    foreground: ForegroundCell,
+}
+
+#[async_trait]
+impl Provider for ForegroundAware {
+    fn id(&self) -> &ProviderId {
+        self.inner.id()
+    }
+
+    fn meta(&self) -> ProviderMeta {
+        self.inner.meta()
+    }
+
+    fn available(&self) -> bool {
+        self.inner.available()
+    }
+
+    async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
+        let guard = interactive_guard(&self.foreground, &req);
+        let stream = self.inner.chat(req).await?;
+        Ok(hold_guard(stream, guard))
+    }
+
+    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.inner.embed(texts).await
+    }
+
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.inner.embed_query(texts).await
+    }
+
+    async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+        self.inner.embed_items(texts, items).await
+    }
+
+    fn embed_prefixes(&self) -> (String, String) {
+        self.inner.embed_prefixes()
+    }
+
+    async fn prewarm(&self) -> Result<()> {
+        self.inner.prewarm().await
+    }
+
+    async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
+        self.inner.prewarm_prefix(req).await
+    }
+}
+
+/// Wrap the configured providers that are not cloud in [`ForegroundAware`], all sharing `cell`.
+/// Cloud providers are returned as they are.
+pub(crate) fn guard_configured(
+    providers: Vec<Arc<dyn Provider>>,
+    cell: &ForegroundCell,
+) -> Vec<Arc<dyn Provider>> {
+    providers
+        .into_iter()
+        .map(|p| {
+            if p.meta().locality == Locality::Cloud {
+                p
+            } else {
+                Arc::new(ForegroundAware {
+                    inner: p,
+                    foreground: cell.clone(),
+                }) as Arc<dyn Provider>
+            }
+        })
+        .collect()
 }
 
 /// A failure to start or reach a role's server, as an error the router falls back on
@@ -1334,5 +1436,145 @@ mod tests {
                 assert!(t.iter().all(|t| t.is_chat()), "{}: {t:?}", e.id);
             }
         }
+    }
+
+    /// A configured provider for the foreground tests: chats stream one delta and stay open.
+    struct Configured {
+        id: ProviderId,
+        locality: Locality,
+    }
+
+    #[async_trait]
+    impl Provider for Configured {
+        fn id(&self) -> &ProviderId {
+            &self.id
+        }
+        fn meta(&self) -> ProviderMeta {
+            ProviderMeta {
+                kind: ProviderKind::OpenaiCompatible,
+                model: "m".into(),
+                locality: self.locality,
+                context_tokens: Some(7),
+            }
+        }
+        fn available(&self) -> bool {
+            false
+        }
+        async fn chat(&self, _req: ChatRequest) -> Result<ChatStream> {
+            let first =
+                futures::stream::iter([Ok(nugget_infer::ChatEvent::TextDelta("hi".into()))]);
+            Ok(Box::pin(futures::StreamExt::chain(
+                first,
+                futures::stream::pending(),
+            )))
+        }
+        async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok(vec![vec![1.0]])
+        }
+        async fn embed_query(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok(vec![vec![2.0]])
+        }
+        async fn embed_items(&self, _t: &[String], _i: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+            Ok(vec![vec![3.0]])
+        }
+        fn embed_prefixes(&self) -> (String, String) {
+            ("q: ".into(), "d: ".into())
+        }
+        async fn prewarm(&self) -> Result<()> {
+            Err(Error::Other("prewarm".into()))
+        }
+        async fn prewarm_prefix(&self, _req: &ChatRequest) -> Result<()> {
+            Err(Error::Other("prewarm_prefix".into()))
+        }
+    }
+
+    fn configured(id: &str, locality: Locality) -> Arc<dyn Provider> {
+        Arc::new(Configured {
+            id: pid(id),
+            locality,
+        })
+    }
+
+    fn feature_req(feature: &str) -> ChatRequest {
+        ChatRequest {
+            feature: feature.into(),
+            ..ChatRequest::default()
+        }
+    }
+
+    /// JJ2: interactive chats on configured on-device and LAN providers hold the foreground for
+    /// the life of their stream; background chats and cloud providers never do.
+    #[tokio::test]
+    async fn configured_local_providers_hold_the_foreground_for_interactive_chats() {
+        let cell = ForegroundCell::default();
+        let wrapped = guard_configured(
+            vec![
+                configured("ollama", Locality::OnDevice),
+                configured("lan", Locality::LocalNetwork),
+                configured("cloud", Locality::Cloud),
+            ],
+            &cell,
+        );
+        // Before ingest publishes its foreground, chats work and hold nothing.
+        let mut s = wrapped[0].chat(feature_req("ask")).await.unwrap();
+        assert!(futures::StreamExt::next(&mut s).await.is_some());
+        drop(s);
+        let fg = Arc::new(nugget_ingest::Foreground::new(
+            std::time::Duration::from_millis(50),
+        ));
+        cell.set(fg.clone()).unwrap();
+
+        for p in &wrapped[..2] {
+            let mut s = p.chat(feature_req("ask")).await.unwrap();
+            assert!(fg.busy(), "{}", p.id());
+            assert_eq!(fg.in_flight(), 1);
+            assert!(futures::StreamExt::next(&mut s).await.is_some());
+            assert_eq!(fg.in_flight(), 1, "held while the stream lives");
+            drop(s);
+            assert_eq!(fg.in_flight(), 0);
+            assert!(fg.busy(), "grace after the stream ends");
+            tokio::time::timeout(std::time::Duration::from_secs(10), fg.idle())
+                .await
+                .expect("idle after the grace period");
+            assert!(!fg.busy());
+
+            for f in [
+                nugget_ingest::FEATURE_TRIAGE,
+                nugget_knowledge::llm::FEATURE_KNOWLEDGE,
+            ] {
+                let s = p.chat(feature_req(f)).await.unwrap();
+                assert!(!fg.busy(), "{f} on {}", p.id());
+                drop(s);
+            }
+        }
+
+        // The cloud provider is not wrapped: an interactive chat holds nothing.
+        let s = wrapped[2].chat(feature_req("ask")).await.unwrap();
+        assert_eq!(fg.in_flight(), 0);
+        assert!(!fg.busy());
+        drop(s);
+    }
+
+    /// The wrapper forwards every other `Provider` method, overrides included.
+    #[tokio::test]
+    async fn the_foreground_wrapper_forwards_everything_else() {
+        let cell = ForegroundCell::default();
+        let p = guard_configured(vec![configured("ollama", Locality::OnDevice)], &cell)
+            .pop()
+            .unwrap();
+        assert_eq!(p.id(), &pid("ollama"));
+        let m = p.meta();
+        assert_eq!(m.locality, Locality::OnDevice);
+        assert_eq!(m.context_tokens, Some(7));
+        assert!(!p.available());
+        let t = ["x".to_string()];
+        assert_eq!(p.embed(&t).await.unwrap(), vec![vec![1.0]]);
+        assert_eq!(p.embed_query(&t).await.unwrap(), vec![vec![2.0]]);
+        assert_eq!(p.embed_items(&t, &[]).await.unwrap(), vec![vec![3.0]]);
+        assert_eq!(p.embed_prefixes(), ("q: ".into(), "d: ".into()));
+        assert!(matches!(p.prewarm().await, Err(Error::Other(m)) if m == "prewarm"));
+        assert!(
+            matches!(p.prewarm_prefix(&feature_req("ask")).await, Err(Error::Other(m)) if m == "prewarm_prefix")
+        );
     }
 }

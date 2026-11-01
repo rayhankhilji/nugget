@@ -19,6 +19,9 @@ pub const ERROR_READ_FAILED: &str = "doubletap.error.read_failed";
 /// Insertion failed, or focus did not come back to the target app.
 pub const ERROR_INSERT_FAILED: &str = "doubletap.error.insert_failed";
 pub const ERROR_DRAFT_FAILED: &str = "doubletap.error.draft_failed";
+/// The focus moved to another field before inserting: nothing inserted, the draft copied.
+pub const ERROR_FIELD_CHANGED: &str = "doubletap.error.field_changed";
+pub const ERROR_FIELD_CHANGED_NO_COPY: &str = "doubletap.error.field_changed_no_copy";
 
 /// The `chat.done` error after `draft.cancel`.
 pub const CANCELLED: &str = "cancelled";

@@ -74,9 +74,14 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `search` | `SearchRequest`: `{query, limit}` (`limit` at most 200) | list of `SearchHit`: `item`, `chunk_id`, `title`, `snippet`, `score`, `url` | yes |
-| `search.faceted` | `{query, limit, offset, filters, utc_offset_minutes}`: `filters` has `sources`, `kinds` (`mail`, `event`, `chat`, `file`), `people`, `from`, `to`; `limit` at most 100 | Hits (each with its item date, kind, `sensitive` and people) and facet counts for `sources`, `kinds`, `people` and `months` | yes |
-| `search.timeline` | `{entity, from, to, limit}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
-| `search.preview` | `{item, chunk_id}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
+| `search.faceted` | `{query, limit, offset, filters, utc_offset_minutes, time_zone}`: `filters` has `sources`, `kinds` (`mail`, `event`, `chat`, `file`), `people`, `from`, `to`; `limit` at most 100 | Hits (each with its item date, kind, `sensitive` and people) and facet counts for `sources`, `kinds`, `people` and `months` | yes |
+| `search.timeline` | `{entity, from, to, limit, utc_offset_minutes, time_zone}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
+| `search.preview` | `{item, chunk_id, utc_offset_minutes, time_zone}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
+
+`time_zone` is an IANA name (`Europe/Berlin`): with it, `from`/`to` days and `months` buckets use
+each date's own offset, so ranges across a daylight-saving change are right. Without it, or for a
+name the daemon's bundled time zone database lacks, `utc_offset_minutes` (the client's current
+offset) applies to every date, and without that the configured `[retrieve] date_utc_offset_minutes`.
 
 ### Retrieval
 
@@ -84,7 +89,7 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `retrieve.context` | `ContextRequest`: `{query, budget_tokens}` (budget at most 131072) | `ContextResponse`: `text` (passages, each under a `[n]` header), `citations`, `excluded_sensitive` | yes |
-| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten); then `chat.delta` and `chat.done` | yes |
+| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten), `general`, `date` (when the question named a date), `partial` (citation numbers of near misses); then `chat.delta` and `chat.done` | yes |
 
 A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. For `retrieve.ask` the daemon chooses
 the provider first, then packs the context for it: with a `cloud` provider, sensitive items are left out
@@ -92,6 +97,15 @@ and counted in `excluded_sensitive`, and the context is repacked if it falls bac
 With `history`, a follow-up question is first rewritten into a standalone query for retrieval, by a
 local (never `cloud`) chat model or, without one, a heuristic; the earlier user and assistant turns
 then go to the model before the question (`system` entries are ignored, and the turns are bounded).
+
+`AskStarted.date` reports a date phrase in the question ("last week", "in March"):
+`{phrase, start, end, applied, listed}`, with `start` (inclusive) and `end` (exclusive) as RFC 3339
+at the offset the phrase was read with. `applied: false` means nothing dated in the range matched,
+so the question was searched without it; `listed: true` means the question was generic ("summarise
+last week") and the sources are the period's items by date. `AskStarted.partial` lists the `n` of
+citations whose item lacks most of the question's rare key words: at best a near miss. The desktop
+shows both under the answer ("Searched items from 26 Oct to 1 Nov", a "Partial match" label). Both
+fields are absent when empty and from older daemons.
 
 ### Sources and ingest
 
@@ -156,6 +170,7 @@ Status: being wired in (wave W, Double Tap). The contracts below are already in 
 | `draft.prewarm` | A partial `DraftContext` (as much as is known when the trigger fires) | `{provider, locality, retrieval}`, or `null` when drafting is refused or disabled. Starts provider warm-up, retrieval and the voice lookup before `draft.begin` | yes |
 | `draft.read_ahead` | `DraftRequest`, as for `draft.begin` (the context read while the field has focus) | Answers within about 100 ms. `{"started": true}` while the prompt is being prefilled into a non-cloud server's cache in the background, `{"started": true, "done": true}` if it already finished, or `{"started": false, "skipped": reason}` with `disabled`, `refused`, `cloud`, `rate_limited`, `unchanged`, `unavailable` or `cancelled`. No text is generated, nothing is sent when the draft would go to a cloud provider, and nothing is audited or stored | yes |
 | `draft.read_ahead_cancel` | `{}` | `{cancelled}`: whether a read-ahead was in flight. Sent when focus leaves the field | yes |
+| `draft.check_sensitive` | `{text}` | `{sensitive}`: whether the ingest PII scan (cards, IBANs, SSNs, API keys and other credentials) finds anything; text over 64 KiB is sensitive. The desktop asks before keeping a draft in its history; nothing is logged | yes |
 | `voice.status` | `{}` | `VoiceStatus`: `samples`, `channels`, `last_built` | yes |
 
 A field with `secure: true` (a password field) is refused, and its value is never read.

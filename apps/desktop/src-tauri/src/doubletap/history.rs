@@ -3,8 +3,9 @@
 //!
 //! Privacy: kept **in memory only** (never written to disk, gone when Nugget quits), clearable,
 //! and never holding a sensitive draft: the overlay state machine drops practice drafts and drafts
-//! that drew on items marked sensitive, and [`History::push`] drops text that looks like a card
-//! number or a long digit run (account numbers, national ids), whatever the context.
+//! that drew on items marked sensitive, [`History::push`] drops text that looks like a card
+//! number or a long digit run, and the flow keeps a draft only once the daemon's PII scan
+//! (`draft.check_sensitive`: cards, IBANs, SSNs, API keys and other credentials) finds nothing.
 
 use std::collections::VecDeque;
 

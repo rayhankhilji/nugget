@@ -9,7 +9,13 @@ uninstall, and days 2–7 (restart, sleep, model-server crash, full disk, offlin
   - Linux and macOS: QA run [41246699570](https://github.com/rayhankhilji/nugget/actions/runs/41246699570).
   - Windows: QA run [41246825875](https://github.com/rayhankhilji/nugget/actions/runs/41246825875).
 - Explorers and verifiers: the same product code (`62b538f` … `6050a7e`).
-- The headline findings were re-checked on integration **`ea3f86c`** (merge `a8d9221`). GG6-1 and GG6-2 still reproduce there, as do the A1 findings behind GG6-12, GG6-13, GG6-14, GG6-21 and GG6-22. The default-config Ollama provider (GG6-4) is fixed there for new configs.
+- The headline findings were re-checked on integration **`ea3f86c`** (merge `a8d9221`) and again on **`44b9e11`** (merge `33a7ee0`), in the container with debug builds.
+  - **Fixed at 44b9e11:**
+    - GG6-1: HH2's background triage. With a frozen model, 1,000 files index in 6 s; before, 8 items in 240 s. Not yet re-run on real OSes.
+    - GG6-28: EE5 now registers the stop signals first.
+    - GG6-18: EE5 says no update request goes out before a channel is chosen in onboarding and every request is in the egress ledger. Code reading only.
+  - **Fixed at ea3f86c:** GG6-4, for new configs.
+  - **Still reproduce at 44b9e11:** GG6-2, GG6-12, GG6-13, GG6-14, GG6-21 and GG6-31.
 
 **Model and runners.** The real model is `qwen3-4b-q4km`, the manifest's pick for 16 GB. It was downloaded from the signed manifest through onboarding on every OS. Runners:
 
@@ -64,7 +70,7 @@ A harness limit to know about: the e2e bridge times out a daemon call after 60 s
 | First run, onboarding | **Works with caveats** | The real app shows Welcome: the Windows app page was up 8.7 s after launch, with the daemon ready 3.5 s later; the Linux window took 0.5 s. A1 flows: 27 of 33 checks pass, 9 of 13 folder mistakes are handled. Resume works on every step (6/6). Broken: GG6-2, GG6-12, GG6-13, GG6-21. |
 | AI setup: local model | **Works with caveats** | The real 2.5 GB download installed on 3/3 OSes (38 s / 47 s / 41 s on runner bandwidth). The 16 GB pick is right. Verification checks the SHA, and a full disk is refused before any byte is downloaded. Broken: failure paths (GG6-5, GG6-6), no chat model on 4 GB (GG6-8), no time estimate (GG6-16). |
 | AI setup: bring your own key | **Works with caveats** | Key and URL checks classify correctly. The key never reaches config.toml or the logs. A saved key can't be changed or removed (GG6-7), needs a restart nobody explains (GG6-15), and fails raw on Linux without a Secret Service (GG6-11). |
-| Adding sources | **Broken with a local model** | Without a model, 141 files are searchable in 1.0 s and a 20k-file messy folder settles in 62 s (debug build). **With the recommended model installed, 24 files took 7.9 min (Linux), 9.8 min (macOS) and more than 10 min (Windows, 22 of 24), and a 20k-file folder indexes 4 to 9 items per minute** (GG6-1). Folders with nothing indexable spin forever (GG6-2). |
+| Adding sources | **Broken with a local model on the tested build; fixed at 44b9e11 (container check; the real-OS confirmation is still to do)** | Without a model, 141 files are searchable in 1.0 s and a 20k-file messy folder settles in 62 s (debug build). **With the recommended model installed, 24 files took 7.9 min (Linux), 9.8 min (macOS) and more than 10 min (Windows, 22 of 24), and a 20k-file folder indexes 4 to 9 items per minute** (GG6-1). Folders with nothing indexable spin forever (GG6-2). |
 | First search and answer | **Works** | Search found the dentist note in the top 3 on 3/3 OSes; A1's day-one questions scored 10/10 hit@3 with no model. Chat with the real model: **60/60 correct answers** (10 questions × 2 days × 3 OSes), including declining the unanswerable question. The expected source was among the citations in 6 of 9 per OS. Median answer time 11 s on Linux, 20 s on macOS Intel and 71 s on Windows; the slowest took 175 s. |
 | Double Tap setup and permissions | **Works with caveats** (Double Tap itself is GG1's) | Every permission is explained before the OS asks. macOS Accessibility can't be recovered in the app once denied (GG6-19, C). |
 | Tray | **Not exercised** (C) | The installer smoke tests run with `NUGGET_TRAY=off`. On GNOME, closing the window quits the app while docs point to the tray (GG6-20, C). |
@@ -77,7 +83,7 @@ A harness limit to know about: the e2e bridge times out a daemon call after 60 s
 Most severe first. Each finding gives its source area id (A1–A4 are the explorer areas). Owners are crate or file, plus
 the wave package that seems closest today; the orchestrator should confirm the routing.
 
-### GG6-1 · Blocker · With a local model installed, indexing runs at LLM speed (one serialized triage call per file) · V, R 3/3, still on ea3f86c
+### GG6-1 · Blocker · With a local model installed, indexing runs at LLM speed (one serialized triage call per file) · V, R 3/3 · **fixed at 44b9e11** (HH2, container re-check)
 - **Repro (container)**: `node qa/GG6/a3-days/s9-slow-index.mjs 1000 AC`.
   - A: no model.
   - C: a local model whose server is frozen.
@@ -92,7 +98,9 @@ the wave package that seems closest today; the orchestrator should confirm the r
   - `crates/nugget-ingest/src/config.rs:87-89`
   - failures are logged at debug only: `pipeline.rs:512`
 - **Fix**: store and index first, then triage from a background queue like knowledge extraction; or skip triage in backfills. Report pending triage in `ingest.status`, and warn on timeouts.
-- **Owner**: `nugget-ingest`. No open package; closest are W12/EE3 (retrieval) and DD2 (energy).
+- **Owner**: `nugget-ingest`.
+- **Status at 44b9e11**: HH2 (`08a0cce`) moved triage to the background (`crates/nugget-ingest/src/triage.rs`). `s9-slow-index.mjs 1000 AC` now gives A `{"items":1000,…,"ms":7050}` and C (frozen model) `{"items":1000,…,"queue":0,…,"ms":6029}`.
+- **Still to do**: confirm with the real model by dispatching `qa-GG6.yml` on a dry run of the new head. The onboarding "First source" step and the 20k-folder rate are the numbers to compare.
 
 ### GG6-2 · High · Folders with nothing indexable spin on "getting ready to index…" forever, and setup says Done · V 4/4, still on ea3f86c
 - **Repro**: `A1_SCRATCH=/tmp/a1 node qa/GG6/a1-onboarding/sources.mjs empty,unsupported,chmod000,huge200mb`
@@ -242,7 +250,7 @@ the wave package that seems closest today; the orchestrator should confirm the r
 - **Fix**: retry once when nothing has streamed yet; use a human message.
 - **Owner**: `nugget-infer`, Ask/Chat handlers.
 
-### GG6-18 · Medium (C) · Update checks contact GitHub by default, outside the egress ledger
+### GG6-18 · Medium (C) · Update checks contacted GitHub by default, outside the egress ledger · **addressed at 44b9e11** (EE5: no request before a channel is chosen in onboarding, and every request is in the ledger; code reading, not run)
 - **Evidence**: Stable channel, first check 60 s after launch (`apps/desktop/src-tauri/src/updater.rs:33-39,370-387`). This contradicts `docs/book/src/privacy.md:7-8` ("Nothing is sent to the Nugget project, ever").
 - **Fix**: record update checks in the ledger, list them on Welcome's "Leaves only when you choose" and in the privacy doc, or ask during onboarding.
 - **Owner**: updater (EE5), docs.
@@ -272,7 +280,7 @@ the wave package that seems closest today; the orchestrator should confirm the r
 | GG6-25 | Full disk: no `status` signal; the source error lags 23 s; the daemon log is cut mid-line. It recovers by itself and nothing is corrupted | A3 1/1 (not re-verified) | FF1 |
 | GG6-26 | Progress `total` is always null, and files over 50 MB or with unsupported extensions are skipped with no trace | A3 | FF2 |
 | GG6-27 | Release and QA jobs on `macos-14` were cancelled within 1 s on 2026-10-31 (release run 41236770656), so no Apple Silicon bundle was built | R 2/2 | EE5 |
-| GG6-28 | Windows: nuggetd exited 0xC000013A without logging "stopped" when the NSIS smoke test sent CTRL_BREAK (release dry run 41073117904 on 5f1998e); it passed on 62b538f | R 1/2 | packaging / nuggetd |
+| GG6-28 | Windows: nuggetd exited 0xC000013A without logging "stopped" when the NSIS smoke test sent CTRL_BREAK (release dry run 41073117904 on 5f1998e); it passed on 62b538f; fixed at 44b9e11 (EE5 registers the stop signals first) | R 1/2 | packaging / nuggetd |
 | GG6-29 | Monotonic-clock timers (proactive refresh, knowledge interval, idle stop) don't count time spent in system sleep | C; `proactive.rs:870-889`, `knowledge.rs:192-196` | nuggetd |
 | GG6-30 | Download cannot be cancelled. A resume after a cancel re-downloads from byte 0 (6.3 MB staged, 16.8 MB fetched again) | A2 | nugget-models |
 | GG6-31 | No AI option is preselected although one is badged "Recommended" | V | EE6 |
@@ -282,7 +290,7 @@ the wave package that seems closest today; the orchestrator should confirm the r
 
 | Who | Moment | Finding / evidence |
 |---|---|---|
-| **All who pick a local model** | After installing the model, the "First source" step crawls: 8 to 10 minutes for 24 files; a real Documents folder takes days | GG6-1 |
+| **All who pick a local model** (until 44b9e11 ships) | After installing the model, the "First source" step crawls: 8 to 10 minutes for 24 files; a real Documents folder takes days | GG6-1 |
 | All | Welcome says setup takes about two minutes; with a local model it takes about ten, plus the download, whose time is never shown | GG6-16 |
 | All | Quit or close: nuggetd keeps running; on Windows the model server keeps 3.3 GB | GG6-8 |
 | All on Windows/macOS releases | The dry-run installer is unsigned: SmartScreen and Gatekeeper ("rejected") block it | install row |
