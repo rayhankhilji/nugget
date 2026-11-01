@@ -342,18 +342,32 @@ impl Worker {
         }
     }
 
-    /// Finish every upsert in preparation and write the batch.
+    /// Finish every upsert in preparation and write the batch; items prepared meanwhile are
+    /// written by the same rules as in `run`, so a stuck preparation never holds back earlier ones.
+    /// Returns `false` if cancelled first (nothing ordered after the upserts may be applied).
     async fn drain(&mut self, cancel: &CancellationToken) -> bool {
-        self.flush().await;
+        self.start_flush().await;
         loop {
-            let next = tokio::select! {
+            let deadline = self
+                .pending
+                .first()
+                .map(|p| tokio::time::Instant::from_std(p.since + BATCH_MAX_WAIT));
+            tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return false,
-                next = self.inflight.next() => next,
-            };
-            match next {
-                Some(done) => self.prepared(done).await,
-                None => break,
+                next = self.inflight.next() => match next {
+                    Some(done) => {
+                        self.prepared(done).await;
+                        if self.pending.len() >= BATCH_MAX {
+                            self.start_flush().await;
+                        }
+                    }
+                    None => break,
+                },
+                res = wait_write(&mut self.writing), if self.writing.is_some() => {
+                    self.written(res).await;
+                }
+                _ = sleep_until(deadline), if deadline.is_some() => self.start_flush().await,
             }
         }
         self.flush().await;

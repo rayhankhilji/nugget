@@ -1,173 +1,74 @@
 # Privacy
 
-Nugget is built so that you can answer, from the app itself, the question "what left my machine?".
+Nugget is built so you can answer "what left my machine?" from the app itself.
 
 ## The defaults
 
-- **No Nugget servers.** Nugget runs no first-party service in the data path. Nothing is sent to the
-  Nugget project, ever.
-- **No telemetry.** There is none at all today. If it is ever added, it will be opt-in.
-- **No update checks until you choose.** A build that can update itself asks once, in setup or
-  on the Status page's Updates card, whether to check for updates (Stable, Beta or Off). Until you
-  answer, the app contacts no update server. A check is a request to GitHub for a small JSON file
-  (the channel's update feed) and its signature, with no identifiers; each one is in the ledger.
-- **Local models by default.** The default config uses only a model server on `127.0.0.1`. A cloud
-  provider is used only if you add one.
-- **Encrypted at rest.** The store (items, chunks, the search indexes, the graph, the ledgers) is one
-  SQLCipher database (AES-256), keyed by a random key in your OS keychain.
-- **No listener on the network.** The daemon listens on a local socket, plus, for
-  [MCP](mcp.md), an HTTP listener on `127.0.0.1` that needs a per-app token. Nothing is reachable
-  from another machine.
+- **No Nugget servers and no telemetry.** Nothing is ever sent to the Nugget project.
+- **No update checks until you choose** (Stable, Beta or Off, in setup or on the Status page). A
+  check fetches a small signed JSON feed from GitHub with no identifiers.
+- **Local models by default.** A cloud provider is used only if you add one.
+- **Encrypted at rest.** The store is one SQLCipher (AES-256) database keyed from your OS keychain.
+- **No network listener.** Only a local socket and, for [MCP](mcp.md), a token-protected listener
+  on `127.0.0.1`.
 
 ## The egress ledger
 
-Every request Nugget's own network layer sends to a destination that is not on this device is recorded
-**before you look for it**, with:
-
-| Field | Example |
-|---|---|
-| When | `2026-10-28T09:14:03Z` |
-| Host | `api.anthropic.com` |
-| Feature | `ask` |
-| Bytes sent and received | 18 204 / 2 911 |
-| Items included | the items whose content (or derived text) was in the request |
-
-The **Privacy** page shows the ledger, newest first, loading older requests as you scroll. Over
-IPC it is [`egress.page`](../reference/ipc.md) (or `egress.recent` for the newest rows only).
-
-Features you will see:
+Every request Nugget sends off this device is recorded with its time, host, feature, bytes sent and
+received, and the items whose content was included. The **Privacy** page shows it, newest first
+(IPC: [`egress.page`](../reference/ipc.md), or `egress.recent`). Requests to this device are not
+recorded; requests to your local network are.
 
 | Feature | Caused by |
 |---|---|
-| `chat` | A chat in the Chat page to a non-local provider |
-| `ask` | Ask a question with a non-local provider |
-| `embed` | Embeddings sent to a non-local embedding provider (only if you opted in, or a LAN server) |
+| `chat`, `ask` | Chat or Ask with a non-local provider |
+| `embed` | Embeddings to a non-local provider (only if you opted in, or a LAN server) |
 | `triage` | Triage on a local-network provider (cloud is never used for triage) |
-| `knowledge` | LLM fact extraction on a non-local provider (only for sources you allowed) |
-| `probe` | Capability probes of a non-local provider, including its embeddings check (two fixed sentences, no data of yours) |
-| `prewarm` | Opening the connection to a cloud provider ahead of a Double Tap draft (a request listing the provider's models, with your key; no data of yours) |
-| `sync:gmail`, `sync:gcal`, `sync:gdrive`, `sync:imap`, `sync:caldav` | Connector syncs, including OAuth token refreshes |
+| `knowledge` | Fact extraction on a non-local provider (only sources you allowed) |
+| `probe`, `prewarm` | Checking or warming up a provider (no data of yours) |
+| `draft` | A [Double Tap](double-tap.md) or Today draft with a non-local provider |
+| `agent` | [Agent](agent.md) model calls to a non-local provider |
+| `proactive_judge` | The [Today](today.md) judge, if you allowed a cloud model |
+| `sync:<kind>` | Connector syncs, including OAuth token refreshes (`sync:gmail`, `sync:imap`, `sync:slack`, …) |
+| `sync:plugin:<id>`, `tool:plugin:<id>` | A [plugin](plugins.md)'s syncs and tool requests |
 | `model_download`, `runtime_download` | Downloading a model or the `llama-server` runtime |
-| `update_check` | The desktop app checking the update channel you chose: the feed, its signature, and the feed again through the updater (see [Install: Updates](install.md#updates)) |
-| `update_download` | The desktop app downloading an update package (when you click Install, or with auto-install on) |
+| `update_check`, `update_download` | Update checks and downloads (see [Install: Updates](install.md#updates)) |
 
-And for the newer features:
-
-| Feature | Caused by |
-|---|---|
-| `draft` | A [Double Tap](double-tap.md) draft, or a draft reply on a Today card, made by a non-local provider |
-| `agent` | Model calls of the [agent](agent.md) to a non-local provider |
-| `proactive_judge` | The optional judge for [Today cards](today.md), when you allowed a cloud model |
-| `sync:plugin:<id>`, `tool:plugin:<id>` | A [plugin](plugins.md) connector's syncs and a plugin tool's requests |
-| `sync:outlook`, `sync:outlook-calendar`, `sync:onedrive`, `sync:slack`, `sync:notion`, `sync:github`, `sync:linear` | The Microsoft 365 and SaaS connectors |
-
-Requests to a server on **this device** (loopback) are not recorded, because nothing leaves the
-machine. Requests to your **local network** are recorded.
-
-### Limits of the ledger
-
-- It records what Nugget's own network layer sends. Code that bypassed it would be a bug. Plugins
-  have no network access of their own for this reason: every request goes through the host, which
-  records it.
-- Update checks and downloads are made by the desktop app, which hands each row to the daemon
-  (`egress.record`). If the daemon is not running, the rows wait in the app's memory and are
-  written when it connects; rows still waiting when you quit the app are lost. Byte counts for
-  the updater's own requests are estimates (the feed it reads is the one the app fetched and
-  verified), and a download is recorded under the host the feed names, even if that host
-  redirects to a content server. These rows are not marked by source: any program running as
-  you can add `update_check` or `update_download` rows the same way (at most 60 a minute), though
-  never rows for Nugget's own features.
-- It does not record what other programs do with what Nugget gives them. An app connected over
-  [MCP](mcp.md) may send the passages it reads to its own cloud model; that is the app's traffic.
-  Likewise, pages the [agent](agent.md) opens in your browser are your browser's traffic.
-- A row is written when an exchange ends, so a crash in the middle of a request can leave no row. A
-  two-phase record (written before the first byte) is planned.
-- A "local" server that forwards to the cloud (for example Ollama's `-cloud` models) looks local.
-  Mark it `locality = "cloud"` in [`config.toml`](../reference/config.md#providers).
+**Limits:** the ledger covers Nugget's own traffic, not what an [MCP](mcp.md) app or your browser
+does with your data. A crash mid-request can leave no row. Update rows come from the desktop app and
+can be lost if it quits while the daemon is stopped. A "local" server that forwards to the cloud
+(such as Ollama's `-cloud` models) looks local: mark it `locality = "cloud"` in [`config.toml`](../reference/config.md#providers).
 
 ## Sensitive items
 
-During indexing, every item is scanned, deterministically and locally, for:
+Every item is scanned locally for payment card numbers, US Social Security numbers, IBANs, and API
+keys, tokens and private keys (only counts are kept, never the values). If the scan or the local
+triage model flags it, or its status is unknown, the item is **sensitive**. Sensitive items:
 
-- payment card numbers (Luhn-checked),
-- US Social Security numbers,
-- IBANs (checksum-verified),
-- API keys, tokens and PEM private keys.
-
-Only counts are kept; the matched values are never stored or logged. If the scan finds anything, or a
-local triage model flags the item, the item is marked **sensitive**. Items whose status is unknown are
-treated as sensitive. Sensitive items:
-
-- are never sent to a cloud model for triage, embedding or knowledge extraction, nor for Double Tap
-  drafts or the Today judge;
-- are left out of the context when Ask uses a cloud model (the answer says how many were withheld);
-- are hidden from MCP clients unless a client is explicitly allowed to see them;
-- never reach the [Markdown vault](knowledge.md#sensitive-items-and-the-vault) once confirmed
-  sensitive (a finding, a rule, or triage): a fact known only from such items is not written
-  there, a citation never quotes one, and an entity known only from them gets no page. The graph
-  view leaves such entities out unless you turn on **Show sensitive**, and the entity view marks
-  them, and their facts, **Sensitive**. Items that are sensitive only because triage has not sorted
-  them yet are shown in these local views (and in Search), but are still kept from cloud models
-  and from MCP clients that are not allowed sensitive items.
+- are never sent to a cloud model (triage, embeddings, knowledge, Double Tap, the Today judge);
+- are left out when Ask uses a cloud model (the answer says how many were withheld);
+- are hidden from MCP clients unless a client is allowed them;
+- never reach the [Markdown vault](knowledge.md#sensitive-items-and-the-vault) once confirmed, and
+  are hidden from the graph view unless you turn on **Show sensitive**.
 
 ## What leaves for each feature
 
 | Feature | With a local model | With a cloud model |
 |---|---|---|
-| Ask and chat | Nothing | The question and the selected, non-sensitive passages |
-| Knowledge extraction | Nothing | Text of non-sensitive items, only from sources you listed |
-| [Double Tap](double-tap.md) | Nothing (read-ahead only reaches the local model server) | The field text, the thread read around it, subject and recipients, non-sensitive passages and your voice examples. Screenshots only if you allow cloud screenshots |
-| [Agent](agent.md) | Nothing | The goal, observations of the apps and pages it works in, and any context from your data |
-| [Today](today.md) | Nothing; cards are generated and ranked on your device | Card evidence for the judge, only if you allowed a cloud judge, never sensitive evidence |
-| [Plugins](plugins.md) | Requests to the hosts you approved for the plugin, whichever model you use | The same |
+| Ask and chat | Nothing | The question and selected non-sensitive passages |
+| Knowledge extraction | Nothing | Non-sensitive item text, only from sources you listed |
+| [Double Tap](double-tap.md) | Nothing (see [Read-ahead](double-tap.md#read-ahead)) | Field text, thread, subject, recipients, non-sensitive passages, voice examples |
+| [Agent](agent.md) | Nothing | The goal, what it observes, and context from your data |
+| [Today](today.md) | Nothing | Card evidence for the judge, only if allowed, never sensitive |
+| [Plugins](plugins.md) | Requests to the hosts you approved | The same |
 
-"Local" includes a server on your local network; such requests stay off the internet but are still
-recorded in the ledger. Every cloud request is recorded with the feature named above.
-
-Double Tap never reads password or secure fields, nor anything in password managers, banking apps or
-system settings. The agent's [safety policy](safety.md) denies acting in those by default.
-
-### Double Tap read-ahead
-
-Double Tap normally reads nothing until you press the trigger. With **read-ahead** on (the default,
-switched off on the Double Tap page) and a local model, it reads a little earlier:
-
-- **What:** the same things it reads at the trigger: the focused field's text, the visible thread,
-  recipients and subject.
-- **When:** after a text field has kept focus for about 1.5 seconds, again at most every 10 seconds
-  or so while it keeps focus, and only if Double Tap is on. Never in excluded apps (password
-  managers, banking, system settings and your own list), never in terminals unless you allowed
-  Double Tap there, never in password or other secure fields.
-- **Where it goes:** to the daemon, which builds the draft's prompt and has the **local** model
-  server read it (on your machine, or a local-network server you configured, which the ledger
-  records). If the draft would use a cloud provider, nothing is read ahead and nothing is sent
-  anywhere before you press the trigger.
-- **What is kept:** nothing on disk. The prompt stays only in the local model server's memory (its
-  prompt cache) and briefly in the daemon's in-memory retrieval cache, and is dropped as other
-  prompts replace it or when the server stops. No draft is generated and nothing is inserted.
-
-See [Double Tap: Read-ahead](double-tap.md#read-ahead).
-
-## What never leaves your device
-
-- Your store, its encryption key, and every index.
-- Your connector credentials (passwords, OAuth tokens, OAuth client secrets): they go only to the
-  service they belong to, for example a Google token only to Google. A plugin's secrets go only to
-  the hosts approved for that plugin.
-- Anything, with the default configuration, beyond connector syncs, model downloads and, once you
-  turn them on, update checks.
-- Sensitive items, to any cloud model.
+Your store, its key, your indexes and your connector credentials never leave the device (a
+credential goes only to its own service).
 
 ## The audit log
 
-Separately from the egress ledger, the daemon keeps an append-only **audit log** of changes: sources
-added, updated and removed, sign-ins started and finished, secrets set (the account name only, never
-the value), model installs, every MCP call (arguments summarised, a query only as its length and a keyed hash, never content), every draft (without its
-content) and plugin installs and approvals. Each new entry is chained to the previous one with an HMAC-SHA256 keyed from
-your store key, so editing or deleting old entries is detectable; `nuggetd status` reports whether
-the chain verified at startup. The newest entry is also anchored in your OS keychain, so cutting off
-the newest entries is detected too. With a key-file store (no keychain), or if that keychain entry is
-deleted, there is no anchor and such truncation is not detected.
-
-Actions taken on your behalf by the [agent](agent.md) and by [Today cards](today.md) also go into a
-separate hash-chained **action log**, exportable from the [Safety](safety.md) page.
+The daemon also keeps an append-only, HMAC-chained **audit log** of changes: sources, sign-ins,
+secrets set (name only), model installs, MCP calls and drafts (never content), and plugin installs.
+`nuggetd status` reports whether the chain verified. The newest entry is anchored in your OS keychain
+so truncation is detected (not with a key-file store). Agent and Today actions go to the separate
+action log on the [Safety](safety.md) page.
