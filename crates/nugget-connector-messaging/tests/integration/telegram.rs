@@ -54,7 +54,7 @@ async fn single_and_full_exports_are_merged() {
         t.contains("_2024-05-01 09:20 · Alice Example called (61 s)_"),
         "{t}"
     );
-    // `date` without `date_unixtime` is read as UTC.
+    // `date` without `date_unixtime`: the local time as written.
     assert!(
         t.contains("**Alice Example** · 2024-05-02 10:00\n> no unixtime here"),
         "{t}"

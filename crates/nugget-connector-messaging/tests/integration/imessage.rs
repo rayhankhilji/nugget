@@ -308,6 +308,12 @@ async fn without_contacts_names_fall_back_to_handles() {
         .await;
     let one = doc(&sink, "im:iMessage;-;+15551234567/2024-05");
     assert_eq!(one.title.as_deref(), Some("+15551234567 — May 2024"));
+    // Regression (JJ1-13): an unresolved phone handle is still a contact, named by the number,
+    // so knowledge can make a person of it.
+    assert_eq!(
+        one.metadata["contacts"],
+        json!([{ "name": "+15551234567", "phones": ["+15551234567"], "emails": [] }])
+    );
     // A broken address book is not fatal either.
     let ab = tmp.path().join("AB");
     std::fs::create_dir_all(&ab).unwrap();
@@ -358,6 +364,81 @@ async fn reads_uncheckpointed_wal_and_old_schemas() {
     let d = doc(&sink, "im:iMessage;-;dan@example.com/2024-05");
     assert!(text(&d).contains("**dan@example.com** · 2024-05-01 09:00\n> from the wal"));
     drop(conn);
+}
+
+/// Regression (JJ1-14): one row with invalid UTF-8 in `text` (and in a handle, a chat name
+/// and an attachment name) failed the whole source with "invalid utf-8 sequence". Text is
+/// decoded lossily; every other row is imported.
+#[tokio::test]
+async fn invalid_utf8_rows_are_decoded_lossily() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = scenario(&tmp.path().join("Messages"));
+    let bad = db.handle("placeholder");
+    db.conn
+        .execute(
+            "UPDATE handle SET id = CAST(X'2B3135353539393900FF' AS TEXT) WHERE ROWID = ?1",
+            [bad],
+        )
+        .unwrap();
+    let chat = db.chat("iMessage;-;bad", "bad", Some("x"), 45, &[bad]);
+    db.conn
+        .execute(
+            "UPDATE chat SET display_name = CAST(X'4E616DC3' AS TEXT) WHERE ROWID = ?1",
+            [chat],
+        )
+        .unwrap();
+    let m = db.text(chat, MAY1, bad, false, "placeholder");
+    db.conn
+        .execute(
+            "UPDATE message SET text = CAST(X'4F6BFF2063' AS TEXT) WHERE ROWID = ?1",
+            [m],
+        )
+        .unwrap();
+    db.attach(m, "placeholder.jpg", "image/jpeg", 10);
+    db.conn
+        .execute(
+            "UPDATE attachment SET transfer_name = X'FE2E6A7067' WHERE transfer_name = 'placeholder.jpg'",
+            [],
+        )
+        .unwrap();
+    // A text stored as a blob in a later row of a good chat.
+    db.conn
+        .execute(
+            "INSERT INTO message (text, handle_id, date, is_from_me) VALUES (X'426C6F6220C3A9', 1, ?1, 0)",
+            [ns(MAY1 + 500)],
+        )
+        .unwrap();
+    let blob = db.conn.last_insert_rowid();
+    db.conn
+        .execute(
+            "INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, ?1)",
+            [blob],
+        )
+        .unwrap();
+
+    let env = Env::new();
+    let replica = Replica::new();
+    let sink = env
+        .pass(Kind::IMessage, &settings(&db.path, None), &replica)
+        .await;
+    assert_eq!(
+        keys(&replica),
+        set(&[
+            "im:iMessage;+;chat123/2024-05",
+            "im:iMessage;-;+15551234567/2024-05",
+            "im:iMessage;-;+15551234567/2024-06",
+            "im:iMessage;-;bad/2024-05",
+        ])
+    );
+    let d = doc(&sink, "im:iMessage;-;bad/2024-05");
+    assert_well_formed(&d);
+    let t = text(&d);
+    assert!(t.contains("> Ok\u{fffd} c\n"), "{t}");
+    assert!(t.contains("[photo: \u{fffd}.jpg]"), "{t}");
+    assert_eq!(d.title.as_deref(), Some("Nam\u{fffd} — May 2024"));
+    let one = doc(&sink, "im:iMessage;-;+15551234567/2024-05");
+    let t = text(&one);
+    assert!(t.contains("> Blob é"), "{t}");
 }
 
 #[test]
