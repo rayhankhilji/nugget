@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   CHAT_ASK_BUDGET,
   api,
-  errorMessage,
+  ApiError,
   events,
   isOpenableUrl,
   quickAskApi,
@@ -21,9 +21,10 @@ import {
 import { citedNumbers, groupSources, splitCitations, withheldNotice } from "../citations";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { itemFileName } from "../components/Provenance";
-import { Spinner } from "../components/ui";
+import { describeError, Spinner } from "../components/ui";
 import { useEvent, useOpener } from "../hooks";
 import { useLocale, useT } from "../i18n";
+import { textDir } from "../bidi";
 import { sourceKindOf } from "../recency";
 import { askCitations } from "../askSearch";
 import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
@@ -151,6 +152,18 @@ export function QuickAsk() {
     sync(d.stream_id);
   });
 
+  /**
+   * LL2: what went wrong in a sentence (the daemon's own for its errors), never a shell's raw
+   * text; no AI provider at all gets its own next step.
+   */
+  const plainError = (err: unknown) => {
+    const e = ApiError.from(err);
+    if (e.kind === "rpc" && /no provider is available/i.test(e.message)) return t("quickAsk.noProvider");
+    // This window has no offline banner: say Nugget isn't reachable, not just that something failed.
+    if (e.isOffline) return t("quickAsk.failed", { error: t("common.offlineHint") });
+    return t("quickAsk.failed", { error: describeError(e, t).headline });
+  };
+
   const ask = async (e?: FormEvent) => {
     e?.preventDefault();
     const q = question.trim();
@@ -186,7 +199,7 @@ export function QuickAsk() {
       });
     } catch (err) {
       setAnswer(null);
-      setFailure(errorMessage(err));
+      setFailure(plainError(err));
     } finally {
       waiting.current = false;
     }
@@ -244,7 +257,7 @@ export function QuickAsk() {
     return { question: typed };
   };
   const openMain = (page: QuickAskPage) => {
-    quickAskApi.openMain(page, handover()).catch((err: unknown) => setFailure(errorMessage(err)));
+    quickAskApi.openMain(page, handover()).catch((err: unknown) => setFailure(plainError(err)));
   };
 
   const withheld = answer?.provider ? withheldNotice(answer.excludedSensitive, answer.provider) : null;
@@ -284,7 +297,7 @@ export function QuickAsk() {
       <div className="quickask-body">
         {failure && (
           <p className="note note-error" role="alert">
-            {t("quickAsk.failed", { error: failure })}
+            {failure}
           </p>
         )}
         {answer && (
@@ -301,7 +314,7 @@ export function QuickAsk() {
             {answer.error ? (
               <p className="note note-error">{t("quickAsk.failed", { error: answer.error })}</p>
             ) : answer.text ? (
-              <div className="quickask-text" dir="auto">
+              <div className="quickask-text" dir={textDir(answer.text)}>
                 {splitCitations(answer.text, valid).map((p, i) =>
                   p.kind === "text" ? (
                     <span key={i}>{p.text}</span>

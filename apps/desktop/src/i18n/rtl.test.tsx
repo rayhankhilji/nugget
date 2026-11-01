@@ -73,13 +73,14 @@ describe("sidebar in RTL", () => {
 });
 
 describe("Chat in RTL", () => {
-  it("gives the composer and every message dir=auto", async () => {
+  it("gives the composer dir=auto and every message its majority direction (LL2, GG7-10)", async () => {
     mockDaemon({
       chat_history_load: [],
       chat_history_save: null,
       chat: () => ({ stream_id: "s-1", provider: "ollama", locality: "on_device" }),
       retrieve_ask: () => ({ stream_id: "s-1", provider: "ollama", locality: "on_device", citations: [], excluded_sensitive: 0 }),
     });
+    localStorage.setItem("nugget.chat.useSources", "false");
     const { container } = await render(<ChatPage />);
     const area = container.querySelector<HTMLTextAreaElement>("form.composer textarea")!;
     expect(area.getAttribute("dir")).toBe("auto");
@@ -90,13 +91,15 @@ describe("Chat in RTL", () => {
     });
     await click(container.querySelector("form.composer button[type=submit]"));
     await flush();
-    await act(() => emit("nugget:chat-delta", { stream_id: "s-1", text: "A reply" }));
+    await act(() => emit("nugget:chat-delta", { stream_id: "s-1", text: "**Nugget Pro** هو الاشتراك الحالي.\n\nيتجدد في 3 نوفمبر." }));
     await act(() => emit("nugget:chat-done", { stream_id: "s-1", input_tokens: 1, output_tokens: 2, error: null }));
     await flush();
 
     const bodies = Array.from(container.querySelectorAll(".msg .msg-body"));
     expect(bodies.length).toBe(2);
-    for (const b of bodies) expect(b.getAttribute("dir")).toBe("auto");
+    // The question is English; the reply starts with a Latin product name but is Arabic.
+    expect(bodies.map((b) => b.getAttribute("dir"))).toEqual(["ltr", "rtl"]);
+    expect(Array.from(bodies[1]!.querySelectorAll("p")).map((p) => p.getAttribute("dir"))).toEqual(["rtl", "rtl"]);
     expect(bodies[0]!.textContent).toContain("An English note");
     expect(container.querySelector(".msg-user")).not.toBeNull();
     expect(unmirroredIcons(container.querySelector("form.composer")!)).toEqual([]);

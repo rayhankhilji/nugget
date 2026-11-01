@@ -25,6 +25,7 @@ import { Highlight, itemFileName, plainSnippet, SourceBadge } from "../component
 import { sourceKindOf } from "../recency";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatDate, formatNumber, useT } from "../i18n";
+import { textDir } from "../bidi";
 import { sourceKindLabel } from "../format";
 import { addRecent } from "../savedSearches";
 import { activeFilters, decode, EMPTY_STATE, encode, hasFilters, normalize, toFilters, type SearchState } from "../searchState";
@@ -195,7 +196,15 @@ export function SearchPage() {
   });
   usePendingSearchState(apply);
 
+  /**
+   * The control that opened the timeline, to hand focus back on Back or Escape: its name and
+   * which of the same-named controls it was (the results list re-renders while the timeline shows).
+   */
+  const timelineOpener = useRef<{ label: string; index: number } | null>(null);
   const openTimeline = (entityId: string) => {
+    const from = document.activeElement;
+    const label = from instanceof HTMLElement ? from.getAttribute("aria-label") : null;
+    timelineOpener.current = label ? { label, index: sameNamed(label).indexOf(from as HTMLElement) } : null;
     setSelected(null);
     stateRef.current = { ...stateRef.current, timeline: entityId };
     setState(stateRef.current);
@@ -208,12 +217,16 @@ export function SearchPage() {
     if (back.q && shownKey.current !== encode(back)) void runState(back);
     focusBack.current = true;
   };
-  // Back on the results: focus their heading (or the box when there are none yet).
+  // Back on the results: focus the control that opened the timeline when it is still there, else
+  // the results heading (or the box when there are none yet).
   const focusBack = useRef(false);
   useEffect(() => {
     if (!focusBack.current || state.timeline) return;
     focusBack.current = false;
-    (headingRef.current ?? inputRef.current)?.focus();
+    const o = timelineOpener.current;
+    timelineOpener.current = null;
+    const opener = o ? sameNamed(o.label)[o.index] : undefined;
+    (opener ?? headingRef.current ?? inputRef.current)?.focus();
   }, [state.timeline]);
 
   const select = (i: number, from: HTMLElement) => {
@@ -709,7 +722,7 @@ function AskPanel({
               {answer.error}
             </p>
           ) : (
-            <div className="answer-text" dir="auto">
+            <div className="answer-text" dir={textDir(answer.text)}>
               {answer.text ? (
                 <CitedText text={answer.text} valid={answerValid} byN={answerByN} onCite={answerCite} />
               ) : (
@@ -814,4 +827,9 @@ function CitationItem({
       )}
     </li>
   );
+}
+
+/** The page's buttons named `label`, in document order. */
+function sameNamed(label: string): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>("main button[aria-label]")).filter((b) => b.getAttribute("aria-label") === label);
 }

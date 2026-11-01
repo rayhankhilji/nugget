@@ -87,8 +87,8 @@ fn main() {
         // running, since a first launch with it just opens normally.
         // A second launch may also carry a `nugget://` link or a `.nuggetplugin` file (Windows,
         // Linux), or `--quick-ask`.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            let links = deeplink::from_args(&argv);
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            let links = deeplink::from_args_in(&argv, &cwd);
             if wants_double_tap(&argv) {
                 tauri::async_runtime::spawn(doubletap::flow::fire(app.clone()));
             } else if wants_quick_ask(&argv) {

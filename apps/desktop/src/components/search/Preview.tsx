@@ -106,7 +106,7 @@ export function Preview({
         <>
           {isOpenableUrl(data.url) && (
             <p>
-              <button type="button" className="btn btn-small btn-primary" onClick={() => void onOpen(data.url!, title)} aria-label={t("search.openTitle", { title })}>
+              <button type="button" className="btn btn-small btn-primary" onClick={() => void onOpen(data.url!, title)} aria-label={t("searchui.openInAppTitle", { title })}>
                 {t("searchui.openInApp")}
               </button>
             </p>

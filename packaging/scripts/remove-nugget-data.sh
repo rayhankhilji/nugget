@@ -101,6 +101,36 @@ if [ -z "$custom_vault" ] && [ -d "$HOME/Nugget Vault" ]; then
   vault="$HOME/Nugget Vault"
 fi
 
+# A folder that holds the vault you chose is kept whole, even when it is one of Nugget's own (a
+# vault put in the data folder, or reached through a link into it). Paths are compared after
+# links are resolved; a leading ~ is the home folder, as nuggetd reads it.
+canon() {
+  local p="$1" rest=""
+  while [ "$p" != "/" ] && [ -n "$p" ] && [ ! -d "$p" ]; do
+    rest="/${p##*/}$rest"
+    p="${p%/*}"
+  done
+  [ -n "$p" ] || p=/
+  local real
+  real="$(cd -- "$p" 2>/dev/null && pwd -P)" || real="$p"
+  printf '%s%s' "${real%/}" "$rest"
+}
+custom_vault_real=""
+case "$custom_vault" in
+  "~") custom_vault_real="$(canon "$HOME")" ;;
+  "~/"*) custom_vault_real="$(canon "$HOME/${custom_vault#\~/}")" ;;
+  /*) custom_vault_real="$(canon "$custom_vault")" ;;
+esac
+holds_vault() {
+  [ -n "$custom_vault_real" ] || return 1
+  local dir
+  dir="$(canon "$1")"
+  case "${custom_vault_real%/}/" in
+    "${dir%/}/"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 size_of() { du -sh "$1" 2>/dev/null | cut -f1; }
 
 # The store key of the default data folder is "store-key-" + 16 hex digits of the SHA-256 of its
@@ -146,6 +176,9 @@ for entry in "${dirs[@]}"; do
   path="${entry#*|}"
   if [ -e "$path" ]; then
     printf '  %-48s %6s  %s\n' "$label" "$(size_of "$path")" "$path"
+    if holds_vault "$path"; then
+      echo "      (kept: your vault, in a folder you chose, is inside it)"
+    fi
     found=1
   fi
 done
@@ -243,7 +276,9 @@ done
 # rm -r never follows a symlink inside the folder, so nothing outside it is deleted.
 for entry in "${dirs[@]}"; do
   path="${entry#*|}"
-  if [ -e "$path" ]; then
+  if [ -e "$path" ] && holds_vault "$path"; then
+    echo "Kept $path: your vault ($custom_vault) is inside it"
+  elif [ -e "$path" ]; then
     rm -rf -- "$path" && echo "Deleted $path"
   fi
 done

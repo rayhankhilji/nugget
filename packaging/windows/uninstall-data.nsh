@@ -32,6 +32,7 @@
 
 !include LogicLib.nsh
 !include FileFunc.nsh
+!include WordFunc.nsh
 !include nsDialogs.nsh
 !include WinMessages.nsh
 
@@ -190,6 +191,34 @@ Function un.NuggetFindVault
   Pop $R2
   Pop $R1
   Pop $R0
+FunctionEnd
+
+; Whether the vault in a folder the user chose ($NuggetVaultCustom) is a folder or inside it, so
+; that folder is kept whole. In: $R0 the folder. Out: $R1 1 when it holds the vault, else 0.
+; The path is compared as written in config.toml: / as \, TOML's escaped \\ as \, a leading ~
+; as the profile folder, ignoring case.
+Function un.NuggetHoldsVault
+  Push $R2
+  Push $R3
+  StrCpy $R1 0
+  ${If} $NuggetVaultCustom != ""
+  ${AndIf} $R0 != ""
+    ${WordReplace} "$NuggetVaultCustom" "/" "\" "+" $R2
+    ${WordReplace} "$R2" "\\" "\" "+" $R2
+    StrCpy $R3 $R2 1
+    ${If} $R3 == "~"
+      StrCpy $R2 $R2 "" 1
+      StrCpy $R2 "$PROFILE$R2"
+    ${EndIf}
+    StrCpy $R2 "$R2\"
+    StrLen $R3 "$R0\"
+    StrCpy $R2 $R2 $R3
+    ${If} $R2 == "$R0\"
+      StrCpy $R1 1
+    ${EndIf}
+  ${EndIf}
+  Pop $R3
+  Pop $R2
 FunctionEnd
 
 ; Append one line to the read-only list on the page (no 1024-character limit this way).
@@ -399,6 +428,18 @@ FunctionEnd
   ${EndIf}
 !macroend
 
+; NUGGET_RMDIR, except that a folder holding the vault the user chose is kept (un.NuggetHoldsVault).
+!macro NUGGET_RMDIR_KEEP_VAULT path
+  StrCpy $R0 "${path}"
+  Call un.NuggetHoldsVault
+  ${If} $R1 = 1
+    DetailPrint "Kept ${path}: your vault ($NuggetVaultCustom) is inside it"
+    StrCpy $NuggetLeftovers "$NuggetLeftovers$\r$\n${path} (kept: your vault is inside it)"
+  ${Else}
+    !insertmacro NUGGET_RMDIR "${path}"
+  ${EndIf}
+!macroend
+
 ; Saved keys: run remove-nugget-keys.ps1 (see that file). The script is read into a script block
 ; rather than run with -File, so a machine-wide execution policy cannot block it.
 Function un.NuggetRemoveKeys
@@ -419,20 +460,25 @@ FunctionEnd
 ; run in a kill-on-close job object).
 Function un.NuggetRemoveAll
   Push $R0
+  Push $R1
   SetShellVarContext current
   StrCpy $NuggetLeftovers ""
   ${If} $LOCALAPPDATA == ""
   ${OrIf} $APPDATA == ""
     DetailPrint "Nugget's data was kept: the AppData folders could not be resolved"
+    Pop $R1
     Pop $R0
     Return
   ${EndIf}
+  ; Read config.toml again (a silent uninstall without /REMOVEVAULT never did): a vault the user
+  ; put inside Nugget's own folders keeps that folder.
+  Call un.NuggetFindVault
 
   ; Keys first, so a failure to delete files never leaves keys without their data's owner knowing.
   Call un.NuggetRemoveKeys
 
-  !insertmacro NUGGET_RMDIR "$LOCALAPPDATA\Nugget\Nugget"  ; data (models, store, logs) and cache
-  !insertmacro NUGGET_RMDIR "$APPDATA\Nugget\Nugget"       ; config
+  !insertmacro NUGGET_RMDIR_KEEP_VAULT "$LOCALAPPDATA\Nugget\Nugget"  ; data (models, store, logs), cache
+  !insertmacro NUGGET_RMDIR_KEEP_VAULT "$APPDATA\Nugget\Nugget"       ; config
   RMDir "$LOCALAPPDATA\Nugget"  ; only when empty; usually the install folder itself
   RMDir "$APPDATA\Nugget"
   RMDir "$INSTDIR"
@@ -453,5 +499,6 @@ Function un.NuggetRemoveAll
     DetailPrint "Could not remove:$NuggetLeftovers"
     MessageBox MB_OK|MB_ICONEXCLAMATION "Some of Nugget's data could not be removed:$\r$\n$NuggetLeftovers$\r$\n$\r$\nDelete it yourself; the Nugget guide's Uninstall page lists every location." /SD IDOK
   ${EndIf}
+  Pop $R1
   Pop $R0
 FunctionEnd

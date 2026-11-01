@@ -49,9 +49,12 @@ export function QuickAskSettings() {
     }
   };
 
+  // LL2: controls stay enabled (aria-disabled) while saving or unchanged, so keyboard focus stays
+  // on them instead of dropping to the page; these guards stand in for `disabled`.
+  const unchanged = !shortcut.trim() || shortcut.trim() === view?.settings.shortcut;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (view) void save({ ...view.settings, shortcut: shortcut.trim() });
+    if (view && !busy && !unchanged) void save({ ...view.settings, shortcut: shortcut.trim() });
   };
 
   if (!view) {
@@ -78,9 +81,9 @@ export function QuickAskSettings() {
           type="checkbox"
           role="switch"
           checked={settings.enabled}
-          disabled={busy}
+          aria-disabled={busy || undefined}
           aria-describedby={hintId}
-          onChange={(e) => void save({ ...settings, enabled: e.target.checked })}
+          onChange={(e) => busy || void save({ ...settings, enabled: e.target.checked })}
         />
         <span className="switch-track" aria-hidden="true" />
         <span>{t("quickAsk.settings.enabled")}</span>
@@ -103,14 +106,15 @@ export function QuickAskSettings() {
             autoComplete="off"
             spellCheck={false}
             value={shortcut}
-            disabled={busy || !settings.enabled}
+            readOnly={busy}
+            disabled={!settings.enabled}
             aria-describedby={`${shortcutId}-hint`}
             onChange={(e) => {
               setShortcut(e.target.value);
               setSaved(false);
             }}
           />
-          <button type="submit" className="btn btn-small" disabled={busy || !settings.enabled || !shortcut.trim() || shortcut.trim() === settings.shortcut}>
+          <button type="submit" className="btn btn-small" disabled={!settings.enabled} aria-disabled={busy || unchanged || undefined}>
             {t("quickAsk.settings.save")}
           </button>
           <span id={`${shortcutId}-hint`} className="muted small">

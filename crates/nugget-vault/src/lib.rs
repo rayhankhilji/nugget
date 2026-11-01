@@ -160,7 +160,9 @@ const STATE_VERSION: u32 = 2;
 ///   aliases and identifiers filtered, pages of sensitive-only entities removed or hidden.
 /// - 2: fact sentences name objects by their current names (GG5-10), addresses and phone
 ///   numbers redacted from footnote quotes (GG5-17).
-const RENDER_RULES: u32 = 2;
+/// - 3: footnote titles redacted too, and contacts in fullwidth forms or other scripts' digits
+///   (security review 3, ER-6).
+const RENDER_RULES: u32 = 3;
 /// How often a page is re-rendered when the user keeps changing it under us.
 const WRITE_ATTEMPTS: usize = 3;
 

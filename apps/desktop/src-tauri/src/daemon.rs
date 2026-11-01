@@ -405,7 +405,12 @@ impl Daemon {
                 Err(CmdError::NotRunning(_)) => {}
                 Err(e) => break Err(e),
             }
-            match child.try_wait() {
+            let exited = child.try_wait();
+            if let (Ok(Some(_)), Some(path)) = (&exited, self.record_path()) {
+                // Reaped: its pid is free for another process now.
+                crate::lifecycle::forget_record_of(&path, pid);
+            }
+            match exited {
                 // Some daemons fork and exit 0; keep polling for the socket in that case.
                 Ok(Some(status)) if !status.success() => {
                     break Err(CmdError::Spawn(format!(
@@ -425,9 +430,15 @@ impl Daemon {
         };
         self.started_pid.store(pid, Ordering::SeqCst);
         let started = self.started_pid.clone();
-        // Reap the child whenever it exits, without blocking the runtime.
+        let record = self.record_path();
+        // Reap the child whenever it exits, without blocking the runtime. Its record goes with
+        // it: once reaped its pid can be reused, and a process that took it within the start
+        // time's resolution (a second outside Linux) would pass for this daemon.
         std::thread::spawn(move || {
             let _ = child.wait();
+            if let Some(path) = record {
+                crate::lifecycle::forget_record_of(&path, pid);
+            }
             let _ = started.compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
         });
         result

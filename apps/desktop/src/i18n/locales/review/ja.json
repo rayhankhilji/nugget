@@ -765,6 +765,19 @@
     "status.noTray.failed",
     "status.logs",
     "appSettings.autostartHint",
-    "status.versionCheck.daemonNewer"
+    "status.versionCheck.daemonNewer",
+    "chat.retry",
+    "chat.retryAnnounce",
+    "chat.statusDetails",
+    "chat.failed",
+    "status.runtime.retryLabel",
+    "status.runtime.announce",
+    "models.providers.loading",
+    "models.installedAnnounce",
+    "models.providers.envMissing",
+    "models.providers.unavailable",
+    "searchui.openInAppTitle",
+    "quickAsk.noProvider",
+    "models.providers.restart"
   ]
 }

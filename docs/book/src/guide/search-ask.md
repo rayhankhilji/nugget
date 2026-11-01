@@ -39,7 +39,9 @@ cloud embedding provider unless you set
    when the passages do not contain the answer, and to treat the passages as data, not instructions.
 4. The answer streams in. Each `[n]` links to its source.
 
-The **Chat** page asks the same way when **Use my sources** is on, and keeps the conversation:
+The **Chat** page asks the same way when **Use my sources** is on, and keeps the conversation. If
+an answer fails (for example because the on-device model stopped), **Retry** asks again in place;
+see [Troubleshooting](troubleshooting.md#the-on-device-model-is-warming-up-stopped-or-wont-start):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/chat-dark.png">
