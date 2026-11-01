@@ -29,6 +29,9 @@ pub struct PostOptions {
     pub strip_signoff: bool,
     /// Cut the draft at a sentence end once it passes this many words.
     pub max_words: Option<usize>,
+    /// The end of the line the user is typing (before the caret): a draft that starts by
+    /// repeating it has the repeat dropped (QA GG1-22).
+    pub typed: String,
 }
 
 /// Output of one [`PostProcessor::push`].
@@ -57,6 +60,8 @@ pub struct PostProcessor {
     quote: Option<char>,
     emitted: String,
     finished: bool,
+    /// The draft's first word continues the word the user is typing ("Thurs" + "day").
+    continues_word: bool,
 }
 
 impl PostProcessor {
@@ -69,7 +74,13 @@ impl PostProcessor {
             quote: None,
             emitted: String::new(),
             finished: false,
+            continues_word: false,
         }
+    }
+
+    /// Whether the draft's first word continues the word before the caret (no space between).
+    pub fn continues_word(&self) -> bool {
+        self.continues_word
     }
 
     /// Everything emitted so far.
@@ -112,6 +123,7 @@ impl PostProcessor {
     }
 
     fn apply_head(&mut self, head: Head) {
+        self.continues_word = head.continues_word;
         self.skip = Some(head.pos);
         self.fence = head.fence;
         self.quote = head.quote;
@@ -228,6 +240,18 @@ impl PostProcessor {
                 Greeting::No => {}
             }
         }
+        if !self.opts.typed.is_empty() {
+            let rest = &raw[head.pos..];
+            match typed_overlap(&self.opts.typed, rest, last) {
+                Overlap::NeedMore => return None,
+                Overlap::Len(k) => {
+                    head.continues_word = rest[k..].starts_with(char::is_alphanumeric)
+                        && self.opts.typed.ends_with(char::is_alphanumeric);
+                    head.pos = skip_ws(raw, head.pos + k);
+                }
+                Overlap::No => {}
+            }
+        }
         Some(head)
     }
 }
@@ -237,15 +261,56 @@ struct Head {
     pos: usize,
     fence: bool,
     quote: Option<char>,
+    continues_word: bool,
 }
 
 impl Head {
     fn at(pos: usize) -> Self {
         Self {
             pos,
-            fence: false,
-            quote: None,
+            ..Default::default()
         }
+    }
+}
+
+enum Overlap {
+    No,
+    NeedMore,
+    /// Bytes of the draft that repeat the typed text.
+    Len(usize),
+}
+
+/// The longest end of `typed` (from a word start, at least three characters) that `rest`
+/// starts with, ignoring ASCII case: "i'd hold off until" + "i'd hold off until the…", or the
+/// partial word "Thurs" + "Thursday".
+fn typed_overlap(typed: &str, rest: &str, last: bool) -> Overlap {
+    let mut need_more = false;
+    let starts = typed.char_indices().filter(|(i, c)| {
+        !c.is_whitespace() && (*i == 0 || typed[..*i].ends_with(char::is_whitespace))
+    });
+    for (i, _) in starts {
+        let tail = &typed[i..];
+        if tail.chars().count() < 3 {
+            continue;
+        }
+        let n = tail.len().min(rest.len());
+        if rest.is_char_boundary(n) && tail.is_char_boundary(n) {
+            if rest.len() >= tail.len() && rest[..n].eq_ignore_ascii_case(tail) {
+                // What follows tells whether the draft continues the word.
+                if rest.len() == n && !last {
+                    return Overlap::NeedMore;
+                }
+                return Overlap::Len(n);
+            }
+            if rest.len() < tail.len() && tail[..n].eq_ignore_ascii_case(&rest[..n]) && !last {
+                need_more = true;
+            }
+        }
+    }
+    if need_more {
+        Overlap::NeedMore
+    } else {
+        Overlap::No
     }
 }
 
@@ -902,8 +967,47 @@ mod tests {
                 strip_greeting: o == "g" || o == "b",
                 strip_signoff: o == "s" || o == "b",
                 max_words: None,
+                typed: String::new(),
             };
             assert_eq!(by_char(opts, text), want, "{text:?}");
+        }
+    }
+
+    /// QA GG1-22: a draft that starts by repeating the typed text has the repeat dropped.
+    #[test]
+    fn typed_text_is_not_repeated() {
+        for (typed, draft, want, joined) in [
+            (
+                "i'd hold off until",
+                "i'd hold off until the flake is fixed.",
+                "the flake is fixed.",
+                false,
+            ),
+            (
+                "I can do Thurs",
+                "Thursday at 3 works.",
+                "day at 3 works.",
+                true,
+            ),
+            (
+                "Sounds good,",
+                "Great, see you then.",
+                "Great, see you then.",
+                false,
+            ),
+        ] {
+            let mut p = PostProcessor::new(PostOptions {
+                plain_text: true,
+                typed: typed.into(),
+                ..Default::default()
+            });
+            let mut out: String = draft.chars().map(|c| p.push(&c.to_string()).text).collect();
+            out.push_str(&p.finish());
+            assert_eq!(
+                (out.as_str(), p.continues_word()),
+                (want, joined),
+                "{typed}"
+            );
         }
     }
 

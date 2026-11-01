@@ -1422,6 +1422,17 @@ pub fn post_options(kind: FieldKind, ctx: &DraftContext, band: LengthBand) -> Po
         strip_greeting,
         strip_signoff,
         max_words: Some(band.hard_max),
+        typed: before
+            .rsplit('\n')
+            .next()
+            .unwrap_or("")
+            .chars()
+            .rev()
+            .take(80)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect(),
     }
 }
 
@@ -1840,6 +1851,7 @@ impl PumpState {
         }
         if let Some(first) = e.text.chars().next()
             && self.join.last.is_none()
+            && !self.post.continues_word()
         {
             e.text.insert_str(0, self.join.prefix(first));
         }
