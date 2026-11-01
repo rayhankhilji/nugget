@@ -61,6 +61,8 @@ pub(crate) enum OpKind {
     Checkpoint(Value, oneshot::Sender<Result<()>>),
     /// Start of a sync pass: clears the persistence-failure flag and the progress counter.
     BeginPass(oneshot::Sender<()>),
+    /// Something the connector could not read ([`ChangeSink::report_problem`]).
+    Problem(ItemKey, String),
 }
 
 pub(crate) struct Op {
@@ -145,6 +147,10 @@ impl ChangeSink for PipelineSink {
         self.push(OpKind::Checkpoint(cursor, ack)).await?;
         rx.await.map_err(|_| Error::Cancelled)?
     }
+
+    async fn report_problem(&self, key: ItemKey, message: String) -> Result<()> {
+        self.push(OpKind::Problem(key, message)).await
+    }
 }
 
 enum Outcome {
@@ -221,6 +227,11 @@ impl Worker {
                 self.failed = 0;
                 self.done = 0;
                 let _ = ack.send(());
+            }
+            OpKind::Problem(key, msg) => {
+                let msg = cap_error(msg);
+                tracing::warn!(source = %self.source, key = %key, "source problem reported");
+                self.inner.record_item_error(&self.source, Some(key), msg);
             }
             OpKind::Checkpoint(cursor, ack) => {
                 let r = self.checkpoint(cursor).await;

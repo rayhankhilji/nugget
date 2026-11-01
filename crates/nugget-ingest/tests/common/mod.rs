@@ -62,6 +62,8 @@ pub enum Step {
     Hang,
     SetSecret(String, String),
     RecordKnown,
+    /// `ChangeSink::report_problem(key, message)`.
+    Problem(String, String),
 }
 
 pub struct FakeState {
@@ -156,6 +158,7 @@ impl Connector for FakeConnector {
                     s.sent.fetch_add(1, Ordering::SeqCst);
                 }
                 Step::Checkpoint(v) => sink.checkpoint(v).await?,
+                Step::Problem(k, m) => sink.report_problem(ItemKey::new(k), m).await?,
                 Step::Fail(k) => return Err(k.err()),
                 Step::Return(v) => return Ok(v),
                 Step::Hang => std::future::pending::<()>().await,
