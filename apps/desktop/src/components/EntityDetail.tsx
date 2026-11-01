@@ -45,6 +45,14 @@ import { RelativeTime } from "./RelativeTime";
 import { SourceIcon } from "./SourceIcon";
 import { SplitDialog } from "./SplitDialog";
 import { Badge, ErrorNote, Spinner } from "./ui";
+import { requestPage, requestSearchState } from "../hooks.nav";
+import { encode } from "../searchState";
+
+/** Open the entity's timeline on the Search page. */
+function openTimeline(id: string): void {
+  requestSearchState(encode({ timeline: id }));
+  requestPage("search");
+}
 
 const MENTIONS_SHOWN = 20;
 
@@ -186,6 +194,9 @@ export function EntityDetailPanel({
                 {t("entity.showInGraph")}
               </button>
             )}
+            <button type="button" className="btn btn-small" onClick={() => openTimeline(d.id)} aria-label={t("searchui.timelineFor", { name: d.name })}>
+              {t("searchui.timeline")}
+            </button>
             {/* Maintenance, set apart from navigation. */}
             <span className="entity-actions-end" role="group" aria-label={t("entity.fixLabel")}>
               <button type="button" className="btn btn-small btn-ghost" onClick={() => setMerging(true)}>

@@ -113,6 +113,8 @@ async fn reembedding_never_sends_sensitive_items_to_cloud_embedders() {
     let h = start(Opts {
         cfg: IngestConfig {
             allow_cloud_embeddings: true,
+            // No local triage here: the opt-out lets unflagged items use cloud embedders.
+            assume_unflagged_safe: true,
             ..no_periodic()
         },
         router: Some(r.clone()),

@@ -350,7 +350,12 @@ function IndexingCard({
                 </div>
                 <div>
                   <dt>{t("status.triage")}</dt>
-                  <dd className="stat-text">{data.triage_provider ?? <span className="muted">{t("status.off")}</span>}</dd>
+                  <dd className="stat-text">
+                    {data.triage_provider ?? <span className="muted">{t("status.off")}</span>}
+                    {(data.triage?.pending ?? 0) > 0 && (
+                      <span className="muted small"> {t("status.triagePending", { n: data.triage?.pending ?? 0 })}</span>
+                    )}
+                  </dd>
                 </div>
               </dl>
               <p className="muted small">{t("status.freshnessHint")}</p>

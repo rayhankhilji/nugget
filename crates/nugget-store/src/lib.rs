@@ -28,6 +28,7 @@ mod export;
 mod fts;
 mod graph;
 mod integrity;
+mod item_graph;
 mod items;
 mod key;
 #[cfg(test)]
@@ -47,6 +48,7 @@ pub use envelope::KeyEnvelope;
 pub use export::{ExportItem, GRAPH_EXPORT_FORMAT, GraphExportCounts, PAGE_BYTE_BUDGET};
 pub use graph::{ENTITY_ID_PREFIX, MAX_MERGE_DEPTH, MAX_NEIGHBOURHOOD_NODES, SqliteGraph};
 pub use integrity::{ConsistencyReport, FileHealth, check_file};
+pub use item_graph::{EntityLinkRow, ItemMention, ItemMeta};
 pub use key::{KEYCHAIN_ENV, KeySource, StoreKey};
 pub use schema::LATEST_VERSION as SCHEMA_VERSION;
 pub use search::TITLE_WEIGHT;

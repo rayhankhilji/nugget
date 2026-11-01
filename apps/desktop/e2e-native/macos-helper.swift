@@ -6,6 +6,7 @@
 //
 //   trigger                 double tap Right Command (flagsChanged, as the hardware sends it)
 //   enter                   press Return
+//   retry                   press R (the overlay's Retry key)
 //   click <x> <y>           left click at a global point
 //   windows <pid>           on-screen windows of <pid> (bounds in points) and its AX window titles
 //   front                   the focused app (pid, bundle id, name), through Accessibility
@@ -82,6 +83,10 @@ while let line = readLine() {
         reply(["ok": true])
     case "enter":
         key(36)
+        reply(["ok": true])
+    case "retry":
+        // kVK_ANSI_R.
+        key(15)
         reply(["ok": true])
     case "click":
         let xy = arg.split(separator: " ").compactMap { Double($0) }

@@ -37,6 +37,11 @@ const CONFIG: &str = r#"
 [runtime]
 enabled = false
 
+# No local model here, so triage can never clear items: without this they all count as
+# sensitive (unknown, GG5-2) and these scope tests would see nothing.
+[ingest]
+assume_unflagged_safe = true
+
 [knowledge]
 debounce_ms = 100
 interval_minutes = 0

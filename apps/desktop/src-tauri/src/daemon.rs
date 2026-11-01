@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
-use nugget_core::ipc::notification;
+use nugget_core::ipc::{EgressRecordRequest, method, notification};
 use nugget_core::paths::Paths;
 use nugget_ipc::{Client, IpcError};
 use serde::de::DeserializeOwned;
@@ -36,6 +36,10 @@ pub mod event {
     /// A page id (`"status"`, ...): the tray asks the window to navigate.
     pub const NAVIGATE: &str = "nugget:navigate";
 }
+
+/// Ledger rows the app keeps while `nuggetd` is unreachable; beyond this the oldest are dropped
+/// (with a warning). A day of update checks is a handful of rows.
+const MAX_QUEUED_EGRESS: usize = 256;
 
 /// How long `start_daemon` waits for a freshly spawned daemon to answer.
 const START_TIMEOUT: Duration = Duration::from_secs(20);
@@ -142,6 +146,11 @@ pub struct Daemon {
     /// connection as down.
     generation: AtomicU64,
     start_lock: Mutex<()>,
+    /// II4: the process id of a `nuggetd` this app started and that still runs (0: none), so a
+    /// quit can stop it when the user chose that ([`Daemon::started_pid`]).
+    started_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    /// Requests the app made itself (update checks), waiting to go to the daemon's ledger.
+    egress: std::sync::Mutex<EgressQueue>,
 }
 
 impl Default for Daemon {
@@ -157,7 +166,14 @@ impl Daemon {
             client: Mutex::new(None),
             generation: AtomicU64::new(0),
             start_lock: Mutex::new(()),
+            started_pid: Default::default(),
+            egress: std::sync::Mutex::new(EgressQueue::default()),
         }
+    }
+
+    /// The `nuggetd` this app started, while it runs (never one run as a service or by hand).
+    pub fn started_pid(&self) -> Option<u32> {
+        Some(self.started_pid.load(Ordering::SeqCst)).filter(|p| *p != 0)
     }
 
     fn paths(&self) -> Result<&Paths, CmdError> {
@@ -187,6 +203,14 @@ impl Daemon {
         forward_notifications(app.clone(), &client, generation, self.socket());
         *slot = Some(client.clone());
         drop(slot);
+        // Rows recorded while the daemon was away go out as soon as it answers.
+        if !self.egress_queue().is_empty() {
+            let (app, client) = (app.clone(), client.clone());
+            tauri::async_runtime::spawn(async move {
+                use tauri::Manager;
+                app.state::<Daemon>().flush_egress(&client).await;
+            });
+        }
         tracing::info!(socket = %self.socket(), "connected to nuggetd");
         crate::tray::set_connected(app, true);
         let _ = app.emit(event::CONNECTION, self.info(None));
@@ -221,6 +245,47 @@ impl Daemon {
         retry_busy(|| client.call(method, params))
             .await
             .map_err(|e| CmdError::from_ipc(e, method))
+    }
+
+    fn egress_queue(&self) -> std::sync::MutexGuard<'_, EgressQueue> {
+        self.egress.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Put a request the app made itself into the daemon's egress ledger (`egress.record`). If
+    /// the daemon isn't reachable the row waits in memory and goes out when it connects; rows
+    /// still waiting when the app quits are lost.
+    pub async fn record_egress(&self, app: &AppHandle, row: EgressRecordRequest) {
+        tracing::debug!(host = %row.host, feature = %row.feature, received = row.bytes_received, "egress");
+        self.egress_queue().push(row);
+        if let Ok(client) = self.client(app).await {
+            self.flush_egress(&client).await;
+        }
+    }
+
+    /// Send every queued row, oldest first. A row the daemon refuses for good (an older daemon
+    /// without `egress.record`, or invalid) is dropped with a warning; on any other error (lost
+    /// connection, still busy, a storage error) the rest wait for the next connection.
+    async fn flush_egress(&self, client: &Client) {
+        let mut rows = self.egress_queue().take().into_iter();
+        while let Some(row) = rows.next() {
+            let sent =
+                retry_busy(|| client.call::<_, serde_json::Value>(method::EGRESS_RECORD, &row));
+            match sent.await {
+                Ok(_) => {}
+                Err(IpcError::Rpc(e))
+                    if e.code == nugget_ipc::code::INVALID_PARAMS
+                        || e.code == nugget_ipc::code::METHOD_NOT_FOUND =>
+                {
+                    tracing::warn!(host = %row.host, feature = %row.feature, error = %e.message, "nuggetd refused an egress row; dropped");
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "egress rows wait for the next connection");
+                    self.egress_queue()
+                        .requeue(std::iter::once(row).chain(rows).collect());
+                    return;
+                }
+            }
+        }
     }
 
     /// Spawn `nuggetd` if it is not answering, then wait until it does.
@@ -263,11 +328,52 @@ impl Daemon {
                 )));
             }
         };
+        let pid = child.id();
+        self.started_pid.store(pid, Ordering::SeqCst);
+        let started = self.started_pid.clone();
         // Reap the child whenever it exits, without blocking the runtime.
         std::thread::spawn(move || {
             let _ = child.wait();
+            let _ = started.compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
         });
         result
+    }
+}
+
+/// Ledger rows waiting for the daemon, oldest first, at most [`MAX_QUEUED_EGRESS`].
+#[derive(Default)]
+struct EgressQueue {
+    rows: std::collections::VecDeque<EgressRecordRequest>,
+}
+
+impl EgressQueue {
+    fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    fn push(&mut self, row: EgressRecordRequest) {
+        self.rows.push_back(row);
+        self.trim();
+    }
+
+    fn take(&mut self) -> Vec<EgressRecordRequest> {
+        self.rows.drain(..).collect()
+    }
+
+    /// Put rows that couldn't be sent back in front of any queued since.
+    fn requeue(&mut self, rows: Vec<EgressRecordRequest>) {
+        for row in rows.into_iter().rev() {
+            self.rows.push_front(row);
+        }
+        self.trim();
+    }
+
+    fn trim(&mut self) {
+        while self.rows.len() > MAX_QUEUED_EGRESS {
+            if let Some(old) = self.rows.pop_front() {
+                tracing::warn!(host = %old.host, feature = %old.feature, "nuggetd unreachable; egress row dropped");
+            }
+        }
     }
 }
 
@@ -373,6 +479,37 @@ fn spawn_detached(exe: &Path) -> std::io::Result<Child> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn row(n: u64) -> EgressRecordRequest {
+        EgressRecordRequest {
+            at: None,
+            host: "github.com".into(),
+            feature: "update_check".into(),
+            bytes_sent: 0,
+            bytes_received: n,
+        }
+    }
+
+    #[test]
+    fn egress_queue_keeps_order_and_a_bounded_size() {
+        let mut q = EgressQueue::default();
+        q.push(row(1));
+        q.push(row(2));
+        let taken = q.take();
+        assert!(q.is_empty());
+        q.push(row(3));
+        // Unsent rows go back in front of the ones queued since.
+        q.requeue(taken);
+        let order: Vec<_> = q.take().iter().map(|r| r.bytes_received).collect();
+        assert_eq!(order, [1, 2, 3]);
+
+        for n in 0..(MAX_QUEUED_EGRESS as u64 + 10) {
+            q.push(row(n));
+        }
+        let kept = q.take();
+        assert_eq!(kept.len(), MAX_QUEUED_EGRESS);
+        assert_eq!(kept[0].bytes_received, 10, "the oldest are dropped");
+    }
 
     fn busy() -> IpcError {
         IpcError::Rpc(nugget_ipc::RpcError::new(

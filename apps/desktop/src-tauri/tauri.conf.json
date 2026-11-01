@@ -53,6 +53,23 @@
     "license": "Apache-2.0",
     "homepage": "https://github.com/rayhankhilji/nugget",
     "longDescription": "Nugget is a local-first personal AI. A background service (nuggetd) keeps your knowledge on this device; the desktop app talks to it over local IPC.",
+    "fileAssociations": [
+      {
+        "ext": [
+          "nuggetplugin"
+        ],
+        "name": "Nugget plugin",
+        "description": "Nugget plugin package",
+        "role": "Viewer",
+        "mimeType": "application/x-nuggetplugin",
+        "exportedType": {
+          "identifier": "dev.nugget.plugin",
+          "conformsTo": [
+            "public.data"
+          ]
+        }
+      }
+    ],
     "linux": {
       "deb": {
         "section": "utils",
@@ -92,6 +109,13 @@
       "endpoints": [],
       "windows": {
         "installMode": "passive"
+      }
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "nugget"
+        ]
       }
     }
   }

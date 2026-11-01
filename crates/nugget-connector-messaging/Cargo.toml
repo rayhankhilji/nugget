@@ -1,0 +1,37 @@
+[package]
+name = "nugget-connector-messaging"
+description = "Chat imports for Nugget: iMessage (macOS chat.db), WhatsApp exports, Telegram Desktop exports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+nugget-core.workspace = true
+nugget-connector.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time = { workspace = true, features = ["macros"] }
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+# Same SQLite build as nugget-store: two `libsqlite3` links in one binary do not build.
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
+# WhatsApp `.zip` exports: only the chat text entry is read (bounded); other entries are listed.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# zip leaves the deflate backend to the user: flate2 defaults to the pure-Rust miniz_oxide.
+flate2 = "1"
+# Native file watching for export folders (same as nugget-connector-files).
+notify-debouncer-full = "0.7"
+sha2 = "0.10"
+url = "2.5"
+# Private temp dirs for the copied chat.db / address book, removed on drop.
+tempfile = "3"
+
+[dev-dependencies]
+nugget-connector = { workspace = true, features = ["testkit"] }
+
+[lints]
+workspace = true

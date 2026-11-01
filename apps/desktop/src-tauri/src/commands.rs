@@ -898,10 +898,13 @@ pub async fn reminders_list(
 #[tauri::command]
 pub async fn notify(
     app: AppHandle,
+    window: tauri::Window,
     title: String,
     body: String,
     open_today: Option<bool>,
 ) -> Result<()> {
+    // II4: only the main window composes notifications (not the quick-ask box or the overlay).
+    crate::platform::main_only(&window)?;
     crate::notify::show(&app, &title, &body, open_today.unwrap_or(false)).map_err(CmdError::Other)
 }
 
@@ -1039,6 +1042,35 @@ pub async fn export_run(
 ) -> Result<Value> {
     check_backup_request(&request)?;
     daemon.call(&app, "export.run", &request).await
+}
+
+// ---- II2: faceted search, timelines, previews (pass-through; the daemon validates) ----
+
+#[tauri::command]
+pub async fn search_faceted(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.faceted", &request).await
+}
+
+#[tauri::command]
+pub async fn search_timeline(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.timeline", &request).await
+}
+
+#[tauri::command]
+pub async fn search_preview(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.preview", &request).await
 }
 
 #[cfg(test)]

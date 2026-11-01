@@ -52,7 +52,8 @@ const FORM_NORMALISED_KINDS: &[&str] = &[
 ];
 
 /// Every connector kind shipped: files, obsidian, gmail, gcal, imap, caldav (M1); gdrive (Google
-/// Drive); outlook, outlook-calendar, onedrive (Microsoft 365); slack, notion, github, linear (SaaS).
+/// Drive); outlook, outlook-calendar, onedrive (Microsoft 365); slack, notion, github, linear (SaaS);
+/// imessage, whatsapp, telegram (messaging imports).
 pub(crate) fn registry() -> Registry {
     let mut r = Registry::new();
     nugget_connector_files::register(&mut r);
@@ -61,6 +62,7 @@ pub(crate) fn registry() -> Registry {
     r.register(Arc::new(nugget_connector_caldav::CalDavFactory::new()));
     nugget_connector_microsoft::register(&mut r);
     nugget_connector_saas::register(&mut r);
+    nugget_connector_messaging::register(&mut r); // II1: imessage, whatsapp, telegram
     r
 }
 
@@ -177,6 +179,7 @@ mod tests {
                 "github",
                 "gmail",
                 "imap",
+                "imessage",
                 "linear",
                 "notion",
                 "obsidian",
@@ -184,6 +187,8 @@ mod tests {
                 "outlook",
                 "outlook-calendar",
                 "slack",
+                "telegram",
+                "whatsapp",
             ]
         );
         // OAuth kinds get their client secret injected; the SaaS kinds take a pasted token.
@@ -219,6 +224,9 @@ mod tests {
     fn desktop_wizard_settings_validate_for_every_kind() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap().to_string();
+        let chat_db = dir.path().join("chat.db");
+        std::fs::write(&chat_db, b"").unwrap();
+        let chat_db = chat_db.to_str().unwrap().to_string();
         let r = registry();
         let cases = [
             (
@@ -316,6 +324,24 @@ mod tests {
             (
                 "linear",
                 json!({"include": ["assigned", "created"], "teams": ["ENG"], "window_days": 60}),
+            ),
+            // II1 messaging imports. The wizard sends no `db_path` (macOS default); here a file
+            // stands in for chat.db so the case validates on every OS.
+            (
+                "imessage",
+                json!({"db_path": chat_db, "contacts": true, "include_groups": true, "private": true}),
+            ),
+            (
+                "whatsapp",
+                json!({"folder": root, "include_groups": true, "private": true}),
+            ),
+            (
+                "whatsapp",
+                json!({"folder": root, "me": "Ada", "since_days": 30, "include_groups": false, "private": false}),
+            ),
+            (
+                "telegram",
+                json!({"path": root, "include_groups": true, "private": true}),
             ),
         ];
         let kinds: std::collections::BTreeSet<&str> = cases.iter().map(|(k, _)| *k).collect();

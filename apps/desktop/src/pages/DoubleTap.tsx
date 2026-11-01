@@ -32,6 +32,8 @@ import {
   WINDOW_MAX_MS,
   WINDOW_MIN_MS,
 } from "../doubletap";
+import { DoubleTapHistory } from "./DoubleTapHistory";
+import { DoubleTapPractice } from "./DoubleTapPractice";
 
 type Notice = { text: string; error: boolean } | null;
 
@@ -239,6 +241,8 @@ export function DoubleTapPage() {
         </form>
       )}
 
+      {saved.data && <DoubleTapPractice settings={saved.data} status={status.data} />}
+      {saved.data && <DoubleTapHistory />}
       <PermissionsCard status={status.data} error={status.error} loading={status.loading} onUpdate={status.reload} />
       <VoiceCard />
     </div>
