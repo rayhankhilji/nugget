@@ -20,6 +20,7 @@ import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { UpdateSettings } from "../components/UpdateSettings";
 import { BackupSettings } from "../components/BackupSettings";
+import { NoTrayControls, useShellInfo, VersionBanner } from "../components/DaemonControls";
 import { formatList, formatNumber, Trans, useT, type MessageKey } from "../i18n";
 
 export function StatusPage() {
@@ -29,6 +30,7 @@ export function StatusPage() {
   const ingest = useAsync(api.ingestStatus);
   const runtime = useAsync(api.runtimeStatus);
   const knowledge = useAsync(api.knowledgeStatus);
+  const [shell, setShell] = useShellInfo();
 
   // Light auto-refresh while the page is open. Methods the daemon lacks are not re-polled.
   const { reload } = status;
@@ -72,6 +74,7 @@ export function StatusPage() {
           </button>
         }
       />
+      <VersionBanner />
       <ErrorNote error={status.error} onRetry={refreshAll} />
       {firstLoad && <Loading label={t("status.loading")} lines={4} />}
       {s && (
@@ -155,6 +158,7 @@ export function StatusPage() {
       />
       )}
       {(!quiet || knowledge.data) && <KnowledgeCard data={knowledge.data} error={quiet ? null : knowledge.error} loading={!quiet && knowledge.loading} onRetry={knowledge.reload} />}
+      {!quiet && shell && <NoTrayControls info={shell} onChange={setShell} />}
       {!quiet && <BackupSettings />}
       <UpdateSettings />
 
@@ -174,6 +178,21 @@ export function StatusPage() {
             }}
           />
         </p>
+        {shell?.logs && (
+          <p className="muted tech-details-body">
+            <Trans
+              k="status.logs"
+              args={{ dir: shell.logs.dir }}
+              tags={{
+                code: (c) => (
+                  <bdi dir="ltr">
+                    <code>{c}</code>
+                  </bdi>
+                ),
+              }}
+            />
+          </p>
+        )}
       </details>
     </div>
   );

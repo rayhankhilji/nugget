@@ -1,14 +1,22 @@
 /**
  * Desktop-app preferences backed by the Tauri shell: "open Nugget in the tray at login"
  * (`src-tauri/src/autostart.rs`), and (II4) OS notifications with quiet hours, what quitting does
- * to the background service (`src-tauri/src/platform.rs`), and the quick-ask shortcut. Distinct
+ * to the background service (GG6-8: stop, keep, or not decided yet; `src-tauri/src/lifecycle.rs`),
+ * and the quick-ask shortcut. Distinct
  * from the background-service toggle above it.
  */
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { autostart, errorMessage, platformApi, type AutostartStatus, type PlatformSettings, type QuietHours } from "../api";
-import { useT } from "../i18n";
+import { autostart, errorMessage, platformApi, type AutostartStatus, type PlatformSettings, type QuitChoice, type QuietHours } from "../api";
+import { useT, type MessageKey } from "../i18n";
 import { QuickAskSettings } from "./QuickAskSettings";
 import { Spinner } from "./ui";
+
+/** The quit choices in the order Settings lists them (GG6-8). */
+const QUIT_CHOICES: [QuitChoice, MessageKey][] = [
+  ["stop", "appSettings.quit.stop"],
+  ["keep", "appSettings.quit.keep"],
+  ["ask", "appSettings.quit.ask"],
+];
 
 /** Default quiet hours when first turned on: 22:00–07:00. */
 export const DEFAULT_QUIET: QuietHours = { start: 22 * 60, end: 7 * 60 };
@@ -122,6 +130,7 @@ export function PlatformPrefs() {
   const t = useT();
   const notifyHint = useId();
   const quitHint = useId();
+  const quitName = useId();
   const fromId = useId();
   const toId = useId();
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
@@ -190,11 +199,23 @@ export function PlatformPrefs() {
         </fieldset>
       )}
       <h3 className="ask-sub">{t("appSettings.quitHeading")}</h3>
-      <Switch checked={settings.quit_stops_daemon} describedBy={quitHint} onChange={(on) => void save({ ...settings, quit_stops_daemon: on })}>
-        {t("appSettings.quitStops")}
-      </Switch>
+      <fieldset className="plain-fieldset" aria-describedby={quitHint}>
+        <legend>{t("appSettings.quitQuestion")}</legend>
+        {QUIT_CHOICES.map(([choice, label]) => (
+          <label key={choice} className="check">
+            <input
+              type="radio"
+              name={quitName}
+              value={choice}
+              checked={settings.quit_daemon === choice}
+              onChange={() => void save({ ...settings, quit_daemon: choice })}
+            />
+            <span>{t(label)}</span>
+          </label>
+        ))}
+      </fieldset>
       <p id={quitHint} className="muted small switch-hint">
-        {t("appSettings.quitHint")}
+        {t("appSettings.quitNote")}
       </p>
       {error && (
         <div className="note note-error" role="alert">

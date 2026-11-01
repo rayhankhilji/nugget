@@ -171,6 +171,8 @@ mod tests {
                 },
             ],
             audit_chain_ok: Some(false),
+            pid: None,
+            service: None,
         };
         let out = format_status(&s, "/tmp/sock");
         assert!(out.starts_with("nuggetd 0.0.1 running (protocol 1), up 1h 2m\n"));

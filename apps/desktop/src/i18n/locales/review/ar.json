@@ -1,6 +1,6 @@
 {
   "wave": "Z2",
-  "note": "Machine-translated in waves Z2, BB1, II1 and II2; a native speaker should review these keys.",
+  "note": "Machine-translated in waves Z2, BB1, II1, II2 and GG6; a native speaker should review these keys.",
   "keys": [
     "addSource.addTitle.caldav",
     "addSource.addTitle.files",
@@ -1897,8 +1897,6 @@
     "appSettings.quietFrom",
     "appSettings.quietTo",
     "appSettings.quitHeading",
-    "appSettings.quitStops",
-    "appSettings.quitHint",
     "onboarding.done.desktopHeading",
     "onboarding.done.desktopHint",
     "deeplink.itemTitle",
@@ -2028,6 +2026,30 @@
     "updates.ask.title",
     "updates.ask.body",
     "updates.ask.stable",
-    "updates.ask.chosen"
+    "updates.ask.chosen",
+    "quit.ask.title",
+    "quit.ask.body",
+    "quit.ask.detail",
+    "quit.ask.stop",
+    "quit.ask.keep",
+    "quit.ask.failed",
+    "appSettings.quitQuestion",
+    "appSettings.quit.ask",
+    "appSettings.quit.stop",
+    "appSettings.quit.keep",
+    "appSettings.quitNote",
+    "status.versionCheck.restarting",
+    "status.versionCheck.notOwned",
+    "status.versionCheck.serviceFailed",
+    "status.versionCheck.restartFailed",
+    "status.versionCheck.again",
+    "status.noTray.title",
+    "status.noTray.body",
+    "status.noTray.pause",
+    "status.noTray.resume",
+    "status.noTray.paused",
+    "status.noTray.agents",
+    "status.noTray.failed",
+    "status.logs"
   ]
 }

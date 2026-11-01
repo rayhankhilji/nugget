@@ -15,8 +15,10 @@
 //!   (XEmbed-only trays).
 //!
 //! `NUGGET_TRAY=off` skips the tray on every platform (the installer smoke tests use it). Without
-//! a tray, closing the window quits Nugget, and launching it again focuses the running window
-//! (single instance).
+//! a tray, closing the window quits Nugget the same way Quit Nugget does (`lifecycle`: the quit
+//! choice applies to the background service), launching it again focuses the running window
+//! (single instance), and the Status page shows the tray's actions instead (pause indexing; the
+//! kill switch is on the Safety page) (GG6-20).
 //!
 //! The status lines are refreshed from the daemon (`ingest.status`, `status`, `agent.list`) when
 //! the connection comes up, shortly after daemon notifications that can change them, every
@@ -153,9 +155,11 @@ pub struct Tray {
     update_version: Mutex<Option<String>>,
     snapshot: Mutex<Snapshot>,
     refresh_scheduled: AtomicBool,
-    /// A pause or resume is running; further clicks are ignored until it is done.
-    pausing: AtomicBool,
 }
+
+/// A pause or resume is running (from the tray or the window); further clicks are ignored until
+/// it is done.
+static PAUSING: AtomicBool = AtomicBool::new(false);
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -260,7 +264,6 @@ fn build(app: &tauri::App) -> tauri::Result<()> {
         update_version: Mutex::new(None),
         snapshot: Mutex::new(Snapshot::default()),
         refresh_scheduled: AtomicBool::new(false),
-        pausing: AtomicBool::new(false),
     });
     Ok(())
 }
@@ -278,6 +281,7 @@ fn on_menu(app: &AppHandle, id: &str) {
             let app = app.clone();
             tauri::async_runtime::spawn(async move { toggle_pause(&app).await });
         }
+        // Through `RunEvent::ExitRequested`, like every other way to quit (`lifecycle`).
         "quit" => app.exit(0),
         id if id == crate::agent::tray_item_id() => crate::agent::tray_clicked(app),
         _ => {}
@@ -526,16 +530,14 @@ fn follow_daemon(app: &AppHandle) {
 }
 
 /// "Pause indexing": turn off every enabled source and remember which; "Resume indexing" turns
-/// exactly those back on. Survives restarts (the sources stay off in the daemon's config).
+/// exactly those back on. Survives restarts (the sources stay off in the daemon's config). Also
+/// offered in the window when there is no tray (`lifecycle::indexing_pause_toggle`).
 pub async fn toggle_pause(app: &AppHandle) {
-    let Some(t) = app.try_state::<Tray>() else {
-        return;
-    };
-    if t.pausing.swap(true, Ordering::SeqCst) {
+    if PAUSING.swap(true, Ordering::SeqCst) {
         return;
     }
     toggle_pause_once(app).await;
-    t.pausing.store(false, Ordering::SeqCst);
+    PAUSING.store(false, Ordering::SeqCst);
     refresh(app).await;
 }
 
@@ -560,7 +562,7 @@ async fn toggle_pause_once(app: &AppHandle) {
                         Err(e) => tracing::warn!(error = %e, "couldn't pause a source"),
                     }
                 }
-                tracing::info!(sources = done.len(), "indexing paused from the tray");
+                tracing::info!(sources = done.len(), "indexing paused");
                 platform.update(|p| {
                     for id in done {
                         if !p.paused_sources.contains(&id) {
@@ -596,7 +598,7 @@ async fn toggle_pause_once(app: &AppHandle) {
         tracing::info!(
             sources = paused.len() - left.len(),
             left = left.len(),
-            "indexing resumed from the tray"
+            "indexing resumed"
         );
         platform.update(|p| p.paused_sources = left)
     };

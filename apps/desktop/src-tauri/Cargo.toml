@@ -48,6 +48,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # the last release that accepts tauri 2.11 and Rust 1.88.
 tauri-plugin-notification = "=2.4.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# GG6-32: the shell's daily log file next to the daemon's (`logs.rs`); the version nuggetd uses.
+tracing-appender = "0.2"
+# GG6-8: which nuggetd this app started, across sessions (pid plus process start time) and when
+# it has exited (`lifecycle.rs`). The version and features nugget-runtime already builds.
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 # A second launch focuses the running window. 2.4.5 is the last release that accepts tauri 2.11
 # and Rust 1.88 (MSRV 1.77.2); 2.5+ needs tauri 2.12 and Rust 1.90.
 tauri-plugin-single-instance = "=2.4.5"

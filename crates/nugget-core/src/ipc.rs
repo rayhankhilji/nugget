@@ -18,6 +18,7 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | method | params | result |
 /// |---|---|---|
 /// | `status` | `{}` | [`StatusResponse`] |
+/// | `daemon.shutdown` | [`DaemonShutdownRequest`] | [`DaemonShutdownResponse`], then the daemon winds down and exits |
 /// | `chat` | [`ChatRequest`] | [`ChatStarted`], then `chat.delta`/`chat.done` notifications |
 /// | `chat.cancel` | [`ChatCancel`] | `null` |
 /// | `search` | [`SearchRequest`] | `Vec<`[`SearchHit`]`>` |
@@ -54,6 +55,11 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `voice.status` | `{}` | [`VoiceStatus`] |
 pub mod method {
     pub const STATUS: &str = "status";
+    /// Stop the daemon cleanly, as SIGTERM would (ingest, the local model servers, then the
+    /// store), after answering. Sent by the desktop app when it quits or replaces a daemon of
+    /// another version. Like every method it is served on the local IPC socket only, which only
+    /// the same OS user can open; no MCP, HTTP or browser-extension surface forwards it.
+    pub const DAEMON_SHUTDOWN: &str = "daemon.shutdown";
     pub const CHAT: &str = "chat";
     pub const CHAT_CANCEL: &str = "chat.cancel";
     pub const SEARCH: &str = "search";
@@ -122,6 +128,37 @@ pub struct StatusResponse {
     /// Result of verifying the audit hash chain at startup. `None` if not checked.
     #[serde(default)]
     pub audit_chain_ok: Option<bool>,
+    /// The daemon's process id (absent from daemons before GG6-10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    /// The service manager running this daemon, when it can tell: [`SERVICE_SYSTEMD`] or
+    /// [`SERVICE_LAUNCHD`]. Absent: started by an app, by hand, or by the Windows task (which
+    /// it cannot tell apart).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+}
+
+/// [`StatusResponse::service`]: the systemd user unit runs this daemon.
+pub const SERVICE_SYSTEMD: &str = "systemd";
+/// [`StatusResponse::service`]: the launchd LaunchAgent runs this daemon.
+pub const SERVICE_LAUNCHD: &str = "launchd";
+
+// ---- daemon.shutdown ----
+
+/// `daemon.shutdown` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DaemonShutdownRequest {
+    /// Why, for the daemon's log (`app_quit`, `version_mismatch`, `update`); clipped.
+    pub reason: Option<String>,
+}
+
+/// `daemon.shutdown` result, sent before the daemon starts winding down.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DaemonShutdownResponse {
+    pub stopping: bool,
+    /// The process that is stopping, so the caller can wait for it to exit.
+    pub pid: u32,
 }
 
 // ---- providers ----
@@ -1991,5 +2028,45 @@ mod tests {
         assert_eq!(v["at"], "2026-09-21T14:13:20Z");
         assert_eq!(serde_json::from_value::<EgressRecordRequest>(v).unwrap(), r);
         assert!(CLIENT_EGRESS_FEATURES.contains(&"update_check"));
+    }
+
+    #[test]
+    fn status_pid_and_service_are_additive() {
+        // A daemon from before GG6-10 sends neither.
+        let old = serde_json::json!({
+            "protocol": 1, "version": "0.0.1", "uptime_secs": 3, "items": 0, "chunks": 0,
+            "providers": [],
+        });
+        let s: StatusResponse = serde_json::from_value(old).unwrap();
+        assert_eq!((s.pid, s.service.as_deref()), (None, None));
+        let v = serde_json::to_value(&s).unwrap();
+        assert!(v.get("pid").is_none() && v.get("service").is_none());
+        let new = StatusResponse {
+            pid: Some(42),
+            service: Some(SERVICE_SYSTEMD.into()),
+            ..s
+        };
+        let v = serde_json::to_value(&new).unwrap();
+        assert_eq!(
+            (v["pid"].as_u64(), v["service"].as_str()),
+            (Some(42), Some("systemd"))
+        );
+    }
+
+    #[test]
+    fn shutdown_params_are_optional() {
+        let r: DaemonShutdownRequest = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(r.reason, None);
+        let r: DaemonShutdownRequest =
+            serde_json::from_value(serde_json::json!({"reason": "app_quit"})).unwrap();
+        assert_eq!(r.reason.as_deref(), Some("app_quit"));
+        let done = DaemonShutdownResponse {
+            stopping: true,
+            pid: 7,
+        };
+        assert_eq!(
+            serde_json::to_value(&done).unwrap(),
+            serde_json::json!({"stopping": true, "pid": 7})
+        );
     }
 }

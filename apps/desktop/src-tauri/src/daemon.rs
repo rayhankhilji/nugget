@@ -15,6 +15,8 @@ use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
+use crate::lifecycle::Ownership;
+
 /// Tauri event names (Tauri allows only `[A-Za-z0-9-/:_]`, so dots become dashes).
 pub mod event {
     /// `ConnectionInfo`, whenever the daemon connection comes up or goes down.
@@ -176,6 +178,57 @@ impl Daemon {
         Some(self.started_pid.load(Ordering::SeqCst)).filter(|p| *p != 0)
     }
 
+    fn record_path(&self) -> Option<PathBuf> {
+        self.paths.as_ref().ok().map(crate::lifecycle::record_path)
+    }
+
+    /// Whether the daemon that reports `reported_pid` / `service` in `status` is the app's own:
+    /// started this session, or by an earlier one with the same process still running (see
+    /// `lifecycle`). A stale record (its process gone) is removed.
+    pub fn ownership(&self, reported_pid: Option<u32>, service: Option<&str>) -> Ownership {
+        if service.is_some() {
+            return Ownership::Service;
+        }
+        if let Some(p) = self.started_pid()
+            && reported_pid.is_none_or(|r| r == p)
+        {
+            return Ownership::Owned;
+        }
+        let path = self.record_path();
+        let rec = path.as_deref().and_then(crate::lifecycle::read_record);
+        let live = rec
+            .as_ref()
+            .and_then(|r| crate::lifecycle::process_start_time(r.pid));
+        if let (Some(r), Some(path)) = (&rec, &path)
+            && live != Some(r.start_time)
+        {
+            crate::lifecycle::remove_record(path);
+        }
+        crate::lifecycle::ownership(rec.as_ref(), live, reported_pid, service)
+    }
+
+    /// The pid and OS start time of the app's own daemon, if one still runs.
+    pub fn owned_target(&self, reported_pid: Option<u32>) -> Option<(u32, u64)> {
+        let rec = self
+            .record_path()
+            .and_then(|p| crate::lifecycle::read_record(&p));
+        if let Some(r) = rec
+            && reported_pid.is_none_or(|p| p == r.pid)
+            && crate::lifecycle::process_start_time(r.pid) == Some(r.start_time)
+        {
+            return Some((r.pid, r.start_time));
+        }
+        let pid = self.started_pid()?;
+        crate::lifecycle::process_start_time(pid).map(|t| (pid, t))
+    }
+
+    /// The app's own daemon has stopped.
+    pub fn forget_owned(&self) {
+        if let Some(p) = self.record_path() {
+            crate::lifecycle::remove_record(&p);
+        }
+    }
+
     fn paths(&self) -> Result<&Paths, CmdError> {
         self.paths.as_ref().map_err(|e| CmdError::Other(e.clone()))
     }
@@ -214,6 +267,8 @@ impl Daemon {
         tracing::info!(socket = %self.socket(), "connected to nuggetd");
         crate::tray::set_connected(app, true);
         let _ = app.emit(event::CONNECTION, self.info(None));
+        // GG6-10: a daemon left over from before an update is replaced or reported.
+        crate::lifecycle::connected(app);
         Ok(client)
     }
 
@@ -301,8 +356,29 @@ impl Daemon {
             )
         })?;
         tracing::info!(exe = %exe.display(), "starting nuggetd");
-        let mut child = spawn_detached(&exe)
-            .map_err(|e| CmdError::Spawn(format!("Couldn't start {}: {e}", exe.display())))?;
+        let mut child = spawn_detached(&exe).map_err(|e| {
+            CmdError::Spawn(format!(
+                "Couldn't start {}: {e}.{}",
+                exe.display(),
+                crate::logs::hint_suffix()
+            ))
+        })?;
+        // Recorded at once, so a later session can still prove this daemon is the app's own.
+        let pid = child.id();
+        match (
+            self.record_path(),
+            crate::lifecycle::process_start_time(pid),
+        ) {
+            (Some(path), Some(start_time)) => crate::lifecycle::write_record(
+                &path,
+                &crate::lifecycle::OwnedRecord {
+                    pid,
+                    start_time,
+                    exe: exe.clone(),
+                },
+            ),
+            _ => tracing::debug!(pid, "nuggetd already exited, or no data directory"),
+        }
 
         let deadline = Instant::now() + START_TIMEOUT;
         let result = loop {
@@ -316,19 +392,20 @@ impl Daemon {
                 // Some daemons fork and exit 0; keep polling for the socket in that case.
                 Ok(Some(status)) if !status.success() => {
                     break Err(CmdError::Spawn(format!(
-                        "nuggetd exited ({status}) before it was ready. Check its log for details."
+                        "nuggetd exited ({status}) before it was ready.{}",
+                        crate::logs::hint_suffix()
                     )));
                 }
                 Ok(_) | Err(_) => {}
             }
             if Instant::now() >= deadline {
                 break Err(CmdError::Spawn(format!(
-                    "nuggetd started but did not answer within {} s.",
-                    START_TIMEOUT.as_secs()
+                    "nuggetd started but did not answer within {} s.{}",
+                    START_TIMEOUT.as_secs(),
+                    crate::logs::hint_suffix()
                 )));
             }
         };
-        let pid = child.id();
         self.started_pid.store(pid, Ordering::SeqCst);
         let started = self.started_pid.clone();
         // Reap the child whenever it exits, without blocking the runtime.

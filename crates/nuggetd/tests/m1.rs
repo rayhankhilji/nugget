@@ -668,6 +668,65 @@ async fn local_runtime_serves_embeddings_and_chat_and_starts_after_install() {
     assert!(pid_files_gone(&home.join("data").join("runtime")));
 }
 
+/// GG6-8: `daemon.shutdown` answers with the daemon's pid, then winds down as SIGTERM does:
+/// `run_until` returns without its own stop signal, and the local model server is stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn daemon_shutdown_stops_the_daemon_and_its_model_servers() {
+    let tmp = temp_home();
+    let home = tmp.path().join("home");
+    let models_server = wiremock::MockServer::start().await;
+    let manifest = test_manifest(&models_server).await;
+    let paths = Paths::rooted(home.clone());
+    let store = ModelStore::open(&paths, Arc::new(NoEgress)).unwrap();
+    store
+        .install(manifest.get("embed-model").unwrap(), |_| {})
+        .await
+        .unwrap();
+    drop(store);
+    let overrides = RuntimeOverrides {
+        server_binary: Some((fake_server(), RuntimeAccel::Cpu)),
+        options: Some(fast_runtime()),
+        manifest: Some(manifest),
+        hardware: Some(Hardware {
+            total_ram: 16 << 30,
+            available_ram: 8 << 30,
+            cpu_cores: 4,
+            gpu: GpuKind::Unknown,
+        }),
+    };
+    let config = "[runtime]\nembedding_model = \"embed-model\"\nidle_stop_minutes = 0\n";
+    let mut h = Harness::start_in(tmp, config, overrides).await;
+    eventually("embedding runtime ready", || {
+        runtime_ready(&h, RuntimeRole::Embedding)
+    })
+    .await;
+    let runtime_dir = home.join("data").join("runtime");
+    assert!(!pid_files_gone(&runtime_dir), "the model server runs");
+
+    // `status` names this process, which no service manager runs.
+    let status: nugget_core::ipc::StatusResponse = h.call(method::STATUS, json!({})).await;
+    assert_eq!(status.pid, Some(std::process::id()));
+    assert_eq!(status.service, None);
+
+    let done: nugget_core::ipc::DaemonShutdownResponse = h
+        .call(method::DAEMON_SHUTDOWN, json!({"reason": "app_quit"}))
+        .await;
+    assert!(done.stopping);
+    assert_eq!(done.pid, std::process::id());
+    // No stop signal is sent: the method alone ends `run_until`, cleanly.
+    tokio::time::timeout(CALL, h.server.take().unwrap())
+        .await
+        .expect("daemon stops promptly")
+        .unwrap()
+        .unwrap();
+    assert!(pid_files_gone(&runtime_dir), "the model server was stopped");
+    assert!(
+        Client::connect(&h.paths).await.is_err(),
+        "the socket no longer answers"
+    );
+    h.stop.take();
+}
+
 /// `models.install` of an update for a model whose server is running restarts the server on
 /// the new weights (the runtime compares the installed model's SHA-256).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

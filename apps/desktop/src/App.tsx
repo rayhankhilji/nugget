@@ -30,6 +30,7 @@ import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
 import { migrateTriggerOnce } from "./onboarding/trigger";
 import { DeepLinks } from "./platform/DeepLinks";
+import { QuitPrompt } from "./platform/QuitPrompt";
 import { useShellLabels } from "./platform/shellLabels";
 
 export interface PageDef {
@@ -328,7 +329,13 @@ export function App() {
   const current = PAGES.find((p) => p.id === page) ?? PAGES[0]!;
   const Current = current.Component;
 
-  if (onboarding) return <Onboarding connected={conn?.connected === true} onExit={endOnboarding} />;
+  if (onboarding)
+    return (
+      <>
+        <Onboarding connected={conn?.connected === true} onExit={endOnboarding} />
+        <QuitPrompt />
+      </>
+    );
 
   return (
     <div className="shell">
@@ -374,6 +381,7 @@ export function App() {
         )}
       </main>
       <DeepLinks pages={PAGE_IDS} go={jump} />
+      <QuitPrompt />
       {palette && <CommandPalette items={paletteItems} queryItem={searchItem} onClose={() => setPalette(false)} />}
       {help && <ShortcutsHelp rows={shortcutRows} onClose={() => setHelp(false)} />}
     </div>

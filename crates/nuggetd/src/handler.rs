@@ -34,6 +34,10 @@ use crate::config::tier_name;
 use crate::daemon::{InFlightGuard, State, blocking, spawn_refresh};
 use crate::sources::{client_secret_account, reconcile_settings};
 
+/// Longest `daemon.shutdown` reason logged.
+const MAX_SHUTDOWN_REASON_CHARS: usize = 64;
+/// How long `daemon.shutdown` waits after answering before the daemon starts winding down.
+const SHUTDOWN_REPLY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
 /// Upper bounds for list-style requests.
 const MAX_SEARCH_RESULTS: u32 = 200;
 const MAX_EGRESS_EVENTS: u32 = 1000;
@@ -66,6 +70,7 @@ impl Handler for RpcHandler {
         tracing::debug!(%method, "rpc call");
         match method {
             method::STATUS => self.status().await,
+            method::DAEMON_SHUTDOWN => self.daemon_shutdown(parse_params(params)?),
             method::CHAT => self.chat(parse_params(params)?, notify).await,
             method::CHAT_CANCEL => self.chat_cancel(parse_params(params)?),
             method::SEARCH => self.search(parse_params(params)?).await,
@@ -130,6 +135,32 @@ impl RpcHandler {
 
     // ---- status / providers ----
 
+    /// `daemon.shutdown`: answer, then cancel `State::shutdown`, which `Daemon::run_until`
+    /// treats like SIGTERM (connections close, ingest and the local model servers stop, the
+    /// store is flushed, then "stopped" is logged and the process exits 0).
+    fn daemon_shutdown(&self, req: ipc::DaemonShutdownRequest) -> Result<Value, RpcError> {
+        let reason: String = req
+            .reason
+            .as_deref()
+            .unwrap_or("unspecified")
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(MAX_SHUTDOWN_REASON_CHARS)
+            .collect();
+        tracing::info!(%reason, "stop requested over IPC");
+        let stop = self.state.shutdown.clone();
+        // Not tracked in `state.tasks` (wind-down waits for those). The pause lets this answer
+        // reach the client before connections start closing.
+        tokio::spawn(async move {
+            tokio::time::sleep(SHUTDOWN_REPLY_DELAY).await;
+            stop.cancel();
+        });
+        to_result(ipc::DaemonShutdownResponse {
+            stopping: true,
+            pid: std::process::id(),
+        })
+    }
+
     async fn status(&self) -> Result<Value, RpcError> {
         let store = self.state.store.clone();
         let counts = blocking(move || store.counts()).await?;
@@ -141,6 +172,8 @@ impl RpcHandler {
             chunks: counts.chunks,
             providers: self.provider_infos(),
             audit_chain_ok: self.state.audit_chain_ok.get().copied(),
+            pid: Some(std::process::id()),
+            service: crate::service::managed_by().map(str::to_owned),
         })
     }
 
