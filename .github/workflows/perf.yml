@@ -16,6 +16,9 @@ name: Perf
 # against `nuggetd` built at `before_ref` on the same runner (same bench, same seeded corpus), for
 # a before/after. Dispatch with `only: scale` to run just this job.
 on:
+  # Weekly, Monday 04:17 UTC, and on demand.
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
     inputs:
       scale:
@@ -40,9 +43,6 @@ on:
         required: false
         default: "[250000, 500000]"
         type: string
-  schedule:
-    # Mondays 04:17 UTC.
-    - cron: "17 4 * * 1"
 
 permissions:
   contents: read

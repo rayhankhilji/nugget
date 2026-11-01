@@ -6,25 +6,9 @@ name: Reproducible build
 # two binaries differ. See docs/security/reproducible-builds.md.
 
 on:
-  pull_request:
-    paths:
-      - "crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "manifests/**"
-      - "packaging/scripts/repro-env.sh"
-      - ".github/workflows/reproducible.yml"
-  push:
-    branches: [main]
-    paths:
-      - "crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "manifests/**"
-      - "packaging/scripts/repro-env.sh"
-      - ".github/workflows/reproducible.yml"
+  # Weekly, Friday 04:53 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
+  schedule:
+    - cron: "53 4 * * 5"
   workflow_dispatch:
 
 # Least privilege: the job only reads the repository.

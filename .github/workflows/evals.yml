@@ -8,6 +8,9 @@ name: Evals (real models)
 # the reports: a suite that misses a target still uploads its report.
 
 on:
+  # Weekly, Monday 03:17 UTC, and on demand.
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
     inputs:
       scale:
@@ -19,9 +22,6 @@ on:
         description: "Manifest id of the chat model (empty: qwen3-4b-q4km, the app's default on 8–16 GB)"
         default: ""
         type: string
-  schedule:
-    # Weekly, Monday 03:17 UTC.
-    - cron: "17 3 * * 1"
 
 # Least privilege: the job only reads the repository.
 permissions:
