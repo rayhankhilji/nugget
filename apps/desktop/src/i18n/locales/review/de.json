@@ -728,6 +728,15 @@
     "updates.ask.title",
     "updates.ask.body",
     "updates.ask.stable",
-    "updates.ask.chosen"
+    "updates.ask.chosen",
+    "search.unsorted",
+    "search.unsortedTitle",
+    "status.triageOffNone",
+    "status.triageOffPending",
+    "status.triageRunning",
+    "status.triageYielding",
+    "status.triagePaused",
+    "status.triageIdle",
+    "status.triageFailed"
   ]
 }

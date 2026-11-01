@@ -2757,6 +2757,8 @@ export type FacetedHit = SearchHit & {
   date_source: "extracted" | "modified" | "indexed";
   kind: ItemKind;
   sensitive: boolean;
+  /** JJ2: sensitive only because triage has not sorted it yet (kept private until sorted). */
+  unsorted?: boolean;
   people: EntityRefView[];
 };
 export type FacetCount = { value: string; count: number };
@@ -2771,7 +2773,7 @@ export type FacetedResult = {
 };
 export type TimelineRequest = { entity: string; from?: string | null; to?: string | null; limit?: number; utc_offset_minutes?: number; time_zone?: string };
 export type TimelineEvent =
-  | { type: "item"; at: string | null; date_source: string; item: ItemRef; title: string | null; snippet: string; kind: ItemKind; url: string | null; sensitive: boolean }
+  | { type: "item"; at: string | null; date_source: string; item: ItemRef; title: string | null; snippet: string; kind: ItemKind; url: string | null; sensitive: boolean; unsorted?: boolean }
   | {
       type: "fact";
       at: string | null;
@@ -2796,6 +2798,8 @@ export type ItemPreview = {
   date: string | null;
   date_source: string;
   sensitive: boolean;
+  /** JJ2: sensitive only because triage has not sorted it yet (kept private until sorted). */
+  unsorted?: boolean;
   text: string;
   truncated: boolean;
   passage: string | null;

@@ -219,6 +219,9 @@ struct FacetedHit {
     date_source: DateSource,
     kind: ItemKind,
     sensitive: bool,
+    /// JJ2: `sensitive` only because triage has not sorted it yet (see `logic::unsorted_private`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unsorted: bool,
     people: Vec<EntityRefView>,
 }
 
@@ -247,6 +250,7 @@ struct PoolItem {
     date_source: DateSource,
     kind: ItemKind,
     sensitive: bool,
+    unsorted: bool,
     people: Vec<EntityLinkRow>,
 }
 
@@ -395,6 +399,7 @@ impl SearchUi {
                 date_source: i.date_source,
                 kind: i.kind,
                 sensitive: i.sensitive,
+                unsorted: i.unsorted,
                 people: i
                     .people
                     .iter()
@@ -460,6 +465,7 @@ fn load_pool(
                 .filter(|p| is_people_kind(p.kind) || selected.contains(p.id.as_str()))
                 .collect(),
             sensitive: nugget_retrieve::is_sensitive(&item.metadata),
+            unsorted: logic::unsorted_private(&item.metadata),
             hit,
             at,
             date_source,
@@ -519,6 +525,9 @@ enum TimelineEvent {
         kind: ItemKind,
         url: Option<String>,
         sensitive: bool,
+        /// JJ2: as `FacetedHit::unsorted`.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        unsorted: bool,
     },
     Fact {
         at: String,
@@ -754,6 +763,7 @@ fn build_timeline(
                         }),
                         url: it.and_then(|i| item_url(&i.metadata)),
                         sensitive: it.is_none_or(|i| nugget_retrieve::is_sensitive(&i.metadata)),
+                        unsorted: it.is_some_and(|i| logic::unsorted_private(&i.metadata)),
                         item,
                     }
                 }
@@ -826,6 +836,9 @@ struct PreviewResult {
     date: Option<String>,
     date_source: DateSource,
     sensitive: bool,
+    /// JJ2: as `FacetedHit::unsorted`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unsorted: bool,
     text: String,
     truncated: bool,
     passage: Option<String>,
@@ -917,6 +930,7 @@ fn build_preview(
         kind: logic::classify_kind(&item.metadata, item.mime.as_deref(), source_kind),
         url: item_url(&item.metadata),
         sensitive: nugget_retrieve::is_sensitive(&item.metadata),
+        unsorted: logic::unsorted_private(&item.metadata),
         date: Some(logic::rfc3339(at)),
         date_source,
         text: text.to_owned(),

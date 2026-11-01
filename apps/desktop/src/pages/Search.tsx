@@ -382,7 +382,7 @@ export function SearchPage() {
                         )}
                       </span>
                     </div>
-                    {(h.kind || h.date || h.sensitive) && (
+                    {(h.kind || h.date || (h.sensitive && !h.unsorted)) && (
                       <p className="small sr-meta">
                         {h.kind && <span className="badge">{kindLabel(t, h.kind)}</span>}
                         {h.date && (
@@ -390,7 +390,8 @@ export function SearchPage() {
                             {formatDate(h.date)}
                           </time>
                         )}
-                        {h.sensitive && (
+                        {/* JJ2: items not sorted yet are private too, but not labelled in the list. */}
+                        {h.sensitive && !h.unsorted && (
                           <span className="badge badge-warn" title={t("search.sensitiveTitle")}>
                             {t("search.sensitive")}
                           </span>

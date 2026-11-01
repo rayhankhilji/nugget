@@ -3248,3 +3248,9 @@ tr[aria-current="true"] {
 .ask-dates {
   margin-block: 0.25rem 0;
 }
+
+/* JJ2: Status → AI sorting: the state under the provider (or "Off"), on its own line. */
+.triage-line {
+  display: block;
+  margin-block-start: 2px;
+}

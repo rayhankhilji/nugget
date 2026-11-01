@@ -80,6 +80,25 @@ impl Zone {
     }
 }
 
+/// JJ2: the item counts as sensitive only because nothing has confirmed it is not: triage has
+/// not sorted it yet (pending, off, failed). No PII was found, no sensitivity rule matched, and
+/// no finished triage said sensitive. Such items stay private (never sent to cloud models), but
+/// clients label them more quietly than a confirmed sensitive item.
+pub(crate) fn unsorted_private(metadata: &Value) -> bool {
+    if !nugget_retrieve::is_sensitive(metadata) {
+        return false;
+    }
+    let pii = metadata["pii"].as_object().is_some_and(|o| !o.is_empty());
+    let rule = metadata["sensitive_rule"].is_string();
+    let triage = &metadata["triage"];
+    let state = triage["state"].as_str();
+    let judged = matches!(state, Some("done") if triage["sensitive"] == Value::Bool(true))
+        // Items from before triage existed were labelled when they were indexed.
+        || state.is_none()
+        || state == Some("skipped");
+    !(pii || rule || judged)
+}
+
 /// What an item is, for the kind facet and the result badges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1162,6 +1181,40 @@ mod tests {
             havana.midnight(Date::from_calendar_date(2024, Month::March, 11).unwrap()),
             dt("2024-03-11T04:00:00Z")
         );
+    }
+
+    #[test]
+    fn unsorted_items_are_private_but_not_confirmed_sensitive() {
+        let unsorted = |m: Value| unsorted_private(&m);
+        // Waiting for triage, triage off, or triage failed: private until sorted.
+        assert!(unsorted(
+            json!({"sensitive": true, "triage": {"state": "pending"}})
+        ));
+        assert!(unsorted(
+            json!({"sensitive": true, "triage": {"state": "unknown", "reason": "off"}})
+        ));
+        assert!(unsorted(
+            json!({"sensitive": true, "triage": {"state": "failed"}})
+        ));
+        // Confirmed: PII, a rule, or triage said so.
+        assert!(!unsorted(
+            json!({"sensitive": true, "pii": {"card": 1}, "triage": {"state": "pending"}})
+        ));
+        assert!(!unsorted(
+            json!({"sensitive": true, "sensitive_rule": "path", "triage": {"state": "unknown"}})
+        ));
+        assert!(!unsorted(
+            json!({"sensitive": true, "triage": {"state": "done", "sensitive": true}})
+        ));
+        assert!(!unsorted(
+            json!({"sensitive": true, "triage": {"state": "skipped", "reason": "pii"}})
+        ));
+        // Older items without triage keep their label; non-sensitive items are neither.
+        assert!(!unsorted(json!({"sensitive": true})));
+        assert!(!unsorted(
+            json!({"sensitive": false, "triage": {"state": "pending"}})
+        ));
+        assert!(!unsorted(json!({})));
     }
 
     #[test]

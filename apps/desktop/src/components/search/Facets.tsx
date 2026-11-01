@@ -110,8 +110,17 @@ export function Facets({
           {facets.people.map((f) => (
             <div key={f.value} className="sr-facet-row">
               <Check label={f.name} count={f.count} checked={state.people.includes(f.value)} onChange={(on) => set((s) => ({ people: toggle(s.people, f.value, on) }))} />
-              <button type="button" className="btn btn-ghost btn-small sr-facet-tl" onClick={() => onTimeline(f.value)} aria-label={t("searchui.timelineFor", { name: f.name })}>
-                {t("searchui.timeline")}
+              {/* JJ2: an icon, so the row fits the filter column in every language; the name says what it does. */}
+              <button
+                type="button"
+                className="btn btn-ghost btn-small btn-icon sr-facet-tl"
+                onClick={() => onTimeline(f.value)}
+                aria-label={t("searchui.timelineFor", { name: f.name })}
+                title={t("searchui.timelineFor", { name: f.name })}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+                  <path d="M1.5 7h11M4 4.5v5M7 3v8M10 5v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+                </svg>
               </button>
             </div>
           ))}

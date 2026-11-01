@@ -470,6 +470,20 @@ describe("review fixes", () => {
     expect(said(t("searchui.recentCleared"))).toBe(true);
   });
 
+  it("labels only confirmed sensitive results; unsorted ones stay private without the warning (JJ2)", async () => {
+    daemon({
+      search_faceted: faceted([hit(1, { sensitive: true }), hit(2, { sensitive: true, unsorted: true }), hit(3)]),
+    });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    const items = [...main().querySelectorAll("ol.results > li")];
+    const badge = (li: Element) => [...li.querySelectorAll(".badge-warn")].map((b) => b.textContent);
+    expect(badge(items[0]!)).toEqual([t("search.sensitive")]);
+    expect(badge(items[1]!)).toEqual([]);
+    expect(badge(items[2]!)).toEqual([]);
+  });
+
   it("renames a saved search, refusing a name another one has (JJ2)", async () => {
     daemon({ search_faceted: faceted([hit(1)]) });
     localStorage.setItem(SAVED_KEY, JSON.stringify([{ id: "a", name: "A", state: "q=a" }, { id: "b", name: "B", state: "q=b" }]));
