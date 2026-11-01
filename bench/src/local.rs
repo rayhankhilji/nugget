@@ -914,16 +914,26 @@ mod tests {
         for p in &pending {
             p.entry.validate().unwrap();
             assert!(signed.get(&p.entry.id).is_none(), "{}", p.entry.id);
-            assert!(p.entry.tiers.iter().any(|t| t.is_chat()), "{}", p.entry.id);
+            assert!(
+                p.entry
+                    .tiers
+                    .iter()
+                    .any(|t| t.is_chat() || *t == Tier::Embedding),
+                "{}",
+                p.entry.id
+            );
         }
         let ids: Vec<&str> = pending.iter().map(|p| p.entry.id.as_str()).collect();
         assert!(ids.contains(&"qwen3-0.6b-q8"), "{ids:?}");
+        assert!(ids.contains(&"nomic-embed-text-v2-moe-q8"), "{ids:?}");
     }
 
     #[test]
     fn pending_entries_do_not_change_recommendations() {
-        // Signed into the manifest, the pending entries must leave every tier's pick (and so
-        // nuggetd's Chat model) unchanged on every amount of RAM.
+        // Signed into the manifest, the pending entries must leave every chat tier's pick (and
+        // so nuggetd's Chat model) unchanged on every amount of RAM. The one intended change:
+        // `multilingual-embed.json` proposes the embedding default for new stores (stores with
+        // vectors keep the model that built them; see nuggetd's `selected_models_for_index`).
         let signed = default_manifest().unwrap();
         let mut merged = signed.clone();
         for p in load_pending(&pending_files(), &signed.models).unwrap() {
@@ -938,9 +948,13 @@ mod tests {
                     gpu: nugget_models::GpuKind::Unknown,
                 };
                 for tier in Tier::ALL {
+                    let want = match nugget_models::recommend(&signed, &hw, tier) {
+                        Some(_) if tier == Tier::Embedding => Some("nomic-embed-text-v2-moe-q8"),
+                        m => m.map(|m| m.id.as_str()),
+                    };
                     assert_eq!(
-                        nugget_models::recommend(&merged, &hw, tier).map(|m| &m.id),
-                        nugget_models::recommend(&signed, &hw, tier).map(|m| &m.id),
+                        nugget_models::recommend(&merged, &hw, tier).map(|m| m.id.as_str()),
+                        want,
                         "{tier:?} at {total_ram} bytes"
                     );
                 }

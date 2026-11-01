@@ -70,6 +70,9 @@ pub enum TextOnlyReason {
     EmbeddingFailed(String),
     /// The query vector's dimension differs from the store's.
     DimensionMismatch(String),
+    /// No eligible embedding provider serves the model the store's vectors were built with
+    /// (`nugget_store::Store::embedding_model`).
+    ModelMismatch(String),
 }
 
 /// How MMR compared candidates.

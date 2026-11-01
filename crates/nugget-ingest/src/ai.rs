@@ -203,6 +203,11 @@ pub(crate) fn parse_triage(raw: &str, n: usize) -> Result<Vec<Triage>> {
 /// ([`nugget_store::Store::embedding_prefixes`]); an index whose scheme is still open adopts the
 /// first provider's ([`Provider::embed_prefixes`]), so one index never mixes schemes and an index
 /// built without prefixes keeps embedding without them.
+///
+/// Likewise the index records the first provider's model
+/// ([`nugget_store::Store::adopt_embedding_model`]) and only providers serving that model embed
+/// for it: two models' vectors are not comparable even at the same dimension, so an item no
+/// provider of the index's model can embed stays text-only rather than mixing vector spaces.
 pub(crate) async fn embed(
     store: &nugget_store::Store,
     router: &Router,
@@ -217,6 +222,7 @@ pub(crate) async fn embed(
     };
     let (query, document) = first.embed_prefixes();
     let (_, document) = store.adopt_embedding_prefixes(&query, &document)?;
+    let model = store.adopt_embedding_model(&first.meta().model)?;
     let prefixed;
     let texts = if document.is_empty() {
         texts
@@ -227,6 +233,14 @@ pub(crate) async fn embed(
     let batch = batch.max(1);
     let mut last_err = None;
     'providers: for p in providers {
+        let served = p.meta().model;
+        if served != model {
+            last_err = Some(Error::Invalid(format!(
+                "{}: serves embedding model `{served}`, the index was built with `{model}`",
+                p.id()
+            )));
+            continue;
+        }
         let mut out = Vec::with_capacity(texts.len());
         for part in texts.chunks(batch) {
             // Every chunk is the item's: the egress ledger lists it.

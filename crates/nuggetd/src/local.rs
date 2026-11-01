@@ -70,18 +70,60 @@ use crate::features::draft::local_draft_model;
 /// Tiers the local chat server always serves, whatever else its model lists.
 const CHAT_TIERS: [Tier; 3] = [Tier::Triage, Tier::Light, Tier::Synthesis];
 
+/// The embedding model of a store whose vectors predate the record of their model
+/// ([`nugget_store::Store::embedding_model`]): the only embedding model the manifest had then.
+pub(crate) const LEGACY_EMBEDDING_MODEL: &str = "nomic-embed-text-v1.5-q8";
+
 /// The manifest model each runtime role should run, per config and hardware.
+#[cfg(test)]
 pub(crate) fn selected_models(
     cfg: &Config,
     manifest: &Manifest,
     hw: &Hardware,
 ) -> Vec<(RuntimeRole, ModelEntry)> {
+    selected_models_for_index(cfg, manifest, hw, None)
+}
+
+/// The embedding model `store`'s vectors were built with: the recorded one, or
+/// [`LEGACY_EMBEDDING_MODEL`] for vectors from before models were recorded; `None` for a store
+/// without vectors (or that cannot be read).
+pub(crate) fn index_embedding_model(store: &nugget_store::Store) -> Option<String> {
+    match store.embedding_model() {
+        Ok(Some(m)) => Some(m),
+        Ok(None) => match store.embedding_dim() {
+            Ok(Some(_)) => Some(LEGACY_EMBEDDING_MODEL.to_owned()),
+            _ => None,
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "cannot read the index's embedding model");
+            None
+        }
+    }
+}
+
+/// The manifest model each runtime role should run, per config, hardware and the embedding
+/// model `index_model` the store's vectors were built with ([`index_embedding_model`]).
+///
+/// Without an explicit embedding model in the config, a store that already has vectors keeps
+/// the manifest model that built them, even when the manifest now recommends another: two
+/// models' vectors are not comparable (even at the same dimension), so switching would leave
+/// every stored vector unusable until the whole store is embedded again. Only a store without
+/// vectors (a new install) takes the recommendation.
+pub(crate) fn selected_models_for_index(
+    cfg: &Config,
+    manifest: &Manifest,
+    hw: &Hardware,
+    index_model: Option<&str>,
+) -> Vec<(RuntimeRole, ModelEntry)> {
     let pick = |explicit: Option<&String>, fallback: Option<&String>, tiers: &[Tier]| {
         explicit.or(fallback).map_or_else(
             || {
-                tiers
-                    .iter()
-                    .find_map(|t| recommend(manifest, hw, *t))
+                let built_with = index_model
+                    .filter(|_| tiers.contains(&Tier::Embedding))
+                    .and_then(|id| manifest.get(id))
+                    .filter(|e| e.tiers.contains(&Tier::Embedding));
+                built_with
+                    .or_else(|| tiers.iter().find_map(|t| recommend(manifest, hw, *t)))
                     .cloned()
             },
             |id| {
@@ -973,6 +1015,71 @@ mod tests {
         )
         .unwrap();
         assert!(selected_models(&cfg, &m, &hw(64)).is_empty());
+    }
+
+    #[test]
+    fn a_store_with_vectors_keeps_the_embedding_model_that_built_them() {
+        let mut m = manifest();
+        let old = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
+        // A newer, larger embedding model the manifest now recommends.
+        let mut newer = old.clone();
+        newer.id = "newer-embedder".into();
+        newer.size = old.size * 4;
+        m.models.push(newer);
+        assert_eq!(
+            recommend(&m, &hw(64), Tier::Embedding).unwrap().id,
+            "newer-embedder"
+        );
+        let embedder = |cfg: &str, index: Option<&str>| {
+            selected_models_for_index(&Config::parse(cfg).unwrap(), &m, &hw(64), index)
+                .into_iter()
+                .find(|(r, _)| *r == RuntimeRole::Embedding)
+                .map(|(_, e)| e.id)
+        };
+        // New install: the recommendation. A store built with the old model keeps it.
+        assert_eq!(embedder("", None).as_deref(), Some("newer-embedder"));
+        assert_eq!(embedder("", Some(&old.id)), Some(old.id.clone()));
+        // An index model the manifest lacks (a cloud embedder, say): the recommendation.
+        assert_eq!(
+            embedder("", Some("text-embedding-3-small")).as_deref(),
+            Some("newer-embedder")
+        );
+        // Explicit config wins over the index.
+        assert_eq!(
+            embedder(
+                "[runtime]\nembedding_model = \"newer-embedder\"\n",
+                Some(&old.id)
+            )
+            .as_deref(),
+            Some("newer-embedder")
+        );
+        // The chat model is unaffected by the index.
+        let chat = |index| {
+            selected_models_for_index(&Config::parse("").unwrap(), &m, &hw(64), index)
+                .into_iter()
+                .find(|(r, _)| *r == RuntimeRole::Chat)
+                .map(|(_, e)| e.id)
+        };
+        assert_eq!(chat(Some(old.id.as_str())), chat(None));
+        // Legacy stores (vectors, no record) count as built with the manifest's original model.
+        let store = nugget_store::Store::open_in_memory().unwrap();
+        assert_eq!(index_embedding_model(&store), None);
+        store
+            .upsert_item_with_chunks(
+                &nugget_store::NewItem::new("src", "a", "h").with_text("a"),
+                &[nugget_store::NewChunk::embedded("a", vec![1.0, 0.0])],
+            )
+            .unwrap();
+        assert_eq!(
+            index_embedding_model(&store).as_deref(),
+            Some(LEGACY_EMBEDDING_MODEL)
+        );
+        store.adopt_embedding_model("recorded").unwrap();
+        assert_eq!(index_embedding_model(&store).as_deref(), Some("recorded"));
+        assert!(
+            m.get(LEGACY_EMBEDDING_MODEL).is_some(),
+            "legacy model left the manifest"
+        );
     }
 
     #[test]

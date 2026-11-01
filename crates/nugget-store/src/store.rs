@@ -368,6 +368,53 @@ impl Store {
             Ok(p)
         })
     }
+
+    /// The embedding model this database's vectors were built with (the provider's model name,
+    /// [`Store::adopt_embedding_model`]); `None` while no model is recorded (no vectors yet, or
+    /// vectors from before models were recorded). Vectors of two models are not comparable even
+    /// when their dimensions agree, so a query must be embedded by this model.
+    pub fn embedding_model(&self) -> Result<Option<String>> {
+        self.with_read_conn(embedding_model)
+    }
+
+    /// The model to embed with: the one already recorded ([`Store::embedding_model`]), or, when
+    /// none is, `model`, recorded so every later vector and query must come from it. A legacy
+    /// database (vectors, no record) adopts `model` too: its vectors came from whatever embedded
+    /// it before, which callers keep running (nuggetd keeps such a store on the model it shipped
+    /// with). A database's model never changes once recorded.
+    pub fn adopt_embedding_model(&self, model: &str) -> Result<String> {
+        if let Some(m) = self.embedding_model()? {
+            return Ok(m);
+        }
+        self.with_conn(|c| {
+            let tx = c.transaction().db("begin")?;
+            let m = match embedding_model(&tx)? {
+                Some(m) => m,
+                None => {
+                    tx.execute(
+                        "INSERT INTO meta (key, value) VALUES (?1, ?2)",
+                        params![META_EMBEDDING_MODEL, model],
+                    )
+                    .db("record embedding model")?;
+                    model.to_owned()
+                }
+            };
+            tx.commit().db("commit")?;
+            Ok(m)
+        })
+    }
+}
+
+const META_EMBEDDING_MODEL: &str = "embedding_model";
+
+fn embedding_model(conn: &Connection) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = ?1",
+        [META_EMBEDDING_MODEL],
+        |r| r.get(0),
+    )
+    .optional()
+    .db("read embedding model")
 }
 
 const META_EMBEDDING_PREFIXES: &str = "embedding_prefixes";
@@ -617,5 +664,14 @@ mod tests {
             none
         );
         assert_eq!(legacy.embedding_prefixes().unwrap(), Some(none));
+    }
+
+    #[test]
+    fn embedding_model_is_fixed_by_the_first_one() {
+        let s = Store::open_in_memory().unwrap();
+        assert_eq!(s.embedding_model().unwrap(), None);
+        assert_eq!(s.adopt_embedding_model("model-a").unwrap(), "model-a");
+        assert_eq!(s.adopt_embedding_model("model-b").unwrap(), "model-a");
+        assert_eq!(s.embedding_model().unwrap().as_deref(), Some("model-a"));
     }
 }
