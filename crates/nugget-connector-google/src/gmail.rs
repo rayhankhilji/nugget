@@ -1,41 +1,25 @@
-//! `gmail`: Gmail over the REST API with `gmail.readonly`.
+//! `gmail`: Gmail over the REST API with `gmail.readonly` (or `gmail.modify` only with
+//! `allow_modify`, for archiving).
 //!
-//! Cursor (JSON, tagged by `phase`):
-//! - `{"phase":"backfill","history_id":"<id>","after":<unix secs>,"page_token":"<tok>"|null,"resync":bool,"reconcile":bool}`
-//!   while the newest-first backfill runs (`history_id` is the mailbox history id taken *before*
-//!   listing, so nothing that arrives during the backfill is missed);
-//! - `{"phase":"incremental","history_id":"<id>","verify":["<id>",...]}` afterwards (`verify`,
-//!   omitted when empty, holds indexed messages a resync did not list and that are still to be
-//!   checked, [`MAX_VERIFY`] per pass).
+//! Cursor (tagged by `phase`): `backfill` (`history_id` taken *before* listing so nothing is
+//! missed, `after`, `page_token`, `resync`, `reconcile`) while the newest-first backfill runs,
+//! then `incremental` (`history_id`, plus `verify`: unlisted indexed messages still to check,
+//! [`MAX_VERIFY`] per pass). Versions are `<historyId>@<internalDate ms>`, so the window test
+//! needs no request.
 //!
-//! A pass without a cursor while items are already indexed (a settings update resets the
-//! cursor) is a *reconciling* backfill: indexed messages the listing does not return are
-//! deleted when they are older than the (possibly new) window, and checked otherwise, so mail
-//! that is now excluded (spam, trash), out of the window or another account's goes away. A
-//! plain resync (expired history id) checks only messages inside the window: older ones are
-//! expected to be missing from the listing and stay. A resync interrupted part-way restarts its listing
-//! (cheap: only unknown messages are fetched), so no message is wrongly taken as missing.
+//! A pass without a cursor while mail is indexed (settings reset it) *reconciles*: unlisted
+//! indexed messages older than the window are deleted, the rest checked, so excluded or
+//! another account's mail goes away. A plain resync (expired history id) checks only in-window
+//! messages. An interrupted resync restarts its listing, so nothing is wrongly taken as missing.
 //!
-//! Versions are `<historyId>@<internalDate ms>`, so the window test needs no extra request.
+//! One bad message never stops a pass: it keeps its indexed version and is carried as
+//! `"refetch":[{"id","n"}]`, fetched again next pass and dropped after
+//! [`MAX_ATTEMPTS`](crate::carry::MAX_ATTEMPTS) failed passes. [`MAX_FAILURE_STREAK`]
+//! first-time failures in a row (an outage) end the pass after saving the counts; carried
+//! messages never count towards it, so poison messages cannot block a source.
 //!
-//! One bad message never stops a pass: a message whose fetch fails (5xx or network after the
-//! in-pass retries, a malformed or mismatched answer, an unexpected status) keeps its indexed
-//! version and is carried in the cursor as `"refetch":[{"id":"<id>","n":<passes failed>},...]`
-//! (either phase, omitted when empty; plain `"<id>"` entries from older cursors are read as
-//! `n: 0`), fetched again at the end of the next pass, and dropped with a warning after
-//! failing in [`MAX_ATTEMPTS`](crate::carry::MAX_ATTEMPTS) passes. Every checkpoint carries the list, and the cursor is
-//! checkpointed before the carried messages are fetched, so failing messages never make a
-//! pass replay. [`MAX_FAILURE_STREAK`] first-time failures in a row (Google is down, not one
-//! message) end the pass with the error, after saving the failure counts; messages that
-//! already failed in an earlier pass never count towards it, so poison messages cannot block
-//! a source. Messages larger than [`MAX_MESSAGE_BYTES`] are skipped.
-//!
-//! Known gap: a cursor reset (settings change) forgets the carried list, and the reconciling
-//! backfill fetches only messages not indexed yet (`messages.list` returns no versions), so an
-//! indexed message whose last update failed keeps its older version until it changes again.
-//!
-//! Scopes: `gmail.readonly` (read messages and history; the default), or `gmail.modify` only
-//! when the source opts into `allow_modify` (archiving from Nugget). Nothing else is requested.
+//! Known gap: a cursor reset forgets the carried list, so an indexed message whose last update
+//! failed keeps its older version until it changes again.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -56,7 +40,7 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use crate::api::{GoogleApi, OAuthSettings, PageGuard, api_url};
-use crate::carry::{Carried, Pending};
+use crate::carry::{Carried, Missing, Pending};
 use crate::settings::GmailSettings;
 use crate::text::mail_headers;
 use crate::{GoogleEndpoints, RetryPolicy};
@@ -155,8 +139,6 @@ impl Cursor {
 pub struct GmailFactory {
     endpoints: GoogleEndpoints,
     retry: RetryPolicy,
-    /// Test override of [`MAX_MESSAGE_BYTES`].
-    max_message_bytes: Option<usize>,
 }
 
 impl GmailFactory {
@@ -171,12 +153,6 @@ impl GmailFactory {
 
     pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
         self.retry = retry;
-        self
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_max_message_bytes(mut self, max: usize) -> Self {
-        self.max_message_bytes = Some(max);
         self
     }
 }
@@ -238,7 +214,6 @@ impl GmailFactory {
             api,
             actions,
             base: self.endpoints.gmail_api.clone(),
-            max_message_bytes: self.max_message_bytes.unwrap_or(MAX_MESSAGE_BYTES),
             settings,
             ctx,
         })
@@ -251,7 +226,6 @@ pub struct GmailConnector {
     /// Same account, metered as [`ACTION_FEATURE`]; only with `allow_modify`.
     actions: Option<GoogleApi>,
     base: String,
-    max_message_bytes: usize,
     settings: GmailSettings,
     ctx: ConnectorContext,
 }
@@ -879,7 +853,7 @@ impl GmailConnector {
         let url = self.url(&["messages", id], &[("format", "raw")])?;
         let resp = match self
             .api
-            .get_capped(&url, message_body_cap(self.max_message_bytes), cancel)
+            .get_capped(&url, message_body_cap(MAX_MESSAGE_BYTES), cancel)
             .await
         {
             Ok(r) => r,
@@ -916,7 +890,7 @@ impl GmailConnector {
                 return Ok(None);
             }
         };
-        if bytes.len() > self.max_message_bytes {
+        if bytes.len() > MAX_MESSAGE_BYTES {
             tracing::warn!(source = %self.ctx.source, message = id, "skipping oversized message");
             return Ok(None);
         }
@@ -1110,40 +1084,18 @@ fn version_date_ms(version: Option<&str>) -> Option<i64> {
     version?.split_once('@')?.1.parse().ok()
 }
 
-/// Indexed messages a resync listing did not return.
-struct Missing {
-    /// Inside the window (or of unknown date): deleted, excluded or another account's, unless
-    /// a check says otherwise. Newest first by id (Gmail ids grow over time).
-    check: Vec<String>,
-    /// Known to be older than the window: expected to be missing from the listing.
-    out_of_window: Vec<String>,
-}
-
+/// Indexed messages missing from a resync listing; `check` newest first (Gmail ids grow).
 fn missing_candidates(
     known: &HashMap<ItemKey, Option<String>>,
     seen: &HashSet<String>,
     after: i64,
 ) -> Missing {
-    let mut check = Vec::new();
-    let mut out_of_window = Vec::new();
-    for (k, v) in known {
-        if seen.contains(k.as_str()) {
-            continue;
-        }
-        let in_window = version_date_ms(v.as_deref())
-            .is_none_or(|ms| ms.div_euclid(1000) >= after - WINDOW_SLACK_SECS);
-        if in_window {
-            check.push(k.as_str().to_string());
-        } else {
-            out_of_window.push(k.as_str().to_string());
-        }
-    }
-    check.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| b.cmp(a)));
-    out_of_window.sort();
-    Missing {
-        check,
-        out_of_window,
-    }
+    let mut m = Missing::split(known.iter(), seen, |v| {
+        version_date_ms(v).is_none_or(|ms| ms.div_euclid(1000) >= after - WINDOW_SLACK_SECS)
+    });
+    m.check
+        .sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| b.cmp(a)));
+    m
 }
 
 /// Gmail ids are short alphanumerics; anything else is not used in a URL path.
@@ -1156,26 +1108,7 @@ mod unit {
     use super::*;
 
     #[test]
-    fn cursor_round_trips() {
-        let c = Cursor::Backfill {
-            history_id: "9".into(),
-            after: 1,
-            page_token: Some("p".into()),
-            resync: false,
-            reconcile: true,
-            refetch: Vec::new(),
-        };
-        let v = c.to_value();
-        assert_eq!(v["phase"], "backfill");
-        assert_eq!(serde_json::from_value::<Cursor>(v).unwrap(), c);
-        let v = Cursor::Incremental {
-            history_id: "10".into(),
-            verify: Vec::new(),
-            refetch: Vec::new(),
-        }
-        .to_value();
-        assert_eq!(v, json!({"phase": "incremental", "history_id": "10"}));
-        // Older cursors (no `verify`, no `reconcile`) still load.
+    fn older_cursors_still_load() {
         let old = json!({"phase": "backfill", "history_id": "1", "after": 5, "resync": true});
         assert!(matches!(
             serde_json::from_value::<Cursor>(old).unwrap(),

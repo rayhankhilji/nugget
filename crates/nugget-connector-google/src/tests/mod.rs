@@ -7,7 +7,6 @@ use nugget_connector::{
     CancellationToken, Change, ChangeSink, Connector, ConnectorContext, ConnectorFactory,
     KnownItems, SecretStore,
 };
-use nugget_core::egress::{EgressEvent, EgressSink};
 use nugget_core::ids::{ItemKey, SourceId};
 use nugget_core::paths::Paths;
 use nugget_core::secrets::oauth_account;
@@ -23,29 +22,7 @@ mod factory;
 mod gcal;
 mod gmail;
 
-#[derive(Default)]
-pub(crate) struct VecSink(pub Mutex<Vec<EgressEvent>>);
-impl EgressSink for VecSink {
-    fn record(&self, e: EgressEvent) {
-        self.0.lock().unwrap().push(e);
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct MemSecrets(pub Mutex<HashMap<String, String>>);
-impl SecretStore for MemSecrets {
-    fn get(&self, account: &str) -> Result<Option<String>> {
-        Ok(self.0.lock().unwrap().get(account).cloned())
-    }
-    fn set(&self, account: &str, value: &str) -> Result<()> {
-        self.0.lock().unwrap().insert(account.into(), value.into());
-        Ok(())
-    }
-    fn delete(&self, account: &str) -> Result<()> {
-        self.0.lock().unwrap().remove(account);
-        Ok(())
-    }
-}
+pub(crate) use nugget_connector::testkit::{MemSecrets, VecEgress as VecSink};
 
 #[derive(Default)]
 pub(crate) struct FakeKnown(pub Mutex<HashMap<ItemKey, Option<String>>>);

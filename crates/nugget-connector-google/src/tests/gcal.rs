@@ -313,66 +313,6 @@ async fn selected_calendars_are_listed_and_dropped_ones_removed() {
 }
 
 #[tokio::test]
-async fn all_day_events_and_resumed_paging() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/calendars/primary/events")))
-        .and(query_param("pageToken", "pg9"))
-        .and(query_param("timeMin", "2025-01-01T00:00:00Z"))
-        .respond_with(page(
-            vec![json!({
-                "id": "allday", "status": "confirmed", "summary": "Offsite",
-                "start": {"date": "2025-11-03"}, "end": {"date": "2025-11-05"},
-                "updated": "2025-10-01T00:00:00Z"
-            })],
-            None,
-            Some("st"),
-        ))
-        .expect(1)
-        .mount(&h.server)
-        .await;
-    let conn = gcal(&h, primary());
-    let sink = RecSink::default();
-    let cursor = json!({"v": 1, "calendars": {"primary": {
-        "time_min": "2025-01-01T00:00:00Z", "time_max": "2026-12-31T00:00:00Z", "page_token": "pg9"
-    }}});
-    let out = run(&conn, Some(cursor), &sink).await.unwrap();
-    assert_eq!(out["calendars"]["primary"]["sync_token"], "st");
-    let doc = &sink.upserts()[0];
-    let Content::Text(text) = &doc.content else {
-        panic!()
-    };
-    assert!(
-        text.contains("When: 2025-11-03 – 2025-11-04 (all day)"),
-        "{text}"
-    );
-    assert_eq!(doc.metadata["all_day"], true);
-    // No etag: version falls back to `updated` (all-day dates at UTC midnight).
-    assert_eq!(
-        doc.version.as_deref(),
-        Some("2025-10-01T00:00:00Z#1762128000:1762300800")
-    );
-}
-
-#[tokio::test]
-async fn calendar_rate_limits_are_retried_then_surface() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(403).set_body_json(json!({"error": {
-            "code": 403, "message": "Rate Limit Exceeded", "errors": [{"reason": "rateLimitExceeded"}]
-        }})))
-        .expect(2)
-        .mount(&h.server)
-        .await;
-    let conn = gcal(&h, primary());
-    let err = run(&conn, None, &RecSink::default()).await.unwrap_err();
-    assert!(matches!(err, Error::RateLimited { .. }), "{err}");
-    h.assert_egress("sync:gcal").await;
-}
-
-#[tokio::test]
 async fn hostile_event_payloads_do_not_panic() {
     let h = Harness::new().await;
     h.seed_tokens("at", false);

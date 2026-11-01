@@ -1,9 +1,9 @@
 //! Authenticated, metered, rate-limit-aware GET requests against Google APIs.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use nugget_connector::http::{MeteredHttp, Response};
+use nugget_connector::retry;
 use nugget_connector::{AuthFlow, CancellationToken, ConnectorContext};
 use nugget_core::secrets::oauth_account;
 use nugget_core::{Error, Result};
@@ -78,21 +78,24 @@ struct GoogleErrorBody {
     #[serde(default)]
     message: String,
     #[serde(default)]
-    errors: Vec<GoogleErrorItem>,
+    errors: Vec<Reason>,
     #[serde(default)]
-    details: Vec<GoogleErrorDetail>,
+    details: Vec<Reason>,
 }
 
 #[derive(Deserialize, Default)]
-struct GoogleErrorItem {
+struct Reason {
     #[serde(default)]
     reason: String,
 }
 
-#[derive(Deserialize, Default)]
-struct GoogleErrorDetail {
-    #[serde(default)]
-    reason: String,
+/// A Google error body: its reasons (`errors[]` then `details[]`) and message (≤ 300 chars).
+fn parse_error(body: &[u8]) -> (Vec<String>, String) {
+    let e = serde_json::from_slice::<GoogleError>(body)
+        .unwrap_or_default()
+        .error;
+    let reasons = e.errors.into_iter().chain(e.details).map(|r| r.reason);
+    (reasons.collect(), e.message.chars().take(300).collect())
 }
 
 impl GoogleApi {
@@ -292,44 +295,18 @@ impl GoogleApi {
                         "Google rejected the access token; reconnect the account".into(),
                     ));
                 }
-                // A server that asks for a longer wait than the policy allows inline is not
-                // retried early: the error (with its hint) goes to the ingest supervisor.
-                Outcome::Retry(e) if attempt < self.retry.max_retries && self.hint_fits(&e) => {
-                    let delay = self.backoff(attempt, &e);
+                // A server hint longer than the policy allows inline goes to the supervisor.
+                Outcome::Retry(e) => {
+                    let Some(delay) = self.retry.pause(attempt, &e) else {
+                        return Err(e);
+                    };
                     tracing::debug!(%url, attempt, ?delay, "google api: retrying after {e}");
                     attempt += 1;
-                    tokio::select! {
-                        _ = tokio::time::sleep(delay) => {}
-                        _ = cancel.cancelled() => return Err(Error::Cancelled),
-                    }
+                    retry::sleep(delay, cancel).await?;
                 }
-                Outcome::Retry(e) | Outcome::Fatal(e) => return Err(e),
+                Outcome::Fatal(e) => return Err(e),
             }
         }
-    }
-
-    /// The server's `Retry-After` hint, if any.
-    fn hint(err: &Error) -> Option<Duration> {
-        match err {
-            Error::RateLimited {
-                retry_after_ms: Some(ms),
-            } => Some(Duration::from_millis(*ms)),
-            _ => None,
-        }
-    }
-
-    /// Whether waiting out the server's hint fits the inline policy.
-    fn hint_fits(&self, err: &Error) -> bool {
-        Self::hint(err).is_none_or(|h| h <= self.retry.max_delay)
-    }
-
-    /// Exponential backoff with jitter; the server's `Retry-After` is a floor.
-    fn backoff(&self, attempt: u32, err: &Error) -> Duration {
-        nugget_connector::retry::Backoff {
-            base: self.retry.base_delay,
-            max: self.retry.max_delay,
-        }
-        .delay(attempt, Self::hint(err))
     }
 
     /// Parse a JSON body, reporting malformed input as `Invalid` (never panics).
@@ -344,17 +321,10 @@ impl GoogleApi {
 fn classify_media(resp: Response) -> Outcome<Media> {
     let status = resp.status.as_u16();
     if status == 400 || status == 403 {
-        let body: GoogleError = serde_json::from_slice(&resp.body).unwrap_or_default();
-        let reasons: Vec<&str> = body
-            .error
-            .errors
-            .iter()
-            .map(|e| e.reason.as_str())
-            .chain(body.error.details.iter().map(|d| d.reason.as_str()))
-            .collect();
+        let (reasons, message) = parse_error(&resp.body);
         let limited = reasons
             .iter()
-            .any(|r| RATE_REASONS.contains(r) || QUOTA_REASONS.contains(r));
+            .any(|r| RATE_REASONS.contains(&r.as_str()) || QUOTA_REASONS.contains(&r.as_str()));
         if status == 400 || !limited {
             let reason = reasons
                 .iter()
@@ -369,7 +339,7 @@ fn classify_media(resp: Response) -> Outcome<Media> {
             return Outcome::Done(Media::Refused {
                 status,
                 reason,
-                message: body.error.message.chars().take(300).collect(),
+                message,
             });
         }
     }
@@ -386,19 +356,9 @@ fn classify(resp: Response) -> Outcome {
     if resp.status.is_success() || status == 404 || status == 410 {
         return Outcome::Done(resp);
     }
-    // Delta-seconds or an HTTP-date (measured against the response's own `Date`, so a skewed
-    // local clock does not shorten or stretch the wait).
-    let retry_after_ms = nugget_connector::retry::retry_after_ms(&resp.headers);
-    let body: GoogleError = serde_json::from_slice(&resp.body).unwrap_or_default();
-    let reasons: Vec<&str> = body
-        .error
-        .errors
-        .iter()
-        .map(|e| e.reason.as_str())
-        .chain(body.error.details.iter().map(|d| d.reason.as_str()))
-        .collect();
-    let has = |set: &[&str]| reasons.iter().any(|r| set.contains(r));
-    let message: String = body.error.message.chars().take(300).collect();
+    let retry_after_ms = retry::retry_after_ms(&resp.headers);
+    let (reasons, message) = parse_error(&resp.body);
+    let has = |set: &[&str]| reasons.iter().any(|r| set.contains(&r.as_str()));
     match status {
         401 => Outcome::Refresh,
         429 => Outcome::Retry(Error::RateLimited { retry_after_ms }),

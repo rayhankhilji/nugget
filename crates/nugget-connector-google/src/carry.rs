@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use nugget_core::Error;
+use nugget_core::ids::ItemKey;
 use serde::{Deserialize, Serialize};
 
 /// Passes an item may fail in before it is dropped.
@@ -134,6 +135,39 @@ impl Pending {
             self.order.push(id.to_string());
         }
         n == 1
+    }
+}
+
+/// Indexed items a resync listing did not return.
+pub(crate) struct Missing {
+    /// Inside the window (or undated): gone or excluded unless a check says otherwise.
+    pub check: Vec<String>,
+    /// Known to lie outside the window: expected to be missing from the listing.
+    pub out_of_window: Vec<String>,
+}
+
+impl Missing {
+    /// Split the `known` keys not in `seen` by whether their stored version is in the window.
+    pub(crate) fn split<'a>(
+        known: impl Iterator<Item = (&'a ItemKey, &'a Option<String>)>,
+        seen: &HashSet<String>,
+        in_window: impl Fn(Option<&str>) -> bool,
+    ) -> Self {
+        let (mut check, mut out_of_window): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+        for (k, v) in known.filter(|(k, _)| !seen.contains(k.as_str())) {
+            let list = if in_window(v.as_deref()) {
+                &mut check
+            } else {
+                &mut out_of_window
+            };
+            list.push(k.as_str().to_string());
+        }
+        check.sort();
+        out_of_window.sort();
+        Self {
+            check,
+            out_of_window,
+        }
     }
 }
 

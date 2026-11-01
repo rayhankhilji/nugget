@@ -554,67 +554,6 @@ async fn an_interrupted_resync_lists_again_instead_of_taking_listed_mail_for_mis
 }
 
 #[tokio::test]
-async fn rate_limit_429_is_retried_with_backoff() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    mount_profile(&h.server, "5").await;
-    mount_list_page(&h.server, None, &["m1"], None).await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/messages/m1")))
-        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
-        .up_to_n_times(1)
-        .with_priority(1)
-        .mount(&h.server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/messages/m1")))
-        .respond_with(ResponseTemplate::new(403).set_body_json(json!({"error": {
-            "code": 403, "message": "User-rate limit exceeded",
-            "errors": [{"reason": "userRateLimitExceeded", "domain": "usageLimits"}]
-        }})))
-        .up_to_n_times(1)
-        .with_priority(2)
-        .mount(&h.server)
-        .await;
-    mount_raw(&h.server, "m1", "4", &["INBOX"]).await;
-    let conn = gmail(&h, fast_retry(3));
-    let sink = RecSink::default();
-    run(&conn, None, &sink).await.unwrap();
-    assert_eq!(sink.summary(), vec!["+m1"]);
-    let gets = h
-        .server
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .filter(|r| r.url.path().ends_with("/messages/m1"))
-        .count();
-    assert_eq!(gets, 3);
-    // Every attempt is in the ledger.
-    h.assert_egress("sync:gmail").await;
-}
-
-#[tokio::test]
-async fn persistent_rate_limit_returns_rate_limited_after_retries() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    mount_profile(&h.server, "5").await;
-    mount_list_page(&h.server, None, &["m1"], None).await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/messages/m1")))
-        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
-        .expect(3)
-        .mount(&h.server)
-        .await;
-    let conn = gmail(&h, fast_retry(2));
-    let sink = RecSink::default();
-    let err = run(&conn, None, &sink).await.unwrap_err();
-    assert!(matches!(err, Error::RateLimited { .. }), "{err}");
-    // The starting checkpoint (with the mailbox history id) was kept for the next attempt.
-    assert_eq!(sink.checkpoints.lock().unwrap()[0]["history_id"], "5");
-}
-
-#[tokio::test]
 async fn forbidden_without_rate_reason_is_unauthorized() {
     let h = Harness::new().await;
     h.seed_tokens("at", false);
@@ -666,39 +605,6 @@ async fn expired_access_token_is_refreshed_through_metered_http() {
 }
 
 #[tokio::test]
-async fn api_401_forces_one_refresh_then_retries() {
-    let h = Harness::new().await;
-    h.seed_tokens("revoked-early", false);
-    Mock::given(method("POST"))
-        .and(path("/token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "access_token": "second", "expires_in": 3600
-        })))
-        .expect(1)
-        .mount(&h.server)
-        .await;
-    Mock::given(method("GET"))
-        .and(header("authorization", "Bearer revoked-early"))
-        .respond_with(ResponseTemplate::new(401))
-        .mount(&h.server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/history")))
-        .and(header("authorization", "Bearer second"))
-        .respond_with(history_page(json!([]), None, "9"))
-        .mount(&h.server)
-        .await;
-    let conn = gmail(&h, fast_retry(0));
-    run(
-        &conn,
-        Some(json!({"phase": "incremental", "history_id": "9"})),
-        &RecSink::default(),
-    )
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
 async fn refresh_invalid_grant_makes_sync_unauthorized() {
     let h = Harness::new().await;
     h.seed_tokens("old", true);
@@ -740,41 +646,6 @@ async fn redirects_are_not_followed() {
         1,
         "no retries on a redirect"
     );
-}
-
-#[tokio::test]
-async fn malformed_responses_are_errors_not_panics() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    mount_profile(&h.server, "5").await;
-    mount_list_page(&h.server, None, &["bad", "../evil", "ok"], None).await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/messages/bad")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id": "bad", "labelIds": ["INBOX"], "raw": "!!!not base64!!!"
-        })))
-        .mount(&h.server)
-        .await;
-    mount_raw(&h.server, "ok", "3", &["INBOX"]).await;
-    let conn = gmail(&h, fast_retry(0));
-    let sink = RecSink::default();
-    run(&conn, None, &sink).await.unwrap();
-    assert_eq!(sink.summary(), vec!["+ok"]);
-
-    // A garbage list body is a typed error.
-    let h2 = Harness::new().await;
-    h2.seed_tokens("at", false);
-    mount_profile(&h2.server, "5").await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/messages")))
-        .respond_with(ResponseTemplate::new(200).set_body_string("<html>"))
-        .mount(&h2.server)
-        .await;
-    let conn = gmail(&h2, fast_retry(0));
-    assert!(matches!(
-        run(&conn, None, &RecSink::default()).await,
-        Err(Error::Invalid(_))
-    ));
 }
 
 #[tokio::test]

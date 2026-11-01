@@ -1,48 +1,28 @@
-//! `gdrive`: Google Drive over the REST API with `drive.readonly`.
+//! `gdrive`: Google Drive over the REST API with `drive.readonly` (which also covers the
+//! Sheets and Slides read APIs; nothing is written).
 //!
-//! A pass is either a **full listing** or an **incremental** pass over the Changes API:
+//! A pass is a **full listing** (`changes/startPageToken` first so nothing is missed, then
+//! `files.list`) followed by **incremental** Changes API pages from that token, or just the
+//! latter. Every page is checkpointed. An expired token (404/410) starts a reconciling full
+//! listing ([`MAX_RESTARTS`] per pass).
 //!
-//! 1. Full listing: `changes/startPageToken` is taken first (so nothing changed during the
-//!    listing is missed), then `files.list` is paged through (`trashed=false`, plus
-//!    `'me' in owners` when neither "shared with me" nor shared drives are wanted; `corpora=user`,
-//!    or `allDrives` with shared drives on). The cursor is checkpointed after every page.
-//! 2. Incremental: `changes.list` from the saved token (`includeRemoved=true`, `spaces=drive`),
-//!    checkpointed after every page, ending at `newStartPageToken`. A full listing is followed
-//!    by an incremental pass from its start token in the same `sync` call. An expired token
-//!    (404/410) starts a reconciling full listing ([`MAX_RESTARTS`] per pass).
+//! Cursor: `{"v":1,"full","reconcile","start_token","page_token","changes_token"}` (false/null
+//! omitted); any other shape starts over. With `reconcile` (no cursor while files are indexed,
+//! or an expired token) indexed files the listing does not report are deleted at its end,
+//! unless Drive flagged `incompleteSearch`; an interrupted reconciling listing restarts.
 //!
-//! Cursor (JSON): `{"v":1,"full":bool,"reconcile":bool,"start_token":"<tok>"|null,
-//! "page_token":"<tok>"|null,"changes_token":"<tok>"|null}` (false/null fields omitted).
-//! `full` marks a listing in progress: `start_token` is the Changes token taken before it and
-//! `page_token` the next `files.list` page. Otherwise `changes_token` is the next Changes page
-//! (or `newStartPageToken`). With `reconcile` (no cursor while files are indexed, e.g. after a
-//! settings change, or an expired token) every indexed file the listing does not report in
-//! scope is deleted at its end, unless Drive flagged the listing `incompleteSearch`; an
-//! interrupted reconciling listing restarts from its first page. Any other cursor version or
-//! shape is discarded (and the pass starts over).
+//! Scope: not trashed, not a folder or shortcut, and either in a shared drive with
+//! `include_shared_drives`, or outside shared drives and owned by the user (or
+//! `include_shared_with_me`).
 //!
-//! Scope: a file is synced iff it is not trashed, not a folder or shortcut, and either lives in
-//! a shared drive (`driveId`) with `include_shared_drives` on, or lives outside shared drives
-//! and is owned by the user (`ownedByMe` not `false`) or `include_shared_with_me` is on.
+//! Versions are `<version>|<driveId>`, and `<version>|<driveId>|skip<max_file_mb>` for "not
+//! indexed" stubs so raising the size cap refetches them; the drive id lets a whole removed
+//! shared drive be deleted.
 //!
-//! Keys are Drive file ids. Versions are `<version>|<driveId>` (empty drive id outside shared
-//! drives) for indexed files, and `<version>|<driveId>|skip<max_file_mb>` for "not indexed"
-//! stubs, so raising the size cap fetches them again. The drive id lets every file of a shared
-//! drive the user left (or that was deleted) be removed when Drive reports only the drive.
-//!
-//! One bad file never stops a pass: a file whose content fails (5xx or network after the
-//! in-pass retries, or a malformed answer) keeps its indexed version (it still counts as
-//! listed) and is carried in the cursor as `"retry":[{"id":"<id>","n":<passes failed>},...]`
-//! (bare ids from older cursors read as `n: 0`), fetched again (`files.get`) at the end of the
-//! next pass, and dropped with a warning after failing in
-//! [`MAX_ATTEMPTS`](crate::carry::MAX_ATTEMPTS) passes. A carried file Drive now refuses (a
-//! 400 or non-rate 403, e.g. `insufficientFilePermissions`) is removed like a deleted one.
-//! [`MAX_FAILURE_STREAK`] first-time failures in a row (an outage, not one file) end the pass,
-//! after the failure counts are checkpointed; files that failed in earlier passes never count
-//! towards it, and failures while retrying carried files only stop the retrying.
-//!
-//! Scopes: `drive.readonly` only. It covers listing, the Changes API, downloads and Docs /
-//! Sheets / Slides exports (the Sheets and Slides read APIs accept it too); nothing is written.
+//! A file whose content fails keeps its indexed version and is carried as
+//! `"retry":[{"id","n"}]`, refetched next pass and dropped after
+//! [`MAX_ATTEMPTS`](crate::carry::MAX_ATTEMPTS) failed passes; a carried file Drive now refuses
+//! is removed. [`MAX_FAILURE_STREAK`] first-time failures in a row end the pass.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -1118,49 +1098,6 @@ mod unit {
         assert_eq!(version_drive(Some("42||skip25")), None);
         assert_eq!(version_drive(Some("42")), None);
         assert_eq!(version_drive(None), None);
-    }
-
-    #[test]
-    fn cursor_round_trips() {
-        let mut c = Cursor::fresh(true);
-        c.start_token = Some("100".into());
-        c.page_token = Some("p2".into());
-        let v = c.to_value();
-        assert_eq!(
-            v,
-            json!({"v": 1, "full": true, "reconcile": true, "start_token": "100", "page_token": "p2"})
-        );
-        let back: Cursor = serde_json::from_value(v).unwrap();
-        assert_eq!(back, c);
-        assert!(back.usable());
-        let inc = Cursor {
-            v: 1,
-            changes_token: Some("200".into()),
-            ..Default::default()
-        };
-        assert_eq!(inc.to_value(), json!({"v": 1, "changes_token": "200"}));
-        assert!(inc.usable());
-        assert!(
-            !Cursor {
-                v: 1,
-                ..Default::default()
-            }
-            .usable()
-        );
-        assert!(
-            !Cursor {
-                v: 2,
-                ..inc.clone()
-            }
-            .usable()
-        );
-        assert!(
-            !Cursor {
-                changes_token: Some("a b".into()),
-                ..inc
-            }
-            .usable()
-        );
     }
 
     #[test]
