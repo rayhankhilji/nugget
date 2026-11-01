@@ -1,4 +1,5 @@
-//! "Bring your own key": check a cloud (or self-hosted) provider key and save it.
+//! "Bring your own key": check a cloud (or self-hosted) provider key, save it, replace it,
+//! remove it, and route to it right away.
 //!
 //! - `ai.key.test` asks the provider for its model list (`GET {base}/models` with a bearer token
 //!   for the OpenAI kinds, `GET {base}/v1/models` with `x-api-key` for Anthropic) and classifies
@@ -7,7 +8,19 @@
 //! - `ai.key.save` runs the same check, then stores the key with the daemon's [`SecretStore`]
 //!   under [`provider_account`] and appends a `[[providers]]` table to `config.toml` that refers
 //!   to it as `keychain:NAME` (the key itself never reaches the file). A provider with the same
-//!   id is refused (`exists`). The router reads providers at start, so a restart is required.
+//!   id is refused (`exists`; the app then offers `ai.key.update`).
+//! - Instead of `api_key`, `key_ref: "env:VAR"` names an environment variable of the daemon that
+//!   holds the key (the fallback when there is no keychain: `ai.key.save` answers `no_keychain`
+//!   if the secret store cannot hold the key). The variable is read to check the key, and
+//!   `config.toml` gets `api_key = "env:VAR"`.
+//! - `ai.key.update` checks a new key (or variable, or address) for a provider that refers to a
+//!   key (`keychain:` or `env:`) and replaces it; `ai.key.remove` deletes the stored key and
+//!   removes the provider's table from `config.toml`, leaving every other byte of the file as it
+//!   was. `ai.key.saved` lists those providers.
+//! - Saved, updated and removed providers take effect at once: the provider is built (its key read
+//!   from the same secret store) and added to, swapped in or dropped from the router
+//!   ([`State::set_provider`]); `restart_required` stays in results for compatibility and is
+//!   always `false`.
 //!
 //! Every request is recorded in the egress ledger under feature `ai_setup` (also for loopback
 //! servers: the user asked for the check and should see it). The key is never logged, echoed in
@@ -22,8 +35,10 @@ use async_trait::async_trait;
 use nugget_connector::SecretStore;
 use nugget_connector::http::MeteredHttp;
 use nugget_core::egress::EgressSink;
+use nugget_core::ids::ProviderId;
 use nugget_core::secrets::provider_account;
 use nugget_core::{Error, Result};
+use nugget_infer::{ApiKeyRef, ProviderConfig, ProviderKind, Secret, SecretResolver};
 use nugget_ipc::{Notifier, RpcError, parse_params, to_result};
 use nugget_store::AuditEntry;
 use serde::{Deserialize, Serialize};
@@ -36,7 +51,16 @@ use crate::daemon::{State, blocking};
 /// IPC methods.
 pub(crate) const AI_KEY_TEST: &str = "ai.key.test";
 pub(crate) const AI_KEY_SAVE: &str = "ai.key.save";
-const METHODS: &[&str] = &[AI_KEY_TEST, AI_KEY_SAVE];
+pub(crate) const AI_KEY_UPDATE: &str = "ai.key.update";
+pub(crate) const AI_KEY_REMOVE: &str = "ai.key.remove";
+pub(crate) const AI_KEY_SAVED: &str = "ai.key.saved";
+const METHODS: &[&str] = &[
+    AI_KEY_TEST,
+    AI_KEY_SAVE,
+    AI_KEY_UPDATE,
+    AI_KEY_REMOVE,
+    AI_KEY_SAVED,
+];
 
 /// Egress ledger feature name.
 const FEATURE: &str = "ai_setup";
@@ -50,6 +74,9 @@ const MAX_MODELS: usize = 500;
 const OPENAI_DEFAULT_BASE: &str = "https://api.openai.com/v1";
 const ANTHROPIC_DEFAULT_BASE: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+
+/// First line of the comment written above each table `ai.key.save` appends.
+const MARKER: &str = "# Added by Nugget's AI setup.";
 
 /// Which API the provider speaks (the `kind` of a `[[providers]]` table).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +95,14 @@ impl Kind {
             Kind::Anthropic => "anthropic",
         }
     }
+
+    fn of(kind: ProviderKind) -> Self {
+        match kind {
+            ProviderKind::Anthropic => Kind::Anthropic,
+            ProviderKind::OpenaiResponses => Kind::OpenaiResponses,
+            ProviderKind::OpenaiCompatible => Kind::OpenaiCompatible,
+        }
+    }
 }
 
 /// An API key; never printed.
@@ -81,26 +116,54 @@ impl std::fmt::Debug for ApiKey {
     }
 }
 
-/// `ai.key.test` params.
+/// `ai.key.test` params: `api_key` or `key_ref` (`env:VAR`).
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct KeyTestRequest {
     pub kind: Kind,
     #[serde(default)]
     pub base_url: Option<String>,
-    pub api_key: ApiKey,
+    #[serde(default)]
+    pub api_key: Option<ApiKey>,
+    #[serde(default)]
+    pub key_ref: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
 }
 
-/// `ai.key.save` params.
+/// `ai.key.save` params: `api_key` or `key_ref` (`env:VAR`).
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct KeySaveRequest {
+    #[serde(alias = "id")]
     pub name: String,
     pub kind: Kind,
     #[serde(default)]
     pub base_url: Option<String>,
-    pub api_key: ApiKey,
+    #[serde(default)]
+    pub api_key: Option<ApiKey>,
+    #[serde(default)]
+    pub key_ref: Option<String>,
     pub model: String,
+}
+
+/// `ai.key.update` params: the provider, and a new `api_key` or `key_ref`; `base_url` replaces
+/// the address when given.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct KeyUpdateRequest {
+    #[serde(alias = "id")]
+    pub name: String,
+    #[serde(default)]
+    pub api_key: Option<ApiKey>,
+    #[serde(default)]
+    pub key_ref: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
+/// `ai.key.remove` params.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct KeyRemoveRequest {
+    #[serde(alias = "id")]
+    pub name: String,
 }
 
 /// Why a check (or a save) did not succeed.
@@ -114,6 +177,16 @@ pub(crate) enum Reason {
     ServerError,
     /// `ai.key.save` only: a provider with this id is already configured.
     Exists,
+    /// The OS keychain cannot store the key (for example no Secret Service on Linux); use an
+    /// environment variable (`key_ref: "env:VAR"`) instead.
+    NoKeychain,
+    /// `key_ref` names an environment variable the daemon does not have (or that is empty).
+    EnvMissing,
+    /// `ai.key.update` / `ai.key.remove`: no provider with this id in config.toml.
+    NotFound,
+    /// `ai.key.update` / `ai.key.remove`: the provider does not use a key (a local server) or is
+    /// managed by Nugget.
+    NotEditable,
 }
 
 /// `ai.key.test` result.
@@ -136,7 +209,7 @@ impl KeyTestResult {
     }
 }
 
-/// `ai.key.save` result.
+/// `ai.key.save` and `ai.key.update` result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct KeySaveResult {
     pub ok: bool,
@@ -145,7 +218,11 @@ pub(crate) struct KeySaveResult {
     pub models: Vec<String>,
     pub saved: bool,
     pub provider_id: Option<String>,
+    /// Always `false`: the provider is routed at once. Kept for older clients.
     pub restart_required: bool,
+    /// With `no_keychain`: an environment variable name to suggest for `key_ref`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_env: Option<String>,
 }
 
 impl KeySaveResult {
@@ -157,9 +234,54 @@ impl KeySaveResult {
             models: t.models,
             saved: false,
             provider_id: None,
-            restart_required: true,
+            restart_required: false,
+            suggested_env: None,
         }
     }
+
+    fn fail(reason: Reason, message: impl Into<String>) -> Self {
+        Self::from_test(KeyTestResult::fail(reason, message))
+    }
+}
+
+/// `ai.key.remove` result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct KeyRemoveResult {
+    pub ok: bool,
+    pub reason: Reason,
+    pub message: String,
+    pub removed: bool,
+    pub provider_id: String,
+}
+
+/// One entry of `ai.key.saved`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SavedProvider {
+    pub id: String,
+    pub kind: Kind,
+    pub base_url: Option<String>,
+    pub model: String,
+    /// `keychain` or `env`.
+    pub key: String,
+    /// With `key: "env"`: the variable's name.
+    pub env_var: Option<String>,
+    /// Routed right now (its key could be read and the provider built).
+    pub available: bool,
+    /// Why it is not available.
+    pub error: Option<String>,
+}
+
+/// `ai.key.saved` result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SavedList {
+    pub providers: Vec<SavedProvider>,
+}
+
+/// Reads one environment variable of the daemon (swapped in tests).
+pub(crate) type EnvReader = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+fn process_env() -> EnvReader {
+    Arc::new(|name| std::env::var(name).ok())
 }
 
 /// The `ai_keys` feature.
@@ -167,7 +289,9 @@ pub(crate) fn start(cx: &FeatureContext<'_>) -> Result<Arc<dyn Feature>> {
     let egress: Arc<dyn EgressSink> = Arc::new(cx.state.store.clone());
     Ok(Arc::new(AiKeys {
         state: cx.state.clone(),
-        http: metered(egress)?,
+        http: metered(egress.clone())?,
+        egress,
+        env: process_env(),
         write: tokio::sync::Mutex::new(()),
     }))
 }
@@ -180,6 +304,9 @@ pub(crate) fn metered(egress: Arc<dyn EgressSink>) -> Result<MeteredHttp> {
 struct AiKeys {
     state: Arc<State>,
     http: MeteredHttp,
+    /// For providers built after a save.
+    egress: Arc<dyn EgressSink>,
+    env: EnvReader,
     /// One config write at a time.
     write: tokio::sync::Mutex<()>,
 }
@@ -198,16 +325,45 @@ impl Feature for AiKeys {
         match method {
             AI_KEY_TEST => {
                 let req: KeyTestRequest = parse_params(params)?;
-                let result = check_key(&self.http, &req, CHECK_TIMEOUT).await;
+                let spec = key_spec(req.api_key.as_ref(), req.key_ref.as_deref())
+                    .map_err(RpcError::invalid_params)?;
+                let key = match spec.read(&*self.env) {
+                    Ok(k) => k,
+                    Err(r) => return to_result(r),
+                };
+                let check = Check {
+                    kind: req.kind,
+                    base_url: req.base_url,
+                    key,
+                    model: req.model,
+                };
+                let result = check_key(&self.http, &check, CHECK_TIMEOUT).await;
                 self.flush_egress().await;
                 to_result(result)
             }
             AI_KEY_SAVE => {
                 let req: KeySaveRequest = parse_params(params)?;
                 validate_save(&req).map_err(RpcError::invalid_params)?;
-                let result = self.save(req).await?;
+                let spec = key_spec(req.api_key.as_ref(), req.key_ref.as_deref())
+                    .map_err(RpcError::invalid_params)?;
+                let result = self.save(req, spec).await?;
                 to_result(result)
             }
+            AI_KEY_UPDATE => {
+                let req: KeyUpdateRequest = parse_params(params)?;
+                validate_name(&req.name).map_err(RpcError::invalid_params)?;
+                let spec = key_spec(req.api_key.as_ref(), req.key_ref.as_deref())
+                    .map_err(RpcError::invalid_params)?;
+                let result = self.update(req, spec).await?;
+                to_result(result)
+            }
+            AI_KEY_REMOVE => {
+                let req: KeyRemoveRequest = parse_params(params)?;
+                validate_name(&req.name).map_err(RpcError::invalid_params)?;
+                let result = self.remove(&req.name).await?;
+                to_result(result)
+            }
+            AI_KEY_SAVED => to_result(self.saved().await?),
             other => Err(RpcError::method_not_found(other)),
         }
     }
@@ -224,19 +380,36 @@ impl AiKeys {
         .await;
     }
 
-    async fn save(&self, req: KeySaveRequest) -> Result<KeySaveResult> {
+    async fn audit(&self, action: &str, target: &str, detail: Value) {
+        let store = self.state.store.clone();
+        let audit = AuditEntry {
+            actor: "user".into(),
+            action: action.into(),
+            target: target.into(),
+            detail,
+        };
+        if let Err(e) = blocking(move || store.append_audit(&audit)).await {
+            tracing::warn!(error = %e, "cannot append audit entry");
+        }
+    }
+
+    async fn save(&self, req: KeySaveRequest, spec: KeySpec) -> Result<KeySaveResult> {
         let config_path = self.state.paths.config_file();
         // Refuse a taken id before going to the network (checked again when writing).
         if provider_exists(&config_path, &req.name)? {
             return Ok(exists_result(&req.name));
         }
-        let test = KeyTestRequest {
+        let key = match spec.read(&*self.env) {
+            Ok(k) => k,
+            Err(r) => return Ok(KeySaveResult::from_test(r)),
+        };
+        let check = Check {
             kind: req.kind,
             base_url: req.base_url.clone(),
-            api_key: req.api_key.clone(),
+            key: key.clone(),
             model: Some(req.model.clone()),
         };
-        let checked = check_key(&self.http, &test, CHECK_TIMEOUT).await;
+        let checked = check_key(&self.http, &check, CHECK_TIMEOUT).await;
         self.flush_egress().await;
         if !checked.ok {
             return Ok(KeySaveResult::from_test(checked));
@@ -248,52 +421,297 @@ impl AiKeys {
             kind: req.kind,
             base_url: clean_base(req.base_url.as_deref()),
             model: req.model.trim().to_owned(),
+            key: spec.stored_ref(&req.name),
         };
-        let key = req.api_key.0.trim().to_owned();
         let written = {
             let entry = entry.clone();
-            blocking(move || write_provider(&config_path, &*secrets, &entry, &key)).await?
+            let path = config_path.clone();
+            blocking(move || write_provider(&path, &*secrets, &entry, key.trim())).await?
         };
-        if written == Written::Exists {
-            return Ok(exists_result(&req.name));
+        match written {
+            Written::Saved => {}
+            Written::Exists => return Ok(exists_result(&req.name)),
+            Written::NoKeychain => return Ok(no_keychain_result(&req.name)),
         }
         tracing::info!(provider = %entry.name, kind = entry.kind.as_str(), "provider key saved");
-        let store = self.state.store.clone();
-        let audit = AuditEntry {
-            actor: "user".into(),
-            action: "ai.key.saved".into(),
-            target: entry.name.clone(),
-            detail: json!({
+        self.audit(
+            "ai.key.saved",
+            &entry.name,
+            json!({
                 "kind": entry.kind.as_str(),
                 "base_url": entry.base_url,
                 "model": entry.model,
+                "key": entry.key.kind(),
             }),
-        };
-        if let Err(e) = blocking(move || store.append_audit(&audit)).await {
-            tracing::warn!(error = %e, "cannot append audit entry");
-        }
+        )
+        .await;
+        self.route(&entry.name).await;
         Ok(KeySaveResult {
             ok: true,
             reason: Reason::Ok,
-            message: "Key checked and saved. Restart Nugget to start using it.".into(),
+            message: "Key checked and saved. You can use it now.".into(),
             models: checked.models,
             saved: true,
             provider_id: Some(entry.name),
-            restart_required: true,
+            restart_required: false,
+            suggested_env: None,
         })
+    }
+
+    async fn update(&self, req: KeyUpdateRequest, spec: KeySpec) -> Result<KeySaveResult> {
+        let config_path = self.state.paths.config_file();
+        let _guard = self.write.lock().await;
+        let current = {
+            let path = config_path.clone();
+            let name = req.name.clone();
+            blocking(move || find_provider(&path, &name)).await?
+        };
+        let cfg = match editable(current.as_ref(), &req.name) {
+            Ok(c) => c.clone(),
+            Err(reason) => {
+                return Ok(KeySaveResult::fail(
+                    reason,
+                    not_editable_message(reason, &req.name),
+                ));
+            }
+        };
+        let key = match spec.read(&*self.env) {
+            Ok(k) => k,
+            Err(r) => return Ok(KeySaveResult::from_test(r)),
+        };
+        let base_url = match req.base_url.as_deref() {
+            Some(b) => clean_base(Some(b)),
+            None => cfg.base_url.clone(),
+        };
+        let kind = Kind::of(cfg.kind);
+        let check = Check {
+            kind,
+            base_url: base_url.clone(),
+            key: key.clone(),
+            model: Some(cfg.model.clone()),
+        };
+        let checked = check_key(&self.http, &check, CHECK_TIMEOUT).await;
+        self.flush_egress().await;
+        if !checked.ok {
+            return Ok(KeySaveResult::from_test(checked));
+        }
+        let secrets = self.state.secrets.clone();
+        let (path, name) = (config_path.clone(), req.name.clone());
+        let new_ref = spec.stored_ref(&req.name);
+        let change = KeyChange {
+            old: cfg.api_key.clone(),
+            new: new_ref.clone(),
+            base_url: req.base_url.as_ref().map(|_| base_url.clone()),
+        };
+        let written = blocking(move || {
+            replace_key(&path, &*secrets, &name, &change, key.trim().to_owned())
+        })
+        .await?;
+        if written == Written::NoKeychain {
+            return Ok(no_keychain_result(&req.name));
+        }
+        tracing::info!(provider = %req.name, kind = kind.as_str(), "provider key replaced");
+        self.audit(
+            "ai.key.updated",
+            &req.name,
+            json!({
+                "kind": kind.as_str(),
+                "base_url": base_url,
+                "model": cfg.model,
+                "key": new_ref.kind(),
+            }),
+        )
+        .await;
+        self.route(&req.name).await;
+        Ok(KeySaveResult {
+            ok: true,
+            reason: Reason::Ok,
+            message: "Key checked and replaced. Nugget uses the new key now.".into(),
+            models: checked.models,
+            saved: true,
+            provider_id: Some(req.name),
+            restart_required: false,
+            suggested_env: None,
+        })
+    }
+
+    async fn remove(&self, name: &str) -> Result<KeyRemoveResult> {
+        let config_path = self.state.paths.config_file();
+        let _guard = self.write.lock().await;
+        let current = {
+            let (path, name) = (config_path.clone(), name.to_owned());
+            blocking(move || find_provider(&path, &name)).await?
+        };
+        let cfg = match editable(current.as_ref(), name) {
+            Ok(c) => c.clone(),
+            Err(reason) => {
+                return Ok(KeyRemoveResult {
+                    ok: false,
+                    reason,
+                    message: not_editable_message(reason, name),
+                    removed: false,
+                    provider_id: name.to_owned(),
+                });
+            }
+        };
+        let secrets = self.state.secrets.clone();
+        let (path, owned) = (config_path.clone(), name.to_owned());
+        let key = cfg.api_key.clone();
+        blocking(move || remove_provider(&path, &*secrets, &owned, key.as_ref())).await?;
+        self.state.remove_provider(&ProviderId::new(name));
+        tracing::info!(provider = %name, "provider removed");
+        self.audit(
+            "ai.key.removed",
+            name,
+            json!({ "kind": Kind::of(cfg.kind).as_str(), "model": cfg.model }),
+        )
+        .await;
+        Ok(KeyRemoveResult {
+            ok: true,
+            reason: Reason::Ok,
+            message: format!("\"{name}\" was removed and its key deleted."),
+            removed: true,
+            provider_id: name.to_owned(),
+        })
+    }
+
+    async fn saved(&self) -> Result<SavedList> {
+        let path = self.state.paths.config_file();
+        let configs = blocking(move || read_providers(&path)).await?;
+        let providers = configs
+            .into_iter()
+            .filter(|c| editable(Some(c), c.id.as_str()).is_ok())
+            .map(|c| {
+                let (key, env_var) = match &c.api_key {
+                    Some(ApiKeyRef::Env(v)) => ("env", Some(v.clone())),
+                    _ => ("keychain", None),
+                };
+                let error = self.state.unavailable_reason(&c.id);
+                let available = error.is_none() && self.state.router.provider(&c.id).is_some();
+                SavedProvider {
+                    id: c.id.to_string(),
+                    kind: Kind::of(c.kind),
+                    base_url: c.base_url.clone(),
+                    model: c.model.clone(),
+                    key: key.into(),
+                    env_var,
+                    available,
+                    error: error.or_else(|| {
+                        (!available).then(|| "Not in use yet: restart Nugget.".to_owned())
+                    }),
+                }
+            })
+            .collect();
+        Ok(SavedList { providers })
+    }
+
+    /// Build provider `name` from config.toml as it is now and route to it (or record why it
+    /// cannot be built). The key is read from the daemon's secret store or environment.
+    async fn route(&self, name: &str) {
+        let path = self.state.paths.config_file();
+        let resolver = StoreResolver {
+            secrets: self.state.secrets.clone(),
+            env: self.env.clone(),
+        };
+        let (egress, owned) = (self.egress.clone(), name.to_owned());
+        let built = blocking(move || {
+            let Some(cfg) = find_provider(&path, &owned)? else {
+                return Ok(None);
+            };
+            let p = nugget_infer::build_provider_with(&cfg, egress, &resolver)
+                .map_err(|e| e.to_string());
+            Ok(Some((cfg, p)))
+        })
+        .await;
+        match built {
+            Ok(Some((cfg, p))) => {
+                if let Err(e) = &p {
+                    tracing::warn!(provider = %name, error = %e, "saved provider cannot be built");
+                }
+                self.state.set_provider(cfg, p);
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(provider = %name, error = %e, "cannot route saved provider"),
+        }
+    }
+}
+
+/// Resolves `keychain:NAME` from the daemon's secret store (the one `ai.key.save` wrote to) and
+/// `env:VAR` from the daemon's environment.
+struct StoreResolver {
+    secrets: Arc<dyn SecretStore>,
+    env: EnvReader,
+}
+
+impl SecretResolver for StoreResolver {
+    fn resolve(&self, key: &ApiKeyRef) -> Result<Secret> {
+        let value = match key {
+            ApiKeyRef::Keychain(name) => self.secrets.get(&provider_account(name))?,
+            ApiKeyRef::Env(var) => (self.env)(var),
+        };
+        match value.map(|v| v.trim().to_owned()) {
+            Some(v) if !v.is_empty() => Ok(Secret::new(v)),
+            _ => Err(Error::NotFound(format!("{key} is not set"))),
+        }
     }
 }
 
 fn exists_result(name: &str) -> KeySaveResult {
-    KeySaveResult::from_test(KeyTestResult::fail(
+    KeySaveResult::fail(
         Reason::Exists,
-        format!("A provider named \"{name}\" is already set up. Pick another name."),
-    ))
+        format!("A provider named \"{name}\" is already set up. Replace its key or pick another name."),
+    )
 }
 
-/// Name and model checks for `ai.key.save` (malformed params, not a validation outcome).
-fn validate_save(req: &KeySaveRequest) -> std::result::Result<(), String> {
-    let n = &req.name;
+fn no_keychain_result(name: &str) -> KeySaveResult {
+    let var = suggested_env(name);
+    KeySaveResult {
+        suggested_env: Some(var.clone()),
+        ..KeySaveResult::fail(
+            Reason::NoKeychain,
+            format!(
+                "This computer has no keyring to store the key safely. Put the key in an environment variable (for example {var}) and enter its name instead."
+            ),
+        )
+    }
+}
+
+fn not_editable_message(reason: Reason, name: &str) -> String {
+    match reason {
+        Reason::NotFound => format!("There is no provider named \"{name}\"."),
+        _ => format!("\"{name}\" does not use an API key, so there is no key to change or remove."),
+    }
+}
+
+/// An environment variable name to suggest for provider `name`, e.g. `NUGGET_OPENAI_KEY`.
+fn suggested_env(name: &str) -> String {
+    let upper: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("NUGGET_{upper}_KEY")
+}
+
+/// The provider in config.toml if `ai.key.update` / `ai.key.remove` may change it: it refers to
+/// a key and is not one of the runtime's own (`local-*`).
+fn editable<'a>(
+    cfg: Option<&'a ProviderConfig>,
+    name: &str,
+) -> std::result::Result<&'a ProviderConfig, Reason> {
+    let cfg = cfg.ok_or(Reason::NotFound)?;
+    if name.starts_with("local-") || cfg.api_key.is_none() {
+        return Err(Reason::NotEditable);
+    }
+    Ok(cfg)
+}
+
+fn validate_name(n: &str) -> std::result::Result<(), String> {
     if n.is_empty()
         || n.len() > 32
         || !n
@@ -304,11 +722,105 @@ fn validate_save(req: &KeySaveRequest) -> std::result::Result<(), String> {
             "name must be 1 to 32 characters: lowercase letters, digits, \"_\" or \"-\"".into(),
         );
     }
+    Ok(())
+}
+
+/// Name and model checks for `ai.key.save` (malformed params, not a validation outcome).
+fn validate_save(req: &KeySaveRequest) -> std::result::Result<(), String> {
+    validate_name(&req.name)?;
     let m = req.model.trim();
     if m.is_empty() || m.len() > 200 || m.chars().any(char::is_control) {
         return Err("model must be a model name of at most 200 characters".into());
     }
     Ok(())
+}
+
+/// Whether `v` can be an environment variable name: a letter or `_`, then letters, digits or
+/// `_`, at most 128.
+fn valid_env_name(v: &str) -> bool {
+    let mut b = v.bytes();
+    v.len() <= 128
+        && b.next().is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
+        && b.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+}
+
+/// Where the key comes from.
+#[derive(Debug, Clone)]
+pub(crate) enum KeySpec {
+    /// Typed into the app; goes to the secret store.
+    Typed(ApiKey),
+    /// The daemon's environment variable of that name.
+    Env(String),
+}
+
+/// What config.toml refers to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum KeyRef {
+    /// `keychain:NAME`.
+    Keychain(String),
+    /// `env:VAR`.
+    Env(String),
+}
+
+impl KeyRef {
+    fn kind(&self) -> &'static str {
+        match self {
+            KeyRef::Keychain(_) => "keychain",
+            KeyRef::Env(_) => "env",
+        }
+    }
+
+    fn as_config(&self) -> String {
+        match self {
+            KeyRef::Keychain(n) => format!("keychain:{n}"),
+            KeyRef::Env(v) => format!("env:{v}"),
+        }
+    }
+}
+
+impl KeySpec {
+    /// The key itself, or why it cannot be read.
+    fn read(&self, env: &dyn Fn(&str) -> Option<String>) -> std::result::Result<String, KeyTestResult> {
+        match self {
+            KeySpec::Typed(k) => Ok(k.0.clone()),
+            KeySpec::Env(var) => match env(var) {
+                Some(v) if !v.trim().is_empty() => Ok(v),
+                _ => Err(KeyTestResult::fail(
+                    Reason::EnvMissing,
+                    format!(
+                        "Nugget can't see an environment variable named {var}, or it is empty. Set it where Nugget starts (for example in your shell profile), then restart Nugget."
+                    ),
+                )),
+            },
+        }
+    }
+
+    fn stored_ref(&self, name: &str) -> KeyRef {
+        match self {
+            KeySpec::Typed(_) => KeyRef::Keychain(name.to_owned()),
+            KeySpec::Env(v) => KeyRef::Env(v.clone()),
+        }
+    }
+}
+
+/// Exactly one of `api_key` and `key_ref` (`env:VAR`); malformed params otherwise.
+fn key_spec(
+    api_key: Option<&ApiKey>,
+    key_ref: Option<&str>,
+) -> std::result::Result<KeySpec, String> {
+    match (api_key, key_ref.map(str::trim).filter(|r| !r.is_empty())) {
+        (Some(k), None) => Ok(KeySpec::Typed(k.clone())),
+        (None, Some(r)) => match r.strip_prefix("env:").map(str::trim) {
+            Some(v) if valid_env_name(v) => Ok(KeySpec::Env(v.to_owned())),
+            Some(_) => Err(
+                "key_ref: the variable name may only have letters, digits and \"_\", and must not start with a digit"
+                    .into(),
+            ),
+            None => Err("key_ref must be \"env:VARIABLE_NAME\"".into()),
+        },
+        (Some(_), Some(_)) => Err("give api_key or key_ref, not both".into()),
+        (None, None) => Err("api_key or key_ref is required".into()),
+    }
 }
 
 /// A base URL as given, trimmed, without a trailing slash; `None` when empty.
@@ -384,14 +896,33 @@ fn models_url(kind: Kind, base: Option<&str>) -> std::result::Result<String, Key
     })
 }
 
-/// Ask the provider for its models with `key` and classify the answer. Never fails: every
+/// One key check.
+#[derive(Clone)]
+pub(crate) struct Check {
+    pub kind: Kind,
+    pub base_url: Option<String>,
+    pub key: String,
+    pub model: Option<String>,
+}
+
+impl std::fmt::Debug for Check {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Check")
+            .field("kind", &self.kind)
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Ask the provider for its models with the key and classify the answer. Never fails: every
 /// outcome is a [`KeyTestResult`].
 pub(crate) async fn check_key(
     http: &MeteredHttp,
-    req: &KeyTestRequest,
+    req: &Check,
     timeout: Duration,
 ) -> KeyTestResult {
-    let key = req.api_key.0.trim();
+    let key = req.key.trim();
     if key.is_empty() {
         return KeyTestResult::fail(Reason::BadKey, "Enter an API key.");
     }
@@ -518,6 +1049,7 @@ pub(crate) struct NewProvider {
     pub kind: Kind,
     pub base_url: Option<String>,
     pub model: String,
+    pub key: KeyRef,
 }
 
 impl NewProvider {
@@ -530,7 +1062,7 @@ impl NewProvider {
             t.insert("base_url".into(), b.clone().into());
         }
         t.insert("model".into(), self.model.clone().into());
-        t.insert("api_key".into(), format!("keychain:{}", self.name).into());
+        t.insert("api_key".into(), self.key.as_config().into());
         t.insert(
             "tiers".into(),
             toml::Value::Array(
@@ -547,14 +1079,49 @@ impl NewProvider {
         );
         toml::to_string(&doc).map_err(|e| Error::Other(format!("provider table: {e}")))
     }
+
+    fn comment(&self) -> String {
+        match &self.key {
+            KeyRef::Keychain(_) => {
+                format!("{MARKER} The key is in the OS keychain, not in this file.\n")
+            }
+            KeyRef::Env(v) => format!(
+                "{MARKER} The key is read from the environment variable {v}, not stored in this file.\n"
+            ),
+        }
+    }
+}
+
+/// `config.toml` at `path`, or `None` when there is none.
+fn read_config(path: &Path) -> Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// The providers in `config.toml` at `path` (none when there is no file).
+fn read_providers(path: &Path) -> Result<Vec<ProviderConfig>> {
+    let Some(text) = read_config(path)? else {
+        return Ok(Vec::new());
+    };
+    Ok(Config::parse(&text)
+        .map_err(|e| Error::Invalid(format!("invalid config {}: {e}", path.display())))?
+        .providers)
+}
+
+/// Provider `name` in `config.toml` at `path`.
+fn find_provider(path: &Path, name: &str) -> Result<Option<ProviderConfig>> {
+    Ok(read_providers(path)?
+        .into_iter()
+        .find(|p| p.id.as_str() == name))
 }
 
 /// Whether `config.toml` at `path` already has a provider `name` (a missing file has none).
 fn provider_exists(path: &Path, name: &str) -> Result<bool> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(e.into()),
+    let Some(text) = read_config(path)? else {
+        return Ok(false);
     };
     let table: toml::Table = toml::from_str(&text)
         .map_err(|e| Error::Invalid(format!("invalid config {}: {e}", path.display())))?;
@@ -571,11 +1138,39 @@ fn provider_exists(path: &Path, name: &str) -> Result<bool> {
 pub(crate) enum Written {
     Saved,
     Exists,
+    /// The secret store refused the key; nothing was written.
+    NoKeychain,
 }
 
-/// Store `key` under [`provider_account`]`(name)` and append the provider to `config.toml`
-/// (written whole to a temporary file, then renamed). The new file is validated as a [`Config`]
-/// before anything is stored. A missing config starts from [`DEFAULT_CONFIG`].
+/// Write `text` to `path` whole (temporary file, then rename).
+fn write_config(path: &Path, text: &str) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, text)
+        .and_then(|()| std::fs::rename(&tmp, path))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })?;
+    Ok(())
+}
+
+/// Store `key` in `secrets` under `account`; `false` (logged, without the key) when the store
+/// cannot hold it.
+fn store_key(secrets: &dyn SecretStore, account: &str, key: &str) -> bool {
+    match secrets.set(account, key) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!(error = %e, "the secret store cannot hold the provider key");
+            false
+        }
+    }
+}
+
+/// Store the key (for a `keychain:` entry) under [`provider_account`]`(name)` and append the
+/// provider to `config.toml`. The new file is validated as a [`Config`] before anything is
+/// stored. A missing config starts from [`DEFAULT_CONFIG`].
 pub(crate) fn write_provider(
     path: &Path,
     secrets: &dyn SecretStore,
@@ -585,34 +1180,310 @@ pub(crate) fn write_provider(
     if provider_exists(path, &entry.name)? {
         return Ok(Written::Exists);
     }
-    let mut text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DEFAULT_CONFIG.to_owned(),
-        Err(e) => return Err(e.into()),
-    };
+    let mut text = read_config(path)?.unwrap_or_else(|| DEFAULT_CONFIG.to_owned());
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
     }
-    text.push_str(
-        "\n# Added by Nugget's AI setup. The key is in the OS keychain, not in this file.\n",
-    );
+    text.push('\n');
+    text.push_str(&entry.comment());
     text.push_str(&entry.toml()?);
     Config::parse(&text)
         .map_err(|e| Error::Invalid(format!("the new provider is invalid: {e}")))?;
 
-    let account = provider_account(&entry.name);
-    secrets.set(&account, key)?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("toml.tmp");
-    let written = std::fs::write(&tmp, &text).and_then(|()| std::fs::rename(&tmp, path));
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
-        let _ = secrets.delete(&account);
-        return Err(e.into());
+    let account = match &entry.key {
+        KeyRef::Keychain(n) => {
+            let account = provider_account(n);
+            if !store_key(secrets, &account, key) {
+                return Ok(Written::NoKeychain);
+            }
+            Some(account)
+        }
+        KeyRef::Env(_) => None,
+    };
+    if let Err(e) = write_config(path, &text) {
+        if let Some(a) = &account {
+            let _ = secrets.delete(a);
+        }
+        return Err(e);
     }
     Ok(Written::Saved)
+}
+
+/// What `ai.key.update` changes.
+#[derive(Debug, Clone)]
+pub(crate) struct KeyChange {
+    /// What config.toml refers to now.
+    pub old: Option<ApiKeyRef>,
+    /// What it should refer to.
+    pub new: KeyRef,
+    /// A new address (`Some(None)` removes it).
+    pub base_url: Option<Option<String>>,
+}
+
+/// Replace provider `name`'s key: overwrite the stored secret, and rewrite its `api_key` /
+/// `base_url` lines in `config.toml` when they change (nothing else in the file changes).
+pub(crate) fn replace_key(
+    path: &Path,
+    secrets: &dyn SecretStore,
+    name: &str,
+    change: &KeyChange,
+    key: String,
+) -> Result<Written> {
+    let text = read_config(path)?.ok_or_else(|| Error::NotFound("config.toml".into()))?;
+    let old_ref = change.old.as_ref().map(ToString::to_string);
+    let new_ref = change.new.as_config();
+    let mut edits: Vec<(&str, Option<String>)> = Vec::new();
+    if old_ref.as_deref() != Some(new_ref.as_str()) {
+        edits.push(("api_key", Some(new_ref.clone())));
+    }
+    if let Some(b) = &change.base_url {
+        edits.push(("base_url", b.clone()));
+    }
+    let new_text = if edits.is_empty() {
+        None
+    } else {
+        let t = edit_provider_text(&text, name, &edits)
+            .ok_or_else(|| Error::Invalid(format!("cannot find provider {name} in config.toml")))?;
+        Some(t)
+    };
+
+    // The keychain entry to write (the one config.toml will refer to).
+    let account = match &change.new {
+        KeyRef::Keychain(n) => Some(provider_account(n)),
+        KeyRef::Env(_) => None,
+    };
+    let previous = match &account {
+        Some(a) => secrets.get(a).ok().flatten(),
+        None => None,
+    };
+    if let Some(a) = &account
+        && !store_key(secrets, a, &key)
+    {
+        return Ok(Written::NoKeychain);
+    }
+    if let Some(t) = &new_text
+        && let Err(e) = write_config(path, t)
+    {
+        if let Some(a) = &account {
+            let _ = match &previous {
+                Some(p) => secrets.set(a, p),
+                None => secrets.delete(a),
+            };
+        }
+        return Err(e);
+    }
+    // A keychain entry config.toml no longer refers to is deleted.
+    if let Some(ApiKeyRef::Keychain(old)) = &change.old
+        && change.new != KeyRef::Keychain(old.clone())
+        && let Err(e) = secrets.delete(&provider_account(old))
+    {
+        tracing::warn!(error = %e, "cannot delete the old provider key");
+    }
+    Ok(Written::Saved)
+}
+
+/// Delete provider `name`'s stored key (if it has one in the keychain) and remove its table from
+/// `config.toml`.
+pub(crate) fn remove_provider(
+    path: &Path,
+    secrets: &dyn SecretStore,
+    name: &str,
+    key: Option<&ApiKeyRef>,
+) -> Result<()> {
+    let text = read_config(path)?.ok_or_else(|| Error::NotFound("config.toml".into()))?;
+    let new_text = remove_provider_text(&text, name)
+        .ok_or_else(|| Error::Invalid(format!("cannot find provider {name} in config.toml")))?;
+    write_config(path, &new_text)?;
+    if let Some(ApiKeyRef::Keychain(n)) = key
+        && let Err(e) = secrets.delete(&provider_account(n))
+    {
+        tracing::warn!(error = %e, "cannot delete the provider key from the secret store");
+    }
+    Ok(())
+}
+
+/// One `[[providers]]` table in the text of a config file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Span {
+    /// Start of the header line.
+    start: usize,
+    /// End of the table's last line that is neither blank nor a comment (comments right before
+    /// the next table belong to that table).
+    end: usize,
+    id: Option<String>,
+}
+
+/// Whether `line` (trimmed) is a table header, and whether it is `[[providers]]`.
+fn header(line: &str) -> Option<bool> {
+    let t = line.trim();
+    if !t.starts_with('[') {
+        return None;
+    }
+    let compact: String = t
+        .split('#')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    Some(compact == "[[providers]]")
+}
+
+/// The `[[providers]]` tables of `text`, in order.
+fn provider_spans(text: &str) -> Vec<Span> {
+    let mut spans: Vec<Span> = Vec::new();
+    let mut open: Option<Span> = None;
+    let mut in_multiline = false;
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let (start, end) = (pos, pos + line.len());
+        pos = end;
+        let toggles = line.matches("\"\"\"").count() + line.matches("'''").count();
+        let was_multiline = in_multiline;
+        if toggles % 2 == 1 {
+            in_multiline = !in_multiline;
+        }
+        if !was_multiline && let Some(is_providers) = header(line) {
+            if let Some(s) = open.take() {
+                spans.push(s);
+            }
+            if is_providers {
+                open = Some(Span {
+                    start,
+                    end,
+                    id: None,
+                });
+            }
+            continue;
+        }
+        if let Some(s) = open.as_mut() {
+            let t = line.trim();
+            if was_multiline || !(t.is_empty() || t.starts_with('#')) {
+                s.end = end;
+            }
+        }
+    }
+    if let Some(s) = open {
+        spans.push(s);
+    }
+    for s in &mut spans {
+        s.id = toml::from_str::<toml::Table>(&text[s.start..s.end])
+            .ok()
+            .and_then(|t| {
+                t.get("providers")?.as_array()?.first()?.get("id")?.as_str().map(str::to_owned)
+            });
+    }
+    spans
+}
+
+/// The providers of `text` other than `name`, as parsed TOML (to check an edit kept them).
+fn other_providers(text: &str, name: &str) -> Option<Vec<toml::Value>> {
+    let t: toml::Table = toml::from_str(text).ok()?;
+    Some(
+        t.get("providers")
+            .and_then(toml::Value::as_array)
+            .map(|ps| {
+                ps.iter()
+                    .filter(|p| p.get("id").and_then(toml::Value::as_str) != Some(name))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// `text` without provider `name`'s table (and the comment `ai.key.save` wrote above it). Every
+/// other byte is kept. `None` if the table cannot be found or the result would not be the same
+/// config minus that provider.
+fn remove_provider_text(text: &str, name: &str) -> Option<String> {
+    let span = provider_spans(text)
+        .into_iter()
+        .find(|s| s.id.as_deref() == Some(name))?;
+    let mut start = span.start;
+    // Our own comment line directly above, and the blank line `ai.key.save` put before it.
+    let line_before = |at: usize| -> Option<usize> {
+        let prev = text[..at].strip_suffix('\n')?;
+        Some(prev.rfind('\n').map_or(0, |i| i + 1))
+    };
+    if let Some(ls) = line_before(start)
+        && text[ls..start].trim_start().starts_with(MARKER)
+    {
+        start = ls;
+        if let Some(ls) = line_before(start)
+            && text[ls..start].trim().is_empty()
+        {
+            start = ls;
+        }
+    }
+    let out = format!("{}{}", &text[..start], &text[span.end..]);
+    let parsed = Config::parse(&out).ok()?;
+    if parsed.providers.iter().any(|p| p.id.as_str() == name)
+        || other_providers(&out, name)? != other_providers(text, name)?
+    {
+        return None;
+    }
+    Some(out)
+}
+
+/// `text` with the given keys of provider `name`'s table set (a line `key = "value"` replaced
+/// in place or added after the header) or removed (`None`). Every other line is kept. `None` if
+/// the table cannot be found or the result is not a valid config with exactly those changes.
+fn edit_provider_text(text: &str, name: &str, edits: &[(&str, Option<String>)]) -> Option<String> {
+    let span = provider_spans(text)
+        .into_iter()
+        .find(|s| s.id.as_deref() == Some(name))?;
+    let body = &text[span.start..span.end];
+    let mut lines: Vec<String> = body.split_inclusive('\n').map(str::to_owned).collect();
+    if lines.last().is_some_and(|l| !l.ends_with('\n')) {
+        lines.last_mut()?.push('\n');
+    }
+    let key_of = |line: &str| -> Option<String> {
+        let (k, _) = line.split_once('=')?;
+        Some(k.trim().trim_matches('"').to_owned())
+    };
+    for (key, value) in edits {
+        let new_line = value
+            .as_ref()
+            .map(|v| format!("{key} = {}\n", toml::Value::String(v.clone())));
+        let at = lines
+            .iter()
+            .skip(1)
+            .position(|l| key_of(l).as_deref() == Some(*key))
+            .map(|i| i + 1);
+        match (at, new_line) {
+            (Some(i), Some(l)) => {
+                let indent: String = lines[i].chars().take_while(|c| c.is_whitespace()).collect();
+                lines[i] = format!("{indent}{l}");
+            }
+            (Some(i), None) => {
+                lines.remove(i);
+            }
+            (None, Some(l)) => lines.insert(1, l),
+            (None, None) => {}
+        }
+    }
+    let mut new_body = lines.concat();
+    if !body.ends_with('\n') {
+        new_body.pop();
+    }
+    let out = format!("{}{}{}", &text[..span.start], new_body, &text[span.end..]);
+    // Same config, except those keys of this provider.
+    let parsed: toml::Table = toml::from_str(&out).ok()?;
+    Config::parse(&out).ok()?;
+    let mine = parsed
+        .get("providers")?
+        .as_array()?
+        .iter()
+        .find(|p| p.get("id").and_then(toml::Value::as_str) == Some(name))?;
+    for (key, value) in edits {
+        if mine.get(*key).and_then(toml::Value::as_str) != value.as_deref() {
+            return None;
+        }
+    }
+    if other_providers(&out, name)? != other_providers(text, name)? {
+        return None;
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -633,6 +1504,22 @@ mod tests {
     impl EgressSink for Ledger {
         fn record(&self, event: EgressEvent) {
             self.0.lock().unwrap().push(event);
+        }
+    }
+
+    /// A secret store like Linux without a Secret Service: every call fails.
+    struct NoKeyring;
+    impl SecretStore for NoKeyring {
+        fn get(&self, _: &str) -> Result<Option<String>> {
+            Err(Error::Storage(
+                "keychain: Platform secure storage failure: no secret service provider or dbus session found".into(),
+            ))
+        }
+        fn set(&self, a: &str, _: &str) -> Result<()> {
+            self.get(a).map(|_| ())
+        }
+        fn delete(&self, a: &str) -> Result<()> {
+            self.get(a).map(|_| ())
         }
     }
 
@@ -686,11 +1573,11 @@ mod tests {
         format!("http://{addr}")
     }
 
-    fn req(kind: Kind, base: Option<&str>, key: &str) -> KeyTestRequest {
-        KeyTestRequest {
+    fn req(kind: Kind, base: Option<&str>, key: &str) -> Check {
+        Check {
             kind,
             base_url: base.map(str::to_owned),
-            api_key: ApiKey(key.to_owned()),
+            key: key.to_owned(),
             model: None,
         }
     }
@@ -840,7 +1727,8 @@ mod tests {
             name: "my-openai_2".into(),
             kind: Kind::OpenaiResponses,
             base_url: None,
-            api_key: ApiKey(GOOD.into()),
+            api_key: Some(ApiKey(GOOD.into())),
+            key_ref: None,
             model: "gpt-x".into(),
         };
         assert!(validate_save(&r).is_ok());
@@ -855,17 +1743,62 @@ mod tests {
     }
 
     #[test]
+    fn key_refs_are_env_variables_with_valid_names() {
+        let k = ApiKey(GOOD.into());
+        assert!(matches!(key_spec(Some(&k), None), Ok(KeySpec::Typed(_))));
+        assert!(matches!(
+            key_spec(None, Some(" env: NUGGET_OPENAI_KEY ")),
+            Ok(KeySpec::Env(v)) if v == "NUGGET_OPENAI_KEY"
+        ));
+        assert!(matches!(key_spec(None, Some("env:_x1")), Ok(KeySpec::Env(_))));
+        for bad in ["env:", "env:1ABC", "env:A-B", "env:A B", "keychain:x", "NAME"] {
+            assert!(key_spec(None, Some(bad)).is_err(), "{bad}");
+        }
+        assert!(key_spec(Some(&k), Some("env:A")).is_err(), "both");
+        assert!(key_spec(None, None).is_err(), "neither");
+        assert!(key_spec(None, Some("  ")).is_err(), "blank is neither");
+        assert!(!valid_env_name(&"A".repeat(129)));
+
+        // Reading: a set variable is the key; an unset or empty one is `env_missing`.
+        let env = |v: &str| match v {
+            "SET" => Some(GOOD.to_owned()),
+            "EMPTY" => Some("  ".to_owned()),
+            _ => None,
+        };
+        assert_eq!(KeySpec::Env("SET".into()).read(&env).unwrap(), GOOD);
+        for v in ["EMPTY", "UNSET"] {
+            let r = KeySpec::Env(v.into()).read(&env).unwrap_err();
+            assert_eq!(r.reason, Reason::EnvMissing);
+            assert!(r.message.contains(v));
+        }
+        assert_eq!(
+            KeySpec::Env("V".into()).stored_ref("custom"),
+            KeyRef::Env("V".into())
+        );
+        assert_eq!(
+            KeySpec::Typed(k).stored_ref("custom"),
+            KeyRef::Keychain("custom".into())
+        );
+        assert_eq!(suggested_env("my-openai"), "NUGGET_MY_OPENAI_KEY");
+    }
+
+    fn entry(name: &str, key: KeyRef) -> NewProvider {
+        NewProvider {
+            name: name.into(),
+            kind: Kind::OpenaiCompatible,
+            base_url: Some("http://127.0.0.1:9/v1".into()),
+            model: "model \"a\"".into(),
+            key,
+        }
+    }
+
+    #[test]
     fn write_provider_refers_to_the_keychain_and_refuses_duplicates() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.toml");
         std::fs::write(&path, DEFAULT_CONFIG).unwrap();
         let secrets = MemorySecrets::new();
-        let entry = NewProvider {
-            name: "custom".into(),
-            kind: Kind::OpenaiCompatible,
-            base_url: Some("http://127.0.0.1:9/v1".into()),
-            model: "model \"a\"".into(),
-        };
+        let entry = entry("custom", KeyRef::Keychain("custom".into()));
         assert_eq!(
             write_provider(&path, &secrets, &entry, GOOD).unwrap(),
             Written::Saved
@@ -913,11 +1846,209 @@ mod tests {
             kind: Kind::OpenaiResponses,
             base_url: None,
             model: "gpt-x".into(),
+            key: KeyRef::Keychain("openai".into()),
         };
         write_provider(&path, &secrets, &entry, GOOD).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("base_url = \"https://api.openai"));
         let cfg = Config::parse(&text).unwrap();
         assert_eq!(cfg.providers.len(), 1);
+    }
+
+    #[test]
+    fn no_keyring_writes_nothing_and_env_refs_need_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+
+        // Keychain refused: config untouched, no raw error.
+        let e = entry("custom", KeyRef::Keychain("custom".into()));
+        assert_eq!(
+            write_provider(&path, &NoKeyring, &e, GOOD).unwrap(),
+            Written::NoKeychain
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), DEFAULT_CONFIG);
+        let r = no_keychain_result("custom");
+        assert_eq!(r.reason, Reason::NoKeychain);
+        assert!(!r.ok && !r.saved);
+        assert_eq!(r.suggested_env.as_deref(), Some("NUGGET_CUSTOM_KEY"));
+        assert!(r.message.contains("environment variable"), "{}", r.message);
+        assert!(!r.message.contains("dbus"), "{}", r.message);
+
+        // An env: reference is written without touching the secret store at all.
+        let e = entry("custom", KeyRef::Env("NUGGET_CUSTOM_KEY".into()));
+        assert_eq!(
+            write_provider(&path, &NoKeyring, &e, GOOD).unwrap(),
+            Written::Saved
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("api_key = \"env:NUGGET_CUSTOM_KEY\""), "{text}");
+        assert!(text.contains("environment variable NUGGET_CUSTOM_KEY"), "{text}");
+        assert!(!text.contains(GOOD));
+
+        // Replacing with a typed key still needs the keyring; removing works without one.
+        let change = KeyChange {
+            old: Some(ApiKeyRef::Env("NUGGET_CUSTOM_KEY".into())),
+            new: KeyRef::Keychain("custom".into()),
+            base_url: None,
+        };
+        assert_eq!(
+            replace_key(&path, &NoKeyring, "custom", &change, GOOD.into()).unwrap(),
+            Written::NoKeychain
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        remove_provider(
+            &path,
+            &NoKeyring,
+            "custom",
+            Some(&ApiKeyRef::Env("NUGGET_CUSTOM_KEY".into())),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), DEFAULT_CONFIG);
+    }
+
+    const HAND_WRITTEN: &str = r#"# My config. Keep this comment.
+[runtime]
+enabled = false   # trailing comment
+
+# The local server.
+[[providers]]
+id = "ollama"
+kind = "openai_compatible"
+base_url = "http://localhost:11434/v1"
+model = "llama"
+tiers = ["light"]
+
+# Work key, set by hand.
+[[providers]]
+id = "work"
+kind = "anthropic"
+model = "claude-x"
+api_key = "env:WORK_KEY"   # in my shell profile
+tiers = ["synthesis"]
+"#;
+
+    #[test]
+    fn replace_and_remove_keep_every_other_byte() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, HAND_WRITTEN).unwrap();
+        let secrets = MemorySecrets::new();
+        let e = entry("custom", KeyRef::Keychain("custom".into()));
+        write_provider(&path, &secrets, &e, GOOD).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.starts_with(HAND_WRITTEN));
+
+        // Same keychain reference: only the secret changes.
+        let change = KeyChange {
+            old: Some(ApiKeyRef::Keychain("custom".into())),
+            new: KeyRef::Keychain("custom".into()),
+            base_url: None,
+        };
+        assert_eq!(
+            replace_key(&path, &secrets, "custom", &change, "sk-new".into()).unwrap(),
+            Written::Saved
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+        assert_eq!(
+            secrets.get(&provider_account("custom")).unwrap().as_deref(),
+            Some("sk-new")
+        );
+
+        // A hand-written env: provider moves to the keychain, with a new address; only its
+        // api_key line changes (comment and all) and base_url is added after the header.
+        let change = KeyChange {
+            old: Some(ApiKeyRef::Env("WORK_KEY".into())),
+            new: KeyRef::Keychain("work".into()),
+            base_url: Some(Some("https://gw.example".into())),
+        };
+        replace_key(&path, &secrets, "work", &change, "sk-work".into()).unwrap();
+        let edited = std::fs::read_to_string(&path).unwrap();
+        let want = saved
+            .replace(
+                "api_key = \"env:WORK_KEY\"   # in my shell profile\n",
+                "api_key = \"keychain:work\"\n",
+            )
+            .replace(
+                "[[providers]]\nid = \"work\"\n",
+                "[[providers]]\nbase_url = \"https://gw.example\"\nid = \"work\"\n",
+            );
+        assert_eq!(edited, want);
+        assert_eq!(
+            secrets.get(&provider_account("work")).unwrap().as_deref(),
+            Some("sk-work")
+        );
+
+        // Removing ours drops the table and our comment; the rest is byte for byte the same.
+        remove_provider(
+            &path,
+            &secrets,
+            "custom",
+            Some(&ApiKeyRef::Keychain("custom".into())),
+        )
+        .unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            after,
+            want.replace(&format!("\n{}{}", e.comment(), e.toml().unwrap()), "")
+        );
+        assert!(secrets.get(&provider_account("custom")).unwrap().is_none());
+
+        // Removing a hand-written one in the middle keeps the comment that belongs to the next
+        // table and everything else.
+        let text = HAND_WRITTEN.replace(
+            "tiers = [\"light\"]\n\n# Work key",
+            "tiers = [\"light\"]\napi_key = \"env:OLLAMA\"\n\n# Work key",
+        );
+        std::fs::write(&path, &text).unwrap();
+        remove_provider(&path, &secrets, "ollama", None).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            after,
+            text.replace(
+                "[[providers]]\nid = \"ollama\"\nkind = \"openai_compatible\"\nbase_url = \"http://localhost:11434/v1\"\nmodel = \"llama\"\ntiers = [\"light\"]\napi_key = \"env:OLLAMA\"\n",
+                ""
+            )
+        );
+        assert!(after.contains("# The local server.\n\n# Work key"));
+        assert!(remove_provider_text(&after, "nope").is_none());
+    }
+
+    #[test]
+    fn only_key_backed_providers_are_editable() {
+        let cfg = Config::parse(HAND_WRITTEN).unwrap();
+        let find = |id: &str| cfg.providers.iter().find(|p| p.id.as_str() == id);
+        assert_eq!(editable(find("nope"), "nope").unwrap_err(), Reason::NotFound);
+        assert_eq!(
+            editable(find("ollama"), "ollama").unwrap_err(),
+            Reason::NotEditable
+        );
+        assert!(editable(find("work"), "work").is_ok());
+        let mut local = find("work").unwrap().clone();
+        local.id = ProviderId::new("local-chat");
+        assert_eq!(
+            editable(Some(&local), "local-chat").unwrap_err(),
+            Reason::NotEditable
+        );
+    }
+
+    #[test]
+    fn the_store_resolver_reads_the_secret_store_and_environment() {
+        let secrets = Arc::new(MemorySecrets::new());
+        secrets.set(&provider_account("custom"), " sk-x \n").unwrap();
+        let r = StoreResolver {
+            secrets: secrets.clone(),
+            env: Arc::new(|v| (v == "SET").then(|| "sk-env".to_owned())),
+        };
+        let get = |s: &str| r.resolve(&s.parse().unwrap());
+        assert_eq!(get("keychain:custom").unwrap().expose(), "sk-x");
+        assert_eq!(get("env:SET").unwrap().expose(), "sk-env");
+        assert!(matches!(get("env:UNSET"), Err(Error::NotFound(_))));
+        assert!(matches!(get("keychain:other"), Err(Error::NotFound(_))));
+        let broken = StoreResolver {
+            secrets: Arc::new(NoKeyring),
+            env: process_env(),
+        };
+        assert!(broken.resolve(&"keychain:x".parse().unwrap()).is_err());
     }
 }

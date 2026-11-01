@@ -169,6 +169,24 @@ export interface SourceInfo {
   settings?: SourceSettings;
   /** Plain-language sync health (FF2); absent from older daemons. */
   health?: SourceHealth | null;
+  /** KK2: what the last folder scan found and skipped; absent for other kinds and older daemons. */
+  scan?: ScanReport | null;
+}
+
+/** KK2: a folder scan's counts, so a folder with nothing indexable says so instead of spinning. */
+export interface ScanReport {
+  /** The walk of this pass ended. */
+  finished: boolean;
+  /** Files that will be (or already are) indexed this pass: the progress total. */
+  found: number;
+  unsupported: number;
+  too_large: number;
+  unreadable: number;
+  roots_missing: number;
+  roots_denied: number;
+  max_file_bytes: number;
+  /** Up to five examples of skipped files. */
+  skipped?: { path: string; reason: "unsupported" | "too_large" | "unreadable" | string; bytes?: number | null }[];
 }
 
 /** Codes of {@link SourceHealth.code}; unknown codes fall back to the daemon's English text. */
@@ -185,7 +203,11 @@ export type SourceHealthCode =
   | "too_large"
   | "config"
   | "item_errors"
-  | "error";
+  | "error"
+  /** KK2: the folder holds nothing Nugget can index. */
+  | "nothing_indexable"
+  /** KK2: the folder can't be opened (permission denied). */
+  | "unreadable";
 
 export interface SourceHealth {
   code: SourceHealthCode | string;
@@ -1609,6 +1631,8 @@ export const doubletapApi = {
   status: () => call<DoubleTapStatus>("doubletap_status"),
   /** macOS: opens the Accessibility / Input Monitoring prompts. Elsewhere just reports status. */
   requestPermissions: () => call<DoubleTapStatus>("doubletap_request_permissions"),
+  /** KK2 (GG6-19), macOS: open System Settings at a Privacy pane; `false` where there is none. */
+  openPrivacySettings: (pane: "accessibility" | "input_monitoring") => call<boolean>("doubletap_open_privacy_settings", { pane }),
   defaultExcluded: () => call<string[]>("doubletap_default_excluded"),
   /** Start a draft as if the trigger fired. */
   fire: () => call<void>("doubletap_fire"),
@@ -2156,7 +2180,7 @@ export interface AiKeySaveRequest {
 export interface AiKeySaveResult extends AiKeyTestResult {
   saved: boolean;
   provider_id: string | null;
-  /** The daemon reads providers at start: always true. */
+  /** Kept for older clients: always false (the provider is usable right away). */
   restart_required: boolean;
 }
 
@@ -2760,3 +2784,64 @@ export type ItemPreview = {
 export function utcOffsetMinutes(d: Date = new Date()): number {
   return -d.getTimezoneOffset();
 }
+
+// ---- KK2: AI keys ----
+
+/** Every reason `ai.key.*` can answer with (the Z3 ones plus replace/remove and the env fallback). */
+export type AiKeyOutcome = AiKeyReason | "no_keychain" | "env_missing" | "not_found" | "not_editable";
+
+/** Where the key comes from: typed (goes to the OS keychain), or the daemon's environment variable. */
+export type AiKeySource = { api_key: string; key_ref?: undefined } | { key_ref: `env:${string}`; api_key?: undefined };
+
+export type AiKeyCheckRequest = Omit<AiKeyTestRequest, "api_key"> & AiKeySource;
+export type AiKeyAddRequest = Omit<AiKeySaveRequest, "api_key"> & AiKeySource;
+
+/** `ai.key.update`: a new key (or variable) for a saved provider; `base_url` replaces the address when set. */
+export type AiKeyUpdateRequest = { name: string; base_url?: string | null } & AiKeySource;
+
+export interface AiKeyCheckResult extends Omit<AiKeyTestResult, "reason"> {
+  reason: AiKeyOutcome;
+}
+
+export interface AiKeyAddResult extends Omit<AiKeySaveResult, "reason"> {
+  reason: AiKeyOutcome;
+  /** With `no_keychain`: a variable name to suggest, e.g. `NUGGET_OPENAI_KEY`. */
+  suggested_env?: string;
+}
+
+export interface AiKeyRemoveResult {
+  ok: boolean;
+  reason: AiKeyOutcome;
+  message: string;
+  removed: boolean;
+  provider_id: string;
+}
+
+/** A provider that uses a key (`ai.key.saved`). */
+export interface SavedKeyProvider {
+  id: string;
+  kind: AiKeyKind;
+  base_url: string | null;
+  model: string;
+  /** Where its key is: the OS keychain or an environment variable. */
+  key: "keychain" | "env";
+  env_var: string | null;
+  /** Routed right now. */
+  available: boolean;
+  /** Why it is not (from the daemon, English). */
+  error: string | null;
+}
+
+/** A valid environment variable name for `key_ref`. */
+export const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+
+export const aiKeysApi = {
+  test: (request: AiKeyCheckRequest) => call<AiKeyCheckResult>("ai_key_test", { request }),
+  /** Check, then save; the provider is usable right away (no restart). */
+  save: (request: AiKeyAddRequest) => call<AiKeyAddResult>("ai_key_save", { request }),
+  /** Check a new key for a saved provider, then replace it. */
+  update: (request: AiKeyUpdateRequest) => call<AiKeyAddResult>("ai_key_update", { request }),
+  /** Delete the provider's key and remove it from config.toml. */
+  remove: (name: string) => call<AiKeyRemoveResult>("ai_key_remove", { request: { name } }),
+  saved: async () => (await call<{ providers: SavedKeyProvider[] }>("ai_key_saved")).providers,
+};

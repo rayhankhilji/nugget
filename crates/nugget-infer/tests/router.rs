@@ -390,3 +390,57 @@ fn tier_map_follows_config_order() {
     assert_eq!(get(Tier::Synthesis), vec!["cloud"]);
     let _: &ProviderConfig = &file.providers[0];
 }
+
+#[test]
+fn providers_can_be_added_replaced_and_removed_while_in_use() {
+    let a = Fake::new("a", Behaviour::Ok);
+    let router = Router::new(vec![a], tiers(&[(Tier::Light, &["a"])]));
+    assert!(
+        router
+            .route(Tier::Synthesis, &Capabilities::default())
+            .is_err()
+    );
+
+    // A new id joins its tiers after the providers already there.
+    router.set_provider(
+        Fake::new("b", Behaviour::Ok),
+        &[Tier::Light, Tier::Synthesis],
+    );
+    let none = Capabilities::default();
+    assert_eq!(ids(&router.candidates(Tier::Light, &none)), ["a", "b"]);
+    assert_eq!(
+        router.route(Tier::Synthesis, &none).unwrap().id().as_str(),
+        "b"
+    );
+    assert_eq!(
+        router.tiers_of(&ProviderId::new("b")),
+        [Tier::Light, Tier::Synthesis]
+    );
+    assert_eq!(ids(&router.providers()), ["a", "b"]);
+
+    // Replacing keeps the place and drops the cooldown.
+    router.report_failure(&ProviderId::new("a"));
+    let a2 = Fake::new("a", Behaviour::Ok);
+    router.set_provider(a2.clone(), &[Tier::Light]);
+    assert!(!router.in_cooldown(&ProviderId::new("a")));
+    assert_eq!(ids(&router.candidates(Tier::Light, &none)), ["a", "b"]);
+    assert!(Arc::ptr_eq(
+        &(router.provider(&ProviderId::new("a")).unwrap()),
+        &(a2 as Arc<dyn Provider>)
+    ));
+    assert_eq!(router.tiers_of(&ProviderId::new("a")), [Tier::Light]);
+
+    // Removing stops routing to it, built or added.
+    assert!(router.remove_provider(&ProviderId::new("b")));
+    assert!(!router.remove_provider(&ProviderId::new("b")));
+    assert!(matches!(
+        router.route(Tier::Synthesis, &none),
+        Err(Error::NotFound(_))
+    ));
+    assert!(router.remove_provider(&ProviderId::new("a")));
+    assert!(router.providers().is_empty());
+    assert!(router.route(Tier::Light, &none).is_err());
+    // And it can come back.
+    router.set_provider(Fake::new("a", Behaviour::Ok), &[Tier::Light]);
+    assert_eq!(ids(&router.candidates(Tier::Light, &none)), ["a"]);
+}

@@ -136,9 +136,12 @@ pub fn tier_map_from_configs(configs: &[ProviderConfig]) -> TierMap {
 pub const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
 
 pub struct Router {
-    providers: HashMap<ProviderId, Arc<dyn Provider>>,
-    order: Vec<ProviderId>,
+    providers: RwLock<HashMap<ProviderId, Arc<dyn Provider>>>,
+    order: RwLock<Vec<ProviderId>>,
     tiers: TierMap,
+    /// Tier entries of providers added after construction ([`Router::set_provider`]), after the
+    /// constructed ones.
+    added: RwLock<TierMap>,
     caps: RwLock<HashMap<ProviderId, Capabilities>>,
     failed_at: Mutex<HashMap<ProviderId, Instant>>,
     cooldown: Duration,
@@ -158,9 +161,10 @@ impl Router {
             }
         }
         Self {
-            providers,
-            order,
+            providers: RwLock::new(providers),
+            order: RwLock::new(order),
             tiers: tier_map,
+            added: RwLock::new(TierMap::new()),
             caps: RwLock::new(HashMap::new()),
             failed_at: Mutex::new(HashMap::new()),
             cooldown: DEFAULT_COOLDOWN,
@@ -227,31 +231,113 @@ impl Router {
     }
 
     pub fn provider(&self, id: &ProviderId) -> Option<Arc<dyn Provider>> {
-        self.providers.get(id).cloned()
+        self.live().get(id).cloned()
     }
 
-    /// All providers, in construction order.
+    /// All providers, in construction order (providers added later last).
     pub fn providers(&self) -> Vec<Arc<dyn Provider>> {
+        let live = self.live();
         self.order
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .filter_map(|id| self.providers.get(id).cloned())
+            .filter_map(|id| live.get(id).cloned())
             .collect()
     }
 
+    /// The tier map the router was built with. Providers added later with
+    /// [`Router::set_provider`] are not in it (see [`Router::tiers_of`]).
     pub fn tiers(&self) -> &TierMap {
         &self.tiers
     }
 
-    /// Tiers a provider is assigned to.
+    /// Tiers a provider is assigned to (including tiers given to [`Router::set_provider`]).
     pub fn tiers_of(&self, id: &ProviderId) -> Vec<Tier> {
+        let added = self.added.read().unwrap_or_else(|e| e.into_inner());
         let mut t: Vec<Tier> = self
             .tiers
             .iter()
+            .chain(added.iter())
             .filter(|(_, ids)| ids.contains(id))
             .map(|(t, _)| *t)
             .collect();
         t.sort_by_key(|t| *t as u8);
+        t.dedup();
         t
+    }
+
+    /// Add a provider while the router is in use, or replace the one with the same id (for
+    /// example after its API key changed). A new id is routed on `tiers` after every provider
+    /// already there; a replaced one keeps its place (and its probed capabilities), and its
+    /// failure cooldown is cleared.
+    pub fn set_provider(&self, provider: Arc<dyn Provider>, tiers: &[Tier]) {
+        let id = provider.id().clone();
+        {
+            let mut order = self.order.write().unwrap_or_else(|e| e.into_inner());
+            if !order.contains(&id) {
+                order.push(id.clone());
+            }
+        }
+        {
+            let mut added = self.added.write().unwrap_or_else(|e| e.into_inner());
+            for tier in tiers {
+                let built = self.tiers.get(tier).is_some_and(|ids| ids.contains(&id));
+                let ids = added.entry(*tier).or_default();
+                if !built && !ids.contains(&id) {
+                    ids.push(id.clone());
+                }
+            }
+        }
+        self.report_success(&id);
+        self.providers
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, provider);
+    }
+
+    /// Stop routing to `id` (its probed capabilities and cooldown are forgotten). Returns
+    /// whether it was there.
+    pub fn remove_provider(&self, id: &ProviderId) -> bool {
+        let was = self
+            .providers
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id)
+            .is_some();
+        self.order
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|o| o != id);
+        for ids in self
+            .added
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .values_mut()
+        {
+            ids.retain(|o| o != id);
+        }
+        self.caps
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+        self.report_success(id);
+        was
+    }
+
+    fn live(&self) -> std::sync::RwLockReadGuard<'_, HashMap<ProviderId, Arc<dyn Provider>>> {
+        self.providers.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Provider ids for `tier`: the built ones, then ones added later.
+    fn tier_ids(&self, tier: Tier) -> Vec<ProviderId> {
+        let added = self.added.read().unwrap_or_else(|e| e.into_inner());
+        self.tiers
+            .get(&tier)
+            .into_iter()
+            .chain(added.get(&tier))
+            .flatten()
+            .cloned()
+            .collect()
     }
 
     /// Probe one provider and remember the result.
@@ -302,15 +388,16 @@ impl Router {
     /// Every provider for `tier` that satisfies `required`, healthy ones first, each group in
     /// configured order.
     pub fn candidates(&self, tier: Tier, required: &Capabilities) -> Vec<Arc<dyn Provider>> {
-        let ids = self.tiers.get(&tier).map(Vec::as_slice).unwrap_or_default();
+        let ids = self.tier_ids(tier);
+        let live = self.live();
         let (healthy, cooling): (Vec<&ProviderId>, Vec<&ProviderId>) = ids
             .iter()
-            .filter(|id| self.providers.contains_key(*id) && self.eligible(id, required))
+            .filter(|id| live.contains_key(*id) && self.eligible(id, required))
             .partition(|id| !self.cooling(id));
         healthy
             .into_iter()
             .chain(cooling)
-            .filter_map(|id| self.providers.get(id).cloned())
+            .filter_map(|id| live.get(id).cloned())
             .collect()
     }
 
@@ -323,10 +410,8 @@ impl Router {
     }
 
     fn no_candidate(&self, tier: Tier, required: &Capabilities) -> Error {
-        let configured = self
-            .tiers
-            .get(&tier)
-            .is_some_and(|ids| ids.iter().any(|id| self.providers.contains_key(id)));
+        let live = self.live();
+        let configured = self.tier_ids(tier).iter().any(|id| live.contains_key(id));
         if configured {
             Error::Unsupported(format!(
                 "no provider for tier {tier:?} has the required capabilities {required:?} (probe providers first)"
