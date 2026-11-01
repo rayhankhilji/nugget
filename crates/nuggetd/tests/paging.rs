@@ -143,7 +143,10 @@ async fn search_pages_cover_the_ranking_once_and_refuse_foreign_cursors() {
                 store,
                 &format!("heron-{i:02}"),
                 &format!("Heron note {i}"),
-                &format!("Herons wading in the marsh, note {i}. heron {}", "heron ".repeat(i % 5)),
+                &format!(
+                    "Herons wading in the marsh, note {i}. heron {}",
+                    "heron ".repeat(i % 5)
+                ),
                 i % 4 == 0,
             );
         }

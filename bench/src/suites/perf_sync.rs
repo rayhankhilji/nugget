@@ -76,7 +76,11 @@ pub fn run(ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
     run_with(ctx, &p, &exe)
 }
 
-pub fn run_with(ctx: &mut RunContext, p: &SyncParams, exe: &Path) -> Result<Vec<Metric>, BenchError> {
+pub fn run_with(
+    ctx: &mut RunContext,
+    p: &SyncParams,
+    exe: &Path,
+) -> Result<Vec<Metric>, BenchError> {
     if p.files == 0 {
         return Err(BenchError::Failed("the first-sync run needs files".into()));
     }
@@ -91,7 +95,15 @@ pub fn run_with(ctx: &mut RunContext, p: &SyncParams, exe: &Path) -> Result<Vec<
         .tempdir()?;
     let home = tmp.path().join("home");
     let paths = Paths::rooted(home.clone());
-    seed_home(&paths, &Corpus::generate(CorpusConfig { docs: 0, ..CorpusConfig::default() }), 384, seed)?;
+    seed_home(
+        &paths,
+        &Corpus::generate(CorpusConfig {
+            docs: 0,
+            ..CorpusConfig::default()
+        }),
+        384,
+        seed,
+    )?;
     let tree = tmp.path().join("tree");
     let corpus = Corpus::generate(CorpusConfig {
         docs: p.files,
@@ -149,13 +161,9 @@ async fn profile(
     let want = p.files as u64;
     let probe = &marker(p.files - 1, SYNC_VERSION);
     let st: IngestStatus = wait_for(&mut d, env.timeout, "the first sync", || async move {
-        let st: IngestStatus = crate::suites::perf_daemon::call(
-            c,
-            method::INGEST_STATUS,
-            json!({}),
-            call_timeout,
-        )
-        .await?;
+        let st: IngestStatus =
+            crate::suites::perf_daemon::call(c, method::INGEST_STATUS, json!({}), call_timeout)
+                .await?;
         let indexed = st.sources.iter().any(|s| s.id == *src && s.items >= want);
         if !(indexed && st.queue_depth == 0) {
             return Ok(None);

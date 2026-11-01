@@ -1285,7 +1285,7 @@ mod tests {
 
     fn keyed(key: &str, text: &str, embedding: Option<Vec<f32>>) -> Prepared {
         let mut p = prepared(text, "1", embedding);
-        p.item.key = key.into();
+        p.item.item.key = ItemKey::new(key);
         p.item.metadata = json!({});
         p
     }

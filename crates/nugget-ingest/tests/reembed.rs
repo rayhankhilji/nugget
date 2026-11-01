@@ -260,7 +260,10 @@ async fn a_dropped_send_releases_its_queue_depth() {
     tokio::time::sleep(Duration::from_millis(150)).await;
     let sent = st.sent.load(Ordering::SeqCst);
     assert!((2..8).contains(&sent), "sent {sent}");
-    assert_eq!(h.ingest.status().await.unwrap().queue_depth, sent as u64 + 1);
+    assert_eq!(
+        h.ingest.status().await.unwrap().queue_depth,
+        sent as u64 + 1
+    );
 
     // Stopping the source drops the connector's pending `send`.
     h.ingest
