@@ -17,6 +17,16 @@
 //!   [`IngestConfig::triage_batch_chars`] characters); the reply is two booleans per item. A
 //!   batch whose reply is unusable is retried one item per request; an item that fails
 //!   [`MAX_ATTEMPTS`] times is marked `state: "failed"` and stays sensitive.
+//! - **Failures are retried.** A failed item records how often it failed (`triage.failures`)
+//!   and when (`triage.failed_at`, Unix seconds). While the queue is empty and a triage model is
+//!   routable (and power allows), the job requeues failed items whose wait
+//!   ([`IngestConfig::triage_retry_ms`], fourfold per failure, capped at a day) has passed:
+//!   at start, when a batch succeeds after failures (a provider outage ended), on
+//!   [`Ingest::triage_now`](crate::Ingest::triage_now) (a model became ready), and then every
+//!   `triage_retry_ms` while retryable items remain. At most [`PAGE`] items are requeued per
+//!   scan. After [`IngestConfig::triage_max_failures`] failures an item stays failed until its
+//!   content changes. A requeued item is `pending` again (and still sensitive), so a restart
+//!   picks it up; it leaves `TriageProgress::failed` while it is retried.
 //! - **Low priority.** The job uses the model only while no interactive request (Ask, Double
 //!   Tap, agent) is in flight or ended within the grace period ([`Foreground`]), and abandons
 //!   its request the moment one starts; the batch is retried later. It also pauses under the
@@ -27,6 +37,8 @@
 //!
 //! [`IngestConfig::triage_batch`]: crate::IngestConfig::triage_batch
 //! [`IngestConfig::triage_batch_chars`]: crate::IngestConfig::triage_batch_chars
+//! [`IngestConfig::triage_retry_ms`]: crate::IngestConfig::triage_retry_ms
+//! [`IngestConfig::triage_max_failures`]: crate::IngestConfig::triage_max_failures
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -73,6 +85,15 @@ pub(crate) struct TriageQueue {
     done: u64,
     skipped: u64,
     failed: u64,
+    /// Items counted in `failed` (so a retried item leaves the count, and is never counted
+    /// twice).
+    counted_failed: HashSet<ItemRef>,
+    /// Scan for failed items to retry at the next chance (at start, after an outage, on
+    /// `triage_now`).
+    retry_due: bool,
+    /// The last scan found failed items still waiting for their retry time.
+    retry_waiting: bool,
+    last_retry_scan: Option<tokio::time::Instant>,
     state: TriageState,
 }
 
@@ -87,6 +108,10 @@ impl Default for TriageQueue {
             done: 0,
             skipped: 0,
             failed: 0,
+            counted_failed: HashSet::new(),
+            retry_due: true,
+            retry_waiting: false,
+            last_retry_scan: None,
             state: TriageState::Idle,
         }
     }
@@ -104,6 +129,11 @@ impl TriageQueue {
 
     pub(crate) fn skipped(&mut self) {
         self.skipped += 1;
+    }
+
+    /// Look for failed items to retry as soon as the job can.
+    pub(crate) fn retry_now(&mut self) {
+        self.retry_due = true;
     }
 
     fn progress(&self) -> TriageProgress {
@@ -153,9 +183,19 @@ pub(crate) async fn run(inner: Arc<Inner>) {
         }
         if lock(&inner.triage).queue.is_empty() {
             inner.set_triage_state(TriageState::Idle);
+            let (requeued, next) = retry_failed(&inner).await;
+            if requeued > 0 {
+                continue;
+            }
             tokio::select! {
                 _ = inner.shutdown.cancelled() => return,
                 _ = inner.triage_wake.notified() => {}
+                _ = async {
+                    match next {
+                        Some(d) => tokio::time::sleep(d).await,
+                        None => std::future::pending().await,
+                    }
+                } => {}
             }
             continue;
         }
@@ -197,7 +237,15 @@ pub(crate) async fn run(inner: Arc<Inner>) {
         }
         inner.set_triage_state(TriageState::Running);
         match run_batch(&inner, provider.as_ref()).await {
-            BatchOutcome::Labelled | BatchOutcome::Nothing => consecutive_failures = 0,
+            BatchOutcome::Labelled => {
+                if consecutive_failures > 0 {
+                    // The model answers again after failures (an outage ended): retry what
+                    // failed meanwhile once its wait has passed.
+                    lock(&inner.triage).retry_now();
+                }
+                consecutive_failures = 0;
+            }
+            BatchOutcome::Nothing => consecutive_failures = 0,
             BatchOutcome::Yielded => {}
             BatchOutcome::Failed => {
                 consecutive_failures += 1;
@@ -591,15 +639,26 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
             if !give_up.is_empty() {
                 let me = inner.clone();
                 let msg2 = msg.clone();
-                let failed = tokio::task::spawn_blocking(move || {
+                let marked = tokio::task::spawn_blocking(move || {
                     give_up
                         .iter()
                         .filter(|it| matches!(apply(&me, it, Verdict::Failed(&msg2)), Ok(Some(_))))
-                        .count() as u64
+                        .map(|it| it.item.clone())
+                        .collect::<Vec<_>>()
                 })
                 .await
-                .unwrap_or(0);
-                lock(&inner.triage).failed += failed;
+                .unwrap_or_default();
+                let failed = marked.len() as u64;
+                {
+                    let mut q = lock(&inner.triage);
+                    for r in marked {
+                        if q.counted_failed.insert(r) {
+                            q.failed += 1;
+                        }
+                    }
+                    // Retried once their wait passed (the periodic scan finds them).
+                    q.retry_waiting = true;
+                }
                 tracing::warn!(items = failed, error = %msg, "triage gave up on items; they stay searchable and count as sensitive");
             }
             BatchOutcome::Failed
@@ -700,9 +759,21 @@ fn apply(inner: &Inner, read: &Item, verdict: Verdict<'_>) -> Result<Option<bool
             pii || t.sensitive
         }
         Verdict::Failed(error) => {
+            // A retried item carries its earlier failures.
+            let failures = m
+                .get("triage")
+                .and_then(|t| t.get("failures"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .saturating_add(1);
             m.insert(
                 "triage".into(),
-                json!({"state": FAILED, "error": cap_error(error)}),
+                json!({
+                    "state": FAILED,
+                    "error": cap_error(error),
+                    "failures": failures,
+                    "failed_at": unix_now(),
+                }),
             );
             // Fail closed: never confirmed as safe for cloud models.
             true
@@ -720,4 +791,124 @@ fn apply(inner: &Inner, read: &Item, verdict: Verdict<'_>) -> Result<Option<bool
         return Ok(None);
     }
     Ok(Some(sensitive))
+}
+
+fn unix_now() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
+}
+
+/// Requeue failed items whose retry wait has passed (see the module docs). Returns how many
+/// were requeued and when to look again (`None`: only when woken).
+async fn retry_failed(inner: &Arc<Inner>) -> (usize, Option<Duration>) {
+    let max = inner.cfg.triage_max_failures;
+    if !inner.cfg.triage || max <= 1 {
+        return (0, None);
+    }
+    let every = Duration::from_millis(inner.cfg.triage_retry_ms.max(1));
+    let (due, waiting, since) = {
+        let q = lock(&inner.triage);
+        (
+            q.retry_due,
+            q.retry_waiting,
+            q.last_retry_scan.map(|t| t.elapsed()),
+        )
+    };
+    let periodic = waiting && since.is_none_or(|s| s >= every);
+    if !due && !periodic {
+        return (
+            0,
+            waiting.then(|| every.saturating_sub(since.unwrap_or_default())),
+        );
+    }
+    // Same gates as the batches: no model to retry with, or power says wait.
+    if inner
+        .router
+        .as_ref()
+        .and_then(|r| ai::triage_provider(r))
+        .is_none()
+    {
+        return (0, Some(NO_PROVIDER_POLL));
+    }
+    if inner.power.constrained() {
+        return (
+            0,
+            Some(Duration::from_millis(inner.cfg.power_poll_ms.max(10))),
+        );
+    }
+    let me = inner.clone();
+    let res = tokio::task::spawn_blocking(move || -> Result<(Vec<ItemRef>, bool)> {
+        let now = unix_now();
+        let mut after: Option<ItemRef> = None;
+        let mut requeue = Vec::new();
+        let mut waiting = false;
+        loop {
+            let page = me.store.items_failed_triage(after.as_ref(), max, PAGE)?;
+            let n = page.len();
+            for (r, failures, failed_at) in page {
+                after = Some(r.clone());
+                if requeue.len() >= PAGE {
+                    // The rest on the next scan, once these are through.
+                    return Ok((requeue, true));
+                }
+                let wait = me.cfg.triage_retry_after(failures).as_secs();
+                let age = u64::try_from(now.saturating_sub(failed_at)).unwrap_or(0);
+                if age < wait {
+                    waiting = true;
+                } else if reopen(&me, &r)? {
+                    requeue.push(r);
+                }
+            }
+            if n < PAGE || me.shutdown.is_cancelled() {
+                return Ok((requeue, waiting));
+            }
+        }
+    })
+    .await
+    .map_err(join_err)
+    .and_then(|r| r);
+    let mut q = lock(&inner.triage);
+    q.last_retry_scan = Some(tokio::time::Instant::now());
+    let (requeue, waiting) = match res {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "listing items whose triage failed failed");
+            return (0, Some(every));
+        }
+    };
+    let full = requeue.len() >= PAGE;
+    q.retry_due = full;
+    q.retry_waiting = waiting;
+    let n = requeue.len();
+    for r in requeue {
+        if q.counted_failed.remove(&r) {
+            q.failed = q.failed.saturating_sub(1);
+        }
+        q.push(r);
+    }
+    drop(q);
+    if n > 0 {
+        tracing::info!(items = n, "retrying triage of items that failed before");
+    }
+    (n, waiting.then_some(every))
+}
+
+/// Mark a failed item `pending` again, keeping its failure count and time. Under the write
+/// lock; nothing is written if it is no longer failed. Returns whether it was written.
+fn reopen(inner: &Inner, r: &ItemRef) -> Result<bool> {
+    let store = &inner.store;
+    let _w = lock(&inner.write_lock);
+    let Some(item) = store.get_item(r)? else {
+        return Ok(false);
+    };
+    let mut metadata = item.metadata.clone();
+    let Some(Value::Object(t)) = metadata.get_mut("triage") else {
+        return Ok(false);
+    };
+    if t.get("state").and_then(Value::as_str) != Some(FAILED) {
+        return Ok(false);
+    }
+    t.insert("state".into(), Value::String(PENDING.into()));
+    t.remove("error");
+    // Still sensitive (it was while failed): pending items count as sensitive until labelled.
+    store.set_item_metadata(&item.item, &item.content_hash, &metadata)
 }
