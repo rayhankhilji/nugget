@@ -342,7 +342,8 @@ fn is_cart_line_removal(text: &str, kw: &RiskKeywords) -> bool {
 
 /// What a click on `node` risks. `context` is the text around it (its dialog's title and text,
 /// the window title), consulted for confirming buttons such as "OK" in "Delete 3 files?".
-/// `None` (the element is not in the last snapshot) is treated as [`RiskClass::Send`].
+/// `None` (the element is not in the last snapshot) is treated as [`RiskClass::Send`]. The tools
+/// never get here with an unknown id: they rate it Edit and refuse to act on it.
 pub fn click_risk(node: Option<&UiNode>, context: &[String], kw: &RiskKeywords) -> RiskClass {
     click_risk_in(node, &[], context, kw)
 }
@@ -468,7 +469,8 @@ pub(crate) fn action_context(found: Option<&crate::state::Found>) -> nugget_poli
 }
 
 /// What typing into (or setting the value of) `node` risks: a secret field is Security, an
-/// unknown element Send, anything else Edit.
+/// unknown element Send, anything else Edit. (The tools rate an `element` id that is not on
+/// screen Edit before calling this, and refuse to act on it.)
 pub fn input_risk(node: Option<&UiNode>, explicit_id: bool) -> RiskClass {
     match node {
         Some(n) if is_secret_field(n) => RiskClass::Security,

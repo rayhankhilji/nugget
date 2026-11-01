@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
+use nugget_policy::RiskClass;
 use serde::{Deserialize, Serialize};
 
 use crate::tool::truncate;
@@ -30,10 +31,17 @@ pub struct Ambiguity {
 
 impl Ambiguity {
     /// The question put to the user: fixed text around the term and the candidates.
+    /// With no candidates, the item was never on screen (a delete about to act on a guess).
     pub fn question(&self) -> String {
+        let term = clean(&self.term, CANDIDATE_MAX);
+        if self.candidates.is_empty() {
+            return format!(
+                "Your request says “{term}”, but I have not found it on the screen, and the \
+                 selection may be something else. Which item do you mean, and where is it?"
+            );
+        }
         format!(
-            "Your request says “{}”, and I see more than one: {}. Which one did you mean?",
-            clean(&self.term, CANDIDATE_MAX),
+            "Your request says “{term}”, and I see more than one: {}. Which one did you mean?",
             self.candidates.join(", ")
         )
     }
@@ -62,6 +70,7 @@ const STOP_WORDS: &[&str] = &[
     "cancel", "reschedule", "schedule", "book", "set", "change", "update", "edit", "add",
     "create", "make", "find", "show", "read", "mark", "star", "flag", "pin", "call", "accept",
     "decline", "share", "save", "print", "check", "look", "go", "put", "give", "back",
+    "empty", "erase", "clear", "clean", "tidy", "buy", "pay", "purchase",
 ];
 
 /// Words that ask for several items at once: nothing to disambiguate.
@@ -109,7 +118,7 @@ pub fn ambiguity(goal: &str, targets: &[String]) -> Option<Ambiguity> {
     let mut seen = HashSet::new();
     let goal_words: Vec<(String, String)> = all
         .into_iter()
-        .filter(|(_, lower)| lower.chars().count() >= 2 && !STOP_WORDS.contains(&lower.as_str()))
+        .filter(|(_, lower)| is_content_word(lower))
         .filter(|(_, lower)| !extensions.contains(lower))
         .filter(|(_, lower)| seen.insert(lower.clone()))
         .collect();
@@ -180,6 +189,107 @@ pub fn ambiguity(goal: &str, targets: &[String]) -> Option<Ambiguity> {
     None
 }
 
+/// Words after which the goal names a place, not the object (`… in Documents`). Not "from",
+/// which as often names a sender ("the spam email from Prize Center").
+const PLACE_WORDS: &[&str] = &["in", "inside", "within", "under", "at"];
+
+/// The words naming what the goal acts on, as written: its content words before a place phrase
+/// ("annual report" in "Delete the annual report in Documents"). `None` when there are none or
+/// the goal asks for several items.
+pub fn goal_object(goal: &str) -> Option<String> {
+    let all = words(goal);
+    if all
+        .iter()
+        .any(|(_, lower)| MANY_WORDS.contains(&lower.as_str()))
+    {
+        return None;
+    }
+    let mut object = Vec::new();
+    for (word, lower) in all {
+        if PLACE_WORDS.contains(&lower.as_str()) {
+            break;
+        }
+        if is_content_word(&lower) {
+            object.push(word);
+        }
+    }
+    (!object.is_empty()).then(|| object.join(" "))
+}
+
+/// Whether some target shows a word of the goal's object ([`goal_object`]), singular or plural.
+pub fn shows_object(goal: &str, targets: &[String]) -> bool {
+    let Some(object) = goal_object(goal) else {
+        return true;
+    };
+    let wanted: Vec<String> = words(&object).into_iter().map(|(_, l)| l).collect();
+    targets.iter().any(|t| {
+        words(t).iter().any(|(_, w)| {
+            wanted
+                .iter()
+                .any(|g| w == g || is_plural_of(w, g) || is_plural_of(g, w))
+        })
+    })
+}
+
+/// Labels of steps that destroy data for good.
+const IRREVERSIBLE: &[&str] = &["empty", "erase", "purge", "wipe", "permanently", "shred"];
+
+/// When `label` names an irreversible step (Empty Trash, Erase) that `goal` does not ask for:
+/// the word. Asking for any irreversible step ("empty", "erase", "permanently") allows them.
+pub fn unrequested_irreversible(goal: &str, label: &str) -> Option<&'static str> {
+    let label_words: Vec<String> = words(label).into_iter().map(|(_, l)| l).collect();
+    let word = IRREVERSIBLE
+        .iter()
+        .copied()
+        .find(|w| label_words.iter().any(|l| l == w))?;
+    let goal_words: Vec<String> = words(goal).into_iter().map(|(_, l)| l).collect();
+    let asked = goal_words.iter().any(|g| {
+        IRREVERSIBLE.iter().any(|w| {
+            g == w
+                || g.strip_prefix(w)
+                    .is_some_and(|r| ["s", "ed", "ing"].contains(&r))
+        })
+    });
+    (!asked).then_some(word)
+}
+
+/// Verbs that need a send, a deletion or a payment to have happened before the request is done.
+const SEND_VERBS: &[&str] = &["send", "reply", "forward", "respond"];
+const DESTROY_VERBS: &[&str] = &["delete", "trash", "remove", "erase"];
+const SPEND_VERBS: &[&str] = &["buy", "pay", "purchase"];
+/// Words that say the request stops short of the act ("draft a reply, don't send it").
+const STOP_SHORT: &[&str] = &["dont", "not", "without", "draft", "never"];
+
+/// The least risk class some action must have reached for `goal` to be done: [`RiskClass::Send`]
+/// for "reply", "send", "forward" (or a goal that starts with "email"), [`RiskClass::Destroy`]
+/// for "delete", [`RiskClass::Spend`] for "buy" or "pay". `None` when the goal names none of these
+/// or says it stops short.
+pub fn required_risk(goal: &str) -> Option<RiskClass> {
+    let w: Vec<String> = words(goal).into_iter().map(|(_, l)| l).collect();
+    if w.iter().any(|x| STOP_SHORT.contains(&x.as_str())) {
+        return None;
+    }
+    let has = |verbs: &[&str]| w.iter().any(|x| verbs.contains(&x.as_str()));
+    let first_is_mail = w.first().is_some_and(|x| x == "email" || x == "mail");
+    if has(SEND_VERBS) || first_is_mail {
+        Some(RiskClass::Send)
+    } else if has(DESTROY_VERBS) {
+        Some(RiskClass::Destroy)
+    } else if has(SPEND_VERBS) {
+        Some(RiskClass::Spend)
+    } else {
+        None
+    }
+}
+
+/// A word that can say which item is meant: two characters or more, not a [`STOP_WORDS`] word,
+/// and not a bare number of one or two digits ("2 files"; a year such as `2023` still counts,
+/// and so does a clock time, which [`words`] keeps whole).
+fn is_content_word(lower: &str) -> bool {
+    let n = lower.chars().count();
+    n >= 2 && !STOP_WORDS.contains(&lower) && !(n <= 2 && lower.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// `plural` is `singular` with an `s` or `es` ending.
 fn is_plural_of(plural: &str, singular: &str) -> bool {
     plural
@@ -191,8 +301,24 @@ fn is_plural_of(plural: &str, singular: &str) -> bool {
 /// a word dropped and a possessive `'s` (or a trailing `'`) removed.
 fn words(text: &str) -> Vec<(String, String)> {
     let text = text.replace('’', "'");
+    // A clock time ("13:00") is one word: its parts alone would match every time on screen.
+    let chars: Vec<char> = text.chars().collect();
+    let keep = |i: usize| {
+        let c = chars[i];
+        c.is_alphanumeric()
+            || c == '\''
+            || (c == ':'
+                && i > 0
+                && chars[i - 1].is_ascii_digit()
+                && chars.get(i + 1).is_some_and(char::is_ascii_digit))
+    };
+    let text: String = chars
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| if keep(i) { c } else { ' ' })
+        .collect();
     let mut out = Vec::new();
-    for raw in text.split(|c: char| !(c.is_alphanumeric() || c == '\'')) {
+    for raw in text.split(' ') {
         let raw = raw.trim_matches('\'');
         let raw = raw
             .strip_suffix("'s")
@@ -391,5 +517,93 @@ mod tests {
             ambiguity("Delete the q3 report", &two).map(|a| a.term),
             Some("q3 report".into())
         );
+    }
+
+    #[test]
+    fn goal_objects_and_whether_the_screen_shows_them() {
+        assert_eq!(
+            goal_object("Delete the annual report in Documents").as_deref(),
+            Some("annual report")
+        );
+        assert_eq!(goal_object("Delete all the newsletters"), None);
+        assert_eq!(goal_object("Empty the trash"), None);
+        assert_eq!(
+            goal_object("Delete the spam email from Prize Center").as_deref(),
+            Some("spam Prize Center")
+        );
+        let folders = t(&["Folder Documents", "Folder Downloads"]);
+        assert!(!shows_object(
+            "Delete the annual report in Documents",
+            &folders
+        ));
+        let files = t(&["File annual-report-2023.pdf", "File notes.txt"]);
+        assert!(shows_object(
+            "Delete the annual report in Documents",
+            &files
+        ));
+        assert!(shows_object("Empty the trash", &folders));
+    }
+
+    #[test]
+    fn irreversible_steps_need_asking_for() {
+        let goal = "Delete backup.zip from Downloads";
+        assert_eq!(unrequested_irreversible(goal, "Empty Trash"), Some("empty"));
+        assert_eq!(unrequested_irreversible(goal, "Move to Trash"), None);
+        assert_eq!(
+            unrequested_irreversible("Empty the trash", "Empty Trash"),
+            None
+        );
+        assert_eq!(
+            unrequested_irreversible("Erase this laptop before I sell it", "Erase all content"),
+            None
+        );
+        assert_eq!(
+            unrequested_irreversible("Permanently delete old.txt", "Empty Trash"),
+            None
+        );
+    }
+
+    #[test]
+    fn required_risk_follows_the_verb() {
+        assert_eq!(
+            required_risk("Reply to Sam and tell him yes"),
+            Some(RiskClass::Send)
+        );
+        assert_eq!(required_risk("Email Bob about Q3"), Some(RiskClass::Send));
+        assert_eq!(
+            required_risk("Delete the old newsletter email"),
+            Some(RiskClass::Destroy)
+        );
+        assert_eq!(required_risk("Buy a USB-C cable"), Some(RiskClass::Spend));
+        assert_eq!(
+            required_risk("Draft a reply to Sam but don't send it"),
+            None
+        );
+        assert_eq!(required_risk("Turn on dark mode"), None);
+    }
+
+    #[test]
+    fn clock_times_do_not_make_a_calendar_ambiguous() {
+        let week = t(&[
+            "Monday 09:00 Team standup",
+            "Tuesday 11:00 Design review",
+            "Thursday 13:00 Customer call",
+        ]);
+        assert_eq!(
+            ambiguity(
+                "Block Wednesday 10:00 in my calendar as \"Focus time\".",
+                &week
+            ),
+            None
+        );
+        // The time still picks out its own event.
+        let thursday = t(&[
+            "Thursday 13:00 Customer call",
+            "Thursday 14:00 1:1 with Sam",
+        ]);
+        assert_eq!(ambiguity("Move my Thursday 13:00 meeting", &thursday), None);
+        assert!(ambiguity("Cancel my Thursday meeting", &thursday).is_some());
+        let reports = t(&["File report-2023.pdf", "File report-2024.pdf"]);
+        assert_eq!(ambiguity("Delete the 2023 report", &reports), None);
     }
 }
