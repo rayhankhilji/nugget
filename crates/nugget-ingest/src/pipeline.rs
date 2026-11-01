@@ -24,6 +24,9 @@
 //! is written at once. If the batch transaction fails, its items are written one by one, so a
 //! bad item is rejected (or fails) alone, exactly as without batching. An item counts as
 //! applied (freshness, progress, the queue gauge, triage) only once its write committed.
+//! A batch is written on a blocking thread while the worker goes on preparing the next items;
+//! the next batch starts only after it ends (one write at a time, in order), and anything
+//! ordered after the upserts (a delete, a checkpoint) waits for their write to end.
 //!
 //! `Delete` removes the item. `checkpoint(cursor)` is queued behind every change sent before it,
 //! so the cursor is stored only after they were applied; if any change since the start of the
@@ -212,6 +215,22 @@ type Preparing = std::pin::Pin<Box<dyn std::future::Future<Output = InFlight> + 
 /// shared extraction slots).
 pub(crate) const PREPARE_AHEAD: usize = 4;
 
+/// A batch being written on a blocking thread, with what to account for once it is.
+struct Writing {
+    task: tokio::task::JoinHandle<Vec<Result<()>>>,
+    written: Vec<Written>,
+}
+
+/// The end of the write in `writing` (never, without one).
+async fn wait_write(
+    writing: &mut Option<Writing>,
+) -> std::result::Result<Vec<Result<()>>, tokio::task::JoinError> {
+    match writing {
+        Some(w) => (&mut w.task).await,
+        None => std::future::pending().await,
+    }
+}
+
 /// What is left of a [`PendingWrite`] once its item went to the store.
 struct Written {
     item: ItemRef,
@@ -263,6 +282,8 @@ pub(crate) struct Worker {
     live: bool,
     /// Prepared upserts not yet written (see "Batched writes" above), in queue order.
     pending: Vec<PendingWrite>,
+    /// The batch being written (see [`Writing`]): at most one at a time.
+    writing: Option<Writing>,
     /// Upserts being prepared, oldest first (results come out in this order)...
     inflight: FuturesOrdered<Preparing>,
     /// ...and their keys and versions, for the version skip.
@@ -293,6 +314,7 @@ impl Worker {
             pending: Vec::new(),
             inflight: FuturesOrdered::new(),
             inflight_keys: VecDeque::new(),
+            writing: None,
             ahead: PREPARE_AHEAD.min(inner_slots).max(1),
         }
     }
@@ -318,8 +340,11 @@ impl Worker {
                         break;
                     }
                 },
+                res = wait_write(&mut self.writing), if self.writing.is_some() => {
+                    self.written(res).await;
+                }
                 // A slow preparation never holds back the items before it for long.
-                _ = sleep_until(deadline), if deadline.is_some() => self.flush().await,
+                _ = sleep_until(deadline), if deadline.is_some() => self.start_flush().await,
             }
             // Write the batch once it is full or nothing more is coming right now.
             // (The deadline is checked here too: a long run of version-skipped changes keeps
@@ -331,9 +356,12 @@ impl Worker {
                     .first()
                     .is_some_and(|p| p.since.elapsed() >= BATCH_MAX_WAIT)
             {
-                self.flush().await;
+                self.start_flush().await;
             }
         }
+        // A batch already handed to the store is written either way: account for it (a short
+        // wait, the write is under way).
+        self.finish_write().await;
         // Discard what is left: nothing after the last checkpoint is committed, so the next
         // pass re-sends it. Dropped checkpoint acks resolve to `Cancelled`. Upserts being
         // prepared or waiting for their batch are abandoned like an upsert cancelled while
@@ -495,19 +523,43 @@ impl Worker {
     /// Write the pending upserts: in one transaction, or one by one if that fails (so a bad
     /// item fails alone). Never abandoned half-way.
     async fn flush(&mut self) {
+        self.start_flush().await;
+        self.finish_write().await;
+    }
+
+    /// Start writing the pending upserts on a blocking thread (after the batch being written,
+    /// if any, is done: one write at a time, in order), while the worker prepares more.
+    async fn start_flush(&mut self) {
         if self.pending.is_empty() {
             return;
         }
+        self.finish_write().await;
         let (batch, written): (Vec<Prepared>, Vec<Written>) = std::mem::take(&mut self.pending)
             .into_iter()
             .map(PendingWrite::split)
             .unzip();
         let inner = self.inner.clone();
-        let res = tokio::task::spawn_blocking(move || {
+        let task = tokio::task::spawn_blocking(move || {
             let _w = lock(&inner.write_lock);
             persist_all(&inner.store, batch)
-        })
-        .await;
+        });
+        self.writing = Some(Writing { task, written });
+    }
+
+    /// Wait for the batch being written, if any, and account for its items.
+    async fn finish_write(&mut self) {
+        if self.writing.is_none() {
+            return;
+        }
+        let res = wait_write(&mut self.writing).await;
+        self.written(res).await;
+    }
+
+    /// Account for the items of the batch whose write just ended (`res`, from its task).
+    async fn written(&mut self, res: std::result::Result<Vec<Result<()>>, tokio::task::JoinError>) {
+        let Some(Writing { written, .. }) = self.writing.take() else {
+            return;
+        };
         let results: Vec<Result<()>> = match res {
             Ok(r) => r,
             // The blocking task panicked: what it wrote is unknown, so every item counts as
@@ -667,8 +719,8 @@ impl Worker {
         observed: Instant,
         live_upsert: bool,
     ) -> Option<Outcome> {
-        // 1. Version skip. An upsert of the same key still being prepared or waiting for its
-        //    batch counts as stored (the latest one).
+        // 1. Version skip. An upsert of the same key still being prepared, waiting for its
+        //    batch or being written counts as stored (the latest one).
         let queued = self
             .inflight_keys
             .iter()
@@ -681,6 +733,15 @@ impl Worker {
                     .rev()
                     .find(|p| p.item.key == doc.key)
                     .map(|p| p.version.clone())
+            })
+            .or_else(|| {
+                self.writing.as_ref().and_then(|w| {
+                    w.written
+                        .iter()
+                        .rev()
+                        .find(|x| x.item.key == doc.key)
+                        .map(|x| x.version.clone())
+                })
             });
         let stored = match queued {
             Some(v) => Some(v),
