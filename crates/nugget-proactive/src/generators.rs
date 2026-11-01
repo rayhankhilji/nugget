@@ -645,7 +645,11 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 stable_hash(&[&key_id, &ev.start.unix_timestamp().to_string()])
             ),
             kind: CandidateKind::MeetingPrep,
-            title: format!("Prepare for {} (in {hours} h)", ev.title),
+            title: format!(
+                "Prepare for {} (in {hours} hour{})",
+                ev.title,
+                if hours == 1 { "" } else { "s" }
+            ),
             detail: format!(
                 "With {}. {} related thread{}, {} note{}.",
                 names.join(", "),
