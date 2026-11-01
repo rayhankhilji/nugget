@@ -302,6 +302,8 @@ pub struct FakeProvider {
     pub chats_completed: AtomicUsize,
     /// Reply to triage with unusable output.
     pub chat_invalid: AtomicBool,
+    /// Simulated prefill: microseconds of delay per character of the request.
+    pub prefill_us_per_char: std::sync::atomic::AtomicU64,
     /// Reply with unusable output to requests containing this marker.
     pub invalid_marker: Mutex<Option<String>>,
     /// Fail every chat as an unreachable server would (`Error::Network`).
@@ -324,6 +326,7 @@ impl FakeProvider {
             chat_open: tokio::sync::watch::channel(true).0,
             chats_completed: AtomicUsize::new(0),
             chat_invalid: AtomicBool::new(false),
+            prefill_us_per_char: std::sync::atomic::AtomicU64::new(0),
             invalid_marker: Mutex::new(None),
             chat_down: AtomicBool::new(false),
         })
@@ -393,6 +396,10 @@ impl Provider for FakeProvider {
                 break;
             }
         }
+        let us = self.prefill_us_per_char.load(Ordering::SeqCst);
+        if us > 0 {
+            tokio::time::sleep(Duration::from_micros(us * text.chars().count() as u64)).await;
+        }
         self.chats_completed.fetch_add(1, Ordering::SeqCst);
         // One label pair per `<document n="k">` block of a triage batch.
         let items: Vec<Value> = text
@@ -404,10 +411,16 @@ impl Provider for FakeProvider {
                     .next()
                     .and_then(|k| k.parse().ok())
                     .unwrap_or(0);
+                let sensitive = block.contains("HUSHHUSH");
                 json!({
                     "n": n,
+                    "topic": if sensitive { "money" } else { "work" },
+                    "health": false,
+                    "money": sensitive,
+                    "legal": false,
+                    "identity": false,
+                    "credentials": false,
                     "junk": block.contains("SPAM"),
-                    "sensitive": block.contains("HUSHHUSH"),
                 })
             })
             .collect();

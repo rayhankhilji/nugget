@@ -65,6 +65,11 @@ use crate::util::cap_error;
 pub(crate) const MAX_ATTEMPTS: u32 = 3;
 /// Items listed per page by the recovery scan.
 const PAGE: usize = 256;
+/// Characters of document text per request before any prefill has been measured.
+const FIRST_REQUEST_CHARS: usize = 800;
+/// Fewest characters per request, whatever the measured rate (a request must carry some text).
+const MIN_REQUEST_CHARS: usize = 300;
+
 /// How long the job lets a part-filled batch gather more items (a sync writes items quickly).
 const GATHER: Duration = Duration::from_millis(250);
 /// How often the job re-checks for a triage provider while none is routable.
@@ -104,6 +109,9 @@ pub(crate) struct TriageQueue {
     /// Requeued failed items: their failures do not back off the whole job.
     retrying: HashSet<ItemRef>,
     state: TriageState,
+    /// Measured prefill cost of triage prompts, ms per character of document text
+    /// (exponential moving average of time to first token over prompt size).
+    ms_per_char: Option<f64>,
 }
 
 impl Default for TriageQueue {
@@ -123,6 +131,7 @@ impl Default for TriageQueue {
             healthy: false,
             retrying: HashSet::new(),
             state: TriageState::Idle,
+            ms_per_char: None,
         }
     }
 }
@@ -534,9 +543,10 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
             return BatchOutcome::Failed { global: true };
         }
     };
-    // Pack by characters: the first item always goes; others while the budget allows.
+    // Pack by characters within this request's budget: the first item always goes (a long one
+    // alone, in parts); others while the budget allows.
     let max_chars = inner.cfg.triage_max_chars.max(1);
-    let budget = inner.cfg.triage_batch_chars.max(1);
+    let budget = request_budget(inner);
     let mut batch: Vec<Loaded> = Vec::new();
     let mut rest: Vec<ItemRef> = Vec::new();
     let mut used = 0usize;
@@ -557,27 +567,13 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
     }
     lock(&inner.triage).in_flight = batch.len();
 
-    let docs: Vec<TriageDoc<'_>> = batch
-        .iter()
-        .map(|l| TriageDoc {
-            item: &l.item.item,
-            title: l.item.title.as_deref(),
-            text: &l.text,
-        })
-        .collect();
-    let timeout = inner
-        .cfg
-        .triage_timeout()
-        .saturating_mul(u32::try_from(docs.len()).unwrap_or(u32::MAX));
-    let result = tokio::select! {
-        biased;
-        _ = inner.shutdown.cancelled() => None,
-        // An interactive request started: give the model back now, retry later.
-        _ = inner.foreground.started() => None,
-        r = ai::triage_batch(provider, &docs, max_chars, timeout) => Some(r),
-    };
-    drop(docs);
+    let result = label(inner, provider, &batch, max_chars, budget).await;
     let refs: Vec<ItemRef> = batch.iter().map(|l| l.item.item.clone()).collect();
+    let result = match result {
+        Ok(labels) => Some(Ok(labels)),
+        Err(Some(e)) => Some(Err(e)),
+        Err(None) => None,
+    };
     let Some(result) = result else {
         tracing::debug!(
             items = refs.len(),
@@ -704,6 +700,117 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
             BatchOutcome::Failed { global }
         }
     }
+}
+
+/// Characters of document text one triage request may carry: what the measured prefill rate
+/// gets through in [`IngestConfig::triage_request_ms`], so an interactive request never waits
+/// longer than that for a triage prompt the local server has already started (a server cannot
+/// stop part-way through a prompt step; it cancels at the next one once the connection
+/// closes). Capped by [`IngestConfig::triage_batch_chars`].
+///
+/// [`IngestConfig::triage_request_ms`]: crate::IngestConfig::triage_request_ms
+/// [`IngestConfig::triage_batch_chars`]: crate::IngestConfig::triage_batch_chars
+pub(crate) fn request_budget(inner: &Inner) -> usize {
+    let cap = inner.cfg.triage_batch_chars.max(MIN_REQUEST_CHARS);
+    let chars = match lock(&inner.triage).ms_per_char {
+        Some(rate) if rate > 0.0 => (inner.cfg.triage_request_ms as f64 / rate) as usize,
+        _ => FIRST_REQUEST_CHARS,
+    };
+    chars.clamp(MIN_REQUEST_CHARS, cap)
+}
+
+/// Fold one request's prefill into the measured rate.
+fn record_prefill(inner: &Inner, chars: usize, first_token: Option<Duration>) {
+    let Some(t) = first_token else { return };
+    if chars < 50 {
+        return;
+    }
+    let sample = t.as_secs_f64() * 1000.0 / chars as f64;
+    let mut q = lock(&inner.triage);
+    q.ms_per_char = Some(match q.ms_per_char {
+        Some(old) => 0.7 * old + 0.3 * sample,
+        None => sample,
+    });
+}
+
+/// Label `batch` with requests of at most `budget` characters of document text: one request for
+/// a packed batch, or, for a single item longer than the budget, one request per part (the
+/// item is sensitive if any part is; junk is the first part's verdict). Between requests and
+/// during each one, an interactive request makes it give up (`Err(None)`): the request in
+/// flight is dropped, which closes its connection.
+async fn label(
+    inner: &Arc<Inner>,
+    provider: &dyn Provider,
+    batch: &[Loaded],
+    max_chars: usize,
+    budget: usize,
+) -> std::result::Result<Vec<Triage>, Option<nugget_core::Error>> {
+    let timeout_per_item = inner.cfg.triage_timeout();
+    // Parts: one per item for a packed batch; several for one long item.
+    let text_of = |l: &Loaded| -> Vec<char> { l.text.chars().take(max_chars).collect() };
+    let requests: Vec<Vec<(usize, String, Option<String>)>> =
+        if batch.len() == 1 && batch[0].text.chars().take(max_chars).count() > budget {
+            let chars = text_of(&batch[0]);
+            let parts: Vec<String> = chars.chunks(budget).map(|c| c.iter().collect()).collect();
+            let n = parts.len();
+            let title = batch[0]
+                .item
+                .title
+                .clone()
+                .unwrap_or_else(|| "(none)".into());
+            parts
+                .into_iter()
+                .enumerate()
+                .map(|(i, p)| vec![(0, p, Some(format!("{title} (part {} of {n})", i + 1)))])
+                .collect()
+        } else {
+            vec![
+                batch
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| (i, text_of(l).into_iter().collect(), None))
+                    .collect(),
+            ]
+        };
+    let mut out: Vec<Option<Triage>> = vec![None; batch.len()];
+    for req in requests {
+        if inner.foreground.busy() {
+            return Err(None);
+        }
+        let docs: Vec<TriageDoc<'_>> = req
+            .iter()
+            .map(|(i, text, title)| TriageDoc {
+                item: &batch[*i].item.item,
+                title: title.as_deref().or(batch[*i].item.title.as_deref()),
+                text,
+            })
+            .collect();
+        let chars: usize = req.iter().map(|(_, t, _)| t.chars().count()).sum();
+        let timeout = timeout_per_item.saturating_mul(u32::try_from(docs.len()).unwrap_or(1));
+        let r = tokio::select! {
+            biased;
+            _ = inner.shutdown.cancelled() => return Err(None),
+            // An interactive request started: drop this one now (closing its connection).
+            _ = inner.foreground.started() => return Err(None),
+            r = ai::triage_batch(provider, &docs, max_chars, timeout) => r,
+        };
+        let labelled = r.map_err(Some)?;
+        record_prefill(inner, chars, labelled.first_token);
+        for ((i, _, _), t) in req.iter().zip(labelled.labels) {
+            out[*i] = Some(match out[*i] {
+                None => t,
+                Some(prev) => Triage {
+                    junk: prev.junk,
+                    sensitive: prev.sensitive || t.sensitive,
+                },
+            });
+        }
+    }
+    out.into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Some(nugget_core::Error::Provider(
+            "triage skipped a document".into(),
+        )))
 }
 
 /// Errors that say the provider could not be reached or would not serve (down, unavailable,

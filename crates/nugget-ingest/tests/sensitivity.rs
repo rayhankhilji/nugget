@@ -242,3 +242,83 @@ async fn gg5_health_and_finance_files_are_flagged_and_unknown_stays_sensitive() 
     assert_eq!(h.store.search_text("ferrous sulfate", 10).unwrap().len(), 1);
     h.ingest.shutdown().await;
 }
+
+/// QA GG7-3: per UI language, five sensitive situations (lab result with a diagnosis, therapy
+/// session, salary letter, bank statement with a loan, one-time code) and two ordinary mails,
+/// written natively (`fixtures/gg7/situations/<lang>/`, generated from
+/// `qa/GG7/scenarios/sensitive/items.py`), plus GG7's 61-item multilingual corpus
+/// (`fixtures/gg7/corpus/`, nothing sensitive in it). Rules only, no model: every situation
+/// must be caught by a rule and nothing ordinary may be.
+#[tokio::test]
+async fn gg7_sensitivity_rules_work_in_every_ui_language() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gg7");
+    let mut files = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+    let mime = |p: &std::path::Path| match p.extension().and_then(|e| e.to_str()) {
+        Some("eml") => "message/rfc822",
+        Some("ics") => "text/calendar",
+        _ => "text/markdown",
+    };
+    let keys: Vec<(String, bool)> = files
+        .iter()
+        .map(|p| {
+            let rel = p
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            let sensitive = rel.starts_with("situations/")
+                && ["-med.", "-ther.", "-sal.", "-bank.", "-otp."]
+                    .iter()
+                    .any(|s| rel.contains(s));
+            (rel, sensitive)
+        })
+        .collect();
+    assert_eq!(keys.iter().filter(|(_, s)| *s).count(), 45);
+    let h = start(Opts::default()).await;
+    let mut script: Vec<Step> = files
+        .iter()
+        .zip(&keys)
+        .map(|(p, (k, _))| {
+            let mut d = Document::new(k, mime(p), Content::Bytes(std::fs::read(p).unwrap()));
+            d.version = Some("1".into());
+            Step::Send(Change::Upsert(d))
+        })
+        .collect();
+    script.push(Step::Return(json!("done")));
+    h.factory.state("files").script(script);
+    h.add("files").await;
+    eventually("pass", || h.cursor("files") == Some(json!("done"))).await;
+    let mut missed = Vec::new();
+    let mut flagged = Vec::new();
+    for (k, sensitive) in &keys {
+        let it = h
+            .item("files", k)
+            .unwrap_or_else(|| panic!("{k} not ingested"));
+        let rule = it.metadata.get("sensitive_rule").and_then(|r| r.as_str());
+        match (sensitive, rule) {
+            (true, None) => missed.push(k.clone()),
+            (false, Some(r)) => flagged.push(format!("{k} ({r})")),
+            _ => {}
+        }
+    }
+    assert!(
+        missed.is_empty() && flagged.is_empty(),
+        "missed {}/45: {missed:#?}\nordinary flagged {}/{}: {flagged:#?}",
+        missed.len(),
+        flagged.len(),
+        keys.len() - 45
+    );
+    h.ingest.shutdown().await;
+}

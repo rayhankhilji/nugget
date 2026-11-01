@@ -3466,6 +3466,43 @@ Misses and caveats, not hidden:
   (the before runs re-ran triage between the two rounds), not a real speed-up, so it is left out
   of the tables.
 
+#### Follow-up: Ask during the sync
+
+To bound the first caveat above, triage now sizes each request from the prefill speed it measured
+(about 3 s of prompt per request, `triage_request_ms`; long items are labelled in parts) and drops
+its stream when an interactive chat starts, which makes llama-server cancel the request. Same
+workflow, before `fae923d` (the integration branch with background triage), after the change.
+
+| Run | Ask during sync p50 before / after | Ask during sync max before / after | Fully triaged before / after |
+|---|---|---|---|
+| [41250346286](https://github.com/rayhankhilji/nugget/actions/runs/41250346286) (after `079122f`) | 46.7 s / 46.4 s | 119.4 s / 120.2 s | 2,199 s / 2,349 s |
+| [41266951762](https://github.com/rayhankhilji/nugget/actions/runs/41266951762) (after `b20d762`, EPYC 9V74) | 29.1 s / 29.3 s | 74.5 s / 76.7 s | 1,514 s / 1,586 s |
+
+**Miss:** the worst Ask did not improve. Cancellation itself works (the slot was free 0.14 s after
+triage dropped a request, 7.4 s before), but the server logs show the slowest Ask in both runs
+was not waiting for triage: it was queued behind a **proactive judge** request (up to 1,200
+output tokens) that started 80 ms after the previous Ask's answer. `b20d762` made background
+chats wait for interactive ones, but for at most 30 s, and that cap ran out during the
+back-to-back Asks. `c2c91d10` lets the judge wait without a cap and ends a judge stream as soon
+as an Ask starts (the proactive pass then ranks without it); knowledge waits at most 90 s. Not
+yet re-measured on a runner: GitHub Actions jobs in the repository failed at start-up when this
+was pushed.
+
+#### GG6-1: time to the first source
+
+GG6 measured 549.5 s from adding the first source to "First source: done" in onboarding on Linux
+with the real 4B (triage ran inline before items were written). Re-measured with GG6's own
+harness (workflow `hh2-gg6.yml`), both builds on one runner, run
+[41267364581](https://github.com/rayhankhilji/nugget/actions/runs/41267364581): before `ea3f86c`,
+after `adc2ee50`; 4 vCPUs, AMD EPYC 9V74.
+
+| | Before | After |
+|---|---|---|
+| "First source" done | 549.5 s | **0.5 s** |
+| Onboarding total | 719 s | **29.4 s** |
+| GG6 checks passed | 18/18 | 18/18 |
+| Chat answers correct | 10/10 | 10/10 |
+
 ### Bugs the real models exposed
 
 - **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).

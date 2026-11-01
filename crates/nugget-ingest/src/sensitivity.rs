@@ -213,7 +213,7 @@ const FOLDERS_AND_TAGS: &[(&str, &str)] = &[
 fn tokens(s: &str) -> Vec<String> {
     s.to_lowercase()
         .replace(['\u{2019}', '\u{2018}'], "'")
-        .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .split(|c: char| !(crate::sensitivity_terms::is_word_char(c) || c == '\''))
         .map(|t| t.trim_matches('\'').to_owned())
         .filter(|t| !t.is_empty())
         .collect()
@@ -268,6 +268,15 @@ pub(crate) fn classify(
         .iter()
         .find(|(p, _)| joined.contains(&format!(" {} ", tokens(p).join(" "))))
     {
+        return Some(kind);
+    }
+    // The other UI languages (and a few English phrases), with their own matching rules.
+    if let Some(kind) = crate::sensitivity_terms::find(
+        &[title, subject, Some(text)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    ) {
         return Some(kind);
     }
     let from = extracted.get("from").and_then(Value::as_str).unwrap_or("");

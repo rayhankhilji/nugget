@@ -266,6 +266,65 @@ struct Active {
     provider: Arc<dyn Provider>,
 }
 
+/// Hold a background chat (not interactive, not triage) while an interactive chat on the same
+/// slot is in flight or just ended: the proactive judge until the slot is free (nothing times
+/// it out, and it is preempted anyway, see [`preempt_on_foreground`]); other background work
+/// (knowledge) for at most `max_wait`, so its caller's timeout is never reached because of it.
+pub(crate) async fn yield_to_interactive(
+    fg: &nugget_ingest::Foreground,
+    feature: &str,
+    max_wait: std::time::Duration,
+) {
+    if nugget_ingest::is_interactive(feature)
+        || feature == nugget_ingest::FEATURE_TRIAGE
+        || !fg.busy()
+    {
+        return;
+    }
+    if feature == nugget_proactive::judge::FEATURE_JUDGE {
+        fg.idle().await;
+    } else {
+        let _ = tokio::time::timeout(max_wait, fg.idle()).await;
+    }
+}
+
+/// Longest knowledge extraction waits for interactive chats on the same slot before it is sent
+/// anyway (under the 120 s timeout knowledge gives a request before it marks the provider as
+/// failing).
+const BACKGROUND_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// End a proactive judge stream as soon as an interactive chat starts: dropping the inner
+/// stream closes the connection, which cancels the request on the server, so the Ask gets the
+/// slot instead of queueing behind up to `max_tokens` of judge output. The judge sees an error
+/// and the proactive pass ranks without it (it does not mark the provider as failing).
+/// Other features are returned unchanged.
+pub(crate) fn preempt_on_foreground(
+    stream: ChatStream,
+    fg: Option<Arc<nugget_ingest::Foreground>>,
+    feature: &str,
+) -> ChatStream {
+    let Some(fg) = fg.filter(|_| feature == nugget_proactive::judge::FEATURE_JUDGE) else {
+        return stream;
+    };
+    use futures::StreamExt;
+    Box::pin(futures::stream::unfold(
+        Some((stream, fg)),
+        |state| async move {
+            let (mut stream, fg) = state?;
+            tokio::select! {
+                biased;
+                _ = fg.started() => Some((
+                    Err(Error::Provider(
+                        "proactive judge preempted by an interactive request".into(),
+                    )),
+                    None,
+                )),
+                ev = stream.next() => ev.map(|ev| (ev, Some((stream, fg)))),
+            }
+        },
+    ))
+}
+
 /// Called with a slot's role each time its server becomes ready on a new config (first start,
 /// restart on another port, new model). The daemon uses it to re-embed text-only items.
 pub(crate) type ReadyHook = Arc<dyn Fn(RuntimeRole) + Send + Sync>;
@@ -545,7 +604,18 @@ impl Provider for RuntimeSlot {
         // Interactive chats (Ask, Double Tap, agent, drafts) are marked for their whole stream
         // so background triage leaves the model alone; background work (knowledge, proactive
         // judge, probes, triage itself) is not (HH2).
+        // Other background work (knowledge extraction, the proactive judge) waits until no
+        // interactive chat is in flight or just ended (knowledge for at most
+        // `BACKGROUND_MAX_WAIT`), so it never takes the server's one slot just ahead of an Ask (QA GG2 follow-up: a judge
+        // request sent the moment one Ask ended held the next for ~67 s). Triage yields on its
+        // own. The wait is bounded so callers' timeouts (which mark the provider as failing)
+        // are never reached because of it.
+        let fg = self.foreground.get().cloned();
+        if let Some(fg) = &fg {
+            yield_to_interactive(fg, &req.feature, BACKGROUND_MAX_WAIT).await;
+        }
         let guard = interactive_guard(&self.foreground, &req);
+        let feature = req.feature.clone();
         // In flight until the stream ends: the hang watchdog checks the server often meanwhile.
         let busy = self.runtime.request(self.role);
         let before = self.runtime.details(self.role);
@@ -576,10 +646,18 @@ impl Provider for RuntimeSlot {
             }
             Err(e) => return Err(e),
         };
-        Ok(Box::pin(futures::StreamExt::map(stream, move |ev| {
-            let _held = (&guard, &busy);
+        // KK1: the request stays "in flight" for the watchdog until the stream ends. HH2: the
+        // interactive guard is held for the stream's life, and a background judge stream is
+        // preempted when an interactive chat starts.
+        let stream: ChatStream = Box::pin(futures::StreamExt::map(stream, move |ev| {
+            let _held = &busy;
             ev
-        })))
+        }));
+        Ok(preempt_on_foreground(
+            hold_guard(stream, guard),
+            fg,
+            &feature,
+        ))
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -892,6 +970,96 @@ pub(crate) fn localities(providers: &[Arc<dyn Provider>]) -> HashMap<ProviderId,
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test(start_paused = true)]
+    async fn background_chats_wait_for_interactive_ones_but_not_forever() {
+        use std::time::Duration;
+        let fg = std::sync::Arc::new(nugget_ingest::Foreground::new(Duration::from_millis(500)));
+        let max = Duration::from_secs(30);
+        // Nothing in flight: no wait.
+        let t = tokio::time::Instant::now();
+        yield_to_interactive(&fg, "knowledge", max).await;
+        assert_eq!(t.elapsed(), Duration::ZERO);
+        // An Ask in flight: the judge waits until it ends plus the grace period.
+        let ask = fg.begin();
+        let fg2 = fg.clone();
+        let judge = tokio::spawn(async move {
+            yield_to_interactive(&fg2, "proactive_judge", max).await;
+            tokio::time::Instant::now()
+        });
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(!judge.is_finished());
+        let ended = tokio::time::Instant::now();
+        drop(ask);
+        let went = judge.await.unwrap();
+        assert!(went - ended >= Duration::from_millis(500));
+        // Interactive chats and triage never wait here.
+        let _ask = fg.begin();
+        let t = tokio::time::Instant::now();
+        yield_to_interactive(&fg, "ask", max).await;
+        yield_to_interactive(&fg, nugget_ingest::FEATURE_TRIAGE, max).await;
+        assert_eq!(t.elapsed(), Duration::ZERO);
+        // A background chat waits at most `max_wait`.
+        yield_to_interactive(&fg, "knowledge", max).await;
+        assert_eq!(t.elapsed(), max);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_judge_waits_out_any_run_of_asks_and_yields_mid_stream() {
+        use futures::StreamExt;
+        use std::time::Duration;
+        let fg = std::sync::Arc::new(nugget_ingest::Foreground::new(Duration::from_millis(500)));
+        // Back-to-back Asks for longer than knowledge's cap: the judge still waits.
+        let ask = fg.begin();
+        let fg2 = fg.clone();
+        let judge = tokio::spawn(async move {
+            yield_to_interactive(
+                &fg2,
+                nugget_proactive::judge::FEATURE_JUDGE,
+                BACKGROUND_MAX_WAIT,
+            )
+            .await;
+        });
+        tokio::time::sleep(BACKGROUND_MAX_WAIT * 3).await;
+        assert!(!judge.is_finished());
+        drop(ask);
+        judge.await.unwrap();
+
+        // A judge stream in flight ends (and drops the connection) when an Ask starts.
+        let (tx, rx) = futures::channel::mpsc::unbounded::<Result<nugget_infer::ChatEvent>>();
+        let inner: ChatStream = Box::pin(rx);
+        let dropped = std::sync::Arc::new(AtomicBool::new(false));
+        struct OnDrop(std::sync::Arc<AtomicBool>);
+        impl Drop for OnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let flag = OnDrop(dropped.clone());
+        let inner: ChatStream = Box::pin(inner.map(move |ev| {
+            let _f = &flag;
+            ev
+        }));
+        let mut s = preempt_on_foreground(
+            inner,
+            Some(fg.clone()),
+            nugget_proactive::judge::FEATURE_JUDGE,
+        );
+        tx.unbounded_send(Ok(nugget_infer::ChatEvent::TextDelta("{".into())))
+            .unwrap();
+        assert!(matches!(s.next().await, Some(Ok(_))));
+        let _ask = fg.begin();
+        assert!(matches!(s.next().await, Some(Err(_))));
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(s.next().await.is_none());
+
+        // Other features are left alone.
+        let (tx, rx) = futures::channel::mpsc::unbounded::<Result<nugget_infer::ChatEvent>>();
+        let mut s = preempt_on_foreground(Box::pin(rx), Some(fg.clone()), "knowledge");
+        tx.unbounded_send(Ok(nugget_infer::ChatEvent::TextDelta("x".into())))
+            .unwrap();
+        assert!(matches!(s.next().await, Some(Ok(_))));
+    }
 
     #[test]
     fn background_features_never_hold_the_foreground() {
