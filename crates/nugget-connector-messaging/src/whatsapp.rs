@@ -355,6 +355,9 @@ pub struct Stamp {
     pub pm: Option<bool>,
     /// The 12-hour marker is written in upper case (`PM`, as in the US), not `pm` or `p. m.`.
     pub upper_marker: bool,
+    /// A word separates date and time (`14/03/2026 à 09:06`), not just `, ` or a space (an
+    /// AM/PM marker there, as in `오후`, does not count).
+    pub worded: bool,
 }
 
 /// AM/PM markers, longest first so `a.m.` wins over `am`.
@@ -485,6 +488,7 @@ pub fn parse_stamp(raw: &str) -> Option<Stamp> {
         second,
         pm,
         upper_marker: pm.is_some() && rest.chars().any(|c| c.is_ascii_uppercase()),
+        worded: !word.trim().is_empty(),
     })
 }
 
@@ -848,7 +852,16 @@ fn is_android_placeholder(line: &str) -> bool {
         return false;
     };
     let inner = inner.trim();
-    inner.chars().count() <= 64
+    // Placeholders in cased scripts are capitalised phrases (`<Media omitted>`); a single or
+    // lower-case word in angle brackets is something a person typed (`<sigh>`, `<evil laugh>`).
+    // Caseless scripts (`<メディアは含まれていません>`) need no space.
+    let shaped = match inner.chars().next() {
+        Some(c) if c.is_uppercase() => inner.contains(' '),
+        Some(c) => !c.is_lowercase(),
+        None => false,
+    };
+    shaped
+        && inner.chars().count() <= 64
         && inner.chars().any(char::is_alphabetic)
         && !inner.contains(['<', '>'])
 }
@@ -910,9 +923,30 @@ fn split_entries(text: &str) -> Vec<Entry<'_>> {
         .filter(|(_, h)| h.as_ref().is_some_and(|h| !h.ios))
         .count();
     let ios_file = ios >= android;
+    // Likewise its headers all separate date and time the same way: in a file of
+    // `14/03/2026, 09:06` headers, a line `14/03/2026 at 09:06 - Bob: hi` is pasted text, and
+    // in a file of `14/03/2026 à 09:06` headers, `14/03/2026, 09:06 - …` is.
+    let (worded, plain) = lines
+        .iter()
+        .filter_map(|(_, h)| h.as_ref().filter(|h| h.ios == ios_file))
+        .fold((0usize, 0usize), |(w, p), h| {
+            if h.stamp.worded {
+                (w + 1, p)
+            } else {
+                (w, p + 1)
+            }
+        });
+    let style_ok = |h: &Header<'_>| {
+        h.ios == ios_file
+            && match worded.cmp(&plain) {
+                std::cmp::Ordering::Greater => h.stamp.worded,
+                std::cmp::Ordering::Less => !h.stamp.worded,
+                std::cmp::Ordering::Equal => true,
+            }
+    };
     let mut entries: Vec<Entry<'_>> = Vec::new();
     for (line, header) in lines {
-        match header.filter(|h| h.ios == ios_file) {
+        match header.filter(|h| style_ok(h)) {
             Some(h) => entries.push(Entry {
                 stamp: h.stamp,
                 rest: h.rest,
@@ -1730,5 +1764,53 @@ mod tests {
         }
         // Without the iOS mark, a sentence ending in "omitted" stays text.
         assert_eq!(classify_media("nothing important omitted"), None);
+    }
+
+    /// Review regression: the `<…>` placeholder rule turned a typed `<sigh>` or `<evil laugh>`
+    /// into an attachment and dropped its text.
+    #[test]
+    fn typed_angle_bracket_messages_stay_text() {
+        let text = "14/03/2026, 09:06 - Ana: <sigh>\n\
+14/03/2026, 09:07 - Ana: <evil laugh>\n\
+14/03/2026, 09:08 - Ana: <Sigh>\n\
+14/03/2026, 09:09 - Ana: <メディアは含まれていません>\n\
+14/03/2026, 09:10 - Ana: <Media weggelaten>\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
+        let texts: Vec<&str> = c.messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts, ["<sigh>", "<evil laugh>", "<Sigh>", "", ""]);
+        assert!(c.messages[3].attachments.len() == 1 && c.messages[4].attachments.len() == 1);
+    }
+
+    /// Review regression: with words allowed between date and time, a pasted line such as
+    /// `14/03/2026 at 09:06 - Bob: hi` in a file of `14/03/2026, 09:06` headers became a
+    /// message from Bob. Headers must share the file's separator style.
+    #[test]
+    fn pasted_header_of_another_separator_style_stays_text() {
+        let text = "14/03/2026, 09:06 - Ana: forwarding:\n\
+14/03/2026 at 08:00 - Bob: the plan\n\
+14/03/2026, 09:07 - Ana: ok\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
+        let texts: Vec<&str> = c.messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            ["forwarding:\n14/03/2026 at 08:00 - Bob: the plan", "ok"]
+        );
+        // And the other way round, in a French export.
+        let text = "14/03/2026 à 09:06 - Chloé: regarde\n\
+14/03/2026, 08:00 - Bob: the plan\n\
+14/03/2026 à 09:07 - Chloé: ok\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
+        assert_eq!(c.messages.len(), 2);
+        assert_eq!(
+            c.messages[0].text,
+            "regarde\n14/03/2026, 08:00 - Bob: the plan"
+        );
+        // Korean markers between date and time are not words.
+        assert!(
+            !parse_header("2023. 12. 31. 오후 9:15 - a: b")
+                .unwrap()
+                .stamp
+                .worded
+        );
     }
 }

@@ -187,13 +187,15 @@ impl Inner {
         let cap = self.cfg.error_ring.max(1);
         let mut slots = lock(&self.slots);
         if let Some(s) = slots.get_mut(id) {
-            // The same problem reported again (every pass) refreshes its entry instead of
-            // pushing other errors out of the ring.
-            if let Some(i) = s
-                .status
-                .errors
-                .iter()
-                .position(|e| e.key == key && e.message == message)
+            // The same item's problem reported again (every pass) refreshes its entry instead
+            // of pushing other errors out of the ring. Pass-level errors (no key) stay one
+            // entry per failed pass: they are the source's failure history.
+            if key.is_some()
+                && let Some(i) = s
+                    .status
+                    .errors
+                    .iter()
+                    .position(|e| e.key == key && e.message == message)
             {
                 s.status.errors.remove(i);
             }

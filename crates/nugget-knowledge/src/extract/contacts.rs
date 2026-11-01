@@ -178,16 +178,28 @@ fn from_json(v: &Value) -> Option<Contact> {
     (c.name.is_some() || !c.emails.is_empty() || !c.phones.is_empty()).then_some(c)
 }
 
+/// Digits a phone number needs before it names a person on its own: SMS short codes
+/// (`72975`, `262966`) and service numbers (`112`) are senders, not people.
+const MIN_PERSON_PHONE_DIGITS: usize = 7;
+
+fn phone_digits(p: &str) -> usize {
+    p.chars().filter(char::is_ascii_digit).count()
+}
+
 /// The name for a contact known only by phone: the number as the source displays it (a name
 /// that is a number, e.g. a chat sender `+49 151 23456789`), else its first phone number.
+/// `None` without a full phone number: a name that is merely a number (`2024`, `007`) with no
+/// phone to identify it would make a new, unmergeable person on every item.
 fn phone_name(c: &Contact) -> Option<String> {
-    let shown =
-        c.name.as_deref().map(str::trim).filter(|n| {
-            n.chars().any(|ch| ch.is_ascii_digit()) && !n.chars().any(char::is_alphabetic)
-        });
-    shown
-        .or_else(|| c.phones.iter().map(|p| p.trim()).find(|p| !p.is_empty()))
-        .map(|p| truncate_chars(p, 200))
+    let phone = c
+        .phones
+        .iter()
+        .map(|p| p.trim())
+        .find(|p| phone_digits(p) >= MIN_PERSON_PHONE_DIGITS)?;
+    let shown = c.name.as_deref().map(str::trim).filter(|n| {
+        phone_digits(n) >= MIN_PERSON_PHONE_DIGITS && !n.chars().any(char::is_alphabetic)
+    });
+    Some(truncate_chars(shown.unwrap_or(phone), 200))
 }
 
 fn contacts(ctx: &ItemCtx<'_>) -> Vec<Contact> {
@@ -385,6 +397,20 @@ mod tests {
         assert_eq!(ex.entities[0].name, "Sam Lee");
         assert!(!ex.entities[0].weak_name);
         assert_eq!(ex.entities[1].name, "kim@example.com");
+    }
+
+    /// Review regression: a contact whose name is just a number but which has no phone
+    /// (`2024`, `007`), or whose only phone is an SMS short code, became a person with no
+    /// identifier, a new one on every item.
+    #[test]
+    fn numbers_without_a_full_phone_make_no_person() {
+        let ex = run(json!({ "source": { "contacts": [
+            { "name": "2024" },
+            { "name": "007", "phones": [] },
+            { "name": "72975", "phones": ["72975"] },
+            { "phones": ["112"] },
+        ]}}));
+        assert!(ex.entities.is_empty(), "{:?}", ex.entities);
     }
 
     #[test]
