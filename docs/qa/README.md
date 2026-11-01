@@ -56,8 +56,8 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG2-3 Date filters and Citation.date use file mtime, not mail Date or DTSTART | High | DD4 follow-up (retrieval) | fixed in c03b984 (copied-folder time questions 76.9% → 92.3%) |
 | GG2-4 Default config's Ollama entry tried first: follow-ups never rewritten, ~2 s failover | High | DD4 follow-up (rewrite, routing) | fixed in c03b984 (example commented out; unprobed on-device providers after the runtime slot; rewrite falls back to the heuristic) |
 | GG2-5 Sources appear only with the first token (35–95 s) | High | EE3 | routed |
-| GG2-6 One triage LLM call per item: 315 files take 41 min, Ask 3× slower meanwhile | High | HH2 (ingest triage) | routed |
-| GG2-7 4B triage leaves real items unsearchable | High | HH2 (ingest triage) | routed |
+| GG2-6 One triage LLM call per item: 315 files take 41 min, Ask 3× slower meanwhile | High | HH2 (ingest triage) | fixed in 08a0cce (all 315 searchable in 28 s, was 1,436 s; background batched triage yields to Ask) |
+| GG2-7 4B triage leaves real items unsearchable | High | HH2 (ingest triage) | fixed in 08a0cce (junk is a label only; items without chunks 98 → 0; legacy installs re-indexed) |
 | GG2-8 No relevance floor: near-misses become answers | High | DD4 follow-up (retrieval) | partly fixed in c03b984 (near misses marked "partial match" in the Ask prompt; dropping them emptied 58 answerable contexts); real-model effect not yet re-measured |
 | GG2-9 to GG2-18 | Medium/Low | retrieval items DD4, prompt items EE3 | retrieval items (9–13) fixed in c03b984; prompt items with EE3 |
 
@@ -84,7 +84,7 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG4-3 RRULE never expanded: recurring meetings missing | High | BB2 follow-up | routed |
 | GG4-4 TZID ignored: cross-zone times off by hours | High | BB2 follow-up | routed |
 | GG4-5 One shared learning model: one dismissal moves unrelated senders, never decays | High | BB2 follow-up | routed |
-| GG4-6 Items never marked sensitive at ingest (therapy, clinic, salary) | High | HH2 | routed |
+| GG4-6 Items never marked sensitive at ingest (therapy, clinic, salary) | High | HH2 | fixed in 08a0cce (deterministic sensitivity rules; English-heavy, a few de/fr/es words) |
 | GG4-7 Confidential HR salary letter becomes a quoted "Reply to" card | High | BB2 follow-up | routed |
 | GG4-8 Scoped learning resets leave the shared part | High | BB2 follow-up | routed |
 | GG4-9 to GG4-19 | Medium | BB2 follow-up | routed |
@@ -95,7 +95,7 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | Finding | Severity | Owner | State |
 |---|---|---|---|
 | GG5-1 4B model writes card/account numbers, salary, diagnosis into vault pages as title facts | **Blocker** | EE1 follow-up | routed |
-| GG5-2 Health/finance items not sensitive without triage; unknown written as not sensitive | High | HH2 (with GG4-6) | routed |
+| GG5-2 Health/finance items not sensitive without triage; unknown written as not sensitive | High | HH2 (with GG4-6) | fixed in 08a0cce (unknown counts as sensitive; `ingest.assume_unflagged_safe` opts out) |
 | GG5-3 Vault and graph ignore sensitivity | High | HH3 | routed |
 | GG5-4 Re-saving a source revives a fact the user edited | High | HH3 | routed |
 | GG5-5 Retyped fact line loses the user's wording | High | HH3 | routed |

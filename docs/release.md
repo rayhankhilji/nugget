@@ -656,7 +656,16 @@ Every release run, dry or real, launches the installers it just built:
 Each waits, with a time limit, for a window named `Nugget`, for the app to start the bundled
 `nuggetd` itself (`starting nuggetd`) and connect to it (`connected to nuggetd`), then closes the
 window the way a user would (`WM_DELETE_WINDOW` through the window manager, the close button,
-`WM_CLOSE`), expects a clean exit, and stops the daemon. Any step that times out fails the job.
+`WM_CLOSE`), expects a clean exit, and stops the daemon (SIGTERM; `CTRL_BREAK` on Windows) and
+requires it to log `stopped`. Any step that times out fails the job.
+
+The Windows stop used to fail in about two of three runs: `nuggetd` created its console signal
+listeners only once its shutdown future was first polled, and a `CTRL_BREAK` that arrived before
+any listener existed got Windows' default handler (exit `0xC000013A`, no clean shutdown). It now
+registers them at startup, logs `console control signals registered`, warns about any it cannot
+register and logs which signal stopped it; five extra runs against dry run
+[41245111121](https://github.com/rayhankhilji/nugget/actions/runs/41245111121) passed, as did
+its own smoke step.
 `.github/workflows/package-smoke.yml` runs the AppImage test on pull requests that touch
 `apps/desktop/`, `crates/` or `packaging/`, and `real-os.yml` runs the dmg and NSIS tests on
 pull requests that touch the desktop app or packaging. The macOS Intel build, the MSI and the
@@ -907,12 +916,26 @@ menu has an *Updates…* item that changes to *Update available: vX…*.
 
 | Setting | Default | Effect |
 |---|---|---|
-| Channel | **Stable** | `stable.json` from the `updater-feed` release. **Beta** follows `beta.json` (prereleases as well as stable). **Off** never contacts the server. |
+| Channel | **not chosen** | Until the user picks one, nothing contacts the server. **Stable** follows `stable.json` from the `updater-feed` release (the recommended answer). **Beta** follows `beta.json` (prereleases as well as stable). **Off** never contacts the server. |
 | Auto-install | **off** | Off means **notify only**: the app shows the version and its release notes, and nothing is downloaded until the user clicks *Install vX and restart*. On means the update is downloaded and verified in the background, its notes are shown, and it installs **when the user quits Nugget**. |
 
-- Checks run 60 s after launch and then every 24 h, plus *Check now*. A check fetches static
-  files only (the channel's JSON feed and its `.sig`, then the feed again through the updater
-  plugin), with no identifiers beyond what any HTTPS request carries.
+- **Opt-in.** `settings.json` has `channel_chosen`; while it is false, no check runs (background
+  or *Check now*). Setup's last step and the *Updates* card ask once: "Check for updates
+  automatically?" (Stable, recommended / Beta / Off), with a line on what a check sends. Builds
+  without an updater key never ask. A settings file from before the flag counts as chosen only
+  for Beta or Off, which were never defaults; Stable there was the old default, so it counts as
+  not chosen and the user is asked.
+- Once a channel is chosen, a check runs right away, then 60 s after each launch and every 24 h,
+  plus *Check now*. A check fetches static files only (the channel's JSON feed and its `.sig`,
+  then the feed again through the updater plugin), with no identifiers beyond what any HTTPS
+  request carries.
+- **Every request is in the egress ledger.** The app sends each one to `nuggetd` with
+  `egress.record`: feature `update_check` for the feed, the `.sig` and the plugin's feed fetch
+  (one row per host, so a redirect to GitHub's content host has its own row), `update_download`
+  for a package. Rows wait in memory while the daemon is not running and are written when it
+  connects; rows still queued when the app quits are lost. The plugin's own requests are recorded
+  with the bytes of the app's verified fetch of the same feed, and a download under the host the
+  feed names (the plugin doesn't report redirects).
 - **The feed is verified before it is used.** The app downloads `<channel>.json` and
   `<channel>.json.sig` and checks the minisign signature over the exact bytes against the
   built-in updater key (`apps/desktop/src-tauri/src/updater/feed.rs`). Nothing in the feed is
@@ -1001,13 +1024,6 @@ gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
 
 ## 8. Known gaps
 
-- **NSIS smoke test fails on the current code.** In the dry run of this branch,
-  [41113647335](https://github.com/rayhankhilji/nugget/actions/runs/41113647335) (both
-  attempts), every job passed except the Windows NSIS smoke step: after the app quits, the
-  `CTRL_BREAK` the script sends ends `nuggetd` with `0xC000013A` before it logs the signal, so
-  its graceful shutdown path didn't run. `nuggetd`'s signal handling is unchanged since dry run
-  40848720974, where the step passed, so a change elsewhere in the daemon is the likely cause. Fix
-  it before tagging.
 - **No real key has signed anything yet.** Apple signing and notarization, Azure Trusted
   Signing, the updater key and the manifest release key have been exercised only with throwaway
   keys (rehearsal, signing proof) or not at all (Apple). The RC in Step 7 is their first real
@@ -1045,8 +1061,8 @@ gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
   relying on this, or upgrade.)
 - Linux packages aren't GPG-signed, and there's no apt/rpm repository yet; users get updates
   through the in-app updater or by downloading again.
-- Update checks aren't recorded in the daemon's egress ledger (the desktop app makes them, not
-  `nuggetd`).
+- Update rows are written after each request, not before it: an app crash mid-request, or quitting
+  while the daemon is down, leaves no row.
 - The `updater-feed` manifests are signed (§5), but the signature covers only the bytes, not the
   channel name or a date: someone who controls the feed URL can still replay an older signed feed
   or serve the beta feed to stable users (a signed prerelease), and can always withhold the feed.

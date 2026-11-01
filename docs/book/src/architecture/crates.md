@@ -64,6 +64,7 @@ place; no feature is registered in it yet.
 | `nugget-plugin` | M6 | in use | WASM component plugins: declared, user-approved capabilities enforced by the host, resource limits, signed packages, a guest SDK |
 | `nugget-connector-microsoft` | M6 | in use | `outlook`, `outlook-calendar` and `onedrive` through Microsoft Graph delta queries |
 | `nugget-connector-saas` | M6 | in use | `slack`, `notion`, `github` and `linear` through their official APIs |
+| `nugget-connector-messaging` | M6 | in use | `imessage` (a copy of the macOS Messages database, address-book names), `whatsapp` ("Export chat" files, watched) and `telegram` (Desktop JSON exports, watched): one Markdown document per chat per month, private by default |
 | `nugget-desktop` | M0 | in use | The Tauri shell (`apps/desktop`): typed commands proxying IPC, the React pages, the in-app updater |
 | `nugget-bench` | M0 | in use | The benchmark harness, suites and report schema (`bench/`); see [Benchmarks](benchmarks.md) |
 

@@ -5,6 +5,7 @@
 #
 #   trigger                  double tap Right Ctrl
 #   enter                    press Enter
+#   retry                    press R (the overlay's Retry key)
 #   click <x> <y>            left click at a screen point
 #   windows <title>          visible top-level windows whose title is <title>, with their rects
 #   foreground               the foreground window's title
@@ -174,6 +175,11 @@ while ($true) {
             }
             'enter' {
                 [NuggetE2E]::Tap(0x0D, 0x1C, $false)
+                Reply @{ ok = $true }
+            }
+            'retry' {
+                # VK_R, scan code 0x13.
+                [NuggetE2E]::Tap(0x52, 0x13, $false)
                 Reply @{ ok = $true }
             }
             'click' {

@@ -1,0 +1,85 @@
+{
+ "name": "Alice Example",
+ "type": "personal_chat",
+ "id": 4242,
+ "messages": [
+  {
+   "id": 1,
+   "type": "message",
+   "date": "2024-04-30T23:59:00",
+   "date_unixtime": "1714521540",
+   "from": "Alice Example",
+   "from_id": "user4242",
+   "text": "End of April"
+  },
+  {
+   "id": 2,
+   "type": "message",
+   "date": "2024-05-01T09:12:00",
+   "date_unixtime": "1714554720",
+   "from": "Alice Example",
+   "from_id": "user4242",
+   "text": [
+    "Check ",
+    {
+     "type": "link",
+     "text": "https://example.com"
+    },
+    " and ",
+    {
+     "type": "bold",
+     "text": "this"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "message",
+   "date": "2024-05-01T09:13:00",
+   "date_unixtime": "1714554780",
+   "from": "Tanuj",
+   "from_id": "user7",
+   "photo": "photos/photo_1@01-05-2024_09-13-00.jpg",
+   "photo_file_size": 20480,
+   "width": 800,
+   "height": 600,
+   "text": ""
+  },
+  {
+   "id": 4,
+   "type": "message",
+   "date": "2024-05-01T09:14:00",
+   "date_unixtime": "1714554840",
+   "from": "Tanuj",
+   "from_id": "user7",
+   "file": "(File not included. Change data exporting settings to download.)",
+   "file_size": 123456,
+   "media_type": "voice_message",
+   "mime_type": "audio/ogg",
+   "duration_seconds": 3,
+   "text": ""
+  },
+  {
+   "id": 5,
+   "type": "service",
+   "date": "2024-05-01T09:20:00",
+   "date_unixtime": "1714555200",
+   "actor": "Alice Example",
+   "actor_id": "user4242",
+   "action": "phone_call",
+   "duration_seconds": 61,
+   "discard_reason": "hangup",
+   "text": ""
+  },
+  {
+   "id": 6,
+   "type": "message",
+   "date": "2024-05-02T10:00:00",
+   "from": "Alice Example",
+   "from_id": "user4242",
+   "text": "no unixtime here",
+   "reply_to_message_id": 2,
+   "edited": "2024-05-02T10:01:00"
+  }
+ ]
+}

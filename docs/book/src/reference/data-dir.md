@@ -43,9 +43,8 @@ On macOS, data and config share one directory.
   vault/                   the vault, only with --home or NUGGET_HOME (see below)
 ```
 
-Status: being wired in (wave W). Installed WebAssembly plugins will live in `<data>/plugins/`
-(the store in `nugget-plugin` already uses that directory), and the agent's hash-chained action log
-will also be kept under the data directory.
+Installed WebAssembly plugins live in `<data>/plugins/`, and the cached plugin catalog in
+`<data>/plugin-catalog/`.
 
 ## The vault
 
