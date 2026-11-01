@@ -33,6 +33,10 @@ name: Release rehearsal
 
 on:
   workflow_dispatch:
+  # TEMPORARY: remove before the final push.
+  push:
+    branches: [ee/release-readiness]
+    paths: [".github/workflows/release-rehearsal.yml"]
 
 permissions: {}
 
