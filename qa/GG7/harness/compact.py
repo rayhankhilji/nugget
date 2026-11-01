@@ -27,15 +27,15 @@ def load(name):
 lines = []
 for r in load("ask"):
     if not (r["facts_ok"] and r["cite_ok"] and r["lang_ok"]):
-        lines.append({"id": r["id"], "q": r["question"], "a": clip(r.get("answer"), 160),
-                      "facts_missing": r["facts_missing"], "cited": [c.rsplit("/", 1)[-1] for c in r["cited"][:3]],
-                      "answer_lang": r["answer_lang"], "s": r.get("seconds")})
+        lines.append({"id": r["id"], "a": clip(r.get("answer"), 120), "facts_ok": r["facts_ok"],
+                      "cited": [c.rsplit("/", 1)[-1][:28] for c in r["cited"][:2]],
+                      "answer_lang": r["answer_lang"]})
 for r in load("draft"):
     if r["lang_ok"] and r["register_ok"] and not r["wrong_side"]:
         continue
     lines.append({"id": r["id"], "register": r.get("register"), "lang": r["draft_lang"],
                   "register_seen": r["register_seen"], "wrong_side": r["wrong_side"],
-                  "draft": clip(r.get("draft"), 110), "s": r.get("seconds")})
+                  "draft": clip(r.get("draft"), 90)})
 with open(dst / "rows.jsonl", "w", encoding="utf-8") as f:
     for x in lines:
         f.write(json.dumps(x, ensure_ascii=False) + "\n")

@@ -62,34 +62,11 @@ Bodies: 60–200 words, natural. Do not put the gold answers only in the subject
 
 ## Gold file `gold/<lang>.json`
 
-```json
-{
-  "lang": "de",
-  "search": [
-    {"id": "de-s1", "query": "Nebenkostenabrechnung", "expect": ["de/03-....eml"], "kind": "exact",
-     "why": "plain word present in the body"}
-  ],
-  "ask": [
-    {"id": "de-a1", "question": "Wie hoch ist die Rechnung von der Hausverwaltung und bis wann muss ich zahlen?",
-     "facts": [["1.284,50", "1284,50", "1284.50"], ["14. November", "14.11", "14.11.2026"]],
-     "cite": ["de/03-....eml"]}
-  ],
-  "draft": [
-    {"id": "de-d1", "file": "de/01-....eml", "register": "formal", "instruction": "",
-     "accept_lang": ["de"],
-     "formal_markers": ["Sie", "Ihnen", "Ihr"], "informal_markers": ["du ", "dich", "dir", "dein"]}
-  ],
-  "extract": {
-    "people": [{"name": "Katharina Vogt", "aliases": ["Frau Vogt"], "email": "k.vogt@hausverwaltung-ried.example", "file": "de/01-....eml"}],
-    "orgs": [{"name": "Hausverwaltung Ried", "file": "de/01-....eml"}],
-    "dates": [{"date": "2026-11-14", "time": "10:00", "text": "Freitag, 14. November, 10 Uhr", "file": "de/04-....eml", "what": "Abgabe Präsentation"}]
-  },
-  "proactive": [
-    {"file": "de/04-....eml", "expect": "commitment", "due": "2026-11-14", "who": "Katharina Vogt"},
-    {"file": "de/01-....eml", "expect": "reply_needed"}
-  ]
-}
-```
+Keys: `search` (`id`, `query`, `expect` files, `kind`), `ask` (`id`, `question`, `facts`: a list
+of alternative lists, each satisfied by any alternative; `cite` files; `question_lang` for the
+English questions), `draft` (`id`, `file`, `register`, `instruction`, `accept_lang`,
+`formal_markers`, `informal_markers`), `extract` (`people`, `orgs`, `dates` with ISO `date`),
+`proactive` (`file`, `expect`: reply_needed / commitment / payment_due / event, `due`).
 
 Search: **8 queries** per language, each with a `kind` from
 `exact` (word as written), `inflected` (another grammatical form than the text has: plural, case,
