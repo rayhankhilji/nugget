@@ -120,6 +120,8 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     shell_labels_set: (a) => Object.keys(a?.labels ?? {}).length,
     deeplink_take: () => null,
     quickask_open_main: () => null,
+    // JJ2: no quick-ask handover is waiting for the main window.
+    quickask_handover_take: () => null,
     doubletap_settings_get: () => doubletapSettings,
     doubletap_settings_set: (a) => a?.settings ?? doubletapSettings,
     doubletap_status: () => doubletapStatus,
