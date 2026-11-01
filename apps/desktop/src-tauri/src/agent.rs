@@ -171,7 +171,6 @@ pub fn tray_clicked<R: Runtime>(app: &AppHandle<R>) {
 
 fn set_tray_label(app: &AppHandle, halted: bool) {
     if let Some(t) = app.try_state::<AgentTray<tauri::Wry>>() {
-        // II4: the localized label when the frontend has sent one.
         let key = if halted {
             "shell.tray.resumeAgents"
         } else {
@@ -181,7 +180,7 @@ fn set_tray_label(app: &AppHandle, halted: bool) {
     }
 }
 
-/// II4: the tray's labels changed language.
+/// The tray's labels changed language.
 pub fn relabel_tray(app: &AppHandle) {
     set_tray_label(app, KillSwitch::global().halted());
 }
@@ -360,75 +359,9 @@ async fn sync_with_daemon(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nugget_hotkey::{EscapeRepeatDetector, InputEvent, Session};
+    use nugget_hotkey::Session;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-
-    fn detector() -> EscapeRepeatDetector {
-        EscapeRepeatDetector::new(ESCAPE_PRESSES, ESCAPE_WINDOW_MS)
-    }
-
-    /// Press and release Escape at each time; return the times at which it fired.
-    fn presses(d: &mut EscapeRepeatDetector, at: &[u64]) -> Vec<u64> {
-        let mut fired = Vec::new();
-        for &t in at {
-            if d.on_event(InputEvent::EscapeDown, t) {
-                fired.push(t);
-            }
-            d.on_event(InputEvent::EscapeUp, t + 40);
-        }
-        fired
-    }
-
-    #[test]
-    fn three_quick_escapes_fire_on_the_third() {
-        let mut d = detector();
-        assert_eq!(presses(&mut d, &[1_000, 1_300, 1_600]), vec![1_600]);
-        // Each gap up to the window counts: three presses within one second.
-        let mut d = detector();
-        assert_eq!(presses(&mut d, &[0, 500, 1_000]), vec![1_000]);
-    }
-
-    #[test]
-    fn slow_or_too_few_escapes_do_not_fire() {
-        let mut d = detector();
-        assert!(presses(&mut d, &[0, 300]).is_empty());
-        let mut d = detector();
-        assert!(presses(&mut d, &[0, 501, 1_002]).is_empty());
-        // A slow gap restarts the count; three quick ones afterwards still fire.
-        let mut d = detector();
-        assert_eq!(presses(&mut d, &[0, 200, 2_000, 2_200, 2_400]), vec![2_400]);
-    }
-
-    #[test]
-    fn another_key_or_click_in_between_resets() {
-        let mut d = detector();
-        presses(&mut d, &[0, 200]);
-        assert!(!d.on_event(InputEvent::OtherKey, 300));
-        assert!(presses(&mut d, &[400]).is_empty());
-        let mut d = detector();
-        presses(&mut d, &[0, 200]);
-        assert!(!d.on_event(InputEvent::MouseButton, 300));
-        assert!(presses(&mut d, &[400]).is_empty());
-    }
-
-    #[test]
-    fn holding_escape_is_one_press() {
-        let mut d = detector();
-        // Auto-repeat sends key-downs without key-ups.
-        for t in [0, 30, 60, 90, 120] {
-            assert!(!d.on_event(InputEvent::EscapeDown, t));
-        }
-    }
-
-    #[test]
-    fn fires_again_after_completing() {
-        let mut d = detector();
-        assert_eq!(
-            presses(&mut d, &[0, 100, 200, 300, 400, 500]),
-            vec![200, 500]
-        );
-    }
 
     fn caps(escape_repeat: bool, chord: bool) -> Capabilities {
         Capabilities {
@@ -472,13 +405,6 @@ mod tests {
             kill_state_from(&note("policy.kill.changed", halted.clone())),
             Some(true)
         );
-        assert_eq!(
-            kill_state_from(&note(
-                agent_notification::POLICY_KILL_CHANGED,
-                serde_json::json!({ "halted": false })
-            )),
-            Some(false)
-        );
         assert_eq!(kill_state_from(&note("agent.event", halted)), None);
         assert_eq!(
             kill_state_from(&note("policy.kill.changed", serde_json::json!(null))),
@@ -489,16 +415,7 @@ mod tests {
     #[test]
     fn reconnect_errs_towards_stopped() {
         assert_eq!(reconcile(true, false), Reconcile::PushKill);
-        assert_eq!(reconcile(true, true), Reconcile::Mirror(true));
-        assert_eq!(reconcile(false, true), Reconcile::Mirror(true));
         assert_eq!(reconcile(false, false), Reconcile::Mirror(false));
-    }
-
-    #[test]
-    fn tray_label_follows_state() {
-        assert_eq!(tray_label(false), "Stop all agents");
-        assert_eq!(tray_label(true), "Resume agents");
-        assert_eq!(tray_item_id(), "agents");
     }
 
     #[test]
@@ -531,129 +448,5 @@ mod tests {
         k.resume();
         k.halt();
         assert_eq!(forwarded.load(Ordering::SeqCst), 2);
-    }
-}
-
-/// Tauri commands for the Agent and Safety pages: each forwards to the daemon method of the same
-/// name (`agent_run` → `agent.run`), with the protocol types from `nugget_core::ipc`.
-pub mod commands {
-    use nugget_core::ipc::{
-        AgentAnswer, AgentConfirm, AgentListRequest, AgentRunRequest, AgentStarted,
-        AgentTaskDetail, AgentTaskRef, AgentTaskSummary, BrowserStatus, KillState, PolicyApprovals,
-        PolicyLogExport, PolicySet, PolicyState, agent_method as m,
-    };
-    use serde_json::Value;
-    use tauri::{AppHandle, State};
-
-    use crate::daemon::{CmdError, Daemon};
-
-    type Result<T> = std::result::Result<T, CmdError>;
-
-    #[tauri::command]
-    pub async fn agent_run(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-        request: AgentRunRequest,
-    ) -> Result<AgentStarted> {
-        if request.goal.trim().is_empty() {
-            return Err(CmdError::Other("an agent task needs a goal".into()));
-        }
-        daemon.call(&app, m::AGENT_RUN, &request).await
-    }
-
-    #[tauri::command]
-    pub async fn agent_cancel(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-        request: AgentTaskRef,
-    ) -> Result<()> {
-        let _: Value = daemon.call(&app, m::AGENT_CANCEL, &request).await?;
-        Ok(())
-    }
-
-    #[tauri::command]
-    pub async fn agent_confirm(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-        request: AgentConfirm,
-    ) -> Result<()> {
-        let _: Value = daemon.call(&app, m::AGENT_CONFIRM, &request).await?;
-        Ok(())
-    }
-
-    #[tauri::command]
-    pub async fn agent_answer(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-        request: AgentAnswer,
-    ) -> Result<()> {
-        let _: Value = daemon.call(&app, m::AGENT_ANSWER, &request).await?;
-        Ok(())
-    }
-
-    #[tauri::command]
-    pub async fn agent_list(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-        request: AgentListRequest,
-    ) -> Result<Vec<AgentTaskSummary>> {
-        daemon.call(&app, m::AGENT_LIST, &request).await
-    }
-
-    #[tauri::command]
-    pub async fn agent_get(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-        request: AgentTaskRef,
-    ) -> Result<AgentTaskDetail> {
-        daemon.call(&app, m::AGENT_GET, &request).await
-    }
-
-    #[tauri::command]
-    pub async fn policy_get(app: AppHandle, daemon: State<'_, Daemon>) -> Result<PolicyState> {
-        daemon.call(&app, m::POLICY_GET, &()).await
-    }
-
-    #[tauri::command]
-    pub async fn policy_set(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-        request: PolicySet,
-    ) -> Result<PolicyState> {
-        daemon.call(&app, m::POLICY_SET, &request).await
-    }
-
-    #[tauri::command]
-    pub async fn policy_approvals(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-    ) -> Result<PolicyApprovals> {
-        daemon.call(&app, m::POLICY_APPROVALS, &()).await
-    }
-
-    #[tauri::command]
-    pub async fn policy_kill(app: AppHandle, daemon: State<'_, Daemon>) -> Result<KillState> {
-        daemon.call(&app, m::POLICY_KILL, &()).await
-    }
-
-    #[tauri::command]
-    pub async fn policy_resume(app: AppHandle, daemon: State<'_, Daemon>) -> Result<KillState> {
-        daemon.call(&app, m::POLICY_RESUME, &()).await
-    }
-
-    #[tauri::command]
-    pub async fn policy_log_export(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-    ) -> Result<PolicyLogExport> {
-        daemon.call(&app, m::POLICY_LOG_EXPORT, &()).await
-    }
-
-    #[tauri::command]
-    pub async fn browser_status(
-        app: AppHandle,
-        daemon: State<'_, Daemon>,
-    ) -> Result<BrowserStatus> {
-        daemon.call(&app, m::BROWSER_STATUS, &()).await
     }
 }

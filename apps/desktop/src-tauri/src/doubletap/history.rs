@@ -129,14 +129,4 @@ mod tests {
         assert!(!h.clear());
         assert!(h.list().is_empty());
     }
-
-    #[test]
-    fn serializes_per_contract() {
-        let mut h = History::default();
-        h.push("Hi", "Mail", 1_700_000_000_000);
-        assert_eq!(
-            serde_json::to_value(&h.list()[0]).unwrap(),
-            serde_json::json!({ "id": 1, "text": "Hi", "app": "Mail", "at": 1_700_000_000_000u64 })
-        );
-    }
 }

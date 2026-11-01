@@ -41,7 +41,7 @@ pub fn run(install: bool) -> Result<String, CmdError> {
     run_verb(&exe, verb)
 }
 
-/// GG6-10: `nuggetd restart-service` (systemd, launchd or the scheduled task), so a service
+/// `nuggetd restart-service` (systemd, launchd or the scheduled task), so a service
 /// still running the previous version starts the updated binary.
 pub fn restart_service() -> Result<String, CmdError> {
     let exe = find_nuggetd().ok_or_else(|| {

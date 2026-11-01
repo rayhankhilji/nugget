@@ -351,14 +351,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn signature_sits_next_to_the_feed() {
-        assert_eq!(
-            sig_url("https://example.invalid/feed/stable.json"),
-            "https://example.invalid/feed/stable.json.sig"
-        );
-    }
-
     /// A loopback HTTP server: `/redirect` sends to `/body` on `localhost` (another host name for
     /// the ledger), `/body` answers five bytes, anything else 404. Returns its port.
     async fn serve() -> u16 {

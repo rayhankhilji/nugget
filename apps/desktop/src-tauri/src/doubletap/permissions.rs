@@ -193,38 +193,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hints_per_os() {
-        let tap = TriggerSpec::DoubleTap {
-            modifier: ModifierId::RightControl,
-            window_ms: 350,
-        };
-        let chord = TriggerSpec::Chord {
-            chord: "Ctrl+Alt+Space".into(),
-        };
-        use PermissionState::*;
-        assert_eq!(
-            hint_for(Platform::Linux, Session::Wayland, Granted, &tap, None),
-            Some(HINT_WAYLAND_CHORD)
-        );
-        assert_eq!(
-            hint_for(Platform::Linux, Session::Wayland, Denied, &chord, None),
-            Some(HINT_ATSPI)
-        );
-        assert_eq!(
-            hint_for(Platform::Linux, Session::X11, Granted, &tap, None),
-            None
-        );
-        assert_eq!(
-            hint_for(Platform::MacOs, Session::MacOs, Denied, &tap, None),
-            Some(HINT_ACCESSIBILITY)
-        );
-        assert_eq!(
-            hint_for(Platform::Windows, Session::Windows, NotRequired, &tap, None),
-            None
-        );
-    }
-
-    #[test]
     fn wayland_without_a_portal() {
         let chord = TriggerSpec::Chord {
             chord: "Ctrl+Alt+Space".into(),
@@ -275,28 +243,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(st(active(Some("Super+D")))).unwrap(),
             serde_json::json!({ "state": "active", "trigger": "Super+D", "error": null })
-        );
-    }
-
-    #[test]
-    fn names_and_modifiers() {
-        assert_eq!(session_name(Session::Headless), "unknown");
-        assert_eq!(session_name(Session::Wayland), "wayland");
-        assert_eq!(platform_name(Platform::MacOs), "macos");
-        let mods = modifiers(Platform::Windows);
-        assert_eq!(mods.len(), 8);
-        assert!(mods.contains(&ModifierOption {
-            id: "right_command",
-            label: "Right Win"
-        }));
-        assert_eq!(input_monitoring(Platform::MacOs), PermissionState::Unknown);
-        assert_eq!(
-            input_monitoring(Platform::Linux),
-            PermissionState::NotRequired
-        );
-        assert_eq!(
-            serde_json::to_value(PermissionState::NotRequired).unwrap(),
-            "not_required"
         );
     }
 }

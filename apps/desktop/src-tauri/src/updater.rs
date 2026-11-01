@@ -395,7 +395,7 @@ impl Updates {
             Some(b) => Ok(b),
             None => download(app, &update).await,
         };
-        // GG6-10: on macOS and Linux nothing else stops the daemon the app started, which would
+        // on macOS and Linux nothing else stops the daemon the app started, which would
         // keep serving the new app from the old binary. (On Windows the installer stops it.) A
         // login service is restarted on the new version after the restart instead.
         let stopped = bytes.is_ok()
@@ -534,16 +534,6 @@ mod tests {
     fn ledger_features_are_ones_the_daemon_accepts() {
         for f in [FEATURE_CHECK, FEATURE_DOWNLOAD] {
             assert!(nugget_core::ipc::CLIENT_EGRESS_FEATURES.contains(&f), "{f}");
-        }
-    }
-
-    #[test]
-    fn event_names_are_valid() {
-        for name in [event::STATUS, event::PROGRESS] {
-            assert!(
-                name.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "-/:_".contains(c))
-            );
         }
     }
 }

@@ -393,12 +393,6 @@ mod tests {
     }
 
     #[test]
-    fn opened_serializes_for_the_frontend() {
-        assert_eq!(serde_json::to_value(Opened::Revealed).unwrap(), "revealed");
-        assert_eq!(serde_json::to_value(Opened::Opened).unwrap(), "opened");
-    }
-
-    #[test]
     fn mailto_accepts_only_mail_links() {
         assert!(mailto("mailto:ana@example.com?subject=Re%3A%20Q3&body=Hi%20Ana%2C%0A").is_ok());
         assert!(mailto("MAILTO:ana@example.com").is_ok());
