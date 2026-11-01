@@ -1,64 +1,64 @@
 {
- "lang": "ja",
- "search": [
-  {"id": "ja-s1", "query": "パンフレット", "expect": ["ja/03-sakura-insatsu-seikyusho.eml"], "kind": "exact", "why": "katakana loanword in the ISO-2022-JP encoded invoice body"},
-  {"id": "ja-s2", "query": "湯豆腐", "expect": ["ja/05-kyoto-kouyou-plan.md"], "kind": "cjk_word", "why": "3-character word mid-sentence (南禅寺の近くで湯豆腐を食べる), no spaces to tokenize on"},
-  {"id": "ja-s3", "query": "混む", "expect": ["ja/05-kyoto-kouyou-plan.md"], "kind": "inflected", "why": "dictionary form; the note has the te-iru form 混んでいる"},
-  {"id": "ja-s4", "query": "LED照明", "expect": ["ja/01-kotobuki-uchiawase.eml"], "kind": "no_diacritics", "why": "half-width Latin query; the mail writes full-width ＬＥＤ照明 (NFKC needed)"},
-  {"id": "ja-s5", "query": "ｷｬﾝﾍﾟｰﾝ", "expect": ["ja/04-nenmatsu-campaign-kikakusho.eml"], "kind": "no_diacritics", "why": "half-width katakana query; the mail has full-width キャンペーン"},
-  {"id": "ja-s6", "query": "森田 由美子", "expect": ["ja/01-kotobuki-uchiawase.eml"], "kind": "name", "why": "sender name in kanji, family name first"},
-  {"id": "ja-s7", "query": "温泉宿に泊まる週末旅行の誘い", "expect": ["ja/02-sho-hakone-ryokou.eml"], "kind": "semantic", "why": "paraphrase of the casual Hakone trip mail (露天風呂付きの旅館, 一泊) without shared words"},
-  {"id": "ja-s8", "query": "quote for translating the user manual", "expect": ["ja/06-hikari-honyaku-re.eml"], "kind": "cross_lingual", "why": "English query for the Japanese translation-quote reply"}
- ],
- "ask": [
-  {"id": "ja-a1", "question_lang": "ja", "question": "寿商事の森田さんとの打ち合わせはいつ、どこですか？", "facts": [["１１月１８日", "11月18日", "11/18", "2026-11-18"], ["１４：００", "14:00", "14時"], ["会議室Ａ", "会議室A", "寿ビル", "日本橋室町"]], "cite": ["ja/01-kotobuki-uchiawase.eml"]},
-  {"id": "ja-a2", "question_lang": "ja", "question": "さくら印刷の請求金額と支払期限を教えてください。", "facts": [["38,500", "38500", "3万8,500", "３８，５００"], ["11月27日", "11/27", "2026-11-27"]], "cite": ["ja/03-sakura-insatsu-seikyusho.eml"]},
-  {"id": "ja-a3", "question_lang": "ja", "question": "小林さんに頼まれた企画書の締め切りはいつ？売上データは誰に聞けばいい？", "facts": [["11月13日", "11/13", "2026-11-13"], ["高橋 彩", "高橋彩", "高橋"]], "cite": ["ja/04-nenmatsu-campaign-kikakusho.eml"]},
-  {"id": "ja-a4", "question_lang": "en", "question": "How much will the manual translation cost, and when would it be delivered?", "facts": [["264,000", "264000"], ["20 November", "November 20", "Nov 20", "2026-11-20", "11月20日"]], "cite": ["ja/06-hikari-honyaku-re.eml"]}
- ],
- "draft": [
-  {"id": "ja-d1", "file": "ja/01-kotobuki-uchiawase.eml", "register": "formal", "instruction": "お受けする。ただし開始を15時にしてほしいと伝える", "accept_lang": ["ja"], "formal_markers": ["です", "ます", "いたします", "申し上げ", "お世話になっております"], "informal_markers": ["だよ", "だね", "じゃん", "かな", "よろしく！"], "note": "Business keigo mail; reply in keigo (いつもお世話になっております, 承知いたしました, 何卒よろしくお願い申し上げます)."},
-  {"id": "ja-d2", "file": "ja/02-sho-hakone-ryokou.eml", "register": "informal", "instruction": "", "accept_lang": ["ja"], "formal_markers": ["いたします", "申し上げ", "でございます", "存じます"], "informal_markers": ["だよ", "だね", "じゃん", "かな", "よろしく！", "行く！", "ね〜"], "note": "Casual friend mail (plain form, ね/よ). Reply casually; keigo would sound cold."},
-  {"id": "ja-d3", "file": "ja/06-hikari-honyaku-re.eml", "register": "formal", "instruction": "発注する。原稿は11月6日までに送り、用語集も添付すると伝える", "accept_lang": ["ja"], "formal_markers": ["です", "ます", "いたします", "申し上げ", "お世話になっております"], "informal_markers": ["だよ", "だね", "じゃん", "かな", "よろしく！"], "note": "Thread reply to a vendor; polite business Japanese."}
- ],
- "extract": {
-  "people": [
-   {"name": "森田 由美子", "aliases": ["森田", "Morita Yumiko", "Yumiko Morita"], "email": "y.morita@kotobuki-shoji.example", "file": "ja/01-kotobuki-uchiawase.eml"},
-   {"name": "中村 翔", "aliases": ["翔", "Sho Nakamura"], "email": "sho.nakamura@example.org", "file": "ja/02-sho-hakone-ryokou.eml"},
-   {"name": "小林 直樹", "aliases": ["小林", "Naoki Kobayashi"], "email": "n.kobayashi@luminous-bridge.example", "file": "ja/04-nenmatsu-campaign-kikakusho.eml"},
-   {"name": "高橋 彩", "aliases": ["高橋", "Aya Takahashi"], "file": "ja/04-nenmatsu-campaign-kikakusho.eml"},
-   {"name": "山口 恵", "aliases": ["山口", "Megumi Yamaguchi"], "email": "m.yamaguchi@hikari-honyaku.example", "file": "ja/06-hikari-honyaku-re.eml"}
-  ],
-  "orgs": [
-   {"name": "株式会社寿商事", "file": "ja/01-kotobuki-uchiawase.eml"},
-   {"name": "株式会社さくら印刷", "file": "ja/03-sakura-insatsu-seikyusho.eml"},
-   {"name": "株式会社ルミナス・ブリッジ", "file": "ja/04-nenmatsu-campaign-kikakusho.eml"},
-   {"name": "株式会社ひかり翻訳", "file": "ja/06-hikari-honyaku-re.eml"}
-  ],
-  "dates": [
-   {"date": "2026-11-18", "time": "14:00", "text": "２０２６年１１月１８日（水）１４：００〜１５：００", "file": "ja/01-kotobuki-uchiawase.eml", "what": "meeting at Kotobuki Shoji, room A"},
-   {"date": "2026-11-21", "text": "11月21日（土）〜22日（日）", "file": "ja/02-sho-hakone-ryokou.eml", "what": "Hakone overnight trip"},
-   {"date": "2026-11-04", "text": "11月4日（水）までに", "file": "ja/02-sho-hakone-ryokou.eml", "what": "tell Sho whether Sam comes"},
-   {"date": "2026-11-27", "text": "2026年11月27日（金）", "file": "ja/03-sakura-insatsu-seikyusho.eml", "what": "invoice payment due"},
-   {"date": "2026-11-13", "text": "11月13日（金）までに", "file": "ja/04-nenmatsu-campaign-kikakusho.eml", "what": "campaign proposal draft"},
-   {"date": "2026-11-06", "text": "11月6日（金）までに", "file": "ja/06-hikari-honyaku-re.eml", "what": "send source manuscript"},
-   {"date": "2026-11-20", "text": "11月20日（金）", "file": "ja/06-hikari-honyaku-re.eml", "what": "translation delivery"}
-  ],
-  "amounts": [
-   {"text": "￥38,500", "value": 38500, "currency": "JPY", "file": "ja/03-sakura-insatsu-seikyusho.eml"},
-   {"text": "¥264,000", "value": 264000, "currency": "JPY", "file": "ja/06-hikari-honyaku-re.eml"},
-   {"text": "300万円", "value": 3000000, "currency": "JPY", "file": "ja/04-nenmatsu-campaign-kikakusho.eml"}
-  ],
-  "ids": [
-   {"text": "SK-2026-1027", "file": "ja/03-sakura-insatsu-seikyusho.eml"}
-  ]
- },
- "proactive": [
-  {"file": "ja/01-kotobuki-uchiawase.eml", "expect": "reply_needed", "who": "森田 由美子"},
-  {"file": "ja/01-kotobuki-uchiawase.eml", "expect": "event", "date": "2026-11-18", "time": "14:00", "tz": "Asia/Tokyo"},
-  {"file": "ja/02-sho-hakone-ryokou.eml", "expect": "reply_needed", "due": "2026-11-04", "who": "中村 翔"},
-  {"file": "ja/03-sakura-insatsu-seikyusho.eml", "expect": "payment_due", "due": "2026-11-27", "amount": "￥38,500"},
-  {"file": "ja/04-nenmatsu-campaign-kikakusho.eml", "expect": "commitment", "due": "2026-11-13", "who": "小林 直樹", "what": "year-end campaign proposal draft"},
-  {"file": "ja/06-hikari-honyaku-re.eml", "expect": "reply_needed", "who": "山口 恵"}
- ]
+"lang":"ja",
+"search":[
+{"id":"ja-s1","query":"パンフレット","expect":["ja/03-sakura-insatsu-seikyusho.eml"],"kind":"exact","why":"katakana loanword in the ISO-2022-JP encoded invoice body"},
+{"id":"ja-s2","query":"湯豆腐","expect":["ja/05-kyoto-kouyou-plan.md"],"kind":"cjk_word","why":"3-character word mid-sentence (南禅寺の近くで湯豆腐を食べる), no spaces to tokenize on"},
+{"id":"ja-s3","query":"混む","expect":["ja/05-kyoto-kouyou-plan.md"],"kind":"inflected","why":"dictionary form; the note has the te-iru form 混んでいる"},
+{"id":"ja-s4","query":"LED照明","expect":["ja/01-kotobuki-uchiawase.eml"],"kind":"no_diacritics","why":"half-width Latin query; the mail writes full-width ＬＥＤ照明 (NFKC needed)"},
+{"id":"ja-s5","query":"ｷｬﾝﾍﾟｰﾝ","expect":["ja/04-nenmatsu-campaign-kikakusho.eml"],"kind":"no_diacritics","why":"half-width katakana query; the mail has full-width キャンペーン"},
+{"id":"ja-s6","query":"森田 由美子","expect":["ja/01-kotobuki-uchiawase.eml"],"kind":"name","why":"sender name in kanji, family name first"},
+{"id":"ja-s7","query":"温泉宿に泊まる週末旅行の誘い","expect":["ja/02-sho-hakone-ryokou.eml"],"kind":"semantic","why":"paraphrase of the casual Hakone trip mail (露天風呂付きの旅館, 一泊) without shared words"},
+{"id":"ja-s8","query":"quote for translating the user manual","expect":["ja/06-hikari-honyaku-re.eml"],"kind":"cross_lingual","why":"English query for the Japanese translation-quote reply"}
+],
+"ask":[
+{"id":"ja-a1","question_lang":"ja","question":"寿商事の森田さんとの打ち合わせはいつ、どこですか？","facts":[["１１月１８日","11月18日","11/18","2026-11-18"],["１４：００","14:00","14時"],["会議室Ａ","会議室A","寿ビル","日本橋室町"]],"cite":["ja/01-kotobuki-uchiawase.eml"]},
+{"id":"ja-a2","question_lang":"ja","question":"さくら印刷の請求金額と支払期限を教えてください。","facts":[["38,500","38500","3万8,500","３８，５００"],["11月27日","11/27","2026-11-27"]],"cite":["ja/03-sakura-insatsu-seikyusho.eml"]},
+{"id":"ja-a3","question_lang":"ja","question":"小林さんに頼まれた企画書の締め切りはいつ？売上データは誰に聞けばいい？","facts":[["11月13日","11/13","2026-11-13"],["高橋 彩","高橋彩","高橋"]],"cite":["ja/04-nenmatsu-campaign-kikakusho.eml"]},
+{"id":"ja-a4","question_lang":"en","question":"How much will the manual translation cost, and when would it be delivered?","facts":[["264,000","264000"],["20 November","November 20","Nov 20","2026-11-20","11月20日"]],"cite":["ja/06-hikari-honyaku-re.eml"]}
+],
+"draft":[
+{"id":"ja-d1","file":"ja/01-kotobuki-uchiawase.eml","register":"formal","instruction":"お受けする。ただし開始を15時にしてほしいと伝える","accept_lang":["ja"],"formal_markers":["です","ます","いたします","申し上げ","お世話になっております"],"informal_markers":["だよ","だね","じゃん","かな","よろしく！"],"note":"Business keigo mail; reply in keigo (いつもお世話になっております, 承知いたしました, 何卒よろしくお願い申し上げます)."},
+{"id":"ja-d2","file":"ja/02-sho-hakone-ryokou.eml","register":"informal","instruction":"","accept_lang":["ja"],"formal_markers":["いたします","申し上げ","でございます","存じます"],"informal_markers":["だよ","だね","じゃん","かな","よろしく！","行く！","ね〜"],"note":"Casual friend mail (plain form, ね/よ). Reply casually; keigo would sound cold."},
+{"id":"ja-d3","file":"ja/06-hikari-honyaku-re.eml","register":"formal","instruction":"発注する。原稿は11月6日までに送り、用語集も添付すると伝える","accept_lang":["ja"],"formal_markers":["です","ます","いたします","申し上げ","お世話になっております"],"informal_markers":["だよ","だね","じゃん","かな","よろしく！"],"note":"Thread reply to a vendor; polite business Japanese."}
+],
+"extract":{
+"people":[
+{"name":"森田 由美子","aliases":["森田","Morita Yumiko","Yumiko Morita"],"email":"y.morita@kotobuki-shoji.example","file":"ja/01-kotobuki-uchiawase.eml"},
+{"name":"中村 翔","aliases":["翔","Sho Nakamura"],"email":"sho.nakamura@example.org","file":"ja/02-sho-hakone-ryokou.eml"},
+{"name":"小林 直樹","aliases":["小林","Naoki Kobayashi"],"email":"n.kobayashi@luminous-bridge.example","file":"ja/04-nenmatsu-campaign-kikakusho.eml"},
+{"name":"高橋 彩","aliases":["高橋","Aya Takahashi"],"file":"ja/04-nenmatsu-campaign-kikakusho.eml"},
+{"name":"山口 恵","aliases":["山口","Megumi Yamaguchi"],"email":"m.yamaguchi@hikari-honyaku.example","file":"ja/06-hikari-honyaku-re.eml"}
+],
+"orgs":[
+{"name":"株式会社寿商事","file":"ja/01-kotobuki-uchiawase.eml"},
+{"name":"株式会社さくら印刷","file":"ja/03-sakura-insatsu-seikyusho.eml"},
+{"name":"株式会社ルミナス・ブリッジ","file":"ja/04-nenmatsu-campaign-kikakusho.eml"},
+{"name":"株式会社ひかり翻訳","file":"ja/06-hikari-honyaku-re.eml"}
+],
+"dates":[
+{"date":"2026-11-18","time":"14:00","text":"２０２６年１１月１８日（水）１４：００〜１５：００","file":"ja/01-kotobuki-uchiawase.eml","what":"meeting at Kotobuki Shoji, room A"},
+{"date":"2026-11-21","text":"11月21日（土）〜22日（日）","file":"ja/02-sho-hakone-ryokou.eml","what":"Hakone overnight trip"},
+{"date":"2026-11-04","text":"11月4日（水）までに","file":"ja/02-sho-hakone-ryokou.eml","what":"tell Sho whether Sam comes"},
+{"date":"2026-11-27","text":"2026年11月27日（金）","file":"ja/03-sakura-insatsu-seikyusho.eml","what":"invoice payment due"},
+{"date":"2026-11-13","text":"11月13日（金）までに","file":"ja/04-nenmatsu-campaign-kikakusho.eml","what":"campaign proposal draft"},
+{"date":"2026-11-06","text":"11月6日（金）までに","file":"ja/06-hikari-honyaku-re.eml","what":"send source manuscript"},
+{"date":"2026-11-20","text":"11月20日（金）","file":"ja/06-hikari-honyaku-re.eml","what":"translation delivery"}
+],
+"amounts":[
+{"text":"￥38,500","value":38500,"currency":"JPY","file":"ja/03-sakura-insatsu-seikyusho.eml"},
+{"text":"¥264,000","value":264000,"currency":"JPY","file":"ja/06-hikari-honyaku-re.eml"},
+{"text":"300万円","value":3000000,"currency":"JPY","file":"ja/04-nenmatsu-campaign-kikakusho.eml"}
+],
+"ids":[
+{"text":"SK-2026-1027","file":"ja/03-sakura-insatsu-seikyusho.eml"}
+]
+},
+"proactive":[
+{"file":"ja/01-kotobuki-uchiawase.eml","expect":"reply_needed","who":"森田 由美子"},
+{"file":"ja/01-kotobuki-uchiawase.eml","expect":"event","date":"2026-11-18","time":"14:00","tz":"Asia/Tokyo"},
+{"file":"ja/02-sho-hakone-ryokou.eml","expect":"reply_needed","due":"2026-11-04","who":"中村 翔"},
+{"file":"ja/03-sakura-insatsu-seikyusho.eml","expect":"payment_due","due":"2026-11-27","amount":"￥38,500"},
+{"file":"ja/04-nenmatsu-campaign-kikakusho.eml","expect":"commitment","due":"2026-11-13","who":"小林 直樹","what":"year-end campaign proposal draft"},
+{"file":"ja/06-hikari-honyaku-re.eml","expect":"reply_needed","who":"山口 恵"}
+]
 }

@@ -1,68 +1,68 @@
 {
- "lang": "ar",
- "search": [
-  {"id": "ar-s1", "query": "كشتة", "expect": ["ar/02-khaled-kashta.eml"], "kind": "exact", "why": "Gulf word for a desert camping trip, as written in the informal mail"},
-  {"id": "ar-s2", "query": "كرسي", "expect": ["ar/02-khaled-kashta.eml"], "kind": "inflected", "why": "singular; the mail has only the broken plural الكراسي"},
-  {"id": "ar-s3", "query": "تاكيد الحضور", "expect": ["ar/01-rimal-alkhaleej-ijtima.eml"], "kind": "no_diacritics", "why": "typed without hamza (ا for أ); the mail has بتأكيد الحضور"},
-  {"id": "ar-s4", "query": "التحول الرقمي", "expect": ["ar/01-rimal-alkhaleej-ijtima.eml"], "kind": "no_diacritics", "why": "query without tashkeel; the body writes التَّحَوُّل الرقمي with shadda/fatha/damma"},
-  {"id": "ar-s5", "query": "فاتوره", "expect": ["ar/03-afaq-fatura.eml"], "kind": "no_diacritics", "why": "ه typed for ta marbuta ة (فاتورة in the base64 body)"},
-  {"id": "ar-s6", "query": "نورة القحطاني", "expect": ["ar/04-ard-majlis-alidara.eml"], "kind": "name", "why": "sender name in Arabic script (From and signature)"},
-  {"id": "ar-s7", "query": "طبخة رز ولحم أبيض بالتوابل الخليجية", "expect": ["ar/05-kabsa-dajaj.md"], "kind": "semantic", "why": "paraphrase of the chicken kabsa recipe without shared words"},
-  {"id": "ar-s8", "query": "printing invoice for brochures and banners", "expect": ["ar/03-afaq-fatura.eml"], "kind": "cross_lingual", "why": "English query for the Arabic print-shop invoice (كتيّبات، Roll-up Banner)"}
- ],
- "ask": [
-  {"id": "ar-a1", "question_lang": "ar", "question": "متى وأين الاجتماع مع شركة رمال الخليج؟", "facts": [["١٨ نوفمبر", "18 نوفمبر", "18/11", "2026-11-18"], ["١٠:٣٠", "10:30"], ["برج النخبة", "حي العليا", "طريق الملك فهد"]], "cite": ["ar/01-rimal-alkhaleej-ijtima.eml"]},
-  {"id": "ar-a2", "question_lang": "ar", "question": "كم المبلغ الإجمالي لفاتورة مؤسسة آفاق وما آخر موعد للسداد؟", "facts": [["١٢٬٤٢٠", "12,420", "12420", "١٢٤٢٠"], ["١٠ نوفمبر", "10 نوفمبر", "10/11", "2026-11-10"]], "cite": ["ar/03-afaq-fatura.eml"]},
-  {"id": "ar-a3", "question_lang": "ar", "question": "ما الذي طلبته مني نورة القحطاني، وما الموعد النهائي؟", "facts": [["العرض التقديمي", "عرض تقديمي"], ["12 نوفمبر", "١٢ نوفمبر", "12/11", "2026-11-12"]], "cite": ["ar/04-ard-majlis-alidara.eml"]},
-  {"id": "ar-a4", "question_lang": "en", "question": "When is the Excel training workshop, how much does it cost, and by when do they need the participant names?", "facts": [["24", "٢٤", "November 24", "2026-11-24"], ["8,500", "8500", "٨٬٥٠٠"], ["11 November", "November 11", "Nov 11", "2026-11-11", "١١ نوفمبر"]], "cite": ["ar/06-almada-warsha-rad.eml"]}
- ],
- "draft": [
-  {"id": "ar-d1", "file": "ar/01-rimal-alkhaleej-ijtima.eml", "register": "formal", "instruction": "قبول الدعوة مع طلب تأجيل الموعد إلى الساعة ١٢ ظهرًا", "accept_lang": ["ar"], "formal_markers": ["حضرتكم", "المحترم", "تحية طيبة", "وتفضلوا", "مع خالص"], "informal_markers": ["هلا", "شخبارك", "يلا", "أبشر", "وش"], "note": "Formal MSA business invitation (سعادة، حضرتكم، وتفضلوا بقبول). Reply in formal MSA."},
-  {"id": "ar-d2", "file": "ar/02-khaled-kashta.eml", "register": "informal", "instruction": "", "accept_lang": ["ar"], "formal_markers": ["حضرتكم", "المحترم", "سعادة", "وتفضلوا"], "informal_markers": ["هلا", "شخبارك", "يلا", "أبشر", "وش", "إن شاء الله"], "note": "Gulf-dialect message from a friend. A casual Gulf or light MSA reply is fine; formal letter style is wrong."},
-  {"id": "ar-d3", "file": "ar/06-almada-warsha-rad.eml", "register": "formal", "instruction": "الموافقة وإرسال أسماء المشاركين قبل ١١ نوفمبر", "accept_lang": ["ar"], "formal_markers": ["حضرتكم", "المحترم", "تحية طيبة", "وتفضلوا", "مع خالص"], "informal_markers": ["هلا", "شخبارك", "يلا", "أبشر", "وش"], "note": "Thread reply to a training centre; polite MSA, keep 'Microsoft Excel' in Latin script."}
- ],
- "extract": {
-  "people": [
-   {"name": "عبدالرحمن الشمري", "aliases": ["م. عبدالرحمن الشمري", "Abdulrahman Al-Shammari"], "email": "a.alshammari@rimal-alkhaleej.example", "file": "ar/01-rimal-alkhaleej-ijtima.eml"},
-   {"name": "خالد المري", "aliases": ["خالد", "Khaled Al-Marri"], "email": "khaled.almarri@example.com", "file": "ar/02-khaled-kashta.eml"},
-   {"name": "فيصل", "aliases": ["Faisal"], "file": "ar/02-khaled-kashta.eml"},
-   {"name": "نورة القحطاني", "aliases": ["د. نورة القحطاني", "Noura Al-Qahtani"], "email": "n.alqahtani@alwaha-holding.example", "file": "ar/04-ard-majlis-alidara.eml"},
-   {"name": "إبراهيم العتيبي", "aliases": ["ابراهيم العتيبي", "Ibrahim Al-Otaibi"], "file": "ar/04-ard-majlis-alidara.eml"},
-   {"name": "ريم الزهراني", "aliases": ["أ. ريم", "Reem Al-Zahrani"], "email": "reem.alzahrani@almada-training.example", "file": "ar/06-almada-warsha-rad.eml"},
-   {"name": "طارق السبيعي", "aliases": ["م. طارق السبيعي", "Tariq Al-Subaie"], "file": "ar/06-almada-warsha-rad.eml"}
-  ],
-  "orgs": [
-   {"name": "شركة رمال الخليج للحلول التقنية", "file": "ar/01-rimal-alkhaleej-ijtima.eml"},
-   {"name": "مؤسسة آفاق للطباعة والإعلان", "file": "ar/03-afaq-fatura.eml"},
-   {"name": "مجموعة الواحة القابضة", "file": "ar/04-ard-majlis-alidara.eml"},
-   {"name": "مركز المدى للتدريب", "file": "ar/06-almada-warsha-rad.eml"}
-  ],
-  "dates": [
-   {"date": "2026-11-18", "time": "10:30", "text": "١٨ نوفمبر ٢٠٢٦ الساعة ١٠:٣٠ صباحًا", "file": "ar/01-rimal-alkhaleej-ijtima.eml", "what": "meeting at Rimal Al-Khaleej, Al Nukhba Tower"},
-   {"date": "2026-11-19", "text": "الخميس 19 نوفمبر", "file": "ar/02-khaled-kashta.eml", "what": "desert camping trip (to Fri 20 Nov)"},
-   {"date": "2026-11-08", "text": "قبل الأحد 8 نوفمبر", "file": "ar/02-khaled-kashta.eml", "what": "tell Khaled whether Sam comes"},
-   {"date": "2026-11-10", "text": "الثلاثاء ١٠ نوفمبر ٢٠٢٦", "file": "ar/03-afaq-fatura.eml", "what": "invoice payment due"},
-   {"date": "2026-11-12", "text": "الخميس 12 نوفمبر 2026", "file": "ar/04-ard-majlis-alidara.eml", "what": "Q3 board presentation, final version"},
-   {"date": "2026-11-15", "text": "الأحد 15 نوفمبر", "file": "ar/04-ard-majlis-alidara.eml", "what": "board meeting"},
-   {"date": "2026-11-24", "time": "09:00", "text": "الثلاثاء والأربعاء ٢٤–٢٥ نوفمبر", "file": "ar/06-almada-warsha-rad.eml", "what": "Excel training workshop"},
-   {"date": "2026-11-11", "text": "الأربعاء ١١ نوفمبر", "file": "ar/06-almada-warsha-rad.eml", "what": "send participant names"}
-  ],
-  "amounts": [
-   {"text": "١٢٬٤٢٠ ر.س", "value": 12420, "currency": "SAR", "file": "ar/03-afaq-fatura.eml"},
-   {"text": "12,420 SAR", "value": 12420, "currency": "SAR", "file": "ar/03-afaq-fatura.eml"},
-   {"text": "٨٬٥٠٠ ر.س", "value": 8500, "currency": "SAR", "file": "ar/06-almada-warsha-rad.eml"},
-   {"text": "150 ريال", "value": 150, "currency": "SAR", "file": "ar/02-khaled-kashta.eml"}
-  ],
-  "ids": [
-   {"text": "INV-2026-0388", "file": "ar/03-afaq-fatura.eml"}
-  ]
- },
- "proactive": [
-  {"file": "ar/01-rimal-alkhaleej-ijtima.eml", "expect": "reply_needed", "who": "عبدالرحمن الشمري"},
-  {"file": "ar/01-rimal-alkhaleej-ijtima.eml", "expect": "event", "date": "2026-11-18", "time": "10:30", "tz": "Asia/Riyadh"},
-  {"file": "ar/02-khaled-kashta.eml", "expect": "reply_needed", "due": "2026-11-08", "who": "خالد المري"},
-  {"file": "ar/03-afaq-fatura.eml", "expect": "payment_due", "due": "2026-11-10", "amount": "١٢٬٤٢٠ ر.س"},
-  {"file": "ar/04-ard-majlis-alidara.eml", "expect": "commitment", "due": "2026-11-12", "who": "نورة القحطاني", "what": "Q3 results presentation for the board"},
-  {"file": "ar/06-almada-warsha-rad.eml", "expect": "commitment", "due": "2026-11-11", "who": "ريم الزهراني", "what": "send participant names and emails"}
- ]
+"lang":"ar",
+"search":[
+{"id":"ar-s1","query":"كشتة","expect":["ar/02-khaled-kashta.eml"],"kind":"exact","why":"Gulf word for a desert camping trip, as written in the informal mail"},
+{"id":"ar-s2","query":"كرسي","expect":["ar/02-khaled-kashta.eml"],"kind":"inflected","why":"singular; the mail has only the broken plural الكراسي"},
+{"id":"ar-s3","query":"تاكيد الحضور","expect":["ar/01-rimal-alkhaleej-ijtima.eml"],"kind":"no_diacritics","why":"typed without hamza (ا for أ); the mail has بتأكيد الحضور"},
+{"id":"ar-s4","query":"التحول الرقمي","expect":["ar/01-rimal-alkhaleej-ijtima.eml"],"kind":"no_diacritics","why":"query without tashkeel; the body writes التَّحَوُّل الرقمي with shadda/fatha/damma"},
+{"id":"ar-s5","query":"فاتوره","expect":["ar/03-afaq-fatura.eml"],"kind":"no_diacritics","why":"ه typed for ta marbuta ة (فاتورة in the base64 body)"},
+{"id":"ar-s6","query":"نورة القحطاني","expect":["ar/04-ard-majlis-alidara.eml"],"kind":"name","why":"sender name in Arabic script (From and signature)"},
+{"id":"ar-s7","query":"طبخة رز ولحم أبيض بالتوابل الخليجية","expect":["ar/05-kabsa-dajaj.md"],"kind":"semantic","why":"paraphrase of the chicken kabsa recipe without shared words"},
+{"id":"ar-s8","query":"printing invoice for brochures and banners","expect":["ar/03-afaq-fatura.eml"],"kind":"cross_lingual","why":"English query for the Arabic print-shop invoice (كتيّبات، Roll-up Banner)"}
+],
+"ask":[
+{"id":"ar-a1","question_lang":"ar","question":"متى وأين الاجتماع مع شركة رمال الخليج؟","facts":[["١٨ نوفمبر","18 نوفمبر","18/11","2026-11-18"],["١٠:٣٠","10:30"],["برج النخبة","حي العليا","طريق الملك فهد"]],"cite":["ar/01-rimal-alkhaleej-ijtima.eml"]},
+{"id":"ar-a2","question_lang":"ar","question":"كم المبلغ الإجمالي لفاتورة مؤسسة آفاق وما آخر موعد للسداد؟","facts":[["١٢٬٤٢٠","12,420","12420","١٢٤٢٠"],["١٠ نوفمبر","10 نوفمبر","10/11","2026-11-10"]],"cite":["ar/03-afaq-fatura.eml"]},
+{"id":"ar-a3","question_lang":"ar","question":"ما الذي طلبته مني نورة القحطاني، وما الموعد النهائي؟","facts":[["العرض التقديمي","عرض تقديمي"],["12 نوفمبر","١٢ نوفمبر","12/11","2026-11-12"]],"cite":["ar/04-ard-majlis-alidara.eml"]},
+{"id":"ar-a4","question_lang":"en","question":"When is the Excel training workshop, how much does it cost, and by when do they need the participant names?","facts":[["24","٢٤","November 24","2026-11-24"],["8,500","8500","٨٬٥٠٠"],["11 November","November 11","Nov 11","2026-11-11","١١ نوفمبر"]],"cite":["ar/06-almada-warsha-rad.eml"]}
+],
+"draft":[
+{"id":"ar-d1","file":"ar/01-rimal-alkhaleej-ijtima.eml","register":"formal","instruction":"قبول الدعوة مع طلب تأجيل الموعد إلى الساعة ١٢ ظهرًا","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","تحية طيبة","وتفضلوا","مع خالص"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش"],"note":"Formal MSA business invitation (سعادة، حضرتكم، وتفضلوا بقبول). Reply in formal MSA."},
+{"id":"ar-d2","file":"ar/02-khaled-kashta.eml","register":"informal","instruction":"","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","سعادة","وتفضلوا"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش","إن شاء الله"],"note":"Gulf-dialect message from a friend. A casual Gulf or light MSA reply is fine; formal letter style is wrong."},
+{"id":"ar-d3","file":"ar/06-almada-warsha-rad.eml","register":"formal","instruction":"الموافقة وإرسال أسماء المشاركين قبل ١١ نوفمبر","accept_lang":["ar"],"formal_markers":["حضرتكم","المحترم","تحية طيبة","وتفضلوا","مع خالص"],"informal_markers":["هلا","شخبارك","يلا","أبشر","وش"],"note":"Thread reply to a training centre; polite MSA, keep 'Microsoft Excel' in Latin script."}
+],
+"extract":{
+"people":[
+{"name":"عبدالرحمن الشمري","aliases":["م. عبدالرحمن الشمري","Abdulrahman Al-Shammari"],"email":"a.alshammari@rimal-alkhaleej.example","file":"ar/01-rimal-alkhaleej-ijtima.eml"},
+{"name":"خالد المري","aliases":["خالد","Khaled Al-Marri"],"email":"khaled.almarri@example.com","file":"ar/02-khaled-kashta.eml"},
+{"name":"فيصل","aliases":["Faisal"],"file":"ar/02-khaled-kashta.eml"},
+{"name":"نورة القحطاني","aliases":["د. نورة القحطاني","Noura Al-Qahtani"],"email":"n.alqahtani@alwaha-holding.example","file":"ar/04-ard-majlis-alidara.eml"},
+{"name":"إبراهيم العتيبي","aliases":["ابراهيم العتيبي","Ibrahim Al-Otaibi"],"file":"ar/04-ard-majlis-alidara.eml"},
+{"name":"ريم الزهراني","aliases":["أ. ريم","Reem Al-Zahrani"],"email":"reem.alzahrani@almada-training.example","file":"ar/06-almada-warsha-rad.eml"},
+{"name":"طارق السبيعي","aliases":["م. طارق السبيعي","Tariq Al-Subaie"],"file":"ar/06-almada-warsha-rad.eml"}
+],
+"orgs":[
+{"name":"شركة رمال الخليج للحلول التقنية","file":"ar/01-rimal-alkhaleej-ijtima.eml"},
+{"name":"مؤسسة آفاق للطباعة والإعلان","file":"ar/03-afaq-fatura.eml"},
+{"name":"مجموعة الواحة القابضة","file":"ar/04-ard-majlis-alidara.eml"},
+{"name":"مركز المدى للتدريب","file":"ar/06-almada-warsha-rad.eml"}
+],
+"dates":[
+{"date":"2026-11-18","time":"10:30","text":"١٨ نوفمبر ٢٠٢٦ الساعة ١٠:٣٠ صباحًا","file":"ar/01-rimal-alkhaleej-ijtima.eml","what":"meeting at Rimal Al-Khaleej, Al Nukhba Tower"},
+{"date":"2026-11-19","text":"الخميس 19 نوفمبر","file":"ar/02-khaled-kashta.eml","what":"desert camping trip (to Fri 20 Nov)"},
+{"date":"2026-11-08","text":"قبل الأحد 8 نوفمبر","file":"ar/02-khaled-kashta.eml","what":"tell Khaled whether Sam comes"},
+{"date":"2026-11-10","text":"الثلاثاء ١٠ نوفمبر ٢٠٢٦","file":"ar/03-afaq-fatura.eml","what":"invoice payment due"},
+{"date":"2026-11-12","text":"الخميس 12 نوفمبر 2026","file":"ar/04-ard-majlis-alidara.eml","what":"Q3 board presentation, final version"},
+{"date":"2026-11-15","text":"الأحد 15 نوفمبر","file":"ar/04-ard-majlis-alidara.eml","what":"board meeting"},
+{"date":"2026-11-24","time":"09:00","text":"الثلاثاء والأربعاء ٢٤–٢٥ نوفمبر","file":"ar/06-almada-warsha-rad.eml","what":"Excel training workshop"},
+{"date":"2026-11-11","text":"الأربعاء ١١ نوفمبر","file":"ar/06-almada-warsha-rad.eml","what":"send participant names"}
+],
+"amounts":[
+{"text":"١٢٬٤٢٠ ر.س","value":12420,"currency":"SAR","file":"ar/03-afaq-fatura.eml"},
+{"text":"12,420 SAR","value":12420,"currency":"SAR","file":"ar/03-afaq-fatura.eml"},
+{"text":"٨٬٥٠٠ ر.س","value":8500,"currency":"SAR","file":"ar/06-almada-warsha-rad.eml"},
+{"text":"150 ريال","value":150,"currency":"SAR","file":"ar/02-khaled-kashta.eml"}
+],
+"ids":[
+{"text":"INV-2026-0388","file":"ar/03-afaq-fatura.eml"}
+]
+},
+"proactive":[
+{"file":"ar/01-rimal-alkhaleej-ijtima.eml","expect":"reply_needed","who":"عبدالرحمن الشمري"},
+{"file":"ar/01-rimal-alkhaleej-ijtima.eml","expect":"event","date":"2026-11-18","time":"10:30","tz":"Asia/Riyadh"},
+{"file":"ar/02-khaled-kashta.eml","expect":"reply_needed","due":"2026-11-08","who":"خالد المري"},
+{"file":"ar/03-afaq-fatura.eml","expect":"payment_due","due":"2026-11-10","amount":"١٢٬٤٢٠ ر.س"},
+{"file":"ar/04-ard-majlis-alidara.eml","expect":"commitment","due":"2026-11-12","who":"نورة القحطاني","what":"Q3 results presentation for the board"},
+{"file":"ar/06-almada-warsha-rad.eml","expect":"commitment","due":"2026-11-11","who":"ريم الزهراني","what":"send participant names and emails"}
+]
 }

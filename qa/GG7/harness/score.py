@@ -143,10 +143,39 @@ def register(text, d):
     return "formal" if f > i else "informal" if i > f else "mixed"
 
 
+def grams(t, n=6):
+    t = re.sub(r"\s+", "", norm(t))
+    return {t[i : i + n] for i in range(max(0, len(t) - n + 1))}
+
+
+def wrong_side(txt, file):
+    """Whether a draft is written from the correspondent's side instead of as the user's reply:
+    it greets the user, signs with the sender's name, or mostly repeats the incoming mail."""
+    sys.path.insert(0, str(HERE))
+    from gg7 import eml_thread
+
+    msg, thread = eml_thread(HERE.parent / "corpus" / file)
+    sender = re.sub(r"<.*?>|\"", "", str(msg.get("From", ""))).strip()
+    first = norm(txt.strip().split("\n")[0][:80])
+    tail = norm(txt[-80:])
+    reasons = []
+    # The user's name in the opening line (Latin, Arabic or katakana): a greeting to the user.
+    if re.search(r"(?<![\w.@])(sam|سام|サム)(?![\w.@])", first) and "okaforです" not in first:
+        reasons.append("greets the user")
+    if sender and (norm(sender) in tail or any(len(p) > 2 and norm(p) in tail for p in sender.split()[-1:])):
+        reasons.append(f"signed as {sender}")
+    g = grams(txt)
+    if g and len(g & grams(thread[0]["text"])) / len(g) > 0.7:
+        reasons.append("repeats the incoming mail")
+    return reasons
+
+
 def score_draft(d):
     out = []
     for r in rows(d, "draft"):
         txt = strip_think(r.get("draft", ""))
+        r["wrong_side"] = wrong_side(txt, r["file"]) if txt else []
+        r["right_side"] = not r["wrong_side"]
         det = detect(txt)
         reg = register(txt, r)
         want = r.get("register")
@@ -240,7 +269,7 @@ def main():
     for name, rs in (("ask", score_ask(d)), ("draft", score_draft(d))):
         if not rs:
             continue
-        keys = ["facts_ok", "cite_ok", "lang_ok"] if name == "ask" else ["nonempty", "lang_ok", "register_ok"]
+        keys = ["facts_ok", "cite_ok", "lang_ok"] if name == "ask" else ["nonempty", "lang_ok", "register_ok", "right_side"]
         by = defaultdict(list)
         for r in rs:
             by[r["lang"]].append(r)
