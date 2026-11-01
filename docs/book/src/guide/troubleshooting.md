@@ -146,7 +146,7 @@ models add more per chunk.
 
 The **Status** page warns when the disk that holds Nugget's data has less than 1 GiB free, and says
 the disk is full below 200 MiB, or as soon as a write fails for lack of space (`nuggetd status` shows
-the same on its `disk:` line, and `status.disk` carries it for scripts). While the disk is full,
+the same on its `disk:` line, and the `disk` field of `status` carries it for scripts). While the disk is full,
 indexing and saving stop; nothing already stored is lost or damaged. Free up some space and indexing
 picks up again by itself.
 

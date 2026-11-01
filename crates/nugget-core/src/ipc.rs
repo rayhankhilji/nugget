@@ -1377,6 +1377,13 @@ pub struct VoiceStatus {
     pub last_built: Option<time::OffsetDateTime>,
 }
 
+// ---- Local runtime retry (KK1) ----
+
+/// IPC method names of the `runtime_retry` feature (nuggetd `features/runtime_retry.rs`).
+pub mod runtime_retry_method {
+    pub const RETRY: &str = "runtime.retry";
+}
+
 // ---- Search UI (II2) ----
 
 /// IPC method names of the search UI feature (`nuggetd` `features/search_ui`); their request and

@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use super::{Feature, FeatureContext};
 use crate::daemon::{State, spawn_ensure};
 
-pub(crate) const RUNTIME_RETRY: &str = "runtime.retry";
+use nugget_core::ipc::runtime_retry_method::RETRY;
 
 pub(crate) fn start(cx: &FeatureContext<'_>) -> Result<Arc<dyn Feature>> {
     Ok(Arc::new(RuntimeRetry {
@@ -35,7 +35,7 @@ impl Feature for RuntimeRetry {
     }
 
     fn methods(&self) -> &'static [&'static str] {
-        &[RUNTIME_RETRY]
+        &[RETRY]
     }
 
     async fn call(
@@ -44,7 +44,7 @@ impl Feature for RuntimeRetry {
         params: Value,
         _notify: Notifier,
     ) -> std::result::Result<Value, RpcError> {
-        if method != RUNTIME_RETRY {
+        if method != RETRY {
             return Err(RpcError::method_not_found(method));
         }
         let req: RuntimeRetryRequest = serde_json::from_value(params)
