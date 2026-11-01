@@ -159,7 +159,7 @@ Each package comes from a QA report and is briefed in its session's first messag
 | WP | Branch | Session | Scope |
 |---|---|---|---|
 | HH1 | `hh/agent-safety` | session_01CTjRSqmXYyfpHJMkM85Dkm | agent safety controls from GG3: ambiguous targets, destructive actions, honest success judging, Send confirmation, key presses |
-| HH2 | `hh/ingest-triage` | session_01CTjRSuENAr49jmyhRicJfp | fast, accurate ingest triage from GG2, plus GG4-6 and GG5-2 |
+| HH2 | `hh/ingest-triage` | session_01CTjRSuENAr49jmyhRicJfp | fast, accurate ingest triage from GG2, plus GG4-6 and GG5-2 (merged) |
 | HH3 | `hh/vault-worker` | session_01CTjRSrrQ23MtSpaPTRSLsG | vault merge-back, sensitivity and the knowledge worker from GG5 |
 
 ## Wave II (new features alongside the fix waves): cloud sessions from fd101a3
@@ -167,8 +167,16 @@ Briefs in `docs/waves/wave-ii/`. Each lead runs a build layer and a review layer
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| II1 | `ii/messaging-imports` | session_01CTjRStzbSDngszaVDyqEKd | iMessage, WhatsApp and Telegram imports; Signal only if a safe export exists |
-| II2 | `ii/search-timeline` | session_01CTjRSu5FjmNFwghuCH6zXU | search facets, saved and recent searches, timeline view, previews |
-| II3 | `ii/doubletap-overlay` | session_01CTjRSssSYSW1zounPmKgQR | Double Tap overlay: edit before insert, retry, refine, practice field, draft history, accessibility |
-| II4 | `ii/platform-integration` | session_01CTjRSqcYoFMkRXF5giqCX2 | tray, launch at login, notifications, `nugget://` links, plugin file association, quick-ask window, single instance |
+| II1 | `ii/messaging-imports` | session_01CTjRStzbSDngszaVDyqEKd | iMessage, WhatsApp and Telegram imports; Signal only if a safe export exists (merged) |
+| II2 | `ii/search-timeline` | session_01CTjRSu5FjmNFwghuCH6zXU | search facets, saved and recent searches, timeline view, previews (merged) |
+| II3 | `ii/doubletap-overlay` | session_01CTjRSssSYSW1zounPmKgQR | Double Tap overlay: edit before insert, retry, refine, practice field, draft history, accessibility (merged) |
+| II4 | `ii/platform-integration` | session_01CTjRSqcYoFMkRXF5giqCX2 | tray, launch at login, notifications, `nugget://` links, plugin file association, quick-ask window, single instance (merged) |
 | II5 | `ii/scale` | session_01CTjRSqY1SocQ9DVnvje1WF | 500k-item bench and fixes, virtualised lists, README Scale section |
+
+## Wave JJ (in the slots II1–II4 and HH2 freed): cloud sessions from efebc0c
+Briefs in `docs/waves/wave-jj/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| JJ1 | `qa/wave-ii` | session_01CTjRSuNbGgjvnnHJyrTbj1 | QA, new files only: the wave II features and HH2's triage as a real user |
+| JJ2 | `jj/follow-ups` | session_01CTjRSsbzcwaAhq1yJumUfT | gaps the last packages reported: Ask shows how it searched, quick-ask handover, time zones in search, interactive guard for user providers, cheap iMessage polls, triage retries |
