@@ -88,7 +88,8 @@ NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi
 - LibreOffice exposes only laid-out paragraphs, so long documents may read partially (not checked
   on real LibreOffice). Rich web text is flattened within 400 objects / 500 ms.
 - Computer-use text input types `\n` as Return on macOS and Windows when insertion is refused.
-- **Computer use on macOS and Windows is compile-checked only.** Unverified: scroll direction
+- **Computer use on macOS and Windows is tested on CI runners only** (real AX/UIA, scripted model,
+  `real-os.yml`), not on physical machines. Unverified: scroll direction
   under natural scrolling and non-US key layouts (macOS); `activateWithOptions` from the
   background on macOS 14+; window id matching for identical frames; Windows foreground lock, UIPI
   for elevated windows, and UWP apps needing their AUMID.

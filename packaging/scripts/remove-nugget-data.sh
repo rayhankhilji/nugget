@@ -16,7 +16,7 @@
 #
 # Paths follow nugget-core paths.rs (directories::ProjectDirs("dev", "Nugget", "Nugget")), the
 # desktop app's identifier dev.nugget.desktop, and nuggetd service.rs; see
-# docs/book/src/guide/uninstall.md.
+# docs/book/src/reference/data-dir.md.
 set -euo pipefail
 
 yes=0

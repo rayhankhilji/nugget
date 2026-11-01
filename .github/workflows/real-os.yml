@@ -876,7 +876,7 @@ jobs:
   # The real login entry (LaunchAgent / HKCU Run key / XDG autostart) written and removed on each
   # OS, and the shell's platform unit tests (deep-link validation, tray status, notification
   # gating, sleep detection) on each OS's own build. Tray rendering, the quick-ask shortcut and
-  # opening a nugget:// link from another app are manual (docs/book/src/guide/desktop.md).
+  # opening a nugget:// link from another app are checked by hand.
   platform:
     name: Platform integration (${{ matrix.os }})
     strategy:
