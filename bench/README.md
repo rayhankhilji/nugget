@@ -507,23 +507,67 @@ Glimmerfen Labs, and the people around them.
 
 | | |
 |---|---|
-| Items | 93: 48 mails (RFC 822, with the IMAP metadata ingest stores: folder, flags, Message-ID, size), 15 calendar events (iCalendar, with CalDAV metadata), 30 Markdown notes (frontmatter, `[[wikilinks]]`, `#tags`, an Obsidian-style vault of people, projects and journal notes) |
-| Gold entities | 85: 25 people, 8 organisations, 10 projects, 15 events, 8 places, 7 commitments, 6 preferences, 6 topics (plus 3 `optional` ones) |
-| Gold claims | 166 scored triples (15 more `optional` event start dates), 3 of them `superseded` |
-| Gold mentions | 515 (item, entity, surface forms) |
-| Scripted LLM | 144 claims: 136 quote-supported, 4 with hallucinated quotes, 4 injected |
+| Items | 106: 57 mails (RFC 822, with the IMAP metadata ingest stores: folder, flags, Message-ID, size), 16 calendar events (iCalendar, with CalDAV metadata), 33 Markdown notes (frontmatter, `[[wikilinks]]`, `#tags`, an Obsidian-style vault of people, projects and journal notes) |
+| Gold entities | 91: 30 people, 8 organisations, 10 projects, 16 events, 8 places, 7 commitments, 6 preferences, 6 topics (plus 5 `optional` ones) |
+| Gold claims | 185 scored triples (16 more `optional` event start dates), 5 of them `superseded` |
+| Gold mentions | 579 (item, entity, surface forms) |
+| Scripted LLM | 168 claims: 160 quote-supported, 4 with hallucinated quotes, 4 injected |
 
-The hard cases are deliberate:
+The hard cases are deliberate. `scenario.json` lists them by kind; each kind's metric passes only
+when every case of that kind is handled (the first case of each kind is the original M2 one; the
+others were added in EE1, items `mail-049`–`mail-057`, `cal-016`, `note-031`–`note-033`):
 
 - **One person, many names.** Margaret Thistlewood is "Margaret" at work
   (`margaret.thistlewood@cindergate.test`), "Maggie T" from a personal address
   (`maggie.t@mail.test`), and "M. Thistlewood" or "Maggie Thistlewood" as a calendar attendee.
   Her person note lists both addresses and the aliases.
+- **Nicknames, display-name variants and initials** (EE1), each with corroboration in the item:
+  Katherine Selkirk (Ostrander Freight, Head of Procurement) writes as "Katherine Selkirk" and
+  signs "Kate" (`mail-049`, Sam Okafor in Cc), replies in the same thread as "Kate S" from the same
+  address (`mail-050`), and is the attendee "K. Selkirk" of a sign-off with her address
+  (`cal-016`). Robert Ferrand (Glimmerfen Labs, Driftwood API) signs "Rob" under his own headers
+  (`mail-051`; "Rob" is also a prefix of the user's name, Robin), and the user's reply, addressed
+  to him alone in that thread, says "Thanks, Bob" (`mail-052`). The scripted model gets "Kate"
+  right and returns "Kate S", "Rob" and "Bob" as names of their own (realistic mistakes the
+  pipeline must cope with). For these cases the majority vote of the resolution score is not
+  enough: every system mention in their items under one of their gold surfaces must be on their
+  single entity, so a "Bob" kept as its own person fails even if the vote goes right. The same
+  stricter rule applies to Maggie (it does not change her pre-EE1 result on the scripted path;
+  `params.hard_case_details` also reports each case's `majority_vote`, the pre-EE1 rule, for
+  comparison with older runs).
+- **The same nickname with nothing to corroborate it** (EE1). `note-031` ("Book club at Kate's on
+  Thursday") names no surname, address, organisation or thread: nothing says this Kate is
+  Katherine Selkirk, a procurement contact. Her gold mention belongs to an `optional` person
+  "Kate" (neither a hit nor a miss), and the case requires that the system does not give that
+  mention to Katherine Selkirk's entity: no system mention in `note-031`, whatever its surface,
+  may land on her.
 - **Two people, one first name.** Sam Okafor (Ostrander Freight) and Sam Whitlock (Marrowbank
   Rowing Club) both sign "Sam"; two notes mention a bare "Sam" whom only context identifies.
+  EE1 adds Tamsin Rook (Quillfeather Systems, Engineering Manager on Quarry Bridge, `mail-056`) and
+  Tamsin Galloway (a reading-mentor volunteer writing from webmail, `mail-057`), both signing
+  "Tamsin"; a standup note says only "Priya and Tamsin from Quillfeather ... sandbox API keys for
+  [[Quarry Bridge]]" (`note-032`: context says Tamsin Rook, and the gold says so); an errands note
+  says "Drop the spare bike lights round to Tamsin" (`note-033`: nothing says which Tamsin, if
+  either, so its mention is an `optional` person "Tamsin" and must be given to neither: no system
+  mention in `note-033` may land on either Tamsin). The EE1 pair also requires each Tamsin to be
+  resolved to one entity of her own, the standup note's bare "Tamsin" on Tamsin Rook's; the
+  original Sam pair keeps the M2 rule (the two resolve apart; the rowing log's bare "Sam" may
+  stay unresolved), so pre-EE1 results stay comparable. The scripted model also makes one
+  quote-supported mistake here: it reads Tamsin Galloway's "I mentor there on Tuesdays myself"
+  as `works_at` Bramblecote Primary School (she volunteers). The gate keeps it (the quote is in
+  the mail), and it counts as a claim false positive.
 - **A job change.** Priya Castellane leaves Cindergate Analytics (Senior Data Scientist) and joins
   Quillfeather Systems (Head of Data) from a new address. The old employer, role and project are
   `superseded` in the gold labels.
+- **A second job change, delivered out of order** (EE1). Delphine Corrigan, an Associate at
+  Vellum & Thistle LLP (`mail-055`, 24 September, from `delphine.corrigan@vellumthistle.test`),
+  is announced as leaving ("Friday 23 October is Delphine Corrigan's last day at Vellum & Thistle
+  LLP", `mail-054`, 16 October) and writes from `delphine.corrigan@glimmerfen.test` that she has
+  joined Glimmerfen Labs as Legal Counsel and that her old address no longer works (`mail-053`,
+  28 October). The manifest delivers them newest first: `mail-055` comes from an `Archive`
+  folder synced after the inbox, so the oldest fact arrives last. Her Vellum & Thistle
+  employment and role are `superseded`; the announcement is a second source of the old employer
+  (true until 23 October), and the scripted model extracts it from there too.
 - **A deletion.** `mail-008` is the only source of a commitment (the venue deposit) and is deleted
   after the first render; `note-025` is one of two sources of another commitment and is deleted
   too. The first commitment's claims must be retracted, the second's must survive.
@@ -550,13 +594,17 @@ The hard cases are deliberate:
   a fingerprint line for requests that carry no item reference. `hallucinated` and `injected`
   flags mark the claims whose quotes are not in the item (the flags are never sent).
 - `scenario.json`: the user (`me`), webmail domains, items to delete, the injection item, the
-  hard cases, the number of pages to edit and the MCP queries.
+  hard cases, the number of pages to edit and the MCP queries. Hard cases are lists:
+  `nickname_identity` `[{entity, unattributed?}]`, `same_first_name` `[{entities,
+  unattributed?}]` and `job_change` `[{superseded, current}]` (claim ids); `unattributed` is
+  `[{item, surface}]`, a name in an item that must not be given to the case's people.
 - `manifest.json`: per item its file, MIME type, store source and key, title, time, version and
   the connector metadata.
 
 The fixtures are static files. A test (`labels_agree_with_ingested_text`) ingests them and checks
 that every gold and scripted quote is in its item's stored chunks, that every hallucinated or
-injected quote is not, that every gold surface form is in its item, and that the labels are
+injected quote is not, that every gold surface form is in its item, that every unattributed name
+is in its item and labelled (if at all) only as an `optional` entity, and that the labels are
 referentially intact; edit them only with that test passing.
 
 **Pipeline under test** (`src/knowledge/wired.rs`, cargo feature `pipeline`, on by default;
@@ -621,7 +669,7 @@ without it the suite reports `not_implemented`):
 | `merge.fidelity` | Share of the 16 user edits still verbatim in their page after the deletions and the re-render. **Target 1.0** |
 | `retraction.correctness` | After the deletions: gold claims supported only by deleted items are gone, and those with support left that were active are still active. **Target 1.0** |
 | `retraction.dangling_refs` | Active claims citing, and mentions in, deleted items. **Target 0** |
-| `hard_cases.{nickname_identity,same_first_name,job_change,deleted_item,injection}` | 1 when the case is handled: all of Maggie's mentions resolve to one entity holding nobody else's; the two Sams resolve apart; the old job and role are inactive and the new ones active; retraction is exact; no injected claim survives |
+| `hard_cases.{nickname_identity,same_first_name,job_change,deleted_item,injection}` | 1 when every case of the kind is handled: each nickname person's mentions (Maggie, Kate, Rob) resolve to one entity holding nobody else's, every system mention under their gold surfaces in their items is on it, and nothing in the unattributed "Kate" item is on it; each same-first-name pair (the Sams, the Tamsins) resolves apart, nothing in the unattributed "Tamsin" item is on either, and (EE1 pair only) each Tamsin resolves strictly to one entity, the context-identified "Tamsin" included; for each job change (Priya, Delphine) the old job and role are inactive and the new ones active; retraction is exact; no injected claim survives. On a subset, a kind is scored over its cases in scope (a nickname case needs two mentions, a pair a mention of each, a job change all its claims); `params.hard_case_details` gives each case's result (`not_in_subset` when out of scope; for nickname cases also `majority_vote`, the pre-EE1 rule; for pairs `one_entity_each`, the strict per-person rule, part of the pass for the EE1 pair only) |
 | `throughput.items_per_s`, `throughput.extract_s` | The extraction run |
 | `mcp.get_context.{p50,p95}_ms`, `mcp.get_context.cited_rate` | In-process round trips, and answers with at least one citation |
 | `llm.calls`, `llm.unmatched`, `vault.pages`, `vault.facts`, `vault.render_ms`, `retraction.checks`, `merge.edits` | Context (`info`) |
@@ -644,6 +692,52 @@ items once more with an LLM that answers nothing, so every false positive says w
 deterministic extractors already produce it (`source: deterministic`) or only the LLM run does
 (`llm`), and every miss whether the deterministic run found it (`in_baseline`). Metric names and
 values are unchanged; `params.knowledge_dump` holds the path and the summary.
+
+**Real-model subsets** (`--local-models`, `src/knowledge/fixture.rs` `select_items`): the deleted
+and injection items and the original case of each hard-case kind are always kept (as before EE1,
+so `smoke`'s 8 items are unchanged); each further hard case is then added whole (every item
+mentioning its people or supporting its claims, and its unattributed names) while it fits, so the
+`quick` 30 hold all 13 EE1 items and 9 evenly spread ones (22 before), so quick-subset numbers
+from before EE1 are not comparable with later ones.
+
+**`--knowledge-corpus original|all`** (default `all`): `original` is the corpus as it was before
+EE1, for before/after runs against a pre-EE1 bench binary. Everything EE1 added is marked
+`"added": "ee1"` (items in `manifest.json`, entities in `gold/entities.json`, hard cases in
+`scenario.json`); `original` drops those, the mentions, scripted answers and claim support of the
+dropped items, and the claims left without support. The result equals the pre-EE1 fixture
+(93 items, 85 gold entities, 166 scored claims, 515 mentions, 144 scripted claims, one case per
+hard-case kind), so every `--knowledge-items N` selects the same items and scores the same gold as
+the pre-EE1 bench (a test pins the `smoke` 8, `quick` 30 and 40-item lists taken from the pre-EE1
+selection), and the scripted run reproduces the 93-item column above exactly. The choice is
+recorded as `params.knowledge_corpus`. `--knowledge-items all` (or any number at or above the
+corpus size) runs every item. The suite's own quality floors are the pre-EE1 ones on `original`
+(subset scores ≥ 0.9 with the scripted answers; entity precision ≥ 0.85 for the simulated noisy
+local model); on `all` they are relaxed while the pipeline fails the EE1 cases (subsets within
+0.07 of the whole corpus and ≥ 0.85; noisy-model entity precision ≥ 0.75, measured 0.78).
+
+**EE1 hard cases, scripted path** (`knowledge --scale smoke`, the corpus before and after the 13
+items; same pipeline, `ee/entity-resolution` at `d643a5a`):
+
+| Metric | 93 items | 106 items |
+|---|---|---|
+| Entity P / R / F1 | 0.934 / 1.0 / 0.966 | 0.867 / 1.0 / 0.929 |
+| Person F1 | 0.980 | 0.870 |
+| Claim P / R / F1 | 0.975 / 0.951 / 0.963 | 0.956 / 0.956 / 0.956 |
+| Resolution B³ F1 / mention recall | 0.988 / 0.791 | 0.979 / 0.782 |
+| `claims.superseded_active` | 1 | 3 |
+| Hard cases: nickname / same first name / job change | pass / pass / pass | **fail** (Rob) / **fail** (Tamsin) / **fail** (Delphine) |
+
+Per case (`--knowledge-dump`): Kate passes (the "Kate S" reply and "K. Selkirk" join her, the
+book-club "Kate" stays apart); **Rob fails**: "Rob" and "Bob" stay people of their own although the
+mails' headers name Robert Ferrand; **the Tamsin pair fails**: they stay apart and the errands
+"Tamsin" is given to neither, but the standup note's "Tamsin" (and "Priya") stays a person of its
+own instead of resolving to Tamsin Rook by context, so its two claims miss too (`one_entity_each`
+is also false for the Sams, where the rowing log's "Sam" has the same problem, but that is not
+part of the original pair's pass); **Delphine fails**: she ends up as three entities (the
+new address, the old address, and the name in the announcement), so nothing supersedes the
+Vellum & Thistle employment and role. Bare "Felix" and "Yusuf" in the new mails also stay
+separate people, and the scripted Tamsin Galloway `works_at` Bramblecote is a claim false positive
+(see above). Every other target still holds.
 
 Not covered yet: embedding-based resolution, the daemon's change-feed path (wave 2), the
 encrypted on-disk store, and graded or partial claim matching.
@@ -2394,7 +2488,7 @@ Options (all suites):
 | `--draft-judge-model ID` | `draft`: judge with this manifest model on a second local server next to the drafting one (same `--models-home`), instead of the drafting model; implies `--draft-judge model` (`params.judge.model`, `judge.same_model_as_drafts`) |
 | `--draft-judge-timeout-s N` | `draft`: per-request timeout of the model judge (default 240 with `--draft-judge-model`, else the draft timeout; `params.judge.timeout_s`) |
 | `--draft-judge-grounding` | `draft`: also judge the grounded Nugget arm against the ungrounded one (`draft.judge_grounding.*`; needs `--draft-grounding both`; doubles the judge requests) |
-| `--knowledge-items N` | `knowledge`: items extracted by the real model instead of the scale's subset (`smoke` 8, `quick` 30, `standard` all 93); the scenario items are always kept |
+| `--knowledge-items N` | `knowledge`: items extracted by the real model instead of the scale's subset (`smoke` 8, `quick` 30, `standard` and `all`: every item of the corpus); the scenario items are always kept. `--knowledge-corpus original` restricts the corpus to the 93 items before EE1 |
 | `--knowledge-dump FILE` | `knowledge` (any LLM): write false positives / negatives and, with a real model, every request with its answer and gate verdicts, as JSONL (see the `knowledge` section) |
 | `NUGGET_BENCH_CUA_TASK_TIMEOUT` | `cua`: per-task wall-clock limit in seconds (default 300) |
 
@@ -3147,6 +3241,66 @@ hours on this CPU (was ~15).
 `nugget_knowledge::EXTRACTOR_VERSION` is **not** bumped for these changes: items extracted or
 changed from now on go through the new LLM path, but an existing vault is not re-extracted, since
 that would cost one local-model request per item (26–33 s each here) without the user asking.
+
+**Measured (EE1): entity resolution and time-aware claims.** Changes since AA3:
+
+- *Names.* A short form of a person ("Maggie", "Bob", "M. Thistlewood", "Kate S", an address
+  like `maggie.t@`) joins a full-name person only when the names fit (a small clean-room table
+  of English diminutives in `nugget-knowledge/src/names.rs`; names that are also standalone
+  names, like Liam or Nathan, never match another given name) **and** something corroborates
+  it: a shared address, the same item, the same mail thread (Message-ID / In-Reply-To /
+  References), or the same organisation (a header participant at the person's mail domain, or
+  "NAME from/at/of ORG" in the text; for the user's own domain, only internal mail between
+  colleagues already known from other items). Exactly one corroborated candidate is required;
+  never on a first name alone. The result does not depend on item order (tested in several
+  orders and batchings). Every merge records why on the surviving entity (`merge_log`), shown
+  in the vault's "Merged" section, and a user split removes the record. The same full name
+  under two addresses merges only when one address's mail names the other's organisation (a
+  job change).
+- *Time.* Claims carry `valid_from` from their earliest evidence; for single-valued predicates
+  (`works_at`, `has_title`, `lives_in`, ...) the current value is recomputed from the evidence
+  (newest sighting wins; a quote saying the fact ended, such as "last day at" or "moved from",
+  ends it), and the older values get `valid_to`. Vault pages list current facts first and the
+  superseded ones under *Earlier:* with their interval, each cited. Existing graphs are
+  migrated once, without the model.
+- *Model output.* Phrases, job titles and acronyms proposed as names ("Felix tells me",
+  "Senior Data Engineer" as a place, "GP" as a person) become literals; a short name of the
+  wrong kind ("Ostrander" as a place) takes the kind of its longer name; a mail's sender named
+  only in the headers is a valid claim subject.
+
+Before and after on one runner each, local 4B model, one attempt per item, 180 s per request.
+"Before" is the integration branch before EE1 (`4b98b90`); "after" runs this branch on the same
+items (`--knowledge-corpus original` reproduces the 93-item corpus and its 30-item subset), then
+on the whole corpus with the EE1 hard cases (106 items):
+
+| Metric | Run 41189133384 (EPYC 7763): before 30 / 93 → after 30 / 93 / 106 | Run 41113623942 (EPYC 9V45, without the last fixes): before 30 / 93 → after 30 / 93 / 106 |
+|---|---|---|
+| Entity F1 (target ≥ 0.8) | 0.72 / 0.74 → **0.74 / 0.79 / 0.80** | 0.69 / 0.72 → **0.71 / 0.78 / 0.78** |
+| Entity P / R, 93 items | 0.64 / 0.88 → 0.73 / 0.87 | 0.61 / 0.89 → 0.71 / 0.87 |
+| Claim F1 | 0.57 / 0.74 → 0.58 / 0.71 / 0.71 | 0.60 / 0.71 → 0.57 / 0.74 / 0.73 |
+| Unsupported claims, also injection (target 0) | **0** → **0** | **0** → **0** |
+| Resolution B³ F1 | 0.97 / 0.95 → 0.94 / 0.95 / 0.97 | 0.97 / 0.94 → 0.95 / 0.95 / 0.95 |
+| Hard cases (real model) | nickname and job change fail → still fail (Kate, Rob and both same-first-name pairs pass) | same |
+| Requests timed out | 0 → 0 | 0 → 0 |
+| Latency per request p50 / p95 | 24 / 57 → 24 / 56 s | 17 / 44 → 17 / 42 s |
+
+The entity F1 target is **MISSED** on the 30- and 93-item sets of the old corpus (0.74 and 0.79
+on the better run) and met only on the 106-item corpus (0.802), so the honest reading is that
+EE1 moved the local model from about 0.73 to about 0.79, just short of 0.8. Precision rose by
+0.09–0.10 (fewer duplicate people, kind mistakes and junk names) at unchanged recall and
+latency, and no unsupported or injected claim survived. Claim F1 did not move. The real-model
+hard cases still fail for reasons the dump shows. Both job changes now have the right current
+employer and the old one superseded, but the roles miss: the model writes no title for Priya's
+new role ("Head of Data"), and gives Delphine "Tidewater Billing review" instead of "Legal
+Counsel". Maggie fails because first names in the user's own notes ("Maggie", "Priya" in a
+journal) have nothing to corroborate them, so they stay separate people by design. The
+remaining entity false positives on 93 items: such first names (10), kind mistakes, mostly
+projects called organisations or people (9), and names not in the gold set (8). With the scripted model every
+hard case passes on both corpora (entity F1 0.966 / 0.958).
+
+`EXTRACTOR_VERSION` is again not bumped: the new resolution rules and the time-aware lifecycle
+apply to existing graphs through the one-time migration and the end-of-run settle pass, without
+a model request per item.
 
 ### Memory recall with a real embedding model (DD4)
 

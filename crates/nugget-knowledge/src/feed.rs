@@ -52,9 +52,10 @@ pub trait ItemFeed: Send + Sync {
         Ok(None)
     }
 
-    /// The date each item's facts are as of (see `extract::item_date`: the extracted content
-    /// date, else the source's modification time, else when it was stored). Unknown items are
-    /// left out. The default loads each item.
+    /// The date each item's facts are as of (`extract::item_date`: a mail's `Date`, a note's
+    /// frontmatter date, a calendar item's event start, a date in the file name or title, else
+    /// the source's modification time, else when it was stored). Unknown items are left out.
+    /// The default loads each item.
     fn item_dates(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, OffsetDateTime>> {
         let mut out = HashMap::new();
         for i in items {
@@ -131,12 +132,18 @@ impl ItemFeed for Store {
         Ok(Store::item_dates(self, items)?
             .into_iter()
             .map(|(i, d)| {
-                let at = d
-                    .extracted_date
-                    .as_deref()
-                    .and_then(crate::extract::parse_when)
-                    .or(d.source_modified_at)
-                    .unwrap_or(d.updated_at);
+                // The same rule as for a loaded item, on the store's date projection.
+                let at = crate::extract::DateSources {
+                    mail_date: d.extracted_date.as_deref(),
+                    frontmatter_date: d.frontmatter_date.as_deref(),
+                    frontmatter_created: d.frontmatter_created.as_deref(),
+                    event_start: d.event_start.as_deref(),
+                    key: i.key.as_str(),
+                    title: d.title.as_deref(),
+                    modified: d.source_modified_at,
+                    stored: d.updated_at,
+                }
+                .date();
                 (i, at)
             })
             .collect())

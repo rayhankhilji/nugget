@@ -27,8 +27,12 @@ On macOS, data and config share one directory.
   ipc/
     nuggetd.sock           the IPC socket (macOS, Linux)
     nuggetd.lock           held while a daemon runs; one daemon per data directory
+    desktop-owned.json     which daemon the desktop app started (pid and process start time),
+                           so quitting stops only that one, never a login service or one you started
   logs/
     nuggetd.<date>.log     daemon log, JSON lines, one file per day, 14 kept
+    nugget-desktop.<date>.log
+                           desktop app log, plain text, one file per day, 7 kept
     llama-server-chat.log, llama-server-embedding.log
                            local model server output (API keys redacted)
     launchd.log            service output on macOS

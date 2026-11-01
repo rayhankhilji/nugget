@@ -44,7 +44,8 @@ object per line, over a local socket. The protocol types live in `nugget_core::i
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `status` | `{}` | `StatusResponse`: `protocol`, `version`, `uptime_secs`, `items`, `chunks`, `providers` (list of `ProviderInfo`), `audit_chain_ok` | yes |
+| `status` | `{}` | `StatusResponse`: `protocol`, `version`, `uptime_secs`, `items`, `chunks`, `providers` (list of `ProviderInfo`), `audit_chain_ok`, `pid` (the daemon's process id), `service` (`systemd` or `launchd` when a login service runs it; absent otherwise) | yes |
+| `daemon.shutdown` | `DaemonShutdownRequest`: `{reason?}` (for the log) | `DaemonShutdownResponse`: `{stopping, pid}`. Sent before the daemon winds down as on SIGTERM (ingest, local model servers, store) and exits 0. Used by the desktop app when it quits or replaces a daemon of another version. Only the local socket serves it; MCP, HTTP and the browser extension never forward it | yes |
 | `providers.list` | `{}` | list of `ProviderInfo`: `id`, `kind`, `model`, `locality`, `tiers`, `capabilities` (`null` until probed), `error` (why it is unavailable) | yes |
 | `providers.probe` | `ProbeRequest`: `{provider}` | `Capabilities`: `streaming`, `vision`, `tools`, `json_schema`, `embeddings`, `context_tokens` | yes |
 | `models.list` | `{}` | list of `ModelInfo`: `id`, `size_bytes`, `installed`, `recommended`, `family`, `tiers`, `license`, `revision`, `update_available` | yes |

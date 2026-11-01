@@ -188,6 +188,17 @@ impl Updates {
         self.lock().settings.clone()
     }
 
+    /// The user's answer to "start Nugget at login?" (the per-user `nuggetd` service).
+    pub fn start_at_login(&self) -> Option<bool> {
+        self.lock().settings.start_at_login
+    }
+
+    /// An update is downloaded and will install as Nugget quits (`install_staged`).
+    pub fn has_staged(&self) -> bool {
+        let s = self.lock();
+        s.settings.auto_install && s.pending.is_some() && s.staged.is_some()
+    }
+
     pub fn status(&self, app: &AppHandle) -> UpdateStatus {
         let s = self.lock();
         UpdateStatus {
@@ -384,8 +395,21 @@ impl Updates {
             Some(b) => Ok(b),
             None => download(app, &update).await,
         };
+        // GG6-10: on macOS and Linux nothing else stops the daemon the app started, which would
+        // keep serving the new app from the old binary. (On Windows the installer stops it.) A
+        // login service is restarted on the new version after the restart instead.
+        let stopped = bytes.is_ok()
+            && cfg!(not(windows))
+            && !matches!(
+                crate::lifecycle::stop_owned(app, "update").await,
+                crate::lifecycle::StopOutcome::Left(_)
+            );
         let result = bytes.and_then(|b| update.install(b).map_err(err));
         if let Err(e) = result {
+            if stopped {
+                // Nothing was replaced: bring the daemon back.
+                let _ = app.state::<Daemon>().start(app).await;
+            }
             {
                 let mut s = self.lock();
                 s.busy = false;
