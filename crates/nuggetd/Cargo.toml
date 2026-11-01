@@ -87,6 +87,7 @@ unicode-normalization = "0.1"
 zeroize = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 nuggetd = { path = ".", version = "0.0.1", features = ["fake-runtime"] }
 base64 = "0.22"
 tempfile = "3"

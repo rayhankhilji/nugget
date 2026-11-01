@@ -258,6 +258,26 @@ struct Active {
     provider: Arc<dyn Provider>,
 }
 
+/// Hold a background chat (not interactive, not triage) while an interactive chat on the same
+/// slot is in flight or just ended, for at most `max_wait`.
+pub(crate) async fn yield_to_interactive(
+    fg: &nugget_ingest::Foreground,
+    feature: &str,
+    max_wait: std::time::Duration,
+) {
+    if nugget_ingest::is_interactive(feature)
+        || feature == nugget_ingest::FEATURE_TRIAGE
+        || !fg.busy()
+    {
+        return;
+    }
+    let _ = tokio::time::timeout(max_wait, fg.idle()).await;
+}
+
+/// Longest a background chat (knowledge, proactive judge) waits for interactive chats on the
+/// same slot to finish before it is sent anyway.
+const BACKGROUND_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Called with a slot's role each time its server becomes ready on a new config (first start,
 /// restart on another port, new model). The daemon uses it to re-embed text-only items.
 pub(crate) type ReadyHook = Arc<dyn Fn(RuntimeRole) + Send + Sync>;
@@ -460,7 +480,17 @@ impl Provider for RuntimeSlot {
         // Interactive chats (Ask, Double Tap, agent, drafts) are marked for their whole stream
         // so background triage leaves the model alone; background work (knowledge, proactive
         // judge, probes, triage itself) is not (HH2).
-        let guard = nugget_ingest::is_interactive(&req.feature)
+        let interactive = nugget_ingest::is_interactive(&req.feature);
+        // Other background work (knowledge extraction, the proactive judge) waits until no
+        // interactive chat is in flight or just ended, for at most `BACKGROUND_MAX_WAIT`, so it
+        // never takes the server's one slot just ahead of an Ask (QA GG2 follow-up: a judge
+        // request sent the moment one Ask ended held the next for ~67 s). Triage yields on its
+        // own. The wait is bounded so callers' timeouts (which mark the provider as failing)
+        // are never reached because of it.
+        if let Some(fg) = self.foreground.get() {
+            yield_to_interactive(fg, &req.feature, BACKGROUND_MAX_WAIT).await;
+        }
+        let guard = interactive
             .then(|| self.foreground.get().map(|f| f.begin()))
             .flatten();
         let stream = self.ready().await?.chat(req).await?;
@@ -678,6 +708,39 @@ pub(crate) fn localities(providers: &[Arc<dyn Provider>]) -> HashMap<ProviderId,
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test(start_paused = true)]
+    async fn background_chats_wait_for_interactive_ones_but_not_forever() {
+        use std::time::Duration;
+        let fg = std::sync::Arc::new(nugget_ingest::Foreground::new(Duration::from_millis(500)));
+        let max = Duration::from_secs(30);
+        // Nothing in flight: no wait.
+        let t = tokio::time::Instant::now();
+        yield_to_interactive(&fg, "knowledge", max).await;
+        assert_eq!(t.elapsed(), Duration::ZERO);
+        // An Ask in flight: the judge waits until it ends plus the grace period.
+        let ask = fg.begin();
+        let fg2 = fg.clone();
+        let judge = tokio::spawn(async move {
+            yield_to_interactive(&fg2, "proactive_judge", max).await;
+            tokio::time::Instant::now()
+        });
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(!judge.is_finished());
+        let ended = tokio::time::Instant::now();
+        drop(ask);
+        let went = judge.await.unwrap();
+        assert!(went - ended >= Duration::from_millis(500));
+        // Interactive chats and triage never wait here.
+        let _ask = fg.begin();
+        let t = tokio::time::Instant::now();
+        yield_to_interactive(&fg, "ask", max).await;
+        yield_to_interactive(&fg, nugget_ingest::FEATURE_TRIAGE, max).await;
+        assert_eq!(t.elapsed(), Duration::ZERO);
+        // A background chat waits at most `max_wait`.
+        yield_to_interactive(&fg, "knowledge", max).await;
+        assert_eq!(t.elapsed(), max);
+    }
 
     #[test]
     fn background_features_never_hold_the_foreground() {
