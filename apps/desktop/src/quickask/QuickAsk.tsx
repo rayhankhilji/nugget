@@ -11,9 +11,11 @@ import {
   events,
   isOpenableUrl,
   quickAskApi,
+  type AskDateFilter,
   type ChatDone,
   type Citation,
   type Locality,
+  type QuickAskHandover,
   type QuickAskPage,
 } from "../api";
 import { citedNumbers, groupSources, splitCitations, withheldNotice } from "../citations";
@@ -23,26 +25,34 @@ import { Spinner } from "../components/ui";
 import { useEvent, useOpener } from "../hooks";
 import { useLocale, useT } from "../i18n";
 import { sourceKindOf } from "../recency";
+import { askCitations } from "../askSearch";
+import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
 
 interface Answer {
+  /** The question this answers (the field may have changed since). */
+  question: string;
   streamId: string | null;
   provider: string | null;
   locality: Locality | null;
   citations: Citation[];
   excludedSensitive: number;
   general: boolean;
+  /** JJ2: the question's date range and how it filtered the search. */
+  date: AskDateFilter | null;
   text: string;
   done: ChatDone | null;
   error: string | null;
 }
 
 const PENDING: Answer = {
+  question: "",
   streamId: null,
   provider: null,
   locality: null,
   citations: [],
   excludedSensitive: 0,
   general: false,
+  date: null,
   text: "",
   done: null,
   error: null,
@@ -148,7 +158,7 @@ export function QuickAsk() {
     streams.current.clear();
     waiting.current = true;
     setFailure(null);
-    setAnswer({ ...PENDING });
+    setAnswer({ ...PENDING, question: q });
     announce(t("announce.answering"));
     try {
       const started = await api.retrieveAsk({
@@ -162,12 +172,14 @@ export function QuickAsk() {
       streams.current.clear();
       streams.current.set(started.stream_id, s);
       setAnswer({
+        question: q,
         streamId: started.stream_id,
         provider: started.provider,
         locality: started.locality,
-        citations: started.citations,
+        citations: askCitations(started),
         excludedSensitive: started.excluded_sensitive ?? 0,
         general: started.general === true,
+        date: started.date ?? null,
         text: s.text,
         done: s.done,
         error: s.done?.error ?? null,
@@ -212,8 +224,27 @@ export function QuickAsk() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answerError]);
 
+  // JJ2: the question goes along, and to Chat the answer with its sources once it finished
+  // (the question in the field, alone, if it changed since).
+  const handover = (): QuickAskHandover | undefined => {
+    const typed = question.trim() || answer?.question || "";
+    if (!typed) return undefined;
+    if (finished && answer && answer.question === typed && answer.text.trim()) {
+      return {
+        question: typed,
+        answer: {
+          text: answer.text,
+          provider: answer.provider,
+          citations: answer.citations,
+          general: answer.general,
+          date: answer.date,
+        },
+      };
+    }
+    return { question: typed };
+  };
   const openMain = (page: QuickAskPage) => {
-    quickAskApi.openMain(page).catch((err: unknown) => setFailure(errorMessage(err)));
+    quickAskApi.openMain(page, handover()).catch((err: unknown) => setFailure(errorMessage(err)));
   };
 
   const withheld = answer?.provider ? withheldNotice(answer.excludedSensitive, answer.provider) : null;
@@ -266,6 +297,7 @@ export function QuickAsk() {
             </h2>
             {withheld && <p className="note small">{withheld}</p>}
             {answer.general && <p className="muted small">{t("quickAsk.general")}</p>}
+            <AskDateNote date={answer.date} />
             {answer.error ? (
               <p className="note note-error">{t("quickAsk.failed", { error: answer.error })}</p>
             ) : answer.text ? (
@@ -304,6 +336,7 @@ export function QuickAsk() {
                         <span className="quickask-source-title" dir="auto">
                           {title}
                         </span>
+                        {s.citations.some((x) => x.partial) && <PartialBadge />}
                         {c.sensitive && <span className="badge badge-warn">{t("search.sensitive")}</span>}
                         {isOpenableUrl(c.url) && (
                           <button type="button" className="btn btn-small" onClick={() => open(c)} aria-label={t("search.openTitle", { title })}>

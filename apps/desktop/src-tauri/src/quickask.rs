@@ -36,6 +36,16 @@ pub const SIZE: (f64, f64) = (640.0, 420.0);
 pub const PREFILL_MAX_CHARS: usize = 500;
 /// Pages the window may open in the main window.
 const MAIN_PAGES: [&str; 2] = ["chat", "search"];
+/// The event telling the main window a [`Handover`] is waiting (JJ2).
+pub const HANDOVER_EVENT: &str = "quickask:handover";
+/// Handover bounds: the question and the answer in characters (as Chat saves them), citations.
+pub const HANDOVER_MAX_QUESTION_CHARS: usize = 4_000;
+pub const HANDOVER_MAX_ANSWER_CHARS: usize = 60_000;
+pub const HANDOVER_MAX_CITATIONS: usize = 200;
+/// The longest question Search takes, in bytes (`search.faceted`'s `MAX_QUERY_LEN`).
+pub const HANDOVER_MAX_SEARCH_BYTES: usize = 4096;
+/// A citation's JSON size limit; larger ones are dropped.
+const HANDOVER_MAX_CITATION_BYTES: usize = 8 * 1024;
 /// Focus lost this soon after showing is the show itself settling (some window managers hand
 /// focus around once), not the user leaving.
 const FOCUS_GRACE: Duration = Duration::from_millis(300);
@@ -59,6 +69,16 @@ impl Default for QuickAskSettings {
         Self {
             enabled: true,
             shortcut: default_shortcut_for(Platform::current()).into(),
+        }
+    }
+}
+
+impl QuickAskSettings {
+    /// The defaults on `platform`.
+    pub fn default_for(platform: Platform) -> Self {
+        Self {
+            enabled: true,
+            shortcut: default_shortcut_for(platform).into(),
         }
     }
 }
@@ -107,12 +127,25 @@ pub fn file_in(config_dir: &Path) -> PathBuf {
 
 /// Parse a settings file; garbage or an invalid shortcut gives the defaults.
 pub fn parse_settings(bytes: &[u8], platform: Platform) -> QuickAskSettings {
-    serde_json::from_slice::<QuickAskSettings>(bytes)
+    /// The file as written; missing fields take `platform`'s defaults.
+    #[derive(Deserialize)]
+    struct Raw {
+        enabled: Option<bool>,
+        shortcut: Option<String>,
+    }
+    let defaults = QuickAskSettings::default_for(platform);
+    serde_json::from_slice::<Raw>(bytes)
         .map_err(|e| e.to_string())
-        .and_then(|s| s.validated_for(platform))
+        .and_then(|raw| {
+            QuickAskSettings {
+                enabled: raw.enabled.unwrap_or(defaults.enabled),
+                shortcut: raw.shortcut.unwrap_or_else(|| defaults.shortcut.clone()),
+            }
+            .validated_for(platform)
+        })
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "ignoring invalid quick-ask settings");
-            QuickAskSettings::default()
+            defaults.clone()
         })
 }
 
@@ -196,6 +229,8 @@ pub struct QuickAsk {
     /// Text for the question field not yet taken by the window (a link can arrive before the
     /// window's page has loaded and subscribed to [`PREFILL_EVENT`]).
     pending_prefill: Mutex<Option<String>>,
+    /// What "Open in Chat" / "Show in Search" carries to the main window, until it takes it.
+    pending_handover: Mutex<Option<Handover>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -275,6 +310,7 @@ pub fn setup(app: &App) {
         error: Mutex::new(None),
         shown_at: Mutex::new(None),
         pending_prefill: Mutex::new(None),
+        pending_handover: Mutex::new(None),
     });
     if let Err(e) = create_window(app) {
         tracing::warn!(error = %e, "cannot create the quick-ask window");
@@ -536,17 +572,154 @@ pub fn quickask_hide(app: AppHandle) {
     hide(&app);
 }
 
-/// Hide quick ask and show the main window on `page` (`chat` or `search`).
+/// Hide quick ask and show the main window on `page` (`chat` or `search`). With `handover`
+/// (sent by the quick-ask window only), the page picks up the question, and Chat the answer and
+/// its sources, through [`quickask_handover_take`].
 #[tauri::command]
-pub fn quickask_open_main(app: AppHandle, page: String) -> Result<(), CmdError> {
+pub fn quickask_open_main(
+    app: AppHandle,
+    window: tauri::Window,
+    page: String,
+    handover: Option<Handover>,
+) -> Result<(), CmdError> {
     if !MAIN_PAGES.contains(&page.as_str()) {
         return Err(CmdError::Other(format!(
             "cannot open page {page:?} from quick ask"
         )));
     }
     hide(&app);
+    let handover = handover
+        .filter(|_| window.label() == LABEL)
+        .and_then(|h| h.bounded(&page));
+    if let Some(h) = handover {
+        if let Some(state) = app.try_state::<QuickAsk>() {
+            *lock(&state.pending_handover) = Some(h);
+        }
+        if let Err(e) = app.emit_to("main", HANDOVER_EVENT, ()) {
+            tracing::debug!(error = %e, "cannot tell the main window about a quick-ask handover");
+        }
+    }
     crate::tray::show_main(&app, Some(&page));
     Ok(())
+}
+
+/// The handover waiting for the main window, once (it calls this when it loads and on each
+/// [`HANDOVER_EVENT`]).
+#[tauri::command]
+pub fn quickask_handover_take(app: AppHandle, window: tauri::Window) -> Option<Handover> {
+    if window.label() != "main" {
+        return None;
+    }
+    app.try_state::<QuickAsk>()
+        .and_then(|s| lock(&s.pending_handover).take())
+}
+
+// --- handover (JJ2) -----------------------------------------------------------------------------
+
+/// A question asked in quick ask, carried to the main window by "Open in Chat" or "Show in
+/// Search". The answer only goes to Chat, and only once it finished.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Handover {
+    /// `chat` or `search`: set by [`quickask_open_main`] from the page it opens.
+    #[serde(default)]
+    pub page: String,
+    pub question: String,
+    #[serde(default)]
+    pub answer: Option<HandoverAnswer>,
+}
+
+/// A finished quick-ask answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HandoverAnswer {
+    pub text: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// As `retrieve.ask` gave them (`Citation` objects, partial matches marked); not inspected.
+    #[serde(default)]
+    pub citations: Vec<serde_json::Value>,
+    /// Nothing in the sources matched: a general answer.
+    #[serde(default)]
+    pub general: bool,
+    /// `AskStarted.date`, as given.
+    #[serde(default)]
+    pub date: Option<serde_json::Value>,
+}
+
+fn clip(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+/// At most `max` bytes of `text`, cut on a character boundary.
+fn clip_bytes(text: &str, max: usize) -> &str {
+    let mut end = text.len().min(max);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+impl Handover {
+    /// The handover for `page`, bounded: the question cleaned like a prefill but longer, the
+    /// answer clipped and only for Chat, oversized citations dropped. `None` without a question.
+    pub fn bounded(self, page: &str) -> Option<Self> {
+        // Control characters other than line breaks have no business in a question; nor have
+        // bidirectional overrides (as for a prefill).
+        let bidi = |c: char| matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
+        let cleaned: String = self
+            .question
+            .chars()
+            .filter(|&c| c == '\n' || !(c.is_control() || bidi(c)))
+            .collect();
+        let mut question = clip(cleaned.trim(), HANDOVER_MAX_QUESTION_CHARS)
+            .trim_end()
+            .to_string();
+        if page == "search" {
+            // Search refuses longer queries (`search.faceted`'s byte limit).
+            question = clip_bytes(&question, HANDOVER_MAX_SEARCH_BYTES)
+                .trim_end()
+                .to_string();
+        }
+        if question.is_empty() {
+            return None;
+        }
+        let answer = self.answer.filter(|_| page == "chat").and_then(|a| {
+            // An answer too long to keep whole goes no further: a clipped one would no longer be
+            // recognised as the answer it is (the daemon finds which items an earlier answer came
+            // from by its exact text, to keep sensitive ones from cloud models).
+            if a.text.trim().is_empty() || a.text.chars().count() > HANDOVER_MAX_ANSWER_CHARS {
+                return None;
+            }
+            let text = a.text;
+            let fits = |v: &serde_json::Value| {
+                v.is_object()
+                    && serde_json::to_vec(v).is_ok_and(|b| b.len() <= HANDOVER_MAX_CITATION_BYTES)
+            };
+            Some(HandoverAnswer {
+                text,
+                provider: a.provider.map(|p| clip(&p, 200)),
+                citations: {
+                    // Within what Chat history saves for one message (all citations together).
+                    let mut total = 2usize;
+                    a.citations
+                        .into_iter()
+                        .filter(fits)
+                        .take(HANDOVER_MAX_CITATIONS)
+                        .take_while(|c| {
+                            total += serde_json::to_vec(c).map_or(usize::MAX, |b| b.len()) + 1;
+                            total <= crate::history::MAX_MESSAGE_BYTES
+                        })
+                        .collect()
+                },
+                general: a.general,
+                date: a.date.filter(|d| d.is_object() && fits(d)),
+            })
+        });
+        Some(Self {
+            page: page.to_string(),
+            question,
+            answer,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -579,15 +752,91 @@ mod tests {
             shortcut: "Ctrl+Alt+K".into(),
         };
         save(&path, &s).unwrap();
-        assert_eq!(load(&path), s);
+        // Read back in this platform's conventional form (Ctrl+Option+K on macOS).
+        assert_eq!(
+            load(&path),
+            s.clone().validated_for(Platform::current()).unwrap()
+        );
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(load(&path), QuickAskSettings::default());
+    }
+
+    fn handover(question: &str, text: &str) -> Handover {
+        Handover {
+            page: String::new(),
+            question: question.into(),
+            answer: Some(HandoverAnswer {
+                text: text.into(),
+                provider: Some("local-chat".into()),
+                citations: vec![
+                    serde_json::json!({"n": 1, "item": {"source": "files-1", "key": "a.md"}, "partial": true}),
+                    serde_json::json!("not a citation"),
+                    serde_json::json!({"n": 2, "title": "x".repeat(HANDOVER_MAX_CITATION_BYTES)}),
+                ],
+                general: false,
+                date: Some(serde_json::json!({"phrase": "last week"})),
+            }),
+        }
+    }
+
+    #[test]
+    fn handover_to_chat_keeps_the_answer_bounded() {
+        let h = handover(
+            "  where did we\u{202E} go?\u{7}\n ",
+            "We went to the river [1].",
+        )
+        .bounded("chat")
+        .unwrap();
+        assert_eq!(h.page, "chat");
+        assert_eq!(h.question, "where did we go?");
+        let a = h.answer.unwrap();
+        assert_eq!(a.text, "We went to the river [1].");
+        // Only well-formed, reasonably sized citations go along.
+        assert_eq!(a.citations.len(), 1);
+        assert_eq!(a.citations[0]["partial"], serde_json::json!(true));
+        assert_eq!(a.date.unwrap()["phrase"], "last week");
+
+        // Too long a question is cut; too long an answer is not handed over at all.
+        let long = handover(&"q".repeat(10_000), &"a".repeat(100_000))
+            .bounded("chat")
+            .unwrap();
+        assert_eq!(long.question.chars().count(), HANDOVER_MAX_QUESTION_CHARS);
+        assert_eq!(long.answer, None);
+
+        // Citations stay within what history saves for one message.
+        let mut many = handover("q", "a");
+        many.answer.as_mut().unwrap().citations =
+            vec![serde_json::json!({"n": 1, "title": "t".repeat(7_000)}); 200];
+        let kept = many.bounded("chat").unwrap().answer.unwrap().citations;
+        assert!(!kept.is_empty() && kept.len() < 200);
+        assert!(serde_json::to_vec(&kept).unwrap().len() <= crate::history::MAX_MESSAGE_BYTES);
+    }
+
+    #[test]
+    fn handover_to_search_carries_the_question_only() {
+        let h = handover("herons", "By the river.")
+            .bounded("search")
+            .unwrap();
+        assert_eq!(h.page, "search");
+        assert_eq!(h.question, "herons");
+        assert_eq!(h.answer, None);
+        // Search takes at most 4096 bytes: a long question in a script of 3-byte characters
+        // is cut on a character boundary.
+        let jp = handover(&"日".repeat(3_000), "").bounded("search").unwrap();
+        assert!(jp.question.len() <= HANDOVER_MAX_SEARCH_BYTES);
+        assert_eq!(jp.question.chars().count(), HANDOVER_MAX_SEARCH_BYTES / 3);
+        // Nothing to carry without a question; an empty answer is no answer.
+        assert_eq!(handover(" \u{7} ", "x").bounded("chat"), None);
+        assert_eq!(handover("q", "  ").bounded("chat").unwrap().answer, None);
+        // From the wire: missing fields take their defaults.
+        let h: Handover = serde_json::from_str(r#"{"question": "q"}"#).unwrap();
+        assert_eq!(h.bounded("chat").unwrap().answer, None);
     }
 
     #[test]
     fn garbage_tolerant() {
         let p = Platform::Linux;
-        let d = QuickAskSettings::default();
+        let d = QuickAskSettings::default_for(p);
         assert_eq!(parse_settings(b"not json", p), d);
         assert_eq!(parse_settings(b"[1,2]", p), d);
         assert_eq!(parse_settings(br#"{"enabled": "yes"}"#, p), d);

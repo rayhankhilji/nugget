@@ -114,7 +114,7 @@ Briefs in `docs/waves/wave-dd/`.
 |---|---|---|---|
 | DD1 | `dd/wayland-shortcut` | session_01CTjRSrbhjVwZjhmA3QQoAb | Double Tap global shortcut on Wayland (portal app id, packaging, KWin/GNOME CI) (merged) |
 | DD2 | `dd/energy` | session_01CTjRSt524Nw1erCRtS19P5 | energy and battery cost of daemon, shell, indexing and read-ahead; cut waste (merged) |
-| DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence (merged) |
+| DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence (merged); GG3 loop fixes (merged) |
 | DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker (merged); retrieval package from QA GG2/GG1 (merged) |
 
 ## Wave EE (after AA3, alongside DD): cloud sessions from the EE briefs commit
@@ -149,7 +149,7 @@ Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every 
 | GG3 | `qa/agent` | session_01CTjRStQCE4cZD93QkhUFM6 | computer-use agent, 50+ tasks incl. injection, kill switch, confirmations (merged) |
 | GG4 | `qa/proactive` | session_01CTjRSs4jvVBSuALYkXyaPB | proactive cards and morning brief over two simulated weeks (merged) |
 | GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases (merged) |
-| GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux |
+| GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux (merged) |
 | GG7 | `qa/multilingual` | session_01CTjRSuVMK4RoFUCfw3YT7S | AI features in all 9 UI languages |
 | GG8 | `qa/privacy` | session_01CTjRSt3BBwCh15spCoLbbe | privacy and egress verified from captured network traffic (merged) |
 
@@ -178,5 +178,15 @@ Briefs in `docs/waves/wave-jj/`.
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| JJ1 | `qa/wave-ii` | session_01CTjRSuNbGgjvnnHJyrTbj1 | QA, new files only: the wave II features and HH2's triage as a real user |
-| JJ2 | `jj/follow-ups` | session_01CTjRSsbzcwaAhq1yJumUfT | gaps the last packages reported: Ask shows how it searched, quick-ask handover, time zones in search, interactive guard for user providers, cheap iMessage polls, triage retries |
+| JJ1 | `qa/wave-ii` | session_01CTjRSuNbGgjvnnHJyrTbj1 | QA, new files only: the wave II features and HH2's triage as a real user (merged) |
+| JJ2 | `jj/follow-ups` | session_01CTjRSsbzcwaAhq1yJumUfT | gaps the last packages reported: Ask shows how it searched, quick-ask handover, time zones in search, interactive guard for user providers, cheap iMessage polls, triage retries (merged) |
+
+## Wave KK (from QA GG6): cloud sessions from ef459c8
+Briefs in `docs/waves/wave-kk/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| KK1 | `kk/local-runtime` | session_01CTjRSqn9kQoQWcX9bBPsQ4 | the local model runtime never leaves the user stuck: hang watchdog, start/crash errors with Retry, robust downloads, warm-up state, config migration |
+| KK2 | `kk/first-run` | session_01CTjRSteVTsZBRrsJbRacvb | first run, sources and keys: folders with nothing to index, change/remove API keys, onboarding memory, duplicate sources, Ask with no AI |
+
+Follow-ups sent to finished leads: EE5 (GG6 lifecycle: quit, uninstall, update, shell log), HH2 (Ask during sync, GG6-1 re-verification, JJ1-1 multilingual sensitivity), II3 (JJ1 overlay fixes, merged), II1 (JJ1 connector fixes), HH3 (confirmed vs unsorted sensitivity; knowledge without a model).
