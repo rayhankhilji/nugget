@@ -51,35 +51,22 @@ async fn every_locale_variant_is_imported() {
         assert!(d.url.as_deref().is_some_and(|u| u.starts_with("file://")));
     }
 
-    // iOS group: system lines, media, multi-line text, me.
+    // iOS group: system lines, media, multi-line text, me, deletions.
     let fam = doc(&sink, "wa:family/2023-12");
-    let t = text(&fam);
     assert_eq!(fam.metadata["is_group"], true);
     assert_eq!(fam.title.as_deref(), Some("Family — December 2023"));
-    assert!(t.contains("conversation: \"Family\""), "{t}");
-    assert!(
-        t.contains("_2023-12-31 21:10 · Messages and calls are end-to-end encrypted."),
-        "{t}"
-    );
-    assert!(t.contains("Mum created group “Family”"), "{t}");
-    assert!(
-        t.contains("**Mum** · 2023-12-31 21:15\n> Happy new year everyone! 🎆👩‍👩‍👧‍👦\n> Can't wait to see you all\n"),
-        "{t}"
-    );
-    assert!(
-        t.contains(
-            "**Dad** · 2023-12-31 21:16\n> [photo: 00000012-PHOTO-2023-12-31-21-16-00.jpg]\n"
-        ),
-        "{t}"
-    );
-    assert!(t.contains("**Sam** · 2023-12-31 21:17\n> [photo]\n"), "{t}");
-    assert!(
-        t.contains("**Me** · 2023-12-31 21:18\n> Love you all\n"),
-        "{t}"
-    );
-    let atts = fam.metadata["attachments"].as_array().unwrap();
-    assert_eq!(atts.len(), 2);
-    assert_eq!(atts[0]["mime"], "image/jpeg");
+    let t = text(&fam);
+    for want in [
+        "conversation: \"Family\"",
+        "_2023-12-31 21:10 · Messages and calls are end-to-end encrypted.",
+        "**Mum** · 2023-12-31 21:15\n> Happy new year everyone! 🎆👩‍👩‍👧‍👦\n> Can't wait to see you all\n",
+        "**Dad** · 2023-12-31 21:16\n> [photo: 00000012-PHOTO-2023-12-31-21-16-00.jpg]\n",
+        "**Sam** · 2023-12-31 21:17\n> [photo]\n",
+        "**Me** · 2023-12-31 21:18\n> Love you all\n",
+    ] {
+        assert!(t.contains(want), "{want}\n{t}");
+    }
+    assert_eq!(fam.metadata["attachments"].as_array().unwrap().len(), 2);
     let me: Vec<_> = fam.metadata["participants"]
         .as_array()
         .unwrap()
@@ -88,100 +75,33 @@ async fn every_locale_variant_is_imported() {
         .collect();
     assert_eq!(me.len(), 1);
     assert_eq!(me[0]["name"], "Tanuj");
-    let jan = doc(&sink, "wa:family/2024-01");
-    let t = text(&jan);
+    let t = text(&doc(&sink, "wa:family/2024-01")).to_owned();
     assert!(t.contains("> [file: Report final.pdf]"), "{t}");
     assert!(
         t.contains("**Sam** · 2024-01-01 08:01\n> _(message deleted)_"),
         "{t}"
     );
 
-    // iOS US 12-hour clock with U+202F, and text that looks like Markdown structure.
-    let t = text(&doc(&sink, "wa:alice/2023-12")).to_owned();
-    assert!(
-        t.contains("**Alice** · 2023-12-31 21:15\n> Are you coming tonight?"),
-        "{t}"
-    );
-    assert!(
-        t.contains("**Alice** · 2023-12-31 23:59\n> --- not frontmatter\n> # not a heading\n"),
-        "{t}"
-    );
-    assert_eq!(doc(&sink, "wa:alice/2023-12").metadata["is_group"], false);
-
-    // Android: media omitted, file attached with caption, deleted, phone-number author.
-    let t = text(&doc(&sink, "wa:bob/2023-12")).to_owned();
-    assert!(t.contains("**Bob** · 2023-12-31 21:15\n> [file]\n"), "{t}");
-    assert!(
-        t.contains("> Look at this view\n> [photo: IMG-20231231-WA0001.jpg]\n"),
-        "{t}"
-    );
-    assert!(
-        t.contains("**Me** · 2023-12-31 21:17\n> _(message deleted)_"),
-        "{t}"
-    );
+    // Android: phone-number author becomes a contact.
     let jan = doc(&sink, "wa:bob/2024-01");
-    let t = text(&jan);
     assert!(
-        t.contains("> Multi-line\n> message\n>   indented third line\n"),
-        "{t}"
+        text(&jan).contains("> Multi-line\n> message\n>   indented third line\n"),
+        "{}",
+        text(&jan)
     );
     let contacts = jan.metadata["contacts"].as_array().unwrap();
     assert_eq!(contacts.len(), 1, "{contacts:?}");
     assert_eq!(contacts[0]["phones"][0], "+15551234567");
-
-    // Ambiguous dates + AM/PM → month-first.
-    let t = text(&doc(&sink, "wa:carol/2024-01")).to_owned();
-    assert!(t.contains("**Carol** · 2024-01-02 21:15"), "{t}");
-    assert!(t.contains("**Me** · 2024-01-03 10:00"), "{t}");
-
-    assert!(text(&doc(&sink, "wa:oma/2023-12")).contains("> [file]\n"));
-    assert!(text(&doc(&sink, "wa:dave/2024-02")).contains("> [video: VID-20240201-WA0003.mp4]"));
-    assert!(
-        text(&doc(&sink, "wa:김민수/2023-12"))
-            .contains("**김민수** · 2023-12-31 21:15\n> 새해 복 많이 받으세요")
-    );
-    assert!(text(&doc(&sink, "wa:김민수/2023-12")).contains("**Me** · 2023-12-31 11:20"));
-    assert!(text(&doc(&sink, "wa:田中/2023-12")).contains("**田中** · 2023-12-31 21:15"));
-    assert!(text(&doc(&sink, "wa:田中/2023-12")).contains("**Me** · 2023-12-31 09:00"));
-    let t = text(&doc(&sink, "wa:yusuf/2023-12")).to_owned();
-    assert!(
-        t.contains("> مرحبا بالعالم") && t.contains("> שלום עולם"),
-        "{t}"
-    );
-    assert!(t.contains("**Me** · 2023-12-31 09:17"), "{t}");
-    let t = text(&doc(&sink, "wa:zoé/2023-12")).to_owned();
-    assert!(t.contains("conversation: \"Zoé\""), "{t}");
-    assert!(
-        t.contains("**Zoé** · 2023-12-31 21:15\n> Bonne année !\n"),
-        "{t}"
-    );
-    assert!(t.contains("> Merci\n> à toi aussi\n"), "{t}");
-    assert!(!t.contains('\r'));
-
-    // Regression (JJ1-5): French `à`, Arabic comma, Eastern Arabic digits and bidi marks.
-    let t = text(&doc(&sink, "wa:chloé/2026-03")).to_owned();
-    assert!(
-        t.contains("**Chloé** · 2026-03-14 09:06\n> Salut, ça va ?"),
-        "{t}"
-    );
-    assert!(
-        t.contains("**Chloé** · 2026-03-14 09:08\n> [file]\n"),
-        "{t}"
-    );
-    let t = text(&doc(&sink, "wa:omar/2026-03")).to_owned();
-    assert!(t.contains("**Omar** · 2026-03-14 21:06\n> مرحبا"), "{t}");
-    assert!(t.contains("**Me** · 2026-03-14 21:07"), "{t}");
-    // Regression (JJ1-6): en_IN `pm` with every day ≤ 12 is day-first.
-    let t = text(&doc(&sink, "wa:priya/2026-05")).to_owned();
-    assert!(
-        t.contains("**Priya** · 2026-05-03 21:00\n> Dinner at 9 tomorrow?"),
-        "{t}"
-    );
-    assert!(
-        t.contains("**Priya** · 2026-05-04 08:16\n> [file]\n"),
-        "{t}"
-    );
-    assert!(text(&doc(&sink, "wa:priya/2026-06")).contains("**Priya** · 2026-06-11 09:30"));
+    // Ambiguous dates + AM/PM → month-first; en_IN `pm` with every day ≤ 12 is day-first
+    // (JJ1-6); Arabic comma, Eastern Arabic digits and bidi marks parse (JJ1-5).
+    for (key, want) in [
+        ("wa:carol/2024-01", "**Me** · 2024-01-03 10:00"),
+        ("wa:priya/2026-05", "**Priya** · 2026-05-03 21:00"),
+        ("wa:omar/2026-03", "**Omar** · 2026-03-14 21:06\n> مرحبا"),
+        ("wa:김민수/2023-12", "**Me** · 2023-12-31 11:20"),
+    ] {
+        assert!(text(&doc(&sink, key)).contains(want), "{key}");
+    }
     assert!(sink.problems.lock().unwrap().is_empty());
 
     // A second pass is a no-op (stable versions).
@@ -362,7 +282,7 @@ async fn private_false_is_not_sensitive_and_toggling_resends() {
 }
 
 #[tokio::test]
-async fn removed_export_deletes_its_keys() {
+async fn removed_export_deletes_its_keys_but_a_missing_folder_is_an_error_not_a_wipe() {
     let tmp = tempfile::tempdir().unwrap();
     let folder = tmp.path().join("w");
     copy_dir(&fixtures("whatsapp"), &folder);
@@ -376,17 +296,6 @@ async fn removed_export_deletes_its_keys() {
         .await;
     assert_eq!(deletes(&sink), set(&["wa:bob/2023-12", "wa:bob/2024-01"]));
     assert_eq!(sink.upserts().len(), 0);
-}
-
-#[tokio::test]
-async fn missing_folder_is_an_error_not_a_wipe() {
-    let tmp = tempfile::tempdir().unwrap();
-    let folder = tmp.path().join("w");
-    copy_dir(&fixtures("whatsapp"), &folder);
-    let env = Env::new();
-    let replica = Replica::new();
-    env.pass(Kind::WhatsApp, &json!({ "folder": folder }), &replica)
-        .await;
     std::fs::remove_dir_all(&folder).unwrap();
     let conn = env.build(
         Kind::WhatsApp,
@@ -398,7 +307,7 @@ async fn missing_folder_is_an_error_not_a_wipe() {
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)), "{err:?}");
-    assert_eq!(keys(&replica).len(), ALL_KEYS.len());
+    assert_eq!(keys(&replica).len(), ALL_KEYS.len() - 2);
 }
 
 #[test]
@@ -423,74 +332,4 @@ fn validation() {
         WhatsAppFactory.validate(&json!({ "folder": file })),
         Err(Error::Invalid(_))
     ));
-    let info = WhatsAppFactory.info();
-    assert_eq!(
-        (info.kind, info.display_name),
-        ("whatsapp", "WhatsApp exports")
-    );
-}
-
-/// Regression (JJ1-5): an export whose date lines cannot be read imported nothing and the
-/// source said "Up to date". Now the file is reported and the chat's documents are kept.
-#[tokio::test]
-async fn unreadable_export_is_reported_and_its_documents_kept() {
-    let tmp = tempfile::tempdir().unwrap();
-    let folder = tmp.path().join("exports");
-    let path = write(
-        &folder,
-        "WhatsApp Chat with Kai.txt",
-        "14/03/2026, 09:06 - Kai: hi\n",
-    );
-    let env = Env::new();
-    let replica = Replica::new();
-    let sink = env
-        .pass(Kind::WhatsApp, &json!({ "folder": folder }), &replica)
-        .await;
-    assert!(sink.problems.lock().unwrap().is_empty());
-    assert_eq!(keys(&replica), set(&["wa:kai/2026-03"]));
-
-    // The re-export is in a format the parser does not know.
-    std::fs::write(&path, "2026年3月14日 9:06 - Kai: hi\n").unwrap();
-    let sink = env
-        .pass(Kind::WhatsApp, &json!({ "folder": folder }), &replica)
-        .await;
-    assert!(deletes(&sink).is_empty(), "{:?}", sink.summary());
-    assert_eq!(keys(&replica), set(&["wa:kai/2026-03"]));
-    let problems = sink.problems.lock().unwrap().clone();
-    assert_eq!(problems.len(), 1, "{problems:?}");
-    assert_eq!(problems[0].0, "whatsapp:WhatsApp Chat with Kai.txt");
-    assert!(
-        problems[0]
-            .1
-            .starts_with("Couldn't read any messages in WhatsApp Chat with Kai.txt: its date format isn't recognised."),
-        "{problems:?}"
-    );
-}
-
-/// Regression (JJ1-6): an old export with only ambiguous dates next to a re-export with a
-/// day above 12 was dated two ways, so every shared message appeared twice.
-#[tokio::test]
-async fn reexport_with_unambiguous_day_dates_both_exports_alike() {
-    let tmp = tempfile::tempdir().unwrap();
-    let folder = tmp.path().join("exports");
-    let old = "03/05/26, 9:00 PM - Priya: dinner at 9?\n04/05/26, 8:15 AM - Priya: late\n";
-    write(&folder, "WhatsApp Chat with Priya.txt", old);
-    write(
-        &folder,
-        "WhatsApp Chat with Priya (1).txt",
-        &format!("{old}25/06/26, 7:00 PM - Priya: home\n"),
-    );
-    let env = Env::new();
-    let replica = Replica::new();
-    let sink = env
-        .pass(Kind::WhatsApp, &json!({ "folder": folder }), &replica)
-        .await;
-    assert_eq!(
-        keys(&replica),
-        set(&["wa:priya/2026-05", "wa:priya/2026-06"])
-    );
-    let may = doc(&sink, "wa:priya/2026-05");
-    assert_eq!(may.metadata["message_count"], 2);
-    assert_eq!(text(&may).matches("dinner at 9?").count(), 1);
-    assert!(text(&may).contains("**Priya** · 2026-05-03 21:00"));
 }

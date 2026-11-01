@@ -802,7 +802,7 @@ mod tests {
         std::fs::write(sub.join("plain.md"), "y").unwrap();
         let cfg = Arc::new(Config::files(&json!({ "roots": [root] })).unwrap());
         let file_key = item_key(0, Path::new(OsStr::from_bytes(b"d\xff/n\xfe.md")));
-        let (_, file_rel) = crate::key::parse_key(&file_key).unwrap();
+        let file_rel = file_key.split_once(':').unwrap().1;
         let dir_rel = rel_key(Path::new(OsStr::from_bytes(b"d\xff")));
         let mut known = KnownMap::new();
         known.insert(file_key.clone(), Some("0:0".into()));

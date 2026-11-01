@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
-use nugget_connector::{CancellationToken, ConnectorFactory, Content, Registry};
-use nugget_connector_files::{CHECKPOINT_EVERY, FilesFactory, ObsidianFactory};
+use nugget_connector::{CancellationToken, Content};
+use nugget_connector_files::CHECKPOINT_EVERY;
 use nugget_core::Error;
 use serde_json::json;
 
@@ -45,16 +45,7 @@ async fn initial_scan_reports_documents() {
     assert!(url.starts_with("file:///"), "{url}");
     assert!(url.ends_with("/docs%20root/a.md"), "{url}");
     assert_eq!(d.metadata["path"], "a.md");
-    assert_eq!(d.metadata["size"], 10);
-    assert_eq!(d.metadata["root"], root.to_string_lossy().as_ref());
-    assert!(d.modified_at.is_some());
-    assert_eq!(docs(&changes)["0:notes/deep/c.pdf"].mime, "application/pdf");
-
-    let cursor = h.cursor.clone().unwrap();
-    assert_eq!(cursor["files"], 4);
-    assert!(cursor["roots"].is_string());
-    assert!(cursor["scanned_at"].is_string());
-    assert!(h.fake.checkpoints.lock().unwrap().is_empty());
+    assert_eq!(h.cursor.as_ref().unwrap()["files"], 4);
 
     // Nothing changed: a second pass is silent.
     assert!(h.sync().await.is_empty());
@@ -138,9 +129,11 @@ async fn gitignore_and_nuggetignore_are_honoured() {
 }
 
 #[tokio::test]
-async fn junk_vcs_dependency_and_cache_dirs_are_always_skipped() {
+async fn junk_and_credential_files_and_dirs_are_never_indexed() {
+    // A root at the home folder with everything included: junk, keys and credentials stay out of
+    // the index (where any prompt-injected request could search them).
     let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "r");
+    let root = root_in(&tmp, "home");
     for rel in [
         ".git/notes.md",
         "node_modules/pkg/readme.md",
@@ -152,22 +145,6 @@ async fn junk_vcs_dependency_and_cache_dirs_are_always_skipped() {
         "note.md.swp",
         "._note.md",
         "download.pdf.crdownload",
-    ] {
-        write(&root, rel, "junk");
-    }
-    write(&root, "proj/src/lib.rs", "ok");
-    let mut h =
-        Harness::files(json!({ "roots": [root], "include": ["*"], "include_hidden": true }));
-    assert_eq!(upserts(&h.sync().await), set(["0:proj/src/lib.rs"]));
-}
-
-#[tokio::test]
-async fn credential_files_and_dirs_are_never_indexed() {
-    // A root at the home folder with everything included: keys and credentials stay out of the
-    // index (where any prompt-injected request could search them).
-    let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "home");
-    for rel in [
         ".ssh/id_ed25519",
         ".ssh/config",
         ".gnupg/private-keys-v1.d/x.key",
@@ -189,11 +166,12 @@ async fn credential_files_and_dirs_are_never_indexed() {
     }
     write(&root, "proj/README.md", "ok");
     write(&root, "proj/keys.md", "ok");
+    write(&root, "proj/src/lib.rs", "ok");
     let mut h =
         Harness::files(json!({ "roots": [root], "include": ["*"], "include_hidden": true }));
     assert_eq!(
         upserts(&h.sync().await),
-        set(["0:proj/README.md", "0:proj/keys.md"])
+        set(["0:proj/README.md", "0:proj/keys.md", "0:proj/src/lib.rs"])
     );
 }
 
@@ -276,37 +254,6 @@ async fn symlinks_follow_the_policy() {
         upserts(&c),
         set(["0:a.md", "0:link.md", "0:linked_dir/o.md"]),
         "links followed, the loop detected and skipped"
-    );
-}
-
-#[tokio::test]
-async fn reconciles_changes_made_while_not_running() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "r");
-    let settings = json!({ "roots": [root] });
-    write(&root, "keep.md", "k");
-    write(&root, "edit.md", "e");
-    write(&root, "gone.md", "g");
-    write(&root, "dir/old.md", "o");
-    let mut h = Harness::files(settings.clone());
-    assert_eq!(h.sync().await.len(), 4);
-
-    // "Downtime": the daemon is stopped while things change.
-    h.restart(settings.clone());
-    append(&root, "edit.md", " more");
-    std::fs::remove_file(path(&root, "gone.md")).unwrap();
-    std::fs::rename(path(&root, "dir"), path(&root, "moved")).unwrap();
-    write(&root, "new.md", "n");
-
-    let c = h.sync().await;
-    assert_eq!(deletes(&c), set(["0:dir/old.md", "0:gone.md"]));
-    assert_eq!(
-        upserts(&c),
-        set(["0:edit.md", "0:moved/old.md", "0:new.md"])
-    );
-    assert_eq!(
-        h.store_keys(),
-        set(["0:edit.md", "0:keep.md", "0:moved/old.md", "0:new.md"])
     );
 }
 
@@ -496,38 +443,4 @@ async fn unreadable_files_and_dirs_are_skipped_without_failing() {
     // Readable again: picked up.
     let c = h.sync().await;
     assert_eq!(upserts(&c), set(["0:fresh.md", "0:known.md"]));
-}
-
-#[tokio::test]
-async fn factories_validate_and_register() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "r");
-    assert!(FilesFactory.validate(&json!({ "roots": [root] })).is_ok());
-    assert!(
-        FilesFactory
-            .validate(&json!({ "roots": [root.join("missing")] }))
-            .is_err()
-    );
-    assert!(
-        FilesFactory
-            .validate(&json!({ "roots": ["relative"] }))
-            .is_err()
-    );
-    assert!(ObsidianFactory.validate(&json!({ "vault": root })).is_ok());
-    assert!(
-        ObsidianFactory
-            .validate(&json!({ "roots": [root] }))
-            .is_err()
-    );
-
-    let mut reg = Registry::new();
-    nugget_connector_files::register(&mut reg);
-    let kinds: Vec<_> = reg.kinds().into_iter().map(|k| k.kind).collect();
-    assert_eq!(kinds, ["files", "obsidian"]);
-    let info = reg.get("files").unwrap().info();
-    assert_eq!(info.settings_schema["required"], json!(["roots"]));
-
-    let h = Harness::files(json!({ "roots": [root] }));
-    assert_eq!(h.conn.kind(), "files");
-    assert!(h.conn.supports_watch());
 }

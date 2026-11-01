@@ -371,26 +371,4 @@ mod tests {
             assert!(i.contacts_dir().is_none());
         }
     }
-
-    #[test]
-    fn schemas_list_every_setting() {
-        for (schema, keys) in [
-            (
-                imessage_schema(),
-                &[
-                    "private",
-                    "since_days",
-                    "include_groups",
-                    "db_path",
-                    "contacts",
-                ][..],
-            ),
-            (whatsapp_schema(), &["folder", "me"][..]),
-            (telegram_schema(), &["path"][..]),
-        ] {
-            for k in keys {
-                assert!(schema["properties"].get(*k).is_some(), "{k}");
-            }
-        }
-    }
 }

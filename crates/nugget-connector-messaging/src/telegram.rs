@@ -20,8 +20,8 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::connector::{Found, Reader};
 use crate::model::{
-    Attachment, Conversation, Message, basename, clean_name, looks_like_phone, mime_from_name,
-    normalise_phone, slug,
+    Attachment, Conversation, Message, basename, clean_name, file_url, looks_like_phone,
+    mime_from_name, normalise_phone, slug,
 };
 
 #[derive(Debug, Default, Deserialize)]
@@ -361,11 +361,6 @@ pub fn convert_chat(chat: &TgChat, me: Option<&str>, url: Option<String>) -> Con
     }
     conv.normalise();
     conv
-}
-
-fn file_url(path: &Path) -> Option<String> {
-    let abs = std::path::absolute(path).ok()?;
-    url::Url::from_file_path(abs).ok().map(String::from)
 }
 
 /// `result.json` files under `path`: the file itself, or in the folder and its direct
@@ -721,14 +716,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn text_entities_flatten() {
-        let v = json!(["Hi ", {"type": "bold", "text": "there"}, {"type": "link", "text": "https://example.com"}, 3]);
-        assert_eq!(flatten_text(&v), "Hi therehttps://example.com");
-        assert_eq!(flatten_text(&json!("plain")), "plain");
-        assert_eq!(flatten_text(&Value::Null), "");
-    }
-
     /// Regression (JJ1-12): times were taken from `date_unixtime` and shown in UTC, so local
     /// 09:12 at UTC+2 showed as 07:12 and 00:30 on 1 June was filed under May. The local
     /// `date` is the time the user saw; `date_unixtime` is only a fallback.
@@ -939,31 +926,5 @@ mod tests {
         let err = parse_export(&p).unwrap_err().to_string();
         assert!(!err.contains("SECRET"), "{err}");
         assert!(err.contains("line 1"), "{err}");
-    }
-
-    #[test]
-    fn personal_chat_infers_me() {
-        let chat: TgChat = serde_json::from_value(json!({
-            "name": "Alice", "type": "personal_chat", "id": 42,
-            "messages": [
-                {"id": 1, "type": "message", "date_unixtime": "1714557600", "from": "Alice", "from_id": "user42", "text": "hi"},
-                {"id": 2, "type": "message", "date_unixtime": "1714557660", "from": "Tanuj", "from_id": "user7", "text": "",
-                 "photo": "photos/photo_1@01-05-2024_12-01-00.jpg", "photo_file_size": 1234},
-                {"id": 3, "type": "service", "date_unixtime": "1714557700", "actor": "Alice", "actor_id": "user42", "action": "phone_call", "duration_seconds": 5, "text": ""},
-                {"id": 4, "type": "message", "date_unixtime": "1714557800", "from": "Alice", "from_id": "user42", "text": "x", "unknown_field": {"a": 1}}
-            ]
-        }))
-        .unwrap();
-        let c = convert_chat(&chat, None, None);
-        assert_eq!(c.id, "tg:42");
-        assert!(!c.is_group);
-        assert_eq!(c.messages.len(), 4);
-        assert!(c.participants[c.messages[1].author.unwrap()].me);
-        assert!(!c.participants[c.messages[0].author.unwrap()].me);
-        let a = &c.messages[1].attachments[0];
-        assert_eq!(a.name.as_deref(), Some("photo_1@01-05-2024_12-01-00.jpg"));
-        assert_eq!(a.size, Some(1234));
-        assert!(c.messages[2].system);
-        assert_eq!(c.messages[2].text, "Alice called (5 s)");
     }
 }

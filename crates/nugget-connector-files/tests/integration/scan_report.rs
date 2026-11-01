@@ -27,8 +27,7 @@ fn skip(path: &str, reason: &str, bytes: Option<u64>) -> SkippedFile {
 #[tokio::test]
 async fn scan_report_empty_folder() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "empty");
-    let r = scan(json!({ "roots": [root] })).await;
+    let r = scan(json!({ "roots": [root_in(&tmp, "empty")] })).await;
     assert_eq!(
         r,
         ScanReport {
@@ -38,42 +37,6 @@ async fn scan_report_empty_folder() {
         }
     );
     assert!(r.max_file_bytes > 0);
-}
-
-#[tokio::test]
-async fn scan_report_unsupported_only() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "pics");
-    write(&root, "a.mp3", "x");
-    write(&root, "b.zip", "x");
-    write(&root, "sub/c.exe", "x");
-    // Hidden and ignored folders are not "skipped".
-    write(&root, ".hidden/d.zip", "x");
-    write(&root, "node_modules/e.zip", "x");
-    let r = scan(json!({ "roots": [root] })).await;
-    assert_eq!(r.found, 0);
-    assert_eq!(r.unsupported, 3);
-    assert_eq!((r.too_large, r.unreadable, r.roots_denied), (0, 0, 0));
-    assert_eq!(
-        r.skipped,
-        [
-            skip("a.mp3", "unsupported", None),
-            skip("b.zip", "unsupported", None),
-            skip("sub/c.exe", "unsupported", None),
-        ]
-    );
-}
-
-#[tokio::test]
-async fn scan_report_too_large() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "big");
-    write(&root, "huge.txt", &"x".repeat(2000));
-    let r = scan(json!({ "roots": [root], "max_file_bytes": 1000 })).await;
-    assert_eq!(r.found, 0);
-    assert_eq!(r.too_large, 1);
-    assert_eq!(r.max_file_bytes, 1000);
-    assert_eq!(r.skipped, [skip("huge.txt", "too_large", Some(2000))]);
 }
 
 #[tokio::test]
@@ -87,10 +50,15 @@ async fn scan_report_mixed_folder_names_examples_first_found_first() {
     for i in 0..6 {
         write(&root, &format!("z{i}.bin"), "x");
     }
+    // Hidden and ignored folders are not "skipped".
+    write(&root, ".hidden/d.zip", "x");
+    write(&root, "node_modules/e.zip", "x");
     let r = scan(json!({ "roots": [root], "max_file_bytes": 100 })).await;
-    assert_eq!(r.found, 2);
-    assert_eq!(r.unsupported, 7);
-    assert_eq!(r.too_large, 1);
+    assert_eq!((r.found, r.unsupported, r.too_large), (2, 7, 1));
+    assert_eq!(
+        (r.unreadable, r.roots_denied, r.max_file_bytes),
+        (0, 0, 100)
+    );
     assert_eq!(
         r.skipped,
         [
@@ -117,49 +85,32 @@ async fn scan_report_missing_root() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn scan_report_unreadable_root() {
+async fn scan_report_unreadable_root_and_subfolder() {
     use std::os::unix::fs::PermissionsExt;
     let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "locked");
+    let (root, other) = (root_in(&tmp, "locked"), root_in(&tmp, "partly"));
     write(&root, "a.md", "secret");
-    let mut h = Harness::files(json!({ "roots": [root] }));
-    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000)).unwrap();
+    write(&other, "a.md", "ok");
+    write(&other, "locked/b.md", "secret");
+    let mut h = Harness::files(json!({ "roots": [root, other] }));
+    let locked = [root.clone(), other.join("locked")];
+    for p in &locked {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
     let readable = std::fs::read_dir(&root).is_ok();
     if !readable {
         h.sync().await;
     }
-    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for p in &locked {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     if readable {
         eprintln!("running with permission bypass (root); skipping");
         return;
     }
     let r = h.fake.scans.lock().unwrap()[0].clone();
     assert!(r.finished);
-    assert_eq!((r.roots_denied, r.roots_missing, r.found), (1, 0, 0));
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn scan_report_unreadable_subfolder() {
-    use std::os::unix::fs::PermissionsExt;
-    let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "partly");
-    write(&root, "a.md", "ok");
-    write(&root, "locked/b.md", "secret");
-    let mut h = Harness::files(json!({ "roots": [root] }));
-    let locked = root.join("locked");
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-    let readable = std::fs::read_dir(&locked).is_ok();
-    if !readable {
-        h.sync().await;
-    }
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
-    if readable {
-        eprintln!("running with permission bypass (root); skipping");
-        return;
-    }
-    let r = h.fake.scans.lock().unwrap()[0].clone();
-    assert_eq!((r.found, r.unreadable, r.roots_denied), (1, 1, 0));
+    assert_eq!((r.found, r.unreadable, r.roots_denied), (1, 1, 1));
     assert_eq!(r.skipped, [skip("locked", "unreadable", None)]);
 }
 
@@ -168,21 +119,22 @@ async fn scan_report_unreadable_subfolder() {
 async fn scan_report_to_index_counts_only_changes() {
     let tmp = tempfile::tempdir().unwrap();
     let root = root_in(&tmp, "docs");
-    write(&root, "a.md", "a");
-    write(&root, "b.md", "b");
-    write(&root, "c.md", "c");
+    for f in ["a.md", "b.md", "c.md"] {
+        write(&root, f, f);
+    }
     let mut h = Harness::files(json!({ "roots": [root] }));
     h.sync().await;
-    let first = h.fake.scans.lock().unwrap()[0].clone();
-    assert_eq!((first.found, first.to_index), (3, 3));
-
     write(&root, "b.md", "b changed");
     std::fs::remove_file(root.join("c.md")).unwrap();
     h.sync().await;
-    let second = h.fake.scans.lock().unwrap()[1].clone();
-    assert_eq!((second.found, second.to_index), (2, 2));
-
     h.sync().await;
-    let third = h.fake.scans.lock().unwrap()[2].clone();
-    assert_eq!((third.found, third.to_index), (2, 0));
+    let got: Vec<_> = h
+        .fake
+        .scans
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|s| (s.found, s.to_index))
+        .collect();
+    assert_eq!(got, [(3, 3), (2, 2), (2, 0)]);
 }

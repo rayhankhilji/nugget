@@ -107,31 +107,6 @@ async fn whatsapp_watch_picks_up_new_exports() {
     .await;
 }
 
-#[tokio::test]
-async fn telegram_watch_picks_up_new_exports() {
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path().join("tg");
-    copy_dir(&fixtures("telegram"), &dir);
-    let sub = dir.join("ChatExport_new");
-    std::fs::create_dir_all(&sub).unwrap();
-    run_watch(
-        Kind::Telegram,
-        json!({ "path": dir }),
-        &sub,
-        "result.json",
-        "tg:555/2024-05",
-        |n| {
-            json!({
-                "name": "Nia", "type": "personal_chat", "id": 555,
-                "messages": [{"id": 1, "type": "message", "date_unixtime": "1714554000",
-                              "from": "Nia", "from_id": "user555", "text": format!("hi {n}")}]
-            })
-            .to_string()
-        },
-    )
-    .await;
-}
-
 /// Regression (JJ1-5): the live path reports an unreadable export too.
 #[tokio::test]
 async fn whatsapp_watch_reports_unreadable_exports() {

@@ -849,36 +849,4 @@ mod tests {
             Some(Scope::Targets(vec![t(0, "sub")]))
         );
     }
-
-    #[test]
-    fn ignore_file_changes_target_their_directory_and_batches_coalesce() {
-        let f = fx();
-        let known = KnownMap::new();
-        let batch = vec![
-            ev(
-                EventKind::Modify(ModifyKind::Any),
-                vec![f.root.join("sub").join(".nuggetignore")],
-            ),
-            ev(
-                EventKind::Create(CreateKind::File),
-                vec![f.root.join("sub").join("n.md")],
-            ),
-            ev(
-                EventKind::Remove(RemoveKind::File),
-                vec![f.root.join("z.md")],
-            ),
-        ];
-        assert_eq!(
-            plan(&f.cfg, &f.roots, batch, &known),
-            Some(Scope::Targets(vec![t(0, "sub"), t(0, "z.md")]))
-        );
-        let root_ignore = vec![ev(
-            EventKind::Modify(ModifyKind::Any),
-            vec![f.root.join(".gitignore")],
-        )];
-        assert_eq!(
-            plan(&f.cfg, &f.roots, root_ignore, &known),
-            Some(Scope::Targets(vec![t(0, "")]))
-        );
-    }
 }

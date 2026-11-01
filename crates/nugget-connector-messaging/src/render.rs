@@ -579,19 +579,15 @@ participants: [\"Alice Smith\"]\nperiod: 2024-05\n---\n# Family — May 2024\n\n
         assert_eq!(n, 81);
     }
 
-    #[test]
-    fn yaml_quoting() {
-        assert_eq!(
-            yaml_quote("a\"b\\c\u{1}\u{2028}"),
-            "\"a\\\"b\\\\c\\u0001\\u2028\""
-        );
-    }
-
     /// Regression: U+FFFE / U+FFFF are not allowed in YAML, so an untrusted name holding one
     /// made the whole frontmatter unreadable.
     #[test]
     fn yaml_quoting_escapes_non_characters() {
         assert_eq!(yaml_quote("a\u{FFFE}b\u{FFFF}"), "\"a\\uFFFEb\\uFFFF\"");
+        assert_eq!(
+            yaml_quote("a\"b\\c\u{1}\u{2028}"),
+            "\"a\\\"b\\\\c\\u0001\\u2028\""
+        );
     }
 
     /// Regression: system lines were cut to 200 characters by the name cleaner.

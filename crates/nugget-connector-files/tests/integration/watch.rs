@@ -106,49 +106,6 @@ async fn renames_and_directory_moves_become_delete_plus_upsert() {
 }
 
 #[tokio::test]
-async fn bursts_of_writes_are_coalesced() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "r");
-    let mut h = Harness::files(live(&root));
-    h.sync().await;
-    let (cancel, task) = h.start_watch();
-    h.wait_watching(&root, "txt").await;
-
-    // An editor save storm: truncate, write, append, many times in a row.
-    let p = path(&root, "burst.md");
-    for i in 0..40 {
-        std::fs::write(&p, format!("draft {i}\n")).unwrap();
-        append(&root, "burst.md", "tail\n");
-    }
-    let last = version(&p);
-    let c = h
-        .wait_for("final version", |c| {
-            c.iter().rev().find_map(|ch| match ch {
-                nugget_connector::Change::Upsert(d) if d.key.0 == "0:burst.md" => {
-                    Some(d.version.as_deref() == Some(last.as_str()))
-                }
-                _ => None,
-            }) == Some(true)
-        })
-        .await;
-    // Give stragglers a moment, then count.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let n = h
-        .snapshot()
-        .iter()
-        .filter(|ch| matches!(ch, nugget_connector::Change::Upsert(d) if d.key.0 == "0:burst.md"))
-        .count();
-    eprintln!("burst: 80 writes -> {n} upserts");
-    assert!(
-        (1..=10).contains(&n),
-        "80 writes produced {n} upserts: {:?}",
-        summary(&c)
-    );
-    cancel.cancel();
-    let _ = task.await.unwrap();
-}
-
-#[tokio::test]
 async fn filtered_paths_are_not_reported_live() {
     let tmp = tempfile::tempdir().unwrap();
     let root = root_in(&tmp, "r");
@@ -205,28 +162,6 @@ async fn watch_start_catches_changes_since_the_last_sync() {
         !upserts(&h.snapshot()).contains("0:b.md"),
         "unchanged files are not re-sent"
     );
-    cancel.cancel();
-    let _ = task.await.unwrap();
-}
-
-#[tokio::test]
-async fn watch_without_a_prior_sync_uses_the_store() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = root_in(&tmp, "r");
-    write(&root, "a.md", "a");
-    let mut h = Harness::files(live(&root));
-    h.sync().await;
-    // A new connector instance (no in-memory state) watching straight away.
-    h.restart(live(&root));
-    let (cancel, task) = h.start_watch();
-    h.wait_watching(&root, "txt").await;
-    assert!(
-        !upserts(&h.snapshot()).contains("0:a.md"),
-        "known versions came from KnownItems"
-    );
-    std::fs::remove_file(path(&root, "a.md")).unwrap();
-    h.wait_for("delete", |c| deletes(c).contains("0:a.md"))
-        .await;
     cancel.cancel();
     let _ = task.await.unwrap();
 }

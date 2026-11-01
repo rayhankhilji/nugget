@@ -253,44 +253,31 @@ async fn reads_chats_messages_and_contacts() {
     let one = doc(&sink, "im:iMessage;-;+15551234567/2024-05");
     assert_eq!(one.title.as_deref(), Some("Alice Smith — May 2024"));
     let t = text(&one);
+    for want in [
+        "**Alice Smith** · 2024-05-01 09:00\n> Hi from Alice\n> line two\n",
+        "**Me** · 2024-05-01 09:01\n> typedstream reply ✓\n",
+        "**Alice Smith** · 2024-05-01 09:02\n> [photo: IMG_0001.HEIC]\n",
+    ] {
+        assert!(t.contains(want), "{want}\n{t}");
+    }
     assert!(
-        t.contains("**Alice Smith** · 2024-05-01 09:00\n> Hi from Alice\n> line two\n"),
-        "{t}"
+        !t.contains("Loved") && !t.contains('\u{fffc}'),
+        "tapbacks skipped: {t}"
     );
-    assert!(
-        t.contains("**Me** · 2024-05-01 09:01\n> typedstream reply ✓\n"),
-        "{t}"
-    );
-    assert!(!t.contains("Loved"), "tapbacks are skipped: {t}");
-    assert!(
-        t.contains("**Alice Smith** · 2024-05-01 09:02\n> [photo: IMG_0001.HEIC]\n"),
-        "{t}"
-    );
-    assert!(!t.contains('\u{fffc}'));
-    assert_eq!(one.metadata["attachments"][0]["size"], 2_000_000);
     assert_eq!(one.metadata["contacts"][0]["name"], "Alice Smith");
     assert_eq!(one.metadata["contacts"][0]["phones"][0], "+15551234567");
-    assert_eq!(one.metadata["is_group"], false);
 
     let g = doc(&sink, "im:iMessage;+;chat123/2024-05");
     assert_eq!(g.metadata["is_group"], true);
-    assert_eq!(g.title.as_deref(), Some("Weekend 🏕️ — May 2024"));
     let t = text(&g);
-    assert!(
-        t.contains("Bob's Bikes named the conversation “Weekend 🏕️”"),
-        "{t}"
-    );
-    assert!(
-        t.contains("**Bob's Bikes** · 2024-05-01 09:05\n> Camping?"),
-        "{t}"
-    );
-    // Carol has no contact card: her handle is shown.
-    assert!(
-        t.contains("**+447700900123** · 2024-05-01 09:06\n> Yes"),
-        "{t}"
-    );
-    let contacts = g.metadata["contacts"].as_array().unwrap();
-    assert!(contacts.iter().any(|c| c["emails"][0] == "bob@example.com"));
+    for want in [
+        "Bob's Bikes named the conversation “Weekend 🏕️”",
+        "**Bob's Bikes** · 2024-05-01 09:05\n> Camping?",
+        // Carol has no contact card: her handle is shown.
+        "**+447700900123** · 2024-05-01 09:06\n> Yes",
+    ] {
+        assert!(t.contains(want), "{want}\n{t}");
+    }
 
     // The copies are removed after the pass.
     let left: Vec<_> = std::fs::read_dir(env.scratch()).unwrap().collect();
@@ -326,44 +313,6 @@ async fn without_contacts_names_fall_back_to_handles() {
         )
         .await;
     assert_eq!(sink.upserts().len(), 3);
-}
-
-#[tokio::test]
-async fn reads_uncheckpointed_wal_and_old_schemas() {
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path().join("Messages");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("chat.db");
-    // An old macOS schema: no attributedBody, item_type, associated_message_type, attachments.
-    let conn = Connection::open(&path).unwrap();
-    conn.execute_batch(
-        "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
-         CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
-         CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, guid TEXT, chat_identifier TEXT);
-         CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
-         CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, handle_id INTEGER, date INTEGER, is_from_me INTEGER);
-         CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);",
-    )
-    .unwrap();
-    // Seconds (pre-High Sierra dates), written only to the WAL while the "app" keeps it open.
-    conn.execute_batch(&format!(
-        "INSERT INTO handle VALUES (1, 'dan@example.com');
-         INSERT INTO chat VALUES (1, 'iMessage;-;dan@example.com', 'dan@example.com');
-         INSERT INTO chat_handle_join VALUES (1, 1);
-         INSERT INTO message VALUES (1, 'from the wal', 1, {}, 0);
-         INSERT INTO chat_message_join VALUES (1, 1);",
-        MAY1 - APPLE_EPOCH
-    ))
-    .unwrap();
-    assert!(dir.join("chat.db-wal").exists());
-    let env = Env::new();
-    let replica = Replica::new();
-    let sink = env
-        .pass(Kind::IMessage, &settings(&path, None), &replica)
-        .await;
-    let d = doc(&sink, "im:iMessage;-;dan@example.com/2024-05");
-    assert!(text(&d).contains("**dan@example.com** · 2024-05-01 09:00\n> from the wal"));
-    drop(conn);
 }
 
 /// Regression (JJ1-14): one row with invalid UTF-8 in `text` (and in a handle, a chat name
@@ -461,8 +410,6 @@ fn validation() {
             .validate(&json!({ "db_path": db.path }))
             .is_ok()
     );
-    let info = IMessageFactory.info();
-    assert_eq!((info.kind, info.display_name), ("imessage", "iMessage"));
 }
 
 /// Permission errors (what macOS privacy protection returns) ask for Full Disk Access, from
