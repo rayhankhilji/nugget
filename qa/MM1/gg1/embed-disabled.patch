@@ -1,0 +1,11 @@
+--- /dev/fd/63	2026-11-01 23:51:12.399103378 +0000
++++ qa/GG1/harness/src/main.rs	2026-11-01 23:15:51.163170109 +0000
+@@ -664,7 +664,7 @@
+         let models = LocalModels::start(&r.models.options(None), roles)
+             .map_err(|e| e.to_string())?;
+         if r.embed {
+-            embedder = Some(models.embedder().map_err(|e| e.to_string())?);
++            return Err("MM1: --embed disabled (LocalModels::embedder was removed by the debloat)".into());
+         }
+         let cfg = models
+             .chat_config(Thinking::Off)
