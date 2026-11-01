@@ -1,26 +1,11 @@
 #!/usr/bin/env node
-// Real-app end-to-end test: the real nuggetd indexes the fictional corpus in
-// bench/fixtures/knowledge/items, and the real desktop frontend (dist/) runs in headless Chromium
-// against it through bridge.mjs, which stands in for the Tauri shell. Every page of the PAGES
-// registry in src/App.tsx is opened and checked for real data and uncaught errors. A second
-// scenario (first-run.mjs) starts from an empty home, goes through onboarding and times how long
-// it takes from app start to a cited answer. A third (i18n.mjs) reopens every page in long, CJK
-// and right-to-left locales on the same indexed home and measures text that doesn't fit.
-// ai-setup.mjs installs the recommended local model in onboarding (signed test manifest, mock
-// download, fake llama-server) and times app start to a cited answer streamed by that model;
-// byok.mjs checks and saves an API key in onboarding. a11y.mjs runs axe-core over every page and the
-// main dialogs in light and dark and checks the accessibility tree; prefs.mjs checks reduced motion,
-// more contrast and 200% zoom; keyboard.mjs completes the core flows without a mouse; visual.mjs
-// compares screenshots of the main screens with committed baselines (Linux only); backup.mjs
-// backs up, exports, wipes the home and restores the backup through the UI; scale.mjs scrolls long
-// lists (500,000 knowledge entities, a 1,000-row egress ledger) and measures long tasks and frames.
-//
-// usage: pnpm run e2e        (see e2e/README.md for the environment variables)
+// Real-app end-to-end test: the real nuggetd on the fictional corpus, the real frontend (dist/) in
+// headless Chromium, bridge.mjs in place of the Tauri shell. Usage and scenarios: e2e/README.md.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
+import { startBridge } from "./bridge.mjs";
 import { CORPUS, addCorpusSource, countFiles, locateNuggetd, rpc, startDaemon, waitForKnowledge } from "./daemon.mjs";
 import { firstRunScenario } from "./first-run.mjs";
 import { i18nScenario } from "./i18n.mjs";
@@ -32,42 +17,31 @@ import { prefsScenario } from "./prefs.mjs";
 import { keyboardScenario } from "./keyboard.mjs";
 import { backupScenario } from "./backup.mjs";
 import { messagingScenario } from "./messaging.mjs";
-import { visualScenario } from "./visual.mjs";
-import { scaleScenario } from "./scale.mjs";
 import { searchScenario } from "./search.mjs";
 import { sourcesSetupScenario } from "./sources-setup.mjs";
 import {
-  check,
-  DESKTOP,
-  DIST,
-  expect,
-  expectNoErrorState,
-  INDEX_TIMEOUT_MS,
-  KEEP,
-  log,
-  newContext,
-  OUT,
-  results,
-  secs,
-  settle,
-  shot,
-  sinceStart,
-  sleep,
-  STEP_TIMEOUT_MS,
-  t,
-  until,
+  check, checkWire, DESKTOP, DIST, expect, expectNoErrorState, INDEX_TIMEOUT_MS, log, newContext, OUT, results, secs, settle, shot, sinceStart, sleep, STEP_TIMEOUT_MS, stopDaemon, t, until,
 } from "./harness.mjs";
 
 /**
- * Scenarios to run (E2E_SCENARIOS, comma-separated): every page on an indexed home, the same pages
- * in other locales (sharing that home), a first run, a first run with the recommended local model,
- * bring-your-own-key, the accessibility audit, display preferences, keyboard-only use,
- * screenshots compared with baselines, backup, export and restore into a wiped home, and long
- * lists at scale.
+ * Every scenario: whether it runs on the shared indexed home (`socket`) or starts its own daemon
+ * (`bin`), and how to run it.
  */
-const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "byok-keys", "a11y", "prefs", "keyboard", "visual", "backup", "messaging", "search", "sources-setup", "scale"];
-/** Scenarios that use the shared indexed home. */
-const INDEXED = ["pages", "i18n", "a11y", "prefs", "visual", "search", "scale"];
+const SCENARIOS = {
+  pages: { indexed: true, run: (a) => pagesScenario(a) },
+  i18n: { indexed: true, run: (a) => i18nScenario({ ...a, pages: pageRegistry() }) },
+  "first-run": { run: firstRunScenario },
+  "ai-setup": { run: aiSetupScenario },
+  byok: { run: byokScenario },
+  "byok-keys": { run: byokKeysScenario },
+  a11y: { indexed: true, run: (a) => a11yScenario({ ...a, pages: pageRegistry() }) },
+  prefs: { indexed: true, run: (a) => prefsScenario({ ...a, pages: pageRegistry() }) },
+  keyboard: { run: keyboardScenario },
+  backup: { run: backupScenario },
+  messaging: { run: messagingScenario },
+  search: { indexed: true, run: searchScenario },
+  "sources-setup": { run: sourcesSetupScenario },
+};
 
 // ---- the page registry, read from the app source so new pages are covered automatically ----
 
@@ -79,8 +53,6 @@ function pageRegistry() {
   if (pages.length < 5) throw new Error(`parsed only ${pages.length} pages from the PAGES registry in src/App.tsx`);
   return pages;
 }
-
-const ONBOARDED = { version: 1, step: "done", completed: [], skipped: [], ai: null, finished: true };
 
 // ---- per-page assertions ----
 
@@ -239,16 +211,14 @@ let indexed = null;
 /** Start nuggetd on a temp home and index the corpus, once; later calls reuse it. */
 function indexedHome(bin) {
   indexed ??= (async () => {
-    const tSetup = Date.now();
     const daemon = await startDaemon(bin, { stderrPath: path.join(OUT, "nuggetd.out.log") });
     log(`daemon ready, home ${daemon.home}, socket ${daemon.socket}`);
     try {
       const source = await addCorpusSource(daemon.socket);
       log(`added source ${source.id}`);
       const settled = await waitForKnowledge(daemon.socket, { timeoutMs: INDEX_TIMEOUT_MS, log });
-      const setup_ms = Date.now() - tSetup;
-      log(`indexed ${settled.status.items} items; ${settled.knowledge.entities} entities, ${settled.knowledge.claims} facts (${secs(setup_ms)})`);
-      return { daemon, settled, setup_ms };
+      log(`indexed ${settled.status.items} items; ${settled.knowledge.entities} entities, ${settled.knowledge.claims} facts`);
+      return { daemon, settled };
     } catch (e) {
       await stopIndexedHome(daemon);
       throw e;
@@ -257,39 +227,26 @@ function indexedHome(bin) {
   return indexed;
 }
 
-async function stopIndexedHome(daemon) {
-  fs.cpSync(daemon.logDir, path.join(OUT, "daemon-logs"), { recursive: true });
-  await daemon.stop({ keep: KEEP });
-  if (KEEP) log(`kept the daemon home: ${daemon.home}`);
-}
+const stopIndexedHome = (daemon) => stopDaemon(daemon, "indexed");
 
 // ---- scenario: every page on an indexed home ----
 
-async function pagesScenario({ browser, bin }) {
+async function pagesScenario({ browser, bin, daemon, settled }) {
   const pages = pageRegistry();
   const expectedItems = countFiles(CORPUS);
   log(`corpus: ${CORPUS} (${expectedItems} files)`);
 
-  const { daemon, settled, setup_ms } = await indexedHome(bin);
   let bridge;
   let ctx;
-  const timings = { setup_ms };
   try {
     bridge = await startBridge({ socket: daemon.socket, dist: DIST });
     log(`bridge on ${bridge.url}`);
-    ctx = await newContext(browser);
-    await ctx.addInitScript(
-      ([key, state]) => {
-        localStorage.setItem(key, JSON.stringify(state));
-      },
-      ["nugget.onboarding.v1", ONBOARDED],
-    );
+    ctx = await newContext(browser, { onboarded: true });
 
     const vaultDir = settled.knowledge.vault?.path ?? path.join(daemon.home, "data", "vault");
     const specific = pageChecks({ expectedItems });
     const pageErrors = {};
     const consoleErrors = {};
-    const tBrowser = Date.now();
 
     for (const { id, label } of pages) {
       await check(`page ${id}`, async () => {
@@ -319,17 +276,8 @@ async function pagesScenario({ browser, bin }) {
         }
       });
     }
-    timings.browser_ms = Date.now() - tBrowser;
 
-    await check("no uncaught page errors on any page", async () => {
-      const bad = Object.entries(pageErrors).filter(([, e]) => e.length);
-      expect(bad.length === 0, `page errors: ${JSON.stringify(Object.fromEntries(bad))}`);
-    });
-
-    await check("every daemon command the UI called exists and accepted its params", async () => {
-      const bad = bridge.calls.filter((c) => c.via === "daemon" && (c.code === METHOD_NOT_FOUND || c.code === -32602));
-      expect(bad.length === 0, `wire mismatches: ${JSON.stringify(bad)}`);
-    });
+    await checkWire(bridge, "pages");
 
     await check("vault has a page for Ada Wexford with footnote citations", async () => {
       const find = (dir) => {
@@ -363,7 +311,7 @@ async function pagesScenario({ browser, bin }) {
     if (rpcErrors.length) log(`note: ${rpcErrors.length} command(s) returned errors (see summary.json): ${[...new Set(rpcErrors.map((c) => `${c.cmd}: ${c.message}`))].join("; ")}`);
     const consoleCount = Object.values(consoleErrors).flat().length;
     if (consoleCount) log(`note: ${consoleCount} console error(s) (see summary.json)`);
-    return { timings, rpcErrors, pageErrors, consoleErrors, commands: [...new Set(bridge.calls.map((c) => c.cmd))].sort() };
+    return { rpcErrors, pageErrors, consoleErrors, commands: [...new Set(bridge.calls.map((c) => c.cmd))].sort() };
   } finally {
     await ctx?.close().catch(() => {});
     await bridge?.close().catch(() => {});
@@ -376,9 +324,10 @@ async function main() {
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
 
-  const wanted = (process.env.E2E_SCENARIOS || SCENARIOS.join(",")).split(",").map((s) => s.trim()).filter(Boolean);
-  const unknown = wanted.filter((s) => !SCENARIOS.includes(s));
-  if (unknown.length) throw new Error(`unknown E2E_SCENARIOS ${JSON.stringify(unknown)}; known: ${SCENARIOS.join(", ")}`);
+  const known = Object.keys(SCENARIOS);
+  const wanted = (process.env.E2E_SCENARIOS || known.join(",")).split(",").map((s) => s.trim()).filter(Boolean);
+  const unknown = wanted.filter((s) => !known.includes(s));
+  if (unknown.length) throw new Error(`unknown E2E_SCENARIOS ${JSON.stringify(unknown)}; known: ${known.join(", ")}`);
 
   const require = createRequire(import.meta.url);
   let chromium;
@@ -405,41 +354,16 @@ async function main() {
     for (const [i, name] of wanted.entries()) {
       log(`---- scenario: ${name} ----`);
       try {
-        if (name === "pages") Object.assign(summary, await pagesScenario({ browser, bin }));
-        else if (name === "i18n") {
-          const { daemon } = await indexedHome(bin);
-          summary.i18n = await i18nScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });
-        } else if (name === "first-run") summary.first_run = await firstRunScenario({ browser, bin });
-        else if (name === "ai-setup") summary.first_run_ai = await aiSetupScenario({ browser });
-        else if (name === "byok") summary.byok = await byokScenario({ browser, bin });
-        else if (name === "byok-keys") summary.byok_keys = await byokKeysScenario({ browser, bin });
-        else if (name === "a11y") {
-          const { daemon } = await indexedHome(bin);
-          summary.a11y = await a11yScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });
-        } else if (name === "prefs") {
-          const { daemon } = await indexedHome(bin);
-          summary.prefs = await prefsScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });
-        } else if (name === "visual") {
-          // Linux only: elsewhere visualScenario just logs a skip, so no daemon is started for it.
-          const socket = process.platform === "linux" ? (await indexedHome(bin)).daemon.socket : null;
-          summary.visual = await visualScenario({ browser, socket, pages: pageRegistry(), onboarded: ONBOARDED });
-        } else if (name === "backup") summary.backup = await backupScenario({ browser, bin });
-        else if (name === "messaging") summary.messaging = await messagingScenario({ browser, bin });
-        else if (name === "sources-setup") summary.sources_setup = await sourcesSetupScenario({ browser, bin });
-        else if (name === "search") {
-          const { daemon } = await indexedHome(bin);
-          summary.search = await searchScenario({ browser, socket: daemon.socket, onboarded: ONBOARDED });
-        } else if (name === "scale") {
-          const { daemon } = await indexedHome(bin);
-          summary.scale = await scaleScenario({ browser, socket: daemon.socket, onboarded: ONBOARDED });
-        } else summary.keyboard = await keyboardScenario({ browser, bin });
+        const sc = SCENARIOS[name];
+        const home = sc.indexed ? await indexedHome(bin) : {};
+        summary[name] = await sc.run({ browser, bin, ...home, socket: home.daemon?.socket });
       } catch (e) {
         // A setup failure (daemon, indexing) fails the scenario and lets the next one run.
         results.push({ name: `scenario ${name}`, ok: false, ms: 0, error: e.stack ?? String(e) });
         log(`FAIL scenario ${name}: ${e.stack ?? e}`);
       }
       // Stop the shared indexed home once no later scenario needs it.
-      if (indexed && !wanted.slice(i + 1).some((s) => INDEXED.includes(s))) {
+      if (indexed && !wanted.slice(i + 1).some((s) => SCENARIOS[s].indexed)) {
         const home = await indexed.catch(() => null);
         indexed = null;
         if (home) await stopIndexedHome(home.daemon);
@@ -449,17 +373,7 @@ async function main() {
     const home = indexed && (await indexed.catch(() => null));
     if (home) await stopIndexedHome(home.daemon);
     await browser.close().catch(() => {});
-    // The first-run summary carries the time to a cited model answer when both ran.
-    const aiMs = summary.first_run_ai?.time_to_cited_model_answer_ms ?? null;
-    if (summary.first_run) summary.first_run.time_to_cited_model_answer_ms = aiMs;
     fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2));
-    if (summary.first_run || summary.first_run_ai) {
-      const cited = summary.first_run?.total_ms ?? null;
-      log(
-        `first run: cited answer (search, no AI) ${cited === null ? "not reached" : secs(cited)}; ` +
-          `cited model answer (local model installed in onboarding) ${aiMs === null ? "not reached" : secs(aiMs)} after app start`,
-      );
-    }
   }
 
   const failed = results.filter((r) => !r.ok).length;

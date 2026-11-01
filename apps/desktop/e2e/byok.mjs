@@ -1,56 +1,46 @@
-// Bring-your-own-key scenario: onboarding's AI step takes an API key for an OpenAI-compatible
-// server, checks it against that server before saving (clear errors for a bad key, a wrong URL
-// and no network), saves it to the secret store (config.toml only names it) and the egress ledger
-// shows the requests. The "server" is a mock on 127.0.0.1; nothing leaves the machine.
-//
-// Daemon side: `ai.key.test` / `ai.key.save` ({ kind, base_url?, api_key, model?, name? } ->
-// { ok, reason, message, models, saved?, provider_id?, restart_required? }); the UI reports the
-// reason with `onboarding.byok.form.error.<reason>` (role=alert) and success with
-// `onboarding.byok.form.saved` (role=status).
+// Bring your own key in onboarding: the key is checked against a mock OpenAI-compatible server on
+// 127.0.0.1 (bad key, wrong URL and no network are reported), saved to the secret store (never to
+// config.toml or the logs), and the requests show in the egress ledger.
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
-import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
+import { startBridge } from "./bridge.mjs";
 import { FIRST_RUN_CONFIG, rpc, startDaemon } from "./daemon.mjs";
-import { check, DIST, expect, KEEP, log, newContext, OUT, settle, shot, t, tPattern, until } from "./harness.mjs";
+import { check, checkWire, DIST, exactName, expect, log, newContext, OUT, shot, startsWith, stopDaemon, t, tPattern, until } from "./harness.mjs";
 
-export const GOOD_KEY = "sk-e2e-good";
+const GOOD_KEY = "sk-e2e-good";
 const BAD_KEY = "sk-e2e-bad";
-const MODEL = "mock-model";
-
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const exactName = (key) => new RegExp(`^${escapeRe(t(key))}$`);
-const startsWith = (key) => new RegExp(`^${escapeRe(t(key))}`);
+export const MODEL = "mock-model";
 
 /**
- * A minimal OpenAI-compatible server: `GET /v1/models` lists one model for
- * `Authorization: Bearer sk-e2e-good` and answers 401 otherwise; every other path is 404.
- * `requests` records `{ method, path, auth }` (auth: "good" | "other" | "none").
+ * A mock OpenAI-compatible server on 127.0.0.1: `GET /v1/models` and `POST /v1/chat/completions` (a
+ * short stream) for any of `keys`, 401 for another key, 404 for other paths. `requests` records
+ * `{ method, path, auth }`, auth being the key used, "other" or "none".
  */
-export function startMockOpenAi() {
+export function startMockOpenAi(keys) {
   const requests = [];
   const server = http.createServer((req, res) => {
-    const auth = req.headers.authorization;
-    const path = new URL(req.url, "http://127.0.0.1").pathname;
-    requests.push({ method: req.method, path, auth: !auth ? "none" : auth === `Bearer ${GOOD_KEY}` ? "good" : "other" });
+    const bearer = req.headers.authorization?.replace(/^Bearer /, "");
+    const auth = !bearer ? "none" : keys.includes(bearer) ? bearer : "other";
+    const p = new URL(req.url, "http://127.0.0.1").pathname;
+    requests.push({ method: req.method, path: p, auth });
     const json = (status, body) => res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
-    if (req.method !== "GET" || path !== "/v1/models") {
-      return json(404, { error: { message: "Not found", type: "invalid_request_error" } });
+    if (!keys.includes(auth)) return json(401, { error: { message: "Incorrect API key provided", code: "invalid_api_key" } });
+    if (req.method === "GET" && p === "/v1/models") return json(200, { object: "list", data: [{ id: MODEL, object: "model" }] });
+    if (req.method === "POST" && p === "/v1/chat/completions") {
+      req.resume();
+      const chunk = (delta, finish = null) =>
+        `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", model: MODEL, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      return res.end(chunk({ role: "assistant", content: "Hello from the mock." }) + chunk({}, "stop") + "data: [DONE]\n\n");
     }
-    if (auth !== `Bearer ${GOOD_KEY}`) {
-      return json(401, { error: { message: "Incorrect API key provided", type: "invalid_request_error", code: "invalid_api_key" } });
-    }
-    json(200, { object: "list", data: [{ id: MODEL, object: "model", owned_by: "e2e" }] });
+    json(404, { error: { message: "Not found" } });
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () =>
-      resolve({
-        port: server.address().port,
-        requests,
-        close: () => new Promise((r) => (server.closeAllConnections?.(), server.close(() => r()))),
-      }),
+      resolve({ port: server.address().port, requests, close: () => new Promise((r) => (server.closeAllConnections?.(), server.close(() => r()))) }),
     );
   });
 }
@@ -67,10 +57,9 @@ function closedPort() {
   });
 }
 
-/** Run the scenario with `browser` (Playwright) and the plain `nuggetd` binary `bin`. */
 export async function byokScenario({ browser, bin }) {
-  const summary = { cases: {} };
-  const mock = await startMockOpenAi();
+  const summary = {};
+  const mock = await startMockOpenAi([GOOD_KEY]);
   const deadPort = await closedPort();
   const daemon = await startDaemon(bin, { stderrPath: path.join(OUT, "byok-nuggetd.out.log"), config: FIRST_RUN_CONFIG });
   log(`byok: daemon home ${daemon.home}, mock server on 127.0.0.1:${mock.port}`);
@@ -97,13 +86,10 @@ export async function byokScenario({ browser, bin }) {
       const want = tPattern(expectKey);
       // The note may add the server's own message after the string; match its fixed start too.
       const head = t(expectKey).split("{")[0].trim();
-      const got = await until(`${name}: the form shows "${t(expectKey)}" (role=${role})`, async () => {
+      return until(`${name}: the form shows "${t(expectKey)}" (role=${role})`, async () => {
         const texts = (await page.locator(`[role=${role}]`).allTextContents()).map((s) => s.trim()).filter(Boolean);
         return [texts.some((s) => want.test(s) || (head.length > 3 && s.includes(head))), texts];
       });
-      summary.cases[name] = got;
-      await shot(page, `byok-${name}`);
-      return got;
     };
 
     await check("byok: onboarding checks keys against the server before saving", async () => {
@@ -125,22 +111,14 @@ export async function byokScenario({ browser, bin }) {
         });
         if ((await field("model").count()) > 0) await field("model").fill(MODEL);
         if ((await field("name").count()) > 0) await field("name").fill("e2e-mock");
-        await shot(page, "byok-form");
 
         const base = `http://127.0.0.1:${mock.port}/v1`;
         await attempt("bad-key", { baseUrl: base, key: BAD_KEY, expectKey: "onboarding.byok.form.error.bad_key" });
         await attempt("wrong-url", { baseUrl: `http://127.0.0.1:${mock.port}/nope`, key: GOOD_KEY, expectKey: "onboarding.byok.form.error.wrong_url" });
         await attempt("no-network", { baseUrl: `http://127.0.0.1:${deadPort}/v1`, key: GOOD_KEY, expectKey: "onboarding.byok.form.error.no_network" });
         await attempt("good-key", { baseUrl: base, key: GOOD_KEY, action: "save", expectKey: "onboarding.byok.form.saved" });
-        expect(
-          mock.requests.some((r) => r.path === "/v1/models" && r.auth === "good"),
-          `the mock server never saw the good key on /v1/models: ${JSON.stringify(mock.requests)}`,
-        );
-        expect(
-          mock.requests.some((r) => r.auth === "other"),
-          `the bad key never reached the mock server: ${JSON.stringify(mock.requests)}`,
-        );
-        summary.mock_requests = mock.requests;
+        expect(mock.requests.some((r) => r.path === "/v1/models" && r.auth === GOOD_KEY), `the mock server never saw the good key: ${JSON.stringify(mock.requests)}`);
+        expect(mock.requests.some((r) => r.auth === "other"), `the bad key never reached the mock server: ${JSON.stringify(mock.requests)}`);
       } catch (e) {
         await shot(page, "FAIL-byok");
         throw e;
@@ -163,41 +141,29 @@ export async function byokScenario({ browser, bin }) {
     await check("byok: the egress ledger shows the key checks (egress.recent and Privacy)", async () => {
       const recent = await rpc(daemon.socket, "egress.recent", { limit: 100 });
       const rows = recent.filter((e) => e.host === "127.0.0.1" || e.host.startsWith("127.0.0.1:"));
-      summary.egress = rows.map((e) => ({ host: e.host, feature: e.feature, sent: e.bytes_sent, received: e.bytes_received }));
       expect(rows.length > 0, `no egress.recent row for 127.0.0.1: ${JSON.stringify(recent.slice(0, 5))}`);
-      const p = await ctx.newPage();
+      const pctx = await newContext(browser, { onboarded: true, page: "privacy" });
+      const p = await pctx.newPage();
       try {
-        await p.addInitScript(() => {
-          localStorage.setItem("nugget.onboarding.v1", JSON.stringify({ version: 1, step: "done", completed: [], skipped: [], ai: "byok", finished: true }));
-          localStorage.setItem("nugget.page", "privacy");
-        });
         await p.goto(`${bridge.url}index.html`);
         await p.locator(`main[aria-label="${t("app.nav.privacy")}"]`).waitFor();
-        const hosts = await until("the Privacy page lists a request to 127.0.0.1", async () => {
+        await until("the Privacy page lists a request to 127.0.0.1", async () => {
           const text = (await p.locator("main table").allTextContents()).join(" ");
           return [text.includes("127.0.0.1"), text.slice(0, 300)];
         });
-        log(`  byok: Privacy ledger shows ${hosts.length > 0 ? "127.0.0.1" : "nothing"}`);
-        await settle(p);
-        await shot(p, "byok-privacy");
       } finally {
-        await p.close();
+        await pctx.close();
       }
     });
 
-    await check("byok: every daemon command the UI called exists and accepted its params", async () => {
-      const bad = bridge.calls.filter((c) => c.via === "daemon" && (c.code === METHOD_NOT_FOUND || c.code === -32602));
-      expect(bad.length === 0, `wire mismatches: ${JSON.stringify(bad)}`);
-      expect(pageErrors.length === 0, `${pageErrors.length} uncaught page error(s): ${JSON.stringify(pageErrors)}`);
-    });
+    await checkWire(bridge, "byok");
+    await check("byok: no uncaught page errors", async () => expect(pageErrors.length === 0, `uncaught page errors: ${JSON.stringify(pageErrors)}`));
     summary.rpcErrors = bridge.calls.filter((c) => !c.ok);
   } finally {
     await ctx?.close().catch(() => {});
     await bridge?.close().catch(() => {});
     await mock.close().catch(() => {});
-    fs.cpSync(daemon.logDir, path.join(OUT, "byok-daemon-logs"), { recursive: true });
-    await daemon.stop({ keep: KEEP });
-    if (KEEP) log(`kept the byok daemon home: ${daemon.home}`);
+    await stopDaemon(daemon, "byok");
   }
   return summary;
 }

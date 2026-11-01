@@ -1,19 +1,12 @@
-// Accessibility audit (e2e scenario "a11y"): axe-core runs over every page of the PAGES registry
-// and the main dialogs (Add source with its folder and WhatsApp forms, Merge and Split entity, a
-// Today card's sources, the command palette, every onboarding step), Search's filters, preview and
-// timeline, Models' Add a provider, and the quick ask and Double Tap overlay windows, in the light
-// and the dark theme, on the indexed home the "pages" scenario uses. Fails on serious or critical
-// violations; every violation (any impact) is written to a11y-violations.json. Each page also gets the accessibility-tree checks of
-// a11y-tree.mjs (landmarks, headings, names) in the light theme. See e2e/README.md.
-//
-// The app follows the system theme (`prefers-color-scheme` in src/styles.css), so the theme is
-// Playwright's emulated colour scheme.
+// Accessibility audit: axe-core over every page, their main states and dialogs, onboarding, quick
+// ask and the Double Tap overlay, in light and dark. Fails on serious or critical violations (all
+// are written to a11y-violations.json); a11y-tree.mjs checks each page's accessibility tree.
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { startBridge } from "./bridge.mjs";
 import { treeChecks } from "./a11y-tree.mjs";
-import { check, DIST, expect, log, newContext, OUT, settle, t, tPattern, until } from "./harness.mjs";
+import { check, DIST, exactName, expect, log, newContext, OUT, settle, startsWith, t, tPattern, until } from "./harness.mjs";
 
 const require = createRequire(import.meta.url);
 const AXE = path.join(path.dirname(require.resolve("axe-core/package.json")), "axe.min.js");
@@ -23,15 +16,7 @@ const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"];
 /** Impacts that fail a check; the others are recorded only. */
 const FAILING = new Set(["serious", "critical"]);
 
-/**
- * Violations that are accepted: `{ rule, selector, reason }`, by axe rule id and a selector the
- * offending element matches or is inside. Empty: nothing is accepted.
- */
-const ALLOW = [];
-
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const exactName = (key) => new RegExp(`^${escapeRe(t(key))}$`);
-const startsWith = (key) => new RegExp(`^${escapeRe(t(key))}`);
 
 /**
  * Pages audited again in further states, in order on the same page: `[name, steps, scope?]`
@@ -46,12 +31,12 @@ const STATES = {
         await box.fill("Tidewater budget");
         await box.press("Enter");
         await page.locator("ol.results li.result").first().waitFor();
-        // LL2: the filters (II2) show beside the results.
+        // the filters (II2) show beside the results.
         await page.locator("#search-filters fieldset").first().waitFor();
       },
     ],
     [
-      // LL2: a filter ticked (the list reruns with it, Clear filters appears).
+      // a filter ticked (the list reruns with it, Clear filters appears).
       "filtered",
       async (page) => {
         await page.locator('#search-filters fieldset[data-facet="kind"] input[type=checkbox]').first().check();
@@ -60,7 +45,7 @@ const STATES = {
       },
     ],
     [
-      // LL2: a result's preview open beside the list (search.preview).
+      // a result's preview open beside the list (search.preview).
       "preview",
       async (page) => {
         await page.locator("ol.results li.result button.result-select").first().click();
@@ -68,7 +53,7 @@ const STATES = {
       },
     ],
     [
-      // LL2: a person's timeline (search.timeline), from the filters; Escape goes back.
+      // a person's timeline (search.timeline), from the filters; Escape goes back.
       "timeline",
       async (page) => {
         await page.locator("#search-filters .sr-facet-tl").first().click();
@@ -78,7 +63,7 @@ const STATES = {
   ],
   models: [
     [
-      // LL2/KK2: "Your providers" with its Add a provider form open.
+      // "Your providers" with its Add a provider form open.
       "add-provider",
       async (page) => {
         const add = page.locator("details.models-add-provider");
@@ -92,16 +77,10 @@ const STATES = {
       "entity",
       async (page) => {
         const list = page.getByRole("region", { name: t("knowledge.entitiesLabel") });
-        await list
-          .getByRole("button", { name: /^Ada Wexford\b/ })
-          .first()
-          .click();
+        await list.getByRole("button", { name: /^Ada Wexford\b/ }).first().click();
         const detail = page.locator("section.entity-detail");
         await detail.getByRole("heading", { name: "Ada Wexford" }).first().waitFor();
-        await detail
-          .getByRole("button", { name: new RegExp(`^${escapeRe(t("entity.why"))}`) })
-          .first()
-          .click();
+        await detail.getByRole("button", { name: new RegExp(`^${escapeRe(t("entity.why"))}`) }).first().click();
         await detail.locator("ul.evidence > li").first().waitFor();
       },
     ],
@@ -117,11 +96,7 @@ const STATES = {
     [
       "connect-dialog",
       async (page) => {
-        await page
-          .locator("main")
-          .getByRole("button", { name: exactName("apps.connect") })
-          .first()
-          .click();
+        await page.locator("main").getByRole("button", { name: exactName("apps.connect") }).first().click();
         await page.locator("dialog[open]").waitFor();
       },
       "dialog[open]",
@@ -189,13 +164,11 @@ const OVERLAY_HISTORY = [
 
 /** Wait for finite animations and transitions (fade-ins skew colour contrast mid-way). */
 async function quiet(page) {
-  await page
-    .evaluate(() => {
+  await page.evaluate(() => {
       const finite = document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity);
       const done = Promise.all(finite.map((a) => a.finished.catch(() => {})));
       return Promise.race([done, new Promise((r) => setTimeout(r, 2000))]);
-    })
-    .catch(() => {});
+    }).catch(() => {});
 }
 
 /** Run axe in the page, over `scope` (a selector) or the whole document; returns the violations. */
@@ -207,9 +180,7 @@ async function runAxe(page, scope) {
   // can't measure its contrast: grow the viewport to the tallest scroll content for the run.
   const viewport = page.viewportSize();
   const tallest = await page.evaluate(() =>
-    Math.max(
-      ...[document.documentElement, ...document.querySelectorAll("*")]
-        .filter((el) => el.scrollHeight > el.clientHeight + 1)
+    Math.max(...[document.documentElement, ...document.querySelectorAll("*")].filter((el) => el.scrollHeight > el.clientHeight + 1)
         .map((el) => el.scrollHeight),
     ),
   );
@@ -223,11 +194,9 @@ async function runAxe(page, scope) {
   // (not the dialog's ancestors) while the dialog is audited.
   const isolate = scope?.startsWith("dialog");
   if (isolate)
-    await page
-      .addStyleTag({
+    await page.addStyleTag({
         content: `body :not(dialog[open], dialog[open] *, :has(dialog[open])) { visibility: hidden !important; }`,
-      })
-      .then((h) => h.evaluate((el) => el.setAttribute("data-a11y-isolate", "")));
+      }).then((h) => h.evaluate((el) => el.setAttribute("data-a11y-isolate", "")));
   try {
     return await axeIn(page, scope);
   } finally {
@@ -238,45 +207,31 @@ async function runAxe(page, scope) {
 
 async function axeIn(page, scope) {
   return page.evaluate(
-    async ({ scope, tags, allow }) => {
+    async ({ scope, tags }) => {
       if (scope && !document.querySelector(scope)) throw new Error(`nothing matches ${scope} to audit`);
       const r = await window.axe.run(scope ? { include: [[scope]] } : document, {
         runOnly: { type: "tag", values: tags },
         resultTypes: ["violations", "incomplete"],
       });
-      const allowed = (id, target) => {
-        const el = typeof target === "string" ? document.querySelector(target) : null;
-        return allow.some((a) => a.rule === id && el?.closest(a.selector));
-      };
       // "incomplete" is what axe could not decide (text over an image or gradient, say): recorded
       // for review with impact "needs-review", never failing.
       const rows = [...r.violations, ...r.incomplete.map((v) => ({ ...v, impact: "needs-review" }))];
-      return rows
-        .map((v) => ({
+      return rows.map((v) => ({
           id: v.id,
           impact: v.impact,
           help: v.help,
           helpUrl: v.helpUrl,
-          nodes: v.nodes
-            .filter((n) => !allowed(v.id, n.target[0]))
-            .map((n) => ({ target: n.target.join(" "), impact: n.impact, html: n.html.slice(0, 300), summary: n.failureSummary })),
-        }))
-        .filter((v) => v.nodes.length > 0);
+          nodes: v.nodes.map((n) => ({ target: n.target.join(" "), impact: n.impact, html: n.html.slice(0, 300), summary: n.failureSummary })),
+        })).filter((v) => v.nodes.length > 0);
     },
-    { scope, tags: TAGS, allow: ALLOW.map(({ rule, selector }) => ({ rule, selector })) },
+    { scope, tags: TAGS },
   );
 }
 
-/**
- * Run the scenario on the indexed home's daemon (`socket`): `pages` from the PAGES registry,
- * `onboarded` the finished onboarding state run.mjs saves. Returns the summary for summary.json.
- */
-export async function a11yScenario({ browser, socket, pages, onboarded }) {
-  const t0 = Date.now();
+export async function a11yScenario({ browser, socket, pages }) {
   const all = [];
   const bridge = await startBridge({ socket, dist: DIST });
-  const onboardedCtx = await newContext(browser);
-  await onboardedCtx.addInitScript(([key, state]) => localStorage.setItem(key, JSON.stringify(state)), ["nugget.onboarding.v1", onboarded]);
+  const onboardedCtx = await newContext(browser, { onboarded: true });
 
   /** Open the app on page `id` in `theme`; `before(page)` runs first (routes). */
   const open = async (id, theme, { ctx = onboardedCtx, before } = {}) => {
@@ -296,18 +251,8 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
     all.push(...found);
     await page.screenshot({ path: path.join(OUT, `a11y-${theme}-${name.replace(/[^\w-]+/g, "-")}.png`) }).catch(() => {});
     const bad = found.filter((v) => FAILING.has(v.impact));
-    expect(
-      bad.length === 0,
-      `${bad.length} serious/critical violation(s): ${bad
-        .map(
-          (v) =>
-            `${v.id} (${v.impact}) at ${v.nodes
-              .map((n) => n.target)
-              .slice(0, 5)
-              .join(", ")}${v.nodes.length > 5 ? ", …" : ""}`,
-        )
-        .join("; ")}`,
-    );
+    const where = (v) => v.nodes.map((n) => n.target).slice(0, 5).join(", ");
+    expect(bad.length === 0, `${bad.length} serious/critical violation(s): ${bad.map((v) => `${v.id} (${v.impact}) at ${where(v)}`).join("; ")}`);
   };
 
   const dialog = (page) => page.locator("dialog[open]");
@@ -368,33 +313,17 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
       await check(`a11y ${theme} dialog add-source (kind and folder steps)`, async () => {
         const { page } = await open("sources", theme);
         try {
-          await page
-            .locator("main")
-            .getByRole("button", { name: exactName("sources.add") })
-            .first()
-            .click();
+          await page.locator("main").getByRole("button", { name: exactName("sources.add") }).first().click();
           await dialog(page).getByRole("radio").first().waitFor();
           await audit(page, "dialog-add-source-kind", theme, "dialog[open]");
-          await dialog(page)
-            .getByRole("button", { name: exactName("common.next") })
-            .click();
-          await dialog(page)
-            .getByRole("button", { name: exactName("addSource.folder.choose") })
-            .waitFor();
+          await dialog(page).getByRole("button", { name: exactName("common.next") }).click();
+          await dialog(page).getByRole("button", { name: exactName("addSource.folder.choose") }).waitFor();
           await audit(page, "dialog-add-source-folder", theme, "dialog[open]");
-          // LL2: the messaging form (WhatsApp exports, II-wave), through Back to the kinds.
-          await dialog(page)
-            .getByRole("button", { name: exactName("common.back") })
-            .click();
-          await dialog(page)
-            .getByRole("radio", { name: new RegExp(`^${escapeRe(t("format.sourceKind.whatsapp"))}\\b`) })
-            .check();
-          await dialog(page)
-            .getByRole("button", { name: exactName("common.next") })
-            .click();
-          await dialog(page)
-            .getByRole("button", { name: exactName("addSource.messages.browse") })
-            .waitFor();
+          // the messaging form (WhatsApp exports, II-wave), through Back to the kinds.
+          await dialog(page).getByRole("button", { name: exactName("common.back") }).click();
+          await dialog(page).getByRole("radio", { name: new RegExp(`^${escapeRe(t("format.sourceKind.whatsapp"))}\\b`) }).check();
+          await dialog(page).getByRole("button", { name: exactName("common.next") }).click();
+          await dialog(page).getByRole("button", { name: exactName("addSource.messages.browse") }).waitFor();
           await audit(page, "dialog-add-source-whatsapp", theme, "dialog[open]");
           await closeDialog(page);
         } finally {
@@ -406,10 +335,7 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
         const { page } = await open("knowledge", theme);
         try {
           const list = page.getByRole("region", { name: t("knowledge.entitiesLabel") });
-          await list
-            .getByRole("button", { name: /^Ada Wexford\b/ })
-            .first()
-            .click();
+          await list.getByRole("button", { name: /^Ada Wexford\b/ }).first().click();
           const detail = page.locator("section.entity-detail");
           await detail.getByRole("heading", { name: "Ada Wexford" }).first().waitFor();
 
@@ -442,20 +368,14 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
         let stubbed;
         const { page } = await open("today", theme, { before: async (p) => (stubbed = await cardsOrStub(p)) });
         try {
-          const card = page
-            .locator("li.today-card")
-            .filter({ has: page.locator("button[aria-controls]") })
-            .first();
+          const card = page.locator("li.today-card").filter({ has: page.locator("button[aria-controls]") }).first();
           await card.waitFor();
           await card.locator("button[aria-controls]").first().click();
           await card.locator("ul.evidence").waitFor();
           const id = await card.getAttribute("id");
           await audit(page, "today-card-sources", theme, `li[id="${id}"]`);
           // The action's review dialog (a dry-run preview; nothing runs until Approve).
-          const action = card
-            .getByRole("group", { name: tPattern("today.actionsLabel") })
-            .locator("button:not([aria-disabled=true])")
-            .first();
+          const action = card.getByRole("group", { name: tPattern("today.actionsLabel") }).locator("button:not([aria-disabled=true])").first();
           if (!stubbed() && (await action.count()) > 0) {
             await action.click();
             await dialog(page).locator(".today-preview, .note-error").first().waitFor();
@@ -482,7 +402,7 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
         }
       });
 
-      // LL2: the quick ask window (its own HTML entry point): empty, then after an ask on the
+      // the quick ask window (its own HTML entry point): empty, then after an ask on the
       // corpus (an answer, or a plain failure when the home has no AI provider).
       await check(`a11y ${theme} quick ask window`, async () => {
         const page = await onboardedCtx.newPage();
@@ -506,7 +426,7 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
         }
       });
 
-      // LL2: the Double Tap caret overlay (its own HTML entry point) with a finished draft, then
+      // the Double Tap caret overlay (its own HTML entry point) with a finished draft, then
       // with the previous drafts list open (H). The shell's overlay state is answered here.
       await check(`a11y ${theme} double tap overlay`, async () => {
         const page = await onboardedCtx.newPage();
@@ -540,10 +460,7 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
           const { page, errors } = await open(null, theme, { ctx });
           const heading = (key) => page.getByRole("heading", { level: 1, name: t(key), exact: true });
           const cont = () =>
-            page
-              .locator("footer.ob-actions")
-              .getByRole("button", { name: exactName("onboarding.continue") })
-              .click();
+            page.locator("footer.ob-actions").getByRole("button", { name: exactName("onboarding.continue") }).click();
           const step = async (key, name) => {
             await heading(key).waitFor();
             await audit(page, `onboarding-${name}`, theme);
@@ -558,9 +475,7 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
           await cont();
           await step("onboarding.source.heading", "source");
           await page.getByRole("button", { name: new RegExp(`^(${escapeRe(t("onboarding.source.addFolder"))}|${escapeRe(t("onboarding.source.addAnother"))})$`) }).click();
-          await dialog(page)
-            .getByRole("button", { name: exactName("addSource.folder.choose") })
-            .waitFor();
+          await dialog(page).getByRole("button", { name: exactName("addSource.folder.choose") }).waitFor();
           await audit(page, "onboarding-source-folder", theme, "dialog[open]");
           await closeDialog(page);
           await cont();
@@ -581,14 +496,7 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
   }
 
   fs.writeFileSync(path.join(OUT, "a11y-violations.json"), JSON.stringify(all, null, 2));
-  const byRule = {};
-  for (const v of all) {
-    const r = (byRule[`${v.id} (${v.impact})`] ??= { checks: 0, nodes: 0 });
-    r.checks++;
-    r.nodes += v.nodes.length;
-  }
   const failing = all.filter((v) => FAILING.has(v.impact)).length;
-  const ms = Date.now() - t0;
-  log(`a11y: ${all.length} finding(s) (${failing} serious/critical) in ${(ms / 1000).toFixed(1)}s: ${JSON.stringify(byRule)}`);
-  return { themes: THEMES, tags: TAGS, allow: ALLOW, by_rule: byRule, violations: all.length, failing, timings: { browser_ms: ms } };
+  log(`a11y: ${all.length} finding(s), ${failing} serious/critical`);
+  return { violations: all.length, failing };
 }

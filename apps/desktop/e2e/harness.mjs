@@ -1,5 +1,4 @@
-// Shared by the e2e scenarios (run.mjs, first-run.mjs): paths and settings from the environment,
-// the log, UI strings from en.json, and the check/until/shot helpers. Node built-ins only.
+// Shared by the e2e scenarios: settings from the environment, UI strings, check/until/shot helpers.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -125,16 +124,76 @@ export async function expectNoErrorState(page, what, scope) {
   expect(notes.length === 0, `${what} shows an error state: ${JSON.stringify(notes)}`);
 }
 
-/** The browser context every scenario uses: fixed viewport, locale, time zone and the Tauri shim. */
-export async function newContext(browser) {
+/** Onboarding state of a user who finished it. */
+export const ONBOARDED = { version: 1, step: "done", completed: [], skipped: [], ai: null, finished: true };
+
+/**
+ * The browser context every scenario uses: fixed viewport, locale, time zone and the Tauri shim.
+ * `onboarded` (true or a state) skips onboarding; `page` opens that page; the rest are Playwright options.
+ */
+export async function newContext(browser, { onboarded, page, ...options } = {}) {
   const ctx = await browser.newContext({
     viewport: { width: 1360, height: 860 },
     deviceScaleFactor: 1,
     locale: "en-US",
     timezoneId: "UTC",
     colorScheme: "light",
+    ...options,
   });
   ctx.setDefaultTimeout(STEP_TIMEOUT_MS);
   await ctx.addInitScript({ path: path.join(here, "tauri-shim.js") });
+  if (onboarded || page) {
+    const state = onboarded === true ? ONBOARDED : (onboarded ?? null);
+    await ctx.addInitScript(
+      ([state, page]) => {
+        if (state) localStorage.setItem("nugget.onboarding.v1", JSON.stringify(state));
+        if (page) localStorage.setItem("nugget.page", page);
+      },
+      [state, page ?? null],
+    );
+  }
   return ctx;
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Accessible-name matchers for the English message `key`. */
+export const exactName = (key) => new RegExp(`^${escapeRe(t(key))}$`);
+export const startsWith = (key) => new RegExp(`^${escapeRe(t(key))}`);
+
+/** Onboarding's source step: add `folder` through the stubbed picker and wait until it's indexed. */
+export async function onboardingAddFolder(page, folder) {
+  await page.getByRole("button", { name: exactName("onboarding.source.addFolder") }).click();
+  const dialog = page.locator("dialog[open]");
+  await dialog.getByRole("button", { name: exactName("addSource.folder.choose") }).click();
+  await until("the picked folder is listed in the wizard", async () => {
+    const paths = await dialog.locator(".path-list code").allTextContents();
+    return [paths.includes(folder), paths];
+  });
+  await dialog.getByRole("button", { name: exactName("addSource.folder.submit") }).click();
+  await dialog.waitFor({ state: "detached" });
+  const readyRe = tPattern("onboarding.source.ready");
+  return until(
+    "the source step says the folder is indexed and search works",
+    async () => {
+      const row = await page.locator(".ob-index li").first().evaluate((li) => ({ phase: li.dataset.phase, text: li.textContent.trim() }));
+      if (row.phase === "failed") throw new Error(`indexing failed: ${row.text}`);
+      return [row.phase === "ready" && readyRe.test(row.text), row];
+    },
+    INDEX_TIMEOUT_MS,
+  );
+}
+
+/** Check that every daemon command the UI called exists and accepted its params. */
+export function checkWire(bridge, label, skip = () => false) {
+  return check(`${label}: every daemon command the UI called exists and accepted its params`, async () => {
+    const bad = bridge.calls.filter((c) => c.via === "daemon" && (c.code === -32601 || c.code === -32602) && !skip(c));
+    expect(bad.length === 0, `wire mismatches: ${JSON.stringify(bad)}`);
+  });
+}
+
+/** Copy a scenario daemon's logs into the artifacts and stop it (E2E_KEEP=1 keeps its home). */
+export async function stopDaemon(daemon, name) {
+  if (fs.existsSync(daemon.logDir)) fs.cpSync(daemon.logDir, path.join(OUT, `${name}-daemon-logs`), { recursive: true });
+  await daemon.stop({ keep: KEEP });
+  if (KEEP) log(`kept the ${name} daemon home: ${daemon.home}`);
 }
