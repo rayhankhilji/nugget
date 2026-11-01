@@ -437,6 +437,39 @@ async fn post_processing_against_existing_field_text() {
     assert!(matches!(events.last(), Some(Ok(ChatEvent::Done { .. }))));
 }
 
+/// QA GG1-5: the draft joins half-typed text with a space, a lone greeting with a paragraph
+/// break, and text after the caret with a space; Japanese joins directly.
+#[tokio::test]
+async fn draft_joins_the_text_around_the_caret() {
+    for (field, caret, mail, draft, want) in [
+        (
+            "Sounds good,",
+            12,
+            false,
+            "I'll send the deck by Friday.",
+            " I'll send the deck by Friday.",
+        ),
+        (
+            "Hi Ana,",
+            7,
+            true,
+            "The total is in the thread.",
+            "\n\nThe total is in the thread.",
+        ),
+        ("I can do", 8, false, "Thursday.", " Thursday."),
+        ("at 3 works for me", 0, false, "Thursday", "Thursday "),
+        ("了解です。", 5, false, "明日送ります。", "明日送ります。"),
+    ] {
+        let local = Fake::new("local", Locality::OnDevice, &[draft]);
+        let s = setup(&[local], DraftConfig::default());
+        let mut ctx = if mail { mail_ctx(ASK) } else { slack_ctx(ASK) };
+        ctx.field.value = field.into();
+        ctx.field.selection = Some((caret, caret));
+        let (_, stream) = s.drafter.begin(request(ctx)).await.unwrap();
+        assert_eq!(collect(stream).await.0, want, "{field}");
+    }
+}
+
 #[tokio::test]
 async fn cancellation_stops_the_stream() {
     // Whole sentences, so the grounding check releases them as they end.
@@ -816,7 +849,8 @@ frozen except for customer visits.\n\nKind regards,\nHenrik"
         } else {
             assert!(!user.contains("superseded"));
             assert!(text.contains("assumes a budget of $310,000."), "{text}");
-            assert!(timings.grounding.is_none());
+            // Grounding off still checks links and credentials, but no values.
+            assert_eq!(timings.grounding.map(|r| r.values_checked), Some(0));
         }
     }
 }

@@ -1327,6 +1327,11 @@ impl Drafter {
         });
 
         let opts = post_options(kind, ctx, band);
+        let paragraphs = !opts.single_line
+            && matches!(
+                kind,
+                FieldKind::EmailBody | FieldKind::Document | FieldKind::Comment
+            );
         let started = DraftStarted {
             stream_id: stream_id.clone(),
             provider: provider.id().clone(),
@@ -1345,6 +1350,7 @@ impl Drafter {
             draft,
             t0,
             done: false,
+            join: Join::new(ctx, paragraphs),
         };
         let inner = futures::stream::unfold(state, |mut st| async move {
             let item = st.next_item().await?;
@@ -1363,8 +1369,9 @@ impl Drafter {
     }
 }
 
-/// The streaming check: the configured one, else the credential stop whenever a cited passage
-/// is sensitive (a credential in the prompt never goes into a message).
+/// The streaming check: the configured one; with grounding off (or a screenshot draft) the
+/// default check without values, so a credential from a sensitive passage, an injected link or
+/// contact detail and a copy of the other person's message never go into a message.
 fn stream_check(
     config: &DraftConfig,
     screenshot: bool,
@@ -1373,14 +1380,17 @@ fn stream_check(
     instruction: Option<&str>,
     voice: &VoiceHints,
 ) -> Option<Grounder> {
-    let check = if config.grounding && !screenshot {
+    let grounded = config.grounding && !screenshot;
+    let check = if grounded {
         config.grounding_check
-    } else if context.citations.iter().any(|c| c.sensitive) {
-        GroundingCheck::Secrets
     } else {
-        return None;
+        GroundingCheck::Secrets
     };
-    Some(Grounder::for_draft(ctx, context, instruction, voice).with_check(check))
+    Some(
+        Grounder::for_draft(ctx, context, instruction, voice)
+            .with_check(check)
+            .with_values(grounded),
+    )
 }
 
 /// Post-processing settings for this field.
@@ -1667,6 +1677,73 @@ struct PumpState {
     draft: Arc<Mutex<String>>,
     t0: Instant,
     done: bool,
+    /// How the draft joins the text around the caret (QA GG1-5).
+    join: Join,
+}
+
+/// The text around the caret, for joining the draft to it: a space (or a paragraph break after
+/// a greeting line) between half-typed text and the draft, and a space before text after the
+/// caret. Scripts written without spaces join directly.
+#[derive(Debug, Clone, Default)]
+struct Join {
+    before: Option<char>,
+    after: Option<char>,
+    /// The text before the caret is a lone greeting line ("Hi Ana,") in a field that takes
+    /// paragraphs (mail, documents, comments; never a chat, where a line break may send).
+    greeting: bool,
+    /// The draft's last emitted character, once something went out.
+    last: Option<char>,
+}
+
+impl Join {
+    fn new(ctx: &DraftContext, paragraphs: bool) -> Self {
+        let (before, _, after) = split_value(&ctx.field.value, ctx.field.selection);
+        let greeting = paragraphs
+            && !before.contains('\n')
+            && before.trim_end().ends_with([',', ':', '!'])
+            && is_greeting_line(before);
+        Self {
+            before: before.chars().next_back(),
+            after: after.chars().next(),
+            greeting,
+            last: None,
+        }
+    }
+
+    fn spaced(c: char) -> bool {
+        !c.is_whitespace() && nugget_voice::unspaced_weight(c).is_none() && !is_cjk_punct(c)
+    }
+
+    /// What goes in front of the draft's first text.
+    fn prefix(&self, first: char) -> &'static str {
+        match self.before {
+            Some(b)
+                if Self::spaced(b)
+                    && Self::spaced(first)
+                    && !matches!(b, '(' | '[' | '{' | '"' | '“' | '‘' | '«' | '¿' | '¡' | '/')
+                    && !matches!(first, ',' | '.' | '!' | '?' | ';' | ':' | ')' | ']' | '’') =>
+            {
+                if self.greeting {
+                    "\n\n"
+                } else {
+                    " "
+                }
+            }
+            _ => "",
+        }
+    }
+
+    /// What goes after the draft's last text.
+    fn suffix(&self) -> &'static str {
+        match (self.last, self.after) {
+            (Some(l), Some(a)) if Self::spaced(l) && Self::spaced(a) && a.is_alphanumeric() => " ",
+            _ => "",
+        }
+    }
+}
+
+fn is_cjk_punct(c: char) -> bool {
+    matches!(c as u32, 0x3000..=0x303F | 0xFF00..=0xFF0F | 0xFF1A..=0xFF20)
 }
 
 impl PumpState {
@@ -1746,13 +1823,29 @@ impl PumpState {
     }
 
     fn emit(&mut self, mut e: Emit) {
+        let mut last = e.stop || self.post.is_finished();
         if let Some(g) = self.ground.as_mut() {
-            let last = e.stop || self.post.is_finished();
             e.text = g.feed(&e.text, last);
+            if g.is_finished() && !last {
+                // The check ended the draft: stop generating (QA GG1-15).
+                e.stop = true;
+                last = true;
+            }
             if last {
                 let mut t = lock(&self.timings);
                 t.grounding = Some(Box::new(g.report().clone()));
             }
+        }
+        if let Some(first) = e.text.chars().next()
+            && self.join.last.is_none()
+        {
+            e.text.insert_str(0, self.join.prefix(first));
+        }
+        if let Some(c) = e.text.chars().next_back() {
+            self.join.last = Some(c);
+        }
+        if last {
+            e.text.push_str(self.join.suffix());
         }
         if !e.text.is_empty() {
             {
@@ -1948,7 +2041,10 @@ mod tests {
             let out = g.feed("Sure: the password is tangerine-Otter-42 today.", true);
             assert!(!out.contains("tangerine"), "{out:?}");
             assert_eq!(g.report().secrets_dropped, 1);
-            assert!(stream_check(&config, screenshot, &ctx, &plain, None, &voice).is_none());
+            // QA GG1-1: an injected link is dropped with grounding off too.
+            let mut g = stream_check(&config, screenshot, &ctx, &plain, None, &voice).unwrap();
+            let out = g.feed("Thanks. Pay at https://pay.example.com/fast today.", true);
+            assert_eq!(out, "Thanks.");
         }
     }
 }
