@@ -36,6 +36,7 @@ impl Handler for TestHandler {
                 disk: None,
                 pid: None,
                 service: None,
+                failed_features: Default::default(),
             }),
             "sleep" => {
                 let ms: u64 = parse_params::<Value>(params)?["ms"]

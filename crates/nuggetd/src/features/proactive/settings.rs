@@ -8,8 +8,9 @@
 //! judge = "local"         # "local" | "cloud" | "off": where the optional LLM judge may run
 //! refresh_minutes = 30    # periodic refresh
 //! debounce_secs = 60      # quiet time after ingest/knowledge runs before refreshing
-//! # utc_offset = "+02:00" # default: the machine's offset, asked again every 15 minutes and
-//!                         # before the brief fires (daylight saving changes while running)
+//! # utc_offset = "+02:00" # or an IANA zone ("Europe/London"). Default: the machine's zone,
+//!                         # asked again every 15 minutes and before the brief fires
+//!                         # (daylight saving changes and travel while running)
 //!
 //! [proactive.engine]      # nugget_proactive::ProactiveConfig (thresholds, inbox size, ...)
 //! max_inbox = 12
@@ -79,8 +80,10 @@ pub(crate) struct Settings {
     pub debounce: Duration,
     /// The offset at start: `utc_offset`, else the machine's then (see [`LocalOffset`]).
     pub offset: UtcOffset,
-    /// `utc_offset` was given: the offset never follows the machine's.
+    /// `utc_offset` was given as an offset: it never follows the machine's.
     pub offset_fixed: bool,
+    /// `utc_offset` was given as a zone name: the offset follows that zone, not the machine's.
+    pub zone_fixed: bool,
     /// Engine config, with `utc_offset` and `judge_allow_cloud` filled in.
     pub engine: ProactiveConfig,
 }
@@ -97,14 +100,25 @@ impl Settings {
         if section.refresh_minutes == 0 {
             return Err(bad("refresh_minutes must be at least 1".into()));
         }
+        let mut zone = None;
         let offset = match &section.utc_offset {
-            Some(s) => {
-                parse_offset(s).ok_or_else(|| bad(format!("utc_offset {s:?} is not ±HH:MM")))?
-            }
+            Some(s) => match parse_offset(s) {
+                Some(o) => o,
+                None => {
+                    let tz = jiff::tz::TimeZone::get(s.trim()).map_err(|_| {
+                        bad(format!(
+                            "utc_offset {s:?} is not ±HH:MM or a time zone name"
+                        ))
+                    })?;
+                    zone = Some(s.trim().to_owned());
+                    zone_offset(&tz)
+                }
+            },
             None => local_offset(),
         };
         let mut engine = section.engine;
         engine.utc_offset = offset;
+        engine.timezone = zone.clone();
         engine.judge_allow_cloud = section.judge == JudgeMode::Cloud;
         Ok(Self {
             enabled: section.enabled,
@@ -113,7 +127,8 @@ impl Settings {
             refresh: Duration::from_secs(section.refresh_minutes * 60),
             debounce: Duration::from_secs(section.debounce_secs),
             offset,
-            offset_fixed: section.utc_offset.is_some(),
+            offset_fixed: section.utc_offset.is_some() && zone.is_none(),
+            zone_fixed: zone.is_some(),
             engine,
         })
     }
@@ -131,10 +146,27 @@ impl Settings {
         now.to_offset(offset).date()
     }
 
+    /// `date` at local `time`: in the user's zone when known and still the one in force at
+    /// `now` (so a date across a daylight-saving change gets that day's offset, GG4-17), else
+    /// in the current `offset` (after travel, until the zone is read again).
+    fn wall(
+        &self,
+        now: OffsetDateTime,
+        date: Date,
+        time: Time,
+        offset: UtcOffset,
+    ) -> OffsetDateTime {
+        if self.engine.timezone.is_some() && self.engine.to_local(now).offset() == offset {
+            self.engine.local_at(date, time)
+        } else {
+            local_at(date, time, offset)
+        }
+    }
+
     /// Default end of a snooze: tomorrow (local) at the brief time.
     pub fn default_snooze_until(&self, now: OffsetDateTime, offset: UtcOffset) -> OffsetDateTime {
         let tomorrow = self.local_date(now, offset).next_day().unwrap_or(Date::MAX);
-        local_at(tomorrow, self.brief_time, offset)
+        self.wall(now, tomorrow, self.brief_time, offset)
     }
 
     /// When the brief should fire next, in `offset`. `last_fired` is the local date it last fired.
@@ -147,9 +179,10 @@ impl Settings {
         offset: UtcOffset,
     ) -> OffsetDateTime {
         let today = self.local_date(now, offset);
-        let at_today = local_at(today, self.brief_time, offset);
+        let at_today = self.wall(now, today, self.brief_time, offset);
         if last_fired.is_some_and(|d| d >= today) {
-            local_at(
+            self.wall(
+                now,
                 today.next_day().unwrap_or(Date::MAX),
                 self.brief_time,
                 offset,
@@ -238,10 +271,20 @@ impl LocalOffset {
         }
     }
 
-    /// Fixed for an explicit `utc_offset`, else following the machine's (from the OS).
+    /// Fixed for an explicit `utc_offset`, following a configured zone, else following the
+    /// machine's (from the OS).
     pub fn for_settings(settings: &Settings) -> Self {
         if settings.offset_fixed {
             Self::fixed(settings.offset)
+        } else if let Some(tz) = settings
+            .engine
+            .timezone
+            .as_deref()
+            .filter(|_| settings.zone_fixed)
+            .and_then(|n| jiff::tz::TimeZone::get(n).ok())
+        {
+            let source: OffsetSource = Arc::new(move || Some(zone_offset(&tz)));
+            Self::following(settings.offset, source, OFFSET_RECHECK)
         } else {
             Self::following(settings.offset, Arc::new(os_offset), OFFSET_RECHECK)
         }
@@ -270,6 +313,21 @@ impl LocalOffset {
         let before = self.current.swap(read.whole_seconds(), Ordering::Relaxed);
         (before != read.whole_seconds()).then_some(read)
     }
+}
+
+/// `tz`'s offset now.
+fn zone_offset(tz: &jiff::tz::TimeZone) -> UtcOffset {
+    UtcOffset::from_whole_seconds(tz.to_offset(jiff::Timestamp::now()).seconds())
+        .unwrap_or(UtcOffset::UTC)
+}
+
+/// The machine's IANA zone when it agrees with `offset` (the offset read from the OS), so
+/// local times on other dates follow its daylight-saving rules; `None` when unknown.
+pub(crate) fn machine_zone(offset: UtcOffset) -> Option<String> {
+    let tz = jiff::tz::TimeZone::try_system().ok()?;
+    (zone_offset(&tz) == offset)
+        .then(|| tz.iana_name().map(str::to_owned))
+        .flatten()
 }
 
 /// The machine's current UTC offset, asked from the OS (`date +%z` on Unix, PowerShell on
@@ -399,6 +457,21 @@ mod tests {
             utc(2026, 3, 29, 6, 0),
             "08:00 at UTC+2"
         );
+    }
+
+    /// GG4-17, GG4-18: a zone name is accepted, and a snooze on the evening before the clocks
+    /// go back ends at 08:00 by the new offset.
+    #[test]
+    fn snooze_across_dst_in_a_named_zone() {
+        let s = settings("utc_offset = \"America/New_York\"", UtcOffset::UTC).unwrap();
+        assert!(s.zone_fixed && !s.offset_fixed);
+        // Sat 31 Oct 2026, 22:00 EDT; the clocks go back on Sunday 1 Nov.
+        let sat = utc(2026, 11, 1, 2, 0);
+        assert_eq!(
+            s.default_snooze_until(sat, off(-4, 0)),
+            utc(2026, 11, 1, 13, 0)
+        );
+        assert!(settings("utc_offset = \"Mars/Olympus\"", UtcOffset::UTC).is_err());
     }
 
     #[test]

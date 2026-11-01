@@ -101,6 +101,9 @@ pub struct StatusResponse {
     /// [`SERVICE_SYSTEMD`] or [`SERVICE_LAUNCHD`] when a service manager runs this daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
+    /// Features that did not start (a bad config section), with why.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub failed_features: std::collections::BTreeMap<String, String>,
 }
 
 pub const SERVICE_SYSTEMD: &str = "systemd";

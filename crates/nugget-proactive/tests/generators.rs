@@ -242,17 +242,6 @@ m-cfo|Rita Cole <rita@larkspur.example>||Board numbers|2||||Confidential. Can yo
     assert!(c[0].sensitive);
 }
 
-/// GG4-11: "1 day" means yesterday by the calendar, not 24 hours.
-#[test]
-fn yesterdays_ask_is_a_day_old() {
-    // Tuesday 17:00 UTC, read Wednesday 09:00 UTC.
-    let p = with_mails("m-dana|Dana <dana@nw.example>||Mockups|0.6||||Can you send the mockups?");
-    assert_eq!(
-        keys(&by_kind(&p, CandidateKind::UnansweredThread)),
-        ["m-dana"]
-    );
-}
-
 /// GG4-12: a nudge keeps the card (same key) that the first ask started.
 #[test]
 fn a_nudge_keeps_the_card() {

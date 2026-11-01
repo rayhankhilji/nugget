@@ -53,6 +53,8 @@ export interface StatusResponse {
   pid?: number;
   /** `"systemd"` or `"launchd"` when a login service runs the daemon. */
   service?: string;
+  /** Features that did not start (a bad config section), with why. */
+  failed_features?: Record<string, string>;
   disk?: DiskStatus | null;
 }
 

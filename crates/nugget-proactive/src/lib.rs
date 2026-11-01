@@ -88,6 +88,8 @@ pub struct Proactive {
     lock: Mutex<()>,
     /// Cards with an action executing: one at a time per card.
     executing: Mutex<HashSet<String>>,
+    /// The user's current IANA zone; replaces `cfg.timezone` (see [`Proactive::set_timezone`]).
+    timezone: Mutex<Option<String>>,
 }
 
 impl Proactive {
@@ -98,6 +100,7 @@ impl Proactive {
             cards: Arc::new(StoreCardStore::new(store.clone())),
             store,
             utc_offset: AtomicI32::new(cfg.utc_offset.whole_seconds()),
+            timezone: Mutex::new(cfg.timezone.clone()),
             cfg,
             judge: None,
             lock: Mutex::new(()),
@@ -139,10 +142,27 @@ impl Proactive {
             .store(offset.whole_seconds(), Ordering::Relaxed);
     }
 
-    /// The configuration with the current UTC offset.
+    /// Change the user's IANA zone (travel, or the OS zone read again). Takes effect from the
+    /// next call.
+    pub fn set_timezone(&self, tz: Option<String>) {
+        *self.timezone.lock().unwrap_or_else(PoisonError::into_inner) = tz;
+    }
+
+    /// The configuration with the current UTC offset and zone.
     fn cfg_now(&self) -> Cow<'_, ProactiveConfig> {
         let offset = self.utc_offset();
-        if offset == self.cfg.utc_offset {
+        let tz = self
+            .timezone
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if tz != self.cfg.timezone {
+            Cow::Owned(ProactiveConfig {
+                utc_offset: offset,
+                timezone: tz,
+                ..self.cfg.clone()
+            })
+        } else if offset == self.cfg.utc_offset {
             Cow::Borrowed(&self.cfg)
         } else {
             Cow::Owned(ProactiveConfig {

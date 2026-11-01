@@ -65,7 +65,7 @@ const APPROVAL_KEY_KEY: &str = "proactive:approval_key";
 /// The clock wakes at least this often (reminders are checked on each wake).
 const CLOCK_TICK: Duration = Duration::from_secs(60);
 
-const METHODS: &[&str] = &[
+pub(crate) const METHODS: &[&str] = &[
     proactive_method::CARDS_LIST,
     proactive_method::CARDS_FEEDBACK,
     proactive_method::CARDS_PREVIEW,
@@ -84,7 +84,11 @@ pub(crate) async fn start(
 ) -> Result<Arc<dyn Feature>> {
     let state = cx.state.clone();
     let table = cx.config.proactive.clone();
-    let settings = blocking(move || Settings::parse(&table, settings::detect_local_offset)).await?;
+    let mut settings =
+        blocking(move || Settings::parse(&table, settings::detect_local_offset)).await?;
+    if !settings.offset_fixed && !settings.zone_fixed {
+        settings.engine.timezone = settings::machine_zone(settings.offset);
+    }
 
     let identity = exec::Identity::from_config(&settings.engine.user_addresses, &cx.config.draft);
     let exec = exec::Exec::new(&state, &cx.config.draft, identity)?;
@@ -377,6 +381,10 @@ impl Core {
         if let Ok(Some(new)) = blocking(move || Ok(offset.recheck(force))).await {
             tracing::info!(utc_offset = %new, "the local UTC offset changed");
             self.engine.set_utc_offset(new);
+            if !self.settings.zone_fixed {
+                // Travel: the machine's zone may have changed too.
+                self.engine.set_timezone(settings::machine_zone(new));
+            }
         }
         self.offset()
     }

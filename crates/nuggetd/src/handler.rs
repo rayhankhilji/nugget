@@ -171,6 +171,12 @@ impl RpcHandler {
             disk,
             pid: Some(std::process::id()),
             service: crate::service::managed_by().map(str::to_owned),
+            failed_features: self
+                .state
+                .features
+                .get()
+                .map(|f| f.failed())
+                .unwrap_or_default(),
         })
     }
 

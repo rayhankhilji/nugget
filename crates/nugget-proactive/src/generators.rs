@@ -40,11 +40,6 @@ impl GenContext<'_> {
         (self.now - t).as_seconds_f64() / 86_400.0
     }
 
-    /// Calendar days from `t` to now in the user's zone (yesterday 23:00 is 1 day ago at 07:00).
-    fn local_days_ago(&self, t: OffsetDateTime) -> i64 {
-        (self.cfg.to_local(self.now).date() - self.cfg.to_local(t).date()).whole_days()
-    }
-
     /// Relationship strength in `[0, 1]` with the strongest of `emails`: graph claims and
     /// mentions of their person entity, and how often the user wrote to them.
     pub fn importance<'e>(&self, emails: impl IntoIterator<Item = &'e str>) -> f64 {
@@ -103,15 +98,14 @@ fn lead(body: &str) -> Option<String> {
 
 /// Whole days from `now` to `due`, by the user's calendar (0 = due today, negative = overdue).
 fn days_left(ctx: &GenContext<'_>, due: OffsetDateTime) -> i64 {
-    let off = ctx.cfg.utc_offset;
-    (due.to_offset(off).date() - ctx.now.to_offset(off).date()).whole_days()
+    (ctx.cfg.to_local(due).date() - ctx.cfg.to_local(ctx.now).date()).whole_days()
 }
 
 /// 17:00 local on `date`.
 fn end_of_day(ctx: &GenContext<'_>, date: time::Date) -> Option<OffsetDateTime> {
     Time::from_hms(17, 0, 0)
         .ok()
-        .map(|t| PrimitiveDateTime::new(date, t).assume_offset(ctx.cfg.utc_offset))
+        .map(|t| ctx.cfg.local_at(date, t))
 }
 
 /// "In about two hours", on the hour: stable across refreshes, so an open preview of a
@@ -175,7 +169,7 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
         let waiting_from = human.iter().rposition(|m| m.from_user).map_or(0, |i| i + 1);
         let first = human[waiting_from];
         let age = ctx.days_ago(first.date);
-        if ctx.local_days_ago(first.date) < ctx.cfg.unanswered_min_days
+        if age < ctx.cfg.unanswered_min_days as f64
             || ctx.days_ago(last.date) > ctx.cfg.unanswered_max_days as f64
         {
             continue;
@@ -238,7 +232,7 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 subject: last.subject.clone(),
             }),
         ];
-        let days = ctx.local_days_ago(first.date);
+        let days = age.floor() as i64;
         out.push(Candidate {
             dedup_key,
             kind: CandidateKind::UnansweredThread,
@@ -1072,9 +1066,7 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 .or_else(|| relative_days(s, written))
         });
         let Some(date) = date else { continue };
-        let Ok(at) = Time::from_hms(9, 0, 0)
-            .map(|t| PrimitiveDateTime::new(date, t).assume_offset(ctx.cfg.utc_offset))
-        else {
+        let Ok(at) = Time::from_hms(9, 0, 0).map(|t| ctx.cfg.local_at(date, t)) else {
             continue;
         };
         if at < ctx.now - Duration::days(1) || at > horizon {
@@ -1302,9 +1294,7 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
             continue;
         }
         let age = ctx.days_ago(last.date);
-        if ctx.local_days_ago(last.date) < ctx.cfg.awaiting_reply_days
-            || age > ctx.cfg.followup_max_days as f64
-        {
+        if age < ctx.cfg.awaiting_reply_days as f64 || age > ctx.cfg.followup_max_days as f64 {
             continue;
         }
         if !asks_something(&last.body) {
@@ -1321,7 +1311,7 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
             .message_id
             .clone()
             .unwrap_or_else(|| last.item.key.as_str().to_owned());
-        let days = ctx.local_days_ago(last.date);
+        let days = age.floor() as i64;
         let who = first.display();
         out.push(Candidate {
             dedup_key: format!("awaiting:{}", stable_hash(&[&last.thread, &msg_key])),
@@ -1424,7 +1414,7 @@ fn todo_candidate(
     left: i64,
 ) -> Candidate {
     let what = truncate(task, 120);
-    let when = due.to_offset(ctx.cfg.utc_offset).date();
+    let when = ctx.cfg.to_local(due).date();
     let title = if left < 0 {
         format!("Overdue since {when}: {what}")
     } else {
