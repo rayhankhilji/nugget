@@ -7,10 +7,6 @@ name: QA GG7 (multilingual, real models)
 # transcripts into per-language verdicts. Reports and daemon logs are uploaded as artifacts.
 
 on:
-  # TEMPORARY: removed before the final push.
-  push:
-    branches: [qa/multilingual]
-    paths: [".github/workflows/qa-GG7.yml", "qa/GG7/harness/**"]
   workflow_dispatch:
     inputs:
       suites:
