@@ -1193,6 +1193,10 @@ fn not_a_name(kind: EntityKind, name: &str) -> Option<&'static str> {
     if name.contains("[[") || name.contains("]]") {
         return Some("a phrase, not a name");
     }
+    // "Sam (Patel": a cut-off aside, not a name.
+    if kind == EntityKind::Person && name.contains(['(', ')', '[', ']', '{', '}']) {
+        return Some("a phrase, not a name");
+    }
     match kind {
         EntityKind::Person => {
             if words.len() > 4 || name.chars().any(|c| c.is_ascii_digit()) {
@@ -2676,6 +2680,7 @@ mod name_shape_tests {
             (Person, "Three candidates"),
             (Person, "Driftwood API v2"),
             (Person, "GP"),
+            (Person, "Sam (Patel"),
             (
                 Person,
                 "Freight tracking integration for [[Ostrander Freight Cooperative",
