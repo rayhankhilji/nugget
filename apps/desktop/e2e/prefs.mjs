@@ -93,7 +93,7 @@ function motionOffenders(instant) {
 function busyProbes() {
   const host = document.createElement("div");
   host.className = "pg-loading";
-  host.innerHTML = '<span class="spinner"></span><div class="state-loading"><span class="state-spinner"></span><span class="state-skeleton"></span></div><span class="pg-skeleton"></span><span class="caret"></span>';
+  host.innerHTML = '<span class="spinner"></span><span class="pg-skeleton"></span><span class="caret"></span>';
   document.querySelector("main").appendChild(host);
   const out = {};
   for (const el of host.querySelectorAll("span")) {
