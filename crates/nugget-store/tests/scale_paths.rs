@@ -170,3 +170,43 @@ fn text_matches_among_agrees_with_search_text() {
     }
     assert_eq!(s.text_matches_among("rare", 10, &[]).unwrap(), Some(vec![]));
 }
+
+#[test]
+fn items_page_walks_a_source_in_key_order() {
+    let s = Store::open_in_memory().unwrap();
+    for i in 0..23 {
+        let body = format!("text {i}");
+        s.upsert_item_with_chunks(
+            &NewItem::new("files:a", format!("k{i:02}"), content_hash(&body))
+                .with_text(body.clone()),
+            &[NewChunk::text(body.clone())],
+        )
+        .unwrap();
+    }
+    s.upsert_item(&NewItem::new("files:b", "other", content_hash("x")))
+        .unwrap();
+    let src = SourceId::new("files:a");
+    let mut keys = Vec::new();
+    let mut after: Option<ItemKey> = None;
+    loop {
+        let page = s.items_page(&src, after.as_ref(), 5).unwrap();
+        assert!(page.len() <= 5);
+        keys.extend(page.iter().map(|it| it.item.key.as_str().to_owned()));
+        assert!(
+            page.iter()
+                .all(|it| it.text.as_deref().is_some_and(|t| t.starts_with("text")))
+        );
+        match page.last() {
+            Some(last) if page.len() == 5 => after = Some(last.item.key.clone()),
+            _ => break,
+        }
+    }
+    let want: Vec<String> = (0..23).map(|i| format!("k{i:02}")).collect();
+    assert_eq!(keys, want);
+    assert!(s.items_page(&src, None, 0).unwrap().is_empty());
+    assert!(
+        s.items_page(&SourceId::new("nope"), None, 5)
+            .unwrap()
+            .is_empty()
+    );
+}

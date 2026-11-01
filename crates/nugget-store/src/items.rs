@@ -662,6 +662,45 @@ impl Store {
         Ok(out)
     }
 
+    /// Items of `source` in key order, starting after `after` (exclusive; `None` from the
+    /// start), at most `limit`: for walking a whole source in pages without holding it in
+    /// memory. Each page costs one key query on the `(source, key)` index and one
+    /// [`Self::get_items`] batch, instead of a query per item. Items written or deleted between
+    /// pages may or may not be seen (keyset paging never repeats or skips the others).
+    pub fn items_page(
+        &self,
+        source: &SourceId,
+        after: Option<&ItemKey>,
+        limit: usize,
+    ) -> Result<Vec<Item>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let lim = limit.min(i64::MAX as usize) as i64;
+        let keys: Vec<String> = self.with_read_conn(|c| {
+            let mut stmt = c
+                .prepare_cached(
+                    "SELECT key FROM items WHERE source = ?1 AND (?2 IS NULL OR key > ?2)
+                     ORDER BY key LIMIT ?3",
+                )
+                .db("prepare items_page")?;
+            let after = after.map(ItemKey::as_str);
+            let rows = stmt
+                .query_map(params![source.as_str(), after, lim], |r| r.get(0))
+                .db("query items_page")?;
+            rows.collect::<rusqlite::Result<_>>().db("read items_page")
+        })?;
+        let refs: Vec<ItemRef> = keys
+            .into_iter()
+            .map(|k| ItemRef {
+                source: source.clone(),
+                key: ItemKey::new(k),
+            })
+            .collect();
+        // An item deleted between the two reads is left out.
+        Ok(self.get_items(&refs)?.into_iter().flatten().collect())
+    }
+
     /// Delete an item with its chunks, full-text entries and vectors. Returns whether it existed.
     ///
     /// In the same transaction, the item's knowledge-graph provenance is dropped as by

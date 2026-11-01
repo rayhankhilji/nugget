@@ -221,43 +221,69 @@ pub struct Corpus {
     pub threads: BTreeMap<String, Vec<usize>>,
 }
 
+/// Items parsed so far by [`Corpus::load`] / [`Corpus::from_items`], before threading.
+#[derive(Default)]
+struct Parts {
+    mail: Vec<MailMessage>,
+    events: Vec<CalEvent>,
+    notes: Vec<NoteDoc>,
+}
+
+impl Parts {
+    fn push(&mut self, it: &Item, cfg: &ProactiveConfig) {
+        if let Some(m) = parse_mail(it) {
+            self.mail.push(m);
+        } else if let Some(e) = parse_event(it, cfg.utc_offset) {
+            self.events.push(e);
+        } else if let Some(n) = parse_note(it) {
+            self.notes.push(n);
+        }
+    }
+}
+
 impl Corpus {
     /// Read every non-proactive item in the store.
     ///
-    /// This walks `source_counts` → `item_versions` → `get_item`, a full scan; see the crate
-    /// docs for the additive store API requested to make it incremental.
+    /// Walks each source in key order a page at a time (`Store::items_page`, II5), parsing each
+    /// item as it comes and keeping only the parsed form, so the raw items (with their metadata
+    /// trees) are never all in memory at once. Still a full scan; making it incremental is the
+    /// crate's follow-up.
     pub fn load(store: &Store, cfg: &ProactiveConfig) -> Result<Self> {
-        let mut items = Vec::new();
+        const PAGE: usize = 500;
+        let mut parts = Parts::default();
         for sc in store.source_counts()? {
             if sc.source.as_str().starts_with(OWN_SOURCE_PREFIX) {
                 continue;
             }
-            for key in store.item_versions(&sc.source)?.into_keys() {
-                let r = ItemRef {
-                    source: sc.source.clone(),
-                    key,
-                };
-                if let Some(item) = store.get_item(&r)? {
-                    items.push(item);
+            let mut after = None;
+            loop {
+                let page = store.items_page(&sc.source, after.as_ref(), PAGE)?;
+                for it in &page {
+                    parts.push(it, cfg);
+                }
+                match page.last() {
+                    Some(last) if page.len() == PAGE => after = Some(last.item.key.clone()),
+                    _ => break,
                 }
             }
         }
-        Ok(Self::from_items(&items, cfg))
+        Ok(Self::assemble(parts, cfg))
     }
 
     pub fn from_items(items: &[Item], cfg: &ProactiveConfig) -> Self {
-        let mut mail = Vec::new();
-        let mut events = Vec::new();
-        let mut notes = Vec::new();
+        let mut parts = Parts::default();
         for it in items {
-            if let Some(m) = parse_mail(it) {
-                mail.push(m);
-            } else if let Some(e) = parse_event(it, cfg.utc_offset) {
-                events.push(e);
-            } else if let Some(n) = parse_note(it) {
-                notes.push(n);
-            }
+            parts.push(it, cfg);
         }
+        Self::assemble(parts, cfg)
+    }
+
+    fn assemble(parts: Parts, cfg: &ProactiveConfig) -> Self {
+        let Parts {
+            mut mail,
+            mut events,
+            mut notes,
+        } = parts;
         notes.sort_by(|a, b| a.item.key.cmp(&b.item.key));
         let mut users = cfg.user_set();
         if users.is_empty() {
