@@ -30,8 +30,10 @@ import { a11yScenario } from "./a11y.mjs";
 import { prefsScenario } from "./prefs.mjs";
 import { keyboardScenario } from "./keyboard.mjs";
 import { backupScenario } from "./backup.mjs";
+import { messagingScenario } from "./messaging.mjs";
 import { visualScenario } from "./visual.mjs";
 import { scaleScenario } from "./scale.mjs";
+import { searchScenario } from "./search.mjs";
 import {
   check,
   DESKTOP,
@@ -61,9 +63,9 @@ import {
  * screenshots compared with baselines, backup, export and restore into a wiped home, and long
  * lists at scale.
  */
-const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard", "visual", "backup", "scale"];
+const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard", "visual", "backup", "messaging", "search", "scale"];
 /** Scenarios that use the shared indexed home. */
-const INDEXED = ["pages", "i18n", "a11y", "prefs", "visual", "scale"];
+const INDEXED = ["pages", "i18n", "a11y", "prefs", "visual", "search", "scale"];
 
 // ---- the page registry, read from the app source so new pages are covered automatically ----
 
@@ -419,11 +421,14 @@ async function main() {
           const socket = process.platform === "linux" ? (await indexedHome(bin)).daemon.socket : null;
           summary.visual = await visualScenario({ browser, socket, pages: pageRegistry(), onboarded: ONBOARDED });
         } else if (name === "backup") summary.backup = await backupScenario({ browser, bin });
-        else if (name === "scale") {
+        else if (name === "messaging") summary.messaging = await messagingScenario({ browser, bin });
+        else if (name === "search") {
+          const { daemon } = await indexedHome(bin);
+          summary.search = await searchScenario({ browser, socket: daemon.socket, onboarded: ONBOARDED });
+        } else if (name === "scale") {
           const { daemon } = await indexedHome(bin);
           summary.scale = await scaleScenario({ browser, socket: daemon.socket, onboarded: ONBOARDED });
-        }
-        else summary.keyboard = await keyboardScenario({ browser, bin });
+        } else summary.keyboard = await keyboardScenario({ browser, bin });
       } catch (e) {
         // A setup failure (daemon, indexing) fails the scenario and lets the next one run.
         results.push({ name: `scenario ${name}`, ok: false, ms: 0, error: e.stack ?? String(e) });

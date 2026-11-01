@@ -183,11 +183,19 @@ The **Updates** card on the Status page (also **Updates…** in the tray menu):
 
 | Setting | Default | What it does |
 |---|---|---|
-| Channel | **Stable** | **Stable** gets released versions. **Beta** also gets prereleases. **Off** never checks. |
+| Channel | **Not chosen** (nothing is checked) | **Stable** gets released versions. **Beta** also gets prereleases. **Off** never checks. |
 | Download updates automatically and install them when I quit Nugget | **Off** | Off means notify only: the app shows the new version and its notes, and downloads nothing until you click **Install … and restart**. On downloads and verifies the update in the background and installs it when you quit. |
 
-Checks run a minute after launch and then once a day, or on **Check now**. A check downloads only
-the channel's feed and its signature, and sends no identifiers. The app checks the feed's signature
+Nothing is checked until you choose a channel. Setup asks *Check for updates automatically?*
+(Stable is recommended), and until you answer, the Updates card asks the same question instead of
+showing the settings. Updating from a version that checked by default counts as not chosen yet,
+unless you had picked Beta or Off.
+
+Once you choose Stable or Beta, the app checks right away, a minute after each launch and then
+once a day, or on **Check now**. A check downloads only the channel's feed and its signature from
+GitHub, and sends no identifiers. Every check and download is in the
+[egress ledger](privacy.md#the-egress-ledger) on the Privacy page (`update_check`,
+`update_download`). The app checks the feed's signature
 before reading it and each update's signature before installing, against a key built into the app,
 and never offers a version older than the one you have. Each install updates itself the way it was
 installed: an AppImage replaces its file, a `.deb` or `.rpm` asks for your password, and on Windows

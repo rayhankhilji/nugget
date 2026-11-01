@@ -622,6 +622,30 @@ impl Store {
         })
     }
 
+    /// Replace an item's `metadata` only, if its content hash is still `content_hash`. Unlike
+    /// [`Store::upsert_item`] this leaves `updated_at` (and so consumers that fingerprint an
+    /// item by `content_hash:updated_at`, like knowledge extraction) alone: meant for labels
+    /// computed from unchanged content, such as background triage. Returns whether a row
+    /// was updated.
+    pub fn set_item_metadata(
+        &self,
+        item: &ItemRef,
+        content_hash: &str,
+        metadata: &serde_json::Value,
+    ) -> Result<bool> {
+        let json = serde_json::to_string(metadata)?;
+        self.with_conn(|conn| {
+            let n = conn
+                .execute(
+                    "UPDATE items SET metadata = ?3
+                     WHERE source = ?1 AND key = ?2 AND content_hash = ?4",
+                    params![item.source.as_str(), item.key.as_str(), json, content_hash],
+                )
+                .db("set item metadata")?;
+            Ok(n > 0)
+        })
+    }
+
     /// Fetch an item by reference.
     pub fn get_item(&self, item: &ItemRef) -> Result<Option<Item>> {
         let found = self.with_read_conn(|c| match find_item(c, item)? {

@@ -5,13 +5,12 @@
  */
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { EgressEvent, EntitySummaryView, SearchHit } from "../api";
+import type { EgressEvent, EntitySummaryView } from "../api";
 import { formatNumber, t } from "../i18n";
 import { RESPONSES } from "../test/fixtures";
 import { cleanup, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { KnowledgePage } from "./Knowledge";
 import { PrivacyPage } from "./Privacy";
-import { SearchPage } from "./Search";
 
 beforeEach(installDomShims);
 afterEach(cleanup);
@@ -96,36 +95,5 @@ describe("Knowledge entities at 50,000", () => {
     expect(requests.at(-1)).toEqual({ limit: 51, offset: 100 });
     expect(buttons().length).toBeLessThanOrEqual(30);
     expect(document.querySelector(".entity-list")!.getAttribute("aria-busy")).toBeNull();
-  });
-});
-
-describe("Search results", () => {
-  it("render as a list with set sizes", async () => {
-    const hits: SearchHit[] = Array.from({ length: 50 }, (_, i) => ({
-      item: { source: "files-1", key: `notes/n${i}.md` },
-      chunk_id: i,
-      title: `Note ${i}`,
-      snippet: "budget",
-      score: 1,
-      url: null,
-    }));
-    mockDaemon({ search: hits });
-    const { container } = await render(<SearchPage />);
-    const input = container.querySelector<HTMLInputElement>("#search-q")!;
-    await act(async () => {
-      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-      set.call(input, "budget");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => {
-      container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    });
-    await flush();
-    const items = container.querySelectorAll("ol.results li.result");
-    expect(items.length).toBeGreaterThan(0);
-    expect(items.length).toBeLessThanOrEqual(50);
-    expect(items[0]!.getAttribute("aria-setsize")).toBe("50");
-    expect(items[0]!.getAttribute("aria-posinset")).toBe("1");
-    expect(container.querySelector("#search-results-heading")!.textContent).toBe(t("search.resultsFor", { n: 50, query: "budget" }));
   });
 });

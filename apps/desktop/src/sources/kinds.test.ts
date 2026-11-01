@@ -7,7 +7,12 @@ import {
   isGoogleKind,
   KIND_GROUPS,
   EMPTY_SAAS,
+  EMPTY_MESSAGING,
   isDrivePath,
+  isMessagingKind,
+  messagingErrors,
+  messagingSettings,
+  parseSinceDays,
   isGuid,
   isRepo,
   isValidTenant,
@@ -140,5 +145,58 @@ describe("googleSettings", () => {
     expect(KIND_GROUPS.find((g) => g.id === "google")?.kinds).toEqual(["gmail", "gcal", "gdrive"]);
     expect(isGoogleKind("gdrive")).toBe(true);
     expect(isGoogleKind("onedrive")).toBe(false);
+  });
+});
+
+describe("messaging kinds", () => {
+  it("groups iMessage, WhatsApp and Telegram under Messages, and none of them signs in", async () => {
+    const { CONNECTOR_KINDS, MESSAGING_KINDS } = await import("../api");
+    expect(KIND_GROUPS.find((g) => g.id === "messages")?.kinds).toEqual(["imessage", "whatsapp", "telegram"]);
+    for (const k of MESSAGING_KINDS) {
+      expect(CONNECTOR_KINDS).toContain(k);
+      expect(isMessagingKind(k)).toBe(true);
+      expect(connectMode(k, {})).toBe("none");
+    }
+    expect(isMessagingKind("signal")).toBe(false);
+  });
+
+  it("sends the defaults explicitly and leaves blank optional fields out", () => {
+    expect(messagingSettings("imessage", EMPTY_MESSAGING)).toEqual({ private: true, include_groups: true, contacts: true });
+    expect(messagingSettings("whatsapp", { ...EMPTY_MESSAGING, path: " /Users/me/WhatsApp ", me: "  " })).toEqual({
+      private: true,
+      include_groups: true,
+      folder: "/Users/me/WhatsApp",
+    });
+    expect(messagingSettings("telegram", { ...EMPTY_MESSAGING, path: "/home/me/Telegram Desktop", sinceDays: " " })).toEqual({
+      private: true,
+      include_groups: true,
+      path: "/home/me/Telegram Desktop",
+    });
+  });
+
+  it("carries the chosen options", () => {
+    const f = { ...EMPTY_MESSAGING, path: "C:\\Exports", me: " Ana ", sinceDays: " 90 ", includeGroups: false, contacts: false, private: false };
+    expect(messagingSettings("whatsapp", f)).toEqual({ private: false, include_groups: false, since_days: 90, folder: "C:\\Exports", me: "Ana" });
+    expect(messagingSettings("imessage", f)).toEqual({ private: false, include_groups: false, since_days: 90, contacts: false });
+  });
+
+  it("checks the path and the number of days", () => {
+    expect(messagingErrors("imessage", EMPTY_MESSAGING)).toEqual({});
+    expect(messagingErrors("whatsapp", EMPTY_MESSAGING)).toEqual({ path: "addSource.messages.whatsappFolderMissing" });
+    expect(messagingErrors("telegram", EMPTY_MESSAGING)).toEqual({ path: "addSource.messages.telegramPathMissing" });
+    expect(messagingErrors("telegram", { ...EMPTY_MESSAGING, path: "Downloads/Telegram" })).toEqual({ path: "addSource.messages.fullPath" });
+    expect(messagingErrors("telegram", { ...EMPTY_MESSAGING, path: "~/Downloads/Telegram Desktop/result.json" })).toEqual({});
+    for (const bad of ["0", "-3", "1.5", "ten", "1e3"]) {
+      expect(parseSinceDays(bad), bad).toBeNull();
+      expect(messagingErrors("imessage", { ...EMPTY_MESSAGING, sinceDays: bad }).sinceDays).toBe("addSource.messages.sinceInvalid");
+    }
+    expect(parseSinceDays("365")).toBe(365);
+  });
+
+  it("recognises the daemon's Full Disk Access error", async () => {
+    const { needsFullDiskAccess } = await import("../api");
+    expect(needsFullDiskAccess("Nugget needs Full Disk Access to read your Messages. Open System Settings …")).toBe(true);
+    expect(needsFullDiskAccess("iMessage is only available on macOS")).toBe(false);
+    expect(needsFullDiskAccess(null)).toBe(false);
   });
 });

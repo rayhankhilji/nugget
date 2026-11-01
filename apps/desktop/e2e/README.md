@@ -6,7 +6,7 @@ Chromium against it. Nothing is mocked except the Tauri shell itself, and it mak
 besides localhost. The vitest suites in `../tests` cover the UI against a mocked daemon; this test
 covers the wire between the two.
 
-It runs eleven scenarios:
+It runs these scenarios:
 
 - **pages**: a home with the corpus already indexed; every page is opened and checked.
 - **i18n**: on the same indexed home (indexed once, shared with pages), every page is opened in
@@ -52,6 +52,20 @@ It runs eleven scenarios:
   bridge's `start_daemon` (given a `startDaemon` hook, it reports the real connection state and
   restarts nuggetd on the same home, as the shell does) brings it back, and the test checks the
   item count and that Search finds corpus text again (`NN-backup-*.png`).
+- **messaging**: its own empty home and a temp folder with a synthetic WhatsApp chat export.
+  Through Sources → Add source → WhatsApp the test chooses the folder (the bridge's picker), keeps
+  "on this device only" on and adds it; the chat is indexed and found by Search
+  in the UI, and a second export dropped into the folder is picked up by the watcher
+  (`messaging-*.png`).
+
+- **search**: on the indexed home, the Search page's filters, saved searches, timelines and
+  previews (II2): a query shows Kind, Source, People and Date filters with counts; ticking the Kind
+  with the fewest results narrows the list to exactly that many, each badged with that kind; the
+  search is saved under a name, appears in the sidebar, and runs again from the command palette on
+  Today with its query and filter restored; a result's preview shows the item's text and Escape
+  closes it and returns focus to the result; from Knowledge, Ada Wexford's Timeline lists items and
+  facts with month headings in time order and Jump to month moves focus to that month; every
+  `search_*` command reached the daemon and was accepted (`NN-search-*.png`).
 - **scale**: on the indexed home, long lists at scale (`scale.mjs`). Indexing hundreds of
   thousands of items would take longer than the whole run, so the large lists are answered by the
   test (Playwright routes): `knowledge_status` reports 500,000 entities, `knowledge_entities`
@@ -93,7 +107,7 @@ built, plus about 60 s for the i18n scenario and about 40 s for visual. Linux an
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_BACKUP_TIMEOUT_MS` | 120000 | backup: how long one backup, export or restore may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual,backup,scale` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual,backup,messaging,search,scale` | Which scenarios to run, comma-separated. |
 | `E2E_SCALE_MAX_LONGTASK_MS`, `E2E_SCALE_MAX_LONGTASKS` | 250, 5 | scale: the longest main-thread task allowed while a list scrolls, and (Privacy) how many long tasks one scroll may have. |
 | `E2E_VISUAL_UPDATE=1` | off | visual: write the screenshots as the new baselines instead of comparing (on Linux). |
 | `E2E_VISUAL_TOLERANCE` | 0.005 | visual: the largest fraction of differing pixels a screen may have (0.005 = 0.5%). |

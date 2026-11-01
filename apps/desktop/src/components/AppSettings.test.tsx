@@ -5,12 +5,13 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { AppSettings } from "./AppSettings";
+import { UpdateQuestion } from "./UpdateChoice";
 import { UpdateSettings } from "./UpdateSettings";
 
 const updateStatus = {
   current_version: "0.0.1",
   configured: true,
-  settings: { channel: "stable", auto_install: false, start_at_login: true, autostart: false },
+  settings: { channel: "stable", channel_chosen: true, auto_install: false, start_at_login: true, autostart: false },
   available: { version: "0.0.2", notes: "Faster search", date: 1_790_000_000 },
   staged: false,
   busy: false,
@@ -89,5 +90,70 @@ describe("UpdateSettings", () => {
     expect(checkbox(container, /in the tray when I log in/).checked).toBe(false);
     const result = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(result.violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it("asks for a channel once, with no check and no Check now until answered", async () => {
+    let status = { ...updateStatus, available: null, last_checked: null, settings: { ...updateStatus.settings, channel_chosen: false } };
+    const sent: unknown[] = [];
+    const calls = mockDaemon({
+      updates_status: () => status,
+      updates_set_settings: (args: unknown) => {
+        sent.push(args);
+        const { channel } = args as { channel: "stable" | "beta" | "off" };
+        status = { ...status, settings: { ...status.settings, channel, channel_chosen: true } };
+        return status;
+      },
+    });
+    const { container } = await render(<UpdateSettings />);
+    expect(container.textContent).toContain("Check for updates automatically?");
+    expect(container.textContent).toContain("small JSON file");
+    const buttons = () => Array.from(container.querySelectorAll("button")).map((b) => b.textContent);
+    expect(buttons()).not.toContain("Check now");
+    const result = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(result.violations.map((v) => v.id)).toEqual([]);
+
+    const stable = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Stable (recommended)")!;
+    await act(async () => stable.click());
+    await flush();
+    expect(sent).toEqual([{ channel: "stable", autoInstall: false }]);
+    expect(calls).not.toContain("updates_check");
+    expect(container.textContent).not.toContain("Check for updates automatically?");
+    expect(buttons()).toContain("Check now");
+  });
+
+  it("never asks in a build that can't update", async () => {
+    mockDaemon({ updates_status: { ...updateStatus, configured: false, settings: { ...updateStatus.settings, channel_chosen: false } } });
+    const { container } = await render(<UpdateSettings />);
+    expect(container.textContent).toContain("no update signing key");
+    expect(container.textContent).not.toContain("Check for updates automatically?");
+  });
+});
+
+describe("UpdateQuestion (setup)", () => {
+  it("asks while unchosen and says what was chosen", async () => {
+    const sent: unknown[] = [];
+    mockDaemon({
+      updates_status: { ...updateStatus, settings: { ...updateStatus.settings, channel_chosen: false } },
+      updates_set_settings: (args: unknown) => {
+        sent.push(args);
+        return null;
+      },
+    });
+    const { container } = await render(<UpdateQuestion />);
+    const off = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Off (never check)")!;
+    await act(async () => off.click());
+    await flush();
+    expect(sent).toEqual([{ channel: "off", autoInstall: false }]);
+    expect(container.textContent).toContain("Updates: Off (never check).");
+  });
+
+  it("stays out of the way once chosen or without an update key", async () => {
+    mockDaemon({ updates_status: updateStatus });
+    const { container } = await render(<UpdateQuestion />);
+    expect(container.textContent).toBe("");
+    cleanup();
+    mockDaemon({ updates_status: { ...updateStatus, configured: false, settings: { ...updateStatus.settings, channel_chosen: false } } });
+    const again = await render(<UpdateQuestion />);
+    expect(again.container.textContent).toBe("");
   });
 });

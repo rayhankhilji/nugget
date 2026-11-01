@@ -36,6 +36,7 @@ const updateStatus = {
   last_error: null,
 };
 const chord = { kind: "chord", chord: "Ctrl+Alt+Space" };
+let platformSettings = { notifications: { enabled: false, brief: true, agent: true, quiet: null }, quit_stops_daemon: false, paused_sources: [] };
 const doubletapSettings = { enabled: false, trigger: chord, app_providers: {}, excluded_apps: [], allow_terminals: false };
 const doubletapStatus = {
   platform: "linux",
@@ -101,6 +102,24 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     login_set: () => updateStatus,
     autostart_get: () => ({ supported: true, enabled: false }),
     autostart_set: (a) => ({ supported: true, enabled: a?.enabled === true }),
+    quickask_settings_get: () => ({
+      settings: { enabled: true, shortcut: "Ctrl+Shift+Space" },
+      status: { listening: true, error: null, wayland_fallback: false, state: "listening" },
+    }),
+    quickask_settings_set: (a) => ({
+      settings: a?.settings ?? { enabled: true, shortcut: "Ctrl+Shift+Space" },
+      status: a?.settings?.enabled === false
+        ? { listening: false, error: null, wayland_fallback: false, state: "off" }
+        : { listening: true, error: null, wayland_fallback: false, state: "listening" },
+    }),
+    quickask_hide: () => null,
+    quickask_prefill_take: () => null,
+    // II4: platform settings round-trip in memory; no link is waiting.
+    platform_settings_get: () => platformSettings,
+    platform_settings_set: (a) => (platformSettings = { ...platformSettings, ...(a?.settings ?? {}), paused_sources: platformSettings.paused_sources }),
+    shell_labels_set: (a) => Object.keys(a?.labels ?? {}).length,
+    deeplink_take: () => null,
+    quickask_open_main: () => null,
     doubletap_settings_get: () => doubletapSettings,
     doubletap_settings_set: (a) => a?.settings ?? doubletapSettings,
     doubletap_status: () => doubletapStatus,
@@ -110,6 +129,14 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     overlay_state: () => ({ phase: "done", text: "", provider: null, locality: null, citations: 0, excluded_sensitive: 0, message: null, verified: null, method: null }),
     overlay_accept: () => null,
     overlay_cancel: () => null,
+    overlay_retry: () => null,
+    overlay_refine: () => null,
+    overlay_resize: (a) => Math.min(420, Math.max(120, Number(a?.height) || 120)),
+    overlay_insert_previous: () => null,
+    doubletap_history: () => [],
+    doubletap_history_clear: () => null,
+    doubletap_history_remove: () => null,
+    doubletap_practice: () => null,
   };
 }
 

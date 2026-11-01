@@ -28,6 +28,7 @@ mod export;
 mod fts;
 mod graph;
 mod integrity;
+mod item_graph;
 mod items;
 mod key;
 #[cfg(test)]
@@ -50,6 +51,7 @@ pub use integrity::{
     BACKGROUND_CHECK_INTERVAL, ConsistencyReport, FileHealth, OpenCheck, check_file,
     check_file_in_background, check_file_on_open,
 };
+pub use item_graph::{EntityLinkRow, ItemMention, ItemMeta};
 pub use key::{KEYCHAIN_ENV, KeySource, StoreKey};
 pub use schema::LATEST_VERSION as SCHEMA_VERSION;
 pub use search::TITLE_WEIGHT;
