@@ -147,6 +147,8 @@ def config_toml(a):
             "",
             "[knowledge]",
             f"enabled = {'false' if a.no_knowledge else 'true'}",
+            # Re-run soon after triage clears items (unjudged items are sensitive and skipped).
+            "interval_minutes = 5",
             "debounce_ms = 500",
             "[knowledge.me]",
             f'name = "{ME[0]}"',
@@ -237,6 +239,20 @@ def wait_runtime(ipc, timeout=900):
     return ipc.call("runtime.status")
 
 
+def wait_triage(ipc, timeout=7200):
+    """Wait until background triage has no backlog. Until then every unjudged item counts as
+    sensitive (fail-closed), so Ask, Double Tap and extraction would see none of them."""
+    t0 = time.time()
+    tri = {}
+    while time.time() - t0 < timeout:
+        tri = ipc.call("ingest.status").get("triage") or {}
+        if not tri or tri.get("state") == "off" or (tri.get("pending") == 0 and tri.get("state") == "idle"):
+            break
+        time.sleep(10)
+    log("triage", tri, "after", round(time.time() - t0), "s")
+    return {"triage": tri, "seconds": round(time.time() - t0)}
+
+
 def ingest(ipc, a, out):
     src = ipc.call(
         "sources.add",
@@ -263,7 +279,10 @@ def ingest(ipc, a, out):
     info = [s for s in ipc.call("sources.list") if s["id"] == sid][0]
     status = ipc.call("status")
     log("ingested", info["items"], "items", info["chunks"], "chunks in", round(time.time() - t0), "s")
-    dump(out, "ingest", [{"source": info, "status": status, "ingest": ipc.call("ingest.status")}])
+    row = {"source": info, "status": status, "ingest": ipc.call("ingest.status")}
+    if not a.no_models:
+        row["triage_wait"] = wait_triage(ipc)
+    dump(out, "ingest", [row])
     return sid
 
 
@@ -351,14 +370,18 @@ def suite_draft(ipc, a, out):
 
 
 def suite_knowledge(ipc, a, out):
-    # Extraction runs on its own after ingest; wait until it has nothing pending.
+    # Extraction runs on its own (after indexing and every 5 minutes); wait for a run that
+    # started after triage finished, with nothing pending and the entity count stable.
     end = time.time() + a.knowledge_wait
-    st = {}
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    st, last = {}, None
     while time.time() < end:
         st = ipc.call("knowledge.status")
-        if not st.get("pending_items") and st.get("last_run"):
-            break
-        time.sleep(10)
+        if not st.get("pending_items") and (st.get("last_run") or "") > since:
+            if last == st.get("entities"):
+                break
+            last = st.get("entities")
+        time.sleep(30)
     ents, off = [], 0
     while True:
         page = ipc.call("knowledge.entities", {"limit": 200, "offset": off})

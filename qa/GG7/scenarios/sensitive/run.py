@@ -15,8 +15,16 @@ p = argparse.ArgumentParser()
 p.add_argument("--nuggetd", default=str(HERE.parents[3] / "target/debug/nuggetd"))
 p.add_argument("--home", default="/tmp/claude-0/gg7s")
 p.add_argument("--default", action="store_true")
+# With a chat model: the shipped default plus the local triage model's verdicts.
+p.add_argument("--chat-model")
+p.add_argument("--embed-model", default="nomic-embed-text-v1.5-q8")
 a = p.parse_args()
-a.out, a.no_models, a.no_knowledge, a.chat_model, a.embed_model = a.home, True, True, None, None
+a.out, a.no_knowledge = a.home, True
+a.no_models = not a.chat_model
+if a.no_models:
+    a.chat_model, a.embed_model = None, None
+else:
+    a.default = True
 home, sset = Path(a.home), Path(a.home) / "set"
 for lang, rows in ITEMS.items():
     (sset / lang).mkdir(parents=True, exist_ok=True)
@@ -29,17 +37,23 @@ for lang, rows in ITEMS.items():
 if not a.default:
     base = gg7.config_toml
     gg7.config_toml = lambda a: base(a) + "\n[ingest]\nassume_unflagged_safe = true\n"
+Path(a.home).mkdir(parents=True, exist_ok=True)
 proc, ipc = gg7.start_daemon(a)
 try:
+    if not a.no_models:
+        gg7.install_models(ipc, [a.chat_model, a.embed_model])
+        gg7.wait_runtime(ipc)
     corpus = gg7.CORPUS
     src = ipc.call("sources.add", {"kind": "files", "name": "s", "settings": {"roots": [str(sset), str(corpus)]}})
     ipc.call("sources.sync", {"id": src["id"]})
     files = sorted(sset.rglob("*.eml")) + sorted(f for f in corpus.rglob("*") if f.suffix in (".eml", ".md", ".ics") and f.name != "SPEC.md")
-    for _ in range(240):
+    for _ in range(1800):
         info = [s for s in ipc.call("sources.list") if s["id"] == src["id"]][0]
         if info["items"] >= len(files) and not ipc.call("ingest.status").get("queue_depth"):
             break
         time.sleep(1)
+    if not a.no_models:
+        print("triage:", gg7.wait_triage(ipc))
 
     def queries(f):
         raw = f.read_bytes()
@@ -73,7 +87,8 @@ try:
                 t[2].append(("MISS " if sit in SENSITIVE else "FP ") + sit)
         elif s:
             fp.append(str(f.relative_to(corpus)))
-    print("mode:", "default (unknown = sensitive)" if a.default else "rule layer (assume_unflagged_safe)")
+    print("mode:", f"rules + triage by {a.chat_model}" if not a.no_models
+          else "default (unknown = sensitive)" if a.default else "rule layer (assume_unflagged_safe)")
     print(f"{'lang':6} sens/5 ord-wrong/2  misses")
     for lang in ITEMS:
         t = table.get(lang, [0, 0, ["(not read)"]])

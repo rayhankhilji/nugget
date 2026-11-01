@@ -60,10 +60,6 @@ jobs:
           - label: 4b-know
             chat_model: qwen3-4b-q4km
             suites: knowledge,proactive
-          - label: 8b-ask
-            chat_model: qwen3-8b-q4km
-            suites: ask
-            extra: --no-knowledge
           - label: 8b-draft
             chat_model: qwen3-8b-q4km
             suites: draft
@@ -71,6 +67,13 @@ jobs:
           - label: 8b-know
             chat_model: qwen3-8b-q4km
             suites: knowledge,proactive
+          # Sensitivity marking per language with the local triage model (qa/GG7/scenarios/sensitive).
+          - label: 4b-sens
+            chat_model: qwen3-4b-q4km
+            sens: true
+          - label: 8b-sens
+            chat_model: qwen3-8b-q4km
+            sens: true
     steps:
       - uses: actions/checkout@v5
         with:
@@ -106,6 +109,11 @@ jobs:
 
       - name: Run GG7 scenarios
         run: |
+          if [ "${{ matrix.sens }}" = "true" ]; then
+            python3 qa/GG7/scenarios/sensitive/run.py --nuggetd target/release/nuggetd \
+              --home "$QA_HOME" --chat-model "${{ matrix.chat_model }}" | tee "$RESULTS/sensitivity.txt"
+            exit 0
+          fi
           python3 qa/GG7/harness/gg7.py run --nuggetd target/release/nuggetd --home "$QA_HOME" \
             --out "$RESULTS" --chat-model "${{ matrix.chat_model }}" \
             --embed-model nomic-embed-text-v1.5-q8 --suites "${{ inputs.suites || matrix.suites }}" --langs "$LANGS" \
