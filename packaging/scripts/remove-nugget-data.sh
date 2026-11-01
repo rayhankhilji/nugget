@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# List, and on request delete, what Nugget leaves behind after the app is removed on Linux or macOS
-# (GG6-9). Package managers can't ask each user about their data, so this does it.
+# List, and on request delete, what Nugget leaves behind after the app is removed on Linux or macOS.
+# Package managers can't ask each user about their data, so this does it.
 #
 # Usage: remove-nugget-data.sh [--yes] [--include-vault]
 #

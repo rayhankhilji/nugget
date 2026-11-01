@@ -1,5 +1,5 @@
 ; "Your Nugget data": the uninstaller page that says what an uninstall leaves behind and offers to
-; remove it (GG6-9). Included from installer-hooks.nsh, so it lands near the top of Tauri's
+; remove it. Included from installer-hooks.nsh, so it lands near the top of Tauri's
 ; installer.nsi template, before the template's own uninstaller pages: this page comes first, then
 ; Tauri's confirm page, then the progress page.
 ;
