@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::{EntityId, ProviderId};
+use nugget_core::lang;
 use nugget_core::{Error, Result};
 use nugget_graph::{EntityKind, EntityQuery, Evidence, GraphStore, normalize_name};
 use nugget_infer::{ChatEvent, ChatRequest, Message, Provider, Router, StopReason};
@@ -856,52 +857,18 @@ const GENERIC: &[&str] = &[
     "invitation",
 ];
 
-const MONTHS: &[(&str, u8)] = &[
-    ("january", 1),
-    ("february", 2),
-    ("march", 3),
-    ("april", 4),
-    ("may", 5),
-    ("june", 6),
-    ("july", 7),
-    ("august", 8),
-    ("september", 9),
-    ("october", 10),
-    ("november", 11),
-    ("december", 12),
-];
-
 const WEEKDAYS: &[&str] = &[
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-    "sunday",
-    "mon",
-    "tue",
-    "tues",
-    "wed",
-    "thu",
-    "thur",
-    "thurs",
-    "fri",
-    "sat",
-    "sun",
+    "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun",
 ];
 
+/// A weekday name, full (any language) or an English abbreviation.
+fn is_weekday(word: &str) -> bool {
+    WEEKDAYS.contains(&word) || lang::weekday_in(&lang::normalize(word)).is_some()
+}
+
+/// A month name, full or abbreviated, in any of the languages.
 fn month_of(word: &str) -> Option<u8> {
-    let w = word.trim_end_matches('.');
-    if w.len() < 3 {
-        return None;
-    }
-    MONTHS
-        .iter()
-        .find(|(m, _)| {
-            *m == w || (w.len() >= 3 && m.starts_with(w) && (w.len() == 3 || w == "sept"))
-        })
-        .map(|(_, n)| *n)
+    lang::month_of(&lang::normalize(word)).map(u8::from)
 }
 
 /// A day of the month (`1`..`31`, optionally `1st`, `2nd`, ...).
@@ -914,7 +881,8 @@ fn day_of(word: &str) -> Option<u8> {
     digits.parse::<u8>().ok().filter(|d| (1..=31).contains(d))
 }
 
-/// Normalise a date literal to `YYYY-MM-DD`.
+/// Normalise a date literal (a few words holding one date, in any of the languages) to
+/// `YYYY-MM-DD`.
 pub(crate) fn normalize_date(s: &str, item_date: OffsetDateTime) -> Option<String> {
     let t = s.trim();
     let b = t.as_bytes();
@@ -933,46 +901,20 @@ pub(crate) fn normalize_date(s: &str, item_date: OffsetDateTime) -> Option<Strin
             .ok()
             .map(|_| t[..10].to_owned());
     }
-    let lower = t.to_lowercase();
-    let words: Vec<&str> = lower
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect();
-    let (mut day, mut month, mut year) = (None, None, None);
-    for w in &words {
-        if let Some(m) = month_of(w).filter(|_| month.is_none()) {
-            month = Some(m);
-        } else if let Some(d) = day_of(w).filter(|_| day.is_none()) {
-            day = Some(d);
-        } else if w.len() == 4
-            && let Ok(y) = w.parse::<i32>()
-            && (1900..=2200).contains(&y)
-            && year.is_none()
-        {
-            year = Some(y);
-        } else if !WEEKDAYS.contains(w) && !matches!(*w, "on" | "by" | "the" | "of" | "before") {
-            return None;
-        }
+    if t.split_whitespace().count() > 6 {
+        return None;
     }
-    let (d, m) = (day?, Month::try_from(month?).ok()?);
-    let date = match year {
-        Some(y) => Date::from_calendar_date(y, m, d).ok()?,
-        None => {
-            let base = item_date.date();
-            let this = Date::from_calendar_date(base.year(), m, d).ok()?;
-            if (base - this).whole_days() > 61 {
-                Date::from_calendar_date(base.year() + 1, m, d).ok()?
-            } else {
-                this
-            }
-        }
-    };
-    Some(format!(
-        "{:04}-{:02}-{:02}",
-        date.year(),
-        u8::from(date.month()),
-        date.day()
-    ))
+    // A date without a year is next year's only when this year's is over two months past.
+    let dates = lang::find_dates(t, item_date.date() - time::Duration::days(30));
+    let date = *dates.first()?;
+    dates.iter().all(|d| *d == date).then(|| {
+        format!(
+            "{:04}-{:02}-{:02}",
+            date.year(),
+            u8::from(date.month()),
+            date.day()
+        )
+    })
 }
 
 /// Words of a relative date or a time of day ("next week", "Friday morning", "end of Q3").
@@ -1002,24 +944,24 @@ const RELATIVE_DATE_WORDS: &[&str] = &[
     "q4",
     "eod",
     "eow",
+    "前",
 ];
 
 /// A time of day, a relative day, an amount of money or a bare number: not an entity.
 fn is_date_or_amount(name: &str) -> bool {
-    let lower = name.trim().to_lowercase();
+    let lower = lang::normalize(name.trim());
     if lower.is_empty() {
         return false;
     }
-    if normalize_date(&lower, OffsetDateTime::UNIX_EPOCH).is_some() {
-        return true;
-    }
     let words: Vec<&str> = lower
-        .split(|c: char| !c.is_alphanumeric())
+        .split(|c: char| !(c.is_alphanumeric() || ('\u{0900}'..='\u{097F}').contains(&c)))
         .filter(|w| !w.is_empty())
         .collect();
+    let filler = |w: &str| matches!(w, "on" | "by" | "the" | "of" | "before");
     let datey = |w: &str| {
-        WEEKDAYS.contains(&w)
+        is_weekday(w)
             || month_of(w).is_some()
+            || !lang::find_dates(w, OffsetDateTime::UNIX_EPOCH.date()).is_empty()
             || RELATIVE_DATE_WORDS.contains(&w)
             || w.chars().all(|c| c.is_ascii_digit())
             || day_of(w).is_some()
@@ -1027,7 +969,7 @@ fn is_date_or_amount(name: &str) -> bool {
                 .chars()
                 .all(|c| c.is_ascii_digit())
     };
-    if !words.is_empty() && words.iter().all(|w| datey(w)) {
+    if words.iter().any(|w| datey(w)) && words.iter().all(|w| datey(w) || filler(w)) {
         return true;
     }
     // Money and plain quantities: a currency mark, or mostly digits.
