@@ -1,0 +1,83 @@
+{
+ "scenario": "s53_followup_history_to_cloud",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 2
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 1,
+   "bytes_in": 730,
+   "paths": [
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 1,
+   "bytes_sent": 730,
+   "features": [
+    "ask"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-followup",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "followup.answered",
+   "ok": true,
+   "detail": "anthropic excluded=7",
+   "severity": null,
+   "t": 1793525464.6114817
+  },
+  {
+   "id": "followup.history_to_cloud_has_no_sensitive",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793525464.61168
+  },
+  {
+   "id": "followup.ledger_lists_source_item",
+   "ok": true,
+   "detail": [
+    []
+   ],
+   "severity": null,
+   "t": 1793525464.6133626
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793525462.9932928,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793525463.496954,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793525464.6149445,
+   "label": "daemon.stop"
+  }
+ ]
+}
