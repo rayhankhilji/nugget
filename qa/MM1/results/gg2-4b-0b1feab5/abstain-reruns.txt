@@ -1,0 +1,9 @@
+rerun 1 A04 | The passage [1] mentions that Sam Ortega is booking a $60k contractor line as final, but it does not provide information about Sam's salary. The passage [4] men
+rerun 1 A08 | The total amount you paid for your car service at Northgate Auto is $289 [1].
+rerun 1 A19 | The building door code changes every quarter, and you should ask Bob Achebe for the current code [1].
+rerun 2 A04 | The salary for Sam is not mentioned in the provided passages. I couldn't find that in your items.
+rerun 2 A08 | The total amount paid for your car service at Northgate Auto is $289 [1].
+rerun 2 A19 | The building door code changes every quarter, and you should ask Bob Achebe for the current code [1].
+rerun 3 A04 | The fee is $40 [2].
+rerun 3 A08 | The total amount paid for your car service at Northgate Auto is $289 [1].
+rerun 3 A19 | The building door code changes every quarter, and you should ask Bob Achebe for the current code [1].
