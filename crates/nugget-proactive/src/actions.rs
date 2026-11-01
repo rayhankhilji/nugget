@@ -281,7 +281,7 @@ impl Action {
                     diff.push(ctx("Invitations will be sent to the attendees."));
                 }
                 (
-                    format!("Create calendar event \"{}\"", e.title),
+                    format!("Create calendar event “{}”", e.title),
                     "calendar".to_owned(),
                     diff,
                 )
@@ -292,7 +292,7 @@ impl Action {
                 vec![add(format!("Reminder at {}: {}", fmt_time(r.at), r.text))],
             ),
             Self::ArchiveThread(a) => (
-                format!("Archive \"{}\"", a.subject),
+                format!("Archive “{}”", a.subject),
                 "mail:inbox".to_owned(),
                 vec![
                     rm(format!(
@@ -309,7 +309,7 @@ impl Action {
                 let mut diff = vec![add(format!("New note: {}", n.title))];
                 diff.extend(n.body.lines().map(add));
                 (
-                    format!("Write note \"{}\"", n.title),
+                    format!("Write note “{}”", n.title),
                     "vault".to_owned(),
                     diff,
                 )
