@@ -10,10 +10,13 @@ import type { PlatformSettings } from "../api";
 import { DesktopOptIns } from "./DesktopOptIns";
 import { DeepLinks, fileName, findItemUrl } from "./DeepLinks";
 import { SHELL_KEYS, shellLabels } from "./shellLabels";
+import { QuitPrompt } from "./QuitPrompt";
+import { emit } from "@tauri-apps/api/event";
+import { QUIT_ASK_EVENT } from "../api";
 
 const defaults = (): PlatformSettings => ({
   notifications: { enabled: false, brief: true, agent: true, quiet: null },
-  quit_stops_daemon: false,
+  quit_daemon: "ask",
   paused_sources: [],
 });
 
@@ -75,8 +78,14 @@ describe("PlatformPrefs", () => {
     const from = container.querySelector<HTMLInputElement>('input[type="time"]');
     expect(from?.value).toBe("22:00");
     expect(container.querySelector(`label[for="${from?.id}"]`)?.textContent).toBe("From");
-    await click(checkbox(container, /Also stop the background service/));
-    expect(sent.at(-1)?.quit_stops_daemon).toBe(true);
+    // GG6-8: three answers; unanswered is shown as such.
+    expect(checkbox(container, /^Not decided yet/).checked).toBe(true);
+    await click(checkbox(container, /^Keep running in the background/));
+    expect(sent.at(-1)?.quit_daemon).toBe("keep");
+    await click(checkbox(container, /^Stop everything/));
+    expect(sent.at(-1)?.quit_daemon).toBe("stop");
+    expect(checkbox(container, /^Stop everything/).checked).toBe(true);
+    expect(container.textContent).toContain("A service set to start at login, or one you started yourself, keeps running.");
   });
 
   it("keeps the old state when saving fails", async () => {
@@ -90,6 +99,56 @@ describe("PlatformPrefs", () => {
     await click(checkbox(container, /^Show notifications/));
     expect(checkbox(container, /^Show notifications/).checked).toBe(false);
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("disk full");
+  });
+});
+
+describe("QuitPrompt", () => {
+  async function ask() {
+    await act(() => emit(QUIT_ASK_EVENT, null));
+    await flush();
+  }
+
+  it("asks when the shell says so, saves the answer and quits", async () => {
+    const answers: unknown[] = [];
+    let acks = 0;
+    mockDaemon({ quit_answer: (a: unknown) => (answers.push(a), null), quit_cancel: null, quit_ack: () => (acks++, acks > 1) });
+    await render(<QuitPrompt />);
+    expect(document.querySelector("dialog")).toBeNull();
+    await ask();
+    // The shell is told the question shows (else it quits with the default after 2 s).
+    expect(acks).toBe(2);
+    const dialog = document.querySelector("dialog");
+    expect(dialog?.textContent).toContain("When you quit Nugget, also stop background indexing and the local AI?");
+    await click(button(dialog!, /^Keep running in the background$/));
+    expect(answers).toEqual([{ choice: "keep", quit: true }]);
+    expect(document.querySelector("dialog")).toBeNull();
+    await ask();
+    await click(button(document.querySelector("dialog")!, /^Stop everything$/));
+    expect(answers.at(-1)).toEqual({ choice: "stop", quit: true });
+  });
+
+  it("shows a question asked before the window was listening", async () => {
+    const calls = mockDaemon({ quit_ack: true, quit_cancel: null });
+    await render(<QuitPrompt />);
+    expect(calls).toContain("quit_ack");
+    expect(document.querySelector("dialog")?.textContent).toContain("Before Nugget quits");
+  });
+
+  it("stays open on a failed save, and closing it cancels the quit", async () => {
+    const calls = mockDaemon({
+      quit_answer: () => {
+        throw { kind: "other", message: "disk full" };
+      },
+      quit_cancel: null,
+    });
+    await render(<QuitPrompt />);
+    await ask();
+    const dialog = document.querySelector("dialog")!;
+    await click(button(dialog, /^Stop everything$/));
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toContain("disk full");
+    await click(dialog.querySelector<HTMLButtonElement>(".dialog-head button")!);
+    expect(document.querySelector("dialog")).toBeNull();
+    expect(calls).toContain("quit_cancel");
   });
 });
 

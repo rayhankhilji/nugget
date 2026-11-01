@@ -71,18 +71,44 @@ impl Default for NotifySettings {
     }
 }
 
+/// GG6-8: what quitting Nugget does to the `nuggetd` this app started (never to one run as a
+/// login service or started by hand, see `lifecycle`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QuitChoice {
+    /// Not answered yet: quitting stops it (quitting is expected to quit), and the first quit
+    /// asks, once.
+    #[default]
+    Ask,
+    /// Stop background indexing and the local AI too.
+    Stop,
+    /// Keep them running in the background.
+    Keep,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlatformSettings {
     pub notifications: NotifySettings,
-    /// Quitting Nugget also stops a `nuggetd` this app started. Off: the daemon keeps indexing
-    /// in the background (a daemon run as a login service or from a terminal is never stopped).
-    pub quit_stops_daemon: bool,
+    /// What quitting does to the `nuggetd` this app started.
+    pub quit_daemon: QuitChoice,
     /// Sources the tray's "Pause indexing" turned off, turned back on by "Resume indexing".
     pub paused_sources: Vec<String>,
+    /// II4's switch, only read from older files: `true` (the user turned it on) becomes
+    /// [`QuitChoice::Stop`]; `false` was the default, not an answer, so it stays [`QuitChoice::Ask`].
+    #[serde(skip_serializing)]
+    pub quit_stops_daemon: Option<bool>,
 }
 
 impl PlatformSettings {
+    /// Fold II4's `quit_stops_daemon` into [`Self::quit_daemon`].
+    fn migrated(mut self) -> Self {
+        if self.quit_stops_daemon.take() == Some(true) && self.quit_daemon == QuitChoice::Ask {
+            self.quit_daemon = QuitChoice::Stop;
+        }
+        self
+    }
+
     fn validate(&self) -> Result<(), String> {
         if let Some(q) = &self.notifications.quiet
             && !q.valid()
@@ -97,6 +123,7 @@ pub fn load(path: &Path) -> PlatformSettings {
     match std::fs::read(path) {
         Ok(bytes) => serde_json::from_slice::<PlatformSettings>(&bytes)
             .ok()
+            .map(PlatformSettings::migrated)
             .filter(|s| s.validate().is_ok())
             .unwrap_or_else(|| {
                 tracing::warn!(path = %path.display(), "ignoring unreadable platform settings");
@@ -282,8 +309,9 @@ pub fn platform_settings_set(
     main_only(&window)?;
     app.state::<Platform>()
         .update(|s| {
+            let settings = settings.migrated();
             s.notifications = settings.notifications;
-            s.quit_stops_daemon = settings.quit_stops_daemon;
+            s.quit_daemon = settings.quit_daemon;
         })
         .map_err(CmdError::Other)
 }
@@ -301,64 +329,6 @@ pub fn shell_labels_set(
     let n = lock(&app.state::<Platform>().labels).apply(&labels);
     crate::tray::relabel(&app);
     n
-}
-
-// ---- quit ----
-
-/// On quit: stop the `nuggetd` this app started, when the user chose that. A daemon run as a
-/// login service or started by hand is left alone (the service manager would restart it, and it
-/// is not ours to stop).
-pub fn on_exit(app: &AppHandle) {
-    let Some(p) = app.try_state::<Platform>() else {
-        return;
-    };
-    if !p.settings().quit_stops_daemon {
-        return;
-    }
-    match app.state::<crate::daemon::Daemon>().started_pid() {
-        Some(pid) => {
-            tracing::info!(pid, "stopping the nuggetd this app started");
-            if let Err(e) = stop_process(pid) {
-                tracing::warn!(error = %e, "couldn't stop nuggetd");
-            }
-        }
-        None => tracing::info!("nuggetd wasn't started by the app; leaving it running"),
-    }
-}
-
-/// SIGTERM: the daemon finishes in-flight work (up to its shutdown grace) and exits.
-#[cfg(unix)]
-fn stop_process(pid: u32) -> std::io::Result<()> {
-    let status = std::process::Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .stdin(std::process::Stdio::null())
-        .status()?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| std::io::Error::other(format!("kill exited with {status}")))
-}
-
-/// The daemon runs without a console, so there is no Ctrl+Break to send it: it is ended (its
-/// SQLite store is crash-safe; an interrupted sync resumes from its cursor next time).
-#[cfg(windows)]
-fn stop_process(pid: u32) -> std::io::Result<()> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let status = std::process::Command::new("taskkill.exe")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .stdin(std::process::Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| std::io::Error::other(format!("taskkill exited with {status}")))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn stop_process(_pid: u32) -> std::io::Result<()> {
-    Err(std::io::Error::other("not supported on this platform"))
 }
 
 // ---- sleep / resume ----
@@ -442,7 +412,7 @@ mod tests {
         let s = PlatformSettings::default();
         assert!(!s.notifications.enabled);
         assert!(s.notifications.brief && s.notifications.agent);
-        assert!(!s.quit_stops_daemon);
+        assert_eq!(s.quit_daemon, QuitChoice::Ask);
         let dir = std::env::temp_dir().join(format!("nugget-platform-{}", std::process::id()));
         let path = dir.join("platform.json");
         assert_eq!(load(&path), s);
@@ -462,6 +432,28 @@ mod tests {
         assert_eq!(load(&path), s, "an invalid time falls back to the defaults");
         std::fs::write(&path, b"{nope").unwrap();
         assert_eq!(load(&path), s);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ii4_quit_switch_migrates_to_the_three_state_choice() {
+        let dir = std::env::temp_dir().join(format!("nugget-platform-q-{}", std::process::id()));
+        let path = dir.join("platform.json");
+        std::fs::create_dir_all(&dir).unwrap();
+        // The user turned II4's switch on: that was an answer.
+        std::fs::write(&path, br#"{"quit_stops_daemon":true}"#).unwrap();
+        assert_eq!(load(&path).quit_daemon, QuitChoice::Stop);
+        // Off was the default, not an answer: ask.
+        std::fs::write(&path, br#"{"quit_stops_daemon":false}"#).unwrap();
+        assert_eq!(load(&path).quit_daemon, QuitChoice::Ask);
+        // A saved choice wins, and the old key is not written back.
+        std::fs::write(&path, br#"{"quit_daemon":"keep","quit_stops_daemon":true}"#).unwrap();
+        let s = load(&path);
+        assert_eq!(s.quit_daemon, QuitChoice::Keep);
+        save(&path, &s).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains(r#""quit_daemon": "keep""#), "{text}");
+        assert!(!text.contains("quit_stops_daemon"), "{text}");
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -1,7 +1,8 @@
 # Safety: rules, confirmations and the kill switch
 
 > **Status:** the policy, confirmations, the kill switch and the action log work in the app: the
-> **Safety** page, Escape ×3 and the tray's **Stop all agents** item. The daemon serves
+> **Safety** page (its kill switch is always there, also on desktops without a tray), Escape ×3 and
+> the tray's **Stop all agents** item. The daemon serves
 > `policy.get`, `policy.set`, `policy.approvals`, `policy.kill`, `policy.resume` and
 > `policy.log.export`. Escape ×3 needs Accessibility permission on macOS and is not available on
 > Linux Wayland, where a chord is used instead.
@@ -83,7 +84,8 @@ Observe and Edit are not limited. The count includes allowed actions and approve
 
 Press **Escape three times**, each press within half a second of the last, and everything Nugget is
 doing on your behalf stops: every running agent, every pending confirmation (denied) and the browser
-extension. **Stop all agents** in the tray menu does the same.
+extension. **Stop all agents** in the tray menu, or the kill switch on the **Safety** page, does the
+same. On desktops without a tray icon (stock GNOME, for example), use the **Safety** page.
 
 - Checking the switch is one atomic read, done before every step and every action and while waiting.
 - It only ever halts. Resuming is a deliberate action in the app (`policy.resume`), never a key press.

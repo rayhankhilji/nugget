@@ -49,6 +49,10 @@ export interface StatusResponse {
   providers: ProviderInfo[];
   /** Audit hash-chain check at daemon start: `null` until it has run. */
   audit_chain_ok?: boolean | null;
+  /** The daemon's process id (absent from older daemons). */
+  pid?: number;
+  /** `"systemd"` or `"launchd"` when a login service runs the daemon. */
+  service?: string;
 }
 
 export type Role = "system" | "user" | "assistant";
@@ -2778,14 +2782,74 @@ export interface NotifySettings {
   quiet: QuietHours | null;
 }
 
+/**
+ * What quitting Nugget does to the background service the app started (never to a login service
+ * or one started by hand). `ask`: not answered yet; quitting stops it, and the first quit asks.
+ */
+export type QuitChoice = "ask" | "stop" | "keep";
+
 /** `platform.json` (see `src-tauri/src/platform.rs`). */
 export interface PlatformSettings {
   notifications: NotifySettings;
-  /** Quitting Nugget also stops a background service the app started. */
-  quit_stops_daemon: boolean;
+  quit_daemon: QuitChoice;
   /** Sources the tray's "Pause indexing" turned off (read-only here). */
   paused_sources: string[];
 }
+
+/** Where the logs are (`src-tauri/src/logs.rs`): both in `<data>/logs`. */
+export interface LogPaths {
+  dir: string;
+  /** The app's own files, as a pattern (`…/nugget-desktop.<date>.log`). */
+  shell: string;
+  /** The background service's files (`…/nuggetd.<date>.log`). */
+  daemon: string;
+}
+
+/** What the window needs to stand in for the tray (`src-tauri/src/lifecycle.rs`). */
+export interface ShellInfo {
+  has_tray: boolean;
+  /** "Pause indexing" is in effect. */
+  indexing_paused: boolean;
+  logs: LogPaths | null;
+}
+
+export type VersionState = "unknown" | "in_step" | "restarting" | "mismatch";
+export type MismatchReason = "not_owned" | "service_restart_failed" | "restart_failed" | "daemon_newer";
+
+/** The background service's version against the app's (`src-tauri/src/lifecycle.rs`). */
+export interface VersionReport {
+  app_version: string;
+  daemon_version: string | null;
+  state: VersionState;
+  reason: MismatchReason | null;
+  /** The error, when a restart failed. */
+  detail: string | null;
+}
+
+/** No payload: ask what quitting should do ({@link lifecycleApi.quitAnswer}). */
+export const QUIT_ASK_EVENT = "nugget:quit-ask";
+/** {@link VersionReport}, whenever it changes. */
+export const DAEMON_VERSION_EVENT = "nugget:daemon-version";
+
+export const lifecycleApi = {
+  /** Save the choice; `quit` also quits Nugget now (the answer to the quit question). */
+  quitAnswer: (choice: QuitChoice, quit: boolean) => call<null>("quit_answer", { choice, quit }),
+  /**
+   * The window shows the quit question. Returns whether one is waiting (a window that loaded late
+   * shows it then). Without this within 2 s the shell quits with the default.
+   */
+  quitAck: () => call<boolean>("quit_ack"),
+  /** The quit question was dismissed: Nugget stays open. */
+  quitCancel: () => call<null>("quit_cancel"),
+  onQuitAsk: (h: (payload: unknown) => void) => on<unknown>(QUIT_ASK_EVENT, h),
+  daemonVersion: () => call<VersionReport>("daemon_version"),
+  /** Re-check, and try once more to bring the background service in step. */
+  recheckVersion: () => call<VersionReport>("daemon_version_recheck"),
+  onDaemonVersion: (h: (r: VersionReport) => void) => on<VersionReport>(DAEMON_VERSION_EVENT, h),
+  shellInfo: () => call<ShellInfo>("shell_info"),
+  /** The tray's Pause indexing / Resume indexing, from the window. */
+  togglePause: () => call<ShellInfo>("indexing_pause_toggle"),
+};
 
 /** A validated `nugget://` link or opened `.nuggetplugin` file (see `src-tauri/src/deeplink.rs`). */
 export type DeepLink =
