@@ -2142,5 +2142,6 @@
   "status.noTray.paused": "インデックス作成は一時停止中です。",
   "status.noTray.agents": "すべてのエージェントを一度に停止するには、「安全」ページの緊急停止スイッチを使ってください。",
   "status.noTray.failed": "インデックス作成を変更できませんでした：{error}",
-  "status.logs": "ログ：<code>{dir}</code>"
+  "status.logs": "ログ：<code>{dir}</code>",
+  "status.versionCheck.daemonNewer": "バックグラウンドサービスはバージョン {daemon} で、このアプリ（{app}）より新しいバージョンです。Nugget は古いバージョンに置き換えません。両者が一致するよう、このアプリを更新するか、新しい方のアプリを開いてください。"
 }

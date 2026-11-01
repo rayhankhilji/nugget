@@ -2142,5 +2142,6 @@
   "status.noTray.paused": "Indexing is paused.",
   "status.noTray.agents": "To stop all agents at once, use the kill switch on the Safety page.",
   "status.noTray.failed": "Couldn't change indexing: {error}",
-  "status.logs": "Logs: <code>{dir}</code>"
+  "status.logs": "Logs: <code>{dir}</code>",
+  "status.versionCheck.daemonNewer": "The background service is version {daemon}, newer than this app ({app}). Nugget won't replace it with an older one. Update this app (or open the newer copy) so both match."
 }

@@ -2142,5 +2142,6 @@
   "status.noTray.paused": "الفهرسة متوقفة مؤقتًا.",
   "status.noTray.agents": "لإيقاف جميع الوكلاء دفعة واحدة، استخدم مفتاح الإيقاف الطارئ في صفحة الأمان.",
   "status.noTray.failed": "تعذّر تغيير الفهرسة: {error}",
-  "status.logs": "السجلات: <code>{dir}</code>"
+  "status.logs": "السجلات: <code>{dir}</code>",
+  "status.versionCheck.daemonNewer": "إصدار الخدمة الخلفية هو {daemon}، وهو أحدث من هذا التطبيق ({app}). لن يستبدلها Nugget بإصدار أقدم. حدِّث هذا التطبيق (أو افتح النسخة الأحدث) ليتطابقا."
 }

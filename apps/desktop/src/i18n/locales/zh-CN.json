@@ -2142,5 +2142,6 @@
   "status.noTray.paused": "索引已暂停。",
   "status.noTray.agents": "要一次停止所有智能体，请使用“安全”页面上的紧急停止开关。",
   "status.noTray.failed": "无法更改索引状态：{error}",
-  "status.logs": "日志：<code>{dir}</code>"
+  "status.logs": "日志：<code>{dir}</code>",
+  "status.versionCheck.daemonNewer": "后台服务的版本是 {daemon}，比此应用（{app}）更新。Nugget 不会用旧版本替换它。请更新此应用（或打开较新的那个副本），使两者一致。"
 }

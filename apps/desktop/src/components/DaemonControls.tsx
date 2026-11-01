@@ -17,6 +17,7 @@ const MISMATCH: Record<NonNullable<VersionReport["reason"]>, MessageKey> = {
   not_owned: "status.versionCheck.notOwned",
   service_restart_failed: "status.versionCheck.serviceFailed",
   restart_failed: "status.versionCheck.restartFailed",
+  daemon_newer: "status.versionCheck.daemonNewer",
 };
 
 /** What the shell knows about the tray and the logs; `null` until loaded (or outside the app). */

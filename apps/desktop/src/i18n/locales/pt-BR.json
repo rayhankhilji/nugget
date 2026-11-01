@@ -2142,5 +2142,6 @@
   "status.noTray.paused": "A indexação está pausada.",
   "status.noTray.agents": "Para parar todos os agentes de uma vez, use o interruptor de emergência na página Segurança.",
   "status.noTray.failed": "Não foi possível alterar a indexação: {error}",
-  "status.logs": "Registros: <code>{dir}</code>"
+  "status.logs": "Registros: <code>{dir}</code>",
+  "status.versionCheck.daemonNewer": "O serviço em segundo plano está na versão {daemon}, mais nova que este app ({app}). O Nugget não vai substituí-lo por um mais antigo. Atualize este app (ou abra a cópia mais nova) para que os dois coincidam."
 }

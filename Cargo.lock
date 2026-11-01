@@ -4159,6 +4159,7 @@ dependencies = [
  "objc2-io-kit",
  "reqwest",
  "rustls",
+ "semver",
  "serde",
  "serde_json",
  "sysinfo",

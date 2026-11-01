@@ -647,6 +647,7 @@
     "status.noTray.agents",
     "status.noTray.failed",
     "status.logs",
-    "appSettings.autostartHint"
+    "appSettings.autostartHint",
+    "status.versionCheck.daemonNewer"
   ]
 }

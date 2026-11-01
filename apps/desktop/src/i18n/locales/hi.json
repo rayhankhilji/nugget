@@ -2142,5 +2142,6 @@
   "status.noTray.paused": "इंडेक्सिंग रुकी हुई है।",
   "status.noTray.agents": "सभी एजेंट एक साथ रोकने के लिए, सुरक्षा पेज पर किल स्विच का इस्तेमाल करें।",
   "status.noTray.failed": "इंडेक्सिंग बदली नहीं जा सकी: {error}",
-  "status.logs": "लॉग: <code>{dir}</code>"
+  "status.logs": "लॉग: <code>{dir}</code>",
+  "status.versionCheck.daemonNewer": "बैकग्राउंड सेवा वर्ज़न {daemon} पर है, जो इस ऐप ({app}) से नया है। Nugget इसे पुराने वर्ज़न से नहीं बदलेगा। दोनों मेल खाएँ, इसके लिए यह ऐप अपडेट करें (या नई कॉपी खोलें)।"
 }

@@ -2669,7 +2669,7 @@ export interface ShellInfo {
 }
 
 export type VersionState = "unknown" | "in_step" | "restarting" | "mismatch";
-export type MismatchReason = "not_owned" | "service_restart_failed" | "restart_failed";
+export type MismatchReason = "not_owned" | "service_restart_failed" | "restart_failed" | "daemon_newer";
 
 /** The background service's version against the app's (`src-tauri/src/lifecycle.rs`). */
 export interface VersionReport {
@@ -2689,6 +2689,11 @@ export const DAEMON_VERSION_EVENT = "nugget:daemon-version";
 export const lifecycleApi = {
   /** Save the choice; `quit` also quits Nugget now (the answer to the quit question). */
   quitAnswer: (choice: QuitChoice, quit: boolean) => call<null>("quit_answer", { choice, quit }),
+  /**
+   * The window shows the quit question. Returns whether one is waiting (a window that loaded late
+   * shows it then). Without this within 2 s the shell quits with the default.
+   */
+  quitAck: () => call<boolean>("quit_ack"),
   /** The quit question was dismissed: Nugget stays open. */
   quitCancel: () => call<null>("quit_cancel"),
   onQuitAsk: (h: (payload: unknown) => void) => on<unknown>(QUIT_ASK_EVENT, h),

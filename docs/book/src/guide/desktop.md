@@ -155,12 +155,15 @@ signature and what it asks to do before anything is installed.
     started the running service (for example one left over from a much older version), it leaves
     it running and says so in its log.
   - Stopping is clean: the service finishes in-flight work, stops the local model server and
-    closes its store, on every system. If it doesn't stop within about 15 seconds, it is ended
-    (on Windows, together with the model server). The store is crash-safe, and an interrupted
-    sync continues from where it stopped.
+    closes its store, on every system. If it doesn't stop within about 15 seconds, it is ended,
+    and its model server goes with it (apps an agent opened keep running). The store is
+    crash-safe, and an interrupted sync continues from where it stopped.
+  - If the window can't show the question (it hasn't loaded, for example), quitting goes ahead
+    after two seconds as if you hadn't answered.
 - **Updates:** the app checks that the background service runs its own version every time it
-  connects. After an update it replaces a service it started, and restarts a service that starts
-  at login. If it can't, the Status page says what to do (see
+  connects. After an update it replaces an older service it started, and restarts an older
+  service that starts at login. A service newer than the app (an older copy of the app was
+  opened) is never replaced with an older one. Otherwise, the Status page says what to do (see
   [Troubleshooting](troubleshooting.md#the-status-page-says-the-background-service-is-another-version)).
 - **Sleep:** after your computer wakes up, Nugget reconnects to the service, refreshes the tray,
   and registers the Double Tap and quick-ask shortcuts again.

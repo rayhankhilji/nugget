@@ -737,6 +737,7 @@
     "status.noTray.paused",
     "status.noTray.agents",
     "status.noTray.failed",
-    "status.logs"
+    "status.logs",
+    "status.versionCheck.daemonNewer"
   ]
 }

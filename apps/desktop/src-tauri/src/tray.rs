@@ -314,6 +314,9 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>, page: Option<&str>) {
 
 /// Reflect the daemon connection in the tray tooltip and menu.
 pub fn set_connected(app: &AppHandle, connected: bool) {
+    if crate::lifecycle::is_exiting(app) {
+        return;
+    }
     if let Some(t) = app.try_state::<Tray>() {
         let mut s = lock(&t.snapshot);
         if s.connected == Some(connected) {
@@ -328,6 +331,9 @@ pub fn set_connected(app: &AppHandle, connected: bool) {
 /// Show "Update available: vX" in the menu (it opens the panel with the release notes), or the
 /// plain "Updates…" item.
 pub fn set_update(app: &AppHandle, version: Option<&str>) {
+    if crate::lifecycle::is_exiting(app) {
+        return;
+    }
     if let Some(t) = app.try_state::<Tray>() {
         *lock(&t.update_version) = version.map(str::to_owned);
         let _ = t.update.set_text(update_text(app, version));
@@ -390,6 +396,10 @@ pub fn line_ops(keys: &[Option<&str>; 4], shown: &[bool; 4]) -> Vec<LineOp> {
 /// so rendering there (never holding a lock while waiting on it) cannot deadlock with a command
 /// that runs on the main thread, and renders never interleave.
 fn render(app: &AppHandle, _t: &Tray) {
+    // Quitting: the main thread may be busy stopping the daemon; nothing to show anyway.
+    if crate::lifecycle::is_exiting(app) {
+        return;
+    }
     let h = app.clone();
     let posted = app.run_on_main_thread(move || {
         if let Some(t) = h.try_state::<Tray>() {
@@ -443,6 +453,9 @@ pub async fn refresh(app: &AppHandle) {
     let Some(t) = app.try_state::<Tray>() else {
         return;
     };
+    if crate::lifecycle::is_exiting(app) {
+        return;
+    }
     if lock(&t.snapshot).connected != Some(true) {
         render(app, &t);
         return;

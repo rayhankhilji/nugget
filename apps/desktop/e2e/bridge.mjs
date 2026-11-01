@@ -124,6 +124,7 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     daemon_version_recheck: () => ({ app_version: "0.0.1", daemon_version: "0.0.1", state: "in_step", reason: null, detail: null }),
     quit_answer: () => null,
     quit_cancel: () => null,
+    quit_ack: () => false,
     indexing_pause_toggle: () => ({ has_tray: true, indexing_paused: false, logs: null }),
     deeplink_take: () => null,
     quickask_open_main: () => null,

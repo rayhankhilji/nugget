@@ -110,10 +110,13 @@ describe("QuitPrompt", () => {
 
   it("asks when the shell says so, saves the answer and quits", async () => {
     const answers: unknown[] = [];
-    mockDaemon({ quit_answer: (a: unknown) => (answers.push(a), null), quit_cancel: null });
+    let acks = 0;
+    mockDaemon({ quit_answer: (a: unknown) => (answers.push(a), null), quit_cancel: null, quit_ack: () => (acks++, acks > 1) });
     await render(<QuitPrompt />);
     expect(document.querySelector("dialog")).toBeNull();
     await ask();
+    // The shell is told the question shows (else it quits with the default after 2 s).
+    expect(acks).toBe(2);
     const dialog = document.querySelector("dialog");
     expect(dialog?.textContent).toContain("When you quit Nugget, also stop background indexing and the local AI?");
     await click(button(dialog!, /^Keep running in the background$/));
@@ -122,6 +125,13 @@ describe("QuitPrompt", () => {
     await ask();
     await click(button(document.querySelector("dialog")!, /^Stop everything$/));
     expect(answers.at(-1)).toEqual({ choice: "stop", quit: true });
+  });
+
+  it("shows a question asked before the window was listening", async () => {
+    const calls = mockDaemon({ quit_ack: true, quit_cancel: null });
+    await render(<QuitPrompt />);
+    expect(calls).toContain("quit_ack");
+    expect(document.querySelector("dialog")?.textContent).toContain("Before Nugget quits");
   });
 
   it("stays open on a failed save, and closing it cancels the quit", async () => {

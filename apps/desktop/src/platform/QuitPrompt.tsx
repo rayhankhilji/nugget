@@ -1,10 +1,11 @@
 /**
  * GG6-8: the one-time question "When you quit Nugget, also stop background indexing and the local
  * AI?". The shell asks for it (`nugget:quit-ask`) the first time quitting would stop the background
- * service the app started; the answer is saved and Nugget quits. Dismissing it keeps Nugget open.
+ * service the app started; the window confirms with `quit_ack` (or the shell quits with the default
+ * after 2 s). The answer is saved and Nugget quits. Dismissing it keeps Nugget open.
  * Until it is answered, quitting stops the service (see `src-tauri/src/lifecycle.rs`).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { errorMessage, lifecycleApi, type QuitChoice } from "../api";
 import { Dialog } from "../components/Dialog";
 import { useEvent } from "../hooks";
@@ -16,10 +17,26 @@ export function QuitPrompt() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEvent(lifecycleApi.onQuitAsk, () => {
+  // The shell waits for this confirmation; without it, quitting goes ahead with the default.
+  const show = () => {
     setError(null);
     setOpen(true);
+  };
+  useEvent(lifecycleApi.onQuitAsk, () => {
+    show();
+    void lifecycleApi.quitAck().catch(() => {});
   });
+  // A question asked before this window was listening.
+  useEffect(() => {
+    let live = true;
+    lifecycleApi
+      .quitAck()
+      .then((waiting) => live && waiting && show())
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   if (!open) return null;
 

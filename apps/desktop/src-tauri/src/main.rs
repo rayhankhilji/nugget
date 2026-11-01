@@ -230,6 +230,7 @@ fn main() {
             platform::platform_settings_set,
             platform::shell_labels_set,
             lifecycle::quit_answer,
+            lifecycle::quit_ack,
             lifecycle::quit_cancel,
             lifecycle::daemon_version,
             lifecycle::daemon_version_recheck,

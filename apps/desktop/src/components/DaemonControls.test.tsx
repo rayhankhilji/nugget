@@ -66,6 +66,16 @@ describe("VersionBanner", () => {
   });
 });
 
+describe("VersionBanner, newer service", () => {
+  it("asks to update the app instead of downgrading the service", async () => {
+    mockDaemon({ daemon_version: report({ app_version: "0.1.0", daemon_version: "0.2.0", state: "mismatch", reason: "daemon_newer" }) });
+    const { container } = await render(<VersionBanner />);
+    const text = container.querySelector('[role="alert"]')?.textContent ?? "";
+    expect(text).toContain("version 0.2.0, newer than this app (0.1.0)");
+    expect(text).toContain("Update this app");
+  });
+});
+
 describe("NoTrayControls", () => {
   it("is hidden when there is a tray", async () => {
     mockDaemon({});

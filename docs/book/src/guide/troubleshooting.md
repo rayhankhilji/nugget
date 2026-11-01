@@ -55,15 +55,17 @@ Without a tray icon (stock GNOME, for example), closing the window is the same a
 
 ## The Status page says the background service is another version
 
-After an update the app checks that the background service runs the same version. It replaces a
-service it started itself, and restarts a service that starts at login. When it can't, the Status
-page says why:
+After an update the app checks that the background service runs the same version. It replaces an
+older service it started itself, and restarts an older service that starts at login. When it
+can't, or shouldn't, the Status page says why:
 
 - **Started outside the app** (from a terminal or another tool): stop that `nuggetd`, and the app
   starts the matching one. Then click **Check again**.
 - **Restarting the login service didn't work**: log out and back in, or turn **Start the Nugget
   background service at login** off and on again. From a terminal: `nuggetd restart-service`.
 - **Nugget couldn't restart it**: quit Nugget and open it again. The app log says what failed.
+- **Newer than this app**: an older copy of Nugget is open (an old AppImage, say). Nugget never
+  replaces the service with an older version: update the app, or open the newer copy.
 
 ## Config errors
 

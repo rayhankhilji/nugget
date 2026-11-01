@@ -2142,5 +2142,6 @@
   "status.noTray.paused": "Die Indexierung ist pausiert.",
   "status.noTray.agents": "Um alle Agenten auf einmal zu stoppen, verwenden Sie den Notschalter auf der Seite Sicherheit.",
   "status.noTray.failed": "Die Indexierung konnte nicht geändert werden: {error}",
-  "status.logs": "Protokolle: <code>{dir}</code>"
+  "status.logs": "Protokolle: <code>{dir}</code>",
+  "status.versionCheck.daemonNewer": "Der Hintergrunddienst hat Version {daemon} und ist damit neuer als diese App ({app}). Nugget ersetzt ihn nicht durch einen älteren. Aktualisieren Sie diese App (oder öffnen Sie die neuere Kopie), damit beide übereinstimmen."
 }

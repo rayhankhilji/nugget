@@ -17,12 +17,17 @@
 //! asks once, in the window ("Stop everything" / "Keep running in the background"), and Settings
 //! offers the same choice. Where the OS quits without asking the app first (the Dock's Quit,
 //! logging out) the unanswered default applies. Stopping is graceful: `daemon.shutdown` over
-//! IPC (ingest, the local model servers, the store), a bounded wait for the process to exit,
-//! then the old signal (SIGTERM, or ending the process tree on Windows) as a fallback, only
-//! after re-checking it is still the same process.
+//! IPC on a connection of its own (ingest, the local model servers, the store), a bounded wait
+//! for the process to exit, and only if it hangs, ending it, after re-checking it is still the
+//! same process (a daemon that refused the request gets SIGTERM, or is ended on Windows). The
+//! stop runs in `ExitRequested`, while the event loop still runs, and the app exits when it is
+//! done; only quits that skip that event stop it in `RunEvent::Exit`, on a thread of their own
+//! with a hard time limit. Stops and starts are serialized (`Lifecycle::op`), and once quitting
+//! begins the tray stops redrawing (its menu calls wait for the busy main thread).
 //!
 //! **Versions.** On every new connection the app compares the daemon's `status.version` with
-//! its own. A daemon it owns is replaced by the bundled one; a login service is restarted
+//! its own (semver). Only an older daemon is acted on; a newer one is reported, never
+//! downgraded. A daemon it owns is replaced by the bundled one; a login service is restarted
 //! (`nuggetd restart-service`); anything else, or a fix that did not work, is reported on the
 //! Status page with what to do. One automatic attempt per session; "Check again" retries.
 
@@ -60,6 +65,12 @@ const KILL_WAIT: Duration = Duration::from_secs(5);
 const POLL: Duration = Duration::from_millis(100);
 /// How long a restarted service gets to answer again.
 const SERVICE_START_WAIT: Duration = Duration::from_secs(20);
+/// How long the window has to confirm it shows the quit question before quitting goes ahead.
+const ACK_WAIT: Duration = Duration::from_secs(2);
+/// Upper bound of the stop quitting does (status, request, waits, fallback).
+const QUIT_STOP_LIMIT: Duration = Duration::from_secs(25);
+/// Upper bound of the stop in `RunEvent::Exit`, which holds the main thread.
+const EXIT_STOP_LIMIT: Duration = Duration::from_secs(20);
 
 // ---- ownership ----
 
@@ -104,19 +115,63 @@ pub fn remove_record(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
-/// The OS start time of a running `pid` (seconds since the epoch), `None` once it has exited.
+/// When a running `pid` started, as a value that never changes for one process and differs for
+/// a new process reusing the pid; `None` once it has exited (or is a zombie).
+///
+/// Linux: the `starttime` field of `/proc/<pid>/stat` (clock ticks since boot), which, unlike a
+/// wall-clock time, does not move when the clock is set. Elsewhere: the OS start time in seconds
+/// since the epoch (`sysinfo`).
 pub fn process_start_time(pid: u32) -> Option<u64> {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System};
-    let pid = Pid::from_u32(pid);
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|s| start_ticks_from_stat(&s))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System};
+        let pid = Pid::from_u32(pid);
+        let mut sys = System::new();
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        sys.process(pid)
+            .filter(|p| !matches!(p.status(), ProcessStatus::Zombie | ProcessStatus::Dead))
+            .map(|p| p.start_time())
+    }
+}
+
+/// `starttime` (field 22) of a `/proc/<pid>/stat` line, `None` for a zombie or dead process.
+/// The command name (field 2) may hold spaces and parentheses, so fields count from the last `)`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn start_ticks_from_stat(stat: &str) -> Option<u64> {
+    let rest = stat.get(stat.rfind(')')? + 1..)?;
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    if matches!(fields.first(), Some(&("Z" | "X" | "x"))) {
+        return None;
+    }
+    // `rest` starts at field 3 (state).
+    fields.get(22 - 3)?.parse().ok()
+}
+
+/// Windows: whether the Task Scheduler started `pid` (its parent is the Schedule service's
+/// `svchost.exe`), the only trace the "Nugget Daemon" task leaves. A daemon the app started has
+/// the app as its parent; one started by hand, a shell.
+pub fn started_by_task_scheduler(pid: u32) -> bool {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let mut sys = System::new();
-    sys.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
-        true,
-        ProcessRefreshKind::nothing(),
-    );
-    sys.process(pid)
-        .filter(|p| !matches!(p.status(), ProcessStatus::Zombie | ProcessStatus::Dead))
-        .map(|p| p.start_time())
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    sys.process(Pid::from_u32(pid))
+        .and_then(|p| p.parent())
+        .and_then(|parent| sys.process(parent))
+        .is_some_and(|p| is_task_scheduler_host(&p.name().to_string_lossy()))
+}
+
+fn is_task_scheduler_host(name: &str) -> bool {
+    name.eq_ignore_ascii_case("svchost.exe") || name.eq_ignore_ascii_case("taskhostw.exe")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +276,9 @@ pub enum MismatchReason {
     ServiceRestartFailed,
     /// The app's own daemon could not be replaced.
     RestartFailed,
+    /// The daemon is newer than the app (an older copy of the app was opened): the app must be
+    /// updated; the daemon is never downgraded.
+    DaemonNewer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -268,6 +326,16 @@ pub fn version_action(
     if app == daemon {
         return VersionAction::InStep;
     }
+    // Only a daemon older than the app is replaced; a newer one is never downgraded (two copies
+    // of the app would take turns replacing each other's daemon). Versions that don't parse are
+    // treated as older, as before.
+    if let (Ok(a), Ok(d)) = (semver::Version::parse(app), semver::Version::parse(daemon)) {
+        match d.cmp_precedence(&a) {
+            std::cmp::Ordering::Equal => return VersionAction::InStep,
+            std::cmp::Ordering::Greater => return VersionAction::Tell(MismatchReason::DaemonNewer),
+            std::cmp::Ordering::Less => {}
+        }
+    }
     let service = own == Ownership::Service || (own == Ownership::NotOwned && service_hint);
     match (tried, own, service) {
         (true, Ownership::Owned, _) => VersionAction::Tell(MismatchReason::RestartFailed),
@@ -284,6 +352,17 @@ pub fn version_action(
 pub struct Lifecycle {
     /// The quit question is showing.
     asking: AtomicBool,
+    /// The window confirmed it is showing the question (`quit_ack`).
+    ask_acked: AtomicBool,
+    /// The window didn't confirm in time: quitting goes ahead with the default.
+    ask_failed: AtomicBool,
+    /// The stop that quitting does is running; the app exits when it is done.
+    stopping: AtomicBool,
+    /// That stop is done: the next exit request goes ahead.
+    stop_done: AtomicBool,
+    /// Serializes stopping and starting the daemon (quitting, updates, version fixes), so none
+    /// of them starts a daemon another just stopped, or stops one twice.
+    op: tokio::sync::Mutex<()>,
     /// The connected daemon is the app's own (last check).
     owned: AtomicBool,
     reconciling: AtomicBool,
@@ -294,7 +373,13 @@ pub struct Lifecycle {
     report: Mutex<VersionReport>,
 }
 
-/// Whether the app is quitting.
+/// Whether the app is quitting (the tray stops redrawing: menu calls from other threads wait
+/// for the main thread, which may be busy quitting).
+pub fn is_exiting<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.try_state::<Lifecycle>()
+        .is_some_and(|lc| lc.exiting.load(Ordering::SeqCst))
+}
+
 fn exiting(app: &AppHandle) -> bool {
     app.try_state::<Lifecycle>()
         .is_some_and(|lc| lc.exiting.load(Ordering::SeqCst))
@@ -363,11 +448,39 @@ pub enum StopOutcome {
     StillRunning,
 }
 
+/// A connection of its own for stopping: closing it as the daemon goes away never reaches the
+/// shared connection's listeners (the tray, the windows).
+async fn own_client(app: &AppHandle) -> Option<nugget_ipc::Client> {
+    let paths = app.state::<Daemon>().paths_opt()?.clone();
+    tokio::time::timeout(CALL_TIMEOUT, nugget_ipc::Client::connect(&paths))
+        .await
+        .ok()?
+        .ok()
+}
+
 /// Stop the daemon the app owns, gracefully when it can (module docs). `reason` goes to the
-/// daemon's log.
+/// daemon's log. Waits for any other stop or start in progress first.
 pub async fn stop_owned(app: &AppHandle, reason: &str) -> StopOutcome {
+    let Some(lc) = app.try_state::<Lifecycle>() else {
+        return stop_owned_locked(app, reason).await;
+    };
+    let _op = lc.op.lock().await;
+    stop_owned_locked(app, reason).await
+}
+
+async fn stop_owned_locked(app: &AppHandle, reason: &str) -> StopOutcome {
     let daemon = app.state::<Daemon>();
-    let st = status(app).await;
+    let client = own_client(app).await;
+    let st = match &client {
+        Some(c) => tokio::time::timeout(
+            CALL_TIMEOUT,
+            c.call::<_, StatusResponse>(method::STATUS, &json!({})),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok),
+        None => None,
+    };
     let own = daemon.ownership(
         st.as_ref().and_then(|s| s.pid),
         st.as_ref().and_then(|s| s.service.as_deref()),
@@ -385,42 +498,81 @@ pub async fn stop_owned(app: &AppHandle, reason: &str) -> StopOutcome {
     };
     let (pid, start) = target;
     tracing::info!(pid, reason, "stopping the nuggetd this app started");
-    let asked = tokio::time::timeout(
-        CALL_TIMEOUT,
-        daemon.call::<_, DaemonShutdownResponse>(
-            app,
-            method::DAEMON_SHUTDOWN,
-            &DaemonShutdownRequest {
-                reason: Some(reason.into()),
-            },
+    let graceful = match &client {
+        Some(c) => matches!(
+            tokio::time::timeout(
+                CALL_TIMEOUT,
+                c.call::<_, DaemonShutdownResponse>(
+                    method::DAEMON_SHUTDOWN,
+                    &DaemonShutdownRequest {
+                        reason: Some(reason.into()),
+                    },
+                ),
+            )
+            .await,
+            Ok(Ok(_))
         ),
-    )
-    .await;
-    let graceful = matches!(asked, Ok(Ok(_)));
-    if !graceful {
-        tracing::info!(?asked, "nuggetd didn't take daemon.shutdown; signalling it");
-    }
+        None => false,
+    };
+    drop(client);
     let gone = || process_start_time(pid) != Some(start);
-    if graceful && wait_until(STOP_WAIT, gone).await {
-        daemon.forget_owned();
-        tracing::info!(pid, "nuggetd stopped");
-        return StopOutcome::Stopped;
-    }
-    // Still the same process (same start time): only then signal it.
-    if !gone() {
-        if let Err(e) = stop_process(pid) {
+    let outcome = if graceful {
+        if wait_until(STOP_WAIT, gone).await {
+            tracing::info!(pid, "nuggetd stopped");
+            StopOutcome::Stopped
+        } else {
+            // It took the request but hangs while winding down: no second request or SIGTERM
+            // (it already is stopping), end it.
+            tracing::warn!(pid, "nuggetd didn't finish stopping in time; ending it");
+            force_kill(pid, start);
+            if wait_until(KILL_WAIT, gone).await {
+                StopOutcome::Killed
+            } else {
+                StopOutcome::StillRunning
+            }
+        }
+    } else {
+        tracing::info!(pid, "nuggetd didn't take daemon.shutdown; signalling it");
+        // Still the same process (same start time): only then signal it.
+        if !gone()
+            && let Err(e) = stop_process(pid)
+        {
             tracing::warn!(pid, error = %e, "couldn't stop nuggetd");
         }
         if wait_until(KILL_WAIT, gone).await {
-            daemon.forget_owned();
             tracing::info!(pid, "nuggetd stopped by signal");
-            return StopOutcome::Killed;
+            StopOutcome::Killed
+        } else {
+            StopOutcome::StillRunning
         }
-        tracing::warn!(pid, "nuggetd is still running");
-        return StopOutcome::StillRunning;
+    };
+    match outcome {
+        StopOutcome::StillRunning => tracing::warn!(pid, "nuggetd is still running"),
+        _ => daemon.forget_owned(),
     }
-    daemon.forget_owned();
-    StopOutcome::Stopped
+    outcome
+}
+
+/// End `pid` at once (SIGKILL, `TerminateProcess`) if it is still the process that started at
+/// `start`. Its model servers go with it (kill-on-close job object on Windows; on Unix the
+/// runtime's pid files let the next daemon clean up an orphan).
+fn force_kill(pid: u32, start: u64) {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    if process_start_time(pid) != Some(start) {
+        return;
+    }
+    let p = Pid::from_u32(pid);
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[p]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    if let Some(proc_) = sys.process(p)
+        && !proc_.kill()
+    {
+        tracing::warn!(pid, "couldn't end nuggetd");
+    }
 }
 
 async fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
@@ -449,15 +601,15 @@ fn stop_process(pid: u32) -> std::io::Result<()> {
         .ok_or_else(|| std::io::Error::other(format!("kill exited with {status}")))
 }
 
-/// The daemon runs without a console, so there is no Ctrl+Break to send it: the tree is ended.
-/// Its model servers are in a kill-on-close job object (`nugget-runtime`), so they go with it
-/// even when only the daemon itself is ended.
+/// The daemon runs without a console, so there is no Ctrl+Break to send it: it is ended. Only the
+/// daemon (no `/T`): processes an agent opened are its children and must survive; its model
+/// servers are in a kill-on-close job object (`nugget-runtime`) and go with it.
 #[cfg(windows)]
 fn stop_process(pid: u32) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let status = std::process::Command::new("taskkill.exe")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .args(["/PID", &pid.to_string(), "/F"])
         .stdin(std::process::Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
         .status()?;
@@ -474,50 +626,95 @@ fn stop_process(_pid: u32) -> std::io::Result<()> {
 
 // ---- run events ----
 
-/// `RunEvent::ExitRequested`: ask once before the first quit that would stop the daemon.
+/// `RunEvent::ExitRequested`: ask once before the first quit that would stop the daemon, then
+/// stop it here, while the event loop still runs, and exit when that is done.
 pub fn on_exit_requested(app: &AppHandle, code: Option<i32>, api: &tauri::ExitRequestApi) {
     let (Some(lc), Some(platform)) = (app.try_state::<Lifecycle>(), app.try_state::<Platform>())
     else {
         return;
     };
+    // A restart after an update: the updater already stopped the app's daemon.
+    if code == Some(tauri::RESTART_EXIT_CODE) || lc.stop_done.load(Ordering::SeqCst) {
+        return;
+    }
+    if lc.stopping.load(Ordering::SeqCst) {
+        api.prevent_exit();
+        return;
+    }
     let owns = app.state::<Daemon>().started_pid().is_some() || lc.owned.load(Ordering::SeqCst);
     let can_ask = app.get_webview_window("main").is_some();
     let choice = platform.settings().quit_daemon;
-    match exit_request(
-        code,
-        choice,
-        owns,
-        lc.asking.load(Ordering::SeqCst),
-        can_ask,
-    ) {
-        ExitRequest::Proceed => {}
+    let asked = lc.asking.load(Ordering::SeqCst) || lc.ask_failed.load(Ordering::SeqCst);
+    match exit_request(code, choice, owns, asked, can_ask) {
         ExitRequest::Ask => {
             api.prevent_exit();
             lc.asking.store(true, Ordering::SeqCst);
+            lc.ask_acked.store(false, Ordering::SeqCst);
             tracing::info!("asking what quitting should do with the background service");
             crate::tray::show_main(app, None);
             let _ = app.emit_to("main", event::QUIT_ASK, ());
+            // The window confirms it shows the question (`quit_ack`); a window that can't (not
+            // loaded, broken) must not leave Quit doing nothing.
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(ACK_WAIT).await;
+                let lc = app.state::<Lifecycle>();
+                if lc.asking.load(Ordering::SeqCst) && !lc.ask_acked.load(Ordering::SeqCst) {
+                    tracing::warn!(
+                        "the window didn't show the quit question; quitting with the default"
+                    );
+                    lc.asking.store(false, Ordering::SeqCst);
+                    lc.ask_failed.store(true, Ordering::SeqCst);
+                    app.exit(code.unwrap_or(0));
+                }
+            });
+        }
+        ExitRequest::Proceed => {
+            let update = cfg!(not(windows))
+                && app
+                    .try_state::<crate::updater::Updates>()
+                    .is_some_and(|u| u.has_staged());
+            if !(owns && (update || stops_on_quit(choice))) {
+                return;
+            }
+            api.prevent_exit();
+            lc.stopping.store(true, Ordering::SeqCst);
+            lc.exiting.store(true, Ordering::SeqCst);
+            for w in app.webview_windows().values() {
+                let _ = w.hide();
+            }
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let reason = if update { "update" } else { "app_quit" };
+                if tokio::time::timeout(QUIT_STOP_LIMIT, stop_owned(&app, reason))
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("stopping nuggetd took too long; quitting anyway");
+                }
+                let lc = app.state::<Lifecycle>();
+                lc.stop_done.store(true, Ordering::SeqCst);
+                lc.stopping.store(false, Ordering::SeqCst);
+                app.exit(code.unwrap_or(0));
+            });
         }
     }
 }
 
-/// `RunEvent::Exit`: install a staged update (stopping the app's daemon first on macOS and
-/// Linux, so the new version starts next time), then stop the daemon unless the user chose to
-/// keep it.
+/// `RunEvent::Exit`: install a staged update, and stop the app's daemon when quitting went
+/// around `ExitRequested` (the Dock's Quit, logging out), where nothing stopped it yet. That stop
+/// runs on its own thread and runtime, never touches the tray or the windows, and is cut off
+/// after [`EXIT_STOP_LIMIT`].
 pub fn on_exit(app: &AppHandle) {
-    if let Some(lc) = app.try_state::<Lifecycle>() {
-        lc.exiting.store(true, Ordering::SeqCst);
-    }
-    for w in app.webview_windows().values() {
-        let _ = w.hide();
-    }
-    let mut stopped = false;
+    let Some(lc) = app.try_state::<Lifecycle>() else {
+        return;
+    };
+    lc.exiting.store(true, Ordering::SeqCst);
+    let done = lc.stop_done.load(Ordering::SeqCst);
+    let mut stopped = done;
     if let Some(updates) = app.try_state::<crate::updater::Updates>() {
-        if cfg!(not(windows)) && updates.has_staged() {
-            stopped = !matches!(
-                tauri::async_runtime::block_on(stop_owned(app, "update")),
-                StopOutcome::Left(_)
-            );
+        if !done && cfg!(not(windows)) && updates.has_staged() {
+            stopped = !matches!(stop_on_own_thread(app, "update"), StopOutcome::Left(_));
         }
         updates.install_staged();
     }
@@ -529,10 +726,40 @@ pub fn on_exit(app: &AppHandle) {
         .map(|p| p.settings().quit_daemon)
         .unwrap_or_default();
     if stops_on_quit(choice) {
-        tauri::async_runtime::block_on(stop_owned(app, "app_quit"));
+        stop_on_own_thread(app, "app_quit");
     } else {
         tracing::info!("leaving nuggetd running, as the user chose");
     }
+}
+
+/// [`stop_owned`] on a thread with its own runtime, waited for at most [`EXIT_STOP_LIMIT`] (the
+/// caller is the main thread, which the app's runtime may be waiting on).
+fn stop_on_own_thread(app: &AppHandle, reason: &'static str) -> StopOutcome {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let app = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("nuggetd-stop".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            let out = match rt {
+                Ok(rt) => rt.block_on(stop_owned(&app, reason)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "no runtime to stop nuggetd");
+                    StopOutcome::StillRunning
+                }
+            };
+            let _ = tx.send(out);
+        });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "couldn't stop nuggetd");
+        return StopOutcome::StillRunning;
+    }
+    rx.recv_timeout(EXIT_STOP_LIMIT).unwrap_or_else(|_| {
+        tracing::warn!("stopping nuggetd took too long; quitting anyway");
+        StopOutcome::StillRunning
+    })
 }
 
 /// A new daemon connection came up: check its version (once at a time).
@@ -564,8 +791,11 @@ async fn reconcile_once(app: &AppHandle, lc: &Lifecycle, user_asked: bool) {
     let daemon = app.state::<Daemon>();
     let own = daemon.ownership(st.pid, st.service.as_deref());
     lc.owned.store(own == Ownership::Owned, Ordering::SeqCst);
-    let service_hint =
-        cfg!(windows) && app.state::<crate::updater::Updates>().start_at_login() == Some(true);
+    // Windows: the task leaves no trace in the daemon; treat it as the task's only when the
+    // user installed the task and the Task Scheduler started the process that answers.
+    let service_hint = cfg!(windows)
+        && app.state::<crate::updater::Updates>().start_at_login() == Some(true)
+        && st.pid.is_some_and(started_by_task_scheduler);
     let tried = !user_asked && lc.auto_fix_tried.load(Ordering::SeqCst);
     let action = version_action(APP_VERSION, &st.version, own, service_hint, tried);
     let theirs = Some(st.version.clone());
@@ -631,7 +861,9 @@ async fn reconcile_once(app: &AppHandle, lc: &Lifecycle, user_asked: bool) {
 
 /// Replace the app's own daemon with the bundled one.
 async fn restart_owned(app: &AppHandle) -> Result<(), String> {
-    match stop_owned(app, "version_mismatch").await {
+    let lc = app.state::<Lifecycle>();
+    let _op = lc.op.lock().await;
+    match stop_owned_locked(app, "version_mismatch").await {
         StopOutcome::Stopped | StopOutcome::Killed => {}
         StopOutcome::Left(_) => return Err("it is no longer the app's own".into()),
         StopOutcome::StillRunning => return Err("it didn't stop".into()),
@@ -639,17 +871,29 @@ async fn restart_owned(app: &AppHandle) -> Result<(), String> {
     if exiting(app) {
         return Err("Nugget is quitting".into());
     }
-    app.state::<Daemon>()
+    let started = app
+        .state::<Daemon>()
         .start(app)
         .await
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    // Quitting began meanwhile: don't leave a daemon behind that the quit didn't see.
+    if exiting(app) {
+        stop_owned_locked(app, "app_quit").await;
+        return Err("Nugget is quitting".into());
+    }
+    started
 }
 
 /// Stop the service's daemon cleanly, then have the service manager start it again (the
 /// updated binary). If the service can't be restarted, the bundled daemon is started instead,
 /// so Nugget keeps working.
 async fn restart_service(app: &AppHandle) -> Result<(), String> {
+    let lc = app.state::<Lifecycle>();
+    let _op = lc.op.lock().await;
+    if exiting(app) {
+        return Err("Nugget is quitting".into());
+    }
     let daemon = app.state::<Daemon>();
     let _ = tokio::time::timeout(
         CALL_TIMEOUT,
@@ -716,6 +960,19 @@ pub fn quit_answer(
         app.exit(0);
     }
     Ok(())
+}
+
+/// The window shows the quit question (after `nugget:quit-ask`, or on load). Returns whether a
+/// question is waiting, so a window that loaded late can still show it.
+#[tauri::command]
+pub fn quit_ack(app: AppHandle, window: tauri::Window) -> Result<bool, CmdError> {
+    main_only(&window)?;
+    let lc = app.state::<Lifecycle>();
+    let asking = lc.asking.load(Ordering::SeqCst);
+    if asking {
+        lc.ask_acked.store(true, Ordering::SeqCst);
+    }
+    Ok(asking)
 }
 
 /// The quit question was dismissed: Nugget stays open.
@@ -923,11 +1180,64 @@ mod tests {
         assert_eq!(v(O::Service, false, true), A::Tell(M::ServiceRestartFailed));
         assert_eq!(v(O::NotOwned, true, true), A::Tell(M::ServiceRestartFailed));
         assert_eq!(v(O::NotOwned, false, true), A::Tell(M::NotOwned));
-        // A newer daemon than the app (an older app opened) is handled the same way.
+        // A newer daemon than the app (an older copy of the app opened): never downgraded,
+        // whoever runs it, so two copies can't take turns replacing each other's daemon.
+        for own in [O::Owned, O::Service, O::NotOwned] {
+            assert_eq!(
+                version_action("0.1.0", "0.2.0", own, true, false),
+                A::Tell(M::DaemonNewer)
+            );
+        }
         assert_eq!(
-            version_action("0.1.0", "0.2.0", O::Owned, false, false),
-            A::RestartOwned
+            version_action("0.2.0", "0.2.0-beta.1", O::Owned, false, false),
+            A::RestartOwned,
+            "a prerelease is older than its release"
         );
+        assert_eq!(
+            version_action("0.2.0-beta.1", "0.2.0", O::Owned, false, false),
+            A::Tell(M::DaemonNewer)
+        );
+        assert_eq!(
+            version_action("0.2.0+abc", "0.2.0+def", O::Owned, false, false),
+            A::InStep,
+            "build metadata doesn't count"
+        );
+        assert_eq!(
+            version_action("0.10.0", "0.9.0", O::Owned, false, false),
+            A::RestartOwned,
+            "numeric, not string, order"
+        );
+    }
+
+    #[test]
+    fn linux_start_ticks_come_from_proc_stat() {
+        // Field 22; the command name may hold spaces and parentheses.
+        let stat = "4242 (nugget d) (x)) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 3 0 987654 1000 200";
+        assert_eq!(start_ticks_from_stat(stat), Some(987_654));
+        let zombie =
+            "4242 (nuggetd) Z 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 3 0 987654 0 0";
+        assert_eq!(start_ticks_from_stat(zombie), None);
+        assert_eq!(start_ticks_from_stat("garbage"), None);
+        assert_eq!(start_ticks_from_stat("1 (x) S 1 2"), None);
+        #[cfg(target_os = "linux")]
+        {
+            let me = std::fs::read_to_string("/proc/self/stat").unwrap();
+            assert_eq!(
+                start_ticks_from_stat(&me),
+                process_start_time(std::process::id())
+            );
+        }
+    }
+
+    #[test]
+    fn the_task_scheduler_hosts_are_recognised() {
+        assert!(is_task_scheduler_host("svchost.exe"));
+        assert!(is_task_scheduler_host("SVCHOST.EXE"));
+        assert!(is_task_scheduler_host("taskhostw.exe"));
+        assert!(!is_task_scheduler_host("nugget-desktop.exe"));
+        assert!(!is_task_scheduler_host("cmd.exe"));
+        // Our own parent here is a test runner or shell, never the Task Scheduler.
+        assert!(!started_by_task_scheduler(std::process::id()));
     }
 
     #[test]

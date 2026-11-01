@@ -2142,5 +2142,6 @@
   "status.noTray.paused": "L’indexation est suspendue.",
   "status.noTray.agents": "Pour arrêter tous les agents d’un coup, utilisez l’arrêt d’urgence sur la page Sécurité.",
   "status.noTray.failed": "Impossible de modifier l’indexation : {error}",
-  "status.logs": "Journaux : <code>{dir}</code>"
+  "status.logs": "Journaux : <code>{dir}</code>",
+  "status.versionCheck.daemonNewer": "Le service d’arrière-plan est en version {daemon}, plus récente que cette application ({app}). Nugget ne le remplacera pas par une version plus ancienne. Mettez à jour cette application (ou ouvrez la copie plus récente) pour que les deux correspondent."
 }

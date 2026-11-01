@@ -178,6 +178,11 @@ impl Daemon {
         Some(self.started_pid.load(Ordering::SeqCst)).filter(|p| *p != 0)
     }
 
+    /// The data directories, if they could be found.
+    pub fn paths_opt(&self) -> Option<&Paths> {
+        self.paths.as_ref().ok()
+    }
+
     fn record_path(&self) -> Option<PathBuf> {
         self.paths.as_ref().ok().map(crate::lifecycle::record_path)
     }
@@ -481,7 +486,10 @@ fn forward_notifications(app: AppHandle, client: &Client, generation: u64, socke
         // The stream ends when the connection closes.
         use tauri::Manager;
         let daemon = app.state::<Daemon>();
-        if daemon.generation.load(Ordering::SeqCst) == generation {
+        // While quitting nothing is redrawn: the daemon going away is expected.
+        if daemon.generation.load(Ordering::SeqCst) == generation
+            && !crate::lifecycle::is_exiting(&app)
+        {
             tracing::info!("disconnected from nuggetd");
             crate::tray::set_connected(&app, false);
             let _ = app.emit(
