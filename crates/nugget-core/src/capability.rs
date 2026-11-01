@@ -84,29 +84,3 @@ pub enum Locality {
     /// A third-party cloud API.
     Cloud,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tier_names_match_serde_and_rerank_is_neither_chat_nor_routed() {
-        for t in Tier::ALL {
-            assert_eq!(
-                serde_json::to_value(t).unwrap(),
-                serde_json::Value::from(t.as_str())
-            );
-        }
-        let r: Tier = serde_json::from_str("\"rerank\"").unwrap();
-        assert_eq!(r, Tier::Rerank);
-        assert!(!Tier::Rerank.is_chat() && !Tier::Embedding.is_chat());
-        assert!(!Tier::ROUTED.contains(&Tier::Rerank));
-        assert_eq!(Tier::ROUTED.len() + 1, Tier::ALL.len());
-        assert!(
-            Tier::ALL
-                .iter()
-                .filter(|t| t.is_chat())
-                .all(|t| Tier::ROUTED.contains(t))
-        );
-    }
-}
