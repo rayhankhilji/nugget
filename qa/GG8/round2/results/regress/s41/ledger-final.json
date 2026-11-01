@@ -1,0 +1,114 @@
+[
+ {
+  "at": "2026-11-01T09:34:31.670161207Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:20.145910568Z",
+  "bytes_received": 0,
+  "bytes_sent": 0,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:17.807350935Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:12.816506989Z",
+  "bytes_received": 0,
+  "bytes_sent": 0,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:10.86953341Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:09.810055175Z",
+  "bytes_received": 0,
+  "bytes_sent": 0,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:06.80464602Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:06.799499028Z",
+  "bytes_received": 0,
+  "bytes_sent": 260,
+  "feature": "sync:imap",
+  "host": "imap.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:01.074816462Z",
+  "bytes_received": 702,
+  "bytes_sent": 568,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:01.030782245Z",
+  "bytes_received": 491,
+  "bytes_sent": 559,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:00.970876511Z",
+  "bytes_received": 1139,
+  "bytes_sent": 490,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:00.926971023Z",
+  "bytes_received": 734,
+  "bytes_sent": 375,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:00.882903585Z",
+  "bytes_received": 702,
+  "bytes_sent": 568,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ },
+ {
+  "at": "2026-11-01T09:34:00.839295243Z",
+  "bytes_received": 491,
+  "bytes_sent": 559,
+  "feature": "sync:caldav",
+  "host": "caldav.gg8-synthetic.test",
+  "items": []
+ }
+]

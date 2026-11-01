@@ -1,0 +1,250 @@
+{
+ "scenario": "s21_cloud_draft",
+ "mode": "sinkhole",
+ "dns_names": [
+  "api.anthropic.com"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 32
+  },
+  {
+   "src": "203.0.113.66",
+   "dst": "203.0.113.74",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 6
+  }
+ ],
+ "observed_hosts": {
+  "api.anthropic.com": {
+   "requests": 4,
+   "bytes_in": 7755,
+   "paths": [
+    "GET /v1/models",
+    "POST /v1/messages"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "api.anthropic.com": {
+   "rows": 4,
+   "bytes_sent": 7755,
+   "features": [
+    "draft",
+    "prewarm"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [
+  {
+   "where": "request GET api.anthropic.com/v1/models",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-APIKEY-anthropic",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-FINAL-1",
+   "count": 1
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-THREAD-1",
+   "count": 3
+  },
+  {
+   "where": "request POST api.anthropic.com/v1/messages",
+   "canary": "GG8CANARY-THREADSENS-1",
+   "count": 1
+  }
+ ],
+ "checks": [
+  {
+   "id": "read_ahead.skipped_cloud",
+   "ok": true,
+   "detail": {
+    "skipped": "cloud",
+    "started": false
+   },
+   "severity": null,
+   "t": 1793525549.7893462
+  },
+  {
+   "id": "read_ahead.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793525551.789622
+  },
+  {
+   "id": "prewarm.nothing_sent",
+   "ok": false,
+   "detail": [
+    [
+     "/v1/models",
+     ""
+    ]
+   ],
+   "severity": null,
+   "t": 1793525554.7917066
+  },
+  {
+   "id": "secure.refused",
+   "ok": true,
+   "detail": "-32602: drafting is refused in password and secure fields",
+   "severity": null,
+   "t": 1793525554.793681
+  },
+  {
+   "id": "secure.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793525556.7942462
+  },
+  {
+   "id": "excluded_app.refused",
+   "ok": true,
+   "detail": "-32602: drafting is disabled in 1Password",
+   "severity": null,
+   "t": 1793525556.7970116
+  },
+  {
+   "id": "excluded_app.nothing_sent",
+   "ok": true,
+   "detail": [],
+   "severity": "High",
+   "t": 1793525558.7973547
+  },
+  {
+   "id": "draft.answered",
+   "ok": true,
+   "detail": "{'citations': [], 'excluded_sensitive': 7, 'field_kind': 'email_body', 'locality': 'cloud', 'provider': 'anthropic', 'stream_id': '1bfce7f8-0328-4f3c-b84e-ec0b628846c9'} {'stream_id': '1bfce7f8-0328-4f3c-b84e-ec0b628846c9', 'error': None, 'input_tokens': 100, 'output_tokens': 3}",
+   "severity": null,
+   "t": 1793525558.8041832
+  },
+  {
+   "id": "draft.excluded_sensitive",
+   "ok": true,
+   "detail": 7,
+   "severity": null,
+   "t": 1793525558.804207
+  },
+  {
+   "id": "draft.no_sensitive_content",
+   "ok": true,
+   "detail": "1 requests; leaked: []",
+   "severity": null,
+   "t": 1793525558.80437
+  },
+  {
+   "id": "draft.no_screenshot",
+   "ok": true,
+   "detail": "",
+   "severity": null,
+   "t": 1793525558.8043807
+  },
+  {
+   "id": "draft.thread_sent_as_documented",
+   "ok": true,
+   "detail": "",
+   "severity": null,
+   "t": 1793525558.8043842
+  },
+  {
+   "id": "draft.no_local_paths",
+   "ok": true,
+   "detail": "",
+   "severity": "Low",
+   "t": 1793525558.8043902
+  },
+  {
+   "id": "draft.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 1 rows (features ['draft']); unmatched []",
+   "severity": null,
+   "t": 1793525560.3078148
+  },
+  {
+   "id": "draft.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793525560.3078356
+  },
+  {
+   "id": "draft.thread_with_card_number",
+   "ok": false,
+   "detail": "status={'citations': [{'chunk_id': 8, 'date': '2026-11-01', 'item': {'key': 'feedback/1bfce7f8-0328-4f3c-b84e-ec0b628846c9', 'source': 'nugget-voice'}, 'n': 1, 'sensitive': False, 'title': None, 'url': None}], 'excluded_sensitive': 7, 'field_kind': 'email_body', 'locality': 'cloud', 'provider': 'anthropic', 'stream_id': '8a246cc9-eabe-46c0-8374-beba680f2c3c'} sent_card=True",
+   "severity": "Medium",
+   "t": 1793525560.3292058
+  },
+  {
+   "id": "draft2.ledger_rows",
+   "ok": true,
+   "detail": "1 requests, 1 rows (features ['draft']); unmatched []",
+   "severity": null,
+   "t": 1793525561.832622
+  },
+  {
+   "id": "draft2.ledger_items_accurate",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793525561.8326392
+  },
+  {
+   "id": "keys.keys_only_to_own_host",
+   "ok": true,
+   "detail": [],
+   "severity": null,
+   "t": 1793525562.429527
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793525548.2660313,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793525548.7700255,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793525551.7913022,
+   "note": "prewarm -> {'locality': 'cloud', 'provider': 'anthropic', 'retrieval': True}"
+  },
+  {
+   "t": 1793525561.8341432,
+   "label": "daemon.stop"
+  },
+  {
+   "t": 1793525561.8661036,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793525562.3687975,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793525562.4291973,
+   "note": "allow_cloud_screenshots=true: image sent=True"
+  },
+  {
+   "t": 1793525562.431219,
+   "label": "daemon.stop"
+  }
+ ]
+}
