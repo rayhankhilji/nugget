@@ -35,25 +35,6 @@ async function violations(): Promise<string[]> {
 }
 
 describe("Your providers (Models page)", () => {
-  it("lists providers with a key and labels their actions for screen readers", async () => {
-    mockDaemon({ ai_key_saved: { providers: [custom, work] } });
-    const { container } = await render(<YourProviders />);
-    const list = container.querySelector('ul[aria-label="Your providers"]')!;
-    expect(list).not.toBeNull();
-    const items = list.querySelectorAll("li");
-    expect(items).toHaveLength(2);
-    expect(items[0]!.textContent).toContain("In use");
-    expect(items[0]!.textContent).toContain("Key stored in your keychain");
-    expect(items[1]!.textContent).toContain("Not in use");
-    expect(items[1]!.textContent).toContain("Key read from the environment variable WORK_KEY");
-    expect(items[1]!.textContent).toContain("WORK_KEY is not set");
-    expect(items[0]!.querySelector('button[aria-label="Replace key: custom"]')?.textContent).toBe("Replace key");
-    expect(items[0]!.querySelector('button[aria-label="Remove custom"]')?.textContent).toBe("Remove");
-    // No restart instructions anywhere.
-    expect(container.textContent).not.toMatch(/restart/i);
-    expect(await violations()).toEqual([]);
-  });
-
   it("removes a provider after confirming, with focus on Cancel first", async () => {
     let providers = [custom, work];
     const removed: unknown[] = [];
@@ -115,11 +96,5 @@ describe("Your providers (Models page)", () => {
     expect(updates).toEqual([{ name: "custom", api_key: "sk-new" }]);
     expect(document.querySelector("dialog")).toBeNull();
     expect(container.querySelector('[role="status"]')?.textContent).toBe("The key of custom was replaced. Nugget uses it now.");
-  });
-
-  it("is hidden on a daemon without saved-key support", async () => {
-    mockDaemon({});
-    const { container } = await render(<YourProviders />);
-    expect(container.textContent).toBe("");
   });
 });

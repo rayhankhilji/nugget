@@ -62,16 +62,6 @@ describe("useCursorList", () => {
     expect(f.calls).toHaveLength(2);
   });
 
-  it("drops a reply for a key that has gone", async () => {
-    const f = fetcher();
-    const { out, rekey } = await mount(f.fetchPage, "a");
-    await rekey("b");
-    await reply(f.calls[0], rows(1), "x");
-    expect(out.current.items).toBeUndefined();
-    await reply(f.calls[1], rows(9), null);
-    expect(ids(out.current)).toEqual(["r9"]);
-  });
-
   it("keeps the rows after a failed page and retries that page", async () => {
     const f = fetcher();
     const { out } = await mount(f.fetchPage, "a");

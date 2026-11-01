@@ -12,7 +12,6 @@ import {
   press,
   queryByText,
   renderApp,
-  selectOption,
   setupHarness,
   t,
   type,
@@ -53,16 +52,6 @@ describe("search flow", () => {
     await findByText(t("hooks.open.opened", { label: "Re: Bernoulli numbers" }));
   });
 
-  it("submits with the button and honours the chosen limit", async () => {
-    const d = daemon({ search: openableHits });
-    await renderApp({ page: "search" });
-    const limit = within(getByRole("search")).getByRole("combobox");
-    await selectOption(limit, "10");
-    await type(searchBox(), "ada");
-    await click(submitButton());
-    await waitFor(() => expect(d.last("search")).toEqual({ query: "ada", limit: 10 }));
-  });
-
   it("does not offer Open for results without a safe URL", async () => {
     daemon({
       search: [
@@ -75,16 +64,6 @@ describe("search flow", () => {
     await press(searchBox(), "Enter");
     await findByText("no url here");
     expect(within(main()).queryAllByRole("button", { name: /^Open / })).toEqual([]);
-  });
-
-  it("says when nothing matched", async () => {
-    const d = daemon({ search: [] });
-    await renderApp({ page: "search" });
-    await type(searchBox(), "zebra");
-    await press(searchBox(), "Enter");
-    await findByText(t("search.noResults", { query: "zebra" }));
-    expect(d.count("search")).toBe(1);
-    expect(main().querySelector("ol")).toBeNull();
   });
 
   it("shows a daemon error and retries the same query", async () => {

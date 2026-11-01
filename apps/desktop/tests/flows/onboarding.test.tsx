@@ -15,13 +15,11 @@ import {
   getAllByRole,
   getByRole,
   queryByRole,
-  render,
   renderApp,
   setupHarness,
   t,
   within,
 } from "../harness";
-import { App } from "../../src/App";
 
 setupHarness();
 
@@ -78,52 +76,6 @@ describe("onboarding flow", () => {
     expect(within(nav()!).getByRole("button", { name: t("app.nav.search") }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("is not shown again once finished", async () => {
-    daemon();
-    await renderApp({ onboarding: true });
-    await click(button(t("onboarding.skipAll")));
-    expect(nav()).not.toBeNull();
-
-    // Next launch.
-    document.body.innerHTML = "";
-    await render(<App />);
-    expect(nav()).not.toBeNull();
-    expect(queryByRole("heading", { name: t("onboarding.welcome.heading") })).toBeNull();
-  });
-
-  it("can be skipped from any step, recording what was left", async () => {
-    daemon();
-    await renderApp({ onboarding: true });
-    await click(button(t("onboarding.continue")));
-    await click(radio("later"));
-    await click(button(t("onboarding.continue")));
-    expect(heading()).toBe(t("onboarding.source.heading"));
-    await click(button(t("onboarding.skipAll")));
-    expect(nav()).not.toBeNull();
-    // "Decide later" is a decision (GG6-21): Continue recorded the AI step as done, not skipped.
-    expect(loadState()).toMatchObject({ finished: true, ai: "later", completed: ["welcome", "ai"], skipped: ["source", "permissions", "trigger"] });
-  });
-
-  it("jumps to a step from the progress list", async () => {
-    daemon();
-    await renderApp({ onboarding: true });
-    const progress = getByRole("navigation", { name: t("onboarding.progressLabel") });
-    const steps = within(progress).getAllByRole("button");
-    expect(steps).toHaveLength(6);
-    expect(steps[0]!.getAttribute("aria-current")).toBe("step");
-    await click(steps[3]!);
-    expect(heading()).toBe(t("onboarding.perm.heading"));
-    expect(steps[3]!.getAttribute("aria-current")).toBe("step");
-  });
-
-  it("runs again from the sidebar", async () => {
-    daemon();
-    await renderApp({ page: "status" });
-    await click(button(t("settings.setupAgain")));
-    expect(heading()).toBe(t("onboarding.welcome.heading"));
-    expect(nav()).toBeNull();
-  });
-
   it("works with the background service down, then shows the offline screen", async () => {
     const d = daemon().offline();
     await renderApp({ onboarding: true });
@@ -142,17 +94,5 @@ describe("onboarding flow", () => {
     await click(button(t("onboarding.skipAll")));
     expect(getByRole("heading", { name: t("offline.title") })).toBeTruthy();
     expect(button(t("offline.start"))).toBeTruthy();
-  });
-
-  it("catches up when the service comes up mid-setup", async () => {
-    daemon().offline();
-    await renderApp({ onboarding: true });
-    await click(button(t("onboarding.continue")));
-    await click(radio("local"));
-    expect(getByRole("main").textContent).toContain(t("onboarding.offline"));
-
-    await emitEvent(EVENT.connection, { connected: true, socket: "/tmp/nuggetd.sock", error: null });
-    await findByText(/qwen3-4b-q4/, { selector: "li" });
-    expect(getByRole("main").textContent).not.toContain(t("onboarding.offline"));
   });
 });

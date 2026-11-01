@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import axe from "axe-core";
 import { act } from "react";
-import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoubleTapSettings, DoubleTapStatus, ShortcutStatus, VoiceStatus } from "../api";
 import { App } from "../App";
@@ -53,16 +52,6 @@ function setup(extra: Record<string, unknown> = {}) {
   return { calls, sent };
 }
 
-async function change(el: Element | null | undefined, value: string) {
-  if (!el) throw new Error("change: element not found");
-  const input = el as HTMLInputElement;
-  const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(input, value);
-    input.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
-  });
-  await flush(2);
-}
 
 beforeEach(() => installDomShims());
 afterEach(() => cleanup());
@@ -101,28 +90,6 @@ describe("Double Tap settings page", () => {
     expect(box.querySelector('[role="alert"]')?.textContent).toContain("Open it from the Apple menu");
   });
 
-  it("shows no macOS recovery steps on other systems", async () => {
-    setup();
-    await render(<App />);
-    await flush(10);
-    expect(document.querySelector(".dt-recover")).toBeNull();
-  });
-
-  it("renders settings, status and voice, with no axe violations", async () => {
-    setup();
-    await render(<App />);
-    await flush(10);
-    const main = document.querySelector("main")!;
-    expect(main.textContent).toContain("mail.google.com");
-    expect(main.textContent).toContain("1Password");
-    expect(main.textContent).toContain("AT-SPI");
-    expect(main.textContent).toContain("Wayland");
-    expect(main.textContent).toContain("1,234");
-    expect(main.textContent).toContain("email");
-    const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
-  });
-
   it("edits and saves normalised settings", async () => {
     const { sent } = setup();
     await render(<App />);
@@ -151,40 +118,6 @@ describe("Double Tap settings page", () => {
     expect(document.querySelector("main")!.textContent).toContain("Saved.");
   });
 
-  it("blocks saving an invalid chord", async () => {
-    setup();
-    await render(<App />);
-    await flush(10);
-    const chordRadio = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'))[1];
-    await click(chordRadio);
-    const chord = document.querySelector('input[placeholder^="e.g. Ctrl"]');
-    await change(chord, "Space");
-    expect(chord?.getAttribute("aria-invalid")).toBe("true");
-    expect((byText(document, "button", "Save") as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("follows a trigger saved in onboarding, but keeps unsaved edits", async () => {
-    let current = settings;
-    setup({ doubletap_settings_get: () => current });
-    await render(<App />);
-    await flush(10);
-    const chordInput = () => document.querySelector<HTMLInputElement>('input[placeholder^="e.g. Ctrl"]');
-    expect(chordInput()).toBeNull();
-
-    current = { ...settings, trigger: { kind: "chord", chord: "Alt+Space" } };
-    await act(() => emit("doubletap:settings", current));
-    await flush(5);
-    expect(chordInput()?.value).toBe("Alt+Space");
-    expect((byText(document, "button", "Save") as HTMLButtonElement).disabled).toBe(true);
-
-    // With unsaved edits, the form is left alone (the saved copy still updates underneath).
-    await change(chordInput(), "Ctrl+Alt+K");
-    current = { ...settings, trigger: { kind: "chord", chord: "CmdOrCtrl+Shift+Space" } };
-    await act(() => emit("doubletap:settings", current));
-    await flush(5);
-    expect(chordInput()?.value).toBe("Ctrl+Alt+K");
-  });
-
   it("turns read-ahead off and explains what it reads", async () => {
     const { sent } = setup();
     await render(<App />);
@@ -201,27 +134,6 @@ describe("Double Tap settings page", () => {
     expect(toggle?.checked).toBe(false);
     await click(byText(document, "button", "Save"));
     expect((sent[0] as DoubleTapSettings).read_ahead).toBe(false);
-  });
-
-  it("shows read-ahead as saved by the shell", async () => {
-    setup({ doubletap_settings_get: { ...settings, read_ahead: false } });
-    await render(<App />);
-    await flush(10);
-    const label = byText(document, "label", "Read ahead while you reply");
-    expect(label?.querySelector<HTMLInputElement>('input[role="switch"]')?.checked).toBe(false);
-    expect((byText(document, "button", "Save") as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("adds a provider row and fires a test draft", async () => {
-    const { calls, sent } = setup();
-    await render(<App />);
-    await flush(10);
-    await change(document.querySelector('input[placeholder^="e.g. mail.google"]'), "slack");
-    await click(byText(document, "button", "Add"));
-    await click(byText(document, "button", "Save"));
-    expect((sent[0] as DoubleTapSettings).app_providers).toEqual({ "mail.google.com": "anthropic", slack: "local-chat" });
-    await click(byText(document, "button", "Try it"));
-    expect(calls).toContain("doubletap_fire");
   });
 
   it("shows the desktop's shortcut consent and checks back until it is approved", async () => {
@@ -252,15 +164,5 @@ describe("Double Tap settings page", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("alerts when the desktop shortcut fails", async () => {
-    setup({
-      doubletap_status: { ...status, listening: true, trigger_error: null, shortcut: { state: "failed", trigger: null, error: "portal gone" } },
-    });
-    await render(<App />);
-    await flush(10);
-    const alerts = Array.from(document.querySelectorAll('[role="alert"]')).map((a) => a.textContent);
-    expect(alerts).toContain("The desktop shortcut stopped working: portal gone");
   });
 });

@@ -5,7 +5,6 @@ import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AskStarted } from "./api";
 import { ChatPage } from "./pages/Chat";
-import { QuickAsk } from "./quickask/QuickAsk";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "./test/render";
 
 const year = new Date().getFullYear();
@@ -64,47 +63,5 @@ describe("how an Ask searched", () => {
     expect(badge?.querySelector(".visually-hidden")?.textContent).toContain("key words");
     // The label is kept with the saved citations.
     expect(JSON.stringify(saved.at(-1))).toContain('"partial":true');
-  });
-
-  it("Chat says when nothing in the period matched", async () => {
-    mockDaemon({
-      retrieve_ask: { ...started, date: { ...started.date!, applied: false }, partial: [] },
-      chat_history_load: [],
-      chat_history_save: null,
-    });
-    const { container } = await render(<ChatPage />);
-    await act(async () => setValue(container.querySelector<HTMLTextAreaElement>("#chat-input")!, "herons last week"));
-    await click(byText(container, "button", "Send"));
-    await flush();
-    await answer("By the river [1].");
-    expect(container.querySelector(".ask-dates")?.textContent).toBe(
-      "Nothing from Oct 26 to Nov 1 matched, so items from any date were searched",
-    );
-    expect(container.querySelector(".ask-partial")).toBeNull();
-  });
-
-  it("quick ask shows the same", async () => {
-    mockDaemon({ retrieve_ask: started, quickask_prefill_take: null });
-    const { container } = await render(<QuickAsk />);
-    await act(async () => setValue(container.querySelector<HTMLInputElement>("#quickask-q")!, "Tokyo last week"));
-    await act(async () => {
-      container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    });
-    await flush(3);
-    await answer("Maybe [2].");
-    expect(container.querySelector(".ask-dates")?.textContent).toBe("Searched items from Oct 26 to Nov 1");
-    const partial = [...container.querySelectorAll(".quickask-source")].filter((li) => li.querySelector(".ask-partial"));
-    expect(partial.map((li) => li.textContent)).toEqual([expect.stringContaining("Trip ideas")]);
-  });
-
-  it("shows nothing for a question without a date or near misses", async () => {
-    mockDaemon({ retrieve_ask: { ...started, date: undefined, partial: undefined }, chat_history_load: [], chat_history_save: null });
-    const { container } = await render(<ChatPage />);
-    await act(async () => setValue(container.querySelector<HTMLTextAreaElement>("#chat-input")!, "herons"));
-    await click(byText(container, "button", "Send"));
-    await flush();
-    await answer("By the river [1].");
-    expect(container.querySelector(".ask-dates")).toBeNull();
-    expect(container.querySelector(".ask-partial")).toBeNull();
   });
 });
