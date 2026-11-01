@@ -240,7 +240,12 @@ def wait_runtime(ipc, timeout=900):
 def ingest(ipc, a, out):
     src = ipc.call(
         "sources.add",
-        {"kind": "files", "name": "GG7 corpus", "settings": {"roots": [str(Path(a.corpus).resolve())]}},
+        {
+            "kind": "files",
+            "name": "GG7 corpus",
+            # SPEC.md describes the corpus; it is not part of the user's data.
+            "settings": {"roots": [str(Path(a.corpus).resolve())], "exclude": ["SPEC.md"]},
+        },
     )
     sid = src["id"]
     ipc.call("sources.sync", {"id": sid})
