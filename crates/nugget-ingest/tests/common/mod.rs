@@ -296,6 +296,10 @@ pub struct FakeProvider {
     pub chats_completed: AtomicUsize,
     /// Reply to triage with unusable output.
     pub chat_invalid: AtomicBool,
+    /// Reply with unusable output to requests containing this marker.
+    pub invalid_marker: Mutex<Option<String>>,
+    /// Fail every chat as an unreachable server would (`Error::Network`).
+    pub chat_down: AtomicBool,
 }
 
 impl FakeProvider {
@@ -314,6 +318,8 @@ impl FakeProvider {
             chat_open: tokio::sync::watch::channel(true).0,
             chats_completed: AtomicUsize::new(0),
             chat_invalid: AtomicBool::new(false),
+            invalid_marker: Mutex::new(None),
+            chat_down: AtomicBool::new(false),
         })
     }
 
@@ -372,6 +378,9 @@ impl Provider for FakeProvider {
             .collect::<Vec<_>>()
             .join("\n");
         self.chat_inputs.lock().unwrap().push(text.clone());
+        if self.chat_down.load(Ordering::SeqCst) {
+            return Err(Error::Network("connection refused".into()));
+        }
         let mut rx = self.chat_open.subscribe();
         while !*rx.borrow_and_update() {
             if rx.changed().await.is_err() {
@@ -396,7 +405,13 @@ impl Provider for FakeProvider {
                 })
             })
             .collect();
-        let reply = if self.chat_invalid.load(Ordering::SeqCst) {
+        let poisoned = self
+            .invalid_marker
+            .lock()
+            .unwrap()
+            .as_deref()
+            .is_some_and(|m| text.contains(m));
+        let reply = if poisoned || self.chat_invalid.load(Ordering::SeqCst) {
             "not json".to_owned()
         } else {
             json!({ "items": items }).to_string()

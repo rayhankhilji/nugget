@@ -417,4 +417,12 @@ describe("overlay", () => {
     result = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(result.violations.map((v) => v.id)).toEqual([]);
   });
+  it("says when a refinement missed after its second try, with the draft", async () => {
+    setup({ ...streaming, phase: "done", can_retry: true, message: "doubletap.overlay.refineMissed" });
+    const { container } = await render(<Overlay />);
+    await flush(5);
+    expect(container.textContent).toContain("Couldn't make that change this time.");
+    expect(container.textContent).toContain("Thanks Ada, Thursday works.");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
 });

@@ -160,16 +160,18 @@ fn observe_blocking(s: &Shared, target: &Target, probe: &Probe) -> Obs {
         }
         return obs;
     }
-    // The element's window; for keyboard focus, the window last observed (so a window that
-    // closes on Enter reads as gone, not as an error).
-    let window = match target {
-        Target::Element(id) => s.find(id).map(|f| f.window.id),
-        _ => s.latest_window().map(|w| w.id),
+    // The element's window. For keyboard focus, the window that has it now (the backend's
+    // focused window), so a keyboard tool is gated on where the keys will go; the window that had
+    // it before is checked too, so one that closes on Enter reads as gone, not as an error.
+    let (window, sel) = match target {
+        Target::Element(id) => {
+            let w = s.find(id).map(|f| f.window.id);
+            let sel = w.clone().map_or(WindowSel::Focused, WindowSel::Id);
+            (w, sel)
+        }
+        _ => (s.keyboard_window().map(|w| w.id), WindowSel::Focused),
     };
-    let sel = match &window {
-        Some(w) => WindowSel::Id(w.clone()),
-        None => WindowSel::Focused,
-    };
+    // Refreshes the cache that `risk`, `describe` and `context` read.
     let tree = match s.snapshot(&sel) {
         Ok(t) => t,
         Err(Error::NotFound(_)) if window.is_some() => {
@@ -185,6 +187,16 @@ fn observe_blocking(s: &Shared, target: &Target, probe: &Probe) -> Obs {
             return obs;
         }
     };
+    if let (Target::Focused, Some(prev)) = (target, &window)
+        && prev != &tree.window.id
+        && s.cu
+            .windows()
+            .is_ok_and(|ws| !ws.iter().any(|w| &w.id == prev))
+    {
+        // Focus moved because the window that had it closed.
+        obs.window_gone = true;
+        s.forget(prev);
+    }
     obs.window = Some(tree.window.id.0.clone());
     obs.fingerprint = Some(fingerprint(&tree));
     obs.nodes = tree.count();
