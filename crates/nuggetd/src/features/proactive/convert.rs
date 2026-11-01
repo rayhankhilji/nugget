@@ -214,6 +214,8 @@ fn brief_card(c: &BriefCard) -> BriefCardView {
 fn brief_meeting(m: &BriefMeeting) -> BriefMeetingView {
     BriefMeetingView {
         title: m.title.clone(),
+        item: Some(m.item.clone()),
+        url: m.url.clone(),
         start: m.start,
         end: m.end,
         all_day: m.all_day,

@@ -1,5 +1,6 @@
 //! The morning brief: top cards, today's meetings with prep, overdue commitments, renewals.
 
+use nugget_core::ids::ItemRef;
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Date, Duration, OffsetDateTime};
@@ -50,6 +51,9 @@ impl BriefCard {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BriefMeeting {
     pub title: String,
+    /// The calendar item it comes from.
+    pub item: ItemRef,
+    pub url: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub start: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option", default)]
@@ -93,22 +97,24 @@ pub fn compose(
     cfg: &ProactiveConfig,
     now: OffsetDateTime,
 ) -> MorningBrief {
-    let local_now = now.to_offset(cfg.utc_offset);
+    let local_now = cfg.to_local(now);
     let today = local_now.date();
+    let day_start = cfg.local_at(today, time::Time::MIDNIGHT);
+    let day_end = cfg.local_at(today.next_day().unwrap_or(today), time::Time::MIDNIGHT);
     let mut cards: Vec<&Card> = state.cards.values().filter(|c| open(c)).collect();
     cards.sort_by(|a, b| b.rank.total_cmp(&a.rank).then_with(|| a.id.cmp(&b.id)));
 
     let mut meetings = Vec::new();
-    for ev in &corpus.events {
-        if ev.cancelled || ev.start.to_offset(cfg.utc_offset).date() != today {
-            continue;
-        }
+    for ev in corpus.events_between(day_start, day_end) {
         let prep_card = cards.iter().find(|c| {
             c.kind == CandidateKind::MeetingPrep
+                && c.due == Some(ev.start)
                 && c.evidence.first().is_some_and(|e| e.item == ev.item)
         });
         meetings.push(BriefMeeting {
             title: ev.title.clone(),
+            item: ev.item.clone(),
+            url: ev.url.clone(),
             start: ev.start,
             end: ev.end,
             all_day: ev.all_day,

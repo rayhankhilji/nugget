@@ -1357,6 +1357,9 @@ export interface BriefCardView {
 
 export interface BriefMeetingView {
   title: string;
+  /** The calendar item it comes from. */
+  item?: ItemRef | null;
+  url?: string | null;
   start: string;
   end?: string | null;
   all_day: boolean;

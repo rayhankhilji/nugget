@@ -27,19 +27,28 @@ fn count_ci(hay: &[u8], needle: &[u8]) -> usize {
 
 fn addresses(a: Option<&Address<'_>>) -> Vec<String> {
     let Some(a) = a else { return Vec::new() };
-    a.iter()
-        .take(500)
-        .filter_map(|addr| {
-            let name = addr.name().map(str::trim).filter(|n| !n.is_empty());
-            let email = addr.address().map(str::trim).filter(|e| !e.is_empty());
-            match (name, email) {
-                (Some(n), Some(e)) => Some(format!("{n} <{e}>")),
-                (None, Some(e)) => Some(e.to_owned()),
-                (Some(n), None) => Some(n.to_owned()),
-                (None, None) => None,
-            }
-        })
-        .collect()
+    let mut out = Vec::new();
+    // An unquoted comma in a display name (`Paula Grant, RN <p@x>`) splits it into a bare name
+    // and a mailbox: the bare parts are put back in front of the next mailbox's name.
+    let mut pending: Vec<&str> = Vec::new();
+    for addr in a.iter().take(500) {
+        let name = addr.name().map(str::trim).filter(|n| !n.is_empty());
+        let Some(e) = addr.address().map(str::trim).filter(|e| !e.is_empty()) else {
+            pending.extend(name);
+            continue;
+        };
+        pending.extend(name);
+        out.push(if pending.is_empty() {
+            e.to_owned()
+        } else {
+            format!("{} <{e}>", pending.join(", "))
+        });
+        pending.clear();
+    }
+    if out.is_empty() && !pending.is_empty() {
+        out.push(pending.join(", "));
+    }
+    out
 }
 
 fn text_list(h: &HeaderValue<'_>) -> Vec<String> {

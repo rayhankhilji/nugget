@@ -11,6 +11,7 @@
 
 pub mod actions;
 pub mod brief;
+pub mod calendar;
 pub mod candidate;
 pub mod cards;
 pub mod config;
@@ -374,11 +375,10 @@ impl Proactive {
             card.title.clone()
         };
         let (features, kind) = (card.features.clone(), card.kind);
-        // One accept per card counts; repeated accepts are no-ops.
+        // One accept per card counts; repeated accepts are no-ops. Feedback teaches only the
+        // scoped, decaying, bounded learned layer: the shared model stays at its prior, so
+        // feedback about one sender never moves everyone else's cards (GG4-5).
         if !(fb == Feedback::Accepted && already_accepted) {
-            state
-                .model
-                .update_weighted(&features, fb, model_weight(fb, reason));
             state
                 .learned
                 .record(kind, &features, fb, reason, &title, now);
@@ -570,17 +570,6 @@ impl Drop for ExecutingGuard<'_> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&self.card_id);
-    }
-}
-
-/// How much one piece of feedback moves the shared model's weights: dismissals that say
-/// something about this one card (already handled, wrong info) move them less.
-fn model_weight(fb: Feedback, reason: Option<&DismissReason>) -> f64 {
-    match (fb, reason) {
-        (Feedback::Dismissed, Some(DismissReason::AlreadyHandled)) => 0.5,
-        (Feedback::Dismissed, Some(DismissReason::WrongInfo)) => 0.25,
-        (Feedback::Dismissed, Some(DismissReason::Other(_))) => 0.75,
-        _ => 1.0,
     }
 }
 

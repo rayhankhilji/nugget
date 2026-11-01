@@ -509,7 +509,7 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
     let c = ctx.corpus;
     let horizon = ctx.now + Duration::hours(ctx.cfg.meeting_horizon_hours);
     let mut out = Vec::new();
-    for ev in &c.events {
+    for ev in &c.events_between(ctx.now, horizon) {
         if ev.cancelled || ev.all_day || ev.start <= ctx.now || ev.start > horizon {
             continue;
         }

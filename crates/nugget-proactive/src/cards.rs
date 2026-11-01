@@ -361,6 +361,11 @@ impl ProactiveState {
         for (sender, w) in self.model.take_legacy_senders() {
             self.learned.import_sender_weight(&sender, w, now);
         }
+        // Older versions trained the shared weights on every feedback, unscoped and without
+        // decay; that is dropped (the learned layer keeps the scoped part).
+        if self.model.updates > 0 {
+            self.model.reset_learned();
+        }
     }
 
     /// Rescore every card that is not terminal with the model and the learned layer at `now`.
@@ -504,7 +509,7 @@ fn state_name(s: CardState) -> &'static str {
 impl Metrics {
     pub fn compute(state: &ProactiveState) -> Self {
         let mut m = Metrics {
-            model_updates: state.model.updates,
+            model_updates: state.feedback_log.len() as u64,
             ..Default::default()
         };
         let mut tta = Vec::new();

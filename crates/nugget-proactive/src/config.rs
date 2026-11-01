@@ -1,8 +1,11 @@
 //! Engine configuration.
 
+use jiff::tz::TimeZone;
 use nugget_core::ids::EntityId;
 use serde::{Deserialize, Serialize};
-use time::UtcOffset;
+use time::{Date, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
+
+use crate::calendar::{fixed_zone, offset_at};
 
 /// Mailbox domains shared by unrelated people: two addresses there are not colleagues.
 pub const PUBLIC_MAIL_DOMAINS: &[&str] = &[
@@ -76,6 +79,9 @@ pub struct ProactiveConfig {
     /// The user's UTC offset, for "today" in the brief and for floating calendar times.
     #[serde(with = "offset_serde")]
     pub utc_offset: UtcOffset,
+    /// The user's IANA time zone (`Europe/London`). When set (and known), local wall times
+    /// follow its daylight-saving rules and `utc_offset` is not used.
+    pub timezone: Option<String>,
     /// LLM judge: how many top candidates it may enrich per refresh.
     pub judge_top_k: usize,
     /// LLM judge: whether a `Cloud` provider may be used (never for sensitive candidates).
@@ -104,6 +110,7 @@ impl Default for ProactiveConfig {
             tombstone_days: 90,
             max_inbox: 12,
             utc_offset: UtcOffset::UTC,
+            timezone: None,
             judge_top_k: 8,
             judge_allow_cloud: false,
         }
@@ -111,6 +118,24 @@ impl Default for ProactiveConfig {
 }
 
 impl ProactiveConfig {
+    /// The user's zone: `timezone`, else the fixed `utc_offset`.
+    pub fn zone(&self) -> TimeZone {
+        self.timezone
+            .as_deref()
+            .and_then(|n| TimeZone::get(n).ok())
+            .unwrap_or_else(|| fixed_zone(self.utc_offset))
+    }
+
+    /// `t` in the user's local offset at that instant.
+    pub fn to_local(&self, t: OffsetDateTime) -> OffsetDateTime {
+        t.to_offset(offset_at(&self.zone(), t))
+    }
+
+    /// Local wall time `time` on `date` (the earlier one in a fold, after a gap).
+    pub fn local_at(&self, date: Date, time: Time) -> OffsetDateTime {
+        crate::calendar::wall_time(&self.zone(), PrimitiveDateTime::new(date, time))
+    }
+
     /// Lowercased user addresses.
     pub(crate) fn user_set(&self) -> Vec<String> {
         self.user_addresses

@@ -9,7 +9,7 @@ use nugget_proactive::cards::CardStore;
 use nugget_proactive::{
     Action, ActionRunner, CandidateKind, Card, CardState, CreateEvent, DiffOp, DismissReason,
     ExecOutcome, Executors, LlmJudge, MemCardStore, Proactive, ProactiveConfig, ProactiveState,
-    Reminder, StoreCardStore, judge_allowed,
+    Reminder, ResetScope, Scope, ScoringModel, StoreCardStore, judge_allowed,
 };
 use nugget_store::Store;
 use time::Duration;
@@ -146,44 +146,50 @@ async fn scoring_order_explanations_and_threshold() {
     assert!(p.brief(now()).unwrap().top.is_empty());
 }
 
+/// GG4-5, GG4-8: feedback is scoped. The shared model never moves, cards of other kinds and
+/// senders keep their rank exactly, and a scoped reset restores a card to its no-feedback rank.
 #[tokio::test]
-async fn feedback_moves_weights_and_order() {
+async fn feedback_is_scoped_and_resettable() {
+    let more = "\
+m-boxy-receipt|Box <billing@boxy.io>||Your receipt|30||||Thanks for your purchase: $10.00.
+m-renew-2|Box <billing@boxy.io>||Renewal notice|1||||Your plan will renew on November 4, 2026 for $10.00.";
+    let new_renewal = |p: &Proactive| {
+        p.all_cards()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.evidence[0].item.key.as_str() == "m-renew-2")
+            .unwrap()
+    };
+    // Control: the same mail, no feedback.
+    let (cf, control) = refreshed().await;
+    put_mails(&cf.store, more);
+    control.refresh(now()).await.unwrap();
+    let control_rank = new_renewal(&control).rank;
+
     let (f, p) = refreshed().await;
-    let before = p.model().unwrap();
-    let renewal_rank = card_of(&p, CandidateKind::Renewal).rank;
-    // Dismissing renewals teaches the model the user doesn't want them.
+    let ana_rank = card_of(&p, CandidateKind::UnansweredThread).rank;
     for c in p.all_cards().unwrap() {
         if c.kind == CandidateKind::Renewal {
             p.dismiss(&c.id, DismissReason::NotImportant, now())
                 .unwrap();
         }
     }
-    let ana = card_of(&p, CandidateKind::UnansweredThread);
-    p.accept(&ana.id, now()).unwrap();
-    // A repeated accept is not double-counted.
-    p.accept(&ana.id, now()).unwrap();
-    let after = p.model().unwrap();
-    assert_eq!(after.updates, 3);
-    assert!(after.weights["kind_renewal"] < before.weights["kind_renewal"]);
-    assert!(after.weights["kind_unanswered_thread"] > before.weights["kind_unanswered_thread"]);
-
-    // A new renewal (from a vendor the user pays) now scores lower than the first one did.
-    put_mails(
-        &f.store,
-        "\
-m-boxy-receipt|Box <billing@boxy.io>||Your receipt|30||||Thanks for your purchase: $10.00.
-m-renew-2|Box <billing@boxy.io>||Renewal notice|1||||Your plan will renew on November 4, 2026 for $10.00.",
-    );
+    assert_eq!(p.model().unwrap(), ScoringModel::default());
+    assert_eq!(card_of(&p, CandidateKind::UnansweredThread).rank, ana_rank);
+    put_mails(&f.store, more);
     p.refresh(now()).await.unwrap();
-    let cards = p.all_cards().unwrap();
-    let new = cards
-        .iter()
-        .find(|c| c.kind == CandidateKind::Renewal && c.state == CardState::New)
+    let lowered = new_renewal(&p);
+    assert!(
+        lowered.rank < control_rank,
+        "{} vs {control_rank}",
+        lowered.rank
+    );
+    assert!(lowered.learned.iter().any(|e| e.scope == Scope::Kind));
+    p.reset_learning(&ResetScope::One(Scope::Kind, "renewal".into()), now())
         .unwrap();
-    assert!(new.rank < renewal_rank, "{} vs {renewal_rank}", new.rank);
-    // Persisted with the cards.
-    let again = Proactive::new(f.store.clone(), cfg());
-    assert_eq!(again.model().unwrap(), p.model().unwrap());
+    let restored = new_renewal(&p);
+    assert!(restored.learned.is_empty());
+    assert_eq!(restored.rank, control_rank);
 }
 
 #[tokio::test]

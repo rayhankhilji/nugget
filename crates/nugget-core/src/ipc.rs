@@ -2045,6 +2045,11 @@ pub struct BriefCardView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BriefMeetingView {
     pub title: String,
+    /// The calendar item it comes from.
+    #[serde(default)]
+    pub item: Option<ItemRef>,
+    #[serde(default)]
+    pub url: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub start: time::OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option", default)]
