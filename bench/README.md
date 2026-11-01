@@ -2264,12 +2264,14 @@ rows in the DOM; the privacy ledger at 1,000 rows at 17 ms p95, no long tasks, a
 
 LL1 took II5's open items. Measured locally (GitHub Actions was down): a 4-vCPU dev container
 (Intel Xeon, 16 GB), release builds, seed 42, before and after run back to back on the same
-machine and the same data.
+machine and the same data, on top of integration head `0b1feab5` (DD4's FTS normalisation
+included).
 
 **Ingest writes in batches.** The per-source pipeline prepared and wrote one item at a time, one
 transaction each. It now prepares up to four items at once (bounded by the shared extraction
 slots; results kept in queue order) and, while more work is queued, writes prepared items
-together, up to 64 per transaction (`upsert_items_with_chunks`). A batch is written as soon as
+together, up to 64 per transaction (`upsert_items_with_chunks`), on a blocking thread while it
+prepares the next ones (one write at a time, in order). A batch is written as soon as
 the queue runs dry, it is full, its oldest item waited 250 ms, or any other operation (a delete, a
 checkpoint, a new pass, a power pause) comes next, so order is kept and a lone live change is
 written at once; a failed batch is retried item by item, so a bad item fails alone; an item counts
@@ -2282,12 +2284,16 @@ one is searchable (knowledge extraction runs alongside, as in the app):
 target/release/nugget-bench perf --backend real --perf-phases sync --perf-items 100000 --perf-sizes mail
 ```
 
-| 100,000 files | Before (`e0d44e6`) | After |
+| 100,000 files | Before (`0b1feab5`) | After |
 |---|---|---|
-| `daemon.sync.items_per_s` | 505 | **1,709** (×3.4) |
-| `daemon.sync.wall_s` | 198 | **58.5** |
-| `daemon.sync.freshness_p50_ms` / `p95_ms` (observed → committed) | 112 / 255 | **80 / 211** |
-| `daemon.sync.live.freshness_p50_ms` (file written → searchable, watcher debounce included) | 598 | 601 |
+| `daemon.sync.items_per_s` | 506 | **1,874** (×3.7) |
+| `daemon.sync.wall_s` | 198 | **53.4** |
+| `daemon.sync.freshness_p50_ms` / `p95_ms` (observed → committed) | 131 / 312 | **90** / 449 |
+| `daemon.sync.live.freshness_p50_ms` (file written → searchable, watcher debounce included) | 605 | 596 |
+
+The p95 of the in-pass freshness rises: an item can wait for its batch and for the write before
+it, while the queue empties almost four times faster. (Before the merge, on `e0d44e6` and
+without the overlapped write: 505 → 1,709 items/s.)
 
 **Search tail.** An OR query made FTS5 score every row matching any term, and a word in most
 chunks of a big store (in the bench corpus, words in 100k–520k of 590k chunks) meant ranking most
@@ -2311,13 +2317,13 @@ NUGGET_BENCH_SEARCH_HOME=/tmp/bench-homes target/release/nugget-bench perf --bac
 
 | 500,000 items, text-only, 300 queries | Before | After |
 |---|---|---|
-| `daemon.search.latency.p50_us` | 102,618 | **62,622** |
-| `daemon.search.latency.p95_us` | 375,980 | **123,486** |
+| `daemon.search.latency.p50_us` | 106,268 | **65,486** |
+| `daemon.search.latency.p95_us` | 350,499 | **125,889** |
 | `daemon.search.recall@10` | 0.7076 | 0.7076 |
-| `Store::search_text` (top 80, in process) p50 / p95 | 97 / 339 ms | **61 / 119 ms** |
+| `Store::search_text` (top 80, in process, before the merge) p50 / p95 | 97 / 339 ms | **61 / 119 ms** |
 
-("Before" here is the branch with the ingest and graph changes but not the search change: the
-`e0d44e6` daemon cannot open the new schema.)
+("Before" is this branch's daemon with the pruned plan switched off, on the same seeded store:
+the integration head's daemon cannot open a schema-v15 store.)
 
 **Graph overview top-N.** Store schema v15 keeps per-entity claim and mention counts
 (`entity_stats`, maintained by triggers with `list_entities`' definition, indexed by rank), and
