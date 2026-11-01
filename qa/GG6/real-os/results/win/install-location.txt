@@ -1,0 +1,2 @@
+uninstall entry: HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\Nugget -> C:\Users\runneradmin\AppData\Local\Nugget\uninstall.exe
+app: C:\Users\runneradmin\AppData\Local\Nugget\nugget-desktop.exe

@@ -1,0 +1,5 @@
+ls: /Users/runner/Library/Application Support/dev.nugget.desktop: No such file or directory
+ls: /Users/runner/Library/Application Support/dev.Nugget.Nugget: No such file or directory
+ls: /Users/runner/Library/Caches/dev.Nugget.Nugget: No such file or directory
+ls: /Users/runner/Library/LaunchAgents/*nugget*: No such file or directory
+/Users/runner/Nugget Vault

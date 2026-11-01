@@ -235,6 +235,34 @@ impl ComputerTool {
         }
     }
 
+    /// An explicit `element` that is not on the cached screen: malformed, never seen, gone
+    /// since (stale), or not found when the call was classified. `None` when there is no
+    /// `element` argument or it is on screen.
+    fn off_screen_id(&self, args: &Value) -> Option<Option<ElementId>> {
+        match element_arg(args) {
+            Ok(None) => None,
+            Ok(Some(id)) if self.shared.find(&id).is_some() => None,
+            Ok(Some(id)) => Some(Some(id)),
+            Err(_) => Some(None),
+        }
+    }
+
+    /// `call` acts only on an element the cached snapshot shows and that was on it when the
+    /// call was classified: anything else was never risk-rated, so nothing is done.
+    fn refuse_off_screen(&self, id: &ElementId) -> Option<ToolResult> {
+        let msg = if !self.shared.knows(id) {
+            "is not on screen (stale or unknown id); observe again"
+        } else if self.shared.was_unclassified(id) {
+            "was not on screen when this action was checked (stale or unknown id); observe again"
+        } else {
+            return None;
+        };
+        Some(fail(format!(
+            "element '{}' {msg}. Nothing was done.",
+            safe_id(id.as_str())
+        )))
+    }
+
     /// The target is in a terminal emulator.
     fn in_terminal(&self, found: Option<&Found>) -> bool {
         let extra = &self.shared.config.terminal_apps;
@@ -320,19 +348,18 @@ fn fail(msg: impl AsRef<str>) -> ToolResult {
     r
 }
 
-fn label(found: Option<&Found>, id: Option<&ElementId>) -> Option<String> {
-    match (found, id) {
-        (Some(f), _) => Some(
-            f.node
-                .name
-                .as_deref()
-                .filter(|n| !n.trim().is_empty())
-                .map(|n| truncate(n.trim(), 80))
-                .unwrap_or_else(|| format!("unnamed {} {}", f.node.role.as_str(), f.node.id)),
-        ),
-        (None, Some(id)) => Some(format!("unknown element {}", safe_id(id.as_str()))),
-        (None, None) => None,
-    }
+/// The label of a found element. An element that is not on screen has none: a label made from
+/// the model's own id would read like a real control in a confirmation.
+fn label(found: Option<&Found>) -> Option<String> {
+    let f = found?;
+    Some(
+        f.node
+            .name
+            .as_deref()
+            .filter(|n| !n.trim().is_empty())
+            .map(|n| truncate(n.trim(), 80))
+            .unwrap_or_else(|| format!("unnamed {} {}", f.node.role.as_str(), f.node.id)),
+    )
 }
 
 /// The line describing an acted-on element in a result.
@@ -509,6 +536,9 @@ impl ComputerTool {
             Ok(None) => return fail("`element` is required"),
             Err(e) => return fail(e),
         };
+        if let Some(r) = self.refuse_off_screen(&id) {
+            return r;
+        }
         let found = self.shared.find(&id);
         if let Some(f) = &found
             && f.node.states.disabled
@@ -564,7 +594,7 @@ impl ComputerTool {
         }
         let window = found
             .map(|f| f.window.id.clone())
-            .or_else(|| self.shared.latest_window().map(|w| w.id));
+            .or_else(|| self.shared.keyboard_window().map(|w| w.id));
         let extra = blocking(&self.shared, move |s| {
             Ok(screen::after_action(s, window.as_ref(), target.as_ref()))
         })
@@ -607,6 +637,9 @@ impl ComputerTool {
             Ok(id) => id,
             Err(e) => return fail(e),
         };
+        if let Some(r) = id.as_ref().and_then(|id| self.refuse_off_screen(id)) {
+            return r;
+        }
         let (found, _) = self.target(args);
         if let Some(r) = self.refuse_secure(found.as_ref()) {
             return r;
@@ -647,6 +680,9 @@ impl ComputerTool {
             Ok(id) => id,
             Err(e) => return fail(e),
         };
+        if let Some(r) = id.as_ref().and_then(|id| self.refuse_off_screen(id)) {
+            return r;
+        }
         let (found, _) = self.target(args);
         let keys: Vec<String> = chords.iter().map(ToString::to_string).collect();
         let input = KeyInput::Keys(chords);
@@ -677,6 +713,9 @@ impl ComputerTool {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        if let Some(r) = self.refuse_off_screen(&id) {
+            return r;
+        }
         let found = self.shared.find(&id);
         if let Some(r) = self.refuse_secure(found.as_ref()) {
             return r;
@@ -729,6 +768,9 @@ impl ComputerTool {
             .and_then(Value::as_u64)
             .unwrap_or(3)
             .min(SCROLL_MAX) as u32;
+        if let Some(r) = self.refuse_off_screen(&id) {
+            return r;
+        }
         let found = self.shared.find(&id);
         let action = UiAction::Scroll { direction, amount };
         let act_id = id.clone();
@@ -941,6 +983,21 @@ impl Tool for ComputerTool {
 
     fn risk(&self, args: &Value) -> RiskClass {
         let kw = &self.shared.config.risk_keywords;
+        if matches!(
+            self.kind,
+            Kind::Click | Kind::TypeText | Kind::SetValue | Kind::PressKey
+        ) {
+            if let Ok(Some(id)) = element_arg(args) {
+                self.shared
+                    .note_classified(&id, self.shared.find(&id).is_some());
+            }
+            // An element that is not on the (refreshed) screen is never acted on: `call`
+            // refuses it. Rating it Send would ask the user to approve a control that does not
+            // exist, named by the model's own id.
+            if self.off_screen_id(args).is_some() {
+                return RiskClass::Edit;
+            }
+        }
         match self.kind {
             Kind::Observe | Kind::Scroll | Kind::WaitFor => RiskClass::Observe,
             Kind::Click => {
@@ -984,17 +1041,16 @@ impl Tool for ComputerTool {
 
     fn describe(&self, args: &Value) -> ActionTarget {
         let (found, _) = self.target(args);
-        let explicit = element_arg(args).ok().flatten();
+        let window = match self.kind {
+            Kind::TypeText | Kind::PressKey => self.shared.keyboard_window(),
+            _ => self.shared.latest_window(),
+        };
         let mut target_app = found
             .as_ref()
             .map(|f| f.app.clone())
-            .or_else(|| {
-                self.shared
-                    .latest_window()
-                    .map(|w| crate::state::app_key(w.app.id.as_deref(), &w.app.name))
-            })
+            .or_else(|| window.map(|w| crate::state::app_key(w.app.id.as_deref(), &w.app.name)))
             .unwrap_or_else(|| "computer".into());
-        let mut target_label = label(found.as_ref(), explicit.as_ref());
+        let mut target_label = label(found.as_ref());
         let secret = found.as_ref().is_some_and(|f| is_secret_field(&f.node));
         let preview = |key: &str| {
             args.get(key).and_then(Value::as_str).map(|t| {

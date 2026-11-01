@@ -48,7 +48,8 @@ mod types;
 
 pub use agent::{
     ActionRecord, Agent, AgentConfig, AgentRun, Budgets, FEATURE_AGENT, Model, MutationRecord,
-    PendingAsk, RunState, Task, ToolRate, TriageReport, TriageVerdict, VerificationSummary,
+    PendingAsk, Progress, RunState, TRIAGE_CANCEL, TRIAGE_GO_AHEAD, Task, ToolRate, TriageReport,
+    TriageVerdict, VerificationSummary,
 };
 pub use chained::{AGENT_SOURCE, ChainedLog, agent_entries};
 pub use clarify::{Ambiguity, ambiguity};

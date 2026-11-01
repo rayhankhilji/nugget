@@ -1,0 +1,2 @@
+install_s=5
+window_s=88

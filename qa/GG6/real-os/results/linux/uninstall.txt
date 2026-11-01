@@ -1,0 +1,14 @@
+== apt remove
+After this operation, 107 MB disk space will be freed.
+Removing nugget (0.0.1) ...
+Processing triggers for mailcap (3.70+nmu1ubuntu1.22.04.1) ...
+Processing triggers for hicolor-icon-theme (0.17-2) ...
+== after remove
+ls: cannot access '/home/runner/.local/share/nugget': No such file or directory
+ls: cannot access '/home/runner/.config/nugget': No such file or directory
+ls: cannot access '/home/runner/.cache/nugget': No such file or directory
+ls: cannot access '/home/runner/.config/autostart/*': No such file or directory
+ls: cannot access '/home/runner/.config/systemd/user/nuggetd.service': No such file or directory
+/home/runner/.config/dev.nugget.desktop
+/home/runner/.local/share/dev.nugget.desktop
+/home/runner/Nugget Vault
