@@ -50,8 +50,9 @@ pub struct IngestConfig {
     /// fewer; see `triage_request_ms`). Default 6 000.
     pub triage_batch_chars: usize,
     /// Prompt processing one triage request may take, in ms (instructions included): requests
-    /// carry as much text as the measured prefill rate gets through in this time (between 1 000
-    /// characters and `triage_batch_chars`), and a longer item is labelled in parts. A local
+    /// carry as much text as the measured prefill rate gets through in this time (at least
+    /// 1 000 characters unless that would take more than twice this long, at most
+    /// `triage_batch_chars`), and a longer item is labelled in parts. A local
     /// server cannot stop part-way through a prompt step, so this bounds how long an interactive
     /// request can wait behind triage; shorter requests repeat the fixed instructions more often
     /// and label fewer items per hour. Default 8 000.
