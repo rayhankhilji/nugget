@@ -1,4 +1,4 @@
-// KK2 sources-setup scenario (QA GG6): the real daemon on an empty home and the real onboarding UI.
+// Sources setup regressions (QA GG6): the real daemon on an empty home and the real onboarding UI.
 // - GG6-31: the recommended AI option starts selected; GG6-21: "Decide later" is not a skipped step.
 // - GG6-16: Welcome makes no fixed time promise.
 // - GG6-2: a folder with nothing indexable (only a video and a song) settles within seconds,
@@ -9,19 +9,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
+import { startBridge } from "./bridge.mjs";
 import { FIRST_RUN_CONFIG, startDaemon } from "./daemon.mjs";
-import { check, DIST, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, shot, t, until } from "./harness.mjs";
-
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const exactName = (key) => new RegExp(`^${escapeRe(t(key))}$`);
-const startsWith = (key) => new RegExp(`^${escapeRe(t(key))}`);
+import { check, checkWire, DIST, exactName, expect, INDEX_TIMEOUT_MS, KEEP, newContext, OUT, shot, startsWith, stopDaemon, t, until } from "./harness.mjs";
 
 /** How soon a folder with nothing indexable must say so (GG6-2: it used to spin for ever). */
-const SETTLE_MS = Number(process.env.E2E_EMPTY_SETTLE_MS || 10_000);
+const SETTLE_MS = 10_000;
 
 export async function sourcesSetupScenario({ browser, bin }) {
-  const summary = {};
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "nugget-e2e-sources-"));
   const pics = path.join(scratch, "Pictures");
   const notes = path.join(scratch, "Notes");
@@ -80,7 +75,6 @@ export async function sourcesSetupScenario({ browser, bin }) {
         expect(s1.completed.includes("ai") && !s1.skipped.includes("ai"), `AI step recorded as ${JSON.stringify(s1)}`);
 
         // A folder with only a video and a song settles within seconds and says why.
-        const t0 = Date.now();
         const dialog = await addFolder(pics);
         await dialog.waitFor({ state: "detached" });
         const empty = await until(
@@ -91,20 +85,16 @@ export async function sourcesSetupScenario({ browser, bin }) {
           },
           SETTLE_MS,
         );
-        summary.empty_settled_ms = Date.now() - t0;
         expect(empty.text.startsWith(t("onboarding.source.empty").replace("{name}", "Pictures")), `unexpected text: ${empty.text}`);
         expect(empty.text.includes("song.mp3") || empty.text.includes("clip.mp4"), `skipped files not named: ${empty.text}`);
         expect((await page.locator("#ob-continue-hint").count()) === 1, "Continue would finish the step with nothing indexed");
-        log(`  sources setup: empty folder settled in ${summary.empty_settled_ms} ms: "${empty.text}"`);
-        await shot(page, "sources-setup-empty");
 
         // The same folder again is refused, in plain words.
         const again = await addFolder(pics);
-        const refusal = await until("adding the same folder again is refused", async () => {
+        await until("adding the same folder again is refused", async () => {
           const text = (await again.locator('[role="alert"]').allTextContents()).join(" ");
           return [/already added/i.test(text), text];
         });
-        summary.duplicate_message = refusal;
         await again.getByRole("button", { name: t("common.close") }).first().click();
         await again.waitFor({ state: "detached" });
         expect((await row("Pictures").count()) === 1, "the folder is listed twice");
@@ -152,7 +142,6 @@ export async function sourcesSetupScenario({ browser, bin }) {
           const text = (await panel.textContent()) ?? "";
           return [text.includes(t("search.noAi")), text.slice(-200)];
         });
-        await shot(page, "sources-setup-no-ai");
         await panel.getByRole("button", { name: exactName("search.setUpAi") }).click();
         await page.locator(`main[aria-label="${t("app.nav.models")}"]`).waitFor();
         expect(pageErrors.length === 0, `${pageErrors.length} uncaught page error(s): ${JSON.stringify(pageErrors)}`);
@@ -162,18 +151,13 @@ export async function sourcesSetupScenario({ browser, bin }) {
       }
     });
 
-    await check("sources setup: every daemon command the UI called exists and accepted its params", async () => {
-      // The refused duplicate folder is an invalid-params reply by design (GG6-13).
-      const bad = bridge.calls.filter(
-        (c) => c.via === "daemon" && (c.code === METHOD_NOT_FOUND || (c.code === -32602 && c.cmd !== "sources_add")),
-      );
-      expect(bad.length === 0, `wire mismatches: ${JSON.stringify(bad)}`);
-    });
+    // The refused duplicate folder is an invalid-params reply by design (GG6-13).
+    await checkWire(bridge, "sources setup", (c) => c.cmd === "sources_add" && c.code === -32602);
   } finally {
     await ctx?.close().catch(() => {});
     await bridge?.close().catch(() => {});
-    await daemon.stop({ keep: KEEP });
+    await stopDaemon(daemon, "sources-setup");
     if (!KEEP) fs.rmSync(scratch, { recursive: true, force: true });
   }
-  return summary;
+  return {};
 }

@@ -1,31 +1,18 @@
-// Backup scenario: back up an indexed home through the Status page's "Backup and export"
-// section, export it, wipe the home, and restore the backup into an empty home through the UI.
-//
-// 1. A daemon on a fresh home indexes the corpus. On the Status page the test sets a backup folder
-//    and a passphrase, clicks Back up now and checks that the backup is listed and on disk.
-// 2. Export everything to a temp folder; items.jsonl has one line per indexed item.
-// 3. The daemon is stopped and its home deleted. A new daemon starts on an empty home (no key in
-//    an OS keychain: NUGGET_KEYCHAIN=off, like every scenario), so only the passphrase can open
-//    the backup. Through the UI: set the same folder, Restore…, enter the passphrase. The daemon
-//    stages the restore and exits; the bridge's `start_daemon` (the shell's job) starts it again
-//    on the same home, which applies the restore.
-// 4. Search finds corpus text again and the item count matches the original.
+// Backup: on Status, back up an indexed home with a passphrase and export it; then wipe the home and
+// restore into an empty one (no keychain, so only the passphrase opens it). The daemon exits after
+// staging the restore and the bridge's `start_daemon` restarts it, as the shell does.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
+import { startBridge } from "./bridge.mjs";
 import { addCorpusSource, rpc, startDaemon, waitForKnowledge } from "./daemon.mjs";
-import { check, DIST, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, settle, shot, t, tPattern, until } from "./harness.mjs";
+import { check, checkWire, DIST, exactName, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, shot, t, tPattern, until } from "./harness.mjs";
 
-/** Backups and restores of the small corpus take seconds; leave room for slow CI disks. */
-const BACKUP_TIMEOUT_MS = Number(process.env.E2E_BACKUP_TIMEOUT_MS || 120_000);
+const BACKUP_TIMEOUT_MS = 120_000;
 const PASSPHRASE = "tidewater lantern quarry";
-const ONBOARDED = { version: 1, step: "done", completed: [], skipped: [], ai: null, finished: true };
-/** A query the corpus answers (see run.mjs, pages scenario). */
 const QUERY = "Tidewater budget";
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const exactName = (key) => new RegExp(`^${escapeRe(t(key))}$`);
 
 /** Backup directories (complete ones have a manifest) in `dir`. */
 function backupsOnDisk(dir) {
@@ -44,10 +31,8 @@ export async function backupScenario({ browser, bin }) {
   const exportDir = path.join(work, "export");
   fs.mkdirSync(backupDir);
   fs.mkdirSync(exportDir);
-  const summary = { items: null, backup: null, export: null, restored_items: null, timings: {} };
-  const t0 = Date.now();
+  const summary = {};
 
-  // ---- 1. an indexed home ----
   let daemon = await startDaemon(bin, { stderrPath: path.join(OUT, "backup-nuggetd-1.out.log") });
   log(`backup: daemon home ${daemon.home}`);
   let settled;
@@ -60,7 +45,6 @@ export async function backupScenario({ browser, bin }) {
   }
   const items = settled.status.items;
   summary.items = items;
-  summary.timings.indexed_ms = Date.now() - t0;
   log(`backup: indexed ${items} items`);
 
   // The daemon the bridge talks to; `start_daemon` restarts it on its own home (restore).
@@ -76,7 +60,7 @@ export async function backupScenario({ browser, bin }) {
       readyTimeoutMs: BACKUP_TIMEOUT_MS,
       stderrPath: path.join(OUT, `backup-nuggetd-restart-${restarts.length + 1}.out.log`),
     });
-    restarts.push({ home: daemon.home, at_ms: Date.now() - t0 });
+    restarts.push(daemon.home);
     log(`backup: restarted the daemon on ${daemon.home}`);
     return daemon.socket;
   };
@@ -86,9 +70,7 @@ export async function backupScenario({ browser, bin }) {
   const pageErrors = [];
   try {
     bridge = await startBridge({ socket: daemon.socket, dist: DIST, startDaemon: restart });
-    ctx = await newContext(browser);
-    await ctx.addInitScript(([key, state]) => localStorage.setItem(key, JSON.stringify(state)), ["nugget.onboarding.v1", ONBOARDED]);
-    await ctx.addInitScript(() => localStorage.setItem("nugget.page", "status"));
+    ctx = await newContext(browser, { onboarded: true, page: "status" });
     const page = await ctx.newPage();
     page.on("pageerror", (e) => pageErrors.push(e.message));
     bridge.deliverEvents(page);
@@ -116,9 +98,7 @@ export async function backupScenario({ browser, bin }) {
         await field("backup.passphrase.confirm").fill(PASSPHRASE);
         await section.getByRole("button", { name: new RegExp(`^(${escapeRe(t("backup.passphrase.submit"))}|${escapeRe(t("backup.passphrase.change"))})$`) }).click();
         await section.getByText(t("backup.passphrase.saved"), { exact: true }).waitFor();
-        await shot(page, "backup-configured");
 
-        const tBackup = Date.now();
         await button("backup.now").click();
         const done = tPattern("backup.done");
         await until("Back up now reports a finished backup", async () => {
@@ -127,7 +107,6 @@ export async function backupScenario({ browser, bin }) {
           if (failed.length) throw new Error(`backup failed: ${failed.join(" | ")}`);
           return [texts.some((x) => done.test(x.trim())), texts];
         }, BACKUP_TIMEOUT_MS);
-        summary.timings.backup_ms = Date.now() - tBackup;
         // Setting the passphrase makes the first scheduled backup due at once, so "Back up now"
         // may add a second one; every backup on disk must be listed.
         const onDisk = backupsOnDisk(backupDir);
@@ -139,10 +118,6 @@ export async function backupScenario({ browser, bin }) {
         const manifest = JSON.parse(fs.readFileSync(path.join(onDisk[0], "manifest.json"), "utf8"));
         expect(manifest.format === 1 && manifest.items === items, `manifest ${JSON.stringify(manifest)} should say format 1 and ${items} items`);
         for (const f of ["store.nbk", "key.json"]) expect(fs.existsSync(path.join(onDisk[0], f)), `${f} missing in ${onDisk[0]}`);
-        summary.backup = { path: onDisk[0], manifest };
-        log(`  backup: ${onDisk[0]} (${manifest.items} items) in ${summary.timings.backup_ms} ms`);
-        await settle(page);
-        await shot(page, "backup-done");
       } catch (e) {
         await shot(page, "FAIL-backup");
         throw e;
@@ -170,9 +145,6 @@ export async function backupScenario({ browser, bin }) {
         for (const f of ["graph.json", "audit.csv", "egress.csv", "README.md"]) expect(fs.existsSync(path.join(where, f)), `${f} missing in ${where}`);
         const shown = (await section.locator("dl.stats > div", { has: page.getByText(t("backup.export.count.items"), { exact: true }) }).locator("dd").textContent())?.replace(/[^\d]/g, "");
         expect(Number(shown) === items, `the UI shows ${shown} exported items, expected ${items}`);
-        summary.export = { path: where, items_jsonl_lines: lines.length };
-        log(`  export: ${where} (${lines.length} items)`);
-        await shot(page, "backup-export");
       } catch (e) {
         await shot(page, "FAIL-backup-export");
         throw e;
@@ -205,8 +177,6 @@ export async function backupScenario({ browser, bin }) {
         await dialog.getByRole("heading", { name: t("backup.restore.title"), exact: true }).waitFor();
         await dialog.getByText(t("backup.restore.setAside"), { exact: true }).waitFor();
         await dialog.getByLabel(t("backup.restore.passphrase"), { exact: true }).fill(PASSPHRASE);
-        await shot(page, "backup-restore-dialog");
-        const tRestore = Date.now();
         await dialog.getByRole("button", { name: exactName("backup.restore.confirm") }).click();
 
         const done = tPattern("backup.restore.done");
@@ -218,13 +188,10 @@ export async function backupScenario({ browser, bin }) {
           const texts = await section.locator("[aria-live] p").allTextContents();
           return [texts.some((x) => done.test(x.replace(/\s+/g, " ").trim().replace(closeSuffix, ""))), texts];
         }, BACKUP_TIMEOUT_MS);
-        summary.timings.restore_ms = Date.now() - tRestore;
         expect(restarts.length === 1, `start_daemon restarted the daemon ${restarts.length} times, expected once`);
         const after = await rpc(daemon.socket, "status");
         summary.restored_items = after.items;
         expect(after.items === items, `after the restore the daemon has ${after.items} items, the backup had ${items}`);
-        log(`  restore: ${after.items} items back in ${summary.timings.restore_ms} ms`);
-        await shot(page, "backup-restored");
       } catch (e) {
         await shot(page, "FAIL-backup-restore");
         throw e;
@@ -240,26 +207,18 @@ export async function backupScenario({ browser, bin }) {
         await box.fill(QUERY);
         await box.press("Enter");
         const results = page.locator("ol.results li.result");
-        const titles = await until(`search "${QUERY}" in the UI shows Tidewater results`, async () => {
+        await until(`search "${QUERY}" in the UI shows Tidewater results`, async () => {
           const all = await results.evaluateAll((lis) => lis.map((li) => li.textContent ?? ""));
           return [all.length > 0 && all.some((x) => x.includes("Tidewater")), all.slice(0, 3).map((x) => x.slice(0, 80))];
         });
-        log(`  search after restore: ${JSON.stringify(titles)}`);
-        await shot(page, "backup-search-after-restore");
       } catch (e) {
         await shot(page, "FAIL-backup-search");
         throw e;
       }
     });
 
-    await check("backup: every backup command the UI called exists and accepted its params", async () => {
-      const bad = bridge.calls.filter((c) => c.via === "daemon" && (c.code === METHOD_NOT_FOUND || c.code === -32602));
-      expect(bad.length === 0, `wire mismatches: ${JSON.stringify(bad)}`);
-      expect(pageErrors.length === 0, `uncaught page errors: ${JSON.stringify(pageErrors)}`);
-    });
-
-    summary.restarts = restarts;
-    summary.commands = [...new Set(bridge.calls.map((c) => c.cmd))].sort();
+    await checkWire(bridge, "backup");
+    await check("backup: no uncaught page errors", async () => expect(pageErrors.length === 0, `uncaught page errors: ${JSON.stringify(pageErrors)}`));
     return summary;
   } finally {
     await ctx?.close().catch(() => {});

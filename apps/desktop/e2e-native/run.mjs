@@ -1,20 +1,5 @@
-// The Double Tap overlay, end to end in the real desktop app on a real desktop session.
-//
-// Starts a fake OpenAI-compatible provider on 127.0.0.1, a real nuggetd configured to draft with
-// it, and the real debug build of nugget-desktop. Opens a text field in a native app (the GTK
-// fixture on Linux, Notepad on Windows, TextEdit on macOS), presses the real Double Tap trigger
-// (XTest / SendInput / CGEvent), then checks that:
-//   1. the overlay window (label `doubletap-overlay`, title "Nugget Double Tap") appears, in
-//      the OS window list,
-//   2. it streams the fake provider's draft (the debug-only probe the app writes with
-//      NUGGET_E2E_PROBE shows each view; screenshots show it on screen),
-//   3. pressing Enter in the overlay (its real accept key) inserts the draft into the target
-//      field, read back from the target app itself.
-// Writes screenshots, logs, the probe and a summary (timings) to --out.
-//
+// The Double Tap overlay, end to end in the real desktop app on a real desktop session (README.md).
 //   node apps/desktop/e2e-native/run.mjs --app <nugget-desktop> --nuggetd <nuggetd> --out <dir>
-//
-// See README.md. Node built-ins only.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

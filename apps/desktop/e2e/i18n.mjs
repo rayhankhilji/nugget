@@ -1,63 +1,20 @@
-// Translation layout check (e2e scenario "i18n"): every page of the PAGES registry is opened in a
-// few locales that stress the layout (the en-XA pseudo-locale, about 35% longer than English;
-// German, long words; Japanese, no spaces to wrap at; Arabic, right to left) on the indexed home
-// the "pages" scenario uses. Each page is screenshotted and its labelled elements are measured
-// for text that is cut off or escapes its box. See e2e/README.md.
+// Translation layout: every page in en-XA (pseudo, ~35% longer), German, Japanese and Arabic (RTL),
+// measured for labels that are cut off or escape their box.
 import fs from "node:fs";
 import path from "node:path";
 import { startBridge } from "./bridge.mjs";
-import { check, DIST, expect, log, newContext, OUT, settle, sleep, until } from "./harness.mjs";
+import { check, DIST, expect, newContext, OUT, settle, sleep, until } from "./harness.mjs";
 
-/** Locales to check (E2E_I18N_LOCALES, comma-separated). */
-export const I18N_LOCALES = (process.env.E2E_I18N_LOCALES || "en-XA,de,ja,ar").split(",").map((s) => s.trim()).filter(Boolean);
+const I18N_LOCALES = (process.env.E2E_I18N_LOCALES || "en-XA,de,ja,ar").split(",").map((s) => s.trim()).filter(Boolean);
 
 /** Elements whose text is a label: what a translation must fit into. */
-export const LABELLED = [
-  "button",
-  "a",
-  "[role=button]",
-  "[role=tab]",
-  "[role=menuitem]",
-  "[role=option]",
-  ".nav-item",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "label",
-  "legend",
-  "summary",
-  "th",
-  "select",
-  "dt",
-  "[class*=badge]",
-  "[class*=chip]",
-  "[class*=pill]",
-  "[aria-label]",
-].join(", ");
+export const LABELLED = "button, a, [role=button], [role=tab], [role=menuitem], [role=option], .nav-item, h1, h2, h3, h4, h5, h6, label, legend, summary, th, select, dt, [class*=badge], [class*=chip], [class*=pill], [aria-label]";
 
 /**
- * Where overflow is intended, with the reason. An element inside one of these is not measured.
+ * Where overflow is intended (not measured): the graph's canvas labels, verbatim code, ellipsized
+ * chat history titles and palette labels, screen-reader-only text, form fields.
  */
-export const ALLOW = [
-  // The knowledge graph draws its own labels on a canvas.
-  "canvas",
-  // Code, paths and patterns are shown verbatim; their blocks scroll. (`kbd` is measured: key
-  // names like "Ctrl" are translated.)
-  "pre",
-  "code",
-  // Chat history titles are the user's own questions, cut with an ellipsis (full text on hover).
-  ".chat-history-open",
-  // Command palette labels are cut with an ellipsis by design.
-  ".palette-label",
-  // Screen-reader-only text is clipped to 1px on purpose.
-  ".visually-hidden",
-  // Form fields: their value and placeholder can't be measured as labels.
-  "input",
-  "textarea",
-];
+export const ALLOW = ["canvas", "pre", "code", ".chat-history-open", ".palette-label", ".visually-hidden", "input", "textarea"];
 
 /**
  * Runs in the page. Returns the overflowing elements:
@@ -92,16 +49,7 @@ export function measure({ labelled, allow }) {
   const report = (kind, el, extra = {}) => {
     if (seen.has(el)) return;
     seen.add(el);
-    out.push({
-      kind,
-      path: pathOf(el),
-      text: textOf(el),
-      scrollWidth: el.scrollWidth,
-      clientWidth: el.clientWidth,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      ...extra,
-    });
+    out.push({ kind, path: pathOf(el), text: textOf(el), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, ...extra });
   };
   const clips = (v) => v === "hidden" || v === "clip";
   const isBlock = (s) => !/^inline$|^contents$/.test(s.display);
@@ -151,22 +99,11 @@ export function measure({ labelled, allow }) {
   return out;
 }
 
-/**
- * Run the scenario on an already indexed daemon (`socket`) for every page in `pages`
- * (`[{ id }]`, from the PAGES registry). Returns `{ locales, offenders, timings }` for summary.json.
- */
-export async function i18nScenario({ browser, socket, pages, onboarded }) {
-  const t0 = Date.now();
+export async function i18nScenario({ browser, socket, pages }) {
   const offenders = [];
   const bridge = await startBridge({ socket, dist: DIST });
-  const ctx = await newContext(browser);
+  const ctx = await newContext(browser, { onboarded: true });
   try {
-    await ctx.addInitScript(
-      ([key, state]) => {
-        localStorage.setItem(key, JSON.stringify(state));
-      },
-      ["nugget.onboarding.v1", onboarded],
-    );
     for (const locale of I18N_LOCALES) {
       for (const { id } of pages) {
         await check(`i18n ${locale} ${id}: nothing cut off or overflowing`, async () => {
@@ -212,8 +149,6 @@ export async function i18nScenario({ browser, socket, pages, onboarded }) {
     await ctx.close().catch(() => {});
     await bridge.close().catch(() => {});
   }
-  const ms = Date.now() - t0;
-  log(`i18n: ${I18N_LOCALES.length} locales x ${pages.length} pages in ${(ms / 1000).toFixed(1)}s, ${offenders.length} offender(s)`);
   fs.writeFileSync(path.join(OUT, "i18n-offenders.json"), JSON.stringify(offenders, null, 2));
-  return { locales: I18N_LOCALES, offenders, timings: { browser_ms: ms } };
+  return { locales: I18N_LOCALES, offenders: offenders.length };
 }
