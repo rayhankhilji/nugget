@@ -69,13 +69,16 @@ async fn checkpoint_waits_for_prior_changes_and_a_crash_never_skips_data() {
     h.factory.state("fake-1").script(script.clone());
     h.add("fake-1").await;
 
-    // Item 3 is stuck in embedding; 1 and 2 are applied; the checkpoint behind 3 and 4 is not.
+    // Item 3 is stuck in embedding; 1 and 2 are applied (held back for their batch at most
+    // `BATCH_MAX_WAIT` while 3 prepares); the checkpoint behind 3 and 4 is not.
     eventually("item 3 reaches the embedder", || {
         embedder.embedded().iter().any(|t| t.contains("BLOCK"))
     })
     .await;
-    assert!(h.item("fake-1", "1").is_some());
-    assert!(h.item("fake-1", "2").is_some());
+    eventually("items 1 and 2 are written while 3 is stuck", || {
+        h.item("fake-1", "1").is_some() && h.item("fake-1", "2").is_some()
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(h.item("fake-1", "3").is_none());
     assert!(h.item("fake-1", "4").is_none());
@@ -525,10 +528,11 @@ async fn send_applies_backpressure_when_the_queue_is_full() {
     })
     .await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    // One item in the worker, two in the queue; the connector is parked in `send`.
+    // At most four items being prepared by the worker (it prepares a few ahead), two in the
+    // queue; the connector is parked in `send`.
     let sent = st.sent.load(Ordering::SeqCst);
     assert!(
-        sent <= 3,
+        sent <= 7,
         "send must block when the queue is full (sent {sent})"
     );
     let status = h.ingest.status().await.unwrap();

@@ -525,7 +525,7 @@ pub(crate) async fn search(
 }
 
 /// Poll `f` until it returns `Some`, failing after `timeout` with `what`.
-async fn wait_for<T, F, Fut>(
+pub(crate) async fn wait_for<T, F, Fut>(
     daemon: &mut Daemon,
     timeout: Duration,
     what: &str,

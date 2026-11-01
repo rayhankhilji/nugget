@@ -244,17 +244,23 @@ async fn a_dropped_send_releases_its_queue_depth() {
         Step::Send(text_doc("b", "second", Some("1"))),
         Step::Send(text_doc("c", "third", Some("1"))),
         Step::Send(text_doc("d", "fourth", Some("1"))),
+        Step::Send(text_doc("e", "fifth", Some("1"))),
+        Step::Send(text_doc("f", "sixth", Some("1"))),
+        Step::Send(text_doc("g", "seventh", Some("1"))),
+        Step::Send(text_doc("h", "eighth", Some("1"))),
         Step::Return(json!("done")),
     ]);
     h.add("fake-1").await;
-    // `a` is stuck in the worker, `b` fills the queue, `c` waits in `send`.
+    // `a` is stuck in the worker (with the few it prepares ahead, which wait behind it), the
+    // next fills the queue, the one after waits in `send`.
     eventually("worker blocked", || {
         embedder.embedded().iter().any(|t| t.contains("BLOCK"))
     })
     .await;
     tokio::time::sleep(Duration::from_millis(150)).await;
-    assert_eq!(st.sent.load(Ordering::SeqCst), 2);
-    assert_eq!(h.ingest.status().await.unwrap().queue_depth, 3);
+    let sent = st.sent.load(Ordering::SeqCst);
+    assert!((2..8).contains(&sent), "sent {sent}");
+    assert_eq!(h.ingest.status().await.unwrap().queue_depth, sent as u64 + 1);
 
     // Stopping the source drops the connector's pending `send`.
     h.ingest

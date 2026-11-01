@@ -15,17 +15,29 @@
 //!    the ingest write lock). On failure nothing changes: the previous item and chunks stay
 //!    searchable, and the pass does not commit its cursor (or the item is rejected).
 //!
+//! **Batched writes (LL1).** While more changes are already waiting in the queue (a first sync
+//! or a large pass), prepared upserts are held back and written together, up to
+//! [`BATCH_MAX`] items in one transaction (`upsert_items_with_chunks`): one commit per run
+//! instead of one per item. A batch is written as soon as the queue runs dry, it is full, its
+//! oldest item waited [`BATCH_MAX_WAIT`], or any other operation (a delete, a checkpoint, a new
+//! pass, a problem report, a power pause) comes next, so order is kept and a single live change
+//! is written at once. If the batch transaction fails, its items are written one by one, so a
+//! bad item is rejected (or fails) alone, exactly as without batching. An item counts as
+//! applied (freshness, progress, the queue gauge, triage) only once its write committed.
+//!
 //! `Delete` removes the item. `checkpoint(cursor)` is queued behind every change sent before it,
 //! so the cursor is stored only after they were applied; if any change since the start of the
 //! pass failed to persist, the checkpoint fails instead (the pass is retried from the last good
 //! cursor). Errors on a single item (bad content, extractor failures) never stop the source.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures::StreamExt;
+use futures::stream::FuturesOrdered;
 use nugget_connector::{CancellationToken, Change, ChangeSink, Content, Document};
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
 use nugget_core::ipc::{IngestPhase, IngestProgress, ScanReport};
@@ -168,6 +180,63 @@ impl ChangeSink for PipelineSink {
     }
 }
 
+/// Most upserts written in one batch transaction.
+pub(crate) const BATCH_MAX: usize = 64;
+/// Longest a prepared upsert waits for its batch to fill.
+pub(crate) const BATCH_MAX_WAIT: Duration = Duration::from_millis(250);
+
+/// A prepared upsert waiting for its batch to be written.
+struct PendingWrite {
+    prepared: Prepared,
+    item: ItemRef,
+    version: Option<String>,
+    /// When the pipeline received the change (freshness runs from here).
+    observed: Instant,
+    /// When it joined the pending batch.
+    since: Instant,
+    live_upsert: bool,
+}
+
+/// An upsert that finished preparing.
+pub(crate) struct InFlight {
+    item: ItemRef,
+    version: Option<String>,
+    observed: Instant,
+    live_upsert: bool,
+    result: std::result::Result<Prepared, String>,
+}
+
+type Preparing = std::pin::Pin<Box<dyn std::future::Future<Output = InFlight> + Send>>;
+
+/// Upserts prepared at once per source, at most (their extraction also waits for one of the
+/// shared extraction slots).
+pub(crate) const PREPARE_AHEAD: usize = 4;
+
+/// What is left of a [`PendingWrite`] once its item went to the store.
+struct Written {
+    item: ItemRef,
+    version: Option<String>,
+    observed: Instant,
+    live_upsert: bool,
+    mark: TriageMark,
+}
+
+impl PendingWrite {
+    fn split(self) -> (Prepared, Written) {
+        let mark = self.prepared.triage;
+        (
+            self.prepared,
+            Written {
+                item: self.item,
+                version: self.version,
+                observed: self.observed,
+                live_upsert: self.live_upsert,
+                mark,
+            },
+        )
+    }
+}
+
 enum Outcome {
     Applied,
     Skipped,
@@ -175,8 +244,6 @@ enum Outcome {
     Rejected(String),
     /// Persistence failure: the pass must not commit its cursor.
     Failed(String),
-    /// Cancelled before anything was written.
-    Abandoned,
 }
 
 /// Applies one source's queue in order.
@@ -194,6 +261,14 @@ pub(crate) struct Worker {
     paused: bool,
     /// The last change came from the watcher (no scan total applies to it).
     live: bool,
+    /// Prepared upserts not yet written (see "Batched writes" above), in queue order.
+    pending: Vec<PendingWrite>,
+    /// Upserts being prepared, oldest first (results come out in this order)...
+    inflight: FuturesOrdered<Preparing>,
+    /// ...and their keys and versions, for the version skip.
+    inflight_keys: VecDeque<(ItemKey, Option<String>)>,
+    /// How many upserts may be prepared at once.
+    ahead: usize,
 }
 
 impl Worker {
@@ -203,6 +278,7 @@ impl Worker {
         ctl: Arc<Control>,
         rx: mpsc::Receiver<Op>,
     ) -> Self {
+        let inner_slots = inner.cfg.extraction_slots();
         Self {
             inner,
             source,
@@ -214,23 +290,54 @@ impl Worker {
             last_progress: Instant::now(),
             paused: false,
             live: false,
+            pending: Vec::new(),
+            inflight: FuturesOrdered::new(),
+            inflight_keys: VecDeque::new(),
+            ahead: PREPARE_AHEAD.min(inner_slots).max(1),
         }
     }
 
     pub async fn run(mut self, cancel: CancellationToken) {
         loop {
-            let op = tokio::select! {
+            let deadline = self
+                .pending
+                .first()
+                .map(|p| tokio::time::Instant::from_std(p.since + BATCH_MAX_WAIT));
+            let take = self.inflight.len() < self.ahead;
+            tokio::select! {
                 biased;
                 _ = cancel.cancelled() => break,
-                op = self.rx.recv() => match op {
-                    Some(op) => op,
-                    None => break,
+                Some(done) = self.inflight.next(), if !self.inflight.is_empty() => {
+                    self.prepared(done).await;
+                }
+                op = self.rx.recv(), if take => match op {
+                    Some(op) => self.handle(op, &cancel).await,
+                    None => {
+                        // The source is gone: finish what was received, as before batching.
+                        self.drain(&cancel).await;
+                        break;
+                    }
                 },
-            };
-            self.handle(op, &cancel).await;
+                // A slow preparation never holds back the items before it for long.
+                _ = sleep_until(deadline), if deadline.is_some() => self.flush().await,
+            }
+            // Write the batch once it is full or nothing more is coming right now.
+            if self.pending.len() >= BATCH_MAX
+                || (!self.pending.is_empty() && self.inflight.is_empty() && self.rx.is_empty())
+            {
+                self.flush().await;
+            }
         }
         // Discard what is left: nothing after the last checkpoint is committed, so the next
-        // pass re-sends it. Dropped checkpoint acks resolve to `Cancelled`.
+        // pass re-sends it. Dropped checkpoint acks resolve to `Cancelled`. Upserts being
+        // prepared or waiting for their batch are abandoned like an upsert cancelled while
+        // preparing.
+        for _ in 0..self.pending.len() + self.inflight.len() {
+            self.inner.metrics.dequeued();
+        }
+        self.pending.clear();
+        self.inflight = FuturesOrdered::new();
+        self.inflight_keys.clear();
         self.rx.close();
         while let Ok(op) = self.rx.try_recv() {
             if matches!(op.kind, OpKind::Change(_)) {
@@ -239,7 +346,36 @@ impl Worker {
         }
     }
 
+    /// Finish every upsert in preparation and write the batch. What is already prepared is
+    /// written first: it precedes everything still preparing, which may take long.
+    /// Returns `false` if cancelled first: then upserts may be left unwritten, so nothing
+    /// ordered after them (a checkpoint above all) may be applied.
+    async fn drain(&mut self, cancel: &CancellationToken) -> bool {
+        self.flush().await;
+        loop {
+            let next = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return false,
+                next = self.inflight.next() => next,
+            };
+            match next {
+                Some(done) => self.prepared(done).await,
+                None => break,
+            }
+        }
+        self.flush().await;
+        true
+    }
+
     async fn handle(&mut self, op: Op, cancel: &CancellationToken) {
+        // Anything but an upsert is ordered after the upserts before it: write them first.
+        if !matches!(op.kind, OpKind::Change(Change::Upsert(_))) && !self.drain(cancel).await {
+            // Cancelled: the op is dropped (a checkpoint's ack resolves to `Cancelled`).
+            if matches!(op.kind, OpKind::Change(_)) {
+                self.inner.metrics.dequeued();
+            }
+            return;
+        }
         match op.kind {
             OpKind::BeginPass(ack) => {
                 self.failed = 0;
@@ -266,47 +402,138 @@ impl Worker {
                     self.inner.metrics.dequeued();
                     return;
                 }
-                let key = match &change {
-                    Change::Upsert(d) => d.key.clone(),
-                    Change::Delete(k) => k.clone(),
-                };
-                let outcome = match change {
-                    Change::Upsert(doc) => self.upsert(doc, cancel).await,
-                    Change::Delete(key) => self.delete(key).await,
-                };
-                self.inner.metrics.dequeued();
-                match outcome {
-                    Outcome::Applied => {
-                        if live_upsert {
-                            self.inner.scan_live_change(&self.source).await;
+                match change {
+                    Change::Upsert(doc) => {
+                        let key = doc.key.clone();
+                        if let Some(outcome) = self.upsert(doc, op.observed, live_upsert).await {
+                            self.finish(key, outcome, op.observed, live_upsert).await;
                         }
-                        self.inner.metrics.record_freshness(op.observed.elapsed());
-                        self.done += 1;
-                        self.progress(false);
                     }
-                    Outcome::Skipped => {
-                        self.done += 1;
-                        self.progress(false);
+                    Change::Delete(key) => {
+                        let outcome = self.delete(key.clone()).await;
+                        self.finish(key, outcome, op.observed, live_upsert).await;
                     }
-                    Outcome::Rejected(msg) => {
-                        let msg = cap_error(msg);
-                        tracing::warn!(source = %self.source, key = %key, error = %msg, "item rejected");
-                        self.inner
-                            .record_item_error(&self.source, Some(key), msg.clone());
-                        self.done += 1;
-                        self.progress_error(msg);
-                    }
-                    Outcome::Failed(msg) => {
-                        let msg = cap_error(msg);
-                        tracing::warn!(source = %self.source, key = %key, error = %msg, "item failed to persist");
-                        self.failed += 1;
-                        self.inner
-                            .record_item_error(&self.source, Some(key), msg.clone());
-                        self.progress_error(msg);
-                    }
-                    Outcome::Abandoned => {}
                 }
             }
+        }
+    }
+
+    /// An upsert finished preparing (in queue order): into the batch, or rejected.
+    async fn prepared(&mut self, done: InFlight) {
+        self.inflight_keys.pop_front();
+        match done.result {
+            Ok(prepared) => self.pending.push(PendingWrite {
+                prepared,
+                item: done.item,
+                version: done.version,
+                observed: done.observed,
+                since: Instant::now(),
+                live_upsert: done.live_upsert,
+            }),
+            // A file that changed (or was swapped) since the connector scanned it is skipped,
+            // not stored: nothing is written, so the next pass sees it as new or changed and
+            // resends it.
+            Err(skip) => {
+                self.finish(
+                    done.item.key,
+                    Outcome::Rejected(skip),
+                    done.observed,
+                    done.live_upsert,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Account for one applied (or failed) change.
+    async fn finish(
+        &mut self,
+        key: ItemKey,
+        outcome: Outcome,
+        observed: Instant,
+        live_upsert: bool,
+    ) {
+        self.inner.metrics.dequeued();
+        match outcome {
+            Outcome::Applied => {
+                if live_upsert {
+                    self.inner.scan_live_change(&self.source).await;
+                }
+                self.inner.metrics.record_freshness(observed.elapsed());
+                self.done += 1;
+                self.progress(false);
+            }
+            Outcome::Skipped => {
+                self.done += 1;
+                self.progress(false);
+            }
+            Outcome::Rejected(msg) => {
+                let msg = cap_error(msg);
+                tracing::warn!(source = %self.source, key = %key, error = %msg, "item rejected");
+                self.inner
+                    .record_item_error(&self.source, Some(key), msg.clone());
+                self.done += 1;
+                self.progress_error(msg);
+            }
+            Outcome::Failed(msg) => {
+                let msg = cap_error(msg);
+                tracing::warn!(source = %self.source, key = %key, error = %msg, "item failed to persist");
+                self.failed += 1;
+                self.inner
+                    .record_item_error(&self.source, Some(key), msg.clone());
+                self.progress_error(msg);
+            }
+        }
+    }
+
+    /// Write the pending upserts: in one transaction, or one by one if that fails (so a bad
+    /// item fails alone). Never abandoned half-way.
+    async fn flush(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let (batch, written): (Vec<Prepared>, Vec<Written>) = std::mem::take(&mut self.pending)
+            .into_iter()
+            .map(PendingWrite::split)
+            .unzip();
+        let inner = self.inner.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            let _w = lock(&inner.write_lock);
+            persist_all(&inner.store, batch)
+        })
+        .await;
+        let results: Vec<Result<()>> = match res {
+            Ok(r) => r,
+            // The blocking task panicked: what it wrote is unknown, so every item counts as
+            // failed (the pass does not commit its cursor and re-sends them).
+            Err(e) => {
+                let msg = join_err(e).to_string();
+                written
+                    .iter()
+                    .map(|_| Err(Error::Storage(msg.clone())))
+                    .collect()
+            }
+        };
+        for (w, r) in written.into_iter().zip(results) {
+            let outcome = match r {
+                Ok(()) => {
+                    self.versions
+                        .get_or_insert_with(HashMap::new)
+                        .insert(w.item.key.clone(), w.version);
+                    match w.mark {
+                        TriageMark::Pending => self.inner.triage_enqueue(w.item.clone()),
+                        TriageMark::Skipped => lock(&self.inner.triage).skipped(),
+                        TriageMark::None => {}
+                    }
+                    Outcome::Applied
+                }
+                Err(e @ (Error::Invalid(_) | Error::NotFound(_))) => {
+                    Outcome::Rejected(format!("store rejected item: {e}"))
+                }
+                Err(e) => Outcome::Failed(format!("store: {e}")),
+            };
+            self.finish(w.item.key, outcome, w.observed, w.live_upsert)
+                .await;
         }
     }
 
@@ -321,6 +548,10 @@ impl Worker {
                 return true;
             }
             if !self.paused {
+                // Nothing prepared stays unwritten while paused.
+                if !self.drain(cancel).await {
+                    return false;
+                }
                 self.paused = true;
                 tracing::info!(source = %self.source, "backfill paused: low power");
                 self.inner.set_paused(&self.source, true);
@@ -422,60 +653,77 @@ impl Worker {
         }
     }
 
-    async fn upsert(&mut self, doc: Document, cancel: &CancellationToken) -> Outcome {
-        // 1. Version skip.
-        if let Some(v) = &doc.version {
-            match self.known_version(&doc.key).await {
-                Ok(Some(Some(stored))) if stored == *v => return Outcome::Skipped,
-                Ok(_) => {}
-                Err(e) => return Outcome::Failed(format!("read versions: {e}")),
+    /// Start preparing an upsert (`None`: it joins the batch once prepared), or the outcome
+    /// when it ends here (version skip).
+    async fn upsert(
+        &mut self,
+        doc: Document,
+        observed: Instant,
+        live_upsert: bool,
+    ) -> Option<Outcome> {
+        // 1. Version skip. An upsert of the same key still being prepared or waiting for its
+        //    batch counts as stored (the latest one).
+        let queued = self
+            .inflight_keys
+            .iter()
+            .rev()
+            .find(|(k, _)| *k == doc.key)
+            .map(|(_, v)| v.clone())
+            .or_else(|| {
+                self.pending
+                    .iter()
+                    .rev()
+                    .find(|p| p.item.key == doc.key)
+                    .map(|p| p.version.clone())
+            });
+        let stored = match queued {
+            Some(v) => Some(v),
+            None if doc.version.is_some() || self.versions.is_some() => {
+                match self.known_version(&doc.key).await {
+                    Ok(v) => v,
+                    Err(e) => return Some(Outcome::Failed(format!("read versions: {e}"))),
+                }
             }
+            None => None,
+        };
+        if let (Some(v), Some(Some(stored))) = (&doc.version, &stored)
+            && stored == v
+        {
+            return Some(Outcome::Skipped);
         }
+        // Known not to be stored (versions loaded, key absent, nothing queued): no earlier
+        // triage labels to look up.
+        let maybe_stored = stored.is_some() || self.versions.is_none();
         let item = ItemRef {
             source: self.source.clone(),
             key: doc.key.clone(),
         };
         let version = doc.version.clone();
+        self.inflight_keys
+            .push_back((doc.key.clone(), version.clone()));
 
-        // 2–6. Everything before the store write may be abandoned on cancellation.
-        let new = tokio::select! {
-            biased;
-            _ = cancel.cancelled() => return Outcome::Abandoned,
-            n = prepare(&self.inner, &item, doc) => n,
-        };
-        // A file that changed (or was swapped) since the connector scanned it is skipped, not
-        // stored: nothing is written, so the next pass sees it as new or changed and resends it.
-        let new = match new {
-            Ok(new) => new,
-            Err(skip) => return Outcome::Rejected(skip),
-        };
-
-        // 7. Persist (never abandoned half-way).
-        let mark = new.triage;
+        // 2–6. Prepared alongside the next few upserts (results kept in queue order); dropped
+        //      (abandoned) on cancellation, before anything is written.
         let inner = self.inner.clone();
-        let res = tokio::task::spawn_blocking(move || {
-            let _w = lock(&inner.write_lock);
-            persist(&inner.store, new)
-        })
-        .await;
-        match res {
-            Ok(Ok(())) => {
-                self.versions
-                    .get_or_insert_with(HashMap::new)
-                    .insert(item.key.clone(), version);
-                match mark {
-                    TriageMark::Pending => self.inner.triage_enqueue(item),
-                    TriageMark::Skipped => lock(&self.inner.triage).skipped(),
-                    TriageMark::None => {}
-                }
-                Outcome::Applied
+        self.inflight.push_back(Box::pin(async move {
+            let result = prepare(&inner, &item, doc, maybe_stored).await;
+            InFlight {
+                item,
+                version,
+                observed,
+                live_upsert,
+                result,
             }
-            Ok(Err(e @ (Error::Invalid(_) | Error::NotFound(_)))) => {
-                Outcome::Rejected(format!("store rejected item: {e}"))
-            }
-            Ok(Err(e)) => Outcome::Failed(format!("store: {e}")),
-            Err(e) => Outcome::Failed(format!("store: {}", join_err(e))),
-        }
+        }));
+        None
+    }
+}
+
+/// `sleep_until(d)`, or never without a deadline.
+async fn sleep_until(d: Option<tokio::time::Instant>) {
+    match d {
+        Some(d) => tokio::time::sleep_until(d).await,
+        None => std::future::pending().await,
     }
 }
 
@@ -507,6 +755,7 @@ async fn prepare(
     inner: &Arc<Inner>,
     item: &ItemRef,
     doc: Document,
+    maybe_stored: bool,
 ) -> std::result::Result<Prepared, String> {
     let Document {
         key,
@@ -575,10 +824,11 @@ async fn prepare(
     // With a model, rule hits are triaged too (for the junk label) but stay sensitive whatever
     // it answers (`triage::apply` reads `sensitive_rule`).
     let plan = if can_triage {
-        match earlier_labels(inner, item, &ex.hash).await {
-            Some(prev) => TriagePlan::Reused(prev),
-            None => TriagePlan::Pending,
+        match maybe_stored {
+            true => earlier_labels(inner, item, &ex.hash).await,
+            false => None,
         }
+        .map_or(TriagePlan::Pending, TriagePlan::Reused)
     } else if let Some(rule) = rule {
         TriagePlan::Skipped(rule)
     } else {
@@ -892,30 +1142,86 @@ fn fallback_title(key: &ItemKey) -> String {
         .to_owned()
 }
 
+/// Store an item text-only (with a note) when its vectors' dimension is not `dim`, the
+/// database's: never mix embedding dimensions within a database.
+fn fit_dimension(p: &mut Prepared, dim: Option<usize>) {
+    let Some(dim) = dim else { return };
+    let Some(got) = p
+        .chunks
+        .iter()
+        .find_map(|c| c.embedding.as_ref())
+        .map(Vec::len)
+    else {
+        return;
+    };
+    if got == dim {
+        return;
+    }
+    for c in &mut p.chunks {
+        c.embedding = None;
+    }
+    if let Value::Object(m) = &mut p.item.metadata {
+        m.insert(
+            "embed_error".into(),
+            Value::String(format!(
+                "embedding dimension {got} does not match the index ({dim}); stored text-only"
+            )),
+        );
+        m.remove("embedding_provider");
+    }
+}
+
 /// Write an item with its chunks and version in one transaction: on any error the stored item
 /// and its chunks stay as they were.
 fn persist(store: &Store, mut p: Prepared) -> Result<()> {
-    // Never mix embedding dimensions within a database.
-    if let Some(dim) = store.embedding_dim()?
-        && let Some(first) = p.chunks.iter().find_map(|c| c.embedding.as_ref())
-        && first.len() != dim
-    {
-        let got = first.len();
-        for c in &mut p.chunks {
-            c.embedding = None;
-        }
-        if let Value::Object(m) = &mut p.item.metadata {
-            m.insert(
-                "embed_error".into(),
-                Value::String(format!(
-                    "embedding dimension {got} does not match the index ({dim}); stored text-only"
-                )),
-            );
-            m.remove("embedding_provider");
-        }
-    }
+    fit_dimension(&mut p, store.embedding_dim()?);
     store.upsert_item_with_chunks(&p.item, &p.chunks)?;
     Ok(())
+}
+
+/// Write items in order, each with its chunks and version: all in one transaction, or, if that
+/// fails, each in its own (so one bad item fails alone and the others are written). Each item's
+/// result, in order.
+fn persist_all(store: &Store, mut batch: Vec<Prepared>) -> Vec<Result<()>> {
+    if batch.len() > 1 {
+        // The first vectors written fix the dimension when the database has none yet.
+        let dim = match store.embedding_dim() {
+            Ok(d) => d.or_else(|| {
+                batch
+                    .iter()
+                    .flat_map(|p| &p.chunks)
+                    .find_map(|c| c.embedding.as_ref())
+                    .map(Vec::len)
+            }),
+            Err(e) => {
+                let msg = e.to_string();
+                return batch
+                    .iter()
+                    .map(|_| Err(Error::Storage(msg.clone())))
+                    .collect();
+            }
+        };
+        for p in &mut batch {
+            fit_dimension(p, dim);
+        }
+        let rows: Vec<(NewItem, Vec<NewChunk>)> =
+            batch.into_iter().map(|p| (p.item, p.chunks)).collect();
+        match store.upsert_items_with_chunks(&rows) {
+            Ok(_) => return rows.iter().map(|_| Ok(())).collect(),
+            Err(e) => {
+                tracing::debug!(error = %e, items = rows.len(), "batch write failed; writing items one by one");
+                batch = rows
+                    .into_iter()
+                    .map(|(item, chunks)| Prepared {
+                        item,
+                        chunks,
+                        triage: TriageMark::None,
+                    })
+                    .collect();
+            }
+        }
+    }
+    batch.into_iter().map(|p| persist(store, p)).collect()
 }
 
 #[cfg(test)]
@@ -969,6 +1275,77 @@ mod tests {
         assert!(store.search_text("heron", 10).unwrap().is_empty());
         assert_eq!(store.search_text("kestrel", 10).unwrap().len(), 1);
         assert_eq!(store.embedding_dim().unwrap(), Some(3));
+    }
+
+    fn keyed(key: &str, text: &str, embedding: Option<Vec<f32>>) -> Prepared {
+        let mut p = prepared(text, "1", embedding);
+        p.item.key = key.into();
+        p.item.metadata = json!({});
+        p
+    }
+
+    fn stored(store: &Store, key: &str) -> Option<nugget_store::Item> {
+        store
+            .get_item(&ItemRef {
+                source: SourceId::new("src"),
+                key: ItemKey::new(key),
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn a_batch_is_written_in_one_go_and_a_bad_item_fails_alone() {
+        let store = Store::open_in_memory().unwrap();
+        let ok = persist_all(
+            &store,
+            vec![
+                keyed("a", "alpha heron", Some(vec![0.5; 3])),
+                keyed("b", "bravo heron", None),
+            ],
+        );
+        assert!(ok.iter().all(Result::is_ok), "{ok:?}");
+        assert_eq!(store.search_text("heron", 10).unwrap().len(), 2);
+
+        // A non-finite vector makes the batch transaction fail: the other items are still
+        // written, one by one, and only the bad one reports the store's rejection.
+        let res = persist_all(
+            &store,
+            vec![
+                keyed("c", "charlie kestrel", Some(vec![0.25; 3])),
+                keyed("d", "delta kestrel", Some(vec![f32::NAN; 3])),
+                keyed("e", "echo kestrel", None),
+            ],
+        );
+        assert!(res[0].is_ok() && res[2].is_ok(), "{res:?}");
+        assert!(matches!(res[1], Err(Error::Invalid(_))), "{res:?}");
+        assert!(stored(&store, "c").is_some() && stored(&store, "e").is_some());
+        assert!(stored(&store, "d").is_none());
+        assert_eq!(store.search_text("kestrel", 10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_batch_never_mixes_embedding_dimensions() {
+        let store = Store::open_in_memory().unwrap();
+        // No dimension yet: the first vectors in the batch fix it; others go text-only.
+        let res = persist_all(
+            &store,
+            vec![
+                keyed("a", "alpha", Some(vec![0.5; 3])),
+                keyed("b", "bravo", Some(vec![0.5; 4])),
+            ],
+        );
+        assert!(res.iter().all(Result::is_ok), "{res:?}");
+        assert_eq!(store.embedding_dim().unwrap(), Some(3));
+        let b = stored(&store, "b").unwrap();
+        assert!(
+            b.metadata["embed_error"]
+                .as_str()
+                .unwrap()
+                .contains("dimension 4"),
+            "{}",
+            b.metadata
+        );
+        assert_eq!(store.search_text("bravo", 10).unwrap().len(), 1);
     }
 
     #[test]

@@ -58,6 +58,12 @@ pub enum PerfPhases {
     Store,
     /// Only the `nuggetd` profile (`crate::suites::perf_daemon`).
     Daemon,
+    /// Only a source's first sync through `nuggetd` (`crate::suites::perf_sync`, LL1): not
+    /// part of `all`.
+    Sync,
+    /// Only `search` through `nuggetd` on a seeded store, knowledge extraction off
+    /// (`crate::suites::perf_search`, LL1): not part of `all`.
+    Search,
 }
 
 /// `perf --backend real` options (flattened into the CLI). The II5 scale runs use
@@ -120,8 +126,15 @@ impl Benchmark for PerfBench {
                         PerfPhases::All => "all",
                         PerfPhases::Store => "store",
                         PerfPhases::Daemon => "daemon",
+                        PerfPhases::Sync => "sync",
+                        PerfPhases::Search => "search",
                     },
                 );
+                match phases {
+                    PerfPhases::Sync => return crate::suites::perf_sync::run(ctx),
+                    PerfPhases::Search => return crate::suites::perf_search::run(ctx),
+                    _ => {}
+                }
                 let mut out = Vec::new();
                 if phases != PerfPhases::Daemon {
                     out.extend(crate::suites::scale::run(ctx)?);
