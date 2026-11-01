@@ -1,1 +1,104 @@
-{"items":1200,"first_search_s":{"Willow Lane Practice":5.2,"mood journal":5.3,"Harbour Lettings":5.4,"net pay 3,130.10":5.6,"Kestrel!Moon42":5.7,"amber-otter-1182":5.9},"t_triaged_s":4436.6,"normal_sensitive_rate":0.0,"normal_junk_rate":0.007,"normal_triage_states":{"done":1157,"pending":0,"failed":0,"skipped":0,"unknown":0},"chat_model":"qwen3-4b-q4km","ask_during":[{"query":"When will the bike wheel be ready?","first_token_ms":27090,"total_ms":30115,"correct":true,"asked_at_s":20.9,"answer":"The shop says the wheel will be ready Wednesday afternoon. (ref-00173)"},{"query":"Where is the new noodle place that opened?","first_token_ms":22413,"total_ms":24882,"correct":true,"asked_at_s":51.0,"answer":"The new noodle place that opened is on Garnet Street [9]."},{"query":"What time does the Saturday barbecue start?","first_token_ms":23982,"total_ms":25493,"correct":false,"asked_at_s":75.9,"answer":"I couldn't find that in your items."},{"query":"What are we reading next month in the book club?","first_token_ms":17144,"total_ms":19641,"correct":true,"asked_at_s":101.4,"answer":"The book club is reading a novel about lighthouse keepers next month. This information is from the m"}],"ask_idle":[{"query":"When will the bike wheel be ready?","first_token_ms":15955,"total_ms":17341,"correct":true,"answer":"The shop says the wheel will be ready Wednesday afternoon [10]."},{"query":"Where is the new noodle place that opened?","first_token_ms":13409,"total_ms":14858,"correct":true,"answer":"The new noodle place that opened is on Garnet Street [4]."},{"query":"What time does the Saturday barbecue start?","first_token_ms":15575,"total_ms":16549,"correct":false,"answer":"I couldn't find that in your items."},{"query":"What are we reading next month in the book club?","first_token_ms":12842,"total_ms":15429,"correct":true,"answer":"The book club is reading a novel about lighthouse keepers next month. This information is from the m"}],"rows":[{"lang":"en","class":"sensitive","kind":"health","subject":"Your lab results are ready","sensitive":true,"rule":"health","junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"en","class":"sensitive","kind":"health","subject":"Follow-up after Thursday's session","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"en","class":"sensitive","kind":"financial","subject":"Statement for account ending 4471","sensitive":true,"rule":"financial","junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"en","class":"sensitive","kind":"financial","subject":"Your payslip for September","sensitive":true,"rule":"financial","junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"en","class":"sensitive","kind":"credentials","subject":"Your new login for the tenant portal","sensitive":true,"rule":"credentials","junk":false,"model_sensitive":true,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"en","class":"sensitive","kind":"credentials","subject":"Wi-Fi for the cabin","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"en","class":"sensitive","kind":"legal","subject":"Re: tenancy dispute — next steps","sensitive":true,"rule":"legal","junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"en","class":"sensitive","kind":"legal","subject":"Custody arrangement draft","sensitive":true,"rule":"legal","junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"de","class":"sensitive","kind":"health","subject":"Ihr Termin in der Praxis Dr. Kaya","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"de","class":"sensitive","kind":"health","subject":"Krankmeldung bis Freitag","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"de","class":"sensitive","kind":"financial","subject":"Kontoauszug Oktober","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"de","class":"sensitive","kind":"financial","subject":"Gehaltsabrechnung September","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"de","class":"sensitive","kind":"credentials","subject":"Zugangsdaten für das Mieterportal","sensitive":true,"rule":null,"junk":false,"model_sensitive":true,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"de","class":"sensitive","kind":"legal","subject":"Ihre Klage gegen die Hausverwaltung","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"es","class":"sensitive","kind":"health","subject":"Resultados de su análisis","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"es","class":"sensitive","kind":"financial","subject":"Extracto de su cuenta","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"es","class":"sensitive","kind":"credentials","subject":"Tu contraseña del portal del colegio","sensitive":true,"rule":"credentials","junk":false,"model_sensitive":true,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"es","class":"sensitive","kind":"legal","subject":"Demanda laboral — citación","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"fr","class":"sensitive","kind":"health","subject":"Compte rendu de consultation","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"fr","class":"sensitive","kind":"financial","subject":"Votre relevé de compte","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"fr","class":"sensitive","kind":"credentials","subject":"Vos identifiants pour l'espace client","sensitive":true,"rule":"credentials","junk":false,"model_sensitive":true,"model_junk":false,"triage_state":"done","searchable":true},{"lang":"fr","class":"sensitive","kind":"legal","subject":"Convocation au tribunal","sensitive":false,"rule":null,"junk":false,"model_sensitive":false,"model_junk":false,"triage_state":"done","searchable":true},{"class":"junk","labelled":21,"of":21}]}
+{
+"items": 1200,
+"first_search_s": {
+"Willow Lane Practice": 5.2,
+"mood journal": 5.3,
+"Harbour Lettings": 5.4,
+"net pay 3,130.10": 5.6,
+"Kestrel!Moon42": 5.7,
+"amber-otter-1182": 5.9
+},
+"t_triaged_s": 4436.6,
+"normal_sensitive_rate": 0.0,
+"normal_junk_rate": 0.007,
+"normal_triage_states": {
+"done": 1157,
+"pending": 0,
+"failed": 0,
+"skipped": 0,
+"unknown": 0
+},
+"chat_model": "qwen3-4b-q4km",
+"ask_during": [
+[
+"When will the bike wheel be re",
+27090,
+30115,
+true
+],
+[
+"Where is the new noodle place ",
+22413,
+24882,
+true
+],
+[
+"What time does the Saturday ba",
+23982,
+25493,
+false
+],
+[
+"What are we reading next month",
+17144,
+19641,
+true
+]
+],
+"ask_idle": [
+[
+"When will the bike wheel be re",
+15955,
+17341,
+true
+],
+[
+"Where is the new noodle place ",
+13409,
+14858,
+true
+],
+[
+"What time does the Saturday ba",
+15575,
+16549,
+false
+],
+[
+"What are we reading next month",
+12842,
+15429,
+true
+]
+],
+"sensitive_rows": [
+"lang kind subject | sensitive rule model_sensitive",
+"en health Your lab results are ready | True health False",
+"en health Follow-up after Thursday's session | False None False",
+"en financial Statement for account ending 4471 | True financial False",
+"en financial Your payslip for September | True financial False",
+"en credentials Your new login for the tenant portal | True credentials True",
+"en credentials Wi-Fi for the cabin | False None False",
+"en legal Re: tenancy dispute — next steps | True legal False",
+"en legal Custody arrangement draft | True legal False",
+"de health Ihr Termin in der Praxis Dr. Kaya | False None False",
+"de health Krankmeldung bis Freitag | False None False",
+"de financial Kontoauszug Oktober | False None False",
+"de financial Gehaltsabrechnung September | False None False",
+"de credentials Zugangsdaten für das Mieterportal | True None True",
+"de legal Ihre Klage gegen die Hausverwaltung | False None False",
+"es health Resultados de su análisis | False None False",
+"es financial Extracto de su cuenta | False None False",
+"es credentials Tu contraseña del portal del colegio | True credentials True",
+"es legal Demanda laboral — citación | False None False",
+"fr health Compte rendu de consultation | False None False",
+"fr financial Votre relevé de compte | False None False",
+"fr credentials Vos identifiants pour l'espace client | True credentials True",
+"fr legal Convocation au tribunal | False None False"
+],
+"junk": {
+"class": "junk",
+"labelled": 21,
+"of": 21
+}
+}

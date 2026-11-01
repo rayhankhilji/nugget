@@ -6,7 +6,7 @@ Stdlib only. Usage from a scenario script:
     from nq import Daemon
     with Daemon("/tmp/jj1/home", nuggetd="target/debug/nuggetd") as d:
         print(d.call("status"))
-        src = d.call("sources.add", {"kind": "whatsapp", "name": "WA", "settings": {"path": "/tmp/wa"}})
+        src = d.call("sources.add", {"kind": "whatsapp", "name": "WA", "settings": {"folder": "/tmp/wa"}})
         d.wait_idle()
         print(d.call("search", {"query": "flight", "limit": 10}))
 

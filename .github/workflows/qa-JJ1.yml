@@ -16,9 +16,6 @@ on:
         description: "Comma-separated parts (refine, triage, messaging)"
         default: "refine,triage,messaging"
         type: string
-  push:
-    branches: [qa/wave-ii]
-    paths: ["qa/JJ1/run.env"]
 
 permissions:
   contents: read
@@ -34,7 +31,6 @@ env:
   CARGO_NET_RETRY: "10"
   RUSTUP_MAX_RETRIES: "10"
   CHAT_MODEL: ${{ inputs.chat_model || 'qwen3-4b-q4km' }}
-  # A dispatch's input wins; otherwise qa/JJ1/run.env's PARTS (default: all).
   PARTS_INPUT: ${{ inputs.parts }}
 
 jobs:
@@ -71,7 +67,7 @@ jobs:
           persist-credentials: false
       - name: Skip parts not asked for
         run: |
-          PARTS="$PARTS_INPUT"; [ -z "$PARTS" ] && PARTS=$(sed -n 's/^PARTS=//p' qa/JJ1/run.env 2>/dev/null); PARTS="${PARTS:-refine,triage,messaging}"
+          PARTS="${PARTS_INPUT:-refine,triage,messaging}"
           case ",$PARTS," in *",${{ matrix.part }},"*) ;; *) echo "SKIP=1" >> "$GITHUB_ENV";; esac
       - uses: actions/download-artifact@v4
         if: env.SKIP != '1'
