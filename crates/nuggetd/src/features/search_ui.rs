@@ -449,7 +449,7 @@ fn load_pool(
         let (Some(item), Some(d)) = (metas.remove(&hit.item), dates.get(&hit.item)) else {
             continue;
         };
-        let (at, date_source) = logic::own_date(d, zone);
+        let (at, date_source) = logic::own_date(&logic::zoned_dates(d, &item.metadata), zone);
         let kind = logic::classify_kind(
             &item.metadata,
             item.mime.as_deref(),
@@ -653,7 +653,14 @@ fn build_timeline(
         }
     }
     let dates = store.item_dates(&order)?;
-    let own = |item: &ItemRef| dates.get(item).map(|d| logic::own_date(d, zone));
+    // JJ1-10: an event start in a named zone is dated at its instant (needs the metadata).
+    let metas = store.item_meta(&order)?;
+    let own = |item: &ItemRef| {
+        dates.get(item).map(|d| match metas.get(item) {
+            Some(m) => logic::own_date(&logic::zoned_dates(d, &m.metadata), zone),
+            None => logic::own_date(d, zone),
+        })
+    };
 
     let mut events: Vec<Dated<Pending>> = Vec::new();
     for item in &order {
@@ -868,7 +875,7 @@ fn build_preview(
     let item = store
         .get_item(&p.item)?
         .ok_or_else(|| Error::NotFound(format!("item {}:{}", p.item.source, p.item.key)))?;
-    let (at, date_source) = logic::own_date(&logic::dates_of(&item), zone);
+    let (at, date_source) = logic::own_date(&logic::item_dates_of(&item), zone);
     let full = item.text.as_deref().unwrap_or("");
     let (text, truncated) = logic::cut_chars(full, PREVIEW_CHARS);
     let passage = match p.chunk_id {

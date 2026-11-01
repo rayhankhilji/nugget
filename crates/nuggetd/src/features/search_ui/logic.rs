@@ -248,6 +248,34 @@ pub(crate) fn own_date(d: &ItemDates, zone: &Zone) -> (OffsetDateTime, DateSourc
     (at, source)
 }
 
+/// JJ1-10: an iCalendar start stored as local wall time with its zone beside it
+/// (`extracted.start` `2026-04-15T20:00:00`, `extracted.timezone` `America/New_York`) as the
+/// instant it names (`2026-04-16T00:00:00Z`). Anything else (UTC, an offset, a floating time, a
+/// date, an unknown zone) is left as it is.
+pub(crate) fn zoned_dates(d: &ItemDates, metadata: &Value) -> ItemDates {
+    let mut out = d.clone();
+    let ex = &metadata["extracted"];
+    let (Some(start), Some(tz)) = (ex["start"].as_str(), ex["timezone"].as_str()) else {
+        return out;
+    };
+    if d.event_start.as_deref() != Some(start) || tz.eq_ignore_ascii_case("UTC") {
+        return out;
+    }
+    let instant = start
+        .parse::<jiff::civil::DateTime>()
+        .ok()
+        .filter(|_| start.len() == 19 && start.as_bytes().get(10) == Some(&b'T'))
+        .and_then(|dt| {
+            let zone = jiff::tz::TimeZone::get(tz.trim()).ok()?;
+            dt.to_zoned(zone).ok()
+        })
+        .map(|z| z.timestamp().to_string());
+    if let Some(utc) = instant {
+        out.event_start = Some(utc);
+    }
+    out
+}
+
 /// The [`ItemDates`] of a loaded item (the fields `nugget_retrieve::dates::item_date_of` reads).
 pub(crate) fn dates_of(item: &Item) -> ItemDates {
     let text = |v: &Value| v.as_str().map(str::to_owned);
@@ -261,6 +289,11 @@ pub(crate) fn dates_of(item: &Item) -> ItemDates {
         created_at: item.created_at,
         updated_at: item.updated_at,
     }
+}
+
+/// [`dates_of`], with a zoned event start as its instant ([`zoned_dates`]).
+pub(crate) fn item_dates_of(item: &Item) -> ItemDates {
+    zoned_dates(&dates_of(item), &item.metadata)
 }
 
 /// A fact's date: when it became true, else its earliest evidence, else when it was recorded.
@@ -1215,6 +1248,42 @@ mod tests {
             json!({"sensitive": false, "triage": {"state": "pending"}})
         ));
         assert!(!unsorted(json!({})));
+    }
+
+    #[test]
+    fn zoned_ics_starts_are_their_instant() {
+        // JJ1-10: DTSTART;TZID=America/New_York:20260415T200000 is 00:00 UTC on 16 April.
+        let u = "2026-05-01T00:00:00Z";
+        let d = |start: &str| dates(None, Some(start), None, u);
+        let meta = |start: &str, tz: &str| json!({"extracted": {"start": start, "timezone": tz}});
+        let z = zoned_dates(
+            &d("2026-04-15T20:00:00"),
+            &meta("2026-04-15T20:00:00", "America/New_York"),
+        );
+        assert_eq!(z.event_start.as_deref(), Some("2026-04-16T00:00:00Z"));
+        let berlin = Zone::named("Europe/Berlin").unwrap();
+        assert_eq!(own_date(&z, &berlin).0, dt("2026-04-16T00:00:00Z"));
+        // A user at +02:00 filtering 16 April finds it.
+        let r = day_range("", Some("2026-04-16"), Some("2026-04-16"), &berlin).unwrap();
+        assert!(r.contains(own_date(&z, &berlin).0));
+        // UTC, dates, unknown zones and starts from elsewhere stay as they are.
+        for (start, tz) in [
+            ("2026-04-15T20:00:00Z", "UTC"),
+            ("2026-04-15", "America/New_York"),
+            ("2026-04-15T20:00:00", "Mars/Olympus"),
+        ] {
+            assert_eq!(
+                zoned_dates(&d(start), &meta(start, tz))
+                    .event_start
+                    .as_deref(),
+                Some(start)
+            );
+        }
+        let other = zoned_dates(
+            &d("2026-04-15T20:00:00"),
+            &json!({"start": {"date_time": "x"}}),
+        );
+        assert_eq!(other.event_start.as_deref(), Some("2026-04-15T20:00:00"));
     }
 
     #[test]
