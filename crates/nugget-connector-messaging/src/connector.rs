@@ -31,6 +31,12 @@ pub(crate) enum Found {
     /// Keep every known key starting with this prefix: its export could not be read this time
     /// (being written, corrupt), so its documents must not be deleted. `""` keeps everything.
     Keep(String),
+    /// Something the pass could not read, for the source's health (`ChangeSink::report_problem`).
+    /// It does not keep any keys by itself: send a `Keep` too.
+    Problem {
+        key: String,
+        message: String,
+    },
 }
 
 /// One messaging source: reads its conversations (blocking I/O).
@@ -50,6 +56,7 @@ pub(crate) trait Reader: Send + Sync + 'static {
 enum Emit {
     Doc(Box<Document>),
     Keep(String),
+    Problem(String, String),
 }
 
 pub(crate) struct MessagingConnector {
@@ -98,6 +105,9 @@ impl MessagingConnector {
         let handle = tokio::task::spawn_blocking(move || {
             reader.read(&token, &mut |found| match found {
                 Found::Keep(prefix) => tx.blocking_send(Emit::Keep(prefix)).is_ok(),
+                Found::Problem { key, message } => {
+                    tx.blocking_send(Emit::Problem(key, message)).is_ok()
+                }
                 Found::Conversation(mut conv) => {
                     if conv.is_group && !common.include_groups {
                         return true;
@@ -125,6 +135,10 @@ impl MessagingConnector {
                 Emit::Keep(p) => {
                     keep.push(p);
                     Ok(())
+                }
+                Emit::Problem(key, message) => {
+                    sink.report_problem(nugget_core::ids::ItemKey::new(key), message)
+                        .await
                 }
                 Emit::Doc(doc) => {
                     let key = doc.key.0.clone();

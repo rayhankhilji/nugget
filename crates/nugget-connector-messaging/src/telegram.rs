@@ -672,7 +672,20 @@ impl Reader for TelegramReader {
                 Err(e) => {
                     // Its chats are unknown: keep everything imported so far.
                     tracing::warn!(file = %f.display(), error = %e, "cannot read Telegram export; keeping what was imported");
-                    if !found(Found::Keep(String::new())) {
+                    let rel = f
+                        .strip_prefix(&self.path)
+                        .ok()
+                        .filter(|r| !r.as_os_str().is_empty());
+                    let rel = rel.unwrap_or(&f).to_string_lossy().replace('\\', "/");
+                    let problem = Found::Problem {
+                        key: format!("telegram:{rel}"),
+                        message: format!(
+                            "Couldn't read the Telegram export {rel} ({e}). If Telegram is still \
+                             exporting, this clears once it finishes; otherwise export again in \
+                             JSON format. Anything imported before is kept."
+                        ),
+                    };
+                    if !found(problem) || !found(Found::Keep(String::new())) {
                         return Ok(());
                     }
                 }
