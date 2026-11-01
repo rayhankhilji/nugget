@@ -279,7 +279,7 @@ fn check_outside(paths: &Paths, folder: &Path, vault: Option<&Path>) -> Result<(
 /// The vault directory the daemon would use, if the vault is enabled.
 fn vault_root(paths: &Paths, default_vault: &Path) -> Result<Option<PathBuf>> {
     let config = if paths.config_file().exists() {
-        Config::load_or_create(paths)?.0
+        Config::load_or_create_no_rewrite(paths)?.0
     } else {
         Config::default_local()
     };

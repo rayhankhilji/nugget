@@ -1247,7 +1247,8 @@ fn is_provider_failure(e: &Error) -> bool {
 }
 
 /// How long a stopped install (client gone, shutdown) gets to checkpoint and wind down.
-const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+// Well under the daemon's shutdown grace, so the install's audit row is still written.
+const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 async fn run_install(
     state: Arc<State>,

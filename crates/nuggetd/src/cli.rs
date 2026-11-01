@@ -81,7 +81,7 @@ pub fn format_status(s: &StatusResponse, socket: &str) -> String {
             format!("{} MB free", b / 1_000_000)
         });
         let line = match d.level {
-            DiskLevel::Ok => free,
+            DiskLevel::Ok | DiskLevel::Unknown => free,
             DiskLevel::Low => format!("LOW: {free}"),
             DiskLevel::Full => format!("FULL: {free}; indexing and saving may fail"),
         };

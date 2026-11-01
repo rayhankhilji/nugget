@@ -182,8 +182,8 @@ impl KnowledgeService {
 
     /// The extraction loop. It sleeps until something happens: an ingest commit (watched via
     /// [`Ingest::subscribe_committed`]), a [`wake`](Self::wake), a batch of vault edits, the
-    /// debounce or periodic deadline, or shutdown. Nothing polls, so an idle daemon does not
-    /// wake up here at all.
+    /// debounce or periodic deadline, or shutdown. While an interval is set it also wakes once
+    /// a minute to notice time spent in system sleep (GG6-29); such a wake does nothing else.
     async fn worker(self: Arc<Self>, ingest: Ingest, stop: CancellationToken) {
         let mut committed = ingest.subscribe_committed();
         let mut seen = *committed.borrow_and_update();

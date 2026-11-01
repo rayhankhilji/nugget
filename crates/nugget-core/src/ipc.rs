@@ -163,6 +163,9 @@ pub enum DiskLevel {
     /// Under [`DISK_FULL_BYTES`] free, or a write just failed for lack of space while under
     /// [`DISK_LOW_BYTES`]: indexing and other writes are failing or about to.
     Full,
+    /// A level this build does not know (a newer daemon): show nothing.
+    #[serde(other)]
+    Unknown,
 }
 
 impl DiskStatus {

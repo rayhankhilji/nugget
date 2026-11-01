@@ -115,6 +115,24 @@ async fn http_500_is_retried_briefly_then_reported() {
     );
 }
 
+/// KK1 review: 511 Network Authentication Required is the standard captive-portal answer.
+#[tokio::test]
+async fn http_511_reads_as_a_captive_portal_and_is_not_retried() {
+    let tmp = tempfile::tempdir().unwrap();
+    let st = store(tmp.path(), Arc::default());
+    let srv = TestServer::start().await;
+    let bytes = data(SIZE, 8);
+    let url = srv.add("m", bytes.clone());
+    let m = signed(vec![entry("m", &url, &bytes)]);
+    srv.set_behavior(|_| Action::Status(511));
+    let (log, cb) = progress_log();
+    st.install(&m.models[0], cb).await.unwrap_err();
+    assert_eq!(srv.requests().len(), 1);
+    let p = last(&log);
+    assert_eq!(p.reason, Some(FailReason::CaptivePortal));
+    assert_plain(p.error.as_deref().unwrap());
+}
+
 #[tokio::test]
 async fn http_4xx_is_not_retried() {
     let tmp = tempfile::tempdir().unwrap();
@@ -170,22 +188,58 @@ async fn stall_is_detected_and_keeps_staged_bytes() {
     let bytes = data(SIZE, 5);
     let url = srv.add("m", bytes.clone());
     let m = signed(vec![entry("m", &url, &bytes)]);
-    // Every part sends 2 KiB, then goes silent.
-    srv.set_behavior(|r| match r.range {
-        Some((s, Some(e))) if e > s => Action::StallAfter(2048),
+    // Each part sends 2 KiB, then goes silent; from then on it sends nothing at all.
+    let seen = Mutex::new(HashSet::new());
+    srv.set_behavior(move |r| match r.range {
+        Some((s, Some(e))) if e > s => {
+            if seen.lock().unwrap().insert(e) {
+                Action::StallAfter(2048)
+            } else {
+                Action::StallAfter(0)
+            }
+        }
         _ => Action::Serve,
     });
 
     let (log, cb) = progress_log();
     let t0 = Instant::now();
     st.install(&m.models[0], cb).await.unwrap_err();
-    assert!(t0.elapsed() < Duration::from_secs(3), "{:?}", t0.elapsed());
+    assert!(t0.elapsed() < Duration::from_secs(4), "{:?}", t0.elapsed());
 
     let p = last(&log);
     assert_eq!(p.reason, Some(FailReason::Stalled));
     assert_plain(p.error.as_deref().unwrap());
     assert!(p.done >= 2048, "staged {}", p.done);
     assert_eq!(p.done, st.staged_bytes(&m.models[0]));
+}
+
+/// KK1 review: a brief silence mid-download (Wi-Fi roaming, a congested link) is not a
+/// failure: the part resumes from where it stopped and the download completes.
+#[tokio::test]
+async fn a_brief_stall_mid_download_resumes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let st = store(tmp.path(), Arc::default()).with_download_options(DownloadOptions {
+        stall_timeout: Duration::from_millis(300),
+        ..fast_opts()
+    });
+    let srv = TestServer::start().await;
+    let bytes = data(SIZE, 9);
+    let url = srv.add("m", bytes.clone());
+    let m = signed(vec![entry("m", &url, &bytes)]);
+    // Each part's first request goes silent after 2 KiB; the resumed one is served.
+    let seen = Mutex::new(HashSet::new());
+    srv.set_behavior(move |r| match r.range {
+        Some((s, Some(e))) if e > s => {
+            if seen.lock().unwrap().insert(e) {
+                Action::StallAfter(2048)
+            } else {
+                Action::Serve
+            }
+        }
+        _ => Action::Serve,
+    });
+    let installed = st.install(&m.models[0], |_| {}).await.unwrap();
+    assert_eq!(installed.size, SIZE as u64);
 }
 
 #[tokio::test]

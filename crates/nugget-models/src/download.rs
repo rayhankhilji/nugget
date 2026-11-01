@@ -373,7 +373,10 @@ fn load_state(dir: &Path, entry: &ModelEntry) -> Option<StagingState> {
 }
 
 fn persist_state(dir: &Path, st: &StagingState) -> std::io::Result<()> {
-    let tmp = dir.join(format!("{STATE_FILE}.tmp"));
+    // Unique per write: an aborted install's last checkpoint may race a new one's.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!("{STATE_FILE}.{}.{n}.tmp", std::process::id()));
     std::fs::write(&tmp, serde_json::to_vec(st)?)?;
     std::fs::rename(&tmp, dir.join(STATE_FILE))
 }
@@ -490,15 +493,23 @@ impl FetchErr {
         } else {
             FailReason::Interrupted
         };
+        // reqwest names the URL, which after a redirect may be a signed CDN link: log the host
+        // only.
+        let mut detail = error_chain(e);
+        if let Some(url) = e.url() {
+            detail = detail.replace(url.as_str(), &host_of(url.as_str()));
+        }
         Self {
             reason,
-            ..Self::transient(error_chain(e))
+            ..Self::transient(detail)
         }
     }
-    /// No headers or body bytes for `after`: not retried.
+    /// No headers or body bytes for `after`. Retried within the retry window, which restarts
+    /// on progress: a brief gap mid-download (Wi-Fi roaming, a congested link) resumes, while a
+    /// source that never sends anything fails once the window is used up.
     fn stalled(after: Duration) -> Self {
         Self {
-            retryable: false,
+            retryable: true,
             retry_after: None,
             reason: FailReason::Stalled,
             err: Error::Network(format!("download stalled: no data for {after:?}")),
@@ -531,6 +542,10 @@ impl FetchErr {
     /// transient statuses (5xx, 408, 425) are [`Error::Network`], since the source is temporarily
     /// unreachable; anything else (403, 404, 416, ...) is a permanent [`Error::Other`].
     fn status(url: &str, status: StatusCode, retry_after: Option<Duration>) -> Self {
+        // 511 Network Authentication Required: the standard captive-portal answer.
+        if status == StatusCode::NETWORK_AUTHENTICATION_REQUIRED {
+            return Self::portal(format!("HTTP 511 from {}", host_of(url)));
+        }
         let retryable = status.is_server_error() || matches!(status.as_u16(), 408 | 425 | 429);
         let msg = format!("download failed: HTTP {status} from {}", host_of(url));
         let err = if status == StatusCode::TOO_MANY_REQUESTS {

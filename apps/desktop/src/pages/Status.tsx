@@ -193,7 +193,8 @@ export function StatusPage() {
 /** KK1: a full or nearly full data disk (GG6-25), in plain words; nothing when there is room. */
 function DiskNote({ disk }: { disk: DiskStatus | null | undefined }) {
   const t = useT();
-  if (!disk || disk.level === "ok") return null;
+  // Unknown levels (a newer daemon) show nothing rather than a false alarm.
+  if (!disk || (disk.level !== "low" && disk.level !== "full")) return null;
   const free = disk.free_bytes != null ? formatBytes(disk.free_bytes) : null;
   if (disk.level === "low") {
     return (

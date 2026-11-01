@@ -467,6 +467,17 @@ impl Config {
     /// Read `path`, or write [`DEFAULT_CONFIG`] there first if it does not exist. Returns the
     /// config and whether it was just created. Errors name the file.
     pub fn load_or_create_at(path: &Path) -> Result<(Self, bool)> {
+        Self::load_at(path, true)
+    }
+
+    /// [`Config::load_or_create_at`], but an old default provider to migrate is only dropped in
+    /// memory, never rewritten in the file: for one-shot commands that run beside the daemon
+    /// (backup, restore), which must not race its own config writes.
+    pub fn load_or_create_no_rewrite(paths: &Paths) -> Result<(Self, bool)> {
+        Self::load_at(&paths.config_file(), false)
+    }
+
+    fn load_at(path: &Path, rewrite: bool) -> Result<(Self, bool)> {
         let created = match std::fs::read_to_string(path) {
             Ok(_) => false,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -485,7 +496,7 @@ impl Config {
         let (text, skip) = if created {
             (text, None)
         } else {
-            migrate_file(path, text)
+            migrate_file(path, text, rewrite)
         };
         let mut cfg = Self::parse(&text).map_err(|e| {
             Error::Invalid(format!("invalid config {}: {}", path.display(), msg(e)))
@@ -516,6 +527,10 @@ model = "qwen3:4b"
 tiers = ["triage", "light", "synthesis"]
 "#;
 
+/// In every config written by builds whose default comments the Ollama example out; never in
+/// the files of the builds that enabled it.
+const CURRENT_DEFAULT_MARKER: &str = "# --- On-device: Ollama (uncomment to use)";
+
 /// Written above the commented-out block by [`migrate_old_default_provider`].
 const MIGRATION_NOTE: [&str; 2] = [
     "# Turned off by Nugget: earlier versions enabled this example Ollama provider by default.",
@@ -538,6 +553,12 @@ enum Migration {
 /// added) and comment it out. Any provider the user added or edited is left alone. Idempotent:
 /// a migrated file has no such block left.
 fn migrate_old_default_provider(text: &str) -> Migration {
+    // One shot: a file this migration already touched, or one written by a build whose default
+    // only offers the block commented out, keeps an enabled block on purpose (the user turned
+    // it on, as the note above it says).
+    if text.contains(MIGRATION_NOTE[0]) || text.contains(CURRENT_DEFAULT_MARKER) {
+        return Migration::Unchanged;
+    }
     let Some(idx) = old_default_index(text) else {
         return Migration::Unchanged;
     };
@@ -619,8 +640,17 @@ fn comment_out_provider(text: &str, count: usize, idx: usize) -> Option<String> 
 /// Apply [`migrate_old_default_provider`] to the config file at `path` whose contents are `text`.
 /// Returns the text to parse and, when the file could not be rewritten, the index of the
 /// provider to drop in memory.
-fn migrate_file(path: &Path, text: String) -> (String, Option<usize>) {
-    match migrate_old_default_provider(&text) {
+fn migrate_file(path: &Path, text: String, rewrite: bool) -> (String, Option<usize>) {
+    // A symlinked config (dotfile managers) would be replaced by a plain file: leave it alone.
+    let symlink = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    let migration = match migrate_old_default_provider(&text) {
+        Migration::Rewritten(_) if symlink || !rewrite => match old_default_index(&text) {
+            Some(i) => Migration::SkipInMemory(i),
+            None => Migration::Unchanged,
+        },
+        m => m,
+    };
+    match migration {
         Migration::Unchanged => (text, None),
         Migration::Rewritten(new) => match write_replacing(path, new.as_bytes()) {
             Ok(()) => {
@@ -1010,7 +1040,13 @@ mod tests {
         let commented = "# [[providers]]\n# id = \"local\"\n# kind = \"openai_compatible\"\n# base_url = \"http://127.0.0.1:11434/v1\"\n# model = \"qwen3:4b\"\n# tiers = [\"triage\", \"light\", \"synthesis\"]\n";
         assert!(DEFAULT_CONFIG.contains(commented));
         let enabled = commented.replace("# ", "");
-        DEFAULT_CONFIG.replacen(commented, &enabled, 1)
+        // Earlier builds' header for the block, without "(uncomment to use)".
+        assert!(DEFAULT_CONFIG.contains(CURRENT_DEFAULT_MARKER));
+        DEFAULT_CONFIG.replacen(commented, &enabled, 1).replacen(
+            CURRENT_DEFAULT_MARKER,
+            "# --- On-device: Ollama",
+            1,
+        )
     }
 
     #[test]
@@ -1036,6 +1072,59 @@ mod tests {
         assert_eq!(
             migrate_old_default_provider(DEFAULT_CONFIG),
             Migration::Unchanged
+        );
+    }
+
+    /// KK1 review: the migration is one shot. A block the user turned back on (after the note,
+    /// or in a config from a build whose default only offers it commented out) stays on.
+    #[test]
+    fn a_block_the_user_turned_back_on_stays_on() {
+        let Migration::Rewritten(migrated) = migrate_old_default_provider(&old_default_config())
+        else {
+            panic!("not migrated");
+        };
+        let commented = "# [[providers]]\n# id = \"local\"\n# kind = \"openai_compatible\"\n# base_url = \"http://127.0.0.1:11434/v1\"\n# model = \"qwen3:4b\"\n# tiers = [\"triage\", \"light\", \"synthesis\"]\n";
+        let enabled = commented.replace("# ", "");
+        // The user follows the note and turns the migrated block back on.
+        let turned_on = migrated.replacen(commented, &enabled, 1);
+        assert!(turned_on.contains(MIGRATION_NOTE[0]));
+        assert_eq!(Config::parse(&turned_on).unwrap().providers.len(), 1);
+        assert_eq!(
+            migrate_old_default_provider(&turned_on),
+            Migration::Unchanged
+        );
+
+        let current = DEFAULT_CONFIG.replacen(commented, &enabled, 1);
+        assert_ne!(
+            current, DEFAULT_CONFIG,
+            "the current default still has the example"
+        );
+        assert_eq!(Config::parse(&current).unwrap().providers.len(), 1);
+        assert_eq!(migrate_old_default_provider(&current), Migration::Unchanged);
+    }
+
+    /// KK1 review: a symlinked config is never replaced by a plain file; the old default is
+    /// only ignored in memory.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_config_is_not_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.toml");
+        let link = dir.path().join("config.toml");
+        std::fs::write(&real, old_default_config()).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let (cfg, created) = Config::load_or_create_at(&link).unwrap();
+        assert!(!created);
+        assert!(cfg.providers.iter().all(|p| p.id.as_str() != "local"));
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&real).unwrap(),
+            old_default_config()
         );
     }
 
