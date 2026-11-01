@@ -63,3 +63,35 @@ python3 qa/HH2/compare.py /tmp/hh2/out /tmp/hh2/out   # (normally: before dir, a
 
 `--models-cache DIR` shares one model store between runs. Before the daemon starts, the
 contents of DIR are moved into `<home>/data/models`, and they are moved back when it stops.
+
+## GG6-1 re-check: onboarding's First source step (`hh2-gg6.yml`)
+
+QA GG6 (`docs/qa/GG6.md` on `qa/first-week`, GG6-1) found that with the recommended 4B installed,
+onboarding's "First source" step (the 24-file corpus in `qa/GG6/real-os/corpus`) took 474 s on
+Linux before "Search works now". `.github/workflows/hh2-gg6.yml` (workflow_dispatch only) reruns
+GG6's own harness, `qa/GG6/real-os/run-bridge.mjs`, before and after on one `ubuntu-22.04` runner.
+The harness is extracted at run time from QA commit `e1eb203` with `git archive`, and it is not
+copied into this branch.
+
+- **Builds:** `nuggetd --release` (with the dev manifest key trusted, as release dry runs are) is
+  built twice. BEFORE comes from a `git worktree` of `before_ref` (default `ea3f86c`, the
+  integration commit GG6 re-checked) with its own `--target-dir`. AFTER comes from the pushed
+  head. The job fails if the two binaries are identical. The frontend (`pnpm build`) and
+  Playwright are installed in both trees. The harness is placed at `<tree>/qa/GG6/real-os` in
+  each, so every run uses the `apps/desktop/dist`, `e2e/bridge.mjs` and `en.json` of its own
+  commit.
+- **Runs:** BEFORE, then AFTER, each with a fresh Nugget home and a real model download. The
+  model is downloaded twice because pre-seeding it would skip GG6's Install click. With
+  `soak_minutes` = 0 (the default), each run uses `--days none`: onboarding (On this device,
+  install the recommended model, add the corpus folder and wait for Search works now,
+  Permissions, Double Tap, Done), the first search and day 1's 10 chat questions. A value above
+  0 also runs GG6's days 2–7 with that soak. `index_timeout_min` (default 30) raises the source
+  step's timeout in the extracted `journey.mjs` (GG6's own value is 10). Any model server left
+  running is killed between the two runs.
+- **Result:** `gg6_compare.py BEFORE_OUT AFTER_OUT [--hardware F] [--labels B A] [--out F]`
+  writes the table to the job summary. The headline is **Time to First source done**: GG6's
+  `results.json` → `steps[]` entry `source_searchable`, `took_ms` (from the folder dialog
+  closing to the step's row reaching `data-phase="ready"`, "N items indexed. Search works
+  now."). The table also gives the item count from that text (or the last text seen, on a
+  timeout), GG6's other onboarding steps, the day 1 chat timings, failed checks and the CPU from
+  `lscpu`. Everything is uploaded as `hh2-gg6-<run id>`.

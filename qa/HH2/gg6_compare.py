@@ -101,8 +101,10 @@ def cpu(hardware, runs):
     if hardware and os.path.isfile(hardware):
         with open(hardware, encoding="utf-8", errors="replace") as f:
             for line in f:
-                if re.match(r"\s*(Model name|CPU\(s\)|Mem):", line):
+                if re.match(r"\s*(Model name|CPU\(s\)):", line):
                     lines.append(" ".join(line.split()))
+                elif line.startswith("Mem:") and len(line.split()) > 1:
+                    lines.append(f"RAM: {line.split()[1]} GB (free -g total)")
     if not lines:
         for r in runs:
             if r:
