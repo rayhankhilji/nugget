@@ -53,6 +53,14 @@ async fn mock_provider() -> MockServer {
         .with_priority(1)
         .mount(&server)
         .await;
+    Mock::given(http_method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+            "text/event-stream",
+        ))
+        .mount(&server)
+        .await;
     Mock::given(http_method("GET"))
         .and(path("/v1/models"))
         .respond_with(ResponseTemplate::new(401).set_body_json(json!({"error": "invalid key"})))
@@ -230,6 +238,43 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
         config
     );
     assert!(provider_ids(&client).await.contains(&"custom".to_owned()));
+    // A routed chat now reaches the provider with the new key.
+    call(
+        &client,
+        method::CHAT,
+        json!({"provider": "custom", "tier": "light", "messages": [{"role": "user", "text": "hi"}], "items": []}),
+    )
+    .await
+    .unwrap();
+    let deadline = std::time::Instant::now() + WAIT;
+    let chat_auth = loop {
+        let reqs = provider.received_requests().await.unwrap_or_default();
+        if let Some(r) = reqs.iter().find(|r| r.url.path() == "/v1/chat/completions") {
+            break r
+                .headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no chat request reached the provider"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(
+        chat_auth.as_deref(),
+        Some(format!("Bearer {ROTATED}").as_str())
+    );
+    // Nugget's own names are refused.
+    let mut local = good.clone();
+    local["name"] = json!("local-chat");
+    let r = call(&client, "ai.key.save", local).await.unwrap();
+    assert_eq!(
+        (r["saved"].clone(), r["reason"].clone()),
+        (json!(false), json!("reserved")),
+        "{r}"
+    );
     // Unknown ids are refused.
     let r = call(
         &client,
@@ -253,7 +298,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
         "ai.key.save",
         json!({
             "name": "from-env", "kind": "openai_compatible", "base_url": base,
-            "key_ref": "env:NUGGET_TEST_SURELY_UNSET_VARIABLE_7F3A", "model": "e2e-model",
+            "key_ref": "env:NUGGET_TEST_SURELY_UNSET_7F3A_KEY", "model": "e2e-model",
         }),
     )
     .await
@@ -261,6 +306,30 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     assert_eq!(
         (r["saved"].clone(), r["reason"].clone()),
         (json!(false), json!("env_missing"))
+    );
+    // Any other variable of the daemon (PATH is always set) is not read, and the answer is the
+    // same as for a missing one, so nothing reveals which variables exist.
+    let other = call(
+        &client,
+        "ai.key.test",
+        json!({"kind": "openai_compatible", "base_url": base, "key_ref": "env:PATH"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(other["reason"], "env_missing", "{other}");
+    let missing = call(
+        &client,
+        "ai.key.test",
+        json!({"kind": "openai_compatible", "base_url": base, "key_ref": "env:NUGGET_TEST_SURELY_UNSET_7F3A_KEY"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        other["message"].as_str().unwrap().replace("PATH", "VAR"),
+        missing["message"]
+            .as_str()
+            .unwrap()
+            .replace("NUGGET_TEST_SURELY_UNSET_7F3A_KEY", "VAR")
     );
     let err = call(
         &client,

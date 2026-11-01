@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { aiKeysApi, api, errorMessage, events, isMethodNotFound, type FitReport, type ModelFit, type ModelInfo, type ModelProgress, type SavedKeyProvider } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
@@ -225,13 +225,24 @@ export function YourProviders() {
   const [replacing, setReplacing] = useState<SavedKeyProvider | null>(null);
   const [removing, setRemoving] = useState<SavedKeyProvider | null>(null);
   const [notice, setNotice] = useState("");
+  // After a removal the card (and the button that opened the dialog) is gone: focus the heading.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [focusHeading, setFocusHeading] = useState(false);
+  useEffect(() => {
+    if (focusHeading) {
+      heading.current?.focus();
+      setFocusHeading(false);
+    }
+  }, [focusHeading, saved.data]);
   const list = saved.data ?? [];
   // An older daemon cannot list or change saved keys.
   if (isMethodNotFound(saved.error)) return null;
 
   return (
     <section className="models-group" aria-labelledby={titleId}>
-      <h2 id={titleId}>{t("models.providers.title")}</h2>
+      <h2 id={titleId} ref={heading} tabIndex={-1}>
+        {t("models.providers.title")}
+      </h2>
       <p className="muted small">{t("models.providers.hint")}</p>
       <ErrorNote error={saved.error} onRetry={saved.reload} />
       {saved.data && list.length === 0 && <p className="muted">{t("models.providers.empty")}</p>}
@@ -274,6 +285,7 @@ export function YourProviders() {
           onRemoved={() => {
             setNotice(t("models.providers.removed", { name: removing.id }));
             setRemoving(null);
+            setFocusHeading(true);
             saved.reload();
           }}
         />

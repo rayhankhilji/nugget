@@ -408,7 +408,10 @@ impl AiKeys {
         }) {
             return Ok(KeySaveResult::fail(
                 Reason::Reserved,
-                format!("Nugget uses the name \"{}\" for its own models. Pick another name.", req.name),
+                format!(
+                    "Nugget uses the name \"{}\" for its own models. Pick another name.",
+                    req.name
+                ),
             ));
         }
         let key = match spec.read(&*self.env, None) {
@@ -1629,7 +1632,12 @@ fn edit_provider_text(text: &str, name: &str, edits: &[(&str, Option<String>)]) 
     if !body.ends_with('\n') {
         new_body.pop();
     }
-    let out = format!("{}{}{}", &text[..span.start], new_body, &text[span.keys_end..]);
+    let out = format!(
+        "{}{}{}",
+        &text[..span.start],
+        new_body,
+        &text[span.keys_end..]
+    );
     same_doc(&out, &expected_doc(text, name, Some(edits))?).then_some(out)
 }
 
@@ -1919,14 +1927,23 @@ mod tests {
         // Reading: an allowed, set variable is the key. Unset, empty or not allowed (any other
         // secret of the daemon's environment) all get the same answer, so nothing can be probed.
         let env = |v: &str| match v {
-            "NUGGET_SET_KEY" | "OPENAI_API_KEY" | "AWS_SECRET_ACCESS_KEY" | "GITHUB_TOKEN"
-            | "NUGGET_MCP_TOKEN" | "NUGGET_PLUGIN_SIGNING_KEY" | "NUGGET_RUNTIME_API_KEY_CHAT"
+            "NUGGET_SET_KEY"
+            | "OPENAI_API_KEY"
+            | "AWS_SECRET_ACCESS_KEY"
+            | "GITHUB_TOKEN"
+            | "NUGGET_MCP_TOKEN"
+            | "NUGGET_PLUGIN_SIGNING_KEY"
+            | "NUGGET_RUNTIME_API_KEY_CHAT"
             | "WORK_KEY" => Some(GOOD.to_owned()),
             "NUGGET_EMPTY_KEY" => Some("  ".to_owned()),
             _ => None,
         };
         for v in ["NUGGET_SET_KEY", "OPENAI_API_KEY"] {
-            assert_eq!(KeySpec::Env(v.into()).read(&env, None).unwrap(), GOOD, "{v}");
+            assert_eq!(
+                KeySpec::Env(v.into()).read(&env, None).unwrap(),
+                GOOD,
+                "{v}"
+            );
         }
         let generic = |v: &str| {
             KeySpec::Env(v.into())
@@ -2221,9 +2238,9 @@ api_key = "env:NUGGET_A_KEY"
 tiers = ["light"]
 # a note with """ in it
 [providers.headers]
-api_key = "not-the-key-line"
+api_key = "env:NUGGET_HDR_KEY"
 
-[server]
+[draft]
 note = """
 [[providers]]
 """
@@ -2236,36 +2253,36 @@ model = "m"
 api_key = "keychain:a"   # '''
 "#;
         Config::parse(text).unwrap();
-        // Removing "a" takes its headers sub-table and leaves [server] (and its multi-line
+        // Removing "a" takes its headers sub-table and leaves [draft] (and its multi-line
         // string that looks like a table) alone.
         let out = remove_provider_text(text, "a").unwrap();
         assert!(
-            out.contains("[server]\nnote = \"\"\"\n[[providers]]\n\"\"\"\n"),
+            out.contains("[draft]\nnote = \"\"\"\n[[providers]]\n\"\"\"\n"),
             "{out}"
         );
         assert!(!out.contains("[providers.headers]"), "{out}");
         let doc: toml::Table = toml::from_str(&out).unwrap();
         assert_eq!(doc["providers"].as_array().unwrap().len(), 1);
-        assert!(doc.contains_key("server"));
+        assert!(doc.contains_key("draft"));
         // Editing "a" changes its own api_key, not the header of that name.
         let out = edit_provider_text(text, "a", &[("api_key", Some("keychain:a".into()))]).unwrap();
         assert!(out.contains("api_key = \"keychain:a\"\ntiers"), "{out}");
-        assert!(out.contains("api_key = \"not-the-key-line\""), "{out}");
+        assert!(out.contains("api_key = \"env:NUGGET_HDR_KEY\""), "{out}");
         assert!(remove_provider_text(&out, "b").is_some());
 
         // A comment with """ right before a table no longer swallows the table after it.
         let tricky = text.replace(
-            "[providers.headers]\napi_key = \"not-the-key-line\"\n",
+            "[providers.headers]\napi_key = \"env:NUGGET_HDR_KEY\"\n",
             "",
         );
         let out = remove_provider_text(&tricky, "a").unwrap();
         assert_eq!(
-            toml::from_str::<toml::Table>(&out).unwrap()["server"],
-            toml::from_str::<toml::Table>(&tricky).unwrap()["server"]
+            toml::from_str::<toml::Table>(&out).unwrap()["draft"],
+            toml::from_str::<toml::Table>(&tricky).unwrap()["draft"]
         );
         // The comment right before the next table belongs to it and stays.
         assert!(
-            out.starts_with("[runtime]\nenabled = false\n\n# a note with \"\"\" in it\n\n[server]"),
+            out.starts_with("[runtime]\nenabled = false\n\n# a note with \"\"\" in it\n\n[draft]"),
             "{out}"
         );
     }

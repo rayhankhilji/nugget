@@ -82,6 +82,9 @@ describe("Your providers (Models page)", () => {
     await click(byText(document.querySelector("dialog")!, "button", "Remove"));
     expect(removed).toEqual([{ name: "custom" }]);
     expect(document.querySelector("dialog")).toBeNull();
+    // The card that opened the dialog is gone; focus goes to the section heading.
+    expect(document.activeElement?.tagName).toBe("H2");
+    expect(document.activeElement?.textContent).toBe("Your providers");
     expect(container.querySelector('[role="status"]')?.textContent).toBe("custom was removed.");
     expect(container.querySelectorAll('ul[aria-label="Your providers"] li')).toHaveLength(1);
   });
@@ -102,6 +105,7 @@ describe("Your providers (Models page)", () => {
     const label = byText(dialog, "label", "API key") as HTMLLabelElement;
     const input = document.getElementById(label.htmlFor) as HTMLInputElement;
     expect(input.type).toBe("password");
+    expect(document.activeElement).toBe(input);
     const { act } = await import("react");
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "sk-new");

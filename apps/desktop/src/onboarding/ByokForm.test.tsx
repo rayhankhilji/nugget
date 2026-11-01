@@ -133,6 +133,8 @@ describe("ByokForm", () => {
     );
     expect(saved).toEqual([]);
 
+    // It says what Replace key keeps (the kind and model typed here are not sent).
+    expect(container.textContent).toContain("Replace key keeps the type and model of “custom” as they are");
     await click(byText(container, "button", "Replace key"));
     expect(updates).toEqual([{ name: "custom", base_url: "http://127.0.0.1:9999/v1", api_key: "sk-rotated" }]);
     expect(container.querySelector('[role="status"]')?.textContent).toBe("Key checked and replaced. Nugget uses the new key now.");
@@ -179,9 +181,12 @@ describe("ByokForm", () => {
     expect(saves[1]).toEqual({ name: "openai", kind: "openai_responses", base_url: null, model: "gpt-5", key_ref: "env:MY_OPENAI_KEY" });
     expect(container.querySelector('[role="status"]')?.textContent).toBe("Key checked and saved. You can use it now.");
 
-    // And back to pasting a key.
+    // And back to pasting a key; focus follows to the field that appears.
     await click(byText(container, "button", "Paste the key instead"));
     expect(field(container, "API key").value).toBe("");
+    expect(document.activeElement).toBe(field(container, "API key"));
+    await click(byText(container, "button", "Use an environment variable instead"));
+    expect(document.activeElement).toBe(field(container, "Environment variable name"));
   });
 
   it("explains a variable the daemon cannot see", async () => {
@@ -190,7 +195,7 @@ describe("ByokForm", () => {
     await click(byText(container, "button", "Use an environment variable instead"));
     await type(field(container, "Environment variable name"), "ANTHROPIC_API_KEY");
     await click(byText(container, "button", "Test key"));
-    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/^Nugget can't see this environment variable/);
+    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/^Nugget can't use this environment variable/);
   });
 });
 

@@ -2790,7 +2790,7 @@ export function utcOffsetMinutes(d: Date = new Date()): number {
 // ---- KK2: AI keys ----
 
 /** Every reason `ai.key.*` can answer with (the Z3 ones plus replace/remove and the env fallback). */
-export type AiKeyOutcome = AiKeyReason | "no_keychain" | "env_missing" | "not_found" | "not_editable";
+export type AiKeyOutcome = AiKeyReason | "no_keychain" | "env_missing" | "not_found" | "not_editable" | "reserved";
 
 /** Where the key comes from: typed (goes to the OS keychain), or the daemon's environment variable. */
 export type AiKeySource = { api_key: string; key_ref?: undefined } | { key_ref: `env:${string}`; api_key?: undefined };

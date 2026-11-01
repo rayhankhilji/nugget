@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   aiKeysApi,
   ENV_NAME_RE,
@@ -56,6 +56,7 @@ const REASON_KEYS: Record<Exclude<AiKeyOutcome, "ok" | "no_keychain">, MessageKe
   env_missing: "onboarding.byok.form.error.env_missing",
   not_found: "onboarding.byok.form.error.not_found",
   not_editable: "onboarding.byok.form.error.not_editable",
+  reserved: "onboarding.byok.form.error.reserved",
 };
 
 type Outcome =
@@ -123,58 +124,72 @@ export function ByokForm({ kind, onSaved }: { kind?: ByokGuideKind; onSaved?: (p
   );
 }
 
-/** The API key field, or (without a keychain) the environment variable's name, with a switch. */
+/**
+ * The API key field, or (without a keychain) the environment variable's name, with a switch.
+ * Switching moves focus to the field that appears (the button that was pressed is gone).
+ * `autoFocus` marks the field for a dialog's initial focus.
+ */
 function KeyFields({
   entry,
   onChange,
   placeholder,
   disabled,
+  autoFocus,
 }: {
   entry: KeyEntry;
   onChange: (e: KeyEntry) => void;
   placeholder?: string;
   disabled?: boolean;
+  autoFocus?: boolean;
 }) {
   const t = useT();
   const id = useId();
-  return entry.mode === "key" ? (
+  const input = useRef<HTMLInputElement>(null);
+  const switched = useRef(false);
+  useEffect(() => {
+    if (switched.current) {
+      switched.current = false;
+      input.current?.focus();
+    }
+  }, [entry.mode]);
+  const switchTo = (mode: KeyEntry["mode"]) => {
+    switched.current = true;
+    onChange({ ...entry, mode });
+  };
+  const env = entry.mode === "env";
+  const fieldId = `${id}-${entry.mode}`;
+  return (
     <div className="field">
-      <label htmlFor={`${id}-key`}>{t("onboarding.byok.form.key")}</label>
+      <label htmlFor={fieldId}>{t(env ? "onboarding.byok.form.envVar" : "onboarding.byok.form.key")}</label>
       <input
-        id={`${id}-key`}
-        type="password"
+        key={entry.mode}
+        ref={input}
+        id={fieldId}
+        type={env ? "text" : "password"}
         dir="ltr"
-        value={entry.key}
+        value={env ? entry.env : entry.key}
         autoComplete="off"
         spellCheck={false}
         required
-        placeholder={placeholder}
-        onChange={(e) => onChange({ ...entry, key: e.target.value })}
+        maxLength={env ? 128 : undefined}
+        placeholder={env ? undefined : placeholder}
+        aria-describedby={env ? `${id}-env-hint` : undefined}
+        {...(autoFocus ? { "data-autofocus": "" } : {})}
+        onChange={(e) => onChange(env ? { ...entry, env: e.target.value } : { ...entry, key: e.target.value })}
       />
-      <button type="button" className="btn btn-ghost btn-small" style={{ justifySelf: "start", alignSelf: "flex-start" }} disabled={disabled} onClick={() => onChange({ ...entry, mode: "env" })}>
-        {t("onboarding.byok.form.useEnv")}
-      </button>
-    </div>
-  ) : (
-    <div className="field">
-      <label htmlFor={`${id}-env`}>{t("onboarding.byok.form.envVar")}</label>
-      <input
-        id={`${id}-env`}
-        type="text"
-        dir="ltr"
-        value={entry.env}
-        autoComplete="off"
-        spellCheck={false}
-        required
-        maxLength={128}
-        aria-describedby={`${id}-env-hint`}
-        onChange={(e) => onChange({ ...entry, env: e.target.value })}
-      />
-      <p id={`${id}-env-hint`} className="muted small">
-        {t("onboarding.byok.form.envVarHint")}
-      </p>
-      <button type="button" className="btn btn-ghost btn-small" style={{ justifySelf: "start", alignSelf: "flex-start" }} disabled={disabled} onClick={() => onChange({ ...entry, mode: "key" })}>
-        {t("onboarding.byok.form.useKey")}
+      {env && (
+        <p id={`${id}-env-hint`} className="muted small">
+          {t("onboarding.byok.form.envVarHint")}
+        </p>
+      )}
+      <button
+        type="button"
+        className="btn btn-ghost btn-small"
+        style={{ justifySelf: "start", alignSelf: "flex-start" }}
+        disabled={disabled}
+        onClick={() => switchTo(env ? "key" : "env")}
+      >
+        {t(env ? "onboarding.byok.form.useKey" : "onboarding.byok.form.useEnv")}
       </button>
     </div>
   );
@@ -348,11 +363,17 @@ function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: strin
         </p>
       )}
       {exists && (
-        <div className="row">
-          <button type="button" className="btn" disabled={busy !== null} onClick={() => void run("replace")}>
-            {busy === "replace" ? t("onboarding.byok.form.replacing") : t("onboarding.byok.form.replace")}
-          </button>
-        </div>
+        <>
+          {/* Replacing changes only the key (and the address); the provider keeps its type and model. */}
+          <p id={`${id}-replace-hint`} className="muted small">
+            {t("onboarding.byok.form.replaceHint", { name: name.trim() })}
+          </p>
+          <div className="row">
+            <button type="button" className="btn" disabled={busy !== null} aria-describedby={`${id}-replace-hint`} onClick={() => void run("replace")}>
+              {busy === "replace" ? t("onboarding.byok.form.replacing") : t("onboarding.byok.form.replace")}
+            </button>
+          </div>
+        </>
       )}
       {outcome?.type === "error" && <ErrorNote error={outcome.error} />}
     </form>
@@ -411,7 +432,7 @@ export function ReplaceKeyForm({
   const alert = outcome?.type === "failed" ? failureText(t, outcome.reason, entry.env) : outcome?.type === "invalid" ? t(outcome.key) : null;
   return (
     <form className="ob-byok-fields" onSubmit={(e) => void submit(e)} noValidate aria-busy={busy}>
-      <KeyFields entry={entry} onChange={setEntry} disabled={busy} />
+      <KeyFields entry={entry} onChange={setEntry} disabled={busy} autoFocus />
       <p role="status" className={outcome?.type === "replaced" ? "note" : undefined}>
         {outcome?.type === "replaced" ? t("onboarding.byok.form.replaced") : ""}
       </p>

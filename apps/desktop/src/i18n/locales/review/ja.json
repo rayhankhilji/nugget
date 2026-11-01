@@ -681,6 +681,8 @@
     "models.providers.removeDialog.description",
     "models.providers.removeDialog.descriptionEnv",
     "models.providers.removing",
-    "models.providers.removed"
+    "models.providers.removed",
+    "onboarding.byok.form.error.reserved",
+    "onboarding.byok.form.replaceHint"
   ]
 }

@@ -206,10 +206,7 @@ impl State {
                             1
                         } else {
                             self.router.provider(other).map_or(3, |o| {
-                                rank(
-                                    o.meta().locality,
-                                    self.router.capabilities(other).is_some(),
-                                )
+                                rank(o.meta().locality, self.router.capabilities(other).is_some())
                             })
                         };
                         theirs > mine

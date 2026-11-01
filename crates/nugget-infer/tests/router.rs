@@ -418,11 +418,14 @@ fn providers_can_be_added_replaced_and_removed_while_in_use() {
     );
     assert_eq!(ids(&router.providers()), ["a", "b"]);
 
-    // Replacing keeps the place and drops the cooldown.
+    // Replacing keeps the place and drops the cooldown and the probed capabilities (the new
+    // endpoint or key has not been probed).
+    router.set_capabilities(&ProviderId::new("a"), caps(true, true, false));
     router.report_failure(&ProviderId::new("a"));
     let a2 = Fake::new("a", Behaviour::Ok);
     router.set_provider(a2.clone(), &[Tier::Light]);
     assert!(!router.in_cooldown(&ProviderId::new("a")));
+    assert!(router.capabilities(&ProviderId::new("a")).is_none());
     assert_eq!(ids(&router.candidates(Tier::Light, &none)), ["a", "b"]);
     assert!(Arc::ptr_eq(
         &(router.provider(&ProviderId::new("a")).unwrap()),
@@ -443,4 +446,35 @@ fn providers_can_be_added_replaced_and_removed_while_in_use() {
     // And it can come back.
     router.set_provider(Fake::new("a", Behaviour::Ok), &[Tier::Light]);
     assert_eq!(ids(&router.candidates(Tier::Light, &none)), ["a"]);
+}
+
+#[test]
+fn added_providers_can_be_placed_before_others() {
+    let router = Router::new(
+        vec![
+            Fake::new("lan", Behaviour::Ok),
+            Fake::new("slot", Behaviour::Ok),
+            Fake::new("cloud", Behaviour::Ok),
+        ],
+        tiers(&[(Tier::Light, &["lan", "slot", "cloud"])]),
+    );
+    // A new LAN server goes before the runtime slot, after the LAN server already there.
+    router.set_provider_before(
+        Fake::new("lan2", Behaviour::Ok),
+        &[Tier::Light, Tier::Synthesis],
+        &|id| id.as_str() != "lan",
+    );
+    let none = Capabilities::default();
+    assert_eq!(
+        ids(&router.candidates(Tier::Light, &none)),
+        ["lan", "lan2", "slot", "cloud"]
+    );
+    assert_eq!(ids(&router.candidates(Tier::Synthesis, &none)), ["lan2"]);
+    // Replacing with fewer tiers leaves the others.
+    router.set_provider(Fake::new("lan2", Behaviour::Ok), &[Tier::Light]);
+    assert_eq!(router.tiers_of(&ProviderId::new("lan2")), [Tier::Light]);
+    assert_eq!(
+        ids(&router.candidates(Tier::Light, &none)),
+        ["lan", "lan2", "slot", "cloud"]
+    );
 }

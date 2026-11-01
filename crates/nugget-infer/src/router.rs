@@ -298,7 +298,7 @@ impl Router {
             for tier in tiers {
                 let ids = routes.entry(*tier).or_default();
                 if !ids.contains(&id) {
-                    let at = ids.iter().position(|o| before(o)).unwrap_or(ids.len());
+                    let at = ids.iter().position(before).unwrap_or(ids.len());
                     ids.insert(at, id.clone());
                 }
             }
