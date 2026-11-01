@@ -24,6 +24,7 @@ import { itemFileName } from "../components/Provenance";
 import { Spinner } from "../components/ui";
 import { useEvent, useOpener } from "../hooks";
 import { useLocale, useT } from "../i18n";
+import { textDir } from "../bidi";
 import { sourceKindOf } from "../recency";
 import { askCitations } from "../askSearch";
 import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
@@ -301,7 +302,7 @@ export function QuickAsk() {
             {answer.error ? (
               <p className="note note-error">{t("quickAsk.failed", { error: answer.error })}</p>
             ) : answer.text ? (
-              <div className="quickask-text" dir="auto">
+              <div className="quickask-text" dir={textDir(answer.text)}>
                 {splitCitations(answer.text, valid).map((p, i) =>
                   p.kind === "text" ? (
                     <span key={i}>{p.text}</span>

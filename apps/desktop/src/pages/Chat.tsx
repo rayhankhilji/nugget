@@ -38,6 +38,7 @@ import { citedNumbers, groupSources, stripCitationMarkers, withheldNotice, type 
 import { Trans, useT } from "../i18n";
 import { askCitations } from "../askSearch";
 import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
+import { textDir } from "../bidi";
 import "../styles-chat.css";
 
 interface Turn {
@@ -964,11 +965,11 @@ function MessageItem({
         )}
       </div>
       {turn.role === "user" ? (
-        <div className="msg-body" dir="auto">
+        <div className="msg-body" dir={textDir(turn.text)}>
           {turn.text}
         </div>
       ) : (
-        <div className="msg-body msg-md" dir="auto">
+        <div className="msg-body msg-md" dir={textDir(turn.text)}>
           {turn.text && <Markdown text={turn.text} onOpenLink={onOpenLink} citations={cite} />}
           {streaming && <span className="caret" aria-hidden="true" />}
           {reading ? (

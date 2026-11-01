@@ -14,6 +14,7 @@ import {
 import { keyOrText } from "../doubletap";
 import { formatRelative, localityLabel } from "../format";
 import { t as translate, useT, type MessageKey } from "../i18n";
+import { textDir } from "../bidi";
 import { detectOs } from "../onboarding/platform";
 import {
   accept,
@@ -325,7 +326,7 @@ export function Overlay() {
         <textarea
           ref={editor}
           className="overlay-editor"
-          dir="auto"
+          dir={textDir(state.draft)}
           aria-label={t("doubletap.overlay.editLabel")}
           value={state.draft}
           onChange={(e) => update(setDraft(ref.current, e.target.value))}
@@ -334,7 +335,7 @@ export function Overlay() {
       ) : (
         view.text && (
           // Focusable so the draft can be scrolled and read; Tab from here still starts editing.
-          <div ref={textRef} className="overlay-text" dir="auto" role="region" tabIndex={0} aria-label={t("doubletap.overlay.draftLabel")}>
+          <div ref={textRef} className="overlay-text" dir={textDir(view.text)} role="region" tabIndex={0} aria-label={t("doubletap.overlay.draftLabel")}>
             {view.text}
             {view.phase === "streaming" && <span className="caret" aria-hidden="true" />}
           </div>

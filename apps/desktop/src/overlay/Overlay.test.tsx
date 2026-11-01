@@ -111,7 +111,8 @@ describe("overlay", () => {
     expect(accept().textContent).toMatch(/^Accept/);
     expect(accept().textContent).not.toContain("so far");
     expect(accept().className).toContain("btn-primary");
-    expect(container.querySelector(".overlay-text")?.getAttribute("dir")).toBe("auto");
+    // LL2 (GG7-10): the draft's direction is its majority script's.
+    expect(container.querySelector(".overlay-text")?.getAttribute("dir")).toBe("ltr");
   });
 
   it("tells how to retry after an error, without reading out the status glyph", async () => {

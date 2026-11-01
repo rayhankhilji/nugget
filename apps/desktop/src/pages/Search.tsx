@@ -25,6 +25,7 @@ import { Highlight, itemFileName, plainSnippet, SourceBadge } from "../component
 import { sourceKindOf } from "../recency";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatDate, formatNumber, useT } from "../i18n";
+import { textDir } from "../bidi";
 import { sourceKindLabel } from "../format";
 import { addRecent } from "../savedSearches";
 import { activeFilters, decode, EMPTY_STATE, encode, hasFilters, normalize, toFilters, type SearchState } from "../searchState";
@@ -709,7 +710,7 @@ function AskPanel({
               {answer.error}
             </p>
           ) : (
-            <div className="answer-text" dir="auto">
+            <div className="answer-text" dir={textDir(answer.text)}>
               {answer.text ? (
                 <CitedText text={answer.text} valid={answerValid} byN={answerByN} onCite={answerCite} />
               ) : (
