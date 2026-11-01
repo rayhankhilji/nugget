@@ -13,6 +13,7 @@ use std::time::UNIX_EPOCH;
 use ignore::{DirEntry, WalkBuilder};
 use nugget_connector::{CancellationToken, Change, Content, Document};
 use nugget_core::ids::ItemKey;
+use nugget_core::ipc::{ScanReport, SkippedFile};
 use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
@@ -115,6 +116,40 @@ pub(crate) enum Emit {
     Change(Change),
     /// `scanned` files seen so far; a good moment to checkpoint.
     Progress(u64),
+    /// What a whole pass ([`Scope::All`]) found and skipped; sent once its walk ended.
+    Scan(ScanReport),
+}
+
+/// How many skipped files a [`ScanReport`] names.
+const SKIPPED_EXAMPLES: usize = 5;
+
+fn note_skip(report: &mut ScanReport, rel: &str, reason: &str, bytes: Option<u64>) {
+    match reason {
+        "unsupported" => report.unsupported += 1,
+        "too_large" => report.too_large += 1,
+        _ => report.unreadable += 1,
+    }
+    if report.skipped.len() < SKIPPED_EXAMPLES {
+        report.skipped.push(SkippedFile {
+            path: rel.to_string(),
+            reason: reason.to_string(),
+            bytes,
+        });
+    }
+}
+
+/// Whether a root that exists can be listed. `Err(true)`: it exists but cannot be read
+/// (permission denied or similar); `Err(false)`: it is not there.
+fn root_access(root: &Path) -> std::result::Result<(), bool> {
+    match std::fs::metadata(root) {
+        Ok(md) if md.is_dir() => match std::fs::read_dir(root) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(true),
+        },
+        Ok(_) => Err(false),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(true),
+        Err(_) => Err(false),
+    }
 }
 
 /// The result of a reconcile pass.
@@ -126,6 +161,8 @@ pub(crate) struct Outcome {
     pub deleted: Vec<String>,
     pub scanned: u64,
     pub upserted: u64,
+    /// Found and skipped counts of this pass.
+    pub report: ScanReport,
 }
 
 /// `mtime_ns:size`. Pre-1970 times are negative; a missing mtime counts as 0.
@@ -184,6 +221,7 @@ pub(crate) fn reconcile(
     emit: &mut dyn FnMut(Emit) -> bool,
 ) -> Result<Outcome> {
     let mut out = Outcome::default();
+    out.report.max_file_bytes = cfg.max_file_bytes;
     let mut protected = Protected::default();
     let mut send = |e: Emit| -> Result<()> {
         if emit(e) {
@@ -215,9 +253,16 @@ pub(crate) fn reconcile(
             return Err(Error::Cancelled);
         }
         let root = cfg.roots[idx].path.clone();
-        if !root.is_dir() {
-            // An unmounted drive or a moved folder: keep what we have rather than wiping it.
-            tracing::warn!(root = %root.display(), "root folder is unavailable; keeping its items");
+        if let Err(denied) = root_access(&root) {
+            // An unmounted drive, a moved folder or one we may not open: keep what we have
+            // rather than wiping it.
+            if denied {
+                tracing::warn!(root = %root.display(), "root folder cannot be read; keeping its items");
+                out.report.roots_denied += 1;
+            } else {
+                tracing::warn!(root = %root.display(), "root folder is unavailable; keeping its items");
+                out.report.roots_missing += 1;
+            }
             protected.0.push(Target::whole_root(idx));
             continue;
         }
@@ -234,6 +279,12 @@ pub(crate) fn reconcile(
             &mut protected,
             &mut send,
         )?;
+    }
+
+    out.report.found = out.found.len() as u64;
+    out.report.finished = true;
+    if matches!(scope, Scope::All) {
+        send(Emit::Scan(out.report.clone()))?;
     }
 
     // Deletes: everything in scope that was known but not found.
@@ -320,10 +371,9 @@ fn walk_root(
                 if let Some(p) = io_error_path(&err)
                     && let Ok(rel) = p.strip_prefix(root)
                 {
-                    protected.0.push(Target {
-                        root: idx,
-                        rel: rel_key(rel),
-                    });
+                    let rel = rel_key(rel);
+                    note_skip(&mut out.report, &rel, "unreadable", None);
+                    protected.0.push(Target { root: idx, rel });
                 }
                 tracing::warn!(error = %err, "skipping unreadable path");
                 continue;
@@ -339,6 +389,7 @@ fn walk_root(
         let rel = rel_key(rel_path);
         let name = entry.file_name().to_string_lossy();
         if !cfg.include.is_match(&rel, &name, false) {
+            note_skip(&mut out.report, &rel, "unsupported", None);
             continue;
         }
         let key = item_key(idx, rel_path);
@@ -346,12 +397,14 @@ fn walk_root(
             Ok(md) => md,
             Err(err) => {
                 tracing::warn!(path = %path.display(), error = %err, "cannot stat file; skipping");
+                note_skip(&mut out.report, &rel, "unreadable", None);
                 protected.1.insert(key);
                 continue;
             }
         };
         if md.len() > cfg.max_file_bytes {
             tracing::debug!(path = %path.display(), size = md.len(), "over max_file_bytes; skipping");
+            note_skip(&mut out.report, &rel, "too_large", Some(md.len()));
             continue;
         }
         out.scanned += 1;
@@ -377,6 +430,7 @@ fn walk_root(
             }
             Err(err) => {
                 tracing::warn!(path = %path.display(), error = %err, "cannot read file; skipping");
+                note_skip(&mut out.report, &rel, "unreadable", None);
                 // Keep a previously indexed copy (e.g. a file locked by another program).
                 protected.1.insert(key);
             }

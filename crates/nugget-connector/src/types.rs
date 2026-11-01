@@ -73,6 +73,10 @@ pub trait ChangeSink: Send + Sync {
     async fn send(&self, change: Change) -> Result<()>;
     /// Commit `cursor` once every change sent before this call has been durably applied.
     async fn checkpoint(&self, cursor: Value) -> Result<()>;
+    /// Report what a scan pass found and skipped (latest wins). Default: ignored.
+    async fn report_scan(&self, report: nugget_core::ipc::ScanReport) {
+        let _ = report;
+    }
 }
 
 /// What the store already holds for this source: item key → connector version.

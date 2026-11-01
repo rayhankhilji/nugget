@@ -23,10 +23,12 @@
 //! `oauth_client_secret:<id>` explicitly). Secret values never reach logs, audit entries, IPC
 //! responses or notifications.
 
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use nugget_connector::{AuthKind, Registry, SecretStore};
 use nugget_core::ids::SourceId;
+use nugget_core::ipc::SourceInfo;
 use nugget_core::{Error, Result};
 use nugget_ingest::{Ingest, SettingsResolver};
 use serde_json::Value;
@@ -113,6 +115,76 @@ pub(crate) fn reconcile_settings(kind: &str, settings: Value) -> Result<Value> {
     Ok(settings)
 }
 
+/// The folders of a `files` source's settings, `~` expanded and made comparable: canonical when
+/// the folder exists, else lexically normalized (`.` dropped, `..` applied).
+fn files_roots(settings: &Value) -> Vec<PathBuf> {
+    let Some(roots) = settings.get("roots").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    roots
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|r| !r.trim().is_empty())
+        .map(|r| comparable(&nugget_connector_files::expand_home(Path::new(r))))
+        .collect()
+}
+
+fn comparable(p: &Path) -> PathBuf {
+    if let Ok(c) = std::fs::canonicalize(p) {
+        return c;
+    }
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// GG6-13: refuse a `files` source whose folders equal, contain or lie inside a folder of
+/// another `files` source (`except` is the source being updated): its items would be indexed
+/// twice.
+pub(crate) fn check_duplicate_folders(
+    kind: &str,
+    settings: &Value,
+    existing: &[SourceInfo],
+    except: Option<&SourceId>,
+) -> Result<()> {
+    if kind != nugget_connector_files::FILES_KIND {
+        return Ok(());
+    }
+    let new = files_roots(settings);
+    for other in existing {
+        if other.kind != nugget_connector_files::FILES_KIND || Some(&other.id) == except {
+            continue;
+        }
+        for theirs in files_roots(&other.settings) {
+            for mine in &new {
+                let name = &other.name;
+                let msg = if *mine == theirs {
+                    format!("This folder is already added as \"{name}\".")
+                } else if mine.starts_with(&theirs) {
+                    format!("This folder is inside \"{name}\", which is already added.")
+                } else if theirs.starts_with(mine) {
+                    format!(
+                        "This folder contains \"{name}\", which is already added. Remove that \
+                         source first or pick a different folder."
+                    )
+                } else {
+                    continue;
+                };
+                return Err(Error::Invalid(msg));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Injects `oauth_client_secret:<id>` as `client_secret` into OAuth kinds' settings at build time.
 pub(crate) fn client_secret_resolver(
     secrets: Arc<dyn SecretStore>,
@@ -163,6 +235,81 @@ mod tests {
     use super::*;
     use nugget_ingest::MemorySecrets;
     use serde_json::json;
+
+    fn files(id: &str, name: &str, roots: &[&Path]) -> SourceInfo {
+        serde_json::from_value(json!({
+            "id": id, "kind": "files", "name": name, "enabled": true, "state": "idle",
+            "items": 0, "chunks": 0, "settings": { "roots": roots },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn duplicate_folders_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("Docs");
+        let inner = docs.join("Notes");
+        let other = dir.path().join("Other");
+        for d in [&inner, &other] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let existing = [files("files-1", "My docs", &[&docs])];
+        let err = |roots: Value| match check_duplicate_folders(
+            "files",
+            &json!({ "roots": roots }),
+            &existing,
+            None,
+        ) {
+            Err(Error::Invalid(m)) => m,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert_eq!(
+            err(json!([docs])),
+            "This folder is already added as \"My docs\"."
+        );
+        // The same folder spelled differently (trailing `/.`, `..`) is still the same folder.
+        assert_eq!(
+            err(json!([docs.join("Notes").join("..").join(".")])),
+            "This folder is already added as \"My docs\"."
+        );
+        assert_eq!(
+            err(json!([inner])),
+            "This folder is inside \"My docs\", which is already added."
+        );
+        assert_eq!(
+            err(json!([dir.path()])),
+            "This folder contains \"My docs\", which is already added. Remove that source \
+             first or pick a different folder."
+        );
+        // A missing folder inside an existing one is compared lexically.
+        assert!(err(json!([docs.join("not-yet")])).contains("is inside"));
+
+        // Disjoint folders, other kinds, and the source being updated itself are fine.
+        assert!(
+            check_duplicate_folders("files", &json!({ "roots": [other] }), &existing, None).is_ok()
+        );
+        assert!(
+            check_duplicate_folders("obsidian", &json!({ "vault": docs }), &existing, None).is_ok()
+        );
+        let me = SourceId::new("files-1");
+        assert!(
+            check_duplicate_folders("files", &json!({ "roots": [inner] }), &existing, Some(&me))
+                .is_ok()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn duplicate_folders_through_a_symlink_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("Docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&docs, &link).unwrap();
+        let existing = [files("files-1", "Docs", &[&docs])];
+        let r = check_duplicate_folders("files", &json!({ "roots": [link] }), &existing, None);
+        assert!(matches!(r, Err(Error::Invalid(m)) if m.contains("already added as")));
+    }
 
     #[test]
     fn registers_every_shipped_kind() {

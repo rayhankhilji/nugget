@@ -1,6 +1,6 @@
 //! Settings (the JSON a source is saved with), their JSON Schemas, and the resolved [`Config`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
@@ -277,7 +277,7 @@ pub fn files_schema() -> Value {
         json!({
             "type": "array", "minItems": 1, "uniqueItems": true,
             "items": { "type": "string", "description": "Absolute folder path" },
-            "description": "Folders to index. They must be absolute and must not overlap."
+            "description": "Folders to index, as full paths (a leading `~` means your home folder). They must not overlap."
         }),
     );
     let defaults: Vec<String> = DEFAULT_EXTENSIONS
@@ -447,29 +447,86 @@ fn check_common(max_file_bytes: u64, debounce_ms: u64) -> Result<()> {
     Ok(())
 }
 
+/// The current user's home folder (`HOME`, or `USERPROFILE` on Windows).
+fn home_dir() -> Option<PathBuf> {
+    let vars: &[&str] = if cfg!(windows) {
+        &["USERPROFILE", "HOME"]
+    } else {
+        &["HOME"]
+    };
+    vars.iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .find(|p| p.is_absolute())
+}
+
+/// Expand a leading `~` (`~`, `~/…`, and `~\…` on Windows) to the home folder. Other paths,
+/// including `~user/…`, are returned unchanged.
+pub fn expand_home(path: &Path) -> PathBuf {
+    let Some(s) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    let rest = if s == "~" {
+        Some("")
+    } else if let Some(r) = s.strip_prefix("~/") {
+        Some(r)
+    } else if cfg!(windows) {
+        s.strip_prefix("~\\")
+    } else {
+        None
+    };
+    match (rest, home_dir()) {
+        (Some(""), Some(home)) => home,
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// An example of a full folder path on this platform, for messages.
+const PATH_EXAMPLE: &str = if cfg!(windows) {
+    "C:\\Users\\you\\Documents"
+} else if cfg!(target_os = "macos") {
+    "/Users/you/Documents"
+} else {
+    "/home/you/Documents"
+};
+
 fn check_roots(roots: &[PathBuf]) -> Result<()> {
     if roots.is_empty() {
-        return Err(Error::Invalid(
-            "at least one root folder is required".into(),
-        ));
+        return Err(Error::Invalid("Pick at least one folder to add.".into()));
     }
     for r in roots {
+        if r.as_os_str().is_empty() {
+            return Err(Error::Invalid(
+                "One of the folders is blank. Pick a folder, or remove the empty line.".into(),
+            ));
+        }
         if !r.is_absolute() {
             return Err(Error::Invalid(format!(
-                "root `{}` must be an absolute path",
+                "\"{}\" isn't a full folder path. Use the full path of the folder, like {PATH_EXAMPLE}, or pick it with Browse.",
                 r.display()
             )));
         }
     }
     for (i, a) in roots.iter().enumerate() {
         for b in &roots[i + 1..] {
-            if a.starts_with(b) || b.starts_with(a) {
+            let (inner, outer) = if a == b {
                 return Err(Error::Invalid(format!(
-                    "roots `{}` and `{}` overlap",
-                    a.display(),
-                    b.display()
+                    "\"{}\" is listed twice. Keep only one of them.",
+                    a.display()
                 )));
-            }
+            } else if a.starts_with(b) {
+                (a, b)
+            } else if b.starts_with(a) {
+                (b, a)
+            } else {
+                continue;
+            };
+            return Err(Error::Invalid(format!(
+                "Two of these folders overlap: \"{}\" is inside \"{}\". Keep only one of them.",
+                inner.display(),
+                outer.display()
+            )));
         }
     }
     Ok(())
@@ -485,7 +542,10 @@ fn parse<T: serde::de::DeserializeOwned>(settings: &Value) -> Result<T> {
 
 impl Config {
     pub fn files(settings: &Value) -> Result<Self> {
-        let s: FilesSettings = parse(settings)?;
+        let mut s: FilesSettings = parse(settings)?;
+        for r in &mut s.roots {
+            *r = expand_home(r);
+        }
         check_roots(&s.roots)?;
         check_common(s.max_file_bytes, s.debounce_ms)?;
         let include = match &s.include {
@@ -516,7 +576,8 @@ impl Config {
     }
 
     pub fn obsidian(settings: &Value) -> Result<Self> {
-        let s: ObsidianSettings = parse(settings)?;
+        let mut s: ObsidianSettings = parse(settings)?;
+        s.vault = expand_home(&s.vault);
         check_roots(std::slice::from_ref(&s.vault))?;
         check_common(s.max_file_bytes, s.debounce_ms)?;
         let vault_name = s
@@ -546,11 +607,27 @@ impl Config {
     /// Validation beyond parsing: every root must currently be a readable directory.
     pub fn check_roots_exist(&self) -> Result<()> {
         for r in &self.roots {
-            if !r.path.is_dir() {
-                return Err(Error::Invalid(format!(
-                    "`{}` is not a folder",
-                    r.path.display()
-                )));
+            let p = &r.path;
+            match std::fs::metadata(p) {
+                Ok(md) if md.is_dir() => {}
+                Ok(_) => {
+                    return Err(Error::Invalid(format!(
+                        "\"{}\" is a file, not a folder. Pick the folder that contains it.",
+                        p.display()
+                    )));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    return Err(Error::Invalid(format!(
+                        "Nugget isn't allowed to open \"{}\". Check the folder's permissions, or pick a different folder.",
+                        p.display()
+                    )));
+                }
+                Err(_) => {
+                    return Err(Error::Invalid(format!(
+                        "There's no folder at \"{}\". Check the spelling, or pick it with Browse.",
+                        p.display()
+                    )));
+                }
             }
         }
         Ok(())
@@ -663,6 +740,87 @@ mod tests {
             assert!(is_junk_dir(n), "{n}");
         }
         assert!(!is_junk_dir("src"));
+    }
+
+    fn invalid(settings: Value) -> String {
+        let r = Config::files(&settings).and_then(|c| c.check_roots_exist());
+        match r {
+            Err(Error::Invalid(m)) => m,
+            other => panic!("expected Invalid for {settings}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tilde_expands_to_the_home_folder() {
+        let Some(home) = home_dir() else {
+            eprintln!("no home folder; skipping");
+            return;
+        };
+        assert_eq!(expand_home(Path::new("~")), home);
+        assert_eq!(
+            expand_home(Path::new("~/Documents/x")),
+            home.join("Documents/x")
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            expand_home(Path::new("~\\Documents")),
+            home.join("Documents")
+        );
+        // Not a home reference: unchanged.
+        assert_eq!(
+            expand_home(Path::new("~other/x")),
+            PathBuf::from("~other/x")
+        );
+        assert_eq!(expand_home(Path::new("a/~/x")), PathBuf::from("a/~/x"));
+
+        let c = Config::files(&json!({ "roots": ["~"] })).unwrap();
+        assert_eq!(c.roots[0].path, home);
+        let c = Config::obsidian(&json!({ "vault": "~/Vault" })).unwrap();
+        assert_eq!(c.roots[0].path, home.join("Vault"));
+    }
+
+    #[test]
+    fn folder_errors_are_plain_sentences() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let m = invalid(json!({ "roots": ["relative/dir"] }));
+        assert!(
+            m.starts_with("\"relative/dir\" isn't a full folder path."),
+            "{m}"
+        );
+        assert!(m.contains("Use the full path of the folder, like"), "{m}");
+        assert!(!m.contains('`'), "{m}");
+
+        let sub = root.join("sub");
+        let m = invalid(json!({ "roots": [root, sub] }));
+        assert_eq!(
+            m,
+            format!(
+                "Two of these folders overlap: \"{}\" is inside \"{}\". Keep only one of them.",
+                sub.display(),
+                root.display()
+            )
+        );
+        let m = invalid(json!({ "roots": [root, root] }));
+        assert!(m.contains("is listed twice"), "{m}");
+
+        let missing = root.join("nope");
+        let m = invalid(json!({ "roots": [missing] }));
+        assert_eq!(
+            m,
+            format!(
+                "There's no folder at \"{}\". Check the spelling, or pick it with Browse.",
+                missing.display()
+            )
+        );
+        let file = root.join("f.txt");
+        std::fs::write(&file, "x").unwrap();
+        let m = invalid(json!({ "roots": [file] }));
+        assert!(m.contains("is a file, not a folder"), "{m}");
+        assert_eq!(
+            invalid(json!({ "roots": [] })),
+            "Pick at least one folder to add."
+        );
     }
 
     #[test]

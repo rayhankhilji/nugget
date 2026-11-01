@@ -62,6 +62,8 @@ pub enum Step {
     Hang,
     SetSecret(String, String),
     RecordKnown,
+    /// Report a scan (files-connector style).
+    Scan(nugget_core::ipc::ScanReport),
 }
 
 pub struct FakeState {
@@ -160,6 +162,7 @@ impl Connector for FakeConnector {
                 Step::Return(v) => return Ok(v),
                 Step::Hang => std::future::pending::<()>().await,
                 Step::SetSecret(a, v) => self.ctx.secrets.set(&a, &v)?,
+                Step::Scan(r) => sink.report_scan(r).await,
                 Step::RecordKnown => {
                     let v = self.ctx.known.versions().await?;
                     *s.known.lock().unwrap() = Some(v);

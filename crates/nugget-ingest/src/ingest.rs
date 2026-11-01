@@ -11,7 +11,8 @@ use nugget_connector::{
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::{ItemKey, SourceId};
 use nugget_core::ipc::{
-    IngestProgress, IngestStatus, SourceInfo, SourceSpec, SourceState, SourceUpdate,
+    IngestProgress, IngestStatus, ScanReport, SourceHealth, SourceInfo, SourceSpec, SourceState,
+    SourceUpdate,
 };
 use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
@@ -52,6 +53,9 @@ pub type SettingsResolver =
 
 /// Something that changed, for UIs. `nuggetd` forwards these as notifications:
 /// [`Progress`](Self::Progress) → `ingest.progress`, the others → `sources.changed`.
+// `SourceChanged` is the common event and is cloned to every subscriber anyway; boxing it would
+// change the public shape for little gain.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum IngestEvent {
     Progress(IngestProgress),
@@ -77,6 +81,8 @@ struct SourceStatus {
     last_error: Option<String>,
     errors: VecDeque<ItemError>,
     paused: bool,
+    /// The latest scan report from the connector (files sources), if any.
+    scan: Option<ScanReport>,
 }
 
 impl SourceStatus {
@@ -91,6 +97,7 @@ impl SourceStatus {
             last_error: None,
             errors: VecDeque::new(),
             paused: false,
+            scan: None,
         }
     }
 }
@@ -218,6 +225,32 @@ impl Inner {
         if changed {
             self.emit_source(id).await;
         }
+    }
+
+    /// Keep the latest scan report of a source and tell listeners when it changed.
+    pub async fn set_scan(&self, id: &SourceId, report: ScanReport) {
+        let changed = {
+            let mut slots = lock(&self.slots);
+            match slots.get_mut(id) {
+                Some(s) if s.status.scan.as_ref() != Some(&report) => {
+                    s.status.scan = Some(report);
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.emit_source(id).await;
+        }
+    }
+
+    /// Files the last finished scan found, once one is known (a progress total).
+    pub fn scan_total(&self, id: &SourceId) -> Option<u64> {
+        lock(&self.slots)
+            .get(id)
+            .and_then(|s| s.status.scan.as_ref())
+            .filter(|r| r.finished)
+            .map(|r| r.found)
     }
 
     pub async fn sync_succeeded(&self, id: &SourceId) {
@@ -455,14 +488,15 @@ fn info_of(slot: &Slot, counts: Option<&SourceCounts>) -> SourceInfo {
         last_sync: slot.status.last_sync,
         last_error: slot.status.last_error.clone(),
         settings: slot.entry.settings.clone(),
-        health: Some(health_of(slot)),
+        health: Some(health_of(slot, counts.map_or(0, |c| c.items))),
+        scan: slot.status.scan.clone(),
     }
 }
 
 /// Plain-language health from the slot's state, last error and item errors of the last day.
 /// Item errors are counted per item (a bad item re-sent every pass counts once), and the last
 /// message names its item.
-fn health_of(slot: &Slot) -> nugget_core::ipc::SourceHealth {
+fn health_of(slot: &Slot, items: u64) -> nugget_core::ipc::SourceHealth {
     let since = OffsetDateTime::now_utc() - time::Duration::days(1);
     let mut keys = std::collections::HashSet::new();
     let mut last = None;
@@ -477,13 +511,104 @@ fn health_of(slot: &Slot) -> nugget_core::ipc::SourceHealth {
     } else {
         SourceState::Disabled
     };
-    nugget_connector::health::diagnose(
+    let health = nugget_connector::health::diagnose(
         &slot.entry.kind,
         state,
         slot.status.last_error.as_deref(),
         keys.len() as u64,
         last.as_deref(),
+    );
+    match &slot.status.scan {
+        Some(scan) => scan_health(health, scan, items),
+        None => health,
+    }
+}
+
+/// Refine an otherwise healthy diagnosis with the latest scan: a folder that cannot be opened,
+/// or a finished scan that found nothing to index while nothing is indexed.
+fn scan_health(health: SourceHealth, scan: &ScanReport, items: u64) -> SourceHealth {
+    use nugget_connector::health::code;
+    if !matches!(
+        health.code.as_str(),
+        code::OK | code::SYNCING | code::ITEM_ERRORS
+    ) {
+        return health;
+    }
+    let mk = |code: &str, reason: String, fix: String| SourceHealth {
+        code: code.into(),
+        reason,
+        fix,
+        ..health.clone()
+    };
+    if scan.roots_denied > 0 {
+        return mk(
+            code::UNREADABLE,
+            "Nugget isn't allowed to open this folder, so it can't index anything in it.".into(),
+            "Check the folder's permissions (or the app's file access in your system settings), \
+             then sync again."
+                .into(),
+        );
+    }
+    if scan.finished && scan.found == 0 && items == 0 {
+        return mk(
+            code::NOTHING_INDEXABLE,
+            "Nothing in this folder can be indexed yet.".into(),
+            nothing_indexable_fix(scan),
+        );
+    }
+    health
+}
+
+fn nothing_indexable_fix(scan: &ScanReport) -> String {
+    let plural = |n: u64, one: &str, many: &str| {
+        if n == 1 {
+            format!("1 {one}")
+        } else {
+            format!("{n} {many}")
+        }
+    };
+    let mut parts = Vec::new();
+    if scan.unsupported > 0 {
+        parts.push(format!(
+            "{} of a type Nugget doesn't read",
+            plural(scan.unsupported, "file is", "files are")
+        ));
+    }
+    if scan.too_large > 0 {
+        parts.push(format!(
+            "{} larger than the {} MB limit",
+            plural(scan.too_large, "file is", "files are"),
+            scan.max_file_bytes.div_ceil(1024 * 1024)
+        ));
+    }
+    if scan.unreadable > 0 {
+        parts.push(format!(
+            "{} couldn't be opened",
+            plural(scan.unreadable, "file or folder", "files or folders")
+        ));
+    }
+    if scan.roots_missing > 0 {
+        return "Nugget can't find this folder: it may have been moved, renamed or be on a drive \
+                that isn't connected. Reconnect it, or remove this source and add the folder again."
+            .into();
+    }
+    if parts.is_empty() {
+        return "The folder is empty. Add documents, notes or PDFs to it, or pick a different \
+                folder."
+            .into();
+    }
+    format!(
+        "{}. Add documents, notes or PDFs to it, or pick a different folder.",
+        capitalize(&parts.join("; "))
     )
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
 }
 
 /// Builder for [`Ingest`] with injectable secrets and power policy (tests, headless runs).

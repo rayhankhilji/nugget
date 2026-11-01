@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use nugget_connector::{CancellationToken, Change, ChangeSink, Content, Document};
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-use nugget_core::ipc::{IngestPhase, IngestProgress};
+use nugget_core::ipc::{IngestPhase, IngestProgress, ScanReport};
 use nugget_core::{Error, Result};
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
 use serde_json::{Map, Value, json};
@@ -75,11 +75,17 @@ pub(crate) struct PipelineSink {
     tx: mpsc::Sender<Op>,
     mode: Mode,
     inner: Arc<Inner>,
+    source: SourceId,
 }
 
 impl PipelineSink {
-    pub fn new(tx: mpsc::Sender<Op>, mode: Mode, inner: Arc<Inner>) -> Self {
-        Self { tx, mode, inner }
+    pub fn new(tx: mpsc::Sender<Op>, mode: Mode, inner: Arc<Inner>, source: SourceId) -> Self {
+        Self {
+            tx,
+            mode,
+            inner,
+            source,
+        }
     }
 
     /// Mark the start of a sync pass (ordered with the queue).
@@ -144,6 +150,12 @@ impl ChangeSink for PipelineSink {
         let (ack, rx) = oneshot::channel();
         self.push(OpKind::Checkpoint(cursor, ack)).await?;
         rx.await.map_err(|_| Error::Cancelled)?
+    }
+
+    /// Not queued: the report describes the walk, which is done long before its changes are
+    /// applied, and the UI should learn about an empty folder right away.
+    async fn report_scan(&self, report: ScanReport) {
+        self.inner.set_scan(&self.source, report).await;
     }
 }
 
@@ -300,6 +312,14 @@ impl Worker {
         }
     }
 
+    /// What this pass is expected to index, once the connector's scan finished (never below
+    /// `done`: deletes and live changes count too).
+    fn total(&self) -> Option<u64> {
+        self.inner
+            .scan_total(&self.source)
+            .map(|t| t.max(self.done))
+    }
+
     fn progress(&mut self, force: bool) {
         if force
             || self.done == 1
@@ -311,7 +331,7 @@ impl Worker {
                 source: self.source.clone(),
                 phase: IngestPhase::Indexing,
                 done: self.done,
-                total: None,
+                total: self.total(),
                 error: None,
             }));
         }
@@ -323,7 +343,7 @@ impl Worker {
             source: self.source.clone(),
             phase: IngestPhase::Indexing,
             done: self.done,
-            total: None,
+            total: self.total(),
             error: Some(msg),
         }));
     }

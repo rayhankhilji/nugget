@@ -15,6 +15,7 @@ use nugget_connector_files::{FilesFactory, ObsidianFactory};
 use nugget_core::Result;
 use nugget_core::egress::{EgressEvent, EgressSink};
 use nugget_core::ids::{ItemKey, SourceId};
+use nugget_core::ipc::ScanReport;
 use nugget_core::paths::Paths;
 use serde_json::Value;
 use tokio::task::JoinHandle;
@@ -25,6 +26,7 @@ pub struct Fake {
     pub changes: Mutex<Vec<Change>>,
     pub checkpoints: Mutex<Vec<Value>>,
     pub store: Mutex<HashMap<ItemKey, Option<String>>>,
+    pub scans: Mutex<Vec<ScanReport>>,
 }
 
 #[async_trait]
@@ -48,6 +50,10 @@ impl ChangeSink for Fake {
     async fn checkpoint(&self, cursor: Value) -> Result<()> {
         self.checkpoints.lock().unwrap().push(cursor);
         Ok(())
+    }
+
+    async fn report_scan(&self, report: ScanReport) {
+        self.scans.lock().unwrap().push(report);
     }
 }
 

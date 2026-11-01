@@ -162,7 +162,10 @@ export async function sourcesSetupScenario({ browser, bin }) {
     });
 
     await check("sources setup: every daemon command the UI called exists and accepted its params", async () => {
-      const bad = bridge.calls.filter((c) => c.via === "daemon" && (c.code === METHOD_NOT_FOUND || c.code === -32602));
+      // The refused duplicate folder is an invalid-params reply by design (GG6-13).
+      const bad = bridge.calls.filter(
+        (c) => c.via === "daemon" && (c.code === METHOD_NOT_FOUND || (c.code === -32602 && c.cmd !== "sources_add")),
+      );
       expect(bad.length === 0, `wire mismatches: ${JSON.stringify(bad)}`);
     });
   } finally {
