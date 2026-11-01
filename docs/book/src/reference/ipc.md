@@ -45,6 +45,9 @@ The **Daemon** column: `yes` = served; `not yet` = in the protocol but the daemo
 | `search.faceted` | `{query, limit, offset, filters, utc_offset_minutes, time_zone}`: `filters` has `sources`, `kinds` (`mail`, `event`, `chat`, `file`), `people`, `from`, `to`; `limit` at most 100 | Hits (each with its item date, kind, `sensitive` and people) and facet counts for `sources`, `kinds`, `people` and `months` | yes |
 | `search.timeline` | `{entity, from, to, limit, utc_offset_minutes, time_zone}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
 | `search.preview` | `{item, chunk_id, utc_offset_minutes, time_zone}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
+| `search.upgrade.status` | `{}` | `SearchUpgradeStatus`: `offer` (`{from, to, download_bytes}`, only while the index's on-device embedding model is not the recommended one, no model is pinned in config and the offer was neither accepted nor dismissed) and `job` (`{to, phase, done, total, error}`: `phase` `downloading` counts bytes, `embedding` counts chunks), each `null` when absent | yes |
+| `search.upgrade.start` | `{}` | `SearchUpgradeStatus`. Accepts the offer (or retries one that stopped on an error): downloads the model if needed, then re-embeds every chunk in the background at the lowest priority (not on low power, after interactive model use), resuming across restarts. Searches use the old vectors until every chunk has a new one; then the index switches in one transaction and the search model restarts on the new model. Invalid params when nothing is on offer | yes |
+| `search.upgrade.dismiss` | `{}` | `SearchUpgradeStatus`. Hides the offer for good and cancels an upgrade in progress (the old index stays) | yes |
 
 `time_zone` is an IANA name; without it `utc_offset_minutes` applies, then `[retrieve]
 date_utc_offset_minutes`.

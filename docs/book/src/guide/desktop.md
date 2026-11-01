@@ -75,7 +75,7 @@ On sway, for example: `bindsym Ctrl+Shift+space exec nugget-desktop --quick-ask`
 | Link | What it does |
 |---|---|
 | `nugget://open/today` | Opens a page: `today`, `chat`, `search`, `knowledge`, `sources`, `apps`, `plugins`, `agent`, `safety`, `doubletap`, `models`, `privacy` or `status`. |
-| `nugget://search?q=quarterly%20report` | Runs a search on this device. |
+| `nugget://search?q=quarterly%20report` | Opens Search with the text typed in, not run: press Enter to search. |
 | `nugget://ask?q=When%20is%20my%20flight%3F` | Opens quick ask with the question typed in, not sent. |
 | `nugget://item?source=<source id>&key=<item key>` | Asks whether to open that item in its own app. |
 

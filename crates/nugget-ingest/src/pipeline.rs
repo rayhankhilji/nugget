@@ -770,6 +770,8 @@ pub(crate) struct Prepared {
     item: NewItem,
     chunks: Vec<NewChunk>,
     triage: TriageMark,
+    /// The embedding model of the chunks' vectors.
+    model: Option<String>,
 }
 
 /// Output of the blocking extraction step.
@@ -892,6 +894,7 @@ async fn prepare(
     let mut embeddings: Option<Vec<Vec<f32>>> = None;
     let mut embed_error = None;
     let mut embed_provider = None;
+    let mut embed_model = None;
     if inner.cfg.embeddings
         && !chunk_texts.is_empty()
         && let Some(router) = &inner.router
@@ -910,8 +913,9 @@ async fn prepare(
             )
             .await
             {
-                Ok((pid, v)) => {
+                Ok((pid, m, v)) => {
                     embed_provider = Some(pid);
+                    embed_model = Some(m);
                     embeddings = Some(v);
                 }
                 Err(e) => embed_error = Some(e.to_string()),
@@ -1009,6 +1013,7 @@ async fn prepare(
         item: new,
         chunks,
         triage: plan.mark(),
+        model: embed_model,
     })
 }
 
@@ -1209,19 +1214,32 @@ fn fit_dimension(p: &mut Prepared, dim: Option<usize>) {
     else {
         return;
     };
-    if got == dim {
-        return;
+    if got != dim {
+        text_only(
+            p,
+            format!("embedding dimension {got} does not match the index ({dim}); stored text-only"),
+        );
     }
+}
+
+/// Drop vectors of a model the index no longer uses (it switched models while the item was being
+/// embedded): the item is stored text-only and the re-embed job gives it vectors later.
+fn fit_model(p: &mut Prepared, index: Option<String>) {
+    if let (Some(got), Some(index)) = (&p.model, &index)
+        && got != index
+    {
+        let msg =
+            format!("embedded with `{got}`, but the index now uses `{index}`; stored text-only");
+        text_only(p, msg);
+    }
+}
+
+fn text_only(p: &mut Prepared, why: String) {
     for c in &mut p.chunks {
         c.embedding = None;
     }
     if let Value::Object(m) = &mut p.item.metadata {
-        m.insert(
-            "embed_error".into(),
-            Value::String(format!(
-                "embedding dimension {got} does not match the index ({dim}); stored text-only"
-            )),
-        );
+        m.insert("embed_error".into(), Value::String(why));
         m.remove("embedding_provider");
     }
 }
@@ -1229,6 +1247,7 @@ fn fit_dimension(p: &mut Prepared, dim: Option<usize>) {
 /// Write an item with its chunks and version in one transaction: on any error the stored item and
 /// its chunks stay as they were.
 fn persist(store: &Store, mut p: Prepared) -> Result<()> {
+    fit_model(&mut p, store.embedding_model()?);
     fit_dimension(&mut p, store.embedding_dim()?);
     store.upsert_item_with_chunks(&p.item, &p.chunks)?;
     Ok(())
@@ -1238,6 +1257,15 @@ fn persist(store: &Store, mut p: Prepared) -> Result<()> {
 /// fails, each in its own (so one bad item fails alone and the others are written).
 fn persist_all(store: &Store, mut batch: Vec<Prepared>) -> Vec<Result<()>> {
     if batch.len() > 1 {
+        match store.embedding_model() {
+            Ok(m) => batch.iter_mut().for_each(|p| fit_model(p, m.clone())),
+            Err(e) => {
+                return batch
+                    .iter()
+                    .map(|_| Err(Error::Storage(e.to_string())))
+                    .collect();
+            }
+        }
         // The first vectors written fix the dimension when the database has none yet.
         let dim = match store.embedding_dim() {
             Ok(d) => d.or_else(|| {
@@ -1270,6 +1298,7 @@ fn persist_all(store: &Store, mut batch: Vec<Prepared>) -> Vec<Result<()>> {
                         item,
                         chunks,
                         triage: TriageMark::None,
+                        model: None,
                     })
                     .collect();
             }
@@ -1295,6 +1324,7 @@ mod tests {
             item,
             chunks: vec![chunk],
             triage: TriageMark::None,
+            model: None,
         }
     }
 

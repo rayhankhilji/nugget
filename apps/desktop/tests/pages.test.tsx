@@ -152,6 +152,18 @@ describe.each(CASES)("$name page", (c) => {
 });
 
 describe("search page", () => {
+  it("types in a nugget://search query without running it until Enter", async () => {
+    const calls = mockDaemon({ search: () => RESPONSES.search });
+    requestSearch("Ada", false);
+    await render(inMain(<SearchPage />));
+    const input = document.querySelector<HTMLInputElement>("#search-q")!;
+    expect(input.value).toBe("Ada");
+    expect(calls).not.toContain("search");
+    input.form!.requestSubmit();
+    await flush();
+    expect(calls).toContain("search");
+  });
+
   it("runs a search requested by the command palette, with a loading state and announced results", async () => {
     const d = deferred(RESPONSES.search);
     const calls = mockDaemon({ search: () => d.promise });

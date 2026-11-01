@@ -2255,5 +2255,15 @@
   "models.fail.kept": "已下载的 {done} 会保留：下次将从那里继续。",
   "models.cancel": "取消",
   "models.cancelLabel": "取消下载 {model}",
-  "models.resume": "继续下载"
+  "models.resume": "继续下载",
+  "models.searchUpgrade.title": "将搜索升级为多语言",
+  "models.searchUpgrade.body": "在后台重新建立索引。",
+  "models.searchUpgrade.bodyDownload": "下载 {size}，然后在后台重新建立索引。",
+  "models.searchUpgrade.upgrade": "升级",
+  "models.searchUpgrade.notNow": "以后再说",
+  "models.searchUpgrade.phase.downloading": "正在下载搜索模型",
+  "models.searchUpgrade.phase.embedding": "正在重建索引",
+  "models.searchUpgrade.keepsWorking": "在此期间搜索仍可正常使用。",
+  "models.searchUpgrade.failed": "升级未完成。搜索仍使用当前索引。",
+  "models.searchUpgrade.retry": "重试"
 }

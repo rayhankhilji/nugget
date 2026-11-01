@@ -3,15 +3,15 @@
 //! | Link | Does |
 //! |---|---|
 //! | `nugget://open/<page>` | shows that page (`today`, `chat`, `search`, ...) |
-//! | `nugget://search?q=<text>` | runs a search (read-only, on this device) |
+//! | `nugget://search?q=<text>` | opens Search with the text typed in, not run |
 //! | `nugget://item?source=<id>&key=<key>` | asks to open that item in its own app |
 //! | `nugget://ask?q=<text>` | opens the quick-ask box with the question typed, not sent |
 //! | a `.nuggetplugin` file | asks to install it, then the usual approval of what it may do |
 //!
 //! Everything is validated here ([`parse_url`], [`parse_plugin_path`]) before the UI sees it:
 //! unknown hosts, pages and parameters, credentials, ports, control characters and over-long
-//! values are refused. A link never acts by itself: a search is read-only, a question is only
-//! typed in, and opening an item or installing a plugin asks the user first (in the main window).
+//! values are refused. A link never acts by itself: a search or a question is only typed in, and
+//! opening an item or installing a plugin asks the user first (in the main window).
 //!
 //! How links arrive:
 //! - Windows and Linux: as a command-line argument, to the first instance or, through the

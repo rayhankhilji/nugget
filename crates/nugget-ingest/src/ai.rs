@@ -294,7 +294,8 @@ pub(crate) fn parse_triage(raw: &str, n: usize) -> Result<Vec<Triage>> {
 }
 
 /// Embed `texts` in batches with the first provider that succeeds for all of them (one provider per
-/// item keeps the vector dimension consistent).
+/// item keeps the vector dimension consistent). Returns the provider, the model it served and
+/// the vectors.
 pub(crate) async fn embed(
     store: &nugget_store::Store,
     router: &Router,
@@ -303,7 +304,7 @@ pub(crate) async fn embed(
     texts: &[String],
     batch: usize,
     timeout: Duration,
-) -> Result<(ProviderId, Vec<Vec<f32>>)> {
+) -> Result<(ProviderId, String, Vec<Vec<f32>>)> {
     if providers.is_empty() {
         return Err(Error::NotFound("no allowed embedding provider".into()));
     }
@@ -398,7 +399,7 @@ pub(crate) async fn embed(
             }
         }
         router.report_success(p.id());
-        return Ok((p.id().clone(), out));
+        return Ok((p.id().clone(), served, out));
     }
     Err(last_err.unwrap_or_else(|| Error::NotFound("no embedding provider".into())))
 }

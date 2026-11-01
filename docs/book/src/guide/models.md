@@ -31,7 +31,11 @@ is warming up or needs a **Retry** (see
 downloads, logged in the egress ledger, are the only network traffic.
 
 An index keeps the embedding model its vectors were built with, even if a newer manifest recommends
-another, unless `[runtime] embedding_model` names one. Naming a different model for an existing index
+another, unless `[runtime] embedding_model` names one. An index built with an older model gets a
+one-time offer on the **Models** page to **upgrade search to multilingual**: accepting downloads the
+model, re-indexes in the background (paused on low battery and while you use the AI), and switches
+over once every passage has its new vector; search keeps working on the old index until then. Cancel
+or **Not now** keeps the old index, and the offer does not come back. Naming a different model for an existing index
 makes search fall back to full-text, and new items get no vectors.
 
 ### Reranking search results

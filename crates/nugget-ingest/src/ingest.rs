@@ -173,6 +173,8 @@ pub(crate) struct Inner {
     /// Wakes the re-embed job.
     pub reembed: Notify,
     pub reembed_state: Mutex<ReembedState>,
+    /// The re-index to another embedding model, while one runs ([`Ingest::start_reindex`]).
+    pub reindex: Mutex<Option<reembed::Reindex>>,
     /// Background triage: queue and counters, its wake-up, and interactive model use.
     pub triage: Mutex<TriageQueue>,
     pub triage_wake: Notify,
@@ -764,6 +766,7 @@ impl IngestBuilder {
             write_lock: Mutex::new(()),
             reembed: Notify::new(),
             reembed_state: Mutex::new(ReembedState::default()),
+            reindex: Mutex::new(None),
             triage: Mutex::new(TriageQueue::default()),
             triage_wake: Notify::new(),
             foreground,
@@ -1358,6 +1361,30 @@ impl Ingest {
     /// embed them now, in the background.
     pub fn reembed_now(&self) {
         self.inner.reembed.notify_one();
+    }
+
+    /// Re-embed every chunk with `provider` (an on-device embedder of the store's re-index target,
+    /// [`nugget_store::Store::begin_reindex`]) in the background, at the lowest priority, then
+    /// switch the index to the new vectors and call `on_done`. Resumes from the staged vectors.
+    pub fn start_reindex(
+        &self,
+        provider: Arc<dyn nugget_infer::Provider>,
+        on_done: reembed::OnReindexed,
+    ) {
+        *lock(&self.inner.reindex) = Some(reembed::Reindex::new(provider, on_done));
+        self.inner.reembed.notify_one();
+    }
+
+    /// Stop the re-index (the staged vectors stay until the caller cancels it in the store).
+    pub fn stop_reindex(&self) {
+        lock(&self.inner.reindex).take();
+    }
+
+    /// The last re-index failure, while a re-index runs.
+    pub fn reindex_error(&self) -> Option<String> {
+        lock(&self.inner.reindex)
+            .as_ref()
+            .and_then(|r| r.error.clone())
     }
 
     /// Interactive model requests in flight, which background triage yields to.
