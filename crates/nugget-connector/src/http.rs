@@ -46,10 +46,7 @@ impl Response {
     }
 }
 
-/// `Retry-After` in milliseconds: delta-seconds or an HTTP-date (see [`crate::retry`]).
-pub fn retry_after_ms(h: &HeaderMap) -> Option<u64> {
-    crate::retry::retry_after_ms(h)
-}
+pub use crate::retry::retry_after_ms;
 
 /// A reqwest client bound to one source's egress ledger.
 #[derive(Clone)]

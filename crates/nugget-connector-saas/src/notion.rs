@@ -32,8 +32,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_connector::http::{MeteredHttp, Response};
 use nugget_connector::{
-    AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, ConnectorFactory,
-    Content, Document, KindInfo,
+    CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
@@ -42,11 +41,11 @@ use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::NOTION_KIND;
 use crate::api::{self, Api, ItemFailures, Outcome, classify_common, server_now, snippet};
 use crate::auth::{Credential, Token};
 use crate::settings;
 use crate::text::{clean, now_unix, one_line, parse_rfc3339, rfc3339, safe_id, truncate_chars};
-use crate::{Endpoints, NOTION_KIND, RetryPolicy};
 
 const FEATURE: &str = "sync:notion";
 const SERVICE: &str = "Notion";
@@ -132,45 +131,16 @@ impl Cursor {
     }
 }
 
-/// Factory for `notion` sources.
-#[derive(Debug, Clone, Default)]
-pub struct NotionFactory {
-    endpoints: Endpoints,
-    retry: RetryPolicy,
-}
+factory!(
+    NotionFactory,
+    NotionConnector,
+    NOTION_KIND,
+    "Notion",
+    NotionSettings
+);
 
 impl NotionFactory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_endpoints(mut self, endpoints: Endpoints) -> Self {
-        self.endpoints = endpoints;
-        self
-    }
-
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
-        self
-    }
-}
-
-impl ConnectorFactory for NotionFactory {
-    fn info(&self) -> KindInfo {
-        KindInfo {
-            kind: NOTION_KIND,
-            display_name: "Notion",
-            auth: AuthKind::Password,
-            settings_schema: NotionSettings::schema(),
-        }
-    }
-
-    fn validate(&self, settings: &Value) -> Result<()> {
-        NotionSettings::parse(settings).map(|_| ())
-    }
-
-    fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
-        let settings = NotionSettings::parse(settings)?;
+    fn make(&self, settings: NotionSettings, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
         let http = api::metered(ctx.egress.clone(), FEATURE)?;
         let cred = Arc::new(Credential::new(
             SERVICE,
@@ -197,14 +167,6 @@ pub struct NotionConnector {
     ctx: ConnectorContext,
     /// User id → name (`None`: unknown or not readable), kept across passes.
     users: Mutex<HashMap<String, Option<String>>>,
-}
-
-impl std::fmt::Debug for NotionConnector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NotionConnector")
-            .field("source", &self.ctx.source)
-            .finish_non_exhaustive()
-    }
 }
 
 fn classify(resp: Response) -> Outcome {

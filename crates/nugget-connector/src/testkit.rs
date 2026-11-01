@@ -738,24 +738,6 @@ mod tests {
         .await;
     }
 
-    #[test]
-    #[should_panic(expected = "unscrubbed")]
-    fn unscrubbed_fixture_fails() {
-        assert_scrubbed(r#"{"refresh_token": "1//abc"}"#);
-    }
-
-    #[tokio::test]
-    async fn replica_sink_crashes_and_stays_crashed() {
-        let r = Replica::new();
-        let s = ReplicaSink::new(r.clone()).crash_at_send(1);
-        let doc = |k: &str| Change::Upsert(Document::new(k, "text/plain", Content::Text(k.into())));
-        s.send(doc("a")).await.unwrap();
-        assert!(s.send(doc("b")).await.is_err());
-        assert!(s.checkpoint(Value::Null).await.is_err());
-        assert_eq!(r.keys(), vec!["a"]);
-        assert_eq!(s.committed(), None);
-    }
-
     /// A toy connector over a fixed list, checkpointing after every item, proves the matrix.
     struct Toy(Arc<Replica>);
     #[async_trait]

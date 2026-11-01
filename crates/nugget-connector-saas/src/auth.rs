@@ -22,27 +22,19 @@ use reqwest::Method;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::Deserialize;
 
-/// Keychain account of a source's OAuth client secret (same name the daemon uses for OAuth
-/// kinds). Read when settings carry no `client_secret`.
-pub fn client_secret_account(source: &str) -> String {
-    format!("oauth_client_secret:{source}")
-}
-
 /// Linear OAuth 2.0 (authorization code with PKCE; the client secret is optional with PKCE).
 pub mod linear {
     use nugget_oauth::Provider;
 
     pub const AUTH_URL: &str = "https://linear.app/oauth/authorize";
     pub const TOKEN_URL: &str = "https://api.linear.app/oauth/token";
-    /// Read-only access to the workspace the user picks.
-    pub const SCOPE_READ: &str = "read";
 
     pub fn provider_with_endpoints(auth_url: &str, token_url: &str) -> Provider {
         Provider {
             name: "linear".into(),
             auth_url: auth_url.into(),
             token_url: token_url.into(),
-            scopes: vec![SCOPE_READ.into()],
+            scopes: vec!["read".into()], // read-only
             extra_auth_params: vec![("prompt".into(), "consent".into())],
         }
     }
@@ -53,7 +45,6 @@ pub mod linear {
 pub mod github {
     use nugget_oauth::Provider;
 
-    pub const LOGIN_ROOT: &str = "https://github.com/login";
     /// Read access to the user's repositories (OAuth Apps; GitHub Apps use their permissions).
     pub const SCOPES: &[&str] = &["repo", "read:discussion"];
 
@@ -244,7 +235,8 @@ impl Credential {
     }
 }
 
-/// An OAuth client secret: from settings, else from `oauth_client_secret:<source>`.
+/// An OAuth client secret: from settings, else from `oauth_client_secret:<source>` (the
+/// account the daemon stores it under).
 pub(crate) fn client_secret(
     secrets: &Arc<dyn SecretStore>,
     source: &str,
@@ -254,7 +246,7 @@ pub(crate) fn client_secret(
         return Some(s.to_string());
     }
     secrets
-        .get(&client_secret_account(source))
+        .get(&format!("oauth_client_secret:{source}"))
         .ok()
         .flatten()
         .filter(|s| !s.is_empty())

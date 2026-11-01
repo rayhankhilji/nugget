@@ -237,6 +237,19 @@ mod tests {
             retry_after(&h(&[(RETRY_AFTER, "Sunday, 06-Nov-94 08:49:37 GMT")])),
             None
         );
+        // A policy pauses at least as long as the hint, and refuses hints over its cap and
+        // attempts past its budget.
+        let p = RetryPolicy {
+            max_retries: 2,
+            base_delay: Duration::from_millis(10),
+            max_delay: Duration::from_secs(2),
+        };
+        let hint = |ms| nugget_core::Error::RateLimited {
+            retry_after_ms: Some(ms),
+        };
+        assert!(p.pause(0, &hint(1_500)).unwrap() >= Duration::from_millis(1_500));
+        assert_eq!(p.pause(0, &hint(60_000)), None);
+        assert_eq!(p.pause(2, &nugget_core::Error::Network("x".into())), None);
         let headers = h(&[
             (DATE, "yesterday"),
             (RETRY_AFTER, "Wed, 21 Oct 2026 07:28:30 GMT"),
