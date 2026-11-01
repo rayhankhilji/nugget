@@ -386,6 +386,35 @@ impl Knowledge {
         drop(self.inner.run_lock.lock().await);
     }
 
+    /// Whether the item change log has moved past what the last plan covered and no carried
+    /// plan is open: items were written after it (an ingest commit, or a store write that is
+    /// not one, such as an embedding backfill), so a new plan is due. Blocking (store reads).
+    pub fn has_unplanned_changes(&self) -> Result<bool> {
+        if self
+            .inner
+            .carry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
+        {
+            return Ok(false);
+        }
+        let through = *self
+            .inner
+            .planned_through
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let feed = self.inner.feed.as_ref();
+        let cursor = match through {
+            Some(c) => c,
+            None => State::load(feed)?.item_cursor,
+        };
+        Ok(match (cursor, feed.item_changes_head()?) {
+            (Some(c), Some(head)) => head > c,
+            _ => false,
+        })
+    }
+
     /// Items not extracted yet: what is left of the current or carried plan, plus the items
     /// changed after the change-log position that plan covers (not planned yet), plus items
     /// deferred for the model. Without a change log only the plan is counted. Blocking (store

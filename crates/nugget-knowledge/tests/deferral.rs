@@ -235,3 +235,35 @@ async fn failing_model_requests_keep_model_facts_for_a_bounded_number_of_runs() 
     assert_eq!((s.items_processed, s.items_deferred), (1, 0), "{s:?}");
     assert_eq!(pending(&k).await, 0);
 }
+
+#[tokio::test]
+async fn writes_after_the_plan_without_an_extraction_change_are_planned_and_leave_nothing_pending()
+{
+    let env = Env::new();
+    put_memo(&env, "1", "");
+    // No model at all: deterministic extraction runs and the run is reported.
+    let k = env.knowledge(KnowledgeConfig::default(), None);
+    let s = run(&k).await;
+    assert_eq!(s.items_processed, 1);
+    let unplanned = |k: &Knowledge| {
+        let k = k.clone();
+        async move {
+            tokio::task::spawn_blocking(move || k.has_unplanned_changes())
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    };
+    assert!(!unplanned(&k).await);
+    assert_eq!(pending(&k).await, 0);
+
+    // The store writes the item again after the plan (same text, a new version token), and no
+    // ingest commit wakes anyone: the change log shows it.
+    put_memo(&env, "2", "");
+    assert!(unplanned(&k).await, "a new plan is due");
+    assert_eq!(pending(&k).await, 1);
+    let s = run(&k).await;
+    assert_eq!(s.planned, 1, "{s:?}");
+    assert!(!unplanned(&k).await);
+    assert_eq!(pending(&k).await, 0);
+}

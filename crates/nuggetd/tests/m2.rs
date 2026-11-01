@@ -665,8 +665,9 @@ async fn sensitive_only_entities_are_marked_hidden_from_the_graph_and_kept_out_o
             .all(|c| c.sensitive),
         "{d:#?}"
     );
-    // No local model here, so the lunch mail is unsorted (triage has not run): sensitive for the
-    // cloud, but shown in the local views like any other item.
+    // No local model here, so triage never ran on the lunch mail: it is not confirmed sensitive
+    // and is shown in the local views like any other item (whether it counts as sensitive for
+    // the cloud depends on `assume_unflagged_safe`; the vault tests cover unsorted items).
     let lunch_ref = h
         .entity(&alice.id)
         .await
@@ -678,7 +679,7 @@ async fn sensitive_only_entities_are_marked_hidden_from_the_graph_and_kept_out_o
         .expect("Alice's facts are cited");
     let lunch = h.store.get_item(&lunch_ref).unwrap().unwrap();
     assert!(
-        nugget_retrieve::is_sensitive(&lunch.metadata)
+        lunch.metadata["triage"]["state"] != "done"
             && !nugget_retrieve::is_confirmed_sensitive(&lunch.metadata),
         "{:?}",
         lunch.metadata

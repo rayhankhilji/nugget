@@ -263,6 +263,11 @@ impl KnowledgeService {
                             chain_deferred |= deferred_for_budget(&stats);
                             if run_again(&stats, from, *committed.borrow(), chain_deferred) {
                                 due = Some(Instant::now());
+                            } else if stats.remaining == 0 && self.unplanned_changes().await {
+                                // Written after the plan without an ingest commit (e.g. an
+                                // embedding backfill): plan again after the quiet period, so
+                                // pending_items reaches 0 (unchanged items cost little).
+                                due = Some(Instant::now() + debounce);
                             }
                             if stats.remaining == 0 {
                                 chain_from = None;
@@ -282,6 +287,14 @@ impl KnowledgeService {
                 _ => {}
             }
         }
+    }
+
+    /// [`Knowledge::has_unplanned_changes`] off the async runtime (false on error).
+    async fn unplanned_changes(&self) -> bool {
+        let k = self.knowledge.clone();
+        blocking(move || k.has_unplanned_changes())
+            .await
+            .unwrap_or(false)
     }
 
     /// One extraction run (respecting the power policy), then a vault pass.
