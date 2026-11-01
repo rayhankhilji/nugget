@@ -566,7 +566,12 @@ fn feedback_final_texts_join_the_profile() {
             .with_thread("can you do 5?")
             .allow_sensitive(true),
     );
-    assert!(local.exemplars.iter().any(|e| e == "sure jamie, 5 works 👍"));
+    assert!(
+        local
+            .exemplars
+            .iter()
+            .any(|e| e == "sure jamie, 5 works 👍")
+    );
     // Unjudged until local triage clears it (QA GG8 R2-1): never a cloud exemplar meanwhile.
     let cloud = p.hints(Channel::Chat, &["jamie".into()], "can you do 5?");
     assert!(
