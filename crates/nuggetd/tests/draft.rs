@@ -2,25 +2,22 @@
 //! cancellation, shutdown, feedback, the sensitive gate (nothing reaches the model), excluded
 //! apps, prewarm, the voice profile at startup and its refresh after an ingest commit.
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use common::{CALL, Harness, KEY};
 use futures::StreamExt;
 use nugget_core::ipc::{ChatDelta, ChatDone, DraftStarted, VoiceStatus, method, notification};
 use nugget_core::paths::Paths;
-use nugget_ingest::MemorySecrets;
-use nugget_ipc::{Client, IpcError, Notification, RpcError, code};
+use nugget_ipc::{Notification, RpcError, code};
 use nugget_models::{GpuKind, Hardware};
 use nugget_store::{NewChunk, NewItem, Store, StoreKey, content_hash};
-use nuggetd::{Daemon, DaemonOptions, Startup};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 
-const WAIT: Duration = Duration::from_secs(20);
-const KEY: [u8; 32] = [7; 32];
 /// Put in a request (as the instruction) to make the fake model send one delta and then hang.
 const SLOW: &str = "SLOWMODEPLEASE";
 /// Field contents that must never reach the model or the audit log.
@@ -161,114 +158,64 @@ async fn read_head(sock: &mut TcpStream, buf: &mut Vec<u8>) -> Option<(usize, us
 
 // ---- the daemon ----
 
-struct Harness {
-    tmp: tempfile::TempDir,
+struct Rig {
+    h: Harness,
     model: FakeModel,
-    store: Store,
-    client: Client,
-    stop: Option<oneshot::Sender<()>>,
-    server: Option<JoinHandle<nugget_core::Result<()>>>,
+}
+
+impl std::ops::Deref for Rig {
+    type Target = Harness;
+    fn deref(&self) -> &Harness {
+        &self.h
+    }
+}
+
+impl std::ops::DerefMut for Rig {
+    fn deref_mut(&mut self) -> &mut Harness {
+        &mut self.h
+    }
 }
 
 /// `draft` is TOML for the `[draft]` section; `seed` runs on the store before the daemon starts.
-async fn start(draft: &str, seed: impl FnOnce(&Store)) -> Harness {
+async fn start(draft: &str, seed: impl FnOnce(&Store)) -> Rig {
     start_in("enabled = false", draft, seed).await
 }
 
 /// [`start`] with `runtime` as the `[runtime]` section (on fixed hardware).
-async fn start_in(runtime: &str, draft: &str, seed: impl FnOnce(&Store)) -> Harness {
+async fn start_in(runtime: &str, draft: &str, seed: impl FnOnce(&Store)) -> Rig {
     let tmp = tempfile::tempdir().unwrap();
-    let paths = Paths::rooted(tmp.path().to_path_buf());
+    let db = Paths::rooted(tmp.path().join("home")).db_file();
+    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+    seed(&Store::open(&db, &StoreKey::from_bytes(KEY)).unwrap());
     let (model, base) = FakeModel::start().await;
-    std::fs::create_dir_all(&paths.config).unwrap();
-    {
-        let db = paths.db_file();
-        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
-        let store = Store::open(&db, &StoreKey::from_bytes(KEY)).unwrap();
-        seed(&store);
-    }
+    // The fake provider is loopback, but treated as cloud so its traffic is in the ledger.
     let config = format!(
-        r#"[runtime]
-{runtime}
-
-[[providers]]
-id = "fake"
-kind = "openai_compatible"
-base_url = "{base}"
-model = "fake-model"
-tiers = ["synthesis"]
-max_retries = 0
-# Loopback, but treated as cloud so its traffic is in the egress ledger.
-locality = "cloud"
-
-[draft]
-voice_refresh_debounce_ms = 100
-{draft}
-"#
+        "[runtime]\n{runtime}\n\n[[providers]]\nid = \"fake\"\nkind = \"openai_compatible\"\n\
+         base_url = \"{base}\"\nmodel = \"fake-model\"\ntiers = [\"synthesis\"]\nmax_retries = 0\n\
+         locality = \"cloud\"\n\n[draft]\nvoice_refresh_debounce_ms = 100\n{draft}\n"
     );
-    std::fs::write(paths.config_file(), config).unwrap();
-    let mut opts = DaemonOptions::new(paths.clone());
-    opts.store_key = Some(StoreKey::from_bytes(KEY));
-    opts.source_secrets = Some(Arc::new(MemorySecrets::new()));
-    opts.runtime.hardware = Some(Hardware {
-        total_ram: 16 << 30,
-        available_ram: 8 << 30,
-        cpu_cores: 4,
-        gpu: GpuKind::Unknown,
-    });
-    let daemon = match Daemon::start(opts).await.unwrap() {
-        Startup::Ready(d) => d,
-        Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
-    };
-    let store = daemon.store();
-    let (tx, rx) = oneshot::channel::<()>();
-    let server = tokio::spawn(daemon.run_until(async {
-        let _ = rx.await;
-    }));
-    let client = Client::connect(&paths).await.unwrap();
-    Harness {
-        tmp,
-        model,
-        store,
-        client,
-        stop: Some(tx),
-        server: Some(server),
-    }
+    let h = Harness::start_in(tmp, &config, |o| {
+        o.runtime.hardware = Some(Hardware {
+            total_ram: 16 << 30,
+            available_ram: 8 << 30,
+            cpu_cores: 4,
+            gpu: GpuKind::Unknown,
+        })
+    })
+    .await;
+    Rig { h, model }
 }
 
-impl Harness {
-    async fn call<R: serde::de::DeserializeOwned>(&self, m: &str, params: Value) -> R {
-        tokio::time::timeout(WAIT, self.client.call(m, &params))
-            .await
-            .unwrap_or_else(|_| panic!("{m} timed out"))
-            .unwrap_or_else(|e| panic!("{m} failed: {e}"))
-    }
-
+impl Rig {
     async fn call_err(&self, m: &str, params: Value) -> RpcError {
-        let r: Result<Value, IpcError> = tokio::time::timeout(WAIT, self.client.call(m, &params))
-            .await
-            .unwrap_or_else(|_| panic!("{m} timed out"));
-        match r {
+        match self.h.try_call(m, params).await {
             Ok(v) => panic!("{m} succeeded: {v}"),
             Err(e) => e.as_rpc().cloned().unwrap_or_else(|| panic!("{m}: {e}")),
         }
     }
 
-    /// Every audit record's action and detail, oldest first.
-    fn audit(&self) -> Vec<(String, String, Value)> {
-        let mut v: Vec<_> = self
-            .store
-            .recent_audit(1000)
-            .unwrap()
-            .into_iter()
-            .map(|r| (r.action, r.target, r.detail))
-            .collect();
-        v.reverse();
-        v
-    }
-
     async fn audit_eventually(&self, action: &str, n: usize) -> Vec<Value> {
-        let deadline = tokio::time::Instant::now() + WAIT;
+        let deadline = tokio::time::Instant::now() + CALL;
         loop {
             let found: Vec<Value> = self
                 .audit()
@@ -282,15 +229,6 @@ impl Harness {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
-
-    async fn stop(&mut self) {
-        let _ = self.stop.take().unwrap().send(());
-        tokio::time::timeout(WAIT, self.server.take().unwrap())
-            .await
-            .expect("daemon stops promptly")
-            .unwrap()
-            .unwrap();
-    }
 }
 
 /// Text and end of one stream.
@@ -300,7 +238,7 @@ async fn collect(
 ) -> (String, ChatDone) {
     let mut text = String::new();
     loop {
-        let n = tokio::time::timeout(WAIT, notes.next())
+        let n = tokio::time::timeout(CALL, notes.next())
             .await
             .expect("chat notification in time")
             .expect("connection open");
@@ -328,7 +266,7 @@ async fn first_delta(
     stream_id: &str,
 ) -> String {
     loop {
-        let n = tokio::time::timeout(WAIT, notes.next())
+        let n = tokio::time::timeout(CALL, notes.next())
             .await
             .expect("chat notification in time")
             .expect("connection open");
@@ -377,8 +315,8 @@ fn seed_chat(store: &Store, from: usize, to: usize) {
     }
 }
 
-async fn voice_status_eventually(h: &Harness, pred: impl Fn(&VoiceStatus) -> bool) -> VoiceStatus {
-    let deadline = tokio::time::Instant::now() + WAIT;
+async fn voice_status_eventually(h: &Rig, pred: impl Fn(&VoiceStatus) -> bool) -> VoiceStatus {
+    let deadline = tokio::time::Instant::now() + CALL;
     loop {
         let s: VoiceStatus = h.call(method::VOICE_STATUS, json!({})).await;
         if pred(&s) || tokio::time::Instant::now() > deadline {
@@ -409,7 +347,7 @@ async fn begin_streams_the_draft_then_feedback_is_recorded() {
     let chats = h.model.chats();
     assert_eq!(chats.len(), 1);
     assert!(chats[0].body.contains(THREAD_SECRET));
-    let deadline = tokio::time::Instant::now() + WAIT;
+    let deadline = tokio::time::Instant::now() + CALL;
     loop {
         h.store.flush_egress();
         let events: Vec<nugget_core::egress::EgressEvent> =
@@ -514,7 +452,7 @@ async fn cancel_stops_a_draft_mid_stream_and_shutdown_ends_one() {
     let _ = h.stop.take().unwrap().send(());
     let (_, done) = collect(&mut notes, &started.stream_id).await;
     assert_eq!(done.error.as_deref(), Some("nuggetd is shutting down"));
-    tokio::time::timeout(WAIT, h.server.take().unwrap())
+    tokio::time::timeout(CALL, h.server.take().unwrap())
         .await
         .expect("daemon stops promptly")
         .unwrap()
@@ -638,7 +576,7 @@ async fn prewarm_names_the_provider_and_opens_its_connection() {
     assert!(v["locality"].is_string());
     assert_eq!(v["retrieval"], json!(false));
     // The warm-up is a bodiless GET (no content is sent).
-    let deadline = tokio::time::Instant::now() + WAIT;
+    let deadline = tokio::time::Instant::now() + CALL;
     while h.model.seen().is_empty() && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -714,7 +652,7 @@ async fn read_ahead_and_prewarm_skip_a_runtime_slot_without_its_model() {
     assert_eq!(v["provider"], json!("fake"), "{v}");
     assert_eq!(v["locality"], json!("cloud"), "{v}");
     // The prewarm only opens the connection: no content reaches the cloud model.
-    let deadline = tokio::time::Instant::now() + WAIT;
+    let deadline = tokio::time::Instant::now() + CALL;
     while h.model.seen().is_empty() && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }

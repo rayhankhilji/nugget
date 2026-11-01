@@ -2,147 +2,69 @@
 //! as the configs `nuggetd mcp install --client claude-desktop|claude-code|cursor` produce say
 //! (command, args and env for the stdio bridge), and over loopback HTTP as the `generic-http`
 //! setup snippet says (url and Authorization header). Each initializes, lists tools and calls
-//! `get_context`. Also: the HTTP listener fails closed on a taken port, and no client config
-//! ever points at a port the daemon does not hold. Loopback only; no external network.
+//! `get_context`. Also: the bridge refuses bad tokens, `mcp install` merges into existing
+//! configs, and the HTTP listener fails closed on a taken port. Loopback only.
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use std::path::Path;
 use std::process::Stdio;
-use std::sync::Arc;
 use std::time::Duration;
 
-use nugget_core::ipc::{McpClientCreated, method};
-use nugget_core::paths::Paths;
-use nugget_ingest::{MemorySecrets, NoPowerPolicy};
-use nugget_ipc::Client;
-use nugget_store::StoreKey;
-use nuggetd::{Daemon, DaemonOptions, Startup};
+use common::*;
+use nugget_core::ipc::{McpClientCreated, McpClientInfo, method};
 use rmcp::ServiceExt;
 use rmcp::model::CallToolRequestParams;
-use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use serde_json::{Value, json};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
-
-const EXE: &str = env!("CARGO_BIN_EXE_nuggetd");
-const CALL: Duration = Duration::from_secs(30);
-const EVENTUALLY: Duration = Duration::from_secs(60);
 
 const NOTE: &str = "# Falcon launch\n\nThe Falcon launch review is on Thursday. Bring the \
                     telemetry dashboard and the rollback checklist.\n";
 
-type McpClient = RunningService<rmcp::RoleClient, ()>;
-
-struct Harness {
-    tmp: tempfile::TempDir,
-    home: PathBuf,
-    client: Client,
-    mcp_addr: Option<std::net::SocketAddr>,
-    stop: Option<oneshot::Sender<()>>,
-    server: Option<JoinHandle<nugget_core::Result<()>>>,
+/// No local model: let unflagged items count as not sensitive (GG5-2 opt-out), or the
+/// default-scoped clients here would see nothing.
+async fn start(mcp_port: u16) -> Harness {
+    let config = format!(
+        "{NO_RUNTIME}\n[ingest]\nassume_unflagged_safe = true\n\n\
+         [knowledge]\ninterval_minutes = 0\n\n[mcp]\nport = {mcp_port}\n"
+    );
+    let h = Harness::start_with(&config, mcp_opts).await;
+    h.add_files("notes", &[("falcon.md", NOTE)]).await;
+    h
 }
 
-impl Harness {
-    async fn start(mcp_port: u16) -> Self {
-        let tmp = tempfile::Builder::new()
-            .prefix("nugget-mcpc-")
-            .tempdir()
-            .unwrap();
-        let home = tmp.path().join("home");
-        let paths = Paths::rooted(home.clone());
-        std::fs::create_dir_all(&paths.config).unwrap();
-        std::fs::write(
-            paths.config_file(),
-            format!(
-                // No local model: let unflagged items count as not sensitive (GG5-2 opt-out), or
-                // the default-scoped clients here would see nothing.
-                "[runtime]\nenabled = false\n\n[ingest]\nassume_unflagged_safe = true\n\n\
-                 [knowledge]\ninterval_minutes = 0\n\n\
-                 [mcp]\nport = {mcp_port}\n"
-            ),
-        )
-        .unwrap();
-        let mut opts = DaemonOptions::new(paths.clone());
-        opts.store_key = Some(StoreKey::from_bytes([5; 32]));
-        opts.source_secrets = Some(Arc::new(MemorySecrets::new()));
-        opts.power = Some(Arc::new(NoPowerPolicy));
-        opts.home = Some(home.clone());
-        opts.nuggetd_exe = Some(PathBuf::from(EXE));
-        let daemon = match Daemon::start(opts).await.unwrap() {
-            Startup::Ready(d) => d,
-            Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
-        };
-        let mcp_addr = daemon.mcp_http_addr();
-        let (tx, rx) = oneshot::channel::<()>();
-        let server = tokio::spawn(daemon.run_until(async {
-            let _ = rx.await;
-        }));
-        let client = Client::connect(&paths).await.unwrap();
-        Self {
-            tmp,
-            home,
-            client,
-            mcp_addr,
-            stop: Some(tx),
-            server: Some(server),
-        }
-    }
+fn home(h: &Harness) -> &Path {
+    h.paths.data.parent().unwrap()
+}
 
-    async fn call<R: serde::de::DeserializeOwned>(&self, m: &str, params: Value) -> R {
-        tokio::time::timeout(CALL, self.client.call(m, &params))
-            .await
-            .unwrap_or_else(|_| panic!("{m} timed out"))
-            .unwrap_or_else(|e| panic!("{m} failed: {e}"))
-    }
+async fn create_client(h: &Harness, name: &str) -> McpClientCreated {
+    h.call(
+        method::MCP_CLIENTS_CREATE,
+        json!({"name": name, "scopes": all_scopes()}),
+    )
+    .await
+}
 
-    async fn add_notes(&self) {
-        let root = self.tmp.path().join("notes");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("falcon.md"), NOTE).unwrap();
-        let _: Value = self
-            .call(
-                method::SOURCES_ADD,
-                json!({"kind": "files", "name": "notes", "settings": {"roots": [root], "exclude": []}}),
-            )
-            .await;
-    }
-
-    async fn create_client(&self, name: &str) -> McpClientCreated {
-        self.call(
-            method::MCP_CLIENTS_CREATE,
-            json!({"name": name, "scopes": {"sources": null, "tools": [], "include_sensitive": false}}),
-        )
+/// `nuggetd <args>` as a user runs it on this home.
+async fn run_bin(h: &Harness, args: &[&str]) -> std::process::Output {
+    tokio::process::Command::new(EXE)
+        .args(args)
+        .env("NUGGET_HOME", home(h))
+        .env("NUGGET_KEYCHAIN", "off")
+        .env_remove(nugget_mcp::TOKEN_ENV)
+        .stdin(Stdio::null())
+        .output()
         .await
-    }
+        .unwrap()
+}
 
-    /// `nuggetd <args>` as a user runs it on this home.
-    async fn run_bin(&self, args: &[&str]) -> std::process::Output {
-        let out = tokio::process::Command::new(EXE)
-            .args(args)
-            .env("NUGGET_HOME", &self.home)
-            .env("NUGGET_KEYCHAIN", "off")
-            .env_remove(nugget_mcp::TOKEN_ENV)
-            .stdin(Stdio::null())
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "nuggetd {args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        out
-    }
-
-    async fn stop(&mut self) {
-        let _ = self.stop.take().unwrap().send(());
-        tokio::time::timeout(CALL, self.server.take().unwrap())
-            .await
-            .expect("daemon stops promptly")
-            .unwrap()
-            .unwrap();
-    }
+/// [`run_bin`], which must succeed; its stdout.
+async fn run_ok(h: &Harness, args: &[&str]) -> String {
+    let out = run_bin(h, args).await;
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "nuggetd {args:?}: {err}");
+    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// A stdio server entry as an app reads it from its config.
@@ -351,21 +273,47 @@ fn http_snippet(created: &McpClientCreated) -> Option<(String, String, String)> 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn installed_app_configs_reach_the_daemon_over_stdio_and_http() {
-    let mut h = Harness::start(0).await;
+    let mut h = start(0).await;
     let addr = h.mcp_addr.expect("http listener on a free loopback port");
-    h.add_notes().await;
 
-    // Claude Desktop and Cursor: the merged JSON config, launched as written.
+    // Claude Desktop (merged into an existing config) and Cursor: launched as written.
+    let desktop = h
+        .tmp
+        .path()
+        .join("claude-desktop")
+        .join("claude_desktop_config.json");
+    std::fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+    let existing = r#"{"theme": "dark", "mcpServers": {"weather": {"command": "weather-mcp"}}}"#;
+    std::fs::write(&desktop, existing).unwrap();
+    let desktop_s = desktop.display().to_string();
+    // Without a terminal, --yes is required.
+    let install = [
+        "mcp",
+        "install",
+        "--client",
+        "claude-desktop",
+        "--config",
+        &desktop_s,
+    ];
+    let out = run_bin(&h, &install).await;
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("--yes"));
     for (app, file) in [
         ("claude-desktop", "claude_desktop_config.json"),
         ("cursor", "mcp.json"),
     ] {
         let cfg = h.tmp.path().join(app).join(file);
         let cfg_s = cfg.display().to_string();
-        h.run_bin(&[
-            "mcp", "install", "--client", app, "--config", &cfg_s, "--yes",
-        ])
+        let stdout = run_ok(
+            &h,
+            &[
+                "mcp", "install", "--client", app, "--config", &cfg_s, "--yes",
+            ],
+        )
         .await;
+        assert!(
+            !stdout.contains("ngt_"),
+            "the token is not printed: {stdout}"
+        );
         let entry = StdioEntry::from_json(&read_json(&cfg));
         assert_eq!(entry.command, EXE, "{app}");
         assert_eq!(&entry.args[..2], ["mcp", "--client"], "{app}");
@@ -373,19 +321,64 @@ async fn installed_app_configs_reach_the_daemon_over_stdio_and_http() {
             entry
                 .env
                 .iter()
-                .any(|(k, v)| k == "NUGGET_HOME" && Path::new(v) == h.home.as_path()),
+                .any(|(k, v)| k == "NUGGET_HOME" && Path::new(v) == home(&h)),
             "{app}: {entry:?}"
         );
         let (client, child) = entry.connect().await;
         exercise(&client, app).await;
         finish(app, client, child).await;
     }
+    let v = read_json(&desktop);
+    assert_eq!(v["theme"], "dark");
+    assert_eq!(v["mcpServers"]["weather"]["command"], "weather-mcp");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&desktop).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    let backups = std::fs::read_dir(desktop.parent().unwrap())
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("nugget-backup")
+        });
+    assert_eq!(backups.count(), 1);
+
+    // Installing again replaces the entry and revokes the client it replaced.
+    let first = StdioEntry::from_json(&v).args[2].clone();
+    let stdout = run_ok(&h, &[&install[..], &["--yes"]].concat()).await;
+    assert!(stdout.contains(&first), "{stdout}");
+    let listed: Vec<McpClientInfo> = h.call(method::MCP_CLIENTS_LIST, json!({})).await;
+    assert!(listed.iter().all(|c| c.id != first));
+    assert!(!serde_json::to_string(&listed).unwrap().contains("ngt_"));
+
+    // A wrong token (or none) is refused before any MCP traffic.
+    let entry = StdioEntry::from_json(&read_json(&desktop));
+    let mut cmd = tokio::process::Command::new(EXE);
+    cmd.args(&entry.args)
+        .env("NUGGET_HOME", home(&h))
+        .stdin(Stdio::null());
+    let out = cmd
+        .env(nugget_mcp::TOKEN_ENV, format!("ngt_{}", "A".repeat(43)))
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        !out.status.success() && out.stdout.is_empty(),
+        "nothing but MCP on stdout"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("revoked"));
+    let args: Vec<&str> = entry.args.iter().map(String::as_str).collect();
+    let out = run_bin(&h, &args).await;
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(nugget_mcp::TOKEN_ENV));
 
     // Claude Code: the printed `claude mcp add` command, parsed as a shell would.
-    let out = h
-        .run_bin(&["mcp", "install", "--client", "claude-code", "--yes"])
-        .await;
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = run_ok(&h, &["mcp", "install", "--client", "claude-code", "--yes"]).await;
     let line = stdout
         .lines()
         .find(|l| l.trim_start().starts_with("claude mcp add"))
@@ -395,9 +388,16 @@ async fn installed_app_configs_reach_the_daemon_over_stdio_and_http() {
     let (client, child) = entry.connect().await;
     exercise(&client, "claude-code").await;
     finish("claude-code", client, child).await;
+    // Stdio tool calls are audited (by a background writer, so possibly just after the exit).
+    eventually("stdio tool calls are audited", || async {
+        h.audit()
+            .iter()
+            .any(|a| a.0 == "mcp.tool_call" && a.2["transport"] == "stdio")
+    })
+    .await;
 
     // HTTP: the generic-http snippet's url and header, on the port the daemon holds.
-    let created = h.create_client("HTTP app").await;
+    let created = create_client(&h, "HTTP app").await;
     let (url, header, value) = http_snippet(&created).expect("http snippet while listening");
     assert_eq!(url, format!("http://127.0.0.1:{}/mcp", addr.port()));
     assert_eq!(header, "Authorization");
@@ -420,9 +420,9 @@ async fn a_taken_port_is_never_offered_to_clients() {
     // HTTP setup, and stdio clients still work.
     let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = squatter.local_addr().unwrap().port();
-    let mut h = Harness::start(port).await;
+    let mut h = start(port).await;
     assert_eq!(h.mcp_addr, None, "no listener on a taken port");
-    let created = h.create_client("Desktop").await;
+    let created = create_client(&h, "Desktop").await;
     assert!(
         created.setup.iter().all(|s| s.app != "generic-http"),
         "HTTP setup offered for a port the daemon does not hold: {:?}",
@@ -435,7 +435,6 @@ async fn a_taken_port_is_never_offered_to_clients() {
             .all(|s| !s.text.contains(&format!(":{port}"))),
         "a snippet points at the squatted port"
     );
-    h.add_notes().await;
     let desktop = created
         .setup
         .iter()
@@ -447,12 +446,4 @@ async fn a_taken_port_is_never_offered_to_clients() {
     finish("stdio with http down", client, child).await;
     drop(squatter);
     h.stop().await;
-}
-
-#[test]
-fn shell_words_split_like_a_shell() {
-    assert_eq!(
-        shell_words("a --env K='/x y' 'it'\\''s' b\\ c"),
-        ["a", "--env", "K=/x y", "it's", "b c"]
-    );
 }

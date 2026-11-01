@@ -6,25 +6,21 @@
 //! it can be removed (`ai.key.remove`) without a restart; without a working keychain the save
 //! answers `no_keychain` and an `env:` reference is the fallback.
 
+mod common;
+
 use std::sync::Arc;
 use std::time::Duration;
 
+use common::*;
 use nugget_connector::SecretStore;
 use nugget_core::egress::EgressEvent;
 use nugget_core::ipc::method;
-use nugget_core::paths::Paths;
 use nugget_core::secrets::provider_account;
-use nugget_ingest::MemorySecrets;
-use nugget_ipc::{Client, IpcError, code};
-use nugget_store::StoreKey;
-use nuggetd::{Daemon, DaemonOptions, Startup};
+use nugget_ipc::{IpcError, code};
 use serde_json::{Value, json};
-use tokio::sync::oneshot;
 use wiremock::matchers::{header, method as http_method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const WAIT: Duration = Duration::from_secs(30);
-const KEY: [u8; 32] = [9; 32];
 const GOOD: &str = "sk-e2e-good";
 const ROTATED: &str = "sk-e2e-rotated";
 
@@ -70,37 +66,21 @@ async fn mock_provider() -> MockServer {
     server
 }
 
-async fn call(client: &Client, m: &str, params: Value) -> Result<Value, IpcError> {
-    tokio::time::timeout(WAIT, client.call(m, &params))
-        .await
-        .unwrap_or_else(|_| panic!("{m} timed out"))
+async fn call(h: &Harness, m: &str, params: Value) -> Result<Value, IpcError> {
+    h.try_call(m, params).await
 }
 
 #[tokio::test]
 async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
-    let tmp = tempfile::tempdir().unwrap();
-    let paths = Paths::rooted(tmp.path().to_path_buf());
-    std::fs::create_dir_all(&paths.config).unwrap();
-    std::fs::write(paths.config_file(), "[runtime]\nenabled = false\n").unwrap();
-    let secrets = Arc::new(MemorySecrets::new());
-    let mut opts = DaemonOptions::new(paths.clone());
-    opts.store_key = Some(StoreKey::from_bytes(KEY));
-    opts.source_secrets = Some(secrets.clone());
-    let daemon = match Daemon::start(opts).await.unwrap() {
-        Startup::Ready(d) => d,
-        Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
-    };
-    let (tx, rx) = oneshot::channel::<()>();
-    let server = tokio::spawn(daemon.run_until(async {
-        let _ = rx.await;
-    }));
-    let client = Client::connect(&paths).await.unwrap();
+    let mut h = Harness::start(NO_RUNTIME).await;
+    let secrets = h.secrets.clone();
+    let paths = h.paths.clone();
     let provider = mock_provider().await;
     let base = format!("{}/v1", provider.uri());
 
     // Test: good key, bad key, wrong path.
     let ok = call(
-        &client,
+        &h,
         "ai.key.test",
         json!({"kind": "openai_compatible", "base_url": base, "api_key": GOOD}),
     )
@@ -110,7 +90,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     assert_eq!(ok["reason"], "ok");
     assert_eq!(ok["models"], json!(["e2e-model", "e2e-other"]));
     let bad = call(
-        &client,
+        &h,
         "ai.key.test",
         json!({"kind": "openai_compatible", "base_url": base, "api_key": "sk-e2e-bad"}),
     )
@@ -121,7 +101,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
         (json!(false), json!("bad_key"))
     );
     let wrong = call(
-        &client,
+        &h,
         "ai.key.test",
         json!({"kind": "openai_compatible", "base_url": provider.uri(), "api_key": GOOD}),
     )
@@ -130,16 +110,12 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     assert_eq!(wrong["reason"], "wrong_url", "{wrong}");
 
     // Malformed params are errors; validation outcomes never are.
-    let err = call(
-        &client,
-        "ai.key.test",
-        json!({"kind": "nope", "api_key": GOOD}),
-    )
-    .await
-    .unwrap_err();
+    let err = call(&h, "ai.key.test", json!({"kind": "nope", "api_key": GOOD}))
+        .await
+        .unwrap_err();
     assert_eq!(err.as_rpc().map(|e| e.code), Some(code::INVALID_PARAMS));
     let err = call(
-        &client,
+        &h,
         "ai.key.save",
         json!({"name": "Bad Name", "kind": "openai_compatible", "base_url": base, "api_key": GOOD, "model": "m"}),
     )
@@ -152,7 +128,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
         "name": "custom", "kind": "openai_compatible", "base_url": base,
         "api_key": "sk-e2e-bad", "model": "e2e-model",
     });
-    let r = call(&client, "ai.key.save", save.clone()).await.unwrap();
+    let r = call(&h, "ai.key.save", save.clone()).await.unwrap();
     assert_eq!(r["saved"], false, "{r}");
     assert_eq!(r["reason"], "bad_key");
     assert!(secrets.get(&provider_account("custom")).unwrap().is_none());
@@ -160,7 +136,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     // A good key is.
     let mut good = save.clone();
     good["api_key"] = json!(GOOD);
-    let r = call(&client, "ai.key.save", good.clone()).await.unwrap();
+    let r = call(&h, "ai.key.save", good.clone()).await.unwrap();
     assert_eq!(r["saved"], true, "{r}");
     assert_eq!(r["provider_id"], "custom");
     assert_eq!(r["restart_required"], false);
@@ -174,15 +150,15 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     assert!(config.contains("[runtime]"), "existing settings kept");
 
     // Routed right away, no restart.
-    let listed = provider_ids(&client).await;
+    let listed = provider_ids(&h).await;
     assert!(listed.contains(&"custom".to_owned()), "{listed:?}");
-    let saved = call(&client, "ai.key.saved", json!({})).await.unwrap();
+    let saved = call(&h, "ai.key.saved", json!({})).await.unwrap();
     assert_eq!(saved["providers"][0]["id"], "custom", "{saved}");
     assert_eq!(saved["providers"][0]["key"], "keychain");
     assert_eq!(saved["providers"][0]["available"], true, "{saved}");
 
     // The same name again is refused.
-    let r = call(&client, "ai.key.save", good.clone()).await.unwrap();
+    let r = call(&h, "ai.key.save", good.clone()).await.unwrap();
     assert_eq!(
         (r["saved"].clone(), r["reason"].clone()),
         (json!(false), json!("exists"))
@@ -191,7 +167,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     // Every request to the provider is in the ledger (3 tests + 2 saves; `exists` is refused
     // before going out), and the key is in no audit entry.
     let events: Vec<EgressEvent> = serde_json::from_value(
-        call(&client, method::EGRESS_RECENT, json!({"limit": 50}))
+        call(&h, method::EGRESS_RECENT, json!({"limit": 50}))
             .await
             .unwrap(),
     )
@@ -206,7 +182,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
 
     // Replace the key: a bad one is refused and changes nothing; a good one is stored.
     let r = call(
-        &client,
+        &h,
         "ai.key.update",
         json!({"id": "custom", "api_key": "sk-e2e-bad"}),
     )
@@ -221,7 +197,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
         Some(GOOD)
     );
     let r = call(
-        &client,
+        &h,
         "ai.key.update",
         json!({"id": "custom", "api_key": ROTATED}),
     )
@@ -237,16 +213,16 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
         std::fs::read_to_string(paths.config_file()).unwrap(),
         config
     );
-    assert!(provider_ids(&client).await.contains(&"custom".to_owned()));
+    assert!(provider_ids(&h).await.contains(&"custom".to_owned()));
     // A routed chat now reaches the provider with the new key.
     call(
-        &client,
+        &h,
         method::CHAT,
         json!({"provider": "custom", "tier": "light", "messages": [{"role": "user", "text": "hi"}], "items": []}),
     )
     .await
     .unwrap();
-    let deadline = std::time::Instant::now() + WAIT;
+    let deadline = std::time::Instant::now() + CALL;
     let chat_auth = loop {
         let reqs = provider.received_requests().await.unwrap_or_default();
         if let Some(r) = reqs.iter().find(|r| r.url.path() == "/v1/chat/completions") {
@@ -269,22 +245,18 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     // Nugget's own names are refused.
     let mut local = good.clone();
     local["name"] = json!("local-chat");
-    let r = call(&client, "ai.key.save", local).await.unwrap();
+    let r = call(&h, "ai.key.save", local).await.unwrap();
     assert_eq!(
         (r["saved"].clone(), r["reason"].clone()),
         (json!(false), json!("reserved")),
         "{r}"
     );
     // Unknown ids are refused.
-    let r = call(
-        &client,
-        "ai.key.update",
-        json!({"id": "nope", "api_key": GOOD}),
-    )
-    .await
-    .unwrap();
+    let r = call(&h, "ai.key.update", json!({"id": "nope", "api_key": GOOD}))
+        .await
+        .unwrap();
     assert_eq!(r["reason"], "not_found", "{r}");
-    let r = call(&client, "ai.key.remove", json!({"id": "nope"}))
+    let r = call(&h, "ai.key.remove", json!({"id": "nope"}))
         .await
         .unwrap();
     assert_eq!(
@@ -294,7 +266,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
 
     // An env: reference to a variable the daemon does not have is explained, not saved.
     let r = call(
-        &client,
+        &h,
         "ai.key.save",
         json!({
             "name": "from-env", "kind": "openai_compatible", "base_url": base,
@@ -310,7 +282,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     // Any other variable of the daemon (PATH is always set) is not read, and the answer is the
     // same as for a missing one, so nothing reveals which variables exist.
     let other = call(
-        &client,
+        &h,
         "ai.key.test",
         json!({"kind": "openai_compatible", "base_url": base, "key_ref": "env:PATH"}),
     )
@@ -318,7 +290,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
     .unwrap();
     assert_eq!(other["reason"], "env_missing", "{other}");
     let missing = call(
-        &client,
+        &h,
         "ai.key.test",
         json!({"kind": "openai_compatible", "base_url": base, "key_ref": "env:NUGGET_TEST_SURELY_UNSET_7F3A_KEY"}),
     )
@@ -332,7 +304,7 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
             .replace("NUGGET_TEST_SURELY_UNSET_7F3A_KEY", "VAR")
     );
     let err = call(
-        &client,
+        &h,
         "ai.key.save",
         json!({"name": "x", "kind": "openai_compatible", "base_url": base, "key_ref": "env:1-bad", "model": "m"}),
     )
@@ -342,31 +314,24 @@ async fn keys_are_checked_saved_to_the_secret_store_and_recorded() {
 
     // Remove: gone from the router, config.toml (byte for byte as before the save) and the
     // secret store.
-    let r = call(&client, "ai.key.remove", json!({"id": "custom"}))
+    let r = call(&h, "ai.key.remove", json!({"id": "custom"}))
         .await
         .unwrap();
     assert_eq!(r["removed"], true, "{r}");
-    assert!(!provider_ids(&client).await.contains(&"custom".to_owned()));
+    assert!(!provider_ids(&h).await.contains(&"custom".to_owned()));
     assert_eq!(
         std::fs::read_to_string(paths.config_file()).unwrap(),
-        "[runtime]\nenabled = false\n"
+        NO_RUNTIME
     );
     assert!(secrets.get(&provider_account("custom")).unwrap().is_none());
-    let saved = call(&client, "ai.key.saved", json!({})).await.unwrap();
+    let saved = call(&h, "ai.key.saved", json!({})).await.unwrap();
     assert_eq!(saved["providers"], json!([]));
 
-    let _ = tx.send(());
-    tokio::time::timeout(WAIT, server)
-        .await
-        .expect("daemon stops")
-        .unwrap()
-        .unwrap();
+    h.stop().await;
 }
 
-async fn provider_ids(client: &Client) -> Vec<String> {
-    let list = call(client, method::PROVIDERS_LIST, json!({}))
-        .await
-        .unwrap();
+async fn provider_ids(h: &Harness) -> Vec<String> {
+    let list = call(h, method::PROVIDERS_LIST, json!({})).await.unwrap();
     list.as_array()
         .unwrap()
         .iter()
@@ -392,28 +357,14 @@ impl SecretStore for NoKeyring {
 
 #[tokio::test]
 async fn without_a_keychain_the_save_explains_and_writes_nothing() {
-    let tmp = tempfile::tempdir().unwrap();
-    let paths = Paths::rooted(tmp.path().to_path_buf());
-    std::fs::create_dir_all(&paths.config).unwrap();
-    let before = "[runtime]\nenabled = false\n";
-    std::fs::write(paths.config_file(), before).unwrap();
-    let mut opts = DaemonOptions::new(paths.clone());
-    opts.store_key = Some(StoreKey::from_bytes(KEY));
-    opts.source_secrets = Some(Arc::new(NoKeyring));
-    let daemon = match Daemon::start(opts).await.unwrap() {
-        Startup::Ready(d) => d,
-        Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
-    };
-    let (tx, rx) = oneshot::channel::<()>();
-    let server = tokio::spawn(daemon.run_until(async {
-        let _ = rx.await;
-    }));
-    let client = Client::connect(&paths).await.unwrap();
+    let before = NO_RUNTIME;
+    let mut h = Harness::start_with(before, |o| o.source_secrets = Some(Arc::new(NoKeyring))).await;
+    let paths = h.paths.clone();
     let provider = mock_provider().await;
     let base = format!("{}/v1", provider.uri());
 
     let r = call(
-        &client,
+        &h,
         "ai.key.save",
         json!({"name": "my-openai", "kind": "openai_compatible", "base_url": base, "api_key": GOOD, "model": "e2e-model"}),
     )
@@ -430,16 +381,7 @@ async fn without_a_keychain_the_save_explains_and_writes_nothing() {
         std::fs::read_to_string(paths.config_file()).unwrap(),
         before
     );
-    assert!(
-        !provider_ids(&client)
-            .await
-            .contains(&"my-openai".to_owned())
-    );
+    assert!(!provider_ids(&h).await.contains(&"my-openai".to_owned()));
 
-    let _ = tx.send(());
-    tokio::time::timeout(WAIT, server)
-        .await
-        .expect("daemon stops")
-        .unwrap()
-        .unwrap();
+    h.stop().await;
 }
