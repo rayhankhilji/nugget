@@ -22,10 +22,13 @@
     "format.sourceKind.gdrive",
     "format.sourceKind.github",
     "format.sourceKind.gmail",
+    "format.sourceKind.imessage",
     "format.sourceKind.linear",
     "format.sourceKind.notion",
     "format.sourceKind.onedrive",
     "format.sourceKind.slack",
+    "format.sourceKind.telegram",
+    "format.sourceKind.whatsapp",
     "knowledge.range",
     "models.progressValueText",
     "onboarding.byok.provider.anthropic",
@@ -41,7 +44,8 @@
     "shortcuts.key.esc",
     "status.version",
     "today.actionFullName",
-    "today.learned.line"
+    "today.learned.line",
+    "shell.tray.doubleTap"
   ],
   "ar": [
     "shortcuts.key.enter"
@@ -103,7 +107,12 @@
     "status.vault",
     "today.learning.scope.domain",
     "updates.badge.beta",
-    "updates.title"
+    "updates.title",
+    "shell.tray.status",
+    "shell.tray.updates",
+    "searchui.kind.chat",
+    "searchui.saveName",
+    "searchui.text"
   ],
   "es": [
     "addSource.linear.include",
@@ -131,7 +140,8 @@
     "status.embeddings",
     "status.role.chat",
     "status.role.embedding",
-    "updates.badge.beta"
+    "updates.badge.beta",
+    "searchui.kind.chat"
   ],
   "fr": [
     "addSource.folder.defaultNone",
@@ -140,6 +150,7 @@
     "addSource.imap.tlsImplicit",
     "addSource.imap.tlsStarttls",
     "addSource.linear.include",
+    "addSource.messages.options",
     "addSource.slack.conversations",
     "agent.field.verb",
     "agent.history.col.actions",
@@ -170,6 +181,7 @@
     "palette.group.page",
     "plugins.title",
     "plugins.version",
+    "quickAsk.sources",
     "safety.log.chainOk",
     "safety.rule.description",
     "safety.rule.verbs",
@@ -185,7 +197,10 @@
     "status.mentions",
     "today.factor.importance",
     "updates.badge.stable",
-    "updates.channel.stable"
+    "updates.channel.stable",
+    "appSettings.notifyHeading",
+    "searchui.facet.date",
+    "searchui.facet.source"
   ],
   "hi": [
     "addSource.linear.include",
@@ -228,7 +243,8 @@
     "status.role.chat",
     "status.role.embedding",
     "status.title",
-    "updates.badge.beta"
+    "updates.badge.beta",
+    "shell.tray.status"
   ],
   "zh-CN": [
     "shortcuts.key.enter",

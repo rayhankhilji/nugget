@@ -17,11 +17,12 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: false,
-    // Two pages: the main window and the Double Tap caret overlay window.
+    // Three pages: the main window, the Double Tap caret overlay and the quick-ask box.
     rollupOptions: {
       input: {
         main: "index.html",
         overlay: "overlay.html",
+        quickask: "quickask.html",
       },
     },
   },

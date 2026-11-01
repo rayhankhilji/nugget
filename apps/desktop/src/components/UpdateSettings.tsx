@@ -1,8 +1,10 @@
 /**
  * Updates and start-at-login, backed by `src-tauri/src/updater.rs`.
  *
- * Nothing installs without the user: the default is notify-only, the release notes are shown
- * before the Install button, and Install names the exact version shown. Auto-install is opt-in.
+ * Nothing checks until the user picks a channel: until then the card asks (`UpdateChoice`), as
+ * setup does. Nothing installs without the user: the default is notify-only, the release notes
+ * are shown before the Install button, and Install names the exact version shown. Auto-install
+ * is opt-in.
  * The desktop app's own preferences (`AppSettings`) render at the end of the same card.
  */
 import { useCallback, useEffect, useState } from "react";
@@ -11,14 +13,14 @@ import { listen } from "@tauri-apps/api/event";
 import { errorMessage, inTauri } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { AppSettings } from "./AppSettings";
+import { UpdateChoice, type Channel } from "./UpdateChoice";
 import { Badge, Spinner } from "./ui";
 
-type Channel = "stable" | "beta" | "off";
-
-interface UpdateStatus {
+export interface UpdateStatus {
   current_version: string;
   configured: boolean;
-  settings: { channel: Channel; auto_install: boolean; start_at_login: boolean | null };
+  /** `channel` counts only once `channel_chosen`; until then nothing is checked. */
+  settings: { channel: Channel; channel_chosen: boolean; auto_install: boolean; start_at_login: boolean | null };
   available: { version: string; notes: string | null; date: number | null } | null;
   staged: boolean;
   busy: boolean;
@@ -91,6 +93,8 @@ export function UpdateSettings() {
 
       {!status.configured ? (
         <div className="note small">{t("updates.unconfigured")}</div>
+      ) : !settings.channel_chosen ? (
+        <UpdateChoice disabled={busy} onChoose={(channel) => setSettings(channel, settings.auto_install)} />
       ) : (
         <>
           <div className="row" style={{ justifyContent: "flex-start", alignItems: "center" }}>

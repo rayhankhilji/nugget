@@ -64,6 +64,9 @@ pub const CARET_UNITS: Units = if cfg!(target_os = "macos") {
 
 /// Gap between the caret and the overlay, logical pixels.
 const GAP: f64 = 6.0;
+/// The least height [`fit`] shrinks to (below `min_height`) rather than cover the caret: a
+/// status line and one row of buttons, the rest scrolls. Logical pixels.
+const FLOOR: f64 = 64.0;
 
 fn caret_to_physical(caret: Area, units: Units, screens: &[Screen]) -> Area {
     match units {
@@ -116,19 +119,50 @@ fn clamp_axis(pos: f64, len: f64, lo: f64, hi: f64) -> f64 {
     }
 }
 
-/// The overlay's top-left corner in physical pixels.
-///
-/// - `caret`: the caret or selection rectangle, in `units`.
-/// - `screens`: every monitor.
-/// - `size`: the overlay's size in logical pixels (scaled by the chosen monitor).
-/// - `fallback`: a physical point to centre on when there is no caret (e.g. the mouse).
-pub fn place(
+/// Where the overlay goes and how tall it is, in physical pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fit {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    /// It sits above the caret (keep it there while it grows, so it doesn't jump).
+    pub above: bool,
+    /// The chosen monitor's scale factor.
+    pub scale: f64,
+}
+
+/// What [`fit`] is asked for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Want {
+    /// Width and wanted height, logical pixels.
+    pub size: (f64, f64),
+    /// The least height worth showing, logical pixels.
+    pub min_height: f64,
+    /// The field is right-to-left.
+    pub rtl: bool,
+    pub prefer_above: Option<bool>,
+}
+
+/// Place an overlay that wants `size` (logical) but may be shorter, down to `min_height`: below
+/// the caret when it fits, else above it when that fits, else on the side with more room, its
+/// height cut to that room so it never covers the caret line (the content scrolls instead).
+/// `prefer_above` keeps the side chosen earlier in the session. Right-to-left fields align the
+/// overlay's right edge with the caret. Without a caret it is centred on the monitor of the
+/// `fallback` point (e.g. the mouse), a third of the way down.
+pub fn fit(
     caret: Option<Area>,
     units: Units,
     screens: &[Screen],
-    size: (f64, f64),
+    want: Want,
     fallback: Option<(f64, f64)>,
-) -> Option<(i32, i32)> {
+) -> Option<Fit> {
+    let Want {
+        size,
+        min_height,
+        rtl,
+        prefer_above,
+    } = want;
     let caret = caret
         .filter(|c| c.x.is_finite() && c.y.is_finite() && c.width >= 0.0 && c.height >= 0.0)
         .map(|c| caret_to_physical(c, units, screens));
@@ -137,31 +171,64 @@ pub fn place(
         (None, Some((x, y))) => screen_at(screens, x, y),
         (None, None) => screens.first(),
     };
+    let px = |v: f64| v.round().max(0.0) as u32;
     let Some(screen) = screen else {
-        return caret.map(|c| (c.x.round() as i32, c.bottom().round() as i32));
+        return caret.map(|c| Fit {
+            x: c.x.round() as i32,
+            y: c.bottom().round() as i32,
+            width: px(size.0),
+            height: px(size.1),
+            above: false,
+            scale: 1.0,
+        });
     };
     let k = screen.scale.max(0.1);
-    let (w, h) = (size.0 * k, size.1 * k);
-    let gap = GAP * k;
     let work = screen.work;
-    let (x, y) = match caret {
+    let w = (size.0 * k).min(work.width);
+    let min_h = (min_height * k).min(size.1 * k);
+    let wanted = (size.1 * k).min(work.height);
+    let gap = GAP * k;
+    let (x, y, h, above) = match caret {
         Some(c) => {
-            let below = c.bottom() + gap;
-            let y = if below + h > work.bottom() && c.y - gap - h >= work.y {
+            let below_room = work.bottom() - (c.bottom() + gap);
+            let above_room = (c.y - gap) - work.y;
+            let above = prefer_above.unwrap_or(
+                wanted > below_room && (wanted <= above_room || above_room > below_room),
+            );
+            let room = if above { above_room } else { below_room };
+            // Shorter than `min_height` rather than over the caret when there is not even that
+            // much room; only a side smaller than the floor leaves no choice.
+            let floor = (FLOOR * k).min(min_h);
+            let h = if room >= floor {
+                wanted.min(room)
+            } else {
+                wanted.min(min_h)
+            };
+            let y = if above {
                 c.y - gap - h
             } else {
-                below
+                c.bottom() + gap
             };
-            (c.x, y)
+            let x = if rtl { c.right() - w } else { c.x };
+            (x, y, h, above)
         }
         None => (
             work.x + (work.width - w) / 2.0,
-            work.y + work.height / 3.0 - h / 2.0,
+            work.y + work.height / 3.0 - wanted / 2.0,
+            wanted,
+            false,
         ),
     };
     let x = clamp_axis(x, w, work.x, work.right());
     let y = clamp_axis(y, h, work.y, work.bottom());
-    Some((x.round() as i32, y.round() as i32))
+    Some(Fit {
+        x: x.round() as i32,
+        y: y.round() as i32,
+        width: px(w),
+        height: px(h),
+        above,
+        scale: k,
+    })
 }
 
 #[cfg(test)]
@@ -270,12 +337,195 @@ mod tests {
     }
 
     #[test]
-    fn an_overlay_larger_than_the_screen_sticks_to_the_top_left() {
+    fn an_overlay_larger_than_the_screen_sticks_to_the_left_and_shrinks_below_the_caret() {
         let screens = [screen(0.0, 0.0, 300.0, 200.0, 1.0)];
         let caret = Area::new(100.0, 100.0, 1.0, 10.0);
+        // Wider than the screen: at its left edge. Taller than either side: shrunk to the
+        // larger room (below the caret) instead of covering it.
         assert_eq!(
             place(Some(caret), Units::Physical, &screens, SIZE, None),
-            Some((0, 50))
+            Some((0, 116))
         );
+    }
+
+    /// The fixed-size placement the original tests describe.
+    fn place(
+        caret: Option<Area>,
+        units: Units,
+        screens: &[Screen],
+        size: (f64, f64),
+        fallback: Option<(f64, f64)>,
+    ) -> Option<(i32, i32)> {
+        fit(
+            caret,
+            units,
+            screens,
+            w(size, size.1, false, None),
+            fallback,
+        )
+        .map(|f| (f.x, f.y))
+    }
+
+    fn w(size: (f64, f64), min_height: f64, rtl: bool, prefer_above: Option<bool>) -> Want {
+        Want {
+            size,
+            min_height,
+            rtl,
+            prefer_above,
+        }
+    }
+
+    #[test]
+    fn fit_grows_below_then_cuts_to_the_room_and_scrolls() {
+        let screens = [screen(0.0, 0.0, 1920.0, 1080.0, 1.0)];
+        let caret = Area::new(300.0, 200.0, 2.0, 18.0);
+        let f = fit(
+            Some(caret),
+            Units::Physical,
+            &screens,
+            w((440.0, 150.0), 120.0, false, None),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            (f.x, f.y, f.width, f.height, f.above),
+            (300, 224, 440, 150, false)
+        );
+        // Near the bottom: above when it fits there.
+        let low = Area::new(300.0, 900.0, 2.0, 18.0);
+        let f = fit(
+            Some(low),
+            Units::Physical,
+            &screens,
+            w((440.0, 300.0), 120.0, false, None),
+            None,
+        )
+        .unwrap();
+        assert!(f.above);
+        assert_eq!(f.y, 900 - 6 - 300);
+        assert!(f.y + f.height as i32 <= 900, "never over the caret line");
+        // Kept below by an earlier choice: cut to the room below the caret.
+        let f = fit(
+            Some(low),
+            Units::Physical,
+            &screens,
+            w((440.0, 300.0), 120.0, false, Some(false)),
+            None,
+        )
+        .unwrap();
+        assert!(!f.above);
+        assert_eq!(f.y, 924);
+        assert_eq!(f.height, 1080 - 924);
+    }
+
+    #[test]
+    fn fit_never_covers_the_caret_when_neither_side_fits() {
+        // A 400 px tall work area with the caret in the middle: 160-ish px each side.
+        let screens = [Screen {
+            bounds: Area::new(0.0, 0.0, 1000.0, 450.0),
+            work: Area::new(0.0, 50.0, 1000.0, 400.0),
+            scale: 1.0,
+        }];
+        let caret = Area::new(100.0, 230.0, 2.0, 20.0);
+        let f = fit(
+            Some(caret),
+            Units::Physical,
+            &screens,
+            w((440.0, 420.0), 120.0, false, None),
+            None,
+        )
+        .unwrap();
+        let (top, bottom) = (f.y, f.y + f.height as i32);
+        assert!(bottom <= 230 || top >= 250, "{f:?} overlaps the caret");
+        assert!(f.height >= 120);
+    }
+
+    #[test]
+    fn fit_scales_on_high_dpi_and_aligns_rtl_to_the_caret_end() {
+        let screens = [
+            screen(0.0, 0.0, 1920.0, 1080.0, 1.0),
+            screen(1920.0, 0.0, 3840.0, 2160.0, 2.0),
+        ];
+        let caret = Area::new(3000.0, 400.0, 2.0, 36.0);
+        let f = fit(
+            Some(caret),
+            Units::Physical,
+            &screens,
+            w((440.0, 200.0), 120.0, true, None),
+            None,
+        )
+        .unwrap();
+        // 2x: 880 x 400 physical, right edge at the caret's right edge.
+        assert_eq!((f.width, f.height), (880, 400));
+        assert_eq!(f.x, 3002 - 880);
+        assert_eq!(f.y, 436 + 12);
+        // Clamped inside the monitor when the caret is near its left edge.
+        let edge = Area::new(1930.0, 400.0, 2.0, 36.0);
+        let f = fit(
+            Some(edge),
+            Units::Physical,
+            &screens,
+            w((440.0, 200.0), 120.0, true, None),
+            None,
+        )
+        .unwrap();
+        assert_eq!(f.x, 1920);
+    }
+
+    #[test]
+    fn fit_without_a_caret_centres_and_caps_to_the_work_area() {
+        let screens = [screen(0.0, 0.0, 800.0, 600.0, 1.0)];
+        let f = fit(
+            None,
+            Units::Physical,
+            &screens,
+            w((440.0, 900.0), 120.0, false, None),
+            Some((10.0, 10.0)),
+        )
+        .unwrap();
+        assert_eq!(f.height, 550);
+        assert_eq!(f.y, 50);
+        assert_eq!(f.x, 180);
+        assert_eq!(
+            fit(
+                None,
+                Units::Physical,
+                &[],
+                w((440.0, 200.0), 120.0, false, None),
+                None
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn fit_shrinks_below_min_height_rather_than_cover_a_tall_selection() {
+        // A multi-line selection: its union rect leaves 84 px above and 214 px below.
+        let screens = [screen(0.0, 0.0, 1920.0, 1080.0, 1.0)];
+        let sel = Area::new(300.0, 140.0, 400.0, 860.0);
+        let f = fit(
+            Some(sel),
+            Units::Physical,
+            &screens,
+            w((440.0, 300.0), 120.0, false, None),
+            None,
+        )
+        .unwrap();
+        let (top, bottom) = (f.y, f.y + f.height as i32);
+        assert!(bottom <= 140 || top >= 1000, "{f:?} overlaps the selection");
+        // Both sides under min_height at 2x: the larger one, shrunk to fit.
+        let screens = [screen(0.0, 0.0, 1600.0, 600.0, 2.0)];
+        let caret = Area::new(100.0, 250.0, 2.0, 120.0);
+        let f = fit(
+            Some(caret),
+            Units::Physical,
+            &screens,
+            w((440.0, 300.0), 120.0, false, None),
+            None,
+        )
+        .unwrap();
+        let (top, bottom) = (f.y, f.y + f.height as i32);
+        assert!(bottom <= 250 || top >= 370, "{f:?} overlaps the caret");
+        assert!(f.height < 240 && f.height >= 128);
     }
 }

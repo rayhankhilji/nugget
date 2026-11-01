@@ -3099,6 +3099,54 @@ tr[aria-current="true"] {
   border-block-start: 1px solid var(--border);
 }
 
+/* Try your shortcut (II3): the sample message, then the practice field. */
+.dt-practice-sample {
+  margin: var(--space-3) 0;
+  max-width: 70ch;
+}
+
+.dt-practice-sample blockquote {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-inline-start: 3px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-small);
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+.dt-practice textarea {
+  width: 100%;
+  max-width: 70ch;
+  font: inherit;
+}
+
+/* Recent drafts (II3). */
+.dt-history-list {
+  list-style: none;
+  margin: var(--space-3) 0;
+  padding: 0;
+  max-width: 70ch;
+}
+
+.dt-history-item {
+  padding-block: var(--space-2);
+  border-block-end: 1px solid var(--border);
+}
+
+.dt-history-meta,
+.dt-history-text {
+  margin: 0;
+}
+
+.dt-history-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+  text-align: start;
+  margin-block: var(--space-1);
+}
+
 /* ---- Models page ---- */
 
 .models-intro {

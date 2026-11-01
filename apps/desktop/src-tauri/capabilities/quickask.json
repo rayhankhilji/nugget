@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quickask",
+  "description": "Quick ask window: listens to the app's chat stream and `quickask:prefill` events and calls the app's own commands (allowed without a core permission). Nothing else.",
+  "windows": [
+    "quickask"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

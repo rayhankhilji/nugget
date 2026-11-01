@@ -29,6 +29,15 @@ and has **Sync now**, **Disable** and **Remove** actions.
 | [`github`](sources-saas.md#github) | Issues, pull requests and discussions involving you | Pasted token, or the device flow | Polled every 10 min, full listing daily |
 | [`linear`](sources-saas.md#linear) | Issues assigned to, created by or followed by you | Pasted API key, or OAuth with PKCE | Polled every 5 min, full listing every 6 h |
 
+| Kind | What it indexes | Sign-in | How changes arrive |
+|---|---|---|---|
+| [`imessage`](sources-messaging.md#imessage) | Your Messages history on this Mac (macOS only) | None; needs Full Disk Access | Polled every 2 min |
+| [`whatsapp`](sources-messaging.md#whatsapp) | Chats you export from WhatsApp into a folder | None | Folder watcher, plus a check every 5 min |
+| [`telegram`](sources-messaging.md#telegram) | A Telegram Desktop export (JSON) | None | Watcher on the export, plus a check every 5 min |
+
+Message sources are [private by default](sources-messaging.md#private-by-default), and Signal is
+[not supported](sources-messaging.md#signal).
+
 **Plugin connectors** add kinds named `plugin:<plugin id>`, for example
 `plugin:dev.nugget.example.feeds` for the example feed reader. They are WebAssembly plugins you install
 and approve on the [**Plugins**](plugins.md) page. A new plugin kind is available after Nugget restarts,
@@ -36,7 +45,7 @@ and the Add source wizard does not list plugin kinds yet. Each one reaches only 
 traffic is in the egress ledger under `sync:plugin:<plugin id>`. A plugin connector signs in with
 nothing or with a secret you set, never with OAuth.
 
-The macOS-only sources (Apple Notes, Messages, Mail) are planned and not available yet.
+The other macOS-only sources (Apple Notes, Mail) are planned and not available yet.
 
 ## What every source guarantees
 

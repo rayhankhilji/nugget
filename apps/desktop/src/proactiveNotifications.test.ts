@@ -38,7 +38,8 @@ describe("proactive notifications", () => {
     await flush();
     expect(shown).toEqual([
       expect.objectContaining({ title: "Your morning brief: 1 item", openToday: true }),
-      expect.objectContaining({ body: "Call Bo", openToday: true }),
+      // II4: the reminder text itself never reaches the OS notification.
+      expect.objectContaining({ body: "A reminder is due.", openToday: true }),
     ]);
 
     stop();
