@@ -187,6 +187,9 @@ pub(crate) enum Reason {
     /// `ai.key.update` / `ai.key.remove`: the provider does not use a key (a local server) or is
     /// managed by Nugget.
     NotEditable,
+    /// `ai.key.save`: the name belongs to Nugget itself (`local-*`, or a provider the daemon has
+    /// that is not in config.toml, such as an on-device runtime slot).
+    Reserved,
 }
 
 /// `ai.key.test` result.
@@ -327,7 +330,7 @@ impl Feature for AiKeys {
                 let req: KeyTestRequest = parse_params(params)?;
                 let spec = key_spec(req.api_key.as_ref(), req.key_ref.as_deref())
                     .map_err(RpcError::invalid_params)?;
-                let key = match spec.read(&*self.env) {
+                let key = match spec.read(&*self.env, None) {
                     Ok(k) => k,
                     Err(r) => return to_result(r),
                 };
@@ -399,7 +402,16 @@ impl AiKeys {
         if provider_exists(&config_path, &req.name)? {
             return Ok(exists_result(&req.name));
         }
-        let key = match spec.read(&*self.env) {
+        if reserved(&req.name, |id| {
+            self.state.router.provider(&ProviderId::new(id)).is_some()
+                || self.state.slot(&ProviderId::new(id)).is_some()
+        }) {
+            return Ok(KeySaveResult::fail(
+                Reason::Reserved,
+                format!("Nugget uses the name \"{}\" for its own models. Pick another name.", req.name),
+            ));
+        }
+        let key = match spec.read(&*self.env, None) {
             Ok(k) => k,
             Err(r) => return Ok(KeySaveResult::from_test(r)),
         };
@@ -475,7 +487,12 @@ impl AiKeys {
                 ));
             }
         };
-        let key = match spec.read(&*self.env) {
+        // The variable the provider already uses stays usable, at its own address only.
+        let current_env = match (&cfg.api_key, &req.base_url) {
+            (Some(ApiKeyRef::Env(v)), None) => Some(v.as_str()),
+            _ => None,
+        };
+        let key = match spec.read(&*self.env, current_env) {
             Ok(k) => k,
             Err(r) => return Ok(KeySaveResult::from_test(r)),
         };
@@ -712,6 +729,12 @@ fn editable<'a>(
     Ok(cfg)
 }
 
+/// Whether `ai.key.save` must not take `name` (not in config.toml): Nugget's own `local-*`
+/// names, or one the daemon already routes (`known`).
+fn reserved(name: &str, known: impl Fn(&str) -> bool) -> bool {
+    name.starts_with("local-") || known(name)
+}
+
 fn validate_name(n: &str) -> std::result::Result<(), String> {
     if n.is_empty()
         || n.len() > 32
@@ -744,6 +767,37 @@ fn valid_env_name(v: &str) -> bool {
         && b.next()
             .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
         && b.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+}
+
+/// The usual key variables of providers (as their own tools name them).
+const PROVIDER_ENV: &[&str] = &[
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENROUTER_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "TOGETHER_API_KEY",
+    "GEMINI_API_KEY",
+    "XAI_API_KEY",
+];
+
+/// Nugget's own secrets in `NUGGET_*_KEY` variables, never usable as a provider key.
+const INTERNAL_ENV: &[&str] = &[
+    "NUGGET_MANIFEST_SIGNING_KEY",
+    "NUGGET_PLUGIN_SIGNING_KEY",
+    "NUGGET_TRUST_DEV_MANIFEST_KEY",
+];
+
+/// Whether `key_ref: "env:VAR"` may read `var`: `NUGGET_…_KEY` (not one of Nugget's own
+/// secrets, nor the runtime's `NUGGET_RUNTIME_…` keys) or a provider's usual variable.
+fn env_allowed(var: &str) -> bool {
+    PROVIDER_ENV.contains(&var)
+        || (var.starts_with("NUGGET_")
+            && var.ends_with("_KEY")
+            && var.len() > "NUGGET__KEY".len()
+            && !var.starts_with("NUGGET_RUNTIME_")
+            && !INTERNAL_ENV.contains(&var))
 }
 
 /// Where the key comes from.
@@ -782,18 +836,27 @@ impl KeyRef {
 
 impl KeySpec {
     /// The key itself, or why it cannot be read.
+    ///
+    /// Only variables meant for AI keys ([`env_allowed`], or `also`: the variable a provider
+    /// already uses) are read, so a caller cannot send another secret of the daemon's
+    /// environment to a server of its choice. A variable that is not allowed, unset or empty
+    /// gets the same answer, so callers cannot probe which variables exist.
     fn read(
         &self,
         env: &dyn Fn(&str) -> Option<String>,
+        also: Option<&str>,
     ) -> std::result::Result<String, KeyTestResult> {
         match self {
             KeySpec::Typed(k) => Ok(k.0.clone()),
-            KeySpec::Env(var) => match env(var) {
+            KeySpec::Env(var) => match (env_allowed(var) || also == Some(var.as_str()))
+                .then(|| env(var))
+                .flatten()
+            {
                 Some(v) if !v.trim().is_empty() => Ok(v),
                 _ => Err(KeyTestResult::fail(
                     Reason::EnvMissing,
                     format!(
-                        "Nugget can't see an environment variable named {var}, or it is empty. Set it where Nugget starts (for example in your shell profile), then restart Nugget."
+                        "Nugget can't use the environment variable {var}. Use a variable whose name starts with NUGGET_ and ends with _KEY (or a provider's usual one, such as OPENAI_API_KEY), set it where Nugget starts, then restart Nugget."
                     ),
                 )),
             },
@@ -1149,7 +1212,13 @@ fn write_config(path: &Path, text: &str) -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("toml.tmp");
+    // Keep the file's permissions (for example 0600) on the replacement.
+    let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
     std::fs::write(&tmp, text)
+        .and_then(|()| match perms {
+            Some(p) => std::fs::set_permissions(&tmp, p),
+            None => Ok(()),
+        })
         .and_then(|()| std::fs::rename(&tmp, path))
         .inspect_err(|_| {
             let _ = std::fs::remove_file(&tmp);
@@ -1273,9 +1342,10 @@ pub(crate) fn replace_key(
         }
         return Err(e);
     }
-    // A keychain entry config.toml no longer refers to is deleted.
+    // A keychain entry no provider refers to any more is deleted.
     if let Some(ApiKeyRef::Keychain(old)) = &change.old
         && change.new != KeyRef::Keychain(old.clone())
+        && !keychain_refs(new_text.as_deref().unwrap_or(&text)).contains(old)
         && let Err(e) = secrets.delete(&provider_account(old))
     {
         tracing::warn!(error = %e, "cannot delete the old provider key");
@@ -1295,7 +1365,9 @@ pub(crate) fn remove_provider(
     let new_text = remove_provider_text(&text, name)
         .ok_or_else(|| Error::Invalid(format!("cannot find provider {name} in config.toml")))?;
     write_config(path, &new_text)?;
+    // Another provider may share the entry; then it stays.
     if let Some(ApiKeyRef::Keychain(n)) = key
+        && !keychain_refs(&new_text).contains(n)
         && let Err(e) = secrets.delete(&provider_account(n))
     {
         tracing::warn!(error = %e, "cannot delete the provider key from the secret store");
@@ -1303,7 +1375,23 @@ pub(crate) fn remove_provider(
     Ok(())
 }
 
-/// One `[[providers]]` table in the text of a config file.
+/// The `keychain:NAME` names the providers in config `text` refer to.
+fn keychain_refs(text: &str) -> Vec<String> {
+    Config::parse(text)
+        .map(|c| {
+            c.providers
+                .into_iter()
+                .filter_map(|p| match p.api_key {
+                    Some(ApiKeyRef::Keychain(n)) => Some(n),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One `[[providers]]` table in the text of a config file, with its sub-tables
+/// (`[providers.headers]`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Span {
     /// Start of the header line.
@@ -1311,23 +1399,57 @@ struct Span {
     /// End of the table's last line that is neither blank nor a comment (comments right before
     /// the next table belong to that table).
     end: usize,
+    /// End of the provider's own keys (before its first sub-table).
+    keys_end: usize,
     id: Option<String>,
 }
 
-/// Whether `line` (trimmed) is a table header, and whether it is `[[providers]]`.
-fn header(line: &str) -> Option<bool> {
-    let t = line.trim();
+/// What a table header line is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Header {
+    /// `[[providers]]`.
+    Provider,
+    /// `[providers.x]` or `[[providers.x]]`: part of the provider above.
+    Sub,
+    Other,
+}
+
+/// The part of `line` before a comment (`#` outside a string). A line that opens or closes a
+/// multi-line string is returned whole.
+fn code_part(line: &str) -> &str {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (i, c) in line.char_indices() {
+        if quote.is_none() && (line[i..].starts_with("\"\"\"") || line[i..].starts_with("'''")) {
+            return line;
+        }
+        match quote {
+            Some('"') if escaped => escaped = false,
+            Some('"') if c == '\\' => escaped = true,
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == '"' || c == '\'' => quote = Some(c),
+            None if c == '#' => return &line[..i],
+            None => {}
+        }
+    }
+    line
+}
+
+/// The kind of table header `line` is, if it is one.
+fn header(line: &str) -> Option<Header> {
+    let t = code_part(line).trim();
     if !t.starts_with('[') {
         return None;
     }
-    let compact: String = t
-        .split('#')
-        .next()
-        .unwrap_or("")
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
-    Some(compact == "[[providers]]")
+    let compact: String = t.chars().filter(|c| !c.is_whitespace()).collect();
+    Some(if compact == "[[providers]]" {
+        Header::Provider
+    } else if compact.starts_with("[providers.") || compact.starts_with("[[providers.") {
+        Header::Sub
+    } else {
+        Header::Other
+    })
 }
 
 /// The `[[providers]]` tables of `text`, in order.
@@ -1339,19 +1461,26 @@ fn provider_spans(text: &str) -> Vec<Span> {
     for line in text.split_inclusive('\n') {
         let (start, end) = (pos, pos + line.len());
         pos = end;
-        let toggles = line.matches("\"\"\"").count() + line.matches("'''").count();
         let was_multiline = in_multiline;
+        // Inside a multi-line string everything counts; outside, a comment does not.
+        let counted = if was_multiline { line } else { code_part(line) };
+        let toggles = counted.matches("\"\"\"").count() + counted.matches("'''").count();
         if toggles % 2 == 1 {
             in_multiline = !in_multiline;
         }
-        if !was_multiline && let Some(is_providers) = header(line) {
+        if !was_multiline && let Some(h) = header(line) {
+            if let (Header::Sub, Some(s)) = (h, open.as_mut()) {
+                s.end = end;
+                continue;
+            }
             if let Some(s) = open.take() {
                 spans.push(s);
             }
-            if is_providers {
+            if h == Header::Provider {
                 open = Some(Span {
                     start,
                     end,
+                    keys_end: end,
                     id: None,
                 });
             }
@@ -1360,6 +1489,9 @@ fn provider_spans(text: &str) -> Vec<Span> {
         if let Some(s) = open.as_mut() {
             let t = line.trim();
             if was_multiline || !(t.is_empty() || t.starts_with('#')) {
+                if s.keys_end == s.end {
+                    s.keys_end = end;
+                }
                 s.end = end;
             }
         }
@@ -1382,25 +1514,55 @@ fn provider_spans(text: &str) -> Vec<Span> {
     spans
 }
 
-/// The providers of `text` other than `name`, as parsed TOML (to check an edit kept them).
-fn other_providers(text: &str, name: &str) -> Option<Vec<toml::Value>> {
-    let t: toml::Table = toml::from_str(text).ok()?;
-    Some(
-        t.get("providers")
-            .and_then(toml::Value::as_array)
-            .map(|ps| {
-                ps.iter()
-                    .filter(|p| p.get("id").and_then(toml::Value::as_str) != Some(name))
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default(),
-    )
+/// The parsed document of `text` with provider `name` removed (`edits: None`) or with those keys
+/// of it changed; an empty `providers` array counts as none.
+fn expected_doc(
+    text: &str,
+    name: &str,
+    edits: Option<&[(&str, Option<String>)]>,
+) -> Option<toml::Table> {
+    let mut doc: toml::Table = toml::from_str(text).ok()?;
+    let ps = doc.get_mut("providers")?.as_array_mut()?;
+    let i = ps
+        .iter()
+        .position(|p| p.get("id").and_then(toml::Value::as_str) == Some(name))?;
+    match edits {
+        None => {
+            ps.remove(i);
+        }
+        Some(edits) => {
+            let t = ps[i].as_table_mut()?;
+            for (k, v) in edits {
+                match v {
+                    Some(v) => t.insert((*k).to_owned(), toml::Value::String(v.clone())),
+                    None => t.remove(*k),
+                };
+            }
+        }
+    }
+    Some(normalized(doc))
 }
 
-/// `text` without provider `name`'s table (and the comment `ai.key.save` wrote above it). Every
-/// other byte is kept. `None` if the table cannot be found or the result would not be the same
-/// config minus that provider.
+fn normalized(mut doc: toml::Table) -> toml::Table {
+    if doc
+        .get("providers")
+        .and_then(toml::Value::as_array)
+        .is_some_and(Vec::is_empty)
+    {
+        doc.remove("providers");
+    }
+    doc
+}
+
+/// Whether `out` is a valid config whose parsed document is exactly `want`.
+fn same_doc(out: &str, want: &toml::Table) -> bool {
+    Config::parse(out).is_ok()
+        && toml::from_str::<toml::Table>(out).is_ok_and(|d| &normalized(d) == want)
+}
+
+/// `text` without provider `name`'s table (with its sub-tables, and the comment `ai.key.save`
+/// wrote above it). Every other byte is kept. `None` if the table cannot be found or the result
+/// would not be exactly the same document minus that provider.
 fn remove_provider_text(text: &str, name: &str) -> Option<String> {
     let span = provider_spans(text)
         .into_iter()
@@ -1422,23 +1584,18 @@ fn remove_provider_text(text: &str, name: &str) -> Option<String> {
         }
     }
     let out = format!("{}{}", &text[..start], &text[span.end..]);
-    let parsed = Config::parse(&out).ok()?;
-    if parsed.providers.iter().any(|p| p.id.as_str() == name)
-        || other_providers(&out, name)? != other_providers(text, name)?
-    {
-        return None;
-    }
-    Some(out)
+    same_doc(&out, &expected_doc(text, name, None)?).then_some(out)
 }
 
 /// `text` with the given keys of provider `name`'s table set (a line `key = "value"` replaced
 /// in place or added after the header) or removed (`None`). Every other line is kept. `None` if
-/// the table cannot be found or the result is not a valid config with exactly those changes.
+/// the table cannot be found or the result is not exactly the same document with those changes.
 fn edit_provider_text(text: &str, name: &str, edits: &[(&str, Option<String>)]) -> Option<String> {
     let span = provider_spans(text)
         .into_iter()
         .find(|s| s.id.as_deref() == Some(name))?;
-    let body = &text[span.start..span.end];
+    // Only the provider's own keys, not its sub-tables'.
+    let body = &text[span.start..span.keys_end];
     let mut lines: Vec<String> = body.split_inclusive('\n').map(str::to_owned).collect();
     if lines.last().is_some_and(|l| !l.ends_with('\n')) {
         lines.last_mut()?.push('\n');
@@ -1472,24 +1629,8 @@ fn edit_provider_text(text: &str, name: &str, edits: &[(&str, Option<String>)]) 
     if !body.ends_with('\n') {
         new_body.pop();
     }
-    let out = format!("{}{}{}", &text[..span.start], new_body, &text[span.end..]);
-    // Same config, except those keys of this provider.
-    let parsed: toml::Table = toml::from_str(&out).ok()?;
-    Config::parse(&out).ok()?;
-    let mine = parsed
-        .get("providers")?
-        .as_array()?
-        .iter()
-        .find(|p| p.get("id").and_then(toml::Value::as_str) == Some(name))?;
-    for (key, value) in edits {
-        if mine.get(*key).and_then(toml::Value::as_str) != value.as_deref() {
-            return None;
-        }
-    }
-    if other_providers(&out, name)? != other_providers(text, name)? {
-        return None;
-    }
-    Some(out)
+    let out = format!("{}{}{}", &text[..span.start], new_body, &text[span.keys_end..]);
+    same_doc(&out, &expected_doc(text, name, Some(edits))?).then_some(out)
 }
 
 #[cfg(test)]
@@ -1775,18 +1916,48 @@ mod tests {
         assert!(key_spec(None, Some("  ")).is_err(), "blank is neither");
         assert!(!valid_env_name(&"A".repeat(129)));
 
-        // Reading: a set variable is the key; an unset or empty one is `env_missing`.
+        // Reading: an allowed, set variable is the key. Unset, empty or not allowed (any other
+        // secret of the daemon's environment) all get the same answer, so nothing can be probed.
         let env = |v: &str| match v {
-            "SET" => Some(GOOD.to_owned()),
-            "EMPTY" => Some("  ".to_owned()),
+            "NUGGET_SET_KEY" | "OPENAI_API_KEY" | "AWS_SECRET_ACCESS_KEY" | "GITHUB_TOKEN"
+            | "NUGGET_MCP_TOKEN" | "NUGGET_PLUGIN_SIGNING_KEY" | "NUGGET_RUNTIME_API_KEY_CHAT"
+            | "WORK_KEY" => Some(GOOD.to_owned()),
+            "NUGGET_EMPTY_KEY" => Some("  ".to_owned()),
             _ => None,
         };
-        assert_eq!(KeySpec::Env("SET".into()).read(&env).unwrap(), GOOD);
-        for v in ["EMPTY", "UNSET"] {
-            let r = KeySpec::Env(v.into()).read(&env).unwrap_err();
-            assert_eq!(r.reason, Reason::EnvMissing);
-            assert!(r.message.contains(v));
+        for v in ["NUGGET_SET_KEY", "OPENAI_API_KEY"] {
+            assert_eq!(KeySpec::Env(v.into()).read(&env, None).unwrap(), GOOD, "{v}");
         }
+        let generic = |v: &str| {
+            KeySpec::Env(v.into())
+                .read(&env, None)
+                .unwrap_err()
+                .message
+                .replace(v, "VAR")
+        };
+        let want = generic("NUGGET_UNSET_KEY");
+        for v in [
+            "NUGGET_EMPTY_KEY",
+            "AWS_SECRET_ACCESS_KEY",
+            "GITHUB_TOKEN",
+            "NUGGET_MCP_TOKEN",
+            "NUGGET_PLUGIN_SIGNING_KEY",
+            "NUGGET_RUNTIME_API_KEY_CHAT",
+            "NUGGET__KEY",
+            "WORK_KEY",
+        ] {
+            let r = KeySpec::Env(v.into()).read(&env, None).unwrap_err();
+            assert_eq!(r.reason, Reason::EnvMissing, "{v}");
+            assert_eq!(generic(v), want, "{v}");
+            assert!(!r.message.contains(GOOD));
+        }
+        // The variable a provider already uses stays usable for it.
+        assert_eq!(
+            KeySpec::Env("WORK_KEY".into())
+                .read(&env, Some("WORK_KEY"))
+                .unwrap(),
+            GOOD
+        );
         assert_eq!(
             KeySpec::Env("V".into()).stored_ref("custom"),
             KeyRef::Env("V".into())
@@ -2034,6 +2205,133 @@ tiers = ["synthesis"]
         );
         assert!(after.contains("# The local server.\n\n# Work key"));
         assert!(remove_provider_text(&after, "nope").is_none());
+    }
+
+    #[test]
+    fn comments_and_sub_tables_do_not_confuse_the_spans() {
+        let text = r#"[runtime]
+enabled = false
+
+[[providers]]
+id = "a"
+kind = "openai_compatible"
+base_url = "http://localhost:1/v1"
+model = "m"
+api_key = "env:NUGGET_A_KEY"
+tiers = ["light"]
+# a note with """ in it
+[providers.headers]
+api_key = "not-the-key-line"
+
+[server]
+note = """
+[[providers]]
+"""
+
+[[providers]]
+id = "b"
+kind = "openai_compatible"
+base_url = "http://localhost:2/v1"
+model = "m"
+api_key = "keychain:a"   # '''
+"#;
+        Config::parse(text).unwrap();
+        // Removing "a" takes its headers sub-table and leaves [server] (and its multi-line
+        // string that looks like a table) alone.
+        let out = remove_provider_text(text, "a").unwrap();
+        assert!(
+            out.contains("[server]\nnote = \"\"\"\n[[providers]]\n\"\"\"\n"),
+            "{out}"
+        );
+        assert!(!out.contains("[providers.headers]"), "{out}");
+        let doc: toml::Table = toml::from_str(&out).unwrap();
+        assert_eq!(doc["providers"].as_array().unwrap().len(), 1);
+        assert!(doc.contains_key("server"));
+        // Editing "a" changes its own api_key, not the header of that name.
+        let out = edit_provider_text(text, "a", &[("api_key", Some("keychain:a".into()))]).unwrap();
+        assert!(out.contains("api_key = \"keychain:a\"\ntiers"), "{out}");
+        assert!(out.contains("api_key = \"not-the-key-line\""), "{out}");
+        assert!(remove_provider_text(&out, "b").is_some());
+
+        // A comment with """ right before a table no longer swallows the table after it.
+        let tricky = text.replace(
+            "[providers.headers]\napi_key = \"not-the-key-line\"\n",
+            "",
+        );
+        let out = remove_provider_text(&tricky, "a").unwrap();
+        assert_eq!(
+            toml::from_str::<toml::Table>(&out).unwrap()["server"],
+            toml::from_str::<toml::Table>(&tricky).unwrap()["server"]
+        );
+        // The comment right before the next table belongs to it and stays.
+        assert!(
+            out.starts_with("[runtime]\nenabled = false\n\n# a note with \"\"\" in it\n\n[server]"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_keychain_entry_another_provider_uses_is_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        let text = r#"[[providers]]
+id = "one"
+kind = "openai_compatible"
+base_url = "http://localhost:1/v1"
+model = "m"
+api_key = "keychain:shared"
+
+[[providers]]
+id = "two"
+kind = "openai_compatible"
+base_url = "http://localhost:2/v1"
+model = "m"
+api_key = "keychain:shared"
+"#;
+        std::fs::write(&path, text).unwrap();
+        let secrets = MemorySecrets::new();
+        secrets.set(&provider_account("shared"), GOOD).unwrap();
+        // "one" moves to its own entry: "shared" stays for "two".
+        let change = KeyChange {
+            old: Some(ApiKeyRef::Keychain("shared".into())),
+            new: KeyRef::Keychain("one".into()),
+            base_url: None,
+        };
+        replace_key(&path, &secrets, "one", &change, "sk-one".into()).unwrap();
+        assert_eq!(
+            secrets.get(&provider_account("shared")).unwrap().as_deref(),
+            Some(GOOD)
+        );
+        // Removing "two" (the last user) deletes it.
+        let shared = ApiKeyRef::Keychain("shared".into());
+        remove_provider(&path, &secrets, "two", Some(&shared)).unwrap();
+        assert!(secrets.get(&provider_account("shared")).unwrap().is_none());
+        assert_eq!(
+            secrets.get(&provider_account("one")).unwrap().as_deref(),
+            Some("sk-one")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rewriting_the_config_keeps_its_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let e = entry("custom", KeyRef::Keychain("custom".into()));
+        write_provider(&path, &MemorySecrets::new(), &e, GOOD).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn nuggets_own_names_are_reserved() {
+        assert!(reserved("local-chat", |_| false));
+        assert!(reserved("local-anything", |_| false));
+        assert!(reserved("slot", |id| id == "slot"));
+        assert!(!reserved("custom", |id| id == "slot"));
     }
 
     #[test]

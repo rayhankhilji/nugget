@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use nugget_connector::{Registry, SecretStore};
+use nugget_core::capability::Locality;
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::ProviderId;
 use nugget_core::paths::Paths;
@@ -191,7 +192,29 @@ impl State {
             match built {
                 Ok(p) => {
                     unavailable.remove(&id);
-                    self.router.set_provider(p, &cfg.tiers);
+                    // Placed as at startup (`local::tier_map`): on-device and LAN servers
+                    // before the runtime's slots (an unprobed on-device one right after them),
+                    // cloud providers last.
+                    let rank = |loc: Locality, probed: bool| match loc {
+                        Locality::Cloud => 3,
+                        Locality::OnDevice if !probed => 2,
+                        _ => 0,
+                    };
+                    let mine = rank(p.meta().locality, false);
+                    let before = |other: &ProviderId| {
+                        let theirs = if self.slot(other).is_some() {
+                            1
+                        } else {
+                            self.router.provider(other).map_or(3, |o| {
+                                rank(
+                                    o.meta().locality,
+                                    self.router.capabilities(other).is_some(),
+                                )
+                            })
+                        };
+                        theirs > mine
+                    };
+                    self.router.set_provider_before(p, &cfg.tiers, &before);
                 }
                 Err(reason) => {
                     self.router.remove_provider(&id);
