@@ -1,21 +1,11 @@
 //! A real model for the `nugget` arm: built on the agent thread, instrumented, and made robust
 //! to what small open models served by llama-server actually send.
 //!
-//! - **Built where it runs.** Each task's agent runs on its own short-lived tokio runtime (see
-//!   [`super::nugget`]). A reqwest client keeps pooled connections on the runtime it first ran
-//!   on, so the provider is built lazily from a [`ProviderFactory`] on the first model turn, on
-//!   the agent's runtime, and dropped with the task.
-//! - **Counted, never hidden.** Provider failures (request, mid-stream error, a stream without
-//!   an end) are counted in [`ModelCounters::errors`] and passed to the loop, which ends the run
-//!   with an error; tool calls whose arguments are not a JSON object and replies that write a
-//!   tool call as text are counted as malformed (the loop then rejects or nudges them as it would
-//!   in the app).
-//! - **Normalised, not repaired.** Two things are fixed so that the measurement is about the
-//!   model and not the wire: a tool call without an id, or with an id already used in the run,
-//!   gets a fresh one (`nugget-agent` derives the action id from the call id, so a reused id
-//!   would replay the first call's recorded result instead of acting); and `<think>` blocks that
-//!   reach the content (a server without reasoning extraction) are dropped from the reply text.
-//!   Arguments are never rewritten: invalid ones stay invalid and the loop rejects them.
+//! The provider is built lazily from a [`ProviderFactory`] on the agent's runtime, because a
+//! reqwest client keeps pooled connections on the runtime it first ran on. Failures are counted
+//! ([`ModelCounters::errors`]), never hidden. Missing or reused tool call ids get fresh ones (a
+//! reused id would replay the first call's result) and leaked `<think>` blocks are dropped;
+//! arguments are never rewritten.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -165,9 +155,8 @@ impl RealModel {
     }
 }
 
-/// Drop `<think>…</think>` blocks (and an unclosed `<think>` to the end, and reasoning before a
-/// lone `</think>` when the template opened the block in the prompt). Returns the text and the
-/// number of blocks dropped.
+/// Drop `<think>` blocks, including unclosed ones and reasoning before a lone `</think>`.
+/// Returns the text and the number of blocks dropped.
 pub fn strip_think(text: &str) -> (String, u32) {
     const OPEN: &str = "<think>";
     const CLOSE: &str = "</think>";

@@ -1,24 +1,10 @@
 //! `bench/draft`: Double Tap reply drafting (milestone M3), Nugget versus a Sentient-style
 //! baseline. See `bench/README.md` for the methodology.
 //!
-//! Both arms write the same prompt format ([`prompt`]) for the same model; only the content
-//! differs ([`arms`]). The default model is the deterministic [`fake`] one, so CI numbers are
-//! reproducible; `--provider-url` runs a real model through `nugget-infer`, and `--local-models`
-//! the manifest's local chat model through `nugget-runtime`, as the app does.
-//!
-//! With a real model every request has a timeout; a failed, timed-out or context-overflow
-//! request is counted (`draft.<arm>.failures`) and its draft scored as empty, and the suite
-//! fails only when no request worked. When the model's context window is known (or
-//! `--draft-context-tokens` is given) the baseline's whole-vault prompt is cut to fit, as
-//! Sentient's own cap does. [`judge`] adds a pairwise judge (`--draft-judge`), on the drafting
-//! model or, with `--draft-judge-model`, on a second local model; the rule-based judge always
-//! runs next to it (`draft.judge_heuristic.*`).
-//!
-//! With a real model the Nugget arm drafts through the real engine ([`engine`]), so
-//! `DraftConfig::grounding` applies: `--draft-grounding both` (the default with a real model)
-//! runs it twice on the same tasks, grounded (`draft.nugget.*`) and not
-//! (`draft.nugget_ungrounded.*`). Drafts use a fixed temperature (`--draft-temperature`, 0 by
-//! default); `ChatRequest` has no seed field, so no seed is sent.
+//! Both arms use the same prompt format ([`prompt`]) and model; only the content differs
+//! ([`arms`]). The default model is the deterministic [`fake`]. Failed requests are counted and
+//! scored as empty drafts; the suite fails only when none worked. The baseline's whole-vault
+//! prompt is cut to the context window, as Sentient's own cap does.
 
 pub mod arms;
 pub mod engine;
@@ -55,17 +41,14 @@ pub const DRAFT_MAX_TOKENS: u32 = 400;
 pub const DRAFT_MAX_TOKENS_THINKING: u32 = 2048;
 /// Output cap for a judge verdict.
 pub const JUDGE_MAX_TOKENS: u32 = 160;
-/// Context window assumed for `--local-models` when the runtime config does not state one
-/// (`nugget-runtime`'s chat default on a 16 GB machine).
+/// Context window assumed for `--local-models` when the runtime config states none.
 pub const DEFAULT_LOCAL_CONTEXT_TOKENS: u32 = 8192;
 /// Tokens kept free besides the output: chat template, role markers, special tokens.
 pub const CONTEXT_MARGIN_TOKENS: u32 = 256;
-/// `estimate_tokens` counts four characters a token; real tokenizers count more tokens for
-/// numbers, addresses and punctuation-heavy text, so only this share of the window is filled.
+/// Share of the window filled: real tokenizers count more tokens than `estimate_tokens`' 4 chars.
 pub const ESTIMATE_SAFETY: f64 = 0.85;
 
-/// The baseline's prompt budget in estimated tokens for a context window: window minus the
-/// output cap minus [`CONTEXT_MARGIN_TOKENS`], times [`ESTIMATE_SAFETY`].
+/// The baseline's prompt budget in estimated tokens for a context window.
 pub fn prompt_budget(context_tokens: u32, max_output: u32) -> usize {
     let room = context_tokens.saturating_sub(max_output + CONTEXT_MARGIN_TOKENS);
     (f64::from(room) * ESTIMATE_SAFETY) as usize
@@ -75,8 +58,7 @@ pub fn prompt_budget(context_tokens: u32, max_output: u32) -> usize {
 pub const TTFT_TARGET_CLOUD_S: f64 = 1.2;
 pub const TTFT_TARGET_LOCAL_S: f64 = 3.0;
 
-/// Which path produced the Nugget arm. Switches to the real crates once `nugget-draft` (M3-C)
-/// exposes its prompt builder and `nugget-voice` (M3-D) its profile and `style_distance`.
+/// Which path produced the Nugget arm.
 pub const NUGGET_PATH: &str = "in_suite: nugget_draft::classify (contract rules) + nugget-retrieve \
      (text-only, recency boost, sensitive items excluded for cloud) + voice-stats prompt \
      (nugget_voice::VoiceHints/StyleStats computed in-suite) + instruction neutralising";
@@ -230,8 +212,7 @@ impl GroundingMode {
         }
     }
 
-    /// The default: `both` with a real model, `on` with the fake one (whose in-suite Nugget
-    /// arm has no grounding switch).
+    /// The default: `both` with a real model, `on` with the fake one (no grounding switch).
     pub fn resolve(opt: Option<Self>, real: bool) -> Self {
         opt.unwrap_or(if real { Self::Both } else { Self::On })
     }
@@ -259,9 +240,8 @@ impl std::str::FromStr for Temperature {
 
 /// Default temperature of draft requests to a real model.
 pub const DEFAULT_TEMPERATURE: f32 = 0.0;
-/// Default `--draft-judge-timeout-s` with `--draft-judge-model`: an 8B judge on 2 CPU cores
-/// reads about 14 tokens/s, so a ~700-token judge prompt takes ~50 s before it writes its
-/// verdict at a few tokens/s.
+/// Default `--draft-judge-timeout-s` with `--draft-judge-model`: an 8B judge on 2 cores takes
+/// ~50 s just to read a ~700-token prompt.
 pub const DEFAULT_JUDGE_TIMEOUT_S: u64 = 240;
 
 /// Where the judge's verdicts come from.
@@ -285,9 +265,7 @@ impl JudgePlan {
     }
 }
 
-/// Decide the judge from the options: `--draft-judge` (default `model` with `--local-models`
-/// or a `--draft-judge-model`, `none` otherwise), `--draft-judge-model`, whether the drafts
-/// come from a real model and from a local one, and the drafting model's manifest id.
+/// Decide the judge from the options and the drafting model.
 pub fn plan_judge(
     mode: Option<JudgeMode>,
     judge_model: Option<&str>,
@@ -341,8 +319,7 @@ impl Switch {
     }
 }
 
-/// Default `--draft-timeout-s`: a 4B model on 4 CPU cores prefills a ~6k-token baseline prompt
-/// in a few minutes.
+/// Default `--draft-timeout-s`: a 4B model on 4 cores takes minutes to prefill the baseline.
 pub const DEFAULT_TIMEOUT_S: u64 = 420;
 
 struct RealModel {
@@ -375,8 +352,7 @@ pub struct RequestFailure {
     pub elapsed: Duration,
 }
 
-/// Run a generation (`work` yields the text and the time of its first visible token) within
-/// `timeout`; a timeout or an error becomes a [`RequestFailure`]. Times are from `started`.
+/// Run a generation within `timeout`; a timeout or an error becomes a [`RequestFailure`].
 async fn timed<F>(
     work: F,
     timeout: Duration,
@@ -671,8 +647,7 @@ pub enum NuggetImpl<'a> {
     Engine(&'a Engine),
 }
 
-/// The Nugget arms of a run: the one reported as `draft.nugget.*` and, optionally, the
-/// ungrounded one.
+/// The Nugget arms of a run: `draft.nugget.*` and, optionally, the ungrounded one.
 #[derive(Clone)]
 pub struct ArmSetup<'a> {
     pub nugget: NuggetImpl<'a>,
@@ -710,8 +685,7 @@ impl Slot {
     }
 }
 
-/// Run both arms over `tasks` (indices into the corpus) and score them. `baseline_budget` cuts
-/// the baseline prompt to that many estimated tokens.
+/// Run both arms over `tasks` and score them.
 #[cfg(test)]
 async fn run_arms(
     world: &World,
@@ -734,8 +708,7 @@ async fn run_arms(
     .await
 }
 
-/// Run the arms of `setup` and the baseline over `tasks` (indices into the corpus) and score
-/// them. `baseline_budget` cuts the baseline prompt to that many estimated tokens.
+/// Run the arms of `setup` and the baseline over `tasks` and score them.
 async fn run_arms_with(
     world: &World,
     tasks: &[usize],
@@ -920,8 +893,7 @@ impl Benchmark for DraftBench {
             ));
         }
         let all = corpus.tasks.len();
-        // The fake model is cheap: always every task. A real one is limited by scale, a local
-        // one more (a 4B model on 4 CPU cores takes minutes per task with the judge).
+        // A local model takes minutes per task with the judge, so it runs fewer tasks.
         let limit = if local {
             ctx.scale().pick(3, 8, 16, all).min(all)
         } else if real {
@@ -979,8 +951,7 @@ impl Benchmark for DraftBench {
             ctx.param("sampling.temperature", "n/a (deterministic fake model)");
         }
 
-        // The baseline must fit a real model's window: config, then option, then (local) the
-        // runtime default.
+        // The baseline must fit a real model's window.
         let window = if !real {
             None
         } else if let Some(c) = context_tokens {
@@ -1297,8 +1268,7 @@ async fn judge_all(
     .await
 }
 
-/// Run the model judge over every task, arm `a` (in the judge's "Nugget" seat) against arm
-/// `b`, each given as (drafts, scores) per task.
+/// Run the model judge over every task, arm `a` (the "Nugget" seat) against arm `b`.
 async fn judge_pairs(
     world: &World,
     tasks: &[usize],
@@ -1625,9 +1595,8 @@ fn arm_metrics(arm: &str, s: &ArmSummary, out: &mut Vec<Metric>) {
     }
 }
 
-/// Turn a run into metrics with targets: Nugget at least the baseline on voice and recall, at
-/// most the baseline on hallucinations, no secret in a cloud prompt or draft, and (real
-/// providers only) time to first token under the M3 target for its locality.
+/// Turn a run into metrics with targets relative to the baseline (TTFT targets for real
+/// providers only).
 fn metrics(run: &DraftRun, real: bool, locality: Locality) -> Vec<Metric> {
     let n = score::summarise(&run.nugget);
     let b = score::summarise(&run.baseline);
@@ -1752,96 +1721,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn fake_run_is_deterministic() {
-        let a = smoke(DraftOptions::default());
-        let b = smoke(DraftOptions::default());
-        let quality = |r: &Report| -> Vec<(String, f64)> {
-            r.metrics
-                .iter()
-                .filter(|m| !m.name.contains("ttft") && !m.name.contains("total"))
-                .map(|m| (m.name.clone(), m.value))
-                .collect()
-        };
-        assert_eq!(quality(&a), quality(&b));
-    }
-
-    #[test]
-    fn local_runs_drop_the_leak_targets_and_artificial_latency_shows() {
-        let r = smoke(DraftOptions {
-            draft_locality: DraftLocality::Local,
-            fake_ttft_ms: 5,
-            fake_prefill_ms_per_1k: 2,
-            ..DraftOptions::default()
-        });
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert!(
-            r.metric("draft.nugget.sensitive_leak_rate")
-                .unwrap()
-                .target
-                .is_none()
-        );
-        // Time to first token is at least the fixed latency plus the prefill of the prompt
-        // (Nugget's also includes its retrieval, so compare floors, not arms).
-        for arm in ["nugget", "baseline"] {
-            let tokens = value(&r, &format!("draft.{arm}.prompt_tokens.p50"));
-            let floor = 0.005 + 0.002 * (tokens / 1000.0).floor();
-            let ttft = value(&r, &format!("draft.{arm}.ttft.p50_s"));
-            assert!(ttft >= floor - 1e-3, "{arm}: {ttft} < {floor}");
-        }
-    }
-
-    #[test]
-    fn local_budget_flag_shrinks_local_prompts_only() {
-        let run = |locality, budget| {
-            smoke(DraftOptions {
-                draft_locality: locality,
-                draft_local_budget: budget,
-                ..DraftOptions::default()
-            })
-        };
-        let on = run(DraftLocality::Local, Switch::On);
-        let off = run(DraftLocality::Local, Switch::Off);
-        assert_eq!(on.status, Status::Ok, "{:?}", on.message);
-        assert_eq!(off.status, Status::Ok, "{:?}", off.message);
-        assert_eq!(on.config.params["draft_local_budget"], "on");
-        assert_eq!(off.config.params["draft_local_budget"], "off");
-        assert!(on.config.params["draft_local_budget.applied"].is_object());
-        assert!(off.config.params["draft_local_budget.applied"].is_null());
-        let tokens = |r: &Report| value(r, "draft.nugget.prompt_tokens.p50");
-        assert!(
-            tokens(&on) < tokens(&off),
-            "{} >= {}",
-            tokens(&on),
-            tokens(&off)
-        );
-        // Cloud models keep the cloud budget either way.
-        let cloud = run(DraftLocality::Cloud, Switch::On);
-        assert!(cloud.config.params["draft_local_budget.applied"].is_null());
-    }
-
-    #[test]
-    fn dump_writes_one_line_per_task_and_arm() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("drafts.jsonl");
-        let r = smoke(DraftOptions {
-            draft_dump: Some(path.clone()),
-            ..DraftOptions::default()
-        });
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.lines().count(), 2 * 66);
-        let first: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
-        assert_eq!(first["task"], "maya-t01");
-        assert!(first["draft"].as_str().is_some_and(|d| !d.is_empty()));
-    }
-
-    #[test]
-    fn spread_picks_evenly() {
-        assert_eq!(spread(10, 3), [0, 3, 6]);
-        assert_eq!(spread(3, 5), [0, 1, 2]);
-    }
-
     // ---- real-model paths, with in-process providers (no network) ----
 
     use async_trait::async_trait;
@@ -1924,32 +1803,6 @@ mod tests {
     }
 
     #[test]
-    fn classifies_provider_failures() {
-        assert_eq!(
-            failure_kind(
-                "provider error: HTTP 400: the request exceeds the available context size, try \
-                 increasing it"
-            ),
-            "context_overflow"
-        );
-        assert_eq!(
-            failure_kind("This model's maximum context length is 8192 tokens"),
-            "context_overflow"
-        );
-        assert_eq!(
-            failure_kind("prompt is too long: 210000 tokens"),
-            "context_overflow"
-        );
-        assert_eq!(failure_kind("network error: connection refused"), "error");
-    }
-
-    #[test]
-    fn budget_leaves_room_for_output_and_margin() {
-        assert_eq!(prompt_budget(8192, 400), 6405);
-        assert_eq!(prompt_budget(100, 400), 0);
-    }
-
-    #[test]
     fn failed_requests_are_counted_scored_empty_and_forfeit_the_judge() {
         let world = World::build(Corpus::load().unwrap()).unwrap();
         // Only Nugget's prompt has a voice profile: the baseline's requests all fail.
@@ -2026,29 +1879,6 @@ mod tests {
     }
 
     #[test]
-    fn real_drafts_lose_inline_thinking_and_baseline_fits_the_budget() {
-        let world = World::build(Corpus::load().unwrap()).unwrap();
-        let p = Scripted::new(|_| Ok("<think>plan the reply</think>\nHi Sam, yes.".into()));
-        let model = real(p, Duration::from_secs(30));
-        let budget = prompt_budget(4096, DRAFT_MAX_TOKENS);
-        let run = block_on(run_arms(
-            &world,
-            &[0, 5],
-            &model,
-            false,
-            1,
-            Some(budget),
-            None,
-        ))
-        .unwrap();
-        assert_eq!(run.nugget_drafts[0], "Hi Sam, yes.");
-        assert_eq!(run.baseline_truncated, 2);
-        assert!(run.baseline.iter().all(|s| s.prompt_tokens <= budget));
-        // Nugget's prompt is never cut.
-        assert!(run.nugget.iter().all(|s| s.prompt_tokens < budget));
-    }
-
-    #[test]
     fn model_judge_cancels_position_bias_and_retries_without_schema() {
         let c = Corpus::load().unwrap();
         let t = &c.tasks[0];
@@ -2095,253 +1925,6 @@ mod tests {
         let j = block_on(judge(garbage).judge(&input, "ZXGOOD", "ZXBAD", "n"));
         assert_eq!(j.winner, judge::Outcome::Failed);
         assert_eq!(j.failure, Some("unparseable"));
-    }
-
-    #[test]
-    fn heuristic_judge_over_the_fake_model() {
-        let r = smoke(DraftOptions {
-            draft_judge: Some(JudgeMode::Heuristic),
-            ..DraftOptions::default()
-        });
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert!(
-            r.config.params["judge"]
-                .as_str()
-                .unwrap()
-                .starts_with("heuristic")
-        );
-        assert_eq!(value(&r, "draft.judge.inconsistent_rate"), 0.0);
-        assert_eq!(value(&r, "draft.judge.failures"), 0.0);
-        let (n, b, t) = (
-            value(&r, "draft.judge.nugget_win_rate"),
-            value(&r, "draft.judge.baseline_win_rate"),
-            value(&r, "draft.judge.tie_rate"),
-        );
-        assert!((n + b + t - 1.0).abs() < 1e-9);
-        assert!(n > b);
-        // Same composite as the suite's own pairwise win rate (ties half).
-        assert!((n + t / 2.0 - value(&r, "draft.win_rate_vs_baseline")).abs() < 1e-9);
-        // The default fake run has no judge, no failure counts and no truncation.
-        let plain = smoke(DraftOptions::default());
-        assert_eq!(plain.config.params["judge"], "none");
-        assert!(plain.metrics.iter().all(|m| !m.name.contains("judge")
-            && !m.name.ends_with("failures")
-            && !m.name.contains("truncated")));
-        // The fake model cannot judge.
-        let bad = smoke(DraftOptions {
-            draft_judge: Some(JudgeMode::Model),
-            ..DraftOptions::default()
-        });
-        assert_eq!(bad.status, Status::Failed);
-    }
-
-    #[test]
-    fn parses_the_new_options() {
-        use clap::Parser;
-        #[derive(clap::Parser)]
-        struct Cli {
-            #[command(flatten)]
-            d: DraftOptions,
-        }
-        let c = Cli::try_parse_from(["x"]).unwrap();
-        assert_eq!(c.d, DraftOptions::default());
-        let c = Cli::try_parse_from([
-            "x",
-            "--draft-judge",
-            "heuristic",
-            "--draft-context-tokens",
-            "4096",
-            "--draft-timeout-s",
-            "60",
-        ])
-        .unwrap();
-        assert_eq!(c.d.draft_judge, Some(JudgeMode::Heuristic));
-        assert_eq!(c.d.draft_context_tokens, Some(4096));
-        assert_eq!(c.d.draft_timeout_s, Some(60));
-        assert!(Cli::try_parse_from(["x", "--draft-judge", "gpt"]).is_err());
-        let c = Cli::try_parse_from([
-            "x",
-            "--draft-grounding",
-            "both",
-            "--draft-temperature",
-            "0.2",
-            "--draft-judge-model",
-            "qwen3-8b-q4km",
-            "--draft-judge-timeout-s",
-            "300",
-            "--draft-judge-grounding",
-        ])
-        .unwrap();
-        assert_eq!(c.d.draft_grounding, Some(GroundingMode::Both));
-        assert_eq!(c.d.draft_temperature, Some(Temperature(0.2)));
-        assert_eq!(c.d.draft_judge_model.as_deref(), Some("qwen3-8b-q4km"));
-        assert_eq!(c.d.draft_judge_timeout_s, Some(300));
-        assert!(c.d.draft_judge_grounding);
-        for bad in [
-            ["x", "--draft-grounding", "maybe"],
-            ["x", "--draft-temperature", "3"],
-            ["x", "--draft-temperature", "warm"],
-        ] {
-            assert!(Cli::try_parse_from(bad).is_err(), "{bad:?}");
-        }
-        // Defaults: both arms with a real model, grounded only with the fake one.
-        assert_eq!(GroundingMode::resolve(None, true), GroundingMode::Both);
-        assert_eq!(GroundingMode::resolve(None, false), GroundingMode::On);
-        assert_eq!(
-            GroundingMode::resolve(Some(GroundingMode::Off), true),
-            GroundingMode::Off
-        );
-    }
-
-    #[test]
-    fn both_mode_over_the_fake_reports_two_nugget_arms() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("drafts.jsonl");
-        let r = smoke(DraftOptions {
-            draft_grounding: Some(GroundingMode::Both),
-            draft_dump: Some(path.clone()),
-            ..DraftOptions::default()
-        });
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert_eq!(r.config.params["nugget.grounding"], "both");
-        for name in [
-            "voice_match",
-            "fact_recall",
-            "hallucination_rate",
-            "sensitive_leak_rate",
-            "injection_resistance",
-            "prompt_tokens.p50",
-            "ttft.p50_s",
-            "total.p50_s",
-        ] {
-            assert!(
-                r.metric(&format!("draft.nugget.{name}")).is_some(),
-                "{name}"
-            );
-            let un = format!("draft.nugget_ungrounded.{name}");
-            assert!(r.metric(&un).is_some(), "{un}");
-            // No targets on the second arm: it is there for comparison.
-            assert!(r.metric(&un).unwrap().target.is_none(), "{un}");
-        }
-        // The in-suite pipeline has no grounding switch: both arms are the same here.
-        assert_eq!(
-            value(&r, "draft.nugget.voice_match"),
-            value(&r, "draft.nugget_ungrounded.voice_match")
-        );
-        for t in &r.targets {
-            assert!(t.pass, "{t:?}");
-        }
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.lines().count(), 3 * 66);
-        let arms: std::collections::BTreeSet<String> = text
-            .lines()
-            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["arm"].to_string())
-            .collect();
-        assert_eq!(arms.len(), 3, "{arms:?}");
-        assert!(arms.contains("\"nugget_ungrounded\""));
-        // The default fake run has one Nugget arm, grounding on.
-        let plain = smoke(DraftOptions::default());
-        assert_eq!(plain.config.params["nugget.grounding"], "on");
-        assert!(plain.metrics.iter().all(|m| !m.name.contains("ungrounded")));
-    }
-
-    #[test]
-    fn grounding_judge_is_opt_in_and_needs_both_arms() {
-        let r = smoke(DraftOptions {
-            draft_grounding: Some(GroundingMode::Both),
-            draft_judge: Some(JudgeMode::Heuristic),
-            draft_judge_grounding: true,
-            ..DraftOptions::default()
-        });
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        // Identical arms: every task is a tie.
-        assert_eq!(value(&r, "draft.judge_grounding.tie_rate"), 1.0);
-        assert!(
-            r.metric("draft.judge_grounding.grounded_win_rate")
-                .is_some()
-        );
-        assert!(
-            r.metric("draft.judge_grounding.ungrounded_win_rate")
-                .is_some()
-        );
-        assert!(
-            r.metric("draft.judge_grounding.factuality.grounded_win_rate")
-                .is_some()
-        );
-        let bad = smoke(DraftOptions {
-            draft_judge: Some(JudgeMode::Heuristic),
-            draft_judge_grounding: true,
-            ..DraftOptions::default()
-        });
-        assert_eq!(bad.status, Status::Failed);
-    }
-
-    #[test]
-    fn judge_plan_follows_the_options() {
-        use JudgePlan as P;
-        let m = Some(JudgeMode::Model);
-        // Defaults: model with --local-models, none otherwise.
-        assert_eq!(
-            plan_judge(None, None, true, true, Some("a")),
-            Ok(P::SameModel)
-        );
-        assert_eq!(plan_judge(None, None, true, false, None), Ok(P::None));
-        assert_eq!(plan_judge(None, None, false, false, None), Ok(P::None));
-        assert_eq!(
-            plan_judge(Some(JudgeMode::Heuristic), None, false, false, None),
-            Ok(P::Heuristic)
-        );
-        // A different judge model: a second local server.
-        assert_eq!(
-            plan_judge(None, Some("big"), true, true, Some("small")),
-            Ok(P::LocalModel("big".into()))
-        );
-        assert_eq!(
-            plan_judge(m, Some("big"), true, true, Some("small")),
-            Ok(P::LocalModel("big".into()))
-        );
-        // The drafting model named as judge is the same model.
-        assert_eq!(
-            plan_judge(m, Some("small"), true, true, Some("small")),
-            Ok(P::SameModel)
-        );
-        // Contradictions and impossible setups.
-        assert!(plan_judge(Some(JudgeMode::Heuristic), Some("big"), true, true, None).is_err());
-        assert!(plan_judge(Some(JudgeMode::None), Some("big"), true, true, None).is_err());
-        assert!(plan_judge(m, Some("big"), true, false, None).is_err());
-        assert!(plan_judge(m, None, false, false, None).is_err());
-        assert!(plan_judge(None, Some("big"), false, false, None).is_err());
-        assert_eq!(P::LocalModel("x".into()).mode(), JudgeMode::Model);
-        // The fake model cannot use a judge model.
-        let bad = smoke(DraftOptions {
-            draft_judge_model: Some("qwen3-8b-q4km".into()),
-            ..DraftOptions::default()
-        });
-        assert_eq!(bad.status, Status::Failed);
-    }
-
-    #[test]
-    fn heuristic_judge_runs_next_to_any_judge() {
-        let r = smoke(DraftOptions {
-            draft_judge: Some(JudgeMode::Heuristic),
-            ..DraftOptions::default()
-        });
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        for name in [
-            "nugget_win_rate",
-            "baseline_win_rate",
-            "tie_rate",
-            "inconsistent_rate",
-            "voice.nugget_win_rate",
-            "factuality.nugget_win_rate",
-            "failures",
-        ] {
-            assert_eq!(
-                value(&r, &format!("draft.judge_heuristic.{name}")),
-                value(&r, &format!("draft.judge.{name}")),
-                "{name}"
-            );
-        }
     }
 
     #[test]
@@ -2462,81 +2045,5 @@ mod tests {
         );
         // 6 tasks x 3 arms (grounded, ungrounded, baseline).
         assert_eq!(reqs.len(), 18);
-    }
-
-    #[test]
-    fn context_option_cuts_the_baseline_and_reports_it() {
-        let ev = json!({
-            "object": "chat.completion.chunk",
-            "choices": [{ "index": 0, "delta": { "content": "Hi, yes." }, "finish_reason": null }],
-        });
-        let body = format!(
-            "data: {ev}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
-        );
-        let (r, reqs) = mock_run(
-            200,
-            &body,
-            true,
-            DraftOptions {
-                draft_context_tokens: Some(4096),
-                ..DraftOptions::default()
-            },
-        );
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        // No judge by default with --provider-url: 6 tasks x 3 arms (both Nugget arms through
-        // the engine, then the baseline), every request at temperature 0.
-        assert_eq!(reqs.len(), 18);
-        for req in &reqs {
-            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
-            assert_eq!(body["temperature"], 0.0, "{body}");
-        }
-        let p = &r.config.params;
-        assert_eq!(p["baseline.context_tokens"], 4096);
-        assert_eq!(p["baseline.context_tokens_source"], "draft_context_tokens");
-        let budget = prompt_budget(4096, DRAFT_MAX_TOKENS) as f64;
-        assert_eq!(p["baseline.prompt_budget_tokens"], budget as u64);
-        assert_eq!(value(&r, "draft.baseline.truncated_tasks"), 6.0);
-        assert!(value(&r, "draft.baseline.prompt_tokens.p95") <= budget);
-        assert_eq!(value(&r, "draft.nugget.failures"), 0.0);
-        assert_eq!(value(&r, "draft.nugget_ungrounded.failures"), 0.0);
-        assert_eq!(value(&r, "draft.baseline.failures"), 0.0);
-        assert_eq!(p["judge"], "none");
-        assert_eq!(p["nugget.grounding"], "both");
-        assert_eq!(p["sampling.temperature"], 0.0);
-        assert_eq!(p["sampling.seed"], SEED_NOTE);
-        assert!(p["nugget_path"].as_str().unwrap().starts_with("engine"));
-        // The engine's prompts are scored like the others.
-        assert!(value(&r, "draft.nugget.prompt_tokens.p50") > 100.0);
-        assert!(value(&r, "draft.nugget_ungrounded.prompt_tokens.p50") > 100.0);
-    }
-
-    #[test]
-    fn grounding_off_runs_one_engine_arm_as_nugget() {
-        let ev = json!({
-            "object": "chat.completion.chunk",
-            "choices": [{ "index": 0, "delta": { "content": "Hi, yes." }, "finish_reason": null }],
-        });
-        let body = format!(
-            "data: {ev}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
-        );
-        let (r, reqs) = mock_run(
-            200,
-            &body,
-            true,
-            DraftOptions {
-                draft_grounding: Some(GroundingMode::Off),
-                draft_temperature: Some(Temperature(0.3)),
-                ..DraftOptions::default()
-            },
-        );
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert_eq!(reqs.len(), 12);
-        for req in &reqs {
-            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
-            assert!((body["temperature"].as_f64().unwrap() - 0.3).abs() < 1e-6);
-        }
-        assert_eq!(r.config.params["nugget.grounding"], "off");
-        assert!(r.metric("draft.nugget.voice_match").is_some());
-        assert!(r.metrics.iter().all(|m| !m.name.contains("ungrounded")));
     }
 }

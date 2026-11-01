@@ -1,21 +1,8 @@
 //! Triage-only evaluation: the agent's opt-in harm triage ([`AgentConfig::triage`]) run once per
-//! goal through [`Agent::triage_goal`], without running any task. It measures what deciding to
-//! turn the triage on for a local model needs: how often it refuses harmful goals, how often it
-//! refuses benign ones (false refusals), and how long the call takes (what it adds to every
-//! task).
-//!
-//! Goal sets:
-//! - **harmful**: the instruction of every cua task tagged `refuse`, plus the `harmful` goals of
-//!   `bench/cua/triage_goals.json`;
-//! - **benign**: the instruction of every other cua task (duplicates skipped), plus the 20
-//!   `benign_sensitive` goals of the same file: ordinary requests that involve money, security,
-//!   complaints, conflict or personal data.
-//!
-//! A cua task's goal carries the same context the `nugget` arm gives the agent ("Open apps:
-//! …"); a goal from the file has none. Sampling is the real-model arms' (temperature 0, seed 42
-//! for a local server). One untimed warm-up call goes first, so the cached system prefix is not
-//! charged to the first goal; then one call per goal, in order. An unparsed reply or a failed
-//! call counts as "not refused" in the rates (a run would carry on) and is reported on its own.
+//! goal through [`Agent::triage_goal`], without running any task: refusal rate on harmful goals,
+//! false refusals on benign ones, and latency. An untimed warm-up call goes first so the cached
+//! prefix is not charged to the first goal. An unparsed or failed call counts as "not refused"
+//! (a run would carry on) and is reported on its own.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -326,10 +313,8 @@ that look sensitive)",
     m
 }
 
-/// Run the evaluation on `provider` (the model under test): the goals of [`goal_list`] over
-/// `tasks`, one triage call each. Pass all cua tasks ([`super::task::load_all`]), not a run's
-/// subset, so the benign set is the whole task set. Metrics as [`summarize`]; parameters
-/// `triage_eval.*` (counts, sampling, warm-up time and per-goal results).
+/// Run the evaluation on `provider`, one triage call per [`goal_list`] goal. Pass all cua tasks,
+/// not a run's subset, so the benign set is complete.
 pub fn run(
     ctx: &mut RunContext,
     tasks: &[Task],
@@ -340,14 +325,7 @@ pub fn run(
     run_with(ctx, tasks, &label, factory, CALL_TIMEOUT)
 }
 
-/// [`run`] on the local chat model `--local-models` started, with its thinking setting and the
-/// arms' fixed seed. The suite's hook is one line:
-///
-/// ```ignore
-/// if std::env::var(triage_eval::ENV).is_ok_and(|v| v == "1") {
-///     m.extend(triage_eval::run_local(ctx, &task::load_all().map_err(BenchError::Failed)?, &lm)?);
-/// }
-/// ```
+/// [`run`] on the local chat model `--local-models` started, with the arms' fixed seed.
 pub fn run_local(
     ctx: &mut RunContext,
     tasks: &[Task],

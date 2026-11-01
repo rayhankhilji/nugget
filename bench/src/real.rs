@@ -1,32 +1,10 @@
 //! `memory --backend real`: the memory benchmark against the real stack, in process.
 //!
-//! Everything a user's data goes through, minus the daemon and IPC:
-//! an encrypted [`nugget_store::Store`] in a temporary `NUGGET_HOME`, [`nugget_ingest::Ingest`]
-//! with the `files` connector (registered through [`nugget_connector_files::register`]) watching
-//! a temporary folder, and [`nugget_retrieve::Retriever`] for every query. Embeddings come from
-//! an in-process deterministic embedder ([`HashEmbedder`], on-device locality) routed through a
-//! [`Router`] as the `Embedding` tier, from an OpenAI-compatible server given with
-//! `--embed-url`, or with `--local-models` from the manifest's embedding model served by
-//! `nugget-runtime`'s `llama-server`, as the app runs it ([`crate::local::LocalModels`]; task
-//! prefixes per `--memory-embed-prefixes`, and the manifest's reranker with
-//! `--memory-rerank local`).
-//!
-//! Phases:
-//! 1. **Eval set.** `nugget-retrieve`'s labelled fixtures are written as Markdown files, ingested
-//!    through the pipeline and queried text-only, hybrid and hybrid+MMR (`retrieval.eval.*`).
-//!    The same set indexed directly into an in-memory store (`eval::index`, one chunk per
-//!    paragraph) is reported alongside (`baseline.eval_direct.*`).
-//! 2. **Initial ingest.** The synthetic corpus of the fake backend (same scale and seed, so the
-//!    same documents) is written as files, then the source is added and timed until every file
-//!    is indexed (`ingest.*`).
-//! 3. **Known-item retrieval** on that corpus (`retrieval.{bm25,vector,hybrid,hybrid_mmr}.*`),
-//!    with the fake index's numbers on the identical corpus and queries as the baseline
-//!    (`baseline.fake.*`): the M1 gate is hybrid recall@10 at or above it.
-//! 4. **Freshness.** Edits, creates, deletes and renames hit the watched folder at random
-//!    (exponential gaps). For each, the clock starts when the file operation returns and stops
-//!    when `Retriever::search` reflects it (new content found, old content and old keys gone),
-//!    probed every few milliseconds (`freshness.*`, `propagation.*`). The M1 gate is p95 ≤ 60 s.
-//! 5. **Resources**: database size on disk and (Linux) the process's peak RSS.
+//! Everything a user's data goes through, minus the daemon and IPC: an encrypted store,
+//! [`nugget_ingest::Ingest`] with the `files` connector watching a temp folder, and
+//! [`nugget_retrieve::Retriever`]. Embeddings come from [`HashEmbedder`], `--embed-url` or
+//! `--local-models`. Freshness is timed from the file operation returning until search reflects
+//! it.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -70,8 +48,7 @@ use crate::suites::{doc_text, item_ref};
 /// Results considered per known-item query (as in the fake backend).
 const DEPTH: usize = 10;
 
-/// Workload of the real backend. Corpus and query parameters equal the fake backend's for the
-/// same scale, so its baseline is computed on identical documents and queries.
+/// Workload of the real backend; corpus and queries equal the fake backend's for the baseline.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RealParams {
     pub docs: usize,
@@ -588,8 +565,7 @@ impl Stack {
         }
     }
 
-    /// Wait until exactly `expected` items of the source carry their version (written last by
-    /// the pipeline, so the item and its chunks are complete). Returns the elapsed time.
+    /// Wait until `expected` items carry their version (written last, so they are complete).
     async fn wait_indexed(&self, expected: usize, timeout: Duration) -> Result<(), BenchError> {
         let start = Instant::now();
         loop {
@@ -643,8 +619,7 @@ impl Stack {
             .any(|i| i.item.source == self.source && i.item.key == *key))
     }
 
-    /// Full-text search (exact; the vector leg would return arbitrary neighbours for a marker)
-    /// returns `key` for `query`.
+    /// Full-text search (not vector, which returns arbitrary neighbours) finds `key`.
     async fn text_hit(&self, query: &str, key: &ItemKey) -> Result<bool, BenchError> {
         let res = self
             .retriever
@@ -692,8 +667,7 @@ struct Variants {
     rerank_fixed: Option<Retriever>,
 }
 
-/// The retrieval modes measured: name, search options, and the retriever variant (reranking
-/// variants only when a reranker runs).
+/// The retrieval modes measured (reranking ones only when a reranker runs).
 const MODES: [(&str, Strategy, bool, Variant); 9] = [
     ("bm25", Strategy::TextOnly, false, Variant::Plain),
     ("vector", Strategy::VectorOnly, false, Variant::Plain),
@@ -813,8 +787,7 @@ async fn eval_phase(
     }
     stack.shutdown().await;
 
-    // The same set indexed straight into a store (one chunk per paragraph), as the
-    // nugget-retrieve eval test does: isolates what the pipeline (extraction, chunking) changes.
+    // The same set indexed directly, to isolate what the pipeline changes.
     let direct = Store::open_in_memory()?;
     eval::index(&direct, set, Some(embedder.provider.as_ref())).await?;
     let retriever = embedder.retriever(direct.clone(), embedder.router());
@@ -888,8 +861,7 @@ async fn synthetic_phase(
     });
     let queries = corpus.queries(p.queries, p.query_terms, p.query_noise, seed);
 
-    // Baseline: the fake index on the identical corpus and queries (the fake backend's numbers
-    // for this scale and seed).
+    // Baseline: the fake index on the identical corpus and queries.
     let mp = MemoryParams {
         docs: p.docs,
         queries: p.queries,
@@ -1173,9 +1145,7 @@ async fn known_item(
                 && mode == "hybrid"
                 && let Some(b) = fake_hybrid
             {
-                // M1 exit criterion: at or above the M0 fake-index baseline, like for like (the
-                // fake hybrid has no MMR; `hybrid_mmr` is reported against the same baseline in
-                // `bench/README.md` but not gated).
+                // M1 exit criterion: at or above the fake-index baseline (`hybrid_mmr` not gated).
                 m = m.with_target(b);
             }
             out.push(m);
@@ -1641,8 +1611,7 @@ async fn freshness(
         );
     }
 
-    // Final state: the store holds exactly the files on disk, and every touched file's current
-    // content is what search finds.
+    // Final state: the store matches the files on disk.
     let expected: HashSet<ItemKey> = live.values().map(|d| Stack::key(&d.rel)).collect();
     let actual: HashSet<ItemKey> = stack
         .store

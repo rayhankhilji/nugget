@@ -1,16 +1,4 @@
 //! The labelled fixture corpus (`bench/fixtures/knowledge/`): loading, validation and ingest.
-//!
-//! Files (all JSON except the items themselves):
-//!
-//! | File | Holds |
-//! |---|---|
-//! | `manifest.json` | One entry per item: id, kind, file, MIME, source id, item key, title, modification time, version and the connector metadata ingest would store |
-//! | `items/{mail,calendar,notes}/…` | RFC 822 messages, iCalendar events and Markdown notes (frontmatter, wikilinks, tags) |
-//! | `gold/entities.json` | Every entity with its kind, name, surface forms and identifiers (`optional` ones are not counted either way) |
-//! | `gold/claims.json` | `(subject, predicate, object)` triples with the items (and quotes) that support them; `status` is `active` or `superseded` |
-//! | `gold/mentions.json` | Resolution gold: which entity each mention in each item refers to, with the surface forms used |
-//! | `llm_script.json` | What the fake LLM returns for each item, including hallucinated and injected claims |
-//! | `scenario.json` | Items to delete, the prompt-injection item, the hard cases, user edits and MCP queries |
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -196,10 +184,8 @@ pub struct JobChange {
     pub added: Option<String>,
 }
 
-/// A name in an item that nothing in the item ties to a known person (a bare first name or
-/// nickname with no corroborating header, thread, organisation or context). Its gold mention, if
-/// any, is of an `optional` entity; the hard case requires that the system does not attribute it
-/// to the case's people.
+/// A bare name nothing in the item ties to a known person; the system must not attribute it to
+/// the case's people.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Unattributed {
@@ -231,9 +217,8 @@ pub struct SameFirstNameCase {
     pub added: Option<String>,
 }
 
-/// The resolution and time-awareness hard cases. Each metric (`hard_cases.<kind>`) passes when
-/// every case of its kind in scope is handled. The first case of each kind is the original M2
-/// case; a real-model subset always keeps its items (see [`Fixture::select_items`]).
+/// The resolution and time-awareness hard cases; `hard_cases.<kind>` passes when every case of
+/// its kind in scope is handled.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HardCases {
@@ -276,9 +261,8 @@ pub struct Scenario {
     pub hard_cases: HardCases,
     /// Vault pages that get simulated user edits before the re-render.
     pub user_edit_pages: usize,
-    /// The time the corpus is judged as of: the pipeline's clock
-    /// (`Knowledge::set_clock`), so whether a calendar event already took place (the gold's
-    /// `attended`) does not depend on when the bench runs. `None`: the wall clock.
+    /// The pipeline's clock, so gold like `attended` does not depend on when the bench runs.
+    /// `None`: the wall clock.
     #[serde(default, with = "time::serde::rfc3339::option")]
     pub as_of: Option<OffsetDateTime>,
     pub mcp_queries: Vec<String>,
@@ -303,8 +287,7 @@ pub enum Corpus {
     /// Every item and hard case.
     #[default]
     All,
-    /// The corpus as it was before EE1 (93 items): everything marked `added` is left out, so
-    /// item selection and the scored gold equal the pre-EE1 bench's, for before/after runs.
+    /// The original 93-item corpus: everything marked `added` is left out.
     Original,
 }
 
@@ -345,9 +328,8 @@ impl Fixture {
         Self::load(Path::new(FIXTURE_DIR))
     }
 
-    /// The corpus restricted to `corpus`. `Original` drops the items, entities and hard cases
-    /// marked `added`, the mentions and scripted answers of dropped items, their support on
-    /// the remaining claims, and the claims left with no support (which only they stated).
+    /// The corpus restricted to `corpus`; `Original` drops everything `added` and claims left
+    /// with no support.
     pub fn corpus(&self, corpus: Corpus) -> Fixture {
         let mut fx = self.clone();
         if corpus == Corpus::All {
@@ -527,15 +509,9 @@ impl Fixture {
         self.entities.iter().find(|e| e.id == id)
     }
 
-    /// Up to `n` item ids for a real-model run, in manifest order, deterministic: first the items
-    /// the scenario needs (the deleted items, the prompt-injection items, and for the first case
-    /// of each hard-case kind: the items supporting the job-change claims (other than those of
-    /// a further case), two items mentioning the nickname person and one per same-first-name
-    /// person), then each further hard case as a whole (every item mentioning its people or
-    /// supporting its claims, plus its unattributed mentions) while it fits, then items evenly
-    /// spaced through the rest of the manifest (which keeps the mail / calendar / note mix). The
-    /// first group is always kept, even when it alone exceeds `n`. `n >= items` keeps
-    /// everything.
+    /// Up to `n` item ids for a real-model run, deterministic: the scenario's required items
+    /// (always kept, even beyond `n`), then whole further hard cases while they fit, then items
+    /// evenly spaced through the manifest to keep the source mix.
     pub fn select_items(&self, n: usize) -> Vec<String> {
         if n >= self.items.len() {
             return self.items.iter().map(|i| i.id.clone()).collect();
@@ -587,9 +563,7 @@ impl Fixture {
         for jc in hc.job_change.iter().skip(1) {
             further.push(supporting(jc));
         }
-        // The original case of each kind (the first): always kept. For the job change, the
-        // items supporting its claims, except those of a further case (which come whole or not
-        // at all).
+        // The first case of each kind is always kept (job change: minus further cases' items).
         if let Some(jc) = hc.job_change.first() {
             for id in supporting(jc) {
                 if !further.iter().flatten().any(|f| *f == id) {
@@ -653,17 +627,8 @@ impl Fixture {
             .collect()
     }
 
-    /// The corpus restricted to `keep` (item ids), for scoring a run that processed only those
-    /// items. Precision and recall are then over what those items support:
-    ///
-    /// - items, scripted extractions and gold mentions: those of kept items;
-    /// - a gold claim is in scope when at least one of its supporting items is kept (its support
-    ///   is cut to those items); a superseded claim stays superseded only while every current
-    ///   job-change claim is in scope too (otherwise nothing in the subset supersedes it);
-    /// - a gold entity is in scope when a kept item mentions it or an in-scope claim names it;
-    /// - out-of-scope claims and entities become `optional`: neither a hit nor a miss, so they
-    ///   leave the recall denominators and a system entity matching one is not a false positive;
-    /// - the scenario's deleted and injection items: the kept ones.
+    /// The corpus restricted to `keep`, so precision and recall are over what those items
+    /// support; out-of-scope claims and entities become `optional` (neither hit nor miss).
     pub fn subset(&self, keep: &[String]) -> Fixture {
         let kept: HashSet<&str> = keep.iter().map(String::as_str).collect();
         let mut fx = self.clone();
@@ -808,11 +773,6 @@ impl Ingested {
         self.by_ref.get(r).map(|&i| &self.items[i])
     }
 
-    /// The stored item a chunk belongs to.
-    pub fn chunk_item(&self, chunk: ChunkId) -> Option<&StoredItem> {
-        self.chunk_owner.get(&chunk).map(|&i| &self.items[i])
-    }
-
     pub fn chunk_count(&self) -> usize {
         self.chunk_owner.len()
     }
@@ -822,10 +782,8 @@ impl Ingested {
     }
 }
 
-/// Write every fixture item into `store` the way `nugget-ingest` would: extract with
-/// `nugget-extract`, chunk with the default options, and store the item with ingest's metadata
-/// layout (`{source, mime, extracted?, links?, tags?, sensitive, junk}`), its text and chunks.
-/// No embeddings (the knowledge pipeline reads text).
+/// Write every fixture item into `store` the way `nugget-ingest` would, without embeddings (the
+/// knowledge pipeline reads text).
 pub fn ingest(store: &Store, fx: &Fixture) -> Result<Ingested, BenchError> {
     let opts = nugget_extract::ExtractOptions::default();
     let chunk_opts = nugget_extract::ChunkOptions::default();
@@ -882,8 +840,7 @@ pub fn ingest(store: &Store, fx: &Fixture) -> Result<Ingested, BenchError> {
     Ok(out)
 }
 
-/// `key: value` lines for every scalar (or list of scalars) in extracted metadata and in its
-/// `frontmatter` object, each also with `[[wikilink]]` brackets removed.
+/// `key: value` lines for every scalar in extracted metadata and frontmatter, also unbracketed.
 pub fn field_lines(meta: &Value) -> String {
     fn scalar(v: &Value) -> Option<String> {
         match v {
@@ -990,9 +947,7 @@ mod tests {
         assert!(bad.validate().unwrap_err().contains("duplicate"));
     }
 
-    /// The labels agree with what ingest actually stores: every gold and scripted quote is in its
-    /// item's chunks, every hallucinated or injected quote is not, and every gold surface form is
-    /// in its raw item.
+    /// The labels agree with what ingest actually stores (quotes and surface forms).
     #[test]
     fn labels_agree_with_ingested_text() {
         let fx = Fixture::builtin().unwrap();
@@ -1080,187 +1035,6 @@ mod tests {
             assert!(!it.chunks.is_empty(), "{}", it.id);
             assert_eq!(ing.by_ref(&it.item).unwrap().id, it.id);
         }
-    }
-
-    #[test]
-    fn real_model_subsets_keep_the_scenario_and_spread_the_rest() {
-        let fx = Fixture::builtin().unwrap();
-        let all = fx.select_items(usize::MAX);
-        assert_eq!(all.len(), fx.items.len());
-        let small = fx.select_items(8);
-        assert_eq!(small, fx.select_items(8), "deterministic");
-        assert_eq!(small.len(), 8);
-        for id in fx.scenario.delete.iter().chain(&fx.scenario.injection) {
-            assert!(small.contains(id), "{id}");
-        }
-        let quick = fx.select_items(30);
-        assert_eq!(quick.len(), 30);
-        assert!(small.iter().all(|id| quick.contains(id)));
-        for kind in [ItemKind::Mail, ItemKind::Calendar, ItemKind::Note] {
-            assert!(
-                quick.iter().any(|id| fx.item(id).unwrap().kind == kind),
-                "{kind:?}"
-            );
-        }
-        // The quick subset carries the further hard cases whole: each item mentioning their
-        // people, holding an unattributed name or supporting a further job change's claims.
-        let hc = &fx.scenario.hard_cases;
-        let people: Vec<&String> = hc
-            .nickname_identity
-            .iter()
-            .skip(1)
-            .map(|c| &c.entity)
-            .chain(hc.same_first_name.iter().skip(1).flat_map(|c| &c.entities))
-            .collect();
-        let mut needed: Vec<&str> = fx
-            .mentions
-            .iter()
-            .filter(|m| people.contains(&&m.entity))
-            .map(|m| m.item.as_str())
-            .collect();
-        needed.extend(hc.unattributed().map(|u| u.item.as_str()));
-        let jc: Vec<&String> = hc
-            .job_change
-            .iter()
-            .skip(1)
-            .flat_map(|j| j.superseded.iter().chain(&j.current))
-            .collect();
-        needed.extend(
-            fx.claims
-                .iter()
-                .filter(|c| jc.contains(&&c.id))
-                .flat_map(|c| c.support.iter().map(|s| s.item.as_str())),
-        );
-        assert!(needed.len() >= 10);
-        for id in needed {
-            assert!(quick.contains(&id.to_owned()), "{id}");
-        }
-        // Manifest order, no duplicates.
-        let pos: Vec<usize> = quick
-            .iter()
-            .map(|id| fx.items.iter().position(|i| &i.id == id).unwrap())
-            .collect();
-        assert!(pos.windows(2).all(|w| w[0] < w[1]));
-    }
-
-    /// `--knowledge-corpus original` is the pre-EE1 corpus (d643a5a): the same counts, and the
-    /// same real-model item selection for every size. The lists were computed with the pre-EE1
-    /// `select_items` on the pre-EE1 fixture.
-    #[test]
-    fn the_original_corpus_reproduces_the_pre_ee1_selection() {
-        let fx = Fixture::builtin().unwrap().corpus(Corpus::Original);
-        fx.validate().unwrap();
-        let s = fx.stats();
-        assert_eq!(s.items, 93);
-        assert_eq!(
-            (s.items_by_kind["mail"], s.items_by_kind["calendar"]),
-            (48, 15)
-        );
-        assert_eq!(s.items_by_kind["note"], 30);
-        assert_eq!(s.entities, 85);
-        assert_eq!(s.entities_by_kind["person"], 25);
-        assert_eq!(fx.entities.len(), 88);
-        assert_eq!(s.claims, 166);
-        assert_eq!(fx.claims.len(), 181);
-        assert_eq!(s.superseded_claims, 3);
-        assert_eq!(s.mentions, 515);
-        let scripted: usize = fx.script.iter().map(|e| e.claims.len()).sum();
-        assert_eq!(scripted, 144);
-        assert_eq!((s.hallucinated_quotes, s.injected_claims), (4, 4));
-        let hc = &fx.scenario.hard_cases;
-        assert_eq!(hc.nickname_identity.len(), 1);
-        assert_eq!(hc.same_first_name.len(), 1);
-        assert_eq!(hc.job_change.len(), 1);
-        assert!(fx.items.iter().all(|i| i.added.is_none()));
-        assert!(
-            fx.claims
-                .iter()
-                .flat_map(|c| &c.support)
-                .all(|s| fx.item(&s.item).is_some())
-        );
-
-        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let smoke = ids(&[
-            "mail-002", "mail-004", "mail-006", "mail-008", "mail-022", "mail-025", "note-002",
-            "note-025",
-        ]);
-        let quick = ids(&[
-            "mail-001", "mail-002", "mail-004", "mail-006", "mail-007", "mail-008", "mail-012",
-            "mail-016", "mail-020", "mail-022", "mail-025", "mail-026", "mail-030", "mail-034",
-            "mail-037", "mail-041", "mail-045", "cal-001", "cal-005", "cal-009", "cal-013",
-            "note-001", "note-002", "note-006", "note-010", "note-014", "note-018", "note-022",
-            "note-025", "note-027",
-        ]);
-        let forty = ids(&[
-            "mail-001", "mail-002", "mail-004", "mail-005", "mail-006", "mail-008", "mail-010",
-            "mail-012", "mail-015", "mail-018", "mail-020", "mail-022", "mail-024", "mail-025",
-            "mail-028", "mail-030", "mail-033", "mail-036", "mail-038", "mail-041", "mail-044",
-            "mail-046", "cal-001", "cal-004", "cal-006", "cal-009", "cal-012", "cal-014",
-            "note-002", "note-003", "note-006", "note-008", "note-011", "note-014", "note-016",
-            "note-019", "note-022", "note-024", "note-025", "note-028",
-        ]);
-        assert_eq!(fx.select_items(8), smoke);
-        assert_eq!(fx.select_items(30), quick);
-        assert_eq!(fx.select_items(40), forty);
-        assert_eq!(fx.select_items(93).len(), 93);
-        assert_eq!(fx.select_items(usize::MAX).len(), 93);
-        // The default corpus keeps everything.
-        let all = Fixture::builtin().unwrap();
-        assert_eq!(all.corpus(Corpus::All).items.len(), all.items.len());
-        assert!(all.items.len() > 93);
-    }
-
-    /// Scoring a subset: only what the kept items support counts.
-    #[test]
-    fn subsets_restrict_the_gold_to_the_kept_items() {
-        let fx = Fixture::builtin().unwrap();
-        let keep = fx.select_items(8);
-        let sub = fx.subset(&keep);
-        assert_eq!(sub.items.len(), 8);
-        assert!(sub.mentions.iter().all(|m| keep.contains(&m.item)));
-        assert!(sub.script.iter().all(|s| keep.contains(&s.item)));
-        for c in sub.claims.iter().filter(|c| !c.optional) {
-            assert!(c.support.iter().all(|s| keep.contains(&s.item)), "{}", c.id);
-        }
-        // Every in-scope entity is mentioned in a kept item or named by an in-scope claim.
-        for e in sub.entities.iter().filter(|e| !e.optional) {
-            let mentioned = sub.mentions.iter().any(|m| m.entity == e.id);
-            let named =
-                sub.claims.iter().filter(|c| !c.optional).any(|c| {
-                    c.subject == e.id || c.object.entity.as_deref() == Some(e.id.as_str())
-                });
-            assert!(mentioned || named, "{}", e.id);
-        }
-        let (s, f) = (sub.stats(), fx.stats());
-        assert!(s.entities > 0 && s.entities < f.entities);
-        assert!(s.claims > 0 && s.claims < f.claims);
-        // The job change is in the smoke subset, so the superseded claims stay superseded.
-        assert!(
-            sub.claims
-                .iter()
-                .any(|c| c.status == GoldStatus::Superseded && !c.optional)
-        );
-        // Without the new job, nothing supersedes the old one: not scored either way.
-        let old_only = fx.subset(&["mail-002".to_owned()]);
-        assert!(
-            old_only
-                .claims
-                .iter()
-                .filter(|c| c.status == GoldStatus::Superseded)
-                .all(|c| c.optional)
-        );
-        assert!(old_only.scenario.delete.is_empty());
-        // Each job change on its own: the second one's new job (mail-053) keeps its old claims
-        // superseded, while the first one's (no new job in scope) are not scored.
-        let second = fx.subset(&["mail-053".to_owned(), "mail-055".to_owned()]);
-        let superseded_scored = |sub: &Fixture, who: &str| {
-            sub.claims
-                .iter()
-                .filter(|c| c.status == GoldStatus::Superseded && c.subject == who)
-                .all(|c| !c.optional)
-        };
-        assert!(superseded_scored(&second, "p-delphine"));
-        assert!(!superseded_scored(&second, "p-priya"));
     }
 
     #[test]

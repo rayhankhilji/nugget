@@ -1,10 +1,6 @@
 //! The adapter between the benchmark and a proactive engine.
 //!
-//! The benchmark drives any [`ProactiveEngine`]: it feeds the world's items in day order, asks
-//! for each morning's brief, reports the simulated user's feedback, and asks the engine to execute
-//! an accepted card's action with the [`Approval`] the user gave. It never reaches into engine
-//! internals, so the same loop scores the reference engine, the recency baseline and the adapter
-//! over the real `nugget-proactive` crate ([`super::real`]).
+//! The loop never reaches into engine internals, so it scores every [`ProactiveEngine`] alike.
 
 use super::world::{CardKind, Item};
 
@@ -153,9 +149,7 @@ pub trait ProactiveEngine {
     /// The user's response to a card shown in a brief.
     fn feedback(&mut self, card_id: &str, feedback: Feedback);
 
-    /// Execute a card's action. The engine must refuse (return `Err`) without a valid approval
-    /// for exactly this card. The benchmark also calls this with no approval, and with another
-    /// card's approval, to check that the engine refuses.
+    /// Execute a card's action; must return `Err` without a valid approval for exactly this card.
     fn execute(&mut self, card_id: &str, approval: Option<&Approval>) -> Result<Execution, String>;
 
     /// Every action the engine executed, in order.

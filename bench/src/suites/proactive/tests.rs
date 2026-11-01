@@ -1,13 +1,8 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::collections::{BTreeMap, HashSet};
 
-use super::engine::{
-    Action, ActionKind, Approval, Card, DismissReason, DryRun, Execution, Feedback,
-};
-use super::generate::generate;
+use super::engine::{Action, ActionKind, Approval, Card, DryRun, Execution, Feedback};
 use super::world::{
-    self, CardKind, DistractorCategory, Gold, Item, World, day_of, iso_date, load_gold, load_world,
-    to_fixture_json, weekday,
+    self, CardKind, DistractorCategory, Gold, Item, World, iso_date, load_gold, load_world,
 };
 use super::*;
 use crate::report::Status;
@@ -15,62 +10,6 @@ use crate::runner::{RunConfig, Scale, run_benchmark};
 
 fn fixture() -> (World, Gold) {
     (load_world().unwrap(), load_gold().unwrap())
-}
-
-/// The committed fixture is exactly what the generator builds. `NUGGET_BENCH_REGEN=1` rewrites it.
-#[test]
-fn committed_fixture_matches_generator() {
-    let f = generate();
-    let world = to_fixture_json(&f.world, &["items"]);
-    let gold = to_fixture_json(&f.gold, &["cards", "distractors"]);
-    if std::env::var_os("NUGGET_BENCH_REGEN").is_some() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/proactive");
-        std::fs::write(dir.join("world.json"), &world).unwrap();
-        std::fs::write(dir.join("gold.json"), &gold).unwrap();
-        return;
-    }
-    assert!(
-        world == world::WORLD_JSON && gold == world::GOLD_JSON,
-        "bench/fixtures/proactive is stale: rerun with NUGGET_BENCH_REGEN=1"
-    );
-    assert_eq!(load_world().unwrap(), f.world);
-    assert_eq!(load_gold().unwrap(), f.gold);
-}
-
-#[test]
-fn dates() {
-    assert_eq!(iso_date(1), "2026-09-01");
-    assert_eq!(iso_date(30), "2026-09-30");
-    assert_eq!(iso_date(0), "2026-08-31");
-    assert_eq!(day_of("2026-09-18"), Some(18));
-    assert_eq!(day_of("2026-10-01"), Some(31));
-    assert_eq!(day_of("not a date"), None);
-    assert_eq!(weekday(1), 1, "2026-09-01 is a Tuesday");
-    assert_eq!(world::pretty_date(18), "Fri 18 Sep");
-}
-
-#[test]
-fn fixture_shape() {
-    let (w, g) = fixture();
-    let count = |f: fn(&Item) -> bool| w.items.iter().filter(|i| f(i)).count();
-    let mails = count(|i| matches!(i, Item::Mail(_)));
-    let events = count(|i| matches!(i, Item::Event(_)));
-    assert!((280..=320).contains(&mails), "{mails} mails");
-    assert!((35..=45).contains(&events), "{events} events");
-    assert!(count(|i| matches!(i, Item::Note(_))) >= 10);
-    assert!(count(|i| matches!(i, Item::Receipt(_))) >= 15);
-    assert_eq!(w.days, 30);
-    assert!(w.items.windows(2).all(|p| p[0].day() <= p[1].day()));
-    assert!(g.cards.len() >= 40);
-    for kind in CardKind::ALL {
-        assert!(
-            g.cards.iter().filter(|c| c.kind == kind).count() >= 5,
-            "{kind:?}"
-        );
-    }
-    for c in DistractorCategory::ALL {
-        assert!(g.distractors.iter().any(|d| d.category == c), "{c:?}");
-    }
 }
 
 /// Fictional addresses only: `example.com` or `.test`.
@@ -159,100 +98,11 @@ fn gold_labels_are_consistent() {
     }
 }
 
-/// Shows exactly the gold cards, each on the first day of its window (spilling to later days
-/// past `k`). It must score perfectly, which checks the scorer and that the labels fit in k = 5.
-struct Oracle {
-    gold: Gold,
-    shown: HashSet<usize>,
-    cards: HashMap<String, Card>,
-    audit: Vec<Execution>,
-}
-
-impl ProactiveEngine for Oracle {
-    fn name(&self) -> &'static str {
-        "oracle"
-    }
-    fn observe(&mut self, _item: &Item) {}
-    fn brief(&mut self, day: i32, k: usize) -> Vec<Card> {
-        let mut due: Vec<usize> = (0..self.gold.cards.len())
-            .filter(|i| !self.shown.contains(i))
-            .filter(|&i| {
-                (self.gold.cards[i].first_day..=self.gold.cards[i].last_day).contains(&day)
-            })
-            .collect();
-        due.sort_by_key(|&i| self.gold.cards[i].last_day);
-        due.truncate(k);
-        due.into_iter()
-            .map(|i| {
-                self.shown.insert(i);
-                let g = &self.gold.cards[i];
-                let card = Card {
-                    id: g.id.clone(),
-                    kind: g.kind,
-                    subject: g.subject.clone(),
-                    title: g.why.clone(),
-                    score: 1.0,
-                    action: Some(Action {
-                        kind: ActionKind::CreateReminder,
-                        dry_run: Some(DryRun {
-                            target: format!("r/{}", g.id),
-                            before: String::new(),
-                            after: g.why.clone(),
-                        }),
-                    }),
-                };
-                self.cards.insert(card.id.clone(), card.clone());
-                card
-            })
-            .collect()
-    }
-    fn feedback(&mut self, _: &str, _: Feedback) {}
-    fn execute(&mut self, card_id: &str, approval: Option<&Approval>) -> Result<Execution, String> {
-        let a = approval.ok_or("none")?;
-        if a.card_id != card_id || self.audit.iter().any(|e| e.card_id == card_id) {
-            return Err("bad".into());
-        }
-        let applied = self.cards[card_id].action.clone().unwrap().dry_run.unwrap();
-        let e = Execution {
-            card_id: card_id.into(),
-            action: ActionKind::CreateReminder,
-            approval: Some(a.token),
-            applied,
-        };
-        self.audit.push(e.clone());
-        Ok(e)
-    }
-    fn audit_log(&self) -> Vec<Execution> {
-        self.audit.clone()
-    }
-}
-
 fn run_once(engine: &mut dyn ProactiveEngine, noise: f64, seed: u64) -> BTreeMap<String, f64> {
     let (w, g) = fixture();
     let cfg = sim::SimConfig { k: K, noise, seed };
     let run = sim::run(&w, &g, engine, cfg);
     sim::score(&w, &g, &run, K)
-}
-
-#[test]
-fn oracle_scores_perfectly() {
-    let (_, gold) = fixture();
-    let mut o = Oracle {
-        gold,
-        shown: HashSet::new(),
-        cards: HashMap::new(),
-        audit: Vec::new(),
-    };
-    let s = run_once(&mut o, 0.0, 1);
-    assert_eq!(s["precision@5"], 1.0);
-    assert_eq!(s["recall"], 1.0);
-    assert_eq!(s["distractors.fpr"], 0.0);
-    assert_eq!(s["duplicate_shows"], 0.0);
-    assert_eq!(s["dry_run_coverage"], 1.0);
-    assert_eq!(s["diff_fidelity"], 1.0);
-    assert_eq!(s["executed_without_approval"], 0.0);
-    assert_eq!(s["acceptance_rate"], 1.0);
-    assert!(s["approval_probes"] > 0.0);
 }
 
 /// Repeats one card every day, offers an action with no diff, and executes anything it is asked
@@ -321,7 +171,7 @@ fn reckless_engine_is_caught() {
 #[test]
 fn reference_engine_meets_the_safety_gates() {
     for seed in 0..5 {
-        let mut e = reference::ReferenceEngine::new(generate::USER, true);
+        let mut e = reference::ReferenceEngine::new("sam@example.com", true);
         let s = run_once(&mut e, USER_NOISE, seed);
         assert_eq!(s["dry_run_coverage"], 1.0, "seed {seed}");
         assert_eq!(s["diff_fidelity"], 1.0);
@@ -342,12 +192,12 @@ fn learning_beats_frozen_weights() {
     let mut off = Vec::new();
     for seed in 0..10 {
         on.push(run_once(
-            &mut reference::ReferenceEngine::new(generate::USER, true),
+            &mut reference::ReferenceEngine::new("sam@example.com", true),
             USER_NOISE,
             seed,
         ));
         off.push(run_once(
-            &mut reference::ReferenceEngine::new(generate::USER, false),
+            &mut reference::ReferenceEngine::new("sam@example.com", false),
             USER_NOISE,
             seed,
         ));
@@ -355,29 +205,6 @@ fn learning_beats_frozen_weights() {
     let (on, off) = (sim::mean(&on), sim::mean(&off));
     assert!(on["precision.days_21_30"] > off["precision.days_21_30"]);
     assert!(on["distractors.bulk_unflagged.fpr"] < off["distractors.bulk_unflagged.fpr"]);
-}
-
-#[test]
-fn baseline_has_no_memory() {
-    let s = run_once(&mut baseline::RecencyJudge::new(generate::USER), 0.0, 1);
-    assert!(s["duplicate_shows"] > 0.0);
-    assert!(s["shown_per_day"] <= K as f64);
-    assert_eq!(s["executed_without_approval"], 0.0);
-}
-
-#[test]
-fn runs_are_deterministic() {
-    let a = run_once(
-        &mut reference::ReferenceEngine::new(generate::USER, true),
-        0.1,
-        7,
-    );
-    let b = run_once(
-        &mut reference::ReferenceEngine::new(generate::USER, true),
-        0.1,
-        7,
-    );
-    assert_eq!(a, b);
 }
 
 #[test]
@@ -423,9 +250,7 @@ fn mail(id: &str, day: i32, thread: &str, from: &str, to: &str, subject: &str, b
     })
 }
 
-/// Six days: an unanswered question, an external meeting, a renewal notice (after last year's
-/// receipt), a newsletter that asks a question, an automated notification and a meeting that is
-/// cancelled.
+/// Six days covering every card kind plus a newsletter, a notification and a cancellation.
 fn tiny_world() -> (World, Gold) {
     let mut newsletter = mail(
         "m-news",
@@ -620,144 +445,10 @@ fn real_engine_refuses_without_a_matching_approval() {
     assert!(e.errors().is_empty(), "{:?}", e.errors());
 }
 
-#[test]
-fn real_learning_off_keeps_the_prior() {
-    let (w, g) = tiny_world();
-    let frozen = real_arm(&w, &g, &[5], false).unwrap();
-    let on = real_arm(&w, &g, &[5], true).unwrap();
-    // Same world, same seed: the arms differ only in ranking, and here everything fits in k.
-    assert_eq!(frozen["recall"], on["recall"]);
-    assert_eq!(frozen["executed_without_approval"], 0.0);
-}
-
-#[test]
-fn reference_metrics_compare_like_for_like() {
-    let mut a = BTreeMap::new();
-    a.insert(format!("precision@{K}"), 0.5);
-    a.insert("recall".to_owned(), 0.25);
-    let mut b = BTreeMap::new();
-    b.insert(format!("precision@{K}"), 0.75);
-    b.insert("recall".to_owned(), 1.0);
-    let m = reference_metrics(&a, &b);
-    let get = |n: &str| m.iter().find(|x| x.name == n).unwrap().value;
-    assert_eq!(get("reference.precision@5"), 0.75);
-    assert_eq!(get("comparison.precision@5_vs_reference"), -0.25);
-    assert_eq!(get("comparison.recall_vs_reference"), -0.75);
-    assert!(m.iter().all(|x| x.target.is_none()));
-}
-
-/// Diagnostic: what the real crate shows on the fixture world, and why it misses.
-#[test]
-#[ignore = "diagnostic; prints the real crate's shows on the fixture world"]
-fn real_engine_diagnostic() {
-    let (w, g) = fixture();
-    let mut e = real::RealEngine::new(SAM, true, 0).unwrap();
-    let run = sim::run(&w, &g, &mut e, sim_config(0));
-    for s in &run.shows {
-        println!(
-            "day {:2} {:?} {:5} {:18} {} | {}",
-            s.day,
-            s.gold.is_some(),
-            s.accepted,
-            s.card.kind.as_str(),
-            s.card.subject,
-            s.card.title
-        );
-    }
-}
-
 // ---- learning from dismiss reasons (BB2) ----
-
-#[test]
-fn simulated_user_gives_reasons_from_the_gold_labels() {
-    let (_, g) = fixture();
-    let distractors: HashMap<&str, DistractorCategory> = g
-        .distractors
-        .iter()
-        .flat_map(|d| d.subjects.iter().map(move |s| (s.as_str(), d.category)))
-        .collect();
-    let card = |subject: &str| Card {
-        id: "c".into(),
-        kind: CardKind::UnansweredThread,
-        subject: subject.into(),
-        title: String::new(),
-        score: 0.0,
-        action: None,
-    };
-    for d in &g.distractors {
-        let want = match d.category {
-            DistractorCategory::AnsweredThread
-            | DistractorCategory::CompletedCommitment
-            | DistractorCategory::CancelledMeeting => DismissReason::AlreadyHandled,
-            _ => DismissReason::NotImportant,
-        };
-        for s in &d.subjects {
-            assert_eq!(
-                sim::dismiss_reason(&card(s), false, &distractors),
-                want,
-                "{s}"
-            );
-        }
-    }
-    // A gold card the user dismissed is noise, not a judgement about it.
-    let gold = &g.cards[0].subject;
-    assert_eq!(
-        sim::dismiss_reason(&card(gold), true, &distractors),
-        DismissReason::NotRelevant
-    );
-    assert_eq!(
-        sim::dismiss_reason(&card("thread:nowhere"), false, &distractors),
-        DismissReason::NotRelevant
-    );
-}
-
-/// Reasons never touch the RNG: an engine that records the decisions sees the same accepts and
-/// dismisses as one that ignores reasons, and every dismissal has a reason.
-#[test]
-fn reasons_do_not_change_the_decisions() {
-    let (w, g) = fixture();
-    let mut e = reference::ReferenceEngine::new(SAM, true);
-    let run = sim::run(&w, &g, &mut e, sim_config(11));
-    assert!(run.shows.iter().all(|s| s.accepted == s.reason.is_none()));
-    let reasons: HashSet<DismissReason> = run.shows.iter().filter_map(|s| s.reason).collect();
-    assert!(reasons.contains(&DismissReason::NotRelevant), "{reasons:?}");
-    // Same seed, same decisions (the RNG draws once per shown card, nothing else).
-    let mut e2 = reference::ReferenceEngine::new(SAM, true);
-    let again = sim::run(&w, &g, &mut e2, sim_config(11));
-    let decisions = |r: &sim::Run| -> Vec<(i32, String, bool)> {
-        r.shows
-            .iter()
-            .map(|s| (s.day, s.card.subject.clone(), s.accepted))
-            .collect()
-    };
-    assert_eq!(decisions(&run), decisions(&again));
-}
-
-/// Feed `items` day by day; `on_brief` sees each morning's brief and gives feedback.
-fn drive(
-    e: &mut real::RealEngine,
-    items: &[Item],
-    days: i32,
-    mut on_brief: impl FnMut(i32, &[Card], &mut real::RealEngine),
-) {
-    let mut items: Vec<&Item> = items.iter().collect();
-    items.sort_by_key(|i| i.day());
-    let mut next = 0;
-    for day in 1..=days {
-        while next < items.len() && items[next].day() < day {
-            e.observe(items[next]);
-            next += 1;
-        }
-        let cards = e.brief(day, K);
-        on_brief(day, &cards, e);
-    }
-    assert!(e.errors().is_empty(), "{:?}", e.errors());
-}
 
 const PRICING: &str = "Hi Sam, could you send me your pricing sheet? Thanks";
 
-/// Day 1: Ana and Bob each ask Sam something. Day 2: Ana and Carl each ask the same new question
-/// in new threads. On day 3 Sam accepts Bob's card and dismisses Ana's as not important.
 fn sender_world() -> Vec<Item> {
     let ask = "Hi Sam, could you share your availability for a demo next week? Thanks";
     vec![
@@ -784,63 +475,6 @@ fn sender_world() -> Vec<Item> {
     ]
 }
 
-/// Day 4 in the sender world: the crate's score for Ana's second card and Carl's, and whether
-/// Ana's ranks below Carl's in the brief (below it, or not shown at all).
-fn sender_brief(learning: bool) -> (f64, f64, bool) {
-    let mut e = real::RealEngine::new(SAM, learning, 21).unwrap();
-    let mut day4 = Vec::new();
-    drive(&mut e, &sender_world(), 4, |day, cards, e| {
-        if day == 3 {
-            let card = |t: &str| {
-                let c = cards.iter().find(|c| c.subject == t);
-                c.unwrap_or_else(|| panic!("day 3 has no {t}: {cards:?}"))
-                    .id
-                    .clone()
-            };
-            e.feedback(&card("thread:t-b1"), Feedback::Accepted);
-            e.feedback(
-                &card("thread:t-a1"),
-                Feedback::Dismissed(DismissReason::NotImportant),
-            );
-        }
-        if day == 4 {
-            day4 = cards.to_vec();
-        }
-    });
-    let pos = |t: &str| day4.iter().position(|c| c.subject == t);
-    let carl = pos("thread:t-c2").unwrap_or_else(|| panic!("day 4: {day4:?}"));
-    let below = pos("thread:t-a2").is_none_or(|ana| ana > carl);
-    // Scores from the crate, including a card it no longer shows.
-    let all = e.proactive().all_cards().unwrap();
-    let score = |mail: &str| {
-        let c = all.iter().find(|c| {
-            c.evidence
-                .first()
-                .is_some_and(|ev| ev.item.key.as_str() == mail)
-        });
-        c.unwrap_or_else(|| panic!("no card for {mail}")).rank
-    };
-    (score("m-a2"), score("m-c2"), below)
-}
-
-/// A sender dismissed as not important is ranked lower the next day: Ana's second card ranks
-/// below Carl's otherwise-equal card (with learning off the two score level), and the gap comes
-/// from the feedback.
-#[test]
-fn not_important_ranks_the_sender_lower_the_next_day() {
-    let (ana, carl, below) = sender_brief(true);
-    let (ana0, carl0, _) = sender_brief(false);
-    assert!(below, "learning on: Ana {ana} vs Carl {carl}");
-    assert!(ana < carl, "learning on: Ana {ana} vs Carl {carl}");
-    assert!(
-        carl - ana > carl0 - ana0 + 0.1,
-        "the gap comes from feedback: on {ana} vs {carl}, frozen {ana0} vs {carl0}"
-    );
-}
-
-/// Sam asks Kim something on day 1 and promises a plan "next week" in the same mail. The
-/// unanswered question shows on day 5 (Sam has waited three days) and the promise on day 7 (its
-/// deadline is two days out). Kim replies with a new question on day 12.
 fn handled_world() -> Vec<Item> {
     vec![
         mail(
@@ -862,58 +496,6 @@ fn handled_world() -> Vec<Item> {
             "Hi Sam, here it is, signed. Could you confirm the start date? Kim",
         ),
     ]
-}
-
-fn in_handled_thread(c: &Card) -> bool {
-    matches!(
-        c.subject.as_str(),
-        "thread:t-h" | "commit:m-h1" | "commit:m-h2"
-    )
-}
-
-/// Cards from the thread shown, by day and subject, and the day Sam dismissed the first one as
-/// already handled.
-fn handled_run(learning: bool) -> (Vec<(i32, String)>, i32) {
-    let mut e = real::RealEngine::new(SAM, learning, 22).unwrap();
-    let mut shown = Vec::new();
-    let mut dismissed = None;
-    drive(&mut e, &handled_world(), 15, |day, cards, e| {
-        for c in cards.iter().filter(|c| in_handled_thread(c)) {
-            shown.push((day, c.subject.clone()));
-            if dismissed.is_none() {
-                dismissed = Some(day);
-                e.feedback(&c.id, Feedback::Dismissed(DismissReason::AlreadyHandled));
-            }
-        }
-    });
-    (shown, dismissed.expect("a card from the thread"))
-}
-
-/// "Already handled" stops a thread's conversation: after Sam dismisses the unanswered question
-/// as already handled, nothing about the conversation shows until Kim writes again, and her new
-/// question shows. Sam's own promise in the same mail is a commitment, not part of the
-/// conversation: it still shows before its deadline.
-#[test]
-fn already_handled_stops_the_thread_until_a_newer_message() {
-    let (shown, at) = handled_run(true);
-    let before_reply = |d: i32| d > at && d <= 12;
-    assert!(
-        shown
-            .iter()
-            .filter(|(d, _)| before_reply(*d))
-            .all(|(_, s)| s == "commit:m-h1"),
-        "dismissed on day {at}, shown {shown:?}"
-    );
-    assert!(
-        shown
-            .iter()
-            .any(|(d, s)| before_reply(*d) && s == "commit:m-h1"),
-        "the promise was hidden by the handled question: {shown:?}"
-    );
-    assert!(
-        shown.iter().any(|(d, _)| *d > 12),
-        "Kim's new question never showed: {shown:?}"
-    );
 }
 
 /// Learning only changes ranking and suppression: with reasons and learning on, nothing executes

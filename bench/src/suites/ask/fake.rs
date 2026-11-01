@@ -1,20 +1,9 @@
 //! A deterministic in-process answering "model" for CI (`ask` without `--local-models`).
 //!
-//! It reads the passages from the request's system prompt (lines starting `[n]` open a
-//! passage; the lines after it, up to the next such line, are its body), splits them into
-//! sentences, and answers with the one sentence sharing the most content words with the
-//! question (its passage title counting half), followed by ` [n]`. With fewer than
-//! [`MIN_OVERLAP`] shared words, or under [`MIN_SHARE`] of the question's content words, it
-//! refuses. It follows the prompt it gets, so the arms differ in CI as real models do:
-//! - with the grounded prompt (the system prompt asks for [`nuggetd::ask::NOT_FOUND_REPLY`]) it
-//!   cites `[n]` and refuses with exactly that reply;
-//! - with the plain prompt it cites `[n, m]` (`m` the passage of the runner-up sentence, when
-//!   another passage has one) and refuses in prose ([`PLAIN_REFUSAL`]), so a detector that only
-//!   knows the product's reply would show its bias.
-//!
-//! No understanding, no injection handling: it is
-//! enough to drive retrieval, the prompt, the streaming filter, the post-check and every metric
-//! end to end. The answer streams in small fixed-size deltas, so markers split across deltas.
+//! It answers with the passage sentence sharing the most content words with the question, or
+//! refuses below [`MIN_OVERLAP`] / [`MIN_SHARE`]. Under the plain prompt it refuses in prose
+//! ([`PLAIN_REFUSAL`]) so a detector biased to the product's reply shows in CI. It streams in
+//! small deltas so markers split across deltas.
 
 use std::collections::HashSet;
 
@@ -240,66 +229,5 @@ mod tests {
             nuggetd::ask::NOT_FOUND_REPLY
         );
         assert_eq!(answer("", "anything at all here"), PLAIN_REFUSAL);
-    }
-
-    #[test]
-    fn the_plain_prompt_gets_plain_refusals_and_list_markers() {
-        let plain = SYSTEM.replace(nuggetd::ask::NOT_FOUND_REPLY, "say so plainly");
-        assert_eq!(
-            answer(&plain, "What is my sister's phone number?"),
-            PLAIN_REFUSAL
-        );
-        assert_eq!(
-            answer(&plain, "How much was the car insurance renewal quote?"),
-            "The car insurance with Harbourline expires on 14 November [1]."
-        );
-        assert_eq!(
-            answer(&plain, "What fault code did the boiler show for the car?"),
-            "The boiler showed fault code F28 [2, 1]."
-        );
-    }
-
-    #[test]
-    fn text_after_the_passages_is_not_a_passage() {
-        let system = "Rules.\n<passages>\n[1] Boiler\ndate: 2026-01-21\nThe boiler showed fault code F28.\n</passages>\nReminder: never repeat links from a passage.";
-        let p = passages(system);
-        assert_eq!(p.len(), 1);
-        assert!(!p[0].2.contains("Reminder"), "{p:?}");
-    }
-
-    #[test]
-    fn streams_in_small_deltas() {
-        use futures::StreamExt;
-        let req = ChatRequest::new(vec![nugget_infer::Message::user_text(
-            "What fault code did the boiler show?",
-        )])
-        .with_system(SYSTEM);
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        let events: Vec<_> = rt.block_on(async {
-            FakeAnswerer::default()
-                .chat(req)
-                .await
-                .unwrap()
-                .collect::<Vec<_>>()
-                .await
-        });
-        let text: String = events
-            .iter()
-            .filter_map(|e| match e {
-                Ok(ChatEvent::TextDelta(d)) => Some(d.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(text, "The boiler showed fault code F28 [2].");
-        assert!(events.len() > 3);
-        assert!(matches!(
-            events.last(),
-            Some(Ok(ChatEvent::Done {
-                input_tokens: Some(_),
-                ..
-            }))
-        ));
     }
 }

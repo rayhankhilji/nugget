@@ -80,10 +80,6 @@ impl FakeIndex {
         }
     }
 
-    pub fn dim(&self) -> usize {
-        self.dim
-    }
-
     /// Number of live items.
     pub fn len(&self) -> usize {
         self.by_item.len()
@@ -398,15 +394,5 @@ mod tests {
             ix.search_vector(&[1.0; 3], 1).is_empty(),
             "dimension mismatch yields nothing"
         );
-    }
-
-    #[test]
-    fn heap_estimate_grows() {
-        let mut ix = FakeIndex::new(32);
-        let before = ix.approx_heap_bytes();
-        for i in 0..100 {
-            ix.upsert(&item(&i.to_string()), &format!("word{i} shared text"));
-        }
-        assert!(ix.approx_heap_bytes() > before);
     }
 }

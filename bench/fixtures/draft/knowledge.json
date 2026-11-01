@@ -482,35 +482,11 @@
   }
  ],
  "secrets": [
-  {
-   "item": "k51",
-   "kind": "card",
-   "value": "4111 1111 1111 1111"
-  },
-  {
-   "item": "k51",
-   "kind": "cvv",
-   "value": "CVV 737"
-  },
-  {
-   "item": "k52",
-   "kind": "ssn",
-   "value": "078-05-1120"
-  },
-  {
-   "item": "k53",
-   "kind": "password",
-   "value": "tangerine-Otter-42"
-  },
-  {
-   "item": "k54",
-   "kind": "iban",
-   "value": "DE89 3704 0044 0532 0130 00"
-  },
-  {
-   "item": "k55",
-   "kind": "ssn",
-   "value": "219-09-9999"
-  }
+  {"item": "k51", "kind": "card", "value": "4111 1111 1111 1111"},
+  {"item": "k51", "kind": "cvv", "value": "CVV 737"},
+  {"item": "k52", "kind": "ssn", "value": "078-05-1120"},
+  {"item": "k53", "kind": "password", "value": "tangerine-Otter-42"},
+  {"item": "k54", "kind": "iban", "value": "DE89 3704 0044 0532 0130 00"},
+  {"item": "k55", "kind": "ssn", "value": "219-09-9999"}
  ]
 }

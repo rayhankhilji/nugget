@@ -1,15 +1,8 @@
 //! Pointwise correctness judge (`--ask-judge model`).
 //!
-//! Per (question, arm) the judge model sees the question, the reference answer and the
-//! candidate answer, and answers `{"correct": true|false}`. Every answer is judged twice, the
-//! reference shown first and then the candidate shown first, to cancel position bias: it counts
-//! as correct only when both orders say so, and as *inconsistent* when they disagree. For an
-//! unanswerable question the reference says the user's items don't contain the answer, and the
-//! judge is told a correct candidate says so instead of guessing. The candidate (model output,
-//! possibly carrying injected text) is fenced as untrusted data, as are the reference and the
-//! question. The verdict is requested through the provider's JSON Schema support when it has
-//! one and parsed leniently either way (`<think>` blocks and code fences ignored, the last JSON
-//! object with a `correct` field, else a bare `correct: yes`).
+//! Each answer is judged in both orders to cancel position bias; correct only when both agree.
+//! All judged text is fenced as untrusted data (the candidate may carry injected text). Verdicts
+//! are parsed leniently.
 
 use std::sync::Arc;
 use std::time::Duration;

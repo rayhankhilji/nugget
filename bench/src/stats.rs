@@ -10,9 +10,7 @@ pub struct Summary {
     pub max: f64,
 }
 
-/// Nearest-rank percentile of an ascending-sorted slice. `p` is in `[0, 100]`.
-///
-/// Returns `None` for an empty slice.
+/// Nearest-rank percentile (`p` in `[0, 100]`) of an ascending-sorted slice; `None` if empty.
 pub fn percentile(sorted: &[f64], p: f64) -> Option<f64> {
     if sorted.is_empty() {
         return None;

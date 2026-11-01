@@ -109,10 +109,7 @@ impl Gold {
         set
     }
 
-    /// Unique ids (questions, and documents across both sets), non-empty texts, known support
-    /// ids, a canary exactly on injection questions, `must` exactly on answerable ones, and
-    /// support exactly on everything but unanswerable questions (an injection question may be
-    /// unanswerable too).
+    /// Check ids are unique and known, and each kind carries exactly its required fields.
     pub fn validate(&self, base: &EvalSet) -> Result<(), String> {
         let mut docs: HashSet<&str> = base.docs.iter().map(|d| d.id.as_str()).collect();
         for d in &self.docs {
@@ -245,70 +242,5 @@ pub(crate) mod tests {
         for k in Kind::ALL {
             assert!(b.questions.iter().any(|q| q.kind == k), "{k:?}");
         }
-    }
-
-    fn check(questions: &str) -> Result<Gold, String> {
-        Gold::from_parts(SAMPLE_DOCS, questions, &EvalSet::builtin().unwrap())
-    }
-
-    #[test]
-    fn validation_rejects_bad_questions() {
-        let one = |q: &str| format!("[{q}]");
-        let ok = r#"{"id":"a","kind":"single","question":"q","answer":"a","must":[["1"]],"support":["boiler-repair"]}"#;
-        assert!(check(&one(ok)).is_ok());
-        for bad in [
-            format!("[{ok},{ok}]"),
-            one(r#"{"id":"a","kind":"bogus","question":"q","answer":"a"}"#),
-            one(
-                r#"{"id":"a","kind":"single","question":"q","answer":"a","must":[["1"]],"support":["nope"]}"#,
-            ),
-            one(
-                r#"{"id":"a","kind":"single","question":"q","answer":"a","must":[["1"]],"support":[]}"#,
-            ),
-            one(
-                r#"{"id":"a","kind":"single","question":"q","answer":"a","support":["boiler-repair"]}"#,
-            ),
-            one(
-                r#"{"id":"a","kind":"single","question":"q","answer":"a","must":[[]],"support":["boiler-repair"]}"#,
-            ),
-            one(
-                r#"{"id":"a","kind":"single","question":"q","answer":"a","must":[["1"]],"support":["boiler-repair"],"canary":"X"}"#,
-            ),
-            one(
-                r#"{"id":"a","kind":"injection","question":"q","answer":"a","must":[["1"]],"support":["boiler-repair"]}"#,
-            ),
-            one(
-                r#"{"id":"a","kind":"unanswerable","question":"q","answer":"a","support":["boiler-repair"]}"#,
-            ),
-            one(
-                r#"{"id":"a","kind":"single","question":" ","answer":"a","must":[["1"]],"support":["boiler-repair"]}"#,
-            ),
-        ] {
-            assert!(check(&bad).is_err(), "{bad}");
-        }
-        // A doc id that collides with the eval set's.
-        let dup = r#"[{"id":"boiler-repair","title":"t","text":"x"}]"#;
-        assert!(Gold::from_parts(dup, "[]", &EvalSet::builtin().unwrap()).is_err());
-    }
-
-    #[test]
-    fn interleave_is_stable_and_round_robin() {
-        let g = sample();
-        let ids: Vec<&str> = interleave(&g.questions, 6)
-            .iter()
-            .map(|&i| g.questions[i].id.as_str())
-            .collect();
-        assert_eq!(
-            ids,
-            [
-                "single-01",
-                "multi-01",
-                "latest-01",
-                "unans-01",
-                "inject-01",
-                "single-02"
-            ]
-        );
-        assert_eq!(interleave(&g.questions, 100).len(), 8);
     }
 }

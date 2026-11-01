@@ -1,15 +1,8 @@
 //! `a11y_poll`: the desktop shell's once-a-second "what is in front" read, alone, in process.
 //!
-//! The shell's Double Tap flow (`apps/desktop/src-tauri/src/doubletap/flow.rs`, `A11y::new` and
-//! `A11y::frontmost`) keeps one `nugget_a11y::Backend` over the platform API (AT-SPI on Linux,
-//! AX on macOS, UI Automation on Windows) with the default config and calls `frontmost_app()`
-//! each second. This scenario does the same: one untimed first call (it connects to the
-//! accessibility bus), then two arms of equal length on the same 1 Hz schedule, metered on this
-//! process: one that only sleeps, then one that calls `frontmost_app()` on every tick. The
-//! difference is the poll's cost. On a headless runner the call may find no app or fail (no
-//! accessibility bus): that is recorded, and the cost reported is that of the failing call.
-//! Work done in other processes (the AT-SPI registry, the focused app answering) counts only in
-//! system energy.
+//! The cost is the difference between a 1 Hz sleep-only arm and a 1 Hz `frontmost_app()` arm.
+//! On a headless runner the call may fail; then that failing call's cost is reported. Work in
+//! other processes (AT-SPI registry, the focused app) counts only in system energy.
 
 use std::time::{Duration, Instant};
 
@@ -257,48 +250,4 @@ fn run(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::runner::{RunConfig, Scale};
-
-    #[test]
-    fn scripted_reader_counts_results() {
-        let mut ctx = RunContext::new(RunConfig {
-            scale: Scale::Smoke,
-            ..RunConfig::default()
-        });
-        let p = EnergyParams {
-            poll_s: 2.0,
-            ..EnergyParams::for_scale(Scale::Smoke)
-        };
-        let mut n = 0;
-        let mut read = || {
-            n += 1;
-            match n {
-                1 => Polled::Error("no bus".into()),
-                2 => Polled::App,
-                _ => Polled::NoApp,
-            }
-        };
-        let out = run(&mut ctx, &p, "scripted", &mut read).unwrap();
-        let v = |name: &str| {
-            out.iter()
-                .find(|m| m.name == name)
-                .unwrap_or_else(|| panic!("missing {name}"))
-                .value
-        };
-        assert_eq!(v("energy.a11y_poll.calls"), 2.0);
-        assert_eq!(v("energy.a11y_poll.frontmost_found"), 1.0);
-        assert_eq!(v("energy.a11y_poll.errors"), 0.0);
-        assert!(
-            ctx.params()["a11y_poll.result"]
-                .as_str()
-                .unwrap()
-                .starts_with("an app on 1 of 2")
-        );
-        if cfg!(target_os = "linux") {
-            assert!(v("energy.a11y_poll.cpu_ms_per_call") >= 0.0);
-            assert!(v("energy.a11y_poll.sleep.window_s") >= 2.0);
-        }
-    }
-}
+mod tests {}

@@ -1,14 +1,8 @@
 //! `prefill` (`--local-models` only): what a Double Tap read-ahead costs in energy.
 //!
-//! The real local chat model runs in `llama-server` as the app runs it ([`LocalModels`], with a
-//! fixed sampling seed and temperature 0). Drafters are built as the `doubletap` suite builds
-//! them (one per persona over the `draft` fixture corpus, text-only retrieval) with read-ahead
-//! on and no minimum interval. After [`Drafters::prewarm_idle`](crate::suites::doubletap::Drafters)
-//! (the fixed rules prefix, as the daemon does) and one unmetered read-ahead, N read-aheads of
-//! distinct fixture tasks run back to back through [`nugget_draft::Drafter::read_ahead`], each
-//! waited for, under one [`Meter`] on the `llama-server` process. With an energy source, an
-//! equal window with the server loaded but idle is metered afterwards as the baseline, so the
-//! attributable energy is the prefill work itself.
+//! N read-aheads of distinct fixture tasks run back to back under one [`Meter`] on the
+//! `llama-server` process, after an unmetered warm-up. The baseline is an equal window with the
+//! server loaded but idle, so the attributable energy is the prefill work itself.
 
 use std::sync::Arc;
 use std::time::Duration;

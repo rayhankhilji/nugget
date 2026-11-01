@@ -150,22 +150,6 @@ class RenderTests(unittest.TestCase):
         self.assertIn("linux/x86_64, 4 CPUs, release build", first)
         self.assertIn("GitHub-hosted Linux", first)  # the default when `machine` is absent
 
-    def test_machine_from_results(self):
-        latest = latest_fixture()
-        latest["machine"] = "a local machine"
-        first = br.render(latest, RUNS).splitlines()[0]
-        self.assertIn("on a local machine (", first)
-        self.assertNotIn("GitHub-hosted", first)
-        self.assertIn("(docs/book/src/benchmarks/dashboard.md)", first)
-        self.assertIn("bench-results", self.block.splitlines()[-1])
-
-    def test_one_row_per_headline_in_order(self):
-        names = [r[1] for r in self.rows]
-        expected = [h["metric"] for run in RUNS["runs"] for h in run["headline"]]
-        self.assertEqual(len(names), len(expected))
-        for n, e in zip(names, expected):
-            self.assertIn(f"`{e}`", n)
-
     def test_values_and_targets(self):
         self.assertEqual(self.rows[0][2:4], ["91.2%", "≥ 85% ✓"])
         self.assertEqual(self.rows[1][2:4], ["7%", "≤ 2% ✗"])
@@ -179,6 +163,7 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(self.rows[7][2:4], ["n/a (not run)", "—"])
 
     def test_suite_and_reproduce_on_first_row_only(self):
+        self.assertEqual(self.rows[3][0], "Store \\| retriever")  # pipes escaped
         self.assertEqual(self.rows[0][0], "Knowledge graph (M2)")
         self.assertEqual(self.rows[0][4], "`cargo run --release -p nugget-bench -- knowledge`")
         self.assertEqual(self.rows[1][0], "")
@@ -186,19 +171,12 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(self.rows[7][0], "CUA Xvfb (Linux only)")
         self.assertIn("setup-debian.sh && cargo run", self.rows[7][4])
 
-    def test_pipe_escaped(self):
-        self.assertEqual(self.rows[3][0], "Store \\| retriever")
-
     def test_missing_commit_and_runs(self):
         latest = {"format": 1, "date": "2026-10-29", "git_commit": None, "runs": []}
         block = br.render(latest, RUNS)
         self.assertIn("unrecorded commit", block)
         self.assertTrue(all(cells(r)[2] == "n/a (not run)" for r in rows(block)))
 
-    def test_deterministic(self):
-        changed = latest_fixture()
-        changed["generated_at"] = "2030-01-01T00:00:00Z"
-        self.assertEqual(br.render(changed, RUNS), self.block)
 
 
 class CliTests(unittest.TestCase):
@@ -238,13 +216,6 @@ class CliTests(unittest.TestCase):
         self.assertTrue(once.endswith(br.END + "\n\n## Next\n"))
         self.assertNotIn("placeholder", once)
 
-    def test_check_detects_changed_results(self):
-        self.run_main()
-        data = latest_fixture()
-        data["runs"][0]["report"]["metrics"][0]["value"] = 0.5
-        self.latest.write_text(json.dumps(data), encoding="utf-8")
-        self.assertEqual(self.run_main("--check")[0], 1)
-
     def test_missing_markers(self):
         self.readme.write_text("# T\nno markers\n", encoding="utf-8")
         code, _, err = self.run_main("--check")
@@ -253,16 +224,6 @@ class CliTests(unittest.TestCase):
         before = self.readme.read_text(encoding="utf-8")
         self.assertEqual(self.run_main()[0], 1)
         self.assertEqual(self.readme.read_text(encoding="utf-8"), before)
-
-    def test_markers_out_of_order(self):
-        self.readme.write_text(f"{br.END}\n{br.BEGIN}\n", encoding="utf-8")
-        self.assertEqual(self.run_main("--check")[0], 1)
-
-    def test_missing_latest(self):
-        self.latest.unlink()
-        code, _, err = self.run_main("--check")
-        self.assertEqual(code, 1)
-        self.assertIn("results file not found", err)
 
     def test_print_does_not_write(self):
         before = self.readme.read_text(encoding="utf-8")

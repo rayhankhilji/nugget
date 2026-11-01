@@ -1,15 +1,6 @@
 //! `perf --backend real --perf-phases sync`: a source's **first sync** through the real
-//! `nuggetd` (LL1).
-//!
-//! The daemon starts on an empty home (same hermetic config as the daemon profile: no
-//! providers, so search is text-only and knowledge extraction deterministic). `N` Markdown files
-//! (`--perf-items`, size mix `--perf-sizes`, 1,000 per folder) are written first; then a files
-//! source is added over them and the clock runs until `ingest.status` reports all `N` items
-//! indexed with an empty queue and the last file is found by `search` (`daemon.sync.*`). The
-//! daemon's own freshness window (change observed → committed) is read at that point. Then
-//! live freshness: files are written one at a time into the watched folder, each timed from the
-//! write until `search` finds its unique marker (`daemon.sync.live.*`). Knowledge extraction
-//! runs alongside, as in the app.
+//! `nuggetd`, on the daemon profile's hermetic config. Timed from adding the source until all
+//! items are indexed and the last file is searchable; then live per-file freshness.
 
 use std::path::Path;
 use std::time::{Duration, Instant};

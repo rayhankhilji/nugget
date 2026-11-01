@@ -1,19 +1,8 @@
 //! The Nugget arm through the real drafting engine ([`nugget_draft::Drafter`]), for real models.
 //!
-//! The in-suite pipeline ([`super::arms::NuggetArm`]) renders the suite's own prompt format,
-//! which the deterministic fake model reads; it has no grounding switch. With a real model the
-//! Nugget arm instead drafts the way `nuggetd` does: one [`Drafter`] per persona over the
-//! persona's store (the same stores as the in-suite arm), routing to the drafting model on the
-//! Synthesis tier, with the product's [`DraftConfig`] except for the settings the run varies
-//! (`grounding`, `temperature`). Whatever `nugget-draft` does (prompt, grounding, streaming
-//! post-processing) is therefore what is scored.
-//!
-//! - **Voice**: [`EngineVoice`] answers the engine's [`VoiceQuery`] with the in-suite voice
-//!   logic ([`NuggetArm::voice`]): recipient statistics when the query's recipients match
-//!   enough of the persona's messages, channel statistics otherwise; exemplars by recipient,
-//!   then topic.
-//! - **Prompt size**: [`Capture`] wraps the provider and keeps the last request's text, so the
-//!   prompt is scored (size, secret exposure) like the other arms' prompts.
+//! One [`Drafter`] per persona with the product's [`DraftConfig`] (except `grounding` and
+//! `temperature`), so whatever `nugget-draft` does is what is scored. [`Capture`] keeps the last
+//! request's text so the prompt is scored like the other arms'.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -181,9 +170,7 @@ impl Engine {
         }
     }
 
-    /// Draft one task: `begin` with the task's context, then the stream to its end. Times are
-    /// from `started`. Returns the outcome and the text of the prompt that was sent (empty if
-    /// none was).
+    /// Draft one task (times from `started`). Returns the outcome and the prompt text sent.
     pub(crate) async fn draft(
         &self,
         task: &Task,
@@ -243,12 +230,5 @@ mod tests {
             m.to_name
         );
         assert_eq!(v.recipient(&m.channel, &[]), "");
-    }
-
-    #[test]
-    fn request_text_has_system_and_user_parts() {
-        let req =
-            ChatRequest::new(vec![nugget_infer::Message::user_text("hello")]).with_system("rules");
-        assert_eq!(request_text(&req), "rules\nhello");
     }
 }

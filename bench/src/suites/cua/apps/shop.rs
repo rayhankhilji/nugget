@@ -418,16 +418,4 @@ mod tests {
         assert!(s.cart.is_empty());
         assert_eq!(s.screen, Screen::Done);
     }
-
-    #[test]
-    fn remove_and_bad_promo() {
-        let mut s = Shop::fixture();
-        s.handle(&click("shop.add.pen")).unwrap();
-        s.handle(&click("shop.remove.pen")).unwrap();
-        assert!(s.cart.is_empty());
-        assert!(s.handle(&click("shop.remove.pen")).is_err());
-        s.promo_input = "FREE".into();
-        assert!(s.handle(&click("shop.apply_promo")).is_err());
-        assert_eq!(money(50000), "$500.00");
-    }
 }

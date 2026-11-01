@@ -37,4 +37,3 @@ does not read your shell profile.
 | `NUGGET_HOTKEY_IT` | `1` runs the X11 integration test in `nugget-hotkey` (needs `DISPLAY`) |
 | `NUGGET_CUA_DISPLAY` | An X display for the computer-use benchmark, instead of starting Xvfb |
 | `NUGGET_CUA_CHROMIUM` | The Chromium binary for the computer-use benchmark |
-| `NUGGET_BENCH_REGEN` | Set to regenerate the proactive benchmark fixtures instead of comparing them |

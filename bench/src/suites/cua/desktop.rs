@@ -1,11 +1,7 @@
 //! The `xvfb` environment: a real Linux desktop for the apps.
 //!
-//! Starts, in order: Xvfb on a free display (or reuses `NUGGET_CUA_DISPLAY`, e.g. one started by
-//! `bench/cua/env/desktop.sh`), a session D-Bus, the AT-SPI bus, a window manager, and one kiosk
-//! Chromium window per app (`--app=` mode, renderer accessibility forced on, so every element is
-//! visible to AT-SPI with the same role, name and id as in the headless tree). Every process is
-//! killed on drop. D-Bus, AT-SPI and the window manager are optional: when missing, the run still
-//! works and the report records what was available.
+//! Xvfb (or `NUGGET_CUA_DISPLAY`), D-Bus, AT-SPI, a window manager and one kiosk Chromium window
+//! per app; all killed on drop. D-Bus, AT-SPI and the WM are optional and recorded when missing.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};

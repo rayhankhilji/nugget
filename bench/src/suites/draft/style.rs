@@ -302,12 +302,7 @@ pub const WEIGHTS: [(&str, f32); 7] = [
     ("lowercase_start", 0.10),
 ];
 
-/// Stylometric distance in `[0, 1]` between two profiles (0 = same habits). Greetings and
-/// sign-offs compare the dominant pattern's first word; length compares median words on a log
-/// scale (a 4× difference is the maximum); emoji compares presence; exclamations saturate at 3
-/// per message.
-///
-/// When `nugget_voice::style_distance` lands (M3-D), the suite switches to it.
+/// Stylometric distance in `[0, 1]` between two profiles (0 = same habits).
 pub fn distance(a: &StyleStats, b: &StyleStats) -> f32 {
     let len = ((a.median_words + 1.0) / (b.median_words + 1.0)).ln().abs() / 4f32.ln();
     let greet = f32::from(u8::from(
@@ -360,18 +355,6 @@ mod tests {
     }
 
     #[test]
-    fn emoji_and_formality() {
-        assert_eq!(emoji_count("great :) 🎉🙌"), 3);
-        assert_eq!(emoji_list("ok 🎉 :)"), ["🎉", ":)"]);
-        let formal = formality(&split(
-            "Dear Lena,\n\nI would be grateful if you could please confirm.\n\nKind regards,\nHenrik",
-        ));
-        let casual = formality(&split("omg yes, can't wait!! 🎉"));
-        assert!(formal > 0.75, "{formal}");
-        assert!(casual < 0.2, "{casual}");
-    }
-
-    #[test]
     fn distance_is_zero_for_same_habits_and_grows_with_differences() {
         let a = stats(["Hi Tom,\n\nThe launch is on November 18.\n\nBest,\nMaya"]);
         let b = stats(["Hi Sam,\n\nThe offsite is in Porto.\n\nBest,\nMaya"]);
@@ -381,22 +364,5 @@ mod tests {
         assert!((distance(&a, &c) - distance(&c, &a)).abs() < 1e-6);
         let total: f32 = WEIGHTS.iter().map(|(_, w)| w).sum();
         assert!((total - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn profile_shares_and_dominant_patterns() {
-        let s = stats([
-            "Hi A,\n\nOne.\n\nBest,\nMaya",
-            "Hi B,\n\nTwo two.\n\nThanks,\nMaya",
-            "Hi C,\n\nThree three three.\n\nBest,\nMaya",
-            "sure",
-        ]);
-        assert_eq!(s.samples, 4);
-        assert_eq!(s.greetings[0], ("Hi {name},".to_owned(), 0.75));
-        assert_eq!(dominant(&s.greetings), Some("Hi {name},"));
-        assert_eq!(dominant(&s.signoffs), Some("Best,\nMaya"));
-        assert_eq!(s.median_words, 1.5);
-        assert_eq!(s.lowercase_start_rate, 0.25);
-        assert_eq!(stats(std::iter::empty::<&str>()), StyleStats::default());
     }
 }

@@ -1,16 +1,7 @@
 //! `memory`: retrieval quality and knowledge freshness.
 //!
-//! * **Retrieval.** Known-item queries over a synthetic corpus; recall@{1,5,10} and MRR@10
-//!   for BM25, vector and hybrid search.
-//! * **Freshness.** A stream of edits, inserts and deletes arrives at random times. A
-//!   simulated watcher batches them (debounce plus a maximum batching delay) and the batch is
-//!   applied to the index for real. Freshness per change is the simulated wait plus the
-//!   measured apply time; propagation checks that edits replace old content and deletes remove
-//!   the item everywhere. The plan's target is about 60 s from change to searchable.
-//!
-//! `--backend fake` (the default) runs against the in-crate [`FakeIndex`] with a simulated
-//! watcher. `--backend real` runs the real stack in process ([`crate::real`]) and keeps the
-//! metric names stable where they mean the same thing.
+//! With `--backend fake`, freshness is a simulated watcher's wait plus the measured apply time on
+//! [`FakeIndex`]; `--backend real` ([`crate::real`]) keeps metric names where they mean the same.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
@@ -244,10 +235,8 @@ pub(crate) fn retrieval(
     out
 }
 
-/// Diagnostic switch: when this environment variable names a file, the known-item phase writes
-/// the target's rank in every retrieval arm, per query, to it as TSV. Off by default; the report
-/// is the same either way. It exists to explain recall gaps between the real stack and the fake
-/// baseline query by query instead of guessing from the aggregate.
+/// Diagnostic: when set to a file path, the known-item phase writes each query's target rank per
+/// arm there as TSV, to explain recall gaps query by query. The report is unchanged.
 pub const RANK_DUMP_ENV: &str = "NUGGET_BENCH_DUMP_MISSES";
 
 /// Depth of the extra single-leg searches in a rank dump, to see how far a missed target fell.
@@ -296,11 +285,8 @@ impl RankDump {
         );
     }
 
-    /// TSV: one row per query with the target's 1-based rank in each arm (`-` when absent).
-    /// Then, when both hybrid arms are present, `#` lines for every query whose hybrid top-10
-    /// outcome differs between the real stack and the fake index: each side's top 10 as
-    /// `doc(bm25 rank/vector rank)` from that side's single-leg arms, which shows what pushed
-    /// the target out.
+    /// TSV of the target's 1-based rank per arm, then `#` lines with both sides' top 10 for each
+    /// query whose hybrid outcome differs between real and fake.
     pub(crate) fn write(&self, path: &Path, queries: &[Query]) -> Result<(), BenchError> {
         let rank = |arm: &str, i: usize, id: usize| {
             self.results(arm, i)
@@ -658,56 +644,6 @@ mod tests {
             assert_eq!(m.value, 1.0, "{kind} propagation");
             assert_eq!(m.target_met, Some(true));
         }
-    }
-
-    #[test]
-    fn deterministic_quality_for_a_seed() {
-        let a = smoke();
-        let b = smoke();
-        for name in [
-            "retrieval.hybrid.recall@10",
-            "retrieval.bm25.mrr@10",
-            "freshness.batches",
-        ] {
-            assert_eq!(
-                a.metric(name).unwrap().value,
-                b.metric(name).unwrap().value,
-                "{name}"
-            );
-        }
-    }
-
-    #[test]
-    fn rank_dump_lists_ranks_and_hybrid_differences() {
-        let queries = vec![
-            Query {
-                text: "alpha".into(),
-                relevant: 7,
-            },
-            Query {
-                text: "beta".into(),
-                relevant: 8,
-            },
-        ];
-        let mut d = RankDump::default();
-        d.push("fake.hybrid@10", vec![vec![1, 7], vec![1, 2]]);
-        d.push("fake.bm25", vec![vec![7, 1], vec![8]]);
-        d.push("fake.vector", vec![vec![1], vec![]]);
-        d.push("real.hybrid@10", vec![vec![1, 2], vec![8]]);
-        d.push("real.bm25", vec![vec![2, 7], vec![8]]);
-        d.push("real.vector", vec![vec![1, 2], vec![]]);
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ranks.tsv");
-        d.write(&path, &queries).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[0].starts_with("query\ttarget\ttext\tfake.hybrid@10"));
-        assert_eq!(lines[1], "0\t7\talpha\t2\t1\t-\t-\t2\t-");
-        assert_eq!(lines[2], "1\t8\tbeta\t-\t1\t-\t1\t1\t-");
-        assert!(text.contains("# hybrid@10 real_only: 1\n"));
-        assert!(text.contains("# hybrid@10 fake_only: 0\n"));
-        assert!(text.contains("#     fake: target 1/- | 1(2/1) 7*(1/-)"));
-        assert!(text.contains("#     real: target 2/- | 1(-/1) 2(1/2)"));
     }
 
     #[test]

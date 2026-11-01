@@ -23,10 +23,8 @@ use crate::runner::BenchError;
 pub struct SystemContext {
     /// The store the corpus was ingested into (items, text and chunks; no embeddings).
     pub store: Store,
-    /// The LLM the pipeline's extractor uses: the scripted fake
-    /// ([`super::fake_llm::ScriptedLlm`]) by default, or a real local model behind
-    /// [`super::metered::MeteredProvider`] (`--local-models`). [`synthesis_router`] routes the
-    /// `Synthesis` (and `Light`) tier to it.
+    /// The extractor's LLM (scripted fake, or a metered real model), routed by
+    /// [`synthesis_router`].
     pub llm: Arc<dyn Provider>,
     /// What `llm` is, for the system label (`scripted`, or the local model's label).
     pub llm_label: String,

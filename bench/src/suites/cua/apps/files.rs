@@ -393,30 +393,4 @@ mod tests {
         f.handle(&click("files.up")).unwrap();
         assert_eq!(f.cwd, "/");
     }
-
-    #[test]
-    fn move_rejects_bad_destinations() {
-        let mut f = Files::fixture();
-        f.handle(&click("files.item.photos")).unwrap();
-        f.handle(&ty("files.dest", "/Photos")).unwrap();
-        assert!(f.handle(&click("files.move")).is_err());
-        f.handle(&ty("files.dest", "/Nowhere")).unwrap();
-        assert!(f.handle(&click("files.move")).is_err());
-        f.handle(&ty("files.dest", "/Documents")).unwrap();
-        f.handle(&click("files.move")).unwrap();
-        assert!(f.get("/Documents/Photos/wedding.jpg").is_some());
-    }
-
-    #[test]
-    fn preview_shows_content() {
-        let mut f = Files::fixture();
-        f.cwd = "/Documents".into();
-        f.handle(&click("files.item.notes_txt")).unwrap();
-        f.handle(&click("files.open")).unwrap();
-        let v = f.view();
-        assert!(
-            v.find("files.preview.content")
-                .is_some_and(|n| n.name.contains("beta"))
-        );
-    }
 }

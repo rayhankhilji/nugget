@@ -156,7 +156,7 @@ jobs:
 
       - name: Regenerate the dashboard data
         run: |
-          python3 scripts/bench-dashboard.py --history bench/results/history \
+          python3 scripts/bench-dashboard.py --history bench/results/latest.json \
             --history bench-results/history
 
       # mdBook (MPL-2.0) is a build tool only, as in docs.yml.

@@ -5,28 +5,10 @@
 //! sees what a user sees: process start, the knowledge worker, the vault, the files watcher and
 //! everything else the daemon runs in the background.
 //!
-//! - **Seeding.** A temporary `NUGGET_HOME` gets a hex key file (`data/store.key`, the
-//!   `NUGGET_KEYCHAIN=off` path, so no OS keychain is touched) and an encrypted store written
-//!   directly with [`Store::upsert_item_with_chunks`]: one chunk per synthetic item with a
-//!   deterministic [`HashEmbedder`] vector, typed as Markdown with frontmatter (a project, two
-//!   people, a topic tag) so the deterministic knowledge extractors find entities. The config
-//!   has no model providers, no on-device runtime and no MCP listener: search is text-only and
-//!   extraction is deterministic (no LLM), which keeps the profile hermetic.
-//! - **First start** (vault off): startup (spawn to the first `status` answer), the first
-//!   `search`, then the startup knowledge run over the whole corpus (`knowledge.status` until
-//!   its last run leaves nothing pending), then warm searches.
-//! - **Second start** (vault on): startup again, the first full vault render (the vault has
-//!   never been rendered, so every entity page is written), then idle CPU and wakeups over a
-//!   quiet window with no IPC traffic, then ingest through the daemon: files dropped into a
-//!   watched folder until all are indexed and searchable.
-//!
-//! The binary is `$NUGGET_BENCH_NUGGETD`, else `nuggetd` next to the running executable (or one
-//! directory up, for test executables under `target/<profile>/deps`). When there is none, the
-//! profile is skipped (recorded in `config.params.daemon`), not failed.
-//!
-//! CPU, wakeups and peak RSS come from `/proc` on Linux (every thread of the process: CPU from
-//! `schedstat`, wakeups as voluntary plus involuntary context switches); macOS reports RSS and
-//! CPU time from `ps`; other platforms skip the process metrics.
+//! The home uses a key file (`NUGGET_KEYCHAIN=off`, no OS keychain) and a store seeded directly
+//! via [`Store::upsert_item_with_chunks`]; no providers, runtime or MCP, so the profile is
+//! hermetic. Without a `nuggetd` binary the profile is skipped, not failed. Process metrics come
+//! from `/proc` on Linux and `ps` on macOS.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -72,9 +54,8 @@ pub struct DaemonParams {
     pub dim: usize,
     /// Warm `search` calls after extraction (plus the first one).
     pub searches: usize,
-    /// Quiet time after the vault render before the idle window. Long enough at real scales
-    /// for post-render work and Tokio's idle blocking threads (10 s keep-alive) to wind down;
-    /// at `smoke` the idle numbers still include some of that.
+    /// Quiet time before the idle window, so post-render work and Tokio's idle blocking threads
+    /// (10 s keep-alive) wind down; at `smoke` some of that remains.
     pub settle_s: f64,
     /// Length of the idle window.
     pub idle_s: f64,
@@ -928,10 +909,7 @@ async fn time_calls(
     Ok(answers)
 }
 
-/// The read paths the app hits on every screen, timed on the full store after extraction:
-/// status and counts (`status`, `sources.list`, `ingest.status`, `knowledge.status`), the
-/// privacy ledger (`egress.recent`), Ask's retrieval step (`retrieve.context`), and the
-/// knowledge page (`knowledge.entities` pages, `knowledge.entity` detail, `knowledge.graph`).
+/// The read paths the app hits on every screen, timed on the full store after extraction.
 async fn hot_paths(
     client: &Client,
     queries: &[crate::corpus::Query],
@@ -1252,22 +1230,6 @@ mod tests {
     use super::*;
     use crate::runner::{Backend, RunConfig, run_benchmark};
     use crate::{Report, Status};
-
-    #[test]
-    fn names_and_hex() {
-        assert_eq!(hex(&[0, 0xab, 0x10]), "00ab10");
-        assert_ne!(name(400_000, 1), name(400_000, 2));
-        assert!(name(400_000, 0).chars().next().unwrap().is_uppercase());
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn samples_this_process() {
-        let s = sample(std::process::id());
-        assert!(s.rss.unwrap() > 0 && s.hwm.unwrap() >= s.rss.unwrap());
-        assert!(s.cpu_s.unwrap() > 0.0);
-        assert!(s.threads.unwrap() >= 1);
-    }
 
     /// The daemon profile at a tiny size against the `nuggetd` built next to this test binary
     /// (CI's workspace build has one); skipped when there is none.

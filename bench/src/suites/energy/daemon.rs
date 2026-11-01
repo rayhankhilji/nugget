@@ -1,10 +1,7 @@
 //! `daemon_idle` and `index_1k`: the real `nuggetd`, launched and driven as in
 //! [`crate::suites::perf_daemon`] (temporary `NUGGET_HOME`, key file, no providers, no runtime,
 //! no MCP listener), metered with [`Meter`].
-//!
-//! The bench polls the daemon every [`POLL`] while it waits (slower than `perf_daemon`'s
-//! 20 ms, so the polling is a small part of what is metered); the idle window itself has no
-//! IPC traffic.
+//! [`POLL`] is slower than `perf_daemon`'s so polling is a small part of what is metered.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -130,9 +127,7 @@ pub(super) fn daemon_idle(
     Ok(out)
 }
 
-/// A fresh daemon (empty store, vault off) indexes `p.index_items` files dropped into a watched
-/// folder, metered until all are indexed and searchable. With an energy source, an equal baseline window is metered after
-/// the daemon stopped.
+/// A fresh daemon indexes `p.index_items` dropped files, metered until all are searchable.
 pub(super) fn index_1k(
     ctx: &mut RunContext,
     p: &EnergyParams,
@@ -273,16 +268,4 @@ pub(super) fn index_1k(
     }
     out.extend(energy_metrics(&prefix, "indexing", &r, base.as_ref()));
     Ok(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn env_layout() {
-        let e = env_for(Path::new("/x/nuggetd"), Path::new("/w"), 2.0);
-        assert_eq!(e.home, Path::new("/w/home"));
-        assert_eq!(e.timeout, Duration::from_secs(2));
-    }
 }

@@ -3,13 +3,8 @@
 //! plus the calendar, returns up to 8 items, at most 5 become actions, and ranking is purely the
 //! LLM's ordering).
 //!
-//! The judge here is a deterministic fake that orders by recency only. To keep the comparison
-//! about ranking rather than reading comprehension, it is given two things an LLM would get right
-//! for free: it skips header-flagged newsletters and notifications and cancelled events, and it
-//! types each item with the same simple mapping (inbound mail asks for a reply, the user's own
-//! mail wants a follow-up or is a promise, an event wants prep, a receipt or a billing mail is a
-//! renewal). It has no candidate store, so it keeps no memory between days (no dedup) and ignores
-//! feedback.
+//! The judge is a deterministic recency-only fake, given bulk-mail filtering and item typing for
+//! free so the comparison is about ranking. It keeps no memory between days and ignores feedback.
 
 use std::collections::HashSet;
 

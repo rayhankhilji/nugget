@@ -1,30 +1,9 @@
-//! The real pipeline behind [`KnowledgeSystem`] (cargo feature `pipeline`, on by default):
-//!
-//! - **Graph:** `nugget-store`'s SQLite graph ([`Store::graph`]) in the store the corpus was
-//!   ingested into, so deleting an item retracts its provenance in the same transaction.
-//! - **Extraction:** `nugget_knowledge::Knowledge` over that store, deterministic extractors plus
-//!   the LLM extractor, with [`SystemContext::llm`] as its `Synthesis` provider (on-device: the
-//!   scripted fake, or a real local model with `--local-models`), the user's name and addresses
-//!   configured, and the context's LLM overrides (timeout, attempts) applied. `extract` and
-//!   `items_deleted` are one `run_once(RunBudget::unlimited())` each (the pipeline diffs the
-//!   store against its ledger).
-//! - **Vault:** `nugget_vault::Vault` in the suite's temporary directory: `render_all` (three-way
-//!   merging user edits on the second call) and `validate`. The suite's view of each page (its
-//!   facts, footnotes and the evidence behind them) is parsed from the files, independently of the
-//!   vault's own validator: fact lines (`- …`) in the `facts` block, footnote references that are
-//!   defined in the `sources` block, and the claim marker `<!-- c:ID -->`, whose evidence is read
-//!   from the graph (the renderer writes one footnote per evidence entry). History lines
-//!   (superseded claims, indented under `*Earlier:*`, marked `<!-- h:ID -->`) are kept apart
-//!   from the facts (flagged `history`): they must be cited and their evidence must check out,
-//!   but they do not count as facts.
-//! - **MCP:** an in-process `nugget_mcp::McpServer`, called through `call_tool("get_context")`
-//!   for one client with default scopes. The daemon's `KnowledgeBackend` is wave-2 work (M2-G), so
-//!   the backend here is minimal: `context` packs the store's full-text hits; the other methods
-//!   return nothing. The latency therefore covers the MCP layer (scopes, rendering, audit) plus
-//!   store full-text search, not `nugget-retrieve`'s hybrid search.
-//!
-//! Built without the feature, [`build`] reports the pipeline as unavailable and the suite
-//! returns `not_implemented`.
+//! The real pipeline behind [`KnowledgeSystem`] (cargo feature `pipeline`, on by default): the
+//! store's SQLite graph, `nugget_knowledge::Knowledge` with [`SystemContext::llm`] as its
+//! `Synthesis` provider, `nugget_vault::Vault`, and an in-process MCP server. Vault pages are
+//! parsed independently of the vault's own validator. The MCP backend is minimal (full-text
+//! hits only), so its latency excludes hybrid search. Without the feature, [`build`] reports the
+//! pipeline as unavailable.
 
 use super::system::{KnowledgeSystem, SystemContext};
 use crate::runner::BenchError;

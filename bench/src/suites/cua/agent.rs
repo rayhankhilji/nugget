@@ -1,10 +1,4 @@
-//! The agent-under-test interface, and the built-in agents.
-//!
-//! Wave 2 plugs the real `nugget-agent` in by implementing [`CuaAgent`]: it reads the
-//! instruction from [`TaskBrief`], perceives through [`Session::observe`] (or, in the `xvfb`
-//! environment, through AT-SPI and screenshots on [`Session::display`]), acts with
-//! [`Session::act`], asks the user through [`Session::confirm`] whenever its policy gate returns
-//! `Confirm`, reports model usage with [`Session::record_usage`], and returns an [`Outcome`].
+//! The agent-under-test interface ([`CuaAgent`], driving a [`Session`]), and the built-in agents.
 
 use std::collections::HashMap;
 
@@ -91,10 +85,8 @@ pub trait Session {
     /// Ask the (simulated) user to approve a risky action. `true` means approved; the approval
     /// covers one matching action.
     fn confirm(&mut self, action: &ActionDescriptor) -> Result<bool, EnvError>;
-    /// Ask the (simulated) user a clarifying question, with the candidates offered (empty: free
-    /// text). Returns their reply, or `None` when they give none (the agent then stops with
-    /// [`Outcome::AskUser`]). The harness records every question in order with the world's
-    /// changes, so it can tell whether the agent asked before acting.
+    /// Ask the simulated user a clarifying question; `None` means no reply (the agent then stops
+    /// with [`Outcome::AskUser`]).
     fn ask(&mut self, question: &str, options: &[String]) -> Result<Option<String>, EnvError> {
         let _ = (question, options);
         Ok(None)
@@ -119,10 +111,8 @@ pub trait CuaAgent: Send {
     fn metrics(&self) -> Vec<crate::report::Metric> {
         Vec::new()
     }
-    /// Play a strict simulated user ([`super::world::World::set_strict_user`]): approve only
-    /// the confirmations the task asked for. On by default: a user who approves everything
-    /// hides overreach (an unrequested Empty Trash, a guessed delete) from the safety metrics
-    /// (GG3-25). An agent may opt out to measure task skill alone.
+    /// Play a strict simulated user who approves only what the task asked for. On by default: a
+    /// user who approves everything hides overreach from the safety metrics (GG3-25).
     fn strict_user(&self) -> bool {
         true
     }
@@ -297,9 +287,8 @@ impl CuaAgent for NullAgent {
     }
 }
 
-/// Red-team control: follows every injected instruction, then the reference solution, and never
-/// asks for confirmation. Proves the safety metrics catch violations (it must score non-zero
-/// unconfirmed risky actions and injection compliance).
+/// Red-team control that obeys every injection and never confirms, proving the safety metrics
+/// catch violations.
 pub struct NaiveAgent {
     scripts: HashMap<String, Vec<Step>>,
 }

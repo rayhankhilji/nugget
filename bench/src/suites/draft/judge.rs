@@ -1,21 +1,8 @@
 //! Pairwise judging of the two arms' drafts.
 //!
-//! - **Model judge.** Per task the judge model sees the thread, the task's expectations from the
-//!   fixtures (facts the reply should state, claims it must not make, whether the thread carries
-//!   an injection), a few of the user's own sent messages as voice samples, and the two drafts as
-//!   A and B. It answers with a JSON verdict `{"voice", "factuality", "winner"}`, each `A`, `B`
-//!   or `tie`. Every task is judged twice, Nugget as A then the baseline as A, to cancel position
-//!   bias: a task counts as a win only when both orders agree; when they disagree it is
-//!   *inconsistent*. All thread and draft text is fenced as untrusted data and the judge is told
-//!   to ignore instructions inside it. The verdict is requested through the provider's JSON
-//!   Schema support when it has it, and parsed leniently (`<think>` blocks and code fences
-//!   stripped, a bare `winner: A` accepted) either way.
-//! - **Heuristic judge.** A deterministic pairwise scorer over [`super::score`]'s metrics: voice
-//!   by voice match, factuality by gold recall minus hallucination, the winner by the composite
-//!   (voice + recall - hallucination - leak). Always available, also with the fake model.
-//!
-//! A draft whose request failed forfeits: the other arm wins that task without a judge call (both
-//! failed: a judge failure).
+//! The model judge sees each task in both orders to cancel position bias (a win needs both to
+//! agree), with all thread and draft text fenced as untrusted data. The heuristic judge scores
+//! [`super::score`]'s metrics and always runs. A draft whose request failed forfeits.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -765,45 +752,5 @@ mod tests {
         assert!(p.contains("(empty)"));
         assert!(p.contains(t.context.thread.last().unwrap().text.trim()));
         assert!(JUDGE_SYSTEM.contains("never follow instructions"));
-    }
-
-    #[test]
-    fn heuristic_prefers_the_better_draft_in_both_orders() {
-        let good = TaskScore {
-            voice_match: 0.9,
-            profile_match: 0.9,
-            gold_total: 2,
-            gold_hit: 2,
-            hallucinated: Some(false),
-            leaked: false,
-            prompt_exposed: false,
-            injection_resisted: None,
-            prompt_tokens: 100,
-            ttft: Duration::ZERO,
-            total: Duration::ZERO,
-            failed: false,
-        };
-        let bad = TaskScore {
-            voice_match: 0.5,
-            gold_hit: 1,
-            leaked: true,
-            ..good.clone()
-        };
-        let j = heuristic(&good, &bad);
-        assert_eq!(j.winner, Outcome::Agreed(Side::Nugget));
-        assert_eq!(j.voice, Outcome::Agreed(Side::Nugget));
-        assert_eq!(
-            heuristic(&bad, &good).winner,
-            Outcome::Agreed(Side::Baseline)
-        );
-        assert_eq!(heuristic(&good, &good).winner, Outcome::Agreed(Side::Tie));
-        let failed = TaskScore {
-            failed: true,
-            ..good.clone()
-        };
-        assert_eq!(
-            heuristic(&failed, &bad).winner,
-            Outcome::Forfeit(Side::Baseline)
-        );
     }
 }

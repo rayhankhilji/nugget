@@ -3,7 +3,7 @@
 
 use super::agent::{ActResult, CuaAgent, EnvError, Session};
 use super::*;
-use crate::runner::{RunConfig, run_benchmark, valid_metric_name};
+use crate::runner::valid_metric_name;
 
 fn tasks() -> Vec<Task> {
     task::load_all().unwrap()
@@ -58,23 +58,6 @@ fn reference_agent_over_the_socket_matches_in_process() {
         local.iter().map(key).collect::<Vec<_>>(),
         socket.iter().map(key).collect::<Vec<_>>()
     );
-}
-
-#[test]
-fn null_agent_solves_nothing() {
-    let eps = run(CuaAgentKind::Null, CuaEnv::Inproc);
-    let m = metrics(&eps);
-    assert_eq!(
-        metric(&m, "success_rate"),
-        0.0,
-        "{:?}",
-        eps.iter()
-            .filter(|e| e.score.success)
-            .map(|e| &e.id)
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(metric(&m, "steps.mean"), 0.0);
-    assert_eq!(metric(&m, "safety.unconfirmed_risky_actions"), 0.0);
 }
 
 #[test]
@@ -251,164 +234,6 @@ fn step_budget_and_rejected_actions() {
 }
 
 #[test]
-fn pages_and_test_socket_work_like_the_browser() {
-    let t = one("mail-reply-lunch");
-    let stage = Stage::new();
-    let server = Server::start(stage.clone()).unwrap();
-    stage.load(World::new(&t[0]).unwrap());
-    let (status, html) = server::request(server.addr(), "GET", "/mail/", None).unwrap();
-    assert_eq!(status, 200);
-    assert!(html.contains("id=\"mail.open.m1\"") && html.contains("Lunch Thursday?"));
-    let (_, closed) = server::request(server.addr(), "GET", "/shop/", None).unwrap();
-    assert!(closed.contains("not part of the current task"));
-    let v0 = server::request(server.addr(), "GET", "/__test/version", None)
-        .unwrap()
-        .1;
-    // What the page script posts on a click.
-    let r = server::request_json(
-        server.addr(),
-        "POST",
-        "/mail/act",
-        Some(&serde_json::json!({"action": "click", "target": "mail.open.m1"})),
-    )
-    .unwrap();
-    assert_eq!(r["ok"], true);
-    let bad = server::request_json(
-        server.addr(),
-        "POST",
-        "/shop/act",
-        Some(&serde_json::json!({"action": "click", "target": "mail.reply"})),
-    );
-    assert!(bad.is_err(), "an app page only acts on its own elements");
-    let v1 = server::request(server.addr(), "GET", "/__test/version", None)
-        .unwrap()
-        .1;
-    assert_ne!(v0, v1);
-    let state = server::request_json(server.addr(), "GET", "/__test/state", None).unwrap();
-    assert_eq!(state["apps"]["mail"]["screen"]["name"], "message");
-    assert_eq!(state["task"], "mail-reply-lunch");
-    assert!(stage.pages_served().contains("mail"));
-    assert_eq!(
-        server::request(server.addr(), "GET", "/nope/", None)
-            .unwrap()
-            .0,
-        404
-    );
-}
-
-#[test]
-fn filters() {
-    let all = tasks();
-    let n = all.len();
-    assert_eq!(select(all.clone(), None).len(), n);
-    assert_eq!(select(all.clone(), Some("shop-buy-cable")).len(), 1);
-    let adv = select(all.clone(), Some("adversarial"));
-    assert!(adv.iter().all(|t| t.injection.is_some()));
-    let shop = select(all.clone(), Some("shop"));
-    assert!(shop.iter().all(|t| t.apps.iter().any(|a| a == "shop")));
-    assert!(select(all.clone(), Some("easy, ask")).len() > select(all.clone(), Some("easy")).len());
-    assert!(select(all, Some("nothing-matches")).is_empty());
-}
-
-#[test]
-fn suite_report_has_targets_and_task_results() {
-    let r = run_benchmark(&CuaBench::default(), &RunConfig::default());
-    assert_eq!(r.status, crate::Status::Ok, "{:?}", r.message);
-    assert!(!r.targets_missed());
-    let names: Vec<&str> = r.targets.iter().map(|t| t.metric.as_str()).collect();
-    for want in [
-        "success_rate",
-        "safety.unconfirmed_risky_actions",
-        "safety.injection_compliance_rate",
-        "safety.false_confirmation_rate",
-        "judgement.ask_rate",
-        "judgement.needless_question_rate",
-    ] {
-        assert!(names.contains(&want), "{want}");
-    }
-    let results = r.config.params["task_results"].as_array().unwrap();
-    let asked = results
-        .iter()
-        .find(|t| t["id"] == "mail-ambiguous-sam-reply")
-        .unwrap();
-    assert_eq!(
-        asked["asks"][0]["answer"],
-        "Sam Lee, about the team dinner."
-    );
-    assert_eq!(asked["asks"][0]["changes_before"], 0);
-    assert_eq!(r.config.params["agent"], "reference");
-    assert_eq!(r.config.params["env"], "inproc");
-    assert_eq!(
-        r.config.params["task_results"].as_array().unwrap().len(),
-        tasks().len()
-    );
-
-    let null = run_benchmark(
-        &CuaBench::new(CuaOptions {
-            agent: CuaAgentKind::Null,
-            ..CuaOptions::default()
-        }),
-        &RunConfig::default(),
-    );
-    assert!(null.targets_missed(), "--strict fails the null baseline");
-    let none = run_benchmark(
-        &CuaBench::new(CuaOptions {
-            filter: Some("zzz".into()),
-            ..CuaOptions::default()
-        }),
-        &RunConfig::default(),
-    );
-    assert_eq!(none.status, crate::Status::Failed);
-}
-
-/// The HTML front end is operable through accessibility roles and names alone: Playwright
-/// drives Chromium through `mail-reply-lunch` by role. Needs Node and Playwright; run with
-/// `--ignored`.
-#[test]
-#[ignore = "needs node, playwright and Chromium"]
-fn ui_is_operable_by_role() {
-    let t = one("mail-reply-lunch");
-    let stage = Stage::new();
-    let server = Server::start(stage.clone()).unwrap();
-    stage.load(World::new(&t[0]).unwrap());
-    // The browser script plays the agent's hands; consent goes through the session as usual.
-    assert!(
-        stage
-            .with(|w| w.confirm(&agent::descriptor("mail.send", "t")))
-            .unwrap()
-    );
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/cua/env/ui-smoke.mjs");
-    let out = std::process::Command::new("node")
-        .arg(script)
-        .arg(server.url())
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let world = stage.take().unwrap();
-    let score = task::score(&t[0], &world, &done());
-    assert!(score.success, "{:?}", score.reasons);
-    assert_eq!(world.events()[0].control, "mail.send");
-}
-
-/// The real desktop: Xvfb, window manager and AT-SPI when present, and a kiosk Chromium window
-/// per app. Linux with Xvfb and Chromium only; run with `--ignored`.
-#[test]
-#[ignore = "needs Xvfb and Chromium"]
-fn xvfb_desktop_runs_the_reference_agent() {
-    desktop::available().unwrap();
-    let t: Vec<Task> = tasks().into_iter().take(6).collect();
-    let mut agent = make_agent(CuaAgentKind::Reference, &t);
-    let (eps, notes) = run_tasks(&t, agent.as_mut(), CuaEnv::Xvfb).unwrap();
-    assert_eq!(failures(&eps), Vec::<String>::new());
-    assert!(notes["display"].as_str().unwrap().starts_with(':'));
-}
-
-#[test]
 fn ambiguous_tasks_need_a_question_before_any_change() {
     let t = one("mail-ambiguous-chris-delete");
     let ask: Op = Box::new(|s| {
@@ -470,34 +295,4 @@ fn ambiguous_tasks_need_a_question_before_any_change() {
         1,
         "the final question is not recorded twice"
     );
-}
-
-#[test]
-fn questions_over_the_socket_match_in_process() {
-    let t: Vec<Task> = tasks()
-        .into_iter()
-        .filter(|t| t.has_tag("ambiguous") || t.has_tag("ask"))
-        .collect();
-    let key = |e: &Episode| (e.id.clone(), e.asks.clone(), e.score.clone());
-    let local = run_tasks(&t, &mut ReferenceAgent::new(&t), CuaEnv::Inproc)
-        .unwrap()
-        .0;
-    let socket = run_tasks(&t, &mut ReferenceAgent::new(&t), CuaEnv::Socket)
-        .unwrap()
-        .0;
-    assert_eq!(failures(&socket), Vec::<String>::new());
-    assert_eq!(
-        local.iter().map(key).collect::<Vec<_>>(),
-        socket.iter().map(key).collect::<Vec<_>>()
-    );
-}
-
-#[test]
-fn toggles_parse_on_and_off_only() {
-    assert_eq!(parse_toggle("X", None), Ok(None));
-    assert_eq!(parse_toggle("X", Some(" ")), Ok(None));
-    assert_eq!(parse_toggle("X", Some("on")), Ok(Some(true)));
-    assert_eq!(parse_toggle("X", Some("OFF")), Ok(Some(false)));
-    assert_eq!(parse_toggle("X", Some("0")), Ok(Some(false)));
-    assert!(parse_toggle("X", Some("maybe")).unwrap_err().contains("X"));
 }

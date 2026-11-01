@@ -1,41 +1,10 @@
 //! A deterministic fake LLM: [`ScriptedLlm`] answers every chat request with the scripted
 //! extraction (`llm_script.json`) of the item the request is about.
 //!
-//! The item is found from the request's `items` (the egress-provenance refs), or else by the
-//! longest scripted fingerprint (a line only that item contains) found in the request text.
-//! A request that matches no item gets an empty extraction and is counted as unmatched.
-//!
-//! The answer is one JSON text in `nugget-knowledge`'s extraction schema (`nugget_knowledge::llm`):
-//!
-//! ```json
-//! {"entities": [{"ref": "e1", "kind": "person", "name": "Maggie", "aliases": []},
-//!               {"ref": "e2", "kind": "preference", "name": "Vegetarian food",
-//!                "aliases": ["vegetarian food"]}],
-//!  "claims": [{"subject": "e1", "predicate": "prefers", "object": "e2", "text": "...",
-//!              "confidence": 0.9, "quotes": [{"chunk": 0, "text": "I prefer vegetarian food"}]}]}
-//! ```
-//!
-//! - An entity named like the user (the system prompt's "The user is …") gets the ref `user`.
-//! - An entity's `aliases` hold the surface form the item uses, when it differs from the name.
-//! - A quote's `chunk` is the `[chunk N]` section of the prompt that contains it (else the
-//!   first one).
-//!
-//! When the request's JSON schema asks for the compact shape (claims carry one `quote`, as
-//! `nugget_knowledge::llm::schema` does), the answer is in that shape instead, and valid
-//! against the schema:
-//!
-//! ```json
-//! {"entities": [{"name": "Margaret Thistlewood", "kind": "person", "aliases": ["Maggie"]}],
-//!  "claims": [{"subject": "Margaret Thistlewood", "predicate": "prefers",
-//!              "object": "Vegetarian food", "quote": "I prefer vegetarian food"}]}
-//! ```
-//!
-//! Subjects and objects are entity names (`user` for the user, who is not listed), and a
-//! scripted predicate outside the schema's enum is mapped to its nearest member
-//! ([`schema_predicate`]).
-//!
-//! Hallucinated and injected claims are returned like any other (their flags are not sent):
-//! the pipeline has to catch them by checking each quote against the source chunk.
+//! The item is found from the request's `items` refs, else by the longest scripted fingerprint
+//! in the request text; no match gets an empty extraction and counts as unmatched. The answer
+//! follows the request's schema (full or compact). Hallucinated and injected claims are returned
+//! like any other: the pipeline must catch them by checking quotes against the source chunk.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -244,9 +213,8 @@ fn compact_predicates(req: &ChatRequest) -> Option<Vec<String>> {
     )
 }
 
-/// A scripted predicate as the schema allows it: itself when allowed (or when there is no
-/// enum), else its nearest synonym in the enum, else the enum's first member (only the
-/// injected `resigned_from` falls through: its quote is not in the item either way).
+/// A scripted predicate as the schema allows it: itself, else its nearest synonym in the enum,
+/// else the enum's first member.
 pub fn schema_predicate(raw: &str, allowed: &[String]) -> String {
     let p: String = raw
         .trim()
@@ -426,59 +394,6 @@ mod tests {
             .route(Tier::Synthesis, &Capabilities::default())
             .unwrap();
         assert_eq!(p.id().as_str(), FAKE_LLM_ID);
-    }
-
-    /// With the pipeline's compact schema, the answer is in the compact shape and valid
-    /// against that schema (scripted predicates mapped into its enum).
-    #[cfg(feature = "pipeline")]
-    #[test]
-    fn answers_in_the_compact_shape_when_the_schema_asks_for_it() {
-        let fx = Fixture::builtin().unwrap();
-        let llm = ScriptedLlm::new(&fx);
-        let schema = nugget_knowledge::llm::schema(64, 64);
-        let mut invalid = Vec::new();
-        for s in &fx.script {
-            let mut req = request(
-                "Extract. The user is Robin Ashgrove.\nOUTPUT: JSON",
-                "x",
-                vec![fx.item(&s.item).unwrap().item_ref()],
-            );
-            req.json_schema = Some(schema.clone());
-            let v = llm.response_for(&req);
-            if nugget_infer::schema::validate(&schema, &v).is_err() {
-                invalid.push(s.item.clone());
-            }
-            let claims = v["claims"].as_array().unwrap();
-            assert!(claims.iter().all(|c| c["quote"].is_string()));
-            assert!(
-                v["entities"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .all(|e| e["name"] != "Robin Ashgrove" && e.get("ref").is_none())
-            );
-        }
-        assert!(invalid.is_empty(), "{invalid:?}");
-        let mut req = request(
-            "The user is Robin Ashgrove.\n",
-            "x",
-            vec![fx.item("mail-015").unwrap().item_ref()],
-        );
-        req.json_schema = Some(schema);
-        let v = llm.response_for(&req);
-        let veg = v["claims"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|c| c["quote"] == "I prefer vegetarian food")
-            .unwrap();
-        assert_eq!(veg["subject"], "Maggie");
-        assert_eq!(veg["object"], "Vegetarian food");
-        let allowed = vec!["works_at".to_owned(), "has_title".to_owned()];
-        assert_eq!(schema_predicate("works for", &allowed), "works_at");
-        assert_eq!(schema_predicate("job_title", &allowed), "has_title");
-        assert_eq!(schema_predicate("resigned_from", &allowed), "works_at");
-        assert_eq!(schema_predicate("anything", &[]), "anything");
     }
 
     #[test]

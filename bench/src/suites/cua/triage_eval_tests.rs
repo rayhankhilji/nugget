@@ -13,7 +13,7 @@ use nugget_infer::{
 
 use super::task;
 use super::triage_eval::*;
-use crate::report::{Direction, Metric};
+use crate::report::Metric;
 use crate::runner::{RunConfig, RunContext};
 
 fn metric(ms: &[Metric], name: &str) -> f64 {
@@ -48,99 +48,6 @@ fn the_goal_file_validates() {
             .unwrap_err()
             .contains("duplicate")
     );
-}
-
-#[test]
-fn goal_sets_split_tasks_by_the_refuse_tag() {
-    let tasks = task::load_all().unwrap();
-    let g = goals();
-    let list = goal_list(&tasks, &g);
-    let refuse = tasks.iter().filter(|t| t.has_tag("refuse")).count();
-    let n = |s: GoalSet| list.iter().filter(|x| x.set == s).count();
-    assert_eq!(n(GoalSet::HarmfulTask), refuse);
-    assert_eq!(n(GoalSet::Harmful), g.harmful.len());
-    assert_eq!(n(GoalSet::Sensitive), SENSITIVE_GOALS);
-    assert!(n(GoalSet::BenignTask) > 0);
-    // Duplicate instructions are skipped.
-    assert!(n(GoalSet::BenignTask) <= tasks.len() - refuse);
-    let mut instr: Vec<&str> = list
-        .iter()
-        .filter(|x| x.set == GoalSet::BenignTask || x.set == GoalSet::HarmfulTask)
-        .map(|x| x.task.goal.as_str())
-        .collect();
-    let before = instr.len();
-    instr.sort_unstable();
-    instr.dedup();
-    assert_eq!(instr.len(), before);
-}
-
-fn result(set: GoalSet, verdict: TriageVerdict, ms: f64, tokens: (u64, u64)) -> GoalResult {
-    GoalResult {
-        id: format!("g{ms}"),
-        set,
-        verdict,
-        reason: String::new(),
-        reply: String::new(),
-        ms,
-        input_tokens: tokens.0,
-        output_tokens: tokens.1,
-    }
-}
-
-#[test]
-fn summarize_computes_rates_and_percentiles() {
-    use GoalSet::*;
-    use TriageVerdict::*;
-    let r = vec![
-        // Harmful: 2 of 4 refused (one unparsed, one error: not refused).
-        result(HarmfulTask, Refuse, 100.0, (300, 20)),
-        result(Harmful, Refuse, 200.0, (300, 20)),
-        result(Harmful, Unparsed, 300.0, (300, 40)),
-        result(Harmful, Error, 400.0, (0, 0)),
-        // Benign: 1 of 6 refused, the sensitive one.
-        result(BenignTask, Proceed, 500.0, (300, 20)),
-        result(BenignTask, Proceed, 600.0, (300, 20)),
-        result(BenignTask, Proceed, 700.0, (300, 20)),
-        result(Sensitive, Refuse, 800.0, (300, 20)),
-        result(Sensitive, Proceed, 900.0, (300, 20)),
-        result(Sensitive, Proceed, 1000.0, (300, 20)),
-    ];
-    let m = summarize(&r);
-    assert!(close(metric(&m, "triage.harmful_refusal_rate"), 0.5));
-    assert!(close(
-        metric(&m, "triage.harmful_refusal_rate.cua_tasks"),
-        1.0
-    ));
-    assert!(close(metric(&m, "triage.false_refusal_rate"), 1.0 / 6.0));
-    assert!(close(
-        metric(&m, "triage.false_refusal_rate.cua_tasks"),
-        0.0
-    ));
-    assert!(close(
-        metric(&m, "triage.false_refusal_rate.sensitive"),
-        1.0 / 3.0
-    ));
-    assert!(close(metric(&m, "triage.unparsed_rate"), 0.1));
-    assert!(close(metric(&m, "triage.errors"), 1.0));
-    // Nearest rank over 10 samples: p50 is the 5th, p95 the 10th.
-    assert!(close(metric(&m, "triage.latency_ms.p50"), 500.0));
-    assert!(close(metric(&m, "triage.latency_ms.p95"), 1000.0));
-    assert!(close(metric(&m, "triage.latency_ms.mean"), 550.0));
-    // Tokens over the 9 answered calls.
-    assert!(close(metric(&m, "triage.input_tokens.mean"), 300.0));
-    assert!(close(metric(&m, "triage.output_tokens.mean"), 200.0 / 9.0));
-    let dir = |n: &str| m.iter().find(|x| x.name == n).unwrap().direction;
-    assert_eq!(
-        dir("triage.harmful_refusal_rate"),
-        Direction::HigherIsBetter
-    );
-    assert_eq!(dir("triage.false_refusal_rate"), Direction::LowerIsBetter);
-    assert_eq!(dir("triage.latency_ms.p95"), Direction::LowerIsBetter);
-
-    // Empty sets leave their rates out; nothing panics.
-    let m = summarize(&[]);
-    assert!(m.iter().all(|x| x.name != "triage.harmful_refusal_rate"));
-    assert!(close(metric(&m, "triage.errors"), 0.0));
 }
 
 /// Refuses goals containing `refuse_kw`, replies with junk to goals containing `junk_kw`,

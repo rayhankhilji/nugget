@@ -1,41 +1,12 @@
 //! `proactive --backend real`: the real `nugget-proactive` crate behind the [`ProactiveEngine`]
 //! adapter.
 //!
-//! Each engine owns an encrypted on-disk [`Store`] in a temporary directory. The world's items
-//! are written into it in the shape the crate's corpus reader expects from ingest:
-//!
-//! - **mail** (`gmail:<user>`, `message/rfc822`): `extracted.{from, to, subject, date,
-//!   message_id, in_reply_to, references}`, Gmail-style `source.{labels, thread_id}` (`SENT` for
-//!   the user's own mail, `INBOX` otherwise), and the bulk headers the world carries
-//!   (`list_unsubscribe`, `auto_submitted`);
-//! - **receipts** become the receipt mail a merchant sends (`receipts@<merchant domain>`), with
-//!   the next billing date when the receipt is for a subscription;
-//! - **events** (`gcal:<user>`): Google Calendar-style `source.{start, end, attendees,
-//!   organizer, status, ical_uid}`; a cancellation rewrites the event with `status: cancelled`,
-//!   as a calendar sync would;
-//! - **notes** (`files:notes`, Markdown, with a text chunk so related-notes search finds them).
-//!
-//! Each morning the adapter calls [`Proactive::refresh`] at 07:00 UTC, then shows the top `k` of
-//! [`Proactive::inbox`]. Accept and dismiss go to [`Proactive::accept`] and
-//! [`Proactive::dismiss`] (with the simulated user's reason: not relevant, already handled, not
-//! important), so the crate learns from the same noisy user as the reference engine. Every shown
-//! action is prepared through [`ActionRunner::prepare`] (the dry-run diff is the crate's rendered
-//! preview) and executed through [`Proactive::run_action`] with an approval bound to that
-//! preview's digest, the default [`PolicyEngine`] and sandbox executors that record what they
-//! were asked to apply. No network: the drafter is a deterministic stub and
-//! no LLM judge is configured.
-//!
-//! The crate's card kinds map to the benchmark's `(kind, subject)` through each card's first
-//! evidence item, whose store key is the world item id:
-//!
-//! | crate kind | benchmark kind | subject |
-//! |---|---|---|
-//! | `unanswered_thread` | `unanswered_thread` | `thread:<world thread of the message>` |
-//! | `follow_up`, `awaiting:` key (the user's unanswered question) | `follow_up` | `thread:<world thread of the message>` |
-//! | `follow_up` (a promise in sent mail) | `commitment_due` | `commit:<mail id>` |
-//! | `commitment` (graph, or a dated todo in a note) | `commitment_due` | `commit:<evidence item id>` |
-//! | `meeting_prep` | `meeting_prep` | `event:<event id>` |
-//! | `renewal` | `renewal` | `sub:<sender domain>` |
+//! Each engine owns an encrypted on-disk [`Store`] in a temp dir, filled with the world's items
+//! in the shape ingest produces. Each morning it calls [`Proactive::refresh`] at 07:00 UTC and
+//! shows the top `k` of [`Proactive::inbox`]; feedback comes from the same noisy simulated user
+//! as the reference engine. Actions run through [`Proactive::run_action`] with the default
+//! [`PolicyEngine`] and recording sandbox executors. No network. Crate card kinds map to the
+//! benchmark's `(kind, subject)` through each card's first evidence item.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -93,9 +64,8 @@ fn store_err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// Card persistence that never keeps what was learned: the learning-off ablation. Feedback still
-/// moves cards through the state machine (so dedup and tombstones work), but every save resets
-/// the scoring model to its prior and forgets the per sender, domain, kind and thread entries.
+/// Learning-off ablation: cards still move through the state machine, but every save resets the
+/// scoring model to its prior.
 struct FrozenModel(StoreCardStore);
 
 impl CardStore for FrozenModel {
@@ -631,8 +601,7 @@ impl ProactiveEngine for RealEngine {
             .get(card_id)
             .cloned()
             .ok_or_else(|| format!("card {card_id} has no prepared action"))?;
-        // The user approved the preview of the card the approval names. With no approval the
-        // adapter still asks the crate, with an approval bound to nothing, so the crate's gate
+        // With no approval, still ask the crate with one bound to nothing, so the crate's gate
         // (not the adapter) is what refuses.
         let crate_approval = match approval {
             Some(a) => self

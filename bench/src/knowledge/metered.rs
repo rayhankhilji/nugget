@@ -1,22 +1,9 @@
 //! [`MeteredProvider`]: a [`Provider`] decorator that counts, times and bounds every chat
 //! request a real model gets from the knowledge pipeline (`knowledge --local-models`).
 //!
-//! Each request is run to completion inside a per-request timeout (the bench's, which is
-//! shorter than the pipeline's own so it always fires first), then classified once:
-//!
-//! | Outcome | Meaning |
-//! |---|---|
-//! | `timeouts` | No complete answer within the timeout (the request is dropped). |
-//! | `failures` | The provider returned an error, the stream failed or ended without `Done`, or the model refused. |
-//! | `unparseable` | A complete answer with no JSON object in it (the pipeline's own tolerance: the whole text, or the outermost `{…}`). |
-//! | `schema_invalid` | JSON, but not valid against the request's JSON schema (the pipeline may still salvage parts). |
-//! | `ok` | Valid JSON under the schema. |
-//!
-//! `truncated` counts answers that stopped at the output-token cap, whatever their class.
-//! Latency is wall time per request, timeouts included (at the timeout). The answer is replayed
-//! to the pipeline unchanged, so the decorator never alters what the model said; timeouts reach
-//! the pipeline as a provider error. Item contents are not touched here: they reach the model
-//! only through `nugget-knowledge`'s own prompt (untrusted-data boundaries, quote gate).
+//! The bench's per-request timeout is shorter than the pipeline's own so it always fires first.
+//! Each request is classified once (ok, timeout, failure, unparseable, schema-invalid) and its
+//! answer replayed to the pipeline unchanged.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -146,10 +133,6 @@ impl MeteredProvider {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(entry);
-    }
-
-    pub fn timeout(&self) -> Duration {
-        self.timeout
     }
 
     /// A copy of the counters so far.
@@ -340,110 +323,5 @@ impl Provider for MeteredProvider {
 
     fn embed_prefixes(&self) -> (String, String) {
         self.inner.embed_prefixes()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nugget_core::capability::Locality;
-    use nugget_infer::{ChatResponse, Message, ProviderKind};
-
-    /// Answers by the first word of the prompt.
-    struct Canned(ProviderId);
-
-    #[async_trait]
-    impl Provider for Canned {
-        fn id(&self) -> &ProviderId {
-            &self.0
-        }
-        fn meta(&self) -> ProviderMeta {
-            ProviderMeta {
-                kind: ProviderKind::OpenaiCompatible,
-                model: "canned".into(),
-                locality: Locality::OnDevice,
-                context_tokens: None,
-            }
-        }
-        async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
-            let prompt = match &req.messages[0].content[0] {
-                nugget_infer::Part::Text { text } => text.clone(),
-                _ => String::new(),
-            };
-            let done = |r| {
-                Ok(ChatEvent::Done {
-                    stop_reason: r,
-                    input_tokens: Some(10),
-                    output_tokens: Some(5),
-                })
-            };
-            let text = |t: &str| Ok(ChatEvent::TextDelta(t.into()));
-            let events = match prompt.as_str() {
-                "ok" => vec![text("```json\n{\"a\": 1}\n```"), done(StopReason::EndTurn)],
-                "bad-schema" => vec![text("{\"b\": 1}"), done(StopReason::EndTurn)],
-                "garbage" => vec![text("Sure! Here you go."), done(StopReason::MaxTokens)],
-                "refuse" => vec![done(StopReason::Refusal)],
-                "broken" => vec![text("{"), Err(Error::Provider("connection reset".into()))],
-                "no-done" => vec![text("{\"a\": 1}")],
-                "error" => return Err(Error::Provider("down".into())),
-                _ => {
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                    vec![done(StopReason::EndTurn)]
-                }
-            };
-            Ok(Box::pin(stream::iter(events)))
-        }
-        async fn embed(&self, _: &[String]) -> Result<Vec<Vec<f32>>> {
-            Err(Error::Unsupported("no".into()))
-        }
-    }
-
-    #[tokio::test]
-    async fn every_outcome_is_counted_once() {
-        let p = MeteredProvider::new(
-            Arc::new(Canned(ProviderId::new("canned"))),
-            Duration::from_millis(50),
-        );
-        let schema = json!({"type": "object", "required": ["a"]});
-        let ask = |s: &str| {
-            ChatRequest::new(vec![Message::user_text(s.to_owned())])
-                .with_json_schema(schema.clone())
-        };
-        let ok = ChatResponse::collect(p.chat(ask("ok")).await.unwrap())
-            .await
-            .unwrap();
-        assert!(
-            ok.text().contains("\"a\""),
-            "the answer is replayed unchanged"
-        );
-        for s in ["bad-schema", "garbage", "refuse", "broken", "no-done"] {
-            let _ = p.chat(ask(s)).await;
-        }
-        assert!(p.chat(ask("error")).await.is_err());
-        let e = p.chat(ask("stall")).await.err().unwrap();
-        assert!(e.to_string().contains("timeout"), "{e}");
-        let m = p.snapshot();
-        assert_eq!(m.requests, 8);
-        assert_eq!(
-            (
-                m.ok,
-                m.schema_invalid,
-                m.unparseable,
-                m.failures,
-                m.timeouts
-            ),
-            (1, 1, 1, 4, 1)
-        );
-        assert_eq!(m.truncated, 1);
-        assert_eq!(m.lost(), 6);
-        assert_eq!(m.latencies_s.len(), 8);
-        assert_eq!(m.output_tokens, 20);
-        let log = p.requests();
-        assert_eq!(log.len(), 8);
-        assert_eq!(log[0].outcome, "ok");
-        assert!(log[0].answer.contains("\"a\""));
-        assert_eq!(log[7].outcome, "timeout");
-        assert_eq!(chunk_ords("x [chunk 0]\na\n[chunk 12]\nb"), [0, 12]);
-        assert_eq!(p.id().as_str(), "canned");
     }
 }

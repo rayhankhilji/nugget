@@ -1,14 +1,7 @@
 //! `perf --backend real --perf-phases search`: `search` latency through the real `nuggetd` on a
-//! seeded store, without the hour of knowledge extraction the full daemon profile runs first
-//! at 500k items (LL1).
-//!
-//! The store is seeded exactly as the daemon profile seeds it (same corpus, sizes, chunks and
-//! seed), then `nuggetd` starts with `[knowledge] enabled = false` (otherwise the same hermetic
-//! config: no providers, so search is text-only) and the same known-item queries are sent over
-//! IPC: one first search, then `searches` warm ones (`daemon.search.*`, comparable with the
-//! daemon profile's), with recall@10 as the quality check. Set `NUGGET_BENCH_SEARCH_HOME` to a
-//! directory to keep the seeded home there and reuse it on later runs with the same item count
-//! and seed (a 500k-item store takes minutes to seed and ~2 GB).
+//! seeded store with knowledge disabled, skipping the hour of extraction the daemon profile runs
+//! first at 500k items. `NUGGET_BENCH_SEARCH_HOME` keeps and reuses the seeded home (a 500k-item
+//! store takes minutes to seed and ~2 GB).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -128,10 +121,8 @@ async fn profile(
             status.items, p.items
         )));
     }
-    // Let the startup work settle first (the proactive engine's first run reads the whole
-    // store; the deferred integrity check reads the whole file): searched during it, the
-    // numbers measure the contention, not search. The daemon profile searches after an hour
-    // of extraction, when it has settled too.
+    // Let startup work (proactive first run, integrity check) settle, or the numbers measure
+    // contention, not search.
     let settled = settle(&mut d, env.timeout).await?;
     out.push(Metric::new(
         "daemon.search.settle_s",
@@ -181,9 +172,8 @@ async fn profile(
     Ok(())
 }
 
-/// Wait until the daemon is idle (under 5% of a core over a 2 s window, and at least 30 s after
-/// startup); how long that took.
-/// Without a CPU counter (not Linux or macOS), a fixed 30 s.
+/// Wait until the daemon is idle (<5% of a core over 2 s, ≥30 s after startup; a fixed 30 s
+/// without a CPU counter). Returns how long that took.
 async fn settle(d: &mut Daemon, timeout: Duration) -> Result<f64, BenchError> {
     const WINDOW: Duration = Duration::from_secs(2);
     const MIN_WAIT: Duration = Duration::from_secs(30);

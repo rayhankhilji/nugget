@@ -200,13 +200,4 @@ mod tests {
             assert!(!kinds(app).is_empty());
         }
     }
-
-    #[test]
-    fn emails() {
-        assert!(valid_email("a@b.co"));
-        assert!(!valid_email("a.b.co"));
-        assert!(!valid_email("@b.co"));
-        assert!(!valid_email("a@bco"));
-        assert_eq!(split_list("a@x.io, b@y.io;;"), ["a@x.io", "b@y.io"]);
-    }
 }

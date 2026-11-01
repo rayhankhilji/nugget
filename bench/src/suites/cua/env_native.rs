@@ -1,26 +1,11 @@
 //! The `native` environment: the apps on the machine's own desktop, read and driven through its
 //! real accessibility API: UI Automation on Windows, AX on macOS. The Linux equivalent is `xvfb`.
 //!
-//! - **Windows.** The apps are served on the loopback socket as in `xvfb`, and each app gets one
-//!   Microsoft Edge window in app mode (`--app=<url>`, renderer accessibility forced on, a
-//!   throwaway profile, tiled like the Xvfb desktop). Edge ships with Windows, so nothing is
-//!   installed. Occlusion and background throttling are off, so a covered window still reloads
-//!   when the world changes. The run waits until every window has loaded its page and is visible
-//!   to UI Automation; every process is killed on drop.
-//! - **macOS.** The same, with one Google Chrome app window per app, read and driven over AX
-//!   (see [`super::env_ax`]). The process running the bench needs the Accessibility permission.
-//! - **Session** ([`NativeSession`]): observations and confirmations go to the harness as in
-//!   `socket`, but every action is performed on the real window through UI Automation by
-//!   [`super::env_uia::UiaDriver`] (over AX on macOS); the page posts it to the server, exactly
-//!   as a user's input.
-//!   So the `reference` agent drives the real windows too, which checks the harness.
-//! - **The nugget arm** gets [`computer`]: a `ComputerUse` that reads the real windows over UI
-//!   Automation and presents them with bench ids (see `env_uia`). It is available while a native
-//!   desktop is up, on the thread that started it ([`NativeDesktop`] registers its driver there
-//!   and unregisters it on drop).
-//!
-//! `NUGGET_CUA_EDGE` (Windows) and `NUGGET_CUA_CHROME` (macOS) override the browser (any
-//! Chromium build with `--app` works).
+//! Each app gets one Edge (Windows) or Chrome (macOS) `--app` window with renderer accessibility
+//! forced on and occlusion/background throttling off, so a covered window still reloads. macOS
+//! needs the Accessibility permission. Every action, including the `reference` agent's, goes
+//! through the real window. [`computer`] is available only on the thread that started the
+//! [`NativeDesktop`]. `NUGGET_CUA_EDGE` / `NUGGET_CUA_CHROME` override the browser.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -329,9 +314,8 @@ const PAGE_COMMIT: Duration = Duration::from_millis(400);
 /// Longest wait for a page to reload after the world changed.
 const PAGE_RELOAD: Duration = Duration::from_secs(6);
 
-/// Wait until `app`'s window shows a page served at the current world version (pages reload
-/// whenever the world changes, a confirmation included): an input sent to a page that is about
-/// to reload would be lost with it. Bounded; on timeout the action goes ahead.
+/// Wait (bounded) until `app`'s page is at the current world version: input sent to a page about
+/// to reload would be lost.
 fn wait_current_page(stage: &Stage, app: &str) {
     let t0 = Instant::now();
     while t0.elapsed() < PAGE_RELOAD {
@@ -450,21 +434,6 @@ mod tests {
         assert!(e.contains("needs Windows"), "{e}");
         assert!(e.contains("macOS"), "{e}");
         assert!(e.contains("xvfb"), "{e}");
-    }
-
-    #[test]
-    fn edge_app_window_command_line() {
-        let a = edge_args(
-            "http://127.0.0.1:9/mail/",
-            Path::new("p"),
-            (0, 490),
-            (530, 490),
-        );
-        assert_eq!(a[0], "--app=http://127.0.0.1:9/mail/");
-        assert!(a.contains(&"--window-position=0,490".to_owned()));
-        assert!(a.contains(&"--force-renderer-accessibility".to_owned()));
-        assert!(is_edge("msedge.exe"));
-        assert!(!is_edge("Google Chrome"));
     }
 
     #[test]
