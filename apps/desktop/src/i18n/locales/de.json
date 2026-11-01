@@ -2284,5 +2284,15 @@
   "models.fail.kept": "Bisher heruntergeladen: {done}. Das bleibt erhalten, der nächste Versuch setzt dort fort.",
   "models.cancel": "Abbrechen",
   "models.cancelLabel": "Download von {model} abbrechen",
-  "models.resume": "Download fortsetzen"
+  "models.resume": "Download fortsetzen",
+  "models.searchUpgrade.title": "Suche auf mehrsprachig umstellen",
+  "models.searchUpgrade.body": "Indexiert im Hintergrund neu.",
+  "models.searchUpgrade.bodyDownload": "Lädt {size} herunter und indexiert dann im Hintergrund neu.",
+  "models.searchUpgrade.upgrade": "Umstellen",
+  "models.searchUpgrade.notNow": "Nicht jetzt",
+  "models.searchUpgrade.phase.downloading": "Suchmodell wird heruntergeladen",
+  "models.searchUpgrade.phase.embedding": "Neuindexierung",
+  "models.searchUpgrade.keepsWorking": "Die Suche funktioniert währenddessen weiter.",
+  "models.searchUpgrade.failed": "Die Umstellung wurde nicht abgeschlossen. Die Suche verwendet weiterhin den aktuellen Index.",
+  "models.searchUpgrade.retry": "Erneut versuchen"
 }

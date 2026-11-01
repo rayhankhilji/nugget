@@ -7,21 +7,9 @@ name: Plugins
 # them through the daemon's catalog and install flow, and uploads the signed packages.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "crates/nugget-plugin/**"
-      - "crates/nuggetd/src/features/plugins.rs"
-      - "plugins/**"
-      - ".github/workflows/plugins.yml"
-      - "Cargo.lock"
-  pull_request:
-    paths:
-      - "crates/nugget-plugin/**"
-      - "crates/nuggetd/src/features/plugins.rs"
-      - "plugins/**"
-      - ".github/workflows/plugins.yml"
-      - "Cargo.lock"
+  # Weekly, Saturday 03:11 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
+  schedule:
+    - cron: "11 3 * * 6"
   workflow_dispatch:
 
 # Least privilege: the job only reads the repository.

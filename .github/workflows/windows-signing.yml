@@ -15,15 +15,10 @@ name: Windows signing
 #    MSI and the installed/extracted nugget-desktop.exe, nuggetd.exe and uninstall.exe.
 
 on:
+  # Weekly, Saturday 04:19 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
+  schedule:
+    - cron: "19 4 * * 6"
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "packaging/windows/**"
-      - ".github/workflows/windows-signing.yml"
-      - ".github/workflows/release.yml"
-      - "apps/desktop/package.json"
-      - "apps/desktop/pnpm-lock.yaml"
-      - "apps/desktop/src-tauri/tauri*.conf.json"
 
 permissions:
   contents: read

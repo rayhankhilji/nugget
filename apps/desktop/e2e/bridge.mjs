@@ -71,7 +71,7 @@ function answers(socket, timeoutMs = 1000) {
  * the new daemon's socket), `connection_info` reports whether the daemon really answers and
  * `start_daemon` starts one when it doesn't, like the shell; without it both report "connected".
  */
-function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket = () => {} } = {}) {
+function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket = () => {}, link = { waiting: null } } = {}) {
   const conn = () => ({ connected: true, socket: socket(), error: null });
   const live = async () => {
     const up = await answers(socket());
@@ -126,7 +126,12 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     quit_cancel: () => null,
     quit_ack: () => false,
     indexing_pause_toggle: () => ({ has_tray: true, indexing_paused: false, logs: null }),
-    deeplink_take: () => null,
+    // A link queued with the bridge's `queueDeepLink`, taken once, like the shell.
+    deeplink_take: () => {
+      const l = link.waiting;
+      link.waiting = null;
+      return l;
+    },
     quickask_open_main: () => null,
     // JJ2: no quick-ask handover is waiting for the main window.
     quickask_handover_take: () => null,
@@ -309,7 +314,8 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
     daemon.socket = next;
     void daemon.close();
   };
-  const shell = shellCommands(() => daemon.socket, { pickFolders, startDaemon, onSocket: setSocket });
+  const link = { waiting: null };
+  const shell = shellCommands(() => daemon.socket, { pickFolders, startDaemon, onSocket: setSocket, link });
   const daemon = new DaemonConn(socket, (n) => {
     notifications.push({ method: n.method, params: n.params, at: Date.now() });
     const events = [{ event: "nugget:notification", payload: { method: n.method, params: n.params } }];
@@ -394,6 +400,8 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
         notifications,
         deliverEvents,
         setSocket,
+        /** Make a link wait for the page, which takes it on its next `nugget:deeplink` event. */
+        queueDeepLink: (l) => (link.waiting = l),
         close: async () => {
           sinks.clear();
           await daemon.close();

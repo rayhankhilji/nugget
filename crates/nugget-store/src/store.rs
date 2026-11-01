@@ -400,7 +400,7 @@ impl Store {
     }
 }
 
-const META_EMBEDDING_MODEL: &str = "embedding_model";
+pub(crate) const META_EMBEDDING_MODEL: &str = "embedding_model";
 
 fn embedding_model(conn: &Connection) -> Result<Option<String>> {
     conn.query_row(
@@ -412,7 +412,7 @@ fn embedding_model(conn: &Connection) -> Result<Option<String>> {
     .db("read embedding model")
 }
 
-const META_EMBEDDING_PREFIXES: &str = "embedding_prefixes";
+pub(crate) const META_EMBEDDING_PREFIXES: &str = "embedding_prefixes";
 
 fn embedding_prefixes(conn: &Connection) -> Result<Option<(String, String)>> {
     let raw: Option<String> = conn

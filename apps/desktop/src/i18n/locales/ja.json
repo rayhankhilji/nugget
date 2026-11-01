@@ -2284,5 +2284,15 @@
   "models.fail.kept": "ここまでにダウンロードした {done} は保持されます。次回はその続きから再開します。",
   "models.cancel": "キャンセル",
   "models.cancelLabel": "{model} のダウンロードをキャンセル",
-  "models.resume": "ダウンロードを再開"
+  "models.resume": "ダウンロードを再開",
+  "models.searchUpgrade.title": "検索を多言語対応にアップグレード",
+  "models.searchUpgrade.body": "バックグラウンドで再インデックスします。",
+  "models.searchUpgrade.bodyDownload": "{size} をダウンロードしてから、バックグラウンドで再インデックスします。",
+  "models.searchUpgrade.upgrade": "アップグレード",
+  "models.searchUpgrade.notNow": "後で",
+  "models.searchUpgrade.phase.downloading": "検索モデルをダウンロード中",
+  "models.searchUpgrade.phase.embedding": "再インデックス中",
+  "models.searchUpgrade.keepsWorking": "その間も検索は使えます。",
+  "models.searchUpgrade.failed": "アップグレードは完了しませんでした。検索は引き続き現在のインデックスを使います。",
+  "models.searchUpgrade.retry": "もう一度試す"
 }

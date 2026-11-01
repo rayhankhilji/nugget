@@ -592,3 +592,68 @@ async fn cancel_keeps_staged_bytes_and_the_next_install_resumes() {
     assert_eq!(after, want);
     h.stop().await;
 }
+
+/// The one-time multilingual upgrade (`search.upgrade.*`): offered only for an index built with
+/// an older on-device embedder and no pinned model, never run until accepted; accepting downloads
+/// the new model, re-embeds in the background and switches the index and the search server.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_search_upgrade_is_offered_once_and_switches_only_when_accepted() {
+    let models = MockServer::start().await;
+    let mut manifest = chat_and_embed(&models).await;
+    // Larger, so recommended for embedding.
+    let newer = model_entry(&models, "embed-v2", &[7u8; 64], "", &[Tier::Embedding]).await;
+    manifest.models.push(newer);
+    let tmp = tempfile::tempdir().unwrap();
+    preinstall(&tmp, manifest.get("embed-model").unwrap()).await;
+    let o = overrides(manifest.clone(), fast_runtime(&[]));
+    let h = Harness::start_in(tmp, BOTH, |opts| opts.runtime = o).await;
+    h.add_files("docs", &[("n.md", "Saffron risotto needs patience.")])
+        .await;
+    eventually("the file has vectors", || async {
+        h.store.embedding_dim().unwrap().is_some()
+            && h.store
+                .items_missing_embeddings(None, 10)
+                .unwrap()
+                .is_empty()
+    })
+    .await;
+    let status: Value = h.call("search.upgrade.status", json!({})).await;
+    assert_eq!(
+        status,
+        json!({"offer": null, "job": null}),
+        "pinned model: no offer"
+    );
+
+    // Unpinned: the index keeps its model, and the upgrade is offered but not run.
+    let config = "[runtime]\nchat_model = \"chat-model\"\nidle_stop_minutes = 0\n";
+    std::fs::write(h.paths.config_file(), config).unwrap();
+    let o = overrides(manifest, fast_runtime(&[]));
+    let mut h = h.restart(|opts| opts.runtime = o).await;
+    let status: Value = h.call("search.upgrade.status", json!({})).await;
+    assert_eq!(status["offer"]["from"], "embed-model");
+    assert_eq!(status["offer"]["to"], "embed-v2");
+    assert_eq!(status["offer"]["download_bytes"], 64);
+    assert_eq!(
+        h.store.embedding_model().unwrap().as_deref(),
+        Some("embed-model")
+    );
+    assert_eq!(h.store.reindex_target().unwrap(), None);
+
+    let status: Value = h.call("search.upgrade.start", json!({})).await;
+    assert_eq!(status["offer"], Value::Null);
+    eventually("the index switched to the new model", || async {
+        h.store.embedding_model().unwrap().as_deref() == Some("embed-v2")
+    })
+    .await;
+    eventually("the search server runs the new model", || async {
+        h.runtime_state(RuntimeRole::Embedding)
+            .await
+            .is_some_and(|r| r.model_id == "embed-v2" && r.state == RuntimeState::Ready)
+    })
+    .await;
+    assert_eq!(h.store.reindex_target().unwrap(), None);
+    assert!(!h.store.search_vector(&[0.5; 8], 5).unwrap().is_empty());
+    let status: Value = h.call("search.upgrade.status", json!({})).await;
+    assert_eq!(status, json!({"offer": null, "job": null}));
+    h.stop().await;
+}

@@ -1318,6 +1318,52 @@ pub mod runtime_retry_method {
     pub const RETRY: &str = "runtime.retry";
 }
 
+/// The one-time offer to re-index search with the recommended embedding model. Params `{}`;
+/// every method answers [`SearchUpgradeStatus`].
+pub mod search_upgrade_method {
+    pub const UPGRADE_STATUS: &str = "search.upgrade.status";
+    /// Accept: download the model if needed, then re-embed in the background and switch.
+    pub const UPGRADE_START: &str = "search.upgrade.start";
+    /// Hide the offer for good, cancelling an upgrade in progress (the old index stays).
+    pub const UPGRADE_DISMISS: &str = "search.upgrade.dismiss";
+}
+
+/// See [`search_upgrade_method`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchUpgradeStatus {
+    /// Until accepted or dismissed, when the index's embedding model is not the recommended one.
+    pub offer: Option<SearchUpgradeOffer>,
+    /// The upgrade in progress.
+    pub job: Option<SearchUpgradeJob>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchUpgradeOffer {
+    /// The index's embedding model and the recommended one (manifest ids).
+    pub from: String,
+    pub to: String,
+    /// Bytes to download first (0 when the model is installed).
+    pub download_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchUpgradeJob {
+    pub to: String,
+    pub phase: SearchUpgradePhase,
+    /// Bytes while downloading, chunks while re-embedding.
+    pub done: u64,
+    pub total: u64,
+    /// The last failure; the upgrade retries later.
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchUpgradePhase {
+    Downloading,
+    Embedding,
+}
+
 /// Request and response types live in nuggetd's `features/search_ui`.
 pub mod search_ui_method {
     pub const FACETED: &str = "search.faceted";

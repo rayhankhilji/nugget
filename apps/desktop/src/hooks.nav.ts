@@ -38,17 +38,20 @@ function channel<T>() {
   return { request, usePending };
 }
 
-const search = channel<string>();
+const search = channel<{ q: string; run: boolean }>();
 const newChat = channel<void>();
 
-/** Ask the Search page to run `q`. The caller navigates to the page itself. */
-export function requestSearch(q: string): void {
-  search.request(q);
+/**
+ * Ask the Search page to run `q`, or with `run: false` only to type it in and wait for Enter (a
+ * `nugget://search` link never acts by itself). The caller navigates to the page itself.
+ */
+export function requestSearch(q: string, run = true): void {
+  search.request({ q, run });
 }
 
 /** Run `onQuery` for a search requested before mount and for every later request. */
-export function usePendingSearch(onQuery: (q: string) => void): void {
-  search.usePending(onQuery);
+export function usePendingSearch(onQuery: (q: string, run: boolean) => void): void {
+  search.usePending(({ q, run }) => onQuery(q, run));
 }
 
 /** Ask the Chat page to start a fresh conversation. The caller navigates to the page itself. */

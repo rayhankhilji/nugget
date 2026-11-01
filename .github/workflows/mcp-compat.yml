@@ -18,19 +18,9 @@ name: MCP compatibility
 # Loopback only: nothing but npm and PyPI (dependency install) is reached over the network.
 
 on:
-  pull_request:
-    paths:
-      - "crates/nugget-mcp/**"
-      - "crates/nuggetd/src/mcp*.rs"
-      - "apps/desktop/e2e/daemon.mjs"
-      - ".github/workflows/mcp-compat.yml"
-  push:
-    branches: [main]
-    paths:
-      - "crates/nugget-mcp/**"
-      - "crates/nuggetd/src/mcp*.rs"
-      - "apps/desktop/e2e/daemon.mjs"
-      - ".github/workflows/mcp-compat.yml"
+  # Weekly, Thursday 03:23 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
+  schedule:
+    - cron: "23 3 * * 4"
   workflow_dispatch:
 
 permissions:

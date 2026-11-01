@@ -355,7 +355,8 @@ pub(crate) type ReadyHook = Arc<dyn Fn(RuntimeRole) + Send + Sync>;
 pub(crate) struct RuntimeSlot {
     id: ProviderId,
     role: RuntimeRole,
-    model: ModelEntry,
+    /// Changes only when the index switches embedding model ([`RuntimeSlot::switch_model`]).
+    model: Mutex<ModelEntry>,
     tiers: Vec<Tier>,
     runtime: Runtime,
     egress: Arc<dyn EgressSink>,
@@ -368,8 +369,20 @@ pub(crate) struct RuntimeSlot {
 }
 
 impl RuntimeSlot {
-    pub fn model(&self) -> &ModelEntry {
-        &self.model
+    pub fn model(&self) -> ModelEntry {
+        self.model
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Serve `model` from now on: the running server is stopped and started again on it. Until
+    /// it is ready the slot reports the model its server still runs (see `meta`), so callers that
+    /// check the model (retrieval, ingest) never mix two models' vectors.
+    pub async fn switch_model(&self, model: ModelEntry) -> Result<Arc<dyn Provider>> {
+        *self.model.lock().unwrap_or_else(PoisonError::into_inner) = model;
+        self.runtime.stop(self.role).await;
+        self.refresh().await
     }
 
     pub fn id(&self) -> &ProviderId {
@@ -418,7 +431,10 @@ impl RuntimeSlot {
     }
 
     fn not_installed(&self) -> Error {
-        Error::Unsupported(format!("local model `{}` is not installed", self.model.id))
+        Error::Unsupported(format!(
+            "local model `{}` is not installed",
+            self.model().id
+        ))
     }
 
     /// Start (or reuse) the server and return the provider in front of it.
@@ -444,7 +460,7 @@ impl RuntimeSlot {
         }
         let cfg = self
             .runtime
-            .ensure(self.role, &self.model)
+            .ensure(self.role, &self.model())
             .await
             .map_err(|e| unavailable(self.role, e))?;
         self.activate(cfg)
@@ -499,7 +515,7 @@ impl RuntimeSlot {
             if let Some(router) = self.router.get().and_then(Weak::upgrade) {
                 router.set_capabilities(&self.id, known_capabilities(self.role, &cfg));
             }
-            tracing::info!(provider = %self.id, model = %self.model.id, "local runtime routed");
+            tracing::info!(provider = %self.id, model = %cfg.model, "local runtime routed");
         }
         *active = Some(Active {
             cfg,
@@ -603,10 +619,17 @@ impl Provider for RuntimeSlot {
         &self.id
     }
 
+    /// `model` is what the server runs (it lags [`RuntimeSlot::switch_model`] until restarted).
     fn meta(&self) -> ProviderMeta {
+        let running = self
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|a| a.cfg.model.clone());
         ProviderMeta {
             kind: ProviderKind::OpenaiCompatible,
-            model: self.model.id.clone(),
+            model: running.unwrap_or_else(|| self.model().id),
             locality: Locality::OnDevice,
             context_tokens: self.context_tokens(),
         }
@@ -698,7 +721,7 @@ impl Provider for RuntimeSlot {
             .as_ref()
         {
             Some(a) => nugget_infer::embed_prefixes(&a.cfg),
-            None => nugget_infer::model_embed_prefixes(&self.model.id),
+            None => nugget_infer::model_embed_prefixes(&self.model().id),
         }
     }
 
@@ -857,7 +880,7 @@ impl LocalRuntime {
                     role,
                     tiers: slot_tiers(role, &model),
                     installed: AtomicBool::new(installed(&model.id)),
-                    model,
+                    model: Mutex::new(model),
                     runtime: runtime.clone(),
                     egress: egress.clone(),
                     active: Mutex::new(None),
@@ -922,7 +945,7 @@ impl LocalRuntime {
                 continue;
             }
             out.push(RuntimeInfo {
-                model_id: s.model.id.clone(),
+                model_id: s.model().id,
                 role: s.role,
                 state: if s.is_installed() {
                     RuntimeState::Stopped

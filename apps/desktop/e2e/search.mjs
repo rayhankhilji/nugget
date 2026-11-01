@@ -37,6 +37,14 @@ export async function searchScenario({ browser, socket }) {
     const box = page.getByRole("searchbox", { name: t("search.query") });
     await box.waitFor();
 
+    await check("search: a nugget://search link types the query in and waits for Enter", async () => {
+      bridge.queueDeepLink({ kind: "search", query: QUERY });
+      await page.evaluate(() => window.__E2E_EMIT__("nugget:deeplink", null));
+      await until("the link's query is typed in", async () => [(await box.inputValue()) === QUERY]);
+      const ran = bridge.calls.filter((c) => c.cmd.startsWith("search"));
+      expect(ran.length === 0, `a link ran a search by itself: ${JSON.stringify(ran)}`);
+    });
+
     let kindName = null;
     await check("search: a query shows filters with counts", async () => {
       await box.fill(QUERY);

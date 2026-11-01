@@ -18,7 +18,7 @@ use crate::vector::AnnWriter;
 /// Upper bound accepted by `sqlite-vec`'s `vec0` tables.
 pub(crate) const MAX_EMBEDDING_DIM: usize = 8192;
 
-const META_EMBEDDING_DIM: &str = "embedding_dim";
+pub(crate) const META_EMBEDDING_DIM: &str = "embedding_dim";
 
 /// Row shape of `items` as stored (strings not yet parsed).
 struct ItemRow {

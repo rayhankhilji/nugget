@@ -2284,5 +2284,15 @@
   "models.fail.kept": "Les {done} déjà téléchargés sont conservés : le prochain essai reprendra à partir de là.",
   "models.cancel": "Annuler",
   "models.cancelLabel": "Annuler le téléchargement de {model}",
-  "models.resume": "Reprendre le téléchargement"
+  "models.resume": "Reprendre le téléchargement",
+  "models.searchUpgrade.title": "Passer la recherche en multilingue",
+  "models.searchUpgrade.body": "La réindexation se fait en arrière-plan.",
+  "models.searchUpgrade.bodyDownload": "Télécharge {size}, puis réindexe en arrière-plan.",
+  "models.searchUpgrade.upgrade": "Mettre à niveau",
+  "models.searchUpgrade.notNow": "Pas maintenant",
+  "models.searchUpgrade.phase.downloading": "Téléchargement du modèle de recherche",
+  "models.searchUpgrade.phase.embedding": "Réindexation",
+  "models.searchUpgrade.keepsWorking": "La recherche continue de fonctionner pendant ce temps.",
+  "models.searchUpgrade.failed": "La mise à niveau n’a pas abouti. La recherche utilise toujours l’index actuel.",
+  "models.searchUpgrade.retry": "Réessayer"
 }
