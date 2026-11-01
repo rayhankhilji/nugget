@@ -1,0 +1,754 @@
+{
+"passed": 41,
+"total": 57,
+"results": [
+{
+"scenario": "im.basic",
+"ok": true,
+"checks": 8,
+"passed": 8,
+"failed": [],
+"notes": [],
+"group": "sc_imessage.s_im_basic",
+"secs": 8.6
+},
+{
+"scenario": "im.contacts",
+"ok": true,
+"checks": 3,
+"passed": 3,
+"failed": [],
+"notes": [],
+"group": "sc_imessage.s_im_basic",
+"secs": 8.6
+},
+{
+"scenario": "im.group",
+"ok": true,
+"checks": 3,
+"passed": 3,
+"failed": [],
+"notes": [],
+"group": "sc_imessage.s_im_basic",
+"secs": 8.6
+},
+{
+"scenario": "im.invalid_utf8_text",
+"ok": false,
+"checks": 1,
+"passed": 0,
+"failed": [
+{
+"check": "one message with invalid UTF-8 text does not block the whole database",
+"observed": "{\"hits\": 0, \"state\": \"error\", \"error\": \"storage error: Messages database: invalid utf-8 sequence of 1 bytes from index 3 at index 2\"}"
+}
+],
+"notes": [],
+"group": "sc_imessage.s_im_wal_and_bad",
+"secs": 8.6
+},
+{
+"scenario": "im.missing_db",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_imessage.s_im_wal_and_bad",
+"secs": 8.6
+},
+{
+"scenario": "im.people_phone",
+"ok": false,
+"checks": 1,
+"passed": 0,
+"failed": [
+{
+"check": "handle-only participant (no Contacts) becomes a person with the phone",
+"observed": "[]"
+}
+],
+"notes": [],
+"group": "sc_imessage.s_im_basic",
+"secs": 8.6
+},
+{
+"scenario": "im.sms_and_imessage_same_person",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [
+"titles for the same person: ['+15550100001 — February 2026', '+15550100001 — January 2026', '+15550100001 — March 2026']"
+],
+"group": "sc_imessage.s_im_basic",
+"secs": 8.6
+},
+{
+"scenario": "im.wal_copy",
+"ok": true,
+"checks": 3,
+"passed": 3,
+"failed": [],
+"notes": [],
+"group": "sc_imessage.s_im_wal_and_bad",
+"secs": 8.6
+},
+{
+"scenario": "tg.bad_inputs",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [
+"invalid-UTF-8 result.json imported: 0; source=watching None {'code': 'ok', 'fix': '', 'item_errors': 0, 'reason': 'Up to date.'}"
+],
+"group": "sc_telegram.s_tg_bad_inputs",
+"secs": 4.6
+},
+{
+"scenario": "tg.full_export.chats",
+"ok": true,
+"checks": 7,
+"passed": 7,
+"failed": [],
+"notes": [],
+"group": "sc_telegram.s_tg_full_and_parent",
+"secs": 8.6
+},
+{
+"scenario": "tg.half_written",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_telegram.s_tg_reexport_and_half",
+"secs": 29.6
+},
+{
+"scenario": "tg.include_groups_false",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_telegram.s_tg_full_and_parent",
+"secs": 8.6
+},
+{
+"scenario": "tg.parent_folder.merge",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_telegram.s_tg_full_and_parent",
+"secs": 8.6
+},
+{
+"scenario": "tg.people",
+"ok": false,
+"checks": 2,
+"passed": 1,
+"failed": [
+{
+"check": "Sam's phone from the export's contacts list reaches the person",
+"observed": "[[\"Sam Lee\", []]]"
+}
+],
+"notes": [],
+"group": "sc_telegram.s_tg_full_and_parent",
+"secs": 8.6
+},
+{
+"scenario": "tg.reexport.both_present",
+"ok": false,
+"checks": 3,
+"passed": 2,
+"failed": [
+{
+"check": "a message edited between exports appears once",
+"observed": "[\"> zqtra The flight lands at 18:40, gate B\", \"> zqtra The flight lands at 19:10 now, gate B\"]"
+}
+],
+"notes": [],
+"group": "sc_telegram.s_tg_reexport_and_half",
+"secs": 29.6
+},
+{
+"scenario": "tg.reexport.old_deleted",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_telegram.s_tg_reexport_and_half",
+"secs": 29.6
+},
+{
+"scenario": "tg.single_chat.content",
+"ok": true,
+"checks": 7,
+"passed": 7,
+"failed": [],
+"notes": [],
+"group": "sc_telegram.s_tg_single",
+"secs": 8.6
+},
+{
+"scenario": "tg.single_chat.file_path",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_telegram.s_tg_single",
+"secs": 8.6
+},
+{
+"scenario": "tg.single_chat.local_time",
+"ok": false,
+"checks": 2,
+"passed": 0,
+"failed": [
+{
+"check": "time shown as the export's local wall time (date: 2026-05-03T09:12:01)",
+"observed": "\"**Sam Lee** · 2026-05-03 07:12\""
+},
+{
+"check": "message sent 00:30 on 1 June (local) filed in June",
+"observed": "[\"Sam Lee — May 2026\", \"**Sam Lee** · 2026-05-31 22:30\"]"
+}
+],
+"notes": [
+"WhatsApp shows the phone's wall-clock time; Telegram shows UTC from date_unixtime"
+],
+"group": "sc_telegram.s_tg_single",
+"secs": 8.6
+},
+{
+"scenario": "tg.symlink_outside",
+"ok": false,
+"checks": 2,
+"passed": 1,
+"failed": [
+{
+"check": "symlinked export folder outside the chosen folder is not followed (as WhatsApp does)",
+"observed": "1"
+}
+],
+"notes": [],
+"group": "sc_telegram.s_tg_symlink",
+"secs": 4.6
+},
+{
+"scenario": "wa.dates.ambiguous_en_GB_24h",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_ambiguous_dates",
+"secs": 9.6
+},
+{
+"scenario": "wa.dates.ambiguous_en_IN",
+"ok": false,
+"checks": 2,
+"passed": 0,
+"failed": [
+{
+"check": "en_IN '03/05/26, 9:00 pm' read as 3 May 2026",
+"observed": "[\"Priya — March 2026\", \"**Priya** · 2026-03-05 21:00\"]"
+},
+{
+"check": "'11/06/26' read as 11 June 2026",
+"observed": "[\"Priya — November 2026\", \"**Robin Park** · 2026-11-06 09:30\"]"
+}
+],
+"notes": [],
+"group": "sc_whatsapp.s_ambiguous_dates",
+"secs": 9.6
+},
+{
+"scenario": "wa.dates.reexport_disambiguates",
+"ok": false,
+"checks": 1,
+"passed": 0,
+"failed": [
+{
+"check": "re-export with an unambiguous day does not duplicate the ambiguous messages",
+"observed": "{\"occurrences\": 2, \"titles\": [\"Priya — March 2026\", \"Priya — May 2026\"]}"
+}
+],
+"notes": [],
+"group": "sc_whatsapp.s_ambiguous_dates",
+"secs": 9.6
+},
+{
+"scenario": "wa.group",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_groups_and_filters",
+"secs": 12.6
+},
+{
+"scenario": "wa.half_written.new_zip_copy_in_progress",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_half_written",
+"secs": 26.6
+},
+{
+"scenario": "wa.half_written.txt_cut_mid_line",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_half_written",
+"secs": 26.6
+},
+{
+"scenario": "wa.half_written.zip_being_replaced",
+"ok": true,
+"checks": 3,
+"passed": 3,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_half_written",
+"secs": 26.6
+},
+{
+"scenario": "wa.hostile.encodings",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_hostile",
+"secs": 39.8
+},
+{
+"scenario": "wa.hostile.fifo_and_big",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [
+"total import time 33.6s, items=30, chunks=41215, peak RSS kB=569460"
+],
+"group": "sc_whatsapp.s_hostile",
+"secs": 39.8
+},
+{
+"scenario": "wa.hostile.symlink_outside",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_hostile",
+"secs": 39.8
+},
+{
+"scenario": "wa.hostile.zip_bomb",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [
+"bomb import: zqhobomb hits=0"
+],
+"group": "sc_whatsapp.s_hostile",
+"secs": 39.8
+},
+{
+"scenario": "wa.hostile.zip_traversal",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_hostile",
+"secs": 39.8
+},
+{
+"scenario": "wa.include_groups_false",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_groups_and_filters",
+"secs": 12.6
+},
+{
+"scenario": "wa.ios_de_group.zip",
+"ok": true,
+"checks": 4,
+"passed": 4,
+"failed": [],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.ios_ru.zip",
+"ok": false,
+"checks": 3,
+"passed": 2,
+"failed": [
+{
+"check": "'изображение отсутствует' -> [photo]",
+"observed": "\"21:16 · изображение отсутствует_\\n\\n**Саша** · 2026-03-13 21:17\\n> zqiosrub отлично\""
+}
+],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.ios_us.zip",
+"ok": true,
+"checks": 10,
+"passed": 10,
+"failed": [],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.locale.and_ar",
+"ok": false,
+"checks": 4,
+"passed": 0,
+"failed": [
+{
+"check": "zqara is in 'ليلى — March 2026'",
+"observed": "null"
+},
+{
+"check": "first message dated 2026-03-14 09:06",
+"observed": "null"
+},
+{
+"check": "April message in the April doc at 2026-04-02 22:45",
+"observed": "[null, null]"
+},
+{
+"check": "multi-line message kept as one message",
+"observed": "\"\""
+}
+],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.locale.and_ar_eastern",
+"ok": false,
+"checks": 4,
+"passed": 0,
+"failed": [
+{
+"check": "zqaea is in 'Omar — March 2026'",
+"observed": "null"
+},
+{
+"check": "first message dated 2026-03-14 09:06",
+"observed": "null"
+},
+{
+"check": "April message in the April doc at 2026-04-02 22:45",
+"observed": "[null, null]"
+},
+{
+"check": "multi-line message kept as one message",
+"observed": "\"\""
+}
+],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.locale.and_de",
+"ok": false,
+"checks": 8,
+"passed": 7,
+"failed": [
+{
+"check": "media placeholder '<Medien ausgeschlossen>' becomes an attachment",
+"observed": "\"2026-03-20 18:30\\n> <Medien ausgeschlossen>\\n\\n**Jonas Weber** · 2026-03-21 07:00\\n> _(message deleted)_\\n\\n\""
+}
+],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.locale.and_es",
+"ok": true,
+"checks": 8,
+"passed": 8,
+"failed": [],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.locale.and_fr",
+"ok": false,
+"checks": 4,
+"passed": 0,
+"failed": [
+{
+"check": "zqfra is in 'Chloé — March 2026'",
+"observed": "null"
+},
+{
+"check": "first message dated 2026-03-14 09:06",
+"observed": "null"
+},
+{
+"check": "April message in the April doc at 2026-04-02 22:45",
+"observed": "[null, null]"
+},
+{
+"check": "multi-line message kept as one message",
+"observed": "\"\""
+}
+],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.locale.and_ru",
+"ok": false,
+"checks": 8,
+"passed": 4,
+"failed": [
+{
+"check": "zqrua is in 'Саша — March 2026'",
+"observed": "\"Чат WhatsApp с Саша — March 2026\""
+},
+{
+"check": "April message in the April doc at 2026-04-02 22:45",
+"observed": "[\"Чат WhatsApp с Саша — April 2026\", \"**Саша** · 2026-04-02 22:45\"]"
+},
+{
+"check": "media placeholder '<Без медиафайлов>' becomes an attachment",
+"observed": "\"2026-03-20 18:30\\n> <Без медиафайлов>\\n\\n**Дима** · 2026-03-21 07:00\\n> Данное сообщение удалено\\n\\n\""
+},
+{
+"check": "deleted notice recognised",
+"observed": "null"
+}
+],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.locale.and_uk",
+"ok": true,
+"checks": 8,
+"passed": 8,
+"failed": [],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.locale.and_us",
+"ok": true,
+"checks": 8,
+"passed": 8,
+"failed": [],
+"notes": [
+"source state=watching"
+],
+"group": "sc_whatsapp.s_locales",
+"secs": 4.7
+},
+{
+"scenario": "wa.people.ios_wrapped_numbers",
+"ok": false,
+"checks": 2,
+"passed": 0,
+"failed": [
+{
+"check": "LRE/PDF-wrapped number recognised",
+"observed": "[]"
+},
+{
+"check": "number with U+2011 non-breaking hyphen gets a phone identifier (UNVERIFIED format)",
+"observed": "[]"
+}
+],
+"notes": [],
+"group": "sc_whatsapp.s_people",
+"secs": 7.6
+},
+{
+"scenario": "wa.people.phone",
+"ok": false,
+"checks": 2,
+"passed": 0,
+"failed": [
+{
+"check": "phone-number sender appears in hit people",
+"observed": "[]"
+},
+{
+"check": "a person entity carries the phone identifier +4915123456789",
+"observed": "[]"
+}
+],
+"notes": [],
+"group": "sc_whatsapp.s_people",
+"secs": 7.6
+},
+{
+"scenario": "wa.private_default",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_privacy",
+"secs": 18.6
+},
+{
+"scenario": "wa.private_off",
+"ok": true,
+"checks": 4,
+"passed": 4,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_privacy",
+"secs": 18.6
+},
+{
+"scenario": "wa.private_toggle",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_privacy",
+"secs": 18.6
+},
+{
+"scenario": "wa.reexport.both_present",
+"ok": true,
+"checks": 3,
+"passed": 3,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_reexport",
+"secs": 19.6
+},
+{
+"scenario": "wa.reexport.message_deleted_on_phone",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_reexport",
+"secs": 19.6
+},
+{
+"scenario": "wa.reexport.old_deleted",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_reexport",
+"secs": 19.6
+},
+{
+"scenario": "wa.remove_purge",
+"ok": true,
+"checks": 2,
+"passed": 2,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_watch_and_remove",
+"secs": 9.2
+},
+{
+"scenario": "wa.retrieve_context_sensitive",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_privacy",
+"secs": 18.6
+},
+{
+"scenario": "wa.settings",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [
+"{\"missing\": \"-32001: WhatsApp export folder /tmp/jj1/messaging/wa_settings/nope does not exist\", \"path_key\": \"-32602: WhatsApp settings: unknown field `path`, expected one of `private`, `since_days`, "
+],
+"group": "sc_whatsapp.s_settings_validation",
+"secs": 0.6
+},
+{
+"scenario": "wa.since_days",
+"ok": true,
+"checks": 1,
+"passed": 1,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_groups_and_filters",
+"secs": 12.6
+},
+{
+"scenario": "wa.watch.new_export",
+"ok": true,
+"checks": 3,
+"passed": 3,
+"failed": [],
+"notes": [],
+"group": "sc_whatsapp.s_watch_and_remove",
+"secs": 9.2
+}
+]
+}

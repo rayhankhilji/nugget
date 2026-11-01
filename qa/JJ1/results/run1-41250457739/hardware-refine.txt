@@ -1,0 +1,9 @@
+part: refine  model: qwen3-4b-q4km
+runner: GitHub Actions 1000013075 (Linux X64)
+commit: 0562be39d65f450588bef51c92275c9ab033f6cc
+2026-10-31T23:07:17Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V74 80-Core Processor
+               total        used        free      shared  buff/cache   available
+Mem:              15           0          13           0           1          14
+Swap:              2           0           2

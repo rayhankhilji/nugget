@@ -1,0 +1,2252 @@
+{
+ "nuggetd": "/home/user/nugget/target/debug/nuggetd",
+ "ran_at": "2026-10-31T23:09:46Z",
+ "passed": 27,
+ "total": 36,
+ "scenarios": [
+  {
+   "scenario": "D1 facet counts",
+   "checks": [
+    {
+     "check": "total equals true count (19)",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "every hit is unique",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind counts",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "source counts",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "people count alice",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "people count bob",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "people count chen",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "people count dana",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "month counts (UTC)",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": true
+  },
+  {
+   "scenario": "D2 own dates, kinds, sensitive",
+   "checks": [
+    {
+     "check": "date of cal/e02.ics is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of cal/e02.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of cal/e02.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of cal/e02.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of notes/long.txt is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of notes/long.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of notes/long.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of notes/long.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m01.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m01.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m01.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m01.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of notes/f01.txt is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of notes/f01.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of notes/f01.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of notes/f01.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of cal/e03.ics is its own date",
+     "ok": false,
+     "detail": "got 2026-04-15T20:00:00Z (extracted), expected 2026-04-16T00:00:00Z"
+    },
+    {
+     "check": "date_source of cal/e03.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of cal/e03.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of cal/e03.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of cal/e01.ics is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of cal/e01.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of cal/e01.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of cal/e01.ics",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of notes/f02.md is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of notes/f02.md",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of notes/f02.md",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of notes/f02.md",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m02.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m02.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m02.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m02.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m03.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m03.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m03.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m03.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m05.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m05.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m05.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m05.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m06.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m06.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m06.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m06.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m07.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m07.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m07.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m07.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m08.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m08.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m08.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m08.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m09.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m09.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m09.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m09.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m10.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m10.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m10.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m10.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of notes/f03.txt is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of notes/f03.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of notes/f03.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of notes/f03.txt",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of mail/m04.eml is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of mail/m04.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of mail/m04.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of mail/m04.eml",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of chat 2026-06 is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of chat 2026-06",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of chat 2026-06",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of chat 2026-06",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date of chat 2026-02 is its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date_source of chat 2026-02",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind of chat 2026-02",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "sensitive flag of chat 2026-02",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": false
+  },
+  {
+   "scenario": "D3 filters and combinations",
+   "checks": [
+    {
+     "check": "filter {\"kinds\": [\"mail\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"mail\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"event\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"event\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"chat\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"chat\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"file\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"file\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"mail\", \"event\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"mail\", \"event\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"sources\": [\"whatsapp-1\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"sources\": [\"whatsapp-1\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"sources\": [\"files-1\", \"whatsapp-1\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"sources\": [\"files-1\", \"whatsapp-1\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"people\": [\"ent_36c43mvwdelmdck7\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"people\": [\"ent_36c43mvwdelmdck7\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"people\": [\"ent_2ux5oxzulddmngpe\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"people\": [\"ent_2ux5oxzulddmngpe\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"people\": [\"ent_hewfdp4v2zyfepjo\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"people\": [\"ent_hewfdp4v2zyfepjo\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"people\": [\"ent_2ux5oxzulddmngpe\", \"ent_hewfdp4v2zyfepjo\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"people\": [\"ent_2ux5oxzulddmngpe\", \"ent_hewfdp4v2zyfepjo\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"mail\"], \"people\": [\"ent_36c43mvwdelmdck7\"]} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"mail\"], \"people\": [\"ent_36c43mvwdelmdck7\"]} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"mail\", \"chat\"], \"sources\": [\"files-1\", \"whatsapp-1\"], \"people\": [\"ent_36c43mvwdelmdck7\"], \"from\": \"2026-02-01\", \"to\": \"2026-06-30\"} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"kinds\": [\"mail\", \"chat\"], \"sources\": [\"files-1\", \"whatsapp-1\"], \"people\": [\"ent_36c43mvwdelmdck7\"], \"from\": \"2026-02-01\", \"to\": \"2026-06-30\"} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"from\": \"2026-03-01\", \"to\": \"2026-03-31\"} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"from\": \"2026-03-01\", \"to\": \"2026-03-31\"} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"from\": \"2026-06-01\"} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"from\": \"2026-06-01\"} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"to\": \"2026-01-31\"} hits",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "filter {\"to\": \"2026-01-31\"} total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "unknown person filter: 0 hits and a 0-count entry",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "unknown source filter: 0 hits and a 0-count entry",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": true
+  },
+  {
+   "scenario": "D4 disjunctive counts",
+   "checks": [
+    {
+     "check": "kind=mail: kind facet still shows other kinds' full counts",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind=mail: source counts are mail-only",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind=mail: Alice count is mail-only (6)",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind=mail: Erin (chat only) is absent",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind=mail+Alice: kind facet counts Alice's items per kind",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "kind=mail+Alice: people facet = mail counts",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "date filter: months facet ignores the date filter",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": true
+  },
+  {
+   "scenario": "D5 date boundaries and offsets",
+   "checks": [
+    {
+     "check": "{\"from\": \"2026-01-31\", \"to\": \"2026-01-31\"} at offset 0",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"from\": \"2026-01-31\", \"to\": \"2026-01-31\"} at offset -300",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"from\": \"2026-01-31\", \"to\": \"2026-01-31\"} at offset 60",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"from\": \"2026-02-01\", \"to\": \"2026-02-01\"} at offset 60",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"from\": \"2026-06-30\", \"to\": \"2026-06-30\"} at offset 0",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"from\": \"2026-07-01\", \"to\": \"2026-07-01\"} at offset 0",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"from\": \"2026-06-30\", \"to\": \"2026-06-30\"} at offset -300",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"kinds\": [\"event\"], \"from\": \"2026-03-01\", \"to\": \"2026-03-01\"} at offset -300",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"kinds\": [\"event\"], \"from\": \"2026-03-01\", \"to\": \"2026-03-01\"} at offset 600",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "{\"kinds\": [\"event\"], \"from\": \"2026-04-16\", \"to\": \"2026-04-16\"} at offset 120",
+     "ok": false,
+     "detail": "got=[] want=['cal/e03.ics']"
+    },
+    {
+     "check": "{\"kinds\": [\"event\"], \"from\": \"2026-04-15\", \"to\": \"2026-04-15\"} at offset -240",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "DST: Berlin user (today +120) filtering 15 Jan sees the 23:30 CET mail",
+     "ok": false,
+     "detail": "got=['mail/m01.eml']"
+    },
+    {
+     "check": "months at -300: 1 Jul 00:00Z counts in June",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "invalid {\"from\": \"2026-03-02\", \"to\": \"2026-03-01\"} offset 0 refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "invalid {\"from\": \"2026-02-30\"} offset 0 refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "invalid {\"to\": \"yesterday\"} offset 0 refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "invalid {} offset 1081 refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "invalid {\"from\": \"2026-1-01\"} offset 0 refused",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": false
+  },
+  {
+   "scenario": "D6 pagination and pool",
+   "checks": [
+    {
+     "check": "quokka paged by 1: same order, no dup/gap",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "quokka paged by 3: same order, no dup/gap",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "quokka paged by 7: same order, no dup/gap",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "wombat: pool 300, pool_limited",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "wombat paged: 300 unique hits, total 300",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "wombat paged by 25 equals paged by 100",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "offset past the end: no hits, total kept",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "limit clamps to 100",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "limit clamps to 100 (wombat)",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "limit=-1 refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "limit='x' refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "limit=1099511627776 refused",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": true
+  },
+  {
+   "scenario": "D7 empty and hostile queries",
+   "checks": [
+    {
+     "check": "empty query '': no hits, no facets",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "empty query '   ': no hits, no facets",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "empty query '\\n\\t': no hits, no facets",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '\"'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '\"\"'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '\"quokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka\"'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '*'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka*'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '*quokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'NEAR'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'NEAR(quokka survey)'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka NEAR survey'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '-'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '-quokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka -survey'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka OR'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'OR'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'AND'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'NOT'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka AND NOT'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '('",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile ')'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka)'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '((quokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile \"'\"",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '\\\\'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'title:quokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'text:quokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '^quokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka:'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '{quokka}'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '[quokka]'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka;DROP TABLE items;--'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '%'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '_'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'kängurú 袋鼠 🦘 quokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'ｑｕｏｋｋａ'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'QUOKKA'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quo\\x00kka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile '\\u202equokka'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka\\u200b'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'aaaaaaaaaaaa... (4096 bytes)'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "hostile 'quokka quokk... (4096 bytes)'",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "query of 4097 bytes refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "query of 6000 bytes refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "daemon alive after hostile queries",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "bad filter {\"kinds\": [\"Mail\"]} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "bad filter {\"kinds\": [\"email\"]} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "bad filter {\"people\": [\"x\", \"x\", \"x\", \"x\", \"x\", \"x\", \"x\", \"x\", \"x\", \"x\" refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "bad filter {\"sources\": [\"ssssssssssssssssssssssssssssssssssssssssssssss refused",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": true
+  },
+  {
+   "scenario": "D8 preview",
+   "checks": [
+    {
+     "check": "preview mail/m01.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m01.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m01.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m01.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m01.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m02.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m02.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m02.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m02.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m02.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m03.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m03.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m03.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m03.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m03.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m04.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m04.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m04.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m04.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m04.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m05.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m05.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m05.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m05.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m05.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m06.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m06.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m06.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m06.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m06.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m07.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m07.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m07.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m07.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m07.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m08.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m08.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m08.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m08.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m08.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m09.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m09.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m09.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m09.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m09.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m10.eml: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m10.eml: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m10.eml: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m10.eml: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview mail/m10.eml: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e01.ics: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e01.ics: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e01.ics: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e01.ics: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e01.ics: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e02.ics: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e02.ics: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e02.ics: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e02.ics: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e02.ics: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e03.ics: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e03.ics: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e03.ics: own date",
+     "ok": false,
+     "detail": "2026-04-15T20:00:00Z vs 2026-04-16T00:00:00Z"
+    },
+    {
+     "check": "preview cal/e03.ics: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview cal/e03.ics: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f01.txt: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f01.txt: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f01.txt: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f01.txt: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f01.txt: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f02.md: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f02.md: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f02.md: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f02.md: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f02.md: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f03.txt: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f03.txt: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f03.txt: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f03.txt: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/f03.txt: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/long.txt: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/long.txt: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/long.txt: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/long.txt: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview notes/long.txt: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-02: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-02: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-02: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-02: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-02: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-06: sensitive label",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-06: ≤ 20,000 chars",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-06: own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-06: no other item's text",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview chat 2026-06: passage is from this item",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "long item: truncated=true, 20,000 chars, marker beyond the cut absent",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "chat preview (June) holds only June messages",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "chunk_id of another (sensitive) item gives no passage",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "unknown chunk_id gives no passage",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "IBAN mail labelled sensitive",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "card-number note labelled sensitive",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview of {\"source\": \"files-1\", \"key\": \"0:nope.txt\"} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview of {\"source\": \"whatsapp-1\", \"key\": \"0:mail/m01.eml\"} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview of {\"source\": \"files-9\", \"key\": \"0:mail/m01.eml\"} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview of {\"source\": \"files-1\", \"key\": \"0:../../etc/passwd\"} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview of {\"source\": \"files-1\", \"key\": \"/etc/passwd\"} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview of {\"source\": \"\", \"key\": \"x\"} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "preview of {\"source\": \"files-1\", \"key\": \"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkk refused",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": false
+  },
+  {
+   "scenario": "D9 timeline",
+   "checks": [
+    {
+     "check": "Alice: every item linked by headers/attendees/chat is in the timeline",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice: no item that does not involve her",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice: the note naming her in its text is in the timeline (guide: 'every item that mentions them')",
+     "ok": false,
+     "detail": "missing=['notes/f02.md']"
+    },
+    {
+     "check": "Alice: events in time order",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m01.eml at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m01.eml sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m05.eml at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m05.eml sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m03.eml at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m03.eml sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m02.eml at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m02.eml sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: cal/e01.ics at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: cal/e01.ics sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: chat 2026-02 at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: chat 2026-02 sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m06.eml at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m06.eml sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: cal/e03.ics at its own date",
+     "ok": false,
+     "detail": "2026-04-15T20:00:00Z vs 2026-04-16T00:00:00Z"
+    },
+    {
+     "check": "Alice timeline: cal/e03.ics sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: chat 2026-06 at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: chat 2026-06 sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m09.eml at its own date",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice timeline: mail/m09.eml sensitive flag",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice: total equals events, not truncated",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice: month counts add up to total",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "limit=3 keeps the newest 3, ascending, truncated, total unchanged",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "limit=3: month counts still cover everything",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "from/to bounds: only events in range, all of them",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "timeline 31 Jan at -300: m02 and m03",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Erin (chat only): both chat months",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "timeline {\"entity\": \"ent_nope\"} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "timeline {\"entity\": \"\"} refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "timeline {\"entity\": \"ent_36c43mvwdelmdck7\", \"from\": \"2026-05-01\", \"to refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "timeline {\"entity\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "info: facts on Alice's timeline",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": false
+  },
+  {
+   "scenario": "D10 restart",
+   "checks": [
+    {
+     "check": "same hits and facets after a daemon restart",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": true
+  },
+  {
+   "scenario": "D12 date phrases in the query",
+   "checks": [
+    {
+     "check": "'quokka in march 2026' keeps March items only",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "'quokka last month' (no items that month): no hits, or the result says the date was not applied",
+     "ok": false,
+     "detail": "total=19, keys=['facets', 'hits', 'pool', 'pool_limited', 'query', 'total']; months=['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']"
+    }
+   ],
+   "pass": false
+  },
+  {
+   "scenario": "D11 removed source",
+   "checks": [
+    {
+     "check": "preview of an item from a removed source is refused",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "removed source gone from hits and source facet",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Alice's timeline drops the removed chats",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Erin (only in removed chats): empty timeline or not found",
+     "ok": true,
+     "detail": null
+    },
+    {
+     "check": "Erin no longer in the people facet",
+     "ok": true,
+     "detail": null
+    }
+   ],
+   "pass": true
+  },
+  {
+   "scenario": "UI A1 query shows results and announces the count",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A1 query shows results and announces the count",
+     "ok": true,
+     "ms": 215,
+     "detail": {
+      "shown": 19,
+      "said": "19 results for “quokka”"
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A2 facet checkbox names carry the daemon's counts (Mail 10, Event 3, File 2+, Chat 2)",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A2 facet checkbox names carry the daemon's counts (Mail 10, Event 3, File 2+, Chat 2)",
+     "ok": true,
+     "ms": 11,
+     "detail": {
+      "kinds": [
+       "Mail, 10 results",
+       "File, 4 results",
+       "Event, 3 results",
+       "Chat, 2 results"
+      ],
+      "people": [
+       "Alice Varga, 10 results",
+       "Example, 10 results",
+       "Dana Ruiz, 6 results",
+       "Chen Li, 6 results",
+       "Bob Okafor, 6 results",
+       "Erin Moss, 2 results"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A3 keyboard only: Tab from the search box to the Mail filter, Space ticks it, results narrow to 10, focus stays",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A3 keyboard only: Tab from the search box to the Mail filter, Space ticks it, results narrow to 10, focus stays",
+     "ok": true,
+     "ms": 508,
+     "detail": {
+      "tabs": 3,
+      "kinds": [
+       "Mail, 10 results",
+       "File, 4 results",
+       "Event, 3 results",
+       "Chat, 2 results"
+      ],
+      "ann": "10 results for “quokka” with 1 filter"
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A4 sensitive items carry a Sensitive badge (IBAN mail only, among mail)",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A4 sensitive items carry a Sensitive badge (IBAN mail only, among mail)",
+     "ok": true,
+     "ms": 4,
+     "detail": [
+      "Quokka survey m04"
+     ]
+    }
+   ]
+  },
+  {
+   "scenario": "UI A5 keyboard: Enter on a result opens the preview with focus on its title; Escape closes and returns focus",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A5 keyboard: Enter on a result opens the preview with focus on its title; Escape closes and returns focus",
+     "ok": true,
+     "ms": 200,
+     "detail": {
+      "region": "region"
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A6 long item preview is cut at 20,000 chars and says so",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A6 long item preview is cut at 20,000 chars and says so",
+     "ok": true,
+     "ms": 422,
+     "detail": {
+      "len": 20000
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A7 Show more pages without duplicates (Show 10, then more)",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A7 Show more pages without duplicates (Show 10, then more)",
+     "ok": true,
+     "ms": 425,
+     "detail": 19
+    }
+   ]
+  },
+  {
+   "scenario": "UI A8 Timeline from the People filter (keyboard): heading focused, Alice's items listed, Back returns to results",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A8 Timeline from the People filter (keyboard): heading focused, Alice's items listed, Back returns to results",
+     "ok": true,
+     "ms": 380,
+     "detail": {
+      "items": 10,
+      "status": "15 events",
+      "sens": 0,
+      "focusAfterBack": {
+       "tag": "H2",
+       "id": "search-results-heading",
+       "label": null,
+       "text": "19 results for “quokka”",
+       "cls": "pg-results-heading"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A9 (expectation, not promised by the guide) Escape in the timeline goes back to results, as in the preview",
+   "pass": false,
+   "checks": [
+    {
+     "check": "A9 (expectation, not promised by the guide) Escape in the timeline goes back to results, as in the preview",
+     "ok": false,
+     "ms": 728,
+     "detail": "Escape does nothing in the timeline"
+    }
+   ]
+  },
+  {
+   "scenario": "UI A10 axe: no serious/critical violations on results+filters, preview, timeline",
+   "pass": false,
+   "checks": [
+    {
+     "check": "A10 axe: no serious/critical violations on results+filters, preview, timeline",
+     "ok": false,
+     "ms": 933,
+     "detail": "[{\"id\":\"label-content-name-mismatch\",\"n\":1,\"t\":[\".btn-primary.btn-small[aria-label=\\\"Open Quokka planning e02\\\"]\"],\"view\":\"preview\"}]"
+    }
+   ]
+  },
+  {
+   "scenario": "UI A11 month bar: picking a month sets From/To to that month and narrows",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A11 month bar: picking a month sets From/To to that month and narrows",
+     "ok": true,
+     "ms": 393,
+     "detail": {
+      "label": "January 2026: 3 results",
+      "from": "2026-01-01"
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A12 save a search (query + Mail filter); stored as a URL-like state",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A12 save a search (query + Mail filter); stored as a URL-like state",
+     "ok": true,
+     "ms": 472,
+     "detail": [
+      {
+       "id": "308c7fb9-ae3a-46d0-9711-a68ad2401613",
+       "name": "Quokka mail",
+       "state": "q=quokka&kind=mail"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "scenario": "UI A13 a query with & = % + and unicode round-trips through a saved search",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A13 a query with & = % + and unicode round-trips through a saved search",
+     "ok": true,
+     "ms": 998,
+     "detail": null
+    }
+   ]
+  },
+  {
+   "scenario": "UI A14 recent searches: listed under an empty box, newest first, with filter count",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A14 recent searches: listed under an empty box, newest first, with filter count",
+     "ok": true,
+     "ms": 636,
+     "detail": {
+      "names": [
+       "Clear recent",
+       "Search again for “wallaby”",
+       "Search again for “R&D=50% + kängurú 袋鼠 #1”",
+       "Search again for “quokka”"
+      ],
+      "raw": [
+       "q=wallaby",
+       "q=R%26D%3D50%25+%2B+k%C3%A4ngur%C3%BA+%E8%A2%8B%E9%BC%A0+%231",
+       "q=quokka"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A15 (observation) a query that is an IBAN is kept in recent searches",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A15 (observation) a query that is an IBAN is kept in recent searches",
+     "ok": true,
+     "ms": 824,
+     "detail": {
+      "stored": true,
+      "raw": [
+       "q=DE89+3704+0044+0532+0130+00",
+       "q=wallaby",
+       "q=R%26D%3D50%25+%2B+k%C3%A4ngur%C3%BA+%E8%A2%8B%E9%BC%A0+%231",
+       "q=quokka"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI A16 hostile saved state in storage (junk kinds, ids, dates, XSS-ish name) is normalized; page works",
+   "pass": true,
+   "checks": [
+    {
+     "check": "A16 hostile saved state in storage (junk kinds, ids, dates, XSS-ish name) is normalized; page works",
+     "ok": true,
+     "ms": 285,
+     "detail": null
+    }
+   ]
+  },
+  {
+   "scenario": "UI A17 a stored state with an impossible date (to=2026-02-30) is dropped or clamped, not sent to the daemon",
+   "pass": false,
+   "checks": [
+    {
+     "check": "A17 a stored state with an impossible date (to=2026-02-30) is dropped or clamped, not sent to the daemon",
+     "ok": false,
+     "ms": 1645,
+     "detail": "{\"calls\":[{\"ok\":false,\"code\":-32602,\"message\":\"filters.to: expected a date as YYYY-MM-DD, got \\\"2026-02-30\\\"\"}],\"shown\":0,\"err\":\"filters.to: expected a date as YYYY-MM-DD, got \\\"2026-02-30\\\"RetryDetails(code -32602)\"}"
+    }
+   ]
+  },
+  {
+   "scenario": "UI A18 DST: a New York user (EDT today) filtering 31 Jan sees the mail sent 23:30 EST on 31 Jan, which the list itself dates 31 Jan",
+   "pass": false,
+   "checks": [
+    {
+     "check": "A18 DST: a New York user (EDT today) filtering 31 Jan sees the mail sent 23:30 EST on 31 Jan, which the list itself dates 31 Jan",
+     "ok": false,
+     "ms": 2608,
+     "detail": "{\"shownDate\":\"Jan 31, 2026\",\"offsetSent\":-240,\"titles\":[\"Quokka survey m03\"]}"
+    }
+   ]
+  },
+  {
+   "scenario": "UI B1 after a daemon restart and a new browser context, saved searches are listed (page + sidebar)",
+   "pass": true,
+   "checks": [
+    {
+     "check": "B1 after a daemon restart and a new browser context, saved searches are listed (page + sidebar)",
+     "ok": true,
+     "ms": 12,
+     "detail": null
+    }
+   ]
+  },
+  {
+   "scenario": "UI B2 running the saved search restores query and Mail filter (10 results)",
+   "pass": true,
+   "checks": [
+    {
+     "check": "B2 running the saved search restores query and Mail filter (10 results)",
+     "ok": true,
+     "ms": 73,
+     "detail": null
+    }
+   ]
+  },
+  {
+   "scenario": "UI B3 recent searches survive (newest first)",
+   "pass": true,
+   "checks": [
+    {
+     "check": "B3 recent searches survive (newest first)",
+     "ok": true,
+     "ms": 37,
+     "detail": [
+      "q=quokka&kind=mail",
+      "q=quokka&kind=chat",
+      "q=DE89+3704+0044+0532+0130+00",
+      "q=wallaby",
+      "q=R%26D%3D50%25+%2B+k%C3%A4ngur%C3%BA+%E8%A2%8B%E9%BC%A0+%231",
+      "q=quokka"
+     ]
+    }
+   ]
+  },
+  {
+   "scenario": "UI B4 Clear recent empties the list, announces it, and stays cleared after a reload",
+   "pass": true,
+   "checks": [
+    {
+     "check": "B4 Clear recent empties the list, announces it, and stays cleared after a reload",
+     "ok": true,
+     "ms": 620,
+     "detail": {
+      "ann": "Recent searches cleared",
+      "focus": {
+       "tag": "INPUT",
+       "id": "search-q",
+       "label": null,
+       "text": "",
+       "cls": ""
+      }
+     }
+    }
+   ]
+  },
+  {
+   "scenario": "UI B5 saved search deleted from the Search page stays deleted after reload",
+   "pass": true,
+   "checks": [
+    {
+     "check": "B5 saved search deleted from the Search page stays deleted after reload",
+     "ok": true,
+     "ms": 112,
+     "detail": null
+    }
+   ]
+  },
+  {
+   "scenario": "UI B6 no failed search commands, no page errors",
+   "pass": true,
+   "checks": [
+    {
+     "check": "B6 no failed search commands, no page errors",
+     "ok": true,
+     "ms": 0,
+     "detail": null
+    }
+   ]
+  }
+ ]
+}
