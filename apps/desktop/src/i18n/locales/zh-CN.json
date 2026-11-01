@@ -2120,5 +2120,8 @@
   "searchui.savedDeleted": "已删除保存的搜索“{name}”",
   "searchui.recentCleared": "已清除最近的搜索",
   "searchui.recentWithFilters": "{query} · {n, plural, other {# 个筛选}}",
-  "searchui.resultsFiltered": "“{query}”的结果：{n, plural, other {# 条}}（{filters, plural, other {# 个筛选}}）"
+  "searchui.resultsFiltered": "“{query}”的结果：{n, plural, other {# 条}}（{filters, plural, other {# 个筛选}}）",
+  "doubletap.overlay.refineMissed": "这次未能做出该修改。这是最接近的草稿。",
+  "doubletap.error.field_changed": "光标移到了另一个字段，因此未插入任何内容。草稿已复制到剪贴板。",
+  "doubletap.error.field_changed_no_copy": "光标移到了另一个字段，因此未插入任何内容。可在 Double Tap 页面的“最近的草稿”中找到草稿。"
 }

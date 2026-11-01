@@ -2120,5 +2120,8 @@
   "searchui.savedDeleted": "Recherche enregistrée « {name} » supprimée",
   "searchui.recentCleared": "Historique des recherches effacé",
   "searchui.recentWithFilters": "{query} · {n, plural, one {# filtre} other {# filtres}}",
-  "searchui.resultsFiltered": "{n, plural, one {# résultat} other {# résultats}} pour « {query} » avec {filters, plural, one {# filtre} other {# filtres}}"
+  "searchui.resultsFiltered": "{n, plural, one {# résultat} other {# résultats}} pour « {query} » avec {filters, plural, one {# filtre} other {# filtres}}",
+  "doubletap.overlay.refineMissed": "Cette modification n'a pas pu être faite cette fois. Voici le brouillon le plus proche.",
+  "doubletap.error.field_changed": "Le curseur est passé dans un autre champ : rien n'a été inséré. Le brouillon est dans le presse-papiers.",
+  "doubletap.error.field_changed_no_copy": "Le curseur est passé dans un autre champ : rien n'a été inséré. Retrouvez le brouillon dans Brouillons récents, sur la page Double Tap."
 }

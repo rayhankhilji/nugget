@@ -620,6 +620,9 @@
     "updates.ask.title",
     "updates.ask.body",
     "updates.ask.stable",
-    "updates.ask.chosen"
+    "updates.ask.chosen",
+    "doubletap.overlay.refineMissed",
+    "doubletap.error.field_changed",
+    "doubletap.error.field_changed_no_copy"
   ]
 }

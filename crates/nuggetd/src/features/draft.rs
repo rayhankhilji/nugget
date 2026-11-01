@@ -119,6 +119,7 @@ const METHODS: &[&str] = &[
     DRAFT_PREWARM,
     method::DRAFT_READ_AHEAD,
     method::DRAFT_READ_AHEAD_CANCEL,
+    method::DRAFT_CHECK_SENSITIVE,
 ];
 
 /// How long `draft.read_ahead` waits for the read-ahead before answering `{"started": true}`
@@ -474,8 +475,25 @@ impl Feature for DraftFeature {
             DRAFT_PREWARM => self.prewarm(parse_params(params)?),
             method::DRAFT_READ_AHEAD => self.read_ahead(parse_params(params)?).await,
             method::DRAFT_READ_AHEAD_CANCEL => Ok(self.read_ahead_cancel()),
+            method::DRAFT_CHECK_SENSITIVE => {
+                let check: nugget_core::ipc::SensitiveCheck = parse_params(params)?;
+                to_result(sensitive_verdict(&check.text))
+            }
             other => Err(RpcError::method_not_found(other)),
         }
+    }
+}
+
+/// Longest text `draft.check_sensitive` scans; anything longer is answered sensitive (the
+/// desktop keeps no draft that long anyway).
+const CHECK_SENSITIVE_MAX_BYTES: usize = 64 * 1024;
+
+/// II3 `draft.check_sensitive`: the ingest PII scan (cards, IBANs, SSNs, API keys and other
+/// credentials), the same one that marks items sensitive. Answers only a flag; logs nothing.
+fn sensitive_verdict(text: &str) -> nugget_core::ipc::SensitiveVerdict {
+    nugget_core::ipc::SensitiveVerdict {
+        sensitive: text.len() > CHECK_SENSITIVE_MAX_BYTES
+            || !nugget_ingest::scan_pii(text).is_empty(),
     }
 }
 
@@ -1119,5 +1137,25 @@ mod tests {
         assert_eq!(e.code, code::INVALID_PARAMS);
         assert_eq!(e.data, Some(json!({"refused": "terminal"})));
         assert_eq!(disabled_error().data, Some(json!({"refused": "disabled"})));
+    }
+
+    #[test]
+    fn check_sensitive_flags_what_the_history_must_not_keep() {
+        for secret in [
+            "Bitte überweise an DE89 3704 0044 0532 0130 00",
+            "My SSN is 123-45-6789",
+            "use sk-live-4eC39HqLyjWDarjtT1zdp7dc to call it",
+            "AKIAIOSFODNN7EXAMPLE is the key id",
+            "My card is 4111 1111 1111 1111",
+        ] {
+            assert!(sensitive_verdict(secret).sensitive, "{secret}");
+        }
+        for fine in [
+            "Thanks, see you at noon in the lobby.",
+            "Call me at 555-0100 on Friday",
+        ] {
+            assert!(!sensitive_verdict(fine).sensitive, "{fine}");
+        }
+        assert!(sensitive_verdict(&"a".repeat(CHECK_SENSITIVE_MAX_BYTES + 1)).sensitive);
     }
 }

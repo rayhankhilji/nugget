@@ -88,6 +88,9 @@ pub mod method {
     pub const DRAFT_BEGIN: &str = "draft.begin";
     pub const DRAFT_CANCEL: &str = "draft.cancel";
     pub const DRAFT_FEEDBACK: &str = "draft.feedback";
+    /// II3: whether a text holds something sensitive (the ingest PII scan: cards, IBANs, SSNs,
+    /// credentials). The desktop asks before keeping a draft in its history.
+    pub const DRAFT_CHECK_SENSITIVE: &str = "draft.check_sensitive";
     /// Sent when the trigger fires, before `draft.begin`: warm the provider, retrieval and voice.
     pub const DRAFT_PREWARM: &str = "draft.prewarm";
     /// Sent while a reply field keeps focus (Double Tap read-ahead, local providers only):
@@ -1078,6 +1081,18 @@ pub struct DraftFeedback {
     /// Whether insertion was verified by reading the field back.
     #[serde(default)]
     pub insert_verified: Option<bool>,
+}
+
+/// `draft.check_sensitive` params (II3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SensitiveCheck {
+    pub text: String,
+}
+
+/// `draft.check_sensitive` result (II3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SensitiveVerdict {
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
