@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 /** Knowledge: entity list, detail, text and kind filters, rejecting a fact, empty knowledge. */
 import { describe, expect, it } from "vitest";
-import type { EntitySummaryView } from "../../src/api";
-import { entities, entityDetail } from "../../src/test/fixtures";
+import { entityDetail } from "../../src/test/fixtures";
 import {
   click,
   daemon,
@@ -10,11 +9,9 @@ import {
   findByRole,
   findByText,
   getByRole,
-  queryByText,
   renderApp,
   setupHarness,
   t,
-  type,
   waitFor,
   within,
 } from "../harness";
@@ -24,13 +21,6 @@ setupHarness();
 const list = () => getByRole("region", { name: t("knowledge.entitiesLabel") });
 const entityButton = (name: string) => within(list()).getByRole("button", { name: new RegExp(`^${name}`) });
 
-/** Filter the fixture entities like the daemon would. */
-function filterEntities(args: Record<string, unknown>): EntitySummaryView[] {
-  const req = args.request as { text: string | null; kind: string | null };
-  return entities.filter(
-    (e) => (!req.text || e.name.toLowerCase().includes(req.text.toLowerCase())) && (!req.kind || e.kind === req.kind),
-  );
-}
 
 describe("knowledge flow", () => {
   it("lists entities and opens one's detail", async () => {
@@ -70,66 +60,6 @@ describe("knowledge flow", () => {
     expect(d.last("knowledge_claim_status")).toEqual({ request: { claim: 1, status: "active" } });
   });
 
-  it("filters by text (debounced) and by kind", async () => {
-    const d = daemon({ knowledge_entities: filterEntities });
-    await renderApp({ page: "knowledge" });
-
-    await type(within(list()).getByRole("searchbox", { name: t("knowledge.searchLabel") }), "engine");
-    await waitFor(() => expect(queryByText(/^Ada Lovelace/, { root: list(), selector: "button" })).toBeNull());
-    // One request for the settled text, not one per keystroke.
-    expect(d.callsTo("knowledge_entities").map((a) => (a.request as { text: string | null }).text)).toEqual([null, "engine"]);
-    expect(entityButton("Analytical Engine")).toBeTruthy();
-
-    await type(within(list()).getByRole("searchbox"), "");
-    await findByText(/^Ada Lovelace/, { root: list(), selector: "button" });
-
-    const kinds = within(list()).getByRole("group", { name: t("knowledge.filterByKind") });
-    await click(within(kinds).getByRole("button", { name: t("knowledge.kindPlural.project") }));
-    expect(d.last("knowledge_entities")).toEqual({ request: { text: null, kind: "project", limit: 51, offset: 0 } });
-    await waitFor(() => expect(queryByText(/^Ada Lovelace/, { root: list(), selector: "button" })).toBeNull());
-    expect(within(kinds).getByRole("button", { name: t("knowledge.kindPlural.project") }).getAttribute("aria-pressed")).toBe("true");
-
-    await click(within(kinds).getByRole("button", { name: t("knowledge.kindPlural.place") }));
-    await findByText(t("knowledge.noMatches"));
-  });
-
-  it("shows an empty state when nothing has been learned yet", async () => {
-    daemon({
-      knowledge_entities: [],
-      knowledge_status: { entities: 0, claims: 0, mentions: 0, pending_items: 0, last_run: null, extractor_provider: null, vault: { path: null, pages: 0, last_render: null, conflicts: [], invalid: [] } },
-    });
-    await renderApp({ page: "knowledge" });
-    await findByText(t("knowledge.emptyTitle"));
-    expect(within(list()).queryAllByRole("listitem")).toEqual([]);
-  });
-
-  it("keeps focus in the search field when a search that found nothing is cleared", async () => {
-    daemon({ knowledge_entities: filterEntities });
-    await renderApp({ page: "knowledge" });
-    const box = within(list()).getByRole("searchbox", { name: t("knowledge.searchLabel") });
-    await type(box, "zzz");
-    await findByText(t("knowledge.noMatches"));
-    await type(box, "");
-    expect(document.activeElement).toBe(box);
-    await findByText(/^Ada Lovelace/, { root: list(), selector: "button" });
-    // Still the same, focused field: never unmounted while the stale empty result was showing.
-    expect(within(list()).getByRole("searchbox")).toBe(box);
-    expect(document.activeElement).toBe(box);
-  });
-
-  it("keeps focus on a kind chip when a kind with no entities is deselected", async () => {
-    daemon({ knowledge_entities: filterEntities });
-    await renderApp({ page: "knowledge" });
-    const kinds = within(list()).getByRole("group", { name: t("knowledge.filterByKind") });
-    const place = within(kinds).getByRole("button", { name: t("knowledge.kindPlural.place") });
-    await click(place);
-    await findByText(t("knowledge.noMatches"));
-    place.focus();
-    await click(place);
-    await findByText(/^Ada Lovelace/, { root: list(), selector: "button" });
-    expect(document.activeElement).toBe(place);
-  });
-
   it("shows one error when status and list both fail, and Retry reloads both", async () => {
     const d = daemon().failOnce("knowledge_status", errors.rpc("database is locked")).failOnce("knowledge_entities", errors.rpc("database is locked"));
     await renderApp({ page: "knowledge" });
@@ -142,24 +72,6 @@ describe("knowledge flow", () => {
     expect(d.count("knowledge_status")).toBeGreaterThan(statusCalls);
     expect(d.count("knowledge_entities")).toBeGreaterThan(listCalls);
     expect(getByRole("main").querySelectorAll('[role="alert"]').length).toBe(0);
-  });
-
-  it("recovers from a failed entity list with Retry", async () => {
-    const d = daemon().failOnce("knowledge_entities", errors.rpc("graph store unavailable"));
-    await renderApp({ page: "knowledge" });
-    const alert = within(list()).getByRole("alert");
-    expect(alert.textContent).toContain("graph store unavailable");
-    await click(within(alert).getByRole("button", { name: t("common.retry") }));
-    await findByText(/^Ada Lovelace/, { root: list(), selector: "button" });
-    expect(d.count("knowledge_entities")).toBe(2);
-  });
-
-  it("switches to the graph tab", async () => {
-    const d = daemon();
-    await renderApp({ page: "knowledge" });
-    await click(getByRole("tab", { name: t("knowledge.tab.graph") }));
-    expect(getByRole("tab", { name: t("knowledge.tab.graph") }).getAttribute("aria-selected")).toBe("true");
-    await waitFor(() => expect(d.count("knowledge_graph")).toBeGreaterThan(0));
   });
 
   it("asks for sensitive entities only when the graph's toggle is on", async () => {

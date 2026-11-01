@@ -110,7 +110,7 @@ export function Facets({
           {facets.people.map((f) => (
             <div key={f.value} className="sr-facet-row">
               <Check label={f.name} count={f.count} checked={state.people.includes(f.value)} onChange={(on) => set((s) => ({ people: toggle(s.people, f.value, on) }))} />
-              {/* JJ2: an icon, so the row fits the filter column in every language; the name says what it does. */}
+              {/* An icon, so the row fits the filter column in every language; the name says what it does. */}
               <button
                 type="button"
                 className="btn btn-ghost btn-small btn-icon sr-facet-tl"

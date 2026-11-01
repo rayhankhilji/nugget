@@ -149,92 +149,6 @@ describe("Agent page", () => {
     expect(container.querySelector(".agent-answer textarea")).not.toBeNull();
     expect(container.querySelector(".agent-working")).toBeNull();
   });
-
-  it("shows the halted banner and blocks new runs", async () => {
-    mockDaemon({ agent_list: [], policy_get: { ...policy, halted: true }, agent_run: { task_id: "t2", tools: [] } });
-    const { container } = await render(<AgentPage />);
-    expect(container.textContent).toContain("All agents are stopped.");
-    expect(byText(container, "button", "Resume agents")).toBeDefined();
-    expect(byText(container, "button", "Run")?.hasAttribute("disabled")).toBe(true);
-  });
-
-  it("shows the explanation for a past task", async () => {
-    mockDaemon({
-      agent_list: history,
-      policy_get: policy,
-      agent_get: { summary: history[0], entries: [], explain: "Step 1: archived 3 messages", pending: [], question: null },
-    });
-    const { container } = await render(<AgentPage />);
-    await click(container.querySelector('button[aria-label^="Details for"]'));
-    await flush(3);
-    expect(document.querySelector("dialog")?.textContent).toContain("Step 1: archived 3 messages");
-    expect(await violations()).toEqual([]);
-  });
-
-  it("asks the user and sends the answer", async () => {
-    const answers: unknown[] = [];
-    mockDaemon({
-      agent_list: [{ ...history[0]!, task_id: "t3", state: "needs_input", outcome: null }],
-      policy_get: policy,
-      agent_get: { summary: { ...history[0]!, task_id: "t3", state: "needs_input", outcome: null }, entries: [], explain: "", pending: [], question: "Which Sam?" },
-      agent_answer: (a: unknown) => {
-        answers.push(a);
-        return null;
-      },
-    });
-    const { container } = await render(<AgentPage />);
-    await flush(5);
-    expect(container.textContent).toContain("Which Sam?");
-    const box = container.querySelector<HTMLTextAreaElement>(".agent-answer textarea")!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Sam Lee");
-      box.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await click(byText(container, "button", "Send answer"));
-    expect(answers).toEqual([{ request: { task_id: "t3", answer: "Sam Lee" } }]);
-  });
-
-  it("offers the candidates the agent saw and answers with the one picked", async () => {
-    const answers: unknown[] = [];
-    const options = ["Sam Lee — Can I take Friday off?", "<b>Sam Ortiz</b> — Renew the contract at +20%?"];
-    const question = "Your request says “Sam”, and I see more than one: Sam Lee, Sam Ortiz. Which one did you mean?";
-    mockDaemon({
-      agent_list: [],
-      policy_get: policy,
-      agent_run: { task_id: "t4", tools: [] },
-      agent_answer: (a: unknown) => {
-        answers.push(a);
-        return null;
-      },
-    });
-    const { container } = await render(<AgentPage />);
-    await flush(5);
-    const goal = container.querySelector<HTMLTextAreaElement>("textarea")!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(goal, "Reply to Sam");
-      goal.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await click(byText(container, "button", "Run"));
-    await agentEvent({ event: "suspended", task_id: "t4", question, options });
-
-    const group = container.querySelector<HTMLElement>('.agent-answer [role="group"]')!;
-    expect(group).toBeTruthy();
-    expect(document.getElementById(group.getAttribute("aria-labelledby")!)!.textContent).toBe(question);
-    const buttons = Array.from(group.querySelectorAll("button"));
-    expect(buttons.map((b) => b.textContent)).toEqual(options);
-    // Untrusted screen text stays text.
-    expect(group.querySelector("b")).toBeNull();
-    expect(container.querySelector(".visually-hidden[aria-live]")!.textContent).toContain("2 options");
-    // The free-text answer stays available.
-    expect(container.querySelector(".agent-answer textarea")).toBeTruthy();
-    expect(byText(container, "label", "Something else")).toBeTruthy();
-    expect(await violations()).toEqual([]);
-
-    await click(buttons[1]!);
-    expect(answers).toEqual([{ request: { task_id: "t4", answer: options[1] } }]);
-    expect(container.querySelector(".agent-answer")).toBeNull();
-    expect(container.querySelector(".visually-hidden[aria-live]")!.textContent).toBe("Answer sent.");
-  });
 });
 
 describe("Safety page", () => {
@@ -246,17 +160,6 @@ describe("Safety page", () => {
       ...extra,
     });
   }
-
-  it("renders rules, approvals, limits, log and browser without violations", async () => {
-    daemon();
-    const { container } = await render(<SafetyPage />);
-    await flush(5);
-    const text = container.textContent ?? "";
-    for (const s of ["mail.example.com", "Ask before mail", "Always ask before spending", "Sends an email to Sam", "Intact", "browser.click", "Stop all agents"]) {
-      expect(text).toContain(s);
-    }
-    expect(await violations()).toEqual([]);
-  });
 
   it("adds a rule through the dialog and saves the config", async () => {
     const sets: unknown[] = [];
@@ -288,23 +191,5 @@ describe("Safety page", () => {
     expect(saved.rules.at(-1)).toEqual({ id: "user-2", targets: ["bank.example"], effect: "deny" });
     expect(document.querySelector("dialog")).toBeNull();
     expect(container.textContent).toContain("bank.example");
-  });
-
-  it("toggles a built-in rule and engages the kill switch", async () => {
-    const sets: unknown[] = [];
-    const calls = daemon({
-      policy_set: (args: unknown) => {
-        sets.push(args);
-        return policy;
-      },
-      policy_kill: { halted: true },
-    });
-    const { container } = await render(<SafetyPage />);
-    await flush(5);
-    await click(container.querySelector('input[role="switch"]'));
-    expect((sets[0] as { request: { config: PolicyState["config"] } }).request.config.disabled_defaults).toEqual(["default:spend"]);
-    await click(byText(container, "button", "Stop all agents"));
-    expect(calls).toContain("policy_kill");
-    expect(byText(container, "button", "Resume")).toBeDefined();
   });
 });

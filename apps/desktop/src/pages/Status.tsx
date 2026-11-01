@@ -52,7 +52,7 @@ export function StatusPage() {
     }, 10_000);
     return () => window.clearInterval(timer);
   }, [reload, reloadIngest, reloadRuntime, reloadKnowledge, ingestMissing, runtimeMissing, knowledgeMissing]);
-  // KK1: while a model warms up or waits to restart, follow it closely (elapsed time, retry).
+  // While a model warms up or waits to restart, follow it closely (elapsed time, retry).
   const runtimeBusy = (runtime.data ?? []).some((r) => r.state === "starting" || r.state === "stopping" || (r.state === "failed" && (r.retry_in_ms ?? 0) > 0));
   useEffect(() => {
     if (!runtimeBusy || runtimeMissing) return;
@@ -214,7 +214,7 @@ export function StatusPage() {
   );
 }
 
-/** KK1: a full or nearly full data disk (GG6-25), in plain words; nothing when there is room. */
+/** A full or nearly full data disk, in plain words; nothing when there is room. */
 function DiskNote({ disk }: { disk: DiskStatus | null | undefined }) {
   const t = useT();
   // Unknown levels (a newer daemon) show nothing rather than a false alarm.
@@ -335,7 +335,7 @@ function ProviderRow({ provider: p, onProbed }: { provider: ProviderInfo; onProb
   );
 }
 
-// ---- indexing (M1) ----
+// ---- indexing ----
 
 function IndexingCard({
   data,
@@ -407,7 +407,7 @@ function IndexingCard({
                   <dt>{t("status.triage")}</dt>
                   <dd className="stat-text">
                     {(() => {
-                      // JJ2: on (provider and what it is doing) or off (and what that means for privacy).
+                      // On (provider and what it is doing) or off (and what that means for privacy).
                       const line = triageLine(data.triage_provider, data.triage);
                       return (
                         <>
@@ -452,7 +452,7 @@ function IndexingCard({
   );
 }
 
-// ---- local runtime (M1) ----
+// ---- local runtime ----
 
 const RUNTIME_STATE: Record<RuntimeState, { label: MessageKey; tone: "neutral" | "accent" | "good" | "warn" | "bad" }> = {
   not_installed: { label: "status.runtime.not_installed", tone: "neutral" },
@@ -463,12 +463,12 @@ const RUNTIME_STATE: Record<RuntimeState, { label: MessageKey; tone: "neutral" |
   failed: { label: "status.runtime.failed", tone: "bad" },
 };
 
-/** KK1: what a starting or failed local model is doing, with Retry and the server's last words. */
+/** What a starting or failed local model is doing, with Retry and the server's last words. */
 function RuntimeStateNote({ r, rowId, onChanged }: { r: RuntimeInfo; rowId: string; onChanged: () => void }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
-  // LL2: Retry goes away once the model starts again; keep keyboard focus on its row.
+  // Retry goes away once the model starts again; keep keyboard focus on its row.
   const retryRef = useRef<HTMLButtonElement>(null);
   const hadFocus = useRef(false);
   useEffect(() => {
@@ -562,7 +562,7 @@ function RuntimeCard({
   offerModels?: boolean;
 }) {
   const t = useT();
-  // LL2: say when a local model becomes ready or fails (the page polls; nothing else would).
+  // Say when a local model becomes ready or fails (the page polls; nothing else would).
   // Ready, and the first failure since the model was last ready: a crash loop's restarts are
   // shown on the card, not read out on every cycle.
   const seen = useRef<Map<string, RuntimeState> | null>(null);
@@ -654,7 +654,7 @@ function RuntimeCard({
   );
 }
 
-// ---- knowledge graph (M2) ----
+// ---- knowledge graph ----
 
 function KnowledgeCard({
   data,

@@ -407,7 +407,7 @@ function CardItem({
   const why = topFactors(card.factors);
   const summary = card.summary?.trim();
   const people = card.people ?? [];
-  // LL2 (GG7-11): ISO dates inside the daemon's text, written for the reader's locale.
+  // ISO dates inside the daemon's text, written for the reader's locale.
   const title = formatDatesInText(card.title);
 
   return (

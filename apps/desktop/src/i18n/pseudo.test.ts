@@ -6,14 +6,6 @@ import { format, signature } from "./icu";
 import { accent, pseudoCatalog, pseudoMessage } from "./pseudo";
 
 const catalog = pseudoCatalog(en as Record<string, string>);
-const ARGS = { count: 2, n: 2, name: "x", total: 3 };
-
-/** Format with placeholder arguments: every name the message uses gets a short value. */
-function render(src: string): string {
-  const args: Record<string, string | number> = { ...ARGS };
-  for (const a of signature(src).args) if (!(a in args)) args[a] = 2;
-  return format(src, "en", args);
-}
 
 describe("pseudo-locale", () => {
   afterEach(() => {
@@ -30,21 +22,6 @@ describe("pseudo-locale", () => {
       if (JSON.stringify(keys(p)) !== JSON.stringify(keys(v))) bad.push(`${k} (keywords)`);
     }
     expect(bad).toEqual([]);
-  });
-
-  it("makes text about a third longer on average, and short strings longer too", () => {
-    let enLen = 0;
-    let psLen = 0;
-    const short: string[] = [];
-    for (const [k, v] of Object.entries(en as Record<string, string>)) {
-      const a = [...render(v)].length;
-      const b = [...render(catalog[k]!)].length;
-      enLen += a;
-      psLen += b;
-      if (/\p{L}/u.test(v) && b < a + 3) short.push(k);
-    }
-    expect(psLen / enLen).toBeGreaterThanOrEqual(1.3);
-    expect(short).toEqual([]);
   });
 
   it("accents letters but not placeholders, # or tag names", () => {

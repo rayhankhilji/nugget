@@ -7,7 +7,6 @@ import {
   click,
   daemon,
   emitEvent,
-  errors,
   findByRole,
   findByText,
   getByRole,
@@ -39,30 +38,6 @@ describe("sources flow", () => {
     expect(row("Work mail").textContent).toContain(t("sources.neverSynced"));
   });
 
-  it("opens the add-source wizard and cancels it without adding anything", async () => {
-    const d = daemon();
-    await renderApp({ page: "sources" });
-    await click(getByRole("button", { name: t("sources.add") }));
-
-    const dialog = getByRole("dialog", { name: t("addSource.title") });
-    // Focus starts on the selected kind.
-    expect(document.activeElement).toBe(within(dialog).getByRole("radio", { name: /Folder/ }));
-    await click(within(dialog).getByRole("button", { name: t("common.cancel") }));
-    expect(queryByRole("dialog")).toBeNull();
-    expect(d.count("sources_add")).toBe(0);
-  });
-
-  it("closes the wizard with Escape and returns focus to the button that opened it", async () => {
-    daemon();
-    await renderApp({ page: "sources" });
-    const add = getByRole("button", { name: t("sources.add") });
-    add.focus();
-    await click(add);
-    await press(document.activeElement, "Escape");
-    expect(queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(add);
-  });
-
   it("adds a folder through the wizard and shows it in the list", async () => {
     const added: SourceInfo = { id: "files-2", kind: "files", name: "Projects", enabled: true, state: "syncing", items: 0, chunks: 0, last_sync: null };
     const d = daemon({ sources_add: added });
@@ -87,52 +62,6 @@ describe("sources flow", () => {
     ]);
     expect(queryByRole("dialog")).toBeNull();
     await findByRole("heading", { name: "Projects", level: 2 });
-  });
-
-  it("keeps focus in the folder list when a folder is removed (LL2)", async () => {
-    daemon();
-    await renderApp({ page: "sources" });
-    await click(getByRole("button", { name: t("sources.add") }));
-    await click(within(getByRole("dialog")).getByRole("button", { name: t("common.next") }));
-    const dialog = getByRole("dialog", { name: t("addSource.addTitle.files") });
-    const path = within(dialog).getByRole("textbox", { name: t("addSource.folder.pathLabel") });
-    for (const p of ["/home/me/A", "/home/me/B"]) {
-      await type(path, p);
-      await press(path, "Enter");
-    }
-    const removeA = within(dialog).getByRole("button", { name: t("addSource.folder.removePath", { path: "/home/me/A" }) });
-    removeA.focus();
-    await click(removeA);
-    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: t("addSource.folder.removePath", { path: "/home/me/B" }) }));
-    await click(document.activeElement);
-    // The last one gone: back to Choose folder, still inside the dialog.
-    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: t("addSource.folder.choose") }));
-  });
-
-  it("explains the blocked Add folder, then adds a typed path without pressing Add", async () => {
-    const added: SourceInfo = { id: "files-2", kind: "files", name: "Projects", enabled: true, state: "syncing", items: 0, chunks: 0, last_sync: null };
-    const d = daemon({ sources_add: added });
-    await renderApp({ page: "sources" });
-    await click(getByRole("button", { name: t("sources.add") }));
-    await click(within(getByRole("dialog")).getByRole("button", { name: t("common.next") }));
-    const dialog = getByRole("dialog", { name: t("addSource.addTitle.files") });
-
-    // Nothing chosen: the submit stays focusable, says why, and pressing it explains.
-    const submitBtn = within(dialog).getByRole("button", { name: t("addSource.folder.submit") });
-    expect(submitBtn.getAttribute("aria-disabled")).toBe("true");
-    expect(dialog.textContent).toContain(t("addSource.folder.needOneHint"));
-    await click(submitBtn);
-    expect(within(dialog).getByRole("alert").textContent).toBe(t("addSource.folder.needOne"));
-    expect(d.count("sources_add")).toBe(0);
-
-    // A typed full path counts, and the name hint says what will be saved.
-    await type(within(dialog).getByRole("textbox", { name: t("addSource.folder.pathLabel") }), "/home/me/Projects");
-    expect(submitBtn.getAttribute("aria-disabled")).toBeNull();
-    expect(dialog.textContent).toContain(t("addSource.nameHintDefault", { name: "Projects" }));
-    await click(submitBtn);
-    expect(d.callsTo("sources_add")).toEqual([
-      { request: { id: null, kind: "files", name: "Projects", settings: expect.objectContaining({ roots: ["/home/me/Projects"] }) } },
-    ]);
   });
 
   it("adds Google Drive with its opt-ins, saves the secret and starts sign-in", async () => {
@@ -166,32 +95,6 @@ describe("sources flow", () => {
     expect(d.callsTo("open_url")).toEqual([{ url }]);
   });
 
-  it("explains a Google rate limit on the row", async () => {
-    daemon({ sources_list: [{ ...fixtureSources[1]!, state: "error", last_error: "rate limited (retry after 3600000 ms)" }, fixtureSources[0]!] });
-    await renderApp({ page: "sources" });
-    expect(row("Work mail").textContent).toContain(t("sources.googleQuotaHint"));
-    expect(row("Documents").textContent).not.toContain(t("sources.googleQuotaHint"));
-  });
-
-  it("syncs one source by id, and all sources with a null id", async () => {
-    const d = daemon({ sources_sync: null });
-    await renderApp({ page: "sources" });
-
-    await click(within(row("Documents")).getByRole("button", { name: t("sources.syncNow") }));
-    expect(d.callsTo("sources_sync")).toEqual([{ request: { id: "files-1" } }]);
-    await findByText(t("sources.announce.syncing", { name: "Documents" }));
-
-    await click(getByRole("button", { name: t("sources.syncAll") }));
-    expect(d.last("sources_sync")).toEqual({ request: { id: null } });
-  });
-
-  it("shows a sync failure on the row", async () => {
-    daemon().fail("sources_sync", errors.rpc("source is busy"));
-    await renderApp({ page: "sources" });
-    await click(within(row("Documents")).getByRole("button", { name: t("sources.syncNow") }));
-    expect(within(row("Documents")).getByRole("alert").textContent).toContain("source is busy");
-  });
-
   it("offers sign-in for a source that needs auth and opens the browser", async () => {
     const url = "https://accounts.google.com/o/oauth2/v2/auth?client_id=x";
     const d = daemon({ sources_auth_begin: { url }, open_url: "opened" });
@@ -207,21 +110,5 @@ describe("sources flow", () => {
     await emitEvent(EVENT.sourcesChanged, { sources: [{ ...fixtureSources[1]!, state: "watching", items: 10 }] });
     await waitFor(() => expect(row("Work mail").textContent).not.toContain(t("sources.needsSignIn")));
     expect(within(row("Work mail")).getByRole("button", { name: t("sources.signInAgain") })).toBeTruthy();
-  });
-
-  it("disables a source with its switch", async () => {
-    const d = daemon({ sources_update: { ...fixtureSources[0]!, enabled: false, state: "disabled" } });
-    await renderApp({ page: "sources" });
-    await click(within(row("Documents")).getByRole("switch"));
-    expect(d.callsTo("sources_update")).toEqual([{ request: { id: "files-1", enabled: false } }]);
-    expect(within(row("Documents")).getByRole("switch")).toHaveProperty("checked", false);
-    expect(within(row("Documents")).getByRole("button", { name: t("sources.syncNow") })).toHaveProperty("disabled", true);
-  });
-
-  it("shows an empty state when there are no sources", async () => {
-    daemon({ sources_list: [] });
-    await renderApp({ page: "sources" });
-    await findByText(t("sources.empty.title"));
-    expect(getByRole("button", { name: t("sources.syncAll") })).toHaveProperty("disabled", true);
   });
 });

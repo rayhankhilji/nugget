@@ -196,19 +196,19 @@ fn main() {
             updater::updates_check,
             updater::updates_install,
             updater::login_set,
-            agent::commands::agent_run,
-            agent::commands::agent_cancel,
-            agent::commands::agent_confirm,
-            agent::commands::agent_answer,
-            agent::commands::agent_list,
-            agent::commands::agent_get,
-            agent::commands::policy_get,
-            agent::commands::policy_set,
-            agent::commands::policy_approvals,
-            agent::commands::policy_kill,
-            agent::commands::policy_resume,
-            agent::commands::policy_log_export,
-            agent::commands::browser_status,
+            commands::agent_run,
+            commands::agent_cancel,
+            commands::agent_confirm,
+            commands::agent_answer,
+            commands::agent_list,
+            commands::agent_get,
+            commands::policy_get,
+            commands::policy_set,
+            commands::policy_approvals,
+            commands::policy_kill,
+            commands::policy_resume,
+            commands::policy_log_export,
+            commands::browser_status,
             autostart::autostart_get,
             autostart::autostart_set,
             doubletap::commands::doubletap_settings_get,
@@ -309,7 +309,7 @@ fn main() {
                     if tray::has_tray(window.app_handle()) {
                         let _ = window.hide();
                     } else {
-                        // GG6-20: quit the way Quit Nugget does (`lifecycle`), which may first ask
+                        // quit the way Quit Nugget does (`lifecycle`), which may first ask
                         // in this window what to do with the background service; the window stays
                         // open for that. Hidden helper windows (the Double Tap overlay) would keep
                         // the app alive, so this exits rather than closing the window.

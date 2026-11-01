@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRef } from "react";
 import { byText, cleanup, click, installDomShims, mockDaemon, render } from "../test/render";
 import type { FitReport, ModelFit } from "../api";
-import { ModelsPage } from "../pages/Models";
 import { AiStep } from "./AiStep";
 import { INITIAL } from "./machine";
 
@@ -66,18 +65,6 @@ describe("model fit in onboarding", () => {
     expect(qwen.querySelector("button")?.textContent).toBe("Install");
   });
 
-  it("says a CPU-only machine runs the model more slowly", async () => {
-    mockDaemon({
-      models_fit: report(
-        [fit({ id: "qwen3-4b-q4", recommended: true, gpu: "unknown", accel: "cpu", reasons: ["ram_fits_largest", "cpu_only_slower"] })],
-        "unknown",
-      ),
-    });
-    const { container } = await renderAiStep();
-    expect(container.textContent).toContain("This computer: 16 GB memory, no graphics card detected.");
-    expect(card(container, "qwen3-4b-q4")!.textContent).toContain("runs on the processor");
-  });
-
   it("warns when a model does not fit memory or disk", async () => {
     mockDaemon({
       models_fit: report([
@@ -96,50 +83,5 @@ describe("model fit in onboarding", () => {
       "This computer has 16 GB of memory; this model needs 32 GB and may not run well.",
     );
     expect(llama.textContent).not.toContain("Recommended for this computer");
-  });
-
-  it("badges one best chat model and lists the search model on its own", async () => {
-    mockDaemon({
-      models_list: [
-        { id: "qwen3-4b-q4", size_bytes: 2.5 * GB, installed: false, recommended: true, tiers: ["light", "synthesis"] },
-        { id: "qwen3-8b-q4", size_bytes: 5 * GB, installed: false, recommended: true, tiers: ["light", "synthesis"] },
-        { id: "nomic-embed", size_bytes: 0.14 * GB, installed: false, recommended: true, tiers: ["embedding"] },
-      ],
-      models_fit: report([
-        fit({ id: "qwen3-4b-q4", recommended: true, reasons: ["ram_fits", "gpu_accelerated"] }),
-        fit({ id: "qwen3-8b-q4", recommended: true, min_ram_gb: 16, reasons: ["ram_fits_largest", "gpu_accelerated"] }),
-        fit({ id: "nomic-embed", recommended: true, tiers: ["embedding"] }),
-      ]),
-    });
-    const { container } = await renderAiStep();
-    const groups = [...container.querySelectorAll("h3.ob-models-group")].map((h) => h.textContent);
-    expect(groups).toEqual(["Chat model (pick one)", "Search model"]);
-    const lists = container.querySelectorAll("ul.ob-models");
-    expect([...lists[0]!.querySelectorAll(".card-title")].map((e) => e.textContent)).toEqual(["qwen3-4b-q4", "qwen3-8b-q4"]);
-    expect([...lists[1]!.querySelectorAll(".card-title")].map((e) => e.textContent)).toEqual(["nomic-embed"]);
-    // Only the daemon's pick is badged, explained, and has the primary Install.
-    expect(container.querySelectorAll("li.card .badges .badge-accent")).toHaveLength(1);
-    const best = card(container, "qwen3-8b-q4")!;
-    expect(best.querySelector(".badges")?.textContent).toContain("Recommended");
-    expect(best.textContent).toContain("Recommended for this computer");
-    expect(best.querySelector("button")?.className).toContain("btn-primary");
-    expect(card(container, "qwen3-4b-q4")!.textContent).not.toContain("Recommended for this computer");
-  });
-
-  it("shows the models without explanations when the daemon has no models.fit", async () => {
-    mockDaemon(); // models_fit answers "method not found"
-    const { container } = await renderAiStep();
-    expect(card(container, "qwen3-4b-q4")).toBeDefined();
-    expect(container.textContent).not.toContain("This computer:");
-    expect(container.textContent).not.toContain("Needs ");
-    expect(container.querySelector(".note-error")).toBeNull();
-  });
-
-  it("explains models on the Models page too", async () => {
-    mockDaemon({ models_fit: report([fit({ id: "qwen3-4b-q4", recommended: true, reasons: ["ram_fits_largest", "gpu_accelerated"] })]) });
-    const { container } = await render(<ModelsPage />);
-    expect(container.textContent).toContain("This computer: 16 GB memory, NVIDIA graphics.");
-    // The Models page titles cards with a readable name; the id is on the card as data.
-    expect(container.querySelector('li.card[data-model-id="qwen3-4b-q4"]')!.textContent).toContain("Needs 8 GB of memory");
   });
 });

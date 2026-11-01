@@ -1,5 +1,5 @@
 /**
- * GG6-8: the one-time question "When you quit Nugget, also stop background indexing and the local
+ * The one-time question "When you quit Nugget, also stop background indexing and the local
  * AI?". The shell asks for it (`nugget:quit-ask`) the first time quitting would stop the background
  * service the app started; the window confirms with `quit_ack` (or the shell quits with the default
  * after 2 s). The answer is saved and Nugget quits. Dismissing it keeps Nugget open.

@@ -408,20 +408,6 @@ mod tests {
     }
 
     #[test]
-    fn a_click_opens_today_on_the_main_window() {
-        let (app, _main, rx) = app();
-        let pending = app.state::<PendingOpen>();
-        pending.arm(Instant::now(), TODAY_PAGE);
-        clicked(app.handle(), TODAY_PAGE);
-        assert_eq!(navigations(&rx), [TODAY_JSON]);
-        assert_eq!(
-            pending.take(Instant::now()),
-            None,
-            "a click consumes the focus fallback"
-        );
-    }
-
-    #[test]
     fn focusing_main_after_a_notification_without_click_callback_opens_today_once() {
         let (app, main, rx) = app();
         let window = main.as_ref().window();

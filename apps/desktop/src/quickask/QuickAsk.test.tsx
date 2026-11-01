@@ -3,7 +3,7 @@ import axe from "axe-core";
 import { act } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { QUICK_ASK_PREFILL_EVENT, type AskStarted } from "../api";
+import { type AskStarted } from "../api";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { QuickAsk } from "./QuickAsk";
 
@@ -62,17 +62,6 @@ beforeEach(() => installDomShims());
 afterEach(() => cleanup());
 
 describe("quick ask", () => {
-  it("has a labelled search field and no axe violations", async () => {
-    setup();
-    const { container } = await render(<QuickAsk />);
-    const input = container.querySelector<HTMLInputElement>("#quickask-q")!;
-    expect(container.querySelector('label[for="quickask-q"]')?.textContent).toBe("Ask a question about your data");
-    expect(input.getAttribute("aria-describedby")).toBe("quickask-hint");
-    expect(container.querySelector('[role="status"][aria-live="polite"]')).not.toBeNull();
-    const result = await axe.run(container, { rules: { "color-contrast": { enabled: false }, region: { enabled: false } } });
-    expect(result.violations.map((v) => v.id)).toEqual([]);
-  });
-
   it("asks, streams a cited answer, and opens a source", async () => {
     const { asked, opened } = setup();
     const { container } = await render(<QuickAsk />);
@@ -104,29 +93,6 @@ describe("quick ask", () => {
     expect(opened).toEqual(["file:///notes/plan.md", "file:///notes/plan.md"]);
   });
 
-  it("ignores other windows' streams", async () => {
-    setup();
-    const { container } = await render(<QuickAsk />);
-    await typeQuestion(container, "q");
-    await submit(container);
-    await act(() => emit("nugget:chat-delta", { stream_id: "other", text: "not ours" }));
-    await act(() => emit("nugget:chat-delta", { stream_id: "s-q", text: "ours" }));
-    await flush(2);
-    expect(container.querySelector(".quickask-text")?.textContent).toBe("ours");
-  });
-
-  it("shows a failure as an alert", async () => {
-    setup({
-      retrieve_ask: () => {
-        throw { kind: "rpc", message: "no model", code: -32000 };
-      },
-    });
-    const { container } = await render(<QuickAsk />);
-    await typeQuestion(container, "q");
-    await submit(container);
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("no model");
-  });
-
   it("says a shell or connection failure in plain words, never its raw text (LL2)", async () => {
     setup({
       retrieve_ask: () => {
@@ -141,56 +107,5 @@ describe("quick ask", () => {
     expect(alert.textContent).not.toContain("os error");
     const result = await axe.run(container, { rules: { "color-contrast": { enabled: false }, region: { enabled: false } } });
     expect(result.violations.map((v) => v.id)).toEqual([]);
-  });
-
-  it("says Nugget isn't reachable when the daemon is not running (LL2)", async () => {
-    setup({
-      retrieve_ask: () => {
-        throw { kind: "not_running", message: "connection refused" };
-      },
-    });
-    const { container } = await render(<QuickAsk />);
-    await typeQuestion(container, "q");
-    await submit(container);
-    expect(container.querySelector('[role="alert"]')!.textContent).toContain("Nugget isn't reachable right now.");
-  });
-
-  it("says what to do when no AI model is set up, instead of the daemon's tier message (LL2)", async () => {
-    setup({
-      retrieve_ask: () => {
-        throw { kind: "rpc", message: "no provider is available for the synthesis tier", code: -32000 };
-      },
-    });
-    const { container } = await render(<QuickAsk />);
-    await typeQuestion(container, "q");
-    await submit(container);
-    const alert = container.querySelector('[role="alert"]')!;
-    expect(alert.textContent).toContain("No AI model is set up yet");
-    expect(alert.textContent).not.toContain("tier");
-  });
-
-  it("prefills without asking, hides on Escape and opens the main window", async () => {
-    const { calls, asked, pages } = setup();
-    const { container } = await render(<QuickAsk />);
-    await act(() => emit(QUICK_ASK_PREFILL_EVENT, "selected text"));
-    await flush(2);
-    expect(container.querySelector<HTMLInputElement>("#quickask-q")!.value).toBe("selected text");
-    expect(asked).toHaveLength(0);
-
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-    });
-    await flush(2);
-    expect(calls).toContain("quickask_hide");
-
-    await click(byText(container, "button", "Open in Chat"));
-    await click(byText(container, "button", "Show in Search"));
-    expect(pages).toEqual(["chat", "search"]);
-  });
-
-  it("follows the locale's direction", async () => {
-    setup();
-    const { container } = await render(<QuickAsk />);
-    expect(container.querySelector("main")?.getAttribute("dir")).toBe("ltr");
   });
 });

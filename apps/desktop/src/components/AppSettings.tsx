@@ -1,7 +1,7 @@
 /**
  * Desktop-app preferences backed by the Tauri shell: "open Nugget in the tray at login"
- * (`src-tauri/src/autostart.rs`), and (II4) OS notifications with quiet hours, what quitting does
- * to the background service (GG6-8: stop, keep, or not decided yet; `src-tauri/src/lifecycle.rs`),
+ * (`src-tauri/src/autostart.rs`), and OS notifications with quiet hours, what quitting does
+ * to the background service (stop, keep, or not decided yet; `src-tauri/src/lifecycle.rs`),
  * and the quick-ask shortcut. Distinct
  * from the background-service toggle above it.
  */
@@ -11,7 +11,7 @@ import { useT, type MessageKey } from "../i18n";
 import { QuickAskSettings } from "./QuickAskSettings";
 import { Spinner } from "./ui";
 
-/** The quit choices in the order Settings lists them (GG6-8). */
+/** The quit choices in the order Settings lists them. */
 const QUIT_CHOICES: [QuitChoice, MessageKey][] = [
   ["stop", "appSettings.quit.stop"],
   ["keep", "appSettings.quit.keep"],
@@ -46,7 +46,7 @@ export function Switch({
 }: {
   checked: boolean;
   disabled?: boolean;
-  /** Saving: the switch stays focusable (aria-disabled) and ignores changes until done (LL2). */
+  /** Saving: the switch stays focusable (aria-disabled) and ignores changes until done. */
   busy?: boolean;
   onChange: (on: boolean) => void;
   describedBy?: string;

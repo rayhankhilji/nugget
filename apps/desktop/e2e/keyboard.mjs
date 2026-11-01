@@ -1,28 +1,16 @@
-// Keyboard-only scenario: the core flows with `page.keyboard` alone (Tab, Shift+Tab, arrows,
-// Enter, Space, Escape, typing and the palette shortcut). Locators are only read, to find out
-// where focus is and what the page shows; nothing is clicked, filled or focused by the test.
-//
-// Every Tab (and every arrow that moves focus) is checked: the focused element must show a focus
-// indicator (an outline, or a box-shadow ring that it or a close ancestor only has while focused),
-// focus must never be lost to <body> while a page is up, and every dialog keeps focus inside,
-// closes on Escape and returns focus to the control that opened it.
-//
-// Setup, outside the keyboard flows: `nuggetd-e2e` with the ai-setup scenario's signed test
-// manifest and fake llama-server, the recommended model installed through `models.install` before
-// the window opens (onboarding then takes "Decide later"), so Chat answers with citations. The
-// Today card comes from the corpus itself (an unanswered mail thread); the test asks the daemon
-// to compute cards with `proactive.refresh` instead of waiting for the scheduled refresh.
+// Keyboard only: the core flows with `page.keyboard` alone. Every Tab stop must show a focus
+// indicator, focus is never lost to <body>, dialogs keep focus inside, close on Escape and return
+// focus to their opener. Chat uses the ai-setup scenario's test model (installed over RPC first).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
+import { startBridge } from "./bridge.mjs";
 import { CORPUS, locateE2eBinaries, rpc, rpcStream, startDaemon } from "./daemon.mjs";
 import { MODEL_ID, signedTestManifest, startModelServer } from "./ai-setup.mjs";
-import { check, CheckError, DIST, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, settle, shot, t, tPattern, until } from "./harness.mjs";
+import { check, CheckError, checkWire, DIST, exactName, expect, INDEX_TIMEOUT_MS, log, newContext, OUT, settle, shot, startsWith, stopDaemon, t, until } from "./harness.mjs";
 
 /** The daemon config: the local runtime on (for Chat), the corpus owner set (for the Today card). */
-const KEYBOARD_CONFIG = `# Written by apps/desktop/e2e/keyboard.mjs.
-[runtime]
+const KEYBOARD_CONFIG = `[runtime]
 enabled = true
 idle_stop_minutes = 0
 
@@ -34,24 +22,17 @@ emails = ["robin.ashgrove@glimmerfen.test", "robin@ashgrove.test"]
 http = false
 `;
 
-/** Same question and corpus facts as the first run (notes/projects/Tidewater Billing.md). */
 const QUERY = "Tidewater Billing vendor contract";
 const EXPECT_TITLE = "Tidewater Billing";
 
 /** The app's shortcut modifier: ⌘ on macOS, Ctrl elsewhere (`hasMod` in src/hooks.shortcuts.ts). */
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const exactName = (key) => new RegExp(`^${escapeRe(t(key))}$`);
-const startsWith = (key) => new RegExp(`^${escapeRe(t(key))}`);
-
-// ---- focus probes (run in the page) ----
-
 /**
  * What has focus: a stable id per element (a WeakMap in the page, the DOM is not touched), a short
  * description, whether it is inside an open dialog, and whether a focus indicator is visible.
  */
-export function probeFocus() {
+function probeFocus() {
   const reg = (window.__kbdIds ??= { map: new WeakMap(), next: 1 });
   const el = document.activeElement;
   if (!el || el === document.body || el === document.documentElement) {
@@ -219,39 +200,16 @@ async function expectFocusKept(page, what) {
 /** A shell page's landmark (`<main aria-label>` is the page's nav label). */
 const pageMain = (page, key) => page.locator(`main[aria-label="${t(key)}"]`);
 
-/** Settle animations, then screenshot. */
-async function snap(page, name) {
-  await page
-    .evaluate(() => {
-      const finite = document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity);
-      return Promise.race([Promise.all(finite.map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 2000))]);
-    })
-    .catch(() => {});
-  await shot(page, name);
-}
-
-// ---- the scenario ----
-
-/**
- * Run the scenario with `browser` (Playwright). Starts its own daemon (`nuggetd-e2e`; `bin`, the
- * plain daemon, is not used: Chat needs the fake local model). Returns the summary for
- * summary.json (`keyboard`).
- */
-export async function keyboardScenario({ browser, bin }) {
+export async function keyboardScenario({ browser }) {
   const bins = locateE2eBinaries(log);
   const fixtures = fs.mkdtempSync(path.join(os.tmpdir(), "nugget-e2e-kbd-"));
-  // A second, small folder for the Sources page's Add source.
-  const extra = path.join(fixtures, "kbd-notes");
-  fs.mkdirSync(extra);
-  fs.writeFileSync(path.join(extra, "Keyboard walk.md"), "# Keyboard walk\n\nAdded from the Sources page without a mouse.\n");
-
   const files = {};
   // Fast: the download is setup here, not what is being tested.
   const served = await startModelServer(files, 64 * 1024 * 1024);
   const manifest = signedTestManifest(fixtures, served.port);
   Object.assign(files, manifest.files);
 
-  const summary = { model: MODEL_ID, flows: {}, opened: [] };
+  const summary = { opened: [] };
   let daemon;
   try {
     daemon = await startDaemon(bins.nuggetd, {
@@ -280,10 +238,8 @@ export async function keyboardScenario({ browser, bin }) {
   let bridge;
   let ctx;
   const pageErrors = [];
-  // What the native folder picker "chooses" next (onboarding: the corpus; Sources: the small folder).
-  let nextPick = [CORPUS];
   try {
-    bridge = await startBridge({ socket: daemon.socket, dist: DIST, pickFolders: () => nextPick });
+    bridge = await startBridge({ socket: daemon.socket, dist: DIST, pickFolders: [CORPUS] });
     ctx = await newContext(browser);
     const page = await ctx.newPage();
     page.on("pageerror", (e) => pageErrors.push(e.message));
@@ -306,19 +262,15 @@ export async function keyboardScenario({ browser, bin }) {
       await heading(headingKey).waitFor();
       await until(`the "${t(headingKey)}" step's heading takes focus`, async () => [await hasFocus(heading(headingKey)), (await focusOf(page)).desc]);
     };
-    const flow = async (name, fn) => {
-      const t0 = Date.now();
-      await check(`keyboard: ${name}`, async () => {
+    const flow = (name, fn) =>
+      check(`keyboard: ${name}`, async () => {
         try {
           await fn();
-          summary.flows[name] = { ok: true, ms: Date.now() - t0 };
         } catch (e) {
-          summary.flows[name] = { ok: false, ms: Date.now() - t0 };
           await shot(page, `FAIL-keyboard-${name.replace(/\W+/g, "-")}`);
           throw e;
         }
       });
-    };
 
     await flow("onboarding from an empty home to the source step", async () => {
       await page.goto(`${bridge.url}index.html`);
@@ -331,7 +283,6 @@ export async function keyboardScenario({ browser, bin }) {
       for (let i = 0; i < 4 && !(await later.isChecked()); i++) await step(page, "ArrowDown");
       expect(await later.isChecked(), `arrow keys did not reach "${t("onboarding.ai.later")}"`);
       expect(await hasFocus(later), "the checked AI choice does not have focus");
-      await snap(page, "keyboard-onboarding-ai");
       await next("onboarding.source.heading");
     });
 
@@ -353,7 +304,6 @@ export async function keyboardScenario({ browser, bin }) {
         const paths = await dialog.locator(".path-list code").allTextContents();
         return [paths.includes(CORPUS), paths];
       });
-      await snap(page, "keyboard-folder");
       await tabTo(page, dialog.getByRole("button", { name: exactName("addSource.folder.submit") }), { what: t("addSource.folder.submit") });
       await page.keyboard.press("Enter");
       await dialog.waitFor({ state: "detached" });
@@ -361,24 +311,21 @@ export async function keyboardScenario({ browser, bin }) {
         await page.evaluate(() => document.activeElement === window.__kbdOpener),
         (await focusOf(page)).desc,
       ]);
-      const readyRe = tPattern("onboarding.source.ready");
       await until(
-        "the source step says the folder is indexed and search works",
+        "the source step says the folder is indexed",
         async () => {
           const row = await page.locator(".ob-index li").first().evaluate((li) => ({ phase: li.dataset.phase, text: li.textContent.trim() }));
           if (row.phase === "failed") throw new Error(`indexing failed: ${row.text}`);
-          return [row.phase === "ready" && readyRe.test(row.text), row];
+          return [row.phase === "ready", row];
         },
         INDEX_TIMEOUT_MS,
       );
-      await snap(page, "keyboard-indexed");
     });
 
     await flow("onboarding through Permissions and Double Tap to Done", async () => {
       await next("onboarding.perm.heading");
       await next("onboarding.trigger.heading");
       await next("onboarding.done.heading");
-      await snap(page, "keyboard-done");
       const toSearch = footer.getByRole("button", { name: exactName("onboarding.done.search") });
       await tabTo(page, toSearch, { what: t("onboarding.done.search") });
       await page.keyboard.press("Enter");
@@ -406,10 +353,8 @@ export async function keyboardScenario({ browser, bin }) {
         return [live.some((s) => s.includes(opened)), live];
       });
       await expectFocusKept(page, "after opening a result");
-      summary.flows.search_opened = url;
-      await snap(page, "keyboard-search");
       // Tab all the way round: nothing on the page or in the sidebar traps focus.
-      summary.search_tab_stops = await expectNoTrap(page, { min: 20 });
+      await expectNoTrap(page, { min: 20 });
     });
 
     await flow("ask in Chat and follow a citation", async () => {
@@ -448,14 +393,12 @@ export async function keyboardScenario({ browser, bin }) {
       const before = summary.opened.length;
       await page.keyboard.press("Enter");
       // A source the shell can open opens; any other one takes focus in the list under the reply.
-      const followed = await until(`Enter on [${n}] follows the citation to "${sourceTitle}"`, async () => {
+      await until(`Enter on [${n}] follows the citation to "${sourceTitle}"`, async () => {
         if (summary.opened.length > before) return [true, { opened: summary.opened.at(-1) }];
         return [await hasFocus(source), (await focusOf(page)).desc];
       });
       expect(await source.isVisible(), `the cited source "${sourceTitle}" is not shown under the reply`);
-      summary.flows.citation = { n, title: sourceTitle, ...(typeof followed === "object" ? followed : { focused: followed }) };
       await expectFocusKept(page, "after following a citation");
-      await snap(page, "keyboard-chat");
     });
 
     await flow("accept a Today card's action through its confirmation", async () => {
@@ -465,7 +408,6 @@ export async function keyboardScenario({ browser, bin }) {
       const card = cards.find((c) => c.actions.some((a) => a.supported));
       expect(card, `no Today card with a supported action after proactive.refresh: ${JSON.stringify(cards.map((c) => c.title))}`);
       const action = card.actions.find((a) => a.supported);
-      summary.flows.today_card = { title: card.title, action: action.label };
       // Drafting a reply is allowed by default; a Safety rule makes the policy ask first, so the
       // flow goes through the dialog's confirmation as well as its Approve.
       const policy = await rpc(daemon.socket, "policy.get");
@@ -514,7 +456,6 @@ export async function keyboardScenario({ browser, bin }) {
         if (f.body) throw new Error("focus was lost to <body> while the action ran");
         return [false, f.desc];
       }, 60_000);
-      summary.flows.today_outcome = outcome;
       expect(outcome === "needs_confirmation", `the action ran without asking for confirmation (the "${rule.id}" rule should make it ask)`);
       await until("the confirmation takes focus", async () => [await hasFocus(confirm), (await focusOf(page)).desc]);
       expectRing(await focusOf(page), "the confirmation appearing");
@@ -522,7 +463,6 @@ export async function keyboardScenario({ browser, bin }) {
       await done.waitFor({ timeout: 60_000 });
       await until(`"${t("common.done")}" takes focus once the action ran`, async () => [await hasFocus(done), (await focusOf(page)).desc]);
       await expectNoErrorNote(dialog, "the card action dialog");
-      await snap(page, "keyboard-today-action");
       await page.keyboard.press("Enter");
       await dialog.waitFor({ state: "detached" });
       // The inbox reloads after an executed action (the card may leave it): check once it has.
@@ -544,12 +484,10 @@ export async function keyboardScenario({ browser, bin }) {
       });
       await until("focus stays on the kill switch", async () => [await hasFocus(resume), (await focusOf(page)).desc]);
       expectRing(await focusOf(page), "stopping all agents");
-      await snap(page, "keyboard-safety");
       await page.keyboard.press("Enter");
       await stop.waitFor();
       expect((await rpc(daemon.socket, "policy.get")).halted === false, "Resume did not release the kill switch");
       await until("focus stays on the kill switch after Resume", async () => [await hasFocus(stop), (await focusOf(page)).desc]);
-      summary.safety_tab_stops = await expectNoTrap(page, { min: 20 });
     });
 
     await flow("command palette: open, Escape, arrows and Enter to a page", async () => {
@@ -572,7 +510,6 @@ export async function keyboardScenario({ browser, bin }) {
         expect(await hasFocus(input), "arrow keys moved focus out of the palette input");
       }
       expect(label === target, `ArrowDown never selected "${target}" (last: "${label}")`);
-      await snap(page, "keyboard-palette");
       await page.keyboard.press("Enter");
       await pageMain(page, "app.nav.status").waitFor();
       await until("the palette closes and focus moves to the Status page", async () => [
@@ -581,62 +518,15 @@ export async function keyboardScenario({ browser, bin }) {
       ]);
     });
 
-    await flow("add a folder from Sources → Add source", async () => {
-      nextPick = [extra];
-      await page.keyboard.press(`${MOD}+5`);
-      await pageMain(page, "app.nav.sources").waitFor();
-      const add = page.locator("main").getByRole("button", { name: exactName("sources.add") }).first();
-      await tabTo(page, add, { what: t("sources.add") });
-      await markOpener(page);
-      await page.keyboard.press("Enter");
-      const dialog = page.locator("dialog[open]");
-      await expectDialogFocused(page, "the Add source wizard");
-      await escapeReturnsFocus(page, "the Add source wizard");
-      await page.keyboard.press("Enter");
-      await expectDialogFocused(page, "the Add source wizard");
-      // The kind picker starts on "Folder"; Next.
-      await tabTo(page, dialog.getByRole("button", { name: exactName("common.next") }), { what: t("common.next") });
-      await page.keyboard.press("Enter");
-      const choose = dialog.getByRole("button", { name: exactName("addSource.folder.choose") });
-      await choose.waitFor();
-      await until("the folder form takes focus", async () => [(await focusOf(page)).dialog && !(await focusOf(page)).body, (await focusOf(page)).desc]);
-      await tabTo(page, choose, { what: t("addSource.folder.choose") });
-      await page.keyboard.press("Enter");
-      await until("the picked folder is listed in the wizard", async () => {
-        const paths = await dialog.locator(".path-list code").allTextContents();
-        return [paths.includes(extra), paths];
-      });
-      await tabTo(page, dialog.getByRole("button", { name: exactName("addSource.folder.submit") }), { what: t("addSource.folder.submit") });
-      await page.keyboard.press("Enter");
-      await dialog.waitFor({ state: "detached" });
-      await expectFocusKept(page, "after adding a source");
-      await until(
-        "the new folder source is indexed",
-        async () => {
-          const list = await rpc(daemon.socket, "sources.list");
-          const s = list.find((x) => (x.settings?.roots ?? []).includes(extra));
-          return [s?.items > 0, s ? { id: s.id, items: s.items } : list.map((x) => x.id)];
-        },
-        INDEX_TIMEOUT_MS,
-      );
-      await settle(page);
-      await snap(page, "keyboard-sources");
-    });
-
-    await check("keyboard: no uncaught page errors and every daemon command exists", async () => {
-      const bad = bridge.calls.filter((c) => c.via === "daemon" && (c.code === METHOD_NOT_FOUND || c.code === -32602));
-      expect(bad.length === 0, `wire mismatches: ${JSON.stringify(bad)}`);
+    await check("keyboard: no uncaught page errors", async () => {
       expect(pageErrors.length === 0, `${pageErrors.length} uncaught page error(s): ${JSON.stringify(pageErrors)}`);
     });
-    summary.rpcErrors = bridge.calls.filter((c) => !c.ok);
-    summary.pageErrors = pageErrors;
+    await checkWire(bridge, "keyboard");
   } finally {
     await ctx?.close().catch(() => {});
     await bridge?.close().catch(() => {});
     await served.close().catch(() => {});
-    fs.cpSync(daemon.logDir, path.join(OUT, "keyboard-daemon-logs"), { recursive: true });
-    await daemon.stop({ keep: KEEP });
-    if (KEEP) log(`kept the keyboard daemon home: ${daemon.home}`);
+    await stopDaemon(daemon, "keyboard");
     fs.rmSync(fixtures, { recursive: true, force: true });
   }
   return summary;

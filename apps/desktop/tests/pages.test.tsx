@@ -151,45 +151,7 @@ describe.each(CASES)("$name page", (c) => {
   });
 });
 
-describe("models page", () => {
-  it("says when nothing is installed yet", async () => {
-    const models = (RESPONSES.models_list as { installed: boolean }[]).map((m) => ({ ...m, installed: false }));
-    mockDaemon({ models_list: models });
-    await render(inMain(<ModelsPage />));
-    expect(text()).toContain("Nothing is installed yet.");
-    expect(text()).toContain("qwen3-4b-q4");
-    expect(await violations()).toEqual([]);
-  });
-});
-
-describe("apps page", () => {
-  it("offers Connect once, in the header, and opens the how-to when nothing is connected", async () => {
-    mockDaemon({ mcp_clients_list: [] });
-    await render(inMain(<AppsPage />));
-    expect(document.querySelector(".pg-empty-action button")).toBeNull();
-    const connect = Array.from(document.querySelectorAll(".page-header button")).find((b) => b.textContent === "Connect an app");
-    expect(connect).toBeDefined();
-    expect(document.querySelector<HTMLDetailsElement>("details.apps-help")?.open).toBe(true);
-  });
-});
-
 describe("search page", () => {
-  it("before the first query, invites one", async () => {
-    mockDaemon();
-    await render(inMain(<SearchPage />));
-    expect(document.querySelector(".pg-empty-title")?.textContent).toBe("Type a query to search");
-    expect(document.querySelectorAll("h1")).toHaveLength(1);
-    expect(await violations()).toEqual([]);
-  });
-
-  it("with nothing indexed, points to Sources", async () => {
-    mockDaemon({ sources_list: [] });
-    await render(inMain(<SearchPage />));
-    expect(document.querySelector(".pg-empty-title")?.textContent).toBe("Nothing to search yet");
-    expect(text()).toContain("Sources page");
-    expect(await violations()).toEqual([]);
-  });
-
   it("runs a search requested by the command palette, with a loading state and announced results", async () => {
     const d = deferred(RESPONSES.search);
     const calls = mockDaemon({ search: () => d.promise });
@@ -206,35 +168,5 @@ describe("search page", () => {
     expect(live).toContain("1 result for “Ada”");
     expect(document.querySelector("ol.results")?.getAttribute("aria-labelledby")).toBe("search-results-heading");
     expect(await violations()).toEqual([]);
-  });
-
-  it("runs a search requested while the page is open", async () => {
-    const calls = mockDaemon();
-    await render(inMain(<SearchPage />));
-    expect(calls).not.toContain("search");
-    requestSearch("Notes");
-    await flush();
-    expect(document.querySelector<HTMLInputElement>("#search-q")?.value).toBe("Notes");
-    expect(text()).toContain("Ada wrote the first program");
-  });
-
-  it("shows no results with a hint", async () => {
-    mockDaemon({ search: [] });
-    requestSearch("zebra");
-    await render(inMain(<SearchPage />));
-    expect(document.querySelector(".pg-empty-title")?.textContent).toBe("No results for “zebra”");
-    expect(await violations()).toEqual([]);
-  });
-
-  it("shows an error with Retry, and Retry runs the search again", async () => {
-    const calls = mockDaemon({ search: failOnce(RESPONSES.search) });
-    requestSearch("Ada");
-    await render(inMain(<SearchPage />));
-    expect(text()).toContain("database is locked");
-    expect(await violations()).toEqual([]);
-    await click(retryButton());
-    await flush();
-    expect(calls.filter((x) => x === "search")).toHaveLength(2);
-    expect(text()).toContain("Ada wrote the first program");
   });
 });

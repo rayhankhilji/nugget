@@ -129,7 +129,7 @@ export const entityDetail: import("../api").EntityDetail = {
   vault_path: null,
 };
 
-/** FF1: one backup in the configured folder. */
+/** One backup in the configured folder. */
 export const backupInfo: import("../api").BackupInfo = {
   path: "/home/me/Backups/nugget-backup-20261028T120000Z",
   created_at: now,

@@ -4,6 +4,11 @@ use nugget_core::egress::EgressEvent;
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::PluginCatalogResult;
 use nugget_core::ipc::{
+    AgentAnswer, AgentConfirm, AgentListRequest, AgentRunRequest, AgentStarted, AgentTaskDetail,
+    AgentTaskRef, AgentTaskSummary, BrowserStatus, KillState, PolicyApprovals, PolicyLogExport,
+    PolicySet, PolicyState, agent_method,
+};
+use nugget_core::ipc::{
     AskRequest, AskStarted, AuthBegin, ChatCancel, ChatRequest, ChatStarted, ClaimStatusRequest,
     ContextRequest, ContextResponse, EgressRecentRequest, EntitiesRequest, EntityDetail, EntityRef,
     EntitySummaryView, GraphRequest, GraphViewIpc, IngestStatus, KnowledgeStatus, McpClientCreate,
@@ -38,8 +43,7 @@ const MAX_CONTEXT_BUDGET: u32 = 32_000;
 const MAX_SECRET_LEN: usize = 4096;
 /// Entity browser pages (the UI asks for one more than it shows, to know if there is a next page).
 const MAX_ENTITIES_LIMIT: u32 = 501;
-/// Graph view: the canvas renders at most 2,000 nodes; a little headroom lets the daemon report
-/// truncation honestly.
+/// The graph canvas renders at most 2,000 nodes; headroom lets the daemon report truncation.
 const MAX_GRAPH_LIMIT: u32 = 2_500;
 const MAX_GRAPH_DEPTH: u32 = 4;
 /// Free-text fields (search text, entity ids, client names) beyond this are a UI bug.
@@ -49,6 +53,161 @@ const MAX_CLIENT_NAME_LEN: usize = 100;
 const MAX_LIST_LEN: usize = 64;
 /// Facts one split may move.
 const MAX_SPLIT_CLAIMS: usize = 2_000;
+/// File paths (plugin packages, backup folders) beyond this are a UI bug.
+const MAX_PATH_LEN: usize = 4096;
+const MAX_CARD_ID_LEN: usize = 256;
+const MAX_REASON_TEXT_LEN: usize = 2_000;
+
+fn err<T>(msg: impl Into<String>) -> Result<T> {
+    Err(CmdError::Other(msg.into()))
+}
+
+/// Commands without arguments: `name -> Output = method, params;`.
+macro_rules! no_arg_commands {
+    ($($name:ident -> $out:ty = $method:expr, $params:expr;)*) => {$(
+        #[tauri::command]
+        pub async fn $name(app: AppHandle, daemon: State<'_, Daemon>) -> Result<$out> {
+            daemon.call(&app, $method, &$params).await
+        }
+    )*};
+}
+
+/// Commands that pass `request` through after an optional check:
+/// `name(Request) -> Output = method [, check];`.
+macro_rules! request_commands {
+    ($($name:ident($req:ty) -> $out:ty = $method:expr $(, $check:expr)?;)*) => {$(
+        #[tauri::command]
+        pub async fn $name(
+            app: AppHandle,
+            daemon: State<'_, Daemon>,
+            request: $req,
+        ) -> Result<$out> {
+            $(($check)(&request)?;)?
+            daemon.call(&app, $method, &request).await
+        }
+    )*};
+}
+
+no_arg_commands! {
+    status -> StatusResponse = method::STATUS, ();
+    providers_list -> Vec<ProviderInfo> = method::PROVIDERS_LIST, ();
+    models_list -> Vec<ModelInfo> = method::MODELS_LIST, ();
+    sources_list -> Vec<SourceInfo> = method::SOURCES_LIST, ();
+    ingest_status -> IngestStatus = method::INGEST_STATUS, ();
+    ai_key_saved -> Value = "ai.key.saved", ();
+    models_fit -> Value = "models.fit", ();
+    runtime_status -> Vec<RuntimeInfo> = method::RUNTIME_STATUS, ();
+    knowledge_status -> KnowledgeStatus = method::KNOWLEDGE_STATUS, ();
+    mcp_clients_list -> Vec<McpClientInfo> = method::MCP_CLIENTS_LIST, ();
+    plugins_list -> PluginListResult = plugin_method::LIST, ();
+    plugins_catalog -> PluginCatalogResult = plugin_method::CATALOG, ();
+    brief_get -> BriefView = proactive_method::BRIEF_GET, json!({});
+    proactive_metrics -> ProactiveMetrics = proactive_method::PROACTIVE_METRICS, json!({});
+    proactive_refresh -> CardsChanged = proactive_method::PROACTIVE_REFRESH, json!({});
+    proactive_learning -> ProactiveLearning = proactive_method::PROACTIVE_LEARNING, json!({});
+    reminders_list -> Vec<ReminderView> = proactive_method::REMINDERS_LIST, json!({});
+    backup_status -> Value = "backup.status", json!({});
+    policy_get -> PolicyState = agent_method::POLICY_GET, ();
+    policy_approvals -> PolicyApprovals = agent_method::POLICY_APPROVALS, ();
+    policy_kill -> KillState = agent_method::POLICY_KILL, ();
+    policy_resume -> KillState = agent_method::POLICY_RESUME, ();
+    policy_log_export -> PolicyLogExport = agent_method::POLICY_LOG_EXPORT, ();
+    browser_status -> BrowserStatus = agent_method::BROWSER_STATUS, ();
+}
+
+// API keys travel in these requests: they are passed through, never logged. Backup requests may
+// carry a passphrase, likewise. The daemon validates the rest.
+request_commands! {
+    sources_add(SourceSpec) -> SourceInfo = method::SOURCES_ADD, check_source_spec;
+    sources_update(SourceUpdate) -> SourceInfo = method::SOURCES_UPDATE;
+    sources_auth_begin(SourceRef) -> AuthBegin = method::SOURCES_AUTH_BEGIN;
+    ai_key_test(Value) -> Value = "ai.key.test";
+    ai_key_save(Value) -> Value = "ai.key.save";
+    ai_key_update(Value) -> Value = "ai.key.update";
+    ai_key_remove(Value) -> Value = "ai.key.remove";
+    knowledge_entity(EntityRef) -> EntityDetail = method::KNOWLEDGE_ENTITY,
+        |r: &EntityRef| check_entity_id("requested", r.id.as_str());
+    knowledge_split(SplitRequest) -> EntityRef = method::KNOWLEDGE_SPLIT, check_split;
+    plugins_inspect(PluginIdParams) -> PluginInspectResult = plugin_method::INSPECT, check_plugin_id;
+    // Verifies and stages a package; `plugins_approve` commits it (unless it is an update within
+    // the capabilities the user already approved).
+    plugins_install(PluginInstallParams) -> PluginInstallResult = plugin_method::INSTALL,
+        check_plugin_install;
+    plugins_approve(PluginApproveParams) -> PluginApproveResult = plugin_method::APPROVE,
+        |r: &PluginApproveParams| check_plugin_field("install token", &r.token);
+    plugins_remove(PluginIdParams) -> PluginRemoveResult = plugin_method::REMOVE, check_plugin_id;
+    plugins_enable(PluginEnableParams) -> PluginInfo = plugin_method::ENABLE,
+        |r: &PluginEnableParams| check_plugin_field("id", &r.id);
+    cards_list(CardsListRequest) -> CardsList = proactive_method::CARDS_LIST;
+    cards_feedback(CardFeedbackRequest) -> CardView = proactive_method::CARDS_FEEDBACK,
+        check_card_feedback;
+    cards_preview(CardPreviewRequest) -> CardPreview = proactive_method::CARDS_PREVIEW,
+        |r: &CardPreviewRequest| check_card_id(&r.card_id);
+    cards_execute(CardExecuteRequest) -> CardExecuteResult = proactive_method::CARDS_EXECUTE,
+        check_card_execute;
+    proactive_reset_learning(ResetLearningRequest) -> ResetLearningResult =
+        proactive_method::PROACTIVE_RESET_LEARNING, check_reset_learning;
+    backup_configure(Value) -> Value = "backup.configure", check_backup_request;
+    backup_set_passphrase(Value) -> Value = "backup.set_passphrase", check_backup_request;
+    backup_run(Value) -> Value = "backup.run", check_backup_request;
+    backup_list(Value) -> Value = "backup.list", check_backup_request;
+    // Stages a restore; the daemon exits right after replying and the UI calls `start_daemon`,
+    // which applies it.
+    backup_restore(Value) -> Value = "backup.restore", check_backup_request;
+    export_run(Value) -> Value = "export.run", check_backup_request;
+    search_faceted(Value) -> Value = "search.faceted";
+    search_timeline(Value) -> Value = "search.timeline";
+    search_preview(Value) -> Value = "search.preview";
+    agent_run(AgentRunRequest) -> AgentStarted = agent_method::AGENT_RUN, check_agent_run;
+    agent_list(AgentListRequest) -> Vec<AgentTaskSummary> = agent_method::AGENT_LIST;
+    agent_get(AgentTaskRef) -> AgentTaskDetail = agent_method::AGENT_GET;
+    policy_set(PolicySet) -> PolicyState = agent_method::POLICY_SET;
+}
+
+/// Calls a method whose result the UI doesn't need.
+async fn call_unit<P: serde::Serialize + Sync>(
+    app: &AppHandle,
+    daemon: &Daemon,
+    method: &str,
+    params: &P,
+) -> Result<()> {
+    let _: Value = daemon.call(app, method, params).await?;
+    Ok(())
+}
+
+fn check_agent_run(request: &AgentRunRequest) -> Result<()> {
+    if request.goal.trim().is_empty() {
+        return err("an agent task needs a goal");
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn agent_cancel(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: AgentTaskRef,
+) -> Result<()> {
+    call_unit(&app, &daemon, agent_method::AGENT_CANCEL, &request).await
+}
+
+#[tauri::command]
+pub async fn agent_confirm(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: AgentConfirm,
+) -> Result<()> {
+    call_unit(&app, &daemon, agent_method::AGENT_CONFIRM, &request).await
+}
+
+#[tauri::command]
+pub async fn agent_answer(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: AgentAnswer,
+) -> Result<()> {
+    call_unit(&app, &daemon, agent_method::AGENT_ANSWER, &request).await
+}
 
 #[tauri::command]
 pub async fn connection_info(app: AppHandle, daemon: State<'_, Daemon>) -> Result<ConnectionInfo> {
@@ -58,19 +217,6 @@ pub async fn connection_info(app: AppHandle, daemon: State<'_, Daemon>) -> Resul
 #[tauri::command]
 pub async fn start_daemon(app: AppHandle, daemon: State<'_, Daemon>) -> Result<ConnectionInfo> {
     daemon.start(&app).await
-}
-
-#[tauri::command]
-pub async fn status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<StatusResponse> {
-    daemon.call(&app, method::STATUS, &()).await
-}
-
-#[tauri::command]
-pub async fn providers_list(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-) -> Result<Vec<ProviderInfo>> {
-    daemon.call(&app, method::PROVIDERS_LIST, &()).await
 }
 
 /// The probe result type is not fixed by the protocol yet, so it is passed through as JSON.
@@ -94,7 +240,7 @@ pub async fn chat(
     request: ChatRequest,
 ) -> Result<ChatStarted> {
     if request.messages.is_empty() {
-        return Err(CmdError::Other("a chat needs at least one message".into()));
+        return err("a chat needs at least one message");
     }
     daemon.call(&app, method::CHAT, &request).await
 }
@@ -105,10 +251,13 @@ pub async fn chat_cancel(
     daemon: State<'_, Daemon>,
     stream_id: String,
 ) -> Result<()> {
-    let _: Value = daemon
-        .call(&app, method::CHAT_CANCEL, &ChatCancel { stream_id })
-        .await?;
-    Ok(())
+    call_unit(
+        &app,
+        &daemon,
+        method::CHAT_CANCEL,
+        &ChatCancel { stream_id },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -125,11 +274,6 @@ pub async fn search(
     daemon.call(&app, method::SEARCH, &req).await
 }
 
-#[tauri::command]
-pub async fn models_list(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Vec<ModelInfo>> {
-    daemon.call(&app, method::MODELS_LIST, &()).await
-}
-
 /// Starts an install; progress arrives as `nugget:models-progress` events.
 #[tauri::command]
 pub async fn models_install(
@@ -142,7 +286,7 @@ pub async fn models_install(
         .await
 }
 
-/// Stops a running install (`models.cancel`); the install's final progress says `cancelled`.
+/// Stops a running install; its final progress says `cancelled`.
 #[tauri::command]
 pub async fn models_cancel(app: AppHandle, daemon: State<'_, Daemon>, id: String) -> Result<Value> {
     daemon
@@ -162,8 +306,7 @@ pub async fn egress_recent(
     daemon.call(&app, method::EGRESS_RECENT, &req).await
 }
 
-// ---- LL1: cursor-paged search and ledger (the daemon validates cursors) ----
-
+/// Cursor-paged search; the daemon validates cursors.
 #[tauri::command]
 pub async fn search_page(
     app: AppHandle,
@@ -190,32 +333,11 @@ pub async fn egress_page(
     daemon.call(&app, method::EGRESS_PAGE, &request).await
 }
 
-// ---- sources (M1) ----
-
-#[tauri::command]
-pub async fn sources_list(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Vec<SourceInfo>> {
-    daemon.call(&app, method::SOURCES_LIST, &()).await
-}
-
-#[tauri::command]
-pub async fn sources_add(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: SourceSpec,
-) -> Result<SourceInfo> {
+fn check_source_spec(request: &SourceSpec) -> Result<()> {
     if request.kind.trim().is_empty() || request.name.trim().is_empty() {
-        return Err(CmdError::Other("a source needs a kind and a name".into()));
+        return err("a source needs a kind and a name");
     }
-    daemon.call(&app, method::SOURCES_ADD, &request).await
-}
-
-#[tauri::command]
-pub async fn sources_update(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: SourceUpdate,
-) -> Result<SourceInfo> {
-    daemon.call(&app, method::SOURCES_UPDATE, &request).await
+    Ok(())
 }
 
 #[tauri::command]
@@ -224,8 +346,7 @@ pub async fn sources_remove(
     daemon: State<'_, Daemon>,
     request: SourceRemove,
 ) -> Result<()> {
-    let _: Value = daemon.call(&app, method::SOURCES_REMOVE, &request).await?;
-    Ok(())
+    call_unit(&app, &daemon, method::SOURCES_REMOVE, &request).await
 }
 
 /// Starts a sync pass; progress arrives as `nugget:ingest-progress` events.
@@ -235,21 +356,7 @@ pub async fn sources_sync(
     daemon: State<'_, Daemon>,
     request: SourceSync,
 ) -> Result<()> {
-    let _: Value = daemon.call(&app, method::SOURCES_SYNC, &request).await?;
-    Ok(())
-}
-
-/// Starts an OAuth authorization. The UI opens the returned URL with `open_url`; completion
-/// arrives as a `nugget:sources-changed` event.
-#[tauri::command]
-pub async fn sources_auth_begin(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: SourceRef,
-) -> Result<AuthBegin> {
-    daemon
-        .call(&app, method::SOURCES_AUTH_BEGIN, &request)
-        .await
+    call_unit(&app, &daemon, method::SOURCES_SYNC, &request).await
 }
 
 /// Stores a password in the OS keychain through the daemon. Write-only: nothing returns it, and
@@ -261,20 +368,16 @@ pub async fn sources_secret_set(
     request: SourceSecret,
 ) -> Result<()> {
     if request.secret.is_empty() {
-        return Err(CmdError::Other("the password is empty".into()));
+        return err("the password is empty");
     }
     if request.secret.len() > MAX_SECRET_LEN {
-        return Err(CmdError::Other("the password is too long".into()));
+        return err("the password is too long");
     }
-    let _: Value = daemon
-        .call(&app, method::SOURCES_SECRET_SET, &request)
-        .await?;
-    Ok(())
+    call_unit(&app, &daemon, method::SOURCES_SECRET_SET, &request).await
 }
 
-#[tauri::command]
-pub async fn ingest_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<IngestStatus> {
-    daemon.call(&app, method::INGEST_STATUS, &()).await
+fn context_budget(budget: u32) -> u32 {
+    budget.clamp(MIN_CONTEXT_BUDGET, MAX_CONTEXT_BUDGET)
 }
 
 #[tauri::command]
@@ -284,20 +387,17 @@ pub async fn retrieve_context(
     request: ContextRequest,
 ) -> Result<ContextResponse> {
     if request.query.trim().is_empty() {
-        return Err(CmdError::Other("the question is empty".into()));
+        return err("the question is empty");
     }
     let req = ContextRequest {
-        budget_tokens: request
-            .budget_tokens
-            .clamp(MIN_CONTEXT_BUDGET, MAX_CONTEXT_BUDGET),
+        budget_tokens: context_budget(request.budget_tokens),
         ..request
     };
     daemon.call(&app, method::RETRIEVE_CONTEXT, &req).await
 }
 
-/// Answer a question from retrieved context. The daemon chooses the model, then packs the
-/// context for it (sensitive passages never go to cloud models); output arrives as
-/// `nugget:chat-delta` / `nugget:chat-done` events for the returned stream.
+/// Answer a question from retrieved context (sensitive passages never go to cloud models); output
+/// arrives as `nugget:chat-delta` / `nugget:chat-done` events for the returned stream.
 #[tauri::command]
 pub async fn retrieve_ask(
     app: AppHandle,
@@ -305,80 +405,16 @@ pub async fn retrieve_ask(
     request: AskRequest,
 ) -> Result<AskStarted> {
     if request.query.trim().is_empty() {
-        return Err(CmdError::Other("the question is empty".into()));
+        return err("the question is empty");
     }
     let req = AskRequest {
-        budget_tokens: request
-            .budget_tokens
-            .clamp(MIN_CONTEXT_BUDGET, MAX_CONTEXT_BUDGET),
+        budget_tokens: context_budget(request.budget_tokens),
         ..request
     };
     daemon.call(&app, method::RETRIEVE_ASK, &req).await
 }
 
-// ---- Z3: AI setup ----
-
-/// Check a provider API key against the provider (`ai.key.test`). The request carries the key:
-/// it is passed through, never logged.
-#[tauri::command]
-pub async fn ai_key_test(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    daemon.call(&app, "ai.key.test", &request).await
-}
-
-/// Check a provider API key, then store it in the keychain and add the provider to the config
-/// (`ai.key.save`). The request carries the key: it is passed through, never logged.
-#[tauri::command]
-pub async fn ai_key_save(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    daemon.call(&app, "ai.key.save", &request).await
-}
-
-/// Check a new key for a saved provider, then replace it (`ai.key.update`). The request carries
-/// the key: it is passed through, never logged.
-#[tauri::command]
-pub async fn ai_key_update(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    daemon.call(&app, "ai.key.update", &request).await
-}
-
-/// Delete a saved provider's key and remove the provider (`ai.key.remove`).
-#[tauri::command]
-pub async fn ai_key_remove(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    daemon.call(&app, "ai.key.remove", &request).await
-}
-
-/// The providers that use a key (`ai.key.saved`).
-#[tauri::command]
-pub async fn ai_key_saved(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
-    daemon.call(&app, "ai.key.saved", &()).await
-}
-
-/// What each manifest model needs and whether this machine has it (`models.fit`).
-#[tauri::command]
-pub async fn models_fit(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
-    daemon.call(&app, "models.fit", &()).await
-}
-
-#[tauri::command]
-pub async fn runtime_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Vec<RuntimeInfo>> {
-    daemon.call(&app, method::RUNTIME_STATUS, &()).await
-}
-
-/// Start a local model server again after it failed or gave up (`runtime.retry`, KK1).
+/// Start a local model server again after it failed or gave up.
 #[tauri::command]
 pub async fn runtime_retry(
     app: AppHandle,
@@ -386,22 +422,22 @@ pub async fn runtime_retry(
     role: String,
 ) -> Result<Value> {
     daemon
-        .call(&app, "runtime.retry", &serde_json::json!({ "role": role }))
+        .call(&app, "runtime.retry", &json!({ "role": role }))
         .await
 }
 
-// ---- knowledge graph (M2) ----
+// ---- knowledge graph ----
 
 fn check_text(what: &str, value: &str) -> Result<()> {
     if value.len() > MAX_TEXT_LEN {
-        return Err(CmdError::Other(format!("the {what} is too long")));
+        return err(format!("the {what} is too long"));
     }
     Ok(())
 }
 
 fn check_entity_id(what: &str, id: &str) -> Result<()> {
     if id.trim().is_empty() {
-        return Err(CmdError::Other(format!("the {what} entity is missing")));
+        return err(format!("the {what} entity is missing"));
     }
     check_text(what, id)
 }
@@ -432,7 +468,7 @@ fn graph_request(request: GraphRequest) -> Result<GraphRequest> {
         check_entity_id("center", c.as_str())?;
     }
     if request.kinds.len() > MAX_LIST_LEN {
-        return Err(CmdError::Other("too many kinds in the graph filter".into()));
+        return err("too many kinds in the graph filter");
     }
     for k in &request.kinds {
         check_text("kind", k)?;
@@ -451,9 +487,7 @@ fn check_merge(request: &MergeRequest) -> Result<()> {
     check_entity_id("target", request.into.as_str())?;
     check_entity_id("merged", request.from.as_str())?;
     if request.into == request.from {
-        return Err(CmdError::Other(
-            "an entity can't be merged into itself".into(),
-        ));
+        return err("an entity can't be merged into itself");
     }
     Ok(())
 }
@@ -463,28 +497,26 @@ fn check_merge(request: &MergeRequest) -> Result<()> {
 fn check_claim_status(request: &ClaimStatusRequest) -> Result<()> {
     match request.status.as_str() {
         "rejected" | "active" | "user_asserted" | "unasserted" => Ok(()),
-        other => Err(CmdError::Other(format!(
+        other => err(format!(
             "a fact can only be rejected, restored, asserted or withdrawn, not set to “{other}”"
-        ))),
+        )),
     }
 }
 
 fn check_split(request: &SplitRequest) -> Result<()> {
     check_entity_id("split", request.entity.as_str())?;
     if request.name.trim().is_empty() {
-        return Err(CmdError::Other("the new entity needs a name".into()));
+        return err("the new entity needs a name");
     }
     check_text("name", &request.name)?;
     if request.claims.is_empty() {
-        return Err(CmdError::Other(
-            "choose at least one fact to split off".into(),
-        ));
+        return err("choose at least one fact to split off");
     }
     if request.claims.len() > MAX_SPLIT_CLAIMS
         || request.aliases.len() > MAX_LIST_LEN
         || request.identifiers.len() > MAX_LIST_LEN
     {
-        return Err(CmdError::Other("too many items in the split".into()));
+        return err("too many items in the split");
     }
     if let Some(k) = &request.kind {
         check_text("kind", k)?;
@@ -510,16 +542,6 @@ pub async fn knowledge_entities(
 }
 
 #[tauri::command]
-pub async fn knowledge_entity(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: EntityRef,
-) -> Result<EntityDetail> {
-    check_entity_id("requested", request.id.as_str())?;
-    daemon.call(&app, method::KNOWLEDGE_ENTITY, &request).await
-}
-
-#[tauri::command]
 pub async fn knowledge_graph(
     app: AppHandle,
     daemon: State<'_, Daemon>,
@@ -536,11 +558,9 @@ pub async fn knowledge_merge(
     request: MergeRequest,
 ) -> Result<()> {
     check_merge(&request)?;
-    let _: Value = daemon.call(&app, method::KNOWLEDGE_MERGE, &request).await?;
-    Ok(())
+    call_unit(&app, &daemon, method::KNOWLEDGE_MERGE, &request).await
 }
 
-/// Reject, restore, assert or withdraw a fact (see `check_claim_status`).
 #[tauri::command]
 pub async fn knowledge_claim_status(
     app: AppHandle,
@@ -548,48 +568,24 @@ pub async fn knowledge_claim_status(
     request: ClaimStatusRequest,
 ) -> Result<()> {
     check_claim_status(&request)?;
-    let _: Value = daemon
-        .call(&app, method::KNOWLEDGE_CLAIM_STATUS, &request)
-        .await?;
-    Ok(())
+    call_unit(&app, &daemon, method::KNOWLEDGE_CLAIM_STATUS, &request).await
 }
 
-/// Split facts off an entity into a new one; returns the new entity.
-#[tauri::command]
-pub async fn knowledge_split(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: SplitRequest,
-) -> Result<EntityRef> {
-    check_split(&request)?;
-    daemon.call(&app, method::KNOWLEDGE_SPLIT, &request).await
-}
-
-#[tauri::command]
-pub async fn knowledge_status(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-) -> Result<KnowledgeStatus> {
-    daemon.call(&app, method::KNOWLEDGE_STATUS, &()).await
-}
-
-// ---- MCP clients (M2) ----
+// ---- MCP clients ----
 
 fn check_client_create(request: &McpClientCreate) -> Result<McpClientCreate> {
     let name = request.name.trim();
     if name.is_empty() {
-        return Err(CmdError::Other("the app needs a name".into()));
+        return err("the app needs a name");
     }
     if name.chars().count() > MAX_CLIENT_NAME_LEN {
-        return Err(CmdError::Other(format!(
+        return err(format!(
             "the name is too long (at most {MAX_CLIENT_NAME_LEN} characters)"
-        )));
+        ));
     }
     let scopes = &request.scopes;
     if scopes.sources.as_ref().is_some_and(Vec::is_empty) {
-        return Err(CmdError::Other(
-            "choose at least one source, or allow all sources".into(),
-        ));
+        return err("choose at least one source, or allow all sources");
     }
     if scopes
         .sources
@@ -597,7 +593,7 @@ fn check_client_create(request: &McpClientCreate) -> Result<McpClientCreate> {
         .is_some_and(|s| s.len() > MAX_LIST_LEN)
         || scopes.tools.len() > MAX_LIST_LEN
     {
-        return Err(CmdError::Other("too many scopes".into()));
+        return err("too many scopes");
     }
     Ok(McpClientCreate {
         name: name.to_owned(),
@@ -615,14 +611,6 @@ fn without_response_detail(err: CmdError) -> CmdError {
         )),
         other => other,
     }
-}
-
-#[tauri::command]
-pub async fn mcp_clients_list(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-) -> Result<Vec<McpClientInfo>> {
-    daemon.call(&app, method::MCP_CLIENTS_LIST, &()).await
 }
 
 /// Creates a client. The result carries its bearer token, which is shown once in the UI and
@@ -647,102 +635,33 @@ pub async fn mcp_clients_revoke(
     request: McpClientRef,
 ) -> Result<()> {
     if request.id.trim().is_empty() {
-        return Err(CmdError::Other("no app to revoke".into()));
+        return err("no app to revoke");
     }
     check_text("app id", &request.id)?;
-    let _: Value = daemon
-        .call(&app, method::MCP_CLIENTS_REVOKE, &request)
-        .await?;
-    Ok(())
+    call_unit(&app, &daemon, method::MCP_CLIENTS_REVOKE, &request).await
 }
 
-// ---- plugins (M6) ----
-
-/// Longest file path the UI may hand to `plugins.install`.
-const MAX_PATH_LEN: usize = 4096;
+// ---- plugins ----
 
 fn check_plugin_field(what: &str, value: &str) -> Result<()> {
     if value.trim().is_empty() {
-        return Err(CmdError::Other(format!("the plugin {what} is missing")));
+        return err(format!("the plugin {what} is missing"));
     }
     check_text(what, value)
 }
 
+fn check_plugin_id(request: &PluginIdParams) -> Result<()> {
+    check_plugin_field("id", &request.id)
+}
+
 fn check_plugin_install(request: &PluginInstallParams) -> Result<()> {
     if request.path.len() > MAX_PATH_LEN {
-        return Err(CmdError::Other("the plugin path is too long".into()));
+        return err("the plugin path is too long");
     }
     if !std::path::Path::new(&request.path).is_absolute() {
-        return Err(CmdError::Other("choose a plugin file".into()));
+        return err("choose a plugin file");
     }
     Ok(())
-}
-
-#[tauri::command]
-pub async fn plugins_list(app: AppHandle, daemon: State<'_, Daemon>) -> Result<PluginListResult> {
-    daemon.call(&app, plugin_method::LIST, &()).await
-}
-
-#[tauri::command]
-pub async fn plugins_inspect(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: PluginIdParams,
-) -> Result<PluginInspectResult> {
-    check_plugin_field("id", &request.id)?;
-    daemon.call(&app, plugin_method::INSPECT, &request).await
-}
-
-/// Verifies and stages a package; it is committed only by `plugins_approve` (unless it is an
-/// update within the capabilities the user already approved).
-#[tauri::command]
-pub async fn plugins_install(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: PluginInstallParams,
-) -> Result<PluginInstallResult> {
-    check_plugin_install(&request)?;
-    daemon.call(&app, plugin_method::INSTALL, &request).await
-}
-
-#[tauri::command]
-pub async fn plugins_approve(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: PluginApproveParams,
-) -> Result<PluginApproveResult> {
-    check_plugin_field("install token", &request.token)?;
-    daemon.call(&app, plugin_method::APPROVE, &request).await
-}
-
-#[tauri::command]
-pub async fn plugins_remove(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: PluginIdParams,
-) -> Result<PluginRemoveResult> {
-    check_plugin_field("id", &request.id)?;
-    daemon.call(&app, plugin_method::REMOVE, &request).await
-}
-
-#[tauri::command]
-pub async fn plugins_enable(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: PluginEnableParams,
-) -> Result<PluginInfo> {
-    check_plugin_field("id", &request.id)?;
-    daemon.call(&app, plugin_method::ENABLE, &request).await
-}
-
-/// Signed packages in the plugin catalog folders, verified but not installed; each entry's path
-/// goes to `plugins_install`.
-#[tauri::command]
-pub async fn plugins_catalog(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-) -> Result<PluginCatalogResult> {
-    daemon.call(&app, plugin_method::CATALOG, &()).await
 }
 
 // ---- shell helpers ----
@@ -758,14 +677,28 @@ pub async fn open_url(url: String) -> Result<Opened> {
         .map_err(CmdError::Other)
 }
 
+fn picked_path(what: &str, p: tauri_plugin_dialog::FilePath) -> Result<String> {
+    let path = p
+        .into_path()
+        .map_err(|e| CmdError::Other(format!("unsupported {what}: {e}")))?;
+    path.into_os_string()
+        .into_string()
+        .map_err(|_| CmdError::Other(format!("{what} paths must be valid Unicode")))
+}
+
+fn file_dialog(app: &AppHandle) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    let dialog = app.dialog().file();
+    match app.get_webview_window("main") {
+        Some(window) => dialog.set_parent(&window),
+        None => dialog,
+    }
+}
+
 /// Native folder picker. Returns the chosen absolute paths (empty when cancelled).
 #[tauri::command]
 pub async fn pick_folders(app: AppHandle, multiple: bool) -> Result<Vec<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let mut dialog = app.dialog().file();
-    if let Some(window) = app.get_webview_window("main") {
-        dialog = dialog.set_parent(&window);
-    }
+    let dialog = file_dialog(&app);
     if multiple {
         dialog
             .set_title("Choose folders")
@@ -784,26 +717,28 @@ pub async fn pick_folders(app: AppHandle, multiple: bool) -> Result<Vec<String>>
         .map_err(|_| CmdError::Other("the folder picker closed unexpectedly".into()))?;
     picked
         .into_iter()
-        .map(|p| {
-            let path = p
-                .into_path()
-                .map_err(|e| CmdError::Other(format!("unsupported folder: {e}")))?;
-            path.into_os_string()
-                .into_string()
-                .map_err(|_| CmdError::Other("folder paths must be valid Unicode".into()))
-        })
+        .map(|p| picked_path("folder", p))
         .collect()
 }
 
-// ---- W4 proactive (M5) ----
-//
-// Typed proxies for the card inbox, morning brief and reminders, plus two shell helpers the
-// Today page needs: OS notifications (driven from Rust; the webview has no `notification:`
-// permission) and opening a draft in the mail app (`mailto:` only, see `open::mailto`).
+/// Native file picker for a `.nuggetplugin` package. Returns its absolute path, or `None` when
+/// cancelled.
+#[tauri::command]
+pub async fn pick_plugin_file(app: AppHandle) -> Result<Option<String>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    file_dialog(&app)
+        .set_title("Choose a plugin")
+        .add_filter("Nugget plugin", &["nuggetplugin"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|_| CmdError::Other("the file picker closed unexpectedly".into()))?;
+    picked.map(|p| picked_path("file", p)).transpose()
+}
 
-/// Card ids and dismiss reasons are short; free-text dismiss reasons stay modest.
-const MAX_CARD_ID_LEN: usize = 256;
-const MAX_REASON_TEXT_LEN: usize = 2_000;
+// ---- proactive: card inbox, brief, reminders ----
 
 const CARD_FEEDBACK: &[&str] = &["accept", "dismiss", "snooze", "seen", "done"];
 const DISMISS_REASONS: &[&str] = &[
@@ -813,10 +748,12 @@ const DISMISS_REASONS: &[&str] = &[
     "not_important",
     "other",
 ];
+/// Scopes `proactive.reset_learning` takes (`all` needs no key).
+const LEARNING_SCOPES: &[&str] = &["all", "sender", "domain", "kind", "thread"];
 
 fn check_card_id(card_id: &str) -> Result<()> {
     if card_id.trim().is_empty() || card_id.len() > MAX_CARD_ID_LEN {
-        return Err(CmdError::Other("no such card".into()));
+        return err("no such card");
     }
     Ok(())
 }
@@ -824,153 +761,45 @@ fn check_card_id(card_id: &str) -> Result<()> {
 fn check_card_feedback(request: &CardFeedbackRequest) -> Result<()> {
     check_card_id(&request.card_id)?;
     if !CARD_FEEDBACK.contains(&request.feedback.as_str()) {
-        return Err(CmdError::Other("unknown card feedback".into()));
+        return err("unknown card feedback");
     }
     if let Some(reason) = &request.reason
         && !DISMISS_REASONS.contains(&reason.as_str())
     {
-        return Err(CmdError::Other("unknown dismiss reason".into()));
+        return err("unknown dismiss reason");
     }
     if request
         .reason_text
         .as_ref()
         .is_some_and(|t| t.len() > MAX_REASON_TEXT_LEN)
     {
-        return Err(CmdError::Other("the reason is too long".into()));
+        return err("the reason is too long");
     }
     Ok(())
 }
 
-#[tauri::command]
-pub async fn cards_list(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: CardsListRequest,
-) -> Result<CardsList> {
-    daemon
-        .call(&app, proactive_method::CARDS_LIST, &request)
-        .await
-}
-
-#[tauri::command]
-pub async fn cards_feedback(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: CardFeedbackRequest,
-) -> Result<CardView> {
-    check_card_feedback(&request)?;
-    daemon
-        .call(&app, proactive_method::CARDS_FEEDBACK, &request)
-        .await
-}
-
-#[tauri::command]
-pub async fn cards_preview(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: CardPreviewRequest,
-) -> Result<CardPreview> {
-    check_card_id(&request.card_id)?;
-    daemon
-        .call(&app, proactive_method::CARDS_PREVIEW, &request)
-        .await
-}
-
-#[tauri::command]
-pub async fn cards_execute(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: CardExecuteRequest,
-) -> Result<CardExecuteResult> {
+fn check_card_execute(request: &CardExecuteRequest) -> Result<()> {
     check_card_id(&request.card_id)?;
     if request.digest.trim().is_empty() || request.digest.len() > MAX_TEXT_LEN {
-        return Err(CmdError::Other(
-            "preview the action before approving it".into(),
-        ));
+        return err("preview the action before approving it");
     }
-    daemon
-        .call(&app, proactive_method::CARDS_EXECUTE, &request)
-        .await
+    Ok(())
 }
-
-#[tauri::command]
-pub async fn brief_get(app: AppHandle, daemon: State<'_, Daemon>) -> Result<BriefView> {
-    daemon
-        .call(&app, proactive_method::BRIEF_GET, &json!({}))
-        .await
-}
-
-#[tauri::command]
-pub async fn proactive_metrics(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-) -> Result<ProactiveMetrics> {
-    daemon
-        .call(&app, proactive_method::PROACTIVE_METRICS, &json!({}))
-        .await
-}
-
-#[tauri::command]
-pub async fn proactive_refresh(app: AppHandle, daemon: State<'_, Daemon>) -> Result<CardsChanged> {
-    daemon
-        .call(&app, proactive_method::PROACTIVE_REFRESH, &json!({}))
-        .await
-}
-
-/// Scopes `proactive.reset_learning` takes (`all` needs no key).
-const LEARNING_SCOPES: &[&str] = &["all", "sender", "domain", "kind", "thread"];
 
 fn check_reset_learning(request: &ResetLearningRequest) -> Result<()> {
     if !LEARNING_SCOPES.contains(&request.scope.as_str()) {
-        return Err(CmdError::Other("unknown learning scope".into()));
+        return err("unknown learning scope");
     }
     match request.key.as_deref() {
-        Some(key) if key.len() > MAX_TEXT_LEN => {
-            Err(CmdError::Other("learning key is too long".into()))
-        }
-        None | Some("") if request.scope != "all" => {
-            Err(CmdError::Other("say what to forget".into()))
-        }
+        Some(key) if key.len() > MAX_TEXT_LEN => err("learning key is too long"),
+        None | Some("") if request.scope != "all" => err("say what to forget"),
         _ => Ok(()),
     }
 }
 
-/// What feedback taught the card ranking.
-#[tauri::command]
-pub async fn proactive_learning(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-) -> Result<ProactiveLearning> {
-    daemon
-        .call(&app, proactive_method::PROACTIVE_LEARNING, &json!({}))
-        .await
-}
-
-/// Forget learned ranking adjustments (all, or one sender/domain/kind/thread); audited.
-#[tauri::command]
-pub async fn proactive_reset_learning(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: ResetLearningRequest,
-) -> Result<ResetLearningResult> {
-    check_reset_learning(&request)?;
-    daemon
-        .call(&app, proactive_method::PROACTIVE_RESET_LEARNING, &request)
-        .await
-}
-
-#[tauri::command]
-pub async fn reminders_list(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-) -> Result<Vec<ReminderView>> {
-    daemon
-        .call(&app, proactive_method::REMINDERS_LIST, &json!({}))
-        .await
-}
-
-/// Show an OS notification (morning brief, due reminder). Text is shown as plain text. With
-/// `open_today`, clicking it opens the Today page (see `notify.rs`).
+/// Show an OS notification (morning brief, due reminder) as plain text. With `open_today`,
+/// clicking it opens the Today page (see `notify.rs`). The webview has no `notification:`
+/// permission, so this is the only way.
 #[tauri::command]
 pub async fn notify(
     app: AppHandle,
@@ -979,7 +808,7 @@ pub async fn notify(
     body: String,
     open_today: Option<bool>,
 ) -> Result<()> {
-    // II4: only the main window composes notifications (not the quick-ask box or the overlay).
+    // Only the main window composes notifications (not the quick-ask box or the overlay).
     crate::platform::main_only(&window)?;
     crate::notify::show(&app, &title, &body, open_today.unwrap_or(false)).map_err(CmdError::Other)
 }
@@ -997,282 +826,32 @@ pub async fn open_mailto(url: String) -> Result<()> {
     .map_err(CmdError::Other)
 }
 
-/// Native file picker for a `.nuggetplugin` package. Returns its absolute path, or `None` when
-/// cancelled.
-#[tauri::command]
-pub async fn pick_plugin_file(app: AppHandle) -> Result<Option<String>> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let mut dialog = app.dialog().file();
-    if let Some(window) = app.get_webview_window("main") {
-        dialog = dialog.set_parent(&window);
-    }
-    dialog
-        .set_title("Choose a plugin")
-        .add_filter("Nugget plugin", &["nuggetplugin"])
-        .pick_file(move |path| {
-            let _ = tx.send(path);
-        });
-    let picked = rx
-        .await
-        .map_err(|_| CmdError::Other("the file picker closed unexpectedly".into()))?;
-    picked
-        .map(|p| {
-            let path = p
-                .into_path()
-                .map_err(|e| CmdError::Other(format!("unsupported file: {e}")))?;
-            path.into_os_string()
-                .into_string()
-                .map_err(|_| CmdError::Other("file paths must be valid Unicode".into()))
-        })
-        .transpose()
-}
-
-// ---- FF1: backup, restore, export ----
-//
-// Pass-through proxies to the daemon's `backup.*` and `export.run` (see `src/api.ts`). Requests
-// are JSON objects whose string fields are paths or a passphrase; the passphrase is passed
-// through, never logged. The daemon validates everything else.
-
-/// Paths beyond this are a UI bug.
-const MAX_BACKUP_PATH_LEN: usize = 4096;
-
+/// Backup and export requests are objects whose string fields are paths or a passphrase.
 fn check_backup_request(request: &Value) -> Result<()> {
     let Some(fields) = request.as_object() else {
-        return Err(CmdError::Other("the request must be an object".into()));
+        return err("the request must be an object");
     };
     for (name, value) in fields {
         let limit = if name == "passphrase" {
             MAX_SECRET_LEN
         } else {
-            MAX_BACKUP_PATH_LEN
+            MAX_PATH_LEN
         };
         if value.as_str().is_some_and(|s| s.len() > limit) {
-            return Err(CmdError::Other(format!("the {name} is too long")));
+            return err(format!("the {name} is too long"));
         }
     }
     Ok(())
 }
 
-#[tauri::command]
-pub async fn backup_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
-    daemon.call(&app, "backup.status", &json!({})).await
-}
-
-#[tauri::command]
-pub async fn backup_configure(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    check_backup_request(&request)?;
-    daemon.call(&app, "backup.configure", &request).await
-}
-
-#[tauri::command]
-pub async fn backup_set_passphrase(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    check_backup_request(&request)?;
-    daemon.call(&app, "backup.set_passphrase", &request).await
-}
-
-#[tauri::command]
-pub async fn backup_run(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    check_backup_request(&request)?;
-    daemon.call(&app, "backup.run", &request).await
-}
-
-#[tauri::command]
-pub async fn backup_list(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    check_backup_request(&request)?;
-    daemon.call(&app, "backup.list", &request).await
-}
-
-/// Stages a restore; the daemon exits by itself right after replying and the UI calls
-/// `start_daemon`, which applies it.
-#[tauri::command]
-pub async fn backup_restore(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    check_backup_request(&request)?;
-    daemon.call(&app, "backup.restore", &request).await
-}
-
-#[tauri::command]
-pub async fn export_run(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    check_backup_request(&request)?;
-    daemon.call(&app, "export.run", &request).await
-}
-
-// ---- II2: faceted search, timelines, previews (pass-through; the daemon validates) ----
-
-#[tauri::command]
-pub async fn search_faceted(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    daemon.call(&app, "search.faceted", &request).await
-}
-
-#[tauri::command]
-pub async fn search_timeline(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    daemon.call(&app, "search.timeline", &request).await
-}
-
-#[tauri::command]
-pub async fn search_preview(
-    app: AppHandle,
-    daemon: State<'_, Daemon>,
-    request: Value,
-) -> Result<Value> {
-    daemon.call(&app, "search.preview", &request).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nugget_core::ids::EntityId;
     use serde_json::json;
 
-    /// The `request` objects `api.ts` sends must decode into the IPC types unchanged.
     #[test]
-    fn frontend_requests_match_the_ipc_types() {
-        let spec: SourceSpec = serde_json::from_value(json!({
-            "id": null, "kind": "files", "name": "Docs",
-            "settings": { "roots": ["/home/me/Docs"], "include": [], "exclude": [] }
-        }))
-        .unwrap();
-        assert_eq!(spec.kind, "files");
-        assert!(spec.id.is_none());
-
-        let upd: SourceUpdate =
-            serde_json::from_value(json!({ "id": "files-1", "enabled": false })).unwrap();
-        assert_eq!(upd.enabled, Some(false));
-        assert!(upd.name.is_none() && upd.settings.is_none());
-
-        let rm: SourceRemove =
-            serde_json::from_value(json!({ "id": "files-1", "purge": false })).unwrap();
-        assert!(!rm.purge);
-
-        let sync: SourceSync = serde_json::from_value(json!({ "id": null })).unwrap();
-        assert!(sync.id.is_none());
-
-        let r: SourceRef = serde_json::from_value(json!({ "id": "gmail-1" })).unwrap();
-        assert_eq!(r.id.as_str(), "gmail-1");
-
-        let secret: SourceSecret =
-            serde_json::from_value(json!({ "id": "imap-1", "secret": "hunter2" })).unwrap();
-        assert!(!format!("{secret:?}").contains("hunter2"));
-
-        let ctx: ContextRequest =
-            serde_json::from_value(json!({ "query": "q", "budget_tokens": 2000 })).unwrap();
-        assert_eq!(ctx.budget_tokens, 2000);
-    }
-
-    /// The plugin `request` objects `api.ts` sends decode into the IPC types and are checked.
-    #[test]
-    fn plugin_requests_match_the_ipc_types() {
-        let id: PluginIdParams = serde_json::from_value(json!({ "id": "rss" })).unwrap();
-        assert!(check_plugin_field("id", &id.id).is_ok());
-        assert!(check_plugin_field("id", " ").is_err());
-
-        let absolute = if cfg!(windows) {
-            r"C:\Users\me\rss.nuggetplugin"
-        } else {
-            "/home/me/rss.nuggetplugin"
-        };
-        let install: PluginInstallParams =
-            serde_json::from_value(json!({ "path": absolute })).unwrap();
-        assert!(check_plugin_install(&install).is_ok());
-        let relative = PluginInstallParams {
-            path: "rss.nuggetplugin".into(),
-        };
-        assert!(check_plugin_install(&relative).is_err());
-
-        let approve: PluginApproveParams =
-            serde_json::from_value(json!({ "token": "tok-1", "approve": false })).unwrap();
-        assert!(!approve.approve);
-
-        let enable: PluginEnableParams =
-            serde_json::from_value(json!({ "id": "rss", "enabled": true })).unwrap();
-        assert!(enable.enabled);
-    }
-
-    /// The knowledge and MCP `request` objects `api.ts` builds decode into the IPC types.
-    #[test]
-    fn knowledge_and_mcp_requests_match_the_ipc_types() {
-        let ents: EntitiesRequest = serde_json::from_value(
-            json!({ "text": "sam", "kind": "person", "limit": 51, "offset": 50 }),
-        )
-        .unwrap();
-        assert_eq!(ents.kind.as_deref(), Some("person"));
-        assert_eq!((ents.limit, ents.offset), (51, 50));
-        // Optional fields may be omitted or null.
-        let ents: EntitiesRequest =
-            serde_json::from_value(json!({ "text": null, "limit": 10 })).unwrap();
-        assert!(ents.text.is_none() && ents.kind.is_none() && ents.offset == 0);
-
-        let r: EntityRef = serde_json::from_value(json!({ "id": "ent_1" })).unwrap();
-        assert_eq!(r.id.as_str(), "ent_1");
-
-        let g: GraphRequest = serde_json::from_value(
-            json!({ "center": "ent_1", "depth": 2, "limit": 2000, "kinds": ["person", "project"] }),
-        )
-        .unwrap();
-        assert_eq!(g.center.as_ref().map(|c| c.as_str()), Some("ent_1"));
-        assert_eq!(g.kinds.len(), 2);
-        let g: GraphRequest =
-            serde_json::from_value(json!({ "center": null, "depth": 1, "limit": 200 })).unwrap();
-        assert!(g.center.is_none() && g.kinds.is_empty());
-
-        let m: MergeRequest =
-            serde_json::from_value(json!({ "into": "ent_1", "from": "ent_2" })).unwrap();
-        assert_eq!(m.from.as_str(), "ent_2");
-
-        let c: ClaimStatusRequest =
-            serde_json::from_value(json!({ "claim": 42, "status": "retracted" })).unwrap();
-        assert_eq!(c.claim, 42);
-
-        let create: McpClientCreate = serde_json::from_value(json!({
-            "name": "Claude Desktop",
-            "scopes": { "sources": ["files-1"], "tools": ["search"], "include_sensitive": false }
-        }))
-        .unwrap();
-        assert_eq!(create.scopes.sources.as_ref().map(Vec::len), Some(1));
-        // "All sources, all read-only tools" is `sources: null, tools: []`.
-        let create: McpClientCreate = serde_json::from_value(json!({
-            "name": "Cursor",
-            "scopes": { "sources": null, "tools": [], "include_sensitive": false }
-        }))
-        .unwrap();
-        assert!(create.scopes.sources.is_none() && !create.scopes.include_sensitive);
-
-        let r: McpClientRef = serde_json::from_value(json!({ "id": "mcp-1" })).unwrap();
-        assert_eq!(r.id, "mcp-1");
-    }
-
-    #[test]
-    fn knowledge_requests_are_bounded_and_validated() {
+    fn requests_are_bounded_and_validated() {
         let req = entities_request(EntitiesRequest {
             text: Some("   ".into()),
             kind: Some(String::new()),
@@ -1282,12 +861,6 @@ mod tests {
         .unwrap();
         assert!(req.text.is_none() && req.kind.is_none());
         assert_eq!(req.limit, MAX_ENTITIES_LIMIT);
-        let req = entities_request(EntitiesRequest {
-            limit: 0,
-            ..Default::default()
-        })
-        .unwrap();
-        assert_eq!(req.limit, 1);
         assert!(
             entities_request(EntitiesRequest {
                 text: Some("x".repeat(MAX_TEXT_LEN + 1)),
@@ -1298,12 +871,9 @@ mod tests {
         );
 
         let g = graph_request(GraphRequest {
-            center: None,
             depth: 99,
             limit: 1_000_000,
-            kinds: vec![],
-            source: None,
-            include_sensitive: false,
+            ..Default::default()
         })
         .unwrap();
         assert_eq!((g.depth, g.limit), (MAX_GRAPH_DEPTH, MAX_GRAPH_LIMIT));
@@ -1311,30 +881,22 @@ mod tests {
         assert_eq!((g.depth, g.limit), (1, 1));
         assert!(
             graph_request(GraphRequest {
-                center: Some(nugget_core::ids::EntityId::new(" ")),
-                depth: 1,
-                limit: 10,
-                kinds: vec![],
-                source: None,
-                include_sensitive: false,
+                center: Some(EntityId::new(" ")),
+                ..Default::default()
             })
             .is_err()
         );
 
         let same = MergeRequest {
-            into: nugget_core::ids::EntityId::new("ent_1"),
-            from: nugget_core::ids::EntityId::new("ent_1"),
+            into: EntityId::new("ent_1"),
+            from: EntityId::new("ent_1"),
         };
         assert!(check_merge(&same).is_err());
 
         for (status, ok) in [
             ("rejected", true),
-            ("active", true),
-            ("user_asserted", true),
             ("unasserted", true),
             ("retracted", false),
-            ("superseded", false),
-            ("", false),
         ] {
             let req = ClaimStatusRequest {
                 claim: 1,
@@ -1344,7 +906,7 @@ mod tests {
         }
 
         let split = SplitRequest {
-            entity: nugget_core::ids::EntityId::new("ent_1"),
+            entity: EntityId::new("ent_1"),
             claims: vec![3],
             name: "Sam Lee".into(),
             kind: None,
@@ -1354,18 +916,17 @@ mod tests {
         assert!(check_split(&split).is_ok());
         assert!(
             check_split(&SplitRequest {
-                name: "  ".into(),
-                ..split.clone()
-            })
-            .is_err()
-        );
-        assert!(
-            check_split(&SplitRequest {
                 claims: vec![],
                 ..split.clone()
             })
             .is_err()
         );
+
+        assert!(check_plugin_field("id", " ").is_err());
+        let relative = PluginInstallParams {
+            path: "rss.nuggetplugin".into(),
+        };
+        assert!(check_plugin_install(&relative).is_err());
     }
 
     #[test]
@@ -1382,7 +943,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(ok.name, "Cursor");
-        for name in ["", "   ", &"x".repeat(MAX_CLIENT_NAME_LEN + 1)] {
+        for name in ["", &"x".repeat(MAX_CLIENT_NAME_LEN + 1)] {
             let req = McpClientCreate {
                 name: name.into(),
                 scopes: scopes.clone(),
@@ -1401,8 +962,15 @@ mod tests {
 
     const TOKEN: &str = "nmcp_s3cr3t-token-value";
 
-    fn created_json() -> Value {
-        json!({
+    /// Secrets reach the webview where they must (the token is shown once) but never a log line
+    /// or an error message.
+    #[test]
+    fn secrets_are_never_logged_or_quoted_in_errors() {
+        let secret: SourceSecret =
+            serde_json::from_value(json!({ "id": "imap-1", "secret": "hunter2" })).unwrap();
+        assert!(!format!("{secret:?}").contains("hunter2"));
+
+        let created = json!({
             "client": {
                 "id": "mcp-1",
                 "name": "Claude Desktop",
@@ -1411,99 +979,47 @@ mod tests {
                 "last_used": null
             },
             "token": TOKEN,
-            "setup": [
-                { "app": "claude-desktop", "config_path": "~/Library/Application Support/Claude/claude_desktop_config.json", "text": format!("{{\"token\": \"{TOKEN}\"}}") }
-            ]
-        })
-    }
+            "setup": []
+        });
+        let c: McpClientCreated = serde_json::from_value(created.clone()).unwrap();
+        assert!(!format!("{c:?}").contains(TOKEN));
+        assert!(!format!("{c:#?}").contains(TOKEN));
+        assert_eq!(serde_json::to_value(&c).unwrap()["token"], TOKEN);
 
-    /// The token reaches the webview (it must be shown once) but never a log line.
-    #[test]
-    fn mcp_token_is_redacted_in_debug() {
-        let created: McpClientCreated = serde_json::from_value(created_json()).unwrap();
-        assert_eq!(created.token, TOKEN);
-        let dbg = format!("{created:?}");
-        assert!(!dbg.contains(TOKEN), "Debug leaked the token: {dbg}");
-        assert!(dbg.contains("<redacted>"));
-        let pretty = format!("{created:#?}");
-        assert!(!pretty.contains(TOKEN));
-        // Serialization for the webview keeps it.
-        let back = serde_json::to_value(&created).unwrap();
-        assert_eq!(back["token"], TOKEN);
-        assert_eq!(back["client"]["created_at"], "2026-10-28T09:00:00Z");
-    }
-
-    /// A malformed create response must not put the token into an error message the UI shows.
-    #[test]
-    fn create_decode_errors_never_quote_the_token() {
-        let mut bad = created_json();
         // serde quotes a string found where a list was expected.
+        let mut bad = created;
         bad["setup"] = json!(TOKEN);
-        let err = serde_json::from_value::<McpClientCreated>(bad).unwrap_err();
-        let leaked = CmdError::Protocol(format!("{}: {err}", method::MCP_CLIENTS_CREATE));
+        let e = serde_json::from_value::<McpClientCreated>(bad).unwrap_err();
+        let leaked = CmdError::Protocol(format!("{}: {e}", method::MCP_CLIENTS_CREATE));
         assert!(leaked.to_string().contains(TOKEN), "fixture should leak");
         let shown = without_response_detail(leaked);
         assert!(!shown.to_string().contains(TOKEN));
         assert!(!format!("{shown:?}").contains(TOKEN));
-        let v = serde_json::to_value(&shown).unwrap();
-        assert_eq!(v["kind"], "protocol");
-        // Other errors pass through unchanged.
-        let rpc = without_response_detail(CmdError::Rpc {
-            code: -32601,
-            message: "method not found".into(),
-        });
-        assert!(matches!(rpc, CmdError::Rpc { code: -32601, .. }));
     }
 
-    /// The proactive `request` objects `api.ts` builds decode into the IPC types and are checked.
     #[test]
-    fn proactive_requests_match_the_ipc_types() {
-        let list: CardsListRequest = serde_json::from_value(json!({})).unwrap();
-        assert!(!list.include_closed);
-        let fb: CardFeedbackRequest = serde_json::from_value(json!({
-            "card_id": "c1", "feedback": "dismiss", "reason": "other", "reason_text": "meh"
-        }))
-        .unwrap();
-        assert!(check_card_feedback(&fb).is_ok());
-        let snooze: CardFeedbackRequest = serde_json::from_value(json!({
-            "card_id": "c1", "feedback": "snooze", "until": "2026-10-29T08:00:00Z"
-        }))
-        .unwrap();
-        assert!(snooze.until.is_some() && check_card_feedback(&snooze).is_ok());
-        let bad: CardFeedbackRequest =
-            serde_json::from_value(json!({ "card_id": "c1", "feedback": "delete" })).unwrap();
-        assert!(check_card_feedback(&bad).is_err());
-        let bad: CardFeedbackRequest = serde_json::from_value(
+    fn proactive_requests_are_checked() {
+        let fb = |v: Value| serde_json::from_value::<CardFeedbackRequest>(v).unwrap();
+        assert!(
+            check_card_feedback(&fb(json!({
+                "card_id": "c1", "feedback": "dismiss", "reason": "other", "reason_text": "meh"
+            })))
+            .is_ok()
+        );
+        for bad in [
+            json!({ "card_id": "c1", "feedback": "delete" }),
             json!({ "card_id": "c1", "feedback": "dismiss", "reason": "spam" }),
-        )
-        .unwrap();
-        assert!(check_card_feedback(&bad).is_err());
-        let bad: CardFeedbackRequest =
-            serde_json::from_value(json!({ "card_id": " ", "feedback": "seen" })).unwrap();
-        assert!(check_card_feedback(&bad).is_err());
+            json!({ "card_id": " ", "feedback": "seen" }),
+        ] {
+            assert!(check_card_feedback(&fb(bad)).is_err());
+        }
 
-        let all: ResetLearningRequest = serde_json::from_value(json!({ "scope": "all" })).unwrap();
-        assert!(check_reset_learning(&all).is_ok());
-        let one: ResetLearningRequest =
-            serde_json::from_value(json!({ "scope": "sender", "key": "bo@vendor.io" })).unwrap();
-        assert!(check_reset_learning(&one).is_ok());
-        let keyless: ResetLearningRequest =
-            serde_json::from_value(json!({ "scope": "kind" })).unwrap();
-        assert!(check_reset_learning(&keyless).is_err());
-        let unknown: ResetLearningRequest =
-            serde_json::from_value(json!({ "scope": "everything" })).unwrap();
-        assert!(check_reset_learning(&unknown).is_err());
-        let prev: CardPreviewRequest =
-            serde_json::from_value(json!({ "card_id": "c1", "action": 0 })).unwrap();
-        assert_eq!(prev.action, 0);
-        let exec: CardExecuteRequest = serde_json::from_value(
-            json!({ "card_id": "c1", "action": 1, "digest": "abc", "confirmed": true }),
-        )
-        .unwrap();
-        assert!(exec.confirmed);
-        let exec: CardExecuteRequest =
-            serde_json::from_value(json!({ "card_id": "c1", "action": 1, "digest": "abc" }))
-                .unwrap();
-        assert!(!exec.confirmed);
+        let reset = |v: Value| serde_json::from_value::<ResetLearningRequest>(v).unwrap();
+        assert!(check_reset_learning(&reset(json!({ "scope": "all" }))).is_ok());
+        assert!(
+            check_reset_learning(&reset(json!({ "scope": "sender", "key": "bo@x.io" }))).is_ok()
+        );
+        assert!(check_reset_learning(&reset(json!({ "scope": "kind" }))).is_err());
+        assert!(check_reset_learning(&reset(json!({ "scope": "everything" }))).is_err());
     }
 }

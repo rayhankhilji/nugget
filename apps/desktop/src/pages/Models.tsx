@@ -7,7 +7,7 @@ import { Dialog } from "../components/Dialog";
 import { ByokForm, kindLabel, ReplaceKeyForm } from "../onboarding/ByokForm";
 import { t as translate, useT, type MessageKey } from "../i18n";
 import { FitNotes, loadFit, MachineLine } from "../onboarding/ModelFit";
-import { DownloadFailureNote, isCancelled } from "../onboarding/DownloadFailure";
+import { DownloadFailureNote, isCancelled, useInstallFocus } from "../onboarding/DownloadFailure";
 
 const PHASES = new Set(["downloading", "verifying", "installed", "failed"]);
 
@@ -225,7 +225,7 @@ export function ModelsPage() {
   );
 }
 
-// ---- KK2: providers with a key ----
+// ---- providers with a key ----
 
 /**
  * "Your providers": the cloud and self-hosted providers that use a key (`ai.key.saved`), with
@@ -333,7 +333,7 @@ function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: Sav
       <p className="small muted">
         {p.key === "env" && p.env_var ? t("models.providers.keyEnv", { name: p.env_var }) : t("models.providers.keyKeychain")}
       </p>
-      {/* LL2: why it isn't in use, in plain words; the daemon's own line stays under Details. */}
+      {/* Why it isn't in use, in plain words; the daemon's own line stays under Details. */}
       {!p.available && (
         <div className="small">
           <p>
@@ -441,37 +441,11 @@ function ModelCard({
   onCancel: () => Promise<boolean>;
 }) {
   const t = useT();
-  const busy = progress && (progress.phase === "downloading" || progress.phase === "verifying");
+  const busy = progress?.phase === "downloading" || progress?.phase === "verifying";
   const failed = progress?.phase === "failed";
   const cancelled = isCancelled(progress);
-  // After Cancel the button goes away: move focus to Resume so keyboard users keep their place.
-  const [cancelling, setCancelling] = useState(false);
-  const actionRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!busy && cancelling) {
-      setCancelling(false);
-      actionRef.current?.focus();
-    }
-  }, [busy, cancelling]);
   const installed = model.installed || progress?.phase === "installed";
-  // LL2: Install turns into Cancel, and Cancel goes away once installed: keep keyboard focus in
-  // the card (on Cancel, then on the card's title or Retry install) instead of dropping it to the page.
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  const titleRef = useRef<HTMLSpanElement>(null);
-  const focusIn = useRef<"cancel" | "title" | null>(null);
-  useEffect(() => {
-    if (busy) {
-      if (focusIn.current === "cancel") cancelRef.current?.focus();
-      // Remembered while it lasts: Cancel unmounts without a blur event.
-      focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
-    } else if (focusIn.current === "title") {
-      // Installed: the name; failed (the request or the download): its Retry install. Only when
-      // focus went with Cancel, never from wherever the user moved to meanwhile.
-      focusIn.current = null;
-      const at = document.activeElement;
-      if (!at || at === document.body || !at.isConnected) (installed ? titleRef.current : actionRef.current)?.focus();
-    }
-  });
+  const focus = useInstallFocus(busy, installed);
   const pct = progress ? percent(progress.downloaded, progress.total || model.size_bytes) : 0;
   const labelId = `model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   const modelFit = fit?.models.find((f) => f.id === model.id);
@@ -480,7 +454,7 @@ function ModelCard({
     <li className="card model-card" aria-labelledby={labelId} data-model-id={model.id}>
       <div className="card-head">
         <span className="model-title">
-          <span id={labelId} ref={titleRef} className="card-title" tabIndex={-1}>
+          <span id={labelId} ref={focus.titleRef} className="card-title" tabIndex={-1}>
             {name}
           </span>
           <bdi dir="ltr" className="model-id">
@@ -513,24 +487,14 @@ function ModelCard({
             })}
           </span>
           <div className="card-actions">
-            <button
-              ref={cancelRef}
-              type="button"
-              className="btn btn-ghost"
-              aria-label={t("models.cancelLabel", { model: name })}
-              disabled={cancelling}
-              onClick={() => {
-                setCancelling(true);
-                void onCancel().then((ok) => ok || setCancelling(false));
-              }}
-            >
+            <button type="button" className="btn btn-ghost" aria-label={t("models.cancelLabel", { model: name })} {...focus.cancelProps(onCancel)}>
               {t("models.cancel")}
             </button>
           </div>
         </div>
       )}
       <DownloadFailureNote t={t} progress={progress} error={error} fallback={t("models.installFailed")} />
-      {/* LL2: an install that finishes while the page is open is said once. */}
+      {/* An install that finishes while the page is open is said once. */}
       <span className="visually-hidden" role="status">
         {progress?.phase === "installed" ? t("models.installedAnnounce", { model: name }) : ""}
       </span>
@@ -538,11 +502,11 @@ function ModelCard({
       {!installed && !busy && (
         <div className="card-actions">
           <button
-            ref={actionRef}
+            ref={focus.actionRef}
             type="button"
             className={best ? "btn btn-primary" : "btn"}
             onClick={(e) => {
-              if (document.activeElement === e.currentTarget) focusIn.current = "cancel";
+              focus.onInstallClick(e);
               onInstall();
             }}
           >

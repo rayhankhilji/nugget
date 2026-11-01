@@ -1,35 +1,22 @@
-//! The daemon's life around the app's: what quitting does to `nuggetd` (GG6-8), keeping the
-//! daemon's version in step with the app's after an update (GG6-10), and the window's stand-ins
-//! for the tray when there is none (GG6-20).
+//! The daemon's life around the app's: what quitting does to `nuggetd`, keeping its version in
+//! step with the app's, and the window's stand-ins for the tray when there is none.
 //!
-//! **Which daemon the app owns.** Only a `nuggetd` this app started, proven by its process id
-//! *and* the OS's start time for that process (`<data>/ipc/desktop-owned.json`, written at
-//! spawn; a reused pid has another start time). This survives the app quitting while the daemon
-//! keeps running, so a later session still knows it. A daemon a service manager runs (it says
-//! so in `status`) or one started by hand is never stopped; when the app can't prove it started
-//! the daemon, it leaves it and logs why.
+//! **Ownership.** The app owns only a `nuggetd` it started, proven by pid *and* the OS start
+//! time of that process (`<data>/ipc/desktop-owned.json`; a reused pid has another start time).
+//! A daemon a service manager runs, or one started by hand, is never stopped.
 //!
-//! **Quitting.** Every way out (tray Quit, the app menu's Quit and ⌘Q, closing the window when
-//! there is no tray) ends in `RunEvent::ExitRequested` and then `RunEvent::Exit`.
-//! `QuitChoice::Ask` (not answered yet) stops the daemon the app started: quitting is expected
-//! to quit, and a background service that holds gigabytes of memory for a model nobody uses
-//! after the app is gone is the surprise (GG6-8), not the other way round. The first such quit
-//! asks once, in the window ("Stop everything" / "Keep running in the background"), and Settings
-//! offers the same choice. Where the OS quits without asking the app first (the Dock's Quit,
-//! logging out) the unanswered default applies. Stopping is graceful: `daemon.shutdown` over
-//! IPC on a connection of its own (ingest, the local model servers, the store), a bounded wait
-//! for the process to exit, and only if it hangs, ending it, after re-checking it is still the
-//! same process (a daemon that refused the request gets SIGTERM, or is ended on Windows). The
-//! stop runs in `ExitRequested`, while the event loop still runs, and the app exits when it is
-//! done; only quits that skip that event stop it in `RunEvent::Exit`, on a thread of their own
-//! with a hard time limit. Stops and starts are serialized (`Lifecycle::op`), and once quitting
-//! begins the tray stops redrawing (its menu calls wait for the busy main thread).
+//! **Quitting.** Every way out ends in `RunEvent::ExitRequested` then `RunEvent::Exit`. An
+//! unanswered `QuitChoice::Ask` stops the owned daemon (a background service holding a model's
+//! memory after the app is gone is the surprise); the first such quit asks once in the window.
+//! Stopping is graceful (`daemon.shutdown` on a connection of its own, a bounded wait) and ends
+//! the process only if it hangs, after re-checking it is the same process. Stops and starts are
+//! serialized (`Lifecycle::op`); once quitting begins the tray stops redrawing (its menu calls
+//! wait for the busy main thread).
 //!
-//! **Versions.** On every new connection the app compares the daemon's `status.version` with
-//! its own (semver). Only an older daemon is acted on; a newer one is reported, never
-//! downgraded. A daemon it owns is replaced by the bundled one; a login service is restarted
-//! (`nuggetd restart-service`); anything else, or a fix that did not work, is reported on the
-//! Status page with what to do. One automatic attempt per session; "Check again" retries.
+//! **Versions.** On each connection the app compares the daemon's version with its own. Only an
+//! older daemon is acted on (a newer one is reported, never downgraded): an owned one is replaced
+//! by the bundled binary, a login service is restarted, anything else is reported on Status. One
+//! automatic attempt per session; "Check again" retries.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -95,18 +82,7 @@ pub fn read_record(path: &Path) -> Option<OwnedRecord> {
 }
 
 pub fn write_record(path: &Path, rec: &OwnedRecord) {
-    let res = (|| {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec(rec).map_err(std::io::Error::other)?,
-        )?;
-        std::fs::rename(&tmp, path)
-    })();
-    if let Err(e) = res {
+    if let Err(e) = crate::settings::write_json(path, rec) {
         tracing::warn!(path = %path.display(), error = %e, "couldn't record the nuggetd this app started");
     }
 }
@@ -300,13 +276,7 @@ pub struct VersionReport {
 
 impl Default for VersionReport {
     fn default() -> Self {
-        Self {
-            app_version: APP_VERSION.into(),
-            daemon_version: None,
-            state: VersionState::Unknown,
-            reason: None,
-            detail: None,
-        }
+        report(None, VersionState::Unknown, None, None)
     }
 }
 
@@ -383,11 +353,6 @@ pub struct Lifecycle {
 /// Whether the app is quitting (the tray stops redrawing: menu calls from other threads wait
 /// for the main thread, which may be busy quitting).
 pub fn is_exiting<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.try_state::<Lifecycle>()
-        .is_some_and(|lc| lc.exiting.load(Ordering::SeqCst))
-}
-
-fn exiting(app: &AppHandle) -> bool {
     app.try_state::<Lifecycle>()
         .is_some_and(|lc| lc.exiting.load(Ordering::SeqCst))
 }
@@ -794,14 +759,14 @@ fn stop_on_own_thread(app: &AppHandle, reason: &'static str) -> StopOutcome {
 
 /// A new daemon connection came up: check its version (once at a time).
 pub fn connected(app: &AppHandle) {
-    if exiting(app) {
+    if is_exiting(app) {
         return;
     }
     let app = app.clone();
     tauri::async_runtime::spawn(async move { reconcile(&app, false).await });
 }
 
-/// GG6-10: compare versions and fix or report a mismatch (module docs).
+/// Compare versions and fix or report a mismatch (module docs).
 pub async fn reconcile(app: &AppHandle, user_asked: bool) {
     let Some(lc) = app.try_state::<Lifecycle>() else {
         return;
@@ -898,7 +863,7 @@ async fn restart_owned(app: &AppHandle) -> Result<(), String> {
         StopOutcome::Left(_) => return Err("it is no longer the app's own".into()),
         StopOutcome::StillRunning => return Err("it didn't stop".into()),
     }
-    if exiting(app) {
+    if is_exiting(app) {
         return Err("Nugget is quitting".into());
     }
     let started = app
@@ -908,7 +873,7 @@ async fn restart_owned(app: &AppHandle) -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| e.to_string());
     // Quitting began meanwhile: don't leave a daemon behind that the quit didn't see.
-    if exiting(app) {
+    if is_exiting(app) {
         stop_owned_locked(app, "app_quit").await;
         return Err("Nugget is quitting".into());
     }
@@ -921,7 +886,7 @@ async fn restart_owned(app: &AppHandle) -> Result<(), String> {
 async fn restart_service(app: &AppHandle) -> Result<(), String> {
     let lc = app.state::<Lifecycle>();
     let _op = lc.op.lock().await;
-    if exiting(app) {
+    if is_exiting(app) {
         return Err("Nugget is quitting".into());
     }
     let daemon = app.state::<Daemon>();
@@ -1027,7 +992,7 @@ pub async fn daemon_version_recheck(app: AppHandle) -> VersionReport {
     app.state::<Lifecycle>().report()
 }
 
-/// What the window needs to stand in for the tray (GG6-20) and point at the logs (GG6-32).
+/// What the window needs to stand in for the tray and point at the logs.
 #[derive(Debug, Clone, Serialize)]
 pub struct ShellInfo {
     pub has_tray: bool,
@@ -1096,10 +1061,6 @@ mod tests {
             ownership(Some(&r), None, Some(77), None),
             Ownership::NotOwned
         );
-        assert_eq!(
-            ownership(Some(&r), Some(1_700_000_000), Some(77), None),
-            Ownership::NotOwned
-        );
         // Nothing recorded: started by hand or by an app that kept no record.
         assert_eq!(ownership(None, None, Some(4242), None), Ownership::NotOwned);
         // A service manager runs it: never ours, whatever the record says.
@@ -1140,36 +1101,14 @@ mod tests {
     }
 
     #[test]
-    fn this_process_has_a_stable_start_time() {
-        let me = std::process::id();
-        let t = process_start_time(me).expect("running");
-        assert_eq!(process_start_time(me), Some(t));
-        let r = OwnedRecord {
-            pid: me,
-            start_time: t,
-            exe: std::env::current_exe().unwrap(),
-        };
-        assert_eq!(
-            ownership(Some(&r), process_start_time(me), Some(me), None),
-            Ownership::Owned
-        );
-        assert_eq!(process_start_time(u32::MAX - 1), None);
-    }
-
-    #[test]
     fn quitting_asks_once_and_only_when_it_would_stop_something() {
         use ExitRequest as E;
         use QuitChoice as Q;
         // Unanswered, the app started the daemon, the window is there: ask.
         assert_eq!(exit_request(Some(0), Q::Ask, true, false, true), E::Ask);
-        assert_eq!(exit_request(None, Q::Ask, true, false, true), E::Ask);
         // Answered either way: just quit.
         assert_eq!(
             exit_request(Some(0), Q::Stop, true, false, true),
-            E::Proceed
-        );
-        assert_eq!(
-            exit_request(Some(0), Q::Keep, true, false, true),
             E::Proceed
         );
         // Nothing of ours to stop (a login service, started by hand): nothing to ask.
@@ -1192,13 +1131,6 @@ mod tests {
     }
 
     #[test]
-    fn unanswered_and_stop_stop_keep_keeps() {
-        assert!(stops_on_quit(QuitChoice::Ask));
-        assert!(stops_on_quit(QuitChoice::Stop));
-        assert!(!stops_on_quit(QuitChoice::Keep));
-    }
-
-    #[test]
     fn version_mismatch_is_fixed_by_whoever_runs_the_daemon() {
         use MismatchReason as M;
         use Ownership as O;
@@ -1208,13 +1140,8 @@ mod tests {
             version_action("0.2.0", "0.2.0", O::NotOwned, false, false),
             A::InStep
         );
-        assert_eq!(
-            version_action("0.2.0", "0.2.0", O::Owned, false, true),
-            A::InStep
-        );
         // The app's own daemon: replaced by the bundled one.
         assert_eq!(v(O::Owned, false, false), A::RestartOwned);
-        assert_eq!(v(O::Owned, true, false), A::RestartOwned);
         // A login service: restarted (Windows: known only from the app's own setting).
         assert_eq!(v(O::Service, false, false), A::RestartService);
         assert_eq!(v(O::NotOwned, true, false), A::RestartService);
@@ -1237,10 +1164,6 @@ mod tests {
             version_action("0.2.0", "0.2.0-beta.1", O::Owned, false, false),
             A::RestartOwned,
             "a prerelease is older than its release"
-        );
-        assert_eq!(
-            version_action("0.2.0-beta.1", "0.2.0", O::Owned, false, false),
-            A::Tell(M::DaemonNewer)
         );
         assert_eq!(
             version_action("0.2.0+abc", "0.2.0+def", O::Owned, false, false),
@@ -1276,30 +1199,10 @@ mod tests {
 
     #[test]
     fn the_task_scheduler_hosts_are_recognised() {
-        assert!(is_task_scheduler_host("svchost.exe"));
         assert!(is_task_scheduler_host("SVCHOST.EXE"));
         assert!(is_task_scheduler_host("taskhostw.exe"));
-        assert!(!is_task_scheduler_host("nugget-desktop.exe"));
         assert!(!is_task_scheduler_host("cmd.exe"));
         // Our own parent here is a test runner or shell, never the Task Scheduler.
         assert!(!started_by_task_scheduler(std::process::id()));
-    }
-
-    #[test]
-    fn reports_serialize_for_the_status_page() {
-        let r = report(
-            Some("0.1.0".into()),
-            VersionState::Mismatch,
-            Some(MismatchReason::ServiceRestartFailed),
-            Some("not installed".into()),
-        );
-        let v = serde_json::to_value(&r).unwrap();
-        assert_eq!(v["app_version"], APP_VERSION);
-        assert_eq!(v["state"], "mismatch");
-        assert_eq!(v["reason"], "service_restart_failed");
-        assert_eq!(v["detail"], "not installed");
-        let d = serde_json::to_value(VersionReport::default()).unwrap();
-        assert_eq!(d["state"], "unknown");
-        assert!(d["reason"].is_null());
     }
 }

@@ -43,7 +43,7 @@ interface ListProps {
 export function SavedSearchList({ onRun, announce, onEmpty }: ListProps) {
   const t = useT();
   const saved = useSavedSearches();
-  /** JJ2: the saved search being renamed. */
+  /** The saved search being renamed. */
   const [renaming, setRenaming] = useState<SavedSearch | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
   /** The saved search to focus after a delete re-renders the list. */
@@ -139,7 +139,7 @@ export function RecentSearchList({ onRun, announce, onEmpty }: ListProps) {
   );
 }
 
-/** JJ2: asks for a new name for a saved search; a name another one has is refused. */
+/** Asks for a new name for a saved search; a name another one has is refused. */
 export function RenameSearchDialog({
   search,
   others,

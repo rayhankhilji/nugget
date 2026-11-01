@@ -27,7 +27,7 @@ export function briefNotification(brief: BriefView): { title: string; body: stri
 }
 
 /**
- * II4: a reminder's own text never goes into an OS notification (lock screens, notification
+ * A reminder's own text never goes into an OS notification (lock screens, notification
  * history and mirrored phones show it): a fixed line instead; clicking opens Today, where it is.
  */
 export function reminderNotification(_reminder: ReminderView): { title: string; body: string } {

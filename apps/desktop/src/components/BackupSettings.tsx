@@ -1,6 +1,6 @@
 /**
  * Backup and export settings (Status page) and the app-wide recovery banner, backed by the
- * daemon's `backup.*` and `export.run` methods (see the FF1 block at the end of `api.ts`).
+ * daemon's `backup.*` and `export.run` methods (see the backup block in `api.ts`).
  *
  * Backups are encrypted; the passphrase only seals the key, so scheduled backups never need it.
  * A restore outlives this component: once the backup is staged the daemon exits and the app shows
@@ -344,6 +344,50 @@ function describedBy(id: string, hint: boolean, error: unknown): string | undefi
   return [hint && `${id}-hint`, error && `${id}-err`].filter(Boolean).join(" ") || undefined;
 }
 
+/** A folder path with a Choose… button (the native picker). */
+function FolderInput({
+  id,
+  value,
+  onChange,
+  hint = false,
+  error,
+  onError,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  hint?: boolean;
+  error?: string | null;
+  onError: (e: unknown) => void;
+}) {
+  const t = useT();
+  const choose = async () => {
+    try {
+      const [picked] = await api.pickFolders(false);
+      if (picked) onChange(picked);
+    } catch (e) {
+      onError(e);
+    }
+  };
+  return (
+    <div className="inline-row">
+      <input
+        id={id}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        autoComplete="off"
+        aria-describedby={describedBy(id, hint, error)}
+        aria-invalid={error ? true : undefined}
+      />
+      <button type="button" className="btn btn-small" onClick={() => void choose()}>
+        {t("backup.choose")}
+      </button>
+    </div>
+  );
+}
+
 function ScheduleForm({ status, onSaved }: { status: BackupStatus; onSaved: (s: BackupStatus) => void }) {
   const t = useT();
   const id = useId();
@@ -354,15 +398,6 @@ function ScheduleForm({ status, onSaved }: { status: BackupStatus; onSaved: (s: 
   const [error, setError] = useState<unknown>(null);
   const [invalid, setInvalid] = useState<{ folder?: string; keep?: string }>({});
   const [saved, setSaved] = useState(false);
-
-  const choose = async () => {
-    try {
-      const [picked] = await api.pickFolders(false);
-      if (picked) setFolder(picked);
-    } catch (e) {
-      setError(e);
-    }
-  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -389,21 +424,7 @@ function ScheduleForm({ status, onSaved }: { status: BackupStatus; onSaved: (s: 
   return (
     <form onSubmit={submit} noValidate aria-busy={busy}>
       <Field id={`${id}-folder`} label={t("backup.folder")} hint={t("backup.folderHint")} error={invalid.folder}>
-        <div className="inline-row">
-          <input
-            id={`${id}-folder`}
-            type="text"
-            value={folder}
-            onChange={(e) => setFolder(e.target.value)}
-            spellCheck={false}
-            autoComplete="off"
-            aria-describedby={describedBy(`${id}-folder`, true, invalid.folder)}
-            aria-invalid={invalid.folder ? true : undefined}
-          />
-          <button type="button" className="btn btn-small" onClick={() => void choose()}>
-            {t("backup.choose")}
-          </button>
-        </div>
+        <FolderInput id={`${id}-folder`} value={folder} onChange={setFolder} hint error={invalid.folder} onError={setError} />
       </Field>
       <div className="row" style={{ justifyContent: "flex-start", alignItems: "flex-end" }}>
         <Field id={`${id}-schedule`} label={t("backup.schedule")}>
@@ -656,15 +677,6 @@ function ExportForm() {
     if (busy && n.method === BACKUP_NOTIFICATION.exportProgress && isExportProgress(n.params)) setProgress(n.params);
   });
 
-  const choose = async () => {
-    try {
-      const [picked] = await api.pickFolders(false);
-      if (picked) setFolder(picked);
-    } catch (e) {
-      setError(e);
-    }
-  };
-
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!folder.trim()) {
@@ -693,21 +705,7 @@ function ExportForm() {
       <p className="note note-warn small">{t("backup.export.warning")}</p>
       <form onSubmit={submit} noValidate aria-busy={busy}>
         <Field id={`${id}-folder`} label={t("backup.export.folder")} error={invalid}>
-          <div className="inline-row">
-            <input
-              id={`${id}-folder`}
-              type="text"
-              value={folder}
-              onChange={(e) => setFolder(e.target.value)}
-              spellCheck={false}
-              autoComplete="off"
-              aria-describedby={describedBy(`${id}-folder`, false, invalid)}
-              aria-invalid={invalid ? true : undefined}
-            />
-            <button type="button" className="btn btn-small" onClick={() => void choose()}>
-              {t("backup.choose")}
-            </button>
-          </div>
+          <FolderInput id={`${id}-folder`} value={folder} onChange={setFolder} error={invalid} onError={setError} />
         </Field>
         <button type="submit" className="btn btn-small" disabled={busy}>
           {t("backup.export.submit")}

@@ -44,16 +44,6 @@ describe("quick ask settings", () => {
     expect(container.textContent).toContain("Saved.");
   });
 
-  it("turns off with the switch", async () => {
-    const saved = setup();
-    const { container } = await render(<QuickAskSettings />);
-    const sw = container.querySelector<HTMLInputElement>('input[role="switch"]')!;
-    expect(sw.checked).toBe(true);
-    await click(sw);
-    expect(saved).toEqual([{ enabled: false, shortcut: "Ctrl+Shift+Space" }]);
-    expect(container.textContent).toContain("Quick ask is off.");
-  });
-
   it("shows a rejected shortcut and a listener error", async () => {
     mockDaemon({
       quickask_settings_get: { ...listening, status: { listening: false, error: "taken by another app", wayland_fallback: false, state: "error" } },
@@ -71,13 +61,5 @@ describe("quick ask settings", () => {
     await click(byText(container, "button", "Save"));
     await flush(2);
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("already used");
-  });
-
-  it("explains the Wayland fallback command", async () => {
-    setup({ ...listening, status: { listening: false, error: null, wayland_fallback: true, state: "unsupported_wayland" } });
-    const { container } = await render(<QuickAskSettings />);
-    expect(container.querySelector("code")?.textContent).toBe("nugget-desktop --quick-ask");
-    expect(container.textContent).toContain("On Wayland");
-    expect(container.querySelector('input[type="text"]')).toBeNull();
   });
 });

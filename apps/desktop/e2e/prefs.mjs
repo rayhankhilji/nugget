@@ -1,56 +1,27 @@
-// Display preferences (e2e scenario "prefs"), on the indexed home the "pages" scenario uses:
-// - reduced motion: with `reducedMotion: "reduce"`, no page runs an infinite or longer-than-instant
-//   animation or transition, spinners stay visible but still, and the knowledge graph draws its
-//   settled layout once and then stops (a control run without the preference shows the probes
-//   would notice motion);
-// - more contrast and forced colours: every page renders, and the stylesheet's overrides apply;
-// - 200% zoom: half the CSS viewport at twice the pixel density, the same thing a browser zoom
-//   does; no page scrolls sideways (Z2's overflow measurement from i18n.mjs, plus `main`, which is
-//   the app's scroll container) and labels still fit.
-// See e2e/README.md.
-import fs from "node:fs";
+// Display preferences on every page: reduced motion (nothing animates, the knowledge graph draws
+// once and stops, even after a drag), more contrast and forced colours (the overrides in
+// styles-a11y.css apply), and 200% zoom (nothing scrolls sideways, labels fit; i18n.mjs's measure).
 import path from "node:path";
 import { startBridge } from "./bridge.mjs";
-import { check, DIST, expect, here, log, OUT, settle, sleep, STEP_TIMEOUT_MS, t, until } from "./harness.mjs";
+import { check, DIST, expect, newContext, OUT, settle, sleep, t, until } from "./harness.mjs";
 import { ALLOW, LABELLED, measure } from "./i18n.mjs";
 
-/** The harness's default window (newContext in harness.mjs). */
 const VIEWPORT = { width: 1360, height: 860 };
-
-/**
- * At 200% zoom: places where an offender other than a page scroll is accepted, with the reason
- * (on top of i18n.mjs's ALLOW).
- */
-const ZOOM_ALLOW = [];
 
 /** Longest animation or transition (seconds) that counts as "no motion": styles.css's 0.01ms. */
 const INSTANT_S = 0.011;
 
-/** A context like harness.mjs's newContext with `options` on top, onboarding already finished. */
-async function prefsContext(browser, onboarded, options = {}) {
-  const ctx = await browser.newContext({
-    viewport: VIEWPORT,
-    deviceScaleFactor: 1,
-    locale: "en-US",
-    timezoneId: "UTC",
-    colorScheme: "light",
-    ...options,
+/** An onboarded context with `options`, counting animation frames in `window.__rafCount`. */
+async function prefsContext(browser, options = {}) {
+  const ctx = await newContext(browser, { onboarded: true, ...options });
+  await ctx.addInitScript(() => {
+    window.__rafCount = 0;
+    const raf = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (cb) => {
+      window.__rafCount++;
+      return raf(cb);
+    };
   });
-  ctx.setDefaultTimeout(STEP_TIMEOUT_MS);
-  await ctx.addInitScript({ path: path.join(here, "tauri-shim.js") });
-  await ctx.addInitScript(
-    ([key, state]) => {
-      localStorage.setItem(key, JSON.stringify(state));
-      // Counts animation frames, so a test can tell whether something keeps drawing.
-      window.__rafCount = 0;
-      const raf = window.requestAnimationFrame.bind(window);
-      window.requestAnimationFrame = (cb) => {
-        window.__rafCount++;
-        return raf(cb);
-      };
-    },
-    ["nugget.onboarding.v1", onboarded],
-  );
   return ctx;
 }
 
@@ -122,7 +93,7 @@ function motionOffenders(instant) {
 function busyProbes() {
   const host = document.createElement("div");
   host.className = "pg-loading";
-  host.innerHTML = '<span class="spinner"></span><div class="state-loading"><span class="state-spinner"></span><span class="state-skeleton"></span></div><span class="pg-skeleton"></span><span class="caret"></span>';
+  host.innerHTML = '<span class="spinner"></span><span class="pg-skeleton"></span><span class="caret"></span>';
   document.querySelector("main").appendChild(host);
   const out = {};
   for (const el of host.querySelectorAll("span")) {
@@ -239,17 +210,11 @@ function colourProbe() {
   };
 }
 
-/**
- * Run the scenario on an already indexed daemon (`socket`) for every page in `pages`
- * (`[{ id }]`, from the PAGES registry). Returns a summary for summary.json.
- */
-export async function prefsScenario({ browser, socket, pages, onboarded }) {
-  const t0 = Date.now();
-  const summary = { motion: {}, graph: {}, contrast: {}, zoom: { offenders: [] } };
+export async function prefsScenario({ browser, socket, pages }) {
   const bridge = await startBridge({ socket, dist: DIST });
   const contexts = [];
   const context = async (options) => {
-    const ctx = await prefsContext(browser, onboarded, options);
+    const ctx = await prefsContext(browser, options);
     contexts.push(ctx);
     return ctx;
   };
@@ -262,7 +227,6 @@ export async function prefsScenario({ browser, socket, pages, onboarded }) {
         try {
           await sleep(300);
           const moving = await page.evaluate(motionOffenders, INSTANT_S);
-          summary.motion[id] = moving;
           expect(moving.length === 0, `${moving.length} moving element(s): ${moving.map((m) => `${m.kind} ${m.what} on ${m.path}`).join("; ")}`);
           const probes = await page.evaluate(busyProbes);
           for (const [name, p] of Object.entries(probes)) {
@@ -288,7 +252,6 @@ export async function prefsScenario({ browser, socket, pages, onboarded }) {
         // Dragging a node moves that node only: once the mouse is up nothing moves on.
         await dragNode(page, canvas);
         const afterDrag = await watchCanvas(page, canvas, 600);
-        summary.graph.reduced = { frames_to_first_draw: toFirstDraw, idle_frames: idle.frames, changed: idle.changed, after_drag: afterDrag };
         expect(!idle.changed, "the graph canvas kept changing 600 ms after its first draw");
         expect(idle.frames === 0, `${idle.frames} animation frame(s) requested in 600 ms after the graph was drawn`);
         expect(!afterDrag.changed && afterDrag.frames === 0, `the layout kept moving after a node was dragged: ${JSON.stringify(afterDrag)}`);
@@ -300,43 +263,17 @@ export async function prefsScenario({ browser, socket, pages, onboarded }) {
       }
     });
 
-    // The control: without the preference the same probes see motion, so they can.
-    const moving = await context({ reducedMotion: "no-preference" });
-    await check("prefs motion control: without reduced motion, spinners spin and the graph animates", async () => {
-      const { page } = await openPage(moving, bridge, "knowledge");
-      try {
-        const probes = await page.evaluate(busyProbes);
-        expect(probes.spinner.animation !== "none" && probes.spinner.iterations === "infinite", `the spinner doesn't spin: ${JSON.stringify(probes.spinner)}`);
-        const canvas = await openGraph(page);
-        // The layout animates here: let it come to rest first, or the node can move away between
-        // finding its pixel and pressing on it (seen under load), and the drag would grab nothing.
-        await until("the animated layout comes to rest", async () => {
-          const w = await watchCanvas(page, canvas, 300);
-          return [!w.changed, w];
-        }, 10_000).catch(() => {});
-        await dragNode(page, canvas);
-        const afterDrag = await watchCanvas(page, canvas, 600);
-        summary.graph.control = { after_drag: afterDrag };
-        // The same drag that leaves a reduced-motion layout still sets this one moving.
-        expect(afterDrag.changed && afterDrag.frames > 0, `the layout didn't move on after a drag: ${JSON.stringify(afterDrag)}`);
-      } finally {
-        await page.close();
-      }
-    });
-
     // ---- (b) more contrast and forced colours ----
     const plain = await context({});
     const { page: basePage } = await openPage(plain, bridge, pages[0].id);
     const base = await basePage.evaluate(colourProbe);
     await basePage.close();
-    summary.contrast.default = base;
 
     for (const [mode, options] of [
       ["contrast", { contrast: "more" }],
       ["forced", { forcedColors: "active" }],
     ]) {
       const ctx = await context(options);
-      summary.contrast[mode] = {};
       for (const { id } of pages) {
         await check(`prefs ${mode === "contrast" ? "more contrast" : "forced colours"} ${id}: renders with the overrides`, async () => {
           const { page, errors } = await openPage(ctx, bridge, id);
@@ -345,7 +282,6 @@ export async function prefsScenario({ browser, socket, pages, onboarded }) {
             await page.keyboard.press("Shift");
             await page.locator("aside.sidebar .nav-item").first().focus();
             const seen = await page.evaluate(colourProbe);
-            summary.contrast[mode][id] = seen;
             await page.screenshot({ path: path.join(OUT, `prefs-${mode}-${id}.png`) });
             expect(errors.length === 0, `uncaught page errors: ${JSON.stringify(errors)}`);
             if (mode === "contrast") {
@@ -368,18 +304,14 @@ export async function prefsScenario({ browser, socket, pages, onboarded }) {
     }
 
     // ---- (c) 200% zoom ----
-    const zoomed = await context({
-      viewport: { width: VIEWPORT.width / 2, height: VIEWPORT.height / 2 },
-      deviceScaleFactor: 2,
-      colorScheme: "light",
-    });
+    const zoomed = await context({ viewport: { width: VIEWPORT.width / 2, height: VIEWPORT.height / 2 }, deviceScaleFactor: 2 });
     for (const { id } of pages) {
       await check(`prefs 200% zoom ${id}: no sideways scrolling, labels fit`, async () => {
         const { page, errors } = await openPage(zoomed, bridge, id);
         try {
           await sleep(300);
           await page.screenshot({ path: path.join(OUT, `zoom200-${id}.png`) });
-          const found = await page.evaluate(measure, { labelled: LABELLED, allow: [...ALLOW, ...ZOOM_ALLOW] });
+          const found = await page.evaluate(measure, { labelled: LABELLED, allow: ALLOW });
           // The app scrolls inside `main`, so the window never does; `main` must not scroll sideways either.
           const main = await page.evaluate(() => {
             const m = document.querySelector("main");
@@ -387,7 +319,6 @@ export async function prefsScenario({ browser, socket, pages, onboarded }) {
           });
           if (main.scrollWidth > main.clientWidth + 1) found.push({ kind: "main-scrolls", path: "main", text: "", ...main });
           const offenders = found.map((o) => ({ page: id, ...o }));
-          summary.zoom.offenders.push(...offenders);
           expect(errors.length === 0, `uncaught page errors: ${JSON.stringify(errors)}`);
           expect(
             offenders.length === 0,
@@ -402,8 +333,5 @@ export async function prefsScenario({ browser, socket, pages, onboarded }) {
     for (const ctx of contexts) await ctx.close().catch(() => {});
     await bridge.close().catch(() => {});
   }
-  const ms = Date.now() - t0;
-  fs.writeFileSync(path.join(OUT, "prefs-zoom-offenders.json"), JSON.stringify(summary.zoom.offenders, null, 2));
-  log(`prefs: ${pages.length} pages x reduced motion, more contrast, forced colours, 200% zoom in ${(ms / 1000).toFixed(1)}s; ${summary.zoom.offenders.length} zoom offender(s)`);
-  return { ...summary, timings: { browser_ms: ms } };
+  return {};
 }

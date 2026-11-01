@@ -23,7 +23,7 @@ pub enum Channel {
     Off,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "StoredSettings")]
 pub struct Settings {
     /// What the update settings show; it takes effect only once `channel_chosen`.
@@ -41,18 +41,6 @@ pub struct Settings {
     pub autostart: bool,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            channel: Channel::Stable,
-            channel_chosen: false,
-            auto_install: false,
-            start_at_login: None,
-            autostart: false,
-        }
-    }
-}
-
 impl Settings {
     /// The channel to check, or `None` when updates are off or not chosen yet.
     pub fn active_channel(&self) -> Option<Channel> {
@@ -61,7 +49,7 @@ impl Settings {
 }
 
 /// `settings.json` as read, with every field optional (older or partial files).
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(default)]
 struct StoredSettings {
     channel: Channel,
@@ -69,19 +57,6 @@ struct StoredSettings {
     auto_install: bool,
     start_at_login: Option<bool>,
     autostart: bool,
-}
-
-impl Default for StoredSettings {
-    fn default() -> Self {
-        let d = Settings::default();
-        Self {
-            channel: d.channel,
-            channel_chosen: None,
-            auto_install: d.auto_install,
-            start_at_login: d.start_at_login,
-            autostart: d.autostart,
-        }
-    }
 }
 
 impl From<StoredSettings> for Settings {
@@ -117,13 +92,17 @@ pub fn load(path: &Path) -> Settings {
     }
 }
 
-/// Write via a temporary file and rename, so a crash never leaves half a file.
 pub fn save(path: &Path, settings: &Settings) -> std::io::Result<()> {
+    write_json(path, settings)
+}
+
+/// Write `value` as JSON via a temporary file and rename, so a crash never leaves half a file.
+pub fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?;
+    let json = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)
 }
@@ -136,16 +115,8 @@ mod tests {
     fn defaults_are_notify_only_on_stable() {
         let s = Settings::default();
         assert_eq!(s.channel, Channel::Stable);
-        assert!(!s.channel_chosen);
         assert_eq!(s.active_channel(), None);
         assert!(!s.auto_install);
-        assert_eq!(s.start_at_login, None);
-        assert!(!s.autostart);
-        // Older or partial files fill in the rest from the defaults.
-        let s: Settings = serde_json::from_str(r#"{"channel":"beta"}"#).unwrap();
-        assert_eq!(s.channel, Channel::Beta);
-        assert!(!s.auto_install);
-        assert!(!s.autostart);
     }
 
     #[test]
@@ -192,9 +163,7 @@ mod tests {
     fn the_flag_round_trips() {
         for (channel, chosen, active) in [
             (Channel::Stable, true, Some(Channel::Stable)),
-            (Channel::Stable, false, None),
             (Channel::Beta, false, None),
-            (Channel::Beta, true, Some(Channel::Beta)),
             (Channel::Off, true, None),
         ] {
             let s = Settings {

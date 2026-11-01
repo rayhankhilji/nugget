@@ -133,7 +133,7 @@ export function diffMarker(op: string): string {
   return " ";
 }
 
-// ---- BB2: what feedback taught the ranking ----
+// ---- what feedback taught the ranking ----
 
 const LEARNING_SCOPES = new Set(["sender", "domain", "kind", "thread"]);
 const LEARNED_REASONS = new Set(["not_relevant", "already_handled", "wrong_info", "not_important"]);

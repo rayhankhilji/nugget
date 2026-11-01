@@ -1,5 +1,5 @@
 /**
- * JJ2: how an Ask searched, as the answer views (Chat, Search, quick ask) show it: the date phrase
+ * How an Ask searched, as the answer views (Chat, Search, quick ask) show it: the date phrase
  * of the question as a range ("Searched items from 26 Oct to 1 Nov", `AskStarted.date`), and the
  * sources that are at best a near miss (`AskStarted.partial`).
  */

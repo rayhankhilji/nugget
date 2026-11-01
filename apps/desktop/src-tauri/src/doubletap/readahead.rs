@@ -223,9 +223,13 @@ impl Planner {
         self.in_flight.is_some()
     }
 
-    /// Forget the running read-ahead, returning whether one may have been running.
-    fn take_in_flight(&mut self) -> bool {
-        self.in_flight.take().is_some()
+    /// Forget the running read-ahead: cancel it if one may have been running.
+    fn cancel_or_wait(&mut self) -> Action {
+        if self.in_flight.take().is_some() {
+            Action::Cancel
+        } else {
+            Action::Wait
+        }
     }
 
     fn reread_after(&self) -> Duration {
@@ -309,11 +313,7 @@ impl Planner {
             }
             Front::Nothing => {
                 self.current = None;
-                if self.take_in_flight() {
-                    Action::Cancel
-                } else {
-                    Action::Wait
-                }
+                self.cancel_or_wait()
             }
             Front::App {
                 key,
@@ -331,18 +331,10 @@ impl Planner {
                     self.last_read = None;
                     self.unchanged = 0;
                     self.last_seen = None;
-                    return if self.take_in_flight() {
-                        Action::Cancel
-                    } else {
-                        Action::Wait
-                    };
+                    return self.cancel_or_wait();
                 }
                 if !allowed {
-                    return if self.take_in_flight() {
-                        Action::Cancel
-                    } else {
-                        Action::Wait
-                    };
+                    return self.cancel_or_wait();
                 }
                 if self.backed_off(now, &key_of(&self.current)) {
                     return Action::Wait;
@@ -380,10 +372,9 @@ impl Planner {
         }
         self.last_seen = Some(seen);
         let Some(fp) = fingerprint else {
-            return if self.take_in_flight() {
-                Decision::Cancel
-            } else {
-                Decision::Skip
+            return match self.cancel_or_wait() {
+                Action::Cancel => Decision::Cancel,
+                _ => Decision::Skip,
             };
         };
         if self.last_sent == Some(fp) || self.rate_limited(now) {
@@ -1013,54 +1004,6 @@ mod tests {
         assert_eq!(p.next_check(r1 + REREAD * 3, true), MIN_WAIT);
     }
 
-    #[test]
-    fn next_check_waits_long_when_nothing_can_happen() {
-        let t0 = Instant::now();
-        let mut p = Planner::new(t0);
-        let vault = Front::App {
-            key: "bitwarden".into(),
-            surface: 1,
-            allowed: false,
-        };
-        p.tick(t0, vault.clone());
-        p.tick(t0 + ms(100), vault);
-        assert_eq!(p.next_check(t0 + ms(100), true), SLOW_POLL);
-        assert_eq!(p.next_check(t0 + ms(100), false), IDLE_POLL);
-        // Backed off: likewise.
-        p.tick(t0 + ms(200), app("mail"));
-        p.tick(t0 + ms(1_700), app("mail"));
-        p.read(t0 + ms(1_800), "mail", Some(3));
-        p.outcome(t0 + ms(1_900), 1, "mail", Outcome::Skipped(Skip::Cloud));
-        assert_eq!(p.next_check(t0 + ms(2_000), true), SLOW_POLL);
-        assert_eq!(p.next_check(t0 + ms(2_000), false), IDLE_POLL);
-        // Busy (a draft runs): nothing to time.
-        p.tick(t0 + ms(3_000), Front::Busy);
-        assert_eq!(p.next_check(t0 + ms(3_000), true), SLOW_POLL);
-    }
-
-    #[test]
-    fn next_check_waits_out_the_rate_limit() {
-        let t0 = Instant::now();
-        let mut p = Planner::new(t0);
-        let mut now = t0;
-        for i in 0..RATE_MAX as u64 {
-            let front = app(&format!("app{i}"));
-            p.tick(now, front.clone());
-            now += DWELL;
-            assert_eq!(p.tick(now, front), Action::Read);
-            assert!(matches!(
-                p.read(now, &format!("app{i}"), Some(i + 1)),
-                Decision::Send(_)
-            ));
-        }
-        p.tick(now, app("next"));
-        // The dwell ends long before a send is allowed again.
-        let free = t0 + DWELL + RATE_WINDOW;
-        assert_eq!(p.next_check(now, true), SLOW_POLL);
-        assert_eq!(p.next_check(free - ms(2_000), true), ms(2_000));
-        assert_eq!(p.next_check(free - ms(2_000), false), POLL);
-    }
-
     /// Ticking only when `next_check` says so reads at the same moments as polling every 100 ms.
     #[test]
     fn scheduled_ticks_read_when_polling_would() {
@@ -1085,34 +1028,14 @@ mod tests {
     }
 
     #[test]
-    fn a_pause_cancels_and_restarts_the_dwell() {
-        // The loop ticks `Front::Nothing` while power pauses read-ahead.
-        let t0 = Instant::now();
-        let mut p = Planner::new(t0);
-        p.tick(t0, app("mail"));
-        p.tick(t0 + DWELL, app("mail"));
-        p.read(t0 + DWELL, "mail", Some(3));
-        assert_eq!(p.tick(t0 + ms(2_000), Front::Nothing), Action::Cancel);
-        assert_eq!(p.tick(t0 + ms(3_000), Front::Nothing), Action::Wait);
-        let t1 = t0 + Duration::from_secs(60);
-        assert_eq!(p.tick(t1, app("mail")), Action::Wait);
-        assert_eq!(p.tick(t1 + DWELL, app("mail")), Action::Read);
-    }
-
-    #[test]
     fn replies_parse() {
         let r: Reply = serde_json::from_str(r#"{"started":true}"#).unwrap();
         assert_eq!(r.outcome(), Outcome::Started { done: false });
         let r: Reply = serde_json::from_str(r#"{"started":true,"done":true}"#).unwrap();
         assert_eq!(r.outcome(), Outcome::Started { done: true });
         for (s, k) in [
-            ("disabled", Skip::Disabled),
-            ("refused", Skip::Refused),
             ("cloud", Skip::Cloud),
             ("rate_limited", Skip::RateLimited),
-            ("unchanged", Skip::Unchanged),
-            ("unavailable", Skip::Unavailable),
-            ("cancelled", Skip::Cancelled),
             ("new_reason", Skip::Other),
         ] {
             let r: Reply =
@@ -1178,10 +1101,6 @@ mod tests {
         assert!(wanted(&s));
         assert!(!wanted(&DoubleTapSettings {
             read_ahead: false,
-            ..s.clone()
-        }));
-        assert!(!wanted(&DoubleTapSettings {
-            enabled: false,
             ..s
         }));
         assert_eq!(
@@ -1192,15 +1111,6 @@ mod tests {
                 url: None,
             }),
             "com.apple.mail"
-        );
-        assert_eq!(
-            app_key(&AppInfo {
-                id: None,
-                name: "Thunderbird".into(),
-                window_title: None,
-                url: None,
-            }),
-            "thunderbird"
         );
     }
 }

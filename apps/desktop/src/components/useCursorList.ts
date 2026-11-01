@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** One page from a cursor-paged daemon method (LL1): its rows and the cursor of the next page. */
+/** One page from a cursor-paged daemon method: its rows and the cursor of the next page. */
 export interface CursorPageResult<T> {
   items: T[];
   /** `null` at the end. */

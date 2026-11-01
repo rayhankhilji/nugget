@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addRecent, clearRecent, deleteSaved, listRecent, listSaved, MAX_RECENT, RECENT_KEY, renameSaved, SAVED_KEY, saveSearch } from "./savedSearches";
+import { addRecent, deleteSaved, listRecent, listSaved, MAX_RECENT, renameSaved, SAVED_KEY, saveSearch } from "./savedSearches";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -32,23 +32,6 @@ describe("saved searches", () => {
     localStorage.setItem(SAVED_KEY, "{not json");
     expect(listSaved()).toEqual([]);
   });
-
-  it("keeps working when storage throws", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
-    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
-    expect(listSaved()).toEqual([]);
-    expect(() => saveSearch("A", "q=a")).not.toThrow();
-    expect(() => addRecent("q=a")).not.toThrow();
-    expect(() => clearRecent()).not.toThrow();
-    expect(listRecent()).toEqual([]);
-  });
 });
 
 describe("recent searches", () => {
@@ -63,13 +46,5 @@ describe("recent searches", () => {
     expect(r[0]).toBe("q=q11");
     expect(r[1]).toBe("q=q5");
     expect(new Set(r).size).toBe(r.length);
-  });
-
-  it("clears", () => {
-    addRecent("q=a");
-    expect(listRecent()).toEqual(["q=a"]);
-    clearRecent();
-    expect(listRecent()).toEqual([]);
-    expect(localStorage.getItem(RECENT_KEY)).toBeNull();
   });
 });

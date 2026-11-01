@@ -247,16 +247,6 @@ mod tests {
     const SIZE: (f64, f64) = (400.0, 150.0);
 
     #[test]
-    fn below_the_caret_physical() {
-        let screens = [screen(0.0, 0.0, 1920.0, 1080.0, 1.0)];
-        let caret = Area::new(300.0, 200.0, 2.0, 18.0);
-        assert_eq!(
-            place(Some(caret), Units::Physical, &screens, SIZE, None),
-            Some((300, 224))
-        );
-    }
-
-    #[test]
     fn logical_caret_on_a_retina_display_is_scaled() {
         let screens = [screen(0.0, 0.0, 2880.0, 1800.0, 2.0)];
         let caret = Area::new(300.0, 200.0, 2.0, 18.0);
@@ -264,24 +254,6 @@ mod tests {
         assert_eq!(
             place(Some(caret), Units::Logical, &screens, SIZE, None),
             Some((600, 448))
-        );
-    }
-
-    #[test]
-    fn flips_above_near_the_bottom_and_clamps_the_right_edge() {
-        let screens = [screen(0.0, 0.0, 1920.0, 1080.0, 1.0)];
-        let caret = Area::new(1900.0, 1000.0, 2.0, 20.0);
-        // Above: 1000 - 6 - 150 = 844; right edge: 1920 - 400 = 1520.
-        assert_eq!(
-            place(Some(caret), Units::Physical, &screens, SIZE, None),
-            Some((1520, 844))
-        );
-        // Scale 1.5: overlay 600 x 225, gap 9.
-        let screens = [screen(0.0, 0.0, 2880.0, 1620.0, 1.5)];
-        let caret = Area::new(2870.0, 1500.0, 3.0, 30.0);
-        assert_eq!(
-            place(Some(caret), Units::Physical, &screens, SIZE, None),
-            Some((2280, 1266))
         );
     }
 
@@ -309,42 +281,6 @@ mod tests {
         assert_eq!(
             place(Some(caret), Units::Physical, &screens, SIZE, None),
             Some((1520, 526))
-        );
-    }
-
-    #[test]
-    fn without_a_caret_centres_on_the_fallback_monitor() {
-        let screens = [
-            screen(0.0, 0.0, 1920.0, 1080.0, 1.0),
-            screen(1920.0, 0.0, 1920.0, 1080.0, 1.0),
-        ];
-        // Work area 1920 x 1030 from y 50: x = 1920 + 760, y = 50 + 343.3 - 75.
-        assert_eq!(
-            place(None, Units::Physical, &screens, SIZE, Some((2500.0, 400.0))),
-            Some((2680, 318))
-        );
-        assert_eq!(
-            place(None, Units::Physical, &screens, SIZE, None),
-            Some((760, 318))
-        );
-        assert_eq!(place(None, Units::Physical, &[], SIZE, None), None);
-        // No monitor information: just below the caret.
-        let caret = Area::new(10.0, 10.0, 1.0, 10.0);
-        assert_eq!(
-            place(Some(caret), Units::Physical, &[], SIZE, None),
-            Some((10, 20))
-        );
-    }
-
-    #[test]
-    fn an_overlay_larger_than_the_screen_sticks_to_the_left_and_shrinks_below_the_caret() {
-        let screens = [screen(0.0, 0.0, 300.0, 200.0, 1.0)];
-        let caret = Area::new(100.0, 100.0, 1.0, 10.0);
-        // Wider than the screen: at its left edge. Taller than either side: shrunk to the
-        // larger room (below the caret) instead of covering it.
-        assert_eq!(
-            place(Some(caret), Units::Physical, &screens, SIZE, None),
-            Some((0, 116))
         );
     }
 

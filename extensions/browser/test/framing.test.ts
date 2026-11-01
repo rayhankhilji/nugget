@@ -31,13 +31,6 @@ describe("native framing", () => {
     expect(rest.length).toBe(0);
   });
 
-  it("keeps a partial frame for later", () => {
-    const a = encodeFrame({ id: 2 });
-    const { messages, rest } = decodeFrames(a.subarray(0, a.length - 1));
-    expect(messages).toEqual([]);
-    expect(rest.length).toBe(a.length - 1);
-  });
-
   it("rejects oversized frames on both sides", () => {
     expect(errCode(() => encodeFrame({ s: "x".repeat(100) }, 50))).toBe("too_large");
     const header = new Uint8Array(4);

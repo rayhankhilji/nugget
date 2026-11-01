@@ -1,5 +1,5 @@
 /**
- * II4: onboarding's opt-ins for the desktop app: open at login (hidden in the tray) and OS
+ * Onboarding's opt-ins for the desktop app: open at login (hidden in the tray) and OS
  * notifications. Both start off; each switch saves at once. Shown only inside the app.
  */
 import { useEffect, useId, useState } from "react";

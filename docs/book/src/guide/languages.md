@@ -29,13 +29,13 @@ The daemon, command line and logs are in English. Models answer in the language 
 ## Translations
 
 Catalogs are in `apps/desktop/src/i18n/locales/`, one JSON file per language, with `en.json` as the
-source. A missing message falls back to English. Some translations are machine-made and not yet
-checked by a native speaker; they are listed in `locales/review/<code>.json`.
+source. A missing message falls back to English. The translations other than English were made by
+machine and have not all been checked by a native speaker.
 
-To review one, fix the listed keys in `locales/<code>.json` against `en.json`, keeping every
-`{name}`, plural keyword and `<tag>`, remove them from the review list, and open a pull request
-(`pnpm test` in `apps/desktop` checks the catalogs). An issue with a screenshot is just as welcome.
+To review one, fix `locales/<code>.json` against `en.json`, keeping every `{name}`, plural keyword
+and `<tag>`, and open a pull request (`pnpm test` in `apps/desktop` checks the catalogs). An issue
+with a screenshot is just as welcome.
 
 To add a language, add it to `LOCALES` in `apps/desktop/src/i18n/index.tsx`, copy `en.json` to
-`<code>.json`, list every key for review, and run `pnpm test` and `pnpm run e2e` with
+`<code>.json` and translate it, and run `pnpm test` and `pnpm run e2e` with
 `E2E_I18N_LOCALES=<code>`.

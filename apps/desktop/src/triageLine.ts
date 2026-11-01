@@ -1,5 +1,5 @@
 /**
- * JJ2: what the Status page says about AI sorting (background triage). Items are searchable as
+ * What the Status page says about AI sorting (background triage). Items are searchable as
  * soon as they are indexed; until sorted they count as sensitive and stay private (never sent to
  * cloud models). Off or without a model, that is said plainly with what it means for privacy.
  */

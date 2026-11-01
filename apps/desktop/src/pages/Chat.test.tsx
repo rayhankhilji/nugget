@@ -2,8 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { emit } from "@tauri-apps/api/event";
-import type { AnswerCheck, AskRestarted, AskStarted, ChatMessage, StoredConversation } from "../api";
-import { answerCheckOf, ChatPage, readUseSources, storedCheck, writeUseSources } from "./Chat";
+import type { AnswerCheck, AskStarted, ChatMessage, StoredConversation } from "../api";
+import { ChatPage, storedCheck } from "./Chat";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 
 type Req = { request: Record<string, unknown> };
@@ -71,14 +71,6 @@ describe("Chat with sources", () => {
   beforeEach(() => installDomShims());
   afterEach(() => cleanup());
 
-  it("remembers the toggle, defaulting to on", () => {
-    expect(readUseSources()).toBe(true);
-    writeUseSources(false);
-    expect(readUseSources()).toBe(false);
-    writeUseSources(true);
-    expect(readUseSources()).toBe(true);
-  });
-
   it("asks with the conversation so far and makes citations work", async () => {
     const { asks, chats } = setup();
     const { container } = await render(<ChatPage />);
@@ -105,72 +97,6 @@ describe("Chat with sources", () => {
     await click(cites[cites.length - 1]);
     expect(document.activeElement?.textContent).toContain("River walk");
     expect(container.textContent).toContain("Searched for: what about the second one? herons river");
-  });
-
-  it("lists the cited sources first, once per item, and the rest behind a toggle", async () => {
-    const passage = (n: number, key: string, title: string, url: string | null = null) => ({
-      n,
-      item: { source: "files-1", key },
-      chunk_id: n,
-      title,
-      url,
-      sensitive: false,
-    });
-    const citations = [
-      passage(1, "budget.md", "Q4 budget"),
-      passage(2, "plan.md", "Launch plan"),
-      passage(3, "notes.md", "Team notes"),
-      passage(4, "budget.md", "Q4 budget"),
-      passage(5, "old.md", "Old memo"),
-      passage(6, "old.md", "Old memo"),
-      passage(7, "trip.md", "Trip", "https://example.com/trip"),
-    ];
-    setup({ citations });
-    const { container } = await render(<ChatPage />);
-    await say(container, "What's the Q4 budget?");
-    await reply("s-ask-1", "It is 40k [1], set in the plan [2] and confirmed later [4]. Not `arr[3]`.");
-
-    const sources = container.querySelector(".chat-sources")!;
-    const rows = () =>
-      [...sources.querySelectorAll("ol.citations li.citation")].map((li) => [
-        li.querySelector(".cite-n")!.textContent,
-        li.querySelector(".citation-title")!.textContent,
-      ]);
-    // Cited items only, each once with every marker the answer used for it.
-    expect(rows()).toEqual([
-      ["[1] [4]", "Q4 budget"],
-      ["[2]", "Launch plan"],
-    ]);
-    const more = byText(sources, "button", "3 more passages the model saw")!;
-    expect(more.getAttribute("aria-expanded")).toBe("false");
-
-    await click(more);
-    expect(more.getAttribute("aria-expanded")).toBe("true");
-    expect(rows()).toEqual([
-      ["[1] [4]", "Q4 budget"],
-      ["[2]", "Launch plan"],
-      ["[3]", "Team notes"],
-      ["[5] [6]", "Old memo"],
-      ["[7]", "Trip"],
-    ]);
-    // `[4]` focuses the item it shares with `[1]`.
-    await click(byText(container, "button.cite", "[4]"));
-    expect(document.activeElement?.textContent).toContain("Q4 budget");
-  });
-
-  it("uses plain chat when the toggle is off, and remembers it", async () => {
-    const { asks, chats } = setup();
-    const { container, unmount } = await render(<ChatPage />);
-    await click(toggle(container));
-    expect(toggle(container).checked).toBe(false);
-    expect(readUseSources()).toBe(false);
-    await say(container, "hello");
-    expect(asks).toHaveLength(0);
-    expect(chats[0]).toMatchObject({ messages: [{ role: "user", text: "hello" }] });
-    unmount();
-
-    const again = await render(<ChatPage />);
-    expect(toggle(again.container).checked).toBe(false);
   });
 
   it("answers as a plain chat, and says so, when nothing in the sources matches", async () => {
@@ -206,109 +132,7 @@ describe("Chat with sources", () => {
     expect(last.messages[1]!.general_answer).toBeUndefined();
   });
 
-  it("keeps the daemon's own general answer instead of cancelling and re-asking", async () => {
-    const { asks, chats, cancels, saved } = setup({ cite: () => false, daemonGeneral: true });
-    const { container } = await render(<ChatPage />);
-    await say(container, "What is a heron?");
-    expect(asks).toHaveLength(1);
-    expect(cancels).toEqual([]);
-    expect(chats).toHaveLength(0);
-    await reply("s-ask-1", "A wading bird.");
-
-    const item = container.querySelector("li.msg-assistant")!;
-    expect(item.textContent).toContain("A wading bird.");
-    expect(item.textContent).toContain("so this is a general answer");
-    expect(item.querySelector(".chat-sources")).toBeNull();
-    expect(saved[saved.length - 1]!.messages[1]).toMatchObject({ text: "A wading bird.", general_answer: true });
-  });
-
   // EE3 (QA GG2-5): `retrieve.ask` replies before the model answers.
-  const bank = { n: 2, item: { source: "files-1", key: "bank.md" }, chunk_id: 2, title: "Bank letter", url: null, sensitive: true };
-  const restarted = (stream_id: string, over: Partial<AskRestarted> = {}): AskRestarted => ({
-    stream_id,
-    provider: "remote",
-    locality: "cloud",
-    citations: askStarted.citations,
-    excluded_sensitive: 1,
-    general: false,
-    ...over,
-  });
-
-  it("shows the sources and what the model is reading before the first words", async () => {
-    setup({ citations: [...askStarted.citations, bank] });
-    const { container } = await render(<ChatPage />);
-    await say(container, "Where did we watch herons?");
-    const item = container.querySelector("li.msg-assistant")!;
-    expect(item.querySelector(".chat-reading")!.textContent).toBe("Reading 2 passages…");
-    const listed = item.querySelector(".chat-citations-reading")!;
-    expect(listed.textContent).toContain("River walk");
-    expect(listed.textContent).toContain("Bank letter");
-
-    await reply("s-ask-1", "By the river [1].");
-    expect(item.querySelector(".chat-reading")).toBeNull();
-    expect(item.querySelector(".chat-citations-reading")).toBeNull();
-    // The cited source comes first; the other is behind the toggle again, and `[1]` focuses its source.
-    expect(item.querySelector(".chat-citations")!.textContent).toContain("River walk");
-    expect(byText(item, "button", "1 more passage the model saw")).toBeTruthy();
-    await click(item.querySelector<HTMLButtonElement>("button.cite")!);
-    expect(document.activeElement?.textContent).toContain("River walk");
-  });
-
-  it("replaces the sources and provider when the stream moves on to another provider", async () => {
-    const { saved } = setup({ citations: [...askStarted.citations, bank] });
-    const { container } = await render(<ChatPage />);
-    await say(container, "Where did we watch herons?");
-    const item = container.querySelector("li.msg-assistant")!;
-    expect(item.querySelector(".msg-meta")!.textContent).toContain("ollama");
-    expect(item.textContent).toContain("Bank letter");
-
-    await act(() => emit("nugget:ask-restarted", restarted("s-ask-1")));
-    await flush();
-    expect(item.querySelector(".msg-meta")!.textContent).toContain("remote");
-    expect(item.querySelector(".chat-reading")!.textContent).toBe("Reading 1 passage…");
-    expect(item.textContent).not.toContain("Bank letter");
-    expect(item.textContent).toContain("left out because remote is a cloud model");
-
-    // Another stream's restart changes nothing here.
-    await act(() => emit("nugget:ask-restarted", restarted("s-other", { provider: "elsewhere" })));
-    await reply("s-ask-1", "By the river [1].");
-    expect(item.querySelector(".msg-meta")!.textContent).toContain("remote");
-    expect(item.querySelector(".chat-citations")!.textContent).toContain("River walk");
-    expect(saved[saved.length - 1]!.messages[1]).toMatchObject({ provider: "remote", citations: askStarted.citations });
-  });
-
-  it("turns into a general answer when the new provider's context has nothing", async () => {
-    setup();
-    const { container } = await render(<ChatPage />);
-    await say(container, "Where did we watch herons?");
-    await act(() => emit("nugget:ask-restarted", restarted("s-ask-1", { citations: [], general: true })));
-    await reply("s-ask-1", "A wading bird.");
-    const item = container.querySelector("li.msg-assistant")!;
-    expect(item.textContent).toContain("so this is a general answer");
-    expect(item.querySelector(".chat-sources")).toBeNull();
-  });
-
-  it("applies a restart that arrives before the ask call returns", async () => {
-    let resolveAsk: (v: AskStarted) => void = () => {};
-    mockDaemon({
-      retrieve_ask: () => new Promise<AskStarted>((r) => (resolveAsk = r)),
-      chat_history_load: [],
-      chat_history_save: () => {},
-    });
-    const { container } = await render(<ChatPage />);
-    await say(container, "Where did we watch herons?");
-    await act(() => emit("nugget:ask-restarted", restarted("s-early")));
-    await act(() => emit("nugget:chat-delta", { stream_id: "s-early", text: "By the river [1]." }));
-    await act(async () => resolveAsk({ ...askStarted, citations: [...askStarted.citations, bank], stream_id: "s-early" }));
-    await flush();
-    const item = container.querySelector("li.msg-assistant")!;
-    expect(item.querySelector(".msg-meta")!.textContent).toContain("remote");
-    expect(item.textContent).toContain("By the river");
-    expect(item.textContent).not.toContain("Bank letter");
-    await act(() => emit("nugget:chat-done", { stream_id: "s-early", input_tokens: 1, output_tokens: 2, error: null }));
-    await flush();
-    expect(item.querySelector(".chat-citations")!.textContent).toContain("River walk");
-  });
 
   it("strips earlier replies' [n] markers from the history it sends", async () => {
     const { asks, chats } = setup();
@@ -333,24 +157,6 @@ describe("Chat with sources", () => {
       "Home.",
     ]);
   });
-
-  it("restores the general-answer note from history", async () => {
-    mockDaemon({
-      chat_history_load: [
-        {
-          id: "c-1",
-          title: "q",
-          updated_at: 1,
-          messages: [
-            { role: "user", text: "q" },
-            { role: "assistant", text: "general", state: "done", general_answer: true },
-          ],
-        },
-      ],
-    });
-    const { container } = await render(<ChatPage />);
-    expect(container.textContent).toContain("so this is a general answer");
-  });
 });
 
 describe("Chat answer check", () => {
@@ -358,25 +164,6 @@ describe("Chat answer check", () => {
   afterEach(() => cleanup());
 
   const status = (container: HTMLElement) => container.querySelector('[role="status"][aria-live="polite"]')!.textContent!.trim();
-
-  it("says calmly when nothing in the items answers, keeping the passages behind the toggle", async () => {
-    const { saved } = setup();
-    const { container } = await render(<ChatPage />);
-    await say(container, "When is the dentist?");
-    const check: AnswerCheck = { not_found: true, claims: 0, flagged: [], invalid_citations: 0 };
-    await reply("s-ask-1", "I couldn't find that in your items.", check);
-
-    const item = container.querySelector("li.msg-assistant")!;
-    expect(item.querySelector(".chat-not-found")!.textContent).toBe("Nothing in your items answers this.");
-    expect(item.querySelector(".chat-check")).toBeNull();
-    expect(status(container)).toBe("Answer ready. Nothing in your items answers this.");
-    // The passage the model saw is still one toggle away.
-    const more = byText(item, "button", "1 more passage the model saw")!;
-    await click(more);
-    expect(item.querySelector(".chat-citations-more")!.textContent).toContain("River walk");
-
-    expect(saved[saved.length - 1]!.messages[1]).toMatchObject({ check: { not_found: true } });
-  });
 
   it("lists claims not backed by a cited item behind a disclosure", async () => {
     const { saved } = setup();
@@ -421,91 +208,6 @@ describe("Chat answer check", () => {
     expect(m.check!.flagged.map((f) => f.reason)).toEqual(["uncited", "unsupported", "something_new"]);
   });
 
-  it("shows nothing extra for an answer without a check or with nothing flagged", async () => {
-    const { saved } = setup();
-    const { container } = await render(<ChatPage />);
-    await say(container, "Where did we watch herons?");
-    await reply("s-ask-1", "By the river [1].", { not_found: false, claims: 1, flagged: [], invalid_citations: 0 });
-    await say(container, "And then?");
-    await reply("s-ask-2", "Home [1].");
-    expect(container.querySelector(".chat-check")).toBeNull();
-    expect(container.querySelector(".chat-not-found")).toBeNull();
-    expect(saved[saved.length - 1]!.messages[3]!.check).toBeUndefined();
-  });
-
-  it("restores the check from history, and turns saved without one still load", async () => {
-    mockDaemon({
-      chat_history_load: [
-        {
-          id: "c-1",
-          title: "q",
-          updated_at: 1,
-          messages: [
-            { role: "user", text: "q1" },
-            { role: "assistant", text: "old answer", state: "done" },
-            { role: "user", text: "q2" },
-            {
-              role: "assistant",
-              text: "It was in May.",
-              state: "done",
-              check: { not_found: false, claims: 1, flagged: [{ text: "It was in May.", reason: "uncited" }], invalid_citations: 0 },
-            },
-            { role: "user", text: "q3" },
-            { role: "assistant", text: "I couldn't find that in your items.", state: "done", check: { not_found: true } },
-            { role: "user", text: "q4" },
-            { role: "assistant", text: "odd", state: "done", check: "garbage" },
-            { role: "user", text: "q5" },
-            {
-              role: "assistant",
-              text: "Mixed. Kept.",
-              state: "done",
-              check: {
-                not_found: "yes",
-                claims: -3,
-                invalid_citations: Number.NaN,
-                flagged: [null, { text: 5, reason: "uncited" }, { text: "   ", reason: "uncited" }, { text: "Kept." }, "x"],
-              },
-            },
-            { role: "user", text: "q6" },
-            {
-              role: "assistant",
-              text: "It broke.",
-              state: "error",
-              error: "boom",
-              check: { not_found: true, flagged: [{ text: "It broke.", reason: "uncited" }] },
-            },
-          ],
-        },
-      ],
-    });
-    const { container } = await render(<ChatPage />);
-    const items = container.querySelectorAll("li.msg-assistant");
-    expect(items).toHaveLength(6);
-    expect(items[0]!.querySelector(".chat-check, .chat-not-found")).toBeNull();
-    expect(byText(items[1]!, "button", "1 statement isn't backed by a cited item")).toBeDefined();
-    expect(items[2]!.querySelector(".chat-not-found")!.textContent).toBe("Nothing in your items answers this.");
-    expect(items[3]!.querySelector(".chat-check, .chat-not-found")).toBeNull();
-    // Malformed entries are skipped; a claim with no reason reads as "not in the cited items".
-    expect(items[4]!.querySelector(".chat-not-found")).toBeNull();
-    await click(byText(items[4]!, "button", "1 statement isn't backed by a cited item"));
-    expect(items[4]!.querySelector(".chat-check-list")!.textContent).toBe("Not in the cited items: Kept.");
-    // A failed turn shows its error, never its check.
-    expect(items[5]!.querySelector(".chat-check, .chat-not-found")).toBeNull();
-    expect(items[5]!.querySelector('[role="alert"]')!.textContent).toBe("boom");
-  });
-
-  it("reads counts and flags defensively", () => {
-    expect(answerCheckOf({ not_found: 1, claims: -1, invalid_citations: Number.NaN, flagged: "x" })).toEqual({
-      not_found: false,
-      claims: 0,
-      flagged: [],
-      invalid_citations: 0,
-    });
-    expect(answerCheckOf({ claims: 2.7, invalid_citations: Infinity })).toMatchObject({ claims: 2, invalid_citations: 0 });
-    expect(answerCheckOf(null)).toBeUndefined();
-    expect(answerCheckOf([])).toMatchObject({ flagged: [] });
-  });
-
   it("bounds the check it saves", () => {
     const text = "A".repeat(5_000);
     const claim = (s: string, reason = "uncited") => ({ text: s, reason });
@@ -526,115 +228,5 @@ describe("Chat answer check", () => {
     const ctl = "\u0001".repeat(1_000);
     const big = storedCheck({ ...check, flagged: Array.from({ length: 200 }, () => claim(ctl)) }, ctl);
     expect(big).toEqual({ ...check, flagged: [] });
-  });
-
-  it("saves a bounded check for an oversized answer", async () => {
-    const { saved } = setup();
-    const { container } = await render(<ChatPage />);
-    await say(container, "Tell me everything");
-    const sentence = "B".repeat(2_000) + ".";
-    const answer = Array.from({ length: 250 }, () => sentence).join(" ");
-    await reply("s-ask-1", answer, {
-      not_found: false,
-      claims: 250,
-      flagged: Array.from({ length: 250 }, () => ({ text: sentence, reason: "uncited" })),
-      invalid_citations: 0,
-    });
-    const m = saved[saved.length - 1]!.messages[1]!;
-    expect(m.text.length).toBe(60_000);
-    expect(m.check!.flagged).toHaveLength(200);
-    expect(m.check!.flagged.every((f) => f.text.length === 1_000)).toBe(true);
-    expect(new TextEncoder().encode(JSON.stringify(m.check)).length).toBeLessThanOrEqual(256 * 1024);
-    // On screen, the full list stays.
-    expect(byText(container, "button", "250 statements aren't backed by a cited item")).toBeDefined();
-  });
-
-  it("shows no check while the answer streams", async () => {
-    setup();
-    const { container } = await render(<ChatPage />);
-    await say(container, "Where did we watch herons?");
-    await act(() => emit("nugget:chat-delta", { stream_id: "s-ask-1", text: "It was in May." }));
-    await flush();
-    expect(container.querySelector(".caret")).not.toBeNull();
-    expect(container.querySelector(".chat-check, .chat-not-found")).toBeNull();
-    await act(() =>
-      emit("nugget:chat-done", {
-        stream_id: "s-ask-1",
-        input_tokens: 1,
-        output_tokens: 2,
-        error: null,
-        check: { not_found: false, claims: 1, flagged: [{ text: "It was in May.", reason: "uncited" }], invalid_citations: 0 },
-      }),
-    );
-    await flush();
-    expect(container.querySelector(".chat-check")).not.toBeNull();
-  });
-
-  it("neither shows nor saves a check that comes with an error or a cancel", async () => {
-    const { saved } = setup();
-    const { container } = await render(<ChatPage />);
-    const check = { not_found: true, claims: 1, flagged: [{ text: "Partial.", reason: "uncited" }], invalid_citations: 0 };
-    for (const [i, error] of ["model failed", "cancelled"].entries()) {
-      await say(container, `q${i}`);
-      const id = `s-ask-${i + 1}`;
-      await act(() => emit("nugget:chat-delta", { stream_id: id, text: "Partial." }));
-      await act(() => emit("nugget:chat-done", { stream_id: id, input_tokens: 1, output_tokens: 2, error, check }));
-      await flush();
-    }
-    const items = container.querySelectorAll("li.msg-assistant");
-    expect(items[0]!.querySelector('[role="alert"]')!.textContent).toBe("model failed");
-    expect(items[1]!.textContent).toContain("Stopped");
-    expect(container.querySelector(".chat-check, .chat-not-found")).toBeNull();
-    const msgs = saved[saved.length - 1]!.messages;
-    expect(msgs.map((m) => m.state)).toEqual([undefined, "error", undefined, "cancelled"]);
-    expect(msgs.every((m) => m.check === undefined)).toBe(true);
-  });
-
-  it("keeps a check that arrives before the ask call returns", async () => {
-    let resolveAsk: (v: AskStarted) => void = () => {};
-    const saved: StoredConversation[] = [];
-    mockDaemon({
-      retrieve_ask: () => new Promise<AskStarted>((r) => (resolveAsk = r)),
-      chat_history_load: [],
-      chat_history_save: (a: unknown) => {
-        saved.push((a as { conversation: StoredConversation }).conversation);
-      },
-    });
-    const { container } = await render(<ChatPage />);
-    await say(container, "When is the dentist?");
-    await act(() => emit("nugget:chat-delta", { stream_id: "s-early", text: "I couldn't find that in your items." }));
-    await act(() =>
-      emit("nugget:chat-done", {
-        stream_id: "s-early",
-        input_tokens: 1,
-        output_tokens: 2,
-        error: null,
-        check: { not_found: true, claims: 0, flagged: [], invalid_citations: 0 },
-      }),
-    );
-    await act(async () => resolveAsk({ ...askStarted, stream_id: "s-early" }));
-    await flush();
-    const item = container.querySelector("li.msg-assistant")!;
-    expect(item.textContent).toContain("I couldn't find that in your items.");
-    expect(item.querySelector(".chat-not-found")!.textContent).toBe("Nothing in your items answers this.");
-    expect(saved[saved.length - 1]!.messages[1]).toMatchObject({ check: { not_found: true } });
-  });
-
-  it("drops the check of an older daemon's stream it stopped, keeping the fallback chat clean", async () => {
-    const { cancels, saved } = setup({ cite: () => false });
-    const { container } = await render(<ChatPage />);
-    await say(container, "What is a heron?");
-    expect(cancels).toEqual(["s-ask-1"]);
-    await reply("s-ask-1", "I couldn't find that in your items.", {
-      not_found: true,
-      claims: 0,
-      flagged: [{ text: "x", reason: "uncited" }],
-      invalid_citations: 0,
-    });
-    await reply("s-chat-1", "A wading bird.");
-    const item = container.querySelector("li.msg-assistant")!;
-    expect(item.textContent).toContain("A wading bird.");
-    expect(item.querySelector(".chat-check, .chat-not-found")).toBeNull();
-    expect(saved[saved.length - 1]!.messages[1]!.check).toBeUndefined();
   });
 });

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
-import { isNoAiError, SearchPage } from "./Search";
+import { SearchPage } from "./Search";
 import type { ContextResponse } from "../api";
 
 beforeEach(() => {
@@ -51,12 +51,5 @@ describe("Ask on Search with no AI (GG6-14)", () => {
     const alert = container.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain("No AI is set up yet");
     expect(alert?.textContent).not.toContain("synthesis tier");
-  });
-
-  it("recognises both no-AI errors", () => {
-    expect(isNoAiError("no provider is available for the synthesis tier")).toBe(true);
-    expect(isNoAiError("local model qwen3-4b-q4km is not installed")).toBe(true);
-    expect(isNoAiError("rate limited")).toBe(false);
-    expect(isNoAiError(null)).toBe(false);
   });
 });

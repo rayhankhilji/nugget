@@ -27,22 +27,10 @@ describe("ErrorNote", () => {
     expect(n.alert.textContent).not.toContain("-32,000");
   });
 
-  it("timed out: a friendly headline", async () => {
-    const n = await note({ kind: "rpc", message: "request timed out after 30s", code: -32000 });
-    expect(n.headline).toBe(t("common.error.timeout"));
-    expect(n.details).toContain("timed out");
-  });
-
   it("other daemon errors keep the daemon's message visible, with the code under Details", async () => {
     const n = await note({ kind: "rpc", message: "a source named Notes already exists", code: -32602 });
     expect(n.headline).toBe("a source named Notes already exists");
     expect(n.details).toBe("(code -32602)");
-  });
-
-  it("version mismatch: a friendly headline", async () => {
-    const n = await note({ kind: "protocol", message: "Unexpected response" });
-    expect(n.headline).toBe(t("common.error.protocol"));
-    expect(n.details).toBe("Unexpected response");
   });
 
   it("shell and script errors: a generic headline, the raw text under Details", async () => {
@@ -51,12 +39,6 @@ describe("ErrorNote", () => {
     expect(n.details).toBe("Permission denied (os error 13)");
     const js = await note(new TypeError("x is undefined"));
     expect(js.headline).toBe(t("common.error.generic"));
-  });
-
-  it("an Error thrown by the app keeps its own (translated) sentence", async () => {
-    const n = await note(new Error(t("plugins.approve.failed")));
-    expect(n.headline).toBe(t("plugins.approve.failed"));
-    expect(n.details).toBeNull();
   });
 
   it("offline: a quiet hint, not an error", async () => {

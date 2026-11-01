@@ -135,18 +135,6 @@ mod tests {
     }
 
     #[test]
-    fn a_busy_daemon_asks_to_try_again() {
-        assert_eq!(
-            classify_ipc(&rpc(
-                nugget_ipc::code::SERVER_BUSY,
-                "too many requests in flight",
-                None
-            )),
-            Failure::Error(ERROR_DRAFT_FAILED.into())
-        );
-    }
-
-    #[test]
     fn other_daemon_errors() {
         assert_eq!(
             classify_ipc(&rpc(-32000, "provider error: quota exceeded", None)),

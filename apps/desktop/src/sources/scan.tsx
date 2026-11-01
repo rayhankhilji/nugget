@@ -2,12 +2,12 @@ import type { SourceInfo } from "../api";
 import { formatBytes } from "../format";
 import { useT } from "../i18n";
 
-// KK2 (GG6-2, GG6-26): what a source's folder scan found, for the setup step and the Sources page.
+// What a source's folder scan found, for the setup step and the Sources page.
 
 /**
  * Where a source is: not started, indexing, searchable, failed, holding nothing Nugget can index
  * (`empty`), or a folder Nugget can't open (`denied`) or can't find (`missing`). The last three
- * settle within seconds of the folder scan instead of spinning (GG6-2).
+ * settle within seconds of the folder scan instead of spinning.
  */
 export type IndexPhase = "waiting" | "indexing" | "ready" | "failed" | "empty" | "denied" | "missing";
 

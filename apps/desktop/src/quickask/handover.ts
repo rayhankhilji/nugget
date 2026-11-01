@@ -1,5 +1,5 @@
 /**
- * JJ2: the main window's side of quick ask's "Open in Chat" / "Show in Search". The shell keeps
+ * The main window's side of quick ask's "Open in Chat" / "Show in Search". The shell keeps
  * the handover (`quickask_open_main`) and tells this window (`quickask:handover`); the app takes
  * it once and passes it to the page: Search runs the question, Chat continues the conversation.
  */

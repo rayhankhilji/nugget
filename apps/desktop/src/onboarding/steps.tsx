@@ -85,7 +85,7 @@ export function SourceStep({ headingRef, connected, dispatch }: StepProps) {
   const t = useT();
   const [open, setOpen] = useState<ConnectorKind | "pick" | null>(null);
   // Every source there is, not only those added on this visit: going Back, quitting and reopening,
-  // or running setup again shows the folder added before, with its progress (GG6-12).
+  // or running setup again shows the folder added before, with its progress.
   const [added, setAdded] = useState<SourceInfo[]>([]);
   // Sources added on this visit: their progress is announced; earlier ones are just shown.
   const [fresh, setFresh] = useState<string[]>([]);
@@ -157,7 +157,7 @@ const PHASE_KEY: Record<IndexPhase, MessageKey> = {
   missing: "onboarding.source.missing",
 };
 
-/** The line for a source: its phase, with the scan's total when it is known (GG6-26). */
+/** The line for a source: its phase, with the scan's total when it is known. */
 function phaseText(t: ReturnType<typeof useT>, s: SourceInfo, phase: IndexPhase): string {
   const total = s.scan?.finished ? s.scan.found : 0;
   const args = { name: s.name, count: s.items, total, error: s.last_error ?? "" };
