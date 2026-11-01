@@ -11,7 +11,7 @@ use nugget_models::{
 
 const CHAT_SMALL: &str = "qwen3-4b-q4km";
 const CHAT_LARGE: &str = "qwen3-8b-q4km";
-const EMBED: &str = "nomic-embed-text-v1.5-q8";
+const EMBED: &str = "nomic-embed-text-v2-moe-q8";
 const RERANK: &str = "bge-reranker-v2-m3-q4km";
 
 /// A machine sold as `gb` GB: the OS reports a little less (here 95%).
