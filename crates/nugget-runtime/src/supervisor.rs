@@ -1917,32 +1917,36 @@ mod tests {
 
     #[test]
     fn check_role_runs_a_reranker_only_for_the_rerank_role() {
-        let rerank = entry(vec![Tier::Rerank]);
-        assert!(check_role(RuntimeRole::Rerank, &rerank).is_ok());
-        for role in [
-            RuntimeRole::Chat,
-            RuntimeRole::Embedding,
-            RuntimeRole::Draft,
+        use RuntimeRole as R;
+        use Tier as T;
+        // A reranker (even mixed with other tiers, which the manifest refuses) never chats or
+        // embeds; the rerank role takes only rerankers; draft takes any chat model.
+        for (role, tiers, ok) in [
+            (R::Rerank, vec![T::Rerank], true),
+            (R::Chat, vec![T::Rerank], false),
+            (R::Embedding, vec![T::Rerank], false),
+            (R::Draft, vec![T::Rerank], false),
+            (R::Chat, vec![T::Triage, T::Embedding, T::Rerank], false),
+            (
+                R::Embedding,
+                vec![T::Triage, T::Embedding, T::Rerank],
+                false,
+            ),
+            (R::Rerank, vec![T::Embedding], false),
+            (R::Rerank, vec![T::Triage, T::Synthesis], false),
+            (R::Chat, vec![T::Light], true),
+            (R::Embedding, vec![T::Embedding], true),
+            (R::Chat, vec![T::Embedding], false),
+            (R::Embedding, vec![T::Light], false),
+            (R::Draft, vec![T::Light], true),
+            (R::Draft, vec![T::Synthesis], true),
+            (R::Draft, vec![T::Embedding], false),
         ] {
-            let err = check_role(role, &rerank).unwrap_err();
-            assert!(matches!(err, Error::Invalid(_)), "{role:?}: {err}");
+            let res = check_role(role, &entry(tiers.clone()));
+            assert_eq!(res.is_ok(), ok, "{role:?} {tiers:?}");
+            if let Err(e) = res {
+                assert!(matches!(e, Error::Invalid(_)), "{e}");
+            }
         }
-        // Mixed with other tiers (the manifest refuses this), it still never chats or embeds.
-        let mixed = entry(vec![Tier::Triage, Tier::Embedding, Tier::Rerank]);
-        assert!(check_role(RuntimeRole::Chat, &mixed).is_err());
-        assert!(check_role(RuntimeRole::Embedding, &mixed).is_err());
-        // The rerank role refuses models without the rerank tier.
-        for tiers in [vec![Tier::Embedding], vec![Tier::Triage, Tier::Synthesis]] {
-            assert!(check_role(RuntimeRole::Rerank, &entry(tiers)).is_err());
-        }
-        // Chat and embedding models keep their roles.
-        assert!(check_role(RuntimeRole::Chat, &entry(vec![Tier::Light])).is_ok());
-        assert!(check_role(RuntimeRole::Embedding, &entry(vec![Tier::Embedding])).is_ok());
-        assert!(check_role(RuntimeRole::Chat, &entry(vec![Tier::Embedding])).is_err());
-        assert!(check_role(RuntimeRole::Embedding, &entry(vec![Tier::Light])).is_err());
-        // The draft role takes any chat model, and nothing else.
-        assert!(check_role(RuntimeRole::Draft, &entry(vec![Tier::Light])).is_ok());
-        assert!(check_role(RuntimeRole::Draft, &entry(vec![Tier::Synthesis])).is_ok());
-        assert!(check_role(RuntimeRole::Draft, &entry(vec![Tier::Embedding])).is_err());
     }
 }

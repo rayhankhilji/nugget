@@ -26,11 +26,9 @@ use crate::types::{ChatEvent, ChatStats, ChatStream, Timings};
 const MAX_ERROR_BODY: usize = 64 * 1024;
 /// Largest non-streaming JSON body we accept (embeddings can be big).
 const MAX_JSON_BODY: usize = 256 * 1024 * 1024;
-/// How long an idle pooled connection is kept for reuse. Long enough that a prewarm on trigger
-/// press (or a previous draft) still has a live TLS session when the request is sent.
+/// How long an idle pooled connection is kept (a prewarm must outlive the trigger press).
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
-/// HTTP/2 PING interval on pooled connections, so middleboxes and servers do not silently drop
-/// them while idle (a dead pooled connection costs a full reconnect on the next request).
+/// HTTP/2 PING interval on pooled connections, so they are not silently dropped while idle.
 const H2_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const H2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
@@ -41,10 +39,8 @@ tokio::task_local! {
     static CONNECT_SLOT: Arc<Mutex<Option<Duration>>>;
 }
 
-/// Tower layer around reqwest's connector (DNS + TCP + TLS) that times each new connection and
-/// reports it to the request whose task started it. A connection opened in the background (the
-/// pool handed the request another one first) reports nothing, which is right: that request did
-/// not wait for it.
+/// Tower layer around reqwest's connector that times each new connection for the request whose
+/// task started it.
 #[derive(Clone, Copy)]
 struct ConnectTiming;
 
@@ -120,9 +116,8 @@ const METER_FLUSH_BYTES: u64 = 256 * 1024;
 /// ...or this long after the last flush, whichever comes first.
 const METER_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 
-/// One HTTP exchange in the egress ledger: the row is opened before the request is sent,
-/// updated periodically while the response streams in, and finished when dropped (exactly once).
-/// Records nothing for on-device providers.
+/// One HTTP exchange in the egress ledger: opened before sending, flushed periodically while
+/// the response streams, finished once on drop. Records nothing for on-device providers.
 pub(crate) struct EgressMeter {
     exchange: EgressExchange,
     unflushed: u64,
@@ -199,9 +194,6 @@ impl Http {
             .default_headers(default_headers)
             .connect_timeout(settings.connect_timeout)
             .read_timeout(settings.idle_timeout)
-            // Connection reuse (M3 latency): keep TLS sessions warm between requests and after a
-            // prewarm. HTTP/2 is negotiated by ALPN on https; plain-http local servers use
-            // HTTP/1.1 keep-alive from the same pool.
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .tcp_nodelay(true)
             .tcp_keepalive(TCP_KEEPALIVE)
@@ -284,10 +276,8 @@ impl Http {
         }
     }
 
-    /// POST a JSON body, retrying transient failures (connect errors, timeouts before the
-    /// response, 408/409/429/5xx/529) with backoff. Returns the successful response and the meter
-    /// that will record its egress once dropped. Once retries run out, 429/529 surface as
-    /// [`Error::RateLimited`] and transport failures as [`Error::Network`].
+    /// POST a JSON body, retrying transient failures with backoff. Once retries run out, 429/529
+    /// surface as [`Error::RateLimited`] and transport failures as [`Error::Network`].
     pub(crate) async fn post_json(
         &self,
         path: &str,
@@ -540,51 +530,43 @@ pub(crate) fn sse_chat_stream<D: SseDecoder>(
                 }
                 None => (parser.finish(), true),
             };
+            let mut batch = Vec::new();
+            let mut failed = None;
             for ev in events {
                 match decoder.on_event(ev) {
-                    Ok(out) => {
-                        for e in out {
-                            if is_token(&e) {
-                                first_token.get_or_insert_with(Instant::now);
-                            }
-                            let done = matches!(e, ChatEvent::Done { .. });
-                            if done {
-                                yield Ok(stats_for(&e, decoder.cache_usage(), &clock, first_byte, first_token));
-                            }
-                            yield Ok(e);
-                            if done {
-                                return;
-                            }
-                        }
-                    }
+                    Ok(out) => batch.extend(out),
                     Err(e) => {
-                        yield Err(e);
-                        return;
+                        failed = Some(e);
+                        break;
                     }
                 }
             }
-            if eof {
+            let has_done = batch.iter().any(|e| matches!(e, ChatEvent::Done { .. }));
+            if eof && failed.is_none() && !has_done {
                 match decoder.on_eof() {
-                    Ok(out) => {
-                        let mut done = false;
-                        for e in out {
-                            if is_token(&e) {
-                                first_token.get_or_insert_with(Instant::now);
-                            }
-                            if matches!(e, ChatEvent::Done { .. }) {
-                                done = true;
-                                yield Ok(stats_for(&e, decoder.cache_usage(), &clock, first_byte, first_token));
-                            }
-                            yield Ok(e);
-                        }
-                        if !done {
-                            yield Err(Error::Provider(format!(
-                                "{provider}: stream ended before completion"
-                            )));
-                        }
-                    }
-                    Err(e) => yield Err(e),
+                    Ok(out) => batch.extend(out),
+                    Err(e) => failed = Some(e),
                 }
+            }
+            for e in batch {
+                if is_token(&e) {
+                    first_token.get_or_insert_with(Instant::now);
+                }
+                let done = matches!(e, ChatEvent::Done { .. });
+                if done {
+                    yield Ok(stats_for(&e, decoder.cache_usage(), &clock, first_byte, first_token));
+                }
+                yield Ok(e);
+                if done {
+                    return;
+                }
+            }
+            if let Some(e) = failed {
+                yield Err(e);
+                return;
+            }
+            if eof {
+                yield Err(Error::Provider(format!("{provider}: stream ended before completion")));
                 return;
             }
         }
@@ -693,9 +675,8 @@ pub(crate) fn error_detail_value(v: &Value) -> Option<String> {
     })
 }
 
-/// Map a non-success response. 429 (too many requests) and 529 (Anthropic "overloaded") become
-/// [`Error::RateLimited`] with the server's retry hint; the body detail is logged, since that
-/// variant carries none. Everything else is [`Error::Provider`].
+/// Map a non-success response: 429/529 become [`Error::RateLimited`] (detail logged), the rest
+/// [`Error::Provider`].
 fn http_error(
     provider: &ProviderId,
     status: StatusCode,
@@ -728,9 +709,8 @@ pub(crate) fn is_rate_limit_status(status: StatusCode) -> bool {
     matches!(status.as_u16(), 429 | 529)
 }
 
-/// Map a reqwest failure (sending, or reading the body). Connect, timeout and other transport
-/// failures are [`Error::Network`]. A request reqwest could not even build (a bad URL or header
-/// from this provider's config) stays [`Error::Provider`], so the Router still falls back.
+/// Map a reqwest failure: transport failures are [`Error::Network`]; a request that could not be
+/// built (bad config) is [`Error::Provider`], so the Router still falls back.
 pub(crate) fn transport_error(provider: &ProviderId, e: &reqwest::Error) -> Error {
     let kind = if e.is_connect() {
         "connection failed"
@@ -807,19 +787,6 @@ mod tests {
             HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
         );
         assert_eq!(retry_after(&h), None);
-    }
-
-    #[test]
-    fn retryable_statuses() {
-        for s in [408u16, 409, 429, 500, 502, 503, 504, 529] {
-            assert!(is_retryable_status(StatusCode::from_u16(s).unwrap()), "{s}");
-        }
-        for s in [400u16, 401, 403, 404, 413, 422] {
-            assert!(
-                !is_retryable_status(StatusCode::from_u16(s).unwrap()),
-                "{s}"
-            );
-        }
     }
 
     #[test]

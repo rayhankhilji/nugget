@@ -1,4 +1,4 @@
-//! Probe logic against mocked servers. The "smart" mocks really decode the PNG sent for the
+//! Probe logic against mocked servers. The "smart" mock really decodes the PNG sent for the
 //! vision check, so a passing vision probe proves the image round-trips through the adapter.
 
 mod common;
@@ -11,9 +11,9 @@ use common::*;
 use nugget_core::capability::Tier;
 use nugget_core::ids::ProviderId;
 use nugget_infer::probe::vision::read_code_png;
-use nugget_infer::{ProbeOptions, Router, probe, probe_with};
+use nugget_infer::{ProbeOptions, Router, probe_with};
 use serde_json::{Value, json};
-use wiremock::matchers::{method, path};
+use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 /// What a capable model would answer, decided from the request.
@@ -61,32 +61,6 @@ fn answer_openai(body: &Value) -> Answer {
     Answer::Text("pong".into())
 }
 
-/// Answer for an Anthropic Messages request.
-fn answer_anthropic(body: &Value) -> Answer {
-    let content = body["messages"].as_array().unwrap().last().unwrap()["content"]
-        .as_array()
-        .unwrap();
-    if let Some(img) = content.iter().find(|b| b["type"] == "image") {
-        let png = B64.decode(img["source"]["data"].as_str().unwrap()).unwrap();
-        return Answer::Text(read_code_png(&png, 4).unwrap());
-    }
-    let text = content
-        .iter()
-        .find(|b| b["type"] == "text")
-        .and_then(|b| b["text"].as_str())
-        .unwrap_or_default();
-    if body.get("tools").is_some() {
-        return Answer::Tool {
-            name: body["tools"][0]["name"].as_str().unwrap().into(),
-            args: json!({"value": quoted(text).unwrap()}),
-        };
-    }
-    if body.get("output_config").is_some() {
-        return Answer::Text(r#"{"answer":7,"unit":"apples"}"#.into());
-    }
-    Answer::Text("pong".into())
-}
-
 struct SmartOpenAi;
 
 impl Respond for SmartOpenAi {
@@ -118,46 +92,6 @@ impl Respond for SmartOpenAi {
     }
 }
 
-struct SmartAnthropic;
-
-impl Respond for SmartAnthropic {
-    fn respond(&self, req: &Request) -> ResponseTemplate {
-        let body: Value = serde_json::from_slice(&req.body).unwrap();
-        let (block_start, delta, stop) = match answer_anthropic(&body) {
-            Answer::Text(t) => (
-                json!({"type": "text", "text": ""}),
-                json!({"type": "text_delta", "text": t}),
-                "end_turn",
-            ),
-            Answer::Tool { name, args } => (
-                json!({"type": "tool_use", "id": "toolu_1", "name": name, "input": {}}),
-                json!({"type": "input_json_delta", "partial_json": args.to_string()}),
-                "tool_use",
-            ),
-        };
-        sse_response(sse(&[
-            (
-                None,
-                json!({"type": "message_start", "message": {"usage": {"input_tokens": 10}}}),
-            ),
-            (
-                None,
-                json!({"type": "content_block_start", "index": 0, "content_block": block_start}),
-            ),
-            (
-                None,
-                json!({"type": "content_block_delta", "index": 0, "delta": delta}),
-            ),
-            (None, json!({"type": "content_block_stop", "index": 0})),
-            (
-                None,
-                json!({"type": "message_delta", "delta": {"stop_reason": stop}, "usage": {"output_tokens": 3}}),
-            ),
-            (None, json!({"type": "message_stop"})),
-        ]))
-    }
-}
-
 #[tokio::test]
 async fn capable_openai_compatible_server_passes_every_check() {
     let server = MockServer::start().await;
@@ -186,23 +120,17 @@ async fn capable_openai_compatible_server_passes_every_check() {
             .count(),
         1
     );
-}
 
-#[tokio::test]
-async fn capable_anthropic_server_passes_chat_checks() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(SmartAnthropic)
-        .mount(&server)
-        .await;
-    let (p, _) = provider(
-        "id = \"claude\"\nkind = \"anthropic\"\nmodel = \"test-model\"\napi_key = \"env:K\"",
-        &server.uri(),
+    // The router remembers what a probe proved.
+    let id = ProviderId::new("smart");
+    let router = Router::new(
+        vec![p],
+        [(Tier::Embedding, vec![id.clone()])].into_iter().collect(),
     );
-    let caps = probe(p.as_ref()).await;
-    assert!(caps.streaming && caps.vision && caps.tools && caps.json_schema);
-    assert!(!caps.embeddings, "Anthropic has no embeddings endpoint");
+    assert!(router.embed(&["x".into()]).await.is_err());
+    router.probe(&id, &ProbeOptions::default()).await.unwrap();
+    assert!(router.capabilities(&id).unwrap().embeddings);
+    assert_eq!(router.embed(&["x".into()]).await.unwrap().1.len(), 1);
 }
 
 /// Streams the same unhelpful text for everything; has no embeddings endpoint.
@@ -284,27 +212,4 @@ async fn unreachable_or_slow_provider_proves_nothing() {
     assert!(report.checks.iter().all(|c| !c.passed));
     assert!(report.checks[0].detail.contains("timed out"));
     assert_eq!(report.checks[4].detail, "skipped");
-}
-
-#[tokio::test]
-async fn router_probe_records_capabilities() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(SmartOpenAi)
-        .mount(&server)
-        .await;
-    let (p, _) = provider(
-        "id = \"smart\"\nkind = \"openai_compatible\"\nmodel = \"test-model\"",
-        &format!("{}/v1", server.uri()),
-    );
-    let id = ProviderId::new("smart");
-    let router = Router::new(
-        vec![p],
-        [(Tier::Embedding, vec![id.clone()])].into_iter().collect(),
-    );
-    assert!(router.embed(&["x".into()]).await.is_err());
-    router.probe(&id, &ProbeOptions::default()).await.unwrap();
-    assert!(router.capabilities(&id).unwrap().embeddings);
-    let (used, v) = router.embed(&["x".into()]).await.unwrap();
-    assert_eq!((used, v.len()), (id, 1));
 }

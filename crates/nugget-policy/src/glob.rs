@@ -47,37 +47,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn literals_and_case() {
-        assert!(glob_match("com.apple.Mail", "com.apple.mail"));
-        assert!(!glob_match("com.apple.mail", "com.apple.mail2"));
-    }
-
-    #[test]
-    fn stars_and_questions() {
-        assert!(glob_match("*bank*", "bankofamerica.com"));
-        assert!(glob_match("*bank*", "com.usbank.mobile"));
-        assert!(glob_match("com.*.mail", "com.apple.mail"));
-        assert!(glob_match("a?c", "abc"));
-        assert!(!glob_match("a?c", "ac"));
-        assert!(glob_match("*", ""));
-        assert!(glob_match("a*b*c", "aXXbYYc"));
-        assert!(!glob_match("a*b*c", "aXXbYY"));
-    }
-
-    #[test]
-    fn dot_star_prefix_matches_bare_domain() {
-        assert!(glob_match("*.chase.com", "chase.com"));
-        assert!(glob_match("*.chase.com", "secure.chase.com"));
-        assert!(!glob_match("*.chase.com", "notchase.com"));
-    }
-
-    #[test]
-    fn unicode() {
-        assert!(glob_match("*löschen*", "Endgültig LÖSCHEN"));
-    }
-
-    #[test]
-    fn specificity_counts_literals() {
+    fn glob_cases() {
+        for (pat, text, want) in [
+            ("com.apple.Mail", "com.apple.mail", true),
+            ("com.apple.mail", "com.apple.mail2", false),
+            ("*bank*", "com.usbank.mobile", true),
+            ("com.*.mail", "com.apple.mail", true),
+            ("a?c", "abc", true),
+            ("a?c", "ac", false),
+            ("*", "", true),
+            ("a*b*c", "aXXbYYc", true),
+            ("a*b*c", "aXXbYY", false),
+            ("*.chase.com", "chase.com", true),
+            ("*.chase.com", "secure.chase.com", true),
+            ("*.chase.com", "notchase.com", false),
+            ("*löschen*", "Endgültig LÖSCHEN", true),
+        ] {
+            assert_eq!(glob_match(pat, text), want, "{pat} {text}");
+        }
         assert_eq!(specificity("*"), 0);
         assert_eq!(specificity("*.chase.com"), 10);
     }

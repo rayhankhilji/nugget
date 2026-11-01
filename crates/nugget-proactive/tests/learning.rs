@@ -27,17 +27,9 @@ fn in_inbox(p: &Proactive, id: &str) -> bool {
 
 /// A second, unrelated question from Ana (another thread).
 fn ana_again(f: &Fixture) {
-    put_mail(
+    put_mails(
         &f.store,
-        Mail {
-            key: "m-ana-contract",
-            from: "Ana Ruiz <ana@acme.io>",
-            subject: "Contract draft",
-            body: "Could you review the contract draft before Friday?",
-            days_ago: 1.5,
-            message_id: "<ana-contract@acme.io>",
-            ..Default::default()
-        },
+        "m-ana-contract|Ana Ruiz <ana@acme.io>||Contract draft|1.5||||Could you review the contract draft before Friday?",
     );
 }
 
@@ -123,19 +115,9 @@ async fn a_sender_dismissed_as_not_important_ranks_lower_and_reset_brings_it_bac
 /// The user promised Hana the deck and asked her something in the same mail, four days ago, with
 /// no answer: one thread, two cards (the promise and the question awaiting an answer).
 fn deck_mail(f: &Fixture) {
-    put_mail(
+    put_mails(
         &f.store,
-        Mail {
-            key: "m-deck",
-            from: ME,
-            to: &["Hana Ito <hana@studio.test>"],
-            subject: "Deck and address",
-            body: "Hi Hana,\n\nI'll send the deck by Friday. Could you confirm the shipping address?\n\nBest",
-            days_ago: 4.0,
-            message_id: "<me-deck@nugget.dev>",
-            labels: &["SENT"],
-            ..Default::default()
-        },
+        "m-deck||Hana Ito <hana@studio.test>|Deck and address|4||||Hi Hana,\\n\\nI'll send the deck by Friday. Could you confirm the shipping address?\\n\\nBest",
     );
 }
 
@@ -212,18 +194,9 @@ async fn a_handled_question_keeps_the_promise_and_a_new_message_surfaces() {
     assert!(pr.learned.iter().all(|e| e.direction != Direction::Hidden));
     assert!(in_inbox(&p, &pr.id));
     // Hana writes after the dismissal: her question surfaces.
-    put_mail(
+    put_mails(
         &f.store,
-        Mail {
-            key: "m-hana-2",
-            from: "Hana Ito <hana@studio.test>",
-            subject: "Re: Deck and address",
-            body: "It's 4 Elm St. Could you also send the budget?",
-            days_ago: -0.5,
-            message_id: "<hana-2@studio.test>",
-            in_reply_to: Some("<me-deck@nugget.dev>"),
-            ..Default::default()
-        },
+        "m-hana-2|Hana Ito <hana@studio.test>||Re: Deck and address|-0.5||m-deck||It's 4 Elm St. Could you also send the budget?",
     );
     let later = now() + Duration::days(2);
     p.refresh(later).await.unwrap();
@@ -318,18 +291,9 @@ async fn legacy_per_sender_weights_move_into_the_learned_layer() {
 #[tokio::test]
 async fn a_sensitive_cards_subject_is_not_kept_as_a_learned_label() {
     let f = fixture();
-    put_mail(
+    put_mails(
         &f.store,
-        Mail {
-            key: "m-lab",
-            from: "Dana Lee <dana@clinic.test>",
-            subject: "Your biopsy results 884213",
-            body: "Could you call me about the biopsy results before Friday?",
-            days_ago: 1.5,
-            message_id: "<lab-1@clinic.test>",
-            sensitive: true,
-            ..Default::default()
-        },
+        "m-lab|Dana Lee <dana@clinic.test>||Your biopsy results 884213|1.5|||sensitive|Could you call me about the biopsy results before Friday?",
     );
     let p = Proactive::new(f.store.clone(), cfg());
     p.refresh(now()).await.unwrap();
@@ -356,17 +320,9 @@ async fn a_sensitive_cards_subject_is_not_kept_as_a_learned_label() {
 #[tokio::test]
 async fn a_thread_turning_sensitive_drops_its_earlier_label() {
     let f = fixture();
-    put_mail(
+    put_mails(
         &f.store,
-        Mail {
-            key: "m-lab-1",
-            from: "Dana Lee <dana@clinic.test>",
-            subject: "Appointment 884213",
-            body: "Could you confirm the appointment time before Friday?",
-            days_ago: 3.0,
-            message_id: "<lab-1@clinic.test>",
-            ..Default::default()
-        },
+        "m-lab-1|Dana Lee <dana@clinic.test>||Appointment 884213|3||||Could you confirm the appointment time before Friday?",
     );
     let p = Proactive::new(f.store.clone(), cfg());
     p.refresh(now()).await.unwrap();
@@ -384,19 +340,9 @@ async fn a_thread_turning_sensitive_drops_its_earlier_label() {
     };
     assert!(label(&p).is_some_and(|l| l.contains("884213")));
 
-    put_mail(
+    put_mails(
         &f.store,
-        Mail {
-            key: "m-lab-2",
-            from: "Dana Lee <dana@clinic.test>",
-            subject: "Re: Appointment 884213",
-            body: "Your biopsy results are in. Could you call me before Friday?",
-            days_ago: 1.0,
-            message_id: "<lab-2@clinic.test>",
-            in_reply_to: Some("<lab-1@clinic.test>"),
-            sensitive: true,
-            ..Default::default()
-        },
+        "m-lab-2|Dana Lee <dana@clinic.test>||Re: Appointment 884213|1||m-lab-1|sensitive|Your biopsy results are in. Could you call me before Friday?",
     );
     let later = now() + Duration::hours(1);
     p.refresh(later).await.unwrap();

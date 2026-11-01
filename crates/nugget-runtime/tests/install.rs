@@ -102,26 +102,38 @@ fn signed(runtimes: Vec<RuntimeEntry>) -> Manifest {
     verify_manifest(&bytes, sig.as_bytes(), &[key.verifying_key()]).unwrap()
 }
 
-fn hw(gpu: GpuKind) -> Hardware {
-    Hardware {
-        gpu,
-        ..common::hw()
-    }
+fn runtime(e: &common::Env, runtimes: Vec<RuntimeEntry>, gpu: GpuKind) -> Runtime {
+    runtime_with_sink(e, runtimes, gpu, e.sink.clone())
+}
+
+fn runtime_with_sink(
+    e: &common::Env,
+    runtimes: Vec<RuntimeEntry>,
+    gpu: GpuKind,
+    sink: Arc<common::VecSink>,
+) -> Runtime {
+    Runtime::new(&e.paths, e.store.clone(), sink)
+        .unwrap()
+        .with_manifest(signed(runtimes))
+        .with_hardware(Hardware {
+            gpu,
+            ..common::hw()
+        })
+        .with_options(common::opts())
+}
+
+/// The CPU build: an archive holding the fake server.
+async fn cpu_entry(e: &common::Env) -> RuntimeEntry {
+    let (bytes, format) = archive(&std::fs::read(common::fake_bin()).unwrap());
+    entry(&e.server, "llama-cpu", RuntimeAccel::Cpu, bytes, format).await
 }
 
 #[tokio::test]
 async fn ensure_installs_the_runtime_from_the_manifest_then_runs_it() {
     let e = env().await;
-    let fake = std::fs::read(common::fake_bin()).unwrap();
-    let (bytes, format) = archive(&fake);
-    let rt_entry = entry(&e.server, "llama-cpu", RuntimeAccel::Cpu, bytes, format).await;
-    let manifest = signed(vec![rt_entry.clone()]);
+    let rt_entry = cpu_entry(&e).await;
     let egress = Arc::new(common::VecSink::default());
-    let rt = Runtime::new(&e.paths, e.store.clone(), egress.clone())
-        .unwrap()
-        .with_manifest(manifest)
-        .with_hardware(hw(GpuKind::Unknown))
-        .with_options(common::opts());
+    let rt = runtime_with_sink(&e, vec![rt_entry.clone()], GpuKind::Unknown, egress.clone());
     assert_eq!(rt.runtime_candidates().len(), 1);
 
     let progress = Arc::new(Mutex::new(Vec::new()));
@@ -138,8 +150,10 @@ async fn ensure_installs_the_runtime_from_the_manifest_then_runs_it() {
     assert_eq!(phases.last(), Some(&Phase::Installed));
 
     let d = rt.details(RuntimeRole::Embedding).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Ready);
-    assert_eq!(d.accel, Some(RuntimeAccel::Cpu));
+    assert_eq!(
+        (d.info.state, d.accel),
+        (RuntimeState::Ready, Some(RuntimeAccel::Cpu))
+    );
     let bin = d.binary.unwrap();
     assert!(bin.starts_with(e.store.runtimes_dir()), "{}", bin.display());
     assert_eq!(
@@ -177,30 +191,17 @@ async fn ensure_installs_the_runtime_from_the_manifest_then_runs_it() {
 }
 
 #[tokio::test]
-async fn tampered_runtime_download_is_rejected() {
+async fn tampered_or_missing_runtime_builds_are_refused() {
     let e = env().await;
-    let fake = std::fs::read(common::fake_bin()).unwrap();
-    let (bytes, format) = archive(&fake);
-    let mut rt_entry = entry(&e.server, "llama-cpu", RuntimeAccel::Cpu, bytes, format).await;
+    let mut rt_entry = cpu_entry(&e).await;
     rt_entry.sha256 = sha256_hex(b"what the manifest promised");
-    let rt = Runtime::new(&e.paths, e.store.clone(), e.sink.clone())
-        .unwrap()
-        .with_manifest(signed(vec![rt_entry.clone()]))
-        .with_hardware(hw(GpuKind::Unknown))
-        .with_options(common::opts());
+    let rt = runtime(&e, vec![rt_entry.clone()], GpuKind::Unknown);
     let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
     assert!(matches!(err, nugget_core::Error::Integrity(_)), "{err}");
     assert!(!e.store.runtime_dir(&rt_entry).unwrap().exists());
     assert_eq!(rt.status()[0].state, RuntimeState::Failed);
-}
 
-#[tokio::test]
-async fn no_build_for_this_platform_is_unsupported() {
-    let e = env().await;
-    let rt = Runtime::new(&e.paths, e.store.clone(), e.sink.clone())
-        .unwrap()
-        .with_manifest(signed(vec![]))
-        .with_options(common::opts());
+    let rt = runtime(&e, vec![], GpuKind::Unknown);
     let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
     assert!(matches!(err, nugget_core::Error::Unsupported(_)), "{err}");
 }
@@ -210,31 +211,18 @@ async fn no_build_for_this_platform_is_unsupported() {
 #[tokio::test]
 async fn failing_gpu_build_falls_back_to_cpu() {
     let e = env().await;
-    let broken = b"#!/bin/sh\necho 'ggml_vulkan: no devices found' >&2\nexit 1\n";
-    let (vk_bytes, f1) = archive(broken);
-    let vk = entry(
-        &e.server,
-        "llama-vulkan",
-        RuntimeAccel::Vulkan,
-        vk_bytes,
-        f1,
-    )
-    .await;
-    let fake = std::fs::read(common::fake_bin()).unwrap();
-    let (cpu_bytes, f2) = archive(&fake);
-    let cpu = entry(&e.server, "llama-cpu", RuntimeAccel::Cpu, cpu_bytes, f2).await;
-    let rt = Runtime::new(&e.paths, e.store.clone(), e.sink.clone())
-        .unwrap()
-        .with_manifest(signed(vec![cpu, vk]))
-        .with_hardware(hw(GpuKind::Amd))
-        .with_options(common::opts());
+    let (vk_bytes, f) = archive(b"#!/bin/sh\necho 'ggml_vulkan: no devices found' >&2\nexit 1\n");
+    let vk = entry(&e.server, "llama-vulkan", RuntimeAccel::Vulkan, vk_bytes, f).await;
+    let rt = runtime(&e, vec![cpu_entry(&e).await, vk], GpuKind::Amd);
     let accels: Vec<_> = rt.runtime_candidates().iter().map(|r| r.accel).collect();
     assert_eq!(accels, vec![RuntimeAccel::Vulkan, RuntimeAccel::Cpu]);
 
     rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
     let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_eq!(d.accel, Some(RuntimeAccel::Cpu));
-    assert_eq!(d.info.state, RuntimeState::Ready);
+    assert_eq!(
+        (d.info.state, d.accel),
+        (RuntimeState::Ready, Some(RuntimeAccel::Cpu))
+    );
     let log = std::fs::read_to_string(rt.log_file(RuntimeRole::Chat)).unwrap();
     assert!(log.contains("no devices found"), "{log}");
     rt.shutdown().await;
@@ -243,31 +231,18 @@ async fn failing_gpu_build_falls_back_to_cpu() {
 #[tokio::test]
 async fn both_roles_starting_at_once_share_one_install() {
     let e = env().await;
-    let fake = std::fs::read(common::fake_bin()).unwrap();
-    let (bytes, format) = archive(&fake);
-    let rt_entry = entry(&e.server, "llama-cpu", RuntimeAccel::Cpu, bytes, format).await;
-    let rt = Runtime::new(&e.paths, e.store.clone(), e.sink.clone())
-        .unwrap()
-        .with_manifest(signed(vec![rt_entry]))
-        .with_hardware(hw(GpuKind::Unknown))
-        .with_options(common::opts());
+    let rt = runtime(&e, vec![cpu_entry(&e).await], GpuKind::Unknown);
     let (a, b) = tokio::join!(
         rt.ensure(RuntimeRole::Chat, &e.chat),
         rt.ensure(RuntimeRole::Embedding, &e.embed)
     );
     a.unwrap();
     b.unwrap();
-    let archive_gets = e
-        .server
-        .received_requests()
-        .await
-        .unwrap()
+    let requests = e.server.received_requests().await.unwrap();
+    let gets = requests
         .iter()
         .filter(|r| r.url.path().contains("/releases/download/"))
         .count();
-    assert!(
-        archive_gets <= 2,
-        "one download (probe + body at most): {archive_gets}"
-    );
+    assert!(gets <= 2, "one download (probe + body at most): {gets}");
     rt.shutdown().await;
 }

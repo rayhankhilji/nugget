@@ -308,8 +308,8 @@ impl PolicyEngine {
     }
 
     /// Decide on an action, with context. An `Allow` consumes one unit of the task's rate limit
-    /// for the risk class; a `Confirm` consumes one when the user approves it through the
-    /// [`crate::ConfirmationBroker`] (or [`PolicyEngine::consume`]). The decision is logged.
+    /// for the risk class; a `Confirm` consumes one when the user approves it
+    /// ([`PolicyEngine::consume`]). The decision is logged.
     pub fn assess(&self, action: &ActionDescriptor, ctx: &ActionContext) -> Assessment {
         let assessment = self.decide(action, ctx, true);
         self.log_assessment(action, ctx, &assessment);
@@ -495,10 +495,6 @@ impl PolicyEngine {
             // Logging must never block an evaluation; a failed write surfaces in verify/open.
             let _ = log.append(event);
         }
-    }
-
-    pub(crate) fn record_event(&self, event: LogEvent) {
-        self.record(event);
     }
 
     fn read_config(&self) -> std::sync::RwLockReadGuard<'_, PolicyConfig> {
@@ -953,9 +949,8 @@ fn explain(action: &ActionDescriptor, ctx: &ActionContext, a: &Assessment) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::Rule;
     use std::sync::Barrier;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     fn engine() -> PolicyEngine {
         PolicyEngine::builder()
@@ -974,111 +969,110 @@ mod tests {
         }
     }
 
-    fn is_confirm(d: &Decision) -> bool {
-        matches!(d, Decision::Confirm(_))
+    /// `"allow"`, `"confirm"` or `"deny"`.
+    fn kind(d: &Decision) -> &'static str {
+        match d {
+            Decision::Allow => "allow",
+            Decision::Confirm(_) => "confirm",
+            Decision::Deny(_) => "deny",
+        }
     }
-    fn is_deny(d: &Decision) -> bool {
-        matches!(d, Decision::Deny(_))
+
+    fn eval(
+        e: &PolicyEngine,
+        app: &str,
+        verb: &str,
+        label: Option<&str>,
+        risk: RiskClass,
+    ) -> &'static str {
+        kind(&e.evaluate(&act(app, verb, label, risk)))
+    }
+
+    fn approval(risk: RiskClass, target: Option<&str>) -> TaskApproval {
+        TaskApproval {
+            risk,
+            target: target.map(Into::into),
+        }
+    }
+
+    fn limit(e: &PolicyEngine, risk: RiskClass, n: u32) {
+        e.update_config("limit", |c| {
+            c.rate_limits.insert(risk, n);
+        })
+        .unwrap();
     }
 
     #[test]
     fn defaults() {
+        use RiskClass::*;
         let e = engine();
-        assert_eq!(
-            e.evaluate(&act("com.apple.mail", "scroll", None, RiskClass::Observe)),
-            Decision::Allow
-        );
-        assert_eq!(
-            e.evaluate(&act(
-                "com.apple.mail",
-                "type",
-                Some("Body"),
-                RiskClass::Edit
-            )),
-            Decision::Allow
-        );
-        for risk in [
-            RiskClass::Send,
-            RiskClass::Destroy,
-            RiskClass::Spend,
-            RiskClass::Security,
+        for (app, verb, label, risk, want) in [
+            ("com.apple.mail", "scroll", None, Observe, "allow"),
+            ("com.apple.mail", "type", Some("Body"), Edit, "allow"),
+            ("com.apple.mail", "click", None, Send, "confirm"),
+            ("com.apple.mail", "click", None, Destroy, "confirm"),
+            ("com.apple.mail", "click", None, Spend, "confirm"),
+            ("com.apple.mail", "click", None, Security, "confirm"),
+            ("com.1password.1password", "scroll", None, Observe, "deny"),
+            (
+                "secure.chase.com",
+                "click",
+                Some("Accounts"),
+                Observe,
+                "deny",
+            ),
+            ("com.robinhood.release", "scroll", None, Observe, "deny"),
+            ("ms-settings:windowsdefender", "open", None, Observe, "deny"),
+            (
+                "com.apple.systempreferences",
+                "click",
+                Some("Privacy & Security"),
+                Observe,
+                "deny",
+            ),
+            // Non-security settings panes are confirmed, not denied.
+            (
+                "com.apple.systempreferences",
+                "click",
+                Some("Displays"),
+                Observe,
+                "confirm",
+            ),
+            // Unrelated hosts are not caught by brand globs.
+            ("gemini.google.com", "scroll", None, Observe, "allow"),
+            ("chime.aws", "scroll", None, Observe, "allow"),
         ] {
-            assert!(
-                is_confirm(&e.evaluate(&act("com.apple.mail", "click", None, risk))),
-                "{risk}"
+            assert_eq!(
+                eval(&e, app, verb, label, risk),
+                want,
+                "{app} {label:?} {risk}"
             );
         }
-        assert!(is_deny(&e.evaluate(&act(
-            "com.1password.1password",
-            "scroll",
-            None,
-            RiskClass::Observe
-        ))));
-        assert!(is_deny(&e.evaluate(&act(
-            "secure.chase.com",
-            "click",
-            Some("Accounts"),
-            RiskClass::Observe
-        ))));
-        assert!(is_deny(&e.evaluate(&act(
-            "com.robinhood.release",
-            "scroll",
-            None,
-            RiskClass::Observe
-        ))));
-        assert!(is_deny(&e.evaluate(&act(
-            "ms-settings:windowsdefender",
-            "open",
-            None,
-            RiskClass::Observe
-        ))));
-        assert!(is_deny(&e.evaluate(&act(
-            "com.apple.systempreferences",
-            "click",
-            Some("Privacy & Security"),
-            RiskClass::Observe
-        ))));
-        // Non-security settings panes are confirmed, not denied.
-        assert!(is_confirm(&e.evaluate(&act(
-            "com.apple.systempreferences",
-            "click",
-            Some("Displays"),
-            RiskClass::Observe
-        ))));
-        // Unrelated hosts are not caught by brand globs.
-        assert_eq!(
-            e.evaluate(&act(
-                "gemini.google.com",
-                "scroll",
-                None,
-                RiskClass::Observe
-            )),
-            Decision::Allow
-        );
-        assert_eq!(
-            e.evaluate(&act("chime.aws", "scroll", None, RiskClass::Observe)),
-            Decision::Allow
-        );
     }
 
     #[test]
     fn confirm_explains() {
-        let e = engine();
         let mut a = act("com.apple.mail", "click", Some("Send"), RiskClass::Edit);
         a.text_preview = Some("Hi Bob, the invoice is attached".into());
-        let Decision::Confirm(text) = e.evaluate(&a) else {
+        let Decision::Confirm(text) = engine().evaluate(&a) else {
             panic!()
         };
-        assert!(text.contains("send something"), "{text}");
-        assert!(text.contains("com.apple.mail"), "{text}");
-        assert!(text.contains("“Send”"), "{text}");
-        assert!(text.contains("Hi Bob"), "{text}");
-        assert!(text.contains("Treated as send"), "{text}");
+        for part in [
+            "send something",
+            "com.apple.mail",
+            "“Send”",
+            "Hi Bob",
+            "Treated as send",
+        ] {
+            assert!(text.contains(part), "{text}");
+        }
     }
 
     #[test]
     fn precedence_deny_beats_allow_and_specific_beats_general() {
+        use RiskClass::*;
         let e = engine();
+        let slack = "com.tinyspeck.slackmacgap";
         // A user allow on a bank does not beat the default deny.
         e.upsert_rule(
             Rule::new("allow-bank", Effect::Allow)
@@ -1086,94 +1080,54 @@ mod tests {
                 .risks(RiskClass::ALL),
         )
         .unwrap();
-        assert!(is_deny(&e.evaluate(&act(
-            "chase.com",
-            "scroll",
-            None,
-            RiskClass::Observe
-        ))));
-
-        // A user rule beats a default: allow sending in Slack.
+        assert_eq!(eval(&e, "chase.com", "scroll", None, Observe), "deny");
+        // A user rule beats a default: allow sending in Slack, but not spending there.
         e.upsert_rule(
             Rule::new("slack-send", Effect::Allow)
                 .targets(["*slack*"])
-                .risks([RiskClass::Send]),
+                .risks([Send]),
         )
         .unwrap();
-        assert_eq!(
-            e.evaluate(&act(
-                "com.tinyspeck.slackmacgap",
-                "click",
-                Some("Send"),
-                RiskClass::Send
-            )),
-            Decision::Allow
-        );
-        // ...but not spending there.
-        assert!(is_confirm(&e.evaluate(&act(
-            "com.tinyspeck.slackmacgap",
-            "click",
-            Some("Upgrade"),
-            RiskClass::Spend
-        ))));
-
+        assert_eq!(eval(&e, slack, "click", Some("Send"), Send), "allow");
+        assert_eq!(eval(&e, slack, "click", Some("Upgrade"), Spend), "confirm");
         // A more specific Confirm beats a general Allow.
-        e.upsert_rule(
-            Rule::new("slack-general-send", Effect::Confirm)
-                .targets(["com.tinyspeck.slackmacgap"])
-                .labels(["*general*"])
-                .risks([RiskClass::Send]),
-        )
-        .unwrap();
-        assert!(is_confirm(&e.evaluate(&act(
-            "com.tinyspeck.slackmacgap",
-            "click",
-            Some("Send to #general"),
-            RiskClass::Send
-        ))));
-
+        let general = Rule::new("slack-general-send", Effect::Confirm)
+            .targets([slack])
+            .labels(["*general*"])
+            .risks([Send]);
+        e.upsert_rule(general).unwrap();
+        assert_eq!(
+            eval(&e, slack, "click", Some("Send to #general"), Send),
+            "confirm"
+        );
         // Same specificity: Confirm wins over Allow.
         e.upsert_rule(
             Rule::new("a", Effect::Allow)
                 .targets(["x.example"])
-                .risks([RiskClass::Edit]),
+                .risks([Edit]),
         )
         .unwrap();
         e.upsert_rule(
             Rule::new("b", Effect::Confirm)
                 .targets(["x.example"])
-                .risks([RiskClass::Edit]),
+                .risks([Edit]),
         )
         .unwrap();
-        assert!(is_confirm(&e.evaluate(&act(
-            "x.example",
-            "type",
-            None,
-            RiskClass::Edit
-        ))));
-
+        assert_eq!(eval(&e, "x.example", "type", None, Edit), "confirm");
         // A user deny on a verb.
         e.upsert_rule(Rule::new("no-upload", Effect::Deny).verbs(["upload*"]))
             .unwrap();
-        assert!(is_deny(&e.evaluate(&act(
-            "drive.google.com",
-            "upload_file",
-            None,
-            RiskClass::Send
-        ))));
-    }
-
-    #[test]
-    fn allow_rule_without_risks_does_not_allow_risky() {
-        let e = engine();
+        assert_eq!(
+            eval(&e, "drive.google.com", "upload_file", None, Send),
+            "deny"
+        );
+        // An Allow rule that names no risk classes does not allow risky actions.
         e.upsert_rule(Rule::new("mail", Effect::Allow).targets(["com.apple.mail"]))
             .unwrap();
-        assert!(is_confirm(&e.evaluate(&act(
-            "com.apple.mail",
-            "click",
-            Some("Send"),
-            RiskClass::Observe
-        ))));
+        assert_eq!(
+            eval(&e, "com.apple.mail", "click", Some("Send"), Observe),
+            "confirm"
+        );
     }
 
     #[test]
@@ -1184,183 +1138,151 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            e.evaluate(&act("chase.com", "scroll", None, RiskClass::Observe)),
-            Decision::Allow
+            eval(&e, "chase.com", "scroll", None, RiskClass::Observe),
+            "allow"
         );
         assert!(
             e.upsert_rule(Rule::new("default:mine", Effect::Allow))
                 .is_err()
         );
-        assert!(
-            e.update_config("dup", |c| {
-                c.rules.push(Rule::new("x", Effect::Allow));
-                c.rules.push(Rule::new("x", Effect::Deny));
-            })
-            .is_err()
-        );
+        let dup = e.update_config("dup", |c| {
+            c.rules.push(Rule::new("x", Effect::Allow));
+            c.rules.push(Rule::new("x", Effect::Deny));
+        });
+        assert!(dup.is_err());
         assert!(e.remove_rule("nope").is_ok_and(|existed| !existed));
     }
 
     #[test]
     fn per_task_approvals() {
+        use RiskClass::*;
         let e = engine();
-        let send = act("com.apple.mail", "click", Some("Send"), RiskClass::Send);
-        assert!(is_confirm(&e.evaluate(&send)));
-        e.approve_for_task(
-            "task-1",
-            TaskApproval {
-                risk: RiskClass::Send,
-                target: Some("com.apple.mail".into()),
-            },
-        )
-        .unwrap();
+        let send = act("com.apple.mail", "click", Some("Send"), Send);
+        assert_eq!(kind(&e.evaluate(&send)), "confirm");
+        e.approve_for_task("task-1", approval(Send, Some("com.apple.mail")))
+            .unwrap();
         assert_eq!(e.evaluate(&send), Decision::Allow);
         // Other tasks, other targets and other classes are unaffected.
-        let mut other_task = send.clone();
-        other_task.task_id = "task-2".into();
-        assert!(is_confirm(&e.evaluate(&other_task)));
-        assert!(is_confirm(&e.evaluate(&act(
-            "com.tinyspeck.slackmacgap",
-            "click",
-            Some("Send"),
-            RiskClass::Send
-        ))));
-        assert!(is_confirm(&e.evaluate(&act(
-            "com.apple.mail",
-            "click",
-            Some("Delete"),
-            RiskClass::Destroy
-        ))));
-        // Spend cannot be approved per task; deny rules still win.
-        assert!(
-            e.approve_for_task(
-                "task-1",
-                TaskApproval {
-                    risk: RiskClass::Spend,
-                    target: None
-                }
-            )
-            .is_err()
+        let other_task = ActionDescriptor {
+            task_id: "task-2".into(),
+            ..send.clone()
+        };
+        assert_eq!(kind(&e.evaluate(&other_task)), "confirm");
+        assert_eq!(
+            eval(&e, "com.tinyspeck.slackmacgap", "click", Some("Send"), Send),
+            "confirm"
         );
-        e.approve_for_task(
-            "task-1",
-            TaskApproval {
-                risk: RiskClass::Send,
-                target: None,
-            },
-        )
-        .unwrap();
-        assert!(is_deny(&e.evaluate(&act(
-            "paypal.com",
-            "click",
-            Some("Send"),
-            RiskClass::Send
-        ))));
+        assert_eq!(
+            eval(&e, "com.apple.mail", "click", Some("Delete"), Destroy),
+            "confirm"
+        );
+        // Spend cannot be approved per task; deny rules still win.
+        assert!(e.approve_for_task("task-1", approval(Spend, None)).is_err());
+        e.approve_for_task("task-1", approval(Send, None)).unwrap();
+        assert_eq!(eval(&e, "paypal.com", "click", Some("Send"), Send), "deny");
         e.end_task("task-1");
-        assert!(is_confirm(&e.evaluate(&send)));
+        assert_eq!(kind(&e.evaluate(&send)), "confirm");
+    }
+
+    #[test]
+    fn task_approvals_are_listed() {
+        let e = engine();
+        assert!(e.task_approvals().is_empty());
+        let send = approval(RiskClass::Send, Some("com.apple.mail"));
+        let destroy = approval(RiskClass::Destroy, None);
+        e.approve_for_task("t2", destroy.clone()).unwrap();
+        e.approve_for_task("t1", send.clone()).unwrap();
+        e.approve_for_task("t1", destroy.clone()).unwrap();
+        // Rate-limit counters alone make no approval.
+        e.consume("t3", RiskClass::Send);
+        let want = [("t1", send), ("t1", destroy.clone()), ("t2", destroy)]
+            .map(|(t, a)| (t.to_string(), a));
+        assert_eq!(e.task_approvals(), want);
+        e.end_task("t1");
+        assert_eq!(e.task_approvals().len(), 1);
     }
 
     #[test]
     fn rate_limits() {
         let e = engine();
-        e.update_config("limit", |c| {
-            c.rate_limits.insert(RiskClass::Send, 2);
-            c.rate_limits.insert(RiskClass::Edit, 3);
-        })
-        .unwrap();
+        limit(&e, RiskClass::Send, 2);
+        limit(&e, RiskClass::Edit, 3);
         let typing = act("com.apple.notes", "type", Some("Body"), RiskClass::Edit);
         for _ in 0..3 {
             assert_eq!(e.evaluate(&typing), Decision::Allow);
         }
-        assert!(is_deny(&e.evaluate(&typing)));
+        assert_eq!(kind(&e.evaluate(&typing)), "deny");
 
         // Confirms count when approved (consume), not when asked.
         let send = act("com.apple.mail", "click", Some("Send"), RiskClass::Send);
-        assert!(is_confirm(&e.evaluate(&send)));
-        assert!(is_confirm(&e.evaluate(&send)));
+        assert_eq!(kind(&e.evaluate(&send)), "confirm");
+        assert_eq!(kind(&e.evaluate(&send)), "confirm");
         assert!(e.consume("task-1", RiskClass::Send));
         assert!(e.consume("task-1", RiskClass::Send));
         assert!(!e.consume("task-1", RiskClass::Send));
-        assert!(is_deny(&e.evaluate(&send)));
+        assert_eq!(kind(&e.evaluate(&send)), "deny");
         assert_eq!(e.used("task-1", RiskClass::Send), 2);
 
         // Approved for the task: still limited.
-        let mut t2 = send.clone();
-        t2.task_id = "task-2".into();
-        e.approve_for_task(
-            "task-2",
-            TaskApproval {
-                risk: RiskClass::Send,
-                target: None,
-            },
-        )
-        .unwrap();
+        let t2 = ActionDescriptor {
+            task_id: "task-2".into(),
+            ..send
+        };
+        e.approve_for_task("task-2", approval(RiskClass::Send, None))
+            .unwrap();
         assert_eq!(e.evaluate(&t2), Decision::Allow);
         assert_eq!(e.evaluate(&t2), Decision::Allow);
-        assert!(is_deny(&e.evaluate(&t2)));
+        assert_eq!(kind(&e.evaluate(&t2)), "deny");
         e.end_task("task-2");
-        assert!(is_confirm(&e.evaluate(&t2)));
-    }
-
-    #[test]
-    fn kill_switch_denies_everything() {
-        let e = engine();
-        let a = act("com.apple.notes", "scroll", None, RiskClass::Observe);
-        assert_eq!(e.evaluate(&a), Decision::Allow);
-        e.halt();
-        assert!(e.halted());
-        assert!(is_deny(&e.evaluate(&a)));
-        e.resume();
-        assert_eq!(e.evaluate(&a), Decision::Allow);
+        assert_eq!(kind(&e.evaluate(&t2)), "confirm");
     }
 
     #[test]
     fn kill_switch_under_concurrency() {
         let kill = KillSwitch::new();
         let e = Arc::new(PolicyEngine::builder().kill_switch(kill.clone()).build());
+        let a = act("com.apple.notes", "scroll", None, RiskClass::Observe);
+        assert_eq!(e.evaluate(&a), Decision::Allow);
         let threads = 8;
         let barrier = Arc::new(Barrier::new(threads + 1));
-        let halted_at = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let halted = Arc::new(AtomicBool::new(false));
         let violations = Arc::new(AtomicUsize::new(0));
-        let allowed = Arc::new(AtomicUsize::new(0));
-        let mut handles = Vec::new();
-        for i in 0..threads {
-            let (e, barrier, halted_at, violations, allowed) = (
-                Arc::clone(&e),
-                Arc::clone(&barrier),
-                Arc::clone(&halted_at),
-                Arc::clone(&violations),
-                Arc::clone(&allowed),
-            );
-            handles.push(std::thread::spawn(move || {
-                let mut a = act("com.apple.notes", "scroll", None, RiskClass::Observe);
-                a.task_id = format!("t{i}");
-                barrier.wait();
-                for _ in 0..2000 {
-                    // Read the flag first: if the halt had completed, nothing may be allowed.
-                    let was_halted = halted_at.load(Ordering::SeqCst);
-                    let d = e.evaluate(&a);
-                    if d == Decision::Allow {
-                        allowed.fetch_add(1, Ordering::SeqCst);
-                        if was_halted {
+        let handles: Vec<_> = (0..threads)
+            .map(|i| {
+                let (e, barrier, halted, violations) = (
+                    e.clone(),
+                    barrier.clone(),
+                    halted.clone(),
+                    violations.clone(),
+                );
+                let a = ActionDescriptor {
+                    task_id: format!("t{i}"),
+                    ..a.clone()
+                };
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..2000 {
+                        // Read the flag first: if the halt had completed, nothing may be allowed.
+                        let was_halted = halted.load(Ordering::SeqCst);
+                        if e.evaluate(&a) == Decision::Allow && was_halted {
                             violations.fetch_add(1, Ordering::SeqCst);
                         }
                     }
-                }
-            }));
-        }
+                })
+            })
+            .collect();
         barrier.wait();
         std::thread::sleep(std::time::Duration::from_millis(2));
         kill.halt();
-        halted_at.store(true, Ordering::SeqCst);
+        halted.store(true, Ordering::SeqCst);
         for h in handles {
             h.join().unwrap();
         }
         assert_eq!(violations.load(Ordering::SeqCst), 0);
         assert!(e.halted());
-        // After the halt every evaluation from every thread is a deny.
-        let a = act("com.apple.notes", "scroll", None, RiskClass::Observe);
-        assert!(is_deny(&e.evaluate(&a)));
+        assert_eq!(kind(&e.evaluate(&a)), "deny");
+        e.resume();
+        assert_eq!(e.evaluate(&a), Decision::Allow);
     }
 
     #[test]
@@ -1394,230 +1316,49 @@ mod tests {
         log.verify_chain().unwrap();
     }
 
-    fn act2(
-        app: &str,
-        verb: &str,
-        label: Option<&str>,
-        preview: Option<&str>,
-        risk: RiskClass,
-    ) -> ActionDescriptor {
-        ActionDescriptor {
-            text_preview: preview.map(Into::into),
-            task_id: "t1".into(),
-            ..act(app, verb, label, risk)
-        }
-    }
-
-    // Security review PA-1 (regression): approvals and Allow rules match only primary targets.
-    #[test]
-    fn pa1_task_approval_does_not_leak_to_other_site_via_label_url() {
-        let e = engine();
-        e.approve_for_task(
-            "t1",
-            TaskApproval {
-                risk: RiskClass::Send,
-                target: Some("mail.google.com".into()),
-            },
-        )
-        .unwrap();
-        let plain = act2(
-            "evil.example",
-            "click",
-            Some("button \"Post comment\""),
-            None,
-            RiskClass::Send,
-        );
-        assert!(is_confirm(&e.evaluate(&plain)));
-        let spoof = act2(
-            "evil.example",
-            "click",
-            Some("button \"Post https://mail.google.com/x\""),
-            None,
-            RiskClass::Send,
-        );
-        assert!(is_confirm(&e.evaluate(&spoof)), "{:?}", e.evaluate(&spoof));
-        // The approved site itself still is approved.
-        let real = act2(
-            "mail.google.com",
-            "click",
-            Some("Send"),
-            None,
-            RiskClass::Send,
-        );
-        assert_eq!(e.evaluate(&real), Decision::Allow);
-    }
-
-    #[test]
-    fn pa1_user_allow_rule_does_not_leak_via_preview_url() {
-        let e = engine();
-        e.upsert_rule(
-            Rule::new("u:work", Effect::Allow)
-                .targets(["*.corp.example"])
-                .risks([RiskClass::Send]),
-        )
-        .unwrap();
-        let a = act2(
-            "com.tinyspeck.slackmacgap",
-            "send_message",
-            Some("Message #general"),
-            Some("see https://wiki.corp.example/page"),
-            RiskClass::Send,
-        );
-        assert!(is_confirm(&e.evaluate(&a)), "{:?}", e.evaluate(&a));
-        // Deny rules still see mentioned hosts.
-        e.upsert_rule(Rule::new("u:no-corp", Effect::Deny).targets(["*.corp.example"]))
-            .unwrap();
-        assert!(is_deny(&e.evaluate(&a)));
-        // Navigating to a deep link or domain makes it a primary target.
-        e.remove_rule("u:no-corp").unwrap();
-        let nav = act2(
-            "com.google.chrome",
-            "navigate",
-            Some("https://wiki.corp.example/page"),
-            None,
-            RiskClass::Send,
-        );
-        assert_eq!(e.evaluate(&nav), Decision::Allow);
-    }
-
-    // Security review PA-6: approvals count against the rate limit through the gate.
+    // Security review PA-6: approvals count against the rate limit through the gate, for the
+    // effective (contextual) risk; a recheck gate never counts twice.
     #[test]
     fn pa6_record_approved_counts_against_the_rate_limit() {
+        use RiskClass::*;
         let e = Arc::new(engine());
-        e.update_config("limit", |c| {
-            c.rate_limits.insert(RiskClass::Spend, 2);
-        })
-        .unwrap();
-        let buy = act("shop.example", "click", Some("Buy now"), RiskClass::Spend);
+        limit(&e, Spend, 2);
+        let buy = act("shop.example", "click", Some("Buy now"), Spend);
         let gate: &dyn PolicyGate = e.as_ref();
-        assert!(gate.record_approved(&buy, RiskClass::Spend));
-        assert!(gate.record_approved(&buy, RiskClass::Spend));
-        assert!(!gate.record_approved(&buy, RiskClass::Spend));
-        assert_eq!(e.used("task-1", RiskClass::Spend), 2);
-        assert!(is_deny(&e.evaluate(&buy)));
+        assert!(gate.record_approved(&buy, Spend));
+        assert!(gate.record_approved(&buy, Spend));
+        assert!(!gate.record_approved(&buy, Spend));
+        assert_eq!(e.used("task-1", Spend), 2);
+        assert_eq!(kind(&e.evaluate(&buy)), "deny");
         // The classifier's risk counts even when the caller under-declares.
-        let mut other = buy.clone();
-        other.task_id = "task-2".into();
-        assert!(gate.record_approved(&other, RiskClass::Edit));
-        assert_eq!(e.used("task-2", RiskClass::Spend), 1);
-        // A recheck gate never counts twice.
+        let other = ActionDescriptor {
+            task_id: "task-2".into(),
+            ..buy.clone()
+        };
+        assert!(gate.record_approved(&other, Edit));
+        assert_eq!(e.used("task-2", Spend), 1);
         let re = RecheckGate(Arc::clone(&e));
-        assert!(re.record_approved(&buy, RiskClass::Spend));
-        assert_eq!(e.used("task-1", RiskClass::Spend), 2);
-    }
+        assert!(re.record_approved(&buy, Spend));
+        assert_eq!(e.used("task-1", Spend), 2);
 
-    #[test]
-    fn task_approvals_are_listed() {
-        let e = engine();
-        assert!(e.task_approvals().is_empty());
-        let send = TaskApproval {
-            risk: RiskClass::Send,
-            target: Some("com.apple.mail".into()),
-        };
-        let destroy = TaskApproval {
-            risk: RiskClass::Destroy,
-            target: None,
-        };
-        e.approve_for_task("t2", destroy.clone()).unwrap();
-        e.approve_for_task("t1", send.clone()).unwrap();
-        e.approve_for_task("t1", destroy.clone()).unwrap();
-        // Rate-limit counters alone make no approval.
-        e.consume("t3", RiskClass::Send);
-        assert_eq!(
-            e.task_approvals(),
-            vec![
-                ("t1".to_string(), send),
-                ("t1".to_string(), destroy.clone()),
-                ("t2".to_string(), destroy),
-            ]
-        );
-        e.end_task("t1");
-        assert_eq!(e.task_approvals().len(), 1);
-    }
-
-    #[test]
-    fn recheck_skips_the_rate_limit_but_not_the_rules() {
-        let e = Arc::new(engine());
-        e.update_config("limit", |c| {
-            c.rate_limits.insert(RiskClass::Edit, 1);
-        })
-        .unwrap();
-        let typing = act("com.apple.notes", "type", Some("Body"), RiskClass::Edit);
-        // The outer gate uses the only unit; the executor's recheck still allows it.
-        assert_eq!(e.evaluate(&typing), Decision::Allow);
-        let gate = RecheckGate(Arc::clone(&e));
-        assert_eq!(gate.evaluate(&typing), Decision::Allow);
-        assert_eq!(e.used("task-1", RiskClass::Edit), 1);
-        assert!(is_deny(&e.evaluate(&typing)));
-        // Deny rules, confirmations and the kill switch still apply.
-        assert!(is_deny(&gate.evaluate(&act(
-            "chase.com",
-            "scroll",
-            None,
-            RiskClass::Observe
-        ))));
-        assert!(is_confirm(&gate.evaluate(&act(
-            "com.apple.mail",
-            "click",
-            Some("Send"),
-            RiskClass::Send
-        ))));
-        e.halt();
-        assert!(gate.halted());
-        assert!(is_deny(&gate.evaluate(&typing)));
-    }
-
-    #[test]
-    fn evaluate_with_context_uses_page_url() {
-        let e = engine();
-        let a = act(
-            "com.google.chrome",
-            "click",
-            Some("Statements"),
-            RiskClass::Observe,
-        );
-        assert_eq!(e.evaluate(&a), Decision::Allow);
-        let ctx = ActionContext::default().with_url("https://www.wellsfargo.com/accounts");
-        assert!(is_deny(&e.evaluate_with_context(&a, &ctx)));
-        let gate: &dyn PolicyGate = &e;
-        assert!(is_deny(&gate.evaluate_with_context(&a, &ctx)));
-    }
-
-    // ---- record_approved with context ----
-
-    #[test]
-    fn record_approved_with_context_counts_the_contextual_risk() {
-        let e = Arc::new(engine());
-        e.update_config("limit", |c| {
-            c.rate_limits.insert(RiskClass::Spend, 1);
-        })
-        .unwrap();
         // A generic "Continue" in a card form is a payment only in context.
-        let cont = act("shop.example", "click", Some("Continue"), RiskClass::Edit);
+        let cont = ActionDescriptor {
+            task_id: "task-3".into(),
+            ..act("shop.example", "click", Some("Continue"), Edit)
+        };
         let ctx = ActionContext::default()
             .with_role("button")
             .with_form_fields(["Card number", "CVC", "Name on card"]);
-        assert_eq!(
-            e.classify(&cont, &ActionContext::default()).risk,
-            RiskClass::Edit
-        );
-        assert_eq!(e.classify(&cont, &ctx).risk, RiskClass::Spend);
-
-        let gate: &dyn PolicyGate = e.as_ref();
-        // Without the context the approval is counted as an Edit.
-        assert!(gate.record_approved(&cont, RiskClass::Edit));
-        assert_eq!(e.used("task-1", RiskClass::Spend), 0);
-        assert_eq!(e.used("task-1", RiskClass::Edit), 1);
-        // With it, against the Spend limit, which then runs out.
-        assert!(gate.record_approved_with_context(&cont, RiskClass::Edit, &ctx));
-        assert_eq!(e.used("task-1", RiskClass::Spend), 1);
-        assert!(!gate.record_approved_with_context(&cont, RiskClass::Edit, &ctx));
-        assert_eq!(e.used("task-1", RiskClass::Spend), 1);
-
-        // A recheck gate never counts, with or without context.
-        let re = RecheckGate(Arc::clone(&e));
-        assert!(re.record_approved_with_context(&cont, RiskClass::Spend, &ctx));
-        assert_eq!(e.used("task-1", RiskClass::Spend), 1);
+        assert_eq!(e.classify(&cont, &ActionContext::default()).risk, Edit);
+        assert_eq!(e.classify(&cont, &ctx).risk, Spend);
+        assert!(gate.record_approved(&cont, Edit));
+        assert_eq!((e.used("task-3", Spend), e.used("task-3", Edit)), (0, 1));
+        assert!(gate.record_approved_with_context(&cont, Edit, &ctx));
+        assert!(gate.record_approved_with_context(&cont, Edit, &ctx));
+        assert!(!gate.record_approved_with_context(&cont, Edit, &ctx));
+        assert_eq!(e.used("task-3", Spend), 2);
+        assert!(re.record_approved_with_context(&cont, Spend, &ctx));
+        assert_eq!(e.used("task-3", Spend), 2);
 
         // A gate that only implements `record_approved` still gets the call.
         struct Old(AtomicUsize);
@@ -1634,8 +1375,46 @@ mod tests {
             }
         }
         let old = Old(AtomicUsize::new(0));
-        assert!(!old.record_approved_with_context(&cont, RiskClass::Edit, &ctx));
+        assert!(!old.record_approved_with_context(&cont, Edit, &ctx));
         assert_eq!(old.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn recheck_skips_the_rate_limit_but_not_the_rules() {
+        let e = Arc::new(engine());
+        limit(&e, RiskClass::Edit, 1);
+        let typing = act("com.apple.notes", "type", Some("Body"), RiskClass::Edit);
+        // The outer gate uses the only unit; the executor's recheck still allows it.
+        assert_eq!(e.evaluate(&typing), Decision::Allow);
+        let gate = RecheckGate(Arc::clone(&e));
+        assert_eq!(gate.evaluate(&typing), Decision::Allow);
+        assert_eq!(e.used("task-1", RiskClass::Edit), 1);
+        assert_eq!(kind(&e.evaluate(&typing)), "deny");
+        // Deny rules, confirmations and the kill switch still apply.
+        assert_eq!(
+            kind(&gate.evaluate(&act("chase.com", "scroll", None, RiskClass::Observe))),
+            "deny"
+        );
+        let send = act("com.apple.mail", "click", Some("Send"), RiskClass::Send);
+        assert_eq!(kind(&gate.evaluate(&send)), "confirm");
+        e.halt();
+        assert!(gate.halted());
+        assert_eq!(kind(&gate.evaluate(&typing)), "deny");
+    }
+
+    #[test]
+    fn evaluate_with_context_uses_page_url() {
+        let e = engine();
+        let a = act(
+            "com.google.chrome",
+            "click",
+            Some("Statements"),
+            RiskClass::Observe,
+        );
+        assert_eq!(e.evaluate(&a), Decision::Allow);
+        let ctx = ActionContext::default().with_url("https://www.wellsfargo.com/accounts");
+        let gate: &dyn PolicyGate = &e;
+        assert_eq!(kind(&gate.evaluate_with_context(&a, &ctx)), "deny");
     }
 
     // ---- remote access ----
@@ -1653,169 +1432,158 @@ mod tests {
         e
     }
 
-    fn toggle(app: &str, label: &str) -> ActionDescriptor {
-        act(app, "toggle", Some(label), RiskClass::Edit)
-    }
-
-    fn assert_remote(e: &PolicyEngine, a: &ActionDescriptor, ctx: &ActionContext) {
-        let r = e.assess(a, ctx);
-        assert_eq!(r.risk, RiskClass::Security, "{a:?} {ctx:?}");
-        assert!(is_confirm(&r.decision), "{a:?} {ctx:?}: {:?}", r.decision);
-        assert!(
-            r.reasons.iter().any(|w| w.contains("remote access")),
-            "{:?}",
-            r.reasons
-        );
+    fn ctx_role(role: &str) -> ActionContext {
+        ActionContext::default().with_role(role)
     }
 
     #[test]
-    fn remote_access_toggles_in_settings_apps_always_confirm() {
+    fn remote_access_always_confirms() {
         let e = trusting_engine();
-        let switch = ActionContext::default().with_role("switch");
-        // macOS System Settings > General > Sharing.
-        for label in ["Remote Login", "Screen Sharing", "Remote Management"] {
-            assert_remote(&e, &toggle("com.apple.systempreferences", label), &switch);
+        let edit = |app, verb, label| act(app, verb, label, RiskClass::Edit);
+        let toggle = |app, label| edit(app, "toggle", Some(label));
+        let mut shell = edit("com.apple.terminal", "type", Some("Shell"));
+        shell.text_preview = Some("sudo systemsetup -setremotelogin on".into());
+        for (a, ctx) in [
+            // macOS System Settings > General > Sharing.
+            (
+                toggle("com.apple.systempreferences", "Remote Login"),
+                ctx_role("switch"),
+            ),
+            (
+                toggle("com.apple.systempreferences", "Screen Sharing"),
+                ctx_role("switch"),
+            ),
+            (
+                toggle("com.apple.systempreferences", "Remote Management"),
+                ctx_role("switch"),
+            ),
+            // Windows Settings > System > Remote Desktop.
+            (
+                toggle("windows.immersivecontrolpanel", "Remote Desktop"),
+                ctx_role("ToggleSwitch"),
+            ),
+            (
+                edit(
+                    "systempropertiesremote.exe",
+                    "click",
+                    Some("Allow remote connections to this computer"),
+                ),
+                ctx_role("radio_button"),
+            ),
+            // GNOME Settings, and the Sharing panel's master switch.
+            (
+                toggle("org.gnome.Settings", "Remote Desktop"),
+                ctx_role("switch"),
+            ),
+            (
+                toggle("gnome-control-center", "Sharing"),
+                ctx_role("switch"),
+            ),
+            // An app that calls itself just "Settings" (GG3-25).
+            (toggle("settings", "Remote Desktop"), ctx_role("switch")),
+            (toggle("Settings", "Remote access"), ctx_role("switch")),
+            // An unnamed switch on a remote-access pane, found by its window title or deep link.
+            (
+                edit("org.gnome.Settings", "click", None),
+                ctx_role("switch").with_window_title("Remote Desktop"),
+            ),
+            (
+                edit("ms-settings:remotedesktop", "click", Some("On")),
+                ctx_role("button").with_url("ms-settings:remotedesktop"),
+            ),
+            // A router's admin page in the browser.
+            (
+                edit(
+                    "192.168.1.1",
+                    "click",
+                    Some("checkbox \"Enable Remote Management\""),
+                ),
+                ctx_role("checkbox").with_url("http://192.168.1.1/admin/advanced.html"),
+            ),
+            // A NAS panel with a bare "SSH" switch.
+            (
+                edit("nas.local", "click", Some("switch \"SSH\"")),
+                ctx_role("switch"),
+            ),
+            // Third-party remote-support apps.
+            (
+                toggle("com.teamviewer.TeamViewer", "Grant easy access"),
+                ctx_role("checkbox").with_window_title("TeamViewer Options"),
+            ),
+            (
+                toggle("com.philandro.anydesk", "Enable unattended access"),
+                ctx_role("checkbox"),
+            ),
+            // A generic "Turn on" in a dialog about remote desktop.
+            (
+                edit("remotedesktop.google.com", "click", Some("Turn on")),
+                ctx_role("button")
+                    .with_dialog_text("Set up Chrome Remote Desktop on this computer"),
+            ),
+            // A command typed into a terminal (or run by any shell tool).
+            (shell, ActionContext::default()),
+            // Localized labels.
+            (
+                toggle("com.apple.systempreferences", "Bildschirmfreigabe"),
+                ctx_role("switch"),
+            ),
+            (
+                toggle("com.apple.systempreferences", "远程登录"),
+                ctx_role("switch"),
+            ),
+        ] {
+            let r = e.assess(&a, &ctx);
+            assert_eq!(r.risk, RiskClass::Security, "{a:?} {ctx:?}");
+            assert_eq!(
+                kind(&r.decision),
+                "confirm",
+                "{a:?} {ctx:?}: {:?}",
+                r.decision
+            );
+            assert!(
+                r.reasons.iter().any(|w| w.contains("remote access")),
+                "{:?}",
+                r.reasons
+            );
+            assert_eq!(r.rule.as_deref(), Some("remote-access"), "{a:?}");
         }
-        // Windows Settings > System > Remote Desktop.
-        assert_remote(
-            &e,
-            &toggle("windows.immersivecontrolpanel", "Remote Desktop"),
-            &ActionContext::default().with_role("ToggleSwitch"),
-        );
-        assert_remote(
-            &e,
-            &act(
-                "systempropertiesremote.exe",
-                "click",
-                Some("Allow remote connections to this computer"),
-                RiskClass::Edit,
-            ),
-            &ActionContext::default().with_role("radio_button"),
-        );
-        // GNOME Settings > System > Remote Desktop, and the Sharing panel's master switch.
-        assert_remote(&e, &toggle("org.gnome.Settings", "Remote Desktop"), &switch);
-        assert_remote(&e, &toggle("gnome-control-center", "Sharing"), &switch);
-        // An app that calls itself just "Settings" (GG3-25).
-        assert_remote(&e, &toggle("settings", "Remote Desktop"), &switch);
-        assert_remote(&e, &toggle("Settings", "Remote access"), &switch);
-        // An unnamed switch on a remote-access pane, found by its window title or deep link.
-        assert_remote(
-            &e,
-            &act("org.gnome.Settings", "click", None, RiskClass::Edit),
-            &switch.clone().with_window_title("Remote Desktop"),
-        );
-        assert_remote(
-            &e,
-            &act(
-                "ms-settings:remotedesktop",
-                "click",
-                Some("On"),
-                RiskClass::Edit,
-            ),
-            &ActionContext::default()
-                .with_role("button")
-                .with_url("ms-settings:remotedesktop"),
-        );
-        // Per-task approvals do not skip it either (Security cannot be task-approved, and
-        // the forced confirmation sits after them).
+        // Deny rules still win.
+        e.upsert_rule(Rule::new("no-router", Effect::Deny).targets(["192.168.1.1"]))
+            .unwrap();
         let r = e.assess(
-            &toggle("com.apple.systempreferences", "Remote Login"),
-            &switch,
+            &toggle("192.168.1.1", "Remote Management"),
+            &ctx_role("checkbox"),
         );
-        assert_eq!(r.rule.as_deref(), Some("remote-access"));
-    }
-
-    #[test]
-    fn remote_access_outside_settings_apps() {
-        let e = trusting_engine();
-        // A router's admin page in the browser.
-        assert_remote(
-            &e,
-            &act(
-                "192.168.1.1",
-                "click",
-                Some("checkbox \"Enable Remote Management\""),
-                RiskClass::Edit,
-            ),
-            &ActionContext::default()
-                .with_role("checkbox")
-                .with_url("http://192.168.1.1/admin/advanced.html"),
-        );
-        // A NAS panel with a bare "SSH" switch.
-        assert_remote(
-            &e,
-            &act(
-                "nas.local",
-                "click",
-                Some("switch \"SSH\""),
-                RiskClass::Edit,
-            ),
-            &ActionContext::default().with_role("switch"),
-        );
-        // Third-party remote-support apps.
-        assert_remote(
-            &e,
-            &toggle("com.teamviewer.TeamViewer", "Grant easy access"),
-            &ActionContext::default()
-                .with_role("checkbox")
-                .with_window_title("TeamViewer Options"),
-        );
-        assert_remote(
-            &e,
-            &toggle("com.philandro.anydesk", "Enable unattended access"),
-            &ActionContext::default().with_role("checkbox"),
-        );
-        // A generic "Turn on" in a dialog about remote desktop.
-        assert_remote(
-            &e,
-            &act(
-                "remotedesktop.google.com",
-                "click",
-                Some("Turn on"),
-                RiskClass::Edit,
-            ),
-            &ActionContext::default()
-                .with_role("button")
-                .with_dialog_text("Set up Chrome Remote Desktop on this computer"),
-        );
-        // A command typed into a terminal (or run by any shell tool).
-        let mut cmd = act("com.apple.terminal", "type", Some("Shell"), RiskClass::Edit);
-        cmd.text_preview = Some("sudo systemsetup -setremotelogin on".into());
-        assert_remote(&e, &cmd, &ActionContext::default());
-        // Localized labels.
-        assert_remote(
-            &e,
-            &toggle("com.apple.systempreferences", "Bildschirmfreigabe"),
-            &ActionContext::default().with_role("switch"),
-        );
-        assert_remote(
-            &e,
-            &toggle("com.apple.systempreferences", "远程登录"),
-            &ActionContext::default().with_role("switch"),
-        );
+        assert_eq!(kind(&r.decision), "deny");
     }
 
     #[test]
     fn unrelated_toggles_and_navigation_are_not_remote_access() {
         let e = trusting_engine();
-        let switch = ActionContext::default().with_role("switch");
+        let switch = ctx_role("switch");
         // Still Security (a settings app), but the user's Allow rule applies.
-        let dark = toggle("com.apple.systempreferences", "Dark Mode");
+        let dark = act(
+            "com.apple.systempreferences",
+            "toggle",
+            Some("Dark Mode"),
+            RiskClass::Edit,
+        );
         let r = e.assess(&dark, &switch);
-        assert_eq!(r.risk, RiskClass::Security);
-        assert_eq!(r.decision, Decision::Allow);
-        assert!(remote_access(&dark, &switch).is_none());
-        // A toggle elsewhere, a generic button on an unrelated page.
+        assert_eq!((r.risk, r.decision), (RiskClass::Security, Decision::Allow));
         for (a, ctx) in [
+            (dark.clone(), switch.clone()),
             (
-                toggle("com.apple.mail", "Show previews"),
+                act(
+                    "com.apple.mail",
+                    "toggle",
+                    Some("Show previews"),
+                    RiskClass::Edit,
+                ),
                 switch.clone().with_window_title("Mail Settings"),
             ),
             (
                 act("shop.example", "click", Some("OK"), RiskClass::Edit),
-                ActionContext::default()
-                    .with_role("button")
-                    .with_url("https://shop.example/account/sharing-preferences"),
+                ctx_role("button").with_url("https://shop.example/account/sharing-preferences"),
             ),
             (
                 act(
@@ -1824,7 +1592,7 @@ mod tests {
                     Some("link \"SSH\""),
                     RiskClass::Edit,
                 ),
-                ActionContext::default().with_role("link"),
+                ctx_role("link"),
             ),
             (
                 act("com.apple.notes", "type", Some("Body"), RiskClass::Edit),
@@ -1851,23 +1619,11 @@ mod tests {
         assert!(remote_access(&read, &switch).is_none());
     }
 
-    #[test]
-    fn remote_access_deny_rules_still_win() {
-        let e = trusting_engine();
-        e.upsert_rule(Rule::new("no-router", Effect::Deny).targets(["192.168.1.1"]))
-            .unwrap();
-        let a = toggle("192.168.1.1", "Remote Management");
-        assert!(is_deny(
-            &e.assess(&a, &ActionContext::default().with_role("checkbox"))
-                .decision
-        ));
-    }
-
     // GG3-6 (regression): click, Space and Enter on the same control get the same decision.
     #[test]
     fn gg3_6_click_space_enter_same_decision() {
         let e = engine();
-        let ctx = ActionContext::default().with_role("button");
+        let ctx = ctx_role("button");
         for label in [
             "Löschen",
             "Supprimer",
@@ -1881,18 +1637,23 @@ mod tests {
             "Admin",
             "Checkout now",
         ] {
-            let mut results = Vec::new();
-            for (verb, keys) in [
+            let results: Vec<_> = [
                 ("click", None),
                 ("press_key", Some("space")),
                 ("press_key", Some("enter")),
-            ] {
+            ]
+            .into_iter()
+            .map(|(verb, keys)| {
                 let mut a = act("mail", verb, Some(label), RiskClass::Edit);
                 a.text_preview = keys.map(Into::into);
                 let out = e.assess(&a, &ctx);
-                results.push((out.risk, is_confirm(&out.decision)));
-            }
-            assert!(results[0].1, "{label}: click must ask ({results:?})");
+                (out.risk, kind(&out.decision))
+            })
+            .collect();
+            assert_eq!(
+                results[0].1, "confirm",
+                "{label}: click must ask ({results:?})"
+            );
             assert!(
                 results.iter().all(|r| *r == results[0]),
                 "{label}: {results:?}"
@@ -1900,67 +1661,69 @@ mod tests {
         }
     }
 
-    // GG3-5: the confirmation names what a Send sends, beyond the log's 80-character cut.
+    fn confirm_text(
+        app: &str,
+        verb: &str,
+        label: &str,
+        risk: RiskClass,
+        preview: String,
+    ) -> String {
+        let mut a = act(app, verb, Some(label), risk);
+        a.text_preview = Some(preview);
+        match engine().evaluate(&a) {
+            Decision::Confirm(text) => text,
+            d => panic!("asks: {d:?}"),
+        }
+    }
+
+    // GG3-5 and review items 8 and 14: the confirmation names what a Send sends, beyond the
+    // log's 80-character cut; a fields preview is not hidden because of the button's label; a
+    // key press shows its keys, then what they send, with the fields' tail kept.
     #[test]
-    fn gg3_5_confirm_reason_carries_the_send_preview() {
-        let e = engine();
-        let mut a = act("mail", "click", Some("Send"), RiskClass::Send);
+    fn confirm_reason_carries_the_send_preview() {
         let body = format!(
             "Sends: To: “a@b.example” · Subject: “Q3” · Message: “{}END”",
             "x".repeat(110)
         );
-        a.text_preview = Some(body);
-        let Decision::Confirm(text) = e.evaluate(&a) else {
-            panic!("a send asks");
-        };
+        let text = confirm_text("mail", "click", "Send", RiskClass::Send, body);
         assert!(
             text.contains("click “Send”, which sends To: “a@b.example”"),
             "{text}"
         );
         assert!(text.contains("END"), "{text}");
-    }
 
-    // Review items 8 and 14: a fields preview is not hidden because of the button's label,
-    // and a key press shows its keys, then what they send, with the fields' tail kept.
-    #[test]
-    fn fields_preview_redaction_is_per_field_and_keys_render_cleanly() {
-        let e = engine();
-        let mut a = act(
+        let preview = "Sends: Email: “me@ourco.example” · Code: ••••".to_string();
+        let text = confirm_text(
             "mail",
             "click",
-            Some("Send verification code"),
+            "Send verification code",
             RiskClass::Send,
+            preview,
         );
-        a.text_preview = Some("Sends: Email: “me@ourco.example” · Code: ••••".into());
-        let Decision::Confirm(text) = e.evaluate(&a) else {
-            panic!("asks");
-        };
         assert!(
             text.contains("which sends Email: “me@ourco.example” · Code: ••••"),
             "{text}"
         );
         assert!(!text.contains("[redacted]"), "{text}");
 
-        let fields: String = (0..12)
+        let fields: Vec<String> = (0..12)
             .map(|i| format!("F{i}: “{}”", "y".repeat(25)))
-            .collect::<Vec<_>>()
-            .join(" · ");
-        let mut k = act("mail", "press_key", Some("Send"), RiskClass::Send);
-        k.text_preview = Some(format!("space\nSends: {fields} · +7 more fields"));
-        let Decision::Confirm(text) = e.evaluate(&k) else {
-            panic!("asks");
-        };
+            .collect();
+        let preview = format!("space\nSends: {} · +7 more fields", fields.join(" · "));
+        let text = confirm_text("mail", "press_key", "Send", RiskClass::Send, preview);
         assert!(text.contains("with “space”, which sends F0:"), "{text}");
         assert!(text.contains("+7 more fields"), "{text}");
         assert!(!text.contains('\n'), "{text}");
 
         // Second review L1: typed text starting with the marker is still typed text, redacted
         // for a secure field.
-        let mut t = act("login", "type_text", Some("Password"), RiskClass::Security);
-        t.text_preview = Some("Sends: hunter2".into());
-        let Decision::Confirm(text) = e.evaluate(&t) else {
-            panic!("asks");
-        };
+        let text = confirm_text(
+            "login",
+            "type_text",
+            "Password",
+            RiskClass::Security,
+            "Sends: hunter2".into(),
+        );
         assert!(
             !text.contains("hunter2") && !text.contains("which sends"),
             "{text}"

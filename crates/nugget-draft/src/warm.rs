@@ -1,19 +1,6 @@
 //! Read-ahead: prefill a draft's whole prompt into a local server's cache while the reply field
-//! keeps focus, so the trigger only has the remainder to read.
-//!
-//! The shell calls [`Drafter::read_ahead`](crate::Drafter::read_ahead) (IPC `draft.read_ahead`)
-//! with the field context it would read at the trigger, once the field has kept focus for a
-//! moment, and [`Drafter::cancel_read_ahead`](crate::Drafter::cancel_read_ahead)
-//! (`draft.read_ahead_cancel`) on blur. The engine prepares the draft exactly as `begin` would
-//! (retrieval, voice, the same request) and sends it to a non-cloud provider as a prefill with no
-//! output (llama-server `n_predict: 0`, `cache_prompt`). At the trigger, `begin` sends the same
-//! request and the server reads only what changed since; the trigger's prefix-only prewarm is
-//! skipped so that it does not cut the cached prompt back to the prefix.
-//!
-//! Privacy: never for cloud providers (nothing at all is sent, not even a connection prewarm),
-//! never in secure fields or excluded apps, rate-limited ([`ReadAheadConfig::min_interval_ms`]),
-//! and nothing is stored or audited: the engine keeps a fingerprint of the last prompt, the app
-//! id and timestamps in memory; the prompt itself lives only in the server's in-memory cache.
+//! keeps focus, so the trigger only reads what changed. Never for cloud providers, secure fields
+//! or excluded apps; rate-limited; nothing is stored or audited.
 
 use nugget_core::ids::ProviderId;
 use serde::{Deserialize, Serialize};

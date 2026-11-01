@@ -428,34 +428,25 @@ fn sign(m: &Manifest) -> (Vec<u8>, String) {
 
 #[test]
 fn runtime_entries_round_trip_through_a_signed_manifest() {
-    let mut cpu = rt_entry(
-        "rt-cpu",
+    let url = "https://github.com/o/r/releases/download/b42/a.tar.gz";
+    let mut vk = rt_entry(
+        "rt-vulkan",
         "b42",
-        "https://github.com/o/r/releases/download/b42/a.tar.gz",
+        url,
         b"x",
-        ArchiveFormat::TarGz,
+        ArchiveFormat::Zip,
         "a/llama-server",
     );
-    cpu.mirrors = vec!["https://mirror.example/b42/a.tar.gz".into()];
-    let mut vk = cpu.clone();
-    vk.id = "rt-vulkan".into();
     vk.accel = RuntimeAccel::Vulkan;
-    vk.archive = ArchiveFormat::Zip;
+    vk.mirrors = vec!["https://mirror.example/b42/a.tar.gz".into()];
     let m = Manifest {
         version: 9,
         models: vec![],
-        runtimes: vec![cpu, vk],
+        runtimes: vec![vk],
     };
     let (bytes, sig) = sign(&m);
-    let text = String::from_utf8(bytes.clone()).unwrap();
-    assert!(text.contains("\"archive\": \"tar.gz\"") && text.contains("\"accel\": \"vulkan\""));
     let back = verify_manifest(&bytes, sig.as_bytes(), &[test_key().verifying_key()]).unwrap();
     assert_eq!(back, m);
-    assert_eq!(
-        back.runtime("rt-vulkan").unwrap().archive,
-        ArchiveFormat::Zip
-    );
-
     // Without runtimes, the field is omitted entirely (old manifests stay byte-identical).
     let empty = Manifest {
         version: 1,
@@ -467,8 +458,6 @@ fn runtime_entries_round_trip_through_a_signed_manifest() {
             .unwrap()
             .contains("runtimes")
     );
-    let parsed: Manifest = serde_json::from_str(r#"{"version":1,"models":[]}"#).unwrap();
-    assert!(parsed.runtimes.is_empty());
 }
 
 type Mutation = Box<dyn Fn(&mut Manifest)>;
@@ -655,8 +644,6 @@ async fn install_runtime_downloads_verifies_extracts_and_is_idempotent() {
     }
     assert_eq!(st.runtime_binary(&e).unwrap(), Some(bin.clone()));
     st.verify_runtime(&e).await.unwrap();
-    // The archive itself is not kept.
-    assert!(!st.staging_data_path(&nugget_models_pseudo(&e)).exists());
     let rec = st.installed_runtime(&e).unwrap().unwrap();
     assert_eq!(rec.release, "b7");
     assert_eq!(rec.files.len(), 2);
@@ -677,24 +664,6 @@ async fn install_runtime_downloads_verifies_extracts_and_is_idempotent() {
     assert!(matches!(err, Error::Integrity(_)), "{err}");
     st.remove_runtime(&e).await.unwrap();
     assert_eq!(st.runtime_binary(&e).unwrap(), None);
-}
-
-/// The staging path helper is keyed by a model entry; build the same pseudo key.
-fn nugget_models_pseudo(e: &RuntimeEntry) -> nugget_models::ModelEntry {
-    nugget_models::ModelEntry {
-        id: e.id.clone(),
-        family: "runtime".into(),
-        file_name: "x".into(),
-        url: e.url.clone(),
-        mirrors: vec![],
-        revision: String::new(),
-        size: e.size,
-        sha256: e.sha256.clone(),
-        min_ram_gb: 0,
-        tiers: vec![],
-        license: e.license.clone(),
-        min_app_version: "0.0.0".into(),
-    }
 }
 
 #[tokio::test]

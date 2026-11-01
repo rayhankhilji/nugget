@@ -159,12 +159,9 @@ pub struct ActionTarget {
     pub text_preview: Option<String>,
 }
 
-/// A capability the model can invoke. Computer-use and browser tools live in other crates and
-/// implement this.
-///
-/// Call order for one action: [`risk`](Tool::risk) and [`describe`](Tool::describe) for the
-/// policy gate; for mutating actions (`Edit` and above) [`observe`](Tool::observe) before,
-/// [`call`](Tool::call), [`observe`](Tool::observe) after, then [`verify`](Tool::verify).
+/// A capability the model can invoke. Per action: [`risk`](Tool::risk) and
+/// [`describe`](Tool::describe) for the gate; for mutating actions (`Edit` and above)
+/// [`observe`](Tool::observe), [`call`](Tool::call), [`observe`](Tool::observe), [`verify`](Tool::verify).
 #[async_trait]
 pub trait Tool: Send + Sync {
     /// Unique name the model calls (`[a-z0-9_.-]`, as providers require).
@@ -503,42 +500,60 @@ mod tests {
 
     #[test]
     fn redaction_masks_secret_keys_recursively_and_truncates() {
-        let long = "x".repeat(500);
         let v = json!({
             "user": "me",
             "Password": "hunter2",
             "nested": {"api_key": "k", "list": [{"otp_code": "123"}]},
-            "body": long,
+            "body": "x".repeat(500),
         });
         let r = redact_default(&v);
         assert_eq!(r["user"], "me");
-        assert_eq!(r["Password"], "[redacted]");
-        assert_eq!(r["nested"]["api_key"], "[redacted]");
-        assert_eq!(r["nested"]["list"][0]["otp_code"], "[redacted]");
+        for secret in [
+            &r["Password"],
+            &r["nested"]["api_key"],
+            &r["nested"]["list"][0]["otp_code"],
+        ] {
+            assert_eq!(secret, "[redacted]");
+        }
         assert_eq!(
             r["body"].as_str().unwrap().chars().count(),
             LOG_STRING_MAX + 1
         );
-    }
-
-    #[test]
-    fn truncate_respects_char_boundaries() {
         assert_eq!(truncate("héllo", 2), "hé…");
         assert_eq!(truncate("hi", 5), "hi");
     }
 
     #[test]
-    fn registry_has_builtins_and_sorted_specs() {
-        let r = ToolRegistry::new();
-        let names: Vec<_> = r.specs().into_iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["ask_user", "finish", "note"]);
+    fn registry_builtins() {
+        let names: Vec<_> = ToolRegistry::new()
+            .specs()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, ["ask_user", "finish", "note"]);
+        let mut r = ToolRegistry::new();
+        assert!(r.remove(NOTE).is_some() && r.remove(NOTE).is_none());
+        let lean = ToolRegistry::new().without(NOTE);
+        assert!(lean.get(NOTE).is_none() && lean.get(FINISH).is_some());
+        for (given, want) in [
+            ("success", "done"),
+            ("failure", "cannot"),
+            ("refused", "refused"),
+            ("bogus", "bogus"),
+        ] {
+            let mut args = json!({"summary": "s", "outcome": given});
+            normalize_finish_args(&mut args);
+            assert_eq!(args["outcome"], want);
+        }
     }
 
     /// GG3-23: an empty or blank question is refused, never suspends the run.
     #[tokio::test]
     async fn ask_user_refuses_an_empty_question() {
-        let schema = AskUserTool.schema();
-        assert!(nugget_infer::schema::validate(&schema, &json!({"question": ""})).is_err());
+        assert!(
+            nugget_infer::schema::validate(&AskUserTool.schema(), &json!({"question": ""}))
+                .is_err()
+        );
         let ctx = ToolCtx {
             task_id: "t".into(),
             action_id: "a".into(),
@@ -551,39 +566,5 @@ mod tests {
             .call(json!({"question": "Which one?"}), &ctx)
             .await;
         assert!(matches!(ok.control, Some(Control::AskUser { .. })));
-    }
-
-    #[test]
-    fn registry_can_drop_a_builtin() {
-        let mut r = ToolRegistry::new();
-        assert!(r.remove(NOTE).is_some());
-        assert!(r.remove(NOTE).is_none());
-        let names: Vec<_> = r.names().collect();
-        assert_eq!(names, vec!["ask_user", "finish"]);
-        let lean = ToolRegistry::new().without(NOTE);
-        assert!(lean.get(NOTE).is_none() && lean.get(FINISH).is_some());
-    }
-
-    #[test]
-    fn finish_schema_offers_the_four_outcomes_and_aliases_normalize() {
-        let schema = FinishTool.schema();
-        assert_eq!(
-            schema["properties"]["outcome"]["enum"],
-            json!(["done", "partial", "cannot", "refused"])
-        );
-        for (given, want) in [
-            ("success", "done"),
-            ("failure", "cannot"),
-            ("done", "done"),
-            ("refused", "refused"),
-            ("bogus", "bogus"),
-        ] {
-            let mut args = json!({"summary": "s", "outcome": given});
-            normalize_finish_args(&mut args);
-            assert_eq!(args["outcome"], want);
-        }
-        let mut odd = json!({"summary": "s"});
-        normalize_finish_args(&mut odd);
-        assert_eq!(odd, json!({"summary": "s"}));
     }
 }

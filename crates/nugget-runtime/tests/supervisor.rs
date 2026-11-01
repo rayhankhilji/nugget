@@ -4,15 +4,20 @@ mod common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::{addr, alive, env, get, read_all_logs, wait_until};
+use RuntimeRole::{Chat, Draft, Embedding, Rerank};
+use RuntimeState::{Failed, Ready, Starting, Stopped, Stopping};
+use common::{Addr, Env, addr, alive, env, get, read_all_logs, wait_until};
 use nugget_core::Error;
 use nugget_core::capability::{Locality, Tier};
 use nugget_core::egress::NullEgress;
 use nugget_infer::{
-    ApiKeyRef, ChatRequest, ChatResponse, Message, ProviderKind, SecretResolver, SystemSecrets,
-    build_provider_with,
+    ApiKeyRef, ChatRequest, ChatResponse, Message, ProviderConfig, ProviderKind, SecretResolver,
+    SystemSecrets, build_provider_with,
 };
-use nugget_runtime::{RuntimeOptions, RuntimeRole, RuntimeState, Tuning, api_key_ref, choose_port};
+use nugget_runtime::{
+    Runtime, RuntimeDetails, RuntimeOptions, RuntimeRole, RuntimeState, Tuning, api_key_ref,
+    choose_port,
+};
 
 fn with_extra(role: RuntimeRole, args: &[&str]) -> RuntimeOptions {
     let mut o = common::opts();
@@ -21,15 +26,15 @@ fn with_extra(role: RuntimeRole, args: &[&str]) -> RuntimeOptions {
         ..Tuning::default()
     };
     match role {
-        RuntimeRole::Chat => o.chat = t,
-        RuntimeRole::Embedding => o.embedding = t,
-        RuntimeRole::Rerank => o.rerank = t,
-        RuntimeRole::Draft => o.draft = t,
+        Chat => o.chat = t,
+        Embedding => o.embedding = t,
+        Rerank => o.rerank = t,
+        Draft => o.draft = t,
     }
     o
 }
 
-fn key(rt: &nugget_runtime::Runtime, role: RuntimeRole) -> String {
+fn key(rt: &Runtime, role: RuntimeRole) -> String {
     rt.secrets()
         .resolve(&api_key_ref(role))
         .unwrap()
@@ -37,11 +42,94 @@ fn key(rt: &nugget_runtime::Runtime, role: RuntimeRole) -> String {
         .to_string()
 }
 
+fn details(rt: &Runtime, role: RuntimeRole) -> RuntimeDetails {
+    rt.details(role).unwrap()
+}
+
+fn state(rt: &Runtime, role: RuntimeRole) -> RuntimeState {
+    details(rt, role).info.state
+}
+
+fn pid(rt: &Runtime, role: RuntimeRole) -> u32 {
+    details(rt, role).pid.unwrap()
+}
+
+fn error_contains(rt: &Runtime, role: RuntimeRole, text: &str) -> bool {
+    details(rt, role)
+        .info
+        .error
+        .as_deref()
+        .is_some_and(|m| m.contains(text))
+}
+
+async fn wait_for(
+    rt: &Runtime,
+    role: RuntimeRole,
+    what: &str,
+    f: impl Fn(&RuntimeDetails) -> bool,
+) {
+    wait_until(what, Duration::from_secs(10), || {
+        rt.details(role).is_some_and(|d| f(&d))
+    })
+    .await;
+}
+
+/// `/fake/info`: the server's argv and environment variable names.
+async fn fake_info(a: &Addr, key: &str) -> (Vec<String>, Vec<String>) {
+    let info: serde_json::Value =
+        serde_json::from_str(&get(a, "/fake/info", Some(key)).await.1).unwrap();
+    let list = |k: &str| serde_json::from_value(info[k].clone()).unwrap();
+    (list("argv"), list("env"))
+}
+
+async fn post(a: &Addr, path: &str, key: &str) -> u16 {
+    match a.client().post(a.url(path)).bearer_auth(key).send().await {
+        Ok(r) => r.status().as_u16(),
+        Err(_) => 0,
+    }
+}
+
+fn pid_file(p: &std::path::Path) -> u32 {
+    std::fs::read_to_string(p).unwrap().trim().parse().unwrap()
+}
+
+fn has_pair(argv: &[String], flag: &str, value: &str) -> bool {
+    argv.windows(2).any(|w| w == [flag, value])
+}
+
+/// A runtime whose `role` server starts with `--fake-crash-after-ms 300 --fake-crash-once`.
+fn crashing_once(e: &Env) -> Runtime {
+    let marker = e
+        .tmp
+        .path()
+        .join("crashed-once")
+        .to_string_lossy()
+        .into_owned();
+    e.runtime(with_extra(
+        Chat,
+        &["--fake-crash-after-ms", "300", "--fake-crash-once", &marker],
+    ))
+}
+
+async fn chat_text(cfg: &ProviderConfig, rt: &Runtime) -> String {
+    let (c, secrets) = (cfg.clone(), rt.secrets());
+    let p = tokio::task::spawn_blocking(move || {
+        build_provider_with(&c, Arc::new(NullEgress), &secrets).unwrap()
+    })
+    .await
+    .unwrap();
+    let stream = p
+        .chat(ChatRequest::new(vec![Message::user_text("hi")]))
+        .await
+        .unwrap();
+    ChatResponse::collect(stream).await.unwrap().text()
+}
+
 #[tokio::test]
 async fn ensure_spawns_on_loopback_and_returns_an_on_device_provider_config() {
     let e = env().await;
     let rt = e.runtime(common::opts());
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let cfg = rt.ensure(Chat, &e.chat).await.unwrap();
 
     assert_eq!(cfg.id.as_str(), "local-chat");
     assert_eq!(cfg.kind, ProviderKind::OpenaiCompatible);
@@ -56,7 +144,7 @@ async fn ensure_spawns_on_loopback_and_returns_an_on_device_provider_config() {
         assert_eq!(sock, e.paths.data.join("run").join("chat.sock"));
         let dir = std::fs::metadata(sock.parent().unwrap()).unwrap();
         assert_eq!(dir.permissions().mode() & 0o777, 0o700);
-        let d = rt.details(RuntimeRole::Chat).unwrap();
+        let d = details(&rt, Chat);
         assert_eq!((d.socket.as_ref(), d.port), (Some(&sock), None));
         sock
     };
@@ -85,98 +173,123 @@ async fn ensure_spawns_on_loopback_and_returns_an_on_device_provider_config() {
         "{:?}",
         cfg.api_key
     );
+    let k = key(&rt, Chat);
     assert_eq!(
         rt.secrets()
             .resolve(cfg.api_key.as_ref().unwrap())
             .unwrap()
             .expose(),
-        key(&rt, RuntimeRole::Chat)
+        k
     );
 
     let status = rt.status();
     assert_eq!(status.len(), 1);
-    assert_eq!(status[0].state, RuntimeState::Ready);
-    assert_eq!(status[0].provider.as_str(), "local-chat");
+    assert_eq!(
+        (status[0].state, status[0].provider.as_str()),
+        (Ready, "local-chat")
+    );
     assert_eq!(status[0].model_id, "chat-model");
 
     // Unauthenticated: only /health answers.
-    let port = addr(&cfg);
-    assert_eq!(get(&port, "/health", None).await.0, 200);
-    assert_eq!(get(&port, "/v1/models", None).await.0, 401);
-    assert_eq!(get(&port, "/v1/models", Some("wrong")).await.0, 401);
-    let k = key(&rt, RuntimeRole::Chat);
+    let a = addr(&cfg);
+    assert_eq!(get(&a, "/health", None).await.0, 200);
+    assert_eq!(get(&a, "/v1/models", None).await.0, 401);
+    assert_eq!(get(&a, "/v1/models", Some("wrong")).await.0, 401);
     assert_eq!(k.len(), 64);
-    let (code, body) = get(&port, "/v1/models", Some(&k)).await;
+    let (code, body) = get(&a, "/v1/models", Some(&k)).await;
     assert_eq!(code, 200);
     assert!(body.contains("chat-model"));
 
     // The key is not on the command line, and the environment is scrubbed.
-    let (_, info) = get(&port, "/fake/info", Some(&k)).await;
-    let info: serde_json::Value = serde_json::from_str(&info).unwrap();
-    let argv: Vec<String> = serde_json::from_value(info["argv"].clone()).unwrap();
+    let (argv, env_names) = fake_info(&a, &k).await;
     assert!(!argv.iter().any(|a| a.contains(&k)));
     #[cfg(unix)]
     {
-        let sock = sock.to_string_lossy().into_owned();
-        assert!(argv.windows(2).any(|w| w == ["--host", sock.as_str()]));
+        assert!(has_pair(&argv, "--host", &sock.to_string_lossy()));
         assert!(!argv.iter().any(|a| a == "--port"));
     }
     #[cfg(not(unix))]
-    assert!(argv.windows(2).any(|w| w == ["--host", "127.0.0.1"]));
-    assert!(argv.windows(2).any(|w| w == ["--alias", "chat-model"]));
+    assert!(has_pair(&argv, "--host", "127.0.0.1"));
+    assert!(has_pair(&argv, "--alias", "chat-model"));
     assert!(!argv.iter().any(|a| a == "--embedding"));
-    let env_names: Vec<String> = serde_json::from_value(info["env"].clone()).unwrap();
     assert!(env_names.contains(&"LLAMA_API_KEY".to_string()));
+    let allowed = [
+        "LLAMA_API_KEY",
+        "PATH",
+        "SystemRoot",
+        "SYSTEMROOT",
+        "windir",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+    ];
     for name in &env_names {
         assert!(
-            [
-                "LLAMA_API_KEY",
-                "PATH",
-                "SystemRoot",
-                "SYSTEMROOT",
-                "windir",
-                "TEMP",
-                "TMP",
-                "TMPDIR",
-                "LANG",
-                "LC_ALL"
-            ]
-            .contains(&name.as_str()),
+            allowed.contains(&name.as_str()),
             "unexpected env var {name} leaked to the server"
         );
     }
 
     // Plain env lookup (without the runtime's resolver) fails closed.
-    assert!(
-        SystemSecrets
-            .resolve(&api_key_ref(RuntimeRole::Chat))
-            .is_err()
-    );
+    assert!(SystemSecrets.resolve(&api_key_ref(Chat)).is_err());
     rt.shutdown().await;
 }
 
+/// Chat, embedding and draft configs work with nugget-infer; each role has its own process,
+/// listener and key; the draft model is never routed by tier.
 #[tokio::test]
 async fn configs_work_with_nugget_infer_providers() {
     let e = env().await;
     let rt = e.runtime(common::opts());
-    let chat_cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let emb_cfg = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
+    // A reranker cannot draft.
+    assert!(rt.ensure(Draft, &e.rerank).await.is_err());
+    let chat_cfg = rt.ensure(Chat, &e.chat).await.unwrap();
+    let emb_cfg = rt.ensure(Embedding, &e.embed).await.unwrap();
+    // The same model may serve chat and draft, from separate processes.
+    let draft_cfg = rt.ensure(Draft, &e.chat).await.unwrap();
     assert_ne!(addr(&chat_cfg), addr(&emb_cfg), "one listener per role");
+    assert_ne!(addr(&chat_cfg), addr(&draft_cfg), "one listener per role");
     assert_eq!(emb_cfg.tiers, vec![Tier::Embedding]);
     assert_eq!(
         emb_cfg.extra_body, None,
         "only chat requests carry template flags"
     );
     assert_eq!(emb_cfg.id.as_str(), "local-embedding");
+    assert_eq!(draft_cfg.id.as_str(), nugget_runtime::DRAFT_PROVIDER_ID);
+    assert_eq!(draft_cfg.id.as_str(), "local-draft");
+    assert!(
+        draft_cfg.tiers.is_empty(),
+        "never routed by tier: {:?}",
+        draft_cfg.tiers
+    );
+    assert_eq!(draft_cfg.locality, Some(Locality::OnDevice));
+    assert_eq!(
+        draft_cfg.extra_body.as_ref().unwrap()["chat_template_kwargs"]["enable_thinking"],
+        false
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        draft_cfg.socket_path,
+        Some(e.paths.data.join("run").join("draft.sock"))
+    );
+    assert_ne!(key(&rt, Draft), key(&rt, Chat));
+    let (argv, _) = fake_info(&addr(&draft_cfg), &key(&rt, Draft)).await;
+    assert!(
+        !argv
+            .iter()
+            .any(|a| a == "--embedding" || a == "--reranking"),
+        "{argv:?}"
+    );
 
     let egress = Arc::new(common::VecSink::default());
-    let secrets = rt.secrets();
     let (chat, emb) = tokio::task::spawn_blocking({
         let (c, m, egress, secrets) = (
             chat_cfg.clone(),
             emb_cfg.clone(),
             egress.clone(),
-            secrets.clone(),
+            rt.secrets(),
         );
         move || {
             (
@@ -188,21 +301,15 @@ async fn configs_work_with_nugget_infer_providers() {
     .await
     .unwrap();
     assert_eq!(chat.meta().locality, Locality::OnDevice);
-
-    let stream = chat
-        .chat(ChatRequest::new(vec![Message::user_text("hi")]))
-        .await
-        .unwrap();
-    let resp = ChatResponse::collect(stream).await.unwrap();
-    assert_eq!(resp.text(), "Hello from fake");
+    assert_eq!(chat_text(&chat_cfg, &rt).await, "Hello from fake");
+    assert_eq!(chat_text(&draft_cfg, &rt).await, "Hello from fake");
 
     let v = emb.embed(&["alpha".into(), "beta".into()]).await.unwrap();
-    assert_eq!(v.len(), 2);
-    assert_eq!(v[0].len(), 8);
+    assert_eq!((v.len(), v[0].len()), (2, 8));
     assert_ne!(v[0], v[1]);
     // On-device: nothing in the egress ledger.
     assert!(egress.0.lock().unwrap().is_empty());
-    // The chat server refuses embeddings and vice versa (roles are separate processes).
+    // The chat server refuses embeddings (roles are separate processes).
     assert!(chat.embed(&["x".into()]).await.is_err());
 
     // Without the runtime's resolver the config cannot be built (fail closed).
@@ -213,6 +320,21 @@ async fn configs_work_with_nugget_infer_providers() {
     .await
     .unwrap();
     assert!(built.is_err());
+
+    let d = details(&rt, Draft);
+    assert_eq!(
+        (d.info.state, d.info.provider.as_str()),
+        (Ready, "local-draft")
+    );
+    assert!(
+        d.log_file.ends_with("llama-server-draft.log"),
+        "{}",
+        d.log_file.display()
+    );
+    assert!(rt.status().iter().any(|i| i.role == Draft));
+    // Stopping it leaves chat running.
+    rt.stop(Draft).await;
+    assert_eq!((state(&rt, Draft), state(&rt, Chat)), (Stopped, Ready));
     rt.shutdown().await;
 }
 
@@ -220,29 +342,26 @@ async fn configs_work_with_nugget_infer_providers() {
 async fn rerank_role_serves_the_rerank_endpoint_and_no_tier() {
     let e = env().await;
     let rt = e.runtime(common::opts());
-    let cfg = rt.ensure(RuntimeRole::Rerank, &e.rerank).await.unwrap();
+    let cfg = rt.ensure(Rerank, &e.rerank).await.unwrap();
     assert_eq!(cfg.id.as_str(), nugget_runtime::RERANK_PROVIDER_ID);
     assert_eq!(cfg.id.as_str(), "local-rerank");
     assert!(cfg.tiers.is_empty(), "never routed: {:?}", cfg.tiers);
     #[cfg(unix)]
     assert_eq!(
-        cfg.socket_path.as_deref(),
-        Some(e.paths.data.join("run").join("rerank.sock").as_path())
+        cfg.socket_path,
+        Some(e.paths.data.join("run").join("rerank.sock"))
     );
     let a = addr(&cfg);
-    let k = key(&rt, RuntimeRole::Rerank);
+    let k = key(&rt, Rerank);
+    let body = serde_json::json!({
+        "model": "m", "query": "red fox", "documents": ["a blue whale", "the red fox jumps"], "top_n": 2
+    });
     let resp = a
         .client()
         .post(a.url("/v1/rerank"))
         .bearer_auth(&k)
         .header("content-type", "application/json")
-        .body(
-            serde_json::json!({
-                "model": "m", "query": "red fox",
-                "documents": ["a blue whale", "the red fox jumps"], "top_n": 2
-            })
-            .to_string(),
-        )
+        .body(body.to_string())
         .send()
         .await
         .unwrap();
@@ -250,162 +369,87 @@ async fn rerank_role_serves_the_rerank_endpoint_and_no_tier() {
     let v: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
     let score = |i: usize| v["results"][i]["relevance_score"].as_f64().unwrap();
     assert!(score(1) > score(0), "{v}");
-    let (_, info) = get(&a, "/fake/info", Some(&k)).await;
-    assert!(info.contains("--reranking"), "{info}");
-    let d = rt.details(RuntimeRole::Rerank).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Ready);
-    assert_eq!(d.info.provider.as_str(), "local-rerank");
-    assert!(rt.status().iter().any(|i| i.role == RuntimeRole::Rerank));
+    let (argv, _) = fake_info(&a, &k).await;
+    assert!(argv.iter().any(|a| a == "--reranking"), "{argv:?}");
+    let d = details(&rt, Rerank);
+    assert_eq!(
+        (d.info.state, d.info.provider.as_str()),
+        (Ready, "local-rerank")
+    );
     // Its key is its own.
-    assert_ne!(k, key(&rt, RuntimeRole::Chat));
+    assert_ne!(k, key(&rt, Chat));
     rt.shutdown().await;
-    assert_eq!(
-        rt.details(RuntimeRole::Rerank).unwrap().info.state,
-        RuntimeState::Stopped
-    );
-}
-
-#[tokio::test]
-async fn draft_role_serves_chat_completions_beside_chat_with_no_tier() {
-    let e = env().await;
-    let rt = e.runtime(common::opts());
-    // A reranker cannot draft.
-    assert!(rt.ensure(RuntimeRole::Draft, &e.rerank).await.is_err());
-    let chat_cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    // The same model may serve both roles, from separate processes.
-    let cfg = rt.ensure(RuntimeRole::Draft, &e.chat).await.unwrap();
-    assert_eq!(cfg.id.as_str(), nugget_runtime::DRAFT_PROVIDER_ID);
-    assert_eq!(cfg.id.as_str(), "local-draft");
-    assert!(
-        cfg.tiers.is_empty(),
-        "never routed by tier: {:?}",
-        cfg.tiers
-    );
-    assert_eq!(cfg.locality, Some(Locality::OnDevice));
-    // Like chat, thinking is off.
-    assert_eq!(
-        cfg.extra_body.as_ref().unwrap()["chat_template_kwargs"]["enable_thinking"],
-        false
-    );
-    assert_ne!(addr(&cfg), addr(&chat_cfg), "its own listener");
-    #[cfg(unix)]
-    assert_eq!(
-        cfg.socket_path.as_deref(),
-        Some(e.paths.data.join("run").join("draft.sock").as_path())
-    );
-    let k = key(&rt, RuntimeRole::Draft);
-    assert_ne!(k, key(&rt, RuntimeRole::Chat));
-    let (_, info) = get(&addr(&cfg), "/fake/info", Some(&k)).await;
-    for f in ["--embedding", "--reranking"] {
-        assert!(!info.contains(f), "{info}");
-    }
-
-    let secrets = rt.secrets();
-    let p = tokio::task::spawn_blocking({
-        let c = cfg.clone();
-        move || build_provider_with(&c, Arc::new(NullEgress), &secrets).unwrap()
-    })
-    .await
-    .unwrap();
-    let stream = p
-        .chat(ChatRequest::new(vec![Message::user_text("hi")]))
-        .await
-        .unwrap();
-    assert_eq!(
-        ChatResponse::collect(stream).await.unwrap().text(),
-        "Hello from fake"
-    );
-    let d = rt.details(RuntimeRole::Draft).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Ready);
-    assert_eq!(d.info.provider.as_str(), "local-draft");
-    assert!(
-        d.log_file.ends_with("llama-server-draft.log"),
-        "{}",
-        d.log_file.display()
-    );
-    assert!(rt.status().iter().any(|i| i.role == RuntimeRole::Draft));
-    // Stopping it leaves chat running.
-    rt.stop(RuntimeRole::Draft).await;
-    assert_eq!(
-        rt.details(RuntimeRole::Draft).unwrap().info.state,
-        RuntimeState::Stopped
-    );
-    assert_eq!(
-        rt.details(RuntimeRole::Chat).unwrap().info.state,
-        RuntimeState::Ready
-    );
-    rt.shutdown().await;
+    assert_eq!(state(&rt, Rerank), Stopped);
 }
 
 #[tokio::test]
 async fn ensure_is_idempotent_and_switches_models() {
     let e = env().await;
     let rt = e.runtime(common::opts());
-    let a = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
-    let pid = rt.details(RuntimeRole::Embedding).unwrap().pid.unwrap();
-    let b = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
-    assert_eq!(a, b);
-    assert_eq!(rt.details(RuntimeRole::Embedding).unwrap().pid, Some(pid));
-
+    let a = rt.ensure(Embedding, &e.embed).await.unwrap();
+    let pid1 = pid(&rt, Embedding);
+    assert_eq!(rt.ensure(Embedding, &e.embed).await.unwrap(), a);
+    assert_eq!(pid(&rt, Embedding), pid1);
     // A different model replaces the server.
-    let c = rt.ensure(RuntimeRole::Embedding, &e.chat).await.unwrap();
-    assert_eq!(c.model, "chat-model");
-    let pid2 = rt.details(RuntimeRole::Embedding).unwrap().pid.unwrap();
-    assert_ne!(pid, pid2);
-    wait_until("old server gone", Duration::from_secs(5), || !alive(pid)).await;
+    assert_eq!(
+        rt.ensure(Embedding, &e.chat).await.unwrap().model,
+        "chat-model"
+    );
+    assert_ne!(pid(&rt, Embedding), pid1);
+    wait_until("old server gone", Duration::from_secs(5), || !alive(pid1)).await;
     rt.shutdown().await;
 }
 
 #[tokio::test]
-async fn slow_start_is_awaited_and_a_hung_start_times_out() {
+async fn slow_start_is_awaited_shared_and_a_hung_start_times_out() {
     let e = env().await;
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &["--fake-start-delay-ms", "700"],
-    ));
+    let rt = e.runtime(with_extra(Chat, &["--fake-start-delay-ms", "700"]));
     let t = Instant::now();
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    // Concurrent callers share one start.
+    let (a, b) = tokio::join!(rt.ensure(Chat, &e.chat), rt.ensure(Chat, &e.chat));
+    let cfg = a.unwrap();
+    assert_eq!(cfg, b.unwrap());
     assert!(
         t.elapsed() >= Duration::from_millis(600),
         "{:?}",
         t.elapsed()
     );
+    assert_eq!(details(&rt, Chat).restarts, 0);
     assert_eq!(get(&addr(&cfg), "/health", None).await.0, 200);
     rt.shutdown().await;
 
-    let mut o = with_extra(RuntimeRole::Chat, &["--fake-start-delay-ms", "60000"]);
+    let mut o = with_extra(Chat, &["--fake-start-delay-ms", "60000"]);
     o.health_timeout = Duration::from_millis(400);
     let rt = e.runtime(o);
-    let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    let err = rt.ensure(Chat, &e.chat).await.unwrap_err();
     assert!(
         matches!(&err, Error::Provider(m) if m.contains("didn't finish loading")),
         "{err}"
     );
-    let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Failed);
-    assert!(d.info.error.unwrap().contains("didn't finish loading"));
+    let d = details(&rt, Chat);
+    assert_eq!(d.info.state, Failed);
+    assert!(error_contains(&rt, Chat, "didn't finish loading"));
     assert_eq!(d.pid, None, "the hung server was killed");
 }
 
 #[tokio::test]
 async fn startup_failure_reports_the_server_output() {
     let e = env().await;
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &["--fake-exit-immediately", "7"],
-    ));
-    let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    let rt = e.runtime(with_extra(Chat, &["--fake-exit-immediately", "7"]));
+    let err = rt.ensure(Chat, &e.chat).await.unwrap_err();
     let msg = err.to_string();
     // GG6-5: one short, plain sentence with what to do; no log dump, no repeated lines.
-    assert!(msg.contains("couldn't start"), "{msg}");
-    assert!(msg.contains("Open Status to retry"), "{msg}");
+    assert!(
+        msg.contains("couldn't start") && msg.contains("Open Status to retry"),
+        "{msg}"
+    );
     assert!(
         !msg.contains("starting"),
         "no supervisor notes in the error: {msg}"
     );
     assert!(msg.len() < 200, "{msg}");
     let info = &rt.status()[0];
-    assert_eq!(info.state, RuntimeState::Failed);
+    assert_eq!(info.state, Failed);
     assert!(matches!(&err, Error::Provider(m) if Some(m) == info.error.as_ref()));
     // The server's own last line is kept apart, as a detail for the log view.
     assert_eq!(
@@ -419,11 +463,11 @@ async fn startup_failure_reports_the_server_output() {
 #[tokio::test]
 async fn failed_starts_back_off_instead_of_relaunching_per_request() {
     let e = env().await;
-    let mut o = with_extra(RuntimeRole::Chat, &["--fake-exit-immediately", "1"]);
+    let mut o = with_extra(Chat, &["--fake-exit-immediately", "1"]);
     o.restart_backoff_base = Duration::from_secs(30);
     o.restart_backoff_max = Duration::from_secs(60);
     let rt = e.runtime(o);
-    let first = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    let first = rt.ensure(Chat, &e.chat).await.unwrap_err();
     let launches = || {
         read_all_logs(&e.paths.data.join("logs"))
             .matches("] starting chat-model")
@@ -434,7 +478,7 @@ async fn failed_starts_back_off_instead_of_relaunching_per_request() {
     // launch nothing.
     for _ in 0..20 {
         let t = Instant::now();
-        let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+        let err = rt.ensure(Chat, &e.chat).await.unwrap_err();
         assert!(
             t.elapsed() < Duration::from_millis(500),
             "{:?}",
@@ -450,8 +494,8 @@ async fn failed_starts_back_off_instead_of_relaunching_per_request() {
         "{info:?}"
     );
     // Retry starts again at once.
-    rt.retry(RuntimeRole::Chat);
-    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    rt.retry(Chat);
+    rt.ensure(Chat, &e.chat).await.unwrap_err();
     assert_eq!(launches(), 2);
 }
 
@@ -465,58 +509,40 @@ async fn a_hung_server_is_detected_killed_and_restarted() {
     o.hang_strikes = 3;
     o.restart_backoff_base = Duration::from_millis(400);
     let rt = e.runtime(o);
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let pid1 = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
+    let cfg = rt.ensure(Chat, &e.chat).await.unwrap();
+    let pid1 = pid(&rt, Chat);
     let a = addr(&cfg);
-    let k = key(&rt, RuntimeRole::Chat);
+    let k = key(&rt, Chat);
     // Stays ready while healthy (the watchdog's probes are answered).
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(
-        rt.details(RuntimeRole::Chat).unwrap().info.state,
-        RuntimeState::Ready
-    );
-    let r = a
-        .client()
-        .post(a.url("/fake/hang"))
-        .bearer_auth(&k)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status().as_u16(), 200);
+    assert_eq!(state(&rt, Chat), Ready);
+    assert_eq!(post(&a, "/fake/hang", &k).await, 200);
     // A request in flight on the hung server (no client timeout): it must end once the
     // watchdog kills the server, not after minutes.
-    let busy = rt.request(RuntimeRole::Chat);
+    let busy = rt.request(Chat);
     let t = Instant::now();
     let pending = tokio::spawn({
         let (a, k) = (a.clone(), k.clone());
         async move {
-            a.client()
+            let r = a
+                .client()
                 .get(a.url("/v1/models"))
                 .bearer_auth(&k)
                 .send()
-                .await
-                .and_then(|r| r.error_for_status())
-                .map(|_| ())
+                .await;
+            r.and_then(|r| r.error_for_status()).map(|_| ())
         }
     });
-    wait_until("hang noticed", Duration::from_secs(10), || {
-        rt.details(RuntimeRole::Chat)
-            .is_some_and(|d| d.info.state != RuntimeState::Ready)
-    })
-    .await;
+    wait_for(&rt, Chat, "hang noticed", |d| d.info.state != Ready).await;
     // GG6-3: the status stops saying Ready, with a plain reason, and requests fail fast while
     // it backs off.
-    let d = rt.details(RuntimeRole::Chat).unwrap();
     assert!(
-        d.info
-            .error
-            .as_deref()
-            .is_some_and(|m| m.contains("stopped responding")),
+        error_contains(&rt, Chat, "stopped responding"),
         "{:?}",
-        d.info
+        details(&rt, Chat).info
     );
     let t2 = Instant::now();
-    let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    let err = rt.ensure(Chat, &e.chat).await.unwrap_err();
     assert!(
         t2.elapsed() < Duration::from_millis(300),
         "{:?}",
@@ -537,116 +563,94 @@ async fn a_hung_server_is_detected_killed_and_restarted() {
     drop(busy);
     // Restarted on the same address, with a new key.
     let cfg2 = rt
-        .wait_ready(RuntimeRole::Chat, Duration::from_secs(10))
+        .wait_ready(Chat, Duration::from_secs(10))
         .await
         .expect("restarted");
     assert_eq!(addr(&cfg2), a);
-    let d = rt.details(RuntimeRole::Chat).unwrap();
+    let d = details(&rt, Chat);
     assert_eq!(d.restarts, 1);
     assert_ne!(d.pid, Some(pid1));
-    let k2 = key(&rt, RuntimeRole::Chat);
-    assert_eq!(get(&a, "/v1/models", Some(&k2)).await.0, 200);
-    let logs = read_all_logs(&e.paths.data.join("logs"));
-    assert!(logs.contains("stopped responding"), "{logs}");
+    assert_eq!(get(&a, "/v1/models", Some(&key(&rt, Chat))).await.0, 200);
+    assert!(read_all_logs(&e.paths.data.join("logs")).contains("stopped responding"));
     rt.shutdown().await;
 }
 
 #[tokio::test]
 async fn warm_up_reports_elapsed_and_expected_load_time() {
     let e = env().await;
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &["--fake-start-delay-ms", "600"],
-    ));
-    let start = {
-        let rt = rt.clone();
-        let chat = e.chat.clone();
-        tokio::spawn(async move { rt.ensure(RuntimeRole::Chat, &chat).await })
-    };
-    wait_until("warming up", Duration::from_secs(5), || {
-        rt.details(RuntimeRole::Chat).is_some_and(|d| {
-            d.info.state == RuntimeState::Starting && d.info.state_ms.is_some_and(|ms| ms >= 200)
+    for first in [true, false] {
+        let rt = e.runtime(with_extra(Chat, &["--fake-start-delay-ms", "600"]));
+        let start = tokio::spawn({
+            let (rt, chat) = (rt.clone(), e.chat.clone());
+            async move { rt.ensure(Chat, &chat).await }
+        });
+        wait_for(&rt, Chat, "warming up", |d| {
+            d.info.state == Starting && d.info.state_ms.is_some_and(|ms| ms >= 200)
         })
-    })
-    .await;
-    // First load: an estimate from the model's size.
-    let first = rt.details(RuntimeRole::Chat).unwrap().info;
-    assert!(first.expected_ms.is_some_and(|ms| ms >= 3000), "{first:?}");
-    start.await.unwrap().unwrap();
-    let ready = rt.details(RuntimeRole::Chat).unwrap().info;
-    assert_eq!(ready.expected_ms, None);
-    rt.shutdown().await;
-
-    // The next start expects what the last load took.
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &["--fake-start-delay-ms", "600"],
-    ));
-    let start = {
-        let rt = rt.clone();
-        let chat = e.chat.clone();
-        tokio::spawn(async move { rt.ensure(RuntimeRole::Chat, &chat).await })
-    };
-    wait_until("warming up again", Duration::from_secs(5), || {
-        rt.details(RuntimeRole::Chat)
-            .is_some_and(|d| d.info.state == RuntimeState::Starting)
-    })
-    .await;
-    let again = rt.details(RuntimeRole::Chat).unwrap().info;
-    assert!(
-        again
-            .expected_ms
-            .is_some_and(|ms| (500..3000).contains(&ms)),
-        "{again:?}"
-    );
-    start.await.unwrap().unwrap();
-    rt.shutdown().await;
+        .await;
+        let info = details(&rt, Chat).info;
+        // First load: an estimate from the model's size; then what the last load took.
+        let range = if first { 3000..u64::MAX } else { 500..3000 };
+        assert!(
+            info.expected_ms.is_some_and(|ms| range.contains(&ms)),
+            "{info:?}"
+        );
+        start.await.unwrap().unwrap();
+        assert_eq!(details(&rt, Chat).info.expected_ms, None);
+        rt.shutdown().await;
+    }
 }
 
+/// A crashed server is restarted on the same port or socket, with a new API key: a key
+/// captured while the port was unguarded (or held by a stale client) does not open the
+/// restarted server, and old configs fail closed.
 #[tokio::test]
-async fn crashed_server_is_restarted_on_the_same_port() {
+async fn crashed_server_is_restarted_with_a_new_key() {
     let e = env().await;
-    let marker = e.tmp.path().join("crashed-once");
-    let marker_s = marker.to_string_lossy().into_owned();
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &[
-            "--fake-crash-after-ms",
-            "300",
-            "--fake-crash-once",
-            &marker_s,
-        ],
-    ));
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let pid1 = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
-    wait_until("crash and restart", Duration::from_secs(10), || {
-        rt.details(RuntimeRole::Chat)
-            .is_some_and(|d| d.restarts == 1 && d.info.state == RuntimeState::Ready)
+    let rt = crashing_once(&e);
+    let cfg1 = rt.ensure(Chat, &e.chat).await.unwrap();
+    let (pid1, k1, secrets) = (pid(&rt, Chat), key(&rt, Chat), rt.secrets());
+    assert_eq!(
+        secrets
+            .resolve(cfg1.api_key.as_ref().unwrap())
+            .unwrap()
+            .expose(),
+        k1
+    );
+    wait_for(&rt, Chat, "crash and restart", |d| {
+        d.restarts == 1 && d.info.state == Ready
     })
     .await;
-    assert!(marker.exists());
-    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert!(e.tmp.path().join("crashed-once").exists());
+    let d = details(&rt, Chat);
     assert_ne!(d.pid.unwrap(), pid1);
-    let cfg2 = d.config.clone().unwrap();
-    assert_eq!(cfg2.base_url, cfg.base_url);
-    assert_eq!(addr(&cfg2), addr(&cfg), "same port or socket");
-    assert_ne!(cfg2.api_key, cfg.api_key, "new key generation");
     assert!(!alive(pid1));
-    // The port keeps working, with the new key.
-    let k = key(&rt, RuntimeRole::Chat);
-    assert_eq!(get(&addr(&cfg), "/v1/models", Some(&k)).await.0, 200);
+    let cfg2 = d.config.clone().unwrap();
+    assert_eq!(cfg2.base_url, cfg1.base_url);
+    let a = addr(&cfg2);
+    assert_eq!(a, addr(&cfg1), "same port or socket");
+    let k2 = key(&rt, Chat);
+    assert_ne!(k1, k2, "the key changed with the restart");
+    assert_ne!(cfg1.api_key, cfg2.api_key, "new key generation");
+    assert!(
+        secrets.resolve(cfg1.api_key.as_ref().unwrap()).is_err(),
+        "an old config no longer resolves"
+    );
+    assert_eq!(
+        secrets
+            .resolve(cfg2.api_key.as_ref().unwrap())
+            .unwrap()
+            .expose(),
+        k2
+    );
+    assert_eq!(get(&a, "/v1/models", Some(&k1)).await.0, 401);
+    assert_eq!(get(&a, "/v1/models", Some(&k2)).await.0, 200);
 
     // A crash on request (exit 42) is handled the same way. While it backs off, ensure() fails
     // fast with a plain reason; once restarted it hands out the new config.
-    let a = addr(&cfg);
-    let _ = a
-        .client()
-        .post(a.url("/fake/crash"))
-        .bearer_auth(&k)
-        .send()
-        .await;
+    post(&a, "/fake/crash", &k2).await;
     let again = loop {
-        match rt.ensure(RuntimeRole::Chat, &e.chat).await {
+        match rt.ensure(Chat, &e.chat).await {
             Ok(c) => break c,
             Err(err) => {
                 assert!(err.to_string().contains("stopped unexpectedly"), "{err}");
@@ -655,48 +659,48 @@ async fn crashed_server_is_restarted_on_the_same_port() {
         }
     };
     assert_eq!(addr(&again), a);
-    wait_until("second restart", Duration::from_secs(10), || {
-        rt.details(RuntimeRole::Chat)
-            .is_some_and(|d| d.restarts == 2 && d.info.state == RuntimeState::Ready)
+    wait_for(&rt, Chat, "second restart", |d| {
+        d.restarts == 2 && d.info.state == Ready
     })
     .await;
-    let logs = read_all_logs(&e.paths.data.join("logs"));
-    assert!(logs.contains("exited unexpectedly"), "{logs}");
+    assert!(read_all_logs(&e.paths.data.join("logs")).contains("exited unexpectedly"));
+
+    // And after a stop and a new start.
+    let k3 = key(&rt, Chat);
+    rt.stop(Chat).await;
+    let cfg4 = rt.ensure(Chat, &e.chat).await.unwrap();
+    let k4 = key(&rt, Chat);
+    assert_ne!(k3, k4);
+    assert_ne!(again.api_key, cfg4.api_key);
+    assert_eq!(get(&addr(&cfg4), "/v1/models", Some(&k3)).await.0, 401);
+    assert_eq!(get(&addr(&cfg4), "/v1/models", Some(&k4)).await.0, 200);
     rt.shutdown().await;
 }
 
 #[tokio::test]
 async fn crash_loop_gives_up_and_ensure_retries() {
     let e = env().await;
-    let mut o = with_extra(RuntimeRole::Chat, &["--fake-crash-after-ms", "150"]);
+    let mut o = with_extra(Chat, &["--fake-crash-after-ms", "150"]);
     o.max_restarts = 2;
     let rt = e.runtime(o);
-    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    wait_until("give up", Duration::from_secs(10), || {
-        rt.details(RuntimeRole::Chat)
-            .is_some_and(|d| d.info.state == RuntimeState::Failed && d.info.gave_up)
+    rt.ensure(Chat, &e.chat).await.unwrap();
+    wait_for(&rt, Chat, "give up", |d| {
+        d.info.state == Failed && d.info.gave_up
     })
     .await;
-    let d = rt.details(RuntimeRole::Chat).unwrap();
+    let d = details(&rt, Chat);
     assert_eq!(d.pid, None);
     assert!(d.config.is_none());
-    assert!(
-        d.info
-            .error
-            .as_deref()
-            .is_some_and(|m| m.contains("keeps stopping")),
-        "{:?}",
-        d.info
-    );
+    assert!(error_contains(&rt, Chat, "keeps stopping"), "{:?}", d.info);
     // GG6-5: after giving up, requests fail fast and start nothing (no relaunch storm)...
     for _ in 0..10 {
-        let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+        let err = rt.ensure(Chat, &e.chat).await.unwrap_err();
         assert!(err.to_string().contains("keeps stopping"), "{err}");
-        assert_eq!(rt.details(RuntimeRole::Chat).unwrap().pid, None);
+        assert_eq!(details(&rt, Chat).pid, None);
     }
     // ...until the user retries: then it starts from scratch (and runs until the next crash).
-    rt.retry(RuntimeRole::Chat);
-    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    rt.retry(Chat);
+    rt.ensure(Chat, &e.chat).await.unwrap();
     rt.shutdown().await;
 }
 
@@ -704,19 +708,16 @@ async fn crash_loop_gives_up_and_ensure_retries() {
 async fn stop_kills_the_server_and_its_process_group() {
     let e = env().await;
     let pidfile = e.tmp.path().join("child.pid");
-    let p = pidfile.to_string_lossy().into_owned();
-    let rt = e.runtime(with_extra(RuntimeRole::Chat, &["--fake-spawn-child", &p]));
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
-    let child: u32 = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    let rt = e.runtime(with_extra(
+        Chat,
+        &["--fake-spawn-child", &pidfile.to_string_lossy()],
+    ));
+    let cfg = rt.ensure(Chat, &e.chat).await.unwrap();
+    let (pid, child) = (pid(&rt, Chat), pid_file(&pidfile));
     assert!(alive(pid) && alive(child));
     assert!(e.paths.data.join("runtime/chat.pid").exists());
 
-    rt.stop(RuntimeRole::Chat).await;
+    rt.stop(Chat).await;
     assert!(!alive(pid));
     #[cfg(unix)]
     wait_until(
@@ -725,20 +726,16 @@ async fn stop_kills_the_server_and_its_process_group() {
         || !alive(child),
     )
     .await;
-    #[cfg(not(unix))]
-    let _ = child;
-    let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Stopped);
+    let d = details(&rt, Chat);
+    assert_eq!(d.info.state, Stopped);
     assert!(d.config.is_none());
     assert!(!e.paths.data.join("runtime/chat.pid").exists());
     assert_eq!(get(&addr(&cfg), "/health", None).await.0, 0);
     // The socket file is gone with the server.
-    if let Some(sock) = &cfg.socket_path {
-        assert!(!sock.exists());
-    }
+    assert!(cfg.socket_path.is_none_or(|s| !s.exists()));
     // Stopping again is a no-op; ensure brings it back.
-    rt.stop(RuntimeRole::Chat).await;
-    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    rt.stop(Chat).await;
+    rt.ensure(Chat, &e.chat).await.unwrap();
     rt.shutdown().await;
 }
 
@@ -746,22 +743,14 @@ async fn stop_kills_the_server_and_its_process_group() {
 async fn dropping_the_runtime_kills_every_server() {
     let e = env().await;
     let pidfile = e.tmp.path().join("child.pid");
-    let p = pidfile.to_string_lossy().into_owned();
     let rt = e.runtime(with_extra(
-        RuntimeRole::Embedding,
-        &["--fake-spawn-child", &p],
+        Embedding,
+        &["--fake-spawn-child", &pidfile.to_string_lossy()],
     ));
-    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
-    let pids: Vec<u32> = [RuntimeRole::Chat, RuntimeRole::Embedding]
-        .iter()
-        .map(|r| rt.details(*r).unwrap().pid.unwrap())
-        .collect();
-    let child: u32 = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    rt.ensure(Chat, &e.chat).await.unwrap();
+    rt.ensure(Embedding, &e.embed).await.unwrap();
+    let pids = [pid(&rt, Chat), pid(&rt, Embedding)];
+    let child = pid_file(&pidfile);
     let clone = rt.clone();
     drop(rt);
     assert!(pids.iter().all(|p| alive(*p)), "a clone keeps them alive");
@@ -775,8 +764,6 @@ async fn dropping_the_runtime_kills_every_server() {
         !alive(child)
     })
     .await;
-    #[cfg(not(unix))]
-    let _ = child;
     assert!(!e.paths.data.join("runtime/chat.pid").exists());
 }
 
@@ -787,36 +774,36 @@ async fn idle_servers_stop_and_come_back_on_ensure() {
     o.idle_shutdown = Some(Duration::from_millis(600));
     o.idle_check_interval = Duration::from_millis(100);
     let rt = e.runtime(o);
-    let cfg = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
+    let cfg = rt.ensure(Embedding, &e.embed).await.unwrap();
     let a = addr(&cfg);
 
     // Requests (seen through /metrics) keep it alive past the idle timeout.
-    let k = key(&rt, RuntimeRole::Embedding);
-    let client = a.client();
+    let (k, client) = (key(&rt, Embedding), a.client());
     let busy_until = Instant::now() + Duration::from_millis(1500);
     while Instant::now() < busy_until {
+        let body = serde_json::json!({"input": ["x"], "model": "embed-model"});
         let r = client
             .post(a.url("/v1/embeddings"))
             .bearer_auth(&k)
             .header("content-type", "application/json")
-            .body(r#"{"input": ["x"], "model": "embed-model"}"#)
+            .body(body.to_string())
             .send()
             .await
             .unwrap();
         assert!(r.status().is_success());
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_eq!(rt.status()[0].state, RuntimeState::Ready);
-    let pid = rt.details(RuntimeRole::Embedding).unwrap().pid.unwrap();
+    assert_eq!(rt.status()[0].state, Ready);
+    let pid = pid(&rt, Embedding);
 
     wait_until("idle stop", Duration::from_secs(5), || {
-        rt.status()[0].state == RuntimeState::Stopped
+        rt.status()[0].state == Stopped
     })
     .await;
     // `Stopped` is reported (and the config withdrawn) before the process is signalled, so the
     // process may still be exiting here.
     wait_until("process exit", Duration::from_secs(10), || !alive(pid)).await;
-    let again = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
+    let again = rt.ensure(Embedding, &e.embed).await.unwrap();
     assert_eq!(addr(&again), a, "the old port (or the socket) is reused");
     rt.shutdown().await;
 }
@@ -824,10 +811,10 @@ async fn idle_servers_stop_and_come_back_on_ensure() {
 #[tokio::test]
 async fn server_output_goes_to_a_redacted_log_file() {
     let e = env().await;
-    let rt = e.runtime(with_extra(RuntimeRole::Chat, &["--fake-print-key"]));
-    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let k = key(&rt, RuntimeRole::Chat);
-    let log = rt.log_file(RuntimeRole::Chat);
+    let rt = e.runtime(with_extra(Chat, &["--fake-print-key"]));
+    rt.ensure(Chat, &e.chat).await.unwrap();
+    let k = key(&rt, Chat);
+    let log = rt.log_file(Chat);
     assert!(log.starts_with(e.paths.data.join("logs")));
     wait_until("log lines", Duration::from_secs(5), || {
         std::fs::read_to_string(&log).is_ok_and(|s| s.contains("model loaded"))
@@ -855,7 +842,6 @@ async fn orphans_from_a_dead_daemon_are_reaped() {
     let e = env().await;
     // A server started by "a previous daemon" (not in our process group).
     let port = choose_port(None).unwrap();
-    let model = e.store.path("chat-model").unwrap();
     let mut orphan = std::process::Command::new(common::fake_bin())
         .args([
             "--host",
@@ -864,7 +850,7 @@ async fn orphans_from_a_dead_daemon_are_reaped() {
             &port.to_string(),
             "--model",
         ])
-        .arg(&model)
+        .arg(e.store.path("chat-model").unwrap())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -896,64 +882,56 @@ async fn orphans_from_a_dead_daemon_are_reaped() {
 async fn bad_requests_are_refused_before_spawning() {
     let e = env().await;
     let rt = e.runtime(common::opts());
-    // Role/model mismatch.
-    let err = rt
-        .ensure(RuntimeRole::Embedding, &{
-            let mut m = e.chat.clone();
-            m.tiers = vec![Tier::Light];
-            m
-        })
-        .await
-        .unwrap_err();
-    assert!(matches!(err, Error::Invalid(_)), "{err}");
-    let err = rt.ensure(RuntimeRole::Chat, &e.embed).await.unwrap_err();
-    assert!(matches!(err, Error::Invalid(_)), "{err}");
-    // A reranker serves only the rerank role, and the rerank role only a reranker.
-    for role in [RuntimeRole::Chat, RuntimeRole::Embedding] {
-        let err = rt.ensure(role, &e.rerank).await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(_)), "{role:?}: {err}");
-    }
-    for m in [&e.chat, &e.embed] {
-        let err = rt.ensure(RuntimeRole::Rerank, m).await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(_)), "{}: {err}", m.id);
+    let mut light = e.chat.clone();
+    light.tiers = vec![Tier::Light];
+    // Role/model mismatches; a reranker serves only the rerank role, and the rerank role only
+    // a reranker.
+    for (role, m) in [
+        (Embedding, &light),
+        (Chat, &e.embed),
+        (Chat, &e.rerank),
+        (Embedding, &e.rerank),
+        (Rerank, &e.chat),
+        (Rerank, &e.embed),
+    ] {
+        let err = rt.ensure(role, m).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{role:?} {}: {err}", m.id);
     }
     assert!(rt.status().is_empty(), "nothing was started");
     // Model not installed.
     let mut missing = e.embed.clone();
     missing.id = "not-installed".into();
-    let err = rt
-        .ensure(RuntimeRole::Embedding, &missing)
-        .await
-        .unwrap_err();
+    let err = rt.ensure(Embedding, &missing).await.unwrap_err();
     assert!(matches!(err, Error::NotFound(_)), "{err}");
     // Dangerous pass-through flags.
     for bad in [
-        ["--host", "0.0.0.0"],
-        ["--host=0.0.0.0", ""],
-        ["--api-key", "x"],
-        ["--port", "80"],
+        &["--host", "0.0.0.0"][..],
+        &["--host=0.0.0.0"],
+        &["--api-key", "x"],
+        &["--port", "80"],
     ] {
-        let args: Vec<&str> = bad.iter().copied().filter(|s| !s.is_empty()).collect();
-        let rt = e.runtime(with_extra(RuntimeRole::Chat, &args));
-        let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+        let err = e
+            .runtime(with_extra(Chat, bad))
+            .ensure(Chat, &e.chat)
+            .await
+            .unwrap_err();
         assert!(matches!(err, Error::Invalid(_)), "{bad:?}: {err}");
     }
     // A missing binary.
     let rt = e
         .runtime(common::opts())
         .with_server_binary(e.tmp.path().join("nope"), nugget_models::RuntimeAccel::Cpu);
-    let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    let err = rt.ensure(Chat, &e.chat).await.unwrap_err();
     assert!(matches!(err, Error::NotFound(_)), "{err}");
-    assert!(rt.status().iter().all(|s| s.state == RuntimeState::Failed));
+    assert!(rt.status().iter().all(|s| s.state == Failed));
 }
 
 #[test]
 fn free_port_selection() {
     let p = choose_port(None).unwrap();
     assert_ne!(p, 0);
-    // A preferred free port is kept.
+    // A preferred free port is kept; a taken one is replaced.
     assert_eq!(choose_port(Some(p)).unwrap(), p);
-    // A taken one is replaced.
     let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let taken = l.local_addr().unwrap().port();
     let other = choose_port(Some(taken)).unwrap();
@@ -968,7 +946,7 @@ async fn tcp_listeners_when_unix_sockets_are_off() {
     let mut o = common::opts();
     o.unix_socket = false;
     let rt = e.runtime(o);
-    let cfg = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
+    let cfg = rt.ensure(Embedding, &e.embed).await.unwrap();
     let base = cfg.base_url.clone().unwrap();
     assert!(
         base.starts_with("http://127.0.0.1:") && base.ends_with("/v1"),
@@ -976,15 +954,13 @@ async fn tcp_listeners_when_unix_sockets_are_off() {
     );
     assert_eq!(cfg.socket_path, None);
     assert_eq!(cfg.effective_locality().unwrap(), Locality::OnDevice);
-    let d = rt.details(RuntimeRole::Embedding).unwrap();
+    let d = details(&rt, Embedding);
     assert_eq!(d.socket, None);
     let a = addr(&cfg);
-    assert_eq!(a, common::Addr::Port(d.port.unwrap()));
+    assert_eq!(a, Addr::Port(d.port.unwrap()));
     assert_eq!(get(&a, "/health", None).await.0, 200);
-    let (_, info) = get(&a, "/fake/info", Some(&key(&rt, RuntimeRole::Embedding))).await;
-    let info: serde_json::Value = serde_json::from_str(&info).unwrap();
-    let argv: Vec<String> = serde_json::from_value(info["argv"].clone()).unwrap();
-    assert!(argv.windows(2).any(|w| w == ["--host", "127.0.0.1"]));
+    let (argv, _) = fake_info(&a, &key(&rt, Embedding)).await;
+    assert!(has_pair(&argv, "--host", "127.0.0.1"));
     assert!(!e.paths.data.join("run").exists());
     rt.shutdown().await;
 }
@@ -999,13 +975,11 @@ async fn a_stale_socket_file_is_replaced() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("chat.sock"), b"stale").unwrap();
     let rt = e.runtime(common::opts());
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let cfg = rt.ensure(Chat, &e.chat).await.unwrap();
     assert_eq!(get(&addr(&cfg), "/health", None).await.0, 200);
     rt.shutdown().await;
     assert!(!dir.join("chat.sock").exists());
 }
-
-// ---- Regression tests: who is on the port, stale configs, key rotation, detached starts ----
 
 /// Another local process grabs the server's port before the server binds it, and answers
 /// `/health` with ok. The runtime must not take it for the server: no config, no key, no prompt.
@@ -1013,88 +987,85 @@ async fn a_stale_socket_file_is_replaced() {
 #[tokio::test]
 async fn a_squatter_on_the_servers_port_is_rejected() {
     let e = env().await;
-    let pidfile = e.tmp.path().join("squatter.pid");
-    let p = pidfile.to_string_lossy().into_owned();
-    let mut o = with_extra(RuntimeRole::Chat, &["--fake-squat", &p]);
+    let p = e
+        .tmp
+        .path()
+        .join("squatter.pid")
+        .to_string_lossy()
+        .into_owned();
+    let mut o = with_extra(Chat, &["--fake-squat", &p]);
     o.health_timeout = Duration::from_secs(5);
     // The port race exists only for TCP listeners.
     o.unix_socket = false;
     let rt = e.runtime(o);
-    let res = rt.ensure(RuntimeRole::Chat, &e.chat).await;
+    let res = rt.ensure(Chat, &e.chat).await;
     let squatter = common::KillOnDrop(
-        std::fs::read_to_string(&pidfile)
+        std::fs::read_to_string(&p)
             .ok()
             .and_then(|s| s.trim().parse().ok()),
     );
-    let squatter_pid = squatter.0.expect("the fake server started a squatter");
-    assert!(alive(squatter_pid), "the squatter is still listening");
+    assert!(
+        alive(squatter.0.expect("the fake server started a squatter")),
+        "still listening"
+    );
 
     let err = res.expect_err("a foreign listener must not count as ready");
     assert!(
         matches!(&err, Error::Provider(m) if m.contains("Another program answered")),
         "{err}"
     );
-    let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Failed);
+    let d = details(&rt, Chat);
+    assert_eq!(d.info.state, Failed);
     assert!(d.config.is_none());
     assert_eq!(d.pid, None, "our server was stopped");
     // The squatter only ever saw unauthenticated health probes: neither the key nor a request.
     let seen = std::fs::read_to_string(format!("{p}.log")).unwrap_or_default();
     assert!(seen.contains("GET /health"), "{seen}");
-    assert!(!seen.contains("authorization=true"), "{seen}");
-    assert!(!seen.contains("/v1/"), "{seen}");
+    assert!(
+        !seen.contains("authorization=true") && !seen.contains("/v1/"),
+        "{seen}"
+    );
 }
 
 /// While a server is shutting down (here it ignores SIGTERM for the whole grace period), its
-/// port must not be handed out: the next owner of the port could be anybody.
+/// port must not be handed out: the next owner of the port could be anybody. Both for a stop
+/// and for an idle stop the supervisor does on its own.
 #[cfg(unix)]
 #[tokio::test]
 async fn no_config_is_handed_out_while_stopping() {
     let e = env().await;
-    let mut o = with_extra(RuntimeRole::Chat, &["--fake-ignore-sigterm"]);
+    let mut o = with_extra(Chat, &["--fake-ignore-sigterm"]);
     o.shutdown_grace = Duration::from_millis(1500);
     let rt = e.runtime(o);
-    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
-
+    rt.ensure(Chat, &e.chat).await.unwrap();
+    let pid = pid(&rt, Chat);
     let stopping = tokio::spawn({
         let rt = rt.clone();
-        async move { rt.stop(RuntimeRole::Chat).await }
+        async move { rt.stop(Chat).await }
     });
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert!(alive(pid), "still in its shutdown grace period");
     assert!(!stopping.is_finished());
-    let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Stopping);
+    let d = details(&rt, Chat);
+    assert_eq!(d.info.state, Stopping);
     assert!(d.config.is_none(), "config handed out during stop");
-    assert_eq!(rt.status()[0].state, RuntimeState::Stopping);
     assert_eq!(
         serde_json::to_value(&rt.status()[0]).unwrap()["state"],
         "stopping"
     );
     stopping.await.unwrap();
     assert!(!alive(pid));
-    assert_eq!(
-        rt.details(RuntimeRole::Chat).unwrap().info.state,
-        RuntimeState::Stopped
-    );
-}
+    assert_eq!(state(&rt, Chat), Stopped);
 
-/// Same for an idle stop, which the supervisor does on its own.
-#[cfg(unix)]
-#[tokio::test]
-async fn no_config_is_handed_out_during_an_idle_stop() {
-    let e = env().await;
-    let mut o = with_extra(RuntimeRole::Embedding, &["--fake-ignore-sigterm"]);
+    let mut o = with_extra(Embedding, &["--fake-ignore-sigterm"]);
     o.shutdown_grace = Duration::from_millis(1500);
     o.idle_shutdown = Some(Duration::from_millis(200));
     o.idle_check_interval = Duration::from_millis(50);
     let rt = e.runtime(o);
-    rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
-    let pid = rt.details(RuntimeRole::Embedding).unwrap().pid.unwrap();
-    wait_until("idle stop begins", Duration::from_secs(5), || {
-        rt.details(RuntimeRole::Embedding)
-            .is_some_and(|d| d.info.state != RuntimeState::Ready)
+    rt.ensure(Embedding, &e.embed).await.unwrap();
+    let pid = self::pid(&rt, Embedding);
+    wait_for(&rt, Embedding, "idle stop begins", |d| {
+        d.info.state != Ready
     })
     .await;
     // The server has been asked to stop but is still there: no config for it any more.
@@ -1102,15 +1073,11 @@ async fn no_config_is_handed_out_during_an_idle_stop() {
         alive(pid),
         "the config was withdrawn only after the server was gone"
     );
-    let d = rt.details(RuntimeRole::Embedding).unwrap();
+    let d = details(&rt, Embedding);
     assert!(d.config.is_none());
-    assert_eq!(d.info.state, RuntimeState::Stopping);
+    assert_eq!(d.info.state, Stopping);
     wait_until("idle server gone", Duration::from_secs(5), || !alive(pid)).await;
-    wait_until("stopped", Duration::from_secs(5), || {
-        rt.details(RuntimeRole::Embedding)
-            .is_some_and(|d| d.info.state == RuntimeState::Stopped)
-    })
-    .await;
+    wait_for(&rt, Embedding, "stopped", |d| d.info.state == Stopped).await;
     rt.shutdown().await;
 }
 
@@ -1123,93 +1090,19 @@ async fn a_crash_is_reported_at_once() {
     // The supervisor would only notice after 30 s.
     o.watch_interval = Duration::from_secs(30);
     let rt = e.runtime(o);
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
-    let a = addr(&cfg);
-    let _ = a
-        .client()
-        .post(a.url("/fake/crash"))
-        .bearer_auth(key(&rt, RuntimeRole::Chat))
-        .send()
-        .await;
+    let cfg = rt.ensure(Chat, &e.chat).await.unwrap();
+    let pid = pid(&rt, Chat);
+    post(&addr(&cfg), "/fake/crash", &key(&rt, Chat)).await;
     wait_until("server exited", Duration::from_secs(5), || !alive(pid)).await;
-    let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_ne!(d.info.state, RuntimeState::Ready);
+    let d = details(&rt, Chat);
+    assert_ne!(d.info.state, Ready);
     assert!(d.config.is_none());
     assert_eq!(d.pid, None, "a dead server has no pid");
     assert!(
-        d.info
-            .error
-            .as_deref()
-            .is_some_and(|m| m.contains("stopped unexpectedly")),
+        error_contains(&rt, Chat, "stopped unexpectedly"),
         "{:?}",
         d.info.error
     );
-    rt.shutdown().await;
-}
-
-/// Every server process gets a new API key: a key captured while the port was unguarded (or
-/// held by a stale client) does not open the restarted server, and old configs fail closed.
-#[tokio::test]
-async fn the_api_key_rotates_on_every_restart() {
-    let e = env().await;
-    let marker = e.tmp.path().join("crashed-once");
-    let marker_s = marker.to_string_lossy().into_owned();
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &[
-            "--fake-crash-after-ms",
-            "300",
-            "--fake-crash-once",
-            &marker_s,
-        ],
-    ));
-    let cfg1 = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let k1 = key(&rt, RuntimeRole::Chat);
-    let secrets = rt.secrets();
-    assert_eq!(
-        secrets
-            .resolve(cfg1.api_key.as_ref().unwrap())
-            .unwrap()
-            .expose(),
-        k1
-    );
-
-    // Crash and restart by the supervisor.
-    wait_until("crash and restart", Duration::from_secs(10), || {
-        rt.details(RuntimeRole::Chat)
-            .is_some_and(|d| d.restarts == 1 && d.info.state == RuntimeState::Ready)
-    })
-    .await;
-    let cfg2 = rt.details(RuntimeRole::Chat).unwrap().config.unwrap();
-    let k2 = key(&rt, RuntimeRole::Chat);
-    assert_ne!(k1, k2, "the key changed with the restart");
-    assert_ne!(cfg1.api_key, cfg2.api_key);
-    assert!(
-        secrets.resolve(cfg1.api_key.as_ref().unwrap()).is_err(),
-        "a config from before the restart no longer resolves"
-    );
-    assert_eq!(
-        secrets
-            .resolve(cfg2.api_key.as_ref().unwrap())
-            .unwrap()
-            .expose(),
-        k2
-    );
-    let port = addr(&cfg2);
-    assert_eq!(get(&port, "/v1/models", Some(&k1)).await.0, 401);
-    assert_eq!(get(&port, "/v1/models", Some(&k2)).await.0, 200);
-
-    // And after a stop and a new start.
-    rt.stop(RuntimeRole::Chat).await;
-    let cfg3 = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let k3 = key(&rt, RuntimeRole::Chat);
-    assert_ne!(k2, k3);
-    assert_ne!(cfg2.api_key, cfg3.api_key);
-    let port = addr(&cfg3);
-    assert_eq!(get(&port, "/v1/models", Some(&k2)).await.0, 401);
-    assert_eq!(get(&port, "/v1/models", Some(&k3)).await.0, 200);
-    // The other role's key is untouched.
     rt.shutdown().await;
 }
 
@@ -1219,66 +1112,33 @@ async fn the_api_key_rotates_on_every_restart() {
 #[tokio::test]
 async fn an_abandoned_ensure_does_not_cancel_the_start() {
     let e = env().await;
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &["--fake-start-delay-ms", "1500"],
-    ));
-    let r = tokio::time::timeout(
-        Duration::from_millis(300),
-        rt.ensure(RuntimeRole::Chat, &e.chat),
-    )
-    .await;
+    let rt = e.runtime(with_extra(Chat, &["--fake-start-delay-ms", "1500"]));
+    let r = tokio::time::timeout(Duration::from_millis(300), rt.ensure(Chat, &e.chat)).await;
     assert!(r.is_err(), "the caller timed out");
-
     // Still starting, with a live server process behind it.
-    let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Starting);
+    let d = details(&rt, Chat);
+    assert_eq!(d.info.state, Starting);
     let pid = d.pid.expect("the loading server keeps running");
     assert!(alive(pid));
-
     // Another impatient caller joins the same start instead of restarting it.
-    let r = tokio::time::timeout(
-        Duration::from_millis(200),
-        rt.ensure(RuntimeRole::Chat, &e.chat),
-    )
-    .await;
+    let r = tokio::time::timeout(Duration::from_millis(200), rt.ensure(Chat, &e.chat)).await;
     assert!(r.is_err());
-    assert_eq!(rt.details(RuntimeRole::Chat).unwrap().pid, Some(pid));
-
-    // It becomes ready with nobody waiting...
-    wait_until("ready without a caller", Duration::from_secs(10), || {
-        rt.details(RuntimeRole::Chat)
-            .is_some_and(|d| d.info.state == RuntimeState::Ready)
+    assert_eq!(details(&rt, Chat).pid, Some(pid));
+    // It becomes ready with nobody waiting, and a later ensure returns it without restarting.
+    wait_for(&rt, Chat, "ready without a caller", |d| {
+        d.info.state == Ready
     })
     .await;
-    // ...and a later ensure returns it without restarting.
     let t = Instant::now();
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let cfg = rt.ensure(Chat, &e.chat).await.unwrap();
     assert!(
         t.elapsed() < Duration::from_millis(500),
         "{:?}",
         t.elapsed()
     );
-    let d = rt.details(RuntimeRole::Chat).unwrap();
+    let d = details(&rt, Chat);
     assert_eq!(d.pid, Some(pid), "same server");
     assert_eq!(d.config, Some(cfg));
-    rt.shutdown().await;
-}
-
-/// A caller that waits for a start in progress gets its result.
-#[tokio::test]
-async fn concurrent_ensures_share_one_start() {
-    let e = env().await;
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &["--fake-start-delay-ms", "500"],
-    ));
-    let (a, b) = tokio::join!(
-        rt.ensure(RuntimeRole::Chat, &e.chat),
-        rt.ensure(RuntimeRole::Chat, &e.chat)
-    );
-    assert_eq!(a.unwrap(), b.unwrap());
-    assert_eq!(rt.details(RuntimeRole::Chat).unwrap().restarts, 0);
     rt.shutdown().await;
 }
 
@@ -1286,35 +1146,23 @@ async fn concurrent_ensures_share_one_start() {
 #[tokio::test]
 async fn stop_and_drop_end_a_detached_start() {
     let e = env().await;
-    let rt = e.runtime(with_extra(
-        RuntimeRole::Chat,
-        &["--fake-start-delay-ms", "60000"],
-    ));
+    let rt = e.runtime(with_extra(Chat, &["--fake-start-delay-ms", "60000"]));
     let waiter = tokio::spawn({
         let (rt, m) = (rt.clone(), e.chat.clone());
-        async move { rt.ensure(RuntimeRole::Chat, &m).await }
+        async move { rt.ensure(Chat, &m).await }
     });
-    wait_until("spawned", Duration::from_secs(5), || {
-        rt.details(RuntimeRole::Chat)
-            .is_some_and(|d| d.pid.is_some())
-    })
-    .await;
-    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
-    rt.stop(RuntimeRole::Chat).await;
+    wait_for(&rt, Chat, "spawned", |d| d.pid.is_some()).await;
+    let pid = pid(&rt, Chat);
+    rt.stop(Chat).await;
     assert!(!alive(pid));
     let err = waiter.await.unwrap().unwrap_err();
     assert!(matches!(err, Error::Cancelled), "{err}");
-    let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_eq!(d.info.state, RuntimeState::Stopped);
-    assert_eq!(d.pid, None);
+    let d = details(&rt, Chat);
+    assert_eq!((d.info.state, d.pid), (Stopped, None));
 
     // Abandoned, then the runtime is dropped: the loading server dies with it.
-    let _ = tokio::time::timeout(
-        Duration::from_millis(200),
-        rt.ensure(RuntimeRole::Chat, &e.chat),
-    )
-    .await;
-    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
+    let _ = tokio::time::timeout(Duration::from_millis(200), rt.ensure(Chat, &e.chat)).await;
+    let pid = self::pid(&rt, Chat);
     drop(rt);
     wait_until("server killed on drop", Duration::from_secs(5), || {
         !alive(pid)
@@ -1331,26 +1179,18 @@ async fn retry_cuts_a_restart_backoff_short() {
     o.restart_backoff_base = Duration::from_secs(60);
     o.restart_backoff_max = Duration::from_secs(60);
     let rt = e.runtime(o);
-    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    let a = addr(&cfg);
-    let _ = a
-        .client()
-        .post(a.url("/fake/crash"))
-        .bearer_auth(key(&rt, RuntimeRole::Chat))
-        .send()
-        .await;
-    wait_until("backing off", Duration::from_secs(5), || {
-        rt.details(RuntimeRole::Chat).is_some_and(|d| {
-            d.info.state == RuntimeState::Failed && d.info.retry_in_ms.is_some_and(|ms| ms > 30_000)
-        })
+    let cfg = rt.ensure(Chat, &e.chat).await.unwrap();
+    post(&addr(&cfg), "/fake/crash", &key(&rt, Chat)).await;
+    wait_for(&rt, Chat, "backing off", |d| {
+        d.info.state == Failed && d.info.retry_in_ms.is_some_and(|ms| ms > 30_000)
     })
     .await;
     let t = Instant::now();
-    rt.retry(RuntimeRole::Chat);
-    rt.wait_ready(RuntimeRole::Chat, Duration::from_secs(10))
+    rt.retry(Chat);
+    rt.wait_ready(Chat, Duration::from_secs(10))
         .await
         .expect("restarted after Retry");
     assert!(t.elapsed() < Duration::from_secs(10), "{:?}", t.elapsed());
-    assert_eq!(rt.details(RuntimeRole::Chat).unwrap().restarts, 1);
+    assert_eq!(details(&rt, Chat).restarts, 1);
     rt.shutdown().await;
 }

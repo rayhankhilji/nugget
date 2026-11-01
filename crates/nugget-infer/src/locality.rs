@@ -1,6 +1,6 @@
 //! Where does a base URL send data?
 //!
-//! Without DNS ([`classify_url`], [`classify_host`]), only literals are trusted:
+//! Without DNS ([`classify_url`]), only literals are trusted:
 //! - `localhost` (exactly; no subdomains), `127.0.0.0/8`, `::1` and unspecified → `OnDevice`.
 //! - Private/LAN IP literals (`10/8`, `172.16/12`, `192.168/16`, link-local, CGNAT `100.64/10`,
 //!   IPv6 ULA and link-local) → `LocalNetwork`.
@@ -40,20 +40,6 @@ pub(crate) fn literal_locality(url: &Url) -> Result<Option<Locality>> {
         Some(Host::Domain(d)) if is_localhost(d) => Ok(Some(Locality::OnDevice)),
         Some(Host::Domain(_)) => Ok(None),
         None => Err(Error::Invalid(format!("base_url {url} has no host"))),
-    }
-}
-
-/// Classify a bare host name or IP literal (IPv6 may be bracketed), without DNS: names other
-/// than `localhost` are `Cloud` (see the module docs).
-pub fn classify_host(host: &str) -> Locality {
-    let trimmed = host.trim_start_matches('[').trim_end_matches(']');
-    if let Ok(ip) = trimmed.parse::<IpAddr>() {
-        return classify_ip(ip);
-    }
-    if is_localhost(host) {
-        Locality::OnDevice
-    } else {
-        Locality::Cloud
     }
 }
 
@@ -248,17 +234,6 @@ pub(crate) mod tests {
     fn invalid_urls() {
         assert!(classify_url("not a url").is_err());
         assert!(classify_url("unix:/tmp/sock").is_err());
-    }
-
-    #[test]
-    fn bare_hosts() {
-        assert_eq!(classify_host("[::1]"), OnDevice);
-        assert_eq!(classify_host("192.168.0.1"), LocalNetwork);
-        assert_eq!(classify_host("example.com"), Cloud);
-        assert_eq!(classify_host("localhost"), OnDevice);
-        assert_eq!(classify_host("a.localhost"), Cloud);
-        assert_eq!(classify_host("nas"), Cloud);
-        assert_eq!(classify_host(""), Cloud);
     }
 
     /// Answers from a fixed table and counts lookups; never touches real DNS.

@@ -1,7 +1,6 @@
 //! Where the policy configuration lives.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use nugget_core::Result;
 
@@ -12,33 +11,6 @@ pub trait PolicyStore: Send + Sync {
     /// `None` when nothing was saved yet.
     fn load(&self) -> Result<Option<PolicyConfig>>;
     fn save(&self, config: &PolicyConfig) -> Result<()>;
-}
-
-/// Keeps the configuration in memory (tests, ephemeral sessions).
-#[derive(Debug, Default)]
-pub struct MemoryPolicyStore {
-    config: Mutex<Option<PolicyConfig>>,
-}
-
-impl MemoryPolicyStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl PolicyStore for MemoryPolicyStore {
-    fn load(&self) -> Result<Option<PolicyConfig>> {
-        Ok(self
-            .config
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone())
-    }
-
-    fn save(&self, config: &PolicyConfig) -> Result<()> {
-        *self.config.lock().unwrap_or_else(|p| p.into_inner()) = Some(config.clone());
-        Ok(())
-    }
 }
 
 /// A pretty-printed JSON file, replaced atomically (write to a sibling temp file, then rename).
@@ -101,24 +73,12 @@ mod tests {
     }
 
     #[test]
-    fn memory_round_trip() {
-        let s = MemoryPolicyStore::new();
-        assert_eq!(s.load().unwrap(), None);
-        s.save(&sample()).unwrap();
-        assert_eq!(s.load().unwrap(), Some(sample()));
-    }
-
-    #[test]
-    fn json_file_round_trip() {
+    fn round_trips() {
         let dir = tempfile::tempdir().unwrap();
-        let s = JsonFilePolicyStore::new(dir.path().join("nested/policy.json"));
-        assert_eq!(s.load().unwrap(), None);
-        s.save(&sample()).unwrap();
-        assert_eq!(s.load().unwrap(), Some(sample()));
-        let mut changed = sample();
-        changed.rules.clear();
-        s.save(&changed).unwrap();
-        assert_eq!(s.load().unwrap(), Some(changed));
+        let file = JsonFilePolicyStore::new(dir.path().join("nested/policy.json"));
+        assert_eq!(file.load().unwrap(), None);
+        file.save(&sample()).unwrap();
+        assert_eq!(file.load().unwrap(), Some(sample()));
     }
 
     #[test]

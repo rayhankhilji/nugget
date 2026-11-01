@@ -674,28 +674,21 @@ fn cut_to_words(s: &str, max: usize, min_len: usize) -> String {
 mod tests {
     use super::*;
 
-    /// Feed `chunks` one by one, then finish; return the concatenated output and each emission.
+    /// Feed `chunks` one by one, then finish; the output and each non-empty emission.
     fn run(opts: PostOptions, chunks: &[&str]) -> (String, Vec<String>) {
         let mut p = PostProcessor::new(opts);
-        let mut out = String::new();
         let mut parts = Vec::new();
         for c in chunks {
             let e = p.push(c);
-            if !e.text.is_empty() {
-                parts.push(e.text.clone());
-            }
-            out.push_str(&e.text);
+            parts.push(e.text);
             if e.stop {
                 break;
             }
         }
-        let tail = p.finish();
-        if !tail.is_empty() {
-            parts.push(tail.clone());
-        }
-        out.push_str(&tail);
-        assert_eq!(out, p.text());
-        (out, parts)
+        parts.push(p.finish());
+        parts.retain(|t| !t.is_empty());
+        assert_eq!(parts.concat(), p.text());
+        (parts.concat(), parts)
     }
 
     /// Feed the text one character at a time (the harshest split).
@@ -713,149 +706,78 @@ mod tests {
     }
 
     #[test]
-    fn strips_preamble_line() {
-        let text = "Sure! Here's a draft reply:\n\nThursday works, see you at 3.";
-        assert_eq!(by_char(plain(), text), "Thursday works, see you at 3.");
-        let text = "Here is a short, friendly response in your voice.\nSounds good to me!";
-        assert_eq!(by_char(plain(), text), "Sounds good to me!");
-    }
-
-    #[test]
-    fn strips_inline_preamble_up_to_colon() {
-        let text = "Sure, here's a reply: Thursday works for me.";
-        assert_eq!(by_char(plain(), text), "Thursday works for me.");
-    }
-
-    #[test]
-    fn keeps_legitimate_openers() {
-        for text in [
-            "Sure, Thursday at 3 works.",
-            "Great news, congrats!",
-            "Here's the deck: https://example.com/deck",
-            "Okay, I'll send it tonight.",
-            "I have a conflict then, can we do Friday?",
-        ] {
-            assert_eq!(by_char(plain(), text), text, "{text}");
+    fn cleans_drafts_streamed_a_character_at_a_time() {
+        // `options|input|output`: p plain text, r raw, g/s/b strip greeting/sign-off/both,
+        // l single line.
+        let cases = [
+            "p|Sure! Here's a draft reply:\n\nThursday works, see you at 3.|Thursday works, see you at 3.",
+            "p|Here is a short, friendly response in your voice.\nSounds good to me!|Sounds good to me!",
+            "p|Sure, here's a reply: Thursday works for me.|Thursday works for me.",
+            "p|Sure, Thursday at 3 works.|Sure, Thursday at 3 works.",
+            "p|Here's the deck: https://example.com/deck|Here's the deck: https://example.com/deck",
+            "p|I have a conflict then, can we do Friday?|I have a conflict then, can we do Friday?",
+            "p|Subject: Re: Thursday\n\n\"Thursday works, see you then.\"|Thursday works, see you then.",
+            "p|“Sounds good!”|Sounds good!",
+            "r|```text\nSounds good, thanks!\n```\n|Sounds good, thanks!",
+            "p|The launch moved to May 3 [1] and the budget is fixed [2][3].|The launch moved to May 3 and the budget is fixed.",
+            "p|See [1, 2].|See.",
+            "p|Use [draft] mode [x1].|Use [draft] mode [x1].",
+            "p|**Yes** — I'll bring the `slides` and ~~cake~~ snacks.|Yes — I'll bring the slides and cake snacks.",
+            "p|# Notes\nAll good|Notes\nAll good",
+            "r|**Yes**, see `main.rs`.|**Yes**, see `main.rs`.",
+            "l|Acme Corp\nLondon office|Acme Corp London office",
+            "g|Hi Sam,\n\nThursday works for me.|Thursday works for me.",
+            "g|Hey Sam, Thursday works for me.|Thursday works for me.",
+            "g|Hiking was great.|Hiking was great.",
+            "p|Hi Sam,\n\nThursday works.|Hi Sam,\n\nThursday works.",
+            "s|Thursday works for me.\n\nBest,\nTanuj|Thursday works for me.",
+            "s|Thursday works for me.\n\nThanks!|Thursday works for me.",
+            "p|Thursday works for me.\n\nBest,\nTanuj|Thursday works for me.\n\nBest,\nTanuj",
+            "p|Thursday works for me.\n\nLet me know if you'd like any changes!|Thursday works for me.",
+            "b|Sure! Here's a draft:\n\n\"Hi Sam,\n\nThursday [1] works.\n\nBest,\nT\"\n\nLet me know if that works!|Thursday works.",
+        ];
+        for case in cases {
+            let [o, text, want] = case.splitn(3, '|').collect::<Vec<_>>()[..] else {
+                panic!("{case}")
+            };
+            let opts = PostOptions {
+                plain_text: o != "r" && o != "l",
+                single_line: o == "l",
+                strip_greeting: o == "g" || o == "b",
+                strip_signoff: o == "s" || o == "b",
+                max_words: None,
+            };
+            assert_eq!(by_char(opts, text), want, "{text:?}");
         }
     }
 
     #[test]
-    fn strips_subject_line_and_wrapping_quotes() {
-        let text = "Subject: Re: Thursday\n\n\"Thursday works, see you then.\"";
-        assert_eq!(by_char(plain(), text), "Thursday works, see you then.");
-        let text = "“Sounds good!”";
-        assert_eq!(by_char(plain(), text), "Sounds good!");
-    }
-
-    #[test]
-    fn strips_code_fence() {
-        let text = "```text\nSounds good, thanks!\n```\n";
-        assert_eq!(
-            by_char(PostOptions::default(), text),
-            "Sounds good, thanks!"
-        );
-    }
-
-    #[test]
-    fn removes_citation_markers_across_splits() {
-        let text = "The launch moved to May 3 [1] and the budget is fixed [2][3].";
-        assert_eq!(
-            by_char(plain(), text),
-            "The launch moved to May 3 and the budget is fixed."
-        );
-        assert_eq!(by_char(plain(), "See [1, 2]."), "See.");
-        // Brackets that are not markers stay.
-        assert_eq!(
-            by_char(plain(), "Use [draft] mode [x1]."),
-            "Use [draft] mode [x1]."
-        );
-    }
-
-    #[test]
-    fn plain_text_strips_markdown_for_chat() {
-        let text = "**Yes** — I'll bring the `slides` and ~~cake~~ snacks.";
-        assert_eq!(
-            by_char(plain(), text),
-            "Yes — I'll bring the slides and cake snacks."
-        );
-        let text = "# Notes\nAll good";
-        assert_eq!(by_char(plain(), text), "Notes\nAll good");
-        // Markdown is kept when plain text is off (comments, documents).
-        let text = "**Yes**, see `main.rs`.";
-        assert_eq!(by_char(PostOptions::default(), text), text);
-    }
-
-    #[test]
-    fn never_emits_trailing_newlines() {
+    fn never_emits_trailing_newlines_or_retracts() {
         let (out, parts) = run(plain(), &["See you then!", "\n", "\n"]);
         assert_eq!(out, "See you then!");
         assert!(parts.iter().all(|p| !p.ends_with('\n')));
-        let (out, _) = run(plain(), &["Line one\n", "Line two\n\n"]);
-        assert_eq!(out, "Line one\nLine two");
-    }
-
-    #[test]
-    fn single_line_folds_newlines() {
-        let opts = PostOptions {
-            single_line: true,
-            ..Default::default()
-        };
         assert_eq!(
-            by_char(opts, "Acme Corp\nLondon office"),
-            "Acme Corp London office"
+            run(plain(), &["Line one\n", "Line two\n\n"]).0,
+            "Line one\nLine two"
         );
-    }
-
-    #[test]
-    fn duplicate_greeting_is_dropped() {
-        let opts = PostOptions {
-            strip_greeting: true,
-            ..plain()
-        };
-        assert_eq!(
-            by_char(opts.clone(), "Hi Sam,\n\nThursday works for me."),
-            "Thursday works for me."
-        );
-        assert_eq!(
-            by_char(opts.clone(), "Hey Sam, Thursday works for me."),
-            "Thursday works for me."
-        );
-        // Not a greeting: "Hiking" starts with "hi".
-        assert_eq!(
-            by_char(opts.clone(), "Hiking was great."),
-            "Hiking was great."
-        );
-        // Without an existing greeting, the draft keeps its own.
-        assert_eq!(
-            by_char(plain(), "Hi Sam,\n\nThursday works."),
-            "Hi Sam,\n\nThursday works."
-        );
-    }
-
-    #[test]
-    fn duplicate_signoff_is_dropped() {
-        let opts = PostOptions {
-            strip_signoff: true,
-            ..plain()
-        };
-        assert_eq!(
-            by_char(opts.clone(), "Thursday works for me.\n\nBest,\nTanuj"),
-            "Thursday works for me."
-        );
-        assert_eq!(
-            by_char(opts.clone(), "Thursday works for me.\n\nThanks!"),
-            "Thursday works for me."
-        );
-        assert_eq!(
-            by_char(plain(), "Thursday works for me.\n\nBest,\nTanuj"),
-            "Thursday works for me.\n\nBest,\nTanuj"
-        );
-    }
-
-    #[test]
-    fn postamble_is_dropped() {
-        let text = "Thursday works for me.\n\nLet me know if you'd like any changes!";
-        assert_eq!(by_char(plain(), text), "Thursday works for me.");
+        // Ordinary text is emitted before the stream ends.
+        let mut p = PostProcessor::new(plain());
+        assert_eq!(p.push("Thursday works ").text, "Thursday works");
+        assert_eq!(p.push("for me").text, " for me");
+        for text in ["```\n**Yes**\n```", "Hello there\n\n\n", "   ", ""] {
+            let mut p = PostProcessor::new(PostOptions {
+                strip_greeting: true,
+                strip_signoff: true,
+                ..plain()
+            });
+            let mut out = String::new();
+            for c in text.chars() {
+                out.push_str(&p.push(&c.to_string()).text);
+                assert_eq!(out, p.text());
+            }
+            out.push_str(&p.finish());
+            assert!(!out.ends_with('\n') && !out.starts_with(char::is_whitespace));
+        }
     }
 
     #[test]
@@ -865,83 +787,26 @@ mod tests {
             ..plain()
         };
         let text = "Thursday works. I will bring the slides. And then we can talk about everything else at length.";
+        let words: Vec<&str> = text.split_inclusive(' ').collect();
         let mut p = PostProcessor::new(opts);
         let mut out = String::new();
-        let mut stopped = false;
-        for w in text.split_inclusive(' ') {
+        for w in words {
             let e = p.push(w);
             out.push_str(&e.text);
             if e.stop {
-                stopped = true;
                 break;
             }
         }
-        assert!(stopped);
         assert_eq!(out, "Thursday works. I will bring the slides.");
         assert!(p.is_finished());
         assert_eq!(p.finish(), "");
     }
 
     #[test]
-    fn emits_early_for_ordinary_text() {
-        // Time to first token: an ordinary reply is emitted before the stream ends.
-        let mut p = PostProcessor::new(plain());
-        let e = p.push("Thursday works ");
-        assert_eq!(e.text, "Thursday works");
-        let e = p.push("for me");
-        assert_eq!(e.text, " for me");
-    }
-
-    #[test]
-    fn emitted_text_is_never_retracted() {
-        let texts = [
-            "Sure! Here's a draft:\n\n\"Hi Sam,\n\nThursday [1] works.\n\nBest,\nT\"\n\nLet me know if that works!",
-            "```\n**Yes**\n```",
-            "Hello there\n\n\n",
-            "   ",
-            "",
-        ];
-        for text in texts {
-            for opts in [
-                plain(),
-                PostOptions {
-                    strip_greeting: true,
-                    strip_signoff: true,
-                    ..plain()
-                },
-            ] {
-                let mut p = PostProcessor::new(opts);
-                let mut out = String::new();
-                for c in text.chars() {
-                    out.push_str(&p.push(&c.to_string()).text);
-                    assert_eq!(out, p.text());
-                }
-                out.push_str(&p.finish());
-                assert_eq!(out, p.text());
-                assert!(!out.ends_with('\n') && !out.starts_with(char::is_whitespace));
-            }
-        }
-    }
-
-    #[test]
-    fn full_wrapped_draft_cleans_up() {
-        let opts = PostOptions {
-            strip_greeting: true,
-            strip_signoff: true,
-            ..plain()
-        };
-        let text = "Sure! Here's a draft:\n\n\"Hi Sam,\n\nThursday [1] works.\n\nBest,\nT\"\n\nLet me know if that works!";
-        assert_eq!(by_char(opts, text), "Thursday works.");
-    }
-
-    #[test]
     fn line_helpers() {
-        assert!(is_signoff("Best,"));
-        assert!(is_signoff("Kind regards"));
-        assert!(is_signoff("--"));
+        assert!(is_signoff("Best,") && is_signoff("Kind regards") && is_signoff("--"));
         assert!(!is_signoff("Best idea ever."));
-        assert!(is_greeting_line("Hi Sam,"));
-        assert!(is_greeting_line("Good morning team!"));
+        assert!(is_greeting_line("Hi Sam,") && is_greeting_line("Good morning team!"));
         assert!(!is_greeting_line("Hiking tomorrow?"));
     }
 }

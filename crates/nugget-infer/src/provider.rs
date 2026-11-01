@@ -9,81 +9,64 @@ use nugget_core::egress::EgressSink;
 use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
 use reqwest::header::{HeaderName, HeaderValue};
+use serde_json::Value;
 
 use crate::adapters::openai_responses::OpenAiResponsesProvider;
 use crate::adapters::{anthropic::AnthropicProvider, openai_compatible::OpenAiCompatibleProvider};
 use crate::config::{ProviderConfig, Secret, SecretResolver, SystemSecrets, resolve_headers};
-use crate::http::{Http, HttpSettings};
+use crate::http::{Http, HttpSettings, SseDecoder, sse_chat_stream};
 use crate::locality::{HostResolver, Resolved, SystemResolver};
 use crate::types::{ChatRequest, ChatStream, FEATURE_PREWARM, ProviderKind, ProviderMeta};
 
 /// One model behind one API. Implementations are cheap to share (`Arc<dyn Provider>`).
+/// Wrappers must forward every method, including the defaulted ones.
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn id(&self) -> &ProviderId;
     fn meta(&self) -> ProviderMeta;
-    /// False when the provider cannot serve anything right now and fails fast without
-    /// contacting anything (a local runtime slot whose model is not installed), so that callers
-    /// resolving a provider ahead of a request (status, prewarm) skip it as the request's own
-    /// fallback would. The default is true.
+    /// False when the provider would fail fast without contacting anything (a local runtime slot
+    /// whose model is not installed), so callers resolving a provider ahead of a request skip it.
     fn available(&self) -> bool {
         true
     }
     /// Start a streaming chat. Transient HTTP failures are retried before the stream starts;
     /// errors after that arrive as `Err` items and end the stream.
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream>;
-    /// Embed documents (passages to be searched), one vector per input in order.
-    /// `Error::Unsupported` if the API has none.
+    /// Embed documents, one vector per input in order. `Error::Unsupported` if the API has none.
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>;
-    /// Embed search queries, one vector per input in order. Models trained with task prefixes
-    /// embed queries and documents differently; the default treats queries as documents.
-    /// Wrappers must forward both this and [`Provider::embed`].
+    /// Embed search queries; the default treats queries as documents.
     async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         self.embed(texts).await
     }
-    /// The capability probe's embeddings check: the same request as [`Provider::embed`] with
-    /// fixed, non-user texts, recorded in the egress ledger under `probe` rather than `embed`
-    /// (GG8 round 2, R2-4). Wrappers forward it.
+    /// The capability probe's embeddings check: like [`Provider::embed`] but recorded in the
+    /// egress ledger under `probe`.
     async fn embed_probe(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         self.embed(texts).await
     }
     /// [`Provider::embed`] with the item each text comes from (`items[i]` for `texts[i]`; empty
-    /// when unknown), so the egress ledger lists the items whose content left the device. The
-    /// default ignores `items`; adapters that call a server record them. Wrappers forward it.
+    /// when unknown), so the egress ledger lists the items whose content left the device.
     async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
         let _ = items;
         self.embed(texts).await
     }
-    /// The model's task prefixes as `(query, document)` (see [`crate::embed_prefixes`]); empty
-    /// for models without them. Providers send texts as given: callers prepend these, and only
-    /// to texts of an index built with them (see `nugget_store::Store::embedding_prefixes`), so
-    /// an index embedded without prefixes keeps getting prefix-free queries. Wrappers forward it.
+    /// The model's task prefixes as `(query, document)` (see [`crate::embed_prefixes`]). Texts
+    /// are sent as given: callers prepend these, only for an index built with them.
     fn embed_prefixes(&self) -> (String, String) {
         (String::new(), String::new())
     }
 
-    /// Get ready for an imminent request without sending any user content: resolve, connect and
-    /// complete the TLS handshake so the connection sits warm in the pool (HTTP/2 keep-alive),
-    /// and the next [`Provider::chat`] skips that latency. The built-in remote adapters make one
-    /// cheap authenticated `GET …/models` request, recorded in the egress ledger under
-    /// [`FEATURE_PREWARM`] with no items. Best effort: callers may ignore the error. The default
-    /// does nothing.
+    /// Open a warm connection for an imminent request without sending user content. Remote
+    /// adapters make one authenticated `GET …/models`, recorded under [`FEATURE_PREWARM`] with no
+    /// items. Best effort; the default does nothing.
     async fn prewarm(&self) -> Result<()> {
         Ok(())
     }
 
-    /// Like [`Provider::prewarm`], and also warm the provider's prompt cache with the stable
-    /// prefix of `req` ([`ChatRequest::cache_prefix`]) when the provider supports doing that
-    /// without generating output. Unlike `prewarm`, this DOES send the prefix content (system
-    /// prompt, tools, messages up to the last [`crate::Part::CacheBreakpoint`]), recorded in the
-    /// egress ledger under `req.feature` and `req.items`, so apply the same routing and
+    /// Like [`Provider::prewarm`], and also warm the prompt cache with `req`'s stable prefix
+    /// ([`ChatRequest::cache_prefix`]) where the provider can do that without generating
+    /// output (Anthropic `max_tokens: 0`, llama-server `n_predict: 0`). This DOES send the prefix
+    /// content, recorded under `req.feature` and `req.items`, so apply the same routing and
     /// sensitivity rules as for the real request. The default calls `prewarm`.
-    ///
-    /// - Anthropic: a `max_tokens: 0` request with the same `cache_control` breakpoints (only if
-    ///   the request marks something cacheable).
-    /// - llama-server (`llama_cpp`): `n_predict: 0` with `cache_prompt`, evaluating the prefix
-    ///   into a slot's KV cache.
-    /// - OpenAI Responses and other OpenAI-compatible servers: connection prewarm only.
     async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
         let _ = req;
         self.prewarm().await
@@ -98,11 +81,8 @@ pub fn build_provider(
     build_provider_with(cfg, egress, &SystemSecrets)
 }
 
-/// [`build_provider`] with an explicit secret resolver.
-///
-/// A `base_url` host name other than `localhost` is resolved here, once, with the system resolver
-/// (a blocking lookup; call from a blocking context), and the client is pinned to the result. See
-/// [`crate::locality`].
+/// [`build_provider`] with an explicit secret resolver. A `base_url` host name is resolved here,
+/// once (blocking), and the client pinned to the result (see [`crate::locality`]).
 pub fn build_provider_with(
     cfg: &ProviderConfig,
     egress: Arc<dyn EgressSink>,
@@ -201,9 +181,41 @@ impl Common {
             cfg: cfg.clone(),
         })
     }
-}
 
-impl Common {
+    /// POST `body` and stream the SSE response through `decoder`.
+    pub(crate) async fn stream(
+        &self,
+        path: &str,
+        body: &Value,
+        req: &ChatRequest,
+        decoder: impl SseDecoder,
+    ) -> Result<ChatStream> {
+        let (resp, meter, clock) = self
+            .http
+            .post_json(path, body, &req.feature, &req.items, true)
+            .await?;
+        Ok(sse_chat_stream(
+            self.id.clone(),
+            resp,
+            meter,
+            clock,
+            decoder,
+        ))
+    }
+
+    /// A non-streaming prefix warm-up request (response discarded).
+    pub(crate) async fn prewarm_post(
+        &self,
+        path: &str,
+        body: &Value,
+        req: &ChatRequest,
+    ) -> Result<()> {
+        self.http
+            .post_for_json(path, body, &req.feature, &req.items)
+            .await?;
+        Ok(())
+    }
+
     /// Connection prewarm: one bodiless authenticated `GET {base}/{path}`, response drained and
     /// metered under [`FEATURE_PREWARM`]. The connection then stays in the pool.
     pub(crate) async fn prewarm_get(&self, path: &str) -> Result<()> {

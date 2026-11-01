@@ -1,44 +1,19 @@
 //! A stand-in for llama.cpp's `llama-server`, for tests (built only with the `fake-server`
-//! feature).
+//! feature). Accepts the arguments `nugget-runtime` passes (rejecting anything else), listens on
+//! `--host`/`--port` or a Unix socket (`--host <path>.sock`), requires the `LLAMA_API_KEY` bearer
+//! token everywhere but `/health`, and serves `/health` (503 while "loading"), `/v1/models`,
+//! `/v1/chat/completions` (JSON or SSE; "Hello from fake", or a quote of passage `[1] ` with a
+//! citation), `/v1/embeddings` (8-dim unit vectors), `/v1/rerank` (score = distinct query words
+//! found), `/metrics`, `GET /fake/info` (argv, env var names), `POST /fake/crash` (exit 42) and
+//! `POST /fake/hang` (never answer again).
 //!
-//! It accepts the arguments `nugget-runtime` passes (and rejects anything else, like the real
-//! server), listens on `--host`/`--port` (or, on Unix, on the socket `--host <path>.sock`, like
-//! llama-server), requires the `LLAMA_API_KEY` bearer token on every
-//! endpoint except `/health`, and serves:
-//! - `GET /health`: 503 while "loading" (see `--fake-start-delay-ms`), then `{"status":"ok"}`;
-//! - `GET /v1/models`;
-//! - `POST /v1/chat/completions` (JSON or SSE stream; refused with `--embedding`): replies
-//!   "Hello from fake", unless a message holds numbered passages (a line starting `[1] `, as in
-//!   the daemon's `retrieve.ask` prompt): then it quotes the first words of passage 1's text and
-//!   cites it, `According to your notes, "<up to 8 words>" [1].`, streamed in several chunks;
-//! - `POST /v1/embeddings` (deterministic 8-dim unit vectors; needs `--embedding`);
-//! - `POST /v1/rerank` (also `/rerank`, `/v1/reranking`; needs `--reranking`): each document
-//!   scores the number of distinct query words it contains, Jina/Cohere response shape;
-//! - `GET /metrics` (needs `--metrics`);
-//! - `GET /fake/info`: argv and environment variable *names*; `POST /fake/crash`: exit 42;
-//!   `POST /fake/hang`: from then on accept every request and never answer (a hung server).
-//!
-//! Test controls (extra arguments):
-//! - `--fake-start-delay-ms N`: report "loading" for N ms;
-//! - `--fake-crash-after-ms N`: exit with code 3 N ms after the first healthy `/health` answer
-//!   (so the crash always comes after the supervisor saw the server ready, however slow the host);
-//! - `--fake-crash-once PATH`: with `--fake-crash-after-ms`, crash only if PATH does not exist
-//!   (and create it), so the restarted instance stays up;
-//! - `--fake-exit-immediately CODE`: exit at once (start-up failure);
-//! - `--fake-spawn-child PIDFILE`: start a sleeping child process and write its pid (process
-//!   group cleanup tests);
-//! - `--fake-print-key`: print the API key to stderr (log redaction tests);
-//! - `--fake-ignore-sigterm`: survive SIGTERM (Unix), so a stop takes the whole grace period;
-//! - `--fake-squat PIDFILE`: do not listen; instead start a *separate* process (own process
-//!   group, so not one of ours) that listens on `--port`, and write its pid. Simulates another
-//!   local user grabbing the port before the server binds it;
-//! - `--fake-squatter LOGFILE`: be that process: answer `/health` with ok on `--port` and append
-//!   every request line (and whether it carried an `authorization` header) to LOGFILE; exits
-//!   after 60 s;
-//! - `--fake-sleeper`: just sleep (used for the spawned child).
-//! - `--fake-hang-on-chat`: hang (as `/fake/hang`) on the first chat completion request;
-//! - `--fake-crash-on-chat-once PATH`: exit 42 on a chat completion request if PATH does not
-//!   exist (creating it), so the restarted server answers;
+//! Test controls: `--fake-start-delay-ms N`, `--fake-crash-after-ms N` (exit 3 N ms after the
+//! first healthy `/health`), `--fake-crash-once PATH` (crash only if PATH does not exist yet),
+//! `--fake-exit-immediately CODE`, `--fake-spawn-child PIDFILE` (a sleeping child, for process
+//! group tests), `--fake-print-key`, `--fake-ignore-sigterm`, `--fake-squat PIDFILE` (do not
+//! listen; start an unrelated process that does, on `--port`, as `--fake-squatter LOGFILE`,
+//! logging every request line), `--fake-sleeper`, `--fake-hang-on-chat`,
+//! `--fake-crash-on-chat-once PATH`.
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -586,27 +561,32 @@ async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
             let alias = &srv.opts.alias;
             let cited = cited_reply(&body);
             if body.get("stream").and_then(Value::as_bool) == Some(true) {
-                if let Some(reply) = &cited {
-                    let mut chunks = Vec::new();
-                    let words: Vec<&str> = reply.split_inclusive(' ').collect();
-                    for (i, piece) in words.chunks(3).enumerate() {
-                        let mut delta = json!({"content": piece.concat()});
-                        if i == 0 {
-                            delta["role"] = json!("assistant");
-                        }
-                        chunks.push(json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": delta}]}));
+                let chunk = |choices: Value| json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": choices});
+                let reply = cited.as_deref().unwrap_or("Hello from fake");
+                let words: Vec<&str> = reply.split_inclusive(' ').collect();
+                // The plain reply comes in two chunks ("Hello", " from fake"), a cited one in
+                // chunks of three words.
+                let pieces: Vec<String> = if cited.is_some() {
+                    words.chunks(3).map(|c| c.concat()).collect()
+                } else {
+                    vec!["Hello".into(), " from fake".into()]
+                };
+                let mut chunks = Vec::new();
+                for (i, piece) in pieces.iter().enumerate() {
+                    let mut delta = json!({"content": piece});
+                    if i == 0 {
+                        delta["role"] = json!("assistant");
                     }
-                    chunks.push(json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}));
-                    let n = words.len();
-                    chunks.push(json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": n, "total_tokens": 5 + n}}));
-                    return write_sse(&mut conn, &chunks).await;
+                    chunks.push(chunk(json!([{"index": 0, "delta": delta}])));
                 }
-                let chunks = [
-                    json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": {"role": "assistant", "content": "Hello"}}]}),
-                    json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": {"content": " from fake"}}]}),
-                    json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
-                    json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}}),
-                ];
+                chunks.push(chunk(
+                    json!([{"index": 0, "delta": {}, "finish_reason": "stop"}]),
+                ));
+                let n = if cited.is_some() { words.len() } else { 2 };
+                let mut usage = chunk(json!([]));
+                usage["usage"] =
+                    json!({"prompt_tokens": 5, "completion_tokens": n, "total_tokens": 5 + n});
+                chunks.push(usage);
                 return write_sse(&mut conn, &chunks).await;
             }
             let content = cited.as_deref().unwrap_or("Hello from fake");

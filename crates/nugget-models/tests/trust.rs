@@ -50,74 +50,42 @@ fn paths_in(dir: &std::path::Path) -> Paths {
 }
 
 #[test]
-fn fresh_install_accepts_and_records() {
+fn versions_only_move_forward_and_persist() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("models");
-    let trust = ManifestTrust::open(&root).unwrap();
-    assert!(!trust.path().exists());
     let k = key(1);
-    assert_eq!(trust.accepted_version(&k.verifying_key()).unwrap(), None);
-
-    assert_eq!(accept(&trust, 4, &k).unwrap().version, 4);
-    assert_eq!(trust.path(), root.join(MANIFEST_TRUST_FILE));
-    assert!(trust.path().exists(), "state written, store dir created");
-    assert_eq!(trust.accepted_version(&k.verifying_key()).unwrap(), Some(4));
-}
-
-#[test]
-fn downgrade_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let trust = ManifestTrust::open(dir.path()).unwrap();
-    let k = key(1);
-    accept(&trust, 5, &k).unwrap();
-
-    let err = accept(&trust, 3, &k).unwrap_err();
-    let msg = err.to_string();
-    assert!(matches!(err, Error::Integrity(_)), "{err}");
-    assert!(msg.contains("version 3 is older than version 5"), "{msg}");
-    assert!(msg.contains("rollback"), "{msg}");
-    let prefix = &hex::encode(k.verifying_key().to_bytes())[..16];
-    assert!(msg.contains(prefix), "{msg}");
-    // The refusal does not lower the record.
-    assert_eq!(trust.accepted_version(&k.verifying_key()).unwrap(), Some(5));
-
-    // Also refused after a restart.
-    let reopened = ManifestTrust::open(dir.path()).unwrap();
-    assert!(accept(&reopened, 4, &k).is_err());
-}
-
-#[test]
-fn equal_version_is_accepted() {
-    let dir = tempfile::tempdir().unwrap();
-    let trust = ManifestTrust::open(dir.path()).unwrap();
-    let k = key(1);
-    accept(&trust, 5, &k).unwrap();
-    accept(&trust, 5, &k).unwrap();
-    let reopened = ManifestTrust::open(dir.path()).unwrap();
-    accept(&reopened, 5, &k).unwrap();
-    assert_eq!(
-        reopened.accepted_version(&k.verifying_key()).unwrap(),
-        Some(5)
-    );
-}
-
-#[test]
-fn upgrade_is_accepted_and_persisted() {
-    let dir = tempfile::tempdir().unwrap();
-    let k = key(1);
+    let vk = k.verifying_key();
     {
-        let trust = ManifestTrust::open(dir.path()).unwrap();
-        accept(&trust, 5, &k).unwrap();
+        let trust = ManifestTrust::open(&root).unwrap();
+        assert!(!trust.path().exists());
+        assert_eq!(trust.accepted_version(&vk).unwrap(), None);
+        assert_eq!(accept(&trust, 5, &k).unwrap().version, 5);
+        assert_eq!(trust.path(), root.join(MANIFEST_TRUST_FILE));
+        assert!(trust.path().exists(), "state written, store dir created");
+        accept(&trust, 5, &k).expect("an equal version is accepted");
+
+        let err = accept(&trust, 3, &k).unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, Error::Integrity(_)), "{err}");
+        assert!(
+            msg.contains("version 3 is older than version 5") && msg.contains("rollback"),
+            "{msg}"
+        );
+        assert!(msg.contains(&hex::encode(vk.to_bytes())[..16]), "{msg}");
+        assert_eq!(
+            trust.accepted_version(&vk).unwrap(),
+            Some(5),
+            "a refusal does not lower it"
+        );
         accept(&trust, 9, &k).unwrap();
     }
-    let reopened = ManifestTrust::open(dir.path()).unwrap();
-    assert_eq!(
-        reopened.accepted_version(&k.verifying_key()).unwrap(),
-        Some(9)
-    );
+    // After a restart.
+    let reopened = ManifestTrust::open(&root).unwrap();
+    assert_eq!(reopened.accepted_version(&vk).unwrap(), Some(9));
     assert!(accept(&reopened, 8, &k).is_err());
+    accept(&reopened, 9, &k).unwrap();
     // No temporary files are left behind.
-    let names: Vec<_> = std::fs::read_dir(dir.path())
+    let names: Vec<_> = std::fs::read_dir(&root)
         .unwrap()
         .map(|e| e.unwrap().file_name())
         .collect();
@@ -315,46 +283,37 @@ fn debug_builds_trust_the_dev_key() {
 }
 
 /// A manifest signed by two trusted keys (release + development during a key rotation) advances
-/// both series, so an older manifest signed by only one of them cannot be replayed.
+/// both series, so an older manifest signed by only one of them cannot be replayed; and a
+/// rollback for one signer records nothing for the other (all or nothing).
 #[test]
-fn a_dual_signed_manifest_advances_every_signing_key() {
+fn dual_signed_manifests_advance_every_signing_key() {
     let dir = tempfile::tempdir().unwrap();
     let trust = ManifestTrust::open(dir.path()).unwrap();
     let (a, b) = (key(1), key(2));
     let keys = [a.verifying_key(), b.verifying_key()];
+    let dual = |version| {
+        let bytes = manifest_bytes(version);
+        let sig = format!(
+            "{}\n{}\n",
+            sign_manifest(&bytes, &a),
+            sign_manifest(&bytes, &b)
+        );
+        (bytes, sig)
+    };
     let (b4, s4) = signed(4, &b);
     verify_manifest_checked(&b4, s4.as_bytes(), &keys, &trust).unwrap();
-    let bytes = manifest_bytes(5);
-    let sig = format!(
-        "{}\n{}\n",
-        sign_manifest(&bytes, &a),
-        sign_manifest(&bytes, &b)
-    );
+    let (bytes, sig) = dual(5);
     verify_manifest_checked(&bytes, sig.as_bytes(), &keys, &trust).unwrap();
     assert_eq!(trust.accepted_version(&a.verifying_key()).unwrap(), Some(5));
     assert_eq!(trust.accepted_version(&b.verifying_key()).unwrap(), Some(5));
     // The old manifest signed only by `b` (e.g. a downgraded app that trusts only `b`).
-    let err = verify_manifest_checked(&b4, s4.as_bytes(), &keys, &trust).unwrap_err();
-    assert!(matches!(err, Error::Integrity(_)), "{err}");
-    let err =
-        verify_manifest_checked(&b4, s4.as_bytes(), &[b.verifying_key()], &trust).unwrap_err();
-    assert!(matches!(err, Error::Integrity(_)), "{err}");
-}
+    assert!(verify_manifest_checked(&b4, s4.as_bytes(), &keys, &trust).is_err());
+    assert!(verify_manifest_checked(&b4, s4.as_bytes(), &[b.verifying_key()], &trust).is_err());
 
-/// All or nothing: refused by one signer's record, nothing is recorded for the other.
-#[test]
-fn a_rollback_for_one_signer_records_nothing_for_the_other() {
     let dir = tempfile::tempdir().unwrap();
     let trust = ManifestTrust::open(dir.path()).unwrap();
-    let (a, b) = (key(1), key(2));
-    let keys = [a.verifying_key(), b.verifying_key()];
     accept(&trust, 9, &b).unwrap();
-    let bytes = manifest_bytes(5);
-    let sig = format!(
-        "{}\n{}\n",
-        sign_manifest(&bytes, &a),
-        sign_manifest(&bytes, &b)
-    );
+    let (bytes, sig) = dual(5);
     verify_manifest_checked(&bytes, sig.as_bytes(), &keys, &trust).unwrap_err();
     assert_eq!(trust.accepted_version(&a.verifying_key()).unwrap(), None);
     assert_eq!(trust.accepted_version(&b.verifying_key()).unwrap(), Some(9));

@@ -1,9 +1,5 @@
-//! Idempotent action ids and the ledger that makes a replayed call a no-op.
-//!
-//! An action id is a stable hash of (task id, the model's call id, tool name, canonical
-//! arguments). Replaying the same model output (a retried stream, a resumed run, a duplicated
-//! call) yields the same id, and the ledger returns the recorded result instead of acting again.
-//! A deliberate retry by the model is a new call with a new call id, so it does execute.
+//! Idempotent action ids (a stable hash of task id, call id, tool and canonical arguments) and
+//! the ledger that returns a replayed call's recorded result instead of acting again.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

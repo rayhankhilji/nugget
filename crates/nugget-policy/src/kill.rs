@@ -15,8 +15,8 @@ struct Inner {
 /// A cheap, cloneable handle to a halt flag. [`KillSwitch::global`] is the process-wide one;
 /// [`KillSwitch::new`] makes an independent one (tests, sandboxes).
 ///
-/// Checking is a single atomic load. Engaging runs the registered hooks (the confirmation broker
-/// uses one to deny everything pending; the engine uses one to log the halt).
+/// Checking is a single atomic load. Engaging runs the registered hooks (the engine logs the
+/// halt with one).
 #[derive(Clone, Default)]
 pub struct KillSwitch {
     inner: Arc<Inner>,
@@ -146,15 +146,5 @@ mod tests {
         drop(guard);
         k.halt();
         assert_eq!(n.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn trigger_hook_halts() {
-        let k = KillSwitch::new();
-        let hook = k.trigger_hook();
-        hook();
-        assert!(k.halted());
-        hook();
-        assert!(k.halted());
     }
 }

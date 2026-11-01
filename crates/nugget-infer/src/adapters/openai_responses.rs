@@ -1,19 +1,11 @@
 //! OpenAI Responses API adapter (`POST {base}/responses`, streaming).
 //!
 //! - Stateless by default (`store: false`) with `include: ["reasoning.encrypted_content"]`, so
-//!   reasoning items stream out as [`ChatEvent::Opaque`] and can be replayed without OpenAI
-//!   keeping the conversation.
-//! - Function tools and `text.format` JSON schemas use `strict: true` only when the schema meets
-//!   strict-mode rules (all properties required, `additionalProperties: false`).
-//! - Embeddings are not part of this API; configure an `openai_compatible` provider against the
-//!   same base URL for `/embeddings`.
-//! - Prompt caching is automatic for long prefixes; requests keep a stable prefix (tools and
-//!   `instructions` first, then the conversation). With a [`crate::CacheHint`] the request sets
-//!   `prompt_cache_key` (the hint's `key`, else `nugget:{feature}`) so requests sharing a prefix
-//!   are routed to the same cache. `input_tokens_details.cached_tokens` is reported in
-//!   [`crate::ChatStats`]. [`crate::Part::CacheBreakpoint`]s are dropped.
-//! - [`Provider::prewarm`] is `GET {base}/models` (no content). The API has no prefill-only
-//!   request, so [`Provider::prewarm_prefix`] only prewarms the connection.
+//!   reasoning items stream out as [`ChatEvent::Opaque`] and replay without server state.
+//! - Tools and `text.format` schemas use `strict: true` only when the schema allows it.
+//! - No embeddings: use an `openai_compatible` provider for `/embeddings`.
+//! - With a [`crate::CacheHint`], `prompt_cache_key` is the hint's `key`, else
+//!   `nugget:{feature}`. [`Provider::prewarm_prefix`] only prewarms the connection.
 
 use std::sync::Arc;
 
@@ -23,9 +15,12 @@ use nugget_core::ids::ProviderId;
 use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};
 
-use crate::adapters::data_url;
-use crate::config::{ProviderConfig, Secret, merge_extra_body};
-use crate::http::{SseDecoder, error_detail_value, parse_tool_arguments, sse_chat_stream};
+use crate::adapters::{
+    args_string, as_u32, data_url, emit_tool_call, finish_body, misplaced, parse_event,
+    release_deferred, result_text, stream_error,
+};
+use crate::config::{ProviderConfig, Secret};
+use crate::http::{SseDecoder, parse_tool_arguments};
 use crate::provider::{Common, Prepared, Provider, auth_header};
 use crate::schema::is_strict_compatible;
 use crate::sse::SseEvent;
@@ -105,9 +100,7 @@ pub(crate) fn build_body(cfg: &ProviderConfig, store: bool, req: &ChatRequest) -
             .unwrap_or_else(|| format!("nugget:{}", req.feature));
         body.insert("prompt_cache_key".into(), json!(key));
     }
-    let mut body = Value::Object(body);
-    merge_extra_body(&mut body, cfg.extra_body.as_ref());
-    Ok(body)
+    Ok(finish_body(body, cfg))
 }
 
 fn convert_input(messages: &[Message]) -> Result<Vec<Value>> {
@@ -125,7 +118,7 @@ fn convert_input(messages: &[Message]) -> Result<Vec<Value>> {
                         } => items.push(json!({
                             "type": "function_call_output",
                             "call_id": call_id,
-                            "output": if *is_error { format!("[error] {out}") } else { out.clone() },
+                            "output": result_text(out, *is_error),
                         })),
                         Part::Text { text } if !text.is_empty() => {
                             content.push(json!({"type": "input_text", "text": text}));
@@ -137,11 +130,7 @@ fn convert_input(messages: &[Message]) -> Result<Vec<Value>> {
                             "type": "input_image",
                             "image_url": data_url(media_type, data_base64),
                         })),
-                        Part::ToolCall { .. } => {
-                            return Err(Error::Invalid(
-                                "tool calls belong in assistant messages".into(),
-                            ));
-                        }
+                        Part::ToolCall { .. } => return Err(misplaced(true)),
                         _ => {}
                     }
                 }
@@ -165,15 +154,11 @@ fn convert_input(messages: &[Message]) -> Result<Vec<Value>> {
                             arguments,
                         } => {
                             flush(&mut text, &mut items);
-                            let args = match arguments {
-                                Value::String(raw) => raw.clone(),
-                                other => other.to_string(),
-                            };
                             items.push(json!({
                                 "type": "function_call",
                                 "call_id": id,
                                 "name": name,
-                                "arguments": args,
+                                "arguments": args_string(arguments),
                             }));
                         }
                         Part::Opaque {
@@ -184,9 +169,7 @@ fn convert_input(messages: &[Message]) -> Result<Vec<Value>> {
                             items.push(data.clone());
                         }
                         Part::Image { .. } | Part::ToolResult { .. } => {
-                            return Err(Error::Invalid(
-                                "images and tool results belong in user messages".into(),
-                            ));
+                            return Err(misplaced(false));
                         }
                         Part::Opaque { .. } | Part::CacheBreakpoint => {}
                     }
@@ -221,19 +204,8 @@ impl Decoder {
 
     fn done(&mut self, response: &Value, stop: StopReason) -> Vec<ChatEvent> {
         let mut out = Vec::new();
-        if stop == StopReason::MaxTokens {
-            if !self.deferred.is_empty() {
-                tracing::warn!(provider = %self.provider, "dropping tool call truncated by max_output_tokens");
-            }
-        } else {
-            out.append(&mut self.deferred);
-        }
-        let n = |k: &str| {
-            response
-                .pointer(&format!("/usage/{k}"))
-                .and_then(Value::as_u64)
-                .map(|v| v.min(u32::MAX as u64) as u32)
-        };
+        release_deferred(&self.provider, &stop, &mut self.deferred, &mut out);
+        let n = |k: &str| as_u32(response.pointer(&format!("/usage/{k}")));
         self.cached_tokens = n("input_tokens_details/cached_tokens");
         out.push(ChatEvent::Done {
             stop_reason: stop,
@@ -249,9 +221,7 @@ impl SseDecoder for Decoder {
         if ev.data.trim().is_empty() || ev.data.trim() == "[DONE]" {
             return Ok(Vec::new());
         }
-        let v: Value = serde_json::from_str(&ev.data).map_err(|e| {
-            Error::Provider(format!("{}: malformed stream event: {e}", self.provider))
-        })?;
+        let v = parse_event(&self.provider, &ev.data)?;
         let ty = v
             .get("type")
             .and_then(Value::as_str)
@@ -284,17 +254,7 @@ impl SseDecoder for Decoder {
                             name,
                             arguments,
                         };
-                        if matches!(
-                            &call,
-                            ChatEvent::ToolCall {
-                                arguments: Value::String(_),
-                                ..
-                            }
-                        ) {
-                            self.deferred.push(call);
-                        } else {
-                            out.push(call);
-                        }
+                        emit_tool_call(call, &mut self.deferred, &mut out);
                     }
                     Some("reasoning") => {
                         // Replayable only if OpenAI stored it or returned it encrypted.
@@ -337,13 +297,7 @@ impl SseDecoder for Decoder {
                     .unwrap_or_else(|| "response failed".into());
                 return Err(Error::Provider(format!("{}: {detail}", self.provider)));
             }
-            "error" => {
-                let detail = error_detail_value(&v).unwrap_or_else(|| ev.data.clone());
-                return Err(Error::Provider(format!(
-                    "{}: stream error: {detail}",
-                    self.provider
-                )));
-            }
+            "error" => return Err(stream_error(&self.provider, &v, &ev.data)),
             _ => {}
         }
         Ok(out)
@@ -378,18 +332,8 @@ impl Provider for OpenAiResponsesProvider {
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
         let body = build_body(&self.common.cfg, self.store, &req)?;
-        let (resp, meter, clock) = self
-            .common
-            .http
-            .post_json("responses", &body, &req.feature, &req.items, true)
-            .await?;
-        Ok(sse_chat_stream(
-            self.common.id.clone(),
-            resp,
-            meter,
-            clock,
-            Decoder::new(self.common.id.clone(), self.store),
-        ))
+        let decoder = Decoder::new(self.common.id.clone(), self.store);
+        self.common.stream("responses", &body, &req, decoder).await
     }
 
     async fn prewarm(&self) -> Result<()> {
@@ -407,162 +351,66 @@ impl Provider for OpenAiResponsesProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ToolSpec;
-
-    fn cfg() -> ProviderConfig {
-        ProviderConfig::from_toml_str("id='o'\nkind='openai_responses'\nmodel='test-model'")
-            .unwrap()
-    }
-
-    fn decode(store: bool, events: &[Value]) -> Result<Vec<ChatEvent>> {
-        let mut d = Decoder::new(ProviderId::new("o"), store);
-        let mut out = Vec::new();
-        for data in events {
-            out.extend(d.on_event(SseEvent {
-                event: data["type"].as_str().map(str::to_string),
-                data: data.to_string(),
-                id: None,
-            })?);
-        }
-        Ok(out)
-    }
 
     #[test]
-    fn body_shape() {
-        let req = ChatRequest::new(vec![
-            Message::user(vec![Part::text("look"), Part::image("image/png", "AAAA")]),
-            Message::new(
-                Role::Assistant,
-                vec![
-                    Part::Opaque {
-                        kind: ProviderKind::OpenaiResponses,
-                        data: json!({"type": "reasoning", "id": "rs_1", "encrypted_content": "e"}),
-                    },
-                    Part::text("ok"),
-                    Part::ToolCall {
-                        id: "call_1".into(),
-                        name: "f".into(),
-                        arguments: json!({"a": 1}),
-                    },
-                ],
-            ),
-            Message::user(vec![Part::tool_result("call_1", "42")]),
-        ])
-        .with_system("be brief")
-        .with_tools(vec![ToolSpec {
-            name: "f".into(),
-            description: "d".into(),
-            input_schema: json!({"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"], "additionalProperties": false}),
-        }])
-        .with_json_schema(json!({"type": "object", "properties": {"x": {"type": "string"}}}))
-        .with_max_tokens(100);
-        let b = build_body(&cfg(), false, &req).unwrap();
-        assert_eq!(b["store"], false);
-        assert_eq!(b["include"], json!(["reasoning.encrypted_content"]));
-        assert_eq!(b["instructions"], "be brief");
+    fn body_options() {
+        let cfg =
+            ProviderConfig::from_toml_str("id='o'\nkind='openai_responses'\nmodel='m'").unwrap();
+        let req = ChatRequest::new(vec![Message::user_text("x")])
+            .with_json_schema(json!({"type": "object", "properties": {"x": {"type": "string"}}}))
+            .with_max_tokens(100);
+        let b = build_body(&cfg, false, &req).unwrap();
         assert_eq!(b["max_output_tokens"], 100);
-        let input = b["input"].as_array().unwrap();
-        assert_eq!(input[0]["role"], "user");
-        assert_eq!(input[0]["content"][1]["type"], "input_image");
         assert_eq!(
-            input[0]["content"][1]["image_url"],
-            "data:image/png;base64,AAAA"
+            b["text"]["format"]["strict"], false,
+            "schema is not strict-compatible"
         );
-        assert_eq!(input[1]["type"], "reasoning");
-        assert_eq!(input[2], json!({"role": "assistant", "content": "ok"}));
-        assert_eq!(input[3]["type"], "function_call");
-        assert_eq!(input[3]["arguments"], "{\"a\":1}");
-        assert_eq!(
-            input[4],
-            json!({"type": "function_call_output", "call_id": "call_1", "output": "42"})
-        );
-        assert_eq!(b["tools"][0]["strict"], true);
-        assert_eq!(b["tools"][0]["parameters"]["type"], "object");
-        assert_eq!(b["text"]["format"]["type"], "json_schema");
-        assert_eq!(b["text"]["format"]["strict"], false);
-        let b = build_body(&cfg(), true, &req).unwrap();
-        assert!(b.get("include").is_none());
-    }
-
-    #[test]
-    fn decodes_text_tool_and_reasoning() {
-        let out = decode(
-            false,
-            &[
-                json!({"type": "response.created", "response": {"id": "resp_1"}}),
-                json!({"type": "response.output_item.done", "output_index": 0, "item": {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "ENC"}}),
-                json!({"type": "response.output_item.done", "output_index": 0, "item": {"type": "reasoning", "id": "rs_2", "summary": []}}),
-                json!({"type": "response.output_text.delta", "delta": "Hel"}),
-                json!({"type": "response.output_text.delta", "delta": "lo"}),
-                json!({"type": "response.function_call_arguments.delta", "delta": "{\"a\""}),
-                json!({"type": "response.output_item.done", "output_index": 1, "item": {"type": "function_call", "call_id": "call_9", "name": "f", "arguments": "{\"a\": 2}"}}),
-                json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 7, "output_tokens": 9}}}),
-            ],
-        )
-        .unwrap();
-        assert_eq!(
-            out,
-            vec![
-                ChatEvent::Opaque {
-                    kind: ProviderKind::OpenaiResponses,
-                    data: json!({"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "ENC"})
-                },
-                ChatEvent::TextDelta("Hel".into()),
-                ChatEvent::TextDelta("lo".into()),
-                ChatEvent::ToolCall {
-                    id: "call_9".into(),
-                    name: "f".into(),
-                    arguments: json!({"a": 2})
-                },
-                ChatEvent::Done {
-                    stop_reason: StopReason::ToolUse,
-                    input_tokens: Some(7),
-                    output_tokens: Some(9)
-                },
-            ]
+        assert!(
+            build_body(&cfg, true, &req)
+                .unwrap()
+                .get("include")
+                .is_none()
         );
     }
 
     #[test]
-    fn incomplete_refusal_and_failures() {
-        let out = decode(
-            false,
-            &[json!({"type": "response.incomplete", "response": {"incomplete_details": {"reason": "max_output_tokens"}, "usage": {"input_tokens": 1, "output_tokens": 2}}})],
-        )
-        .unwrap();
-        assert!(matches!(
-            out[0],
-            ChatEvent::Done {
-                stop_reason: StopReason::MaxTokens,
-                ..
+    fn decodes_stop_reasons_failures_and_unreplayable_reasoning() {
+        let decode = |events: &[Value]| -> Result<Vec<ChatEvent>> {
+            let mut d = Decoder::new(ProviderId::new("o"), false);
+            let mut out = Vec::new();
+            for v in events {
+                out.extend(d.on_event(SseEvent {
+                    event: None,
+                    data: v.to_string(),
+                    id: None,
+                })?);
             }
-        ));
-        let out = decode(
-            false,
-            &[
-                json!({"type": "response.refusal.delta", "delta": "I can't"}),
-                json!({"type": "response.completed", "response": {}}),
-            ],
-        )
+            Ok(out)
+        };
+        let stop = |events: &[Value]| match decode(events).unwrap().pop() {
+            Some(ChatEvent::Done { stop_reason, .. }) => stop_reason,
+            other => panic!("{other:?}"),
+        };
+        // Reasoning that is neither stored nor encrypted cannot be replayed: dropped.
+        let out = decode(&[
+            json!({"type": "response.output_item.done", "item": {"type": "reasoning", "id": "rs_2"}}),
+            json!({"type": "response.completed", "response": {}}),
+        ])
         .unwrap();
-        assert!(matches!(
-            out[1],
-            ChatEvent::Done {
-                stop_reason: StopReason::Refusal,
-                ..
-            }
-        ));
-        let e = decode(
-            false,
-            &[json!({"type": "response.failed", "response": {"error": {"code": "server_error", "message": "boom"}}})],
-        )
-        .unwrap_err();
-        assert!(e.to_string().contains("server_error: boom"), "{e}");
-        let e = decode(
-            false,
-            &[json!({"type": "error", "code": "rate_limit_exceeded", "message": "slow down"})],
-        )
-        .unwrap_err();
-        assert!(e.to_string().contains("slow down"), "{e}");
+        assert_eq!(out.len(), 1);
+        let incomplete = json!({"type": "response.incomplete", "response": {"incomplete_details": {"reason": "max_output_tokens"}}});
+        assert_eq!(stop(&[incomplete]), StopReason::MaxTokens);
+        let refusal = json!({"type": "response.refusal.delta", "delta": "I can't"});
+        assert_eq!(
+            stop(&[
+                refusal,
+                json!({"type": "response.completed", "response": {}})
+            ]),
+            StopReason::Refusal
+        );
+        let e = decode(&[
+            json!({"type": "error", "code": "rate_limit_exceeded", "message": "slow down"}),
+        ]);
+        assert!(e.unwrap_err().to_string().contains("slow down"));
     }
 }

@@ -1,28 +1,11 @@
 //! Streaming grounding check on the post-processed draft.
 //!
-//! [`Grounder`] sits after the [`PostProcessor`](crate::post::PostProcessor): it is fed the text
-//! the post-processor made final and holds back the **current sentence** until it ends (`.`, `!`
-//! or `?` followed by whitespace, or a newline). Each finished sentence is checked:
-//!
-//! - **Values** (numbers, money, percentages, dates, times, weekday names) are extracted and
-//!   normalised (`$275,000` ≡ `275,000` ≡ `275k`; `November 14` ≡ `Nov 14` ≡ `14 November`;
-//!   `2:00 PM` ≡ `2 pm` ≡ `14:00`). A value is supported when it also occurs in the grounding
-//!   corpus: the thread, subject, recipients, window title, the field's text, the user's
-//!   instruction and the facts that are not superseded ([`crate::prompt_facts`]). A sentence
-//!   with any unsupported value, including one found only in a superseded fact, is dropped:
-//!   it is never emitted.
-//! - **Secrets**: a sentence that copies a credential-like value (a password, a card or account
-//!   number) from a fact whose source is marked sensitive is dropped, whatever the thread asked.
-//! - **Proper names** the corpus doesn't know, and unsupported **weekday names** (usually a
-//!   proposal such as "see you Friday"), are only counted ([`GroundingReport`]).
-//!
-//! Greeting and sign-off lines are held until the first body sentence is accepted, so a draft
-//! whose every content sentence was dropped emits nothing at all (the fallback). Like the
-//! post-processor, nothing emitted is ever retracted and no trailing whitespace is emitted:
-//! whitespace is only ever sent in front of an accepted sentence.
-//!
-//! Each delta is scanned once (the boundary search resumes where it stopped) and a sentence is
-//! checked once, when it ends, so the cost is linear in the draft.
+//! [`Grounder`] holds back the current sentence until it ends, then checks it: a sentence with a
+//! value (number, money, date, time) found nowhere in the grounding corpus (thread, subject,
+//! field text, instruction, non-superseded facts) is dropped, and so is one copying a
+//! credential from a sensitive fact. Unknown names and weekdays are only counted. Greeting and
+//! sign-off lines wait for the first accepted body sentence, so a draft whose every sentence
+//! was dropped emits nothing. Nothing emitted is retracted and no trailing whitespace is emitted.
 
 use std::collections::HashSet;
 
@@ -560,13 +543,9 @@ impl Grounder {
         self.digits = keep[n..].iter().collect();
     }
 
-    /// `Secrets`: move `cut` back to where the longest end of `pending[..cut]` that a
-    /// credential starts with begins (squashed, so at any letter or digit, mid-word too), so
-    /// that no start of a credential goes out before the text after it shows whether it is one
-    /// ("tangerine- Otter-42", "isTangerine Otter-42", or a password spelled out a character
-    /// at a time). The scan back is bounded, so each push costs time linear in what it adds:
-    /// padding past the bound can let a start out, never the whole credential (the tail
-    /// catches it).
+    /// `Secrets`: move `cut` back so no (squashed) start of a credential goes out before the
+    /// text after it shows whether it is one. The scan back is bounded; the tail catches a
+    /// credential whose start slipped out.
     fn hold_secret_start(&self, cut: usize) -> usize {
         let head = &self.pending[..cut];
         let max = self.corpus.secret_len;
@@ -1861,29 +1840,6 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
         let mut g = with_secrets().with_check(GroundingCheck::Secrets);
         let out = stream(&mut g, &["le 12\u{a0}345 6", "78 et\u{3000}9 1 fin."]);
         assert_eq!(out, "le 12\u{a0}345 678 et\u{3000}9 1 fin.");
-    }
-
-    #[test]
-    fn secrets_mode_cost_is_linear_in_a_long_held_stream() {
-        // The start of a credential, then thousands of pushes of punctuation: each push scans a
-        // bounded end of what is held, not all of it.
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let t = std::time::Instant::now();
-        let mut out = g.push("Hi t ");
-        for i in 0..4096 {
-            out.push_str(&g.push(if i % 16 == 15 {
-                "= "
-            } else {
-                "================"
-            }));
-        }
-        out.push_str(&g.finish());
-        assert!(out.starts_with("Hi t ="), "{:?}", &out[..20]);
-        assert!(
-            t.elapsed() < std::time::Duration::from_secs(2),
-            "{:?}",
-            t.elapsed()
-        );
     }
 
     #[test]

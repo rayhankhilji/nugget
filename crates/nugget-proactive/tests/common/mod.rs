@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use nugget_core::Result;
 use nugget_core::capability::Locality;
-use nugget_core::ids::{ItemRef, ProviderId};
+use nugget_core::ids::{ItemKey, ItemRef, ProviderId, SourceId};
 use nugget_graph::{
     ClaimObject, ClaimStatus, EntityKind, Evidence, GraphStore, Identifier, NewClaim, NewEntity,
 };
@@ -21,7 +21,8 @@ use nugget_proactive::{
     NoteExecutor, ProactiveConfig, Reminder, ReminderExecutor, ResearchNote,
 };
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
-use serde_json::{Value, json};
+use serde_json::json;
+use time::format_description::well_known::Rfc3339;
 use time::macros::datetime;
 use time::{Duration, OffsetDateTime};
 
@@ -38,75 +39,68 @@ pub fn cfg() -> ProactiveConfig {
     }
 }
 
-pub struct Mail<'a> {
-    pub key: &'a str,
-    pub from: &'a str,
-    pub to: &'a [&'a str],
-    pub subject: &'a str,
-    pub body: &'a str,
-    pub days_ago: f64,
-    pub message_id: &'a str,
-    pub in_reply_to: Option<&'a str>,
-    pub labels: &'a [&'a str],
-    pub extra: Value,
-    pub sensitive: bool,
-}
-
-impl Default for Mail<'_> {
-    fn default() -> Self {
-        Self {
-            key: "",
-            from: "",
-            to: &[ME],
-            subject: "",
-            body: "",
-            days_ago: 2.0,
-            message_id: "",
-            in_reply_to: None,
-            labels: &["INBOX"],
-            extra: json!({}),
-            sensitive: false,
-        }
+pub fn mail_ref(key: &str) -> ItemRef {
+    ItemRef {
+        source: SourceId::new("gmail:me"),
+        key: ItemKey::new(key),
     }
 }
 
-pub fn put_mail(store: &Store, m: Mail<'_>) -> ItemRef {
-    let date = now() - Duration::seconds_f64(m.days_ago * 86_400.0);
-    let mut extracted = json!({
-        "from": m.from,
-        "to": m.to,
-        "subject": m.subject,
-        "date": date.format(&time::format_description::well_known::Rfc3339).unwrap(),
-        "message_id": m.message_id,
-    });
-    if let Some(r) = m.in_reply_to {
-        extracted["in_reply_to"] = json!([r]);
-        extracted["references"] = json!([r]);
-    }
-    if let Value::Object(extra) = &m.extra {
-        for (k, v) in extra {
-            extracted[k] = v.clone();
+/// Puts mail, one per line: `key|from|to|subject|days ago|labels|reply to|flags|body`. An empty
+/// `from` or `to` is the user, empty labels are `INBOX` (`SENT` when from the user), `reply to`
+/// is the key of the message answered, flags are `unsub`, `bulk` and `sensitive`. Message ids
+/// are `<key@test>`; `\n` in the body is a newline.
+pub fn put_mails(store: &Store, table: &str) {
+    for line in table.lines().filter(|l| !l.trim().is_empty()) {
+        let f: Vec<&str> = line.splitn(9, '|').collect();
+        let [key, from, to, subject, days, labels, reply, flags, body] = f[..] else {
+            panic!("bad mail line: {line}")
+        };
+        let from = if from.is_empty() { ME } else { from };
+        let to: Vec<&str> = if to.is_empty() {
+            vec![ME]
+        } else {
+            to.split(',').collect()
+        };
+        let labels: Vec<&str> = match labels {
+            "" if from == ME => vec!["SENT"],
+            "" => vec!["INBOX"],
+            l => l.split(',').collect(),
+        };
+        let date = now() - Duration::seconds_f64(days.parse::<f64>().unwrap() * 86_400.0);
+        let body = body.replace("\\n", "\n");
+        let mut extracted = json!({
+            "from": from,
+            "to": to,
+            "subject": subject,
+            "date": date.format(&Rfc3339).unwrap(),
+            "message_id": format!("<{key}@test>"),
+        });
+        if !reply.is_empty() {
+            extracted["in_reply_to"] = json!([format!("<{reply}@test>")]);
+            extracted["references"] = extracted["in_reply_to"].clone();
         }
+        if flags.contains("unsub") {
+            extracted["list_unsubscribe"] = json!("<mailto:u@list.test>");
+        }
+        if flags.contains("bulk") {
+            extracted["headers"] = json!({"Precedence": "bulk"});
+        }
+        let meta = json!({
+            "source": {"labels": labels},
+            "mime": "message/rfc822",
+            "extracted": extracted,
+            "sensitive": flags.contains("sensitive"),
+            "url": format!("https://mail.example/{key}"),
+        });
+        let item = NewItem::new("gmail:me", key, content_hash(format!("{key}{body}")))
+            .with_title(subject)
+            .with_mime("message/rfc822")
+            .with_text(body)
+            .with_modified_at(date)
+            .with_metadata(meta);
+        store.upsert_item(&item).unwrap();
     }
-    let meta = json!({
-        "source": {"labels": m.labels},
-        "mime": "message/rfc822",
-        "extracted": extracted,
-        "sensitive": m.sensitive,
-        "url": format!("https://mail.example/{}", m.key),
-    });
-    let item = NewItem::new(
-        "gmail:me",
-        m.key,
-        content_hash(format!("{}{}", m.key, m.body)),
-    )
-    .with_title(m.subject)
-    .with_mime("message/rfc822")
-    .with_text(m.body)
-    .with_modified_at(date)
-    .with_metadata(meta);
-    store.upsert_item(&item).unwrap();
-    item.item
 }
 
 pub fn put_event(
@@ -116,10 +110,11 @@ pub fn put_event(
     start: OffsetDateTime,
     attendees: &[&str],
 ) -> ItemRef {
-    let fmt = |t: OffsetDateTime| {
-        t.format(&time::format_description::well_known::Rfc3339)
-            .unwrap()
-    };
+    let fmt = |t: OffsetDateTime| t.format(&Rfc3339).unwrap();
+    let people: Vec<_> = attendees
+        .iter()
+        .map(|a| json!({"email": a, "name": null, "resource": false}))
+        .collect();
     let meta = json!({
         "source": {
             "event_id": key,
@@ -127,7 +122,7 @@ pub fn put_event(
             "status": "confirmed",
             "start": {"date_time": fmt(start)},
             "end": {"date_time": fmt(start + Duration::hours(1))},
-            "attendees": attendees.iter().map(|a| json!({"email": a, "name": null, "resource": false})).collect::<Vec<_>>(),
+            "attendees": people,
             "location": "Zoom",
         },
         "mime": "text/plain",
@@ -154,7 +149,7 @@ pub fn put_note(store: &Store, key: &str, title: &str, text: &str) -> ItemRef {
     item.item
 }
 
-/// Item keys of the fixture, by role.
+/// Item refs of the fixture, by role.
 pub struct Fixture {
     pub store: Store,
     pub unanswered: ItemRef,
@@ -166,389 +161,155 @@ pub struct Fixture {
     pub note: ItemRef,
 }
 
-/// The full fixture: mail threads (answered and unanswered), newsletters and automated mail,
-/// events, receipts, a sent promise, a note, and graph commitments.
+/// Ana's unanswered question (the fixture's only unanswered thread).
+pub const ANA: &str = "m-ana-1|Ana Ruiz <ana@acme.io>||Pricing for the pilot|3|||\
+|Hi,\\n\\nCould you send over the pricing for the pilot? We'd like to decide this week.\\n\\nThanks, Ana";
+
+/// The full fixture: an unanswered and an answered thread, newsletters and automated mail
+/// (never cards), mail too old and too fresh, a sent promise and a kept one, a renewal and a
+/// trial (each after an earlier mail from the vendor) and a past receipt, events (external
+/// tomorrow, internal, in 5 days), a note and graph commitments.
 pub fn fixture() -> Fixture {
     let store = Store::open_in_memory().unwrap();
-
-    // 1. Unanswered: Ana asks a question 3 days ago.
-    let unanswered = put_mail(
+    put_mails(&store, ANA);
+    put_mails(
         &store,
-        Mail {
-            key: "m-ana-1",
-            from: "Ana Ruiz <ana@acme.io>",
-            subject: "Pricing for the pilot",
-            body: "Hi,\n\nCould you send over the pricing for the pilot? We'd like to decide this week.\n\nThanks, Ana",
-            days_ago: 3.0,
-            message_id: "<ana-1@acme.io>",
-            ..Default::default()
-        },
+        "\
+m-bob-1|Bob Lee <bob@globex.com>||Lunch next week?|4||||Are you free for lunch next Tuesday?
+m-bob-2||bob@globex.com|Re: Lunch next week?|3.5||m-bob-1||Tuesday works, see you then.\\n\\nOn Sat, Bob wrote:\\n> Are you free
+m-news-1|The Weekly <newsletter@weekly.news>||This week in AI|2|||unsub|Top stories... Unsubscribe here.
+m-news-2|Deals <deals@shop.example>||Your exclusive offer?|2|INBOX,CATEGORY_PROMOTIONS|||Don't miss out, can you believe these prices?
+m-noreply|GitHub <noreply@github.com>||[repo] New issue opened|2||||Someone opened an issue. Can you take a look?
+m-bulk|Team Updates <carol@bigco.com>||Org update|2|||bulk|Please read the attached update?
+m-old|Dan Wu <dan@initech.com>||Old question|20||||Any update?
+m-fresh|Eve Park <eve@initech.com>||Quick one|0.1||||Got a minute?
+m-promise||Frank Ode <frank@partner.org>|Partnership deck|2||||Great talking today. I'll send the deck by Friday.\\n\\nBest
+m-kept-1||gina@partner.org|Notes|5||||I'll share my notes tomorrow.
+m-kept-2||gina@partner.org|Re: Notes|4||m-kept-1||Here are my notes.
+m-cloudy-receipt|Cloudy Billing <billing@cloudy.io>||Your receipt from Cloudy|26||||Thanks for your purchase. Pro plan, monthly: $49.00.
+m-streamco-welcome|StreamCo <no-reply@streamco.tv>||Welcome to StreamCo|11||||Your account is ready. Enjoy watching.
+m-renew|Cloudy Billing <billing@cloudy.io>||Your subscription renews soon|1|||unsub|Your Pro plan will renew on November 2, 2026. You will be charged $49.00 to the card on file.
+m-trial|StreamCo <no-reply@streamco.tv>||Your free trial ends in 3 days|0.5||||Your free trial ends in 3 days. After that, your plan is €9,99 per month.
+m-receipt-old|Shop <orders@shop.example>||Your receipt|27||||Thanks for your order of $20.00 on October 1, 2026.",
     );
-
-    // 2. Answered: Bob wrote, the user replied.
-    let answered_inbound = put_mail(
-        &store,
-        Mail {
-            key: "m-bob-1",
-            from: "Bob Lee <bob@globex.com>",
-            subject: "Lunch next week?",
-            body: "Are you free for lunch next Tuesday?",
-            days_ago: 4.0,
-            message_id: "<bob-1@globex.com>",
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "m-bob-2",
-            from: ME,
-            to: &["bob@globex.com"],
-            subject: "Re: Lunch next week?",
-            body: "Tuesday works, see you then.\n\nOn Sat, Bob wrote:\n> Are you free",
-            days_ago: 3.5,
-            message_id: "<me-bob-2@nugget.dev>",
-            in_reply_to: Some("<bob-1@globex.com>"),
-            labels: &["SENT"],
-            ..Default::default()
-        },
-    );
-
-    // 3. Newsletters / automated mail that must never become unanswered cards.
-    put_mail(
-        &store,
-        Mail {
-            key: "m-news-1",
-            from: "The Weekly <newsletter@weekly.news>",
-            subject: "This week in AI",
-            body: "Top stories... Unsubscribe here.",
-            days_ago: 2.0,
-            message_id: "<n1@weekly.news>",
-            extra: json!({"list_unsubscribe": "<mailto:u@weekly.news>"}),
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "m-news-2",
-            from: "Deals <deals@shop.example>",
-            subject: "Your exclusive offer?",
-            body: "Don't miss out, can you believe these prices?",
-            days_ago: 2.0,
-            message_id: "<n2@shop.example>",
-            labels: &["INBOX", "CATEGORY_PROMOTIONS"],
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "m-noreply",
-            from: "GitHub <noreply@github.com>",
-            subject: "[repo] New issue opened",
-            body: "Someone opened an issue. Can you take a look?",
-            days_ago: 2.0,
-            message_id: "<gh@github.com>",
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "m-bulk",
-            from: "Team Updates <carol@bigco.com>",
-            subject: "Org update",
-            body: "Please read the attached update?",
-            days_ago: 2.0,
-            message_id: "<bulk@bigco.com>",
-            extra: json!({"headers": {"Precedence": "bulk"}}),
-            ..Default::default()
-        },
-    );
-    // Too old (20 days) and too fresh (2 hours).
-    put_mail(
-        &store,
-        Mail {
-            key: "m-old",
-            from: "Dan Wu <dan@initech.com>",
-            subject: "Old question",
-            body: "Any update?",
-            days_ago: 20.0,
-            message_id: "<old@initech.com>",
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "m-fresh",
-            from: "Eve Park <eve@initech.com>",
-            subject: "Quick one",
-            body: "Got a minute?",
-            days_ago: 0.1,
-            message_id: "<fresh@initech.com>",
-            ..Default::default()
-        },
-    );
-
-    // 4. Promise in sent mail, no follow-through: "I'll send the deck by Friday."
-    let promise = put_mail(
-        &store,
-        Mail {
-            key: "m-promise",
-            from: ME,
-            to: &["Frank Ode <frank@partner.org>"],
-            subject: "Partnership deck",
-            body: "Great talking today. I'll send the deck by Friday.\n\nBest",
-            days_ago: 2.0,
-            message_id: "<me-promise@nugget.dev>",
-            labels: &["SENT"],
-            ..Default::default()
-        },
-    );
-    // A kept promise (a later sent message in the same thread).
-    put_mail(
-        &store,
-        Mail {
-            key: "m-kept-1",
-            from: ME,
-            to: &["gina@partner.org"],
-            subject: "Notes",
-            body: "I'll share my notes tomorrow.",
-            days_ago: 5.0,
-            message_id: "<me-kept-1@nugget.dev>",
-            labels: &["SENT"],
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "m-kept-2",
-            from: ME,
-            to: &["gina@partner.org"],
-            subject: "Re: Notes",
-            body: "Here are my notes.",
-            days_ago: 4.0,
-            message_id: "<me-kept-2@nugget.dev>",
-            in_reply_to: Some("<me-kept-1@nugget.dev>"),
-            labels: &["SENT"],
-            ..Default::default()
-        },
-    );
-
-    // 5. Receipts: a renewal in 5 days (the vendor's receipt from last cycle proves the user
-    //    pays it), a trial ending in 3 days (after the sign-up mail), a plain past receipt.
-    put_mail(
-        &store,
-        Mail {
-            key: "m-cloudy-receipt",
-            from: "Cloudy Billing <billing@cloudy.io>",
-            subject: "Your receipt from Cloudy",
-            body: "Thanks for your purchase. Pro plan, monthly: $49.00.",
-            days_ago: 26.0,
-            message_id: "<receipt@cloudy.io>",
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "m-streamco-welcome",
-            from: "StreamCo <no-reply@streamco.tv>",
-            subject: "Welcome to StreamCo",
-            body: "Your account is ready. Enjoy watching.",
-            days_ago: 11.0,
-            message_id: "<welcome@streamco.tv>",
-            ..Default::default()
-        },
-    );
-    // Receipts and notices.
-    let renewal = put_mail(
-        &store,
-        Mail {
-            key: "m-renew",
-            from: "Cloudy Billing <billing@cloudy.io>",
-            subject: "Your subscription renews soon",
-            body: "Your Pro plan will renew on November 2, 2026. You will be charged $49.00 to the card on file.",
-            days_ago: 1.0,
-            message_id: "<renew@cloudy.io>",
-            extra: json!({"list_unsubscribe": "<mailto:x@cloudy.io>"}),
-            ..Default::default()
-        },
-    );
-    let trial = put_mail(
-        &store,
-        Mail {
-            key: "m-trial",
-            from: "StreamCo <no-reply@streamco.tv>",
-            subject: "Your free trial ends in 3 days",
-            body: "Your free trial ends in 3 days. After that, your plan is €9,99 per month.",
-            days_ago: 0.5,
-            message_id: "<trial@streamco.tv>",
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "m-receipt-old",
-            from: "Shop <orders@shop.example>",
-            subject: "Your receipt",
-            body: "Thanks for your order of $20.00 on October 1, 2026.",
-            days_ago: 27.0,
-            message_id: "<receipt@shop.example>",
-            ..Default::default()
-        },
-    );
-
-    // 6. Events: an external meeting tomorrow, an internal one, one in 5 days, a cancelled one.
+    let room = "room-1@resource.calendar.google.com";
+    let kickoff = now() + Duration::hours(26);
     let meeting = put_event(
         &store,
         "ev-acme",
         "Acme pilot kickoff",
-        now() + Duration::hours(26),
-        &[ME, "ana@acme.io", "room-1@resource.calendar.google.com"],
+        kickoff,
+        &[ME, "ana@acme.io", room],
     );
+    let standup = now() + Duration::hours(2);
     put_event(
         &store,
         "ev-standup",
         "Standup",
-        now() + Duration::hours(2),
+        standup,
         &[ME, "zed@nugget.dev"],
     );
+    let review = now() + Duration::days(5);
     put_event(
         &store,
         "ev-later",
         "Quarterly review",
-        now() + Duration::days(5),
+        review,
         &[ME, "ana@acme.io"],
     );
-    let note = put_note(
-        &store,
-        "acme.md",
-        "Acme pilot notes",
-        "Acme pilot: they need SSO and pricing by end of month.",
-    );
-
+    let note_text = "Acme pilot: they need SSO and pricing by end of month.";
+    let note = put_note(&store, "acme.md", "Acme pilot notes", note_text);
     seed_graph(&store);
-
     Fixture {
         store,
-        unanswered,
-        answered_inbound,
-        promise,
-        renewal,
-        trial,
+        unanswered: mail_ref("m-ana-1"),
+        answered_inbound: mail_ref("m-bob-1"),
+        promise: mail_ref("m-promise"),
+        renewal: mail_ref("m-renew"),
+        trial: mail_ref("m-trial"),
         meeting,
         note,
     }
 }
 
-/// Graph: the user, Ana (strong relationship), and commitments.
+/// Graph: the user, Ana (strong relationship), and commitments: mine due in 2 days, Ana's
+/// overdue, one outside the horizon and a done one.
 pub fn seed_graph(store: &Store) {
     let g = store.graph();
-    let mut me = NewEntity::new(EntityKind::Person, "Me Myself");
-    me.identifiers.push(Identifier::new("email", ME));
-    let me = g.create_entity(&me).unwrap();
-    let mut ana = NewEntity::new(EntityKind::Person, "Ana Ruiz");
-    ana.identifiers
-        .push(Identifier::new("email", "ana@acme.io"));
-    let ana = g.create_entity(&ana).unwrap();
-    let ev = |key: &str, quote: &str| Evidence {
-        item: ItemRef {
-            source: nugget_core::ids::SourceId::new("gmail:me"),
-            key: nugget_core::ids::ItemKey::new(key),
-        },
-        chunk_id: None,
-        quote: Some(quote.into()),
+    let person = |name: &str, email: &str| {
+        let mut e = NewEntity::new(EntityKind::Person, name);
+        e.identifiers.push(Identifier::new("email", email));
+        g.create_entity(&e).unwrap()
     };
-    let claim =
-        |s: &nugget_core::ids::EntityId, p: &str, o: ClaimObject, text: &str, e: Evidence| {
-            NewClaim {
-                subject: s.clone(),
-                predicate: p.into(),
-                object: o,
-                text: text.into(),
-                confidence: 0.9,
-                status: ClaimStatus::Active,
-                evidence: vec![e],
-                valid_from: None,
-                valid_to: None,
-            }
+    let me = person("Me Myself", ME);
+    let ana = person("Ana Ruiz", "ana@acme.io");
+    let claim = |s: &nugget_core::ids::EntityId, p: &str, o: ClaimObject, text: &str, q: &str| {
+        let evidence = Evidence {
+            item: mail_ref("m-ana-1"),
+            chunk_id: None,
+            quote: Some(q.into()),
         };
+        g.add_claim(&NewClaim {
+            subject: s.clone(),
+            predicate: p.into(),
+            object: o,
+            text: text.into(),
+            confidence: 0.9,
+            status: ClaimStatus::Active,
+            evidence: vec![evidence],
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    };
+    let lit = |s: &str| ClaimObject::Literal(s.into());
     for i in 0..6 {
-        g.add_claim(&claim(
+        claim(
             &ana,
             "works_on",
-            ClaimObject::Literal(format!("project {i}")),
+            lit(&format!("project {i}")),
             "Ana works on the pilot",
-            ev("m-ana-1", "pilot"),
-        ))
-        .unwrap();
+            "pilot",
+        );
     }
-
-    // My commitment, due in 2 days.
-    let c1 = g
-        .create_entity(&NewEntity::new(
-            EntityKind::Commitment,
-            "Send SOC 2 report to Acme",
-        ))
-        .unwrap();
-    g.add_claim(&claim(
+    let commitment = |title: &str| {
+        g.create_entity(&NewEntity::new(EntityKind::Commitment, title))
+            .unwrap()
+    };
+    let c1 = commitment("Send SOC 2 report to Acme");
+    let c1o = ClaimObject::Entity(c1.clone());
+    claim(
         &me,
         "committed_to",
-        ClaimObject::Entity(c1.clone()),
+        c1o,
         "I committed to send the SOC 2 report",
-        ev("m-ana-1", "send the SOC 2 report"),
-    ))
-    .unwrap();
-    g.add_claim(&claim(
+        "send the SOC 2 report",
+    );
+    claim(
         &c1,
         "due_on",
-        ClaimObject::Literal("2026-10-30".into()),
+        lit("2026-10-30"),
         "Due on 2026-10-30",
-        ev("m-ana-1", "by Oct 30"),
-    ))
-    .unwrap();
-
-    // Overdue commitment owed by Ana.
-    let c2 = g
-        .create_entity(&NewEntity::new(
-            EntityKind::Commitment,
-            "Signed pilot agreement",
-        ))
-        .unwrap();
-    g.add_claim(&claim(
+        "by Oct 30",
+    );
+    let c2 = commitment("Signed pilot agreement");
+    let c2o = ClaimObject::Entity(c2.clone());
+    claim(
         &ana,
         "owes",
-        ClaimObject::Entity(c2.clone()),
+        c2o,
         "Ana owes the signed agreement",
-        ev("m-ana-1", "we'll sign"),
-    ))
-    .unwrap();
-    g.add_claim(&claim(
+        "we'll sign",
+    );
+    claim(
         &c2,
         "due_on",
-        ClaimObject::Literal("October 20, 2026".into()),
+        lit("October 20, 2026"),
         "Due October 20",
-        ev("m-ana-1", "by Oct 20"),
-    ))
-    .unwrap();
-
-    // Far-future commitment (outside the horizon) and a done one.
-    let c3 = g
-        .create_entity(&NewEntity::new(EntityKind::Commitment, "Annual plan"))
-        .unwrap();
-    g.add_claim(&claim(
-        &c3,
-        "due_on",
-        ClaimObject::Literal("2027-03-01".into()),
-        "Due March",
-        ev("m-ana-1", "March"),
-    ))
-    .unwrap();
+        "by Oct 20",
+    );
+    let c3 = commitment("Annual plan");
+    claim(&c3, "due_on", lit("2027-03-01"), "Due March", "March");
     let mut done = NewEntity::new(EntityKind::Commitment, "Old task");
     done.attributes = json!({"status": "done", "due": "2026-10-29"});
     g.create_entity(&done).unwrap();
@@ -566,29 +327,31 @@ pub struct RecordingPolicy {
 impl PolicyGate for RecordingPolicy {
     fn evaluate(&self, action: &ActionDescriptor) -> Decision {
         self.seen.lock().unwrap().push(action.clone());
-        self.decision
-            .lock()
-            .unwrap()
-            .clone()
-            .unwrap_or(Decision::Allow)
+        let decision = self.decision.lock().unwrap().clone();
+        decision.unwrap_or(Decision::Allow)
     }
     fn halted(&self) -> bool {
         *self.halted.lock().unwrap()
     }
 }
 
+/// Every executor; records `verb:what` per call.
 #[derive(Default)]
 pub struct RecordingExec {
     pub calls: Mutex<Vec<String>>,
 }
 
+impl RecordingExec {
+    fn log(&self, verb: &str, what: &str, out: &str) -> Result<String> {
+        self.calls.lock().unwrap().push(format!("{verb}:{what}"));
+        Ok(out.into())
+    }
+}
+
 #[async_trait]
 impl Drafter for RecordingExec {
     async fn draft_reply(&self, req: &DraftRequest) -> Result<String> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("draft:{}", req.subject));
+        self.log("draft", &req.subject, "")?;
         Ok(format!("Hi,\n\nHere it is.\n\n(re: {})", req.subject))
     }
 }
@@ -596,48 +359,31 @@ impl Drafter for RecordingExec {
 #[async_trait]
 impl MailExecutor for RecordingExec {
     async fn save_draft(&self, d: &DraftReply) -> Result<String> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("save_draft:{}", d.subject));
-        Ok("draft-1".into())
+        self.log("save_draft", &d.subject, "draft-1")
     }
     async fn archive_thread(&self, a: &ArchiveThread) -> Result<String> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("archive:{}", a.subject));
-        Ok("archived".into())
+        self.log("archive", &a.subject, "archived")
     }
 }
 
 #[async_trait]
 impl CalendarExecutor for RecordingExec {
     async fn create_event(&self, e: &CreateEvent) -> Result<String> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("event:{}", e.title));
-        Ok("ev-1".into())
+        self.log("event", &e.title, "ev-1")
     }
 }
 
 #[async_trait]
 impl ReminderExecutor for RecordingExec {
     async fn create_reminder(&self, r: &Reminder) -> Result<String> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("reminder:{}", r.text));
-        Ok("rem-1".into())
+        self.log("reminder", &r.text, "rem-1")
     }
 }
 
 #[async_trait]
 impl NoteExecutor for RecordingExec {
     async fn write_note(&self, n: &ResearchNote) -> Result<String> {
-        self.calls.lock().unwrap().push(format!("note:{}", n.title));
-        Ok("notes/prep.md".into())
+        self.log("note", &n.title, "notes/prep.md")
     }
 }
 
@@ -645,7 +391,7 @@ impl NoteExecutor for RecordingExec {
 pub struct FakeProvider {
     pub id: ProviderId,
     pub locality: Locality,
-    pub reply: Mutex<String>,
+    pub reply: String,
     pub requests: Mutex<Vec<ChatRequest>>,
 }
 
@@ -654,7 +400,7 @@ impl FakeProvider {
         Arc::new(Self {
             id: ProviderId::new("fake"),
             locality,
-            reply: Mutex::new(reply.into()),
+            reply: reply.into(),
             requests: Mutex::new(Vec::new()),
         })
     }
@@ -675,9 +421,8 @@ impl Provider for FakeProvider {
     }
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
         self.requests.lock().unwrap().push(req);
-        let text = self.reply.lock().unwrap().clone();
         Ok(Box::pin(futures::stream::iter(vec![
-            Ok(ChatEvent::TextDelta(text)),
+            Ok(ChatEvent::TextDelta(self.reply.clone())),
             Ok(ChatEvent::Done {
                 stop_reason: StopReason::EndTurn,
                 input_tokens: None,

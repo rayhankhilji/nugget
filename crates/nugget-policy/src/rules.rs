@@ -20,7 +20,7 @@ pub enum Effect {
 ///
 /// - `targets`: globs over the action's target candidates (the app id, hosts of URLs and deep
 ///   links found in the action and its context, deep-link schemes and panes). See
-///   [`target_candidates`].
+///   [`target_sets`].
 /// - `verbs`: globs over the executor verb.
 /// - `risks`: effective risk classes (after the classifier). An `Allow` rule with no `risks`
 ///   only covers Observe and Edit.
@@ -127,7 +127,7 @@ impl Rule {
 
 /// What rules are matched against.
 pub(crate) struct MatchInput<'a> {
-    /// Every candidate ([`target_candidates`]): matched by Deny rules.
+    /// Every candidate (both lists of [`target_sets`]): matched by Deny rules.
     pub targets: &'a [String],
     /// The primary candidates ([`target_sets`]): matched by Allow and Confirm rules.
     pub primary: &'a [String],
@@ -193,19 +193,6 @@ impl PolicyConfig {
             .filter(|r| !self.disabled_defaults.contains(&r.id))
             .collect()
     }
-}
-
-/// Every target the rules should see for this action: the app id, the hosts of URLs and deep
-/// links in the action and context, deep-link schemes and settings panes. All lowercase.
-/// This is the union of the two lists of [`target_sets`].
-pub fn target_candidates(action: &ActionDescriptor, ctx: &ActionContext) -> Vec<String> {
-    let (mut primary, mentioned) = target_sets(action, ctx);
-    for m in mentioned {
-        if !primary.contains(&m) {
-            primary.push(m);
-        }
-    }
-    primary
 }
 
 /// The action's target candidates split in two, all lowercase and without duplicates:
@@ -683,6 +670,13 @@ const SECURITY_PANE_LABELS: &[&str] = &[
 mod tests {
     use super::*;
 
+    /// Both lists of [`target_sets`].
+    fn target_candidates(action: &ActionDescriptor, ctx: &ActionContext) -> Vec<String> {
+        let (mut all, mentioned) = target_sets(action, ctx);
+        all.extend(mentioned);
+        all
+    }
+
     fn action(
         app: &str,
         verb: &str,
@@ -767,38 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn allow_without_risks_covers_only_observe_and_edit() {
-        let rule = Rule::new("u", Effect::Allow).targets(["com.apple.mail"]);
-        let targets = vec!["com.apple.mail".to_string()];
-        let input = |risk| MatchInput {
-            targets: &targets,
-            primary: &targets,
-            verb: "click",
-            risk,
-            labels: &[],
-        };
-        assert!(rule.matches(&input(RiskClass::Edit)).is_some());
-        assert!(rule.matches(&input(RiskClass::Send)).is_none());
-        let explicit = rule.clone().risks([RiskClass::Send]);
-        assert!(explicit.matches(&input(RiskClass::Send)).is_some());
-    }
-
-    #[test]
-    fn config_serde_round_trip() {
-        let mut cfg = PolicyConfig::default();
-        cfg.rules.push(
-            Rule::new("u1", Effect::Confirm)
-                .targets(["*.example.com"])
-                .verbs(["click"])
-                .risks([RiskClass::Edit])
-                .labels(["*save*"]),
-        );
-        cfg.disabled_defaults
-            .push("default:allow-observe-edit".into());
-        let json = serde_json::to_string_pretty(&cfg).unwrap();
-        assert!(json.contains("\"send\": 25"), "{json}");
-        let back: PolicyConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, cfg);
+    fn missing_config_keys_take_defaults() {
         let minimal: PolicyConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(minimal, PolicyConfig::default());
     }

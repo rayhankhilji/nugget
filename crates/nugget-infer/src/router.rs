@@ -5,132 +5,22 @@
 //! after a failure (falling back to a cooling candidate only if nothing else qualifies).
 //! Providers that have not been probed are only eligible when nothing beyond plain streaming
 //! chat is required.
-//!
-//! Latency: [`Router::with_metrics`] installs a [`ChatMetrics`] hook that receives one
-//! [`ChatMetric`] per stream opened by [`Router::chat`] (time to first event including fallbacks,
-//! time to first token, total, and the provider's [`ChatStats`]). [`Router::prewarm`] warms the
-//! provider a request on a tier would use.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
-
-use serde::{Deserialize, Serialize};
 
 use futures::StreamExt;
 use nugget_core::capability::{Capabilities, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::{Error, Result};
 
-use crate::config::ProviderConfig;
 use crate::probe::{ProbeOptions, ProbeReport, probe_with};
 use crate::provider::Provider;
-use crate::types::{
-    ChatEvent, ChatRequest, ChatStats, ChatStream, StopReason, requires_nothing_probed, satisfies,
-};
-
-/// How a routed chat stream ended.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum ChatOutcome {
-    Done(StopReason),
-    /// The stream yielded an error (its message).
-    Error(String),
-    /// The consumer dropped the stream before it finished (e.g. a cancelled draft).
-    Dropped,
-}
-
-/// One routed chat, reported when its stream ends.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChatMetric {
-    pub provider: ProviderId,
-    pub tier: Tier,
-    pub feature: String,
-    /// Providers that failed before this one served the stream.
-    pub fallbacks: u32,
-    /// From [`Router::chat`] being called to the first stream event (includes routing,
-    /// connection, fallbacks and the provider's time to first event).
-    pub first_event: Duration,
-    /// From [`Router::chat`] being called to the first text delta or tool call.
-    pub first_token: Option<Duration>,
-    /// From [`Router::chat`] being called to the end of the stream.
-    pub total: Duration,
-    pub outcome: ChatOutcome,
-    /// The provider's usage and per-request timings ([`ChatEvent::Stats`]), if it sent them.
-    pub stats: Option<ChatStats>,
-}
-
-/// Receives [`ChatMetric`]s. Called on the task polling the stream: keep it cheap and
-/// non-blocking (record into a histogram or channel).
-pub trait ChatMetrics: Send + Sync {
-    fn record(&self, metric: ChatMetric);
-}
-
-impl<F: Fn(ChatMetric) + Send + Sync> ChatMetrics for F {
-    fn record(&self, metric: ChatMetric) {
-        self(metric)
-    }
-}
-
-/// Reports a [`ChatMetric`] exactly once: when the stream ends, or when it is dropped.
-struct MetricGuard {
-    sink: Arc<dyn ChatMetrics>,
-    started: Instant,
-    metric: Option<ChatMetric>,
-}
-
-impl MetricGuard {
-    fn observe(&mut self, ev: &Result<ChatEvent>) {
-        let Some(m) = self.metric.as_mut() else {
-            return;
-        };
-        match ev {
-            Ok(ChatEvent::TextDelta(t)) if !t.is_empty() => {
-                m.first_token.get_or_insert_with(|| self.started.elapsed());
-            }
-            Ok(ChatEvent::ToolCall { .. }) => {
-                m.first_token.get_or_insert_with(|| self.started.elapsed());
-            }
-            Ok(ChatEvent::Stats(s)) => m.stats = Some(s.clone()),
-            Ok(ChatEvent::Done { stop_reason, .. }) => {
-                self.finish(ChatOutcome::Done(stop_reason.clone()));
-            }
-            Err(e) => self.finish(ChatOutcome::Error(e.to_string())),
-            Ok(_) => {}
-        }
-    }
-
-    fn finish(&mut self, outcome: ChatOutcome) {
-        if let Some(mut m) = self.metric.take() {
-            m.total = self.started.elapsed();
-            m.outcome = outcome;
-            self.sink.record(m);
-        }
-    }
-}
-
-impl Drop for MetricGuard {
-    fn drop(&mut self) {
-        self.finish(ChatOutcome::Dropped);
-    }
-}
+use crate::types::{ChatRequest, ChatStream, requires_nothing_probed, satisfies};
 
 /// Ordered provider ids per tier.
 pub type TierMap = HashMap<Tier, Vec<ProviderId>>;
-
-/// Build a tier map from configs: each provider joins the tiers it lists, in config order.
-pub fn tier_map_from_configs(configs: &[ProviderConfig]) -> TierMap {
-    let mut map = TierMap::new();
-    for c in configs {
-        for t in &c.tiers {
-            let ids = map.entry(*t).or_default();
-            if !ids.contains(&c.id) {
-                ids.push(c.id.clone());
-            }
-        }
-    }
-    map
-}
 
 /// How long a provider is deprioritised after a failure.
 pub const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
@@ -145,7 +35,6 @@ pub struct Router {
     caps: RwLock<HashMap<ProviderId, Capabilities>>,
     failed_at: Mutex<HashMap<ProviderId, Instant>>,
     cooldown: Duration,
-    metrics: RwLock<Option<Arc<dyn ChatMetrics>>>,
 }
 
 impl Router {
@@ -168,7 +57,6 @@ impl Router {
             caps: RwLock::new(HashMap::new()),
             failed_at: Mutex::new(HashMap::new()),
             cooldown: DEFAULT_COOLDOWN,
-            metrics: RwLock::new(None),
         }
     }
 
@@ -177,25 +65,9 @@ impl Router {
         self
     }
 
-    /// Report a [`ChatMetric`] for every stream [`Router::chat`] opens.
-    pub fn with_metrics(self, metrics: Arc<dyn ChatMetrics>) -> Self {
-        self.set_metrics(Some(metrics));
-        self
-    }
-
-    /// Install (or remove) the metrics hook on a shared router.
-    pub fn set_metrics(&self, metrics: Option<Arc<dyn ChatMetrics>>) {
-        *self.metrics.write().unwrap_or_else(|e| e.into_inner()) = metrics;
-    }
-
-    /// Warm the provider that [`Router::chat`] would pick first for `tier` and `required`
-    /// (plus whatever `prefix` itself requires) before the full request is ready, e.g. on a
-    /// trigger press. With `prefix`, its stable part may be sent to warm the prompt cache (see
-    /// [`Provider::prewarm_prefix`] for what leaves the machine); without, only the connection
-    /// is warmed ([`Provider::prewarm`], no content). Returns the provider warmed.
-    ///
-    /// Routing can still differ by the time the real request is sent (a failure cooldown, or
-    /// final context that needs more capabilities); the warm-up is then simply unused.
+    /// Warm the provider [`Router::chat`] would pick first for `tier`, `required` and `prefix`'s
+    /// own requirements: with `prefix` via [`Provider::prewarm_prefix`] (sends the stable
+    /// prefix), else [`Provider::prewarm`] (no content). Returns the provider warmed.
     pub async fn prewarm(
         &self,
         tier: Tier,
@@ -383,10 +255,6 @@ impl Router {
 
     /// Whether `id` failed within the cooldown (it is then routed after healthy providers).
     pub fn in_cooldown(&self, id: &ProviderId) -> bool {
-        self.cooling(id)
-    }
-
-    fn cooling(&self, id: &ProviderId) -> bool {
         self.failed_at
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -409,7 +277,7 @@ impl Router {
         let (healthy, cooling): (Vec<&ProviderId>, Vec<&ProviderId>) = ids
             .iter()
             .filter(|id| live.contains_key(*id) && self.eligible(id, required))
-            .partition(|id| !self.cooling(id));
+            .partition(|id| !self.in_cooldown(id));
         healthy
             .into_iter()
             .chain(cooling)
@@ -446,7 +314,6 @@ impl Router {
         required: &Capabilities,
         req: ChatRequest,
     ) -> Result<(Arc<dyn Provider>, ChatStream)> {
-        let started = Instant::now();
         let mut need = req.required_capabilities();
         merge_required(&mut need, required);
         need.context_tokens = required.context_tokens;
@@ -455,69 +322,21 @@ impl Router {
             return Err(self.no_candidate(tier, &need));
         }
         let mut last_err = None;
-        let mut fallbacks = 0u32;
         for p in candidates {
             match self.try_chat(p.as_ref(), req.clone()).await {
                 Ok(stream) => {
                     self.report_success(p.id());
-                    let stream =
-                        self.metered(stream, p.id(), tier, &req.feature, fallbacks, started);
                     return Ok((p, stream));
                 }
                 Err(e) if is_fallback_error(&e) => {
                     tracing::warn!(provider = %p.id(), error = %e, ?tier, "provider failed; trying next");
                     self.report_failure(p.id());
                     last_err = Some(e);
-                    fallbacks += 1;
                 }
                 Err(e) => return Err(e),
             }
         }
         Err(last_err.unwrap_or_else(|| self.no_candidate(tier, &need)))
-    }
-
-    /// Wrap `stream` so the metrics hook (if any) sees how it ends.
-    fn metered(
-        &self,
-        stream: ChatStream,
-        provider: &ProviderId,
-        tier: Tier,
-        feature: &str,
-        fallbacks: u32,
-        started: Instant,
-    ) -> ChatStream {
-        let Some(sink) = self
-            .metrics
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-        else {
-            return stream;
-        };
-        let mut guard = MetricGuard {
-            sink,
-            started,
-            metric: Some(ChatMetric {
-                provider: provider.clone(),
-                tier,
-                feature: feature.to_string(),
-                fallbacks,
-                // The first event has already arrived (see `try_chat`).
-                first_event: started.elapsed(),
-                first_token: None,
-                total: Duration::ZERO,
-                outcome: ChatOutcome::Dropped,
-                stats: None,
-            }),
-        };
-        let mut stream = stream;
-        Box::pin(async_stream::stream! {
-            while let Some(ev) = stream.next().await {
-                guard.observe(&ev);
-                yield ev;
-            }
-            guard.finish(ChatOutcome::Error("stream ended before completion".into()));
-        })
     }
 
     /// Start a chat and wait for its first event, so early failures can fall back.

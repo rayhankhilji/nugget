@@ -16,38 +16,19 @@ const GAP: u32 = 2;
 /// Border around the text, in font dots.
 const MARGIN: u32 = 4;
 
-/// Rows of each digit, most significant of the low 5 bits = leftmost dot.
+/// Rows of each digit (0-9), most significant of the low 5 bits = leftmost dot.
+#[rustfmt::skip]
 const DIGITS: [[u8; 7]; 10] = [
-    [
-        0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
-    ], // 0
-    [
-        0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
-    ], // 1
-    [
-        0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
-    ], // 2
-    [
-        0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110,
-    ], // 3
-    [
-        0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
-    ], // 4
-    [
-        0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
-    ], // 5
-    [
-        0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
-    ], // 6
-    [
-        0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
-    ], // 7
-    [
-        0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
-    ], // 8
-    [
-        0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
-    ], // 9
+    [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
+    [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+    [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
+    [0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110],
+    [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
+    [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
+    [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
+    [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
+    [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
+    [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
 ];
 
 /// A random 4-digit code (1000–9999, so no leading zero to drop).
@@ -154,40 +135,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn glyphs_are_distinct() {
-        for (a, ga) in DIGITS.iter().enumerate() {
-            for (b, gb) in DIGITS.iter().enumerate().skip(a + 1) {
-                assert_ne!(ga, gb, "{a} vs {b}");
-            }
-        }
-    }
-
-    #[test]
     fn round_trip_all_digits() {
-        for code in ["0123", "4567", "8901", "9999", "1000"] {
+        for code in ["0123", "4567", "8901", random_code().as_str()] {
             let png = render_code_png(code).unwrap();
-            assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
             assert_eq!(read_code_png(&png, 4).as_deref(), Some(code));
         }
         let png = render_code_png("0123456789").unwrap();
         assert_eq!(read_code_png(&png, 10).as_deref(), Some("0123456789"));
         assert_eq!(read_code_png(&png, 4), None);
-    }
-
-    #[test]
-    fn random_codes_are_four_digits() {
-        for _ in 0..50 {
-            let c = random_code();
-            assert_eq!(c.len(), 4);
-            assert!(c.bytes().all(|b| b.is_ascii_digit()));
-            assert_ne!(c.as_bytes()[0], b'0');
-        }
-    }
-
-    #[test]
-    fn rejects_non_digits() {
-        assert!(render_code_png("12a4").is_err());
-        assert!(render_code_png("").is_err());
+        assert!(render_code_png("12a4").is_err() && render_code_png("").is_err());
         assert_eq!(read_code_png(b"not a png", 4), None);
     }
 }

@@ -10,21 +10,28 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::stream;
 use nugget_agent::{
-    ActionTarget, Agent, AgentEvent, AgentRun, Model, Snapshot, Tool, ToolCtx, ToolRegistry,
-    ToolResult, Verification,
+    ActionTarget, Agent, AgentConfig, AgentEvent, AgentRun, Model, Snapshot, Task, Tool, ToolCtx,
+    ToolRegistry, ToolResult, Verification,
 };
 use nugget_core::capability::Locality;
 use nugget_core::ids::ProviderId;
 use nugget_core::{Error, Result};
 use nugget_infer::{
-    ChatEvent, ChatRequest, ChatStream, Provider, ProviderKind, ProviderMeta, StopReason,
+    ChatEvent, ChatRequest, ChatStream, Part, Provider, ProviderKind, ProviderMeta, StopReason,
 };
 use nugget_policy::{ActionDescriptor, Decision, PolicyGate, RiskClass};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-// ---------------------------------------------------------------------------------------------
-// Scripted model
+pub fn cfg() -> AgentConfig {
+    AgentConfig {
+        confirm_timeout: Duration::from_secs(5),
+        halt_poll: Duration::from_millis(5),
+        ..AgentConfig::default()
+    }
+}
+
+// --- Scripted model ---
 
 pub struct Turn {
     pub delay: Duration,
@@ -45,12 +52,25 @@ pub fn turn(calls: Vec<(&str, &str, Value)>) -> Turn {
     }
 }
 
+/// A turn with one call.
+pub fn one(id: &str, name: &str, args: Value) -> Turn {
+    turn(vec![(id, name, args)])
+}
+
 pub fn text_turn(text: &str) -> Turn {
     Turn {
         text: text.into(),
         stop: StopReason::EndTurn,
         ..turn(vec![])
     }
+}
+
+pub fn send(id: &str, to: &str, body: &str) -> Turn {
+    one(id, "send_email", json!({"to": to, "body": body}))
+}
+
+pub fn fin(outcome: &str) -> Turn {
+    turn(vec![finish(outcome)])
 }
 
 impl Turn {
@@ -107,7 +127,7 @@ impl Scripted {
             .content
             .iter()
             .filter_map(|p| match p {
-                nugget_infer::Part::ToolResult {
+                Part::ToolResult {
                     call_id,
                     content,
                     is_error,
@@ -115,6 +135,11 @@ impl Scripted {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The text of the first tool result in request `n`.
+    pub fn result_text(&self, n: usize) -> String {
+        self.last_results_of(&self.requests()[n])[0].1.clone()
     }
 }
 
@@ -165,8 +190,7 @@ impl Provider for Scripted {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Policy gate
+// --- Policy gate ---
 
 #[derive(Default)]
 pub struct FakeGate {
@@ -227,15 +251,118 @@ impl PolicyGate for FakeGate {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Tools
+// --- Tools ---
 
-/// A number the agent can set; `broken` makes `set_value` silently do nothing.
+type CallFn = Box<dyn Fn(&Value) -> ToolResult + Send + Sync>;
+type ObserveFn = Box<dyn Fn() -> Value + Send + Sync>;
+type VerifyFn =
+    Box<dyn Fn(&Value, &Snapshot, &Snapshot, &ToolResult) -> Verification + Send + Sync>;
+type DescribeFn = Box<dyn Fn(&Value) -> ActionTarget + Send + Sync>;
+
+/// A tool built from closures.
+pub struct Fake {
+    name: &'static str,
+    risk: RiskClass,
+    schema: Value,
+    call: CallFn,
+    observe: Option<ObserveFn>,
+    verify: Option<VerifyFn>,
+    describe: Option<DescribeFn>,
+}
+
+impl Fake {
+    pub fn new(
+        name: &'static str,
+        risk: RiskClass,
+        call: impl Fn(&Value) -> ToolResult + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            name,
+            risk,
+            schema: json!({"type": "object"}),
+            call: Box::new(call),
+            observe: None,
+            verify: None,
+            describe: None,
+        }
+    }
+
+    /// An object schema requiring these properties, each of type `ty`.
+    pub fn args(mut self, ty: &str, required: &[&str]) -> Self {
+        let props: serde_json::Map<String, Value> = required
+            .iter()
+            .map(|k| (k.to_string(), json!({"type": ty})))
+            .collect();
+        self.schema = json!({"type": "object", "properties": props, "required": required});
+        self
+    }
+
+    pub fn observe(mut self, f: impl Fn() -> Value + Send + Sync + 'static) -> Self {
+        self.observe = Some(Box::new(f));
+        self
+    }
+
+    pub fn verify(
+        mut self,
+        f: impl Fn(&Value, &Snapshot, &Snapshot, &ToolResult) -> Verification + Send + Sync + 'static,
+    ) -> Self {
+        self.verify = Some(Box::new(f));
+        self
+    }
+
+    pub fn describe(mut self, f: impl Fn(&Value) -> ActionTarget + Send + Sync + 'static) -> Self {
+        self.describe = Some(Box::new(f));
+        self
+    }
+
+    pub fn arc(self) -> Arc<dyn Tool> {
+        Arc::new(self)
+    }
+}
+
+#[async_trait]
+impl Tool for Fake {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "A test tool."
+    }
+    fn schema(&self) -> Value {
+        self.schema.clone()
+    }
+    fn declared_risk(&self) -> RiskClass {
+        self.risk
+    }
+    fn describe(&self, args: &Value) -> ActionTarget {
+        match &self.describe {
+            Some(f) => f(args),
+            None => ActionTarget {
+                target_app: "nugget".into(),
+                verb: self.name.into(),
+                ..ActionTarget::default()
+            },
+        }
+    }
+    async fn observe(&self, _args: &Value, _ctx: &ToolCtx) -> Snapshot {
+        self.observe.as_ref().map(|f| f())
+    }
+    async fn call(&self, args: Value, _ctx: &ToolCtx) -> ToolResult {
+        (self.call)(&args)
+    }
+    fn verify(&self, a: &Value, b: &Snapshot, after: &Snapshot, r: &ToolResult) -> Verification {
+        self.verify
+            .as_ref()
+            .map_or(Verification::Unverifiable, |f| f(a, b, after, r))
+    }
+}
+
+/// A counter the agent can set or increment, sent mail and typed text. `broken` makes
+/// `set_value` silently do nothing (`broken_once`: only the next time).
 #[derive(Default)]
 pub struct World {
     pub value: Mutex<i64>,
     pub broken: AtomicBool,
-    /// Fail only the next `set_value`.
     pub broken_once: AtomicBool,
     pub set_calls: AtomicU32,
     pub increments: AtomicU32,
@@ -251,240 +378,124 @@ impl World {
     pub fn value(&self) -> i64 {
         *self.value.lock().unwrap()
     }
+
+    pub fn sent(&self) -> usize {
+        self.sent.lock().unwrap().len()
+    }
+
+    pub fn n(&self, counter: &AtomicU32) -> u32 {
+        counter.load(Ordering::SeqCst)
+    }
 }
 
-pub struct SetValue(pub Arc<World>);
+fn counter(w: &Arc<World>) -> impl Fn() -> Value + use<> {
+    let w = w.clone();
+    move || json!(w.value())
+}
 
-#[async_trait]
-impl Tool for SetValue {
-    fn name(&self) -> &str {
-        "set_value"
-    }
-    fn description(&self) -> &str {
-        "Set the counter."
-    }
-    fn schema(&self) -> Value {
-        json!({"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]})
-    }
-    fn declared_risk(&self) -> RiskClass {
-        RiskClass::Edit
-    }
-    async fn observe(&self, _args: &Value, _ctx: &ToolCtx) -> Snapshot {
-        Some(json!(self.0.value()))
-    }
-    async fn call(&self, args: Value, _ctx: &ToolCtx) -> ToolResult {
-        self.0.set_calls.fetch_add(1, Ordering::SeqCst);
-        let once = self.0.broken_once.swap(false, Ordering::SeqCst);
-        if !self.0.broken.load(Ordering::SeqCst) && !once {
-            *self.0.value.lock().unwrap() = args["value"].as_i64().unwrap();
+/// `set_value`, `increment`, `send_email`, `type_text` (unverifiable), `delete_all` (panics if
+/// run) and `login` (takes a password), plus the built-ins.
+pub fn registry(w: &Arc<World>) -> ToolRegistry {
+    let (w1, w2, w3, w4, w5) = (w.clone(), w.clone(), w.clone(), w.clone(), w.clone());
+    let set = Fake::new("set_value", RiskClass::Edit, move |a| {
+        w1.set_calls.fetch_add(1, Ordering::SeqCst);
+        let once = w1.broken_once.swap(false, Ordering::SeqCst);
+        if !w1.broken.load(Ordering::SeqCst) && !once {
+            *w1.value.lock().unwrap() = a["value"].as_i64().unwrap();
         }
         ToolResult::ok("set")
-    }
-    fn verify(
-        &self,
-        args: &Value,
-        _b: &Snapshot,
-        after: &Snapshot,
-        _r: &ToolResult,
-    ) -> Verification {
-        if after.as_ref() == Some(&args["value"]) {
-            Verification::Passed(format!("counter reads {}", args["value"]))
-        } else {
-            Verification::Failed(format!(
-                "counter reads {}, expected {}",
-                after.clone().unwrap_or_default(),
-                args["value"]
-            ))
-        }
-    }
-}
-
-pub struct Increment(pub Arc<World>);
-
-#[async_trait]
-impl Tool for Increment {
-    fn name(&self) -> &str {
-        "increment"
-    }
-    fn description(&self) -> &str {
-        "Add one to the counter."
-    }
-    fn schema(&self) -> Value {
-        json!({"type": "object"})
-    }
-    fn declared_risk(&self) -> RiskClass {
-        RiskClass::Edit
-    }
-    async fn observe(&self, _args: &Value, _ctx: &ToolCtx) -> Snapshot {
-        Some(json!(self.0.value()))
-    }
-    async fn call(&self, _args: Value, _ctx: &ToolCtx) -> ToolResult {
-        self.0.increments.fetch_add(1, Ordering::SeqCst);
-        *self.0.value.lock().unwrap() += 1;
+    })
+    .args("integer", &["value"])
+    .observe(counter(w))
+    .verify(|a, _, after, _| match after.as_ref() == Some(&a["value"]) {
+        true => Verification::Passed(format!("counter reads {}", a["value"])),
+        false => Verification::Failed(format!(
+            "counter reads {}, expected {}",
+            after.clone().unwrap_or_default(),
+            a["value"]
+        )),
+    });
+    let inc = Fake::new("increment", RiskClass::Edit, move |_| {
+        w2.increments.fetch_add(1, Ordering::SeqCst);
+        *w2.value.lock().unwrap() += 1;
         ToolResult::ok("incremented")
-    }
-    fn verify(
-        &self,
-        _a: &Value,
-        before: &Snapshot,
-        after: &Snapshot,
-        _r: &ToolResult,
-    ) -> Verification {
-        let b = before.as_ref().and_then(Value::as_i64).unwrap_or_default();
-        let a = after.as_ref().and_then(Value::as_i64).unwrap_or_default();
-        if a == b + 1 {
-            Verification::Passed(format!("{b} → {a}"))
-        } else {
-            Verification::Failed(format!("{b} → {a}"))
+    })
+    .observe(counter(w))
+    .verify(|_, b, a, _| {
+        let (b, a) = (b.clone().unwrap_or_default(), a.clone().unwrap_or_default());
+        match a.as_i64() == b.as_i64().map(|b| b + 1) {
+            true => Verification::Passed(format!("{b} → {a}")),
+            false => Verification::Failed(format!("{b} → {a}")),
         }
-    }
-}
-
-pub struct SendEmail(pub Arc<World>);
-
-#[async_trait]
-impl Tool for SendEmail {
-    fn name(&self) -> &str {
-        "send_email"
-    }
-    fn description(&self) -> &str {
-        "Send an email."
-    }
-    fn schema(&self) -> Value {
-        json!({"type": "object", "properties": {"to": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "body"]})
-    }
-    fn declared_risk(&self) -> RiskClass {
-        RiskClass::Send
-    }
-    fn describe(&self, args: &Value) -> ActionTarget {
-        ActionTarget {
-            target_app: "mail".into(),
-            verb: "send_email".into(),
-            target_label: args["to"].as_str().map(String::from),
-            text_preview: args["body"].as_str().map(String::from),
-        }
-    }
-    async fn observe(&self, _args: &Value, _ctx: &ToolCtx) -> Snapshot {
-        Some(json!(self.0.sent.lock().unwrap().len()))
-    }
-    async fn call(&self, args: Value, _ctx: &ToolCtx) -> ToolResult {
-        self.0.sent.lock().unwrap().push((
-            args["to"].as_str().unwrap().into(),
-            args["body"].as_str().unwrap().into(),
-        ));
+    });
+    let mail = Fake::new("send_email", RiskClass::Send, move |a| {
+        let (to, body) = (a["to"].as_str().unwrap(), a["body"].as_str().unwrap());
+        w3.sent.lock().unwrap().push((to.into(), body.into()));
         ToolResult::ok("sent")
-    }
-    fn verify(
-        &self,
-        _a: &Value,
-        before: &Snapshot,
-        after: &Snapshot,
-        _r: &ToolResult,
-    ) -> Verification {
-        if after.as_ref().and_then(Value::as_u64)
-            == before.as_ref().and_then(Value::as_u64).map(|b| b + 1)
+    })
+    .args("string", &["to", "body"])
+    .observe(move || json!(w4.sent()))
+    .verify(|_, b, a, _| {
+        match a.as_ref().and_then(Value::as_u64)
+            == b.as_ref().and_then(Value::as_u64).map(|b| b + 1)
         {
-            Verification::Passed("message is in Sent".into())
-        } else {
-            Verification::Failed("message not found in Sent".into())
+            true => Verification::Passed("message is in Sent".into()),
+            false => Verification::Failed("message not found in Sent".into()),
         }
-    }
-}
-
-pub struct DeleteAll;
-
-#[async_trait]
-impl Tool for DeleteAll {
-    fn name(&self) -> &str {
-        "delete_all"
-    }
-    fn description(&self) -> &str {
-        "Delete everything."
-    }
-    fn schema(&self) -> Value {
-        json!({"type": "object"})
-    }
-    fn declared_risk(&self) -> RiskClass {
-        RiskClass::Destroy
-    }
-    async fn call(&self, _args: Value, _ctx: &ToolCtx) -> ToolResult {
-        panic!("delete_all must never run in tests");
-    }
-}
-
-/// Edits without any way to check the result.
-pub struct TypeText(pub Arc<World>);
-
-#[async_trait]
-impl Tool for TypeText {
-    fn name(&self) -> &str {
-        "type_text"
-    }
-    fn description(&self) -> &str {
-        "Type text into the focused field."
-    }
-    fn schema(&self) -> Value {
-        json!({"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]})
-    }
-    fn declared_risk(&self) -> RiskClass {
-        RiskClass::Edit
-    }
-    async fn call(&self, args: Value, _ctx: &ToolCtx) -> ToolResult {
-        self.0
-            .typed
+    })
+    .describe(|a| ActionTarget {
+        target_app: "mail".into(),
+        verb: "send_email".into(),
+        target_label: a["to"].as_str().map(String::from),
+        text_preview: a["body"].as_str().map(String::from),
+    });
+    let typing = Fake::new("type_text", RiskClass::Edit, move |a| {
+        w5.typed
             .lock()
             .unwrap()
-            .push(args["text"].as_str().unwrap().into());
+            .push(a["text"].as_str().unwrap().into());
         ToolResult::ok("typed")
-    }
+    })
+    .args("string", &["text"]);
+    let delete = Fake::new("delete_all", RiskClass::Destroy, |_| {
+        panic!("delete_all must never run in tests")
+    });
+    let login = Fake::new("login", RiskClass::Observe, |_| ToolResult::ok("signed in"))
+        .args("string", &["username", "password"]);
+    [set, inc, mail, typing, delete, login]
+        .into_iter()
+        .fold(ToolRegistry::new(), |r, t| r.with(t.arc()))
 }
 
-/// Returns fixed untrusted page text.
-pub struct ReadPage(pub String);
+/// Returns fixed untrusted text under `name`.
+pub fn page(name: &'static str, text: &str) -> Arc<dyn Tool> {
+    let text = text.to_string();
+    Fake::new(name, RiskClass::Observe, move |_| {
+        ToolResult::untrusted(text.clone())
+    })
+    .arc()
+}
 
-#[async_trait]
-impl Tool for ReadPage {
-    fn name(&self) -> &str {
-        "read_page"
-    }
-    fn description(&self) -> &str {
-        "Read the current page."
-    }
-    fn schema(&self) -> Value {
-        json!({"type": "object"})
-    }
-    fn declared_risk(&self) -> RiskClass {
-        RiskClass::Observe
-    }
-    async fn call(&self, _args: Value, _ctx: &ToolCtx) -> ToolResult {
-        ToolResult::untrusted(self.0.clone())
-    }
+/// Shows `rows` as untrusted text whose lines are the result's on-screen targets.
+pub fn screen(name: &'static str, rows: &[&str]) -> Arc<dyn Tool> {
+    let rows: Vec<String> = rows.iter().map(|s| s.to_string()).collect();
+    Fake::new(name, RiskClass::Observe, move |_| {
+        ToolResult::untrusted(rows.join("\n")).with_targets(rows.clone())
+    })
+    .arc()
 }
 
 /// Engages the kill switch while it runs (the user hits the hotkey mid-action).
-pub struct PressKillSwitch(pub Arc<FakeGate>);
-
-#[async_trait]
-impl Tool for PressKillSwitch {
-    fn name(&self) -> &str {
-        "look"
-    }
-    fn description(&self) -> &str {
-        "Look at the screen."
-    }
-    fn schema(&self) -> Value {
-        json!({"type": "object"})
-    }
-    fn declared_risk(&self) -> RiskClass {
-        RiskClass::Observe
-    }
-    async fn call(&self, _args: Value, _ctx: &ToolCtx) -> ToolResult {
-        self.0.halt();
+pub fn kill_switch(gate: &Arc<FakeGate>) -> Arc<dyn Tool> {
+    let gate = gate.clone();
+    Fake::new("look", RiskClass::Observe, move |_| {
+        gate.halt();
         ToolResult::ok("a window")
-    }
+    })
+    .arc()
 }
 
-/// Takes `secs` to run (for interrupting mid-action).
+/// An edit that takes `.0` to run and sets `.1` when it completes.
 pub struct Slow(pub Duration, pub Arc<AtomicBool>);
 
 #[async_trait]
@@ -508,43 +519,28 @@ impl Tool for Slow {
     }
 }
 
-/// Takes a password; must never appear in the log.
-pub struct Login;
-
-#[async_trait]
-impl Tool for Login {
-    fn name(&self) -> &str {
-        "login"
-    }
-    fn description(&self) -> &str {
-        "Sign in."
-    }
-    fn schema(&self) -> Value {
-        json!({"type": "object", "properties": {"username": {"type": "string"}, "password": {"type": "string"}}, "required": ["username", "password"]})
-    }
-    fn declared_risk(&self) -> RiskClass {
-        RiskClass::Observe
-    }
-    async fn call(&self, _args: Value, _ctx: &ToolCtx) -> ToolResult {
-        ToolResult::ok("signed in")
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Harness
-
-pub fn registry(world: &Arc<World>) -> ToolRegistry {
-    ToolRegistry::new()
-        .with(Arc::new(SetValue(world.clone())))
-        .with(Arc::new(Increment(world.clone())))
-        .with(Arc::new(SendEmail(world.clone())))
-        .with(Arc::new(TypeText(world.clone())))
-        .with(Arc::new(DeleteAll))
-        .with(Arc::new(Login))
-}
+// --- Harness ---
 
 pub fn agent(model: &Arc<Scripted>, tools: ToolRegistry, gate: &Arc<FakeGate>) -> Agent {
     Agent::new(Model::Provider(model.clone()), tools, gate.clone())
+}
+
+/// Run `turns` against `tools` with an allow-all gate and [`cfg`].
+pub async fn exec(tools: ToolRegistry, turns: Vec<Turn>, goal: &str) -> (AgentRun, Arc<Scripted>) {
+    exec_cfg(tools, turns, goal, cfg()).await
+}
+
+pub async fn exec_cfg(
+    tools: ToolRegistry,
+    turns: Vec<Turn>,
+    goal: &str,
+    cfg: AgentConfig,
+) -> (AgentRun, Arc<Scripted>) {
+    let model = Scripted::new(turns);
+    let run = agent(&model, tools, &FakeGate::new())
+        .run(Task::new(format!("t-{goal}"), goal), cfg)
+        .await;
+    (run, model)
 }
 
 /// Collects events; answers confirmation requests with `answer` (`None`: never answer).
@@ -566,6 +562,34 @@ pub fn events(
         seen
     });
     (agent, handle)
+}
+
+/// Confirmations asked for `tool` (all tools: `None`), and whether each was forced by injection.
+pub fn asked(events: &[AgentEvent], tool: Option<&str>) -> Vec<bool> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::ConfirmationNeeded { request, .. }
+                if tool.is_none_or(|t| request.tool == t) =>
+            {
+                Some(request.forced_by_injection)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Questions the run suspended on, with their options.
+pub fn suspensions(events: &[AgentEvent]) -> Vec<(String, Vec<String>)> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Suspended {
+                question, options, ..
+            } => Some((question.clone(), options.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn executed(run: &AgentRun, tool: &str) -> usize {

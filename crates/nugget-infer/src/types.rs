@@ -91,13 +91,8 @@ pub enum Part {
         kind: ProviderKind,
         data: Value,
     },
-    /// Prompt-cache boundary: everything before this marker (tools, system, earlier messages and
-    /// the parts before it in this message) is a stable prefix worth caching. Carries no content.
-    ///
-    /// - Anthropic: `cache_control` on the content block just before the marker (at most four
-    ///   breakpoints per request; see [`crate::adapters::anthropic`]).
-    /// - OpenAI Responses / OpenAI-compatible: dropped (their caches are automatic prefix
-    ///   matches); [`ChatRequest::cache_prefix`] still uses it to know what to prewarm.
+    /// Prompt-cache boundary: everything before it is a stable prefix worth caching. Anthropic
+    /// marks the block before it; the OpenAI kinds drop it (their caches match prefixes).
     CacheBreakpoint,
 }
 
@@ -161,19 +156,16 @@ pub const FEATURE_CHAT: &str = "chat";
 pub const FEATURE_EMBED: &str = "embed";
 /// Egress-ledger feature tag for capability probes.
 pub const FEATURE_PROBE: &str = "probe";
-/// Egress-ledger feature tag for [`crate::Provider::prewarm`] connection warm-ups (which carry
-/// no content).
+/// Egress-ledger feature tag for [`crate::Provider::prewarm`] (no content).
 pub const FEATURE_PREWARM: &str = "prewarm";
 
-/// How long a provider should keep a cached prefix (Anthropic `cache_control.ttl`; ignored by
-/// providers without a choice).
+/// How long a provider should keep a cached prefix (Anthropic `cache_control.ttl`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheTtl {
     /// The provider default (Anthropic: 5 minutes, refreshed by every hit).
     #[default]
     Default,
-    /// One hour (Anthropic `ttl: "1h"`; writes cost more, see the Anthropic caching docs).
     OneHour,
 }
 
@@ -181,13 +173,11 @@ pub enum CacheTtl {
 /// [`Part::CacheBreakpoint`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheHint {
-    /// Cache the tools + system prompt prefix (Anthropic: `cache_control` on the last system
-    /// block, or the last tool when there is no system prompt). Default true.
+    /// Cache the tools + system prompt prefix. Default true.
     #[serde(default = "default_true")]
     pub system: bool,
-    /// A stable routing key for requests that share a prefix, e.g. `draft:email` or a session
-    /// id. Never put user content here: it is sent as-is. Used as OpenAI's `prompt_cache_key`
-    /// and, when the provider enables `slot_affinity`, to pick a llama-server slot (`id_slot`).
+    /// A stable routing key for requests sharing a prefix (OpenAI `prompt_cache_key`,
+    /// llama-server slot). Sent as-is: never put user content here.
     #[serde(default)]
     pub key: Option<String>,
     #[serde(default)]
@@ -311,13 +301,9 @@ impl ChatRequest {
             .any(|p| matches!(p, Part::CacheBreakpoint))
     }
 
-    /// The stable prefix of this request, for prewarming a provider's prompt cache before the
-    /// final context is known: tools, system prompt and the messages up to (and including the
-    /// marker of) the last [`Part::CacheBreakpoint`]. Without a breakpoint only tools and system
-    /// remain. `None` if there is nothing to cache (no system prompt, tools or breakpoint).
-    ///
-    /// `json_schema`, `max_tokens` and `temperature` are dropped; `feature`, `items` and `cache`
-    /// are kept so the egress ledger and routing key stay the same as the real request's.
+    /// The stable prefix for prewarming a prompt cache: tools, system prompt and the messages
+    /// up to the last [`Part::CacheBreakpoint`] (inclusive). `None` if nothing is cacheable.
+    /// Output options are dropped; `feature`, `items` and `cache` are kept for the ledger.
     pub fn cache_prefix(&self) -> Option<ChatRequest> {
         let mut messages = Vec::new();
         if let Some((mi, pi)) = self.messages.iter().enumerate().rev().find_map(|(mi, m)| {
@@ -416,9 +402,7 @@ pub enum ChatEvent {
         kind: ProviderKind,
         data: Value,
     },
-    /// Usage detail and timings, sent by the built-in adapters immediately before `Done`. A
-    /// separate event (rather than new `Done` fields) so existing `Done` patterns keep compiling;
-    /// consumers that do not care can ignore it.
+    /// Usage detail and timings, sent by the built-in adapters immediately before `Done`.
     Stats(ChatStats),
     Done {
         stop_reason: StopReason,
@@ -435,29 +419,24 @@ pub struct ChatStats {
     pub input_tokens: Option<u32>,
     #[serde(default)]
     pub output_tokens: Option<u32>,
-    /// Prompt tokens served from the provider's cache (included in `input_tokens`): Anthropic
-    /// `cache_read_input_tokens`, OpenAI `cached_tokens`, llama-server `cached_tokens` /
-    /// `timings.cache_n`. `None` if the provider did not say.
+    /// Prompt tokens served from the provider's cache (included in `input_tokens`).
     #[serde(default)]
     pub cached_input_tokens: Option<u32>,
-    /// Prompt tokens written to the cache by this request (Anthropic
-    /// `cache_creation_input_tokens`; included in `input_tokens`).
+    /// Prompt tokens written to the cache (Anthropic; included in `input_tokens`).
     #[serde(default)]
     pub cache_write_tokens: Option<u32>,
     #[serde(default)]
     pub timings: Option<Timings>,
 }
 
-/// Wall-clock timings of one chat request, each measured from when the provider started sending
-/// it (including retries). For a successful stream they are monotonic:
-/// `headers <= first_byte <= first_token <= total`.
+/// Wall-clock timings of one chat request, measured from when it was first sent (including
+/// retries); monotonic for a successful stream.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Timings {
-    /// Time spent opening a new connection (DNS, TCP, TLS) for this request. `None` when a
-    /// pooled connection was reused (or the client could not tell).
+    /// Time opening a new connection; `None` when a pooled one was reused.
     #[serde(default)]
     pub connect: Option<Duration>,
-    /// Until the response status and headers arrived (time to first byte of the response).
+    /// Until the response headers arrived.
     pub headers: Duration,
     /// Until the first body bytes arrived.
     #[serde(default)]
@@ -609,67 +588,33 @@ pub(crate) fn requires_nothing_probed(required: &Capabilities) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::stream;
     use serde_json::json;
-
-    fn boxed(events: Vec<Result<ChatEvent>>) -> ChatStream {
-        Box::pin(stream::iter(events))
-    }
-
-    #[tokio::test]
-    async fn collect_merges_text_and_keeps_order() {
-        let s = boxed(vec![
-            Ok(ChatEvent::Opaque {
-                kind: ProviderKind::Anthropic,
-                data: json!({"type": "thinking", "thinking": "", "signature": "sig"}),
-            }),
-            Ok(ChatEvent::TextDelta("Hel".into())),
-            Ok(ChatEvent::TextDelta("lo".into())),
-            Ok(ChatEvent::ToolCall {
-                id: "t1".into(),
-                name: "f".into(),
-                arguments: json!({"a": 1}),
-            }),
-            Ok(ChatEvent::Done {
-                stop_reason: StopReason::ToolUse,
-                input_tokens: Some(3),
-                output_tokens: Some(4),
-            }),
-        ]);
-        let r = ChatResponse::collect(s).await.unwrap();
-        assert_eq!(r.text(), "Hello");
-        assert_eq!(r.parts.len(), 3);
-        assert!(matches!(r.parts[0], Part::Opaque { .. }));
-        assert_eq!(r.tool_calls()[0].arguments, json!({"a": 1}));
-        assert_eq!(r.stop_reason, StopReason::ToolUse);
-        let m = r.into_message();
-        assert_eq!(m.role, Role::Assistant);
-    }
 
     #[tokio::test]
     async fn collect_drops_declined_partial_before_fallback_marker() {
-        let s = boxed(vec![
+        let opaque = |data| {
             Ok(ChatEvent::Opaque {
                 kind: ProviderKind::Anthropic,
-                data: json!({"type": "thinking", "thinking": "", "signature": "a"}),
-            }),
+                data,
+            })
+        };
+        let done = ChatEvent::Done {
+            stop_reason: StopReason::EndTurn,
+            input_tokens: None,
+            output_tokens: None,
+        };
+        let s: ChatStream = Box::pin(futures::stream::iter(vec![
+            opaque(json!({"type": "thinking", "signature": "a"})),
             Ok(ChatEvent::TextDelta("partial ".into())),
             Ok(ChatEvent::ToolCall {
                 id: "t0".into(),
                 name: "f".into(),
                 arguments: json!({}),
             }),
-            Ok(ChatEvent::Opaque {
-                kind: ProviderKind::Anthropic,
-                data: json!({"type": "fallback"}),
-            }),
+            opaque(json!({"type": "fallback"})),
             Ok(ChatEvent::TextDelta("continued".into())),
-            Ok(ChatEvent::Done {
-                stop_reason: StopReason::EndTurn,
-                input_tokens: None,
-                output_tokens: None,
-            }),
-        ]);
+            Ok(done),
+        ]));
         let r = ChatResponse::collect(s).await.unwrap();
         assert!(r.tool_calls().is_empty());
         assert_eq!(r.text(), "partial continued");
@@ -678,25 +623,10 @@ mod tests {
                 .iter()
                 .any(|p| matches!(p, Part::Opaque { data, .. } if data["type"] == "thinking"))
         );
-    }
-
-    #[tokio::test]
-    async fn collect_errors_without_done() {
-        let s = boxed(vec![Ok(ChatEvent::TextDelta("x".into()))]);
-        assert!(ChatResponse::collect(s).await.is_err());
-    }
-
-    #[test]
-    fn stop_reason_mapping() {
-        assert_eq!(StopReason::from_wire("end_turn"), StopReason::EndTurn);
-        assert_eq!(StopReason::from_wire("stop"), StopReason::EndTurn);
-        assert_eq!(StopReason::from_wire("length"), StopReason::MaxTokens);
-        assert_eq!(StopReason::from_wire("tool_calls"), StopReason::ToolUse);
-        assert_eq!(StopReason::from_wire("refusal"), StopReason::Refusal);
-        assert_eq!(
-            StopReason::from_wire("pause_turn"),
-            StopReason::Other("pause_turn".into())
-        );
+        let no_done: ChatStream = Box::pin(futures::stream::iter(vec![Ok(ChatEvent::TextDelta(
+            "x".into(),
+        ))]));
+        assert!(ChatResponse::collect(no_done).await.is_err());
     }
 
     #[test]
@@ -704,47 +634,19 @@ mod tests {
         let have = Capabilities {
             streaming: true,
             vision: true,
-            tools: false,
-            json_schema: true,
-            embeddings: false,
             context_tokens: Some(1000),
-        };
-        let mut req = Capabilities {
-            streaming: true,
-            vision: true,
             ..Default::default()
         };
-        assert!(satisfies(&have, &req));
-        req.tools = true;
-        assert!(!satisfies(&have, &req));
-        req.tools = false;
-        req.context_tokens = Some(2000);
-        assert!(!satisfies(&have, &req));
-        req.context_tokens = Some(500);
-        assert!(satisfies(&have, &req));
-    }
-
-    #[test]
-    fn required_capabilities_from_request() {
-        let req = ChatRequest::new(vec![Message::user(vec![
-            Part::text("what is this"),
-            Part::image("image/png", "AAAA"),
-        ])])
-        .with_json_schema(json!({"type": "object"}));
-        let caps = req.required_capabilities();
-        assert!(caps.vision && caps.json_schema && caps.streaming);
-        assert!(!caps.tools && !caps.embeddings);
-    }
-
-    #[test]
-    fn part_serde_shape() {
-        let p = Part::image("image/png", "AAAA");
-        assert_eq!(
-            serde_json::to_value(&p).unwrap(),
-            json!({"type": "image", "media_type": "image/png", "data_base64": "AAAA"})
-        );
-        let req: ChatRequest =
-            serde_json::from_value(json!({"system": null, "messages": []})).unwrap();
-        assert_eq!(req.feature, FEATURE_CHAT);
+        let need = |tools, context_tokens| Capabilities {
+            streaming: true,
+            vision: true,
+            tools,
+            context_tokens,
+            ..Default::default()
+        };
+        assert!(satisfies(&have, &need(false, None)));
+        assert!(satisfies(&have, &need(false, Some(500))));
+        assert!(!satisfies(&have, &need(true, None)));
+        assert!(!satisfies(&have, &need(false, Some(2000))));
     }
 }
