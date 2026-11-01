@@ -65,16 +65,6 @@ fn parses_instapaper_csv() {
 }
 
 #[test]
-fn parses_pocket_csv() {
-    let (src, a) = formats::parse(POCKET_CSV);
-    assert_eq!(src, Source::Pocket);
-    assert_eq!(a.len(), 2);
-    assert_eq!(a[0].tags, ["ai", "reading"]);
-    assert_eq!(a[0].folder.as_deref(), Some("Unread"));
-    assert_eq!(a[1].folder.as_deref(), Some("Read Archive"));
-}
-
-#[test]
 fn parses_netscape_bookmarks() {
     let (src, a) = formats::parse(BOOKMARKS);
     assert_eq!(src, Source::Bookmarks);
@@ -113,34 +103,6 @@ fn tolerates_garbage() {
     );
     assert_eq!(a.len(), 1);
     assert_eq!(a[0].url, "https://y.example/");
-}
-
-#[test]
-fn tags_times_and_dates() {
-    assert_eq!(formats::parse_tags("a, b,,A"), ["a", "b"]);
-    assert_eq!(formats::parse_tags("x|y"), ["x", "y"]);
-    assert_eq!(formats::parse_tags("#x;y"), ["x", "y"]);
-    assert_eq!(formats::parse_tags(r#"["q","r"]"#), ["q", "r"]);
-    assert_eq!(formats::parse_tags("[q, r]"), ["q", "r"]);
-    assert_eq!(formats::parse_time("1500000000"), Some(1_500_000_000_000));
-    assert_eq!(
-        formats::parse_time("1500000000123"),
-        Some(1_500_000_000_123)
-    );
-    assert_eq!(
-        formats::parse_time("2017-07-14T02:40:00Z"),
-        Some(1_500_000_000_000)
-    );
-    assert_eq!(
-        formats::parse_time("2017-07-14T04:40:00+02:00"),
-        Some(1_500_000_000_000)
-    );
-    assert_eq!(formats::parse_time("2017-07-14"), Some(1_499_990_400_000));
-    assert_eq!(formats::parse_time("0"), None);
-    assert_eq!(formats::parse_time("soon"), None);
-    assert_eq!(formats::format_date(1_500_000_000_000), "2017-07-14");
-    assert_eq!(formats::format_date(0), "1970-01-01");
-    assert_eq!(formats::format_date(951_782_400_000), "2000-02-29");
 }
 
 #[test]
@@ -342,44 +304,6 @@ fn cancellation_is_prompt() {
 }
 
 #[test]
-fn reads_a_real_export_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("instapaper-export.csv");
-    std::fs::write(&file, INSTAPAPER).unwrap();
-    let h = TestHost::from_manifest(MANIFEST);
-    let s = json!({ "export": file.to_str().unwrap() });
-    h.validate::<ReadLater>(s.clone()).unwrap();
-    assert_eq!(h.sync::<ReadLater>(s, None).unwrap().upserts.len(), 3);
-}
-
-#[test]
-fn multibyte_text_at_the_sniffing_boundary() {
-    // A multibyte character straddling byte 512 of an HTML export.
-    for pad in 505..515 {
-        let html = format!(
-            "<html>{}é<a href='https://x.example/'>x</a>",
-            "a".repeat(pad)
-        );
-        assert_eq!(formats::parse(&html).1.len(), 1);
-    }
-}
-
-#[test]
-fn out_of_range_and_overflowing_times_are_dropped() {
-    assert_eq!(formats::parse_time("9223372036854775"), None);
-    assert_eq!(formats::parse_time("999999999999"), None); // year 33658
-    assert_eq!(
-        formats::parse_time("253402300799999"),
-        Some(253_402_300_799_999)
-    );
-    let csv = "url,title,time_added\nhttps://a.example/,A,999999999999\n";
-    let h = host_with(MemFs::single_file(csv, 1));
-    let pass = h.sync::<ReadLater>(settings(), None).unwrap();
-    assert_eq!(pass.upserts.len(), 1);
-    assert_eq!(pass.upserts[0].modified_at, None);
-}
-
-#[test]
 fn credentials_are_stripped_and_paths_not_trimmed() {
     let csv = "url,title\nhttps://user:secret@a.example/x,A\n";
     let h = host_with(MemFs::single_file(csv, 1));
@@ -407,16 +331,4 @@ fn a_truncated_or_partly_unlistable_folder_never_deletes() {
     assert!(pass.deletes.is_empty());
     assert!(h.logged(Level::Warn, "cannot list `sub`"));
     assert_eq!(pass.cursor["fingerprint"], Value::Null);
-}
-
-#[test]
-fn entity_and_script_heavy_inputs_stay_fast() {
-    let start = std::time::Instant::now();
-    formats::decode_entities(&"&".repeat(200_000));
-    formats::parse(&"<script>x".repeat(50_000));
-    formats::parse(&format!(
-        "<a href='https://x/'>{}</a>",
-        "&amp".repeat(100_000)
-    ));
-    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
 }

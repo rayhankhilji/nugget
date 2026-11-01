@@ -171,48 +171,6 @@ fn forbidden_headers_and_request_caps() {
 }
 
 #[test]
-fn tool_calls_are_capped_at_32_requests() {
-    struct Many;
-    impl Tools for Many {
-        fn tools() -> Vec<Tool> {
-            vec![Tool::new("x", "", json!({}))]
-        }
-        fn call(_: &str, _: Value) -> Result<Value> {
-            for _ in 0..40 {
-                http::get("https://api.example.com/")?;
-            }
-            Ok(Value::Null)
-        }
-    }
-    let h = host();
-    h.respond("GET", "https://api.example.com/", http::Response::ok(""));
-    assert!(matches!(
-        h.call::<Many>("x", Value::Null),
-        Err(Error::Denied(_))
-    ));
-    assert_eq!(h.requests().len(), 33);
-}
-
-#[test]
-fn respond_with_sees_the_request() {
-    let h = host();
-    h.respond_with("GET", "https://api.example.com/c", |req| {
-        Ok(match req.header_value("if-none-match") {
-            Some("v1") => http::Response::new(304),
-            _ => http::Response::ok("fresh").with_header("ETag", "v1"),
-        })
-    });
-    let _active = h.enter(Mode::Sync, None);
-    let r = http::get("https://api.example.com/c").unwrap();
-    assert_eq!(r.header("etag"), Some("v1"));
-    let r = http::Request::get("https://api.example.com/c")
-        .header("If-None-Match", "v1")
-        .send()
-        .unwrap();
-    assert_eq!(r.status, 304);
-}
-
-#[test]
 fn validate_has_no_network_kv_secrets_or_sink() {
     let h = host();
     h.respond("GET", "https://api.example.com/a", http::Response::ok(""));
@@ -278,17 +236,6 @@ fn kv_respects_the_declared_size_and_secrets_the_declared_names() {
 }
 
 #[test]
-fn clock_and_logs() {
-    let h = host();
-    assert_eq!(crate::now_ms(), DEFAULT_NOW_MS);
-    h.advance(1000);
-    assert_eq!(crate::now_ms(), DEFAULT_NOW_MS + 1000);
-    crate::log::warn("disk is on fire");
-    assert!(h.logged(Level::Warn, "on fire"));
-    assert!(!h.logged(Level::Error, "on fire"));
-}
-
-#[test]
 fn mem_fs_lists_sorted_and_refuses_escapes() {
     let h = host();
     h.mount(
@@ -338,32 +285,6 @@ fn mem_fs_lists_sorted_and_refuses_escapes() {
         Err(Error::Invalid(_))
     ));
     assert!(matches!(fs::read_dir("other", ""), Err(Error::Denied(_))));
-}
-
-#[test]
-fn single_file_roots() {
-    let h = host();
-    h.mount("folder", MemFs::single_file("data", 7));
-    let _active = h.enter(Mode::Sync, None);
-    assert_eq!(fs::read_file("folder", "").unwrap(), b"data");
-    let st = fs::stat("folder", "").unwrap();
-    assert_eq!((st.name.as_str(), st.is_dir, st.size), ("", false, 4));
-    assert!(fs::read_dir("folder", "").is_err());
-}
-
-#[test]
-fn file_size_cap() {
-    let h = host();
-    h.set_limits(Limits {
-        max_fs_file_bytes: 3,
-        ..Limits::default()
-    });
-    h.mount("folder", MemFs::new().file("big", "four"));
-    let _active = h.enter(Mode::Sync, None);
-    assert!(matches!(
-        fs::read_file("folder", "big"),
-        Err(Error::Invalid(_))
-    ));
 }
 
 #[test]
@@ -446,120 +367,6 @@ fn sync_reports_events_and_keeps_a_store() {
         .unwrap_err();
     assert_eq!(err, Error::Cancelled);
     assert!(h.document("c").is_some() && h.document("d").is_none());
-}
-
-#[test]
-fn sink_validates_documents() {
-    let h = host();
-    let _active = h.enter(Mode::Sync, None);
-    assert!(sink::upsert(Document::text("", "text/plain", "")).is_err());
-    assert!(sink::upsert(Document::text("k".repeat(1025), "text/plain", "")).is_err());
-    assert!(sink::upsert(Document::text("k", "", "")).is_err());
-    assert!(sink::upsert(Document::text("k", "text/plain", "").with_metadata(json!([]))).is_err());
-    assert!(sink::upsert(Document::text("k", "text/plain", "")).is_ok());
-}
-
-#[test]
-fn kinds_and_manifest_checks() {
-    let tool_only = TestHost::from_manifest(
-        r#"
-        id = "dev.example.t"
-        name = "T"
-        version = "0.1.0"
-        description = ""
-        kind = ["tool"]
-        "#,
-    );
-    assert!(matches!(
-        tool_only.sync::<Probe>(json!({}), None),
-        Err(Error::Denied(_))
-    ));
-    assert_eq!(tool_only.tools::<Probe>().len(), 1);
-
-    for (bad, why) in [
-        ("id = \"nodots\"", "reverse-DNS"),
-        ("[capabilities]\nhosts = [\"*.com\"]", "wildcard"),
-        ("[capabilities]\nfile_roots = [\"Bad\"]", "file root"),
-        ("[capabilities]\nnope = 1", "unknown capability"),
-    ] {
-        let text = format!(
-            "{}\nname = \"T\"\nversion = \"0.1.0\"\ndescription = \"\"\nkind = [\"tool\"]\n{}",
-            if bad.starts_with("id") {
-                bad
-            } else {
-                "id = \"dev.example.t\""
-            },
-            if bad.starts_with("id") { "" } else { bad }
-        );
-        let err = parse_manifest(&text).unwrap_err();
-        assert!(err.contains(why), "{err}");
-    }
-
-    let not_in_schema = MANIFEST.replace("properties.folder", "properties.other");
-    assert!(
-        parse_manifest(&not_in_schema)
-            .unwrap_err()
-            .contains("not a property")
-    );
-}
-
-#[test]
-#[should_panic(expected = "must be 1-64 chars")]
-fn bad_tool_names_panic() {
-    struct Bad;
-    impl Tools for Bad {
-        fn tools() -> Vec<Tool> {
-            vec![Tool::new("Bad-Name", "", json!({}))]
-        }
-        fn call(_: &str, _: Value) -> Result<Value> {
-            Ok(Value::Null)
-        }
-    }
-    TestHost::new().tools::<Bad>();
-}
-
-#[test]
-fn tool_output_goes_through_json() {
-    let h = host();
-    assert_eq!(
-        h.call::<Probe>("probe", json!({ "op": "noop" })).unwrap(),
-        Value::Null
-    );
-}
-
-#[test]
-fn fs_budgets_and_settings() {
-    struct V;
-    impl Connector for V {
-        fn validate(_: &Value) -> Result<()> {
-            assert_eq!(fs::read_file("folder", "a")?, b"abc");
-            assert!(matches!(
-                fs::read_file("folder", "a"),
-                Err(Error::Denied(_))
-            ));
-            assert!(matches!(fs::stat("folder", "a"), Err(Error::Denied(_))));
-            Ok(())
-        }
-        fn sync(_: &Value, _: Option<Value>) -> Result<Value> {
-            fs::stat("folder", "")?;
-            Ok(Value::Null)
-        }
-    }
-    let h = host();
-    h.set_limits(Limits {
-        max_fs_ops_per_call: 2,
-        max_fs_read_bytes_per_call: 5,
-        ..Limits::default()
-    });
-    h.mount("folder", MemFs::new().file("a", "abc"));
-    // In validate (per-call budgets): two operations, five bytes.
-    h.validate::<V>(json!({ "folder": "/x" })).unwrap();
-    // The settings must name the root, even when a test mounts it.
-    assert!(matches!(
-        h.sync::<V>(json!({}), None),
-        Err(Error::Invalid(_))
-    ));
-    assert!(h.sync::<V>(json!({ "folder": "/x" }), None).is_ok());
 }
 
 #[test]

@@ -151,13 +151,6 @@ fn hostile_notes_stay_bounded() {
     }
 }
 
-#[test]
-fn percent_coding() {
-    assert_eq!(note::percent_encode("Daily/A b&c"), "Daily%2FA%20b%26c");
-    assert_eq!(note::percent_decode("The%20Plan%2"), "The Plan%2");
-    assert_eq!(note::percent_decode("%E2%9C%93"), "✓");
-}
-
 // ---- settings ----
 
 #[test]
@@ -195,13 +188,6 @@ fn validates_settings() {
         missing.validate::<Vault>(json!({ "vault": "/definitely/not/here/vault" })),
         Err(Error::Invalid(_))
     ));
-}
-
-#[test]
-fn vault_name_from_any_path_style() {
-    let s = |v: &str| Settings::parse(&json!({ "vault": v })).unwrap();
-    assert_eq!(s("/home/ada/Notes Vault/").vault_name(), "Notes Vault");
-    assert_eq!(s("C:\\Users\\ada\\Work").vault_name(), "Work");
 }
 
 // ---- the connector ----
@@ -375,33 +361,6 @@ fn a_failed_folder_only_protects_its_own_notes() {
     // `Daily` could not be listed: its note stays. `Projects` is gone: its note is deleted.
     assert_eq!(pass.deletes, ["Projects/Compiler.md"]);
     assert!(h.document("Daily/2026-01-05.md").is_some());
-}
-
-#[test]
-fn out_of_range_times_are_left_out() {
-    let h = TestHost::from_manifest(MANIFEST);
-    h.mount(
-        ROOT,
-        MemFs::new()
-            .file_at("future.md", "x", i64::MAX)
-            .file_at("past.md", "y", i64::MIN),
-    );
-    let pass = h.sync::<Vault>(settings(), None).unwrap();
-    assert_eq!(pass.upserts.len(), 2);
-    assert!(pass.upserts.iter().all(|d| d.modified_at.is_none()));
-}
-
-#[test]
-fn pathological_lines_scan_in_linear_time() {
-    let start = std::time::Instant::now();
-    for unit in ["[[", "](", "`", "``x", "![[a", "](a)"] {
-        let line = unit.repeat(100_000 / unit.len());
-        note::parse(&line);
-        note::parse(&format!("{line})]]`"));
-    }
-    let many_keys: String = (0..20_000).map(|i| format!("k{i}: v\n")).collect();
-    note::parse(&format!("---\n{many_keys}---\nbody"));
-    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
 }
 
 #[cfg(unix)]

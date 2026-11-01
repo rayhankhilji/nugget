@@ -77,19 +77,6 @@ fn core_modules_are_not_components() {
     assert!(pkg.verify(&[k.verifying_key()]).is_err());
 }
 
-#[test]
-fn package_dir_round_trip_and_key_parsing() {
-    let k = parse_signing_key(&"07".repeat(32)).unwrap();
-    let vk = parse_verifying_key(&hex::encode(k.verifying_key().as_bytes())).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    package(&manifest(), EMPTY_COMPONENT, &k)
-        .write_dir(dir.path())
-        .unwrap();
-    let pkg = PluginPackage::from_dir(dir.path()).unwrap();
-    pkg.verify(&[vk]).unwrap();
-    assert!(parse_verifying_key("abcd").is_err());
-}
-
 const MAGIC: &[u8] = b"NUGGETPKG\x01";
 
 fn section(out: &mut Vec<u8>, bytes: &[u8]) {
@@ -196,6 +183,11 @@ fn from_path_reads_directories_and_files() {
         PluginPackage::from_file(&file).unwrap().to_bytes(),
         pkg.to_bytes()
     );
+
+    let k = parse_signing_key(&"07".repeat(32)).unwrap();
+    let vk = parse_verifying_key(&hex::encode(k.verifying_key().as_bytes())).unwrap();
+    assert_eq!(vk, k.verifying_key());
+    assert!(parse_verifying_key("abcd").is_err());
 
     let junk = tmp.path().join("junk.nuggetplugin");
     std::fs::write(&junk, b"not a package").unwrap();

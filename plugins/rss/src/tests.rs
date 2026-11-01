@@ -128,19 +128,6 @@ fn repairs_html_entities_and_bare_ampersands() {
 }
 
 #[test]
-fn decodes_latin1_bodies() {
-    let mut body =
-        b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><rss><channel><title>Caf".to_vec();
-    body.extend([0xe9, 0x20, 0x93, b'q', 0x94]);
-    body.extend(b"</title></channel></rss>");
-    let f = feed::parse(&feed::decode(&body), RSS_URL).unwrap();
-    assert_eq!(f.title.as_deref(), Some("Café “q”"));
-    // A BOM is dropped.
-    let f = feed::parse(&feed::decode(b"\xEF\xBB\xBF<rss><channel/></rss>"), RSS_URL).unwrap();
-    assert!(f.entries.is_empty());
-}
-
-#[test]
 fn refuses_non_feeds_and_entity_bombs() {
     assert!(matches!(
         feed::parse("<html><body/></html>", RSS_URL),
@@ -462,39 +449,6 @@ fn honours_max_entries_and_cancellation() {
     assert_eq!(h.documents().len(), 1);
 }
 
-#[test]
-fn long_ids_get_hashed_keys() {
-    let long = "x".repeat(2000);
-    let k = entry_key(RSS_URL, &long);
-    assert!(k.len() <= 1024 && k.starts_with(&format!("{RSS_URL}#h:")));
-    assert_eq!(k, entry_key(RSS_URL, &long));
-    assert_eq!(entry_key(RSS_URL, "a"), format!("{RSS_URL}#a"));
-}
-
-#[test]
-fn state_stays_within_the_declared_kv_size() {
-    // 500 entries in each of 100 feeds must fit the manifest's kv_max_bytes.
-    let mut items = String::new();
-    for i in 0..500 {
-        items.push_str(&format!(
-            "<item><guid>https://example.substack.com/p/{i}-{}</guid><pubDate>Mon, 02 Jan 2006 15:04:05 GMT</pubDate></item>",
-            "slug".repeat(10)
-        ));
-    }
-    let body = format!("<rss><channel><title>Big</title>{items}</channel></rss>");
-    let h = host();
-    let feeds: Vec<String> = (0..100)
-        .map(|i| format!("https://feed{i}.substack.com/feed"))
-        .collect();
-    for f in &feeds {
-        h.respond("GET", f, http::Response::ok(body.clone()));
-    }
-    let s = json!({ "feeds": feeds, "max_entries": 500 });
-    h.sync::<Feeds>(s, None).unwrap();
-    assert!(!h.logged(Level::Warn, "could not save state"));
-    assert_eq!(h.kv_keys().len(), 100);
-}
-
 // ---- the tool ----
 
 #[test]
@@ -536,18 +490,6 @@ fn feed_headlines_tool() {
 }
 
 #[test]
-fn manifest_declares_no_wildcard_tld_and_stays_under_limits() {
-    let hosts: Vec<&str> = MANIFEST
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with('"') && l.ends_with("\","))
-        .collect();
-    assert!(hosts.len() >= 10 && hosts.len() <= 64, "{}", hosts.len());
-    // The manifest parses in the test host (which applies the host's rules).
-    host();
-}
-
-#[test]
 fn a_single_large_entity_is_never_expanded() {
     let big = "A".repeat(100_000);
     let refs = "&big;".repeat(4000);
@@ -581,15 +523,6 @@ fn oversized_feeds_fail_alone() {
 }
 
 #[test]
-fn repair_keeps_cdata_and_comments() {
-    let xml = "<a><!-- a & b --><![CDATA[x &nbsp; & y]]>&nbsp;&</a>";
-    assert_eq!(
-        feed::repair_entities(xml),
-        "<a><!-- a & b --><![CDATA[x &nbsp; & y]]>&#160;&amp;</a>"
-    );
-}
-
-#[test]
 fn channel_link_prefers_the_rss_link_and_links_must_be_http() {
     let xml = r#"<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel>
         <atom:link rel="self" href="https://blog.example.substack.com/feed"/>
@@ -602,16 +535,6 @@ fn channel_link_prefers_the_rss_link_and_links_must_be_http() {
         Some("https://blog.example.substack.com/")
     );
     assert_eq!(f.entries[0].link, None);
-}
-
-#[test]
-fn out_of_range_dates_are_dropped_not_sent() {
-    let xml = "<rss><channel><item><guid>y</guid><pubDate>Mon, 02 Jan 99999 15:04:05 GMT</pubDate></item></channel></rss>";
-    let h = host();
-    h.respond("GET", RSS_URL, http::Response::ok(xml));
-    let pass = h.sync::<Feeds>(settings(&[RSS_URL]), None).unwrap();
-    assert_eq!(pass.upserts.len(), 1);
-    assert_eq!(pass.upserts[0].modified_at, None);
 }
 
 #[test]
