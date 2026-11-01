@@ -91,7 +91,9 @@ Tunables for the indexing pipeline (`nugget_ingest::IngestConfig`). Durations ar
 | `triage_max_chars` | integer | `6000` | Characters of each item's text sent to triage |
 | `triage_batch` | integer | `8` | Items labelled per triage request |
 | `triage_batch_chars` | integer | `6000` | Characters of text per triage request; a longer item goes alone |
-| `triage_idle_ms` | integer | `3000` | How long background triage waits after the last interactive model request (Ask, Double Tap, agent) before it uses the local model again |
+| `triage_idle_ms` | integer | `3000` | How long background triage waits after the last interactive model request (Ask, Double Tap, agent) before it uses the local model again. This covers the built-in runtime and the on-device and local-network providers in `providers.toml` (Ollama, a LAN server) |
+| `triage_retry_ms` | integer | `600000` | An item whose triage failed is tried again this long after the failure, once a local triage model is available; the wait grows fourfold with each failure of the item, up to a day |
+| `triage_max_failures` | integer | `5` | Failures after which an item stays failed (still searchable and sensitive) until its content changes; `1` turns retries off |
 | `assume_unflagged_safe` | bool | `false` | Count items nobody has judged (triage off or no local triage model, and no sensitivity rule matched) as not sensitive, so cloud models may use them. By default they count as sensitive until local triage clears them |
 | `embeddings` | bool | `true` | Compute embeddings with embedding-tier providers |
 | `allow_cloud_embeddings` | bool | `false` | Allow cloud embedding providers for non-sensitive items |

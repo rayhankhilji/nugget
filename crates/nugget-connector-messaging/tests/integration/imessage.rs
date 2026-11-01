@@ -418,3 +418,58 @@ async fn permission_denied_asks_for_full_disk_access() {
     );
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
+
+/// Set `db`'s (and its WAL's) modification time an hour back, so the reader trusts its stamp.
+fn settle(db: &Path) {
+    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    let mut wal = db.as_os_str().to_owned();
+    wal.push("-wal");
+    for f in [db.to_path_buf(), PathBuf::from(wal)] {
+        if f.exists() {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&f)
+                .unwrap()
+                .set_modified(past)
+                .unwrap();
+        }
+    }
+}
+
+/// JJ2: polling an unchanged database sends nothing and deletes nothing (the copy is skipped);
+/// a change still arrives, also after a pass that failed to deliver it.
+#[tokio::test]
+async fn unchanged_polls_keep_everything_and_changes_still_arrive() {
+    use nugget_connector::testkit::{ReplicaSink, run_pass};
+    let tmp = tempfile::tempdir().unwrap();
+    let db = scenario(&tmp.path().join("Messages"));
+    settle(&db.path);
+    let env = Env::new();
+    let replica = Replica::new();
+    let conn = env.build(Kind::IMessage, &settings(&db.path, None), replica.clone());
+
+    let sink = ReplicaSink::new(replica.clone());
+    run_pass(&*conn, None, &sink).await.unwrap();
+    assert_eq!(sink.upserts().len(), 3);
+    let sink = ReplicaSink::new(replica.clone());
+    run_pass(&*conn, None, &sink).await.unwrap();
+    assert_eq!(sink.sends(), 0);
+    assert_eq!(replica.len(), 3, "an unchanged pass keeps every document");
+
+    // A new message in June, and a pass that fails before delivering it.
+    db.text(1, MAY1 + 31 * 86_400 + 60, 1, false, "Still June");
+    settle(&db.path);
+    let sink = ReplicaSink::new(replica.clone()).crash_at_send(0);
+    assert!(run_pass(&*conn, None, &sink).await.is_err());
+    let sink = ReplicaSink::new(replica.clone());
+    run_pass(&*conn, None, &sink).await.unwrap();
+    let june = doc(&sink, "im:iMessage;-;+15551234567/2024-06");
+    assert!(text(&june).contains("Still June"));
+    assert_eq!(sink.sends(), 1);
+    let sink = ReplicaSink::new(replica.clone());
+    run_pass(&*conn, None, &sink).await.unwrap();
+    assert_eq!(sink.sends(), 0);
+    assert_eq!(replica.len(), 3);
+    let left: Vec<_> = std::fs::read_dir(env.scratch()).unwrap().collect();
+    assert!(left.is_empty(), "{left:?}");
+}

@@ -296,6 +296,52 @@ impl Store {
         })
     }
 
+    /// Items whose triage failed (`metadata.triage.state == "failed"`) fewer than
+    /// `max_failures` times, each with its failure count (`metadata.triage.failures`, 1 when
+    /// absent) and the time of its last failure (`metadata.triage.failed_at`, Unix seconds, 0
+    /// when absent), ordered by `(source, key)`, at most `limit`, after `after` (keyset
+    /// pagination). A full scan of `items`, for the triage job's occasional retry pass.
+    pub fn items_failed_triage(
+        &self,
+        after: Option<&ItemRef>,
+        max_failures: u32,
+        limit: usize,
+    ) -> Result<Vec<(ItemRef, u32, i64)>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let (src, key) = after.map_or(("", ""), |a| (a.source.as_str(), a.key.as_str()));
+        self.with_read_conn(|conn| {
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT i.source, i.key,
+                            COALESCE(json_extract(i.metadata, '$.triage.failures'), 1),
+                            COALESCE(json_extract(i.metadata, '$.triage.failed_at'), 0)
+                     FROM items i
+                     WHERE (i.source > ?1 OR (i.source = ?1 AND i.key > ?2))
+                       AND json_valid(i.metadata)
+                       AND json_extract(i.metadata, '$.triage.state') = 'failed'
+                       AND COALESCE(json_extract(i.metadata, '$.triage.failures'), 1) < ?3
+                     ORDER BY i.source, i.key
+                     LIMIT ?4",
+                )
+                .db("prepare items_failed_triage")?;
+            let rows = stmt
+                .query_map(params![src, key, i64::from(max_failures), limit], |r| {
+                    let failures: i64 = r.get(2)?;
+                    Ok((
+                        item_ref(r.get(0)?, r.get(1)?),
+                        u32::try_from(failures.max(1)).unwrap_or(u32::MAX),
+                        r.get::<_, i64>(3)?,
+                    ))
+                })
+                .db("query items_failed_triage")?;
+            rows.collect::<rusqlite::Result<_>>()
+                .db("read items_failed_triage")
+        })
+    }
+
     /// Items without a `metadata.triage.state` (written before background triage existed),
     /// ordered by `(source, key)`, at most `limit`, after `after` (keyset pagination). A full
     /// scan, for a one-off migration at start.
