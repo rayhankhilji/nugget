@@ -2,7 +2,7 @@
 
 use time::OffsetDateTime;
 
-use super::{RELATIVE_DATE_WORDS, WEEKDAYS, day_of, month_of, normalize_date};
+use super::{RELATIVE_DATE_WORDS, day_of, is_weekday, month_of, normalize_date};
 use crate::text::is_email;
 
 /// Why `s` holds a credential, account or financial value, if it does.
@@ -408,7 +408,7 @@ pub(crate) fn is_date_value(s: &str) -> bool {
                 .is_some_and(|h| {
                     !h.is_empty() && h.len() <= 2 && h.chars().all(|c| c.is_ascii_digit())
                 });
-            if WEEKDAYS.contains(&w)
+            if is_weekday(w)
                 || month_of(w).is_some()
                 || day_of(w).is_some()
                 || year

@@ -726,6 +726,91 @@ const RENEWAL_WORDS: &[&str] = &[
     "trial will end",
     "trial expires",
     "free trial",
+    // de
+    "verlängert",
+    "verlängerung",
+    "abonnement",
+    "wird abgebucht",
+    "wird belastet",
+    "nächste zahlung",
+    "nächste abbuchung",
+    "testphase",
+    "probezeitraum",
+    // fr
+    "renouvel",
+    "sera débité",
+    "prélèvement",
+    "prochain paiement",
+    "période d'essai",
+    "essai gratuit",
+    // es
+    "renueva",
+    "renovación",
+    "renovará",
+    "suscripción",
+    "se cobrará",
+    "próximo pago",
+    "prueba gratuita",
+    "período de prueba",
+    "periodo de prueba",
+    // pt
+    "renovação",
+    "renovad",
+    "assinatura",
+    "será cobrado",
+    "próxima cobrança",
+    "teste grátis",
+    "período de teste",
+    // hi
+    "नवीनीकरण",
+    "रिन्यू",
+    "सदस्यता",
+    "शुल्क लिया जाएगा",
+    "ट्रायल",
+    // ja
+    "自動更新",
+    "契約更新",
+    "更新日",
+    "更新されます",
+    "サブスクリプション",
+    "次回のお支払い",
+    "請求されます",
+    "トライアル",
+    // zh
+    "续订",
+    "续费",
+    "自动续",
+    "订阅",
+    "扣款",
+    "下次付款",
+    "试用",
+    // ar
+    "تجديد",
+    "يتجدد",
+    "سيتجدد",
+    "اشتراك",
+    "سيتم خصم",
+    "الدفعة التالية",
+    "تجربة مجانية",
+    "الفترة التجريبية",
+];
+
+/// Words of a free trial (in a renewal notice).
+const TRIAL_WORDS: &[&str] = &[
+    "trial",
+    "testphase",
+    "probezeitraum",
+    "d'essai",
+    "essai gratuit",
+    "de prueba",
+    "prueba gratuita",
+    "de teste",
+    "teste grátis",
+    "ट्रायल",
+    "トライアル",
+    "试用",
+    "تجربة مجانية",
+    "التجريبية",
 ];
 
 /// Phrases of a receipt or payment confirmation: proof that the user pays a vendor.
@@ -740,6 +825,63 @@ const RECEIPT_WORDS: &[&str] = &[
     "we received your payment",
     "payment successful",
     "invoice paid",
+    // de
+    "quittung",
+    "zahlung erhalten",
+    "zahlung eingegangen",
+    "zahlungsbestätigung",
+    "bestellbestätigung",
+    "danke für ihre bestellung",
+    "danke für deine bestellung",
+    // fr
+    "paiement reçu",
+    "votre reçu",
+    "confirmation de paiement",
+    "confirmation de commande",
+    "merci pour votre commande",
+    "merci pour votre achat",
+    "facture payée",
+    // es
+    "pago recibido",
+    "recibo de",
+    "tu recibo",
+    "su recibo",
+    "confirmación de pago",
+    "confirmación de pedido",
+    "gracias por tu compra",
+    "gracias por su compra",
+    "gracias por tu pedido",
+    "gracias por su pedido",
+    // pt
+    "pagamento recebido",
+    "pagamento confirmado",
+    "seu recibo",
+    "confirmação de pagamento",
+    "confirmação de pedido",
+    "obrigado pela sua compra",
+    "obrigado pelo seu pedido",
+    // hi
+    "रसीद",
+    "भुगतान प्राप्त",
+    "भुगतान सफल",
+    // ja
+    "領収書",
+    "お支払いが完了",
+    "決済完了",
+    "ご購入ありがとう",
+    "ご注文ありがとう",
+    // zh
+    "收据",
+    "付款成功",
+    "支付成功",
+    "已收到您的付款",
+    "感谢您的购买",
+    "感谢您的订单",
+    // ar
+    "إيصال",
+    "ايصال",
+    "تم استلام الدفع",
+    "تم الدفع",
 ];
 
 /// A receipt or payment confirmation (not a renewal or charge *notice*, which spam imitates).
@@ -819,7 +961,7 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
         if !RENEWAL_WORDS.iter().any(|w| lower.contains(w)) {
             continue;
         }
-        let trial = lower.contains("trial");
+        let trial = TRIAL_WORDS.iter().any(|w| lower.contains(w));
         let proof = paid
             .get(&base)
             .is_some_and(|ds| ds.iter().any(|d| *d <= m.date));
