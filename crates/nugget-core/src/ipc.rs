@@ -396,8 +396,10 @@ pub struct SourceInfo {
     /// daemon from `state`, `last_error` and recent item errors; absent from older daemons.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<SourceHealth>,
-    /// What the latest scan pass found and skipped (files sources); absent until a connector
-    /// reports one, and from older daemons.
+    /// What the last whole-folder scan found and skipped (files sources); absent until a
+    /// connector reports one, after the settings change or the source is turned on or off, and
+    /// from older daemons. Live (watcher) changes do not refresh it, so `found == 0` is only
+    /// meaningful while `items == 0`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan: Option<ScanReport>,
 }
@@ -412,6 +414,10 @@ pub struct ScanReport {
     /// Files that will be (or already are) indexed this pass.
     #[serde(default)]
     pub found: u64,
+    /// Changes (new or changed files, plus deletions) this pass sends for indexing; files
+    /// already indexed and unchanged are not counted. The progress total of the pass.
+    #[serde(default)]
+    pub to_index: u64,
     /// Files skipped because their type is not indexed.
     #[serde(default)]
     pub unsupported: u64,

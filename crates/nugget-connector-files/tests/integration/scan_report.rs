@@ -162,3 +162,27 @@ async fn scan_report_unreadable_subfolder() {
     assert_eq!((r.found, r.unreadable, r.roots_denied), (1, 1, 0));
     assert_eq!(r.skipped, [skip("locked", "unreadable", None)]);
 }
+
+/// `to_index` counts what a pass sends (upserts and deletes), not every file found.
+#[tokio::test]
+async fn scan_report_to_index_counts_only_changes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = root_in(&tmp, "docs");
+    write(&root, "a.md", "a");
+    write(&root, "b.md", "b");
+    write(&root, "c.md", "c");
+    let mut h = Harness::files(json!({ "roots": [root] }));
+    h.sync().await;
+    let first = h.fake.scans.lock().unwrap()[0].clone();
+    assert_eq!((first.found, first.to_index), (3, 3));
+
+    write(&root, "b.md", "b changed");
+    std::fs::remove_file(root.join("c.md")).unwrap();
+    h.sync().await;
+    let second = h.fake.scans.lock().unwrap()[1].clone();
+    assert_eq!((second.found, second.to_index), (2, 2));
+
+    h.sync().await;
+    let third = h.fake.scans.lock().unwrap()[2].clone();
+    assert_eq!((third.found, third.to_index), (2, 0));
+}

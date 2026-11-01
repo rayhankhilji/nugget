@@ -83,6 +83,9 @@ struct SourceStatus {
     paused: bool,
     /// The latest scan report from the connector (files sources), if any.
     scan: Option<ScanReport>,
+    /// `scan` came from the current (or most recent) sync pass: cleared when a pass begins,
+    /// set when its report arrives.
+    scan_fresh: bool,
 }
 
 impl SourceStatus {
@@ -98,6 +101,7 @@ impl SourceStatus {
             errors: VecDeque::new(),
             paused: false,
             scan: None,
+            scan_fresh: false,
         }
     }
 }
@@ -232,11 +236,13 @@ impl Inner {
         let changed = {
             let mut slots = lock(&self.slots);
             match slots.get_mut(id) {
-                Some(s) if s.status.scan.as_ref() != Some(&report) => {
+                Some(s) => {
+                    let changed = s.status.scan.as_ref() != Some(&report) || !s.status.scan_fresh;
                     s.status.scan = Some(report);
-                    true
+                    s.status.scan_fresh = true;
+                    changed
                 }
-                _ => false,
+                None => false,
             }
         };
         if changed {
@@ -244,13 +250,37 @@ impl Inner {
         }
     }
 
-    /// Files the last finished scan found, once one is known (a progress total).
+    /// A sync pass begins: the kept report now describes an earlier pass.
+    pub fn scan_pass_begins(&self, id: &SourceId) {
+        if let Some(s) = lock(&self.slots).get_mut(id) {
+            s.status.scan_fresh = false;
+        }
+    }
+
+    /// A live change was indexed: a report claiming the folder had nothing to index is out of
+    /// date (live changes reconcile subtrees only and send no report).
+    pub async fn scan_live_change(&self, id: &SourceId) {
+        let changed = match lock(&self.slots).get_mut(id) {
+            Some(s) if s.status.scan.as_ref().is_some_and(|r| r.found == 0) => {
+                s.status.scan = None;
+                s.status.scan_fresh = false;
+                true
+            }
+            _ => false,
+        };
+        if changed {
+            self.emit_source(id).await;
+        }
+    }
+
+    /// Changes the current pass's finished scan sent (a progress total), once known.
     pub fn scan_total(&self, id: &SourceId) -> Option<u64> {
         lock(&self.slots)
             .get(id)
+            .filter(|s| s.status.scan_fresh)
             .and_then(|s| s.status.scan.as_ref())
             .filter(|r| r.finished)
-            .map(|r| r.found)
+            .map(|r| r.to_index)
     }
 
     pub async fn sync_succeeded(&self, id: &SourceId) {
@@ -519,6 +549,13 @@ fn health_of(slot: &Slot, items: u64) -> nugget_core::ipc::SourceHealth {
         last.as_deref(),
     );
     match &slot.status.scan {
+        // While a new pass runs, an earlier pass's report does not override "syncing".
+        Some(_)
+            if health.code == nugget_connector::health::code::SYNCING
+                && !slot.status.scan_fresh =>
+        {
+            health
+        }
         Some(scan) => scan_health(health, scan, items),
         None => health,
     }
@@ -540,13 +577,29 @@ fn scan_health(health: SourceHealth, scan: &ScanReport, items: u64) -> SourceHea
         fix,
         ..health.clone()
     };
-    if scan.roots_denied > 0 {
+    if scan.roots_denied > 0 && scan.found == 0 && items == 0 {
         return mk(
             code::UNREADABLE,
             "Nugget isn't allowed to open this folder, so it can't index anything in it.".into(),
             "Check the folder's permissions (or the app's file access in your system settings), \
              then sync again."
                 .into(),
+        );
+    }
+    if scan.roots_denied > 0 && health.code == code::OK {
+        // Other folders of this source are fine: say so without calling the source broken.
+        let n = scan.roots_denied;
+        return mk(
+            code::OK,
+            format!(
+                "Up to date, but Nugget isn't allowed to open {} of this source's folders.",
+                if n == 1 {
+                    "one".to_string()
+                } else {
+                    n.to_string()
+                }
+            ),
+            "Check that folder's permissions to index it too.".into(),
         );
     }
     if scan.finished && scan.found == 0 && items == 0 {
@@ -940,6 +993,11 @@ impl Ingest {
             s.entry = new.clone();
             if settings_changed {
                 s.connector = None;
+            }
+            if settings_changed || enabled_changed {
+                // The kept report describes the old settings (or a pass long ago).
+                s.status.scan = None;
+                s.status.scan_fresh = false;
             }
             if !new.enabled {
                 s.status.state = SourceState::Disabled;

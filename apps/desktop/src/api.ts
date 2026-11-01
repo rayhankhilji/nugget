@@ -177,8 +177,10 @@ export interface SourceInfo {
 export interface ScanReport {
   /** The walk of this pass ended. */
   finished: boolean;
-  /** Files that will be (or already are) indexed this pass: the progress total. */
+  /** Files that will be (or already are) indexed this pass. */
   found: number;
+  /** New or changed files plus deletions this pass sends (absent from older daemons). */
+  to_index?: number;
   unsupported: number;
   too_large: number;
   unreadable: number;

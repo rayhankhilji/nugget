@@ -138,17 +138,28 @@ fn note_skip(report: &mut ScanReport, rel: &str, reason: &str, bytes: Option<u64
     }
 }
 
-/// Whether a root that exists can be listed. `Err(true)`: it exists but cannot be read
-/// (permission denied or similar); `Err(false)`: it is not there.
-fn root_access(root: &Path) -> std::result::Result<(), bool> {
+/// Why a root cannot be walked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootProblem {
+    /// Not there (unmounted, moved, or not a folder).
+    Missing,
+    /// There, but permission to read it is denied.
+    Denied,
+    /// There, but listing it failed for another reason (I/O error, ...).
+    Unreadable,
+}
+
+fn root_access(root: &Path) -> std::result::Result<(), RootProblem> {
+    use std::io::ErrorKind::PermissionDenied;
     match std::fs::metadata(root) {
         Ok(md) if md.is_dir() => match std::fs::read_dir(root) {
             Ok(_) => Ok(()),
-            Err(_) => Err(true),
+            Err(e) if e.kind() == PermissionDenied => Err(RootProblem::Denied),
+            Err(_) => Err(RootProblem::Unreadable),
         },
-        Ok(_) => Err(false),
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(true),
-        Err(_) => Err(false),
+        Ok(_) => Err(RootProblem::Missing),
+        Err(e) if e.kind() == PermissionDenied => Err(RootProblem::Denied),
+        Err(_) => Err(RootProblem::Missing),
     }
 }
 
@@ -253,15 +264,14 @@ pub(crate) fn reconcile(
             return Err(Error::Cancelled);
         }
         let root = cfg.roots[idx].path.clone();
-        if let Err(denied) = root_access(&root) {
+        if let Err(problem) = root_access(&root) {
             // An unmounted drive, a moved folder or one we may not open: keep what we have
             // rather than wiping it.
-            if denied {
-                tracing::warn!(root = %root.display(), "root folder cannot be read; keeping its items");
-                out.report.roots_denied += 1;
-            } else {
-                tracing::warn!(root = %root.display(), "root folder is unavailable; keeping its items");
-                out.report.roots_missing += 1;
+            tracing::warn!(root = %root.display(), ?problem, "root folder cannot be walked; keeping its items");
+            match problem {
+                RootProblem::Denied => out.report.roots_denied += 1,
+                RootProblem::Missing => out.report.roots_missing += 1,
+                RootProblem::Unreadable => note_skip(&mut out.report, "", "unreadable", None),
             }
             protected.0.push(Target::whole_root(idx));
             continue;
@@ -281,12 +291,6 @@ pub(crate) fn reconcile(
         )?;
     }
 
-    out.report.found = out.found.len() as u64;
-    out.report.finished = true;
-    if matches!(scope, Scope::All) {
-        send(Emit::Scan(out.report.clone()))?;
-    }
-
     // Deletes: everything in scope that was known but not found.
     let candidates: Vec<&String> = match scope {
         Scope::All => known.keys().collect(),
@@ -298,10 +302,19 @@ pub(crate) fn reconcile(
             .into_iter()
             .collect(),
     };
-    for key in candidates {
-        if out.found.contains_key(key) || protected.contains(key) {
-            continue;
-        }
+    let deletes: Vec<&String> = candidates
+        .into_iter()
+        .filter(|key| !out.found.contains_key(*key) && !protected.contains(key))
+        .collect();
+
+    out.report.found = out.found.len() as u64;
+    out.report.to_index = out.upserted + deletes.len() as u64;
+    out.report.finished = true;
+    if matches!(scope, Scope::All) {
+        send(Emit::Scan(out.report.clone()))?;
+    }
+
+    for key in deletes {
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }

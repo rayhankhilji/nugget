@@ -115,8 +115,8 @@ pub(crate) fn reconcile_settings(kind: &str, settings: Value) -> Result<Value> {
     Ok(settings)
 }
 
-/// The folders of a `files` source's settings, `~` expanded and made comparable: canonical when
-/// the folder exists, else lexically normalized (`.` dropped, `..` applied).
+/// The folders of a `files` source's settings, `~` expanded and made comparable (see
+/// [`comparable`]). Relative paths are left out: validation refuses them with its own message.
 fn files_roots(settings: &Value) -> Vec<PathBuf> {
     let Some(roots) = settings.get("roots").and_then(Value::as_array) else {
         return Vec::new();
@@ -125,14 +125,14 @@ fn files_roots(settings: &Value) -> Vec<PathBuf> {
         .iter()
         .filter_map(Value::as_str)
         .filter(|r| !r.trim().is_empty())
-        .map(|r| comparable(&nugget_connector_files::expand_home(Path::new(r))))
+        .map(|r| nugget_connector_files::expand_home(Path::new(r)))
+        .filter(|p| p.is_absolute())
+        .map(|p| comparable(&p))
         .collect()
 }
 
-fn comparable(p: &Path) -> PathBuf {
-    if let Ok(c) = std::fs::canonicalize(p) {
-        return c;
-    }
+/// `.` dropped and `..` applied, without touching the filesystem.
+fn lexical(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in p.components() {
         match c {
@@ -146,21 +146,74 @@ fn comparable(p: &Path) -> PathBuf {
     out
 }
 
+/// A path in a form two spellings of the same folder agree on: the deepest existing ancestor
+/// canonicalized (symlinks such as macOS's `/var` → `/private/var` resolved) with the rest
+/// appended, Windows `\\?\` prefixes stripped, and case folded where file systems usually
+/// ignore case (Windows, macOS).
+fn comparable(p: &Path) -> PathBuf {
+    let p = lexical(p);
+    let mut out = p.clone();
+    for a in p.ancestors() {
+        if let Ok(c) = std::fs::canonicalize(a) {
+            out = match p.strip_prefix(a) {
+                Ok(rest) if !rest.as_os_str().is_empty() => c.join(rest),
+                _ => c,
+            };
+            break;
+        }
+    }
+    let out = strip_verbatim(out);
+    if cfg!(any(windows, target_os = "macos")) {
+        PathBuf::from(out.to_string_lossy().to_lowercase())
+    } else {
+        out
+    }
+}
+
+/// `\\?\C:\x` → `C:\x`, `\\?\UNC\server\share` → `\\server\share` (what
+/// `canonicalize` returns on Windows); other paths unchanged.
+fn strip_verbatim(p: PathBuf) -> PathBuf {
+    let Some(s) = p.to_str() else {
+        return p;
+    };
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\")
+        && rest.as_bytes().get(1) == Some(&b':')
+    {
+        return PathBuf::from(rest);
+    }
+    p
+}
+
 /// GG6-13: refuse a `files` source whose folders equal, contain or lie inside a folder of
-/// another `files` source (`except` is the source being updated): its items would be indexed
-/// twice.
+/// another `files` source: its items would be indexed twice. For an update, `current` is the
+/// source being updated: it is not compared with itself, and only folders not already in its
+/// stored settings are checked (so an existing overlap never makes a source uneditable).
 pub(crate) fn check_duplicate_folders(
     kind: &str,
     settings: &Value,
     existing: &[SourceInfo],
-    except: Option<&SourceId>,
+    current: Option<&SourceInfo>,
 ) -> Result<()> {
     if kind != nugget_connector_files::FILES_KIND {
         return Ok(());
     }
-    let new = files_roots(settings);
+    let before = current
+        .map(|c| files_roots(&c.settings))
+        .unwrap_or_default();
+    let new: Vec<PathBuf> = files_roots(settings)
+        .into_iter()
+        .filter(|r| !before.contains(r))
+        .collect();
+    if new.is_empty() {
+        return Ok(());
+    }
     for other in existing {
-        if other.kind != nugget_connector_files::FILES_KIND || Some(&other.id) == except {
+        if other.kind != nugget_connector_files::FILES_KIND
+            || current.is_some_and(|c| c.id == other.id)
+        {
             continue;
         }
         for theirs in files_roots(&other.settings) {
@@ -281,8 +334,13 @@ mod tests {
             "This folder contains \"My docs\", which is already added. Remove that source \
              first or pick a different folder."
         );
-        // A missing folder inside an existing one is compared lexically.
-        assert!(err(json!([docs.join("not-yet")])).contains("is inside"));
+        // A missing folder inside an existing one: its existing ancestor is canonicalized.
+        assert!(err(json!([docs.join("not-yet").join("deeper")])).contains("is inside"));
+        // Relative roots are left to validation's own message.
+        assert!(
+            check_duplicate_folders("files", &json!({ "roots": ["Docs"] }), &existing, None)
+                .is_ok()
+        );
 
         // Disjoint folders, other kinds, and the source being updated itself are fine.
         assert!(
@@ -291,11 +349,47 @@ mod tests {
         assert!(
             check_duplicate_folders("obsidian", &json!({ "vault": docs }), &existing, None).is_ok()
         );
-        let me = SourceId::new("files-1");
+        let me = &existing[0];
         assert!(
-            check_duplicate_folders("files", &json!({ "roots": [inner] }), &existing, Some(&me))
+            check_duplicate_folders("files", &json!({ "roots": [inner] }), &existing, Some(me))
                 .is_ok()
         );
+    }
+
+    /// Two sources that already overlap (added before the check existed) stay editable: an
+    /// update only checks folders it adds.
+    #[test]
+    fn updating_an_existing_overlapping_source_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("Docs");
+        let inner = docs.join("Notes");
+        let other = dir.path().join("Other");
+        for d in [&inner, &other] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let existing = [
+            files("files-1", "Docs", &[&docs]),
+            files("files-2", "Notes", &[&inner]),
+        ];
+        let me = Some(&existing[1]);
+        let include = json!({ "roots": [inner], "include": ["*.md"] });
+        assert!(check_duplicate_folders("files", &include, &existing, me).is_ok());
+        // Adding a disjoint folder is fine; adding one inside "Docs" is not.
+        let more = json!({ "roots": [inner, other] });
+        assert!(check_duplicate_folders("files", &more, &existing, me).is_ok());
+        let worse = json!({ "roots": [inner, docs.join("Else")] });
+        assert!(check_duplicate_folders("files", &worse, &existing, me).is_err());
+    }
+
+    #[test]
+    fn verbatim_prefixes_are_stripped() {
+        let p = |s: &str| strip_verbatim(PathBuf::from(s));
+        assert_eq!(p(r"\\?\C:\Users\x"), PathBuf::from(r"C:\Users\x"));
+        assert_eq!(
+            p(r"\\?\UNC\server\share\x"),
+            PathBuf::from(r"\\server\share\x")
+        );
+        assert_eq!(p("/home/x"), PathBuf::from("/home/x"));
     }
 
     #[cfg(unix)]
@@ -309,6 +403,27 @@ mod tests {
         let existing = [files("files-1", "Docs", &[&docs])];
         let r = check_duplicate_folders("files", &json!({ "roots": [link] }), &existing, None);
         assert!(matches!(r, Err(Error::Invalid(m)) if m.contains("already added as")));
+    }
+
+    /// As on macOS (`/var` → `/private/var`): the existing source is stored under its real
+    /// path, the new missing folder is spelled through a symlinked ancestor.
+    #[cfg(unix)]
+    #[test]
+    fn missing_folder_under_a_symlinked_ancestor_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("private").join("var");
+        std::fs::create_dir_all(real.join("Docs")).unwrap();
+        let var = dir.path().join("var");
+        std::os::unix::fs::symlink(&real, &var).unwrap();
+        let existing = [files("files-1", "Docs", &[&real.join("Docs")])];
+        let missing = var.join("Docs").join("not-yet");
+        let r = check_duplicate_folders("files", &json!({ "roots": [missing] }), &existing, None);
+        assert!(matches!(r, Err(Error::Invalid(m)) if m.contains("is inside")));
+        // And the other way round: stored through the link, new one under the real path.
+        let existing = [files("files-1", "Docs", &[&var.join("Docs")])];
+        let missing = real.join("Docs").join("not-yet");
+        let r = check_duplicate_folders("files", &json!({ "roots": [missing] }), &existing, None);
+        assert!(matches!(r, Err(Error::Invalid(m)) if m.contains("is inside")));
     }
 
     #[test]

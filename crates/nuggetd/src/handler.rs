@@ -634,10 +634,11 @@ impl RpcHandler {
 
     async fn sources_update(&self, mut update: SourceUpdate) -> Result<Value, RpcError> {
         if let Some(settings) = update.settings.take() {
-            let kind = self.state.ingest.get(&update.id).await?.kind;
+            let current = self.state.ingest.get(&update.id).await?;
+            let kind = current.kind.clone();
             let settings = reconcile_settings(&kind, settings)?;
             let existing = self.state.ingest.list().await?;
-            check_duplicate_folders(&kind, &settings, &existing, Some(&update.id))?;
+            check_duplicate_folders(&kind, &settings, &existing, Some(&current))?;
             update.settings = Some(settings);
         }
         let detail = json!({
