@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BriefView, CardsList, CardView } from "../api";
 import { TodayPage } from "./Today";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
+import { loadLocale } from "../i18n";
 
 const card: CardView = {
   id: "c1",
@@ -141,6 +142,44 @@ describe("Today page", () => {
     expect(text).toContain("Nov 3, 2026");
     expect(container.querySelector(".today-card-title")!.textContent).toBe("Domain renews Nov 3, 2026");
     expect(byText(container, "button", "Accept")?.getAttribute("aria-label") ?? "").not.toContain("2026-11-03");
+  });
+
+  it("writes card, brief and action text in the UI language from the daemon's keys (GG7-6)", async () => {
+    const renewal: CardView = {
+      ...card,
+      title: "Pixelboard renews 2026-11-03 — $49.00",
+      title_text: { key: "renewal.renews_amount", args: { vendor: "Pixelboard", due: "2026-11-03", amount: 49, currency: "USD" } },
+      detail: "Keep it, or cancel before the charge.",
+      detail_text: { key: "renewal.detail" },
+      summary: null,
+      actions: [
+        { index: 0, kind: "reminder", label: "Remind me 2026-11-02T09:00:00Z", label_text: { key: "action.reminder", args: { at: "2026-11-02T09:00:00Z" } }, risk: "edit", supported: true },
+        { index: 1, kind: "archive_thread", label: "Archive", label_text: { key: "no.such.key" }, risk: "destroy", supported: true },
+      ],
+    };
+    setup({
+      cards_list: { ...list, cards: [renewal] },
+      brief_get: { ...brief, renewals: [{ ...brief.renewals[0]!, title_text: { key: "awaiting.title", args: { who: "Ana", subject: "Q3" } } }] },
+      cards_execute: { outcome: "needs_confirmation", detail: "this sends on your behalf", detail_text: { key: "confirm.risk", args: { risk: "send" } } },
+    });
+    await loadLocale("de");
+    try {
+      const { container } = await render(<TodayPage />);
+      await flush();
+      expect(container.querySelector(".today-card-title")!.textContent).toMatch(/^Pixelboard verlängert sich am 03.11.2026 — 49,00\s\$$/);
+      expect(container.querySelector(".today-card-detail")!.textContent).toBe("Behalten oder vor der Abbuchung kündigen.");
+      expect(container.textContent).toContain("Keine Antwort von Ana: Q3");
+      const remind = container.querySelector(".today-proposed button")!;
+      expect(remind.getAttribute("title")).toMatch(/^Erinnern am 0[23]\.11\.2026 um \d\d:\d\d$/);
+      // An unknown key falls back to the daemon's English.
+      expect(container.querySelectorAll(".today-proposed button")[1]!.getAttribute("title")).toBe("Archive");
+      await click(container.querySelector<HTMLElement>(".today-proposed button")!);
+      await flush();
+      await click(byText(document.querySelector("dialog")!, "button", "Freigeben"));
+      expect(document.querySelector("dialog")!.textContent).toContain("Nugget sendet gleich etwas in Ihrem Namen.");
+    } finally {
+      await loadLocale("en");
+    }
   });
 
   it("previews, approves, confirms and shows the draft", async () => {

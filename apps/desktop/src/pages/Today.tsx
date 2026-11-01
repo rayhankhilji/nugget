@@ -36,6 +36,7 @@ import { LearnedLines, LearningPanel, type Forget } from "./today/Learning";
 import {
   SNOOZE_CHOICES,
   cardKindLabel,
+  localText,
   evidenceLine,
   factorLabel,
   formatBriefDate,
@@ -198,13 +199,13 @@ export function TodayPage() {
                 <CardItem
                   key={c.id}
                   card={c}
-                  onAccept={() => void feedback(c, { feedback: "accept" }, t("today.accepted", { title: formatDatesInText(c.title) }))}
+                  onAccept={() => void feedback(c, { feedback: "accept" }, t("today.accepted", { title: localText(c.title_text, c.title) }))}
                   onDismiss={(reason, text) =>
-                    void feedback(c, { feedback: "dismiss", reason, reason_text: reason === "other" ? text || null : null }, t("today.dismissed", { title: formatDatesInText(c.title) }))
+                    void feedback(c, { feedback: "dismiss", reason, reason_text: reason === "other" ? text || null : null }, t("today.dismissed", { title: localText(c.title_text, c.title) }))
                   }
                   onSnooze={(choice) => {
                     const until = snoozeUntil(choice);
-                    void feedback(c, { feedback: "snooze", until }, t("today.snoozed", { title: formatDatesInText(c.title), until: formatTime(until) }));
+                    void feedback(c, { feedback: "snooze", until }, t("today.snoozed", { title: localText(c.title_text, c.title), until: formatTime(until) }));
                   }}
                   onAction={(a) => setAction({ card: c, action: a })}
                   onForget={forget}
@@ -320,11 +321,11 @@ function BriefList({ title, items }: { title: string; items: BriefCardView[] }) 
         {items.map((c) => (
           <li key={c.card_id}>
             <span className="today-brief-title" dir="auto">
-              {formatDatesInText(c.title)}
+              {localText(c.title_text, c.title)}
             </span>
             {c.summary && (
               <span className="muted small block" dir="auto">
-                {formatDatesInText(c.summary)}
+                {localText(c.summary_text, c.summary)}
               </span>
             )}
             {c.due && (
@@ -407,8 +408,7 @@ function CardItem({
   const why = topFactors(card.factors);
   const summary = card.summary?.trim();
   const people = card.people ?? [];
-  // ISO dates inside the daemon's text, written for the reader's locale.
-  const title = formatDatesInText(card.title);
+  const title = localText(card.title_text, card.title);
 
   return (
     <li className="card today-card" id={cardDomId(card.id)} tabIndex={-1} aria-labelledby={titleId}>
@@ -429,7 +429,7 @@ function CardItem({
       )}
       {card.detail && card.detail !== summary && (
         <p className="muted today-card-detail" dir="auto">
-          {formatDatesInText(card.detail)}
+          {localText(card.detail_text, card.detail)}
         </p>
       )}
       <p className="muted small today-card-meta">
@@ -477,8 +477,9 @@ function CardItem({
           <div className="today-proposed" role="group" aria-label={t("today.actionsLabel", { title })}>
             {card.actions.map((a) => {
               const short = ACTION_LABEL[a.kind];
-              const label = short ? t(short) : a.label;
-              const full = short && a.label !== label ? a.label : undefined;
+              const long = localText(a.label_text, a.label);
+              const label = short ? t(short) : long;
+              const full = short && long !== label ? long : undefined;
               return a.supported ? (
                 <button
                   key={a.index}

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Date, Duration, OffsetDateTime};
 
-use crate::candidate::{CandidateKind, EvidenceRef};
+use crate::candidate::{CandidateKind, EvidenceRef, LocalText};
 use crate::cards::{Card, CardState, ProactiveState};
 use crate::config::ProactiveConfig;
 use crate::corpus::Corpus;
@@ -20,6 +20,11 @@ pub struct BriefCard {
     pub title: String,
     /// The judge's summary when available, else the card's detail.
     pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_text: Option<LocalText>,
+    /// The card's `detail_text` when `summary` is its detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<LocalText>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub due: Option<OffsetDateTime>,
     pub rank: f64,
@@ -39,6 +44,12 @@ impl BriefCard {
                 .enrichment
                 .as_ref()
                 .map_or_else(|| c.detail.clone(), |e| e.summary.clone()),
+            title_text: c.title_text.clone(),
+            summary_text: c
+                .enrichment
+                .is_none()
+                .then(|| c.detail_text.clone())
+                .flatten(),
             due: c.due,
             rank: c.rank,
             factors: c.factors.clone(),

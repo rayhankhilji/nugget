@@ -1,7 +1,8 @@
 /** Display helpers for the Today page: factor names, kinds, snooze times, risk tones. */
-import type { CardEvidence, CardFactor, CardLearned, LearnedView } from "../../api";
+import type { CardEvidence, CardFactor, CardLearned, LearnedView, LocalText } from "../../api";
 import { isSafeEvidenceUrl } from "../../api";
-import { formatDate, t, type MessageKey } from "../../i18n";
+import { formatDatesInText } from "../../format";
+import { formatDate, formatNumber, t, type Args, type MessageKey } from "../../i18n";
 import { truncateText } from "../../knowledge";
 import { plainSnippet } from "../../components/Provenance";
 
@@ -15,6 +16,38 @@ function known(key: string, fallback: string): string {
 function humanize(name: string): string {
   const text = name.replace(/[_:-]+/g, " ").replace(/\s+/g, " ").trim();
   return text || name;
+}
+
+/** Arguments holding a calendar date (`YYYY-MM-DD`), read as a local date rather than UTC midnight. */
+const DATE_ARGS = new Set(["due", "date"]);
+
+/**
+ * Card, brief and action text in the user's language: the daemon's message key and raw
+ * arguments formatted here (dates and amounts with Intl), else its English `fallback` with ISO
+ * dates localised. Names, subjects and quotes in the arguments stay as written.
+ */
+export function localText(text: LocalText | null | undefined, fallback: string): string {
+  const english = () => formatDatesInText(fallback);
+  if (!text?.key) return english();
+  const args: Record<string, Args[string]> = {};
+  for (const [name, v] of Object.entries(text.args ?? {})) {
+    if (typeof v === "number") args[name] = v;
+    else if (typeof v === "string") {
+      const d = DATE_ARGS.has(name) ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(v) : null;
+      args[name] = d ? new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3])) : v;
+    }
+  }
+  const { amount, currency } = args;
+  if (typeof amount === "number" && typeof currency === "string") {
+    try {
+      args.amount = formatNumber(amount, { style: "currency", currency });
+    } catch {
+      args.amount = `${formatNumber(amount)} ${currency}`;
+    }
+  }
+  const key = `today.text.${text.key}` as MessageKey;
+  const out = t(key, args);
+  return out === key ? english() : out;
 }
 
 export function cardKindLabel(kind: string): string {

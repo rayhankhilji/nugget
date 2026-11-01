@@ -1249,12 +1249,23 @@ export interface CardEvidence {
   url?: string | null;
 }
 
+/**
+ * Text the app writes in the user's language (see `localText` in `pages/today/model.ts`): a
+ * message key under `today.text.` and raw arguments (ISO dates, numbers, an amount with its
+ * `currency`). Unknown keys fall back to the daemon's English text.
+ */
+export interface LocalText {
+  key: string;
+  args?: Record<string, string | number | boolean | null>;
+}
+
 export interface CardActionView {
   /** Position in the card's actions (`cards.preview`/`cards.execute` take it). */
   index: number;
   /** `draft_reply`, `create_event`, `reminder`, `archive_thread`, `research_note`. */
   kind: string;
   label: string;
+  label_text?: LocalText | null;
   /** `observe`, `edit`, `send`, `destroy`, `spend`, `security`. */
   risk: string;
   /** Whether an executor is configured for it. */
@@ -1266,6 +1277,9 @@ export interface CardView {
   kind: CardKind;
   title: string;
   detail: string;
+  title_text?: LocalText | null;
+  /** Unset when the detail is quoted source text. */
+  detail_text?: LocalText | null;
   summary?: string | null;
   people?: string[];
   /** RFC 3339. */
@@ -1310,6 +1324,7 @@ export interface CardPreview {
   action: number;
   kind: string;
   summary: string;
+  summary_text?: LocalText | null;
   risk: string;
   /** Where the change lands, e.g. `mail:drafts`, `calendar`, `vault`. */
   target: string;
@@ -1340,6 +1355,8 @@ export interface CardExecuteResult {
   outcome: ExecuteOutcome | string;
   /** The executor's result id, or the policy's reason. */
   detail?: string | null;
+  /** For `needs_confirmation`: the question to ask, localisable. */
+  detail_text?: LocalText | null;
   artifact?: ActionArtifact | null;
 }
 
@@ -1348,6 +1365,8 @@ export interface BriefCardView {
   kind: CardKind;
   title: string;
   summary: string;
+  title_text?: LocalText | null;
+  summary_text?: LocalText | null;
   due?: string | null;
   rank: number;
   factors: CardFactor[];
