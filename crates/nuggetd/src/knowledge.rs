@@ -11,8 +11,10 @@
 //! - **Vault.** After every run (and after merges and claim-status changes), pages of entities
 //!   changed in the graph's change feed are re-rendered with `Vault::render_changed`; the
 //!   high-water mark is persisted in the store (cursor key [`VAULT_MARK_KEY`], with the vault
-//!   root, so moving the vault re-renders everything). `Vault::watch` applies user edits and
-//!   signals them (`Vault::subscribe_edits`), which triggers that pass.
+//!   root, so moving the vault re-renders everything; a vault last rendered under older render
+//!   rules, `Vault::needs_full_render`, is rendered in full once even with no graph change).
+//!   `Vault::watch` applies user edits and signals them (`Vault::subscribe_edits`), which
+//!   triggers that pass.
 //! - **No polling.** The worker sleeps until one of those events or a deadline (debounce,
 //!   `interval_minutes`), so an idle daemon spends no wakeups here.
 
@@ -169,12 +171,20 @@ impl KnowledgeService {
                 }
             });
         }
+        // Stop runs between items once the daemon stops, before the model runtime goes away.
+        let k = self.knowledge.clone();
+        let stopping = stop.clone();
+        tasks.spawn(async move {
+            stopping.cancelled().await;
+            k.interrupt();
+        });
         let me = self.clone();
         let ingest = ingest.clone();
         tasks.spawn(async move { me.worker(ingest, stop).await });
     }
 
-    /// Ask the worker to run soon (e.g. after a source was removed).
+    /// Ask the worker to run soon (e.g. after a source was removed, or when a local model
+    /// became ready: items waiting for the model are retried).
     pub fn wake(&self) {
         self.wake.notify_one();
     }
@@ -194,6 +204,12 @@ impl KnowledgeService {
         // Startup run: pick up whatever was indexed while extraction was not running.
         let mut due: Option<Instant> = self.cfg.enabled.then(Instant::now);
         let mut periodic = interval.map(|i| Instant::now() + i);
+        // The commit counter when the current chain of runs started. A run that cannot finish
+        // its plan carries the rest over to the next run, which does not plan again, so commits
+        // that arrive meanwhile are planned only by a run after the chain.
+        let mut chain_from: Option<u64> = None;
+        // Some run of the chain left items for the model after spending its request budget.
+        let mut chain_deferred = false;
         loop {
             let deadline = if self.cfg.enabled {
                 [due, periodic].into_iter().flatten().min()
@@ -241,10 +257,28 @@ impl KnowledgeService {
             match due {
                 Some(at) if now >= at => {
                     due = None;
+                    let from = *chain_from.get_or_insert(seen);
                     match self.run_now().await {
-                        Ok(stats) if stats.remaining > 0 => due = Some(Instant::now()),
-                        Ok(_) => {}
-                        Err(e) => tracing::warn!(error = %e, "knowledge run failed"),
+                        Ok(stats) => {
+                            chain_deferred |= deferred_for_budget(&stats);
+                            if run_again(&stats, from, *committed.borrow(), chain_deferred) {
+                                due = Some(Instant::now());
+                            } else if stats.remaining == 0 && self.unplanned_changes().await {
+                                // Written after the plan without an ingest commit (e.g. an
+                                // embedding backfill): plan again after the quiet period, so
+                                // pending_items reaches 0 (unchanged items cost little).
+                                due = Some(Instant::now() + debounce);
+                            }
+                            if stats.remaining == 0 {
+                                chain_from = None;
+                                chain_deferred = false;
+                            }
+                        }
+                        Err(e) => {
+                            chain_from = None;
+                            chain_deferred = false;
+                            tracing::warn!(error = %e, "knowledge run failed");
+                        }
                     }
                 }
                 // Vault edits applied by the watcher change the graph too (a run syncs the
@@ -253,6 +287,14 @@ impl KnowledgeService {
                 _ => {}
             }
         }
+    }
+
+    /// [`Knowledge::has_unplanned_changes`] off the async runtime (false on error).
+    async fn unplanned_changes(&self) -> bool {
+        let k = self.knowledge.clone();
+        blocking(move || k.has_unplanned_changes())
+            .await
+            .unwrap_or(false)
     }
 
     /// One extraction run (respecting the power policy), then a vault pass.
@@ -288,6 +330,8 @@ impl KnowledgeService {
                 deleted = stats.items_deleted,
                 failed = stats.items_failed,
                 remaining = stats.remaining,
+                deferred = stats.items_deferred,
+                llm_requests = stats.llm_requests,
                 entities = stats.changed_entities,
                 constrained,
                 took_ms,
@@ -315,7 +359,9 @@ impl KnowledgeService {
             let root = vault.root().display().to_string();
             let mark = load_mark(&store, &root, &vault)?;
             let (peek, _) = graph.changes_since(mark, MAX_NOTIFIED_IDS)?;
-            if peek.is_empty() {
+            // After an upgrade that changed what pages show, render everything once even when
+            // the graph has not changed (`render_changed` does the full pass itself).
+            if peek.is_empty() && !vault.needs_full_render() {
                 return Ok(Vec::new());
             }
             let report = vault.render_changed(mark)?;
@@ -373,9 +419,8 @@ impl KnowledgeService {
         if st.llm_provider.is_some() {
             return st.llm_provider;
         }
-        if !st.llm_local_available {
-            return None;
-        }
+        // Asked of the router now, not as of the last run: a model that became ready since is
+        // reported right away.
         let caps = nugget_core::capability::Capabilities {
             json_schema: true,
             ..Default::default()
@@ -386,6 +431,24 @@ impl KnowledgeService {
             .find(|p| p.meta().locality != nugget_core::capability::Locality::Cloud)
             .map(|p| p.id().clone())
     }
+}
+
+/// Whether the worker runs again right away after a run: the plan was cut by the budget (the
+/// rest is carried over); or the chain of carried-over runs that began when the commit counter
+/// was `chain_from` is over and commits arrived since (a carried plan never plans again, so
+/// they are not in it); or items were left for the model because this run's request budget
+/// ran out somewhere in the chain (`chain_deferred`, see [`deferred_for_budget`]).
+fn run_again(stats: &RunStats, chain_from: u64, committed: u64, chain_deferred: bool) -> bool {
+    stats.remaining > 0 || committed != chain_from || chain_deferred
+}
+
+/// Whether a run left items for the model because its request budget ran out while it made
+/// progress with the model (so a fresh budget will get further). A run that extracted nothing
+/// (every request failed, power constrained) does not count: that would loop.
+fn deferred_for_budget(stats: &RunStats) -> bool {
+    stats.items_deferred > 0
+        && stats.llm_requests > stats.llm_failed_requests
+        && stats.items_processed > 0
 }
 
 /// Sleep until `deadline`, or forever without one.
@@ -455,6 +518,44 @@ async fn forward_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runs_again_after_a_carried_chain_that_missed_commits() {
+        let done = RunStats::default();
+        let carried = RunStats {
+            remaining: 3,
+            ..RunStats::default()
+        };
+        // Budget cut: continue the chain.
+        assert!(run_again(&carried, 7, 7, false));
+        // Chain over, nothing committed since it started: sleep.
+        assert!(!run_again(&done, 7, 7, false));
+        // Chain over, commits arrived while it ran (QA GG5-7): plan again now.
+        assert!(run_again(&done, 7, 9, false));
+        // Items deferred somewhere in the chain because the request budget ran out.
+        assert!(run_again(&done, 7, 7, true));
+        let budget = RunStats {
+            items_deferred: 2,
+            items_processed: 3,
+            llm_requests: 4,
+            ..RunStats::default()
+        };
+        assert!(deferred_for_budget(&budget));
+        // No progress with the model (constrained, or every request failed): no busy loop.
+        let constrained = RunStats {
+            items_deferred: 2,
+            ..RunStats::default()
+        };
+        assert!(!deferred_for_budget(&constrained));
+        let failing = RunStats {
+            items_deferred: 2,
+            items_processed: 1,
+            llm_requests: 4,
+            llm_failed_requests: 4,
+            ..RunStats::default()
+        };
+        assert!(!deferred_for_budget(&failing));
+    }
 
     #[test]
     fn vault_paths() {

@@ -71,6 +71,23 @@ pub(crate) struct State {
     pub retry_failed: bool,
     /// Some ledger entry may be waiting for the LLM extractor.
     pub retry_llm: bool,
+    /// Changed items whose graph facts came from the model and that were left as they are
+    /// because the model could not run for them (no request budget, power constrained, the
+    /// daemon stopping): re-extracting them without it would replace the model's facts with
+    /// the deterministic extractors' alone. Every plan picks them up again.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub deferred: Vec<Deferred>,
+}
+
+/// An item left as it is for the model ([`State::deferred`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Deferred {
+    pub item: ItemRef,
+    /// Times the model step ran for it without finishing (no provider, failed requests, request
+    /// budget spent in the middle of the item). At the extractor's `max_attempts` the item is
+    /// extracted without the model after all.
+    #[serde(default)]
+    pub attempts: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

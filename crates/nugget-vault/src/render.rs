@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use nugget_core::Result;
 use nugget_core::ids::{EntityId, ItemRef};
-use nugget_graph::{Claim, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore};
+use nugget_graph::{Claim, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore, Identifier};
 use time::UtcOffset;
 use time::format_description::well_known::Rfc3339;
 
@@ -24,7 +24,15 @@ pub(crate) struct Ctx<'a> {
     pub cfg: &'a VaultConfig,
     sources: RefCell<HashMap<ItemRef, SourceInfo>>,
     entities: RefCell<HashMap<EntityId, Option<Entity>>>,
+    /// [`Ctx::entity_sensitive`] per entity (for this pass).
+    sensitive: RefCell<HashMap<EntityId, bool>>,
+    /// A source lookup failed in this pass (those items count as sensitive).
+    lookup_failed: std::cell::Cell<bool>,
 }
+
+/// Mentions read per entity to decide whether it is sensitive-only (as `nuggetd`'s graph views
+/// and MCP do).
+const SENSITIVE_MENTIONS: usize = 5000;
 
 pub(crate) struct Rendered {
     pub doc: Doc,
@@ -146,6 +154,8 @@ impl<'a> Ctx<'a> {
             cfg,
             sources: RefCell::default(),
             entities: RefCell::default(),
+            sensitive: RefCell::default(),
+            lookup_failed: std::cell::Cell::new(false),
         }
     }
 
@@ -174,32 +184,175 @@ impl<'a> Ctx<'a> {
     /// Forget cached entities (after the graph changed under us).
     pub fn forget(&self) {
         self.entities.borrow_mut().clear();
+        self.sensitive.borrow_mut().clear();
+    }
+
+    /// Look up every item in `items` not looked up yet in this pass, in one batch
+    /// ([`ItemLookup::source_infos`]), so the per-item checks below hit the cache.
+    pub fn prefetch<'i>(&self, items: impl IntoIterator<Item = &'i ItemRef>) {
+        let want: Vec<ItemRef> = {
+            let cached = self.sources.borrow();
+            let mut seen = std::collections::HashSet::new();
+            items
+                .into_iter()
+                .filter(|i| !cached.contains_key(*i) && seen.insert(*i))
+                .cloned()
+                .collect()
+        };
+        if want.is_empty() {
+            return;
+        }
+        let missing = || SourceInfo {
+            sensitive: self.items.missing_is_sensitive(),
+            ..SourceInfo::default()
+        };
+        // A failed lookup counts as sensitive.
+        let failed = || SourceInfo {
+            sensitive: true,
+            ..SourceInfo::default()
+        };
+        let infos: Vec<(ItemRef, SourceInfo)> = match self.items.source_infos(&want) {
+            Ok(mut f) => want
+                .into_iter()
+                .map(|i| {
+                    let info = f.remove(&i).unwrap_or_else(missing);
+                    (i, info)
+                })
+                .collect(),
+            Err(e) => {
+                // One bad item must not count the whole batch as sensitive: ask one by one.
+                tracing::warn!(error = %e, "vault: batched source lookup failed; retrying per item");
+                want.into_iter()
+                    .map(|i| {
+                        let info = match self.items.source_info(&i) {
+                            Ok(Some(info)) => info,
+                            Ok(None) => missing(),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "vault: source lookup failed");
+                                self.lookup_failed.set(true);
+                                failed()
+                            }
+                        };
+                        (i, info)
+                    })
+                    .collect()
+            }
+        };
+        self.sources.borrow_mut().extend(infos);
+    }
+
+    /// Whether a source lookup failed in this pass: its items counted as sensitive, so nothing
+    /// is deleted on that answer.
+    pub fn lookup_failed(&self) -> bool {
+        self.lookup_failed.get()
+    }
+
+    /// Whether the item is sensitive. An item the lookup does not know counts as sensitive when
+    /// the lookup says so ([`ItemLookup::missing_is_sensitive`]); a failed lookup always does.
+    pub fn item_sensitive(&self, item: &ItemRef) -> bool {
+        self.source(item).sensitive
+    }
+
+    /// A claim is sensitive-only when it has evidence and every piece of it is from a sensitive
+    /// item. A claim without evidence (the user's own) is not.
+    pub fn claim_sensitive(&self, c: &Claim) -> bool {
+        !c.evidence.is_empty() && c.evidence.iter().all(|ev| self.item_sensitive(&ev.item))
+    }
+
+    /// An entity is sensitive-only when it has at least one active claim or mention, every
+    /// active claim (as subject or object) is sensitive-only and every mention is from a
+    /// sensitive item. Such an entity gets no page.
+    pub fn entity_sensitive(&self, id: &EntityId) -> Result<bool> {
+        if let Some(s) = self.sensitive.borrow().get(id) {
+            return Ok(*s);
+        }
+        let claims = self.graph.claims_for(id, false)?;
+        self.prefetch(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        );
+        let mut any = !claims.is_empty();
+        let mut sensitive = claims.iter().all(|c| self.claim_sensitive(c));
+        if sensitive {
+            let mentions = self.graph.mentions_for(id, SENSITIVE_MENTIONS)?;
+            self.prefetch(mentions.iter().map(|m| &m.item));
+            any |= !mentions.is_empty();
+            sensitive = mentions.iter().all(|m| self.item_sensitive(&m.item));
+        }
+        let out = any && sensitive;
+        self.sensitive.borrow_mut().insert(id.clone(), out);
+        Ok(out)
+    }
+
+    /// The aliases and identifiers the page may show: all but those whose recorded provenance
+    /// ([`GraphStore::entity_provenance`]) is only sensitive items. A detail without recorded
+    /// provenance (one the user added in the vault, or from a merge) is shown: the page is the
+    /// user's own file.
+    fn shown_details(&self, e: &Entity) -> Result<(Vec<String>, Vec<Identifier>)> {
+        let Some(p) = self.graph.entity_provenance(&e.id)? else {
+            return Ok((e.aliases.clone(), e.identifiers.clone()));
+        };
+        self.prefetch(
+            p.aliases
+                .iter()
+                .flat_map(|(_, items)| items)
+                .chain(p.identifiers.iter().flat_map(|(_, items)| items)),
+        );
+        let hidden =
+            |items: &[ItemRef]| !items.is_empty() && items.iter().all(|i| self.item_sensitive(i));
+        let hidden_aliases: Vec<&String> = p
+            .aliases
+            .iter()
+            .filter(|(_, items)| hidden(items))
+            .map(|(a, _)| a)
+            .collect();
+        let hidden_ids: Vec<&Identifier> = p
+            .identifiers
+            .iter()
+            .filter(|(_, items)| hidden(items))
+            .map(|(i, _)| i)
+            .collect();
+        let aliases = e
+            .aliases
+            .iter()
+            .filter(|a| !hidden_aliases.contains(a))
+            .cloned()
+            .collect();
+        let identifiers = e
+            .identifiers
+            .iter()
+            .filter(|i| !hidden_ids.contains(i))
+            .cloned()
+            .collect();
+        Ok((aliases, identifiers))
     }
 
     fn source(&self, item: &ItemRef) -> SourceInfo {
         if let Some(s) = self.sources.borrow().get(item) {
             return s.clone();
         }
-        let info = match self.items.source_info(item) {
-            Ok(i) => i.unwrap_or_default(),
-            Err(e) => {
-                tracing::warn!(error = %e, "vault: source lookup failed");
-                SourceInfo::default()
-            }
-        };
-        self.sources.borrow_mut().insert(item.clone(), info.clone());
-        info
+        self.prefetch([item]);
+        self.sources
+            .borrow()
+            .get(item)
+            .cloned()
+            .unwrap_or_else(|| SourceInfo {
+                sensitive: true,
+                ..SourceInfo::default()
+            })
     }
 
-    fn frontmatter(&self, e: &Entity) -> Vec<String> {
+    fn frontmatter(&self, e: &Entity) -> Result<Vec<String>> {
+        let (aliases, identifiers) = self.shown_details(e)?;
         let mut fm = vec![
             format!("nugget_id: {}", json(e.id.as_str())),
             format!("kind: {}", json(e.kind.as_str())),
-            format!("aliases: {}", json(&e.aliases)),
+            format!("aliases: {}", json(&aliases)),
         ];
-        if self.cfg.include_identifiers && !e.identifiers.is_empty() {
+        if self.cfg.include_identifiers && !identifiers.is_empty() {
             let mut ids: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-            for i in &e.identifiers {
+            for i in &identifiers {
                 ids.entry(i.scheme.as_str())
                     .or_default()
                     .push(i.value.as_str());
@@ -207,16 +360,26 @@ impl<'a> Ctx<'a> {
             fm.push(format!("identifiers: {}", json(ids)));
         }
         fm.push(format!("updated: {}", json(rfc3339(e.updated_at))));
-        fm
+        Ok(fm)
     }
 
     pub fn render_entity(&self, e: &Entity, claims: &[Claim]) -> Result<Rendered> {
         let mut links = BTreeSet::new();
+        self.prefetch(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        );
 
         // ---- facts ----
         let mut groups: BTreeMap<&str, Vec<&Claim>> = BTreeMap::new();
-        for c in claims {
-            if c.subject == e.id && c.status.is_active() {
+        // Facts supported only by sensitive items are left out (and so are their footnotes).
+        let claims: Vec<&Claim> = claims
+            .iter()
+            .filter(|c| c.status.is_active() && !self.claim_sensitive(c))
+            .collect();
+        for &c in &claims {
+            if c.subject == e.id {
                 groups.entry(c.predicate.as_str()).or_default().push(c);
             }
         }
@@ -243,7 +406,7 @@ impl<'a> Ctx<'a> {
 
         // ---- related ----
         let mut nb: BTreeMap<EntityId, (BTreeSet<&str>, BTreeSet<&str>)> = BTreeMap::new();
-        for c in claims.iter().filter(|c| c.status.is_active()) {
+        for c in &claims {
             let ClaimObject::Entity(o) = &c.object else {
                 continue;
             };
@@ -274,11 +437,14 @@ impl<'a> Ctx<'a> {
                 other.name.to_lowercase(),
                 other.id.clone(),
             );
-            links.insert(other.id.clone());
-            rows.push((
-                key,
-                format!("- {}: {}", self.link(&other), preds.join(", ")),
-            ));
+            // A sensitive-only entity has no page: name it without a link.
+            let name = if self.entity_sensitive(&other.id)? {
+                display(&other.name)
+            } else {
+                links.insert(other.id.clone());
+                self.link(&other)
+            };
+            rows.push((key, format!("- {name}: {}", preds.join(", "))));
         }
         rows.sort();
         rows.dedup_by(|a, b| a.1 == b.1);
@@ -289,7 +455,7 @@ impl<'a> Ctx<'a> {
         related.extend(rows.into_iter().map(|(_, l)| l));
 
         let doc = Doc {
-            fm: Some(self.frontmatter(e)),
+            fm: Some(self.frontmatter(e)?),
             segs: vec![
                 Segment::Region {
                     name: R_HEADER.into(),
@@ -339,7 +505,17 @@ impl<'a> Ctx<'a> {
                 .trim()
                 .to_owned();
         }
-        if let Some(o) = object {
+        let object_has_page = match &object {
+            Some(o) => !self.entity_sensitive(&o.id)?,
+            None => false,
+        };
+        if let Some(o) = object.as_ref().filter(|_| !object_has_page) {
+            // A sensitive-only entity has no page to link to: keep the sentence, and add the
+            // name as plain text when the sentence lacks it.
+            if find_word(&body, &inline(&o.name)).is_none() {
+                body = format!("{body} ({})", display(&o.name));
+            }
+        } else if let Some(o) = object {
             links.insert(o.id.clone());
             // Link the entity where the sentence names it (by name, else by its longest alias).
             let mut names: Vec<String> = o.aliases.iter().map(|a| inline(a)).collect();
@@ -358,7 +534,12 @@ impl<'a> Ctx<'a> {
             }
         }
         let mut cites = String::new();
-        for ev in &c.evidence {
+        // Never cite (or quote) a sensitive item, even next to other evidence.
+        for ev in c
+            .evidence
+            .iter()
+            .filter(|ev| !self.item_sensitive(&ev.item))
+        {
             let key = (ev.item.clone(), ev.quote.clone());
             let n = match note_ids.get(&key) {
                 Some(n) => *n,
@@ -410,13 +591,16 @@ impl<'a> Ctx<'a> {
         line
     }
 
-    /// Stub for a page whose entity was merged away (`target`) or no longer exists.
+    /// Stub for a page whose entity was merged away (`target`) or no longer exists. With
+    /// `hide_name` (the entity is now known only from sensitive items) the stub does not name
+    /// it: the heading is neutral.
     pub fn render_stub(
         &self,
         id: &EntityId,
         kind: EntityKind,
         name: &str,
         target: Option<&Entity>,
+        hide_name: bool,
     ) -> Rendered {
         let mut fm = vec![
             format!("nugget_id: {}", json(id.as_str())),
@@ -438,12 +622,17 @@ impl<'a> Ctx<'a> {
                     .into()
             }
         };
+        let heading = if hide_name {
+            "# Hidden page".to_owned()
+        } else {
+            format!("# {}", inline(name))
+        };
         Rendered {
             doc: Doc {
                 fm: Some(fm),
                 segs: vec![Segment::Region {
                     name: R_REDIRECT.into(),
-                    body: vec![format!("# {}", inline(name)), String::new(), line],
+                    body: vec![heading, String::new(), line],
                 }],
             },
             links,

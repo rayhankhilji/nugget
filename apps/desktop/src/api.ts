@@ -464,6 +464,8 @@ export interface ClaimView {
   evidence: EvidenceView[];
   /** RFC 3339: when the fact last changed, if the daemon sends it. */
   updated_at?: string | null;
+  /** All of the fact's evidence is from sensitive items: it is not in the vault or default MCP. */
+  sensitive?: boolean;
 }
 
 export interface MentionView {
@@ -486,6 +488,8 @@ export interface EntityDetail {
   mentions: MentionView[];
   /** The entity's vault page, relative to the vault root. */
   vault_path?: string | null;
+  /** Known only from sensitive items: no vault page, hidden from the graph unless asked for. */
+  sensitive?: boolean;
 }
 
 export interface GraphRequest {
@@ -496,6 +500,8 @@ export interface GraphRequest {
   kinds?: EntityKind[];
   /** Only nodes and edges supported by items of this source. */
   source?: string | null;
+  /** Also show entities and facts known only from sensitive items (marked `sensitive`). */
+  include_sensitive?: boolean;
 }
 
 export interface GraphNodeView {
@@ -503,6 +509,8 @@ export interface GraphNodeView {
   kind: EntityKind;
   name: string;
   depth: number;
+  /** Known only from sensitive items (only sent with `include_sensitive`, or for the centre). */
+  sensitive?: boolean;
 }
 
 export interface GraphEdgeView {

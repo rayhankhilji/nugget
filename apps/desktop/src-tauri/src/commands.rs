@@ -1254,6 +1254,7 @@ mod tests {
             limit: 1_000_000,
             kinds: vec![],
             source: None,
+            include_sensitive: false,
         })
         .unwrap();
         assert_eq!((g.depth, g.limit), (MAX_GRAPH_DEPTH, MAX_GRAPH_LIMIT));
@@ -1266,6 +1267,7 @@ mod tests {
                 limit: 10,
                 kinds: vec![],
                 source: None,
+                include_sensitive: false,
             })
             .is_err()
         );

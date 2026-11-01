@@ -1,6 +1,6 @@
 {
   "wave": "Z2",
-  "note": "Machine-translated in waves Z2, BB1, FF1, II1, II2 and JJ2; a native speaker should review these keys.",
+  "note": "Machine-translated in waves Z2, BB1, FF1, II1, II2 and JJ2, GG5; a native speaker should review these keys.",
   "keys": [
     "addSource.addTitle.gdrive",
     "addSource.blurb.gcal",
@@ -709,6 +709,10 @@
     "models.providers.removing",
     "models.providers.removed",
     "onboarding.byok.form.error.reserved",
-    "onboarding.byok.form.replaceHint"
+    "onboarding.byok.form.replaceHint",
+    "entity.sensitive",
+    "entity.sensitiveEntityTitle",
+    "entity.sensitiveFactTitle",
+    "graph.showSensitive"
   ]
 }

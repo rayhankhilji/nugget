@@ -9,13 +9,16 @@ repository.workspace = true
 
 [features]
 default = ["store"]
-# `impl ItemLookup for nugget_store::Store` (citation titles and urls from the encrypted store).
-store = ["dep:nugget-store"]
+# `impl ItemLookup for nugget_store::Store` (citation titles, urls and sensitivity from the
+# encrypted store).
+store = ["dep:nugget-store", "dep:nugget-retrieve"]
 
 [dependencies]
 nugget-core.workspace = true
 nugget-graph.workspace = true
 nugget-store = { workspace = true, optional = true }
+# `is_sensitive` for store items: the same rule as search and MCP.
+nugget-retrieve = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true

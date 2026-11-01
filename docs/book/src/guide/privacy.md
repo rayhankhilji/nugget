@@ -100,7 +100,14 @@ treated as sensitive. Sensitive items:
 - are never sent to a cloud model for triage, embedding or knowledge extraction, nor for Double Tap
   drafts or the Today judge;
 - are left out of the context when Ask uses a cloud model (the answer says how many were withheld);
-- are hidden from MCP clients unless a client is explicitly allowed to see them.
+- are hidden from MCP clients unless a client is explicitly allowed to see them;
+- never reach the [Markdown vault](knowledge.md#sensitive-items-and-the-vault) once confirmed
+  sensitive (a finding, a rule, or triage): a fact known only from such items is not written
+  there, a citation never quotes one, and an entity known only from them gets no page. The graph
+  view leaves such entities out unless you turn on **Show sensitive**, and the entity view marks
+  them, and their facts, **Sensitive**. Items that are sensitive only because triage has not sorted
+  them yet are shown in these local views (and in Search), but are still kept from cloud models
+  and from MCP clients that are not allowed sensitive items.
 
 ## What leaves for each feature
 
