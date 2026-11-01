@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** A list fetched a page at a time by `offset`/`limit` (II5). */
+/** A list fetched a page at a time by `offset`/`limit`. */
 export interface PagedList<T> {
   /** Every row loaded so far (undefined before the first page; the previous key's rows while a new key loads). */
   items: T[] | undefined;

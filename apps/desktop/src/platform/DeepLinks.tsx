@@ -1,5 +1,5 @@
 /**
- * II4: acts on `nugget://` links and opened `.nuggetplugin` files, already validated by the shell
+ * Acts on `nugget://` links and opened `.nuggetplugin` files, already validated by the shell
  * (`src-tauri/src/deeplink.rs`). Takes the waiting link at mount and on each `nugget:deeplink`
  * event. A page or a search just navigates; opening an item or installing a plugin asks first.
  */

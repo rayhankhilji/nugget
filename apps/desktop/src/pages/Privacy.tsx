@@ -7,7 +7,7 @@ import { VirtualList } from "../components/VirtualList";
 import { useCursorList, type CursorPageResult } from "../components/useCursorList";
 import { formatNumber, useT } from "../i18n";
 
-/** Rows per page (LL1: older pages load as the ledger scrolls). */
+/** Rows per page (older pages load as the ledger scrolls). */
 const LIMITS = [50, 200, 1000];
 /** Ledger rows have no id; time and position keep keys stable for a loaded ledger (pages only append). */
 const egressKey = (r: EgressEvent, i: number) => `${r.at}-${i}`;
@@ -103,7 +103,7 @@ export function PrivacyPage() {
             </div>
           </dl>
           <div className="table-wrap" tabIndex={0} role="region" aria-label={t("privacy.ledgerLabel")}>
-            {/* Only a window of rows is rendered (II5): the row count tells assistive tech the whole size. */}
+            {/* Only a window of rows is rendered: the row count tells assistive tech the whole size. */}
             <table aria-rowcount={rows.length + 1}>
               <caption className="visually-hidden">{t("privacy.ledgerCaption")}</caption>
               <thead>

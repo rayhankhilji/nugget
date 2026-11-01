@@ -1,8 +1,9 @@
+import { useEffect, useRef, useState } from "react";
 import type { ModelFailReason, ModelProgress } from "../api";
 import { formatBytes } from "../format";
 import type { MessageKey, TFunction } from "../i18n";
 
-// KK1: plain-language model download failures, shared by the Models page and onboarding.
+// Plain-language model download failures, shared by the Models page and onboarding.
 
 const FAIL_KEY: Partial<Record<ModelFailReason, MessageKey>> = {
   offline: "models.fail.offline",
@@ -60,4 +61,50 @@ export function DownloadFailureNote({
       {kept && <> {kept}</>}
     </p>
   );
+}
+
+/**
+ * Keyboard focus for a model card whose Install turns into Cancel and back: after Cancel, focus
+ * moves to Resume; after an install started from the keyboard ends, to the title (installed) or
+ * Retry (failed), never away from wherever the user moved to meanwhile.
+ */
+export function useInstallFocus(busy: boolean, installed: boolean) {
+  const [cancelling, setCancelling] = useState(false);
+  const actionRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLElement>(null);
+  const focusIn = useRef<"cancel" | "title" | null>(null);
+  useEffect(() => {
+    if (!busy && cancelling) {
+      setCancelling(false);
+      actionRef.current?.focus();
+    }
+  }, [busy, cancelling]);
+  useEffect(() => {
+    if (busy) {
+      if (focusIn.current === "cancel") cancelRef.current?.focus();
+      // Remembered while it lasts: Cancel unmounts without a blur event.
+      focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
+    } else if (focusIn.current === "title") {
+      focusIn.current = null;
+      const at = document.activeElement;
+      if (!at || at === document.body || !at.isConnected) (installed ? titleRef.current : actionRef.current)?.focus();
+    }
+  });
+  return {
+    actionRef,
+    titleRef,
+    /** Install's onClick: an install started from the keyboard keeps focus on its Cancel. */
+    onInstallClick: (e: { currentTarget: Element }) => {
+      if (document.activeElement === e.currentTarget) focusIn.current = "cancel";
+    },
+    cancelProps: (onCancel: () => Promise<boolean>) => ({
+      ref: cancelRef,
+      disabled: cancelling,
+      onClick: () => {
+        setCancelling(true);
+        void onCancel().then((ok) => ok || setCancelling(false));
+      },
+    }),
+  };
 }

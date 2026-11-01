@@ -74,7 +74,7 @@ export function SearchPage() {
   const [announcement, announce] = useAnnouncer();
   /** Whether the daemon serves `search.faceted` (unknown until the first search). */
   const faceted = useRef<boolean | null>(null);
-  /** Without `search.faceted`: whether the daemon serves `search.page` (LL1), else plain `search`. */
+  /** Without `search.faceted`: whether the daemon serves `search.page`, else plain `search`. */
   const paged = useRef<boolean | null>(null);
   /** Plain results (no `search.faceted`): the cursor of their next page, if any. */
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -452,7 +452,7 @@ export function SearchPage() {
                             {formatDate(h.date)}
                           </time>
                         )}
-                        {/* JJ2: items not sorted yet are private too, but not labelled in the list. */}
+                        {/* Items not sorted yet are private too, but not labelled in the list. */}
                         {h.sensitive && !h.unsorted && (
                           <span className="badge badge-warn" title={t("search.sensitiveTitle")}>
                             {t("search.sensitive")}
@@ -546,7 +546,7 @@ type Answer = {
   /** The passages the model was given (they can differ from the preview, e.g. for a cloud model). */
   citations: Citation[];
   excludedSensitive: number;
-  /** JJ2: the question's date range and how it filtered the search. */
+  /** The question's date range and how it filtered the search. */
   date: AskDateFilter | null;
   text: string;
   done: ChatDone | null;
@@ -569,7 +569,7 @@ export function isNoAiError(error: string | null | undefined): boolean {
   return !!error && /no provider is available|is not installed/i.test(error);
 }
 
-/** "No AI is set up yet" with a button to set it up (GG6-14). */
+/** "No AI is set up yet" with a button to set it up. */
 export function NoAiNote({ alert = false }: { alert?: boolean }) {
   const t = useT();
   return (
@@ -599,7 +599,7 @@ function AskPanel({
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
-  // GG6-14: with no AI set up, say so up front and offer setup instead of a red internal error.
+  // With no AI set up, say so up front and offer setup instead of a red internal error.
   const providers = useAsync(api.providersList);
   const noAi = (providers.data !== undefined && providers.data.length === 0) || isNoAiError(answer?.error);
   // Chat events can arrive before `chat` returns the stream id; buffer them by id.

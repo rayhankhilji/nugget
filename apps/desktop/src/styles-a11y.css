@@ -12,8 +12,7 @@
     scroll-behavior: auto;
   }
 
-  .spinner,
-  .state-spinner {
+  .spinner {
     animation: none;
     border-style: dotted;
     border-color: currentColor;
@@ -21,8 +20,7 @@
 
   .caret,
   .ob-panel,
-  .pg-skeleton,
-  .state-skeleton {
+  .pg-skeleton {
     animation: none;
   }
 
@@ -157,8 +155,7 @@
     background: HighlightText;
   }
 
-  .spinner,
-  .state-spinner {
+  .spinner {
     forced-color-adjust: none;
     border-color: GrayText;
     border-block-start-color: Highlight;

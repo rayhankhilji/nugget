@@ -21,7 +21,7 @@ import {
 } from "../api";
 import { useAsync, useNow } from "../hooks";
 import { usePendingPluginInstall } from "../hooks.nav";
-import { formatBytes, formatRelative, formatTime } from "../format";
+import { baseName, formatBytes, formatRelative, formatTime } from "../format";
 import { useT, type MessageKey, type TFunction } from "../i18n";
 import { Dialog } from "../components/Dialog";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
@@ -103,7 +103,7 @@ export function PluginsPage() {
   };
   const installFromFile = () => installFrom(pickPluginFile);
   const installFromCatalog = (entry: PluginCatalogEntry) => installFrom(async () => entry.path);
-  // II4: a `.nuggetplugin` file opened from the OS, after the user confirmed (platform/DeepLinks.tsx).
+  // A `.nuggetplugin` file opened from the OS, after the user confirmed (platform/DeepLinks.tsx).
   usePendingPluginInstall((path) => void installFrom(async () => path));
 
   const unavailable = isMethodNotFound(loaded.error);
@@ -339,11 +339,6 @@ function CatalogRow({
   );
 }
 
-/** Last segment of a `/` or `\\` path (the whole path when it has none). */
-function baseName(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
-}
 
 /** What a catalog entry is called: its name, else its file (or unreadable folder) name. */
 function catalogName(e: PluginCatalogEntry): string {

@@ -38,7 +38,7 @@ interface Answer {
   citations: Citation[];
   excludedSensitive: number;
   general: boolean;
-  /** JJ2: the question's date range and how it filtered the search. */
+  /** The question's date range and how it filtered the search. */
   date: AskDateFilter | null;
   text: string;
   done: ChatDone | null;
@@ -153,7 +153,7 @@ export function QuickAsk() {
   });
 
   /**
-   * LL2: what went wrong in a sentence (the daemon's own for its errors), never a shell's raw
+   * What went wrong in a sentence (the daemon's own for its errors), never a shell's raw
    * text; no AI provider at all gets its own next step.
    */
   const plainError = (err: unknown) => {
@@ -237,7 +237,7 @@ export function QuickAsk() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answerError]);
 
-  // JJ2: the question goes along, and to Chat the answer with its sources once it finished
+  // The question goes along, and to Chat the answer with its sources once it finished
   // (the question in the field, alone, if it changed since).
   const handover = (): QuickAskHandover | undefined => {
     const typed = question.trim() || answer?.question || "";

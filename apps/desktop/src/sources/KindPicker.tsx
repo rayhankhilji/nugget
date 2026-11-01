@@ -6,7 +6,7 @@ import { useT, type MessageKey } from "../i18n";
 import { useAutofocus } from "./form";
 import { isNewKind, NEW_KIND_BLURB } from "./forms";
 import { KIND_GROUPS } from "./kinds";
-import { KindIcon } from "./KindIcon";
+import { SourceIcon } from "../components/SourceIcon";
 
 export function KindPicker({
   value,
@@ -55,7 +55,7 @@ export function KindPicker({
                 checked={k === value}
                 onChange={() => onChange(k)}
               />
-              <KindIcon kind={k} size={22} />
+              <SourceIcon kind={k} size={22} />
               <span>
                 <span className="kind-label">{sourceKindLabel(k)}</span>
                 <span className="muted small">{t(isNewKind(k) ? NEW_KIND_BLURB[k] : blurb[k])}</span>

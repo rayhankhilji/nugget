@@ -101,6 +101,7 @@ export function DeviceCode({ code, url }: { code: string; url: string }) {
 /** The wizard's waiting step (replaces the form until the sign-in completes or is put off). */
 export function ConnectWait({
   label,
+  text,
   source,
   flow,
   note,
@@ -108,6 +109,8 @@ export function ConnectWait({
   onClose,
 }: {
   label: string;
+  /** Replaces the default waiting line. */
+  text?: string;
   source: SourceInfo;
   flow: AuthBegin | null;
   note: string | null;
@@ -131,7 +134,7 @@ export function ConnectWait({
       {code && url && <DeviceCode code={code} url={url} />}
       <p role="status">
         <Spinner label={t("addSource.wait.waiting")} />{" "}
-        {code ? t("addSource.device.waiting", { label }) : t("addSource.wait.textAny", { label })}
+        {text ?? (code ? t("addSource.device.waiting", { label }) : t("addSource.wait.textAny", { label }))}
       </p>
       {source.state === "error" && source.last_error && (
         <p className="note note-error" role="alert">

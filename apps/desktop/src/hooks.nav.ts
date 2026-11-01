@@ -73,7 +73,7 @@ export function usePendingPage(onPage: (id: PageId) => void): void {
   page.usePending(onPage);
 }
 
-// ---- II4: a `.nuggetplugin` file opened from the OS, after the user said to go ahead ----
+// ---- a `.nuggetplugin` file opened from the OS, after the user said to go ahead ----
 
 const pluginInstall = channel<string>();
 
@@ -102,7 +102,7 @@ export function usePendingSearchState(onState: (encoded: string) => void): void 
   searchState.usePending(onState);
 }
 
-// ---- JJ2: a quick-ask question (and answer) opened in Chat ----
+// ---- a quick-ask question (and answer) opened in Chat ----
 
 const chatHandover = channel<QuickAskHandover>();
 

@@ -49,7 +49,7 @@ export function QuickAskSettings() {
     }
   };
 
-  // LL2: controls stay enabled (aria-disabled) while saving or unchanged, so keyboard focus stays
+  // Controls stay enabled (aria-disabled) while saving or unchanged, so keyboard focus stays
   // on them instead of dropping to the page; these guards stand in for `disabled`.
   const unchanged = !shortcut.trim() || shortcut.trim() === view?.settings.shortcut;
   const submit = (e: FormEvent) => {

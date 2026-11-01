@@ -30,7 +30,6 @@
   --control-border: #8a8478;
   --backdrop: rgb(0 0 0 / 0.35);
   --overlay-shadow: 0 12px 40px rgb(0 0 0 / 0.18);
-  --skeleton: color-mix(in srgb, var(--text) 9%, transparent);
   --user-bubble: #f1ece1;
 
   /* Button outline: 3:1 against --surface and --bg in both themes (follows --control-border). */
@@ -45,7 +44,7 @@
   --radius-small: 6px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 
-  /* Shared scale (EE6). Spacing 4/8/12/16/24/32; type: h1 = xl, h2 = lg, h3 = md semibold. */
+  /* Shared scale. Spacing 4/8/12/16/24/32; type: h1 = xl, h2 = lg, h3 = md semibold. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -502,7 +501,7 @@ main {
   cursor: default;
 }
 
-/* ---- keyboard focus (BB3) ----
+/* ---- keyboard focus ----
    A button that is busy for a moment is aria-disabled rather than disabled, so it keeps keyboard
    focus (a disabled button drops it to the page body); it looks disabled all the same. */
 .btn[aria-disabled="true"] {
@@ -1893,13 +1892,6 @@ h4.ask-sub {
   overflow-wrap: anywhere;
 }
 
-.pager {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-}
-
 /* Sticky, so the selected entity stays in view however far down the list it was picked. */
 .kb-detail {
   min-width: 0;
@@ -2629,88 +2621,12 @@ h3.token-heading:focus {
   }
 }
 
-/* ---- shared states: use on any page ----
-   .state-empty    nothing to show yet (wrap a title + hint + optional action)
-   .state-loading  waiting; contains .state-spinner and/or .state-skeleton lines
-   .state-error    something failed (pair with role="alert" and a retry button) */
-
-.state-empty,
-.state-loading,
-.state-error {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-2);
-  padding: var(--space-6) var(--space-4);
-  text-align: center;
-  color: var(--muted);
-}
-
-.state-empty > :first-child,
-.state-error > :first-child {
-  margin: 0;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.state-error {
-  margin: 12px 0;
-  padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--border));
-  border-radius: var(--radius);
-  background: var(--bad-soft);
-  color: var(--bad);
-}
-
-.state-error > :first-child {
-  color: var(--bad);
-}
-
-.state-loading {
-  justify-items: stretch;
-}
-
-.state-spinner {
-  justify-self: center;
-  width: 18px;
-  height: 18px;
-  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-.state-skeleton {
-  height: 14px;
-  border-radius: var(--radius-small);
-  background: linear-gradient(90deg, var(--skeleton) 25%, color-mix(in srgb, var(--skeleton) 40%, transparent) 50%, var(--skeleton) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s ease-in-out infinite;
-}
-
-.state-skeleton:nth-child(3n + 2) {
-  width: 80%;
-}
-
-.state-skeleton:nth-child(3n) {
-  width: 60%;
-}
-
 /* Empty states (EmptyState in components/ui.tsx): one next step, always a normal-size button,
    whatever size class the page gave it. */
-.pg-empty-action .btn,
-.state-empty .btn {
+.pg-empty-action .btn {
   min-height: var(--control-h);
   padding: 4px 14px;
   font-size: var(--fs-md);
-}
-
-@keyframes shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
-  }
 }
 
 /* The one reduced-motion switch: every animation and transition in the app (and page sheets)
@@ -2724,14 +2640,7 @@ h3.token-heading:focus {
     transition: none !important;
     scroll-behavior: auto !important;
   }
-
-  .state-skeleton {
-    animation: none;
-    background: var(--skeleton);
-  }
 }
-
-/* W3 */
 
 .agent-run-head {
   display: flex;
@@ -3099,7 +3008,7 @@ tr[aria-current="true"] {
   border-block-start: 1px solid var(--border);
 }
 
-/* Try your shortcut (II3): the sample message, then the practice field. */
+/* Try your shortcut: the sample message, then the practice field. */
 .dt-practice-sample {
   margin: var(--space-3) 0;
   max-width: 70ch;
@@ -3121,7 +3030,7 @@ tr[aria-current="true"] {
   font: inherit;
 }
 
-/* Recent drafts (II3). */
+/* Recent drafts. */
 .dt-history-list {
   list-style: none;
   margin: var(--space-3) 0;
@@ -3240,7 +3149,7 @@ tr[aria-current="true"] {
   margin-block: var(--space-4);
 }
 
-/* JJ2: a source that is at best a near miss for the question (Chat, Search, quick ask). */
+/* A source that is at best a near miss for the question (Chat, Search, quick ask). */
 .ask-partial {
   margin-inline-start: 0.4em;
   vertical-align: baseline;
@@ -3249,7 +3158,7 @@ tr[aria-current="true"] {
   margin-block: 0.25rem 0;
 }
 
-/* JJ2: Status → AI sorting: the state under the provider (or "Off"), on its own line. */
+/* Status → AI sorting: the state under the provider (or "Off"), on its own line. */
 .triage-line {
   display: block;
   margin-block-start: 2px;

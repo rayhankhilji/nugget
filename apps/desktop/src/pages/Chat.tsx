@@ -57,7 +57,7 @@ interface Turn {
   queryRewrite?: string;
   /** Sensitive items withheld from a cloud model (not saved). */
   excludedSensitive?: number;
-  /** JJ2: the question's date range and how it filtered the search (not saved). */
+  /** The question's date range and how it filtered the search (not saved). */
   dateFilter?: AskDateFilter;
   /** Sources were on but none matched, so this is a plain chat answer. */
   generalAnswer?: boolean;
@@ -166,7 +166,7 @@ function historyOf(turns: readonly Turn[]): ChatMessage[] {
 }
 
 /**
- * LL2: whether a failed reply came from an on-device model server (so Status has the details and a
+ * Whether a failed reply came from an on-device model server (so Status has the details and a
  * Retry): its provider is a local runtime's, or it failed before any provider answered while the
  * local chat model is down.
  */
@@ -364,7 +364,7 @@ export function ChatPage() {
     }
   });
 
-  // EE3: an Ask stream moved on to another provider (before any delta of it): new sources.
+  // An Ask stream moved on to another provider (before any delta of it): new sources.
   useEvent(onAskRestarted, (r) => {
     if (dropped.current.has(r.stream_id)) return;
     if (attached.current.has(r.stream_id)) {
@@ -420,7 +420,7 @@ export function ChatPage() {
     await answer(text, history, reply);
   };
 
-  // LL2: the runtimes, read when the newest reply failed, to tell an on-device failure (Status
+  // The runtimes, read when the newest reply failed, to tell an on-device failure (Status
   // has its details and Retry) from any other.
   const [runtimes, setRuntimes] = useState<RuntimeInfo[] | null>(null);
   const lastTurn = turns[turns.length - 1];
@@ -437,7 +437,7 @@ export function ChatPage() {
     };
   }, [failedId]);
 
-  /** LL2: ask the failed newest reply's question again, in its place. */
+  /** Ask the failed newest reply's question again, in its place. */
   const retry = async (replyId: number) => {
     if (active) return;
     const at = turns.findIndex((x) => x.id === replyId);
@@ -546,7 +546,7 @@ export function ChatPage() {
   };
   usePendingNewChat(startNew);
 
-  // JJ2: quick ask's "Open in Chat": a new conversation with its question and finished answer
+  // Quick ask's "Open in Chat": a new conversation with its question and finished answer
   // (saved like any other), or with the question in the composer when there was no answer yet.
   // While a reply streams it waits for it to end; a draft in the composer is never replaced.
   const queuedHandover = useRef<QuickAskHandover | null>(null);
@@ -852,9 +852,9 @@ function MessageItem({
 }: {
   turn: Turn;
   onOpenLink: (url: string, label: string) => void;
-  /** LL2: the newest reply failed: ask its question again in place. */
+  /** The newest reply failed: ask its question again in place. */
   onRetry?: () => void;
-  /** LL2: it failed on an on-device model server: link to its details on Status. */
+  /** It failed on an on-device model server: link to its details on Status. */
   onDevice?: boolean;
 }) {
   const t = useT();
@@ -948,7 +948,7 @@ function MessageItem({
   };
 
   const streaming = isActive(turn);
-  // EE3: the sources arrive with the reply, long before its first words on a slow model: while
+  // The sources arrive with the reply, long before its first words on a slow model: while
   // the model reads them, say so and list them all (nothing is cited yet).
   const reading = turn.role === "assistant" && turn.state === "pending" && !turn.text && !!turn.citations?.length;
   return (

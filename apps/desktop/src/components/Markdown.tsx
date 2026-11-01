@@ -510,7 +510,7 @@ function blocksText(blocks: Block[]): string {
     .join(" ");
 }
 
-// LL2 (GG7-10): every block gets its own direction, by its majority script, so a pure-Arabic
+// Every block gets its own direction, by its majority script, so a pure-Arabic
 // paragraph after a Latin-led one (or a Latin-led Arabic one) is laid out right-to-left.
 function renderBlocks(blocks: Block[], ctx: Ctx, tight = false): ReactNode[] {
   return blocks.map((b, k) => {

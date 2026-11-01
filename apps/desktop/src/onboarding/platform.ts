@@ -8,11 +8,3 @@ export function detectOs(ua: string = typeof navigator === "undefined" ? "" : na
   return "other";
 }
 
-/** True when the user asked the OS to minimise motion. */
-export function prefersReducedMotion(): boolean {
-  try {
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-    return false;
-  }
-}

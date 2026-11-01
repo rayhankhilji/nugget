@@ -1,5 +1,5 @@
 /**
- * LL2 (GG7-10): the base direction of generated text (answers, drafts) by its majority script.
+ * The base direction of generated text (answers, drafts) by its majority script.
  *
  * `dir="auto"` decides by the first strong character, so an Arabic answer that starts with a
  * product name (`iPhone 15 سيصل يوم الخميس…`) is laid out left-to-right. Counting letters instead

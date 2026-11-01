@@ -53,6 +53,7 @@ export interface StatusResponse {
   pid?: number;
   /** `"systemd"` or `"launchd"` when a login service runs the daemon. */
   service?: string;
+  disk?: DiskStatus | null;
 }
 
 export type Role = "system" | "user" | "assistant";
@@ -157,7 +158,7 @@ export interface EgressEvent {
   items: ItemRef[];
 }
 
-// ---- sources (M1) ----
+// ---- sources ----
 
 /** Connector kinds shipped in M1. The daemon may report others; treat `kind` as a string. */
 export type SourceKind = "files" | "obsidian" | "gmail" | "gcal" | "gdrive" | "imap" | "caldav";
@@ -190,13 +191,13 @@ export interface SourceInfo {
   last_sync?: string | null;
   last_error?: string | null;
   settings?: SourceSettings;
-  /** Plain-language sync health (FF2); absent from older daemons. */
+  /** Plain-language sync health; absent from older daemons. */
   health?: SourceHealth | null;
-  /** KK2: what the last folder scan found and skipped; absent for other kinds and older daemons. */
+  /** What the last folder scan found and skipped; absent for other kinds and older daemons. */
   scan?: ScanReport | null;
 }
 
-/** KK2: a folder scan's counts, so a folder with nothing indexable says so instead of spinning. */
+/** A folder scan's counts, so a folder with nothing indexable says so instead of spinning. */
 export interface ScanReport {
   /** The walk of this pass ended. */
   finished: boolean;
@@ -229,9 +230,9 @@ export type SourceHealthCode =
   | "config"
   | "item_errors"
   | "error"
-  /** KK2: the folder holds nothing Nugget can index. */
+  /** The folder holds nothing Nugget can index. */
   | "nothing_indexable"
-  /** KK2: the folder can't be opened (permission denied). */
+  /** The folder can't be opened (permission denied). */
   | "unreadable";
 
 export interface SourceHealth {
@@ -299,11 +300,11 @@ export interface IngestStatus {
   embedding_provider?: string | null;
   triage_provider?: string | null;
   sources: SourceInfo[];
-  /** HH2: background triage progress (items are searchable before triage). */
+  /** Background triage progress (items are searchable before triage). */
   triage?: TriageProgress | null;
 }
 
-/** HH2: background triage (junk / sensitive labels) progress. */
+/** Background triage (junk / sensitive labels) progress. */
 export interface TriageProgress {
   state: "off" | "idle" | "running" | "yielding" | "paused";
   pending: number;
@@ -331,7 +332,7 @@ export interface Citation {
   sensitive?: boolean;
   /** The item's date (`YYYY-MM-DD`): source modification time, else last update. */
   date?: string;
-  /** JJ2, set by the client from `AskStarted.partial`: at best a near miss for the question. */
+  /** Set by the client from `AskStarted.partial`: at best a near miss for the question. */
   partial?: boolean;
 }
 
@@ -369,15 +370,15 @@ export interface AskStarted {
   excluded_sensitive?: number;
   /** The standalone query actually searched, when a follow-up was rewritten. */
   query_rewrite?: string | null;
-  /** Nothing relevant in the sources: the daemon answers as an ordinary chat (Z3). */
+  /** Nothing relevant in the sources: the daemon answers as an ordinary chat. */
   general?: boolean;
-  /** JJ2: the question's date phrase and how it filtered the search. */
+  /** The question's date phrase and how it filtered the search. */
   date?: AskDateFilter | null;
-  /** JJ2: citation numbers of near misses (the item lacks some of the question's rare key words). */
+  /** Citation numbers of near misses (the item lacks some of the question's rare key words). */
   partial?: number[];
 }
 
-/** JJ2: a date phrase in an Ask question and what it did (`AskStarted.date`). */
+/** A date phrase in an Ask question and what it did (`AskStarted.date`). */
 export interface AskDateFilter {
   /** As written in the question, e.g. `last week`. */
   phrase: string;
@@ -404,19 +405,19 @@ export interface RuntimeInfo {
   provider: string;
   /** One short sentence for the user (`failed`). */
   error?: string | null;
-  /** Milliseconds in the current state: while `starting`, how long the model has been warming up (KK1). */
+  /** Milliseconds in the current state: while `starting`, how long the model has been warming up. */
   state_ms?: number | null;
-  /** While `starting`: how long loading is expected to take, in ms (KK1). */
+  /** While `starting`: how long loading is expected to take, in ms. */
   expected_ms?: number | null;
-  /** While `failed`: ms until the next automatic restart (KK1). */
+  /** While `failed`: ms until the next automatic restart. */
   retry_in_ms?: number | null;
-  /** While `failed`: the daemon stopped restarting it and waits for a Retry (KK1). */
+  /** While `failed`: the daemon stopped restarting it and waits for a Retry. */
   gave_up?: boolean;
-  /** The model server's last line before it failed, for the details view (KK1). */
+  /** The model server's last line before it failed, for the details view. */
   detail?: string | null;
 }
 
-// ---- knowledge graph (M2) ----
+// ---- knowledge graph ----
 
 /** Entity kinds, as `nugget_core::ipc` sends them. */
 export type EntityKind =
@@ -599,7 +600,7 @@ export interface KnowledgeChanged {
   entities: string[];
 }
 
-// ---- MCP clients (M2) ----
+// ---- MCP clients ----
 
 /** What an MCP client may see and call. */
 export interface McpScopes {
@@ -629,14 +630,6 @@ export interface McpClientRef {
 }
 
 export type McpSetupApp = "claude-desktop" | "claude-code" | "cursor" | "generic-http" | "generic-stdio";
-export const MCP_SETUP_APPS: readonly McpSetupApp[] = [
-  "claude-desktop",
-  "claude-code",
-  "cursor",
-  "generic-http",
-  "generic-stdio",
-];
-
 export interface McpSetupSnippet {
   /** Usually an `McpSetupApp`; unknown apps are shown generically. */
   app: string;
@@ -1125,8 +1118,7 @@ export const api = {
   /** Native folder picker; `[]` when cancelled. */
   pickFolders: (multiple: boolean) => call<string[]>("pick_folders", { multiple }),
 
-  // II2 (types and notes in the II2 block at the end of this file).
-  // JJ2: with the time zone, the daemon dates each day and month at its own offset (DST).
+  // With the time zone, the daemon dates each day and month at its own offset (DST).
   searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { ...localZone(), ...request } }),
   searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { ...localZone(), ...request } }),
   searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request: { ...localZone(), ...request } }),
@@ -1185,7 +1177,7 @@ export const events = {
   onNavigate: (h: (page: PageId) => void) => on(EVENT.navigate, h),
 };
 
-// ---- W7: knowledge ----
+// ---- knowledge ----
 
 /**
  * What `knowledge.claim.status` accepts: `rejected` (sticky rejection), `active` (restore; a fact
@@ -1211,9 +1203,9 @@ export async function knowledgeSplit(request: SplitRequest): Promise<string> {
   return r.id;
 }
 
-// ---- W4 proactive ----
+// ---- proactive ----
 //
-// Card inbox, morning brief and reminders (`nugget_core::ipc`, `---- Proactive (M5) ----`).
+// Card inbox, morning brief and reminders (`nugget_core::ipc`, `---- Proactive ----`).
 // Card titles, details, evidence quotes and diff lines are untrusted source text: render them as
 // plain text only.
 
@@ -1288,6 +1280,8 @@ export interface CardView {
   sensitive: boolean;
   created_at: string;
   snoozed_until?: string | null;
+  /** How the user's feedback changed this card's ranking, strongest first (absent from older daemons). */
+  learned?: CardLearned[] | null;
 }
 
 export interface CardFeedbackRequest {
@@ -1496,7 +1490,7 @@ export const proactiveEvents = {
     }),
 };
 
-// ---- W11: chat history ----
+// ---- chat history ----
 
 /** One saved chat message (mirrors `src-tauri/src/history.rs`). */
 export interface StoredChatMessage {
@@ -1511,6 +1505,8 @@ export interface StoredChatMessage {
   citations?: Citation[] | null;
   /** Answered without sources because none matched (with "Use my sources" on). */
   general_answer?: boolean | null;
+  /** The answer's post-check, when it came with one. */
+  check?: AnswerCheck | null;
 }
 
 export interface StoredConversation {
@@ -1540,7 +1536,7 @@ export function isCommandMissing(err: unknown): boolean {
   return /not found|unknown command|not allowed/i.test(e.message) && e.kind !== "rpc";
 }
 
-// ---- W11: desktop shell ----
+// ---- desktop shell ----
 
 /** "Open Nugget at login" (the desktop app itself, hidden in the tray); see `autostart.rs`. */
 export interface AutostartStatus {
@@ -1554,7 +1550,7 @@ export const autostart = {
   set: (enabled: boolean) => call<AutostartStatus>("autostart_set", { enabled }),
 };
 
-// W5: connectors
+// Connectors
 
 /** Microsoft 365 connector kinds (OAuth with the user's own Entra app registration). */
 export type MicrosoftKind = "outlook" | "outlook-calendar" | "onedrive";
@@ -1569,11 +1565,7 @@ export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind | MessagingKin
 // The messaging kinds are spelled out (MESSAGING_KINDS is declared at the end of the file).
 export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS, "imessage", "whatsapp", "telegram"];
 
-export function isConnectorKind(v: unknown): v is ConnectorKind {
-  return typeof v === "string" && (CONNECTOR_KINDS as readonly string[]).includes(v);
-}
-
-// ---- W1 Double Tap ----
+// ---- Double Tap ----
 // Tauri commands in apps/desktop/src-tauri/src/doubletap/ (the settings page and the overlay window).
 
 /** Modifier keys a double tap can use (mirrors `nugget_hotkey::Modifier`). */
@@ -1602,7 +1594,7 @@ export interface DoubleTapSettings {
   /** Allow drafting in terminal emulators (off by default: text there can run as a command). */
   allow_terminals: boolean;
   /**
-   * Read ahead (CC1): when a reply field keeps focus for a moment, prefill its prompt into the
+   * Read ahead: when a reply field keeps focus for a moment, prefill its prompt into the
    * local model server's cache so the trigger only reads the remainder. Local models only; never
    * in excluded apps, terminals or secure fields. Absent from an older shell: treated as on.
    */
@@ -1677,11 +1669,11 @@ export interface OverlayView {
   /** After insertion: whether reading the field back matched. */
   verified: boolean | null;
   method: InsertMethod | null;
-  /** II3: Retry and the refinements can run (a request to repeat exists). Absent from an older shell. */
+  /** Retry and the refinements can run (a request to repeat exists). Absent from an older shell. */
   can_retry?: boolean;
-  /** II3: the refinement this draft was asked for, while it is on screen. */
+  /** The refinement this draft was asked for, while it is on screen. */
   refinement?: Refinement | null;
-  /** II3: this session drafts for the practice field on the Double Tap page (nothing real is touched). */
+  /** This session drafts for the practice field on the Double Tap page (nothing real is touched). */
   practice?: boolean;
 }
 
@@ -1696,7 +1688,7 @@ export const doubletapApi = {
   status: () => call<DoubleTapStatus>("doubletap_status"),
   /** macOS: opens the Accessibility / Input Monitoring prompts. Elsewhere just reports status. */
   requestPermissions: () => call<DoubleTapStatus>("doubletap_request_permissions"),
-  /** KK2 (GG6-19), macOS: open System Settings at a Privacy pane; `false` where there is none. */
+  /** macOS: open System Settings at a Privacy pane; `false` where there is none. */
   openPrivacySettings: (pane: "accessibility" | "input_monitoring") => call<boolean>("doubletap_open_privacy_settings", { pane }),
   defaultExcluded: () => call<string[]>("doubletap_default_excluded"),
   /** Start a draft as if the trigger fired. */
@@ -1712,7 +1704,7 @@ export const doubletapApi = {
   onSettings: (h: (settings: DoubleTapSettings) => void) => on<DoubleTapSettings>(DOUBLETAP_SETTINGS_EVENT, h),
 };
 
-// ---- II3 Double Tap overlay: retry, refinements, resize, history, practice ----
+// ---- Double Tap overlay: retry, refinements, resize, history, practice ----
 // Tauri commands in apps/desktop/src-tauri/src/doubletap/commands.rs.
 
 /** A quick refinement: a new draft of the current text with an instruction. */
@@ -1775,8 +1767,8 @@ export const practiceApi = {
   onAction: (h: (action: PracticeAction) => void) => on<PracticeAction>(DOUBLETAP_PRACTICE_EVENT, h),
 };
 
-// ---- W6 plugins ----
-// Wire types mirror the `// ---- Plugins (M6) ----` block of `nugget_core::ipc`.
+// ---- plugins ----
+// Wire types mirror the `// ---- Plugins ----` block of `nugget_core::ipc`.
 
 /** What a plugin may use. The host denies everything not listed. */
 export interface PluginCapabilities {
@@ -1786,6 +1778,8 @@ export interface PluginCapabilities {
   secrets: string[];
   /** Size limit of the plugin's own key-value store; `0` means none. */
   kv_max_bytes: number;
+  /** Source settings fields holding a folder or file the plugin may read (absent from older daemons). */
+  file_roots?: string[];
 }
 
 /** `trusted`: signer is in `[plugins] trusted_keys`; `dev`: this device's dev key; else `untrusted`. */
@@ -1818,12 +1812,6 @@ export interface PluginInfo {
 
 export interface PluginListResult {
   plugins: PluginInfo[];
-}
-
-export interface PluginInspectResult {
-  plugin: PluginInfo;
-  requested: PluginCapabilities;
-  connector_display_name?: string | null;
 }
 
 /** A verified package staged under `token` (for 10 minutes) until approved or rejected. */
@@ -1918,7 +1906,6 @@ export const listPlugins = async (): Promise<PluginInfo[]> => {
   const r = await call<PluginListResult>("plugins_list");
   return Array.isArray(r?.plugins) ? r.plugins.filter(isPluginInfo) : [];
 };
-export const inspectPlugin = (id: string) => call<PluginInspectResult>("plugins_inspect", { request: { id } });
 /** Verify and stage a `.nuggetplugin` file; commit it with `approvePlugin` when `needs_approval`. */
 export const installPlugin = (path: string) => call<PluginInstallResult>("plugins_install", { request: { path } });
 /** `approve: false` discards the staged package. */
@@ -1929,9 +1916,9 @@ export const setPluginEnabled = (id: string, enabled: boolean) =>
   call<PluginInfo>("plugins_enable", { request: { id, enabled } });
 /** Native file picker for `.nuggetplugin` packages; `null` when cancelled. */
 export const pickPluginFile = () => call<string | null>("pick_plugin_file");
-// ---- W3: agent and safety ----
+// ---- agent and safety ----
 //
-// Mirrors the `// ---- Agent (M4) ----` block of `nugget_core::ipc`. Values the daemon carries as
+// Mirrors the `// ---- Agent ----` block of `nugget_core::ipc`. Values the daemon carries as
 // JSON (`nugget_agent::AgentEvent`, `nugget_policy::PolicyConfig`, ...) are typed here from their
 // serde form. Each method maps to the Tauri command of the same name with `.` → `_`
 // (`agent.run` → `agent_run`), whose argument is `{ request }` like the other commands.
@@ -2180,7 +2167,7 @@ export const agentEvents = {
     }),
 };
 
-// ---- X4: conversational ask ----
+// ---- conversational ask ----
 
 /** Context budget (tokens) for a Chat reply that uses the user's sources, as Search's default. */
 export const CHAT_ASK_BUDGET = 2000;
@@ -2206,7 +2193,7 @@ export function askInConversation(
   });
 }
 
-// ---- Z3: bring your own key ----
+// ---- bring your own key ----
 
 /** The `kind` of a `[[providers]]` table a key is for. */
 export type AiKeyKind = "openai_compatible" | "openai_responses" | "anthropic";
@@ -2249,14 +2236,7 @@ export interface AiKeySaveResult extends AiKeyTestResult {
   restart_required: boolean;
 }
 
-export const aiKeyApi = {
-  /** Check a key against the provider's model list. Validation outcomes are results, not errors. */
-  aiKeyTest: (request: AiKeyTestRequest) => call<AiKeyTestResult>("ai_key_test", { request }),
-  /** Check, then save the key (keychain) and add the provider to config.toml. */
-  aiKeySave: (request: AiKeySaveRequest) => call<AiKeySaveResult>("ai_key_save", { request }),
-};
-
-// ---- Z3: model fit ----
+// ---- model fit ----
 
 /** Coarse GPU class the daemon detected (`unknown`: could not tell, or none). */
 export type GpuKind = "apple_silicon" | "nvidia" | "amd" | "intel" | "unknown";
@@ -2306,7 +2286,7 @@ export const modelFitApi = {
   modelsFit: () => call<FitReport>("models_fit"),
 };
 
-// ---- BB2 proactive learning ----
+// ---- proactive learning ----
 //
 // What the user's own Accept/Dismiss feedback taught the card ranking, and forgetting it
 // (`proactive.learning`, `proactive.reset_learning` in `nugget_core::ipc`). Learning only changes
@@ -2365,12 +2345,6 @@ export interface ResetLearningResult {
   cleared: number;
 }
 
-// Declaration merge: `CardView` (W4 block) gains the learned effects.
-export interface CardView {
-  /** How the user's feedback changed this card's ranking, strongest first (absent from older daemons). */
-  learned?: CardLearned[] | null;
-}
-
 /** A card's learned effects; older daemons send none. */
 export function cardLearned(card: CardView): CardLearned[] {
   return Array.isArray(card.learned) ? card.learned : [];
@@ -2383,15 +2357,9 @@ export const learningApi = {
   resetLearning: (request: ResetLearningRequest) => call<ResetLearningResult>("proactive_reset_learning", { request }),
 };
 
-// ---- FF4 plugins ----
+// ---- plugins ----
 // Mirrors `PluginCatalogEntry` / `PluginCatalogResult` and the `file_roots` capability in the
-// `// ---- Plugins (M6) ----` block of `nugget_core::ipc`.
-
-// Declaration merge: `PluginCapabilities` (W6 block) gains file access.
-export interface PluginCapabilities {
-  /** Source settings fields holding a folder or file the plugin may read (absent from older daemons). */
-  file_roots?: string[];
-}
+// `// ---- Plugins ----` block of `nugget_core::ipc`.
 
 /** `capabilities.file_roots`, empty when absent. */
 export function pluginFileRoots(c: PluginCapabilities | null | undefined): string[] {
@@ -2467,7 +2435,7 @@ export const listPluginCatalog = async (): Promise<PluginCatalogResult> => {
   };
 };
 
-// ---- EE3: Ask answer check ----
+// ---- Ask answer check ----
 
 /** Why the daemon's post-check flagged a claim. Newer daemons may send other values (shown like `unsupported`). */
 export type ClaimFlag = "uncited" | "unsupported";
@@ -2492,13 +2460,7 @@ export interface AnswerCheck {
   invalid_citations: number;
 }
 
-// Declaration merge: `StoredChatMessage` (chat history) keeps an answer's check.
-export interface StoredChatMessage {
-  /** The answer's post-check, when it came with one (absent from turns saved before EE3). */
-  check?: AnswerCheck | null;
-}
-
-// ---- FF1: backup, restore, export ----
+// ---- backup, restore, export ----
 //
 // `backup.*` and `export.run` (`crates/nuggetd/src/features/backup*`; snake_case like the rest of
 // the IPC). Backups are encrypted with the store key, which is sealed under the user's backup
@@ -2579,7 +2541,6 @@ export interface ExportResult {
 }
 
 export type ExportPhase = "items" | "graph" | "audit" | "egress" | "vault";
-export const EXPORT_PHASES: readonly ExportPhase[] = ["items", "graph", "audit", "egress", "vault"];
 
 /** `export.progress` notification params. */
 export interface ExportProgress {
@@ -2659,7 +2620,7 @@ export async function restoreAndRestart(
   return conn;
 }
 
-// ---- EE3: Ask sources early ----
+// ---- Ask sources early ----
 
 /** Tauri event `ask.restarted` is re-emitted as (see apps/desktop/src-tauri/src/daemon.rs). */
 export const ASK_RESTARTED_EVENT = "nugget:ask-restarted";
@@ -2693,7 +2654,7 @@ export const onAskRestarted = (h: (r: AskRestarted) => void) =>
     if (isAskRestarted(p)) h(p);
   });
 
-// ---- II4: quick ask ----
+// ---- quick ask ----
 
 /** `quickask.json` (see `src-tauri/src/quickask.rs`). */
 export interface QuickAskSettings {
@@ -2724,10 +2685,10 @@ export type QuickAskPage = Extract<PageId, "chat" | "search">;
 export const QUICK_ASK_COMMAND = "nugget-desktop --quick-ask";
 /** Text for the question field, sent by the shell; never submitted by itself. */
 export const QUICK_ASK_PREFILL_EVENT = "quickask:prefill";
-/** JJ2: sent to the main window when "Open in Chat" or "Show in Search" carries a question. */
+/** Sent to the main window when "Open in Chat" or "Show in Search" carries a question. */
 export const QUICK_ASK_HANDOVER_EVENT = "quickask:handover";
 
-/** JJ2: a quick-ask question (and, for Chat, its finished answer) carried to the main window. */
+/** A quick-ask question (and, for Chat, its finished answer) carried to the main window. */
 export interface QuickAskHandover {
   /** Set by the shell: the page it opened. */
   page?: QuickAskPage | "";
@@ -2749,14 +2710,14 @@ export const quickAskApi = {
   settingsGet: () => call<QuickAskView>("quickask_settings_get"),
   settingsSet: (settings: QuickAskSettings) => call<QuickAskView>("quickask_settings_set", { settings }),
   hide: () => call<null>("quickask_hide"),
-  /** JJ2: with `handover`, the page picks up the question (and Chat the finished answer). */
+  /** With `handover`, the page picks up the question (and Chat the finished answer). */
   openMain: (page: QuickAskPage, handover?: QuickAskHandover) =>
     call<null>("quickask_open_main", handover ? { page, handover } : { page }),
-  /** JJ2, main window: the handover waiting for it, once. */
+  /** Main window: the handover waiting for it, once. */
   takeHandover: () => call<QuickAskHandover | null>("quickask_handover_take"),
-  /** JJ2, main window: a handover is waiting (take it with {@link quickAskApi.takeHandover}). */
+  /** Main window: a handover is waiting (take it with {@link quickAskApi.takeHandover}). */
   onHandover: (h: () => void) => on<unknown>(QUICK_ASK_HANDOVER_EVENT, () => h()),
-  /** II4: a prefill sent before this window subscribed, once. */
+  /** A prefill sent before this window subscribed, once. */
   takePrefill: () => call<string | null>("quickask_prefill_take"),
   onPrefill: (h: (text: string) => void) =>
     on<unknown>(QUICK_ASK_PREFILL_EVENT, (p) => {
@@ -2764,7 +2725,7 @@ export const quickAskApi = {
     }),
 };
 
-// ---- II4: platform integration (tray labels, notifications, quit, deep links) ----
+// ---- platform integration (tray labels, notifications, quit, deep links) ----
 
 /** Quiet hours, in minutes after local midnight; an end before the start spans midnight. */
 export interface QuietHours {
@@ -2874,7 +2835,7 @@ export const platformApi = {
   onResumed: (h: (payload: unknown) => void) => on<unknown>(RESUMED_EVENT, h),
 };
 
-// ---- II1: messaging imports ----
+// ---- messaging imports ----
 // Kinds of `crates/nugget-connector-messaging`; settings keys mirror that crate's `lib.rs`.
 
 /** Local message history: the macOS Messages database, WhatsApp chat exports, Telegram Desktop exports. */
@@ -2904,7 +2865,7 @@ export interface MessagingSettings {
 /** The daemon's error when macOS keeps the Messages database from Nugget (Full Disk Access is off). */
 export const needsFullDiskAccess = (message: string | null | undefined): boolean => /full disk access/i.test(message ?? "");
 
-// ---- II2: faceted search, timelines, previews ----
+// ---- faceted search, timelines, previews ----
 // Served by the daemon's `search_ui` feature (`search.faceted`, `search.timeline`,
 // `search.preview`). Older daemons answer "method not found": callers fall back (see
 // `isCommandMissing`). Everything stays on this device.
@@ -2919,7 +2880,7 @@ export type FacetedHit = SearchHit & {
   date_source: "extracted" | "modified" | "indexed";
   kind: ItemKind;
   sensitive: boolean;
-  /** JJ2: sensitive only because triage has not sorted it yet (kept private until sorted). */
+  /** Sensitive only because triage has not sorted it yet (kept private until sorted). */
   unsorted?: boolean;
   people: EntityRefView[];
 };
@@ -2960,7 +2921,7 @@ export type ItemPreview = {
   date: string | null;
   date_source: string;
   sensitive: boolean;
-  /** JJ2: sensitive only because triage has not sorted it yet (kept private until sorted). */
+  /** Sensitive only because triage has not sorted it yet (kept private until sorted). */
   unsorted?: boolean;
   text: string;
   truncated: boolean;
@@ -2974,9 +2935,9 @@ export function utcOffsetMinutes(d: Date = new Date()): number {
   return -d.getTimezoneOffset();
 }
 
-// ---- KK2: AI keys ----
+// ---- AI keys ----
 
-/** Every reason `ai.key.*` can answer with (the Z3 ones plus replace/remove and the env fallback). */
+/** Every reason `ai.key.*` can answer with (test/save ones plus replace/remove and the env fallback). */
 export type AiKeyOutcome = AiKeyReason | "no_keychain" | "env_missing" | "not_found" | "not_editable" | "reserved";
 
 /** Where the key comes from: typed (goes to the OS keychain), or the daemon's environment variable. */
@@ -3035,7 +2996,7 @@ export const aiKeysApi = {
   saved: async () => (await call<{ providers: SavedKeyProvider[] }>("ai_key_saved")).providers,
 };
 
-/** JJ2: this machine's IANA time zone (`Europe/Berlin`), when the runtime knows it. */
+/** This machine's IANA time zone (`Europe/Berlin`), when the runtime knows it. */
 export function timeZoneName(): string | undefined {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -3051,21 +3012,21 @@ export function localZone(): { utc_offset_minutes: number; time_zone?: string } 
   return tz ? { utc_offset_minutes: utcOffsetMinutes(), time_zone: tz } : { utc_offset_minutes: utcOffsetMinutes() };
 }
 
-// ---- KK1 (runtime) ----
+// ---- runtime ----
 
 /** Start a local model server again after it failed (`runtime.retry`). */
 export function runtimeRetry(role: RuntimeRole): Promise<{ started: boolean }> {
   return call<{ started: boolean }>("runtime_retry", { role });
 }
 
-// ---- KK1 (model downloads) ----
+// ---- model downloads ----
 
 /** Stop a running model download (`models.cancel`); staged bytes are kept for a resume. */
 export function modelsCancel(id: string): Promise<{ cancelled: boolean }> {
   return call<{ cancelled: boolean }>("models_cancel", { id });
 }
 
-// ---- KK1 (disk) ----
+// ---- disk ----
 
 /** How much room is left on the disk that holds Nugget's data (`status.disk`). */
 export type DiskLevel = "ok" | "low" | "full";
@@ -3078,12 +3039,7 @@ export interface DiskStatus {
   recent_full_error?: boolean;
 }
 
-/** `status.disk` (merged into the declaration above): absent from older daemons. */
-export interface StatusResponse {
-  disk?: DiskStatus | null;
-}
-
-// LL1
+// ---- cursor paging ----
 // Cursor-paged search and egress ledger (`search.page`, `egress.page`). Cursors are opaque: pass
 // back the `next_cursor` of the previous page; `null` means the end. Older daemons answer
 // "method not found": callers fall back to `search` / `egress.recent` (one page, no cursor).

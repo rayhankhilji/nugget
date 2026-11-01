@@ -2,9 +2,9 @@
  * Status-page pieces for the background service's life around the app's
  * (`src-tauri/src/lifecycle.rs`):
  *
- * - {@link VersionBanner} (GG6-10): the service is another version than the app, and what Nugget
+ * - {@link VersionBanner}: the service is another version than the app, and what Nugget
  *   did or what the user has to do about it.
- * - {@link NoTrayControls} (GG6-20): on desktops without a tray icon, the tray's controls the
+ * - {@link NoTrayControls}: on desktops without a tray icon, the tray's controls the
  *   docs point to (pause indexing; the kill switch lives on the Safety page).
  */
 import { useEffect, useState } from "react";
