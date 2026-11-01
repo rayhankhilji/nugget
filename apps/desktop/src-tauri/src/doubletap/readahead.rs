@@ -708,7 +708,7 @@ async fn observe(app: &AppHandle, s: &DoubleTapSettings, hasher: &impl BuildHash
 }
 
 /// Whether `front` is Nugget itself (its bundle id or product name).
-fn is_own(app: &AppHandle, front: &AppInfo) -> bool {
+pub(super) fn is_own(app: &AppHandle, front: &AppInfo) -> bool {
     let config = app.config();
     let ours = AppInfo {
         id: Some(config.identifier.clone()),

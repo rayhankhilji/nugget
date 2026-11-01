@@ -9,6 +9,8 @@
 //! - [`readahead`]: read-ahead, prefilling the local model's cache while a reply field keeps
 //!   focus (with its privacy rules); [`focus`]: the OS focus change notifications it sleeps on;
 //!   [`power`]: battery and low power mode, which pause it.
+//! - [`history`]: the last drafts, in memory only, to insert one again.
+//! - [`practice`]: the Double Tap page's practice field, a sandbox target for the real trigger.
 //! - [`commands`]: the Tauri commands.
 //! - `probe`: debug builds only, a step log for the native overlay runs (`apps/desktop/e2e-native`).
 
@@ -16,10 +18,12 @@ pub mod commands;
 pub mod errors;
 pub mod flow;
 pub mod focus;
+pub mod history;
 pub mod overlay;
 pub mod permissions;
 pub mod placement;
 pub mod power;
+pub mod practice;
 mod probe;
 pub mod readahead;
 pub mod settings;
@@ -29,7 +33,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use tauri::{App, Manager, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
 
-use flow::{A11y, Target};
+use flow::{A11y, Layout, Target};
+use nugget_core::ipc::DraftRequest;
 use overlay::Machine;
 use settings::DoubleTapSettings;
 
@@ -41,8 +46,19 @@ pub const OVERLAY_EVENT: &str = "doubletap:overlay";
 /// settings page and onboarding show what the running trigger is.
 pub const SETTINGS_EVENT: &str = "doubletap:settings";
 pub use nugget_core::ipc::method::DRAFT_PREWARM;
-/// The overlay's size in logical pixels.
+/// The overlay's size in logical pixels: its width and the height it starts at before its
+/// content is measured.
 pub const OVERLAY_SIZE: (f64, f64) = (440.0, 200.0);
+/// The overlay's height limits in logical pixels: it resizes to fit its content within them
+/// (and within the room beside the caret), and scrolls past the maximum.
+pub const OVERLAY_MIN_HEIGHT: f64 = 120.0;
+pub const OVERLAY_MAX_HEIGHT: f64 = 420.0;
+/// The event carrying the draft history (newest first) to every window after a change.
+pub const HISTORY_EVENT: &str = "doubletap:history";
+/// The event carrying a `practice::Action` to the main window.
+pub const PRACTICE_EVENT: &str = "doubletap:practice";
+/// The main window's label (the practice field lives there).
+pub const MAIN_LABEL: &str = "main";
 
 /// Managed state.
 pub struct DoubleTap {
@@ -52,6 +68,12 @@ pub struct DoubleTap {
     pub(crate) trigger_error: Mutex<Option<String>>,
     pub(crate) machine: Mutex<Machine>,
     pub(crate) target: Mutex<Option<Target>>,
+    /// The request of the session's last draft, for Retry and the refinements.
+    pub(crate) request: Mutex<Option<DraftRequest>>,
+    /// The practice field while it has focus.
+    pub(crate) practice: Mutex<Option<practice::PracticeField>>,
+    pub(crate) history: Mutex<history::History>,
+    pub(crate) layout: Mutex<Layout>,
     pub(crate) a11y: Arc<A11y>,
     pub(crate) read_ahead: readahead::Runner,
 }
@@ -82,6 +104,10 @@ pub fn setup(app: &App) {
         trigger_error: Mutex::new(None),
         machine: Mutex::new(Machine::new()),
         target: Mutex::new(None),
+        request: Mutex::new(None),
+        practice: Mutex::new(None),
+        history: Mutex::new(history::History::default()),
+        layout: Mutex::new(Layout::default()),
         a11y: Arc::new(A11y::new()),
         read_ahead: readahead::Runner::default(),
     });
@@ -120,8 +146,16 @@ fn create_overlay(app: &App) -> tauri::Result<()> {
 }
 
 /// Call from `on_window_event`: closing the overlay (Alt+F4, Cmd+W) cancels instead of
-/// destroying the window.
+/// destroying the window; the main window losing focus forgets the practice field.
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
+    // The practice field only counts while the main window has the keyboard (the page clears it
+    // on blur too; this covers a page that could not).
+    if let WindowEvent::Focused(false) = event
+        && window.label() == MAIN_LABEL
+        && let Some(state) = window.app_handle().try_state::<DoubleTap>()
+    {
+        *lock(&state.practice) = None;
+    }
     if let WindowEvent::CloseRequested { api, .. } = event
         && window.label() == OVERLAY_LABEL
     {

@@ -274,6 +274,8 @@ pub(crate) struct RuntimeSlot {
     active: Mutex<Option<Active>>,
     router: OnceLock<Weak<Router>>,
     on_ready: OnceLock<ReadyHook>,
+    /// Interactive chats hold a guard on it so background triage yields (HH2).
+    foreground: OnceLock<Arc<nugget_ingest::Foreground>>,
 }
 
 impl RuntimeSlot {
@@ -455,7 +457,20 @@ impl Provider for RuntimeSlot {
         if !matches!(self.role, RuntimeRole::Chat | RuntimeRole::Draft) {
             return Err(Error::Unsupported(format!("{} does not chat", self.id)));
         }
-        self.ready().await?.chat(req).await
+        // Interactive chats (Ask, Double Tap, agent, drafts) are marked for their whole stream
+        // so background triage leaves the model alone; background work (knowledge, proactive
+        // judge, probes, triage itself) is not (HH2).
+        let guard = nugget_ingest::is_interactive(&req.feature)
+            .then(|| self.foreground.get().map(|f| f.begin()))
+            .flatten();
+        let stream = self.ready().await?.chat(req).await?;
+        Ok(match guard {
+            Some(g) => Box::pin(futures::StreamExt::map(stream, move |ev| {
+                let _held = &g;
+                ev
+            })),
+            None => stream,
+        })
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -552,6 +567,7 @@ impl LocalRuntime {
                     active: Mutex::new(None),
                     router: OnceLock::new(),
                     on_ready: OnceLock::new(),
+                    foreground: OnceLock::new(),
                 })
             })
             .collect();
@@ -574,6 +590,13 @@ impl LocalRuntime {
     }
 
     /// Call `hook` whenever a slot's server becomes ready on a new config (set once).
+    /// Mark interactive chats on `fg` (see `nugget_ingest::Foreground`). Call once.
+    pub fn set_foreground(&self, fg: Arc<nugget_ingest::Foreground>) {
+        for s in &self.slots {
+            let _ = s.foreground.set(fg.clone());
+        }
+    }
+
     pub fn on_ready(&self, hook: ReadyHook) {
         for s in &self.slots {
             let _ = s.on_ready.set(hook.clone());
@@ -655,6 +678,22 @@ pub(crate) fn localities(providers: &[Arc<dyn Provider>]) -> HashMap<ProviderId,
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn background_features_never_hold_the_foreground() {
+        // HH2: triage yields to interactive chats only.
+        for f in [
+            nugget_ingest::FEATURE_TRIAGE,
+            nugget_knowledge::llm::FEATURE_KNOWLEDGE,
+            nugget_proactive::judge::FEATURE_JUDGE,
+            nugget_infer::FEATURE_PROBE,
+        ] {
+            assert!(!nugget_ingest::is_interactive(f), "{f}");
+        }
+        for f in ["ask", "chat", "agent", "draft", "query_rewrite"] {
+            assert!(nugget_ingest::is_interactive(f), "{f}");
+        }
+    }
     use super::*;
     use nugget_models::GpuKind;
 

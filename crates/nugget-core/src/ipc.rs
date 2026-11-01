@@ -26,6 +26,7 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `models.list` | `{}` | `Vec<`[`ModelInfo`]`>` |
 /// | `models.install` | [`ModelInstallRequest`] | `null`, then `models.progress` notifications |
 /// | `egress.recent` | [`EgressRecentRequest`] | [`EgressRecentResponse`] |
+/// | `egress.record` | [`EgressRecordRequest`] | `null` |
 /// | `sources.list` | `{}` | `Vec<`[`SourceInfo`]`>` |
 /// | `sources.add` | [`SourceSpec`] | [`SourceInfo`] |
 /// | `sources.update` | [`SourceUpdate`] | [`SourceInfo`] |
@@ -61,6 +62,8 @@ pub mod method {
     pub const MODELS_LIST: &str = "models.list";
     pub const MODELS_INSTALL: &str = "models.install";
     pub const EGRESS_RECENT: &str = "egress.recent";
+    /// A request the desktop app made itself (update checks), for the daemon's ledger.
+    pub const EGRESS_RECORD: &str = "egress.record";
     pub const SOURCES_LIST: &str = "sources.list";
     pub const SOURCES_ADD: &str = "sources.add";
     pub const SOURCES_UPDATE: &str = "sources.update";
@@ -315,6 +318,33 @@ pub struct EgressRecentRequest {
 
 pub type EgressRecentResponse = Vec<EgressEvent>;
 
+/// Ledger features a client may record with `egress.record`: requests the desktop app makes
+/// itself, outside the daemon's network layer. Anything else is refused.
+pub const CLIENT_EGRESS_FEATURES: &[&str] = &[
+    // The updater's channel feed and its signature.
+    "update_check",
+    // An update package.
+    "update_download",
+];
+
+/// `egress.record`: one request a client made off the device, written to the ledger as is
+/// (no items: these requests carry none of the user's content).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EgressRecordRequest {
+    /// When the request started; the daemon's clock when absent. Rows queued while the daemon
+    /// was not running carry the time they were made.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub at: Option<time::OffsetDateTime>,
+    /// Destination host (`host` or `host:port`).
+    pub host: String,
+    /// One of [`CLIENT_EGRESS_FEATURES`].
+    pub feature: String,
+    #[serde(default)]
+    pub bytes_sent: u64,
+    #[serde(default)]
+    pub bytes_received: u64,
+}
+
 // ---- sources ----
 
 /// Connector kinds shipped in M1: `files`, `obsidian`, `gmail`, `gcal`, `imap`, `caldav`.
@@ -492,6 +522,42 @@ pub struct IngestStatus {
     #[serde(default)]
     pub triage_provider: Option<ProviderId>,
     pub sources: Vec<SourceInfo>,
+    /// Background triage progress. Items are searchable as soon as they are indexed; triage
+    /// (junk / sensitive labels) runs afterwards at low priority. Absent from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage: Option<TriageProgress>,
+}
+
+/// What the background triage job is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageState {
+    /// Triage is turned off or no local triage provider is routable.
+    Off,
+    /// Nothing to triage.
+    Idle,
+    /// Classifying items.
+    Running,
+    /// Waiting for interactive model requests (Ask, Double Tap, agent) to finish.
+    Yielding,
+    /// Waiting for power (battery) to allow heavy work.
+    Paused,
+}
+
+/// Background triage counters since the daemon started (`pending` is the current backlog).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriageProgress {
+    pub state: TriageState,
+    /// Items indexed and searchable whose triage has not run yet.
+    pub pending: u64,
+    /// Items triaged by the model.
+    pub done: u64,
+    /// Items labelled by rule without a model call (e.g. PII already found).
+    #[serde(default)]
+    pub skipped: u64,
+    /// Items whose triage failed for good (they stay searchable and count as sensitive).
+    #[serde(default)]
+    pub failed: u64,
 }
 
 // ---- retrieval ----
@@ -1048,6 +1114,16 @@ pub struct VoiceStatus {
     pub channels: Vec<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_built: Option<time::OffsetDateTime>,
+}
+
+// ---- Search UI (II2) ----
+
+/// IPC method names of the search UI feature (`nuggetd` `features/search_ui`); their request and
+/// response types live in that feature module.
+pub mod search_ui_method {
+    pub const FACETED: &str = "search.faceted";
+    pub const TIMELINE: &str = "search.timeline";
+    pub const PREVIEW: &str = "search.preview";
 }
 
 // ---- Plugins (M6) ----
@@ -1920,5 +1996,26 @@ mod tests {
             serde_json::json!({"url": "https://example.com/device", "user_code": "WDJB-MJHT"})
         );
         assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), device);
+    }
+
+    #[test]
+    fn egress_record_time_and_bytes_are_optional() {
+        let r: EgressRecordRequest = serde_json::from_value(
+            serde_json::json!({"host": "github.com", "feature": "update_check"}),
+        )
+        .unwrap();
+        assert_eq!((r.at, r.bytes_sent, r.bytes_received), (None, 0, 0));
+        let at = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
+        let r = EgressRecordRequest {
+            at: Some(at),
+            host: "github.com".into(),
+            feature: "update_download".into(),
+            bytes_sent: 0,
+            bytes_received: 42,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["at"], "2026-09-21T14:13:20Z");
+        assert_eq!(serde_json::from_value::<EgressRecordRequest>(v).unwrap(), r);
+        assert!(CLIENT_EGRESS_FEATURES.contains(&"update_check"));
     }
 }

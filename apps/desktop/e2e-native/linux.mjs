@@ -96,6 +96,10 @@ export const linux = {
     xte(...tap, ...tap);
   },
 
+  /** The overlay's Retry key. */
+  async retry() {
+    xte("key r");
+  },
   async enter() {
     xte("key Return");
   },

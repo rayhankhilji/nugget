@@ -1,0 +1,130 @@
+{
+ "about": "Here is the data you requested.",
+ "personal_information": {
+  "user_id": 7,
+  "first_name": "Tanuj",
+  "last_name": "",
+  "phone_number": "+1 555 0100",
+  "bio": ""
+ },
+ "contacts": {
+  "about": "",
+  "list": []
+ },
+ "chats": {
+  "about": "",
+  "list": [
+   {
+    "name": "Book Club 📚",
+    "type": "private_supergroup",
+    "id": 1001,
+    "messages": [
+     {
+      "id": 10,
+      "type": "service",
+      "date": "2024-03-01T18:00:00",
+      "date_unixtime": "1709316000",
+      "actor": "Bea",
+      "actor_id": "user11",
+      "action": "create_group",
+      "title": "Book Club 📚",
+      "members": [
+       "Bea",
+       "Tanuj"
+      ],
+      "text": ""
+     },
+     {
+      "id": 11,
+      "type": "service",
+      "date": "2024-03-01T18:01:00",
+      "date_unixtime": "1709316060",
+      "actor": "Bea",
+      "actor_id": "user11",
+      "action": "invite_members",
+      "members": [
+       "Chen",
+       "Dara"
+      ],
+      "text": ""
+     },
+     {
+      "id": 12,
+      "type": "message",
+      "date": "2024-03-01T18:05:00",
+      "date_unixtime": "1709316300",
+      "from": "Bea",
+      "from_id": "user11",
+      "text": "First pick: Dune"
+     },
+     {
+      "id": 13,
+      "type": "message",
+      "date": "2024-03-01T18:06:00",
+      "date_unixtime": "1709316360",
+      "from": "Tanuj",
+      "from_id": "user7",
+      "text": "Yes!"
+     },
+     {
+      "id": 14,
+      "type": "message",
+      "date": "2024-04-02T18:06:00",
+      "date_unixtime": "1712081160",
+      "from": "Chen",
+      "from_id": "user12",
+      "file": "files/dune-notes.pdf",
+      "file_name": "dune-notes.pdf",
+      "file_size": 999,
+      "mime_type": "application/pdf",
+      "text": "my notes"
+     }
+    ]
+   },
+   {
+    "name": "Alice Example",
+    "type": "personal_chat",
+    "id": 4242,
+    "messages": [
+     {
+      "id": 1,
+      "type": "message",
+      "date": "2024-04-30T23:59:00",
+      "date_unixtime": "1714521540",
+      "from": "Alice Example",
+      "from_id": "user4242",
+      "text": "End of April"
+     },
+     {
+      "id": 7,
+      "type": "message",
+      "date": "2024-04-29T08:00:00",
+      "date_unixtime": "1714377600",
+      "from": "Tanuj",
+      "from_id": "user7",
+      "text": "Only in the full export"
+     }
+    ]
+   },
+   {
+    "type": "saved_messages",
+    "id": 7,
+    "messages": [
+     {
+      "id": 20,
+      "type": "message",
+      "date": "2024-01-05T12:00:00",
+      "date_unixtime": "1704456000",
+      "from": "Tanuj",
+      "from_id": "user7",
+      "text": "note to self"
+     }
+    ]
+   }
+  ]
+ },
+ "left_chats": {
+  "about": "",
+  "list": []
+ }
+}

@@ -62,6 +62,12 @@ export function KindPicker({
               </span>
             </label>
           )),
+          // Signal has no export to read from; said here so nobody looks for it in vain.
+          g.id === "messages" ? (
+            <p key="signal" className="muted small kind-note">
+              {t("addSource.messages.signal")}
+            </p>
+          ) : null,
         ])}
       </fieldset>
       <div className="dialog-actions">
