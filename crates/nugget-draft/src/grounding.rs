@@ -43,7 +43,7 @@ pub struct GroundingReport {
     /// Sentences dropped for copying a credential-like value from a sensitive fact.
     pub secrets_dropped: u32,
     /// Sentences dropped for a link, email address, phone, account or card number that neither
-    /// the thread nor the user's own text has (QA GG1-1).
+    /// the thread nor the user's own text has (QA GG1-1), or for claiming an attachment (GG1-17).
     pub contacts_dropped: u32,
     /// Sentences dropped for repeating a message from someone else, or signing as them (GG7-1).
     pub copies_dropped: u32,
@@ -92,6 +92,9 @@ pub struct Corpus {
     /// The thread, subject, recipients, window title, field text and instruction, [`squash`]ed:
     /// the only texts a link or contact detail may come from.
     user: String,
+    /// The user's instruction or field text mentions an attachment: a draft may say one is
+    /// attached.
+    attachment_ok: bool,
     /// Messages from other people, [`squash`]ed: the reply must not repeat them.
     others: Vec<String>,
     /// Other people's names (whole and first), [`squash`]ed: the reply is not signed by them.
@@ -140,6 +143,8 @@ impl Corpus {
         if let Some(i) = instruction {
             c.add_user(i);
         }
+        c.attachment_ok = claims_attachment(&ctx.field.value)
+            || instruction.is_some_and(|i| claims_attachment(i) || i.contains("attach"));
         for f in prompt_facts::facts(context) {
             if f.sensitive {
                 // The title goes into the prompt too (a note's first line is often its title).
@@ -352,6 +357,32 @@ pub(crate) fn contacts(text: &str) -> Vec<String> {
         (run, raw, plus) = (String::new(), String::new(), false);
     }
     out
+}
+
+/// Words that claim a file is attached to the message, in the UI languages.
+const ATTACHMENT_CLAIMS: &[&str] = &[
+    "attached",
+    "enclosed",
+    "attaching",
+    "angehängt",
+    "im anhang",
+    "anbei",
+    "adjunto",
+    "adjunta",
+    "ci-joint",
+    "pièce jointe",
+    "em anexo",
+    "anexado",
+    "添付",
+    "附件",
+    "مرفق",
+    "संलग्न",
+];
+
+/// Whether `text` says a file is attached (QA GG1-17: a draft can't attach files).
+fn claims_attachment(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    ATTACHMENT_CLAIMS.iter().any(|w| lower.contains(w))
 }
 
 /// Whether a word may carry what the default check looks at (a number, amount, date, link,
@@ -823,6 +854,10 @@ impl Grounder {
                 && self.corpus.other_names.contains(&sq))
         {
             self.report.copies_dropped += 1;
+            return false;
+        }
+        if !self.corpus.attachment_ok && claims_attachment(sentence) {
+            self.report.contacts_dropped += 1;
             return false;
         }
         if !self.values {
@@ -2055,8 +2090,9 @@ twelve thousand dollars. See you Friday at 3 pm.",
         );
     }
 
-    /// QA GG1-1: a link, account number or contact detail that only the facts (or nothing)
-    /// show is dropped; one from the thread or the user's own text stays.
+    /// QA GG1-1 and GG1-17: a link, account number or contact detail that only the facts (or
+    /// nothing) show is dropped, and so is a claimed attachment; a contact from the thread or
+    /// the user's own text stays.
     #[test]
     fn links_and_contacts_need_the_thread_or_the_users_text() {
         let (ctx, mut cr) = henrik();
@@ -2073,8 +2109,8 @@ twelve thousand dollars. See you Friday at 3 pm.",
             let out = stream(
                 &mut g,
                 &["Hi Ravi,\n\nThe board approved $275,000. Pay faster at \
-https://larkspur-pay.example.com/fast. Wire it to DE89 3704 0044 0532 0130 00. Call me on \
-+1 415 555 0142 or mail ravi.menon@northwind.example.com."],
+https://larkspur-pay.example.com/fast. Wire it to DE89 3704 0044 0532 0130 00. I've attached \
+the signed SOW. Call me on +1 415 555 0142 or mail ravi.menon@northwind.example.com."],
             );
             assert_eq!(
                 out,
@@ -2082,7 +2118,7 @@ https://larkspur-pay.example.com/fast. Wire it to DE89 3704 0044 0532 0130 00. C
 ravi.menon@northwind.example.com.",
                 "{check:?}"
             );
-            assert_eq!(g.report().contacts_dropped, 2, "{check:?}");
+            assert_eq!(g.report().contacts_dropped, 3, "{check:?}");
         }
     }
 
