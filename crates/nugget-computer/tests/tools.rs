@@ -73,11 +73,12 @@ async fn observe_renders_untrusted_tree_and_other_windows() {
 async fn risk_table() {
     let kit = Kit::new(vec![mail(), terminal()]);
     let risk = |n: &str, a: serde_json::Value| kit.tool(n).risk(&a);
-    // Nothing observed yet: every element is unknown.
-    assert_eq!(risk("click", json!({"element": "ebold"})), RiskClass::Send);
+    // Nothing observed yet: every element is unknown. Edit, not Send (GG3-13): `call` refuses
+    // an id that is not on the cached screen, so there is nothing to confirm.
+    assert_eq!(risk("click", json!({"element": "ebold"})), RiskClass::Edit);
     assert_eq!(
         risk("set_value", json!({"element": "eto", "value": "x"})),
-        RiskClass::Send
+        RiskClass::Edit
     );
     kit.look().await;
     let click = |id: &str| risk("click", json!({"element": id}));
@@ -90,9 +91,10 @@ async fn risk_table() {
     assert_eq!(click("em1"), RiskClass::Edit);
     // "OK" in a "Delete 3 files?" dialog.
     assert_eq!(click("eok"), RiskClass::Destroy);
-    // Unknown id: fail safe.
-    assert_eq!(click("e404"), RiskClass::Send);
-    assert_eq!(click("[not an id]"), RiskClass::Send);
+    // Unknown or malformed id: Edit, and never acted on (GG3-13; was a fail-closed Send that
+    // asked the user to approve a control named by the model's own id).
+    assert_eq!(click("e404"), RiskClass::Edit);
+    assert_eq!(click("[not an id]"), RiskClass::Edit);
 
     let ty = |a| risk("type_text", a);
     assert_eq!(ty(json!({"text": "hi"})), RiskClass::Edit);
@@ -104,7 +106,7 @@ async fn risk_table() {
         ty(json!({"text": "x", "element": "epw"})),
         RiskClass::Security
     );
-    assert_eq!(ty(json!({"text": "x", "element": "e404"})), RiskClass::Send);
+    assert_eq!(ty(json!({"text": "x", "element": "e404"})), RiskClass::Edit);
     assert_eq!(
         risk("set_value", json!({"element": "eprio", "value": "High"})),
         RiskClass::Edit
@@ -127,7 +129,14 @@ async fn risk_table() {
     assert_eq!(keys("backspace", None), RiskClass::Edit);
     assert_eq!(keys("delete", Some("em1")), RiskClass::Destroy);
     assert_eq!(keys("space", Some("esend")), RiskClass::Send);
-    assert_eq!(keys("enter", Some("e404")), RiskClass::Send);
+    // An unknown element: Edit, refused by `call` (focus unknown without `element` stays Send).
+    assert_eq!(keys("enter", Some("e404")), RiskClass::Edit);
+    assert!(
+        kit.call("press_key", json!({"keys": "enter", "element": "e404"}))
+            .await
+            .is_error
+    );
+    assert!(kit.cu.acts().is_empty());
 
     assert_eq!(
         risk("scroll", json!({"element": "elist", "direction": "down"})),
@@ -211,7 +220,8 @@ async fn describe_and_redact() {
     assert_eq!(d.verb, "click");
     assert_eq!(d.target_label.as_deref(), Some("Send"));
     let d = kit.tool("click").describe(&json!({"element": "e404"}));
-    assert_eq!(d.target_label.as_deref(), Some("unknown element e404"));
+    // No label made from the model's own id (GG3-13).
+    assert_eq!(d.target_label, None);
 
     let long = "x".repeat(500);
     let d = kit

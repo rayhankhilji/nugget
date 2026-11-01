@@ -71,20 +71,90 @@ pub enum Refinement {
     Casual,
 }
 
+/// The i18n key shown with a refinement that missed (unchanged, or not shorter or longer) after
+/// its stricter second try.
+pub const REFINE_MISSED: &str = "doubletap.overlay.refineMissed";
+
+/// Length in words, counting each CJK, kana or Hangul character as a word (those scripts don't
+/// separate words with spaces).
+pub fn length_units(text: &str) -> usize {
+    let dense = |c: char| matches!(c as u32, 0x3040..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF);
+    let cjk = text.chars().filter(|c| dense(*c)).count();
+    let words = text
+        .split(|c: char| c.is_whitespace() || dense(c))
+        .filter(|w| w.chars().any(char::is_alphanumeric))
+        .count();
+    words + cjk
+}
+
+fn normalized(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 impl Refinement {
-    /// The instruction sent with the refined request (the user's own hint to the model).
-    pub fn instruction(self) -> &'static str {
+    /// The length the rewrite aims at, in [`length_units`].
+    pub fn target_units(self, base: usize) -> usize {
         match self {
-            Refinement::Shorter => {
-                "Rewrite the selected draft shorter: keep what matters, drop the rest."
-            }
-            Refinement::Longer => {
-                "Rewrite the selected draft longer, with a little more detail, without inventing facts."
-            }
-            Refinement::Formal => "Rewrite the selected draft in a more formal tone.",
-            Refinement::Casual => "Rewrite the selected draft in a more casual, relaxed tone.",
+            Refinement::Shorter => (base * 6 / 10).clamp(1, base.saturating_sub(1).max(1)),
+            Refinement::Longer => base * 16 / 10 + 3,
+            Refinement::Formal | Refinement::Casual => base.max(1),
         }
     }
+
+    /// The instruction sent with the refined request (the user's own hint to the model): an
+    /// explicit rewrite with a target length taken from the draft. `strict` is the second try,
+    /// after a rewrite that missed. Under 300 characters (the local prompt's instruction cap).
+    pub fn instruction(self, base_units: usize, strict: bool) -> String {
+        let target = self.target_units(base_units);
+        let task = match self {
+            Refinement::Shorter => format!(
+                "Rewrite the selected draft to be clearly shorter: at most {target} words (it has {base_units}). Keep only the main point."
+            ),
+            Refinement::Longer => format!(
+                "Rewrite the selected draft to be longer: about {target} words (it has {base_units}). Add detail only from the conversation; invent nothing."
+            ),
+            Refinement::Formal => format!(
+                "Rewrite the selected draft in a clearly more formal tone: polite, full sentences, no slang. About {target} words."
+            ),
+            Refinement::Casual => format!(
+                "Rewrite the selected draft in a clearly more casual, friendly tone: contractions, short sentences. About {target} words."
+            ),
+        };
+        let strict = if strict {
+            " The last rewrite missed this; change it now."
+        } else {
+            ""
+        };
+        format!("{task} Same meaning and language. Never return it unchanged.{strict}")
+    }
+
+    /// A token cap that fits the target length with room to spare (tokens per word vary by
+    /// language), so a "shorter" rewrite cannot run on.
+    pub fn max_tokens(self, base_units: usize) -> u32 {
+        u32::try_from(self.target_units(base_units) * 3 + 32).unwrap_or(u32::MAX)
+    }
+
+    /// Whether `out` is the rewrite asked for: changed, and shorter or longer when that was the
+    /// point. (Tone can't be checked by rule; changed is the floor.)
+    pub fn accepts(self, base: &str, out: &str) -> bool {
+        if out.trim().is_empty() || normalized(out) == normalized(base) {
+            return false;
+        }
+        let (b, o) = (length_units(base), length_units(out));
+        match self {
+            Refinement::Shorter => o < b,
+            Refinement::Longer => o > b,
+            Refinement::Formal | Refinement::Casual => true,
+        }
+    }
+}
+
+/// One refinement request: rewrite `base` with `kind`; `strict` on the automatic second try.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefineRequest {
+    pub kind: Refinement,
+    pub base: String,
+    pub strict: bool,
 }
 
 /// What the overlay window renders (event `doubletap:overlay`, command `overlay_state`).
@@ -170,6 +240,11 @@ pub enum Event {
     },
     /// Insert a draft from the history instead of the one shown.
     InsertPrevious(String),
+    /// The overlay lost the keyboard to another window (the user clicked or switched away):
+    /// close it, without taking the keyboard back.
+    FocusLost,
+    /// The trigger fired while busy: a draft on screen comes back with the keyboard.
+    Refocus,
     Inserted {
         verified: bool,
         method: InsertMethod,
@@ -209,7 +284,7 @@ pub enum Effect {
     /// rewrite of this text with the refinement's instruction. Its results carry `generation`.
     Redraft {
         generation: u64,
-        refine: Option<(Refinement, String)>,
+        refine: Option<RefineRequest>,
     },
     /// Give the keyboard back to the field the draft was read from (after Esc or a timeout).
     RestoreFocus,
@@ -268,6 +343,8 @@ pub struct Machine {
     focused: bool,
     /// The error on screen came from inserting (the target already has focus): no retry.
     insert_failed: bool,
+    /// The refinement being drafted, checked when its draft is done.
+    refining: Option<RefineRequest>,
 }
 
 impl Machine {
@@ -390,7 +467,7 @@ impl Machine {
     }
 
     /// Retry and Refine: back to reading, a new request for the same context.
-    fn redraft(&mut self, refine: Option<(Refinement, String)>) -> Step {
+    fn redraft(&mut self, refine: Option<RefineRequest>) -> Step {
         let mut effects = Vec::new();
         if matches!(self.view.phase, Phase::Streaming | Phase::Done) {
             if self.streaming
@@ -407,7 +484,7 @@ impl Machine {
         }
         self.generation += 1;
         self.view = OverlayView {
-            refinement: refine.as_ref().map(|(k, _)| *k),
+            refinement: refine.as_ref().map(|r| r.kind),
             practice: self.practice,
             ..OverlayView::default()
         };
@@ -417,6 +494,7 @@ impl Machine {
         self.buffered_bytes = 0;
         self.accepted = None;
         self.insert_failed = false;
+        self.refining = refine.clone();
         effects.push(Effect::Redraft {
             generation: self.generation,
             refine,
@@ -442,6 +520,7 @@ impl Machine {
                 self.requested = false;
                 self.sensitive = false;
                 self.insert_failed = false;
+                self.refining = None;
                 // A refusal or error still on screen was shown without the keyboard (a focused
                 // one makes the machine busy).
                 self.focused = false;
@@ -511,6 +590,15 @@ impl Machine {
                 }
                 match error {
                     None => {
+                        if let Some(r) = self.refining.clone()
+                            && !r.kind.accepts(&r.base, &self.view.text)
+                        {
+                            if !r.strict {
+                                // One stricter try before showing a miss.
+                                return self.redraft(Some(RefineRequest { strict: true, ..r }));
+                            }
+                            self.view.message = Some(REFINE_MISSED.into());
+                        }
                         self.view.phase = Phase::Done;
                         Step::changed(Vec::new())
                     }
@@ -590,6 +678,24 @@ impl Machine {
                 effects.push(Effect::Insert(text));
                 Step::changed(effects)
             }
+            Event::FocusLost => {
+                let open = matches!(self.view.phase, Phase::Streaming | Phase::Done)
+                    || (self.view.phase == Phase::Error && !self.insert_failed);
+                if !self.active || !self.focused || !open {
+                    return Step::default();
+                }
+                // The user went elsewhere on purpose: leave the keyboard where they put it.
+                self.focused = false;
+                self.apply_inner(Event::Cancel)
+            }
+            Event::Refocus => {
+                let open = matches!(self.view.phase, Phase::Streaming | Phase::Done)
+                    || (self.view.phase == Phase::Error && !self.insert_failed);
+                if !self.active || !open {
+                    return Step::default();
+                }
+                Step::effects(vec![self.show(true)])
+            }
             Event::Retry => {
                 if !self.can_retry() {
                     return Step::default();
@@ -606,7 +712,11 @@ impl Machine {
                 if base.trim().is_empty() {
                     return Step::default();
                 }
-                self.redraft(Some((kind, base)))
+                self.redraft(Some(RefineRequest {
+                    kind,
+                    base,
+                    strict: false,
+                }))
             }
             Event::Cancel => {
                 if !self.active || self.view.phase == Phase::Inserting {
@@ -751,7 +861,11 @@ mod tests {
     fn redraft(m: &Machine, refine: Option<(Refinement, String)>) -> Effect {
         Effect::Redraft {
             generation: m.generation(),
-            refine,
+            refine: refine.map(|(kind, base)| RefineRequest {
+                kind,
+                base,
+                strict: false,
+            }),
         }
     }
 
@@ -1196,7 +1310,7 @@ mod tests {
             Step::default()
         );
         assert!(
-            Refinement::Longer.instruction().contains("longer"),
+            Refinement::Longer.instruction(10, false).contains("longer"),
             "instructions name what they do"
         );
         assert_eq!(
@@ -1392,5 +1506,118 @@ mod tests {
             base: None,
         });
         assert!(!s.effects.iter().any(|e| matches!(e, Effect::Feedback(_))));
+    }
+
+    #[test]
+    fn losing_the_keyboard_closes_the_draft_and_the_trigger_always_recovers() {
+        // JJ1-2: the user clicks back into the target while the draft is done.
+        let mut m = streaming("j1");
+        m.apply(delta("j1", "Done draft"));
+        m.apply(done("j1"));
+        assert!(m.busy());
+        let s = m.apply(Event::FocusLost);
+        assert_eq!(
+            s.effects,
+            vec![
+                feedback("j1", "rejected", None, None),
+                Effect::Remember("Done draft".into()),
+                Effect::Hide
+            ],
+            "closed, kept in the history, the keyboard left where the user put it"
+        );
+        assert!(!m.busy(), "the next trigger starts a new draft");
+        assert!(m.apply(Event::Begin).changed);
+        // A focus loss while reading, inserting or closed changes nothing.
+        assert_eq!(m.apply(Event::FocusLost), Step::default());
+        let mut m = streaming("j2");
+        m.apply(delta("j2", "x"));
+        m.apply(Event::Accept(None));
+        assert_eq!(m.apply(Event::FocusLost), Step::default());
+        // The trigger while a draft is on screen brings it back with the keyboard.
+        let mut m = streaming("j3");
+        m.apply(Event::FocusLost);
+        let mut m2 = streaming("j4");
+        assert_eq!(
+            m2.apply(Event::Refocus).effects,
+            vec![Effect::Show { focus: true }]
+        );
+        assert_eq!(m.apply(Event::Refocus), Step::default(), "nothing open");
+        let mut m3 = Machine::new();
+        m3.apply(Event::Begin);
+        assert_eq!(
+            m3.apply(Event::Refocus),
+            Step::default(),
+            "reading finishes on its own"
+        );
+    }
+
+    #[test]
+    fn a_refinement_that_misses_is_tried_once_more_then_flagged() {
+        let base = "Thanks for the update, I can make the meeting on Thursday at noon.";
+        let mut m = streaming("v1");
+        m.apply(delta("v1", base));
+        m.apply(done("v1"));
+        m.apply(Event::Refine {
+            kind: Refinement::Shorter,
+            base: None,
+        });
+        m.apply(started(&m, "v2"));
+        m.apply(delta("v2", base));
+        // Unchanged: a stricter second try, not a "done".
+        let s = m.apply(done("v2"));
+        assert_eq!(m.view().phase, Phase::Reading);
+        assert_eq!(
+            s.effects.last(),
+            Some(&Effect::Redraft {
+                generation: m.generation(),
+                refine: Some(RefineRequest {
+                    kind: Refinement::Shorter,
+                    base: base.into(),
+                    strict: true
+                })
+            })
+        );
+        m.apply(started(&m, "v3"));
+        m.apply(delta(
+            "v3",
+            "Thanks for the update, I can make the meeting on Thursday at noon, sure.",
+        ));
+        m.apply(done("v3"));
+        assert_eq!(m.view().phase, Phase::Done);
+        assert_eq!(
+            m.view().message.as_deref(),
+            Some(REFINE_MISSED),
+            "not shorter: said so"
+        );
+        // A rewrite that does what was asked is just done.
+        let mut m = streaming("w1");
+        m.apply(delta("w1", base));
+        m.apply(done("w1"));
+        m.apply(Event::Refine {
+            kind: Refinement::Shorter,
+            base: None,
+        });
+        m.apply(started(&m, "w2"));
+        m.apply(delta("w2", "Thursday at noon works."));
+        m.apply(done("w2"));
+        assert_eq!(m.view().phase, Phase::Done);
+        assert_eq!(m.view().message, None);
+    }
+
+    #[test]
+    fn refinement_checks_count_words_in_every_script() {
+        assert_eq!(length_units("Hello there,  Ada!"), 3);
+        assert_eq!(length_units("会議は木曜日です"), 8);
+        assert_eq!(length_units("OK 了解"), 3);
+        assert!(
+            !Refinement::Formal.accepts("Hi  there", "Hi there"),
+            "whitespace only"
+        );
+        assert!(Refinement::Formal.accepts("Hi there", "Good afternoon."));
+        assert!(Refinement::Longer.accepts("Hi there", "Hi there, see you soon."));
+        assert!(!Refinement::Longer.accepts("Hi there, see you", "Hi."));
+        assert!(!Refinement::Shorter.accepts("Hi there", ""));
+        assert_eq!(Refinement::Shorter.target_units(1), 1);
+        assert_eq!(Refinement::Shorter.target_units(10), 6);
     }
 }
