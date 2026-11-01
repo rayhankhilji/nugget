@@ -54,6 +54,10 @@ pub(crate) struct State {
     /// stopping).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub deferred: Vec<Deferred>,
+    /// Items last extracted without the model because triage had not sorted them yet (their
+    /// ledger entries wait for the model; [`crate::Knowledge::pending_items`] counts them).
+    #[serde(skip_serializing_if = "HashSet::is_empty")]
+    pub awaiting_triage: HashSet<ItemRef>,
 }
 
 /// An item left as it is for the model ([`State::deferred`]).

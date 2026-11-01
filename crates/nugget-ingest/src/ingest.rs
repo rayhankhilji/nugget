@@ -1190,7 +1190,8 @@ impl Ingest {
             .is_some_and(|s| s.status.paused)
     }
 
-    /// Changes committed since start (applied upserts and deletes; skips excluded).
+    /// Changes committed since start (applied upserts and deletes, plus triage verdicts that
+    /// wake the knowledge loop; skips excluded).
     pub fn committed(&self) -> u64 {
         self.inner.metrics.committed()
     }

@@ -256,11 +256,7 @@ impl Knowledge {
         let deadline = budget
             .max_millis
             .map(|ms| started + Duration::from_millis(ms));
-        let llm_ready = self.inner.cfg.llm.enabled
-            && self.inner.router.as_ref().is_some_and(|r| {
-                !r.candidates(Tier::Synthesis, &crate::llm::json_caps())
-                    .is_empty()
-            });
+        let llm_ready = self.llm_ready();
         // Taken, so a failed run leaves nothing behind and the next one plans afresh.
         let carried = crate::lock(&self.inner.carry)
             .take()
@@ -400,7 +396,8 @@ impl Knowledge {
         })
     }
 
-    /// Items not extracted yet.
+    /// Items not extracted yet, including items extracted without the model that wait for triage
+    /// to sort them.
     pub fn pending_items(&self) -> Result<u64> {
         const MAX_COUNTED: usize = 100_000;
         let left = self.inner.plan_left.load(Ordering::Relaxed);
@@ -423,12 +420,24 @@ impl Knowledge {
             .as_ref()
             .map(|(_, p)| p.upserts.iter().map(|w| w.item.clone()).collect())
             .unwrap_or_default();
-        let deferred = state
+        let deferred: HashSet<&nugget_core::ids::ItemRef> = state
             .deferred
             .iter()
-            .filter(|d| !unplanned.contains(&d.item) && !carried.contains(&d.item))
-            .count();
-        Ok(left + unplanned.len() as u64 + deferred as u64)
+            .map(|d| &d.item)
+            .filter(|i| !unplanned.contains(*i) && !carried.contains(*i))
+            .collect();
+        // Items extracted without the model while triage has them queued: re-planned (and
+        // counted in `left`) by every run while the model is ready, waiting otherwise (MM1-9).
+        let awaiting = if left == 0 && self.llm_ready() {
+            state
+                .awaiting_triage
+                .iter()
+                .filter(|i| !unplanned.contains(*i) && !deferred.contains(i))
+                .count()
+        } else {
+            0
+        };
+        Ok(left + unplanned.len() as u64 + deferred.len() as u64 + awaiting as u64)
     }
 
     /// Current status (cheap).
@@ -456,6 +465,7 @@ impl Knowledge {
                 l.flush(feed.as_ref(), &source)?;
             }
             state.sources.clear();
+            state.awaiting_triage.clear();
             state.item_cursor = None;
             state.save(feed.as_ref())
         })
@@ -486,6 +496,15 @@ impl Knowledge {
         crate::splits::save(self.inner.feed.as_ref(), &list)?;
         *cached = Some(Arc::new(list));
         Ok(())
+    }
+
+    /// Whether the model step can run for some item (a synthesis provider is routable).
+    fn llm_ready(&self) -> bool {
+        self.inner.cfg.llm.enabled
+            && self.inner.router.as_ref().is_some_and(|r| {
+                !r.candidates(Tier::Synthesis, &crate::llm::json_caps())
+                    .is_empty()
+            })
     }
 
     fn llm_local_available(&self) -> bool {
