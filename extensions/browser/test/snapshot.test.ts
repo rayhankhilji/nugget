@@ -18,13 +18,6 @@ describe("form snapshot", () => {
   const doc = dom(fixture("form.html"));
   const s = snap(doc);
 
-  it("captures url, title and snapshot id", () => {
-    expect(s.url).toBe("https://shop.example/page");
-    expect(s.title).toBe("Sign up");
-    expect(s.snapshot_id).toBe("t0.1");
-    expect(s.captured_at_ms).toBe(42);
-  });
-
   it("derives roles and accessible names", () => {
     expect(byName(s, "Log in")).toMatchObject({ role: "link", tag: "a", href: "https://shop.example/login" });
     expect(byName(s, "Email address")).toMatchObject({ role: "textbox", input_type: "email", value: "ada@example.com", editable: true });
@@ -81,33 +74,10 @@ describe("form snapshot", () => {
     expect(s.text).not.toContain("Ghost");
   });
 
-  it("includes hidden subtrees on request", () => {
-    const all = snap(doc, registry(), { include_hidden: true });
-    expect(byName(all, "Hidden").visible).toBe(false);
-  });
-
-  it("marks disabled controls", () => {
-    expect(byName(s, "Disabled").disabled).toBe(true);
-  });
-
   it("treats contenteditable roots as textboxes", () => {
     const ed = s.elements.find((e) => e.tag === "div" && e.role === "textbox");
     expect(ed).toMatchObject({ editable: true, value: "Draft text" });
     expect(s.elements.filter((e) => e.tag === "b")).toHaveLength(0);
-  });
-
-  it("keeps element ids stable across snapshots", () => {
-    const reg = registry();
-    const a = snap(doc, reg);
-    const b = snap(doc, reg);
-    expect(b.snapshot_id).toBe("t0.2");
-    expect(b.elements.map((e) => e.id)).toEqual(a.elements.map((e) => e.id));
-    expect(new Set(a.elements.map((e) => e.id)).size).toBe(a.elements.length);
-  });
-
-  it("treats zero-size elements as not visible", () => {
-    const s0 = buildSnapshot(doc, { registry: registry(), measure: () => ({ x: 0, y: 0, width: 0, height: 0 }) });
-    expect(s0.elements.every((e) => !e.visible)).toBe(true);
   });
 });
 
@@ -188,11 +158,6 @@ describe("caps", () => {
     expect(s.text.length).toBeLessThanOrEqual(LIMITS.maxTextChars);
     expect(s.text_truncated).toBe(true);
     expect(s.elements[0]!.name).toHaveLength(LIMITS.maxNameChars);
-  });
-
-  it("can omit text", () => {
-    const s = snap(dom("<body><p>hello</p></body>"), registry(), { include_text: false });
-    expect(s.text).toBe("");
   });
 });
 

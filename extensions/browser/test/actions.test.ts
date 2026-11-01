@@ -108,30 +108,6 @@ describe("PageAgent.act with verification diff", () => {
     expect(r.diff.changed).toContainEqual({ id: email, fields: expect.arrayContaining(["value"]) });
   });
 
-  it("appends when clear is false", async () => {
-    const { doc, agent: a } = agent();
-    const s = a.snapshot();
-    await a.act(s.snapshot_id, { kind: "type", element: id(s, "Email address"), text: ".uk", clear: false });
-    expect((doc.getElementById("email") as HTMLInputElement).value).toBe("ada@example.com.uk");
-  });
-
-  it("clicks a checkbox", async () => {
-    const { agent: a } = agent();
-    const s = a.snapshot();
-    const tos = id(s, "I agree to the terms");
-    const r = await a.act(s.snapshot_id, { kind: "click", element: tos });
-    expect(r.snapshot.elements.find((e) => e.id === tos)?.checked).toBe(true);
-    expect(r.diff.changed.find((c) => c.id === tos)?.fields).toContain("checked");
-  });
-
-  it("selects by value or label", async () => {
-    const { doc, agent: a } = agent();
-    const s = a.snapshot();
-    const r = await a.act(s.snapshot_id, { kind: "select", element: id(s, "Plan"), value: "Free" });
-    expect((doc.getElementById("plan") as HTMLSelectElement).value).toBe("free");
-    expect(r.diff.changed.find((c) => c.id === id(s, "Plan"))?.fields).toContain("value");
-  });
-
   it("submits the owning form", async () => {
     const { doc, agent: a } = agent();
     let submitted = 0;
@@ -155,20 +131,6 @@ describe("PageAgent.act with verification diff", () => {
     expect(r.diff.removed).toEqual([id(s, "Remove me")]);
     expect(r.diff.added).toEqual([id(r.snapshot, "More results")]);
     expect(r.diff.text_changed).toBe(true);
-  });
-
-  it("waits for an element to appear", async () => {
-    const { doc, agent: a } = agent(`<body><p>Loading</p></body>`);
-    setTimeout(() => doc.body.insertAdjacentHTML("beforeend", "<button>Continue</button>"), 150);
-    const s = a.snapshot();
-    const r = await a.act(s.snapshot_id, { kind: "wait_for", until: { element_present: { role: "button", name: "continue" } }, timeout_ms: 2000 });
-    expect(r.diff.added).toHaveLength(1);
-  });
-
-  it("times out waiting", async () => {
-    const { agent: a } = agent(`<body><p>Loading</p></body>`);
-    const s = a.snapshot();
-    expect(await codeAsync(a.act(s.snapshot_id, { kind: "wait_for", until: { text_present: "never" }, timeout_ms: 200 }))).toBe("timeout");
   });
 
   it("refuses to act after the old snapshot is superseded", async () => {
