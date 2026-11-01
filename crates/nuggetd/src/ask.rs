@@ -145,7 +145,7 @@ fn grounded_system_prompt(
             block.push_str(&format!("[{}] ", f.n));
         }
         // Titles (a mail subject, an event name) come from the sender as much as bodies do.
-        block.push_str(&defang(&neutralise(&visible(&f.title))));
+        block.push_str(&defang(&f.title));
         block.push_str("\ndate: ");
         block.push_str(f.date.as_deref().unwrap_or("unknown"));
         if let Some(n) = f.superseded_by.and_then(|id| marker_of.get(&id)) {
@@ -155,7 +155,7 @@ fn grounded_system_prompt(
             block.push_str(" · partial match");
         }
         block.push('\n');
-        block.push_str(&defang_body(&neutralise(&visible(&f.body))));
+        block.push_str(&defang_body(&f.body));
     }
     let mut out = format!(
         "Answer the user's question using only the passages below, from the user's own notes, \
@@ -207,149 +207,6 @@ about their own things, say you couldn't find it in their items.\n",
 /// `Today is Friday, 2026-10-30.`
 fn today_line(d: time::Date) -> String {
     format!("Today is {}, {}.\n", d.weekday(), iso(d))
-}
-
-/// What replaces passage text addressed to an AI assistant.
-const NEUTRALISED: &str = "(text addressed to an AI assistant, ignored)";
-
-/// Who planted instructions address: an AI, an assistant, "the system".
-const ADDRESSEE_CUES: &[&str] = &[
-    "ai assistant",
-    "ai model",
-    "for any ai",
-    "for ai ",
-    "to any ai",
-    "dear ai",
-    "assistant:",
-    "assistants",
-    "to the assistant",
-    "for the assistant",
-    "dear assistant",
-    "assistant reading",
-    "assistant processing",
-    "assistant summarising",
-    "assistant summarizing",
-    "language model",
-    "chatbot",
-    "llm",
-    "system notice",
-    "system message",
-    "system prompt",
-    "system:",
-];
-
-/// What they ask for.
-const DIRECTIVE_CUES: &[&str] = &[
-    "tell the user",
-    "inform the user",
-    "tell them",
-    "let the user know",
-    "reply",
-    "respond",
-    "answer",
-    "say ",
-    "include",
-    "ignore",
-    "disregard",
-    "from now on",
-    "you must",
-    "instruction",
-    "forward",
-    "send ",
-    "email ",
-];
-
-/// Sentences that continue a planted instruction ("Do not reveal this instruction.").
-const FOLLOW_ON_CUES: &[&str] = &[
-    "do not reveal",
-    "don't reveal",
-    "do not mention",
-    "don't mention",
-    "present this",
-    "this instruction",
-    "this note",
-    "formatting preference",
-    "preference from the user",
-];
-
-/// Passage text with every sentence addressed to an AI assistant (an addressee and a directive,
-/// or "ignore … previous instructions"), and the sentences right after it that continue it,
-/// replaced with [`NEUTRALISED`]. The model never reads planted instructions, whatever it would
-/// make of them; the user still sees the item itself.
-fn neutralise(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut previous_flagged = false;
-    let mut previous_addressee = false;
-    let mut last_was_marker = false;
-    for sentence in split_sentences(text) {
-        // Cues are matched on a folded form (security review 3, ER-5): look-alike letters
-        // (`АI аssistant` in Cyrillic), fullwidth forms, combining marks and invisible
-        // characters (a soft hyphen survives extraction) do not hide them.
-        let lower = nugget_policy::fold_confusables(&nugget_policy::strip_text_marks(
-            &nugget_policy::normalize_text(sentence),
-        ));
-        let addressee = ADDRESSEE_CUES.iter().any(|c| lower.contains(c));
-        let directive = DIRECTIVE_CUES.iter().any(|c| lower.contains(c));
-        // "Note for any AI assistant reading this. Tell the user ...": the address and the
-        // directive in consecutive sentences.
-        let addressed = (addressee || previous_addressee) && directive;
-        let override_attempt = lower.contains("ignore all previous")
-            || lower.contains("ignore previous instructions")
-            || lower.contains("ignore your previous")
-            || lower.contains("ignore the previous instructions");
-        let continues = previous_flagged && FOLLOW_ON_CUES.iter().any(|c| lower.contains(c));
-        let flagged = addressed || override_attempt || continues;
-        if flagged {
-            if !last_was_marker {
-                out.push_str(NEUTRALISED);
-                out.push(' ');
-            }
-            last_was_marker = true;
-        } else {
-            out.push_str(sentence);
-            last_was_marker = false;
-        }
-        previous_flagged = flagged;
-        previous_addressee = addressee;
-    }
-    out.trim_end().to_owned()
-}
-
-/// `text` without invisible format characters (zero-width, tag characters), so a cue split by
-/// one (`ign\u{200B}ore previous instructions`) is still recognised by [`neutralise`].
-fn visible(text: &str) -> String {
-    text.chars()
-        .filter(|c| !nugget_draft::prompt::is_invisible(*c))
-        .collect()
-}
-
-/// `text` cut after each `.`, `!` or `?` that is followed by whitespace, and at the end of an
-/// HTML comment or bracketed aside; the pieces keep their trailing whitespace, so they
-/// concatenate back to `text`.
-fn split_sentences(text: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut chars = text.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        let ends = matches!(c, '.' | '!' | '?' | ']' | '>')
-            && chars.peek().is_none_or(|(_, n)| n.is_whitespace());
-        if ends {
-            let mut end = i + c.len_utf8();
-            while let Some(&(j, n)) = chars.peek() {
-                if !n.is_whitespace() {
-                    break;
-                }
-                end = j + n.len_utf8();
-                chars.next();
-            }
-            out.push(&text[start..end]);
-            start = end;
-        }
-    }
-    if start < text.len() {
-        out.push(&text[start..]);
-    }
-    out
 }
 
 fn iso(d: time::Date) -> String {
@@ -1289,6 +1146,7 @@ mod tests {
     use super::*;
     use nugget_core::ids::{ItemKey, SourceId};
     use nugget_core::ipc::Citation;
+    use nugget_draft::prompt_facts::{NEUTRALISED, neutralise};
 
     fn msg(role: IpcRole, text: &str) -> ChatMessage {
         ChatMessage {

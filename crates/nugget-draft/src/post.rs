@@ -666,6 +666,11 @@ fn token_clean(s: &str, opts: &PostOptions) -> String {
             }
         }
         let c = rest.chars().next().unwrap_or(' ');
+        if c == '‸' {
+            // The prompt's caret marker, copied by a small model (QA GG1-56).
+            i += c.len_utf8();
+            continue;
+        }
         if opts.single_line && (c == '\n' || c == '\r') {
             if !out.is_empty() && !out.ends_with(' ') {
                 out.push(' ');
@@ -932,6 +937,7 @@ mod tests {
             "r|```text\nSounds good, thanks!\n```\n|Sounds good, thanks!",
             "p|The launch moved to May 3 [1] and the budget is fixed [2][3].|The launch moved to May 3 and the budget is fixed.",
             "p|See [1, 2].|See.",
+            "p|I can do Thursday‸|I can do Thursday",
             "p|Thanks, {first_name}!\n\nKind regards, {my_name}|Thanks!\n\nKind regards,",
             "p|Use [draft] mode [x1].|Use [draft] mode [x1].",
             "p|**Yes** — I'll bring the `slides` and ~~cake~~ snacks.|Yes — I'll bring the slides and cake snacks.",

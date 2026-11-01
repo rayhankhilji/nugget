@@ -13,6 +13,7 @@ nugget-store.workspace = true
 nugget-infer.workspace = true
 nugget-retrieve.workspace = true
 nugget-voice.workspace = true
+nugget-policy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true }
