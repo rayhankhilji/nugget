@@ -299,7 +299,7 @@
   "onboarding.source.missing": "{name}：找不到此文件夹。请连接它所在的驱动器，或重新选择文件夹。",
   "onboarding.source.nothingNext": "请添加其他文件夹，或不添加直接继续。你可以随时在“来源”页面添加来源。",
   "onboarding.source.skipped.heading": "已跳过：",
-  "onboarding.source.skipped.unsupported": "{count, plural, other {# 个}}Nugget 不读取的类型的文件（如照片、视频或压缩包）",
+  "onboarding.source.skipped.unsupported": "{count, plural, other {# 个}}Nugget 不读取的类型的文件（如视频、音乐或压缩包）",
   "onboarding.source.skipped.tooLarge": "{count, plural, other {# 个}}大于 {limit} 的文件",
   "onboarding.source.skipped.unreadable": "{count, plural, other {# 个}}Nugget 无权打开的文件或文件夹",
   "onboarding.source.skipped.examples": "例如：",

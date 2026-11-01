@@ -299,7 +299,7 @@
   "onboarding.source.missing": "{name}: Dieser Ordner ist nicht vorhanden. Schließen Sie das Laufwerk an, auf dem er liegt, oder wählen Sie den Ordner erneut.",
   "onboarding.source.nothingNext": "Fügen Sie einen anderen Ordner hinzu oder fahren Sie ohne fort. Quellen können Sie jederzeit auf der Seite „Quellen“ hinzufügen.",
   "onboarding.source.skipped.heading": "Übersprungen:",
-  "onboarding.source.skipped.unsupported": "{count, plural, one {# Datei} other {# Dateien}} eines Typs, den Nugget nicht liest (etwa Fotos, Videos oder Archive)",
+  "onboarding.source.skipped.unsupported": "{count, plural, one {# Datei} other {# Dateien}} eines Typs, den Nugget nicht liest (etwa Videos, Musik oder Archive)",
   "onboarding.source.skipped.tooLarge": "{count, plural, one {# Datei} other {# Dateien}} größer als {limit}",
   "onboarding.source.skipped.unreadable": "{count, plural, one {# Datei oder Ordner} other {# Dateien oder Ordner}}, die Nugget nicht öffnen darf",
   "onboarding.source.skipped.examples": "Zum Beispiel:",

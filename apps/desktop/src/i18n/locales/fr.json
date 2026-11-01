@@ -299,7 +299,7 @@
   "onboarding.source.missing": "{name} : ce dossier est introuvable. Branchez le disque qui le contient, ou choisissez à nouveau le dossier.",
   "onboarding.source.nothingNext": "Ajoutez un autre dossier, ou continuez sans. Vous pouvez ajouter des sources à tout moment sur la page Sources.",
   "onboarding.source.skipped.heading": "Ignoré :",
-  "onboarding.source.skipped.unsupported": "{count, plural, one {# fichier} many {# fichiers} other {# fichiers}} d'un type que Nugget ne lit pas (photos, vidéos ou archives, par exemple)",
+  "onboarding.source.skipped.unsupported": "{count, plural, one {# fichier} many {# fichiers} other {# fichiers}} d'un type que Nugget ne lit pas (vidéos, musique ou archives, par exemple)",
   "onboarding.source.skipped.tooLarge": "{count, plural, one {# fichier} many {# fichiers} other {# fichiers}} de plus de {limit}",
   "onboarding.source.skipped.unreadable": "{count, plural, one {# fichier ou dossier} many {# fichiers ou dossiers} other {# fichiers ou dossiers}} que Nugget n'a pas le droit d'ouvrir",
   "onboarding.source.skipped.examples": "Par exemple :",

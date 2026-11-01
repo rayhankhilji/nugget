@@ -299,7 +299,7 @@
   "onboarding.source.missing": "{name}：このフォルダーが見つかりません。フォルダーがあるドライブを接続するか、もう一度フォルダーを選んでください。",
   "onboarding.source.nothingNext": "別のフォルダーを追加するか、追加せずに続けてください。ソースは「ソース」ページでいつでも追加できます。",
   "onboarding.source.skipped.heading": "スキップしたもの：",
-  "onboarding.source.skipped.unsupported": "Nuggetが読み取らない種類のファイル {count, plural, other {#件}}（写真、動画、圧縮ファイルなど）",
+  "onboarding.source.skipped.unsupported": "Nuggetが読み取らない種類のファイル {count, plural, other {#件}}（動画、音楽、圧縮ファイルなど）",
   "onboarding.source.skipped.tooLarge": "{limit}を超えるファイル {count, plural, other {#件}}",
   "onboarding.source.skipped.unreadable": "Nuggetに開く権限がないファイルまたはフォルダー {count, plural, other {#件}}",
   "onboarding.source.skipped.examples": "例：",

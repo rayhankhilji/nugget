@@ -299,7 +299,7 @@
   "onboarding.source.missing": "{name}: هذا المجلد غير موجود. صِل محرك الأقراص الموجود عليه، أو اختر المجلد مرة أخرى.",
   "onboarding.source.nothingNext": "أضف مجلدًا آخر، أو تابع بدون مصدر. يمكنك إضافة مصادر في أي وقت من صفحة المصادر.",
   "onboarding.source.skipped.heading": "تم تخطي:",
-  "onboarding.source.skipped.unsupported": "{count, plural, zero {# ملف} one {ملف واحد} two {ملفان} few {# ملفات} many {# ملفًا} other {# ملف}} من نوع لا يقرؤه Nugget (مثل الصور أو الفيديو أو الأرشيفات)",
+  "onboarding.source.skipped.unsupported": "{count, plural, zero {# ملف} one {ملف واحد} two {ملفان} few {# ملفات} many {# ملفًا} other {# ملف}} من نوع لا يقرؤه Nugget (مثل الفيديو أو الموسيقى أو الأرشيفات)",
   "onboarding.source.skipped.tooLarge": "{count, plural, zero {# ملف} one {ملف واحد} two {ملفان} few {# ملفات} many {# ملفًا} other {# ملف}} أكبر من {limit}",
   "onboarding.source.skipped.unreadable": "{count, plural, zero {# ملف أو مجلد} one {ملف أو مجلد واحد} two {ملفان أو مجلدان} few {# ملفات أو مجلدات} many {# ملفًا أو مجلدًا} other {# ملف أو مجلد}} لا يُسمح لـ Nugget بفتحها",
   "onboarding.source.skipped.examples": "على سبيل المثال:",

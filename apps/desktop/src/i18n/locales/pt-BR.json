@@ -299,7 +299,7 @@
   "onboarding.source.missing": "{name}: esta pasta não está lá. Conecte a unidade onde ela fica ou escolha a pasta de novo.",
   "onboarding.source.nothingNext": "Adicione outra pasta ou continue sem nenhuma. Você pode adicionar fontes a qualquer momento na página Fontes.",
   "onboarding.source.skipped.heading": "Ignorados:",
-  "onboarding.source.skipped.unsupported": "{count, plural, one {# arquivo} many {# arquivos} other {# arquivos}} de um tipo que o Nugget não lê (como fotos, vídeos ou arquivos compactados)",
+  "onboarding.source.skipped.unsupported": "{count, plural, one {# arquivo} many {# arquivos} other {# arquivos}} de um tipo que o Nugget não lê (como vídeos, músicas ou arquivos compactados)",
   "onboarding.source.skipped.tooLarge": "{count, plural, one {# arquivo} many {# arquivos} other {# arquivos}} com mais de {limit}",
   "onboarding.source.skipped.unreadable": "{count, plural, one {# arquivo ou pasta} many {# arquivos ou pastas} other {# arquivos ou pastas}} que o Nugget não tem permissão para abrir",
   "onboarding.source.skipped.examples": "Por exemplo:",

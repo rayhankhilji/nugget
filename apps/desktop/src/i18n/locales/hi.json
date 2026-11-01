@@ -299,7 +299,7 @@
   "onboarding.source.missing": "{name}: यह फ़ोल्डर मौजूद नहीं है। जिस ड्राइव पर यह है उसे जोड़ें, या फ़ोल्डर फिर से चुनें।",
   "onboarding.source.nothingNext": "कोई दूसरा फ़ोल्डर जोड़ें, या इसके बिना आगे बढ़ें। आप स्रोत पेज पर कभी भी स्रोत जोड़ सकते हैं।",
   "onboarding.source.skipped.heading": "छोड़े गए:",
-  "onboarding.source.skipped.unsupported": "{count, plural, one {# फ़ाइल} other {# फ़ाइलें}} ऐसे प्रकार की जिसे Nugget नहीं पढ़ता (जैसे फ़ोटो, वीडियो या आर्काइव)",
+  "onboarding.source.skipped.unsupported": "{count, plural, one {# फ़ाइल} other {# फ़ाइलें}} ऐसे प्रकार की जिसे Nugget नहीं पढ़ता (जैसे वीडियो, संगीत या आर्काइव)",
   "onboarding.source.skipped.tooLarge": "{limit} से बड़ी {count, plural, one {# फ़ाइल} other {# फ़ाइलें}}",
   "onboarding.source.skipped.unreadable": "{count, plural, one {# फ़ाइल या फ़ोल्डर} other {# फ़ाइलें या फ़ोल्डर}} जिन्हें खोलने की Nugget को अनुमति नहीं है",
   "onboarding.source.skipped.examples": "उदाहरण के लिए:",

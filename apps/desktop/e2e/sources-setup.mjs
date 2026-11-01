@@ -1,7 +1,7 @@
 // KK2 sources-setup scenario (QA GG6): the real daemon on an empty home and the real onboarding UI.
 // - GG6-31: the recommended AI option starts selected; GG6-21: "Decide later" is not a skipped step.
 // - GG6-16: Welcome makes no fixed time promise.
-// - GG6-2: a folder with nothing indexable (only a photo and a video) settles within seconds,
+// - GG6-2: a folder with nothing indexable (only a video and a song) settles within seconds,
 //   says why and names the skipped files, and doesn't finish the step.
 // - GG6-13: adding the same folder again is refused with a plain message.
 // - GG6-12: the source step still lists the folders after Back.
@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
 import { FIRST_RUN_CONFIG, startDaemon } from "./daemon.mjs";
-import { check, DIST, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, shot, t, tPattern, until } from "./harness.mjs";
+import { check, DIST, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, shot, t, until } from "./harness.mjs";
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const exactName = (key) => new RegExp(`^${escapeRe(t(key))}$`);
@@ -27,7 +27,8 @@ export async function sourcesSetupScenario({ browser, bin }) {
   const notes = path.join(scratch, "Notes");
   fs.mkdirSync(pics);
   fs.mkdirSync(notes);
-  fs.writeFileSync(path.join(pics, "holiday.jpg"), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]));
+  // Types Nugget doesn't read (images are read, so none here).
+  fs.writeFileSync(path.join(pics, "song.mp3"), Buffer.alloc(64));
   fs.writeFileSync(path.join(pics, "clip.mp4"), Buffer.alloc(64));
   fs.writeFileSync(path.join(notes, "saffron.md"), "# Saffron rice\n\nToast the saffron, then steep it in warm stock for ten minutes.\n");
 
@@ -57,7 +58,7 @@ export async function sourcesSetupScenario({ browser, bin }) {
       await dialog.getByRole("button", { name: exactName("addSource.folder.submit") }).click();
       return dialog;
     };
-    const row = (name) => page.locator(".ob-index li", { hasText: name });
+    const row = (name) => page.locator(".ob-index > li", { hasText: name });
 
     await check("sources setup: onboarding is honest about empty folders, duplicates and no AI", async () => {
       try {
@@ -78,7 +79,7 @@ export async function sourcesSetupScenario({ browser, bin }) {
         const s1 = await saved();
         expect(s1.completed.includes("ai") && !s1.skipped.includes("ai"), `AI step recorded as ${JSON.stringify(s1)}`);
 
-        // A folder with only a photo and a video settles within seconds and says why.
+        // A folder with only a video and a song settles within seconds and says why.
         const t0 = Date.now();
         const dialog = await addFolder(pics);
         await dialog.waitFor({ state: "detached" });
@@ -91,8 +92,8 @@ export async function sourcesSetupScenario({ browser, bin }) {
           SETTLE_MS,
         );
         summary.empty_settled_ms = Date.now() - t0;
-        expect(tPattern("onboarding.source.empty").test(empty.text), `unexpected text: ${empty.text}`);
-        expect(empty.text.includes("holiday.jpg") || empty.text.includes("clip.mp4"), `skipped files not named: ${empty.text}`);
+        expect(empty.text.startsWith(t("onboarding.source.empty").replace("{name}", "Pictures")), `unexpected text: ${empty.text}`);
+        expect(empty.text.includes("song.mp3") || empty.text.includes("clip.mp4"), `skipped files not named: ${empty.text}`);
         expect((await page.locator("#ob-continue-hint").count()) === 1, "Continue would finish the step with nothing indexed");
         log(`  sources setup: empty folder settled in ${summary.empty_settled_ms} ms: "${empty.text}"`);
         await shot(page, "sources-setup-empty");
@@ -127,8 +128,8 @@ export async function sourcesSetupScenario({ browser, bin }) {
         await cont();
         await heading("onboarding.source.heading").waitFor();
         await until("the source step remembers both folders after Back", async () => {
-          const n = await page.locator(".ob-index li").count();
-          return [n === 2, n];
+          const rows = await page.locator(".ob-index > li").allTextContents();
+          return [rows.length === 2, rows];
         });
 
         await cont();

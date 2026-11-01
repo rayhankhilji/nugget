@@ -299,7 +299,7 @@
   "onboarding.source.missing": "{name}: esta carpeta no está. Conecta la unidad donde se encuentra o vuelve a elegir la carpeta.",
   "onboarding.source.nothingNext": "Añade otra carpeta o continúa sin ninguna. Puedes añadir fuentes cuando quieras en la página Fuentes.",
   "onboarding.source.skipped.heading": "Omitido:",
-  "onboarding.source.skipped.unsupported": "{count, plural, one {# archivo} many {# archivos} other {# archivos}} de un tipo que Nugget no lee (como fotos, vídeos o archivos comprimidos)",
+  "onboarding.source.skipped.unsupported": "{count, plural, one {# archivo} many {# archivos} other {# archivos}} de un tipo que Nugget no lee (como vídeos, música o archivos comprimidos)",
   "onboarding.source.skipped.tooLarge": "{count, plural, one {# archivo} many {# archivos} other {# archivos}} de más de {limit}",
   "onboarding.source.skipped.unreadable": "{count, plural, one {# archivo o carpeta} many {# archivos o carpetas} other {# archivos o carpetas}} que Nugget no tiene permiso para abrir",
   "onboarding.source.skipped.examples": "Por ejemplo:",
