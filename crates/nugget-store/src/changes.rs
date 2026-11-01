@@ -15,7 +15,7 @@ use rusqlite::{OptionalExtension, params};
 use crate::Store;
 use crate::error::{DbExt, parse_time};
 use crate::items::{LOOKUP_BATCH, WANTED_ITEMS_JOIN, item_ref, refs_json};
-use crate::types::{ItemChange, ItemDates, ItemMeta};
+use crate::types::{ItemChange, ItemDates};
 
 /// The event start of a calendar item, as stored (see [`ItemDates::event_start`]).
 const EVENT_START_SQL: &str = "CASE WHEN json_type(i.metadata, '$.extracted.start') = 'text'                                      THEN json_extract(i.metadata, '$.extracted.start')                                      WHEN json_type(i.metadata, '$.start.date_time') = 'text'                                      THEN json_extract(i.metadata, '$.start.date_time')                                      WHEN json_type(i.metadata, '$.start.date') = 'text'                                      THEN json_extract(i.metadata, '$.start.date') END";
@@ -201,48 +201,6 @@ impl Store {
                         updated_at: parse_time(&updated)?,
                     },
                 );
-            }
-        }
-        Ok(out)
-    }
-
-    /// The title and metadata of each stored item in `items` (unknown items, and items whose
-    /// stored metadata is not valid JSON, are left out),
-    /// without loading its text: what a caller needs to check sensitivity
-    /// (`nugget_retrieve::is_sensitive` on the metadata) or cite the item. Looked up in batches
-    /// of [`LOOKUP_BATCH`] items, one query each, on a read connection.
-    pub fn item_meta(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, ItemMeta>> {
-        type Row = (usize, Option<String>, String);
-        let mut out = HashMap::with_capacity(items.len());
-        for batch in items.chunks(LOOKUP_BATCH) {
-            let refs = refs_json(batch)?;
-            let rows: Vec<Row> = self.with_read_conn(|c| {
-                let mut stmt = c
-                    .prepare_cached(&format!(
-                        "SELECT want.key, i.title, i.metadata {WANTED_ITEMS_JOIN}"
-                    ))
-                    .db("prepare item_meta")?;
-                let rows = stmt
-                    .query_map([&refs], |r| {
-                        Ok((r.get::<_, i64>(0)? as usize, r.get(1)?, r.get(2)?))
-                    })
-                    .db("query item_meta")?;
-                rows.collect::<rusqlite::Result<_>>().db("read item_meta")
-            })?;
-            for (idx, title, metadata) in rows {
-                let Some(item) = batch.get(idx) else {
-                    continue;
-                };
-                // One unreadable row does not fail the batch: that item is left out (so a
-                // caller treats it like an unknown item).
-                let metadata = match serde_json::from_str(&metadata) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::warn!(source = %item.source, error = %e, "item_meta: unreadable metadata");
-                        continue;
-                    }
-                };
-                out.insert(item.clone(), ItemMeta { title, metadata });
             }
         }
         Ok(out)

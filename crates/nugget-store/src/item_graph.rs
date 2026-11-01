@@ -244,12 +244,21 @@ impl Store {
             })?;
             for (idx, title, mime, metadata) in rows {
                 if let Some(item) = batch.get(idx) {
+                    // One unreadable row must not fail the whole batch: it is left out, as an
+                    // unknown item (which the vault counts as sensitive).
+                    let metadata = match serde_json::from_str(&metadata) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            tracing::warn!(item = %item.key, error = %e, "item metadata is not valid JSON");
+                            continue;
+                        }
+                    };
                     out.insert(
                         item.clone(),
                         ItemMeta {
                             title,
                             mime,
-                            metadata: serde_json::from_str(&metadata)?,
+                            metadata,
                         },
                     );
                 }

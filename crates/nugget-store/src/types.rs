@@ -244,13 +244,6 @@ pub struct ItemChange {
     pub version: Option<String>,
 }
 
-/// An item's title and metadata, without its text ([`Store::item_meta`](crate::Store::item_meta)).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ItemMeta {
-    pub title: Option<String>,
-    pub metadata: Value,
-}
-
 /// An item's dates ([`Store::item_dates`](crate::Store::item_dates)).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemDates {

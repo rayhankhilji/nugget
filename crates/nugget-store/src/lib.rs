@@ -55,8 +55,8 @@ pub use search::TITLE_WEIGHT;
 pub use sources::{MAX_CHUNK_IDS, MAX_NEIGHBOUR_RADIUS};
 pub use store::Store;
 pub use types::{
-    AuditEntry, AuditRecord, Chunk, ChunkId, Counts, Hit, Item, ItemChange, ItemDates, ItemMeta,
-    NewChunk, NewItem, SourceCounts, UpsertOutcome, content_hash,
+    AuditEntry, AuditRecord, Chunk, ChunkId, Counts, Hit, Item, ItemChange, ItemDates, NewChunk,
+    NewItem, SourceCounts, UpsertOutcome, content_hash,
 };
 pub use vector::{ANN_MIN_VECTOR_BYTES, ANN_MIN_VECTORS, ANN_OVERSAMPLE};
 
