@@ -73,6 +73,16 @@ impl Default for QuickAskSettings {
     }
 }
 
+impl QuickAskSettings {
+    /// The defaults on `platform`.
+    pub fn default_for(platform: Platform) -> Self {
+        Self {
+            enabled: true,
+            shortcut: default_shortcut_for(platform).into(),
+        }
+    }
+}
+
 /// The default shortcut: Shift+Command+Space on macOS (written in Apple's modifier order, as
 /// `Chord::accelerator_for` gives it back), Ctrl+Shift+Space elsewhere.
 pub fn default_shortcut_for(platform: Platform) -> &'static str {
@@ -117,12 +127,25 @@ pub fn file_in(config_dir: &Path) -> PathBuf {
 
 /// Parse a settings file; garbage or an invalid shortcut gives the defaults.
 pub fn parse_settings(bytes: &[u8], platform: Platform) -> QuickAskSettings {
-    serde_json::from_slice::<QuickAskSettings>(bytes)
+    /// The file as written; missing fields take `platform`'s defaults.
+    #[derive(Deserialize)]
+    struct Raw {
+        enabled: Option<bool>,
+        shortcut: Option<String>,
+    }
+    let defaults = QuickAskSettings::default_for(platform);
+    serde_json::from_slice::<Raw>(bytes)
         .map_err(|e| e.to_string())
-        .and_then(|s| s.validated_for(platform))
+        .and_then(|raw| {
+            QuickAskSettings {
+                enabled: raw.enabled.unwrap_or(defaults.enabled),
+                shortcut: raw.shortcut.unwrap_or_else(|| defaults.shortcut.clone()),
+            }
+            .validated_for(platform)
+        })
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "ignoring invalid quick-ask settings");
-            QuickAskSettings::default()
+            defaults.clone()
         })
 }
 
@@ -729,7 +752,11 @@ mod tests {
             shortcut: "Ctrl+Alt+K".into(),
         };
         save(&path, &s).unwrap();
-        assert_eq!(load(&path), s);
+        // Read back in this platform's conventional form (Ctrl+Option+K on macOS).
+        assert_eq!(
+            load(&path),
+            s.clone().validated_for(Platform::current()).unwrap()
+        );
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(load(&path), QuickAskSettings::default());
     }
@@ -809,7 +836,7 @@ mod tests {
     #[test]
     fn garbage_tolerant() {
         let p = Platform::Linux;
-        let d = QuickAskSettings::default();
+        let d = QuickAskSettings::default_for(p);
         assert_eq!(parse_settings(b"not json", p), d);
         assert_eq!(parse_settings(b"[1,2]", p), d);
         assert_eq!(parse_settings(br#"{"enabled": "yes"}"#, p), d);

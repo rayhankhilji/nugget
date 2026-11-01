@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use nugget_connector::ConnectorFactory;
 use nugget_connector::testkit::Replica;
+use nugget_connector_messaging::IMessageFactory;
 use nugget_connector_messaging::typedstream::encode_for_tests;
-use nugget_connector_messaging::{FULL_DISK_ACCESS_MESSAGE, IMessageFactory};
 use nugget_core::Error;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
@@ -402,7 +402,7 @@ async fn permission_denied_asks_for_full_disk_access() {
     let check = |r: Result<(), Error>| match r {
         Err(Error::Unauthorized(m)) => {
             assert!(m.contains("Full Disk Access"));
-            assert_eq!(m, FULL_DISK_ACCESS_MESSAGE);
+            assert_eq!(m, nugget_connector_messaging::FULL_DISK_ACCESS_MESSAGE);
         }
         other => panic!("{other:?}"),
     };
