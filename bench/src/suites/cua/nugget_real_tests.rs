@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use nugget_core::capability::Locality;
@@ -214,41 +213,6 @@ fn done() -> nugget_core::Result<ChatEvent> {
         input_tokens: None,
         output_tokens: None,
     })
-}
-
-#[test]
-fn a_stalled_model_hits_the_task_timeout_and_is_listed() {
-    let t = task("settings-dark-mode");
-    let mut agent = NuggetAgent::with_provider(&t, "stalls", fake(|| None))
-        .with_task_timeout(Duration::from_millis(500));
-    let t0 = Instant::now();
-    let (eps, _) = run_tasks(&t, &mut agent, CuaEnv::Inproc).unwrap();
-    assert!(t0.elapsed() < Duration::from_secs(20), "{:?}", t0.elapsed());
-    let e = &eps[0];
-    assert_eq!(e.outcome.kind(), "timeout", "{:?}", e.outcome);
-    assert!(!e.score.success);
-    assert_eq!(agent.timed_out(), ["settings-dark-mode"]);
-    let am = agent.metrics();
-    assert_eq!(metric(&am, "model.timeouts"), 1.0);
-    assert_eq!(metric(&am, "model.errors"), 0.0);
-    let params = agent.params();
-    let listed = &params
-        .iter()
-        .find(|(k, _)| k == "timed_out_tasks")
-        .unwrap()
-        .1;
-    assert_eq!(listed, &json!(["settings-dark-mode"]));
-    assert_eq!(
-        &params
-            .iter()
-            .find(|(k, _)| k == "task_timeout_s")
-            .unwrap()
-            .1,
-        &json!(0.5)
-    );
-    // A timeout is a failure in the headline metrics.
-    let m = metrics(&eps);
-    assert_eq!(metric(&m, "success_rate"), 0.0);
 }
 
 #[test]

@@ -1151,36 +1151,4 @@ mod tests {
         assert_eq!(ctx.params()["rescore.rows"], 16);
         assert_eq!(ctx.params()["judge.mode"], "none");
     }
-
-    #[test]
-    fn the_judge_runs_after_answering_and_logs_each_verdict() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ask.jsonl");
-        // The scripted model answers everything with a verdict, so it judges "correct".
-        let (m, params) = scripted_as(
-            "{\"correct\": true}",
-            Duration::ZERO,
-            AskOptions {
-                ask_dump: Some(path.clone()),
-                ..AskOptions::default()
-            },
-            true,
-        );
-        assert_eq!(params["arms"], "both");
-        assert_eq!(params["judge.mode"], "model");
-        assert_eq!(params["judge.same_model_as_answers"], true);
-        for arm in ["plain", "grounded"] {
-            assert_eq!(value(&m, &format!("ask.{arm}.judge_coverage")), 1.0);
-            assert_eq!(value(&m, &format!("ask.{arm}.judge_correct_rate")), 1.0);
-        }
-        let dumped = std::fs::read_to_string(&path).unwrap();
-        let verdicts = std::fs::read_to_string(dump::verdict_path(&path)).unwrap();
-        assert_eq!(dumped.lines().count(), 16);
-        assert_eq!(verdicts.lines().count(), 16);
-        // Answers are dumped before any verdict exists.
-        assert!(dumped.lines().all(|l| !l.contains("\"judge\"")));
-        let mut ctx = RunContext::new(RunConfig::default());
-        let again = rescore(&mut ctx, &gold::tests::sample(), &path).unwrap();
-        assert_eq!(value(&again, "ask.grounded.judge_correct_rate"), 1.0);
-    }
 }

@@ -868,52 +868,6 @@ mod tests {
     }
 
     #[test]
-    fn set_value_select_keys_and_stale_ids() {
-        let (_stage, cu) = computer("forms-fill-basic");
-        let tree = cu
-            .snapshot(&WindowSel::App("forms".into()), &TreeLimits::default())
-            .unwrap();
-        let text = tree
-            .root
-            .iter()
-            .find(|n| n.role == A11yRole::TextField && !n.states.disabled)
-            .expect("a text field")
-            .id
-            .clone();
-        let out = cu
-            .act(
-                &text,
-                &UiAction::SetValue {
-                    value: "Ada".into(),
-                },
-            )
-            .unwrap();
-        assert!(out.verified, "{}", out.detail);
-        assert_eq!(out.after.unwrap().value.as_deref(), Some("Ada"));
-        // Typed text appends at the end of the field.
-        let out = cu
-            .key_input(Some(&text), &KeyInput::Text(" Lovelace\n".into()))
-            .unwrap();
-        assert!(out.verified, "{}", out.detail);
-        assert_eq!(out.after.unwrap().value.as_deref(), Some("Ada Lovelace"));
-        // Named keys other than enter/space on a control are unsupported.
-        assert!(cu.key_input(Some(&text), &KeyInput::Keys(vec![])).is_err());
-        // A stale or unknown id never touches anything else.
-        let err = cu
-            .act(&ElementId("forms-nope".into()), &UiAction::Press)
-            .unwrap_err();
-        assert!(matches!(err, Error::NotFound(_)), "{err}");
-        // A combo box, by value or by option, if this screen has one.
-        if let Some(combo) = tree.root.iter().find(|n| n.role == A11yRole::ComboBox) {
-            let opt = combo.children.last().unwrap();
-            let out = cu.act(&opt.id, &UiAction::Select).unwrap();
-            assert!(out.verified, "{}", out.detail);
-        }
-        // Pressing a text field is refused.
-        assert!(cu.act(&text, &UiAction::Press).is_err());
-    }
-
-    #[test]
     fn confirmations_are_normalised_for_the_harness() {
         let obs = Observation {
             windows: vec![

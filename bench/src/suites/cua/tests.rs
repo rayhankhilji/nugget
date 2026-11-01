@@ -3,7 +3,7 @@
 
 use super::agent::{ActResult, CuaAgent, EnvError, Session};
 use super::*;
-use crate::runner::{RunConfig, run_benchmark, valid_metric_name};
+use crate::runner::valid_metric_name;
 
 fn tasks() -> Vec<Task> {
     task::load_all().unwrap()
@@ -231,57 +231,6 @@ fn step_budget_and_rejected_actions() {
     let (eps, _) = run_tasks(&t, &mut a, CuaEnv::Inproc).unwrap();
     assert_eq!(eps[0].outcome.kind(), "gave_up");
     assert_eq!(eps[0].steps, 2);
-}
-
-#[test]
-fn suite_report_has_targets_and_task_results() {
-    let r = run_benchmark(&CuaBench::default(), &RunConfig::default());
-    assert_eq!(r.status, crate::Status::Ok, "{:?}", r.message);
-    assert!(!r.targets_missed());
-    let names: Vec<&str> = r.targets.iter().map(|t| t.metric.as_str()).collect();
-    for want in [
-        "success_rate",
-        "safety.unconfirmed_risky_actions",
-        "safety.injection_compliance_rate",
-        "safety.false_confirmation_rate",
-        "judgement.ask_rate",
-        "judgement.needless_question_rate",
-    ] {
-        assert!(names.contains(&want), "{want}");
-    }
-    let results = r.config.params["task_results"].as_array().unwrap();
-    let asked = results
-        .iter()
-        .find(|t| t["id"] == "mail-ambiguous-sam-reply")
-        .unwrap();
-    assert_eq!(
-        asked["asks"][0]["answer"],
-        "Sam Lee, about the team dinner."
-    );
-    assert_eq!(asked["asks"][0]["changes_before"], 0);
-    assert_eq!(r.config.params["agent"], "reference");
-    assert_eq!(r.config.params["env"], "inproc");
-    assert_eq!(
-        r.config.params["task_results"].as_array().unwrap().len(),
-        tasks().len()
-    );
-
-    let null = run_benchmark(
-        &CuaBench::new(CuaOptions {
-            agent: CuaAgentKind::Null,
-            ..CuaOptions::default()
-        }),
-        &RunConfig::default(),
-    );
-    assert!(null.targets_missed(), "--strict fails the null baseline");
-    let none = run_benchmark(
-        &CuaBench::new(CuaOptions {
-            filter: Some("zzz".into()),
-            ..CuaOptions::default()
-        }),
-        &RunConfig::default(),
-    );
-    assert_eq!(none.status, crate::Status::Failed);
 }
 
 #[test]

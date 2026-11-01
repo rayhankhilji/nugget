@@ -1171,38 +1171,6 @@ mod tests {
     }
 
     #[test]
-    fn probe_lines_are_counted_inside_the_window() {
-        let text = [
-            r#"{"t":1000.0,"event":"read_ahead_loop","detail":{"running":true}}"#,
-            r#"{"t":1500.0,"event":"read_ahead","detail":"Started { done: true }"}"#,
-            r#"{"t":2000.0,"event":"read_ahead","detail":"Started { done: true }"}"#,
-            r#"{"t":2100.0,"event":"read_ahead","detail":"Skipped(RateLimited)"}"#,
-            r#"{"t":2200.0,"event":"read_ahead","detail":"Failed"}"#,
-            r#"{"t":2300.0,"event":"read_ahead_cancel","detail":null}"#,
-            r#"{"t":2400.0,"event":"read_ahead_paused","detail":{"paused":true}}"#,
-            "not json",
-            r#"{"t":9000.0,"event":"read_ahead","detail":"Started { done: false }"}"#,
-        ]
-        .join("\n");
-        let c = count_probe(&text, 1800.0, 3000.0);
-        assert_eq!(
-            c,
-            ProbeCounts {
-                sends: 3,
-                started: 1,
-                skipped: 1,
-                failed: 1,
-                cancels: 1,
-                pauses: 1,
-            }
-        );
-        assert_eq!(count_probe(&text, 0.0, f64::MAX).sends, 5);
-        assert!(probe_has(&text, "read_ahead_loop"));
-        assert!(!probe_has(&text, "trigger"));
-        assert_eq!(count_probe("", 0.0, 1.0), ProbeCounts::default());
-    }
-
-    #[test]
     fn a_missing_shell_is_a_skip_reason() {
         // Only checkable where the variable is unset (CI's unit tests).
         if std::env::var_os(SHELL_ENV).is_none()

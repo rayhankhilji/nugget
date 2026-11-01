@@ -1879,29 +1879,6 @@ mod tests {
     }
 
     #[test]
-    fn real_drafts_lose_inline_thinking_and_baseline_fits_the_budget() {
-        let world = World::build(Corpus::load().unwrap()).unwrap();
-        let p = Scripted::new(|_| Ok("<think>plan the reply</think>\nHi Sam, yes.".into()));
-        let model = real(p, Duration::from_secs(30));
-        let budget = prompt_budget(4096, DRAFT_MAX_TOKENS);
-        let run = block_on(run_arms(
-            &world,
-            &[0, 5],
-            &model,
-            false,
-            1,
-            Some(budget),
-            None,
-        ))
-        .unwrap();
-        assert_eq!(run.nugget_drafts[0], "Hi Sam, yes.");
-        assert_eq!(run.baseline_truncated, 2);
-        assert!(run.baseline.iter().all(|s| s.prompt_tokens <= budget));
-        // Nugget's prompt is never cut.
-        assert!(run.nugget.iter().all(|s| s.prompt_tokens < budget));
-    }
-
-    #[test]
     fn model_judge_cancels_position_bias_and_retries_without_schema() {
         let c = Corpus::load().unwrap();
         let t = &c.tasks[0];

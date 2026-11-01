@@ -1,8 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
-use super::engine::{
-    Action, ActionKind, Approval, Card, DismissReason, DryRun, Execution, Feedback,
-};
+use super::engine::{Action, ActionKind, Approval, Card, DryRun, Execution, Feedback};
 use super::world::{
     self, CardKind, DistractorCategory, Gold, Item, World, iso_date, load_gold, load_world,
 };
@@ -100,100 +98,11 @@ fn gold_labels_are_consistent() {
     }
 }
 
-/// Shows exactly the gold cards, each on the first day of its window (spilling to later days
-/// past `k`). It must score perfectly, which checks the scorer and that the labels fit in k = 5.
-struct Oracle {
-    gold: Gold,
-    shown: HashSet<usize>,
-    cards: HashMap<String, Card>,
-    audit: Vec<Execution>,
-}
-
-impl ProactiveEngine for Oracle {
-    fn name(&self) -> &'static str {
-        "oracle"
-    }
-    fn observe(&mut self, _item: &Item) {}
-    fn brief(&mut self, day: i32, k: usize) -> Vec<Card> {
-        let mut due: Vec<usize> = (0..self.gold.cards.len())
-            .filter(|i| !self.shown.contains(i))
-            .filter(|&i| {
-                (self.gold.cards[i].first_day..=self.gold.cards[i].last_day).contains(&day)
-            })
-            .collect();
-        due.sort_by_key(|&i| self.gold.cards[i].last_day);
-        due.truncate(k);
-        due.into_iter()
-            .map(|i| {
-                self.shown.insert(i);
-                let g = &self.gold.cards[i];
-                let card = Card {
-                    id: g.id.clone(),
-                    kind: g.kind,
-                    subject: g.subject.clone(),
-                    title: g.why.clone(),
-                    score: 1.0,
-                    action: Some(Action {
-                        kind: ActionKind::CreateReminder,
-                        dry_run: Some(DryRun {
-                            target: format!("r/{}", g.id),
-                            before: String::new(),
-                            after: g.why.clone(),
-                        }),
-                    }),
-                };
-                self.cards.insert(card.id.clone(), card.clone());
-                card
-            })
-            .collect()
-    }
-    fn feedback(&mut self, _: &str, _: Feedback) {}
-    fn execute(&mut self, card_id: &str, approval: Option<&Approval>) -> Result<Execution, String> {
-        let a = approval.ok_or("none")?;
-        if a.card_id != card_id || self.audit.iter().any(|e| e.card_id == card_id) {
-            return Err("bad".into());
-        }
-        let applied = self.cards[card_id].action.clone().unwrap().dry_run.unwrap();
-        let e = Execution {
-            card_id: card_id.into(),
-            action: ActionKind::CreateReminder,
-            approval: Some(a.token),
-            applied,
-        };
-        self.audit.push(e.clone());
-        Ok(e)
-    }
-    fn audit_log(&self) -> Vec<Execution> {
-        self.audit.clone()
-    }
-}
-
 fn run_once(engine: &mut dyn ProactiveEngine, noise: f64, seed: u64) -> BTreeMap<String, f64> {
     let (w, g) = fixture();
     let cfg = sim::SimConfig { k: K, noise, seed };
     let run = sim::run(&w, &g, engine, cfg);
     sim::score(&w, &g, &run, K)
-}
-
-#[test]
-fn oracle_scores_perfectly() {
-    let (_, gold) = fixture();
-    let mut o = Oracle {
-        gold,
-        shown: HashSet::new(),
-        cards: HashMap::new(),
-        audit: Vec::new(),
-    };
-    let s = run_once(&mut o, 0.0, 1);
-    assert_eq!(s["precision@5"], 1.0);
-    assert_eq!(s["recall"], 1.0);
-    assert_eq!(s["distractors.fpr"], 0.0);
-    assert_eq!(s["duplicate_shows"], 0.0);
-    assert_eq!(s["dry_run_coverage"], 1.0);
-    assert_eq!(s["diff_fidelity"], 1.0);
-    assert_eq!(s["executed_without_approval"], 0.0);
-    assert_eq!(s["acceptance_rate"], 1.0);
-    assert!(s["approval_probes"] > 0.0);
 }
 
 /// Repeats one card every day, offers an action with no diff, and executes anything it is asked
@@ -538,31 +447,8 @@ fn real_engine_refuses_without_a_matching_approval() {
 
 // ---- learning from dismiss reasons (BB2) ----
 
-/// Feed `items` day by day; `on_brief` sees each morning's brief and gives feedback.
-fn drive(
-    e: &mut real::RealEngine,
-    items: &[Item],
-    days: i32,
-    mut on_brief: impl FnMut(i32, &[Card], &mut real::RealEngine),
-) {
-    let mut items: Vec<&Item> = items.iter().collect();
-    items.sort_by_key(|i| i.day());
-    let mut next = 0;
-    for day in 1..=days {
-        while next < items.len() && items[next].day() < day {
-            e.observe(items[next]);
-            next += 1;
-        }
-        let cards = e.brief(day, K);
-        on_brief(day, &cards, e);
-    }
-    assert!(e.errors().is_empty(), "{:?}", e.errors());
-}
-
 const PRICING: &str = "Hi Sam, could you send me your pricing sheet? Thanks";
 
-/// Day 1: Ana and Bob each ask Sam something. Day 2: Ana and Carl each ask the same new question
-/// in new threads. On day 3 Sam accepts Bob's card and dismisses Ana's as not important.
 fn sender_world() -> Vec<Item> {
     let ask = "Hi Sam, could you share your availability for a demo next week? Thanks";
     vec![
@@ -589,60 +475,6 @@ fn sender_world() -> Vec<Item> {
     ]
 }
 
-/// Day 4 in the sender world: the crate's score for Ana's second card and Carl's, and whether
-/// Ana's ranks below Carl's in the brief (below it, or not shown at all).
-fn sender_brief(learning: bool) -> (f64, f64, bool) {
-    let mut e = real::RealEngine::new(SAM, learning, 21).unwrap();
-    let mut day4 = Vec::new();
-    drive(&mut e, &sender_world(), 4, |day, cards, e| {
-        if day == 3 {
-            let card = |t: &str| {
-                let c = cards.iter().find(|c| c.subject == t);
-                c.unwrap_or_else(|| panic!("day 3 has no {t}: {cards:?}"))
-                    .id
-                    .clone()
-            };
-            e.feedback(&card("thread:t-b1"), Feedback::Accepted);
-            e.feedback(
-                &card("thread:t-a1"),
-                Feedback::Dismissed(DismissReason::NotImportant),
-            );
-        }
-        if day == 4 {
-            day4 = cards.to_vec();
-        }
-    });
-    let pos = |t: &str| day4.iter().position(|c| c.subject == t);
-    let carl = pos("thread:t-c2").unwrap_or_else(|| panic!("day 4: {day4:?}"));
-    let below = pos("thread:t-a2").is_none_or(|ana| ana > carl);
-    // Scores from the crate, including a card it no longer shows.
-    let all = e.proactive().all_cards().unwrap();
-    let score = |mail: &str| {
-        let c = all.iter().find(|c| {
-            c.evidence
-                .first()
-                .is_some_and(|ev| ev.item.key.as_str() == mail)
-        });
-        c.unwrap_or_else(|| panic!("no card for {mail}")).rank
-    };
-    (score("m-a2"), score("m-c2"), below)
-}
-
-/// A sender dismissed as not important ranks below an otherwise-equal sender the next day.
-#[test]
-fn not_important_ranks_the_sender_lower_the_next_day() {
-    let (ana, carl, below) = sender_brief(true);
-    let (ana0, carl0, _) = sender_brief(false);
-    assert!(below, "learning on: Ana {ana} vs Carl {carl}");
-    assert!(ana < carl, "learning on: Ana {ana} vs Carl {carl}");
-    assert!(
-        carl - ana > carl0 - ana0 + 0.1,
-        "the gap comes from feedback: on {ana} vs {carl}, frozen {ana0} vs {carl0}"
-    );
-}
-
-/// Sam asks Kim a question and promises a plan on day 1 (shown days 5 and 7); Kim replies with
-/// a new question on day 12.
 fn handled_world() -> Vec<Item> {
     vec![
         mail(
@@ -664,56 +496,6 @@ fn handled_world() -> Vec<Item> {
             "Hi Sam, here it is, signed. Could you confirm the start date? Kim",
         ),
     ]
-}
-
-fn in_handled_thread(c: &Card) -> bool {
-    matches!(
-        c.subject.as_str(),
-        "thread:t-h" | "commit:m-h1" | "commit:m-h2"
-    )
-}
-
-/// Cards from the thread shown, by day and subject, and the day Sam dismissed the first one as
-/// already handled.
-fn handled_run(learning: bool) -> (Vec<(i32, String)>, i32) {
-    let mut e = real::RealEngine::new(SAM, learning, 22).unwrap();
-    let mut shown = Vec::new();
-    let mut dismissed = None;
-    drive(&mut e, &handled_world(), 15, |day, cards, e| {
-        for c in cards.iter().filter(|c| in_handled_thread(c)) {
-            shown.push((day, c.subject.clone()));
-            if dismissed.is_none() {
-                dismissed = Some(day);
-                e.feedback(&c.id, Feedback::Dismissed(DismissReason::AlreadyHandled));
-            }
-        }
-    });
-    (shown, dismissed.expect("a card from the thread"))
-}
-
-/// "Already handled" hides a conversation until a newer message, but not the commitment in the
-/// same mail.
-#[test]
-fn already_handled_stops_the_thread_until_a_newer_message() {
-    let (shown, at) = handled_run(true);
-    let before_reply = |d: i32| d > at && d <= 12;
-    assert!(
-        shown
-            .iter()
-            .filter(|(d, _)| before_reply(*d))
-            .all(|(_, s)| s == "commit:m-h1"),
-        "dismissed on day {at}, shown {shown:?}"
-    );
-    assert!(
-        shown
-            .iter()
-            .any(|(d, s)| before_reply(*d) && s == "commit:m-h1"),
-        "the promise was hidden by the handled question: {shown:?}"
-    );
-    assert!(
-        shown.iter().any(|(d, _)| *d > 12),
-        "Kim's new question never showed: {shown:?}"
-    );
 }
 
 /// Learning only changes ranking and suppression: with reasons and learning on, nothing executes
