@@ -57,8 +57,7 @@ pub fn locate(chunks: &[Chunk], needle: &str) -> Option<(i64, String)> {
     for c in chunks {
         let lower = c.text.to_lowercase();
         if let Some(pos) = lower.find(&n) {
-            // `to_lowercase` can change byte lengths; fall back to the needle if the offsets
-            // do not line up with the original text.
+            // `to_lowercase` can change byte lengths.
             let quote = if lower.len() == c.text.len() && c.text.is_char_boundary(pos) {
                 line_around(&c.text, pos)
             } else {
@@ -77,9 +76,7 @@ fn line_around(text: &str, pos: usize) -> String {
     truncate_chars(text[start..end].trim(), MAX_QUOTE_CHARS)
 }
 
-/// A parsed mail address: `"Name" <addr>`, `addr`, or a bare name. A trailing participation
-/// status in parentheses (`(accepted)`, as the calendar extractor writes it) is returned
-/// separately.
+/// A parsed mail address: `"Name" <addr>`, `addr`, or a bare name.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Address {
     pub name: Option<String>,
@@ -176,8 +173,7 @@ const SECOND_LEVEL: &[&str] = &[
     "co", "com", "ac", "gov", "org", "net", "edu", "ne", "or", "go", "gv", "ltd", "plc",
 ];
 
-/// The registrable part of a host (`mail.eu.acme.com` → `acme.com`, `x.acme.co.uk` →
-/// `acme.co.uk`). A heuristic without the public-suffix list.
+/// The registrable part of a host (`mail.eu.acme.com` → `acme.com`, `x.acme.co.uk` → `acme.co.uk`).
 pub fn registrable_domain(domain: &str) -> String {
     let labels: Vec<&str> = domain.split('.').filter(|l| !l.is_empty()).collect();
     if labels.len() <= 2 {
@@ -303,8 +299,7 @@ const FREEMAIL: &[&str] = &[
     "users.noreply.github.com",
 ];
 
-/// Whether `domain` (or its registrable part) is a consumer mail provider. Matches the
-/// `yahoo.*` / `hotmail.*` / `outlook.*` / `live.*` country variants too.
+/// Whether `domain` (or its registrable part) is a consumer mail provider.
 pub fn is_freemail(domain: &str, extra: &[String]) -> bool {
     let d = domain.to_lowercase();
     let reg = registrable_domain(&d);
@@ -362,8 +357,7 @@ pub fn normalize_predicate(raw: &str) -> Option<String> {
         .then_some(out)
 }
 
-/// Phrases that mark text as trying to steer a model. Quotes containing them are never accepted
-/// as evidence.
+/// Phrases that mark text as trying to steer a model.
 const INJECTION_MARKERS: &[&str] = &[
     "ignore previous instruction",
     "ignore all previous",
@@ -394,12 +388,7 @@ pub fn has_injection_marker(text: &str) -> bool {
     })
 }
 
-/// `text` as marker scans read it (security review 3, ER-4): lower case, fullwidth forms as
-/// ASCII, Cyrillic and Greek letters that look Latin as Latin (`іgnore` with a Cyrillic `і`),
-/// without combining marks (`ign\u{301}ore`) and with invisible characters (zero-width, soft
-/// hyphen, bidi controls, variation selectors, tag characters) removed or, with `spaced`, read
-/// as a space (`ignore\u{2060}previous`), and whitespace runs as one space. For matching
-/// only: the result is never shown.
+/// `text` as marker scans read it (security review 3, ER-4).
 pub fn fold_for_markers(text: &str, spaced: bool) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars().flat_map(char::to_lowercase) {

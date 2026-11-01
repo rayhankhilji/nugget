@@ -1,14 +1,5 @@
-//! Calendar events: `text/calendar` items (`metadata.extracted.events`, as the ics extractor
-//! writes them) and Google Calendar items (`metadata.source` with `event_id` / `attendees`).
-//! An event entity with time attributes, attendees as people with `attended` / `invited_to`,
-//! the organiser with `organized`, and the location as a place.
-//!
-//! An acceptance (or the organiser's own attendance) is `attended` only once the event has
-//! ended by the time the item is processed (`ItemCtx::now`, the pipeline's clock); before that
-//! it is `invited_to` ("accepted the invitation to"). A recurring event's claims say how it
-//! repeats ("weekly from 2026-03-10") rather than naming its first date as if it were the only
-//! one, and it counts as attended once its first occurrence has ended. An attendee's evidence
-//! quotes the `Attendees:` line, an organiser's the `Organizer:` line.
+//! Calendar events: `text/calendar` items (`metadata.extracted.events`, as the ics extractor writes
+//! them) and Google Calendar items (`metadata.source` with `event_id` / `attendees`).
 
 use nugget_graph::EntityKind;
 use nugget_store::Chunk;
@@ -243,8 +234,7 @@ fn one(ctx: &ItemCtx<'_>, ex: &mut Extraction, ev: Event) {
     };
     let happened = has_ended(&ev, start, ctx.now);
 
-    // A dial-in number or an address is not a place (security review 3, ER-7): it would name a
-    // vault page and a claim sentence.
+    // A dial-in number or an address is not a place (security review 3, ER-7).
     if let Some(loc) = ev
         .location
         .as_deref()
@@ -294,9 +284,7 @@ fn one(ctx: &ItemCtx<'_>, ex: &mut Extraction, ev: Event) {
         };
         let organizer = seen.first() == Some(&r);
         let status = a.status.as_deref().unwrap_or("");
-        // Accepting is not attending: `attended` only once the event (for a recurring one, its
-        // first occurrence) has ended by the processing time; before, an acceptance is
-        // `invited_to`.
+        // Accepting is not attending.
         let (predicate, verb, confidence) = match status {
             "declined" => ("invited_to", "was invited to (declined)", 0.9),
             "accepted" if happened => ("attended", "attended", 0.85),
@@ -328,9 +316,7 @@ fn one(ctx: &ItemCtx<'_>, ex: &mut Extraction, ev: Event) {
     }
 }
 
-/// Whether the event has ended by `now`: its end, else its start (an all-day event without an
-/// end lasts its day). A recurring event has taken place once its first occurrence has. An
-/// event without a start has not provably taken place.
+/// Whether the event has ended by `now`.
 fn has_ended(ev: &Event, start: Option<OffsetDateTime>, now: OffsetDateTime) -> bool {
     let end = ev.end.as_deref().and_then(parse_when).or_else(|| {
         start.map(|s| {
@@ -344,9 +330,7 @@ fn has_ended(ev: &Event, start: Option<OffsetDateTime>, now: OffsetDateTime) -> 
     end.is_some_and(|e| e <= now)
 }
 
-/// How a recurring event repeats, in words, from its `RRULE` and first start: "weekly from
-/// 2026-03-10", "every 2 weeks from 2026-03-10, 8 times", "monthly from 2026-01-05 until
-/// 2026-06-30". An unknown frequency reads "repeats".
+/// How a recurring event repeats, in words, from its `RRULE` and first start.
 fn recurrence(rrule: &str, start: &str) -> String {
     let mut freq = None;
     let mut interval = 1u32;
@@ -390,8 +374,7 @@ fn recurrence(rrule: &str, start: &str) -> String {
 }
 
 /// The first line (in chunk order) that starts with `prefix` and contains `needle`, both
-/// case-insensitive, with its chunk id: the `Attendees:` line naming an address, which
-/// [`crate::text::locate`] misses when the organizer line names it first.
+/// case-insensitive, with its chunk id.
 fn locate_line(chunks: &[Chunk], prefix: &str, needle: &str) -> Option<(i64, String)> {
     let n = needle.trim().to_lowercase();
     if n.is_empty() {

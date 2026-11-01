@@ -1,11 +1,4 @@
 //! Where items come from, and where the pipeline keeps its progress.
-//!
-//! [`ItemFeed`] is the small slice of the store the pipeline needs. The first run (and any run
-//! after a reset) lists each source's item keys and versions (`item_versions`) and diffs them
-//! against the pipeline's ledger, which also reveals deletions. After that, a feed with a change
-//! log ([`ItemFeed::items_changed_since`], implemented for [`nugget_store::Store`] over its item
-//! change feed with deletion tombstones) makes every run incremental: only changed and deleted
-//! items are looked at. Feeds without one keep the full diff.
 
 use std::collections::HashMap;
 
@@ -17,8 +10,7 @@ use time::OffsetDateTime;
 
 /// Chunk positions requested per `get_chunks_by_ord` call at most.
 const ORD_PAGE: u32 = 128;
-/// Chunk positions requested by the first call; each next call asks for twice as many (up to
-/// [`ORD_PAGE`]). Each position is one lookup and most items have few chunks.
+/// Chunk positions requested by the first call.
 const FIRST_ORD_PAGE: u32 = 4;
 
 /// Read access to items plus a small key/value area for pipeline state.
@@ -52,10 +44,7 @@ pub trait ItemFeed: Send + Sync {
         Ok(None)
     }
 
-    /// The date each item's facts are as of (`extract::item_date`: a mail's `Date`, a note's
-    /// frontmatter date, a calendar item's event start, a date in the file name or title, else
-    /// the source's modification time, else when it was stored). Unknown items are left out.
-    /// The default loads each item.
+    /// The date each item's facts are as of (`extract::item_date`).
     fn item_dates(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, OffsetDateTime>> {
         let mut out = HashMap::new();
         for i in items {

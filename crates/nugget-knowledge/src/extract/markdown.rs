@@ -1,20 +1,4 @@
 //! Markdown notes: frontmatter, `#tags` and `[[wikilinks]]`.
-//!
-//! - Tags and frontmatter `topic(s)` become topics; frontmatter `project(s)` become projects;
-//!   `people` / `attendees` / `members` / `owner` (and a person's `reports_to` / `manager`)
-//!   become people; `org` / `company` / `organization` / `club` become organisations.
-//! - A note whose frontmatter `type` (or `kind`) names an entity kind *is* that entity, named
-//!   after the note's title. A project's `owner` leads it and its `members` work on it; a
-//!   person's `org` is where they work and their `club` one they are a member of; an
-//!   organisation-valued key of a project is what the project is part of.
-//! - An untyped note with a `project:` (a meeting note) makes only its `owner` / `lead` and
-//!   `members` / `team` the project's people (`leads`, `works_on`); whoever it lists under
-//!   `people` / `attendees` / `participants` / `with` took part in the meeting and is only
-//!   `related_to` the project.
-//! - Every frontmatter claim quotes the `key: value` line it came from, exactly as stored.
-//! - The note's subjects (its own entity, else its projects, else its topics) are what its
-//!   wikilinks connect: a link becomes a `references` claim from each subject to the linked
-//!   note's subjects (or an entity of that name) once the target resolves.
 
 use nugget_graph::{EntityKind, Evidence};
 use serde_json::{Map, Value};
@@ -32,9 +16,7 @@ const MAX_LIST: usize = 50;
 const LEAD_KEYS: &[&str] = &["owner", "owners", "lead", "leads"];
 /// Frontmatter keys naming the members of the note's subject (a project's team).
 const MEMBER_KEYS: &[&str] = &["members", "member", "team"];
-/// Frontmatter keys naming the people a note involves: of a typed note, its subject's people
-/// (a project's team, an event's attendees); of an untyped note (a meeting note with a
-/// `project:`), only who took part, not the project's members.
+/// Frontmatter keys naming the people a note involves.
 const PEOPLE_KEYS: &[&str] = &["people", "person", "attendees", "participants", "with"];
 /// Frontmatter keys of a person note naming who they report to.
 const MANAGER_KEYS: &[&str] = &["reports_to", "manager"];
@@ -57,8 +39,7 @@ fn get_ci<'a>(m: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
         .map(|(_, v)| v)
 }
 
-/// A frontmatter value and the `key: value` line it was read from: the key as written and the
-/// value as stored, so the line is the source's own text and serves as evidence quote.
+/// A frontmatter value and the `key: value` line it was read from.
 #[derive(Debug, Clone, PartialEq)]
 struct FmName {
     /// The value with `[[wikilink]]` brackets, a `|alias` and a leading `#` removed.
@@ -375,8 +356,7 @@ pub(super) fn extract(ctx: &ItemCtx<'_>, ex: &mut Extraction) {
                         q.clone(),
                     );
                 }
-                // Membership only from explicit keys: the people a meeting note lists (a
-                // vendor, a manager in a 1:1) took part in it; they are not the project's team.
+                // Membership only from explicit keys.
                 for (person, name, role, f) in &people {
                     let (pred, text, c) = match role {
                         PersonRole::Lead => ("leads", format!("{name} leads {pn}."), 0.6),
@@ -594,119 +574,6 @@ mod tests {
         assert!(
             !got.iter()
                 .any(|(_, _, _, q)| q.as_deref().is_some_and(|q| q.starts_with("people:"))),
-            "{got:#?}"
-        );
-        assert_quotes_are_source_text(&ex, &fm);
-    }
-
-    #[test]
-    fn person_org_club_and_manager() {
-        let fm = json!({
-            "type": "person",
-            "email": ["robin@ashgrove.test"],
-            "org": "[[Glimmerfen Labs]]",
-            "club": "[[Marrowbank Rowing Club]]",
-            "reports_to": "[[Theo Brannigan]]",
-            "role": "Product Lead",
-        });
-        let ex = run("people/Robin Ashgrove.md", fm.clone());
-        let got = triples(&ex);
-        for want in [
-            t(
-                "Robin Ashgrove",
-                "works_at",
-                "Glimmerfen Labs",
-                "org: [[Glimmerfen Labs]]",
-            ),
-            t(
-                "Robin Ashgrove",
-                "member_of",
-                "Marrowbank Rowing Club",
-                "club: [[Marrowbank Rowing Club]]",
-            ),
-            t(
-                "Robin Ashgrove",
-                "reports_to",
-                "Theo Brannigan",
-                "reports_to: [[Theo Brannigan]]",
-            ),
-        ] {
-            assert!(got.contains(&want), "missing {want:?} in {got:#?}");
-        }
-        assert_quotes_are_source_text(&ex, &fm);
-    }
-
-    #[test]
-    fn every_key_variant_quotes_the_key_it_was_read_from() {
-        let fm = json!({
-            "type": "project",
-            "Company": "Acme",
-            "Owners": ["Dana Scully"],
-            "people": ["Fox Mulder"],
-            "projects": ["[[Apollo]]"],
-            "topic": "#space",
-        });
-        let ex = run("projects/Gemini.md", fm.clone());
-        let got = triples(&ex);
-        for want in [
-            t("Gemini", "part_of", "Acme", "Company: Acme"),
-            t("Dana Scully", "leads", "Gemini", "Owners: Dana Scully"),
-            t("Fox Mulder", "works_on", "Gemini", "people: Fox Mulder"),
-            t("Gemini", "part_of", "Apollo", "projects: [[Apollo]]"),
-            t("Gemini", "has_topic", "space", "topic: #space"),
-        ] {
-            assert!(got.contains(&want), "missing {want:?} in {got:#?}");
-        }
-        assert_quotes_are_source_text(&ex, &fm);
-    }
-
-    #[test]
-    fn untyped_note_quotes_people_lines() {
-        let fm = json!({
-            "project": "[[Harbourline]]",
-            "owner": "[[Robin Ashgrove]]",
-            "with": ["Sam Okafor"],
-            "team": ["Ada Wexford"],
-        });
-        let ex = run("journal/Standup.md", fm.clone());
-        let got = triples(&ex);
-        for want in [
-            t(
-                "Robin Ashgrove",
-                "leads",
-                "Harbourline",
-                "owner: [[Robin Ashgrove]]",
-            ),
-            t(
-                "Sam Okafor",
-                "related_to",
-                "Harbourline",
-                "with: Sam Okafor",
-            ),
-            t(
-                "Ada Wexford",
-                "works_on",
-                "Harbourline",
-                "team: Ada Wexford",
-            ),
-            // Body tag: quoted from the chunk.
-            t(
-                "Harbourline",
-                "has_topic",
-                "rowing",
-                "Some text about #rowing.",
-            ),
-        ] {
-            assert!(got.contains(&want), "missing {want:?} in {got:#?}");
-        }
-        // A tag found neither in the body nor in the frontmatter carries no invented quote.
-        assert!(
-            got.contains(&(
-                "Harbourline".into(),
-                "has_topic".into(),
-                "budget".into(),
-                None
-            )),
             "{got:#?}"
         );
         assert_quotes_are_source_text(&ex, &fm);

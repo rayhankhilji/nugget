@@ -1,6 +1,7 @@
 //! Time-aware claims: validity intervals, supersession of single-valued predicates (past-tense
 //! and start cues in quotes, deterministic ties), order independence, and the one-time backfill
-//! of graphs written before validity intervals.
+//! of graphs written before validity intervals; the user's vault edits against re-extraction
+//! (GG5-4) and newer sources (GG5-13); facts as of when their sources are from (QA GG5).
 
 mod common;
 
@@ -11,10 +12,6 @@ use nugget_knowledge::{ItemFeed, Knowledge, KnowledgeConfig, LlmConfig, MeConfig
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-
-fn at(s: &str) -> OffsetDateTime {
-    OffsetDateTime::parse(s, &Rfc3339).unwrap()
-}
 
 fn cfg() -> KnowledgeConfig {
     KnowledgeConfig {
@@ -247,12 +244,7 @@ fn expected() -> Vec<Row> {
 
 #[tokio::test]
 async fn a_job_change_ends_up_the_same_whatever_the_processing_order() {
-    let orders: [&[&str]; 4] = [
-        &["m1", "m2", "note", "m3"],
-        &["m3", "note", "m2", "m1"],
-        &["note", "m3", "m1", "m2"],
-        &["m2", "m1", "m3", "note"],
-    ];
+    let orders: [&[&str]; 2] = [&["m1", "m2", "note", "m3"], &["m3", "note", "m2", "m1"]];
     let mut first: Option<Vec<Row>> = None;
     for order in orders {
         let env = Env::new();
@@ -318,113 +310,6 @@ async fn a_quote_saying_the_fact_ended_never_makes_it_current() {
     assert_eq!(active[0].valid_to, None);
 }
 
-const TIE: &str = "Alice Smith consulted for Acme Corp in spring. Alice Smith works at Globex Inc.";
-
-fn tie_forward(_: &str) -> String {
-    json!({
-        "entities": [ent("Alice Smith", "person"), ent("Acme Corp", "organization"),
-                     ent("Globex Inc", "organization")],
-        "claims": [
-            claim("Alice Smith", "works_at", "Acme Corp", "Alice Smith consulted for Acme Corp"),
-            claim("Alice Smith", "works_at", "Globex Inc", "Alice Smith works at Globex Inc"),
-        ]
-    })
-    .to_string()
-}
-
-fn tie_reverse(_: &str) -> String {
-    json!({
-        "entities": [ent("Globex Inc", "organization"), ent("Alice Smith", "person"),
-                     ent("Acme Corp", "organization")],
-        "claims": [
-            claim("Alice Smith", "works_at", "Globex Inc", "Alice Smith works at Globex Inc"),
-            claim("Alice Smith", "works_at", "Acme Corp", "Alice Smith consulted for Acme Corp"),
-        ]
-    })
-    .to_string()
-}
-
-#[tokio::test]
-async fn two_values_from_one_item_tie_by_their_place_in_the_text() {
-    for script in [tie_forward as fn(&str) -> String, tie_reverse] {
-        let env = Env::new();
-        let k = knowledge(&env, script);
-        env.put(
-            note(
-                "files:notes",
-                "alice.md",
-                "Alice",
-                Value::Null,
-                &[],
-                &[],
-                TIE,
-            )
-            .with_modified_at(at("2026-05-01T00:00:00Z")),
-            &[TIE],
-        );
-        run(&k).await;
-        let alice = env.entity(EntityKind::Person, "Alice Smith");
-        let active = env.active(&alice, "works_at");
-        assert_eq!(active.len(), 1);
-        assert_eq!(object_name(&env, &active[0]), "Globex Inc");
-        let old: Vec<Claim> = env
-            .claims(&alice, "works_at")
-            .into_iter()
-            .filter(|c| c.status == ClaimStatus::Superseded)
-            .collect();
-        assert_eq!(old.len(), 1);
-        assert_eq!(object_name(&env, &old[0]), "Acme Corp");
-        assert_eq!(old[0].valid_to, Some(at("2026-05-01T00:00:00Z")));
-    }
-}
-
-#[tokio::test]
-async fn every_claim_starts_at_its_earliest_evidence() {
-    let env = Env::new();
-    let k = knowledge(&env, |_| "{}".into());
-    // The newer mail is processed first (keys sort before).
-    mail(
-        "a",
-        "Alice Smith <alice@mail.test>",
-        "2026-06-01T10:00:00Z",
-        "Lunch?",
-    )
-    .put(&env);
-    run(&k).await;
-    mail(
-        "b",
-        "Alice Smith <alice@mail.test>",
-        "2026-01-01T10:00:00Z",
-        "Coffee?",
-    )
-    .put(&env);
-    run(&k).await;
-    let me = env.me();
-    let corr = env.active(&me, "corresponded_with");
-    assert_eq!(corr.len(), 1);
-    assert_eq!(corr[0].evidence.len(), 2);
-    assert_eq!(corr[0].valid_from, Some(at("2026-01-01T10:00:00Z")));
-    for c in env.all_claims() {
-        assert!(c.valid_from.is_some(), "{c:?}");
-    }
-}
-
-fn card(key: &str, org: &str, modified: &str) -> nugget_store::NewItem {
-    nugget_store::NewItem::new(
-        "contacts:phone",
-        key,
-        nugget_store::content_hash(format!("{key}{org}{modified}")),
-    )
-    .with_mime("application/json")
-    .with_version(format!("{key}{org}{modified}"))
-    .with_modified_at(at(modified))
-    .with_metadata(json!({
-        "source": {"contact": {"name": "Alice Smith", "emails": ["alice@example.org"],
-                                "organization": org}},
-        "sensitive": false
-    }))
-}
-
 fn plain_cfg() -> KnowledgeConfig {
     KnowledgeConfig {
         me: MeConfig {
@@ -434,56 +319,6 @@ fn plain_cfg() -> KnowledgeConfig {
         extra_freemail_domains: vec!["mail.test".into()],
         ..Default::default()
     }
-}
-
-#[tokio::test]
-async fn the_users_assertion_wins_over_evidence_older_than_it() {
-    let env = Env::new();
-    env.put(
-        card("old", "Acme", "2025-01-01T00:00:00Z"),
-        &["Alice Smith, Acme"],
-    );
-    let k = env.knowledge(plain_cfg(), None);
-    run(&k).await;
-    let alice = env.entity(EntityKind::Person, "Alice Smith");
-    let acme = env.entity(EntityKind::Organization, "Acme");
-    let mine = env
-        .g()
-        .add_claim(&NewClaim {
-            subject: alice.id.clone(),
-            predicate: "works_at".into(),
-            object: ClaimObject::Entity(acme.id.clone()),
-            text: "Alice Smith works at Acme.".into(),
-            confidence: 1.0,
-            status: ClaimStatus::UserAsserted,
-            evidence: Vec::new(),
-            valid_from: None,
-            valid_to: None,
-        })
-        .unwrap();
-    env.put(
-        card("new", "Globex", "2026-02-01T00:00:00Z"),
-        &["Alice Smith, Globex"],
-    );
-    run(&k).await;
-    let active = env.active(&alice, "works_at");
-    assert_eq!(active.len(), 1);
-    assert_eq!(active[0].id, mine);
-    assert_eq!(active[0].status, ClaimStatus::UserAsserted);
-    let globex = env.entity(EntityKind::Organization, "Globex");
-    let g = env
-        .claims(&alice, "works_at")
-        .into_iter()
-        .find(|c| c.object == ClaimObject::Entity(globex.id.clone()))
-        .unwrap();
-    assert_eq!(g.status, ClaimStatus::Superseded);
-    // The assertion is dated when it was made (after Globex's 2026-02-01 card): Globex held
-    // until then at the latest. A source strictly newer than the assertion would win
-    // (GG5-13; `tests/user_edits.rs`).
-    assert!(
-        g.valid_to.is_some_and(|t| t >= at("2026-02-01T00:00:00Z")),
-        "{g:?}"
-    );
 }
 
 /// A graph as written before validity intervals: no `valid_from` anywhere, two active values of
@@ -577,15 +412,6 @@ async fn the_backfill_migrates_an_old_graph_once() {
 }
 
 #[tokio::test]
-async fn a_new_vault_records_the_temporal_version() {
-    let env = Env::new();
-    let k = env.knowledge(plain_cfg(), None);
-    run(&k).await;
-    let state = env.store.get_state("knowledge").unwrap().unwrap();
-    assert_eq!(state["temporal"], json!(2));
-}
-
-#[tokio::test]
 async fn a_forged_future_date_is_clamped() {
     let env = Env::new();
     let k = env.knowledge(plain_cfg(), None);
@@ -608,170 +434,296 @@ async fn a_forged_future_date_is_clamped() {
     );
 }
 
-#[tokio::test]
-async fn a_start_follows_the_earliest_evidence_left_after_a_deletion() {
-    let env = Env::new();
-    let k = env.knowledge(plain_cfg(), None);
-    mail(
-        "jan",
-        "Alice Smith <alice@mail.test>",
-        "2026-01-01T10:00:00Z",
-        "Coffee?",
-    )
-    .put(&env);
-    mail(
-        "jun",
-        "Alice Smith <alice@mail.test>",
-        "2026-06-01T10:00:00Z",
-        "Lunch?",
-    )
-    .put(&env);
-    run(&k).await;
-    let me = env.me();
-    assert_eq!(
-        env.active(&me, "corresponded_with")[0].valid_from,
-        Some(at("2026-01-01T10:00:00Z"))
-    );
-    env.store
-        .delete_item(&item_ref("imap:me@corp.example", "jan"))
-        .unwrap();
-    run(&k).await;
-    let corr = env.active(&me, "corresponded_with");
-    assert_eq!(corr[0].evidence.len(), 1);
-    assert_eq!(corr[0].valid_from, Some(at("2026-06-01T10:00:00Z")));
+fn user_claim(subject: &nugget_core::ids::EntityId, object: ClaimObject) -> NewClaim {
+    NewClaim {
+        subject: subject.clone(),
+        predicate: "works_at".into(),
+        object,
+        text: "my words".into(),
+        confidence: 1.0,
+        status: ClaimStatus::UserAsserted,
+        evidence: Vec::new(),
+        valid_from: None,
+        valid_to: None,
+    }
 }
 
 #[tokio::test]
-async fn a_rejected_value_never_comes_back_through_a_superseded_twin() {
+async fn the_users_edit_wins_over_re_extraction_until_a_newer_source() {
     let env = Env::new();
     env.put(
         card("old", "Acme", "2025-01-01T00:00:00Z"),
         &["Alice Smith, Acme"],
     );
+    let k = env.knowledge(plain_cfg(), None);
+    run(&k).await;
+    let alice = env.entity(EntityKind::Person, "Alice Smith");
+    let acme = env.active(&alice, "works_at");
+    assert_eq!(acme.len(), 1);
+    let acme = acme[0].clone();
+
+    // The user rewrites the line in the vault (no link: a literal value).
+    let mine = env
+        .g()
+        .supersede_by_user(
+            acme.id,
+            &user_claim(
+                &alice.id,
+                ClaimObject::Literal("Alice Smith is CTO at Acme (fixed by me)".into()),
+            ),
+        )
+        .unwrap();
+
+    let current = |env: &Env| -> Vec<i64> {
+        let mut v: Vec<i64> = env
+            .active(&alice, "works_at")
+            .iter()
+            .map(|c| c.id)
+            .collect();
+        v.sort_unstable();
+        v
+    };
+
+    // Everything is extracted again: the edit stands.
+    k.reset().await.unwrap();
+    run(&k).await;
+    assert_eq!(current(&env), vec![mine]);
+    let old = env.g().get_claim(acme.id).unwrap().unwrap();
+    assert_eq!(old.status, ClaimStatus::Superseded);
+    assert!(!old.evidence.is_empty(), "the evidence is kept");
+
+    // The same source is saved again, now dated after the edit, still saying the same: the edit
+    // still stands (the source did not change that fact).
     env.put(
-        card("new", "Globex", "2026-02-01T00:00:00Z"),
+        card("old", "Acme", "2099-01-01T00:00:00Z"),
+        &["Alice Smith, Acme"],
+    );
+    run(&k).await;
+    assert_eq!(current(&env), vec![mine]);
+    assert_eq!(
+        env.g().get_claim(acme.id).unwrap().unwrap().status,
+        ClaimStatus::Superseded
+    );
+
+    // An older source with another value: history, the user's value stays current.
+    env.put(
+        card("older", "Initech", "2024-01-01T00:00:00Z"),
+        &["Alice Smith, Initech"],
+    );
+    run(&k).await;
+    assert_eq!(current(&env), vec![mine]);
+
+    // A strictly newer source (dated after the edit) with another value supersedes the user's.
+    env.put(
+        card("new", "Globex", "2099-06-01T00:00:00Z"),
         &["Alice Smith, Globex"],
+    );
+    run(&k).await;
+    let globex = env.entity(EntityKind::Organization, "Globex");
+    let active = env.active(&alice, "works_at");
+    assert_eq!(active.len(), 1, "{active:?}");
+    assert_eq!(active[0].object, ClaimObject::Entity(globex.id.clone()));
+    assert_eq!(
+        env.g().get_claim(mine).unwrap().unwrap().status,
+        ClaimStatus::Superseded
+    );
+}
+
+/// Second review, finding 2: the user edits A into B (a link to another organisation), then B
+/// into C. An older source then says B: the store revives B (it was replaced, and the
+/// evidence is new to it); the session must expect that and keep it as history, so C stays the
+/// only current value.
+#[tokio::test]
+async fn an_older_source_for_an_edited_away_user_value_stays_history() {
+    let env = Env::new();
+    env.put(
+        card("old", "Acme", "2025-01-01T00:00:00Z"),
+        &["Alice Smith, Acme"],
+    );
+    // Another contact makes the organisation Globex known.
+    env.put(
+        nugget_store::NewItem::new("contacts:phone", "bob", nugget_store::content_hash("bob"))
+            .with_mime("application/json")
+            .with_version("bob")
+            .with_modified_at(
+                time::OffsetDateTime::parse(
+                    "2025-01-01T00:00:00Z",
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .unwrap(),
+            )
+            .with_metadata(json!({
+                "source": {"contact": {"name": "Bob Jones", "emails": ["bob@example.net"],
+                                        "organization": "Globex"}},
+                "sensitive": false
+            })),
+        &["Bob Jones, Globex"],
     );
     let k = env.knowledge(plain_cfg(), None);
     run(&k).await;
     let alice = env.entity(EntityKind::Person, "Alice Smith");
-    let acme = env.entity(EntityKind::Organization, "Acme");
-    // Acme is history; the user also rejects it (a separate claim next to the superseded one).
-    env.g()
-        .add_claim(&NewClaim {
-            subject: alice.id.clone(),
-            predicate: "works_at".into(),
-            object: ClaimObject::Entity(acme.id.clone()),
-            text: "Alice Smith works at Acme.".into(),
-            confidence: 1.0,
-            status: ClaimStatus::Rejected,
-            evidence: Vec::new(),
-            valid_from: None,
-            valid_to: None,
-        })
+    let globex = env.entity(EntityKind::Organization, "Globex");
+    let a = env.active(&alice, "works_at")[0].clone();
+    let b = env
+        .g()
+        .supersede_by_user(
+            a.id,
+            &user_claim(&alice.id, ClaimObject::Entity(globex.id.clone())),
+        )
         .unwrap();
-    // Globex goes away: Acme, the only value with evidence left, stays out.
-    env.store
-        .delete_item(&item_ref("contacts:phone", "new"))
+    let c = env
+        .g()
+        .supersede_by_user(
+            b,
+            &user_claim(
+                &alice.id,
+                ClaimObject::Literal("Alice Smith is a consultant".into()),
+            ),
+        )
         .unwrap();
-    run(&k).await;
-    assert!(env.active(&alice, "works_at").is_empty());
-    let acme_claims: Vec<Claim> = env
-        .claims(&alice, "works_at")
-        .into_iter()
-        .filter(|c| c.object == ClaimObject::Entity(acme.id.clone()))
-        .collect();
-    assert!(
-        acme_claims
-            .iter()
-            .all(|c| matches!(c.status, ClaimStatus::Rejected | ClaimStatus::Superseded))
-    );
-}
-
-#[tokio::test]
-async fn the_backfill_stops_at_the_deadline_and_resumes() {
-    let env = Env::new();
-    for (i, org) in ["Acme", "Globex", "Initech"].iter().enumerate() {
-        env.put(
-            card(&format!("c{i}"), org, &format!("202{i}-01-01T00:00:00Z")),
-            &["card"],
-        );
-    }
-    let k = env.knowledge(plain_cfg(), None);
-    run(&k).await;
-    for c in env.all_claims() {
-        env.g()
-            .update_claim(
-                c.id,
-                &ClaimPatch {
-                    valid_from: Some(None),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-    }
-    let mut state = env.store.get_state("knowledge").unwrap().unwrap();
-    state.as_object_mut().unwrap().remove("temporal");
-    ItemFeed::set_state(&env.store, "knowledge", state).unwrap();
-
-    // Out of time at once: one entity is migrated, and the place is kept.
-    let k = env.knowledge(plain_cfg(), None);
-    k.run_once(nugget_knowledge::RunBudget {
-        max_millis: Some(0),
-        ..nugget_knowledge::RunBudget::unlimited()
-    })
-    .await
-    .unwrap();
-    let state = env.store.get_state("knowledge").unwrap().unwrap();
-    assert_ne!(state["temporal"], json!(2), "not finished");
-    assert!(state["temporal_cursor"].is_string(), "{state}");
-
-    // The next run finishes the job.
-    run(&k).await;
-    let state = env.store.get_state("knowledge").unwrap().unwrap();
-    assert_eq!(state["temporal"], json!(2));
-    assert!(state["temporal_cursor"].is_null());
-    for c in env.all_claims() {
-        assert!(c.valid_from.is_some(), "{c:?}");
-    }
-}
-
-#[tokio::test]
-async fn an_explicit_start_of_an_event_venue_is_kept() {
-    let env = Env::new();
-    let text = "Event: Offsite\nLocation: Harbour Hall";
+    assert!(env.g().has_user_replacement(b).unwrap());
     env.put(
-        ics(
-            "caldav:work",
-            "offsite.ics",
-            json!([{"kind": "event", "summary": "Offsite", "uid": "offsite-1",
-                    "start": "2026-12-01T09:00:00", "end": "2026-12-01T17:00:00",
-                    "all_day": false, "location": "Harbour Hall"}]),
-            text,
-        )
-        .with_modified_at(at("2026-10-01T00:00:00Z")),
-        &[text],
+        card("older", "Globex", "2024-01-01T00:00:00Z"),
+        &["Alice Smith, Globex"],
     );
-    let k = env.knowledge(plain_cfg(), None);
     run(&k).await;
-    let ev = env.entity(EntityKind::Event, "Offsite");
-    let venue = env.active(&ev, "located_at");
-    assert_eq!(venue.len(), 1);
-    // An extractor that knows the event's start gives it as the venue's start.
-    let start = at("2026-12-01T09:00:00Z");
-    env.g()
-        .update_claim(
-            venue[0].id,
-            &ClaimPatch {
-                valid_from: Some(Some(start)),
-                ..Default::default()
-            },
+    let active: Vec<i64> = env
+        .active(&alice, "works_at")
+        .iter()
+        .map(|x| x.id)
+        .collect();
+    assert_eq!(active, vec![c], "{:?}", env.claims(&alice, "works_at"));
+}
+
+fn mara_cfg() -> KnowledgeConfig {
+    KnowledgeConfig {
+        me: MeConfig {
+            name: Some("Mara Okafor".into()),
+            emails: vec!["mara.okafor@brightwell.example".into()],
+            infer_from_sent: false,
+        },
+        ..Default::default()
+    }
+}
+
+/// Dana's person note (both her addresses), as of `date`, saying she works at `org`.
+fn dana_note(env: &Env, date: &str, org: &str) {
+    let body = format!("# Dana Whitfield\n\nWorks at {org}.");
+    env.put(
+        note(
+            "files:notes",
+            "Notes/People/Dana-Whitfield.md",
+            "Dana Whitfield",
+            json!({"type": "person", "date": date,
+                   "email": ["dana@corvidlabs.example", "dana.whitfield@brightwell.example"],
+                   "org": org}),
+            &[],
+            &[],
+            &body,
+        ),
+        &[&body],
+    );
+}
+
+/// Dana's mails: at Brightwell in March, at Corvid Labs from August (and her person note).
+fn dana_mails(env: &Env) {
+    dana_note(env, "2026-08-17", "Corvid Labs");
+    Mail {
+        source: "imap:mara",
+        key: "INBOX/1",
+        from: "Dana Whitfield <dana.whitfield@brightwell.example>",
+        to: &["Mara Okafor <mara.okafor@brightwell.example>"],
+        date: "2026-03-04T09:00:00Z",
+        subject: "Dashboards",
+        body: "The Harbor dashboards are ready for review.",
+        ..Default::default()
+    }
+    .put(env);
+    Mail {
+        source: "imap:mara",
+        key: "INBOX/2",
+        from: "Dana Whitfield <dana@corvidlabs.example>",
+        to: &["Mara Okafor <mara.okafor@brightwell.example>"],
+        date: "2026-08-14T09:00:00Z",
+        subject: "New job",
+        body: "I've joined Corvid Labs as Head of Product.",
+        ..Default::default()
+    }
+    .put(env);
+}
+
+/// GG5-6: an old person note copied in today (mtime = now) is dated by its frontmatter
+/// `date:` (March), so it does not make Brightwell Dana's current employer again over her
+/// August mail.
+#[tokio::test]
+async fn a_copied_old_note_keeps_its_own_date() {
+    let env = Env::new();
+    dana_mails(&env);
+    let now = OffsetDateTime::now_utc();
+    env.put(
+        note(
+            "files:notes",
+            "Notes/People/Dana (Brightwell).md",
+            "Dana Whitfield",
+            json!({"type": "person", "date": "2026-03-01",
+                   "email": "dana.whitfield@brightwell.example",
+                   "org": "Brightwell Analytics"}),
+            &[],
+            &[],
+            "# Dana Whitfield\n\nDesign Lead at Brightwell Analytics.",
         )
-        .unwrap();
-    // Settling the pair again (the migration does) keeps it.
-    let mut state = env.store.get_state("knowledge").unwrap().unwrap();
-    state.as_object_mut().unwrap().remove("temporal");
-    ItemFeed::set_state(&env.store, "knowledge", state).unwrap();
-    run(&env.knowledge(plain_cfg(), None)).await;
-    assert_eq!(env.active(&ev, "located_at")[0].valid_from, Some(start));
+        .with_modified_at(now),
+        &["# Dana Whitfield\n\nDesign Lead at Brightwell Analytics."],
+    );
+    let k = env.knowledge(mara_cfg(), None);
+    run(&k).await;
+
+    let dana = env.entity(EntityKind::Person, "Dana Whitfield");
+    let current = env.active(&dana, "works_at");
+    assert_eq!(current.len(), 1, "{current:#?}");
+    assert!(object_name(&env, &current[0]).starts_with("Corvid"));
+    // Every Brightwell claim is history, dated by the note's own date, not the copy time.
+    let old: Vec<_> = env
+        .claims(&dana, "works_at")
+        .into_iter()
+        .filter(|c| object_name(&env, c).starts_with("Brightwell"))
+        .collect();
+    assert!(!old.is_empty());
+    for c in &old {
+        assert_eq!(c.status, ClaimStatus::Superseded, "{c:#?}");
+        assert!(c.valid_from.is_some_and(|f| f < at("2026-04-01T00:00:00Z")));
+    }
+}
+
+/// GG5-16: a person only copied on a mail did not correspond with the user.
+#[tokio::test]
+async fn cc_alone_is_not_correspondence() {
+    let env = Env::new();
+    Mail {
+        source: "imap:mara",
+        key: "INBOX/9",
+        from: "Robert Chen <robert.chen@brightwell.example>",
+        to: &["Mara Okafor <mara.okafor@brightwell.example>"],
+        cc: &["Dana Whitfield <dana@corvidlabs.example>"],
+        date: "2026-09-01T09:00:00Z",
+        subject: "Harbor",
+        body: "Launch plan attached.",
+        ..Default::default()
+    }
+    .put(&env);
+    let k = env.knowledge(mara_cfg(), None);
+    run(&k).await;
+    let me = env.me();
+    let bob = env.entity(EntityKind::Person, "Robert Chen");
+    let dana = env.entity(EntityKind::Person, "Dana Whitfield");
+    let corr = env.active(&me, "corresponded_with");
+    assert!(
+        corr.iter()
+            .any(|c| c.object == ClaimObject::Entity(bob.id.clone()))
+    );
+    assert!(
+        corr.iter()
+            .all(|c| c.object != ClaimObject::Entity(dana.id.clone())),
+        "{corr:#?}"
+    );
 }

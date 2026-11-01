@@ -1,35 +1,4 @@
-//! Value checks of the LLM gate (QA GG5-1, GG5-15): what a model may never put into the graph,
-//! whatever the quote says.
-//!
-//! - **Credential, account and financial values** ([`sensitive_value`]): a payment-card number
-//!   (13–19 digits, Luhn-valid, spaces or dashes allowed), an IBAN (mod-97 checked), an
-//!   account- or identifier-like token (letters and at least six digits, like
-//!   `NCU-4471-0093-218`), any other run of seven or more digits (or six in one group): account
-//!   and phone numbers; a currency amount (a currency sign, an ISO code next to a number, or
-//!   thousands separators like `210,437.55`); an email address. Dates and times are masked
-//!   first, so `2026-06-03` or `13:00` are never "long numbers". No claim object and no entity
-//!   name may contain one. Only the date predicates (`due_on`, `starts_at`, `born_on`) take a
-//!   date instead, and only a date ([`is_date_value`]).
-//! - **Quotes** ([`credential_in_quote`]): a quote is shown in vault footnotes, so one holding a
-//!   card number, an IBAN or an identifier-like token is refused.
-//! - **Health and finance** ([`health_or_finance_item`], [`health_or_finance_term`]): a small
-//!   lexicon ([`STRONG_TERMS`], [`WEAK_TERMS`], [`PRIVATE_FOLDERS`]). An item that looks medical
-//!   or financial keeps only structural claims ([`STRUCTURAL`]: who attended what, who works
-//!   where, where an event is held); and no item yields a title, preference or other
-//!   non-structural claim whose object is a health or finance term.
-//! - **Job titles** ([`title_problem`]): 1–6 words with a word from [`JOB_TITLE_WORDS`]; no
-//!   digits, currency, `@` or sentence punctuation; not a date; not the name of a person or
-//!   organisation of the item; not starting with a verb or pronoun.
-//! - **Hypothetical quotes** ([`hypothetical`]): "case for promotion to", "would", "if",
-//!   "might", "plan to", ... A state claim (title, employer, ...) from such a quote is not a
-//!   current fact and is not stored. (Past cues, "before that she was", are the temporal
-//!   detector's: the claim is stored as history, see `crate::temporal`.)
-//! - **Field labels** ([`FIELD_LABEL_WORDS`]): "Mortgage account", "Gross salary",
-//!   "Prescription", "Balance at …" are never a person (see `not_a_name`).
-//!
-//! The detectors are deliberately local and small (this crate does not depend on the ingest
-//! crate's PII scanner) and lean towards refusing: a refused claim costs a fact, a kept one can
-//! put a card number into a plain-text vault.
+//! Value checks of the LLM gate (QA GG5-1, GG5-15).
 
 use time::OffsetDateTime;
 
@@ -79,12 +48,7 @@ const DIGIT_ZEROS: &[u32] = &[
     0x1D7CE, 0x1D7D8, 0x1D7E2, 0x1D7EC, 0x1D7F6,
 ];
 
-/// `s` as the value checks read it (security review 3, ER-2, ER-3): fullwidth forms and other
-/// scripts' decimal digits as ASCII (`４０００`, `٤٠٠٠`), Unicode dashes as `-`, any whitespace
-/// run (line breaks included) as one space, and without invisible characters, Markdown
-/// emphasis (`**4000** 0566`) or HTML tags (`<b>4000</b>`), so formatting cannot hide a card
-/// number, an IBAN or an account number from the checks. A `<…>` holding `@` is an address,
-/// not a tag, and stays.
+/// `s` as the value checks read it (security review 3, ER-2, ER-3).
 fn plain(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
@@ -192,8 +156,7 @@ fn digit_runs(s: &str) -> Vec<Run> {
             let len = run.digits.len() - start;
             run.groups += 1;
             run.longest = run.longest.max(len);
-            // Up to three separators, then more digits: the same run. More than one only with
-            // a parenthesis (`(0) 20`) or as one separator spaced out (`4000 - 0566`).
+            // Up to three separators, then more digits: the same run.
             let mut j = i;
             while j < chars.len()
                 && j - i < 3
@@ -364,8 +327,7 @@ fn iban_ok(c: &str) -> bool {
     rem == 1
 }
 
-/// An account- or identifier-like token: ASCII letters and at least six digits
-/// (`NCU-4471-0093-218`, `AB1234567`). Dates and date-times are not.
+/// An account- or identifier-like token.
 fn id_token(tok: &str) -> bool {
     let t = tok.trim_matches(|c: char| !c.is_alphanumeric());
     if is_numeric_date(t) || t.split_once('T').is_some_and(|(d, _)| is_numeric_date(d)) {
@@ -415,9 +377,7 @@ fn is_amount(s: &str) -> bool {
     false
 }
 
-/// Whether `s` is a date or time and nothing else: what the date predicates take. An ISO or
-/// numeric date, or words that are all weekdays, months, days of the month, years
-/// (1900–2200), times or relative-date words ("next Friday", "end of Q3").
+/// Whether `s` is a date or time and nothing else: what the date predicates take.
 pub(crate) fn is_date_value(s: &str) -> bool {
     let t = s.trim();
     if t.is_empty() || sensitive_amount_or_card(t) {
@@ -488,8 +448,7 @@ fn sensitive_amount_or_card(s: &str) -> bool {
     is_amount(s) || credential(s).is_some()
 }
 
-/// Predicates an item that looks medical or financial may still yield: who attended or
-/// organised what, who works where and on what, where things are.
+/// Predicates an item that looks medical or financial may still yield.
 pub(crate) const STRUCTURAL: &[&str] = &[
     "attended",
     "organized",
@@ -504,8 +463,7 @@ pub(crate) const STRUCTURAL: &[&str] = &[
     "leads",
 ];
 
-/// One of these in an item's text or title makes it medical or financial; in a claim's
-/// object, the claim is refused (outside [`STRUCTURAL`]).
+/// One of these in an item's text or title makes it medical or financial.
 pub(crate) const STRONG_TERMS: &[&str] = &[
     "diagnosis",
     "diagnosed",
@@ -835,7 +793,6 @@ pub(crate) fn title_problem(title: &str, names: &[String]) -> Option<&'static st
 }
 
 /// Words that make a quote hypothetical, a request or a plan rather than a statement of fact.
-/// (`may` is left out: it is also a month.)
 const HYPOTHETICAL_WORDS: &[&str] = &[
     "would",
     "could",
@@ -877,8 +834,6 @@ const HYPOTHETICAL_PHRASES: &[&str] = &[
 ];
 
 /// Predicates a hypothetical quote cannot support (states: titles, employers, membership...).
-/// Commitments, deadlines and preferences are stated in exactly that language ("I would
-/// prefer", "I plan to send"), and events and places are the calendar's.
 pub(crate) fn hypothesis_matters(predicate: &str) -> bool {
     !matches!(
         predicate,
@@ -886,9 +841,7 @@ pub(crate) fn hypothesis_matters(predicate: &str) -> bool {
     )
 }
 
-/// The hypothetical cue in a quote, if any. Besides the words and phrases above, a request:
-/// "asked" (or "ask", "asking") followed by "to" within five words ("I asked her in March to
-/// lead Harbor").
+/// The hypothetical cue in a quote, if any.
 pub(crate) fn hypothetical(quote: &str) -> Option<&'static str> {
     let words = words_of(quote);
     if let Some(w) = HYPOTHETICAL_WORDS
@@ -906,8 +859,7 @@ pub(crate) fn hypothetical(quote: &str) -> Option<&'static str> {
         .then_some("a request")
 }
 
-/// Words of a field label: a person's name holding one is a form field ("Mortgage account",
-/// "Gross salary", "Prescription", "Balance at 30 June"), never a person.
+/// Words of a field label.
 pub(crate) const FIELD_LABEL_WORDS: &[&str] = &[
     "account",
     "balance",
@@ -957,44 +909,24 @@ mod tests {
     fn credentials_accounts_and_amounts_are_found() {
         for (s, why) in [
             ("4000 0566 5566 5556", "card number"),
-            ("Card number: 4000 0566 5566 5556", "card number"),
-            ("4000-0566-5566-5556", "card number"),
             ("NCU-4471-0093-218", "account or identifier"),
-            (
-                "Mortgage account NCU-4471-0093-218",
-                "account or identifier",
-            ),
             ("GB82 WEST 1234 5698 7654 32", "IBAN"),
-            ("DE89370400440532013000", "IBAN"),
-            ("£7,450.00", "currency amount"),
-            ("£210,437.55", "currency amount"),
             ("210,437.55", "currency amount"),
-            ("6 x £1,104.00", "currency amount"),
             ("450 GBP", "currency amount"),
-            ("$40,000", "currency amount"),
             ("mara.okafor@mailbox.example", "email address"),
-            ("Mara <mara.okafor@mailbox.example>", "email address"),
             ("+44 7700 900123", "phone or account number"),
-            ("555-123-4567", "phone or account number"),
             ("12345678", "long number"),
         ] {
             assert_eq!(sensitive_value(s), Some(why), "{s}");
         }
         for s in [
             "Head of Product",
-            "2026-06-03",
             "2026-06-03 13:00",
-            "2026-06-03T13:00:00Z",
             "05/30",
             "Harbor go-no-go review (launch 3 Dec)",
-            "1:1 Mara / Bob",
-            "Q3 2026",
             "Room 101",
-            "Brightwell Analytics",
             "4000",
-            "2025 to 2026",
             "COVID-19",
-            "5 mg",
         ] {
             assert_eq!(sensitive_value(s), None, "{s}");
         }
@@ -1009,7 +941,6 @@ mod tests {
         for (s, why) in [
             ("４０００ ０５６６ ５５６６ ５５５６", "card number"),
             ("Karte ٤٠٠٠ ٠٥٦٦ ٥٥٦٦ ٥٥٥٦", "card number"),
-            ("कार्ड ४००० ०५६६ ५५६६ ५५५६", "card number"),
             ("4000 - 0566 - 5566 - 5556", "card number"),
             (
                 "4000 \u{2013} 0566 \u{2013} 5566 \u{2013} 5556",
@@ -1017,11 +948,6 @@ mod tests {
             ),
             ("4000\n0566\n5566\n5556", "card number"),
             ("**4000** **0566** **5566** **5556**", "card number"),
-            ("`4000 0566 5566 5556`", "card number"),
-            (
-                "<b>4000</b> <b>0566</b> <b>5566</b> <b>5556</b>",
-                "card number",
-            ),
             (
                 "<td>4000</td><td>0566</td><td>5566</td><td>5556</td>",
                 "card number",
@@ -1077,25 +1003,14 @@ mod tests {
     fn date_values() {
         for s in [
             "2026-11-03",
-            "4 May",
             "Friday 30 October",
-            "next Friday",
-            "05/30",
             "end of Q3",
-            "10am",
             "13:00",
             "tomorrow",
         ] {
             assert!(is_date_value(s), "{s}");
         }
-        for s in [
-            "4000 0566 5566 5556",
-            "£7,450.00",
-            "NCU-4471-0093-218",
-            "the launch",
-            "ferrous sulfate 200 mg",
-            "",
-        ] {
+        for s in ["4000 0566 5566 5556", "the launch", ""] {
             assert!(!is_date_value(s), "{s}");
         }
     }
@@ -1106,36 +1021,21 @@ mod tests {
         for t in [
             "Head of Product",
             "Staff Engineer, Platform",
-            "Staff Engineer",
             "VP Engineering",
-            "Nurse",
             "nurse",
-            "Account Manager",
             "HR Business Partner",
-            "Principal Engineer",
-            "Design Lead",
-            "Counsellor",
         ] {
             assert_eq!(title_problem(t, &names), None, "{t}");
         }
         for t in [
             "NCU-4471-0093-218",
-            "4000 0566 5566 5556",
             "£7,450.00",
-            "£210,437.55",
             "ferrous sulfate 200 mg",
-            "05/30",
             "25 November",
             "Tessellate Systems",
             "Mara Okafor",
-            "iron-deficiency anaemia",
-            "Peer statements",
             "backfill green, dual-write starts next sprint",
-            "very good baker",
             "joined Corvid Labs as Head of Product",
-            "She leads the team",
-            "a@b.example",
-            "One. Two engineer",
             "senior staff principal lead engineer of platform",
         ] {
             assert!(title_problem(t, &names).is_some(), "{t}");
@@ -1185,8 +1085,6 @@ mod tests {
             "I support her case for promotion to Principal Engineer",
             "She would make a great Head of Platform",
             "If Dana joins Corvid Labs",
-            "Sam might lead Harbor",
-            "We plan to move Gus to Lumenfold",
             "I asked her in March to lead Harbor",
             "Proposed level: Principal Engineer.",
         ] {

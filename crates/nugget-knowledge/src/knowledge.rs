@@ -32,9 +32,8 @@ pub struct RunStats {
     pub items_unchanged: u64,
     pub items_deleted: u64,
     pub items_failed: u64,
-    /// Changed items left as they are because the model could not run for them now (request
-    /// budget spent, power constrained, stopping) and their facts came from the model: they
-    /// are picked up again by the next runs.
+    /// Changed items left as they are because the model could not run for them now (request budget
+    /// spent, power constrained, stopping) and their facts came from the model.
     #[serde(default)]
     pub items_deferred: u64,
     /// Planned items left for the next run (budget exhausted).
@@ -66,9 +65,7 @@ pub struct RunStats {
     pub llm_quotes_rejected: u64,
     /// Entities not named in the text (or malformed).
     pub llm_entities_dropped: u64,
-    /// Items not sent to any model: flagged sensitive (`metadata.sensitive == true`: no model
-    /// at all), or only cloud providers exist and the item is sensitive or its source is not
-    /// allow-listed.
+    /// Items not sent to any model.
     pub llm_skipped_privacy: u64,
     /// Entities whose data changed (also sent to [`Knowledge::subscribe`]rs).
     pub changed_entities: u64,
@@ -107,7 +104,7 @@ impl Inner {
 
     /// The user's splits (a snapshot; [`Knowledge::record_split`] replaces it).
     pub fn splits(&self) -> Result<Arc<Vec<Split>>> {
-        let mut cached = self.splits.lock().unwrap_or_else(|p| p.into_inner());
+        let mut cached = crate::lock(&self.splits);
         if let Some(s) = cached.as_ref() {
             return Ok(s.clone());
         }
@@ -116,13 +113,9 @@ impl Inner {
         Ok(s)
     }
 
-    /// The time the pipeline judges items against: the fixed clock if one is set
-    /// ([`Knowledge::set_clock`]), else the wall clock.
+    /// The time the pipeline judges items against.
     pub fn now(&self) -> time::OffsetDateTime {
-        self.clock
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .unwrap_or_else(time::OffsetDateTime::now_utc)
+        crate::lock(&self.clock).unwrap_or_else(time::OffsetDateTime::now_utc)
     }
 }
 
@@ -137,15 +130,12 @@ pub(crate) struct Inner {
     /// A fixed "now" ([`Knowledge::set_clock`]); `None`: the wall clock.
     clock: Mutex<Option<time::OffsetDateTime>>,
     run_lock: tokio::sync::Mutex<()>,
-    /// What a budget-cut run left of its plan (and whether the LLM was ready when planning),
-    /// picked up by the next run instead of planning again: re-planning diffs every item
-    /// against the ledger, which at scale costs more than the run's own work. Only runs (under
-    /// `run_lock`) write the pipeline state, so the carried state equals what is persisted.
+    /// What a budget-cut run left of its plan (and whether the LLM was ready when planning), picked
+    /// up by the next run instead of planning again.
     carry: Mutex<Option<(bool, Plan)>>,
     /// Items of the current (or carried) plan not processed yet.
     plan_left: AtomicU64,
-    /// The change-log position the current (or carried) plan covers; `None` before the first
-    /// plan (then the stored cursor is used).
+    /// The change-log position the current (or carried) plan covers.
     planned_through: Mutex<Option<Option<u64>>>,
     /// Set by [`Knowledge::interrupt`]: runs stop between items and leave model-extracted
     /// items they cannot finish untouched.
@@ -214,26 +204,16 @@ impl Knowledge {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn inner_for_tests(&self) -> &Inner {
-        &self.inner
-    }
-
     pub fn config(&self) -> &KnowledgeConfig {
         &self.inner.cfg
     }
 
-    /// Fix the time the pipeline judges items against (`None`: the wall clock, the default):
-    /// whether a calendar event has taken place yet (`attended` or only `invited_to`), and the
-    /// horizon far-future item dates are clamped to. For reproducible runs over a corpus
-    /// written as of a known date (benches, tests); takes effect from the next run.
+    /// Fix the time the pipeline judges items against (`None`: the wall clock).
     pub fn set_clock(&self, now: Option<time::OffsetDateTime>) {
-        *self.inner.clock.lock().unwrap_or_else(|p| p.into_inner()) = now;
+        *crate::lock(&self.inner.clock) = now;
     }
 
-    /// Process changed and deleted items within `budget`. Idempotent and resumable: progress
-    /// is persisted as items complete, and an interrupted item is simply redone. Concurrent
-    /// calls run one after the other.
+    /// Process changed and deleted items within `budget`.
     pub async fn run_once(&self, budget: RunBudget) -> Result<RunStats> {
         let _guard = self.inner.run_lock.lock().await;
         self.set_status(|s| s.running = true);
@@ -282,11 +262,7 @@ impl Knowledge {
                     .is_empty()
             });
         // Taken, so a failed run leaves nothing behind and the next one plans afresh.
-        let carried = self
-            .inner
-            .carry
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        let carried = crate::lock(&self.inner.carry)
             .take()
             .filter(|(ready, _)| *ready == llm_ready);
         let mut p = match carried {
@@ -301,11 +277,7 @@ impl Knowledge {
         };
         let total = (p.deletes.len() + p.upserts.len()) as u64;
         self.inner.plan_left.store(total, Ordering::Relaxed);
-        *self
-            .inner
-            .planned_through
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = Some(p.next_cursor);
+        *crate::lock(&self.inner.planned_through) = Some(p.next_cursor);
         let mut s = Session::new(
             &self.inner,
             p.state,
@@ -314,8 +286,7 @@ impl Knowledge {
             budget.max_llm_requests,
         );
         s.stats.planned = total;
-        // A graph from before validity intervals: migrate it once, before any item (resumable:
-        // a run out of time continues it next time).
+        // A graph from before validity intervals.
         if s.state.temporal < TEMPORAL_VERSION && s.backfill_validity(deadline)? {
             s.state.temporal = TEMPORAL_VERSION;
         }
@@ -347,8 +318,7 @@ impl Knowledge {
         s.resolve_pending_links()?;
         s.settle_short_names()?;
         if s.retracted_any {
-            // Retractions may leave entities with nothing behind them. Every batch is applied
-            // by now, so whatever is orphaned really is.
+            // Retractions may leave entities with nothing behind them.
             let pruned = self.inner.graph.prune_orphans(None)?;
             s.stats.entities_pruned += pruned.len() as u64;
             s.touched.extend(pruned);
@@ -360,8 +330,7 @@ impl Knowledge {
         if s.stats.remaining == 0
             && let Some(c) = p.next_cursor
         {
-            // Everything up to `c` is processed; a budget cut keeps the old cursor, so the next
-            // run plans the rest again (processed items are then seen as unchanged).
+            // Everything up to `c` is processed.
             s.state.item_cursor = Some(c);
         }
         s.flush()?;
@@ -386,15 +355,14 @@ impl Knowledge {
                 ledgers,
                 ..p
             };
-            *self.inner.carry.lock().unwrap_or_else(|p| p.into_inner()) = Some((llm_ready, rest));
+            *crate::lock(&self.inner.carry) = Some((llm_ready, rest));
         }
         Ok((stats, state))
     }
 
     /// Stop: the running run (if any) ends after the item at hand, and an item whose facts came
-    /// from the model is left as it is rather than re-extracted without it (its in-flight
-    /// request may be cut off). Later runs do nothing until [`Knowledge::resume`]. For daemon
-    /// shutdown, before the model runtime stops.
+    /// from the model is left as it is rather than re-extracted without it (its in-flight request
+    /// may be cut off).
     pub fn interrupt(&self) {
         self.inner.stopping.store(true, Ordering::Relaxed);
     }
@@ -406,11 +374,7 @@ impl Knowledge {
 
     fn forget_plan(&self) {
         self.inner.plan_left.store(0, Ordering::Relaxed);
-        *self
-            .inner
-            .planned_through
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = None;
+        *crate::lock(&self.inner.planned_through) = None;
     }
 
     /// Wait until no run is in progress (a run started later is not waited for).
@@ -418,24 +382,13 @@ impl Knowledge {
         drop(self.inner.run_lock.lock().await);
     }
 
-    /// Whether the item change log has moved past what the last plan covered and no carried
-    /// plan is open: items were written after it (an ingest commit, or a store write that is
-    /// not one, such as an embedding backfill), so a new plan is due. Blocking (store reads).
+    /// Whether the item change log has moved past what the last plan covered and no carried plan is
+    /// open.
     pub fn has_unplanned_changes(&self) -> Result<bool> {
-        if self
-            .inner
-            .carry
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some()
-        {
+        if crate::lock(&self.inner.carry).is_some() {
             return Ok(false);
         }
-        let through = *self
-            .inner
-            .planned_through
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let through = *crate::lock(&self.inner.planned_through);
         let feed = self.inner.feed.as_ref();
         let cursor = match through {
             Some(c) => c,
@@ -447,18 +400,11 @@ impl Knowledge {
         })
     }
 
-    /// Items not extracted yet: what is left of the current or carried plan, plus the items
-    /// changed after the change-log position that plan covers (not planned yet), plus items
-    /// deferred for the model. Without a change log only the plan is counted. Blocking (store
-    /// reads): call it off the async runtime.
+    /// Items not extracted yet.
     pub fn pending_items(&self) -> Result<u64> {
         const MAX_COUNTED: usize = 100_000;
         let left = self.inner.plan_left.load(Ordering::Relaxed);
-        let through = *self
-            .inner
-            .planned_through
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let through = *crate::lock(&self.inner.planned_through);
         let feed = self.inner.feed.as_ref();
         let state = State::load(feed)?;
         let cursor = match through {
@@ -473,11 +419,7 @@ impl Knowledge {
         }
         // A carried plan already holds the deferred items it planned (while a run is going,
         // its own may be counted twice until it ends).
-        let carried: HashSet<nugget_core::ids::ItemRef> = self
-            .inner
-            .carry
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        let carried: HashSet<nugget_core::ids::ItemRef> = crate::lock(&self.inner.carry)
             .as_ref()
             .map(|(_, p)| p.upserts.iter().map(|w| w.item.clone()).collect())
             .unwrap_or_default();
@@ -491,11 +433,7 @@ impl Knowledge {
 
     /// Current status (cheap).
     pub fn status(&self) -> KnowledgeStatus {
-        self.inner
-            .status
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+        crate::lock(&self.inner.status).clone()
     }
 
     /// Entity ids changed by each run (sent once per run that changed something).
@@ -504,15 +442,10 @@ impl Knowledge {
     }
 
     /// Forget which items were processed, so the next runs re-extract everything (e.g. after
-    /// enabling the LLM extractor or changing the configuration). The graph is kept;
-    /// re-extraction replaces each item's evidence.
+    /// enabling the LLM extractor or changing the configuration).
     pub async fn reset(&self) -> Result<()> {
         let _guard = self.inner.run_lock.lock().await;
-        self.inner
-            .carry
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .take();
+        crate::lock(&self.inner.carry).take();
         self.forget_plan();
         let feed = self.inner.feed.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
@@ -531,17 +464,15 @@ impl Knowledge {
     }
 
     /// Remember that the user split `new` off `from` (call right after `GraphStore::split`), so
-    /// re-extraction never merges them back together, and the occurrences the split moved (by
-    /// item, or by a name only `new` has) keep resolving to `new` with their facts. Kept until
-    /// the user merges the two again or one of them is gone; [`Knowledge::reset`] and extractor
-    /// upgrades keep it. Blocking (store writes): call it off the async runtime.
+    /// re-extraction never merges them back together, and the occurrences the split moved (by item,
+    /// or by a name only `new` has) keep resolving to `new` with their facts.
     pub fn record_split(&self, from: &EntityId, new: &EntityId) -> Result<()> {
         let Some(split) = crate::splits::describe(self.inner.graph.as_ref(), from, new)? else {
             return Err(Error::NotFound(format!(
                 "split of {new} off {from}: an entity is missing"
             )));
         };
-        let mut cached = self.inner.splits.lock().unwrap_or_else(|p| p.into_inner());
+        let mut cached = crate::lock(&self.inner.splits);
         let mut list: Vec<Split> = match cached.as_ref() {
             Some(s) => s.as_ref().clone(),
             None => crate::splits::load(self.inner.feed.as_ref())?,
@@ -566,6 +497,6 @@ impl Knowledge {
     }
 
     fn set_status(&self, f: impl FnOnce(&mut KnowledgeStatus)) {
-        f(&mut self.inner.status.lock().unwrap_or_else(|p| p.into_inner()));
+        f(&mut crate::lock(&self.inner.status));
     }
 }

@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use nugget_core::Result;
 use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::{ItemRef, ProviderId};
-use nugget_graph::{Claim, ClaimObject, Entity, EntityKind, EntityQuery, GraphStore, MemGraph};
+use nugget_graph::{Claim, Entity, EntityKind, EntityQuery, GraphStore, MemGraph};
 use nugget_infer::{
     ChatEvent, ChatRequest, ChatStream, Part, Provider, ProviderKind, ProviderMeta, Router,
     StopReason,
@@ -17,6 +17,8 @@ use nugget_infer::{
 use nugget_knowledge::{Knowledge, KnowledgeConfig, RunBudget, RunStats};
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
 use serde_json::{Value, json};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 pub struct Env {
     pub store: Store,
@@ -116,13 +118,6 @@ impl Env {
     }
 }
 
-pub fn obj(c: &Claim) -> String {
-    match &c.object {
-        ClaimObject::Entity(e) => e.to_string(),
-        ClaimObject::Literal(l) => l.clone(),
-    }
-}
-
 pub fn item_ref(source: &str, key: &str) -> ItemRef {
     ItemRef {
         source: nugget_core::ids::SourceId::new(source),
@@ -132,6 +127,27 @@ pub fn item_ref(source: &str, key: &str) -> ItemRef {
 
 pub async fn run(k: &Knowledge) -> RunStats {
     k.run_once(RunBudget::unlimited()).await.unwrap()
+}
+
+pub fn at(s: &str) -> OffsetDateTime {
+    OffsetDateTime::parse(s, &Rfc3339).unwrap()
+}
+
+/// A phone contact card for Alice Smith at `org`, modified at `modified`.
+pub fn card(key: &str, org: &str, modified: &str) -> NewItem {
+    NewItem::new(
+        "contacts:phone",
+        key,
+        content_hash(format!("{key}{org}{modified}")),
+    )
+    .with_mime("application/json")
+    .with_version(format!("{key}{org}{modified}"))
+    .with_modified_at(at(modified))
+    .with_metadata(json!({
+        "source": {"contact": {"name": "Alice Smith", "emails": ["alice@example.org"],
+                                "organization": org}},
+        "sensitive": false
+    }))
 }
 
 /// A mail item as ingest stores it (`metadata.extracted` holds the parsed headers).
@@ -270,7 +286,6 @@ pub struct FakeProvider {
     script: Box<Script>,
     pub prompts: Mutex<Vec<String>>,
     pub systems: Mutex<Vec<String>>,
-    pub embeddings: HashMap<String, Vec<f32>>,
 }
 
 impl FakeProvider {
@@ -285,21 +300,6 @@ impl FakeProvider {
             script: Box::new(script),
             prompts: Mutex::new(Vec::new()),
             systems: Mutex::new(Vec::new()),
-            embeddings: HashMap::new(),
-        })
-    }
-
-    pub fn embedder(id: &str, vectors: &[(&str, Vec<f32>)]) -> Arc<Self> {
-        Arc::new(Self {
-            id: ProviderId::new(id),
-            locality: Locality::OnDevice,
-            script: Box::new(|_| "{}".into()),
-            prompts: Mutex::new(Vec::new()),
-            systems: Mutex::new(Vec::new()),
-            embeddings: vectors
-                .iter()
-                .map(|(k, v)| ((*k).to_owned(), v.clone()))
-                .collect(),
         })
     }
 
@@ -351,15 +351,7 @@ impl Provider for FakeProvider {
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        Ok(texts
-            .iter()
-            .map(|t| {
-                self.embeddings
-                    .get(t)
-                    .cloned()
-                    .unwrap_or_else(|| vec![0.0, 0.0, 1.0])
-            })
-            .collect())
+        Ok(texts.iter().map(|_| vec![0.0, 0.0, 1.0]).collect())
     }
 }
 

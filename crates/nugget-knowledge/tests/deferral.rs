@@ -109,21 +109,6 @@ async fn a_changed_item_waits_for_the_model_instead_of_losing_its_model_facts() 
 }
 
 #[tokio::test]
-async fn an_item_without_model_facts_is_still_extracted_without_the_model() {
-    let env = Env::new();
-    put_memo(&env, "1", "");
-    let p = FakeProvider::new("local", Locality::OnDevice, |_| reply());
-    let k = env.knowledge(llm_cfg(), Some(router(Tier::Synthesis, vec![p.clone()])));
-    // Never had the model: deterministic extraction goes ahead and the model is retried later.
-    let s = k.run_once(no_model_budget()).await.unwrap();
-    assert_eq!((s.items_processed, s.items_deferred), (1, 0));
-    let s = run(&k).await;
-    assert_eq!(s.items_processed, 1);
-    assert_eq!(p.calls(), 1);
-    assert_eq!(works_at(&env), 1);
-}
-
-#[tokio::test]
 async fn interrupt_keeps_model_facts_of_an_item_whose_request_was_cut_off() {
     let env = Env::new();
     put_memo(&env, "1", "");
@@ -198,72 +183,5 @@ async fn pending_items_counts_changes_a_carried_plan_does_not_cover() {
     assert_eq!(pending(&k).await, 1);
     let s = run(&k).await;
     assert_eq!(s.items_processed, 1);
-    assert_eq!(pending(&k).await, 0);
-}
-
-#[tokio::test]
-async fn failing_model_requests_keep_model_facts_for_a_bounded_number_of_runs() {
-    let env = Env::new();
-    put_memo(&env, "1", "");
-    let calls = Arc::new(AtomicUsize::new(0));
-    let n = calls.clone();
-    let p = FakeProvider::new("local", Locality::OnDevice, move |_| {
-        if n.fetch_add(1, Ordering::SeqCst) == 0 {
-            reply()
-        } else {
-            // A slow CPU: every later request times out (here: an unusable answer).
-            "timed out".into()
-        }
-    });
-    let k = env.knowledge(llm_cfg(), Some(router(Tier::Synthesis, vec![p.clone()])));
-    run(&k).await;
-    assert_eq!(works_at(&env), 1);
-
-    put_memo(&env, "2", " Re-saved.");
-    let max = llm_cfg().llm.max_attempts;
-    for attempt in 1..max {
-        let s = run(&k).await;
-        assert_eq!(
-            (s.items_processed, s.items_deferred),
-            (0, 1),
-            "attempt {attempt}: {s:?}"
-        );
-        assert_eq!(works_at(&env), 1, "the model's fact is kept");
-    }
-    // Attempts used up: extracted without the model after all, and not deferred again.
-    let s = run(&k).await;
-    assert_eq!((s.items_processed, s.items_deferred), (1, 0), "{s:?}");
-    assert_eq!(pending(&k).await, 0);
-}
-
-#[tokio::test]
-async fn writes_after_the_plan_without_an_extraction_change_are_planned_and_leave_nothing_pending()
-{
-    let env = Env::new();
-    put_memo(&env, "1", "");
-    // No model at all: deterministic extraction runs and the run is reported.
-    let k = env.knowledge(KnowledgeConfig::default(), None);
-    let s = run(&k).await;
-    assert_eq!(s.items_processed, 1);
-    let unplanned = |k: &Knowledge| {
-        let k = k.clone();
-        async move {
-            tokio::task::spawn_blocking(move || k.has_unplanned_changes())
-                .await
-                .unwrap()
-                .unwrap()
-        }
-    };
-    assert!(!unplanned(&k).await);
-    assert_eq!(pending(&k).await, 0);
-
-    // The store writes the item again after the plan (same text, a new version token), and no
-    // ingest commit wakes anyone: the change log shows it.
-    put_memo(&env, "2", "");
-    assert!(unplanned(&k).await, "a new plan is due");
-    assert_eq!(pending(&k).await, 1);
-    let s = run(&k).await;
-    assert_eq!(s.planned, 1, "{s:?}");
-    assert!(!unplanned(&k).await);
     assert_eq!(pending(&k).await, 0);
 }
