@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use nugget_connector::CancellationToken;
 use nugget_core::{Error, Result};
@@ -244,8 +244,10 @@ fn read_book(conn: &Connection, book: &mut ContactBook) -> Result<()> {
     Ok(())
 }
 
-/// Read every address book under `dir` (copies in `tmp`). Failures are logged, never fatal.
-pub fn load_contacts(dir: &Path, tmp: &Path) -> ContactBook {
+/// Read every address book under `dir` (copies in `tmp`), and whether every one could be
+/// read. Failures are logged, never fatal.
+fn load_contacts_checked(dir: &Path, tmp: &Path) -> (ContactBook, bool) {
+    let mut complete = true;
     let mut book = ContactBook::default();
     for (i, path) in address_books(dir).into_iter().enumerate() {
         let sub = tmp.join(format!("ab{i}"));
@@ -255,10 +257,11 @@ pub fn load_contacts(dir: &Path, tmp: &Path) -> ContactBook {
             .and_then(|copy| open_copy(&copy))
             .and_then(|conn| read_book(&conn, &mut book));
         if let Err(e) = res {
+            complete = false;
             tracing::warn!(book = %path.display(), error = %e, "cannot read address book; showing handles instead");
         }
     }
-    book
+    (book, complete)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -666,7 +669,7 @@ fn fingerprint(db: &Path, contacts_dir: Option<&Path>) -> Option<Fingerprint> {
 #[derive(Default)]
 struct PollState {
     /// Taken before the last pass that succeeded end to end, and when that pass ran.
-    last: Option<(Fingerprint, Instant)>,
+    last: Option<(Fingerprint, SystemTime)>,
     /// Taken before the current pass's copy; becomes `last` if the pass succeeds.
     pending: Option<Fingerprint>,
 }
@@ -714,7 +717,9 @@ impl IMessageReader {
         st.pending = None;
         if let (Some(fp), Some((last, at))) = (&fp, &st.last)
             && fp == last
-            && at.elapsed() < self.full_pass_every
+            // Wall-clock time, which (unlike `Instant` on macOS) also runs while the Mac
+            // sleeps; a clock that went backwards makes a full pass due.
+            && at.elapsed().is_ok_and(|age| age < self.full_pass_every)
         {
             return true;
         }
@@ -749,7 +754,14 @@ impl Reader for IMessageReader {
             .tempdir_in(&self.scratch)?;
         let copy = copy_db(&self.db, tmp.path(), true)?;
         let contacts = match &self.contacts_dir {
-            Some(dir) => load_contacts(dir, tmp.path()),
+            Some(dir) => {
+                let (book, complete) = load_contacts_checked(dir, tmp.path());
+                if !complete {
+                    // Names may be missing this time: do not let later passes skip the read.
+                    self.state().pending = None;
+                }
+                book
+            }
             None => ContactBook::default(),
         };
         let conn = open_copy(&copy)?;
@@ -770,10 +782,14 @@ impl Reader for IMessageReader {
         Duration::from_secs(120)
     }
 
+    fn remembers_passes(&self) -> bool {
+        true
+    }
+
     fn pass_succeeded(&self) {
         let mut st = self.state();
         if let Some(fp) = st.pending.take() {
-            st.last = Some((fp, Instant::now()));
+            st.last = Some((fp, SystemTime::now()));
         }
     }
 }
@@ -973,6 +989,53 @@ mod tests {
         r.pass_succeeded();
         assert_eq!(read(&r), (0, true));
         assert_eq!(r.copies(), 4);
+    }
+
+    /// A pass with an address book that could not be read is not a complete pass: the next
+    /// one reads again.
+    #[test]
+    fn an_unreadable_address_book_keeps_the_next_pass_reading() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (db, _conn) = wal_db(tmp.path());
+        settle(&db);
+        let ab = tmp.path().join("AB");
+        std::fs::create_dir_all(&ab).unwrap();
+        let book = ab.join("AddressBook-v22.abcddb");
+        // Readable, but a row that cannot be read (a text primary key).
+        Connection::open(&book)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE ZABCDRECORD (Z_PK TEXT, ZFIRSTNAME TEXT);
+                 INSERT INTO ZABCDRECORD VALUES ('x', 'Ann');",
+            )
+            .unwrap();
+        settle(&book);
+        let r = IMessageReader::new(db.clone(), Some(ab), tmp.path().join("scratch"));
+        for _ in 0..2 {
+            assert_eq!(read(&r), (1, false));
+            r.pass_succeeded();
+        }
+        assert_eq!(r.copies(), 2);
+    }
+
+    /// A full pass is due once `full_pass_every` has passed by the wall clock, also when the
+    /// clock went backwards.
+    #[test]
+    fn a_full_pass_is_due_after_the_interval_or_a_clock_jump() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (db, _conn) = wal_db(tmp.path());
+        settle(&db);
+        let r = reader(&db, &tmp.path().join("scratch"));
+        assert_eq!(read(&r), (1, false));
+        r.pass_succeeded();
+        assert_eq!(read(&r), (0, true));
+        r.state().last.as_mut().unwrap().1 = SystemTime::now() - FULL_PASS_EVERY;
+        assert_eq!(read(&r), (1, false));
+        r.pass_succeeded();
+        assert_eq!(read(&r), (0, true));
+        r.state().last.as_mut().unwrap().1 = SystemTime::now() + Duration::from_secs(3600);
+        assert_eq!(read(&r), (1, false));
+        assert_eq!(r.copies(), 3);
     }
 
     /// A file modified just now is not trusted to be unchanged by its stamp alone.
