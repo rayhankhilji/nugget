@@ -44,6 +44,7 @@ impl BriefCard {
             summary: c
                 .enrichment
                 .as_ref()
+                .filter(|e| !c.sensitive && e.confidence >= 0.5)
                 .map_or_else(|| c.detail.clone(), |e| e.summary.clone()),
             title_text: c.title_text.clone(),
             summary_text: c
@@ -144,7 +145,13 @@ pub fn compose(
                 .collect(),
             prep_card: prep_card.map(|c| c.id.clone()),
             prep: prep_card
-                .map(|c| c.evidence[1..].to_vec())
+                .map(|c| {
+                    let mut ev = c.evidence[1..].to_vec();
+                    if c.sensitive {
+                        ev.iter_mut().for_each(|e| e.quote = None);
+                    }
+                    ev
+                })
                 .unwrap_or_default(),
         });
     }

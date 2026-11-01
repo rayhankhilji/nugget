@@ -48,7 +48,8 @@ pub fn mail_ref(key: &str) -> ItemRef {
 
 /// Puts mail, one per line: `key|from|to|subject|days ago|labels|reply to|flags|body`. An empty
 /// `from` or `to` is the user, empty labels are `INBOX` (`SENT` when from the user), `reply to`
-/// is the key of the message answered, flags are `unsub`, `bulk` and `sensitive`. Message ids
+/// is the key of the message answered, flags are `unsub`, `bulk`, `cc` (the user on Cc) and
+/// `sensitive`. Message ids
 /// are `<key@test>`; `\n` in the body is a newline.
 pub fn put_mails(store: &Store, table: &str) {
     for line in table.lines().filter(|l| !l.trim().is_empty()) {
@@ -82,6 +83,9 @@ pub fn put_mails(store: &Store, table: &str) {
         }
         if flags.contains("unsub") {
             extracted["list_unsubscribe"] = json!("<mailto:u@list.test>");
+        }
+        if flags.contains("cc") {
+            extracted["cc"] = json!([ME]);
         }
         if flags.contains("bulk") {
             extracted["headers"] = json!({"Precedence": "bulk"});

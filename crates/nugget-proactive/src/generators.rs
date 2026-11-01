@@ -40,6 +40,11 @@ impl GenContext<'_> {
         (self.now - t).as_seconds_f64() / 86_400.0
     }
 
+    /// Calendar days from `t` to now in the user's zone (yesterday 23:00 is 1 day ago at 07:00).
+    fn local_days_ago(&self, t: OffsetDateTime) -> i64 {
+        (self.cfg.to_local(self.now).date() - self.cfg.to_local(t).date()).whole_days()
+    }
+
     /// Relationship strength in `[0, 1]` with the strongest of `emails`: graph claims and
     /// mentions of their person entity, and how often the user wrote to them.
     pub fn importance<'e>(&self, emails: impl IntoIterator<Item = &'e str>) -> f64 {
@@ -118,6 +123,22 @@ fn reply_subject(s: &str) -> String {
 
 // ---- unanswered threads ----
 
+/// Whether `body` names the user: their first name (from their sent mail) or their address.
+fn names_user(c: &Corpus, body: &str) -> bool {
+    let own = own_text(body).to_lowercase();
+    let words: Vec<&str> = own
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    c.mail
+        .iter()
+        .filter(|m| m.from_user)
+        .filter_map(|m| m.from.as_ref()?.name.as_deref()?.split_whitespace().next())
+        .map(str::to_lowercase)
+        .chain(c.user_addresses.iter().cloned())
+        .any(|n| words.contains(&n.as_str()) || (n.contains('@') && own.contains(&n)))
+}
+
 /// Inbound mail from real people, addressed to the user, that asks something and has no later
 /// reply from the user, 1–14 days old. Newsletters, automated senders, role mailboxes and
 /// calendar replies never qualify.
@@ -136,8 +157,14 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
             continue;
         }
         let Some(from) = &last.from else { continue };
-        let age = ctx.days_ago(last.date);
-        if age < ctx.cfg.unanswered_min_days as f64 || age > ctx.cfg.unanswered_max_days as f64 {
+        // What arrived since the user last wrote: a nudge ("Any update?") keeps the card that
+        // the first of these started, with its age and id (GG4-12).
+        let waiting_from = human.iter().rposition(|m| m.from_user).map_or(0, |i| i + 1);
+        let first = human[waiting_from];
+        let age = ctx.days_ago(first.date);
+        if ctx.local_days_ago(first.date) < ctx.cfg.unanswered_min_days
+            || ctx.days_ago(last.date) > ctx.cfg.unanswered_max_days as f64
+        {
             continue;
         }
         let direct = last.to.iter().any(|a| c.is_user(&a.email));
@@ -146,9 +173,16 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
         if !c.user_addresses.is_empty() && !direct && !cc {
             continue;
         }
+        // On Cc only, an ask is for someone else unless it names the user (GG4-13).
+        if !direct && cc && !names_user(c, &last.body) {
+            continue;
+        }
         // Only a message that asks something or requests an action is waiting on the user: FYIs,
         // thanks and closing replies ("Done, you're on from the 1st.") are not.
-        if !asks_something(&last.body) {
+        if !human[waiting_from..]
+            .iter()
+            .any(|m| asks_something(&m.body))
+        {
             continue;
         }
         let question = true;
@@ -158,10 +192,10 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
         if let Some(mine) = human.iter().rev().find(|m| m.from_user) {
             evidence_list.push(evidence(mine, lead(&mine.body)));
         }
-        let msg_key = last
+        let msg_key = first
             .message_id
             .clone()
-            .unwrap_or_else(|| last.item.key.as_str().to_owned());
+            .unwrap_or_else(|| first.item.key.as_str().to_owned());
         let dedup_key = format!("unanswered:{}", stable_hash(&[&last.thread, &msg_key]));
         let mut to = vec![from.email.clone()];
         let cc_list: Vec<String> = last
@@ -191,7 +225,7 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 subject: last.subject.clone(),
             }),
         ];
-        let days = age.floor() as i64;
+        let days = ctx.local_days_ago(first.date);
         out.push(Candidate {
             dedup_key,
             kind: CandidateKind::UnansweredThread,
@@ -1258,7 +1292,9 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
             continue;
         }
         let age = ctx.days_ago(last.date);
-        if age < ctx.cfg.awaiting_reply_days as f64 || age > ctx.cfg.followup_max_days as f64 {
+        if ctx.local_days_ago(last.date) < ctx.cfg.awaiting_reply_days
+            || age > ctx.cfg.followup_max_days as f64
+        {
             continue;
         }
         if !asks_something(&last.body) {
@@ -1275,7 +1311,7 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
             .message_id
             .clone()
             .unwrap_or_else(|| last.item.key.as_str().to_owned());
-        let days = age.floor() as i64;
+        let days = ctx.local_days_ago(last.date);
         let who = first.display();
         out.push(Candidate {
             dedup_key: format!("awaiting:{}", stable_hash(&[&last.thread, &msg_key])),

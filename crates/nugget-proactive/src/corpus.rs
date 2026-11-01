@@ -158,6 +158,15 @@ fn automated_local(local: &str) -> bool {
         "community",
         "webmaster",
         "security",
+        "hr",
+        "people",
+        "peopleops",
+        "payroll",
+        "benefits",
+        "recruiting",
+        "talent",
+        "legal",
+        "compliance",
     ];
     const PARTS: &[&str] = &[
         "noreply",
@@ -546,6 +555,31 @@ fn header(meta: &Value, name: &str) -> Option<String> {
     None
 }
 
+/// Marked confidential by its sender: kept from cloud models and never quoted on cards.
+fn confidential(subject: &str, body: &str) -> bool {
+    const MARKS: &[&str] = &[
+        "confidential",
+        "do not share",
+        "don't share",
+        "do not forward",
+        "don't forward",
+        "vertraulich",
+        "confidentiel",
+        "confidencial",
+        "riservato",
+        "गोपनीय",
+        "機密",
+        "机密",
+        "保密",
+        "سري للغاية",
+    ];
+    let head: String = body.chars().take(4000).collect();
+    let text = format!("{subject}\n{head}")
+        .to_lowercase()
+        .replace('\u{2019}', "'");
+    MARKS.iter().any(|m| text.contains(m))
+}
+
 fn sensitive(meta: &Value) -> bool {
     // Same rule as retrieval: only an explicit `false` means not sensitive.
     meta.get("sensitive") != Some(&Value::Bool(false))
@@ -609,6 +643,7 @@ fn parse_mail(item: &Item) -> Option<MailMessage> {
         .into_iter()
         .map(|l| l.trim().trim_start_matches('\\').to_uppercase())
         .collect();
+    let confidential = confidential(&subject, &body);
     Some(MailMessage {
         item: item.item.clone(),
         message_id: str_at(meta, &["extracted", "message_id"])
@@ -630,7 +665,7 @@ fn parse_mail(item: &Item) -> Option<MailMessage> {
         precedence: header(meta, "Precedence").map(|p| p.trim().to_lowercase()),
         auto_submitted: header(meta, "Auto-Submitted").map(|p| p.trim().to_lowercase()),
         junk: meta.get("junk") == Some(&Value::Bool(true)),
-        sensitive: sensitive(meta),
+        sensitive: sensitive(meta) || confidential,
         url: url(meta),
         from_user: false,
         thread: String::new(),

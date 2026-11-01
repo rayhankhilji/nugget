@@ -51,13 +51,25 @@ pub(crate) fn card_view(c: &Card, supports: &dyn Fn(&Action) -> bool) -> CardVie
         detail: c.detail.clone(),
         title_text: c.title_text.clone(),
         detail_text: c.detail_text.clone(),
-        summary: c.enrichment.as_ref().map(|e| e.summary.clone()),
+        // Sensitive cards are never quoted (GG4-7): no evidence quotes, no model summary.
+        summary: c
+            .enrichment
+            .as_ref()
+            .filter(|_| !c.sensitive)
+            .map(|e| e.summary.clone()),
         people: c.people.clone(),
         due: c.due,
         score: c.score,
         rank: c.rank,
         factors: c.factors.iter().map(factor).collect(),
-        evidence: c.evidence.iter().map(evidence).collect(),
+        evidence: c
+            .evidence
+            .iter()
+            .map(|e| CardEvidence {
+                quote: e.quote.clone().filter(|_| !c.sensitive),
+                ..evidence(e)
+            })
+            .collect(),
         actions: c
             .actions
             .iter()
