@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -100,7 +100,7 @@ jobs:
 
       - name: Upload bench reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-perf-real-${{ inputs.scale || 'full' }}
           path: ${{ runner.temp }}/bench-results/
@@ -132,7 +132,7 @@ jobs:
       NUGGET_BENCH_FAKE_LLAMA_SERVER: ${{ github.workspace }}/target/debug/nuggetd-fake-llama-server
       NUGGET_BENCH_SHELL: ${{ github.workspace }}/target/debug/nugget-desktop
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # The whole history when an older shell is built too (`git worktree add <ref>`).
@@ -159,11 +159,11 @@ jobs:
           prefix-key: v0-rust-energy
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: apps/desktop/package.json
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
 
@@ -271,7 +271,7 @@ jobs:
 
       - name: Upload energy reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-energy-${{ matrix.os }}-${{ env.SCALE }}
           path: ${{ env.RESULTS }}/
@@ -293,7 +293,7 @@ jobs:
       RESULTS: ${{ github.workspace }}/energy-results
       NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -308,7 +308,7 @@ jobs:
       # Models and llama-server builds, keyed by the signed manifest that pins them (as
       # evals.yml). The store re-verifies SHA-256 on install.
       - name: Cache models and runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: bench/.local-models/data/models
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
@@ -370,7 +370,7 @@ jobs:
 
       - name: Upload prefill reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-energy-prefill-${{ matrix.os }}
           path: ${{ env.RESULTS }}/
@@ -396,7 +396,7 @@ jobs:
       ITEMS: ${{ matrix.items }}
       RESULTS: ${{ github.workspace }}/scale-results
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: ${{ env.BEFORE_REF != '' && '0' || '1' }}
@@ -482,7 +482,7 @@ jobs:
 
       - name: Upload scale reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-scale-${{ matrix.items }}
           path: ${{ env.RESULTS }}/

@@ -87,7 +87,7 @@ jobs:
               knowledge --knowledge-items all
               --knowledge-dump eval-results/knowledge-dump-all.jsonl
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -101,7 +101,7 @@ jobs:
       # Models and llama-server builds, keyed by the signed manifest that pins them. The store
       # re-verifies SHA-256 on install, so a stale or corrupt cache entry is re-downloaded.
       - name: Cache models and runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: bench/.local-models/data/models
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
@@ -173,7 +173,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-${{ matrix.suite }}
           path: |
@@ -206,7 +206,7 @@ jobs:
               --ask-judge model --ask-judge-model qwen3-8b-q4km --ask-judge-timeout-s 240
               --ask-dump eval-results/ask-answers.jsonl
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -218,7 +218,7 @@ jobs:
           shared-key: evals
 
       - name: Cache models and runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: bench/.local-models/data/models
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
@@ -258,7 +258,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-${{ matrix.suite }}
           path: |
@@ -307,7 +307,7 @@ jobs:
               draft-1.7b draft --draft-judge model --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --draft-dump eval-results/draft-1.7b/drafts.jsonl
               draft-0.6b draft --draft-judge model --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --draft-dump eval-results/draft-0.6b/drafts.jsonl
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -320,7 +320,7 @@ jobs:
 
       # Keyed by the signed manifest and the pending entries the runs install.
       - name: Cache models and runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: bench/.local-models/data/models
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json', 'manifests/pending/*.json') }}
@@ -379,7 +379,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-${{ matrix.suite }}
           path: |
@@ -422,7 +422,7 @@ jobs:
               hash memory --backend real
               nomic memory --backend real --local-models
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -434,7 +434,7 @@ jobs:
           shared-key: evals
 
       - name: Cache models and runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: bench/.local-models/data/models
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
@@ -495,7 +495,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-memory-${{ matrix.scale }}
           path: |
@@ -537,7 +537,7 @@ jobs:
               triage-off NUGGET_BENCH_CUA_TRIAGE=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
               triage-on NUGGET_BENCH_CUA_TRIAGE=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -549,7 +549,7 @@ jobs:
           shared-key: evals
 
       - name: Cache models and runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: bench/.local-models/data/models
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
@@ -605,7 +605,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-${{ matrix.suite }}
           path: |
