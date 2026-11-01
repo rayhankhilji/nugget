@@ -1,7 +1,6 @@
 # Benchmark reports are machine-specific; publish curated numbers in the README instead.
-# Exceptions: the nightly results the README table and the dashboard are generated from.
+# Exception: the nightly results the README table and the dashboard are generated from.
 /results/*
 !/results/latest.json
-!/results/history/
 # `--local-models` downloads (models and llama-server builds).
 /.local-models/

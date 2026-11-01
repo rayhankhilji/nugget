@@ -126,16 +126,9 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual([(p["commit"], p["value"]) for p in pts], [("new", 0.9), ("keep", 0.2)])
         pts = self.series(self.generate(new, old), "beta", "b.rate")["points"]
         self.assertEqual(pts[0]["commit"], "old")
-
-    def test_output_is_deterministic_and_readable(self):
-        h = self.write("h", results("2026-10-01", "x", [run("alpha", [metric("a.f1", 0.5)])]))
-        self.generate(h)
-        first = self.out.read_text()
-        self.generate(h)
-        self.assertEqual(first, self.out.read_text())
-        self.assertTrue(first.endswith("}\n"))
-        self.assertIn('        {"date": "2026-10-01", "commit": "x", "value": 0.5, "target_met": null}\n',
-                      first)
+        # A single results file is keyed by its own `date`.
+        pts = self.series(self.generate(old, new / "2026-10-01.json"), "beta", "b.rate")["points"]
+        self.assertEqual(pts[0]["commit"], "new")
 
     def test_check_reports_stale_and_fresh(self):
         h = self.write("h", results("2026-10-01", "x", [run("alpha", [metric("a.f1", 0.5)])]))

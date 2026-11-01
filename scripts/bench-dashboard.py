@@ -7,13 +7,13 @@ workflow writes) and the headline metrics listed in `scripts/bench-runs.json`, a
 each holding one point per day that has an `ok` report with that metric.
 
 Usage:
-    python3 scripts/bench-dashboard.py                       # reads bench/results/history
+    python3 scripts/bench-dashboard.py                       # reads bench/results/latest.json
     python3 scripts/bench-dashboard.py --history DIR [--history DIR2 ...]
     python3 scripts/bench-dashboard.py --check               # exit 1 if history.json is stale
 
 Options:
-    --history DIR  a directory of YYYY-MM-DD.json files; repeatable. When two directories hold the
-                   same date, the later one wins. A missing or empty directory adds nothing.
+    --history PATH a directory of YYYY-MM-DD.json files, or one results file (keyed by its `date`);
+                   repeatable, the later one wins on the same date. A missing path adds nothing.
     --runs FILE    the run list (default: scripts/bench-runs.json).
     --out FILE     where to write (default: docs/book/src/benchmarks/history.json).
     --check        write nothing; exit 1 when FILE differs from what would be written.
@@ -39,19 +39,19 @@ def load_history(dirs: list[Path]) -> dict[str, dict]:
     """date -> results document; later directories win on duplicate dates."""
     days: dict[str, dict] = {}
     for d in dirs:
-        if not d.is_dir():
-            continue
-        for f in sorted(d.iterdir()):
+        files = sorted(d.iterdir()) if d.is_dir() else [d] if d.is_file() else []
+        for f in files:
             m = DATE_FILE.match(f.name)
-            if not m or not f.is_file():
+            if d.is_dir() and not (m and f.is_file()):
                 continue
             try:
                 doc = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as e:
                 print(f"bench-dashboard: skipping {f}: {e}", file=sys.stderr)
                 continue
-            if isinstance(doc, dict):
-                days[m.group(1)] = doc
+            date = m.group(1) if m else doc.get("date") if isinstance(doc, dict) else None
+            if isinstance(doc, dict) and isinstance(date, str):
+                days[date] = doc
     return days
 
 
@@ -136,13 +136,13 @@ def render(data: dict) -> str:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--history", action="append", type=Path,
-                   help="directory of YYYY-MM-DD.json files (repeatable; later wins)")
+                   help="a directory of YYYY-MM-DD.json files, or one results file (repeatable; later wins)")
     p.add_argument("--runs", type=Path, default=ROOT / "scripts" / "bench-runs.json")
     p.add_argument("--out", type=Path, default=ROOT / "docs" / "book" / "src" / "benchmarks" / "history.json")
     p.add_argument("--check", action="store_true", help="exit 1 if --out is stale")
     a = p.parse_args(argv)
 
-    dirs = a.history or [ROOT / "bench" / "results" / "history"]
+    dirs = a.history or [ROOT / "bench" / "results" / "latest.json"]
     runs_doc = json.loads(a.runs.read_text(encoding="utf-8"))
     data = build(runs_doc, load_history(dirs))
     text = render(data)

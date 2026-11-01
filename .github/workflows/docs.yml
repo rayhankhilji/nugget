@@ -41,7 +41,7 @@ jobs:
       - name: Check the README benchmarks table
         run: python3 scripts/bench-readme.py --check
 
-      # Likewise the dashboard data, from the history committed in bench/results/history.
+      # Likewise the dashboard data, from the committed bench/results/latest.json.
       - name: Check the benchmark dashboard data
         run: python3 scripts/bench-dashboard.py --check
 
