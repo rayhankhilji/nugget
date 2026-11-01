@@ -48,3 +48,13 @@ pub struct ItemRef {
     pub source: SourceId,
     pub key: ItemKey,
 }
+
+/// Source of the voice samples `nugget-voice` keeps: the texts the user sent with Double Tap.
+/// They are a drafting aid only, never knowledge: general retrieval (search, Ask, draft
+/// context) and MCP leave them out, and the voice profile reads them from the store directly.
+pub const VOICE_SAMPLES_SOURCE: &str = "nugget-voice";
+
+/// Whether items of `source` are kept out of retrieval and MCP ([`VOICE_SAMPLES_SOURCE`]).
+pub fn is_private_source(source: &str) -> bool {
+    source == VOICE_SAMPLES_SOURCE
+}

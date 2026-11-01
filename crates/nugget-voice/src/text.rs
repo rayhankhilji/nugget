@@ -475,6 +475,47 @@ pub(crate) fn words(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// How much of a word one character is, for scripts written without spaces between words:
+/// half a word for Chinese and Japanese (about two characters per word), a quarter for Thai,
+/// Lao, Khmer and Myanmar. `None` for every other character.
+pub fn unspaced_weight(c: char) -> Option<f32> {
+    match c as u32 {
+        0x3040..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0xFF66..=0xFF9F => {
+            Some(0.5)
+        }
+        0x0E00..=0x0EFF | 0x1000..=0x109F | 0x1780..=0x17FF => Some(0.25),
+        _ => None,
+    }
+}
+
+/// The byte offset where the text passes `max` words, and the words before it (QA GG1-8): a
+/// whitespace-separated word with a letter or digit counts one, and a character of a script
+/// written without spaces counts its [`unspaced_weight`]. `None` when the text stays within.
+pub fn word_units_until(text: &str, max: f32) -> (Option<usize>, f32) {
+    let mut units = 0.0;
+    let mut in_word = false;
+    for (i, c) in text.char_indices() {
+        if let Some(w) = unspaced_weight(c) {
+            units += w;
+            in_word = false;
+        } else if c.is_whitespace() {
+            in_word = false;
+        } else if !in_word && c.is_alphanumeric() {
+            units += 1.0;
+            in_word = true;
+        }
+        if units > max {
+            return (Some(i), units);
+        }
+    }
+    (None, units)
+}
+
+/// The length of a text in words, script-aware ([`word_units_until`]).
+pub fn word_units(text: &str) -> usize {
+    word_units_until(text, f32::INFINITY).1.ceil() as usize
+}
+
 pub(crate) fn is_emoji(c: char) -> bool {
     matches!(c as u32,
         0x1F000..=0x1FAFF   // emoticons, symbols, pictographs, flags, ...
@@ -624,7 +665,7 @@ fn de_language<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Lang>, D
 
 /// The text's language, when detection is confident.
 pub(crate) fn language(text: &str) -> Option<Lang> {
-    if words(text).len() < 4 {
+    if word_units(text) < 4 {
         return None;
     }
     let info = whatlang::detect(text)?;
@@ -726,7 +767,7 @@ pub(crate) struct Features {
 impl Features {
     pub fn of(text: &str, recipient_names: &[String], my_names: &[String]) -> Self {
         Self {
-            words: words(text).len() as u32,
+            words: word_units(text) as u32,
             greeting: normalize_greeting(text, recipient_names),
             signoff: normalize_signoff(text, my_names),
             formality: formality(text),

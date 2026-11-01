@@ -368,6 +368,12 @@ async fn local_prompts_leave_sensitive_items_out_unless_allowed() {
         );
     }
     assert!(user_text(&req).contains("compensation"));
+
+    // QA GG1-16: turning the small-prompt budget off does not let them in.
+    let local = Fake::local("local");
+    let s = setup(&[local.clone()], local_off());
+    let (started, _stream) = s.drafter.begin(ask()).await.unwrap();
+    assert!(!keys(&started).contains(&"salaries"));
 }
 
 #[tokio::test]
@@ -435,6 +441,39 @@ async fn post_processing_against_existing_field_text() {
     let (text, events) = collect(stream).await;
     assert_eq!(text, "Thursday works.");
     assert!(matches!(events.last(), Some(Ok(ChatEvent::Done { .. }))));
+}
+
+/// QA GG1-5: the draft joins half-typed text with a space, a lone greeting with a paragraph
+/// break, and text after the caret with a space; Japanese joins directly.
+#[tokio::test]
+async fn draft_joins_the_text_around_the_caret() {
+    for (field, caret, mail, draft, want) in [
+        (
+            "Sounds good,",
+            12,
+            false,
+            "I'll send the deck by Friday.",
+            " I'll send the deck by Friday.",
+        ),
+        (
+            "Hi Ana,",
+            7,
+            true,
+            "The total is in the thread.",
+            "\n\nThe total is in the thread.",
+        ),
+        ("I can do", 8, false, "Thursday.", " Thursday."),
+        ("at 3 works for me", 0, false, "Thursday", "Thursday "),
+        ("了解です。", 5, false, "明日送ります。", "明日送ります。"),
+    ] {
+        let local = Fake::new("local", Locality::OnDevice, &[draft]);
+        let s = setup(&[local], DraftConfig::default());
+        let mut ctx = if mail { mail_ctx(ASK) } else { slack_ctx(ASK) };
+        ctx.field.value = field.into();
+        ctx.field.selection = Some((caret, caret));
+        let (_, stream) = s.drafter.begin(request(ctx)).await.unwrap();
+        assert_eq!(collect(stream).await.0, want, "{field}");
+    }
 }
 
 #[tokio::test]
@@ -816,7 +855,8 @@ frozen except for customer visits.\n\nKind regards,\nHenrik"
         } else {
             assert!(!user.contains("superseded"));
             assert!(text.contains("assumes a budget of $310,000."), "{text}");
-            assert!(timings.grounding.is_none());
+            // Grounding off still checks links and credentials, but no values.
+            assert_eq!(timings.grounding.map(|r| r.values_checked), Some(0));
         }
     }
 }
@@ -825,7 +865,9 @@ frozen except for customer visits.\n\nKind regards,\nHenrik"
 async fn local_budget_trims_local_prompts_only() {
     // One snippet: the best passage only, and the citations and egress items say so.
     let wide = Fake::local("local");
-    let s = setup(&[wide.clone()], local_off());
+    let mut off = local_off();
+    off.local.include_sensitive = true;
+    let s = setup(&[wide.clone()], off);
     let (all, _st) = s.drafter.begin(ask()).await.unwrap();
     assert!(all.citations.len() >= 2, "{:?}", keys(&all));
     let one = Fake::local("local");
@@ -1195,4 +1237,37 @@ async fn small_model_routing_leaves_cloud_and_explicit_choices_alone() {
     assert_eq!(provider_of(&s, ask()).await, "big");
     assert!(small.requests().is_empty());
     assert_eq!(cloud.requests().len(), 1);
+}
+
+/// QA GG8-4: a card number in the thread (or the field) never reaches a cloud drafter when the
+/// daemon's sensitive scan is set; the message is withheld whole. Local providers keep it.
+#[tokio::test]
+async fn cloud_drafts_withhold_scanned_thread_and_field_text() {
+    let card = "Use card 4111 1111 1111 1111 for the deposit. GG8CANARY-THREADSENS-1";
+    let scan: nugget_draft::SensitiveScan = Arc::new(|t: &str| t.contains("4111 1111"));
+    for locality in [Locality::Cloud, Locality::OnDevice] {
+        let p = Fake::new("p", locality, &["Thanks, I'll take care of the deposit."]);
+        let s = setup(&[p.clone()], DraftConfig::default());
+        let drafter = s.drafter.with_sensitive_scan(scan.clone());
+        let mut ctx = slack_ctx("Can you send the Q3 numbers?");
+        ctx.thread.push(ThreadMessage {
+            author: Some("Priya".into()),
+            text: card.into(),
+            from_me: Some(false),
+            timestamp: None,
+        });
+        ctx.field.value = "Card: 4111 1111 1111 1111".into();
+        let (_, stream) = drafter.begin(request(ctx)).await.unwrap();
+        collect(stream).await;
+        let sent = user_text(&p.last());
+        if locality == Locality::Cloud {
+            assert!(!sent.contains("4111"), "{sent}");
+            assert!(!sent.contains("GG8CANARY"), "{sent}");
+            assert!(sent.contains(nugget_draft::WITHHELD_TEXT), "{sent}");
+            // The rest of the thread still goes.
+            assert!(sent.contains("Q3 numbers"), "{sent}");
+        } else {
+            assert!(sent.contains("GG8CANARY-THREADSENS-1"), "{sent}");
+        }
+    }
 }

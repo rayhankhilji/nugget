@@ -407,7 +407,7 @@ async fn begin_streams_the_draft_then_feedback_is_recorded() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancel_stops_a_draft_mid_stream_and_shutdown_ends_one() {
-    // The slow model stops mid-sentence; grounding would hold that sentence back.
+    // The slow model stops mid-sentence; with grounding off its first words stream at once.
     let mut h = start("grounding = false", |_| {}).await;
     let mut notes = h.client.notifications();
 
@@ -418,7 +418,7 @@ async fn cancel_stops_a_draft_mid_stream_and_shutdown_ends_one() {
         )
         .await;
     let first = first_delta(&mut notes, &started.stream_id).await;
-    assert!(first.contains("Sounds good"), "{first:?}");
+    assert!(first.starts_with("Sounds"), "{first:?}");
     let v: Value = h
         .call(
             method::DRAFT_CANCEL,

@@ -330,8 +330,10 @@ Double Tap drafting. Keys below are relative to `[draft]` (`local.model` is `mod
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `grounding` | bool | `true` | Retrieved context goes in as dated facts (superseded and sensitive items marked) and the stream is checked per `grounding_check` |
-| `grounding_check` | `"secrets"` or `"sentences"` | `"secrets"` | `secrets`: stop the draft before a credential copied from a sensitive item. `sentences`: hold each sentence until it ends and drop ones with unsupported numbers, dates or amounts (adds first-sentence latency) |
+| `grounding` | bool | `true` | Retrieved context goes in as dated facts (superseded and sensitive items marked) and the stream is checked per `grounding_check`. With `false` the stream is still checked for credentials, links and contact details, but not values |
+| `grounding_check` | `"secrets"` or `"sentences"` | `"secrets"` | Both drop sentences with a credential from a sensitive item, a link, email address, phone, account or card number that neither the thread nor your own text has, an amount, date or number the thread and the facts don't support, or a copy of the other person's message. `secrets` streams the first sentence at once (holding it from its first number, link or credential) and leaves times, weekdays and small counts alone. `sentences` holds every sentence, checks every value, and holds the greeting until a sentence passes (adds first-sentence latency) |
+| `local.include_sensitive` | bool | `false` | Let passages marked sensitive into local prompts (never cloud ones) |
+| `local.enabled` | bool | `true` | Smaller prompts for on-device models (fewer passages, shorter thread excerpts); does not change what is sensitive |
 | `local.model` | manifest model id | none | Run this model in its own server (provider `local-draft`) and use it first for non-cloud drafting, falling back to the chat model |
 | `read_ahead.enabled` | bool | `true` | Prefill the prompt into the local cache while a reply field has focus ([Read-ahead](../guide/double-tap.md#read-ahead)); `false` makes `draft.read_ahead` skip with `"disabled"`. Also needs the desktop switch **Read ahead while you reply**; low power mode pauses it |
 | `read_ahead.min_interval_ms` | integer | `5000` | Minimum time between read-aheads that do work; others skip with `"rate_limited"` |
