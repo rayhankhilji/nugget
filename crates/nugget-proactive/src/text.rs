@@ -653,23 +653,61 @@ pub struct Money {
     pub minor: i64,
 }
 
+/// As English `Intl.NumberFormat` currency style writes it (`$1,299.00`, `¥1,299`,
+/// `CHF 12.99`), so the English fallback matches what the app shows.
 impl std::fmt::Display for Money {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let sym = match self.currency.as_str() {
-            "USD" => "$",
-            "EUR" => "€",
-            "GBP" => "£",
-            "JPY" => "¥",
-            "INR" => "₹",
-            _ => "",
+        let prefix = match self.currency.as_str() {
+            "USD" => "$".to_owned(),
+            "EUR" => "€".to_owned(),
+            "GBP" => "£".to_owned(),
+            "JPY" => "¥".to_owned(),
+            "INR" => "₹".to_owned(),
+            "CAD" => "CA$".to_owned(),
+            "AUD" => "A$".to_owned(),
+            "NZD" => "NZ$".to_owned(),
+            c => format!("{c}\u{a0}"),
         };
-        let v = format!("{}.{:02}", self.minor / 100, (self.minor % 100).abs());
-        if sym.is_empty() {
-            write!(f, "{v} {}", self.currency)
+        let sign = if self.minor < 0 { "-" } else { "" };
+        let abs = self.minor.unsigned_abs();
+        let digits = (abs / 100).to_string();
+        let mut whole = String::new();
+        for (i, c) in digits.chars().enumerate() {
+            if i > 0 && (digits.len() - i).is_multiple_of(3) {
+                whole.push(',');
+            }
+            whole.push(c);
+        }
+        if self.currency == "JPY" {
+            write!(f, "{sign}{prefix}{whole}")
         } else {
-            write!(f, "{sym}{v}")
+            write!(f, "{sign}{prefix}{whole}.{:02}", abs % 100)
         }
     }
+}
+
+const MONTH_ABBR: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// A date as English `Intl.DateTimeFormat` `dateStyle: "medium"` writes it (`Nov 3, 2026`).
+pub fn en_date(d: Date) -> String {
+    format!(
+        "{} {}, {}",
+        MONTH_ABBR[d.month() as usize - 1],
+        d.day(),
+        d.year()
+    )
+}
+
+/// A time as English `timeStyle: "short"` writes it (`2:05\u{202f}PM`).
+pub fn en_time(t: time::Time) -> String {
+    let h = match t.hour() % 12 {
+        0 => 12,
+        h => h,
+    };
+    let ampm = if t.hour() < 12 { "AM" } else { "PM" };
+    format!("{h}:{:02}\u{202f}{ampm}", t.minute())
 }
 
 const SYMBOLS: &[(&str, &str)] = &[

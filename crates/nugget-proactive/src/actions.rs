@@ -22,7 +22,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::candidate::LocalText;
-use crate::text::truncate;
+use crate::text::{en_date, en_time, truncate};
 
 /// Draft a reply for the user to copy or open in their mail app. Never sends, and nothing is
 /// written to the mailbox.
@@ -287,7 +287,11 @@ impl Action {
                 )
             }
             Self::Reminder(r) => (
-                format!("Remind me {}", fmt_time(r.at)),
+                format!(
+                    "Remind me on {} at {}",
+                    en_date(r.at.date()),
+                    en_time(r.at.time())
+                ),
                 "reminders".to_owned(),
                 vec![add(format!("Reminder at {}: {}", fmt_time(r.at), r.text))],
             ),
