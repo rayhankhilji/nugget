@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::{BrowserAction, ValidationError, Verification, verify};
 use crate::bridge::{BridgeError, BrowserBridge};
-use crate::protocol::{ActResult, ErrorCode, HostRequest, SnapshotOptions};
+use crate::protocol::{ActResult, ErrorCode, Expectations, HostRequest, SnapshotOptions};
 use crate::snapshot::{PageSnapshot, SnapshotDiff};
 use crate::tool::action_context;
 
@@ -45,6 +45,8 @@ pub enum BrowserError {
     PermissionRequired,
     #[error("the page changed since the last snapshot; take a new snapshot")]
     StaleSnapshot,
+    #[error("the form changed after it was confirmed; nothing was sent: {0}")]
+    FormChanged(String),
     #[error(transparent)]
     Bridge(BridgeError),
 }
@@ -64,6 +66,10 @@ impl From<BridgeError> for BrowserError {
                 code: ErrorCode::StaleSnapshot | ErrorCode::UnknownElement,
                 ..
             } => Self::StaleSnapshot,
+            BridgeError::Extension {
+                code: ErrorCode::FormChanged,
+                message,
+            } => Self::FormChanged(message),
             other => Self::Bridge(other),
         }
     }
@@ -199,6 +205,18 @@ impl BrowserController {
         task_id: &str,
         action: BrowserAction,
     ) -> Result<ActionOutcome, BrowserError> {
+        self.act_expecting(task_id, action, Expectations::default())
+            .await
+    }
+
+    /// [`BrowserController::act`] for a confirmed send: the extension dispatches it only while
+    /// the form or the send's dialog still has the digest the user confirmed.
+    pub async fn act_expecting(
+        &self,
+        task_id: &str,
+        action: BrowserAction,
+        expect: Expectations,
+    ) -> Result<ActionOutcome, BrowserError> {
         self.check_halt().await?;
         let latest = self.latest_snapshot();
         action.validate(latest.as_ref())?;
@@ -213,6 +231,9 @@ impl BrowserController {
         self.authorize(&descriptor, &context).await?;
 
         self.show_overlay().await;
+        // Authorizing and showing the overlay can wait on the user and the extension; Stop may
+        // have been pressed meanwhile. Nothing is sent after it.
+        self.check_halt().await?;
         let value = self
             .bridge
             .request(HostRequest::Act {
@@ -222,6 +243,8 @@ impl BrowserController {
                     .map(|s| s.snapshot_id.clone())
                     .unwrap_or_default(),
                 action: action.clone(),
+                expect_form: expect.form,
+                expect_scope: expect.scope,
             })
             .await;
         let value = match value {
@@ -265,6 +288,19 @@ impl BrowserController {
             .await
             .is_ok();
         self.lock().overlay_on = shown;
+    }
+
+    /// The daemon's kill switch changed. Engaged: tell the extension to halt (it stops acting,
+    /// refuses reads and swaps "Nugget is acting" for "stopped"), and forget the overlay so the
+    /// next task shows it again. Lifted: tell the extension the user resumed. Best effort: the
+    /// controller refuses every action while halted whatever the extension says.
+    pub async fn kill_changed(&self, halted: bool) {
+        if halted {
+            self.lock().overlay_on = false;
+            let _ = self.bridge.request(HostRequest::Halt).await;
+        } else {
+            let _ = self.bridge.request(HostRequest::Resume).await;
+        }
     }
 
     /// End of a task: hide the overlay. Best effort.

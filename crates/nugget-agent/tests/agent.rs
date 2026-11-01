@@ -432,6 +432,12 @@ async fn kill_switch_interrupts_a_running_action() {
             ..
         }
     )));
+    // GG3-11: the log says the started action may have completed, not that it was stopped.
+    assert!(log.entries().iter().any(|e| matches!(
+        &e.record,
+        Record::Executed { interrupted: true, result, .. }
+            if result.contains("may have completed")
+    )));
 }
 
 #[tokio::test]

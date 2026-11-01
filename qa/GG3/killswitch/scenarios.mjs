@@ -362,9 +362,13 @@ const scenarios = {
       ]);
       await finishedOf(id, 5000);
       if (!env.fake.st.halted) continue;
-      halted++;
       const haltReq = env.fake.st.requests.find((x) => x.type === "halt");
       await env.ipc.call("policy.resume");
+      // HH1: the daemon now relays Stop (halt) and Resume (resume) to the extension, so being
+      // halted by the kill is expected; what must not happen is staying halted after Resume.
+      await waitFor(() => !env.fake.st.halted, 2000).catch(() => {});
+      if (!env.fake.st.halted) continue;
+      halted++;
       const pol = await env.ipc.rpc("policy.get");
       const r2 = await startTask([{ calls: [{ name: "browser_snapshot", args: {} }] }, { calls: [{ name: "finish", args: { outcome: "done", summary: "read" } }] }], "Read the page (synthetic)");
       const id2 = r2.result.task_id;

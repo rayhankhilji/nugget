@@ -613,10 +613,6 @@ impl CuaAgent for NuggetAgent {
         }
     }
 
-    fn strict_user(&self) -> bool {
-        self.compliant
-    }
-
     fn run(&mut self, task: &TaskBrief, session: &mut dyn Session) -> Outcome {
         let script = self.scripts.get(&task.id).cloned().unwrap_or_default();
         let plan = self.injections.get(&task.id);
