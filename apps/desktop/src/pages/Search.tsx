@@ -6,6 +6,7 @@ import {
   isCommandMissing,
   isMethodNotFound,
   isOpenableUrl,
+  searchPage,
   type ChatDone,
   type AskDateFilter,
   type Citation,
@@ -42,6 +43,15 @@ const BUDGETS = [1000, 2000, 4000, 8000];
 /** A result from `search.faceted` (with date, kind, people) or from plain `search` (without). */
 type Hit = SearchHit & Partial<Omit<FacetedHit, keyof SearchHit>>;
 
+/** A hit's identity across pages: its item and passage. */
+const hitKey = (h: SearchHit) => `${h.item.source}\u0000${h.item.key}\u0000${h.chunk_id ?? ""}`;
+
+/** `prev` then the hits of `page` not already in it (a re-ranked page can repeat one). */
+function mergeHits(prev: Hit[], page: Hit[]): Hit[] {
+  const seen = new Set(prev.map(hitKey));
+  return [...prev, ...page.filter((h) => !seen.has(hitKey(h)))];
+}
+
 export function SearchPage() {
   const t = useT();
   const [query, setQuery] = useState("");
@@ -63,6 +73,12 @@ export function SearchPage() {
   const [announcement, announce] = useAnnouncer();
   /** Whether the daemon serves `search.faceted` (unknown until the first search). */
   const faceted = useRef<boolean | null>(null);
+  /** Without `search.faceted`: whether the daemon serves `search.page` (LL1), else plain `search`. */
+  const paged = useRef<boolean | null>(null);
+  /** Plain results (no `search.faceted`): the cursor of their next page, if any. */
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  /** After "Show more": the index of the first new result, to move focus to it. */
+  const focusFrom = useRef<number | null>(null);
   /** Only the latest search may update the page. */
   const seq = useRef(0);
   /** The wanted state, updated at once (before any answer), so quick changes build on each other. */
@@ -122,18 +138,42 @@ export function SearchPage() {
           faceted.current = false;
         }
       }
-      const plain = result ? null : await api.search(q, limit);
+      let plain: Hit[] | null = null;
+      let cursorAfter: string | null = null;
+      if (!result && paged.current !== false) {
+        try {
+          const page = await searchPage(append && nextCursor ? { query: q, limit, cursor: nextCursor } : { query: q, limit });
+          paged.current = true;
+          plain = page.items;
+          cursorAfter = page.next_cursor ?? null;
+        } catch (err) {
+          if (append || !isCommandMissing(err)) throw err;
+          paged.current = false;
+        }
+      }
+      if (!result && plain === null) plain = await api.search(q, limit);
       if (mine !== seq.current) return;
+      const before = append ? (hits?.length ?? 0) : 0;
+      let shown: number;
       if (result) {
+        shown = before + result.hits.length;
         setHits((prev) => (append ? [...(prev ?? []), ...result.hits] : result.hits));
         setFacets(result.facets);
         setTotal(result.total);
         setPoolLimited(result.pool_limited ? result.pool : null);
+        setNextCursor(null);
       } else {
-        setHits(plain);
+        const merged = append ? mergeHits(hits ?? [], plain ?? []) : (plain ?? []);
+        shown = merged.length;
+        setHits(merged);
         setFacets(null);
         setTotal(null);
         setPoolLimited(null);
+        setNextCursor(cursorAfter);
+      }
+      if (append) {
+        if (shown > before) focusFrom.current = before;
+        announce(t("searchui.loadedMore", { n: shown }));
       }
       if (!append) {
         setSelected(null);
@@ -235,7 +275,16 @@ export function SearchPage() {
     buttons[Math.max(0, Math.min(buttons.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
   };
 
+  // After "Show more": focus the first new result, so keyboard and screen-reader users carry on there.
+  useEffect(() => {
+    const from = focusFrom.current;
+    if (from === null || !hits) return;
+    focusFrom.current = null;
+    document.querySelectorAll<HTMLButtonElement>(".sr-results .result-select")[from]?.focus();
+  }, [hits]);
+
   const count = total ?? hits?.length ?? 0;
+  const canShowMore = !!hits && (total !== null ? hits.length < total : !!nextCursor);
   const shownState = { ...state, q: state.q || query.trim() };
   const canSave = !!shownState.q || !!state.timeline;
   const preview = selected !== null ? hits?.[selected] : undefined;
@@ -420,9 +469,15 @@ export function SearchPage() {
               })}
             </ol>
           )}
-          {hits && total !== null && hits.length < total && (
+          {hits && canShowMore && (
             <button type="button" className="btn sr-more" disabled={moreBusy || busy} onClick={() => void runState(stateRef.current, { append: true })}>
-              {moreBusy ? <Spinner label={t("searchui.loadingMore")} /> : t("searchui.showMore", { shown: hits.length, total })}
+              {moreBusy ? (
+                <Spinner label={t("searchui.loadingMore")} />
+              ) : total !== null ? (
+                t("searchui.showMore", { shown: hits.length, total })
+              ) : (
+                t("searchui.showMorePlain", { shown: hits.length })
+              )}
             </button>
           )}
           {!hits && !busy && !error &&

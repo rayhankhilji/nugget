@@ -1,23 +1,53 @@
-import { useState } from "react";
-import { api, type EgressEvent } from "../api";
-import { useAsync } from "../hooks";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, egressPage, isCommandMissing, type EgressEvent } from "../api";
 import { formatBytes, formatTime } from "../format";
-import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui";
+import { EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
+import { Announce, useAnnouncer } from "../components/Announce";
 import { VirtualList } from "../components/VirtualList";
+import { useCursorList, type CursorPageResult } from "../components/useCursorList";
 import { formatNumber, useT } from "../i18n";
 
+/** Rows per page (LL1: older pages load as the ledger scrolls). */
 const LIMITS = [50, 200, 1000];
-/** Ledger rows have no id; time and position keep keys stable for a loaded ledger. */
+/** Ledger rows have no id; time and position keep keys stable for a loaded ledger (pages only append). */
 const egressKey = (r: EgressEvent, i: number) => `${r.at}-${i}`;
 
 export function PrivacyPage() {
   const t = useT();
   const [limit, setLimit] = useState(200);
-  const egress = useAsync(() => api.egressRecent(limit), [limit]);
-  const rows = egress.data ?? [];
+  /** The daemon has no `egress.page` (older daemon): one page from `egress.recent`. */
+  const legacy = useRef(false);
+  const fetchPage = useCallback(
+    async (cursor: string | null): Promise<CursorPageResult<EgressEvent>> => {
+      if (!legacy.current) {
+        try {
+          const page = await egressPage(cursor ? { limit, cursor } : { limit });
+          return { items: page.items, next: page.next_cursor ?? null };
+        } catch (err) {
+          if (cursor || !isCommandMissing(err)) throw err;
+          legacy.current = true;
+        }
+      }
+      return { items: await api.egressRecent(limit), next: null };
+    },
+    [limit],
+  );
+  const egress = useCursorList(fetchPage, String(limit));
+  const rows = egress.items ?? [];
   const sent = rows.reduce((n, r) => n + r.bytes_sent, 0);
   const received = rows.reduce((n, r) => n + r.bytes_received, 0);
   const hosts = new Set(rows.map((r) => r.host)).size;
+  const firstLoad = egress.loading && !egress.loadingMore;
+  const loadedText = egress.hasMore ? t("privacy.loadedSome", { n: rows.length }) : t("privacy.loadedAll", { n: rows.length });
+
+  // Say how many rows are loaded once a page arrives (not on the first load: the page says it).
+  const [announcement, announce] = useAnnouncer();
+  const shown = useRef(0);
+  useEffect(() => {
+    if (egress.loading) return;
+    if (shown.current > 0 && rows.length > shown.current) announce(loadedText);
+    shown.current = rows.length;
+  }, [egress.loading, rows.length, loadedText, announce]);
 
   return (
     <div className="page">
@@ -31,28 +61,29 @@ export function PrivacyPage() {
               <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
                 {LIMITS.map((l) => (
                   <option key={l} value={l}>
-                    {t("privacy.lastN", { n: l })}
+                    {t("privacy.pageN", { n: l })}
                   </option>
                 ))}
               </select>
             </label>
-            <button type="button" className="btn btn-ghost" onClick={egress.reload} disabled={egress.loading && !egress.data}>
+            <button type="button" className="btn btn-ghost" onClick={egress.reload} disabled={egress.loading && !egress.items}>
               {t("common.refresh")}
             </button>
           </>
         }
       />
-      <ErrorNote error={egress.error} onRetry={egress.reload} />
-      {egress.loading && !egress.data && <Loading label={t("privacy.loading")} lines={5} />}
+      <ErrorNote error={egress.error} onRetry={egress.retry} />
+      <Announce message={announcement} />
+      {egress.loading && !egress.items && <Loading label={t("privacy.loading")} lines={5} />}
 
-      {egress.data && rows.length === 0 && (
+      {egress.items && rows.length === 0 && (
         <div className="privacy-clear">
           <EmptyState title={t("privacy.emptyTitle")}>{t("privacy.emptyBody")}</EmptyState>
         </div>
       )}
 
       {rows.length > 0 && (
-        <div className={egress.loading ? "pg-stale" : undefined} aria-busy={egress.loading}>
+        <div className={firstLoad ? "pg-stale" : undefined} aria-busy={firstLoad}>
           <dl className="stats">
             <div>
               <dt>{t("privacy.stat.requests")}</dt>
@@ -99,6 +130,9 @@ export function PrivacyPage() {
                 columns={6}
                 rowIndexBase={2}
                 focus="none"
+                hasMore={egress.hasMore}
+                loadingMore={egress.loadingMore}
+                onEndReached={egress.loadMore}
                 renderItem={(r) => (
                   <>
                     <td className="nowrap">{formatTime(r.at)}</td>
@@ -118,6 +152,12 @@ export function PrivacyPage() {
               />
             </table>
           </div>
+          <p className="muted small privacy-loaded">{loadedText}</p>
+          {egress.hasMore && (
+            <button type="button" className="btn" onClick={egress.loadMore} disabled={egress.loadingMore || egress.error != null}>
+              {egress.loadingMore ? <Spinner label={t("list.loadingMore")} /> : t("privacy.loadOlder")}
+            </button>
+          )}
         </div>
       )}
     </div>

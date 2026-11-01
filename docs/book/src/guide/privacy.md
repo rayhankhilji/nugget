@@ -32,8 +32,8 @@ Every request Nugget's own network layer sends to a destination that is not on t
 | Bytes sent and received | 18 204 / 2 911 |
 | Items included | the items whose content (or derived text) was in the request |
 
-The **Privacy** page shows the ledger, newest first. Over IPC it is
-[`egress.recent`](../reference/ipc.md).
+The **Privacy** page shows the ledger, newest first, loading older requests as you scroll. Over
+IPC it is [`egress.page`](../reference/ipc.md) (or `egress.recent` for the newest rows only).
 
 Features you will see:
 

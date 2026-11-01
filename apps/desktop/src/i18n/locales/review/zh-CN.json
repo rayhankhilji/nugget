@@ -1,6 +1,6 @@
 {
   "wave": "Z2",
-  "note": "Machine-translated in waves Z2, BB1, FF1, II1, II2, JJ2, GG5 and II5; a native speaker should review these keys.",
+  "note": "Machine-translated in waves Z2, BB1, FF1, II1, II2, JJ2, GG5, II5 and LL1; a native speaker should review these keys.",
   "keys": [
     "addSource.addTitle.gdrive",
     "addSource.blurb.gcal",
@@ -739,6 +739,12 @@
     "models.cancel",
     "models.cancelLabel",
     "models.resume",
-    "list.loadingMore"
+    "list.loadingMore",
+    "privacy.pageN",
+    "privacy.loadedSome",
+    "privacy.loadedAll",
+    "privacy.loadOlder",
+    "searchui.showMorePlain",
+    "searchui.loadedMore"
   ]
 }

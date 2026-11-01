@@ -89,6 +89,8 @@ fn main() {
             commands::models_install,
             commands::models_cancel,
             commands::egress_recent,
+            commands::egress_page,
+            commands::search_page,
             commands::sources_list,
             commands::sources_add,
             commands::sources_update,
