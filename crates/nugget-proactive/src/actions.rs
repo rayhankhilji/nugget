@@ -328,10 +328,13 @@ impl Action {
         let (app, verb) = self.target();
         let (label, text) = match self {
             Self::DraftReply(d) => (d.subject.clone(), d.body.clone().unwrap_or_default()),
+            Self::CreateEvent(e) if e.attendees.is_empty() => ("Event".into(), e.title.clone()),
             Self::CreateEvent(e) => (e.title.clone(), e.attendees.join(", ")),
-            Self::Reminder(r) => (r.text.clone(), r.text.clone()),
+            // Local items: their text is the user's note to self, not a control to press, so
+            // its words ("submit", "renew") are not read as a send or a purchase (GG4-15).
+            Self::Reminder(r) => ("Reminder".into(), r.text.clone()),
             Self::ArchiveThread(a) => (a.subject.clone(), String::new()),
-            Self::ResearchNote(n) => (n.title.clone(), n.body.clone()),
+            Self::ResearchNote(n) => ("Note".into(), format!("{}\n{}", n.title, n.body)),
         };
         ActionDescriptor {
             target_app: app.into(),
@@ -781,6 +784,33 @@ mod tests {
     use nugget_policy::{Effect, PolicyConfig, PolicyEngine, Rule};
 
     use super::*;
+
+    /// GG4-15: a local reminder or note keeps its typed risk whatever words its text holds.
+    #[test]
+    fn local_actions_keep_their_typed_risk() {
+        let at = OffsetDateTime::UNIX_EPOCH;
+        for text in [
+            "Submit the October expense report",
+            "Renew Pixelboard: $12.99",
+        ] {
+            let reminder = Action::Reminder(Reminder {
+                text: text.into(),
+                at,
+                about: None,
+            });
+            let note = Action::ResearchNote(ResearchNote {
+                title: text.into(),
+                body: text.into(),
+                sources: Vec::new(),
+            });
+            for a in [reminder, note] {
+                let ctx = ActionContext::default().with_window_title(a.preview().summary);
+                let c = nugget_policy::RiskClassifier::global()
+                    .classify_with_context(&a.descriptor("t"), &ctx);
+                assert_eq!(c.risk, a.risk(), "{text}: {:?}", c.reasons);
+            }
+        }
+    }
 
     /// Records the context of every check; refuses any check made without one.
     #[derive(Default)]
