@@ -1,0 +1,6 @@
+indexed 2000 in 6.0s; sensitive caught 22/22
+  en: 8/8 missed: []
+  de: 6/6 missed: []
+  es: 4/4 missed: []
+  fr: 4/4 missed: []
+non-sensitive flagged: [] of 27; not found: []

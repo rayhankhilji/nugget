@@ -1,0 +1,15 @@
+14:33:09 triage {'done': 125, 'failed': 0, 'pending': 0, 'skipped': 0, 'state': 'idle'} after 1580 s
+triage: {'triage': {'done': 125, 'failed': 0, 'pending': 0, 'skipped': 0, 'state': 'idle'}, 'seconds': 1580}
+mode: rules + triage by qwen3-4b-q4km
+lang   sens/5 ord-wrong/2  misses
+en     5/5    0/2          
+de     5/5    0/2          
+es     5/5    0/2          
+fr     5/5    1/2          FP dinner
+pt-BR  5/5    0/2          
+hi     5/5    1/2          FP proj
+ja     5/5    0/2          
+zh-CN  5/5    0/2          
+ar     5/5    0/2          
+GG7 corpus marked sensitive: 19/61 ['ar/03-afaq-fatura.eml', 'ar/05-kabsa-dajaj.md', 'de/03-rechnung-sanitaer-woehrle.eml', 'de/05-rezept-zwetschgendatschi.md', 'de/06-aw-ablesung-heizkostenverteiler.eml', 'en/02-ridgeline-hike-saturday.eml', 'en/03-invoice-copperline-print.eml', 'en/04-q4-forecast-deadline.eml', 'es/03-factura-reformas-penalver.eml', 'es/05-receta-paella-valenciana.md', 'es/06-re-cotizacion-embarque.eml', 'fr/05-cr-conseil-syndical.md', 'hi/03-kamalvan-chalan.eml', 'ja/03-sakura-insatsu-seikyusho.eml', 'ja/06-hikari-honyaku-re.eml', 'mixed/03-hinglish-team-dinner.eml', 'mixed/04-hi-en-invoice-gst.eml', 'pt-BR/03-fatura-marcenaria-sao-joao.eml', 'zh-CN/05-hongshaorou-biji.md']
+not found over IPC: []
