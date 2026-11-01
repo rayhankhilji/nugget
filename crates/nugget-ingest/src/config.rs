@@ -58,6 +58,13 @@ pub struct IngestConfig {
     /// Background triage waits this long after the last interactive model request (Ask,
     /// Double Tap, agent) before it uses the local model again. Default 3 s.
     pub triage_idle_ms: u64,
+    /// Items whose triage failed are tried again after this long, once a triage model is
+    /// routable; the wait grows fourfold with each failure of the item (capped at a day).
+    /// Default 10 min.
+    pub triage_retry_ms: u64,
+    /// Failures after which an item stays `failed` for good (until its content changes).
+    /// Default 5; `1` turns retries off.
+    pub triage_max_failures: u32,
     /// Compute embeddings with `Tier::Embedding` providers.
     pub embeddings: bool,
     /// Allow `Cloud` embedding providers for non-sensitive items. Default `false`: on-device and
@@ -114,6 +121,8 @@ impl Default for IngestConfig {
             triage_batch_chars: 6_000,
             triage_request_ms: 3_000,
             triage_idle_ms: 3_000,
+            triage_retry_ms: 10 * 60 * 1000,
+            triage_max_failures: 5,
             embeddings: true,
             allow_cloud_embeddings: false,
             embed_batch: 32,
@@ -154,6 +163,15 @@ impl IngestConfig {
 
     pub(crate) fn triage_timeout(&self) -> Duration {
         Duration::from_millis(self.triage_timeout_ms.max(1))
+    }
+
+    /// How long after its `failures`-th failure an item is triaged again (see
+    /// [`IngestConfig::triage_retry_ms`]).
+    pub(crate) fn triage_retry_after(&self, failures: u32) -> Duration {
+        const CAP: u64 = 24 * 60 * 60 * 1000;
+        let base = self.triage_retry_ms.max(1);
+        let exp = 2 * failures.saturating_sub(1).min(16);
+        Duration::from_millis(base.saturating_mul(1u64 << exp).min(CAP.max(base)))
     }
 
     pub(crate) fn embed_timeout(&self) -> Duration {
@@ -202,6 +220,23 @@ fn jitter_unit() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn triage_retries_wait_longer_after_each_failure() {
+        let cfg = IngestConfig {
+            triage_retry_ms: 1_000,
+            ..Default::default()
+        };
+        let ms = |n| cfg.triage_retry_after(n).as_millis() as u64;
+        assert_eq!(ms(0), 1_000);
+        assert_eq!(ms(1), 1_000);
+        assert_eq!(ms(2), 4_000);
+        assert_eq!(ms(3), 16_000);
+        assert_eq!(ms(40), 24 * 60 * 60 * 1000);
+        let d = IngestConfig::default();
+        assert_eq!(d.triage_retry_after(1), Duration::from_secs(600));
+        assert_eq!(d.triage_retry_after(4), Duration::from_secs(640 * 60));
+    }
 
     #[test]
     fn backoff_grows_and_is_capped() {

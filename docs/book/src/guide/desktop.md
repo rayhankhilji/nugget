@@ -95,7 +95,9 @@ Quick ask is a small ask box that floats above your other windows, separate from
   `[n]` citations. Choose a citation or a source to open it.
 - **To close it:** press Escape or click elsewhere.
 
-**Open in Chat** and **Show in Search** switch to the main window. You can change or turn off
+**Open in Chat** and **Show in Search** switch to the main window and take your question along:
+Search runs it, and Chat starts a new conversation with the question and, once it has finished,
+the answer and its sources, so you can ask a follow-up. You can change or turn off
 the shortcut on the Status page.
 
 On Wayland, apps can't register global shortcuts this way. Bind a key in your desktop's keyboard

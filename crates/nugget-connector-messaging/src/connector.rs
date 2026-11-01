@@ -45,6 +45,15 @@ pub(crate) trait Reader: Send + Sync + 'static {
         None
     }
     fn poll_interval(&self) -> Duration;
+    /// Called after a sync pass whose changes are committed (read, every change and delete
+    /// sent, and the sink's checkpoint, which waits for them to be stored, succeeded), so a
+    /// reader may remember what it read. Never after a live pass. The default does nothing.
+    fn pass_succeeded(&self) {}
+    /// Whether [`Reader::pass_succeeded`] does anything: `sync` then waits for the pass's
+    /// changes to be stored before calling it (one more checkpoint per pass).
+    fn remembers_passes(&self) -> bool {
+        false
+    }
 }
 
 enum Emit {
@@ -235,7 +244,14 @@ impl Connector for MessagingConnector {
     ) -> Result<Value> {
         // Every pass is a full reconcile, so the cursor carries no state.
         self.pass(sink, cancel, true).await?;
-        Ok(json!({ "v": 1 }))
+        let cursor = json!({ "v": 1 });
+        // `send` only queues a change: the checkpoint returns once every change of the pass is
+        // stored (or fails if one could not be). Only then may the reader skip unchanged input.
+        if self.reader.remembers_passes() {
+            sink.checkpoint(cursor.clone()).await?;
+            self.reader.pass_succeeded();
+        }
+        Ok(cursor)
     }
 
     fn poll_interval(&self) -> Duration {

@@ -18,7 +18,9 @@ value with how many results it has:
   the results mention. Choose one to keep only the results that mention them.
 - **Date**: a **From** and **To** date, or a month from the results-by-month bars. Dates are the
   item's *own* date: when an event starts, when a mail was sent, otherwise when the file was last
-  changed. A folder of old mail copied today keeps its real dates.
+  changed. A folder of old mail copied today keeps its real dates. Days and months are those of
+  your time zone, each at its own offset: a range or a month across a daylight-saving change
+  starts and ends at local midnight on both sides of it.
 
 Tick several values in one group to see results matching any of them; filters in different groups
 all apply. The counts in each group show what you would get if you changed that group, given the
@@ -37,8 +39,8 @@ A search with its filters is kept as one short line of text (for example
 
 - **Save search** (top of the Search page) asks for a name. Saved searches are listed on the Search
   page, in the sidebar under the pages, and in the command palette (<kbd>Ctrl</kbd>+<kbd>K</kbd>, or
-  <kbd>⌘</kbd>+<kbd>K</kbd> on a Mac: type the name and press Enter). Delete one from the Search
-  page.
+  <kbd>⌘</kbd>+<kbd>K</kbd> on a Mac: type the name and press Enter). Rename or delete one from
+  the Search page; two saved searches can't share a name.
 - **Recent searches** show under the search box when it is empty: the last ten searches, newest
   first. **Clear recent** forgets them.
 

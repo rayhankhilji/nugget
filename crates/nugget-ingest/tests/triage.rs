@@ -670,6 +670,369 @@ async fn labels_leave_updated_at_alone_and_survive_a_concurrent_metadata_write()
     h.ingest.shutdown().await;
 }
 
+/// Two items whose triage fails for good on a model that replies with garbage.
+async fn two_failed_items(cfg: IngestConfig) -> (Harness, Arc<FakeProvider>) {
+    let local = local_model();
+    local.chat_invalid.store(true, Ordering::SeqCst);
+    let h = start(Opts {
+        cfg,
+        router: Some(router(&[(
+            local.clone(),
+            vec![Tier::Triage, Tier::Embedding],
+        )])),
+        ..Default::default()
+    })
+    .await;
+    h.factory.state("fake-1").script(vec![
+        Step::Send(text_doc("a", "alpha note", Some("1"))),
+        Step::Send(text_doc("b", "bravo note", Some("1"))),
+        Step::Return(json!("done")),
+    ]);
+    h.add("fake-1").await;
+    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    eventually_async("given up", || {
+        let ingest = h.ingest.clone();
+        async move { ingest.status().await.unwrap().triage.unwrap().failed == 2 }
+    })
+    .await;
+    (h, local)
+}
+
+/// JJ2: failed items are triaged again with backoff once the model answers again, and leave
+/// the `failed` count while they are retried.
+#[tokio::test]
+async fn failed_triage_is_retried_once_the_model_answers_again() {
+    let (h, local) = two_failed_items(IngestConfig {
+        triage_retry_ms: 100,
+        ..cfg()
+    })
+    .await;
+    for key in ["a", "b"] {
+        let t = &h.item("fake-1", key).unwrap().metadata["triage"];
+        assert!(t["failures"].as_u64().unwrap() >= 1, "{t}");
+        assert!(t["failed_at"].as_i64().unwrap() > 0, "{t}");
+    }
+    // The outage ends.
+    local.chat_invalid.store(false, Ordering::SeqCst);
+    eventually("retried and labelled", || {
+        ["a", "b"]
+            .iter()
+            .all(|k| h.item("fake-1", k).unwrap().metadata["triage"]["state"] == json!("done"))
+    })
+    .await;
+    let t = h.ingest.status().await.unwrap().triage.unwrap();
+    assert_eq!((t.failed, t.done, t.pending), (0, 2, 0), "{t:?}");
+    for key in ["a", "b"] {
+        let it = h.item("fake-1", key).unwrap();
+        assert_eq!(it.metadata["sensitive"], json!(false), "{key}");
+    }
+    h.ingest.shutdown().await;
+}
+
+/// Retries stop after `triage_max_failures`, each item is counted as failed once, and the
+/// job does not keep calling the model.
+#[tokio::test]
+async fn triage_retries_stop_after_the_maximum_failures() {
+    let (h, local) = two_failed_items(IngestConfig {
+        triage_retry_ms: 20,
+        triage_max_failures: 2,
+        ..cfg()
+    })
+    .await;
+    eventually("failed for good", || {
+        ["a", "b"].iter().all(|k| {
+            let t = h.item("fake-1", k).unwrap().metadata["triage"].clone();
+            t["state"] == json!("failed") && t["failures"] == json!(2)
+        })
+    })
+    .await;
+    triage_settled(&h).await;
+    let t = h.ingest.status().await.unwrap().triage.unwrap();
+    assert_eq!((t.failed, t.done), (2, 0), "{t:?}");
+    let chats = local.chats().len();
+    // Well past the retry wait (20 ms): nothing is tried again.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(local.chats().len(), chats);
+    for key in ["a", "b"] {
+        let it = h.item("fake-1", key).unwrap();
+        assert_eq!(it.metadata["triage"]["failures"], json!(2));
+        assert_eq!(it.metadata["sensitive"], json!(true));
+    }
+    // Even an explicit wake does not retry them.
+    h.ingest.triage_now();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(local.chats().len(), chats);
+    h.ingest.shutdown().await;
+}
+
+/// A failed item is not retried before its wait has passed, even when woken.
+#[tokio::test]
+async fn failed_triage_waits_for_its_backoff() {
+    let (h, local) = two_failed_items(IngestConfig {
+        triage_retry_ms: 60 * 60 * 1000,
+        ..cfg()
+    })
+    .await;
+    local.chat_invalid.store(false, Ordering::SeqCst);
+    let chats = local.chats().len();
+    h.ingest.triage_now();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(local.chats().len(), chats);
+    assert_eq!(
+        h.item("fake-1", "a").unwrap().metadata["triage"]["state"],
+        json!("failed")
+    );
+    h.ingest.shutdown().await;
+}
+
+/// JJ2 review: an unreachable server (an outage) never uses up an item's tries; once it
+/// answers again, the failed items are labelled, one per request.
+#[tokio::test]
+async fn an_outage_does_not_use_up_triage_retries() {
+    let local = local_model();
+    local.chat_down.store(true, Ordering::SeqCst);
+    let h = start(Opts {
+        cfg: IngestConfig {
+            triage_retry_ms: 20,
+            triage_max_failures: 2,
+            ..cfg()
+        },
+        router: Some(router(&[(
+            local.clone(),
+            vec![Tier::Triage, Tier::Embedding],
+        )])),
+        ..Default::default()
+    })
+    .await;
+    h.factory.state("fake-1").script(vec![
+        Step::Send(text_doc("a", "alpha note", Some("1"))),
+        Step::Send(text_doc("b", "bravo note", Some("1"))),
+        Step::Return(json!("done")),
+    ]);
+    h.add("fake-1").await;
+    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    eventually("both failed", || {
+        ["a", "b"]
+            .iter()
+            .all(|k| h.item("fake-1", k).unwrap().metadata["triage"]["state"] == json!("failed"))
+    })
+    .await;
+    // The server stays down while the job keeps probing: no try is used up.
+    let probes = local.chats().len();
+    eventually("probed again", || local.chats().len() > probes + 3).await;
+    for key in ["a", "b"] {
+        let t = &h.item("fake-1", key).unwrap().metadata["triage"];
+        assert_eq!(t["failures"], json!(0), "{key}: {t}");
+    }
+    local.chat_down.store(false, Ordering::SeqCst);
+    let before = local.chats().len();
+    eventually("labelled after the outage", || {
+        ["a", "b"]
+            .iter()
+            .all(|k| h.item("fake-1", k).unwrap().metadata["triage"]["state"] == json!("done"))
+    })
+    .await;
+    let t = h.ingest.status().await.unwrap().triage.unwrap();
+    assert_eq!((t.failed, t.done), (0, 2), "{t:?}");
+    assert!(
+        local.chats()[before..]
+            .iter()
+            .all(|c| c.matches("<document n=").count() == 1),
+        "retried items go one per request"
+    );
+    h.ingest.shutdown().await;
+}
+
+/// Index `keys` with triage off into a fresh store, then set each item's `triage` metadata
+/// (and `sensitive: true`). Returns the store, data dir and factory for the next start.
+async fn seeded(
+    keys: &[(&str, serde_json::Value)],
+) -> (
+    nugget_store::Store,
+    Arc<tempfile::TempDir>,
+    Arc<FakeFactory>,
+) {
+    let store = nugget_store::Store::open_in_memory().unwrap();
+    let dir = Arc::new(tempfile::tempdir().unwrap());
+    let h = start(Opts {
+        cfg: IngestConfig {
+            triage: false,
+            ..cfg()
+        },
+        store: Some(store.clone()),
+        dir: Some(dir.clone()),
+        ..Default::default()
+    })
+    .await;
+    let mut steps: Vec<Step> = keys
+        .iter()
+        .map(|(k, _)| Step::Send(text_doc(k, &format!("{k} note"), Some("1"))))
+        .collect();
+    steps.push(Step::Return(json!("done")));
+    h.factory.state("fake-1").script(steps);
+    h.add("fake-1").await;
+    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.ingest.shutdown().await;
+    for (k, triage) in keys {
+        let it = h.item("fake-1", k).unwrap();
+        let mut m = it.metadata.clone();
+        m["triage"] = triage.clone();
+        m["sensitive"] = json!(true);
+        assert!(
+            store
+                .set_item_metadata(&it.item, &it.content_hash, &m)
+                .unwrap()
+        );
+    }
+    (store, dir, h.factory.clone())
+}
+
+/// A retried item that fails again does not back off the whole job: a fresh item is
+/// labelled while it fails.
+#[tokio::test]
+async fn a_poison_retry_does_not_hold_up_fresh_items() {
+    let (store, dir, factory) = seeded(&[(
+        "poison",
+        json!({"state": "failed", "failures": 1, "failed_at": 0}),
+    )])
+    .await;
+    let local = local_model();
+    *local.invalid_marker.lock().unwrap() = Some("poison".into());
+    let h = start(Opts {
+        cfg: IngestConfig {
+            triage_retry_ms: 20,
+            // A job-wide backoff would hold everything up for seconds.
+            backoff_base_ms: 5_000,
+            backoff_max_ms: 5_000,
+            ..cfg()
+        },
+        router: Some(router(&[(
+            local.clone(),
+            vec![Tier::Triage, Tier::Embedding],
+        )])),
+        store: Some(store),
+        dir: Some(dir),
+        factory: Some(factory),
+        ..Default::default()
+    })
+    .await;
+    eventually("poison retried and failed again", || {
+        h.item("fake-1", "poison").unwrap().metadata["triage"]["failures"] == json!(2)
+    })
+    .await;
+    let started = std::time::Instant::now();
+    h.factory.state("fake-1").script(vec![
+        Step::Send(text_doc("fresh", "fresh note", Some("1"))),
+        Step::Return(json!("p2")),
+    ]);
+    h.ingest.sync_now(None).unwrap();
+    eventually("fresh labelled", || {
+        h.item("fake-1", "fresh")
+            .is_some_and(|it| it.metadata["triage"]["state"] == json!("done"))
+    })
+    .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    h.ingest.shutdown().await;
+}
+
+/// An item whose triage failed before stays sensitive when triage is turned off before a
+/// model labelled it, even with `assume_unflagged_safe`.
+#[tokio::test]
+async fn a_retried_item_stays_sensitive_when_triage_is_turned_off() {
+    let (store, dir, factory) = seeded(&[
+        ("retried", json!({"state": "pending", "failures": 1})),
+        ("plain", json!({"state": "pending"})),
+    ])
+    .await;
+    let h = start(Opts {
+        cfg: IngestConfig {
+            triage: false,
+            assume_unflagged_safe: true,
+            ..cfg()
+        },
+        store: Some(store),
+        dir: Some(dir),
+        factory: Some(factory),
+        ..Default::default()
+    })
+    .await;
+    eventually("resolved", || {
+        ["retried", "plain"]
+            .iter()
+            .all(|k| h.item("fake-1", k).unwrap().metadata["triage"]["state"] == json!("unknown"))
+    })
+    .await;
+    assert_eq!(
+        h.item("fake-1", "retried").unwrap().metadata["sensitive"],
+        json!(true)
+    );
+    assert_eq!(
+        h.item("fake-1", "plain").unwrap().metadata["sensitive"],
+        json!(false)
+    );
+    h.ingest.shutdown().await;
+}
+
+/// A failed item that is re-indexed (new content) leaves the `failed` count.
+#[tokio::test]
+async fn a_reindexed_failed_item_leaves_the_failed_count() {
+    let (h, local) = two_failed_items(cfg()).await;
+    local.chat_invalid.store(false, Ordering::SeqCst);
+    h.factory.state("fake-1").script(vec![
+        Step::Send(text_doc("a", "alpha note, edited", Some("2"))),
+        Step::Return(json!("p2")),
+    ]);
+    h.ingest.sync_now(None).unwrap();
+    eventually("relabelled", || {
+        h.item("fake-1", "a").unwrap().metadata["triage"]["state"] == json!("done")
+    })
+    .await;
+    let t = h.ingest.status().await.unwrap().triage.unwrap();
+    assert_eq!((t.failed, t.done), (1, 1), "{t:?}");
+    h.ingest.shutdown().await;
+}
+
+/// The job sleeps until the earliest waiting item is due, then retries it.
+#[tokio::test]
+async fn a_failed_item_is_retried_when_its_wait_is_over() {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let (store, dir, factory) = seeded(&[(
+        "a",
+        json!({"state": "failed", "failures": 1, "failed_at": now}),
+    )])
+    .await;
+    let local = local_model();
+    let h = start(Opts {
+        cfg: IngestConfig {
+            triage_retry_ms: 2_000,
+            ..cfg()
+        },
+        router: Some(router(&[(
+            local.clone(),
+            vec![Tier::Triage, Tier::Embedding],
+        )])),
+        store: Some(store),
+        dir: Some(dir),
+        factory: Some(factory),
+        ..Default::default()
+    })
+    .await;
+    let started = std::time::Instant::now();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(local.chats().is_empty(), "retried before its wait was over");
+    eventually("retried", || {
+        h.item("fake-1", "a").unwrap().metadata["triage"]["state"] == json!("done")
+    })
+    .await;
+    assert!(started.elapsed() >= Duration::from_millis(900));
+    assert_eq!(local.chats().len(), 1);
+    h.ingest.shutdown().await;
+}
+
 #[tokio::test]
 async fn requests_are_sized_by_the_measured_prefill_rate_and_long_items_go_in_parts() {
     // A model that takes 1 ms per prompt character before its first token, and a 200 ms target:
