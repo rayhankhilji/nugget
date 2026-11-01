@@ -121,8 +121,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macos-15, not macos-14: GitHub is retiring the macOS 14 image, and its jobs were
-          # cancelled before a runner was assigned (no log, runner_id 0) on 2026-10-31 (GG6-27).
+          # macos-15, not macos-14: every macos-14 job was cancelled before a runner was assigned
+          # (no log, runner_id 0) on 2026-10-31 while macos-15 jobs ran (GG6-27). GitHub is
+          # retiring the macOS 14 image; account-level runner limits can look the same.
           - { os: macos-15, target: aarch64-apple-darwin, bundles: "app,dmg", arch: aarch64, experimental: false }
           - { os: macos-15-intel, target: x86_64-apple-darwin, bundles: "app,dmg", arch: x64, experimental: false }
           - { os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "nsis,msi", arch: x64, experimental: false }

@@ -473,8 +473,12 @@ rehearsal does.
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | AppImage, `.deb`, `.rpm` | all three |
 | Linux arm64 | `ubuntu-22.04-arm` | `aarch64-unknown-linux-gnu` | AppImage, `.deb`, `.rpm` | all three (job may fail without blocking the release) |
 
-The Apple silicon build runs on `macos-15`: GitHub is retiring the macOS 14 image, and on
-2026-10-31 every `macos-14` job was cancelled before a runner was assigned (no log; GG6-27). The
+The Apple silicon build runs on `macos-15`: on 2026-10-31 every `macos-14` job was cancelled
+before a runner was assigned (no log; GG6-27), while `macos-15` jobs built and passed the dmg
+smoke test (dry run 41270093195). GitHub is retiring the macOS 14 image. A job that never gets
+a runner (`runner_id` 0, cancelled or failed within seconds, no log) can also mean the account's
+Actions minutes or spending limit is reached: check Settings → Billing before suspecting the
+workflow. The
 runner version doesn't raise the app's floor: `bundle.macOS.minimumSystemVersion` (11.0) sets the
 deployment target.
 
