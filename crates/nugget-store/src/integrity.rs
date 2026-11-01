@@ -777,6 +777,24 @@ const ROW_CHECKS: &[(&str, &str)] = &[
                  WHERE (s.items <> 0 OR s.chunks <> 0)
                    AND NOT EXISTS (SELECT 1 FROM actual a WHERE a.source = s.source))",
     ),
+    (
+        "per-entity counts (entity_stats) that differ from the claims and mentions",
+        "WITH actual AS (
+             SELECT e.id,
+                    (SELECT count(*) FROM claims c
+                     WHERE c.subject = e.id AND c.status IN ('active', 'user_asserted'))
+                  + (SELECT count(*) FROM claims c
+                     WHERE c.object_entity = e.id AND c.subject <> e.id
+                       AND c.status IN ('active', 'user_asserted')) AS claims,
+                    (SELECT count(*) FROM mentions m WHERE m.entity_id = e.id) AS mentions
+             FROM entities e
+         )
+         SELECT (SELECT count(*) FROM actual a LEFT JOIN entity_stats s ON s.entity_id = a.id
+                 WHERE s.claims IS NOT a.claims OR s.mentions IS NOT a.mentions)
+              + (SELECT count(*) FROM entity_stats s
+                 WHERE (s.claims <> 0 OR s.mentions <> 0)
+                   AND NOT EXISTS (SELECT 1 FROM entities e WHERE e.id = s.entity_id))",
+    ),
 ];
 
 /// Checks of the vector tables, run once the embedding dimension is fixed (`chunk_vec` exists).
@@ -845,7 +863,7 @@ impl Store {
     /// - no duplicate items per (source, external id); no chunks, text layouts, mentions or
     ///   evidence pointing at missing items, entities or claims;
     /// - the item change feed has a live entry per item and none for missing items, and its head
-    ///   is not below its number of entries; the per-source counts match.
+    ///   is not below its number of entries; the per-source and per-entity counts match.
     ///
     /// Runs inside one read transaction on a connection of its own (a consistent snapshot that
     /// does not block writers; an in-memory store uses its writer); the audit check runs on the
@@ -1566,6 +1584,13 @@ mod tests {
                 "source_stats",
                 "UPDATE source_stats SET items = items + 1",
                 "per-source counts",
+            ),
+            (
+                "entity_stats",
+                "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
+                     VALUES ('ent_counted', 'person', 'C', 'c', 't', 't');
+                 UPDATE entity_stats SET mentions = mentions + 1 WHERE entity_id = 'ent_counted'",
+                "per-entity counts",
             ),
             (
                 "dangling chunk",

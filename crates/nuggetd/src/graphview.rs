@@ -321,10 +321,14 @@ pub(crate) fn scan_entities(
     }
 }
 
-/// Graph overview: the `limit` most connected entities (by facts, then mentions) of `kinds`,
-/// with the active entity-to-entity claims between them. Without `include_sensitive`,
+/// Graph overview: the `limit` most connected entities (by facts, then mentions, then name) of
+/// `kinds`, with the active entity-to-entity claims between them. Without `include_sensitive`,
 /// sensitive-only entities and claims (see [`entity_sensitive`]) are left out; with it, nodes
-/// are marked.
+/// are marked. `truncated`: more entities (supported by `source`, when given) exist than were
+/// considered for the `limit` shown.
+///
+/// Entities come most connected first from [`GraphStore::top_entities`] (an index range in
+/// `SqliteGraph`), a page at a time, until `limit` are kept.
 pub(crate) fn overview(
     graph: &dyn GraphStore,
     kinds: &[EntityKind],
@@ -336,33 +340,59 @@ pub(crate) fn overview(
         items: sens,
         include: include_sensitive,
     } = sensitivity;
-    let (mut all, scan_cut) = scan_entities(graph, None, kinds)?;
-    all.sort_by(|a, b| {
-        b.claims
-            .cmp(&a.claims)
-            .then(b.mentions.cmp(&a.mentions))
-            .then(a.name.cmp(&b.name))
-    });
-    if let Some(src) = source {
-        // One query for the supported set.
-        let supported: HashSet<EntityId> = graph.entities_supported_by(src)?.into_iter().collect();
-        all.retain(|e| supported.contains(&e.id));
-    }
-    // Most connected first, so stop once `limit` shown entities are found.
-    let mut kept = Vec::with_capacity(limit.min(all.len()));
+    // One query for the supported set.
+    let supported: Option<HashSet<EntityId>> = match source {
+        Some(src) => Some(graph.entities_supported_by(src)?.into_iter().collect()),
+        None => None,
+    };
+    let page = limit.saturating_mul(2).max(OVERVIEW_PAGE);
+    let mut kept = Vec::with_capacity(limit.min(page));
+    let mut seen = HashSet::new();
     let mut cut = false;
-    for e in all {
-        if kept.len() >= limit {
-            cut = true;
+    let mut offset = 0;
+    'pages: loop {
+        let batch = graph.top_entities(kinds, page, offset)?;
+        let n = batch.len();
+        offset += n;
+        for e in batch {
+            // Pages are separate reads: a write in between may shift an entity across a page
+            // boundary, so never show one twice.
+            if !seen.insert(e.id.clone()) {
+                continue;
+            }
+            if supported.as_ref().is_some_and(|s| !s.contains(&e.id)) {
+                continue;
+            }
+            if kept.len() >= limit {
+                cut = true;
+                break 'pages;
+            }
+            let sensitive = entity_sensitive(graph, sens, &e.id)?;
+            if sensitive && !include_sensitive {
+                continue;
+            }
+            kept.push((e, sensitive));
+        }
+        if n < page {
             break;
         }
-        let sensitive = entity_sensitive(graph, sens, &e.id)?;
-        if sensitive && !include_sensitive {
-            continue;
-        }
-        kept.push((e, sensitive));
     }
-    let truncated = scan_cut || cut;
+    overview_view(graph, kept, cut, source, sens, include_sensitive)
+}
+
+/// Smallest page [`overview`] reads from [`GraphStore::top_entities`].
+const OVERVIEW_PAGE: usize = 100;
+
+/// The overview's nodes (`kept`, most connected first, each with whether it is sensitive-only)
+/// and the active entity-to-entity claims between them.
+fn overview_view(
+    graph: &dyn GraphStore,
+    kept: Vec<(EntitySummary, bool)>,
+    truncated: bool,
+    source: Option<&SourceId>,
+    sens: &mut dyn ItemSensitivity,
+    include_sensitive: bool,
+) -> Result<GraphViewIpc> {
     let ids: HashSet<EntityId> = kept.iter().map(|(e, _)| e.id.clone()).collect();
     let mut seen = HashSet::new();
     let mut edges = Vec::new();
@@ -568,6 +598,182 @@ mod tests {
     impl ItemSensitivity for Sens {
         fn item_sensitive(&mut self, item: &ItemRef) -> Result<bool> {
             Ok(self.0.contains(item))
+        }
+    }
+
+    /// The overview as it was computed before `top_entities`: every entity scanned (up to
+    /// `MAX_SCAN`), sorted, filtered.
+    fn overview_by_scan(
+        graph: &dyn GraphStore,
+        kinds: &[EntityKind],
+        limit: usize,
+        source: Option<&SourceId>,
+        sens: &mut dyn ItemSensitivity,
+        include_sensitive: bool,
+    ) -> Result<GraphViewIpc> {
+        let (mut all, scan_cut) = scan_entities(graph, None, kinds)?;
+        all.sort_by(|a, b| {
+            b.claims
+                .cmp(&a.claims)
+                .then(b.mentions.cmp(&a.mentions))
+                .then(a.name.cmp(&b.name))
+        });
+        if let Some(src) = source {
+            let supported: HashSet<EntityId> =
+                graph.entities_supported_by(src)?.into_iter().collect();
+            all.retain(|e| supported.contains(&e.id));
+        }
+        let mut kept = Vec::new();
+        let mut cut = false;
+        for e in all {
+            if kept.len() >= limit {
+                cut = true;
+                break;
+            }
+            let sensitive = entity_sensitive(graph, sens, &e.id)?;
+            if sensitive && !include_sensitive {
+                continue;
+            }
+            kept.push((e, sensitive));
+        }
+        overview_view(
+            graph,
+            kept,
+            scan_cut || cut,
+            source,
+            sens,
+            include_sensitive,
+        )
+    }
+
+    /// The paged `top_entities` overview gives what the full scan gave, on both graph stores:
+    /// ties in counts and names, sensitive-only entities (hidden and shown), source and kind
+    /// filters, limits below, at and above a page.
+    #[test]
+    fn overview_matches_the_full_scan() {
+        use nugget_graph::{Evidence, MemGraph, NewClaim, NewEntity};
+        let sqlite = nugget_store::SqliteGraph::open_in_memory().unwrap();
+        let mem = MemGraph::new();
+        for g in [&sqlite as &dyn GraphStore, &mem] {
+            let kinds_cycle = [
+                EntityKind::Person,
+                EntityKind::Organization,
+                EntityKind::Project,
+                EntityKind::Topic,
+            ];
+            let mut ids = Vec::new();
+            for i in 0..260usize {
+                // Repeated names (some differing in case only) make name and id tie-breaks count.
+                let name = match i % 7 {
+                    0 => "Same".to_owned(),
+                    1 => "same".to_owned(),
+                    _ => format!("E{:03}", (i * 37) % 260),
+                };
+                ids.push(
+                    g.create_entity(&NewEntity::new(kinds_cycle[i % 4], name))
+                        .unwrap(),
+                );
+            }
+            let srcs = ["mail", "notes", "secret"];
+            for (i, id) in ids.iter().enumerate() {
+                for m in 0..(i % 5) {
+                    g.add_mention(&Mention {
+                        entity: id.clone(),
+                        item: item(srcs[(i + m) % 3], &format!("k{}", (i + m) % 11)),
+                        chunk_id: None,
+                        surface: format!("s{m}"),
+                        confidence: 1.0,
+                    })
+                    .unwrap();
+                }
+                for c in 0..(i % 4) {
+                    let to = &ids[(i * 13 + c * 7 + 1) % ids.len()];
+                    g.add_claim(&NewClaim {
+                        subject: id.clone(),
+                        predicate: format!("p{c}"),
+                        object: ClaimObject::Entity(to.clone()),
+                        text: "t".into(),
+                        confidence: 0.9,
+                        status: ClaimStatus::Active,
+                        evidence: vec![Evidence {
+                            item: item(srcs[(i + c) % 3], &format!("k{}", (i * c) % 11)),
+                            chunk_id: None,
+                            quote: None,
+                        }],
+                        valid_from: None,
+                        valid_to: None,
+                    })
+                    .unwrap();
+                }
+            }
+            // Items of `secret` (some keys) and mail/k3 are sensitive.
+            let mut sensitive: HashSet<ItemRef> = (0..11)
+                .filter(|k| k % 2 == 0)
+                .map(|k| item("secret", &format!("k{k}")))
+                .collect();
+            sensitive.insert(item("mail", "k3"));
+            let kind_sets: [&[EntityKind]; 4] = [
+                &[],
+                &[EntityKind::Person],
+                &[EntityKind::Person, EntityKind::Organization],
+                &[EntityKind::Event],
+            ];
+            let sources = [
+                None,
+                Some(SourceId::new("mail")),
+                Some(SourceId::new("secret")),
+            ];
+            let mut checked = 0;
+            for kinds in kind_sets {
+                for limit in [0, 1, 7, 60, 150, 1000] {
+                    for source in &sources {
+                        for include in [false, true] {
+                            let old = overview_by_scan(
+                                g,
+                                kinds,
+                                limit,
+                                source.as_ref(),
+                                &mut Sens(sensitive.clone()),
+                                include,
+                            )
+                            .unwrap();
+                            let new = overview(
+                                g,
+                                kinds,
+                                limit,
+                                source.as_ref(),
+                                Sensitivity {
+                                    items: &mut Sens(sensitive.clone()),
+                                    include,
+                                },
+                            )
+                            .unwrap();
+                            assert_eq!(new, old, "{kinds:?} {limit} {source:?} {include}");
+                            checked += usize::from(!new.nodes.is_empty());
+                        }
+                    }
+                }
+            }
+            assert!(checked >= 80, "{checked}");
+            // The fixture has sensitive-only entities, and more entities than a page.
+            let all = |include| {
+                overview(
+                    g,
+                    &[],
+                    1000,
+                    None,
+                    Sensitivity {
+                        items: &mut Sens(sensitive.clone()),
+                        include,
+                    },
+                )
+                .unwrap()
+            };
+            let (hidden, shown) = (all(false), all(true));
+            assert_eq!(shown.nodes.len(), ids.len());
+            let marked = shown.nodes.iter().filter(|n| n.sensitive).count();
+            assert!(marked > 0);
+            assert_eq!(hidden.nodes.len(), ids.len() - marked);
         }
     }
 
