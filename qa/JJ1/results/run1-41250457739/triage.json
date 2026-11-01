@@ -1,0 +1,104 @@
+{
+"items": 1200,
+"first_search_s": {
+"Willow Lane Practice": 5.2,
+"mood journal": 5.3,
+"Harbour Lettings": 5.4,
+"net pay 3,130.10": 5.6,
+"Kestrel!Moon42": 5.7,
+"amber-otter-1182": 5.9
+},
+"t_triaged_s": 4436.6,
+"normal_sensitive_rate": 0.0,
+"normal_junk_rate": 0.007,
+"normal_triage_states": {
+"done": 1157,
+"pending": 0,
+"failed": 0,
+"skipped": 0,
+"unknown": 0
+},
+"chat_model": "qwen3-4b-q4km",
+"ask_during": [
+[
+"When will the bike wheel be re",
+27090,
+30115,
+true
+],
+[
+"Where is the new noodle place ",
+22413,
+24882,
+true
+],
+[
+"What time does the Saturday ba",
+23982,
+25493,
+false
+],
+[
+"What are we reading next month",
+17144,
+19641,
+true
+]
+],
+"ask_idle": [
+[
+"When will the bike wheel be re",
+15955,
+17341,
+true
+],
+[
+"Where is the new noodle place ",
+13409,
+14858,
+true
+],
+[
+"What time does the Saturday ba",
+15575,
+16549,
+false
+],
+[
+"What are we reading next month",
+12842,
+15429,
+true
+]
+],
+"sensitive_rows": [
+"lang kind subject | sensitive rule model_sensitive",
+"en health Your lab results are ready | True health False",
+"en health Follow-up after Thursday's session | False None False",
+"en financial Statement for account ending 4471 | True financial False",
+"en financial Your payslip for September | True financial False",
+"en credentials Your new login for the tenant portal | True credentials True",
+"en credentials Wi-Fi for the cabin | False None False",
+"en legal Re: tenancy dispute — next steps | True legal False",
+"en legal Custody arrangement draft | True legal False",
+"de health Ihr Termin in der Praxis Dr. Kaya | False None False",
+"de health Krankmeldung bis Freitag | False None False",
+"de financial Kontoauszug Oktober | False None False",
+"de financial Gehaltsabrechnung September | False None False",
+"de credentials Zugangsdaten für das Mieterportal | True None True",
+"de legal Ihre Klage gegen die Hausverwaltung | False None False",
+"es health Resultados de su análisis | False None False",
+"es financial Extracto de su cuenta | False None False",
+"es credentials Tu contraseña del portal del colegio | True credentials True",
+"es legal Demanda laboral — citación | False None False",
+"fr health Compte rendu de consultation | False None False",
+"fr financial Votre relevé de compte | False None False",
+"fr credentials Vos identifiants pour l'espace client | True credentials True",
+"fr legal Convocation au tribunal | False None False"
+],
+"junk": {
+"class": "junk",
+"labelled": 21,
+"of": 21
+}
+}

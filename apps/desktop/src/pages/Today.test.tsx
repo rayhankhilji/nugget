@@ -444,6 +444,7 @@ describe("today helpers", () => {
 
   it("composes notifications", () => {
     expect(briefNotification(brief)).toEqual({ title: "Your morning brief: 2 items", body: "2 things need you · 1 meeting today" });
-    expect(reminderNotification({ id: "r", text: "  Call\nBo ", at: "2026-10-28T10:00:00Z" }).body).toBe("Call Bo");
+    // II4: the reminder's own text never reaches the OS notification.
+    expect(reminderNotification({ id: "r", text: "  Call\nBo ", at: "2026-10-28T10:00:00Z" }).body).toBe("A reminder is due.");
   });
 });

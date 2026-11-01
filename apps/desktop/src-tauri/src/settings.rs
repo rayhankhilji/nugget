@@ -1,5 +1,10 @@
 //! Desktop-only preferences (update channel, auto-install, start-at-login answer, autostart),
 //! kept in `settings.json` under the app's config directory. The daemon never reads this file.
+//!
+//! The update channel counts only once the user has chosen it (`channel_chosen`): until then
+//! the app contacts no update server. Files written before that flag existed can't tell a
+//! picked Stable from the old default, so a missing flag means "chosen" only for Beta and Off,
+//! which were never defaults.
 
 use std::path::{Path, PathBuf};
 
@@ -19,9 +24,13 @@ pub enum Channel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(from = "StoredSettings")]
 pub struct Settings {
+    /// What the update settings show; it takes effect only once `channel_chosen`.
     pub channel: Channel,
+    /// The user picked the channel (in setup, the Updates card, or by any change to it). Until
+    /// then nothing checks for updates, whatever `channel` says.
+    pub channel_chosen: bool,
     /// Opt-in: download verified updates in the background and install them when Nugget quits.
     /// Off (the default) means notify only; nothing is downloaded until the user asks.
     pub auto_install: bool,
@@ -36,9 +45,55 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             channel: Channel::Stable,
+            channel_chosen: false,
             auto_install: false,
             start_at_login: None,
             autostart: false,
+        }
+    }
+}
+
+impl Settings {
+    /// The channel to check, or `None` when updates are off or not chosen yet.
+    pub fn active_channel(&self) -> Option<Channel> {
+        Some(self.channel).filter(|c| self.channel_chosen && *c != Channel::Off)
+    }
+}
+
+/// `settings.json` as read, with every field optional (older or partial files).
+#[derive(Deserialize)]
+#[serde(default)]
+struct StoredSettings {
+    channel: Channel,
+    channel_chosen: Option<bool>,
+    auto_install: bool,
+    start_at_login: Option<bool>,
+    autostart: bool,
+}
+
+impl Default for StoredSettings {
+    fn default() -> Self {
+        let d = Settings::default();
+        Self {
+            channel: d.channel,
+            channel_chosen: None,
+            auto_install: d.auto_install,
+            start_at_login: d.start_at_login,
+            autostart: d.autostart,
+        }
+    }
+}
+
+impl From<StoredSettings> for Settings {
+    fn from(s: StoredSettings) -> Self {
+        Self {
+            channel: s.channel,
+            // No flag: written before it existed. Stable was the silent default, so it
+            // doesn't count as a choice; Beta and Off were never defaults, so they do.
+            channel_chosen: s.channel_chosen.unwrap_or(s.channel != Channel::Stable),
+            auto_install: s.auto_install,
+            start_at_login: s.start_at_login,
+            autostart: s.autostart,
         }
     }
 }
@@ -47,7 +102,7 @@ pub fn file_in(config_dir: &Path) -> PathBuf {
     config_dir.join("settings.json")
 }
 
-/// Missing or unreadable settings fall back to the defaults (notify-only, stable).
+/// Missing or unreadable settings fall back to the defaults (notify-only, no channel chosen).
 pub fn load(path: &Path) -> Settings {
     match std::fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
@@ -81,6 +136,8 @@ mod tests {
     fn defaults_are_notify_only_on_stable() {
         let s = Settings::default();
         assert_eq!(s.channel, Channel::Stable);
+        assert!(!s.channel_chosen);
+        assert_eq!(s.active_channel(), None);
         assert!(!s.auto_install);
         assert_eq!(s.start_at_login, None);
         assert!(!s.autostart);
@@ -99,6 +156,7 @@ mod tests {
         assert_eq!(load(&path), Settings::default());
         let s = Settings {
             channel: Channel::Off,
+            channel_chosen: true,
             auto_install: true,
             start_at_login: Some(false),
             autostart: true,
@@ -108,5 +166,47 @@ mod tests {
         std::fs::write(&path, b"{not json").unwrap();
         assert_eq!(load(&path), Settings::default());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn files_without_the_flag_count_stable_as_unchosen() {
+        let parse = |json: &str| serde_json::from_str::<Settings>(json).unwrap();
+        // The old default: no choice was ever made, so nothing is checked.
+        let s = parse(r#"{"channel":"stable","auto_install":false,"start_at_login":true}"#);
+        assert_eq!((s.channel, s.channel_chosen), (Channel::Stable, false));
+        assert_eq!(s.active_channel(), None);
+        assert_eq!(s.start_at_login, Some(true));
+        // Beta and Off were never defaults: the user picked them.
+        let s = parse(r#"{"channel":"beta"}"#);
+        assert_eq!(
+            (s.channel_chosen, s.active_channel()),
+            (true, Some(Channel::Beta))
+        );
+        let s = parse(r#"{"channel":"off"}"#);
+        assert_eq!((s.channel_chosen, s.active_channel()), (true, None));
+        // No channel at all is the default, unchosen.
+        assert_eq!(parse("{}"), Settings::default());
+    }
+
+    #[test]
+    fn the_flag_round_trips() {
+        for (channel, chosen, active) in [
+            (Channel::Stable, true, Some(Channel::Stable)),
+            (Channel::Stable, false, None),
+            (Channel::Beta, false, None),
+            (Channel::Beta, true, Some(Channel::Beta)),
+            (Channel::Off, true, None),
+        ] {
+            let s = Settings {
+                channel,
+                channel_chosen: chosen,
+                ..Settings::default()
+            };
+            let json = serde_json::to_string(&s).unwrap();
+            assert!(json.contains("\"channel_chosen\""), "{json}");
+            let back: Settings = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, s);
+            assert_eq!(back.active_channel(), active);
+        }
     }
 }

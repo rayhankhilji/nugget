@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject } from "react";
-import { api, events, type ConnectorKind, type SourceInfo } from "../api";
+import { api, events, needsFullDiskAccess, type ConnectorKind, type SourceInfo } from "../api";
 import { useEvent } from "../hooks";
 import { formatList, Trans, useT, type MessageKey } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
+import { FullDiskAccessSteps } from "../sources/MessagingForm";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { CopyButton } from "../components/CopyButton";
+import { UpdateQuestion } from "../components/UpdateChoice";
 import { legacyDone, pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
 import { detectOs, type Os } from "./platform";
 import { TriggerKeys } from "./TriggerStep";
 import { loadTrigger, readTrigger } from "./trigger";
 import { detectAiSetup } from "./detect";
+import { DesktopOptIns } from "../platform/DesktopOptIns";
 
 export interface StepProps {
   state: OnboardingState;
@@ -60,6 +63,7 @@ export function WelcomeStep({ headingRef }: StepProps) {
             <li>{t("onboarding.welcome.leaves1")}</li>
             <li>{t("onboarding.welcome.leaves2")}</li>
             <li>{t("onboarding.welcome.leaves3")}</li>
+            <li>{t("onboarding.welcome.leaves4")}</li>
           </ul>
         </section>
       </div>
@@ -211,6 +215,7 @@ function IndexProgress({ added, announce }: { added: SourceInfo[]; announce: (te
           <li key={s.id} className={`note ob-index-${phase}${phase === "failed" ? " note-error" : ""}`} data-phase={phase}>
             {phase !== "ready" && phase !== "failed" && <span className="spinner" aria-hidden="true" />}{" "}
             {t(PHASE_KEY[phase], { name: s.name, count: s.items, error: s.last_error ?? "" })}
+            {phase === "failed" && s.kind === "imessage" && needsFullDiskAccess(s.last_error) && <FullDiskAccessSteps />}
           </li>
         );
       })}
@@ -413,6 +418,7 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
           </dd>
         </div>
       </dl>
+      <DesktopOptIns />
       {pending.length > 0 ? (
         <>
           <p>{t("onboarding.done.pending", { count: pending.length })}</p>
@@ -429,6 +435,7 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
       ) : (
         <p>{t("onboarding.done.allDone")}</p>
       )}
+      <UpdateQuestion />
       <p className="muted">{t("onboarding.done.again")}</p>
     </>
   );

@@ -169,6 +169,13 @@ struct AgentSettings {
     /// Overrides `[policy] confirm_timeout_secs` for agent runs.
     confirm_timeout_secs: Option<u64>,
     max_concurrent: usize,
+    /// Screen each goal for fraud, impersonation, harassment and other serious harm before the
+    /// first step, on the light tier (a small local model). Off by default: turning it on is
+    /// the user's decision (docs/PLAN.md, "Also open").
+    triage: bool,
+    /// With `triage`, a refusal asks the user ("Do it anyway" / "Cancel") instead of ending the
+    /// task; going ahead is logged as their decision.
+    triage_override: bool,
 }
 
 impl Default for AgentSettings {
@@ -182,6 +189,8 @@ impl Default for AgentSettings {
             max_tokens: None,
             confirm_timeout_secs: None,
             max_concurrent: 4,
+            triage: false,
+            triage_override: true,
         }
     }
 }
@@ -366,12 +375,24 @@ impl AgentFeature {
         let mut task = Task::new(task_id.clone(), goal);
         task.context = req.context.filter(|c| !c.trim().is_empty());
         let gate: Arc<dyn PolicyGate> = self.safety.engine.clone();
-        let agent = Arc::new(
-            Agent::new(model, registry, gate)
-                .with_log(self.log.clone())
-                .with_events(self.runs.clone())
-                .with_ledger(self.ledger.clone()),
-        );
+        let mut agent = Agent::new(model, registry, gate)
+            .with_log(self.log.clone())
+            .with_events(self.runs.clone())
+            .with_ledger(self.ledger.clone());
+        // The triage is one short call: a small model judges it as well as a large one and much
+        // sooner (DD3), so it goes to the light tier when one is configured.
+        if cfg.triage
+            && !self
+                .router
+                .candidates(Tier::Light, &Capabilities::default())
+                .is_empty()
+        {
+            agent = agent.with_triage_model(Model::Router {
+                router: self.router.clone(),
+                tier: Tier::Light,
+            });
+        }
+        let agent = Arc::new(agent);
         {
             let mut tasks = self.runs.lock();
             let active = tasks.values().filter(|t| t.active()).count();
@@ -483,6 +504,8 @@ impl AgentFeature {
             },
             confirm_timeout: Duration::from_secs(timeout),
             cancel: self.shutdown.child_token(),
+            triage: s.triage,
+            triage_override: s.triage_override,
             ..AgentConfig::default()
         }
     }
@@ -1050,6 +1073,12 @@ mod tests {
         assert_eq!(s.max_steps, Some(7));
         assert_eq!(s.confirm_timeout_secs, Some(3));
         assert_eq!(s.max_concurrent, 4);
+        // The triage stays off unless the user turns it on; a refusal is then a question.
+        assert!(!s.triage);
+        assert!(s.triage_override);
+        let t: toml::Table = toml::from_str("triage = true").unwrap();
+        let s: AgentSettings = section("agent", &t).unwrap();
+        assert!(s.triage);
     }
 
     #[test]

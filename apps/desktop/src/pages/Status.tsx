@@ -21,6 +21,7 @@ import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinne
 import { UpdateSettings } from "../components/UpdateSettings";
 import { BackupSettings } from "../components/BackupSettings";
 import { formatList, formatNumber, Trans, useT, type MessageKey } from "../i18n";
+import { triageLine } from "../triageLine";
 
 export function StatusPage() {
   const t = useT();
@@ -350,7 +351,19 @@ function IndexingCard({
                 </div>
                 <div>
                   <dt>{t("status.triage")}</dt>
-                  <dd className="stat-text">{data.triage_provider ?? <span className="muted">{t("status.off")}</span>}</dd>
+                  <dd className="stat-text">
+                    {(() => {
+                      // JJ2: on (provider and what it is doing) or off (and what that means for privacy).
+                      const line = triageLine(data.triage_provider, data.triage);
+                      return (
+                        <>
+                          {line.on ? <span>{data.triage_provider}</span> : <span className="muted">{t("status.off")}</span>}
+                          <span className="muted small triage-line">{t(line.key, line.args)}</span>
+                          {line.failed > 0 && <span className="muted small triage-line">{t("status.triageFailed", { n: line.failed })}</span>}
+                        </>
+                      );
+                    })()}
+                  </dd>
                 </div>
               </dl>
               <p className="muted small">{t("status.freshnessHint")}</p>

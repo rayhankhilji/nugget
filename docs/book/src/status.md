@@ -142,13 +142,14 @@ unless stated otherwise.
 
 ## Updates
 
-- The in-app updater is built: you choose the channel (Stable, Beta or Off), and by default it only
-  tells you about an update; nothing downloads or installs without you. The update feed and every
+- The in-app updater is built: it checks nothing until you choose a channel (Stable, Beta or Off),
+  and by default it only tells you about an update; nothing downloads or installs without you. The update feed and every
   update are signature-checked before use, and it never offers an older version. See
   [Install](guide/install.md#updates).
 - Nothing can update yet: there is no release, and builds made without the updater key (dry runs,
   your own builds) have no updater.
-- Update checks are made by the desktop app, so they are not in the daemon's egress ledger.
+- Update checks and downloads are made by the desktop app and recorded in the daemon's egress
+  ledger (`update_check`, `update_download`); while the daemon is down the rows wait in the app.
 
 ## Also included
 

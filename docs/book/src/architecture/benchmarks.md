@@ -113,16 +113,16 @@ nDCG@10 0.913, against 0.905 and 0.810 for full-text alone.
 
 ## Not measured yet
 
-- Time to first useful result on a fresh install (target: under 2 minutes).
 - Retrieval quality with a real embedding model (`--embed-url` exists; no published run yet).
 - Mail and calendar connectors end to end, through the daemon and IPC.
 - Citation accuracy (does each `[n]` support its sentence?).
-- CPU, battery and idle cost per 1 000 items, and daemon idle overhead.
-- Published `knowledge`, `draft`, `cua` and `proactive` results: the suites run in CI at smoke
-  scale, but no release-build run is published here yet, and `knowledge` and `draft` use fake models
-  by default.
-- Nugget's own computer-use agent and the real proactive engine on their suites (being wired in
-  wave W).
+- Battery cost per 1 000 items.
+- Double Tap time to first token with a cloud model.
+
+Measured since this page was first written: time to first useful result on a fresh install (the
+desktop e2e first-run scenario), daemon CPU, memory, startup and idle cost at 100 000 items (`perf`),
+and published `knowledge`, `draft`, `cua` and `proactive` results, including runs with real local
+models; see [bench/README.md](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md).
 
 The [benchmark dashboard](../benchmarks/dashboard.md) charts the headline metrics of each nightly
 run over time.

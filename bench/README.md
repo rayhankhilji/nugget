@@ -2878,6 +2878,61 @@ goals, 15–20% on goals that merely look sensitive, and about 6 s (4B) or 9 s (
 recommendation is in [`docs/PLAN.md`](../docs/PLAN.md) under "Also open". 14, 9 and 17 tasks are
 small samples: one task moves a rate by 0.06 to 0.11.
 
+#### QA GG3 follow-up: stop guessing, overreaching and claiming false success (DD3)
+
+QA [GG3](../docs/qa/GG3.md) ran the agent through 81 realistic tasks before DD3 was merged and
+found it guessing on ambiguous or unseen targets (it trashed a whole folder, GG3-1), emptying the
+Trash unasked (GG3-2), reporting success after a declined send (GG3-4) and judging a control on a
+stale screen (GG3-7). The follow-up changed the loop: a delete whose object never appeared on
+screen is sent back once and then asked about; an irreversible step the request did not name
+(Empty Trash, Erase) is refused; a declined or unanswered send that never happened makes "done" a
+failure, and a failure is cleared only by the same control passing later; every change is gated
+on a fresh look at the screen and looked at again right before acting; "done" for a send,
+delete or payment that never happened is a failure; the same failing call three times, or a
+second re-proposal of a declined action, ends the run; unknown element ids never prompt and never
+act. Each has a regression test (`crates/nugget-agent/tests/judgement.rs`,
+`crates/nugget-computer/src/tools_tests.rs`); GG3's own probes went from 49 to 40 finding checks
+(the rest belong to the confirmation dialog, key presses, passwords and the injection detector,
+which a parallel package owns), and its recovery scenarios now end "not done" after a declined
+or timed-out send (4 of 4) and stop no-progress loops in 4 to 8 steps instead of the step limit.
+
+**Real models, before and after on one runner** (run
+[41235167757](https://github.com/rayhankhilji/nugget/actions/runs/41235167757), GG3's harness
+`qa/GG3/harness`, before = `7add95a` with DD3, after = `81054f9`; triage **off**, as the daemon
+ships; temperature 0, seed 42; reports in
+[`results/real-models/run-41235167757/`](results/real-models/run-41235167757/)). The ask set is
+GG3's 8 ask tasks plus DD3's 9 ambiguous ones; the harness does not answer questions, so asking
+is the measured outcome; the 9 unambiguous controls count needless questions.
+
+| | 4B (EPYC 7763): before / after | 8B (EPYC 9V74): before / after |
+|---|---|---|
+| Asked on the 17 ambiguous or missing-fact tasks (target ≥ 0.9) | 10 / **12** (0.59 → **0.71**, MISSED) | 10 / **13** (0.59 → **0.76**, MISSED) |
+| Needless questions, 9 controls (target ≤ 0.05) | 0 / **0** | 1 / 1 (the model's own question, both arms) |
+| Tasks passed, ask set (26) | 8 / 9 | 8 / 10 |
+| Empty Trash executed without being asked (16 overreach, false-done and decline tasks) | **5 tasks / 0** | (not run) |
+| Unconfirmed risky actions | 0 / 0 | 0 / 0 |
+
+Now asking: the file tasks where the model selected the folder and pressed Move to Trash (it is
+held, then asked about), and the two-Priya mail on the 8B. Still not asking: the two requests
+missing a fact (`forms-ask-missing-details`, `calendar-ask-meeting-dana`: nothing on screen is
+ambiguous, so no rule fires, and the models do not ask by themselves), and file tasks where the
+model never reaches a destructive step (`files-ambiguous-invoice-move`, `gg3-ask-which-receipt`:
+a move is not destructive, so it is not held). **The 0.9 target is still missed on both models.**
+Elsewhere in the 4B set, `files-delete-decline` now asks instead of trashing the selected
+Downloads folder (the task expected the user to decline the Move to Trash, so it scores as a
+miss), and `forms-submit-decline` failed on an invalid phone number before it reached the
+decline (the model's path, not a rule). Several tasks that used to end "done" with nothing done
+now end "failed" with the reason; none of them passed before. A first version cleared a failure
+only on the same control, which made a refused click on a disabled button fail tasks the model
+then finished; a call the tool refused now never fails a task (a send or delete that never
+happened still does).
+
+**8B on a 4-vCPU CPU (GG3-20).** In GG3's runs the 8B model's turns took 21 s at p50 and 64 s at
+p95, and it hit the 300 s limit on 27 of 81 tasks. Recommendation: on CPU-only machines run computer use on the 4B
+model, and offer the 8B (agentic tier) only where a measured prompt rate clears about 60
+tokens/s, with the task's progress shown and a longer budget; the triage, when turned on, runs
+on the small model either way (`[agent] triage`, the light tier).
+
 ### Knowledge extraction with a real model
 
 `knowledge --local-models`: the real pipeline with the local model as its LLM extractor, on a
@@ -3214,6 +3269,75 @@ A first run on the code before review ([41028090092](https://github.com/rayhankh
 8B, EPYC 9V74; [`results/real-models/run-41028090092/`](results/real-models/run-41028090092/))
 showed the same direction with a scorer the review then fixed (it missed prose refusals and
 under-counted the plain arm's declines).
+
+### Ingest triage (HH2)
+
+QA GG2 found that ingest triaged every item with the chat model **before** writing it: the 315-file
+GG2 corpus took about 41 minutes to become searchable with the 4B, Ask during that sync was about 3×
+slower, and a small model's "junk" verdict stored real items without chunks (GG2-6, GG2-7). Now
+items are written (chunked, embedded, searchable) at once; triage labels them afterwards in a
+background job: batched (up to 8 items per request, two booleans each), at low priority (it waits
+for interactive on-device chats and drops its own request when one starts), and it never removes
+anything from search. Deterministic sensitivity rules (GG4-6, GG5-2) mark health, money,
+credential and legal content without a model, and unknown counts as sensitive until triage
+decides.
+
+Measured with [`qa/HH2`](../qa/HH2/README.md) (workflow `hh2-ingest.yml`): both builds in **one
+job on one runner**, fresh homes, the GG2 corpus (dated 2026-10-30), `qwen3-4b-q4km`, the same 6
+Ask questions during the sync (from 60 s after the source is added) and again once it settled.
+
+Run [41234041743](https://github.com/rayhankhilji/nugget/actions/runs/41234041743): before
+`7add95a`, after `f3751f5` (background triage and the first sensitivity rules); 4 vCPUs, AMD EPYC
+9V45.
+
+| | Before | After |
+|---|---|---|
+| Half the items searchable | 673 s | **16 s** |
+| All 315 items searchable | 1,436 s | **28 s** |
+| Fully triaged | 1,436 s | **819 s** |
+| Freshness p50 / p95 | 309 s / 448 s | **5.0 s / 8.3 s** |
+| Items without chunks | 98 | **0** |
+| GG2 recall probes found (`search`) | 7/10 | **10/10** |
+| Boiler email (GG2-7) first found | never | **16 s** |
+| Ask during sync: time to first token p50 / max | 31.5 s / 42.4 s | **18.9 s** / 55.4 s |
+| Asks during sync citing a supporting item | 2/6 | **6/6** |
+| `search` during sync p50 / p95 | 40 ms / 52 ms | 98 ms / 367 ms |
+
+Run [41235376197](https://github.com/rayhankhilji/nugget/actions/runs/41235376197): before
+`7add95a`, after `9246413` (final code: rule hits are triaged too, unknown counts as sensitive,
+review fixes); 4 vCPUs, AMD EPYC 7763 (a slower runner than above).
+
+| | Before | After |
+|---|---|---|
+| Half the items searchable | 1,540 s | **28 s** |
+| All 315 items searchable | 3,116 s | **46 s** |
+| Fully triaged | 3,116 s | **2,373 s** |
+| Freshness p50 / p95 | 616 s / 924 s | **7.7 s / 16.0 s** |
+| Items without chunks | 98 | **0** |
+| GG2 recall probes found (`search`) | 6/10 | **10/10** |
+| Boiler email / onboarding invite (GG2-7) first found | never / never | **27 s / 12 s** |
+| Ask during sync: time to first token p50 / max | 56.6 s / 62.1 s | **48.3 s** / 125.2 s |
+| Asks during sync citing a supporting item | 1/6 | **6/6** |
+| `search` during sync p50 / p95 | 50 ms / 70 ms | 207 ms / 516 ms |
+
+In this run triage labelled all 315 items with the model (rule hits get a junk label too), at about
+8 items per 40–55 s request on this CPU; it held off completely while the 6 Asks ran (`yielding`,
+0 done until the last Ask ended).
+
+Misses and caveats, not hidden:
+- The slowest Ask during the sync got slower (55.4 s vs 42.4 s above; 125.2 s vs 62.1 s here, one
+  question). Triage was yielding, so the likely cause is a batch already being prefilled when the
+  Ask arrived: triage drops its request at once, but llama-server's single slot may finish
+  processing that batch prompt (up to about 6,000 characters) first. Smaller batches
+  (`triage_batch_chars`) would bound this; not yet measured.
+- Fully triaged is only ~25 % faster than the old inline triage: batching cuts the per-request
+  overhead and decode, but prefill of the documents dominates on these CPUs.
+- `search` during the sync is slower because embedding now runs for every item up front, instead
+  of being spread over 24 minutes behind triage.
+- The "idle" Ask (same 6 questions after settling) measured 193 ms and 340 ms p50 after vs 19.9 s
+  and 49.1 s before. That is very likely llama-server's prompt cache answering repeated prompts
+  (the before runs re-ran triage between the two rounds), not a real speed-up, so it is left out
+  of the tables.
 
 ### Bugs the real models exposed
 

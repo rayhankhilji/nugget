@@ -56,8 +56,8 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG2-3 Date filters and Citation.date use file mtime, not mail Date or DTSTART | High | DD4 follow-up (retrieval) | fixed in c03b984 (copied-folder time questions 76.9% → 92.3%) |
 | GG2-4 Default config's Ollama entry tried first: follow-ups never rewritten, ~2 s failover | High | DD4 follow-up (rewrite, routing) | fixed in c03b984 (example commented out; unprobed on-device providers after the runtime slot; rewrite falls back to the heuristic) |
 | GG2-5 Sources appear only with the first token (35–95 s) | High | EE3 | routed |
-| GG2-6 One triage LLM call per item: 315 files take 41 min, Ask 3× slower meanwhile | High | HH2 (ingest triage) | routed |
-| GG2-7 4B triage leaves real items unsearchable | High | HH2 (ingest triage) | routed |
+| GG2-6 One triage LLM call per item: 315 files take 41 min, Ask 3× slower meanwhile | High | HH2 (ingest triage) | fixed in 08a0cce (all 315 searchable in 28 s, was 1,436 s; background batched triage yields to Ask) |
+| GG2-7 4B triage leaves real items unsearchable | High | HH2 (ingest triage) | fixed in 08a0cce (junk is a label only; items without chunks 98 → 0; legacy installs re-indexed) |
 | GG2-8 No relevance floor: near-misses become answers | High | DD4 follow-up (retrieval) | partly fixed in c03b984 (near misses marked "partial match" in the Ask prompt; dropping them emptied 58 answerable contexts); real-model effect not yet re-measured |
 | GG2-9 to GG2-18 | Medium/Low | retrieval items DD4, prompt items EE3 | retrieval items (9–13) fixed in c03b984; prompt items with EE3 |
 
@@ -84,7 +84,7 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG4-3 RRULE never expanded: recurring meetings missing | High | BB2 follow-up | routed |
 | GG4-4 TZID ignored: cross-zone times off by hours | High | BB2 follow-up | routed |
 | GG4-5 One shared learning model: one dismissal moves unrelated senders, never decays | High | BB2 follow-up | routed |
-| GG4-6 Items never marked sensitive at ingest (therapy, clinic, salary) | High | HH2 | routed |
+| GG4-6 Items never marked sensitive at ingest (therapy, clinic, salary) | High | HH2 | fixed in 08a0cce (deterministic sensitivity rules; English-heavy, a few de/fr/es words) |
 | GG4-7 Confidential HR salary letter becomes a quoted "Reply to" card | High | BB2 follow-up | routed |
 | GG4-8 Scoped learning resets leave the shared part | High | BB2 follow-up | routed |
 | GG4-9 to GG4-19 | Medium | BB2 follow-up | routed |
@@ -95,7 +95,7 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | Finding | Severity | Owner | State |
 |---|---|---|---|
 | GG5-1 4B model writes card/account numbers, salary, diagnosis into vault pages as title facts | **Blocker** | EE1 follow-up | routed |
-| GG5-2 Health/finance items not sensitive without triage; unknown written as not sensitive | High | HH2 (with GG4-6) | routed |
+| GG5-2 Health/finance items not sensitive without triage; unknown written as not sensitive | High | HH2 (with GG4-6) | fixed in 08a0cce (unknown counts as sensitive; `ingest.assume_unflagged_safe` opts out) |
 | GG5-3 Vault and graph ignore sensitivity | High | HH3 | routed |
 | GG5-4 Re-saving a source revives a fact the user edited | High | HH3 | routed |
 | GG5-5 Retyped fact line loses the user's wording | High | HH3 | routed |
@@ -104,3 +104,24 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG5-8 Restart re-extracts before the model is ready and replaces model facts | High | HH3 | routed |
 | GG5-9 People named by the first display name seen, never renamed | High | EE1 follow-up | routed |
 | GG5-10 and later | Medium/Low | knowledge side EE1, vault/worker side HH3 | routed |
+
+## GG6: a new user's first week ([report](GG6.md)), installers from ec35d39 (before HH2) on three OSes, real 4B model
+
+| Finding | Severity | Owner | State |
+|---|---|---|---|
+| GG6-1 With a local model, indexing runs at LLM speed (24 files: 474–589 s in onboarding) | **Blocker** | HH2 | likely fixed by HH2's background triage (08a0cce, merged after the tested build); HH2 to re-verify with GG6's harness |
+| GG6-2 Folders with nothing indexable spin on "getting ready to index…" forever; setup says Done | High | KK2 | routed |
+| GG6-3 A hung local model server blocks Ask for minutes while status says Ready | High | KK1 | routed |
+| GG6-4 Default config enabled an Ollama provider nobody set up | High | KK1 (migration) | fixed for new installs by DD4 (c03b984); configs written by earlier builds need a migration |
+| GG6-5 A model server that won't start: raw repeated dump, crash loop blocks 32 s, relaunch storm | High | KK1 | routed |
+| GG6-6 Failed model downloads sit at "Downloading" ~100 s, then a raw error | High | KK1 | routed |
+| GG6-7 A saved API key can't be changed or removed | High | KK2 | routed |
+| GG6-8 Quitting leaves the daemon and the model server (3.3 GB on Windows) running | High | EE5 follow-up | routed |
+| GG6-9 Uninstall silently leaves models, the store, the keychain entry and `~/Nugget Vault` | High | EE5 follow-up | routed |
+| GG6-10 After an update on macOS/Linux the old daemon serves the new UI | High | EE5 follow-up | routed |
+| GG6-11 to GG6-16, GG6-21, GG6-22, GG6-26, GG6-31 (keys without Secret Service, onboarding memory, duplicate sources, Ask with no AI, restart after a key, download estimate, wording, skipped files) | Medium/Low | KK2 | routed |
+| GG6-17, GG6-23 to GG6-25, GG6-29, GG6-30 (crash mid-answer, warm-up state, WAL warning, full disk, sleep timers, download cancel/resume) | Medium/Low | KK1 | routed |
+| GG6-18 Update checks contact GitHub by default, outside the ledger | Medium | EE5 | fixed in 44b9e11 (no request before a channel is chosen; every update request ledgered) |
+| GG6-19 macOS: no recovery once Accessibility is denied | Medium | KK2 | routed |
+| GG6-20, GG6-27, GG6-32 (GNOME without tray, macos-14 jobs cancelled, no shell log) | Medium/Low | EE5 follow-up | routed |
+| GG6-28 Windows daemon killed by CTRL_BREAK in the NSIS smoke | Low | EE5 | fixed in 44b9e11 |

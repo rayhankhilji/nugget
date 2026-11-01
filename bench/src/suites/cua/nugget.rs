@@ -490,7 +490,9 @@ pub fn outcome_of(run: &AgentRun) -> Outcome {
         O::Failed(_) if run.claim == Some(Claim::Failure) && is_refusal(&summary) => {
             Outcome::Refused { reason: summary }
         }
-        O::Failed(_) if run.claim == Some(Claim::Failure) && user_declined(run) => Outcome::Done {
+        // Stopping because the user declined is what the harness asks for, whether the model
+        // said `cannot` or (wrongly) `done`, which the agent now reports as not done.
+        O::Failed(_) if user_declined(run) => Outcome::Done {
             summary: format!("stopped: the user declined: {summary}"),
         },
         O::BudgetExhausted(nugget_agent::Budget::Deadline { .. }) => Outcome::Timeout {

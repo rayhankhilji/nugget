@@ -10,10 +10,10 @@ use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
     self, AskRequest, AskStarted, AuthBegin, ChatCancel, ChatDelta, ChatDone, ChatStarted,
-    ContextRequest, ContextResponse, EgressRecentRequest, ModelInfo, ModelInstallRequest,
-    ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo, Role as IpcRole,
-    RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret, SourceSpec,
-    SourceSync, SourceUpdate, StatusResponse, method, notification,
+    ContextRequest, ContextResponse, EgressRecentRequest, EgressRecordRequest, ModelInfo,
+    ModelInstallRequest, ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo,
+    Role as IpcRole, RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret,
+    SourceSpec, SourceSync, SourceUpdate, StatusResponse, method, notification,
 };
 use nugget_core::{Error, Result};
 use nugget_infer::{
@@ -74,6 +74,7 @@ impl Handler for RpcHandler {
             method::MODELS_LIST => self.models_list().await,
             method::MODELS_INSTALL => self.models_install(parse_params(params)?, notify).await,
             method::EGRESS_RECENT => self.egress_recent(parse_params(params)?).await,
+            method::EGRESS_RECORD => self.egress_record(parse_params(params)?).await,
             method::SOURCES_LIST => to_result(self.state.ingest.list().await?),
             method::SOURCES_ADD => self.sources_add(parse_params(params)?).await,
             method::SOURCES_UPDATE => self.sources_update(parse_params(params)?).await,
@@ -460,6 +461,7 @@ impl RpcHandler {
                 let PackedContext {
                     response: ctx,
                     passages,
+                    date,
                     ..
                 } = packed;
                 // Belt and braces: nothing marked sensitive is ever sent to a cloud model.
@@ -488,7 +490,7 @@ impl RpcHandler {
                 match open_stream(p.as_ref(), ask).await {
                     Ok(stream) => {
                         router.report_success(p.id());
-                        return Ok((p, stream, ctx, passages, sent));
+                        return Ok((p, stream, ctx, passages, sent, date));
                     }
                     Err(e) if !explicit && is_fallback_error(&e) => {
                         tracing::warn!(provider = %p.id(), error = %e, "ask: provider failed; trying next");
@@ -507,7 +509,7 @@ impl RpcHandler {
                 Error::NotFound("no provider could answer".into())
             })))
         };
-        let (provider, stream, ctx, passages, sent): (_, _, _, _, SafeHistory) = tokio::select! {
+        let (provider, stream, ctx, passages, sent, date): (_, _, _, _, SafeHistory, _) = tokio::select! {
             r = start => r?,
             () = self.state.shutdown.cancelled() => return Err(shutting_down()),
         };
@@ -555,6 +557,9 @@ impl RpcHandler {
             excluded_sensitive: ctx.excluded_sensitive,
             query_rewrite: rewritten.then_some(search_query),
             general,
+            date: date
+                .map(|d| ask_date_filter(d, self.state.retriever.config().date_utc_offset_minutes)),
+            partial: passages.iter().filter(|p| p.partial).map(|p| p.n).collect(),
         };
         self.spawn_stream(provider, stream, stream_id, notify, filter);
         to_result(started)
@@ -746,6 +751,21 @@ impl RpcHandler {
         let store = self.state.store.clone();
         let events = blocking(move || store.recent_egress(limit)).await?;
         to_result(events)
+    }
+
+    /// A request the desktop app made itself (update checks), written to the ledger and
+    /// flushed before answering, so `egress.recent` shows it right away.
+    async fn egress_record(&self, req: EgressRecordRequest) -> Result<Value, RpcError> {
+        let event = client_egress_event(req, time::OffsetDateTime::now_utc())?;
+        if !client_egress_allowed(std::time::Instant::now()) {
+            return Err(RpcError::new(
+                code::SERVER_BUSY,
+                "too many egress.record calls; try again in a minute",
+            ));
+        }
+        let store = self.state.store.clone();
+        blocking(move || store.record_egress(&event)).await?;
+        Ok(Value::Null)
     }
 
     // ---- models ----
@@ -949,6 +969,20 @@ fn to_infer_request(messages: Vec<ipc::ChatMessage>) -> Result<ChatRequest, RpcE
         req.system = Some(system.join("\n\n"));
     }
     Ok(req)
+}
+
+/// The retriever's date filter as Ask reports it to clients, its bounds at the offset the
+/// phrase was read with (the retriever keeps them in UTC), so their dates are the user's days.
+fn ask_date_filter(d: nugget_retrieve::DateFilter, offset_minutes: i32) -> ipc::AskDateFilter {
+    let offset = time::UtcOffset::from_whole_seconds(offset_minutes.clamp(-18 * 60, 18 * 60) * 60)
+        .unwrap_or(time::UtcOffset::UTC);
+    ipc::AskDateFilter {
+        phrase: d.phrase,
+        start: d.range.start.to_offset(offset),
+        end: d.range.end.to_offset(offset),
+        applied: d.applied,
+        listed: d.listed,
+    }
 }
 
 /// The earlier turns of a `retrieve.ask` conversation that are sent on: the client's text is
@@ -1295,6 +1329,117 @@ async fn run_install(
     append_audit(&state, "model.install.result", &entry.id, detail).await;
 }
 
+/// Longest host `egress.record` accepts (a DNS name is at most 253, plus `:port`).
+const MAX_EGRESS_HOST: usize = 260;
+/// How far ahead of the daemon's clock a recorded time may be (clock skew between processes).
+const EGRESS_FUTURE_SLACK: time::Duration = time::Duration::minutes(5);
+/// How old a recorded time may be. The app queues rows in memory only, so real ones are minutes
+/// or hours old at most.
+const EGRESS_MAX_AGE: time::Duration = time::Duration::days(30);
+/// Rows `egress.record` accepts per minute, across all clients: an update check makes a handful,
+/// so this only stops a client from flooding the ledger (and pushing real rows off the Privacy
+/// page's recent list).
+const EGRESS_RECORD_PER_MINUTE: u32 = 60;
+
+type EgressWindow = std::sync::Mutex<Option<(std::time::Instant, u32)>>;
+
+/// Fixed one-minute window shared by all connections.
+fn client_egress_allowed(now: std::time::Instant) -> bool {
+    static WINDOW: EgressWindow = std::sync::Mutex::new(None);
+    egress_window_allows(&WINDOW, now)
+}
+
+fn egress_window_allows(window: &EgressWindow, now: std::time::Instant) -> bool {
+    let mut w = window.lock().unwrap_or_else(|p| p.into_inner());
+    match &mut *w {
+        Some((start, n)) if now.duration_since(*start) < std::time::Duration::from_secs(60) => {
+            if *n >= EGRESS_RECORD_PER_MINUTE {
+                return false;
+            }
+            *n += 1;
+        }
+        _ => *w = Some((now, 1)),
+    }
+    true
+}
+
+/// A bare `host[:port]`: a DNS name (ASCII labels; IDNs in punycode), an IPv4 address, or an
+/// IPv6 address in brackets, with an optional numeric port.
+fn valid_egress_host(host: &str) -> bool {
+    let (name, port) = if let Some(rest) = host.strip_prefix('[') {
+        let Some((addr, after)) = rest.split_once(']') else {
+            return false;
+        };
+        if addr.parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        match after {
+            "" => return true,
+            p => match p.strip_prefix(':') {
+                Some(p) => return p.parse::<u16>().is_ok(),
+                None => return false,
+            },
+        }
+    } else {
+        match host.split_once(':') {
+            Some((name, port)) => (name, Some(port)),
+            None => (host, None),
+        }
+    };
+    if port.is_some_and(|p| p.parse::<u16>().is_err()) {
+        return false;
+    }
+    if name.parse::<std::net::Ipv4Addr>().is_ok() {
+        return true;
+    }
+    let name = name.strip_suffix('.').unwrap_or(name);
+    !name.is_empty()
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+}
+
+/// Validate an `egress.record` request: a known client feature, a bare `host[:port]` (no scheme,
+/// path, credentials or spaces) and a time not in the future. The row never lists items.
+fn client_egress_event(
+    req: EgressRecordRequest,
+    now: time::OffsetDateTime,
+) -> Result<nugget_core::egress::EgressEvent, RpcError> {
+    if !ipc::CLIENT_EGRESS_FEATURES.contains(&req.feature.as_str()) {
+        return Err(RpcError::invalid_params(format!(
+            "unknown feature {:?}; egress.record takes one of {:?}",
+            req.feature,
+            ipc::CLIENT_EGRESS_FEATURES
+        )));
+    }
+    let host = req.host.trim().to_ascii_lowercase();
+    let host_ok = host.len() <= MAX_EGRESS_HOST && valid_egress_host(&host);
+    if !host_ok {
+        return Err(RpcError::invalid_params(
+            "host must be a bare host name or address, with an optional :port",
+        ));
+    }
+    let at = req.at.unwrap_or(now).to_offset(time::UtcOffset::UTC);
+    if at > now + EGRESS_FUTURE_SLACK {
+        return Err(RpcError::invalid_params("at is in the future"));
+    }
+    if at < now - EGRESS_MAX_AGE {
+        return Err(RpcError::invalid_params("at is more than 30 days old"));
+    }
+    Ok(nugget_core::egress::EgressEvent {
+        at,
+        host,
+        feature: req.feature,
+        bytes_sent: req.bytes_sent,
+        bytes_received: req.bytes_received,
+        items: Vec::new(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1305,6 +1450,117 @@ mod tests {
             role,
             text: text.into(),
         }
+    }
+
+    fn record(host: &str, feature: &str, at: Option<time::OffsetDateTime>) -> EgressRecordRequest {
+        EgressRecordRequest {
+            at,
+            host: host.into(),
+            feature: feature.into(),
+            bytes_sent: 0,
+            bytes_received: 512,
+        }
+    }
+
+    #[test]
+    fn client_egress_takes_only_known_features_and_bare_hosts() {
+        let now = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
+        let ev = client_egress_event(record(" GitHub.com ", "update_check", None), now).unwrap();
+        assert_eq!(
+            (
+                ev.host.as_str(),
+                ev.feature.as_str(),
+                ev.at,
+                ev.bytes_received
+            ),
+            ("github.com", "update_check", now, 512)
+        );
+        assert!(ev.items.is_empty());
+        for host in ["objects.example.com:443", "192.168.1.2:8080", "[::1]:80"] {
+            assert!(
+                client_egress_event(record(host, "update_download", None), now).is_ok(),
+                "{host}"
+            );
+        }
+        // A daemon feature, or anything made up, is refused: the app can't write rows that look
+        // like the daemon's own traffic.
+        for feature in ["chat", "ask", "model_download", "", "update-check"] {
+            let e = client_egress_event(record("github.com", feature, None), now).unwrap_err();
+            assert_eq!(e.code, code::INVALID_PARAMS, "{feature}");
+        }
+        for host in [
+            "",
+            " ",
+            "https://github.com",
+            "github.com/x",
+            "user@github.com",
+            "a b",
+        ] {
+            let e = client_egress_event(record(host, "update_check", None), now).unwrap_err();
+            assert_eq!(e.code, code::INVALID_PARAMS, "{host:?}");
+        }
+        for host in [
+            "::::", "][", "-", ".", "a:b:c", "a:99999", "[::1", "[zz]", "a..b", "-a.com",
+        ] {
+            let e = client_egress_event(record(host, "update_check", None), now).unwrap_err();
+            assert_eq!(e.code, code::INVALID_PARAMS, "{host:?}");
+        }
+        for host in [
+            "github.com",
+            "objects.githubusercontent.com:443",
+            "127.0.0.1:8443",
+            "[::1]:8443",
+            "xn--bcher-kva.example",
+        ] {
+            assert!(
+                client_egress_event(record(host, "update_check", None), now).is_ok(),
+                "{host:?}"
+            );
+        }
+        let long = "a".repeat(MAX_EGRESS_HOST + 1);
+        assert!(client_egress_event(record(&long, "update_check", None), now).is_err());
+    }
+
+    #[test]
+    fn client_egress_keeps_a_past_time_and_refuses_a_future_one() {
+        let now = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
+        let queued = now - time::Duration::hours(3);
+        let ev =
+            client_egress_event(record("github.com", "update_check", Some(queued)), now).unwrap();
+        assert_eq!(ev.at, queued);
+        let skew = now + time::Duration::minutes(1);
+        assert!(client_egress_event(record("github.com", "update_check", Some(skew)), now).is_ok());
+        let ahead = now + time::Duration::hours(1);
+        assert!(
+            client_egress_event(record("github.com", "update_check", Some(ahead)), now).is_err()
+        );
+        let ancient = now - time::Duration::days(31);
+        assert!(
+            client_egress_event(record("github.com", "update_check", Some(ancient)), now).is_err()
+        );
+        let offset = queued.to_offset(time::UtcOffset::from_hms(2, 0, 0).unwrap());
+        let ev =
+            client_egress_event(record("github.com", "update_check", Some(offset)), now).unwrap();
+        assert_eq!(ev.at.offset(), time::UtcOffset::UTC);
+        assert_eq!(ev.at, queued);
+    }
+
+    #[test]
+    fn client_egress_is_rate_limited_per_minute() {
+        let window = EgressWindow::new(None);
+        let t0 = std::time::Instant::now();
+        let allowed = (0..EGRESS_RECORD_PER_MINUTE + 5)
+            .filter(|_| egress_window_allows(&window, t0))
+            .count();
+        assert_eq!(allowed, EGRESS_RECORD_PER_MINUTE as usize);
+        assert!(!egress_window_allows(
+            &window,
+            t0 + std::time::Duration::from_secs(59)
+        ));
+        assert!(egress_window_allows(
+            &window,
+            t0 + std::time::Duration::from_secs(61)
+        ));
     }
 
     #[test]
@@ -1344,6 +1600,27 @@ mod tests {
         assert!(!is_provider_failure(&Error::Invalid("x".into())));
         assert!(!is_provider_failure(&Error::Cancelled));
     }
+    #[test]
+    fn ask_date_filter_is_written_at_the_phrase_offset() {
+        use time::format_description::well_known::Rfc3339;
+        let at = |s: &str| time::OffsetDateTime::parse(s, &Rfc3339).unwrap();
+        // "last week" read at +01:00: the retriever keeps 26 Oct–2 Nov local midnights in UTC.
+        let d = nugget_retrieve::DateFilter {
+            phrase: "last week".into(),
+            range: nugget_retrieve::DateRange {
+                start: at("2026-10-25T23:00:00Z"),
+                end: at("2026-11-01T23:00:00Z"),
+            },
+            applied: true,
+            listed: false,
+        };
+        let f = ask_date_filter(d, 60);
+        let json = serde_json::to_value(&f).unwrap();
+        assert_eq!(json["start"], "2026-10-26T00:00:00+01:00");
+        assert_eq!(json["end"], "2026-11-02T00:00:00+01:00");
+        assert!(f.applied && !f.listed);
+    }
+
     #[test]
     fn ask_history_drops_system_and_keeps_the_newest_turns() {
         let h = ask_history(vec![

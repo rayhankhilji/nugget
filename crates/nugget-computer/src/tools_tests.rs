@@ -351,8 +351,12 @@ async fn every_hook_resolves_the_same_element_for_any_spelling() {
     );
 }
 
+/// GG3-13: an id that is not on the cached screen (unknown, stale, or malformed) used to be rated
+/// Send and labelled "unknown element <id>", so the user was asked to approve a "send" named by
+/// the model's own id. Now it is Edit with no label, and every tool refuses it without acting:
+/// nothing unclassified is ever acted on.
 #[tokio::test]
-async fn unknown_or_malformed_ids_stay_fail_safe() {
+async fn unknown_or_malformed_ids_never_prompt_and_never_act() {
     let kit = Kit::new();
     kit.call("observe", json!({})).await;
     for bad in [
@@ -365,29 +369,83 @@ async fn unknown_or_malformed_ids_stay_fail_safe() {
         "\"\"",
         "e1; rm -rf /",
     ] {
-        let args = json!({"element": bad, "text": "x", "value": "x"});
-        assert!(kit.risk("click", args.clone()) >= RiskClass::Send, "{bad}");
-        assert!(
-            kit.risk("type_text", args.clone()) >= RiskClass::Send,
-            "{bad}"
-        );
-        assert!(
-            kit.risk("set_value", args.clone()) >= RiskClass::Send,
-            "{bad}"
-        );
-        assert!(kit.call("click", args).await.is_error, "{bad}");
+        let args = json!({"element": bad, "text": "x", "value": "x", "keys": "enter",
+                          "direction": "down"});
+        for tool in ["click", "type_text", "set_value", "press_key"] {
+            assert_eq!(
+                kit.risk(tool, args.clone()),
+                RiskClass::Edit,
+                "{tool} {bad}"
+            );
+            let d = kit.tool(tool).describe(&args);
+            assert_eq!(d.target_label, None, "{tool} {bad}");
+        }
+        for tool in ["click", "type_text", "set_value", "press_key", "scroll"] {
+            let r = kit.call(tool, args.clone()).await;
+            assert!(r.is_error, "{tool} {bad}: {}", r.content);
+        }
     }
+    let r = kit.call("click", json!({"element": "[mail-nope]"})).await;
+    assert!(
+        r.content
+            .contains("element 'mail-nope' is not on screen (stale or unknown id); observe again"),
+        "{}",
+        r.content
+    );
     assert!(kit.fake.acts.lock().unwrap().is_empty());
+}
+
+/// An id that was unknown when the call was classified is refused even when it appears on the
+/// screen before `call` runs (and a refresh caches it): it was never risk-rated.
+#[tokio::test]
+async fn an_id_unknown_at_the_gate_is_refused_even_if_it_appears_later() {
+    let kit = Kit::new();
+    kit.call("observe", json!({})).await;
+    let args = json!({"element": "mail-forward"});
+    assert_eq!(kit.risk("click", args.clone()), RiskClass::Edit);
+    // The loop observes before gating: still absent.
+    let ctx = ctx();
+    kit.tool("click").observe(&args, &ctx).await;
+    assert_eq!(kit.risk("click", args.clone()), RiskClass::Edit);
+    // A "Forward and send" button appears, and the before-snapshot caches it.
+    kit.fake.windows.lock().unwrap()[0].root.children.push(node(
+        "mail-forward",
+        Role::Button,
+        "Forward and send",
+    ));
+    kit.tool("click").observe(&args, &ctx).await;
+    let r = kit.call("click", args.clone()).await;
+    assert!(r.is_error, "{}", r.content);
+    assert!(
+        r.content.contains("was not on screen when"),
+        "{}",
+        r.content
+    );
+    assert!(kit.fake.acts.lock().unwrap().is_empty());
+    // Classified again it is a send, and acting on it is allowed after that gate.
+    assert_eq!(kit.risk("click", args.clone()), RiskClass::Send);
+    assert_eq!(
+        kit.tool("click").describe(&args).target_label.as_deref(),
+        Some("Forward and send")
+    );
+    assert!(!kit.call("click", args).await.is_error);
+    assert_eq!(kit.acts(), ["press:mail-forward"]);
 }
 
 #[tokio::test]
 async fn ids_of_other_observed_windows_resolve_without_a_window_argument() {
     let kit = Kit::new();
     kit.call("observe", json!({})).await;
-    // Not observed yet: unknown.
+    // Not observed yet: unknown (Edit; `call` would refuse it).
     assert_eq!(
         kit.risk("click", json!({"element": "notes-new"})),
-        RiskClass::Send
+        RiskClass::Edit
+    );
+    assert_eq!(
+        kit.tool("click")
+            .describe(&json!({"element": "notes-new"}))
+            .target_label,
+        None
     );
     let r = kit.call("observe", json!({"window": "[w2]"})).await;
     assert!(r.content.starts_with("window [w2]"), "{}", r.content);
@@ -615,17 +673,18 @@ async fn role_hints_leave_risk_and_describe_unchanged() {
             json!({"element": "f-day", "text": "x"}),
             RiskClass::Edit,
         ),
-        // Unknown ids stay Send.
-        ("click", json!({"element": "f-nope"}), RiskClass::Send),
+        // Unknown ids are Edit (GG3-13): `call` refuses them without acting, so they are
+        // never put to the user as a "send".
+        ("click", json!({"element": "f-nope"}), RiskClass::Edit),
         (
             "set_value",
             json!({"element": "f-nope", "value": "x"}),
-            RiskClass::Send,
+            RiskClass::Edit,
         ),
         (
             "type_text",
             json!({"element": "f-nope", "text": "x"}),
-            RiskClass::Send,
+            RiskClass::Edit,
         ),
     ];
     for (tool, args, want) in cases {
@@ -705,10 +764,16 @@ async fn an_action_that_changes_the_window_returns_the_new_screen() {
     );
     assert!(!r.content.contains("4242"), "{}", r.content);
     assert_eq!(r.data.as_ref().unwrap()["screen_changed"], true);
-    // The gone id is unknown again (Send); the new ones resolve.
+    // The gone id is unknown again (Edit, and refused by `call`); the new ones resolve.
     assert_eq!(
         kit.risk("click", json!({"element": "mail-compose"})),
-        RiskClass::Send
+        RiskClass::Edit
+    );
+    let r = kit.call("click", json!({"element": "mail-compose"})).await;
+    assert!(
+        r.is_error && r.content.contains("not on screen"),
+        "{}",
+        r.content
     );
     assert_eq!(
         kit.risk("click", json!({"element": "compose-send"})),
@@ -1033,18 +1098,12 @@ async fn keys_with_no_reported_focus_go_to_the_confirmed_control() {
 #[tokio::test]
 async fn a_press_on_an_unknown_control_is_refused() {
     let kit = send_kit();
+    // Refused either by the unknown-id check (DD3) or by the fail-closed freeze, never pressed.
+    let refused = |c: &str| c.contains("Observe first") || c.contains("observe again");
     let r = kit.call("click", json!({"element": "c-send"})).await;
-    assert!(
-        r.is_error && r.content.contains("Observe first"),
-        "{}",
-        r.content
-    );
+    assert!(r.is_error && refused(&r.content), "{}", r.content);
     let r = kit.call("press_key", json!({"keys": "enter"})).await;
-    assert!(
-        r.is_error && r.content.contains("Observe first"),
-        "{}",
-        r.content
-    );
+    assert!(r.is_error && refused(&r.content), "{}", r.content);
     assert!(kit.acts().is_empty() && kit.fake.inputs.lock().unwrap().is_empty());
     // Keys that press nothing are not held up.
     kit.call("observe", json!({})).await;
@@ -1441,4 +1500,100 @@ fn gg3_24_linux_bus_failure_is_not_a_permission() {
     assert!(observe_hint(&bus, true, false).contains("permission is not granted"));
     assert!(observe_hint(&Error::NotFound("w".into()), false, true).contains("without arguments"));
     assert_eq!(observe_hint(&Error::Other("x".into()), false, true), "");
+}
+
+/// GG3-7: a control relabelled after `observe` (an attendee was filled in elsewhere, so "Save
+/// event" became "Save and send invitations"). The tool's `observe` hook, which the loop runs
+/// before gating and again before acting, refreshes the cache, so risk, label and context are
+/// recomputed from the screen as it now is.
+#[tokio::test]
+async fn observing_refreshes_what_risk_and_describe_see() {
+    let cal = window(
+        "w5",
+        "Calendar",
+        vec![
+            node("cal-attendees", Role::TextField, "Attendees"),
+            node("cal-save", Role::Button, "Save event"),
+        ],
+    );
+    let kit = Kit::with(vec![cal], Vec::new());
+    kit.call("observe", json!({})).await;
+    let args = json!({"element": "cal-save"});
+    assert_eq!(kit.risk("click", args.clone()), RiskClass::Edit);
+    kit.fake.windows.lock().unwrap()[0].root.children[1].name =
+        Some("Save and send invitations".into());
+    // The cache still shows the old label until something observes.
+    assert_eq!(kit.risk("click", args.clone()), RiskClass::Edit);
+    let snap = kit.tool("click").observe(&args, &ctx()).await.unwrap();
+    assert_eq!(snap["element"]["name"], "Save and send invitations");
+    assert_eq!(kit.risk("click", args.clone()), RiskClass::Send);
+    assert_eq!(
+        kit.tool("click").describe(&args).target_label.as_deref(),
+        Some("Save and send invitations")
+    );
+    assert_eq!(
+        kit.tool("click").context(&args).role.as_deref(),
+        Some("button")
+    );
+    // A control that went away is off screen after the refresh: no prompt, no action.
+    kit.fake.windows.lock().unwrap()[0].root.children.pop();
+    kit.tool("click").observe(&args, &ctx()).await;
+    assert_eq!(kit.risk("click", args.clone()), RiskClass::Edit);
+    assert_eq!(kit.tool("click").describe(&args).target_label, None);
+    assert!(kit.call("click", args).await.is_error);
+    assert!(kit.acts().is_empty());
+}
+
+/// GG3-7, focus variant: keyboard focus is in the calendar's attendee field while the model last
+/// observed mail. Typing without `element` goes to the focused field, so after the `observe`
+/// hook refreshes the focused window the call is described as that app and field, not as mail.
+#[tokio::test]
+async fn keyboard_tools_are_described_from_the_focused_window() {
+    let mail = window(
+        "w1",
+        "Mail",
+        vec![node("mail-search", Role::TextField, "Search")],
+    );
+    let mut cal = window(
+        "w5",
+        "Calendar",
+        vec![
+            node("cal-attendees", Role::TextField, "Attendees"),
+            node("cal-save", Role::Button, "Save event"),
+        ],
+    );
+    cal.focused = Some(ElementId("cal-attendees".into()));
+    // Calendar is in front (it has keyboard focus); the model looks at mail.
+    let kit = Kit::with(vec![cal, mail], Vec::new());
+    kit.call("observe", json!({"window": "w1"})).await;
+    let args = json!({"text": "eve@evil.example"});
+    let before = kit.tool("type_text").describe(&args);
+    assert_ne!(before.target_label.as_deref(), Some("Attendees"));
+    kit.tool("type_text").observe(&args, &ctx()).await;
+    for tool in ["type_text", "press_key"] {
+        let a = json!({"text": "eve@evil.example", "keys": "enter"});
+        let d = kit.tool(tool).describe(&a);
+        assert_eq!(d.target_app, "Calendar", "{tool}");
+        assert_eq!(d.target_label.as_deref(), Some("Attendees"), "{tool}");
+    }
+    // Enter in a single-line field submits.
+    assert_eq!(
+        kit.risk("press_key", json!({"keys": "enter"})),
+        RiskClass::Send
+    );
+    // Observing another window afterwards does not move the keyboard target.
+    kit.call("observe", json!({"window": "w1"})).await;
+    assert_eq!(kit.tool("type_text").describe(&args).target_app, "Calendar");
+    // Focus moves to mail's search field: the next refresh follows it.
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        ws.swap(0, 1);
+        ws[0].focused = Some(ElementId("mail-search".into()));
+    }
+    kit.tool("type_text").observe(&args, &ctx()).await;
+    let d = kit.tool("type_text").describe(&args);
+    assert_eq!(
+        (d.target_app.as_str(), d.target_label.as_deref()),
+        ("Mail", Some("Search"))
+    );
 }

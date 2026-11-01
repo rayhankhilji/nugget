@@ -36,6 +36,7 @@ const updateStatus = {
   last_error: null,
 };
 const chord = { kind: "chord", chord: "Ctrl+Alt+Space" };
+let platformSettings = { notifications: { enabled: false, brief: true, agent: true, quiet: null }, quit_stops_daemon: false, paused_sources: [] };
 const doubletapSettings = { enabled: false, trigger: chord, app_providers: {}, excluded_apps: [], allow_terminals: false };
 const doubletapStatus = {
   platform: "linux",
@@ -101,6 +102,26 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     login_set: () => updateStatus,
     autostart_get: () => ({ supported: true, enabled: false }),
     autostart_set: (a) => ({ supported: true, enabled: a?.enabled === true }),
+    quickask_settings_get: () => ({
+      settings: { enabled: true, shortcut: "Ctrl+Shift+Space" },
+      status: { listening: true, error: null, wayland_fallback: false, state: "listening" },
+    }),
+    quickask_settings_set: (a) => ({
+      settings: a?.settings ?? { enabled: true, shortcut: "Ctrl+Shift+Space" },
+      status: a?.settings?.enabled === false
+        ? { listening: false, error: null, wayland_fallback: false, state: "off" }
+        : { listening: true, error: null, wayland_fallback: false, state: "listening" },
+    }),
+    quickask_hide: () => null,
+    quickask_prefill_take: () => null,
+    // II4: platform settings round-trip in memory; no link is waiting.
+    platform_settings_get: () => platformSettings,
+    platform_settings_set: (a) => (platformSettings = { ...platformSettings, ...(a?.settings ?? {}), paused_sources: platformSettings.paused_sources }),
+    shell_labels_set: (a) => Object.keys(a?.labels ?? {}).length,
+    deeplink_take: () => null,
+    quickask_open_main: () => null,
+    // JJ2: no quick-ask handover is waiting for the main window.
+    quickask_handover_take: () => null,
     doubletap_settings_get: () => doubletapSettings,
     doubletap_settings_set: (a) => a?.settings ?? doubletapSettings,
     doubletap_status: () => doubletapStatus,
