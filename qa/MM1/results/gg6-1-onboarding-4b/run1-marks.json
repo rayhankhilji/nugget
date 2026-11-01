@@ -1,0 +1,268 @@
+{
+ "marks": {
+  "start": 815,
+  "daemon_ready": 1024,
+  "welcome_visible": 2160,
+  "install_clicked": 3900,
+  "model_installed": 34249,
+  "ai_step_done": 34329,
+  "source_added": 34787,
+  "source_searchable": 35305,
+  "onboarding_done": 35655,
+  "first_search_results": 36010
+ },
+ "onboarding": {
+  "ai": "local",
+  "folder": "/root/mm1/tmp/gg6-efKaWb/Documents/Jordan",
+  "page_errors": [],
+  "welcome_text": "Set up Nugget\nLanguage\nSystem (English)\nEnglish\nEspa\u00f1ol\nDeutsch\nFran\u00e7ais\nPortugu\u00eas (Brasil)\n\u7b80\u4f53\u4e2d\u6587\n\u65e5\u672c\u8a9e\n\u0939\u093f\u0928\u094d\u0926\u0940\n\u0627\u0644\u0639\u0631\u0628\u064a\u0629\nSkip setup\n1\nWelcome\n(current step)\n2\nChoose your AI\n3\nFirst source\n4\nPermissions\n5\nDouble Tap\n6\nDone\n\nStep 1 of 6\n\nWelcome to Nugget\n\nNugget learns from your notes, mail and calendar, and helps you write, find and remember things. It runs on this computer, and you decide what it reads and what, if anything, leaves your computer.\n\nStays on this device\nEverything Nugget indexes from your sources, and the knowledge it builds from them\nYour chats and drafts when you use a local model\nYour settings, encrypted with a key kept in your OS keychain\nLeaves only when you choose\nRequests to a cloud AI provider, if you set one up with your own key\nSyncing with accounts you connect, such as Gmail or a CalDAV calendar\nModel downloads, checked against a signed manifest\nUpdate checks, once you turn them on\n\nThere's no telemetry and no Nugget server. Every request that leaves this device is logged on the Privacy page.\n\nMost steps take a minute. Downloading a model to this device can take longer, depending on your connection; you'll see an estimate. You can skip any step and change everything later.\n\nContinue",
+  "models_offered": [
+   {
+    "id": "qwen3-4b-q4km",
+    "badges": "Recommended",
+    "text": "qwen3-4b-q4km\nRecommended\n\n2.5 GB download \u00b7 License: \u2068Apache-2.0\u2069\n\nDownload time depends on your connection: about 4 minutes on a fast one (100 Mbit/s), about 34 minutes on a slower one (10 Mbit/s).\n\nNeeds 8 GB of memory and 3.8 GB of free disk space.\n\nRecommended for this computer: it has 16 GB of memory. The model runs on the processor, so answers come more slowly than with a graphics card.\n\nInstall"
+   },
+   {
+    "id": "qwen3-8b-q4km",
+    "badges": "",
+    "text": "qwen3-8b-q4km\n\n5.0 GB download \u00b7 License: \u2068Apache-2.0\u2069\n\nDownload time depends on your connection: about 7 minutes on a fast one (100 Mbit/s), about 68 minutes on a slower one (10 Mbit/s).\n\nNeeds 16 GB of memory and 6.6 GB of free disk space.\n\nInstall"
+   },
+   {
+    "id": "nomic-embed-text-v2-moe-q8",
+    "badges": "",
+    "text": "nomic-embed-text-v2-moe-q8\n\n512 MB download \u00b7 License: \u2068Apache-2.0\u2069\n\nDownload time depends on your connection: less than a minute on a fast one (100 Mbit/s), about 7 minutes on a slower one (10 Mbit/s).\n\nNeeds 4 GB of memory and 1.6 GB of free disk space.\n\nInstall"
+   }
+  ],
+  "machine_line": "Models for this computer\n\nPicked to run well on most computers. The download is checked before use, and you can keep using Nugget while it runs.\n\nThis computer: 16 GB memory, no graphics card detected.\n\nChat model (pick one)\nqwen3-4b-q4km\nRecommended\n\n2.5 GB download \u00b7 License: \u2068Apache-2.0\u2069\n\nDownload time depends on your connection: about 4 minutes on a fast one (100 Mbit/s), about 34 minutes on a slower one (10 Mbit/s).\n\nNeeds 8 GB of memory and 3.8 GB of free disk space.\n\nRecommended for this computer: it has 16 GB of memory. The model runs on the processor, so answers come more slowly than with a graphics card.\n\nInstall\nqwen3-8b-q4km\n\n5.0 GB download \u00b7 License: \u2068Apache-2.0\u2069\n\nDownload time depends on your connection: about 7 minutes on a fast one (100 Mbit/s), about 68 minutes on a slower one (10 Mbit/s).\n\nNeeds 16 GB of memory and 6.6 GB of free disk space.\n\nInstall\nSearch model\n\nHelps search find notes by meaning, not just matching words. Small, and works with any chat model.\n\nnomic-embed-text-v2-moe-q8\n\n512 MB download \u00b7 License: \u2068Apache-2.0\u2069\n\nDownload time depends on your connection: less than a minute on a fast one (100 Mbit/s), about 7 minutes on a slower one (10 Mbit/s).\n\nNeeds 4 GB of memory and 1.6 GB of free disk space.\n\nInstall\nShow all models (6)",
+  "model": "qwen3-4b-q4km",
+  "install_samples": [
+   {
+    "value": 0,
+    "text": "Downloading \u00b7 0% \u00b7 0 byte of 2.5 GB",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571016222
+   },
+   {
+    "value": 3,
+    "text": "Downloading \u00b7 3% \u00b7 73 MB of 2.5 GB",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571018269
+   },
+   {
+    "value": 7,
+    "text": "Downloading \u00b7 7% \u00b7 175 MB of 2.5 GB",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571019276
+   },
+   {
+    "value": 11,
+    "text": "Downloading \u00b7 11% \u00b7 279 MB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571020287
+   },
+   {
+    "value": 15,
+    "text": "Downloading \u00b7 15% \u00b7 378 MB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571021299
+   },
+   {
+    "value": 19,
+    "text": "Downloading \u00b7 19% \u00b7 464 MB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571022307
+   },
+   {
+    "value": 23,
+    "text": "Downloading \u00b7 23% \u00b7 564 MB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571023317
+   },
+   {
+    "value": 27,
+    "text": "Downloading \u00b7 27% \u00b7 666 MB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571024326
+   },
+   {
+    "value": 31,
+    "text": "Downloading \u00b7 31% \u00b7 772 MB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571025334
+   },
+   {
+    "value": 35,
+    "text": "Downloading \u00b7 35% \u00b7 870 MB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571026341
+   },
+   {
+    "value": 38,
+    "text": "Downloading \u00b7 38% \u00b7 959 MB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571027349
+   },
+   {
+    "value": 42,
+    "text": "Downloading \u00b7 42% \u00b7 1.1 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571028357
+   },
+   {
+    "value": 46,
+    "text": "Downloading \u00b7 46% \u00b7 1.2 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571029365
+   },
+   {
+    "value": 51,
+    "text": "Downloading \u00b7 51% \u00b7 1.3 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571030374
+   },
+   {
+    "value": 54,
+    "text": "Downloading \u00b7 54% \u00b7 1.3 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571031382
+   },
+   {
+    "value": 57,
+    "text": "Downloading \u00b7 57% \u00b7 1.4 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571032391
+   },
+   {
+    "value": 61,
+    "text": "Downloading \u00b7 61% \u00b7 1.5 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571033399
+   },
+   {
+    "value": 65,
+    "text": "Downloading \u00b7 65% \u00b7 1.6 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571034406
+   },
+   {
+    "value": 68,
+    "text": "Downloading \u00b7 68% \u00b7 1.7 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571035416
+   },
+   {
+    "value": 71,
+    "text": "Downloading \u00b7 71% \u00b7 1.8 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571036424
+   },
+   {
+    "value": 76,
+    "text": "Downloading \u00b7 76% \u00b7 1.9 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571037432
+   },
+   {
+    "value": 80,
+    "text": "Downloading \u00b7 80% \u00b7 2.0 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571038440
+   },
+   {
+    "value": 84,
+    "text": "Downloading \u00b7 84% \u00b7 2.1 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571039451
+   },
+   {
+    "value": 87,
+    "text": "Downloading \u00b7 87% \u00b7 2.2 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571040460
+   },
+   {
+    "value": 92,
+    "text": "Downloading \u00b7 92% \u00b7 2.3 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571041468
+   },
+   {
+    "value": 96,
+    "text": "Downloading \u00b7 96% \u00b7 2.4 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571042476
+   },
+   {
+    "value": 100,
+    "text": "Downloading \u00b7 100% \u00b7 2.5 GB of 2.5 GB \u00b7 less than a minute left",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571043483
+   },
+   {
+    "value": 50,
+    "text": "Verifying \u00b7 50% \u00b7 1.2 GB of 2.5 GB",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571044491
+   },
+   {
+    "value": 100,
+    "text": "Verifying \u00b7 100% \u00b7 2.5 GB of 2.5 GB",
+    "badges": "Recommended",
+    "error": null,
+    "at_ms": 1793571045500
+   },
+   {
+    "value": null,
+    "text": null,
+    "badges": "RecommendedInstalled",
+    "error": null,
+    "at_ms": 1793571046507
+   }
+  ],
+  "source_text": "Set up Nugget\nLanguage\nSystem (English)\nEnglish\nEspa\u00f1ol\nDeutsch\nFran\u00e7ais\nPortugu\u00eas (Brasil)\n\u7b80\u4f53\u4e2d\u6587\n\u65e5\u672c\u8a9e\n\u0939\u093f\u0928\u094d\u0926\u0940\n\u0627\u0644\u0639\u0631\u0628\u064a\u0629\nSkip setup\nWelcome\n(done)\nChoose your AI\n(done)\n3\nFirst source\n(current step)\n4\nPermissions\n5\nDouble Tap\n6\nDone\n\nStep 3 of 6\n\nAdd your first source\n\nA source is somewhere Nugget reads from: a folder, an Obsidian vault, a mailbox or a calendar. It stays where it is; Nugget builds a searchable index on this device and keeps it up to date.\n\nAdd a folder\nMail, calendar and more\u2026\n\nYou can add and remove sources any time on the Sources page.\n\nBack\nNothing set up here yet: Continue skips this step.\nSkip this step\nContinue",
+  "index_phases": [
+   {
+    "phase": "indexing",
+    "text": "Jordan: indexing, 7 of 24 items\u2026",
+    "at_ms": 1793571047056
+   },
+   {
+    "phase": "ready",
+    "text": "Jordan: 24 items indexed. Search works now.",
+    "at_ms": 1793571047564
+   }
+  ],
+  "index_ready_text": "Jordan: 24 items indexed. Search works now.",
+  "permissions_text": "Set up Nugget\nLanguage\nSystem (English)\nEnglish\nEspa\u00f1ol\nDeutsch\nFran\u00e7ais\nPortugu\u00eas (Brasil)\n\u7b80\u4f53\u4e2d\u6587\n\u65e5\u672c\u8a9e\n\u0939\u093f\u0928\u094d\u0926\u0940\n\u0627\u0644\u0639\u0631\u0628\u064a\u0629\nSkip setup\nWelcome\n(done)\nChoose your AI\n(done)\nFirst source\n(done)\n4\nPermissions\n(current step)\n5\nDouble Tap\n6\nDone\n\nStep 4 of 6\n\nWhat Double Tap needs\n\nDouble Tap drafts a reply right where you're typing. To do that, your system has to let Nugget read the text field you're in and type into it. Nothing is requested now: you'll be asked the first time you use Double Tap, and you can say no.\n\nOn this computer: Linux\nAT-SPI, the Linux accessibility bus, lets Nugget read and fill text fields. Most desktops have it on. On GNOME, turn on any accessibility feature, or run this command:\ngsettings set org.gnome.desktop.interface toolkit-accessibility true\nCopy\nOn Wayland, your desktop asks once before Nugget can use a global shortcut. On X11 no prompt is needed.\nSome apps (for example, some Flatpaks and Electron apps) don't expose their text to AT-SPI; there, Double Tap falls back to the clipboard.\nOther systems\n\nNugget only reads the window you trigger it in, only when you trigger it.\n\nBack\nSkip this step\nContinue",
+  "trigger_text": "Set up Nugget\nLanguage\nSystem (English)\nEnglish\nEspa\u00f1ol\nDeutsch\nFran\u00e7ais\nPortugu\u00eas (Brasil)\n\u7b80\u4f53\u4e2d\u6587\n\u65e5\u672c\u8a9e\n\u0939\u093f\u0928\u094d\u0926\u0940\n\u0627\u0644\u0639\u0631\u0628\u064a\u0629\nSkip setup\nWelcome\n(done)\nChoose your AI\n(done)\nFirst source\n(done)\nPermissions\n(done)\n5\nDouble Tap\n(current step)\n6\nDone\n\nStep 5 of 6\n\nChoose your Double Tap trigger\n\nDouble Tap opens wherever you're typing. Choose how to call it up: tap a key twice, or press a shortcut you won't hit by accident.\n\nTrigger type\nDouble-tap a key\nTap a modifier key twice quickly, without pressing anything else.\nShortcut\nPress several keys together, like a normal shortcut.\nShortcut\nAlt+Space\nCtrl+Shift+Space\nCtrl+Alt+K\nCtrl+Alt+Space\n\nYour trigger:\nCtrl\nAlt\nSpace\n\nDouble Tap listens for it right away. You can change it any time in Double Tap settings.\n\nBack\nSkip this step\nContinue",
+  "done_text": "Set up Nugget\nLanguage\nSystem (English)\nEnglish\nEspa\u00f1ol\nDeutsch\nFran\u00e7ais\nPortugu\u00eas (Brasil)\n\u7b80\u4f53\u4e2d\u6587\n\u65e5\u672c\u8a9e\n\u0939\u093f\u0928\u094d\u0926\u0940\n\u0627\u0644\u0639\u0631\u0628\u064a\u0629\nWelcome\n(done)\nChoose your AI\n(done)\nFirst source\n(done)\nPermissions\n(done)\nDouble Tap\n(done)\n6\nDone\n(current step)\n\nStep 6 of 6\n\nYou're all set\n\nNugget keeps indexing in the background. You can start searching and chatting straight away.\n\n24 items are indexed and searchable.\n\nAI model\nOn this device (qwen3-4b-q4km)\nSources\nJordan\nDouble Tap trigger\nCtrl\nAlt\nSpace\nOn this computer\nOpen Nugget in the tray when I log in\nShow notifications\n\nNotifications never include the text of your messages, files, reminders or agent actions. Clicking one opens the right page.\n\nYou can change these later on the Status page.\n\nEvery step is done.\n\nTo change any of this later, choose Run setup again at the bottom of the sidebar.\n\nBack\nSearch your sources"
+ }
+}

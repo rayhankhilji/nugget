@@ -1,0 +1,39 @@
+[gg6 0.2s] step start: +0.2s (at 0.2s)
+[gg6 0.4s] step daemon_ready: +0.2s (at 0.4s)
+[gg6 0.8s] step welcome_visible: +0.4s (at 0.8s)
+[gg6 0.8s] PASS onboarding: welcome shows on first launch
+[gg6 2.5s] PASS onboarding: AI step
+[gg6 2.5s] step install_clicked: +1.7s (at 2.5s)
+[gg6 32.9s] step model_installed: +30.4s (at 32.9s)
+[gg6 33.0s] PASS onboarding: install the recommended model (real download)
+[gg6 33.0s] step ai_step_done: +0.1s (at 33.0s)
+[gg6 33.5s] step source_added: +0.5s (at 33.5s)
+[gg6 34.1s] step source_searchable: +0.5s (at 34.1s)
+[gg6 34.1s] PASS onboarding: add the documents folder and wait until searchable
+[gg6 34.2s] PASS onboarding: permissions step
+[gg6 34.3s] PASS onboarding: Double Tap trigger step
+[gg6 34.5s] step onboarding_done: +0.4s (at 34.5s)
+[gg6 34.5s] PASS onboarding: done
+[gg6 34.8s] step first_search_results: +0.3s (at 34.8s)
+[gg6 34.9s] PASS search: "dentist appointment" finds the dentist note
+[gg6 63.8s] q1: correct in 8778 ms (first token 63 ms): Your dentist appointment is on Thursday, 12 November 2026 at 08:40 [3].
+[gg6 63.8s] PASS chat_day1: q1 "When is my dentist appointment?"
+[gg6 75.2s] q2: correct in 11319 ms (first token 48 ms): Priya said that the Harbor budget of 182,000 is approved and that 10% should be kept as contingency and not committed to Saltmarsh until the ra
+[gg6 75.2s] PASS chat_day1: q2 "What did Priya say about the Harbor budget?"
+[gg6 85.5s] q3: correct in 10269 ms (first token 50 ms): The hotel booking reference for Lisbon is QZ8-1142 [1].
+[gg6 85.5s] PASS chat_day1: q3 "What is the hotel booking reference for Lisbon?"
+[gg6 90.2s] q4: correct in 4656 ms (first token 43 ms): The spare key is with Ines Varga at number 14 [1].
+[gg6 90.2s] PASS chat_day1: q4 "Who has our spare key?"
+[gg6 99.5s] q5: correct in 9261 ms (first token 45 ms): Saltmarsh will confirm the API rate limits by 6 November 2026 [1].
+[gg6 99.5s] PASS chat_day1: q5 "When will Saltmarsh confirm the API rate limits?"
+[gg6 105.2s] q6: correct in 5678 ms (first token 46 ms): You need to pick up the cake on Saturday from Bramble Bakery at 11.
+[gg6 105.2s] PASS chat_day1: q6 "What time do I need to pick up the cake on Saturday and from where?"
+[gg6 117.6s] q7: correct in 12327 ms (first token 44 ms): The migration test includes three warehouses: Dunmore, Kestrel Park, and Ashby Cross [1].
+[gg6 117.6s] PASS chat_day1: q7 "Which warehouses are in the migration test?"
+[gg6 126.3s] q8: correct in 8740 ms (first token 47 ms): Your car insurance policy number is HL-77310 [1].
+[gg6 126.3s] PASS chat_day1: q8 "What is my car insurance policy number?"
+[gg6 131.0s] q9: correct in 4660 ms (first token 48 ms): I couldn't find that in your items.
+[gg6 131.0s] PASS chat_day1: q9 "What is the capital of my dentist's cat?"
+[gg6 138.8s] q10: correct in 7715 ms (first token 43 ms): Leo Marchetti starts on 16 November [1].
+[gg6 138.8s] PASS chat_day1: q10 "When does Leo Marchetti start?"
+[gg6 147.5s] done: 18/18 checks passed, 0 friction notes
