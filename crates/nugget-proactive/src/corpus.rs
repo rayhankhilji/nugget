@@ -735,11 +735,9 @@ fn parse_events(item: &Item, tz: &TimeZone) -> Option<Vec<CalEvent>> {
         .into_iter()
         .flatten()
         .filter(|ev| ev.get("kind").and_then(Value::as_str) != Some("task"))
-        .filter_map(|ev| {
+        .filter(|ev| ev.get("start").is_some())
+        .map(|ev| {
             let mut e = event_fields(item, ev, tz);
-            if ev.get("start").is_none() {
-                return None;
-            }
             e.cancelled |= cancel_all;
             if !single {
                 // A file of many events: each is its own (the item title is the calendar's).
@@ -749,7 +747,7 @@ fn parse_events(item: &Item, tz: &TimeZone) -> Option<Vec<CalEvent>> {
                     .unwrap_or("(untitled event)")
                     .to_owned();
             }
-            Some(e)
+            e
         })
         .collect();
     Some(out)
