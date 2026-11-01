@@ -10,12 +10,16 @@
 //! 31.12.23, 21:15 - Alice: text               Android, German
 //! 2023-12-31, 21:15 - Alice: text             Android, ISO
 //! 2023. 12. 31. 오후 9:15 - Alice: text        Android, Korean
+//! 14/03/2026 à 09:06 - Alice: text            Android, French
+//! ١٤/٠٣/٢٠٢٦، ٩:٠٦ م - Alice: text              Android, Arabic (with bidi marks)
 //! ```
 //!
 //! Lines that do not start with a timestamp continue the previous message. A timestamp line
 //! without `Name: ` is a system line (the encryption notice, "Alice added Bob"); iOS writes
 //! system lines with an author and a leading U+200E mark instead. Day/month order is inferred
-//! per file. Timestamps carry no zone; they are read as UTC (what the user saw on the phone).
+//! per conversation, over all its exports ([`infer_day_first`]). Timestamps carry no zone;
+//! they are read as UTC (what the user saw on the phone). An export none of whose lines can be
+//! read is reported (`Found::Problem`) and its chat's documents are kept.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{BufReader, Read};
@@ -349,6 +353,11 @@ pub struct Stamp {
     pub second: u32,
     /// `Some(true)` for PM, `Some(false)` for AM, `None` for a 24-hour clock.
     pub pm: Option<bool>,
+    /// The 12-hour marker is written in upper case (`PM`, as in the US), not `pm` or `p. m.`.
+    pub upper_marker: bool,
+    /// A word separates date and time (`14/03/2026 à 09:06`), not just `, ` or a space (an
+    /// AM/PM marker there, as in `오후`, does not count).
+    pub worded: bool,
 }
 
 /// AM/PM markers, longest first so `a.m.` wins over `am`.
@@ -358,6 +367,22 @@ const AM: &[&str] = &[
 const PM: &[&str] = &[
     "p. m.", "p.m.", "nachm.", "μ.μ.", "午後", "下午", "오후", "pm", "م",
 ];
+
+/// Bidi marks phones put around the numbers of a date in right-to-left locales (U+061C, the
+/// Arabic letter mark, besides the marks every locale may carry).
+fn is_mark(c: char) -> bool {
+    is_invisible(c) || c == '\u{061C}'
+}
+
+/// Arabic-Indic (U+0660–0669) and Persian (U+06F0–06F9) digits as ASCII digits.
+fn ascii_digit(c: char) -> char {
+    let base = match c {
+        '\u{0660}'..='\u{0669}' => 0x0660,
+        '\u{06F0}'..='\u{06F9}' => 0x06F0,
+        _ => return c,
+    };
+    char::from_digit(u32::from(c) - base, 10).unwrap_or(c)
+}
 
 fn take_digits(s: &str, max: usize) -> Option<(u32, usize, &str)> {
     let n = s.bytes().take_while(u8::is_ascii_digit).count();
@@ -382,12 +407,19 @@ fn strip_marker(t: &str) -> (String, Option<bool>) {
     (lower, None)
 }
 
-/// Parse `31/12/2023, 21:15:42`, `12/31/23, 9:15 PM`, `2023. 12. 31. 오후 9:15` ...
+/// Parse `31/12/2023, 21:15:42`, `12/31/23, 9:15 PM`, `2023. 12. 31. 오후 9:15`,
+/// `14/03/2026 à 09:06`, `١٤/٠٣/٢٠٢٦، ٩:٠٦ م` ...
 pub fn parse_stamp(raw: &str) -> Option<Stamp> {
     let s: String = raw
         .chars()
-        .filter(|c| !is_invisible(*c))
-        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .filter(|c| !is_mark(*c))
+        .map(|c| {
+            if c.is_whitespace() {
+                ' '
+            } else {
+                ascii_digit(c)
+            }
+        })
         .collect();
     let s = s.trim();
     let (a, ad, rest) = take_digits(s, 4)?;
@@ -408,11 +440,29 @@ pub fn parse_stamp(raw: &str) -> Option<Stamp> {
         return None;
     }
     let rest = rest.strip_prefix('.').unwrap_or(rest);
-    let time_part = rest.trim_start_matches([',', ' ']);
-    if time_part.len() == rest.len() {
-        return None; // no separator between date and time
+    // Between date and time: a short separator (`, `, ` `, `، `, ` à `, ` um `, ` a las `,
+    // ` в `), possibly holding the 12-hour marker (`오후 `, `午後`).
+    let digit = rest.find(|c: char| c.is_ascii_digit())?;
+    let (between, time_part) = rest.split_at(digit);
+    if !between.starts_with([' ', ',', '،'])
+        || between.chars().count() > 12
+        || between.contains([':', '/', '[', ']', '<', '>'])
+    {
+        return None;
     }
-    let (time_s, pm) = strip_marker(time_part.trim());
+    let (word, pre) = strip_marker(between.trim_matches([' ', ',', '،']));
+    let word_ok = word.chars().count() <= 8
+        && word
+            .chars()
+            .all(|c| c.is_alphabetic() || c == '.' || c == ' ');
+    if !word_ok {
+        return None;
+    }
+    let (time_s, post) = strip_marker(time_part.trim());
+    let pm = match (pre, post) {
+        (Some(_), Some(_)) => return None,
+        (p, q) => p.or(q),
+    };
     let mut fields = time_s.split([':', '.']);
     let hour: u32 = fields.next()?.trim().parse().ok()?;
     let minute: u32 = fields.next()?.trim().parse().ok()?;
@@ -437,11 +487,14 @@ pub fn parse_stamp(raw: &str) -> Option<Stamp> {
         minute,
         second,
         pm,
+        upper_marker: pm.is_some() && rest.chars().any(|c| c.is_ascii_uppercase()),
+        worded: !word.trim().is_empty(),
     })
 }
 
 impl Stamp {
-    /// The instant, reading day-first (`31/12`) or month-first (`12/31`).
+    /// The instant, reading day-first (`31/12`) or month-first (`12/31`). Years before 2000
+    /// are not WhatsApp dates (a Solar Hijri `1405` would otherwise land in the Middle Ages).
     pub fn to_datetime(self, day_first: bool) -> Option<OffsetDateTime> {
         let (y, m, d) = if self.year_first {
             (self.a, self.b, self.c)
@@ -451,6 +504,9 @@ impl Stamp {
             (self.c, self.a, self.b)
         };
         let y = if y < 100 { 2000 + y } else { y };
+        if y < 2000 {
+            return None;
+        }
         let hour = match self.pm {
             Some(true) if self.hour < 12 => self.hour + 12,
             Some(false) if self.hour == 12 => 0,
@@ -472,17 +528,39 @@ impl Stamp {
     }
 }
 
-/// Day-first or month-first for a whole file: a first field above 12 means day-first, a second
-/// above 12 month-first; otherwise 12-hour clocks suggest month-first (US) and 24-hour clocks
-/// day-first.
-pub fn infer_day_first(stamps: &[Stamp]) -> bool {
-    let dm: Vec<&Stamp> = stamps.iter().filter(|s| !s.year_first).collect();
-    let first = dm.iter().filter(|s| s.a > 12).count();
-    let second = dm.iter().filter(|s| s.b > 12).count();
-    if first > 0 || second > 0 {
-        return first >= second;
+/// How far past `now` a stamp may lie and still be plausible: stamps are local phone time read
+/// as UTC, so a message just sent east of UTC looks up to 14 hours ahead.
+const FUTURE_SLACK: time::Duration = time::Duration::days(1);
+
+/// Day-first or month-first for one conversation, from the stamps of all its exports (so
+/// re-exports of a chat agree). The order that makes fewer stamps impossible (`13/01` is not
+/// month-first) wins, then the one that puts fewer messages after `now`. When both read alike,
+/// an upper-case `AM/PM` clock suggests month-first (US); `am/pm`, `p. m.` or a 24-hour clock
+/// suggest day-first (en_IN, en_GB, most of the world).
+pub fn infer_day_first(stamps: &[Stamp], now: OffsetDateTime) -> bool {
+    let dm: Vec<&Stamp> = stamps
+        .iter()
+        .filter(|s| !s.year_first && s.a != s.b)
+        .collect();
+    let limit = now + FUTURE_SLACK;
+    let score = |day_first: bool| {
+        let (mut invalid, mut future) = (0usize, 0usize);
+        for s in &dm {
+            match s.to_datetime(day_first) {
+                None => invalid += 1,
+                Some(t) if t > limit => future += 1,
+                Some(_) => {}
+            }
+        }
+        (invalid, future)
+    };
+    let (df, mf) = (score(true), score(false));
+    if df != mf {
+        return df < mf;
     }
-    !stamps.iter().any(|s| s.pm.is_some())
+    let twelve = dm.iter().filter(|s| s.pm.is_some()).count();
+    let upper = dm.iter().filter(|s| s.upper_marker).count();
+    !(upper > 0 && upper * 2 >= twelve)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -498,7 +576,7 @@ pub struct Header<'a> {
 
 /// Split a line into timestamp and remainder when it starts a message.
 pub fn parse_header(line: &str) -> Option<Header<'_>> {
-    let line = line.trim_start_matches(|c: char| is_invisible(c) || c == ' ');
+    let line = line.trim_start_matches(|c: char| is_mark(c) || c == ' ');
     if let Some(inner) = line.strip_prefix('[') {
         let end = inner.find(']')?;
         if end > 48 {
@@ -514,7 +592,8 @@ pub fn parse_header(line: &str) -> Option<Header<'_>> {
             ios: true,
         });
     }
-    let window = &line[..floor_boundary(line, 64)];
+    // Right-to-left dates carry bidi marks (3 bytes each) and 2-byte digits.
+    let window = &line[..floor_boundary(line, 100)];
     let (i, sep_len) = [" - ", " – ", " — "]
         .iter()
         .filter_map(|sep| window.find(sep).map(|i| (i, sep.len())))
@@ -549,7 +628,7 @@ fn strip_suffix_ci<'a>(t: &'a str, suffix: &str) -> Option<&'a str> {
 }
 
 fn strip_invisible(s: &str) -> String {
-    s.chars().filter(|c| !is_invisible(*c)).collect()
+    s.chars().filter(|c| !is_mark(*c)).collect()
 }
 
 /// What a message's first line turned out to be.
@@ -574,6 +653,14 @@ const DELETED: &[&str] = &[
     "questo messaggio è stato eliminato",
     "hai eliminato questo messaggio",
     "dit bericht is verwijderd",
+    "je hebt dit bericht verwijderd",
+    "este mensaje fue eliminado",
+    "данное сообщение удалено",
+    "это сообщение удалено",
+    "вы удалили данное сообщение",
+    "вы удалили это сообщение",
+    "bu mesaj silindi",
+    "ta wiadomość została usunięta",
 ];
 
 const OMITTED: &[&str] = &[
@@ -589,6 +676,10 @@ const OMITTED: &[&str] = &[
     "ocultado",
     "omessi",
     "omesso",
+    "ocultada",
+    "omitidos",
+    "omitidas",
+    "отсутствует",
 ];
 
 /// iOS `image omitted` lines (also localized): (phrase, mime).
@@ -618,7 +709,35 @@ const IOS_OMITTED: &[(&str, &str)] = &[
     ("imagem ocultada", "image/jpeg"),
     ("vídeo ocultado", "video/mp4"),
     ("áudio ocultado", "audio/mp4"),
+    ("изображение отсутствует", "image/jpeg"),
+    ("видео отсутствует", "video/mp4"),
+    ("аудиофайл отсутствует", "audio/mp4"),
+    ("стикер отсутствует", "image/webp"),
+    ("gif отсутствует", "image/gif"),
+    ("документ отсутствует", "application/octet-stream"),
+    ("gif omitido", "image/gif"),
+    ("gif weggelassen", "image/gif"),
 ];
+
+/// The media kind named by the first word of a localized iOS `<kind> omitted` line.
+fn omitted_kind_mime(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "image"
+        | "photo"
+        | "bild"
+        | "foto"
+        | "imagen"
+        | "imagem"
+        | "immagine"
+        | "изображение"
+        | "фото" => "image/jpeg",
+        "video" | "vidéo" | "vídeo" | "видео" => "video/mp4",
+        "audio" | "áudio" | "аудио" | "аудиофайл" => "audio/mp4",
+        "sticker" | "figurinha" | "стикер" => "image/webp",
+        "gif" => "image/gif",
+        _ => return None,
+    })
+}
 
 /// `IMG-....jpg (file attached)` on Android, localized.
 const FILE_ATTACHED: &[&str] = &[
@@ -687,7 +806,9 @@ pub fn classify_media(line: &str) -> Option<Media> {
             }));
         }
         // `Report.pdf • 3 pages document omitted`
-        if (phrase.contains("document") || phrase.contains("dokument"))
+        if (phrase.contains("document")
+            || phrase.contains("dokument")
+            || phrase.contains("документ"))
             && let Some(head) = strip_suffix_ci(t, phrase)
         {
             let name = head.trim();
@@ -705,7 +826,44 @@ pub fn classify_media(line: &str) -> Option<Media> {
             }
         }
     }
+    // Other iOS locales: `‎<kind> <omitted>` behind the U+200E mark iOS puts on notices.
+    if line.trim_start_matches(' ').starts_with('\u{200E}') {
+        let words: Vec<&str> = lower.split_whitespace().collect();
+        if (2..=4).contains(&words.len())
+            && words
+                .last()
+                .is_some_and(|w| OMITTED.contains(&w.trim_end_matches('.')))
+        {
+            return Some(Media::Attachment(Attachment {
+                name: None,
+                mime: omitted_kind_mime(words[0]).map(str::to_owned),
+                size: None,
+            }));
+        }
+    }
     None
+}
+
+/// An Android media placeholder in any language: a whole message that is one `<…>` phrase
+/// (`<Media omitted>`, `<Medien ausgeschlossen>`, `<Без медиафайлов>`, `<Multimedia omitido>`).
+fn is_android_placeholder(line: &str) -> bool {
+    let t = strip_invisible(line);
+    let Some(inner) = t.trim().strip_prefix('<').and_then(|t| t.strip_suffix('>')) else {
+        return false;
+    };
+    let inner = inner.trim();
+    // Placeholders in cased scripts are capitalised phrases (`<Media omitted>`); a single or
+    // lower-case word in angle brackets is something a person typed (`<sigh>`, `<evil laugh>`).
+    // Caseless scripts (`<メディアは含まれていません>`) need no space.
+    let shaped = match inner.chars().next() {
+        Some(c) if c.is_uppercase() => inner.contains(' '),
+        Some(c) => !c.is_lowercase(),
+        None => false,
+    };
+    shaped
+        && inner.chars().count() <= 64
+        && inner.chars().any(char::is_alphabetic)
+        && !inner.contains(['<', '>'])
 }
 
 const GROUP_HINTS: &[&str] = &[
@@ -744,14 +902,8 @@ struct Entry<'a> {
     more: Vec<&'a str>,
 }
 
-/// Parse one export's text into a conversation (`None` when it holds no WhatsApp messages).
-pub fn parse_chat(
-    text: &str,
-    id: &str,
-    name: &str,
-    me: Option<&str>,
-    media_sizes: &HashMap<String, u64>,
-) -> Option<Conversation> {
+/// One export's message headers, each with its continuation lines.
+fn split_entries(text: &str) -> Vec<Entry<'_>> {
     let lines: Vec<(&str, Option<Header<'_>>)> = text
         .split('\n')
         .map(|line| {
@@ -771,9 +923,30 @@ pub fn parse_chat(
         .filter(|(_, h)| h.as_ref().is_some_and(|h| !h.ios))
         .count();
     let ios_file = ios >= android;
+    // Likewise its headers all separate date and time the same way: in a file of
+    // `14/03/2026, 09:06` headers, a line `14/03/2026 at 09:06 - Bob: hi` is pasted text, and
+    // in a file of `14/03/2026 à 09:06` headers, `14/03/2026, 09:06 - …` is.
+    let (worded, plain) = lines
+        .iter()
+        .filter_map(|(_, h)| h.as_ref().filter(|h| h.ios == ios_file))
+        .fold((0usize, 0usize), |(w, p), h| {
+            if h.stamp.worded {
+                (w + 1, p)
+            } else {
+                (w, p + 1)
+            }
+        });
+    let style_ok = |h: &Header<'_>| {
+        h.ios == ios_file
+            && match worded.cmp(&plain) {
+                std::cmp::Ordering::Greater => h.stamp.worded,
+                std::cmp::Ordering::Less => !h.stamp.worded,
+                std::cmp::Ordering::Equal => true,
+            }
+    };
     let mut entries: Vec<Entry<'_>> = Vec::new();
     for (line, header) in lines {
-        match header.filter(|h| h.ios == ios_file) {
+        match header.filter(|h| style_ok(h)) {
             Some(h) => entries.push(Entry {
                 stamp: h.stamp,
                 rest: h.rest,
@@ -788,11 +961,28 @@ pub fn parse_chat(
             }
         }
     }
+    entries
+}
+
+/// The timestamps of one export's messages, for [`infer_day_first`].
+pub fn chat_stamps(text: &str) -> Vec<Stamp> {
+    split_entries(text).iter().map(|e| e.stamp).collect()
+}
+
+/// Parse one export's text into a conversation, reading dates day-first or month-first
+/// (`None` when it holds no readable WhatsApp message).
+pub fn parse_chat(
+    text: &str,
+    id: &str,
+    name: &str,
+    me: Option<&str>,
+    media_sizes: &HashMap<String, u64>,
+    day_first: bool,
+) -> Option<Conversation> {
+    let entries = split_entries(text);
     if entries.is_empty() {
         return None;
     }
-    let stamps: Vec<Stamp> = entries.iter().map(|e| e.stamp).collect();
-    let day_first = infer_day_first(&stamps);
     let me_norm = me.map(|m| clean_name(m).to_lowercase());
 
     let mut conv = Conversation::new(id, name);
@@ -834,7 +1024,11 @@ pub fn parse_chat(
             Some(author) => {
                 let author = clean_name(&author);
                 let lrm_system = e.ios && first.starts_with('\u{200E}');
-                let media = classify_media(first);
+                let whole = e.more.iter().all(|l| l.trim().is_empty());
+                let media = classify_media(first).or_else(|| {
+                    (!e.ios && whole && is_android_placeholder(first))
+                        .then(|| Media::Attachment(Attachment::default()))
+                });
                 let mut msg = if lrm_system && media.is_none() {
                     let mut m = Message::system(at, String::new());
                     if author != clean_name(name) {
@@ -882,12 +1076,146 @@ pub fn parse_chat(
         .collect();
     conv.is_group = group_hint || authors.len() > 2;
     conv.normalise();
-    Some(conv)
+    (!conv.messages.is_empty()).then_some(conv)
 }
 
 fn file_url(path: &Path) -> Option<String> {
     let abs = std::path::absolute(path).ok()?;
     url::Url::from_file_path(abs).ok().map(String::from)
+}
+
+/// An export's path relative to the watched folder, with `/` separators.
+fn relative_name(path: &Path, folder: &Path) -> String {
+    let rel = path.strip_prefix(folder).unwrap_or(path);
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Whether a file none of whose lines could be read is still meant as a WhatsApp export (so
+/// it is reported, not skipped as a stray text file): its name says so, or some line looks
+/// like a message header in a format this parser does not know (`<digits…> - Name: text`).
+fn looks_like_export(path: &Path, text: &str) -> bool {
+    let file = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if file.contains("whatsapp") || file.starts_with("_chat.") {
+        return true;
+    }
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .take(200)
+        .any(|l| {
+            let l = l.trim_start_matches(|c: char| is_mark(c) || c.is_whitespace() || c == '[');
+            let head = &l[..floor_boundary(l, 100)];
+            l.chars().next().is_some_and(char::is_numeric)
+                && head.contains(": ")
+                && (head.contains(" - ") || head.contains(']'))
+        })
+}
+
+impl WhatsAppReader {
+    /// One read, judging future dates against `now`.
+    fn read_at(
+        &self,
+        cancel: &CancellationToken,
+        found: &mut dyn FnMut(Found) -> bool,
+        now: OffsetDateTime,
+    ) -> Result<()> {
+        let (files, incomplete) = find_exports(&self.folder)?;
+        // Exports in an unreadable subfolder are unknown: do not delete anything this pass.
+        if incomplete && !found(Found::Keep(String::new())) {
+            return Ok(());
+        }
+        // A chat's exports (re-exports, duplicate downloads) are read together, so they agree
+        // on the day/month order and merge without duplicates.
+        let mut chats: BTreeMap<String, Vec<ExportFile>> = BTreeMap::new();
+        for f in files {
+            chats
+                .entry(format!("wa:{}", slug(&f.name)))
+                .or_default()
+                .push(f);
+        }
+        for (id, files) in chats {
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            let mut texts: Vec<(ExportFile, ExportText)> = Vec::new();
+            for f in files {
+                if cancel.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+                match read_export(&f.path) {
+                    Ok(Some(t)) => texts.push((f, t)),
+                    Ok(None) => {
+                        tracing::debug!(file = %f.path.display(), "no chat text in archive; skipped");
+                    }
+                    Err(e) => {
+                        tracing::warn!(file = %f.path.display(), error = %e, "cannot read WhatsApp export; keeping what was imported");
+                        if !found(Found::Keep(format!("{id}/"))) {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            let stamps: Vec<Stamp> = texts
+                .iter()
+                .flat_map(|(_, t)| chat_stamps(&t.text))
+                .collect();
+            let day_first = infer_day_first(&stamps, now);
+            let mut merged: Option<Conversation> = None;
+            for (f, t) in texts {
+                match parse_chat(
+                    &t.text,
+                    &id,
+                    &f.name,
+                    self.me.as_deref(),
+                    &t.media,
+                    day_first,
+                ) {
+                    Some(mut conv) => {
+                        conv.url = file_url(&f.path);
+                        match &mut merged {
+                            Some(existing) => existing.merge(conv),
+                            None => merged = Some(conv),
+                        }
+                    }
+                    None if t.text.trim().is_empty() => {
+                        // Being written: keep what was imported, the next pass reads it.
+                        tracing::debug!(file = %f.path.display(), "empty WhatsApp export; keeping what was imported");
+                        if !found(Found::Keep(format!("{id}/"))) {
+                            return Ok(());
+                        }
+                    }
+                    None if looks_like_export(&f.path, &t.text) => {
+                        let rel = relative_name(&f.path, &self.folder);
+                        tracing::warn!(file = %f.path.display(), "no readable message in WhatsApp export; keeping what was imported");
+                        let problem = Found::Problem {
+                            key: format!("whatsapp:{rel}"),
+                            message: format!(
+                                "Couldn't read any messages in {rel}: its date format isn't \
+                                 recognised. Anything imported from this chat before is kept."
+                            ),
+                        };
+                        if !found(problem) || !found(Found::Keep(format!("{id}/"))) {
+                            return Ok(());
+                        }
+                    }
+                    None => {
+                        tracing::debug!(file = %f.path.display(), "not a WhatsApp export; skipped");
+                    }
+                }
+            }
+            if let Some(conv) = merged
+                && !found(Found::Conversation(conv))
+            {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Reader for WhatsAppReader {
@@ -900,50 +1228,7 @@ impl Reader for WhatsAppReader {
     }
 
     fn read(&self, cancel: &CancellationToken, found: &mut dyn FnMut(Found) -> bool) -> Result<()> {
-        let (files, incomplete) = find_exports(&self.folder)?;
-        // Exports in an unreadable subfolder are unknown: do not delete anything this pass.
-        if incomplete && !found(Found::Keep(String::new())) {
-            return Ok(());
-        }
-        let mut convs: BTreeMap<String, Conversation> = BTreeMap::new();
-        for f in files {
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            let id = format!("wa:{}", slug(&f.name));
-            let parsed = read_export(&f.path).map(|t| {
-                t.and_then(|t| parse_chat(&t.text, &id, &f.name, self.me.as_deref(), &t.media))
-            });
-            match parsed {
-                Ok(Some(mut conv)) => {
-                    conv.url = file_url(&f.path);
-                    match convs.get_mut(&id) {
-                        Some(existing) => existing.merge(conv),
-                        None => {
-                            convs.insert(id, conv);
-                        }
-                    }
-                }
-                Ok(None) => {
-                    tracing::debug!(file = %f.path.display(), "not a WhatsApp export; skipped");
-                }
-                Err(e) => {
-                    tracing::warn!(file = %f.path.display(), error = %e, "cannot read WhatsApp export; keeping what was imported");
-                    if !found(Found::Keep(format!("{id}/"))) {
-                        return Ok(());
-                    }
-                }
-            }
-        }
-        for (_, conv) in convs {
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            if !found(Found::Conversation(conv)) {
-                return Ok(());
-            }
-        }
-        Ok(())
+        self.read_at(cancel, found, OffsetDateTime::now_utc())
     }
 
     fn watch_target(&self) -> Option<(PathBuf, RecursiveMode)> {
@@ -1028,12 +1313,13 @@ mod tests {
     #[test]
     fn day_month_inference() {
         let s = |l: &str| parse_header(l).unwrap().stamp;
-        assert!(infer_day_first(&[s("13/01/2024, 10:00 - a: b")]));
-        assert!(!infer_day_first(&[s("01/13/2024, 10:00 - a: b")]));
-        assert!(!infer_day_first(&[s("01/02/2024, 10:00 AM - a: b")]));
-        assert!(infer_day_first(&[s("01/02/2024, 10:00 - a: b")]));
+        let now = datetime!(2026-11-01 12:00 UTC);
+        assert!(infer_day_first(&[s("13/01/2024, 10:00 - a: b")], now));
+        assert!(!infer_day_first(&[s("01/13/2024, 10:00 - a: b")], now));
+        assert!(!infer_day_first(&[s("01/02/2024, 10:00 AM - a: b")], now));
+        assert!(infer_day_first(&[s("01/02/2024, 10:00 - a: b")], now));
         // Year-first stamps say nothing about the order.
-        assert!(infer_day_first(&[s("2024-01-02, 10:00 - a: b")]));
+        assert!(infer_day_first(&[s("2024-01-02, 10:00 - a: b")], now));
         // Feb 30 is not a date.
         assert!(s("30/02/2024, 10:00 - a: b").to_datetime(true).is_none());
     }
@@ -1090,7 +1376,7 @@ mod tests {
     #[test]
     fn crlf_line_endings() {
         let text = "\u{feff}31/12/2023 21:15 - Zo: a\r\nb\r\n31/12/2023 21:16 - Zo: c\r\n";
-        let c = parse_chat(text, "wa:zo", "Zo", None, &HashMap::new()).unwrap();
+        let c = parse_chat(text, "wa:zo", "Zo", None, &HashMap::new(), true).unwrap();
         assert_eq!(c.messages.len(), 2);
         assert_eq!(c.messages[0].text, "a\nb");
         assert_eq!(c.messages[1].text, "c");
@@ -1103,7 +1389,7 @@ mod tests {
         let text = "[31/12/2023, 21:15:42] Alice: forwarding this\n\
 31/12/2023, 20:00 - Bob: original\n\
 [31/12/2023, 21:16:00] Zo: ok\n";
-        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new()).unwrap();
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
         assert_eq!(c.messages.len(), 2);
         assert_eq!(
             c.messages[0].text,
@@ -1117,7 +1403,7 @@ mod tests {
     #[test]
     fn impossible_date_lines_keep_their_full_text() {
         let text = "31/12/2023, 21:15 - Alice: plan\n30/02/2024, 10:00 - pay rent\n";
-        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new()).unwrap();
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
         assert_eq!(c.messages.len(), 1);
         assert_eq!(c.messages[0].text, "plan\n30/02/2024, 10:00 - pay rent");
     }
@@ -1180,7 +1466,7 @@ mod tests {
 31/12/2023, 21:17 - Bob changed the subject from “a” to “b: c”\n\
 31/12/2023, 21:18 - Mike \"Ace\" Li: <Media omitted>\n\
 31/12/2023, 21:18 - Mike \"Ace\" Li: <Media omitted>\n";
-        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new()).unwrap();
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
         assert_eq!(c.messages.len(), 5);
         assert!(!c.messages[0].system);
         assert_eq!(
@@ -1214,7 +1500,7 @@ mod tests {
 12/31/23, 9:01 PM - Alice: Hello\nsecond line\n\
 12/31/23, 9:02 PM - +1 (555) 123-4567: <Media omitted>\n\
 12/31/23, 9:03 PM - Tanuj: me here\n";
-        let c = parse_chat(text, "wa:x", "X", Some("tanuj"), &HashMap::new()).unwrap();
+        let c = parse_chat(text, "wa:x", "X", Some("tanuj"), &HashMap::new(), false).unwrap();
         assert_eq!(c.messages.len(), 4);
         assert!(c.messages[0].system);
         assert_eq!(c.messages[1].text, "Hello\nsecond line");
@@ -1224,5 +1510,307 @@ mod tests {
         assert!(c.participants[c.messages[3].author.unwrap()].me);
         assert!(!c.is_group);
         assert_eq!(c.messages[3].at, datetime!(2023-12-31 21:03 UTC));
+    }
+
+    /// Regression (JJ1-5): date lines with a word, an Arabic comma, Eastern Arabic or Persian
+    /// digits, or bidi marks between the fields were not headers, so the export vanished.
+    #[test]
+    fn localized_date_time_separators_and_digits() {
+        let want = datetime!(2026-03-14 09:06 UTC);
+        for l in [
+            "14/03/2026 à 09:06 - Chloé: salut",
+            "14.03.26 um 09:06 - Oma: hallo",
+            "14/03/2026 a las 9:06 a. m. - Yusuf: hola",
+            "14.03.2026 в 9:06 - Иван: привет",
+            "14/03/2026، 9:06 ص - Omar: مرحبا",
+            "١٤/٠٣/٢٠٢٦، ٩:٠٦ ص - Omar: مرحبا",
+            "\u{200f}١٤\u{200f}/٠٣\u{200f}/٢٠٢٦، \u{61c}٩:٠٦ ص - Omar: مرحبا",
+            "۱۴/۰۳/۲۰۲۶، ۹:۰۶ - Sara: سلام",
+            "[١٤/٠٣/٢٠٢٦، ٩:٠٦:٠٠ ص] Omar: مرحبا",
+        ] {
+            assert_eq!(dt(l, true), want, "{l}");
+        }
+        let pm = dt("١٤/٠٣/٢٠٢٦، ٩:٠٦ م - Omar: مرحبا", true);
+        assert_eq!(pm, datetime!(2026-03-14 21:06 UTC));
+        for l in [
+            "14/03/2026 something long here 09:06 - x: y",
+            "14/03/2026 - 09:06 - x: y",
+            "14/03/202609:06 - x: y",
+            // A Solar Hijri year is not a date this parser can place.
+            "۱۴۰۵/۰۱/۰۱، ۹:۰۶ - Sara: سلام",
+        ] {
+            assert!(
+                parse_header(l)
+                    .and_then(|h| h.stamp.to_datetime(true))
+                    .is_none(),
+                "{l}"
+            );
+        }
+        let c = parse_chat(
+            "\u{200f}١٤/٠٣/٢٠٢٦، ٩:٠٦ م - Omar: مرحبا\nسطر ثان\n",
+            "wa:omar",
+            "Omar",
+            None,
+            &HashMap::new(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(c.messages.len(), 1);
+        assert_eq!(c.messages[0].text, "مرحبا\nسطر ثان");
+        assert_eq!(c.participants[c.messages[0].author.unwrap()].name, "Omar");
+    }
+
+    /// Regression (JJ1-6): day-first 12-hour exports (en_IN, all days ≤ 12) were read
+    /// month-first, some into the future.
+    #[test]
+    fn day_order_rejects_future_dates_and_reads_lower_case_am_pm_day_first() {
+        let s = |l: &str| parse_header(l).unwrap().stamp;
+        let now = datetime!(2026-11-01 12:00 UTC);
+        // `pm` in lower case: en_IN / en_GB, day-first.
+        assert!(infer_day_first(
+            &[
+                s("03/05/26, 9:00 pm - Priya: hi"),
+                s("04/05/26, 9:05 am - Priya: x")
+            ],
+            now
+        ));
+        assert!(infer_day_first(&[s("03/05/26, 9:00 p. m. - Ana: hi")], now));
+        // Upper-case AM/PM and nothing else to go by: US, month-first.
+        assert!(!infer_day_first(&[s("03/05/26, 9:00 PM - Al: hi")], now));
+        // Month-first would put 11 June on 6 November, after `now`.
+        assert!(infer_day_first(
+            &[
+                s("03/05/26, 9:00 PM - Al: hi"),
+                s("11/06/26, 9:30 AM - Al: x")
+            ],
+            now
+        ));
+        // A day above 12 still decides over everything else.
+        assert!(!infer_day_first(
+            &[
+                s("10/09/26, 9:00 pm - Al: hi"),
+                s("10/13/26, 9:30 pm - Al: x")
+            ],
+            datetime!(2026-12-01 0:00 UTC)
+        ));
+    }
+
+    fn reader_pass(folder: &Path, now: OffsetDateTime) -> Vec<Found> {
+        let reader = WhatsAppReader {
+            folder: folder.to_path_buf(),
+            me: None,
+        };
+        let mut out = Vec::new();
+        reader
+            .read_at(
+                &CancellationToken::new(),
+                &mut |f| {
+                    out.push(f);
+                    true
+                },
+                now,
+            )
+            .unwrap();
+        out
+    }
+
+    /// Regression (JJ1-6): an old export with only ambiguous dates and a re-export with a day
+    /// above 12 were dated with different orders, so the shared messages showed up twice.
+    #[test]
+    fn reexports_share_one_day_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("WhatsApp Chat with Priya.txt"),
+            "03/05/26, 9:00 PM - Priya: dinner at 9?\n04/05/26, 8:15 AM - Priya: running late\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("WhatsApp Chat with Priya (1).txt"),
+            "03/05/26, 9:00 PM - Priya: dinner at 9?\n04/05/26, 8:15 AM - Priya: running late\n\
+25/06/26, 7:00 PM - Priya: back home\n",
+        )
+        .unwrap();
+        let found = reader_pass(tmp.path(), datetime!(2026-11-01 12:00 UTC));
+        let convs: Vec<&Conversation> = found
+            .iter()
+            .filter_map(|f| match f {
+                Found::Conversation(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(convs.len(), 1);
+        let at: Vec<OffsetDateTime> = convs[0].messages.iter().map(|m| m.at).collect();
+        assert_eq!(
+            at,
+            [
+                datetime!(2026-05-03 21:00 UTC),
+                datetime!(2026-05-04 08:15 UTC),
+                datetime!(2026-06-25 19:00 UTC),
+            ]
+        );
+    }
+
+    /// Regression (JJ1-5): an export with no readable line was skipped at debug level and the
+    /// source said "Up to date"; now it is reported and its chat's documents are kept.
+    #[test]
+    fn unreadable_export_is_reported_and_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("old")).unwrap();
+        std::fs::write(
+            tmp.path().join("old").join("WhatsApp Chat with Kai.txt"),
+            "2026年3月14日 9:06 - Kai: hi\n",
+        )
+        .unwrap();
+        // Not a WhatsApp name, but its lines look like headers in an unknown format.
+        std::fs::write(tmp.path().join("export.txt"), "14|03|2026 9:06 - Lu: hi\n").unwrap();
+        // Stray text and a file still being written are not reported.
+        std::fs::write(tmp.path().join("notes.txt"), "Just some notes.\n").unwrap();
+        std::fs::write(tmp.path().join("WhatsApp Chat with Mo.txt"), "").unwrap();
+        let found = reader_pass(tmp.path(), datetime!(2026-11-01 12:00 UTC));
+        let mut problems = Vec::new();
+        let mut keep = Vec::new();
+        for f in &found {
+            match f {
+                Found::Problem { key, message } => problems.push((key.clone(), message.clone())),
+                Found::Keep(p) => keep.push(p.clone()),
+                Found::Conversation(c) => panic!("{}", c.id),
+            }
+        }
+        let keys: Vec<&str> = problems.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "whatsapp:export.txt",
+                "whatsapp:old/WhatsApp Chat with Kai.txt"
+            ]
+        );
+        assert!(
+            problems[1].1.starts_with(
+                "Couldn't read any messages in old/WhatsApp Chat with Kai.txt: its date format isn't recognised."
+            ),
+            "{}",
+            problems[1].1
+        );
+        assert_eq!(keep, ["wa:export/", "wa:kai/", "wa:mo/"]);
+    }
+
+    /// Regression (JJ1-16): media placeholders and deletion notices in other languages were
+    /// kept as text, or turned into an authorless system line.
+    #[test]
+    fn localized_placeholders() {
+        let android = "14/03/2026, 09:06 - Oma: <Medien ausgeschlossen>\n\
+14/03/2026, 09:07 - Иван: <Без медиафайлов>\n\
+14/03/2026, 09:08 - Ana: <Multimedia omitido>\n\
+14/03/2026, 09:09 - Ana: <sarcasm>\nnot a placeholder\n\
+14/03/2026, 09:10 - Иван: Данное сообщение удалено\n";
+        let c = parse_chat(android, "wa:x", "X", None, &HashMap::new(), true).unwrap();
+        assert_eq!(c.messages.len(), 5);
+        for m in &c.messages[..3] {
+            assert_eq!(m.attachments, [Attachment::default()]);
+            assert!(m.text.is_empty() && !m.system && m.author.is_some());
+        }
+        assert_eq!(c.messages[3].text, "<sarcasm>\nnot a placeholder");
+        assert!(c.messages[4].deleted && c.messages[4].text.is_empty());
+
+        // iOS 1:1 chat named after its contact: the placeholder stays Иван's.
+        let ios = "[14.03.26, 09:06:00] Иван: \u{200e}изображение отсутствует\n\
+[14.03.26, 09:07:00] Иван: \u{200e}видео отсутствует\n\
+[14.03.26, 09:08:00] Иван: \u{200e}Данное сообщение удалено.\n\
+[14.03.26, 09:09:00] Иван: \u{200e}Вы удалили это сообщение.\n\
+[14.03.26, 09:10:00] Иван: \u{200e}Пропущенный звонок\n";
+        let c = parse_chat(ios, "wa:ivan", "Иван", None, &HashMap::new(), true).unwrap();
+        let ivan = c.participants.iter().position(|p| p.name == "Иван");
+        let mimes: Vec<Option<&str>> = c.messages[..2]
+            .iter()
+            .map(|m| {
+                assert!(!m.system && m.author == ivan, "{m:?}");
+                m.attachments[0].mime.as_deref()
+            })
+            .collect();
+        assert_eq!(mimes, [Some("image/jpeg"), Some("video/mp4")]);
+        assert!(c.messages[2].deleted && c.messages[3].deleted);
+        assert!(!c.messages[2].system && c.messages[2].author == ivan);
+        // A real notice still is one.
+        assert!(c.messages[4].system);
+
+        let att = |l: &str| match classify_media(l) {
+            Some(Media::Attachment(a)) => a.mime,
+            other => panic!("{l}: {other:?}"),
+        };
+        assert_eq!(
+            att("\u{200e}Bild weggelassen").as_deref(),
+            Some("image/jpeg")
+        );
+        assert_eq!(att("\u{200e}imagen omitida").as_deref(), Some("image/jpeg"));
+        assert_eq!(att("\u{200e}image absente").as_deref(), Some("image/jpeg"));
+        assert_eq!(
+            att("\u{200e}imagem ocultada").as_deref(),
+            Some("image/jpeg")
+        );
+        assert_eq!(att("\u{200e}GIF omitido").as_deref(), Some("image/gif"));
+        assert_eq!(
+            att("\u{200e}figurinha omitida").as_deref(),
+            Some("image/webp")
+        );
+        for l in [
+            "Diese Nachricht wurde gelöscht",
+            "Se eliminó este mensaje.",
+            "Ce message a été supprimé",
+            "Mensagem apagada",
+            "\u{200e}You deleted this message.",
+            "Вы удалили данное сообщение",
+        ] {
+            assert_eq!(classify_media(l), Some(Media::Deleted), "{l}");
+        }
+        // Without the iOS mark, a sentence ending in "omitted" stays text.
+        assert_eq!(classify_media("nothing important omitted"), None);
+    }
+
+    /// Review regression: the `<…>` placeholder rule turned a typed `<sigh>` or `<evil laugh>`
+    /// into an attachment and dropped its text.
+    #[test]
+    fn typed_angle_bracket_messages_stay_text() {
+        let text = "14/03/2026, 09:06 - Ana: <sigh>\n\
+14/03/2026, 09:07 - Ana: <evil laugh>\n\
+14/03/2026, 09:08 - Ana: <Sigh>\n\
+14/03/2026, 09:09 - Ana: <メディアは含まれていません>\n\
+14/03/2026, 09:10 - Ana: <Media weggelaten>\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
+        let texts: Vec<&str> = c.messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts, ["<sigh>", "<evil laugh>", "<Sigh>", "", ""]);
+        assert!(c.messages[3].attachments.len() == 1 && c.messages[4].attachments.len() == 1);
+    }
+
+    /// Review regression: with words allowed between date and time, a pasted line such as
+    /// `14/03/2026 at 09:06 - Bob: hi` in a file of `14/03/2026, 09:06` headers became a
+    /// message from Bob. Headers must share the file's separator style.
+    #[test]
+    fn pasted_header_of_another_separator_style_stays_text() {
+        let text = "14/03/2026, 09:06 - Ana: forwarding:\n\
+14/03/2026 at 08:00 - Bob: the plan\n\
+14/03/2026, 09:07 - Ana: ok\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
+        let texts: Vec<&str> = c.messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            ["forwarding:\n14/03/2026 at 08:00 - Bob: the plan", "ok"]
+        );
+        // And the other way round, in a French export.
+        let text = "14/03/2026 à 09:06 - Chloé: regarde\n\
+14/03/2026, 08:00 - Bob: the plan\n\
+14/03/2026 à 09:07 - Chloé: ok\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new(), true).unwrap();
+        assert_eq!(c.messages.len(), 2);
+        assert_eq!(
+            c.messages[0].text,
+            "regarde\n14/03/2026, 08:00 - Bob: the plan"
+        );
+        // Korean markers between date and time are not words.
+        assert!(
+            !parse_header("2023. 12. 31. 오후 9:15 - a: b")
+                .unwrap()
+                .stamp
+                .worded
+        );
     }
 }

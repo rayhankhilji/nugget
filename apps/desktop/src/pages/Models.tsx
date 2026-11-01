@@ -1,8 +1,10 @@
-import { useState } from "react";
-import { api, errorMessage, events, type FitReport, type ModelFit, type ModelInfo, type ModelProgress } from "../api";
+import { useEffect, useId, useRef, useState } from "react";
+import { aiKeysApi, api, errorMessage, events, isMethodNotFound, type FitReport, type ModelFit, type ModelInfo, type ModelProgress, type SavedKeyProvider } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
-import { Badge, EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
+import { Dialog } from "../components/Dialog";
+import { ByokForm, kindLabel, ReplaceKeyForm } from "../onboarding/ByokForm";
 import { t as translate, useT, type MessageKey } from "../i18n";
 import { FitNotes, loadFit, MachineLine } from "../onboarding/ModelFit";
 
@@ -205,7 +207,178 @@ export function ModelsPage() {
           </ul>
         </section>
       )}
+      <YourProviders />
     </div>
+  );
+}
+
+// ---- KK2: providers with a key ----
+
+/**
+ * "Your providers": the cloud and self-hosted providers that use a key (`ai.key.saved`), with
+ * Replace key and Remove, and the form to add one. Every change takes effect without a restart.
+ */
+export function YourProviders() {
+  const t = useT();
+  const titleId = useId();
+  const saved = useAsync(aiKeysApi.saved);
+  const [replacing, setReplacing] = useState<SavedKeyProvider | null>(null);
+  const [removing, setRemoving] = useState<SavedKeyProvider | null>(null);
+  const [notice, setNotice] = useState("");
+  // After a removal the card (and the button that opened the dialog) is gone: focus the heading.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [focusHeading, setFocusHeading] = useState(false);
+  useEffect(() => {
+    if (focusHeading) {
+      heading.current?.focus();
+      setFocusHeading(false);
+    }
+  }, [focusHeading, saved.data]);
+  const list = saved.data ?? [];
+  // An older daemon cannot list or change saved keys.
+  if (isMethodNotFound(saved.error)) return null;
+
+  return (
+    <section className="models-group" aria-labelledby={titleId}>
+      <h2 id={titleId} ref={heading} tabIndex={-1}>
+        {t("models.providers.title")}
+      </h2>
+      <p className="muted small">{t("models.providers.hint")}</p>
+      <ErrorNote error={saved.error} onRetry={saved.reload} />
+      {saved.data && list.length === 0 && <p className="muted">{t("models.providers.empty")}</p>}
+      {list.length > 0 && (
+        <ul className="cards" aria-label={t("models.providers.title")} aria-busy={saved.loading}>
+          {list.map((p) => (
+            <SavedProviderCard key={p.id} provider={p} onReplace={() => setReplacing(p)} onRemove={() => setRemoving(p)} />
+          ))}
+        </ul>
+      )}
+      <p role="status" className={notice ? "note" : undefined}>
+        {notice}
+      </p>
+      <details className="models-add-provider">
+        <summary>{t("models.providers.add")}</summary>
+        <ByokForm
+          onSaved={() => {
+            setNotice("");
+            saved.reload();
+          }}
+        />
+      </details>
+      {replacing && (
+        <Dialog title={t("models.providers.replaceDialog.title", { name: replacing.id })} onClose={() => setReplacing(null)}>
+          <ReplaceKeyForm
+            provider={replacing}
+            onCancel={() => setReplacing(null)}
+            onDone={() => {
+              setNotice(t("models.providers.replaced", { name: replacing.id }));
+              setReplacing(null);
+              saved.reload();
+            }}
+          />
+        </Dialog>
+      )}
+      {removing && (
+        <RemoveProviderDialog
+          provider={removing}
+          onClose={() => setRemoving(null)}
+          onRemoved={() => {
+            setNotice(t("models.providers.removed", { name: removing.id }));
+            setRemoving(null);
+            setFocusHeading(true);
+            saved.reload();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: SavedKeyProvider; onReplace: () => void; onRemove: () => void }) {
+  const t = useT();
+  const labelId = `provider-${p.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  return (
+    <li className="card model-card" aria-labelledby={labelId} data-provider-id={p.id}>
+      <div className="card-head">
+        <bdi dir="ltr" id={labelId} className="card-title">
+          {p.id}
+        </bdi>
+        <span className="badges">
+          {p.available ? <Badge tone="good">{t("models.providers.inUse")}</Badge> : <Badge tone="warn">{t("models.providers.notInUse")}</Badge>}
+        </span>
+      </div>
+      <p className="small">
+        {t(kindLabel(p.kind))}{" "}
+        <span className="muted">
+          ·{" "}
+          <bdi dir="ltr">
+            <code>{p.model}</code>
+          </bdi>
+        </span>
+      </p>
+      <p className="small muted">
+        {p.key === "env" && p.env_var ? t("models.providers.keyEnv", { name: p.env_var }) : t("models.providers.keyKeychain")}
+      </p>
+      {!p.available && p.error && (
+        <p className="small muted" dir="auto">
+          {p.error}
+        </p>
+      )}
+      <div className="card-actions" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+        <button type="button" className="btn" onClick={onReplace} aria-label={t("models.providers.replaceLabel", { name: p.id })}>
+          {t("models.providers.replace")}
+        </button>
+        <button type="button" className="btn btn-danger-ghost" onClick={onRemove} aria-label={t("models.providers.removeLabel", { name: p.id })}>
+          {t("models.providers.remove")}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function RemoveProviderDialog({ provider, onClose, onRemoved }: { provider: SavedKeyProvider; onClose: () => void; onRemoved: () => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [refused, setRefused] = useState("");
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await aiKeysApi.remove(provider.id);
+      if (r.removed) {
+        onRemoved();
+        return;
+      }
+      setRefused(r.reason === "not_found" ? t("onboarding.byok.form.error.not_found") : t("onboarding.byok.form.error.not_editable"));
+    } catch (err) {
+      setError(err);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <Dialog
+      title={t("models.providers.removeDialog.title", { name: provider.id })}
+      description={provider.key === "env" ? t("models.providers.removeDialog.descriptionEnv") : t("models.providers.removeDialog.description")}
+      onClose={onClose}
+    >
+      {refused && (
+        <p role="alert" className="note note-error">
+          {refused}
+        </p>
+      )}
+      <ErrorNote error={error} />
+      <div className="dialog-actions">
+        <button type="button" className="btn" onClick={onClose} disabled={busy} data-autofocus="">
+          {t("common.cancel")}
+        </button>
+        <button type="button" className="btn btn-danger" onClick={() => void remove()} disabled={busy}>
+          {busy ? <Spinner label={t("models.providers.removing")} /> : t("models.providers.remove")}
+        </button>
+      </div>
+    </Dialog>
   );
 }
 

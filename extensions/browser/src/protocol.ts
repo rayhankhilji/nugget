@@ -83,6 +83,27 @@ export interface Viewport {
   scroll_y: number;
 }
 
+/** A form some element of the snapshot belongs to. */
+export interface FormInfo {
+  id: string;
+  /** Resolved `action` URL. */
+  action: string;
+  method: string;
+  /** Salted digest of everything the form would send (see `digest.ts`); compare for equality
+   * only. Absent when the form could not be read. */
+  digest?: string;
+}
+
+/** A dialog, form or region a send's content lives in (a compose window with a contenteditable
+ * body), with the snapshot elements inside it. */
+export interface ScopeInfo {
+  id: string;
+  /** Ids of the snapshot's elements inside it. */
+  members: string[];
+  /** Salted digest of its editable contents (see `scopeDigest`); absent when unreadable. */
+  digest?: string;
+}
+
 export interface PageSnapshot {
   snapshot_id: string;
   url: string;
@@ -94,6 +115,10 @@ export interface PageSnapshot {
   text: string;
   text_truncated: boolean;
   frames: FrameInfo[];
+  /** Forms the elements belong to, in document order. */
+  forms: FormInfo[];
+  /** Send scopes around the elements (innermost first per element). */
+  scopes: ScopeInfo[];
 }
 
 export interface ElementChange {
@@ -125,6 +150,12 @@ export type BrowserAction =
   | { kind: "submit"; element: string }
   | { kind: "wait_for"; until: WaitCondition; timeout_ms?: number };
 
+/** A confirmed submit: dispatch it only while `form` still has exactly this digest. */
+export interface FormExpectation {
+  form: string;
+  digest: string;
+}
+
 export interface SnapshotOptions {
   include_text?: boolean;
   include_hidden?: boolean;
@@ -133,9 +164,10 @@ export interface SnapshotOptions {
 export type HostRequest =
   | { id: number; type: "hello"; protocol: number }
   | { id: number; type: "snapshot"; tab_id?: number; options?: SnapshotOptions }
-  | { id: number; type: "act"; tab_id?: number; snapshot_id: string; action: BrowserAction }
+  | { id: number; type: "act"; tab_id?: number; snapshot_id: string; action: BrowserAction; expect_form?: FormExpectation; expect_scope?: FormExpectation }
   | { id: number; type: "overlay"; tab_id?: number; active: boolean; label?: string }
-  | { id: number; type: "halt" };
+  | { id: number; type: "halt" }
+  | { id: number; type: "resume" };
 
 export interface ActResult {
   before_snapshot_id: string;
@@ -164,6 +196,7 @@ export type ErrorCode =
   | "bad_url"
   | "timeout"
   | "halted"
+  | "form_changed"
   | "internal";
 
 export interface ReplyError {

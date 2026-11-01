@@ -437,7 +437,7 @@ fn plain_cfg() -> KnowledgeConfig {
 }
 
 #[tokio::test]
-async fn the_users_assertion_wins_over_newer_evidence() {
+async fn the_users_assertion_wins_over_evidence_older_than_it() {
     let env = Env::new();
     env.put(
         card("old", "Acme", "2025-01-01T00:00:00Z"),
@@ -477,9 +477,13 @@ async fn the_users_assertion_wins_over_newer_evidence() {
         .find(|c| c.object == ClaimObject::Entity(globex.id.clone()))
         .unwrap();
     assert_eq!(g.status, ClaimStatus::Superseded);
-    // The assertion (with the 2025 card's evidence) is older than Globex's sighting: no end
-    // date can be given to Globex.
-    assert_eq!(g.valid_to, None);
+    // The assertion is dated when it was made (after Globex's 2026-02-01 card): Globex held
+    // until then at the latest. A source strictly newer than the assertion would win
+    // (GG5-13; `tests/user_edits.rs`).
+    assert!(
+        g.valid_to.is_some_and(|t| t >= at("2026-02-01T00:00:00Z")),
+        "{g:?}"
+    );
 }
 
 /// A graph as written before validity intervals: no `valid_from` anywhere, two active values of

@@ -22,6 +22,10 @@ pub mod code {
     pub const SYNCING: &str = "syncing";
     pub const NOT_SET_UP: &str = "not_set_up";
     pub const DISK_FULL: &str = "disk_full";
+    /// A finished scan found nothing this source can index.
+    pub const NOTHING_INDEXABLE: &str = "nothing_indexable";
+    /// A folder exists but Nugget is not allowed to open it.
+    pub const UNREADABLE: &str = "unreadable";
 }
 
 /// Describe a source's health.

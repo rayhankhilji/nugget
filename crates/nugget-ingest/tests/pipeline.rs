@@ -354,6 +354,46 @@ async fn connector_marked_sensitive_items_stay_local() {
     h.ingest.shutdown().await;
 }
 
+/// A problem a connector reports (an unreadable export) shows in the source's health, and
+/// reporting it again on the next pass counts once.
+#[tokio::test]
+async fn reported_problems_show_in_health_once() {
+    let h = start(Opts::default()).await;
+    let st = h.factory.state("fake-1");
+    for done in ["one", "two"] {
+        st.script(vec![
+            Step::Send(text_doc("a", "hello", Some("1"))),
+            Step::Problem("export:chat.txt".into(), "no readable messages".into()),
+            Step::Checkpoint(json!(done)),
+            Step::Return(json!(done)),
+        ]);
+    }
+    h.add("fake-1").await;
+    eventually("first pass", || h.cursor("fake-1") == Some(json!("one"))).await;
+    h.ingest.sync_now(Some(&SourceId::new("fake-1"))).unwrap();
+    eventually("second pass", || h.cursor("fake-1") == Some(json!("two"))).await;
+    let id = SourceId::new("fake-1");
+    let errors = h.ingest.errors(&id).unwrap();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!(
+        errors[0].key.as_ref().map(|k| k.as_str()),
+        Some("export:chat.txt")
+    );
+    let info = h.ingest.get(&id).await.unwrap();
+    let health = info.health.expect("health");
+    assert_eq!(health.code, "item_errors", "{health:?}");
+    assert_eq!(health.item_errors, 1);
+    assert!(
+        health
+            .last_item_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no readable messages"),
+        "{health:?}"
+    );
+    h.ingest.shutdown().await;
+}
+
 #[tokio::test]
 async fn cloud_embeddings_are_off_by_default() {
     let cloud = FakeProvider::new("cloud", Locality::Cloud);

@@ -60,7 +60,13 @@ when the first and last were sent, so search can filter by them.
 **People.** Participants with a phone number or e-mail address are passed to the
 [knowledge graph](knowledge.md)'s contacts extractor, which links them to the people it already knows
 from your mail and calendars. Someone you message on WhatsApp and e-mail at work becomes one person
-when the phone number or address matches.
+when the phone number or address matches. Someone known only by a number (a sender not in your
+contacts, or an iMessage handle with **Show names from Contacts** off) becomes a person named by that
+number, which later merges with the person once the number turns up with a name.
+
+WhatsApp exports carry names, not numbers, for people saved in your phone's contacts: those people
+are matched with the rest of your data by name only. Senders you have not saved appear in the export
+as their phone number (for example `+49 151 23456789`) and are matched by it.
 
 Editing or deleting is reflected too: when a chat changes (new messages, or a message deleted before
 the next export), that month's document is updated; when a chat disappears, its documents are removed.
@@ -228,6 +234,11 @@ history**.
 **A WhatsApp chat is not found** — check that the `.zip` or `.txt` is in the chosen folder or one
 level below it, not deeper, and that it is an **Export chat** file (its text file is named like
 `WhatsApp Chat with Alice.txt` or `_chat.txt`).
+
+**A WhatsApp export can't be read** — an export Nugget cannot read (for example an unrecognised date
+format or a damaged `.zip`) is shown as a problem on the source on **Sources**, instead of the source
+saying it is up to date. Export the chat again; if the problem stays, check that the file is an
+unchanged **Export chat** file.
 
 **My WhatsApp messages are not shown as "Me"** — set **Your name in WhatsApp** to exactly the name that
 appears next to your messages in the export's text file.

@@ -17,11 +17,15 @@ const ALL_KEYS: &[&str] = &[
     "wa:bob/2023-12",
     "wa:bob/2024-01",
     "wa:carol/2024-01",
+    "wa:chloé/2026-03",
     "wa:dave/2023-12",
     "wa:dave/2024-02",
     "wa:family/2023-12",
     "wa:family/2024-01",
     "wa:oma/2023-12",
+    "wa:omar/2026-03",
+    "wa:priya/2026-05",
+    "wa:priya/2026-06",
     "wa:yusuf/2023-12",
     "wa:zoé/2023-12",
     "wa:김민수/2023-12",
@@ -153,6 +157,32 @@ async fn every_locale_variant_is_imported() {
     );
     assert!(t.contains("> Merci\n> à toi aussi\n"), "{t}");
     assert!(!t.contains('\r'));
+
+    // Regression (JJ1-5): French `à`, Arabic comma, Eastern Arabic digits and bidi marks.
+    let t = text(&doc(&sink, "wa:chloé/2026-03")).to_owned();
+    assert!(
+        t.contains("**Chloé** · 2026-03-14 09:06\n> Salut, ça va ?"),
+        "{t}"
+    );
+    assert!(
+        t.contains("**Chloé** · 2026-03-14 09:08\n> [file]\n"),
+        "{t}"
+    );
+    let t = text(&doc(&sink, "wa:omar/2026-03")).to_owned();
+    assert!(t.contains("**Omar** · 2026-03-14 21:06\n> مرحبا"), "{t}");
+    assert!(t.contains("**Me** · 2026-03-14 21:07"), "{t}");
+    // Regression (JJ1-6): en_IN `pm` with every day ≤ 12 is day-first.
+    let t = text(&doc(&sink, "wa:priya/2026-05")).to_owned();
+    assert!(
+        t.contains("**Priya** · 2026-05-03 21:00\n> Dinner at 9 tomorrow?"),
+        "{t}"
+    );
+    assert!(
+        t.contains("**Priya** · 2026-05-04 08:16\n> [file]\n"),
+        "{t}"
+    );
+    assert!(text(&doc(&sink, "wa:priya/2026-06")).contains("**Priya** · 2026-06-11 09:30"));
+    assert!(sink.problems.lock().unwrap().is_empty());
 
     // A second pass is a no-op (stable versions).
     let again = env
@@ -398,4 +428,69 @@ fn validation() {
         (info.kind, info.display_name),
         ("whatsapp", "WhatsApp exports")
     );
+}
+
+/// Regression (JJ1-5): an export whose date lines cannot be read imported nothing and the
+/// source said "Up to date". Now the file is reported and the chat's documents are kept.
+#[tokio::test]
+async fn unreadable_export_is_reported_and_its_documents_kept() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("exports");
+    let path = write(
+        &folder,
+        "WhatsApp Chat with Kai.txt",
+        "14/03/2026, 09:06 - Kai: hi\n",
+    );
+    let env = Env::new();
+    let replica = Replica::new();
+    let sink = env
+        .pass(Kind::WhatsApp, &json!({ "folder": folder }), &replica)
+        .await;
+    assert!(sink.problems.lock().unwrap().is_empty());
+    assert_eq!(keys(&replica), set(&["wa:kai/2026-03"]));
+
+    // The re-export is in a format the parser does not know.
+    std::fs::write(&path, "2026年3月14日 9:06 - Kai: hi\n").unwrap();
+    let sink = env
+        .pass(Kind::WhatsApp, &json!({ "folder": folder }), &replica)
+        .await;
+    assert!(deletes(&sink).is_empty(), "{:?}", sink.summary());
+    assert_eq!(keys(&replica), set(&["wa:kai/2026-03"]));
+    let problems = sink.problems.lock().unwrap().clone();
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert_eq!(problems[0].0, "whatsapp:WhatsApp Chat with Kai.txt");
+    assert!(
+        problems[0]
+            .1
+            .starts_with("Couldn't read any messages in WhatsApp Chat with Kai.txt: its date format isn't recognised."),
+        "{problems:?}"
+    );
+}
+
+/// Regression (JJ1-6): an old export with only ambiguous dates next to a re-export with a
+/// day above 12 was dated two ways, so every shared message appeared twice.
+#[tokio::test]
+async fn reexport_with_unambiguous_day_dates_both_exports_alike() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("exports");
+    let old = "03/05/26, 9:00 PM - Priya: dinner at 9?\n04/05/26, 8:15 AM - Priya: late\n";
+    write(&folder, "WhatsApp Chat with Priya.txt", old);
+    write(
+        &folder,
+        "WhatsApp Chat with Priya (1).txt",
+        &format!("{old}25/06/26, 7:00 PM - Priya: home\n"),
+    );
+    let env = Env::new();
+    let replica = Replica::new();
+    let sink = env
+        .pass(Kind::WhatsApp, &json!({ "folder": folder }), &replica)
+        .await;
+    assert_eq!(
+        keys(&replica),
+        set(&["wa:priya/2026-05", "wa:priya/2026-06"])
+    );
+    let may = doc(&sink, "wa:priya/2026-05");
+    assert_eq!(may.metadata["message_count"], 2);
+    assert_eq!(text(&may).matches("dinner at 9?").count(), 1);
+    assert!(text(&may).contains("**Priya** · 2026-05-03 21:00"));
 }

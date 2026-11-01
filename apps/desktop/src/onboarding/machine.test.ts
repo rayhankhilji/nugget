@@ -82,7 +82,7 @@ describe("onboarding state machine", () => {
   });
 
   it("Continue marks a step done only when it set something up, else skips it", () => {
-    let s = run({ type: "continue" }, { type: "chooseAi", ai: "later" }, { type: "continue" });
+    let s = run({ type: "continue" }, { type: "continue" });
     expect(s.step).toBe("source");
     expect(s.skipped).toEqual(["ai"]);
     s = reduce(s, { type: "continue" });
@@ -94,9 +94,33 @@ describe("onboarding state machine", () => {
     // A setup on another path doesn't count for the current choice.
     expect(stepGoalMet({ ...s, ai: "byok" }, "ai")).toBe(false);
     s = reduce(s, { type: "sourcesFound", names: ["Notes"] });
+    // GG6-2: a source with nothing indexed yet doesn't finish the step.
+    expect(stepGoalMet(s, "source")).toBe(false);
+    s = reduce(s, { type: "sourcesIndexed" });
     s = reduce(s, { type: "continue" });
     expect(s.completed).toEqual(["welcome", "ai", "source"]);
     expect(s.sources).toEqual(["Notes"]);
+    expect(s.indexed).toBe(true);
+  });
+
+  it("GG6-21: Decide later is a decision, not a skipped step", () => {
+    const s = run({ type: "next" }, { type: "chooseAi", ai: "later" }, { type: "continue" });
+    expect(s.step).toBe("source");
+    expect(s.skipped).toEqual([]);
+    expect(s.completed).toEqual(["welcome", "ai"]);
+    expect(pendingSteps(s)).not.toContain("ai");
+  });
+
+  it("GG6-2: Continue with a source that indexed nothing counts as continuing without one", () => {
+    let s = run({ type: "next" }, { type: "chooseAi", ai: "later" }, { type: "next" }, { type: "sourcesFound", names: ["Empty"] });
+    s = reduce(s, { type: "continue" });
+    expect(s.skipped).toEqual(["source"]);
+    expect(pendingSteps(s)).toContain("source");
+  });
+
+  it("remembers that a source indexed something across a save", () => {
+    const s = reduce({ ...INITIAL, sources: ["Notes"] }, { type: "sourcesIndexed" });
+    expect(parseState(JSON.stringify(s))).toEqual(s);
   });
 
   it("counts steps completed in progress saved before setups were recorded", () => {
@@ -105,7 +129,7 @@ describe("onboarding state machine", () => {
     expect(stepGoalMet(old, "source")).toBe(true);
     // Once this run records a setup, that record decides.
     expect(stepGoalMet({ ...old, aiSetup: { ai: "byok", what: "anthropic" } }, "ai")).toBe(false);
-    expect(stepGoalMet({ ...old, ai: "later" }, "ai")).toBe(false);
+    expect(stepGoalMet({ ...old, ai: null }, "ai")).toBe(false);
   });
 
   it("restart keeps the AI choice", () => {

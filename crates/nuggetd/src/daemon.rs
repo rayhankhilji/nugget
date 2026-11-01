@@ -5,10 +5,11 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use nugget_connector::{Registry, SecretStore};
+use nugget_core::capability::Locality;
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::ProviderId;
 use nugget_core::paths::Paths;
@@ -36,6 +37,9 @@ use crate::sources;
 
 /// How long shutdown waits for chat streams and installs to stop.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+/// How long shutdown waits for an interrupted knowledge run, before and after stopping the
+/// local models.
+const KNOWLEDGE_GRACE: Duration = Duration::from_secs(3);
 
 /// How to start a daemon.
 #[derive(Clone)]
@@ -126,9 +130,10 @@ pub(crate) struct State {
     /// Broadcast notifications to every connection.
     pub hub: Arc<Hub>,
     /// Every configured provider, in config order (including ones that failed to build).
-    pub configs: Vec<ProviderConfig>,
+    /// Changed while running by [`State::set_provider`] / [`State::remove_provider`].
+    pub configs: RwLock<Vec<ProviderConfig>>,
     /// Providers that could not be built, with the reason. They are not in the router.
-    pub unavailable: HashMap<ProviderId, String>,
+    pub unavailable: RwLock<HashMap<ProviderId, String>>,
     /// Result of verifying the audit hash chain; unset until the startup check finishes.
     pub audit_chain_ok: Arc<OnceLock<bool>>,
     pub probes: Arc<Mutex<ProbeCache>>,
@@ -149,11 +154,92 @@ pub(crate) struct State {
 
 impl State {
     /// Config of a provider that was built (and so is in the router).
-    pub fn config_of(&self, id: &ProviderId) -> Option<&ProviderConfig> {
-        if self.unavailable.contains_key(id) {
+    pub fn config_of(&self, id: &ProviderId) -> Option<ProviderConfig> {
+        if self.unavailable_reason(id).is_some() {
             return None;
         }
-        self.configs.iter().find(|c| &c.id == id)
+        self.provider_configs().into_iter().find(|c| &c.id == id)
+    }
+
+    /// Every configured provider, in config order (a snapshot).
+    pub fn provider_configs(&self) -> Vec<ProviderConfig> {
+        self.configs
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Why a configured provider could not be built, if it could not.
+    pub fn unavailable_reason(&self, id: &ProviderId) -> Option<String> {
+        self.unavailable
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned()
+    }
+
+    /// Route `cfg` from now on without a restart: added after the other providers, or replacing
+    /// the one with its id (for example with a new key). `built` is the provider built from it,
+    /// or why it could not be built (it is then listed as unavailable and not routed).
+    pub fn set_provider(
+        &self,
+        cfg: ProviderConfig,
+        built: std::result::Result<Arc<dyn Provider>, String>,
+    ) {
+        let id = cfg.id.clone();
+        {
+            let mut unavailable = self
+                .unavailable
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            match built {
+                Ok(p) => {
+                    unavailable.remove(&id);
+                    // Placed as at startup (`local::tier_map`): on-device and LAN servers
+                    // before the runtime's slots (an unprobed on-device one right after them),
+                    // cloud providers last.
+                    let rank = |loc: Locality, probed: bool| match loc {
+                        Locality::Cloud => 3,
+                        Locality::OnDevice if !probed => 2,
+                        _ => 0,
+                    };
+                    let mine = rank(p.meta().locality, false);
+                    let before = |other: &ProviderId| {
+                        let theirs = if self.slot(other).is_some() {
+                            1
+                        } else {
+                            self.router.provider(other).map_or(3, |o| {
+                                rank(o.meta().locality, self.router.capabilities(other).is_some())
+                            })
+                        };
+                        theirs > mine
+                    };
+                    self.router.set_provider_before(p, &cfg.tiers, &before);
+                }
+                Err(reason) => {
+                    self.router.remove_provider(&id);
+                    unavailable.insert(id.clone(), reason);
+                }
+            }
+        }
+        let mut configs = self.configs.write().unwrap_or_else(PoisonError::into_inner);
+        match configs.iter_mut().find(|c| c.id == id) {
+            Some(c) => *c = cfg,
+            None => configs.push(cfg),
+        }
+    }
+
+    /// Stop routing to provider `id` and forget its config. Returns whether it was configured.
+    pub fn remove_provider(&self, id: &ProviderId) -> bool {
+        self.router.remove_provider(id);
+        self.unavailable
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+        let mut configs = self.configs.write().unwrap_or_else(PoisonError::into_inner);
+        let before = configs.len();
+        configs.retain(|c| &c.id != id);
+        configs.len() != before
     }
 
     pub fn streams(&self) -> MutexGuard<'_, HashMap<String, CancellationToken>> {
@@ -179,6 +265,7 @@ pub(crate) fn spawn_refresh(state: &Arc<State>, slot: Arc<RuntimeSlot>) {
 
 fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
     let stop = state.shutdown.clone();
+    let knowledge = state.knowledge.clone();
     // Route chat to the slot while its model loads (the request waits for the server).
     slot.starting();
     state.tasks.spawn(async move {
@@ -193,7 +280,11 @@ fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
         tokio::select! {
             () = stop.cancelled() => {}
             r = start => match r {
-                Ok(_) => tracing::info!(provider = %slot.id(), %model, "local runtime ready"),
+                Ok(_) => {
+                    tracing::info!(provider = %slot.id(), %model, "local runtime ready");
+                    // Items waiting for a model are retried now, not at the periodic run.
+                    knowledge.wake();
+                }
                 Err(e) => {
                     slot.start_failed();
                     tracing::warn!(provider = %slot.id(), %model, error = %e, "local runtime did not start");
@@ -568,8 +659,8 @@ impl Daemon {
             mcp,
             secrets,
             hub,
-            configs,
-            unavailable,
+            configs: RwLock::new(configs),
+            unavailable: RwLock::new(unavailable),
             audit_chain_ok,
             probes: Arc::new(Mutex::new(probes)),
             manifest,
@@ -585,9 +676,8 @@ impl Daemon {
 
         // Forward ingest events to every client; start installed local models (not awaited).
         crate::hub::spawn_forwarder(state.hub.clone(), &state.ingest, state.shutdown.clone());
-        state
-            .knowledge
-            .spawn(&state.ingest, &state.tasks, state.shutdown.clone());
+        // Local models first: a starting chat model is routable at once (requests wait for
+        // it), so knowledge's startup run extracts with it instead of without it.
         if let Some(l) = &state.local {
             for slot in &l.slots {
                 if slot.is_installed() {
@@ -595,6 +685,9 @@ impl Daemon {
                 }
             }
         }
+        state
+            .knowledge
+            .spawn(&state.ingest, &state.tasks, state.shutdown.clone());
 
         let features = crate::features::build(&crate::features::FeatureContext {
             state: &state,
@@ -682,9 +775,14 @@ impl Daemon {
             m.shutdown().await;
         }
         state.ingest.shutdown().await;
+        // Knowledge runs were interrupted at `wind_down`; one may still wait on a model request.
+        // Give it a moment to end before the runtime stops (a request cut off then leaves its
+        // item as it was).
+        let _ = tokio::time::timeout(KNOWLEDGE_GRACE, state.knowledge.knowledge.idle()).await;
         if let Some(l) = &state.local {
             l.runtime.shutdown().await;
         }
+        let _ = tokio::time::timeout(KNOWLEDGE_GRACE, state.knowledge.knowledge.idle()).await;
         let store = state.store.clone();
         let _ = blocking(move || {
             store.flush_egress();

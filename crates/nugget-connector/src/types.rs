@@ -73,6 +73,19 @@ pub trait ChangeSink: Send + Sync {
     async fn send(&self, change: Change) -> Result<()>;
     /// Commit `cursor` once every change sent before this call has been durably applied.
     async fn checkpoint(&self, cursor: Value) -> Result<()>;
+    /// Report something under `key` the pass could not read (e.g. an export file with no
+    /// readable message), so the source's health names it instead of saying "Up to date".
+    /// `key` need not be an item key (a file name works); repeated reports of the same problem
+    /// count once. Default: ignored.
+    async fn report_problem(&self, key: ItemKey, message: String) -> Result<()> {
+        let _ = (key, message);
+        Ok(())
+    }
+
+    /// Report what a scan pass found and skipped (latest wins). Default: ignored.
+    async fn report_scan(&self, report: nugget_core::ipc::ScanReport) {
+        let _ = report;
+    }
 }
 
 /// What the store already holds for this source: item key → connector version.

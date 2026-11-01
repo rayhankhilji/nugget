@@ -1,0 +1,12 @@
+From: Pixelboard <billing@pixelboard.example>
+To: Sam Okafor <sam.okafor@example.net>
+Date: Mon, 26 Oct 2026 10:42:00 +0100
+Subject: Your receipt
+Message-ID: <en-renew.eml@t.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Payment received: $12.99.
+
+Your subscription renews on November 3, 2026.

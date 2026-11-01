@@ -231,7 +231,9 @@ function NameField({ value, onChange, placeholder }: { value: string; onChange: 
   );
 }
 
-const isAbsolutePath = (p: string) => p.startsWith("/") || p.startsWith("~") || /^[A-Za-z]:[\\/]/.test(p);
+// `~` and `~/…` are the home folder (the daemon expands them, GG6-22); `~name` is not supported.
+const isAbsolutePath = (p: string) =>
+  p.startsWith("/") || p === "~" || p.startsWith("~/") || p.startsWith("~\\") || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("\\\\");
 
 /** Native folder picker, with a typed path as the fallback. */
 async function pickFolders(multiple: boolean): Promise<{ paths: string[]; error: string | null }> {

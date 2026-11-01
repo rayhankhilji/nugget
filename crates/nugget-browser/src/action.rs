@@ -4,10 +4,12 @@
 //! The extension validates again in the page (`extensions/browser/src/actions.ts`); validating
 //! here as well means a bad action is refused before the policy gate or the user is asked about it.
 
+use nugget_policy::preview::{FieldValue, fields_preview, freeze_digest};
 use nugget_policy::{ActionDescriptor, RiskClass};
 use serde::{Deserialize, Serialize};
 
-use crate::snapshot::{ElementInfo, PageSnapshot, Sensitive, SnapshotDiff, host_of};
+use crate::protocol::{Expectations, FormExpectation};
+use crate::snapshot::{ElementInfo, PageSnapshot, ScopeInfo, Sensitive, SnapshotDiff, host_of};
 
 /// Longest text a single `type` action may enter (matches the extension).
 pub const MAX_TYPE_CHARS: usize = 10_000;
@@ -290,7 +292,10 @@ impl BrowserAction {
         let text_preview = match self {
             Self::Type { text, .. } => Some(preview(text)),
             Self::Select { value, .. } => Some(preview(value)),
-            _ => None,
+            // A submit, or a click on a form's submit button, shows what the form sends.
+            _ => self
+                .sent_fields(snapshot)
+                .and_then(|fields| fields_preview(&fields)),
         };
         ActionDescriptor {
             target_app,
@@ -300,6 +305,182 @@ impl BrowserAction {
             declared_risk: self.classify(snapshot),
             task_id: task_id.to_owned(),
         }
+    }
+}
+
+impl BrowserAction {
+    /// The form this action submits, if it does: a `submit`, or a click on a button that
+    /// submits its form.
+    pub fn submitted_form<'a>(&self, snapshot: Option<&'a PageSnapshot>) -> Option<&'a str> {
+        let snap = snapshot?;
+        match self {
+            Self::Submit { element } => snap.element(element)?.form.as_deref(),
+            Self::Click { element } => {
+                let e = snap.element(element)?;
+                (matches!(e.role.as_str(), "button" | "menuitem") && submits(e))
+                    .then_some(e.form.as_deref())
+                    .flatten()
+            }
+            _ => None,
+        }
+    }
+
+    /// The fields (with their full values) the form this action submits sends, in page order;
+    /// `None` when the action submits nothing.
+    pub fn sent_fields(&self, snapshot: Option<&PageSnapshot>) -> Option<Vec<FieldValue>> {
+        let form = self.submitted_form(snapshot)?;
+        Some(form_fields(snapshot?, form))
+    }
+}
+
+/// Whether activating `e` submits its form.
+pub(crate) fn submits(e: &ElementInfo) -> bool {
+    e.form.is_some()
+        && (e.tag == "button" && e.input_type.is_none()
+            || matches!(e.input_type.as_deref(), Some("submit" | "image")))
+}
+
+/// Every value-carrying control of `form` in the snapshot, in page order: text inputs, text
+/// areas, selects, check boxes, radio buttons, file inputs and editable regions. Controls that
+/// are not visible are kept, marked hidden (digested, never previewed). Password, payment and
+/// secret-labelled fields are marked secret (their values are never shown). No cap: the preview
+/// bounds itself, and the digest must cover everything. (Hidden `<input type=hidden>` controls
+/// and values longer than the snapshot keeps are covered by the extension's own form digest,
+/// [`crate::snapshot::FormInfo::digest`].)
+pub fn form_fields(snapshot: &PageSnapshot, form: &str) -> Vec<FieldValue> {
+    value_fields(snapshot.form_elements(form))
+}
+
+/// Is `e` a control that carries a value (not a button)?
+fn carries_value(e: &ElementInfo) -> bool {
+    match e.tag.as_str() {
+        "input" => !matches!(
+            e.input_type.as_deref(),
+            Some("submit" | "button" | "image" | "reset")
+        ),
+        "textarea" | "select" => true,
+        _ => e.editable || e.role == "textbox",
+    }
+}
+
+/// The value-carrying controls among `elements`, as [`FieldValue`]s (see [`form_fields`]).
+fn value_fields<'a>(elements: impl Iterator<Item = &'a ElementInfo>) -> Vec<FieldValue> {
+    elements
+        .filter(|e| carries_value(e))
+        .map(|e| {
+            let label = if e.name.trim().is_empty() {
+                e.input_type.clone().unwrap_or_else(|| e.tag.clone())
+            } else {
+                e.name.clone()
+            };
+            let secret = e.sensitive.is_some()
+                || e.input_type.as_deref() == Some("password")
+                || nugget_policy::redact::is_secure_label(&e.name);
+            let value = if e.sensitive.is_some() {
+                None
+            } else if let Some(c) = e.checked {
+                Some(if c { "checked" } else { "not checked" }.to_string())
+            } else if let Some(opts) = &e.options {
+                opts.iter().find(|o| o.selected).map(|o| o.label.clone())
+            } else {
+                e.value.clone()
+            };
+            let f = FieldValue::new(label, value, secret);
+            if e.visible { f } else { f.hidden() }
+        })
+        .collect()
+}
+
+/// The send scope of element `id` for an activation that submits no form: of the scopes around
+/// it (dialogs, forms, regions), the innermost one that holds a value-carrying control, else
+/// the innermost one.
+fn send_scope<'a>(snap: &'a PageSnapshot, id: &str) -> Option<&'a ScopeInfo> {
+    let mut around: Vec<&ScopeInfo> = snap
+        .scopes
+        .iter()
+        .filter(|s| s.members.iter().any(|m| m == id))
+        .collect();
+    around.sort_by_key(|s| s.members.len());
+    let has_fields = |s: &&ScopeInfo| {
+        s.members
+            .iter()
+            .filter_map(|m| snap.element(m))
+            .any(carries_value)
+    };
+    around
+        .iter()
+        .find(|s| has_fields(s))
+        .or(around.first())
+        .copied()
+}
+
+/// What a confirmation of a click or submit binds (see [`BrowserAction::freeze_view`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FreezeView {
+    /// The control (verb, role, name, link target) and, for a submit, the form's action,
+    /// method and the extension's digest of it.
+    pub control: Vec<String>,
+    /// The form's fields (empty when nothing is submitted).
+    pub fields: Vec<FieldValue>,
+    /// What the extension must still see right before dispatching, when it gave a digest.
+    pub expect: Expectations,
+}
+
+impl FreezeView {
+    pub fn digest(&self) -> String {
+        let control: Vec<&str> = self.control.iter().map(String::as_str).collect();
+        freeze_digest(&control, &self.fields)
+    }
+}
+
+impl BrowserAction {
+    /// The [`FreezeView`] of a click or submit in `snapshot`; `None` for other actions or when
+    /// the element is not there.
+    pub fn freeze_view(&self, snapshot: Option<&PageSnapshot>) -> Option<FreezeView> {
+        let snap = snapshot?;
+        let id = match self {
+            Self::Click { element } | Self::Submit { element } => element,
+            _ => return None,
+        };
+        let e = snap.element(id)?;
+        let mut control = vec![
+            self.verb().to_string(),
+            e.role.clone(),
+            e.name.clone(),
+            e.href.clone().unwrap_or_default(),
+        ];
+        let mut fields = Vec::new();
+        let mut expect = Expectations::default();
+        if let Some(form) = self.submitted_form(Some(snap)) {
+            fields = form_fields(snap, form);
+            let info = snap.form(form);
+            control.push(form.to_string());
+            control.push(info.map(|f| f.action.clone()).unwrap_or_default());
+            control.push(info.map(|f| f.method.clone()).unwrap_or_default());
+            let digest = info.and_then(|f| f.digest.clone());
+            control.push(digest.clone().unwrap_or_default());
+            expect.form = digest.map(|digest| FormExpectation {
+                form: form.to_string(),
+                digest,
+            });
+        } else if let Some(scope) = send_scope(snap, id) {
+            // A send that is no native submit (a role=button Send in a compose dialog whose body
+            // is contenteditable, a type=button in a form): the dialog or region's fields. The
+            // values here are the snapshot's (capped); the extension's digest covers the rest.
+            fields = value_fields(scope.members.iter().filter_map(|m| snap.element(m)));
+            control.push("scope".into());
+            control.push(scope.id.clone());
+            control.push(scope.digest.clone().unwrap_or_default());
+            expect.scope = scope.digest.clone().map(|digest| FormExpectation {
+                form: scope.id.clone(),
+                digest,
+            });
+        }
+        Some(FreezeView {
+            control,
+            fields,
+            expect,
+        })
     }
 }
 
@@ -369,10 +550,7 @@ fn click_risk(snapshot: Option<&PageSnapshot>, e: &ElementInfo) -> RiskClass {
     match e.role.as_str() {
         "link" => keyword_risk(&e.name).unwrap_or(RiskClass::Observe),
         "button" | "menuitem" => {
-            let submits = e.form.is_some()
-                && (e.tag == "button" && e.input_type.is_none()
-                    || matches!(e.input_type.as_deref(), Some("submit" | "image")));
-            let base = if submits {
+            let base = if submits(e) {
                 form_risk(snapshot, e.form.as_deref()).max(RiskClass::Send)
             } else {
                 RiskClass::Edit

@@ -137,10 +137,10 @@ pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) 
         state.item_cursor = None;
         state.version = EXTRACTOR_VERSION;
     }
-    if let Some(cursor) = state.item_cursor
+    let mut p = if let Some(cursor) = state.item_cursor
         && let Some((changes, next)) = feed.items_changed_since(cursor, 0)?
     {
-        return plan_incremental(
+        plan_incremental(
             feed,
             state,
             notes,
@@ -148,9 +148,52 @@ pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) 
             next,
             llm_ready,
             max_llm_attempts,
-        );
+        )?
+    } else {
+        plan_full(feed, state, notes, reset, llm_ready, max_llm_attempts)?
+    };
+    plan_deferred(feed, &mut p)?;
+    Ok(p)
+}
+
+/// Add the items left deferred ([`State::deferred`]) that the plan does not cover already.
+/// Their ledger entry still describes the version whose (model) facts are in the graph, so
+/// [`Session::process_upsert`] sees them as changed.
+fn plan_deferred(feed: &dyn ItemFeed, p: &mut Plan) -> Result<()> {
+    if p.state.deferred.is_empty() {
+        return Ok(());
     }
-    plan_full(feed, state, notes, reset, llm_ready, max_llm_attempts)
+    let mut planned: HashSet<ItemRef> = p.deletes.iter().cloned().collect();
+    planned.extend(p.upserts.iter().map(|w| w.item.clone()));
+    for item in p
+        .state
+        .deferred
+        .iter()
+        .map(|d| d.item.clone())
+        .collect::<Vec<_>>()
+    {
+        if planned.contains(&item) {
+            continue;
+        }
+        if !p.ledgers.contains_key(&item.source) {
+            let l = SourceLedger::load(feed, &item.source)?;
+            p.ledgers.insert(item.source.clone(), l);
+        }
+        let prev = p.ledgers[&item.source].get(&item.key).cloned();
+        let Some(prev) = prev else {
+            // Forgotten meanwhile (reset, deletion): nothing to protect any more.
+            p.state.deferred.retain(|d| d.item != item);
+            continue;
+        };
+        planned.insert(item.clone());
+        p.upserts.push(Work {
+            item,
+            version: prev.version.clone(),
+            prev: Some(prev),
+            llm_retry: false,
+        });
+    }
+    Ok(())
 }
 
 fn plan_full(
@@ -376,6 +419,10 @@ struct ValueGroup {
     claims: Vec<Claim>,
     /// The user rejected this value.
     rejected: bool,
+    /// The user replaced this value in the vault and its sources still say the same
+    /// ([`GraphStore::replaced_by_user`](nugget_graph::GraphStore::replaced_by_user)): it stays
+    /// history and never becomes current again.
+    replaced: bool,
     /// Some claim is active or superseded with evidence, or user-asserted.
     live: bool,
     /// The newest user assertion (its newest evidence, else when it was asserted).
@@ -399,6 +446,7 @@ impl ValueGroup {
             names,
             claims: Vec::new(),
             rejected: false,
+            replaced: false,
             live: false,
             user: None,
             affirmed: None,
@@ -420,7 +468,8 @@ impl ValueGroup {
         c
     }
 
-    fn add(&mut self, c: &Claim, dates: &Dates) {
+    /// Add a claim; `asserted`: when the user asserted it, if the store keeps that.
+    fn add(&mut self, c: &Claim, dates: &Dates, asserted: Option<OffsetDateTime>) {
         self.claims.push(c.clone());
         match c.status {
             ClaimStatus::Rejected => {
@@ -462,7 +511,7 @@ impl ValueGroup {
             }
         }
         if c.status == ClaimStatus::UserAsserted {
-            let t = newest.unwrap_or(c.created_at);
+            let t = asserted.or(newest).unwrap_or(c.created_at);
             self.user = self.user.max(Some(t));
             self.sightings.push(t);
         }
@@ -862,6 +911,7 @@ impl<'a> Session<'a> {
         self.stats.claims_retracted += r.reuse.len() as u64;
         self.restore_superseded()?;
         self.ledger(&item.source).remove(&item.key);
+        self.undefer(item);
         self.since_flush += 1;
         self.stats.items_deleted += 1;
         Ok(())
@@ -931,6 +981,7 @@ impl<'a> Session<'a> {
             if w.version != p.version {
                 self.ledger(&w.item.source).set(&w.item.key, entry);
             }
+            self.undefer(&w.item);
             self.stats.items_unchanged += 1;
             return Ok(false);
         }
@@ -941,8 +992,17 @@ impl<'a> Session<'a> {
             .as_ref()
             .filter(|p| p.fingerprint == fp)
             .map_or(LLM_NONE, |p| p.llm);
-        match self.extract_and_apply(&item, prev_llm).await {
-            Ok(llm) => {
+        // The graph holds the model's facts of an earlier version of this item.
+        let had_model = w.prev.as_ref().is_some_and(|p| p.llm == LLM_DONE);
+        match self.extract_and_apply(&item, prev_llm, had_model).await {
+            Ok(None) => {
+                // Keep the earlier facts; the ledger keeps describing the version they are
+                // from, and the next plans pick the item up again.
+                self.stats.items_deferred += 1;
+                return Ok(false);
+            }
+            Ok(Some(llm)) => {
+                self.undefer(&w.item);
                 self.stats.items_processed += 1;
                 self.record(
                     &w.item,
@@ -972,11 +1032,61 @@ impl<'a> Session<'a> {
         Ok(true)
     }
 
-    /// Retract the item's old evidence, extract again, apply. Returns the LLM status.
-    async fn extract_and_apply(&mut self, item: &Item, prev_llm: u32) -> Result<u32> {
+    fn undefer(&mut self, item: &ItemRef) {
+        self.state.deferred.retain(|d| d.item != *item);
+    }
+
+    /// Keep `item` deferred. `failed`: the model step ran for it and did not finish, which
+    /// counts as an attempt; returns `false` (and forgets the item) once attempts are used up,
+    /// so it is extracted without the model rather than waiting forever.
+    fn defer(&mut self, item: &ItemRef, failed: bool) -> bool {
+        let max = self.inner.cfg.llm.max_attempts.max(1);
+        let pos = match self.state.deferred.iter().position(|d| d.item == *item) {
+            Some(i) => i,
+            None => {
+                self.state.deferred.push(crate::state::Deferred {
+                    item: item.clone(),
+                    attempts: 0,
+                });
+                self.state.deferred.len() - 1
+            }
+        };
+        if failed {
+            self.state.deferred[pos].attempts += 1;
+            if self.state.deferred[pos].attempts >= max {
+                self.state.deferred.remove(pos);
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Whether the model is wanted for `item` but cannot run for it now: this run's request
+    /// budget is spent (or zero: power constrained), or the pipeline is stopping.
+    fn llm_blocked(&self, item: &Item) -> bool {
+        let junk = item.metadata.get("junk") == Some(&Value::Bool(true));
+        self.inner.cfg.llm.enabled
+            && self.inner.router.is_some()
+            && !junk
+            && (self.llm_left == 0 || self.inner.stopping())
+    }
+
+    /// Retract the item's old evidence, extract again, apply. Returns the LLM status, or
+    /// `None` when the item was left as it is: `had_model` (the graph holds the model's facts
+    /// of an earlier version) and the model could not run for it now, so re-extracting would
+    /// replace those facts with the deterministic extractors' alone.
+    async fn extract_and_apply(
+        &mut self,
+        item: &Item,
+        prev_llm: u32,
+        had_model: bool,
+    ) -> Result<Option<u32>> {
+        if had_model && self.llm_blocked(item) {
+            self.defer(&item.item, false);
+            return Ok(None);
+        }
         let date = self.clamp(crate::extract::item_date(item));
         self.dates.insert(item.item.clone(), Some(date));
-        let retracted = self.retract(&item.item)?;
         let chunks = self
             .feed()
             .chunks(&item.item, self.inner.cfg.max_chunks_per_item.max(1))?;
@@ -998,7 +1108,22 @@ impl<'a> Session<'a> {
             let name = ex.me_name.take();
             self.learn_me(&emails, name.as_deref())?;
         }
+        let failed_before = self.stats.llm_failed_requests;
         let llm = self.llm_step(item, &chunks, &mut ex, prev_llm).await;
+        let failed = self.stats.llm_failed_requests > failed_before;
+        if had_model && self.inner.stopping() && (llm >= LLM_PENDING || failed) {
+            // A request was cut off by shutdown (the runtime stops with the daemon): even a
+            // partial answer would replace the full one. Not counted as an attempt.
+            self.defer(&item.item, false);
+            return Ok(None);
+        }
+        if had_model && llm >= LLM_PENDING && self.defer(&item.item, true) {
+            // No provider, failed requests, or the budget ran out within the item: keep the
+            // earlier model facts for now (bounded by `max_attempts`).
+            return Ok(None);
+        }
+        // Retracted only now, once the model step is known to have run (or not to be wanted).
+        let retracted = self.retract(&item.item)?;
         let mut reuse = retracted.reuse;
         if let Err(e) = self.apply(ex, item, date, &mut reuse).await {
             self.discard();
@@ -1007,7 +1132,7 @@ impl<'a> Session<'a> {
         // Also settles the single-valued pairs this item touched or lost evidence of.
         self.commit()?;
         self.stats.claims_retracted += reuse.len() as u64;
-        Ok(llm)
+        Ok(Some(llm))
     }
 
     async fn llm_step(
@@ -1032,8 +1157,8 @@ impl<'a> Session<'a> {
                 &crate::llm::json_caps(),
             )
             .is_empty();
-        if any && crate::llm::triage_pending(item) {
-            // Sensitive until triage says otherwise: ask again on a later run.
+        if any && crate::llm::unsorted(item) {
+            // Sensitive until triage sorts it: ask again on a later run.
             return LLM_PENDING + attempts;
         }
         let providers = crate::llm::allowed_providers(&router, cfg, item);
@@ -1580,8 +1705,17 @@ impl<'a> Session<'a> {
                 let names = self.object_names(&c.object)?;
                 groups.insert(key.clone(), ValueGroup::new(names));
             }
+            let asserted = if c.status == ClaimStatus::UserAsserted {
+                self.graph().asserted_at(c.id)?
+            } else {
+                None
+            };
+            let replaced = matches!(c.status, ClaimStatus::Superseded | ClaimStatus::Active)
+                && !c.evidence.is_empty()
+                && self.graph().replaced_by_user(c.id, &c.evidence)?;
             if let Some(g) = groups.get_mut(&key) {
-                g.add(c, &dates);
+                g.add(c, &dates, asserted);
+                g.replaced |= replaced;
             }
         }
         let winner = self.winner(&mut groups, &dates)?;
@@ -1590,10 +1724,13 @@ impl<'a> Session<'a> {
         let mut current: Vec<Claim> = Vec::with_capacity(claims.len());
         for (key, g) in &groups {
             let win = winner.as_ref() == Some(key);
-            if g.rejected || (g.live && !win) {
+            if g.rejected || g.replaced || (g.live && !win) {
                 for c in &g.claims {
                     let mut c = c.clone();
-                    if c.status == ClaimStatus::Active {
+                    // A user's value too, once a strictly newer source holds another (GG5-13).
+                    if c.status == ClaimStatus::Active
+                        || (c.status == ClaimStatus::UserAsserted && winner.is_some())
+                    {
                         self.graph()
                             .set_claim_status(c.id, ClaimStatus::Superseded)?;
                         self.stats.claims_superseded += 1;
@@ -1689,16 +1826,27 @@ impl<'a> Session<'a> {
         groups: &mut BTreeMap<String, ValueGroup>,
         dates: &Dates,
     ) -> Result<Option<String>> {
-        let cands: Vec<(&String, &ValueGroup)> = groups
+        let mut cands: Vec<(&String, &ValueGroup)> = groups
             .iter()
-            .filter(|(_, g)| g.live && !g.rejected && !g.ended())
+            .filter(|(_, g)| g.live && !g.rejected && !g.replaced && !g.ended())
             .collect();
-        if cands.iter().any(|(_, g)| g.user.is_some()) {
-            return Ok(cands
+        // The user's value is current until a source strictly newer than the assertion holds
+        // another value (GG5-13); then only such newer values compete.
+        if let Some((uk, ut)) = cands
+            .iter()
+            .filter(|(_, g)| g.user.is_some())
+            .max_by(|a, b| (a.1.user, &a.1.name, a.0).cmp(&(b.1.user, &b.1.name, b.0)))
+            .map(|(k, g)| ((*k).clone(), g.user))
+        {
+            let newer: Vec<(&String, &ValueGroup)> = cands
                 .iter()
-                .filter(|(_, g)| g.user.is_some())
-                .max_by(|a, b| (a.1.user, &a.1.name, a.0).cmp(&(b.1.user, &b.1.name, b.0)))
-                .map(|(k, _)| (*k).clone()));
+                .filter(|(k, g)| **k != uk && g.user.is_none() && g.affirmed > ut)
+                .copied()
+                .collect();
+            if newer.is_empty() {
+                return Ok(Some(uk));
+            }
+            cands = newer;
         }
         let Some(best) = cands.iter().map(|(_, g)| (g.affirmed, g.started())).max() else {
             return Ok(None);
@@ -2317,7 +2465,7 @@ mod temporal_tests {
         }
         let summary = |ev: Vec<Evidence>| {
             let mut g = ValueGroup::new(vec!["Acme".into()]);
-            g.add(&claim(ev), &dates);
+            g.add(&claim(ev), &dates, None);
             let mut s = g.sightings.clone();
             s.sort();
             (g.affirmed, g.ended, g.ended(), s)

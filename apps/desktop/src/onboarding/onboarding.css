@@ -517,3 +517,15 @@
 .ob-manual > summary {
   margin-block-end: 0.5rem;
 }
+
+/* KK2: what a folder scan skipped, under its row (setup step and Sources page). */
+.ob-skipped {
+  margin-block-start: 0.4rem;
+}
+.ob-skipped p,
+.ob-skipped ul {
+  margin: 0.15rem 0;
+}
+.ob-skipped ul {
+  padding-inline-start: 1.2rem;
+}

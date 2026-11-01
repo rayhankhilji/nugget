@@ -202,32 +202,19 @@ pub fn cloud_allowed(cfg: &LlmConfig, item: &Item) -> bool {
             .any(|s| s == item.item.source.as_str())
 }
 
-/// `metadata.triage.state` of an item, if ingest recorded one.
-fn triage_state(item: &Item) -> Option<&str> {
-    item.metadata
-        .get("triage")
-        .and_then(|t| t.get("state"))
-        .and_then(Value::as_str)
-}
-
-/// Whether the item is flagged sensitive by a rule, the PII scan or a triage verdict
-/// (`metadata.sensitive == true` and its triage state is not `pending` or `unknown`). No model
-/// extracts from it, local ones included; the deterministic extractors still run (QA GG5-1).
-///
-/// Ingest also writes `sensitive: true` for items whose sensitivity is not known yet (GG5-2:
-/// unknown counts as sensitive). Those are not this: an item whose triage is still
-/// [`triage_pending`] waits for the verdict; one triage cannot decide (`unknown`: triage off,
-/// no text) goes to local models only ([`is_sensitive`] keeps it from cloud ones), as before.
+/// Whether the item is *confirmed* sensitive: a PII finding, a sensitivity rule, or local
+/// triage that ran and said so ([`nugget_retrieve::is_confirmed_sensitive`], the rule the vault
+/// and the graph views use too). No model extracts from it, local ones included; the
+/// deterministic extractors still run (QA GG5-1).
 pub fn flagged_sensitive(item: &Item) -> bool {
-    item.metadata.get("sensitive") == Some(&Value::Bool(true))
-        && !matches!(triage_state(item), Some("pending" | "unknown"))
+    nugget_retrieve::is_confirmed_sensitive(&item.metadata)
 }
 
-/// Whether the item counts as sensitive only until its background triage runs: the model
-/// step waits (and is retried) instead of extracting from an item that may turn out sensitive.
-pub fn triage_pending(item: &Item) -> bool {
-    item.metadata.get("sensitive") == Some(&Value::Bool(true))
-        && triage_state(item) == Some("pending")
+/// Whether the item counts as sensitive only because triage has not sorted it yet (pending,
+/// unknown, failed: GG5-2's "unknown counts as sensitive"). Its model step waits, and is
+/// retried on later runs, instead of sending an item that may turn out sensitive.
+pub fn unsorted(item: &Item) -> bool {
+    item.metadata.get("sensitive") == Some(&Value::Bool(true)) && !flagged_sensitive(item)
 }
 
 /// Synthesis providers allowed for this item, best first (see the module docs). None for an

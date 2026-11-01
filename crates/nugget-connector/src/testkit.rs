@@ -198,6 +198,8 @@ pub struct ReplicaSink {
     pub replica: Arc<Replica>,
     pub changes: Mutex<Vec<Change>>,
     pub checkpoints: Mutex<Vec<Value>>,
+    /// `(key, message)` of every [`ChangeSink::report_problem`] call, in order.
+    pub problems: Mutex<Vec<(String, String)>>,
     fail_send_at: Option<usize>,
     fail_checkpoint_at: Option<usize>,
     sends: AtomicUsize,
@@ -211,6 +213,7 @@ impl ReplicaSink {
             replica,
             changes: Mutex::default(),
             checkpoints: Mutex::default(),
+            problems: Mutex::default(),
             fail_send_at: None,
             fail_checkpoint_at: None,
             sends: AtomicUsize::new(0),
@@ -288,6 +291,11 @@ impl ChangeSink for ReplicaSink {
             return Err(Error::Other(CRASH.into()));
         }
         lock(&self.checkpoints).push(cursor);
+        Ok(())
+    }
+
+    async fn report_problem(&self, key: ItemKey, message: String) -> Result<()> {
+        lock(&self.problems).push((key.as_str().to_owned(), message));
         Ok(())
     }
 }

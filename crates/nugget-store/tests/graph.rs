@@ -766,3 +766,102 @@ fn pruned_entities_stay_tombstoned_across_reopen() {
     assert!(g.list_entities(&EntityQuery::default()).unwrap().len() == 1);
     assert!(g.neighbourhood(&gone, 1, 0).is_err());
 }
+
+/// GG5-4 review: a claim the user replaced remembers the items it had evidence from and their
+/// content then. Another quote from the same, unchanged item (an LLM retry) stays remembered;
+/// after the item changed, so does any quote while the quote recorded then is still in its
+/// text (second review, finding 3); once the source no longer says it, a new quote revives.
+#[test]
+fn user_replacement_remembers_item_versions() {
+    let s = Store::open_in_memory().unwrap();
+    let g = s.graph();
+    let put = |text: &str| {
+        let it = NewItem::new("files", "n.md", content_hash(text)).with_text(text);
+        s.upsert_item_with_chunks(&it, &[NewChunk::text(text)])
+            .unwrap();
+    };
+    put("Harbor is part of Acme.");
+    let a = entity(&g, EntityKind::Project, "Harbor");
+    let quoted = |q: &str| Evidence {
+        item: iref("files", "n.md"),
+        chunk_id: Some(1),
+        quote: Some(q.into()),
+    };
+    let lit = ClaimObject::Literal("Acme".into());
+    let old = g
+        .add_claim(&claim(
+            &a,
+            "part_of",
+            lit.clone(),
+            vec![quoted("part of Acme")],
+        ))
+        .unwrap();
+    let mut mine = claim(&a, "part_of", ClaimObject::Literal("mine".into()), vec![]);
+    mine.status = ClaimStatus::UserAsserted;
+    g.supersede_by_user(old, &mine).unwrap();
+
+    // Same item, unchanged: any quote is remembered.
+    assert!(
+        g.replaced_by_user(old, &[quoted("Acme owns Harbor")])
+            .unwrap()
+    );
+    g.retract_item(&iref("files", "n.md")).unwrap();
+    g.add_evidence(old, &quoted("Acme owns Harbor")).unwrap();
+    assert_eq!(
+        g.get_claim(old).unwrap().unwrap().status,
+        ClaimStatus::Superseded
+    );
+
+    // The item is saved again (new content) still saying it: any quote is remembered.
+    put("Harbor is part of Acme.\n\nre-saved");
+    assert!(g.replaced_by_user(old, &[quoted("part of Acme")]).unwrap());
+    assert!(
+        g.replaced_by_user(old, &[quoted("Acme runs Harbor")])
+            .unwrap()
+    );
+    g.retract_item(&iref("files", "n.md")).unwrap();
+    g.add_evidence(old, &quoted("Acme runs Harbor")).unwrap();
+    assert_eq!(
+        g.get_claim(old).unwrap().unwrap().status,
+        ClaimStatus::Superseded
+    );
+    // The source no longer says it: a new quote is the source saying it differently.
+    put("Harbor moved to Acme Labs.");
+    assert!(
+        !g.replaced_by_user(old, &[quoted("Harbor moved to Acme Labs")])
+            .unwrap()
+    );
+    // (The quote recorded then still counts as remembered: an extractor quoting it means the
+    // source says it.)
+    assert!(g.replaced_by_user(old, &[quoted("part of Acme")]).unwrap());
+    g.retract_item(&iref("files", "n.md")).unwrap();
+    g.add_evidence(old, &quoted("Harbor moved to Acme Labs"))
+        .unwrap();
+    assert_eq!(
+        g.get_claim(old).unwrap().unwrap().status,
+        ClaimStatus::Active
+    );
+    assert!(!g.replaced_by_user(old, &[quoted("part of Acme")]).unwrap());
+}
+
+/// GG5-13 review: the assertion time survives a store reopen and later evidence.
+#[test]
+fn assertion_time_is_kept() {
+    let g = mem();
+    let a = entity(&g, EntityKind::Person, "Dana");
+    let mut mine = claim(
+        &a,
+        "works_at",
+        ClaimObject::Literal("Corvid".into()),
+        vec![],
+    );
+    mine.status = ClaimStatus::UserAsserted;
+    let id = g.add_claim(&mine).unwrap();
+    let at = g.asserted_at(id).unwrap().expect("asserted");
+    let c = g.get_claim(id).unwrap().unwrap();
+    assert_eq!(at, c.created_at);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    g.add_evidence(id, &ev("s", "1")).unwrap();
+    assert!(g.get_claim(id).unwrap().unwrap().updated_at > at);
+    assert_eq!(g.asserted_at(id).unwrap(), Some(at));
+}

@@ -324,8 +324,9 @@ pub struct RunState {
     pub mutations: Vec<MutationRecord>,
     pub actions: Vec<ActionRecord>,
     pub consecutive_verify_failures: u32,
-    /// Set when an observation looked like an injection; cleared once the user approves a
-    /// risky action.
+    /// Set when an observation looked like an injection, merged with later findings, and kept
+    /// for the rest of the run; an approved action only stops the entities it showed from being
+    /// taint ([`InjectionFinding::after_approval`]).
     pub suspicion: Option<InjectionFinding>,
     /// Per-run nonce for untrusted-content fences.
     pub fence: String,
@@ -1196,7 +1197,7 @@ impl Agent {
             }
         };
         if matches!(gate_outcome, GateOutcome::Approved { .. }) && risk >= RiskClass::Edit {
-            st.suspicion = None;
+            st.suspicion = st.suspicion.take().map(|f| f.after_approval(&descriptor));
         }
         if matches!(
             gate_outcome,
@@ -1319,7 +1320,12 @@ impl Agent {
         }
         let result = match leg.stop.guard(tool.call(args.clone(), &ctx)).await {
             Ok(r) => r,
-            Err(s) => return self.interrupted(st, step, &aid, &call.name, s, leg.cfg, t1),
+            // The action was already handed to the app, OS or browser: it may have finished
+            // there, so the log must not claim it was stopped (GG3-11).
+            Err(s) => {
+                let note = "the action had already started and may have completed";
+                return self.interrupted_note(st, step, &aid, &call.name, s, leg.cfg, t1, note);
+            }
         };
         let verification = if mutating {
             let after = match leg.stop.guard(tool.observe(&args, &ctx)).await {
@@ -1329,7 +1335,8 @@ impl Agent {
                     let v =
                         Verification::Failed("interrupted before the result was observed".into());
                     self.ledger.complete(&aid, &result, Some(&v));
-                    return self.interrupted(st, step, &aid, &call.name, s, leg.cfg, t1);
+                    let note = "the action ran; its result was not checked";
+                    return self.interrupted_note(st, step, &aid, &call.name, s, leg.cfg, t1, note);
                 }
             };
             Some(tool.verify(&args, &before, &after, &result))
@@ -1416,7 +1423,7 @@ impl Agent {
                 if let Err(o) = self.append(st, record) {
                     return Act::Stop(o);
                 }
-                st.suspicion = Some(f.clone());
+                st.suspicion = Some(f.clone().merged(st.suspicion.take()));
             }
             content = wrap_untrusted(&call.name, &st.fence, &content, finding.is_some());
         }
@@ -1670,8 +1677,11 @@ impl Agent {
         }
     }
 
+    /// Log an action the kill switch, cancellation or the deadline interrupted after it was
+    /// handed to the tool, saying what is known (`note`: it may have completed, or it ran but
+    /// was not checked), then stop (GG3-11).
     #[allow(clippy::too_many_arguments)]
-    fn interrupted(
+    fn interrupted_note(
         &self,
         st: &mut RunState,
         step: u32,
@@ -1680,6 +1690,7 @@ impl Agent {
         s: Stop,
         cfg: &AgentConfig,
         t1: Instant,
+        note: &str,
     ) -> Act {
         let o = stop_outcome(s, cfg);
         let record = Record::Executed {
@@ -1687,7 +1698,7 @@ impl Agent {
             action_id: aid.to_string(),
             tool: tool.to_string(),
             is_error: true,
-            result: format!("interrupted ({})", o.label()),
+            result: format!("interrupted ({}): {note}", o.label()),
             verification: None,
             interrupted: true,
             duration_ms: ms(t1.elapsed()),

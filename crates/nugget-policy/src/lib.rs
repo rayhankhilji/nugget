@@ -39,6 +39,7 @@ pub mod engine;
 mod glob;
 pub mod kill;
 pub mod log;
+pub mod preview;
 pub mod redact;
 pub mod rules;
 pub mod store;
@@ -56,8 +57,8 @@ pub use redact::RedactedAction;
 pub use rules::{Effect, PolicyConfig, Rule, default_rules};
 pub use store::{JsonFilePolicyStore, MemoryPolicyStore, PolicyStore};
 pub use text::{
-    fold_confusables, normalize as normalize_text, normalize_spaced as normalize_text_spaced,
-    strip_marks as strip_text_marks,
+    fold_confusables, is_invisible, normalize as normalize_text,
+    normalize_spaced as normalize_text_spaced, strip_marks as strip_text_marks,
 };
 
 /// What kind of consequence an action can have. Higher classes need stronger consent.
@@ -115,7 +116,9 @@ pub struct ActionDescriptor {
     pub verb: String,
     /// Human-readable label of the element or object acted on.
     pub target_label: Option<String>,
-    /// Short preview of text that would be typed or sent.
+    /// Short preview of text that would be typed or sent. For a click or key press that sends
+    /// or submits, the values of the fields it sends ([`preview::fields_preview`]); for a key
+    /// press, the keys, then (after a line break) what they send.
     pub text_preview: Option<String>,
     /// The executor's own estimate; the policy engine may raise it, never lower it.
     pub declared_risk: RiskClass,

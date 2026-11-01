@@ -282,32 +282,40 @@ async fn items_flagged_sensitive_reach_no_model_at_all() {
 
 #[tokio::test]
 async fn an_item_waiting_for_triage_reaches_the_model_once_triage_clears_it() {
-    // HH2 marks every item sensitive until triage has run (GG5-2). Those wait for the verdict
-    // instead of losing their model facts for good; a rule hit is never sent.
+    // HH2 marks every item sensitive until triage has sorted it (GG5-2). Unsorted items
+    // (pending, unknown, failed) wait for the verdict instead of reaching the model or losing
+    // their model facts for good; a rule hit is never sent.
     let env = Env::new();
-    let pending = |key: &str, state: &str| {
+    let item = |key: &str, triage: Value| {
         let mut it = memo("files:notes", key, Some(true));
-        it.metadata["triage"] = json!({"state": state});
+        it.metadata["triage"] = triage;
         it
     };
-    env.put(pending("pending", "pending"), &[MEMO]);
-    env.put(pending("rule", "skipped"), &[MEMO]);
-    env.put(pending("undecided", "unknown"), &[MEMO]);
+    env.put(item("pending", json!({"state": "pending"})), &[MEMO]);
+    env.put(item("undecided", json!({"state": "unknown"})), &[MEMO]);
+    env.put(item("failed", json!({"state": "failed"})), &[MEMO]);
+    env.put(
+        item("rule", json!({"state": "skipped", "reason": "health"})),
+        &[MEMO],
+    );
     let local = FakeProvider::new("local", Locality::OnDevice, |_| reply());
     let k = env.knowledge(
         llm_cfg(),
         Some(router(Tier::Synthesis, vec![local.clone()])),
     );
     let first = run(&k).await;
-    // Only the item triage cannot decide goes to the (local) model now.
-    assert_eq!(local.calls(), 1);
+    assert_eq!(
+        local.calls(),
+        0,
+        "nothing unsorted or confirmed sensitive is sent"
+    );
     assert_eq!(first.llm_skipped_privacy, 1);
     // Triage clears the pending item; its labels change only the metadata.
     let r = item_ref("files:notes", "pending");
     let it = env.store.get_item(&r).unwrap().unwrap();
     let mut meta = it.metadata.clone();
     meta["sensitive"] = json!(false);
-    meta["triage"] = json!({"state": "done"});
+    meta["triage"] = json!({"state": "done", "sensitive": false});
     assert!(
         env.store
             .set_item_metadata(&r, &it.content_hash, &meta)
@@ -316,11 +324,11 @@ async fn an_item_waiting_for_triage_reaches_the_model_once_triage_clears_it() {
     run(&k).await;
     assert_eq!(
         local.calls(),
-        2,
+        1,
         "the cleared item is extracted on a later run"
     );
     run(&k).await;
-    assert_eq!(local.calls(), 2, "the rule hit never is");
+    assert_eq!(local.calls(), 1, "the others still wait or never go");
 }
 
 #[tokio::test]

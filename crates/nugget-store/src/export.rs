@@ -439,6 +439,13 @@ struct ExportClaim {
     created_at: String,
     updated_at: String,
     evidence: Vec<ExportEvidence>,
+    /// When the claim was last made `user_asserted` (absent if never).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asserted_at: Option<String>,
+    /// The user replaced this claim in the vault: `{replaced_by, evidence: [{source, key,
+    /// quote, item_hash}]}` (absent if not).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_replaced: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -477,7 +484,16 @@ const CLAIMS_SQL: &str = "SELECT c.id, c.subject, c.predicate, c.object_entity, 
                                                  'chunk_id', v.chunk_id, 'quote', v.quote,
                                                  'created_at', v.created_at))
              FROM (SELECT source, key, chunk_id, quote, created_at
-                   FROM claim_evidence WHERE claim_id = c.id ORDER BY id) v)
+                   FROM claim_evidence WHERE claim_id = c.id ORDER BY id) v),
+            (SELECT asserted_at FROM claim_assertions WHERE claim_id = c.id),
+            (SELECT json_object('replaced_by', r.replaced_by, 'evidence',
+                                (SELECT json_group_array(json_object('source', e.source,
+                                                                     'key', e.key,
+                                                                     'quote', e.quote,
+                                                                     'item_hash', e.item_hash))
+                                 FROM claim_replacement_evidence e
+                                 WHERE e.claim_id = r.claim_id))
+             FROM claim_replacements r WHERE r.claim_id = c.id)
      FROM claims c WHERE c.id > ?1 AND c.id <= ?2 ORDER BY c.id LIMIT ?3";
 
 /// A page of mentions (id in `(?1, ?2]`, at most `?3`).
@@ -534,6 +550,15 @@ fn read_claim(r: &rusqlite::Row<'_>) -> Result<ExportClaim> {
         created_at: r.get(10).db("read claim")?,
         updated_at: r.get(11).db("read claim")?,
         evidence: parse_list(r, 12, "evidence")?,
+        asserted_at: r.get(13).db("read claim")?,
+        user_replaced: r
+            .get::<_, Option<String>>(14)
+            .db("read claim")?
+            .map(|j| {
+                serde_json::from_str(&j)
+                    .map_err(|e| Error::Storage(format!("export: bad user_replaced: {e}")))
+            })
+            .transpose()?,
     })
 }
 
@@ -1499,6 +1524,9 @@ mod tests {
             assert_eq!(cls[0]["confidence"], 0.75);
             assert_eq!(cls[1]["object_literal"], "likes tea");
             assert_eq!(cls[1]["status"], "user_asserted");
+            assert!(cls[1]["asserted_at"].is_string(), "{}", cls[1]);
+            assert!(cls[0].get("asserted_at").is_none());
+            assert!(cls[0].get("user_replaced").is_none());
             let ids: HashSet<&str> = ents.iter().map(|e| e["id"].as_str().unwrap()).collect();
             assert!(
                 cls.iter()

@@ -41,7 +41,7 @@ pub(crate) struct Merged {
 /// Keys that always come from the new render.
 const FORCED: [&str; 5] = ["nugget_id", "kind", "updated", "merged_into", "status"];
 /// Keys the renderer owns.
-const OURS: [&str; 7] = [
+pub(crate) const OURS: [&str; 7] = [
     "nugget_id",
     "kind",
     "updated",
@@ -163,6 +163,38 @@ fn get<'a>(v: &'a Entries, k: &str) -> Option<&'a Vec<String>> {
     v.iter().find(|(kk, _)| kk == k).map(|(_, l)| l)
 }
 
+/// A frontmatter value as YAML means it, so that spelling differences (`["A", "B"]` against
+/// `["A","B"]`, flow against block style, quoting) do not count as a change.
+#[derive(PartialEq)]
+enum FmValue {
+    List(Vec<String>),
+    Scalar(String),
+    Raw(String),
+}
+
+fn fm_parsed(entry: &[String]) -> FmValue {
+    let v = fm_value(entry);
+    let t = v.trim();
+    if (t.starts_with('[') || t.starts_with('-') || t.is_empty())
+        && let Some(l) = fm_list(t)
+    {
+        return FmValue::List(l.into_iter().map(|a| a.trim().to_owned()).collect());
+    }
+    match fm_scalar(t) {
+        Some(s) => FmValue::Scalar(s),
+        None => FmValue::Raw(t.to_owned()),
+    }
+}
+
+/// Whether two frontmatter entries (absent = `None`) hold the same value.
+fn same_value(a: Option<&Vec<String>>, b: Option<&Vec<String>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a == b || fm_parsed(a) == fm_parsed(b),
+        _ => false,
+    }
+}
+
 fn merge_fm(
     base: Option<&[String]>,
     user: Option<&[String]>,
@@ -187,9 +219,9 @@ fn merge_fm(
         }
         let ul = get(&ue, k);
         let bl = get(&be, k);
-        let pick = if ul == bl || ul == Some(nl) {
+        let pick = if same_value(ul, bl) || same_value(ul, Some(nl)) {
             Some(nl)
-        } else if bl == Some(nl) {
+        } else if same_value(bl, Some(nl)) {
             conflict |= prev_conflict && ul.is_some();
             ul
         } else {
@@ -204,7 +236,7 @@ fn merge_fm(
         if get(&ne, k).is_some() {
             continue;
         }
-        if OURS.contains(&k.as_str()) && get(&be, k) == Some(ul) {
+        if OURS.contains(&k.as_str()) && same_value(get(&be, k), Some(ul)) {
             continue;
         }
         out.extend(ul.iter().cloned());
@@ -586,5 +618,39 @@ mod tests {
         let (fm, c) = merge_fm(Some(&b), Some(&u), Some(&n2), false);
         assert!(c);
         assert!(fm.unwrap().contains(&"aliases: [\"Sam\"]".to_string()));
+    }
+
+    /// GG5-20: the user adds an alias with YAML spacing; the new render writes the same list
+    /// without the space. Not a conflict, also when the previous pass reported one, and aliases
+    /// learned later still reach the page.
+    #[test]
+    fn frontmatter_compares_values_not_spelling() {
+        let b = v("nugget_id: \"e\"\naliases: [\"Robert Chen\"]");
+        let u = v("nugget_id: \"e\"\naliases: [\"Robert Chen\", \"Bobby\"]");
+        let n = v("nugget_id: \"e\"\naliases: [\"Robert Chen\",\"Bobby\"]");
+        for prev in [false, true] {
+            let (fm, c) = merge_fm(Some(&b), Some(&u), Some(&n), prev);
+            assert!(!c, "prev conflict {prev}");
+            assert_eq!(fm.unwrap(), n);
+        }
+        // The stuck state of older builds: base = new render, user spelled differently.
+        let (fm, c) = merge_fm(Some(&n), Some(&u), Some(&n), true);
+        assert!(!c);
+        assert_eq!(fm.unwrap(), n);
+        // A later learned alias is written.
+        let n2 = v("nugget_id: \"e\"\naliases: [\"Robert Chen\",\"Bobby\",\"Bob C\"]");
+        let (fm, c) = merge_fm(Some(&n), Some(&u), Some(&n2), true);
+        assert!(!c);
+        assert_eq!(fm.unwrap(), n2);
+        // Block style and quoting are the same value too.
+        let block = v("nugget_id: \"e\"\naliases:\n  - Robert Chen\n  - 'Bobby'");
+        let (fm, c) = merge_fm(Some(&n), Some(&block), Some(&n2), false);
+        assert!(!c);
+        assert_eq!(fm.unwrap(), n2);
+        // A real change still wins over an unchanged generated value.
+        let real = v("nugget_id: \"e\"\naliases: [\"Robert Chen\", \"Bob\"]");
+        let (fm, c) = merge_fm(Some(&n), Some(&real), Some(&n), false);
+        assert!(!c);
+        assert_eq!(fm.unwrap(), real);
     }
 }

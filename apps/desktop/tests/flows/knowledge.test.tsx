@@ -161,4 +161,15 @@ describe("knowledge flow", () => {
     expect(getByRole("tab", { name: t("knowledge.tab.graph") }).getAttribute("aria-selected")).toBe("true");
     await waitFor(() => expect(d.count("knowledge_graph")).toBeGreaterThan(0));
   });
+
+  it("asks for sensitive entities only when the graph's toggle is on", async () => {
+    const d = daemon();
+    await renderApp({ page: "knowledge" });
+    await click(getByRole("tab", { name: t("knowledge.tab.graph") }));
+    await waitFor(() => expect(d.count("knowledge_graph")).toBeGreaterThan(0));
+    const sent = () => d.callsTo("knowledge_graph").map((a) => (a as { request: { include_sensitive?: boolean } }).request.include_sensitive);
+    expect(sent()).toEqual([false]);
+    await click(getByRole("checkbox", { name: t("graph.showSensitive") }));
+    await waitFor(() => expect(sent()).toEqual([false, true]));
+  });
 });

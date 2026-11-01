@@ -12,6 +12,40 @@ use rusqlite::{Connection, TransactionBehavior};
 
 use crate::error::DbExt;
 
+/// User decisions on claims that must outlive re-extraction (see `GraphStore`):
+/// - `claim_replacements`: claims the user replaced in the vault
+///   (`GraphStore::supersede_by_user`), with the user's claim that replaced them (the record
+///   goes when either claim does);
+/// - `claim_replacement_evidence`: per replaced claim, the evidence it had then: item, quote
+///   ('' for none) and the item's content hash at the time (NULL: no item row);
+/// - `claim_assertions`: when a claim was last made `user_asserted` (its `updated_at` moves with
+///   every fold and evidence add); existing user-asserted claims are backfilled from
+///   `updated_at`, the best time known.
+///
+/// Every statement is idempotent, so v13 can repeat it for stores that ran an earlier v12.
+const USER_DECISIONS: &str = r#"
+    DROP TABLE IF EXISTS claim_user_replaced;
+    CREATE TABLE IF NOT EXISTS claim_replacements (
+        claim_id    INTEGER PRIMARY KEY REFERENCES claims (id) ON DELETE CASCADE,
+        replaced_by INTEGER REFERENCES claims (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS claim_replacements_by ON claim_replacements (replaced_by);
+    CREATE TABLE IF NOT EXISTS claim_replacement_evidence (
+        claim_id  INTEGER NOT NULL REFERENCES claim_replacements (claim_id) ON DELETE CASCADE,
+        source    TEXT NOT NULL,
+        key       TEXT NOT NULL,
+        quote     TEXT NOT NULL,
+        item_hash TEXT,
+        PRIMARY KEY (claim_id, source, key, quote)
+    ) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS claim_assertions (
+        claim_id    INTEGER PRIMARY KEY REFERENCES claims (id) ON DELETE CASCADE,
+        asserted_at TEXT NOT NULL
+    );
+    INSERT OR IGNORE INTO claim_assertions (claim_id, asserted_at)
+        SELECT id, updated_at FROM claims WHERE status = 'user_asserted';
+"#;
+
 /// Ordered migrations; `MIGRATIONS[i]` takes the schema from version `i` to `i + 1`.
 const MIGRATIONS: &[&str] = &[
     // v1: items, chunks, FTS5, cursors, egress ledger, audit log.
@@ -497,6 +531,11 @@ const MIGRATIONS: &[&str] = &[
         SELECT id, fts_segment(title) FROM items
         WHERE title IS NOT NULL AND fts_segment(title) IS NOT title;
     "#,
+    // v12: user decisions on claims that must outlive re-extraction (see `USER_DECISIONS`).
+    USER_DECISIONS,
+    // v13: the same, idempotently, for development stores that ran an earlier v12 (which made
+    // an obsolete `claim_user_replaced` table instead).
+    USER_DECISIONS,
 ];
 
 /// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
@@ -738,7 +777,7 @@ mod tests {
             "v10: one token"
         );
 
-        assert_eq!(migrate(&mut conn).unwrap(), 1);
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 10);
         assert_eq!(ids(&conn, "chunks_fts", "上海"), [10]);
         assert_eq!(ids(&conn, "chunks_fts", "预算"), [10]);
         assert_eq!(ids(&conn, "chunks_fts", "uber"), [20]);
@@ -1032,6 +1071,71 @@ mod tests {
         let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
         assert_eq!(store.migrate().unwrap(), 0);
         assert_eq!(store.graph().get_entity(&sam).unwrap().unwrap().name, "Sam");
+    }
+
+    /// v12 makes the user-decision tables and backfills assertion times; v13 repairs a store
+    /// that ran an earlier v12 (an obsolete table, the new ones missing).
+    #[test]
+    fn v11_database_migrates_to_v12_and_an_early_v12_is_repaired() {
+        let seed = "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
+                 VALUES ('ent_a', 'person', 'Sam', 'sam', 't', 't');
+             INSERT INTO claims (id, subject, predicate, object_literal, text, confidence,
+                                 status, created_at, updated_at)
+                 VALUES (1, 'ent_a', 'likes', 'tea', 'Sam likes tea', 1.0, 'user_asserted',
+                         '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z'),
+                        (2, 'ent_a', 'likes', 'coffee', 'Sam likes coffee', 0.8, 'active',
+                         '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z');";
+        let asserted = |conn: &Connection| -> Vec<(i64, String)> {
+            let mut stmt = conn
+                .prepare("SELECT claim_id, asserted_at FROM claim_assertions ORDER BY claim_id")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let want = vec![(1, "2026-02-01T00:00:00Z".to_string())];
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::fts::register_functions(&conn).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&mut conn, 11);
+        conn.execute_batch(seed).unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 11);
+        assert_eq!(asserted(&conn), want);
+        // The record goes with the user's claim that replaced it.
+        conn.execute_batch(
+            "INSERT INTO claim_replacements (claim_id, replaced_by) VALUES (2, 1);
+             DELETE FROM claims WHERE id = 1;",
+        )
+        .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM claim_replacements", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+
+        // A store that ran the earlier v12.
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::fts::register_functions(&conn).unwrap();
+        migrate_to(&mut conn, 11);
+        conn.execute_batch(seed).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE claim_user_replaced (claim_id INTEGER, source TEXT, key TEXT,
+                                               quote TEXT);",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 12).unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 12);
+        assert_eq!(asserted(&conn), want);
+        let names: Vec<String> = schema_snapshot(&conn).into_iter().map(|(n, _)| n).collect();
+        assert!(!names.contains(&"claim_user_replaced".to_string()));
+        for t in [
+            "claim_replacements",
+            "claim_replacement_evidence",
+            "claim_assertions",
+        ] {
+            assert!(names.contains(&t.to_string()), "{t}");
+        }
     }
 
     #[test]

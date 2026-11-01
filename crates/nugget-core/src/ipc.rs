@@ -36,7 +36,7 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `sources.secret.set` | [`SourceSecret`] | `null` |
 /// | `ingest.status` | `{}` | [`IngestStatus`] |
 /// | `retrieve.context` | [`ContextRequest`] | [`ContextResponse`] |
-/// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications |
+/// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications (and `ask.restarted` ([`AskRestarted`]) before them when the stream falls back to another provider) |
 /// | `runtime.status` | `{}` | `Vec<`[`RuntimeInfo`]`>` |
 /// | `knowledge.entities` | [`EntitiesRequest`] | `Vec<`[`EntitySummaryView`]`>` |
 /// | `knowledge.entity` | [`EntityRef`] | [`EntityDetail`] |
@@ -110,6 +110,8 @@ pub mod notification {
     pub const SOURCES_CHANGED: &str = "sources.changed";
     /// [`KnowledgeChanged`].
     pub const KNOWLEDGE_CHANGED: &str = "knowledge.changed";
+    /// [`AskRestarted`]: a `retrieve.ask` stream moved on to another provider (EE3).
+    pub const ASK_RESTARTED: &str = "ask.restarted";
 }
 
 // ---- status ----
@@ -399,6 +401,61 @@ pub struct SourceInfo {
     /// daemon from `state`, `last_error` and recent item errors; absent from older daemons.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<SourceHealth>,
+    /// What the last whole-folder scan found and skipped (files sources); absent until a
+    /// connector reports one, after the settings change or the source is turned on or off, and
+    /// from older daemons. Live (watcher) changes do not refresh it, so `found == 0` is only
+    /// meaningful while `items == 0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<ScanReport>,
+}
+
+/// What a source's scan pass found and what it skipped, so "nothing indexed" can be told apart
+/// from "still working" and explained.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanReport {
+    /// The walk of this pass ended (false while it runs).
+    #[serde(default)]
+    pub finished: bool,
+    /// Files that will be (or already are) indexed this pass.
+    #[serde(default)]
+    pub found: u64,
+    /// Changes (new or changed files, plus deletions) this pass sends for indexing; files
+    /// already indexed and unchanged are not counted. The progress total of the pass.
+    #[serde(default)]
+    pub to_index: u64,
+    /// Files skipped because their type is not indexed.
+    #[serde(default)]
+    pub unsupported: u64,
+    /// Files skipped because they are over `max_file_bytes`.
+    #[serde(default)]
+    pub too_large: u64,
+    /// Files or subfolders that could not be read.
+    #[serde(default)]
+    pub unreadable: u64,
+    /// Roots that are not there (unmounted or moved).
+    #[serde(default)]
+    pub roots_missing: u64,
+    /// Roots that exist but cannot be read (permission denied).
+    #[serde(default)]
+    pub roots_denied: u64,
+    #[serde(default)]
+    pub max_file_bytes: u64,
+    /// Up to 5 examples of skipped files, first found first.
+    #[serde(default)]
+    pub skipped: Vec<SkippedFile>,
+}
+
+/// One skipped file in a [`ScanReport`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedFile {
+    /// Relative to its root, `/`-separated.
+    #[serde(default)]
+    pub path: String,
+    /// `unsupported`, `too_large` or `unreadable`.
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
 }
 
 /// A source's sync health, for people rather than logs.
@@ -406,7 +463,8 @@ pub struct SourceInfo {
 pub struct SourceHealth {
     /// Stable machine code (`ok`, `syncing`, `disabled`, `reconnect`, `not_set_up`,
     /// `rate_limited`, `offline`, `server_error`, `too_large`, `disk_full`, `config`,
-    /// `item_errors`, `error`); clients translate it and fall back to `reason`/`fix`.
+    /// `item_errors`, `nothing_indexable`, `unreadable`, `error`); clients translate it and
+    /// fall back to `reason`/`fix`.
     pub code: String,
     /// One sentence on what is going on, in English.
     pub reason: String,
@@ -627,6 +685,11 @@ fn default_ask_tier() -> Tier {
 }
 
 /// Result of `retrieve.ask`: the stream (as for `chat`) plus the context it was given.
+///
+/// Returned as soon as the context for the first provider tried is packed, before that
+/// provider answers (EE3): a provider failure then ends the stream with `chat.done { error }`,
+/// or, routing by tier, moves it on to the next provider with an `ask.restarted`
+/// ([`AskRestarted`]) notification.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AskStarted {
     pub stream_id: String,
@@ -674,6 +737,31 @@ pub struct AskDateFilter {
     /// by date rather than search matches.
     #[serde(default)]
     pub listed: bool,
+}
+
+/// `ask.restarted` notification: the provider [`AskStarted`] named could not answer and the
+/// `retrieve.ask` stream `stream_id` moved on to `provider` (routing by tier only; an explicit
+/// provider is never substituted). The context is the one packed for that provider's locality,
+/// so `citations`, `excluded_sensitive` and `general` replace the earlier ones: the answer's
+/// `[n]` markers refer to these. Sent before the new provider's request goes out, so before any
+/// `chat.delta` of it, at most once per provider tried; it can arrive before the
+/// `retrieve.ask` reply. The searched query (`AskStarted::query_rewrite`) is unchanged.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AskRestarted {
+    pub stream_id: String,
+    pub provider: ProviderId,
+    pub locality: Locality,
+    pub citations: Vec<Citation>,
+    #[serde(default)]
+    pub excluded_sensitive: u32,
+    #[serde(default)]
+    pub general: bool,
+    /// As [`AskStarted::date`], for this provider's context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<AskDateFilter>,
+    /// As [`AskStarted::partial`], for this provider's context.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partial: Vec<u32>,
 }
 
 // ---- local runtime ----
@@ -796,6 +884,10 @@ pub struct ClaimView {
     pub evidence: Vec<EvidenceView>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub updated_at: Option<time::OffsetDateTime>,
+    /// Sensitive-only: the claim has evidence and all of it is from sensitive items (missing
+    /// items count as sensitive). Such claims are not in the vault or default-scope MCP.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -824,6 +916,11 @@ pub struct EntityDetail {
     /// The entity's vault page, relative to the vault root.
     #[serde(default)]
     pub vault_path: Option<String>,
+    /// Sensitive-only: the entity has at least one active claim or mention, and all of them
+    /// come from sensitive items. It has no vault page and is left out of `knowledge.graph`
+    /// unless `include_sensitive` is set.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -839,6 +936,10 @@ pub struct GraphRequest {
     /// from it, a node with a mention or an active claim backed by it (the centre always stays).
     #[serde(default)]
     pub source: Option<SourceId>,
+    /// Also show sensitive-only entities (see [`EntityDetail::sensitive`]) and claims. Off by
+    /// default: they and their edges are left out (the centre always stays, marked).
+    #[serde(default)]
+    pub include_sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -847,6 +948,9 @@ pub struct GraphNodeView {
     pub kind: String,
     pub name: String,
     pub depth: u32,
+    /// Sensitive-only entity (see [`EntityDetail::sensitive`]).
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -922,8 +1026,13 @@ pub struct KnowledgeStatus {
     pub entities: u64,
     pub claims: u64,
     pub mentions: u64,
-    /// Items changed but not yet processed by extraction.
+    /// Items changed but not yet processed by extraction: what is left of the current or
+    /// carried-over plan, items changed since that plan was made, and items waiting for the
+    /// model.
     pub pending_items: u64,
+    /// An extraction run is in progress.
+    #[serde(default)]
+    pub running: bool,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_run: Option<time::OffsetDateTime>,
     /// Provider used for LLM extraction, if any (deterministic extractors always run).

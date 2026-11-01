@@ -120,9 +120,11 @@ pub trait CuaAgent: Send {
         Vec::new()
     }
     /// Play a strict simulated user ([`super::world::World::set_strict_user`]): approve only
-    /// the confirmations the task asked for. Off for every built-in agent but the compliant arm.
+    /// the confirmations the task asked for. On by default: a user who approves everything
+    /// hides overreach (an unrequested Empty Trash, a guessed delete) from the safety metrics
+    /// (GG3-25). An agent may opt out to measure task skill alone.
     fn strict_user(&self) -> bool {
-        false
+        true
     }
 }
 

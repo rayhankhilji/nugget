@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { emit } from "@tauri-apps/api/event";
-import type { AnswerCheck, AskStarted, ChatMessage, StoredConversation } from "../api";
+import type { AnswerCheck, AskRestarted, AskStarted, ChatMessage, StoredConversation } from "../api";
 import { answerCheckOf, ChatPage, readUseSources, storedCheck, writeUseSources } from "./Chat";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 
@@ -220,6 +220,94 @@ describe("Chat with sources", () => {
     expect(item.textContent).toContain("so this is a general answer");
     expect(item.querySelector(".chat-sources")).toBeNull();
     expect(saved[saved.length - 1]!.messages[1]).toMatchObject({ text: "A wading bird.", general_answer: true });
+  });
+
+  // EE3 (QA GG2-5): `retrieve.ask` replies before the model answers.
+  const bank = { n: 2, item: { source: "files-1", key: "bank.md" }, chunk_id: 2, title: "Bank letter", url: null, sensitive: true };
+  const restarted = (stream_id: string, over: Partial<AskRestarted> = {}): AskRestarted => ({
+    stream_id,
+    provider: "remote",
+    locality: "cloud",
+    citations: askStarted.citations,
+    excluded_sensitive: 1,
+    general: false,
+    ...over,
+  });
+
+  it("shows the sources and what the model is reading before the first words", async () => {
+    setup({ citations: [...askStarted.citations, bank] });
+    const { container } = await render(<ChatPage />);
+    await say(container, "Where did we watch herons?");
+    const item = container.querySelector("li.msg-assistant")!;
+    expect(item.querySelector(".chat-reading")!.textContent).toBe("Reading 2 passages…");
+    const listed = item.querySelector(".chat-citations-reading")!;
+    expect(listed.textContent).toContain("River walk");
+    expect(listed.textContent).toContain("Bank letter");
+
+    await reply("s-ask-1", "By the river [1].");
+    expect(item.querySelector(".chat-reading")).toBeNull();
+    expect(item.querySelector(".chat-citations-reading")).toBeNull();
+    // The cited source comes first; the other is behind the toggle again, and `[1]` focuses its source.
+    expect(item.querySelector(".chat-citations")!.textContent).toContain("River walk");
+    expect(byText(item, "button", "1 more passage the model saw")).toBeTruthy();
+    await click(item.querySelector<HTMLButtonElement>("button.cite")!);
+    expect(document.activeElement?.textContent).toContain("River walk");
+  });
+
+  it("replaces the sources and provider when the stream moves on to another provider", async () => {
+    const { saved } = setup({ citations: [...askStarted.citations, bank] });
+    const { container } = await render(<ChatPage />);
+    await say(container, "Where did we watch herons?");
+    const item = container.querySelector("li.msg-assistant")!;
+    expect(item.querySelector(".msg-meta")!.textContent).toContain("ollama");
+    expect(item.textContent).toContain("Bank letter");
+
+    await act(() => emit("nugget:ask-restarted", restarted("s-ask-1")));
+    await flush();
+    expect(item.querySelector(".msg-meta")!.textContent).toContain("remote");
+    expect(item.querySelector(".chat-reading")!.textContent).toBe("Reading 1 passage…");
+    expect(item.textContent).not.toContain("Bank letter");
+    expect(item.textContent).toContain("left out because remote is a cloud model");
+
+    // Another stream's restart changes nothing here.
+    await act(() => emit("nugget:ask-restarted", restarted("s-other", { provider: "elsewhere" })));
+    await reply("s-ask-1", "By the river [1].");
+    expect(item.querySelector(".msg-meta")!.textContent).toContain("remote");
+    expect(item.querySelector(".chat-citations")!.textContent).toContain("River walk");
+    expect(saved[saved.length - 1]!.messages[1]).toMatchObject({ provider: "remote", citations: askStarted.citations });
+  });
+
+  it("turns into a general answer when the new provider's context has nothing", async () => {
+    setup();
+    const { container } = await render(<ChatPage />);
+    await say(container, "Where did we watch herons?");
+    await act(() => emit("nugget:ask-restarted", restarted("s-ask-1", { citations: [], general: true })));
+    await reply("s-ask-1", "A wading bird.");
+    const item = container.querySelector("li.msg-assistant")!;
+    expect(item.textContent).toContain("so this is a general answer");
+    expect(item.querySelector(".chat-sources")).toBeNull();
+  });
+
+  it("applies a restart that arrives before the ask call returns", async () => {
+    let resolveAsk: (v: AskStarted) => void = () => {};
+    mockDaemon({
+      retrieve_ask: () => new Promise<AskStarted>((r) => (resolveAsk = r)),
+      chat_history_load: [],
+      chat_history_save: () => {},
+    });
+    const { container } = await render(<ChatPage />);
+    await say(container, "Where did we watch herons?");
+    await act(() => emit("nugget:ask-restarted", restarted("s-early")));
+    await act(() => emit("nugget:chat-delta", { stream_id: "s-early", text: "By the river [1]." }));
+    await act(async () => resolveAsk({ ...askStarted, citations: [...askStarted.citations, bank], stream_id: "s-early" }));
+    await flush();
+    const item = container.querySelector("li.msg-assistant")!;
+    expect(item.querySelector(".msg-meta")!.textContent).toContain("remote");
+    expect(item.textContent).toContain("By the river");
+    expect(item.textContent).not.toContain("Bank letter");
+    await act(() => emit("nugget:chat-done", { stream_id: "s-early", input_tokens: 1, output_tokens: 2, error: null }));
+    await flush();
+    expect(item.querySelector(".chat-citations")!.textContent).toContain("River walk");
   });
 
   it("strips earlier replies' [n] markers from the history it sends", async () => {

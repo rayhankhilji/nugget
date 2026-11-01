@@ -202,7 +202,9 @@ pub fn map_role(role: Role) -> A11yRole {
         Role::List => A11yRole::List,
         Role::ListItem => A11yRole::ListItem,
         Role::Group => A11yRole::Group,
-        Role::Alert => A11yRole::StaticText,
+        // AT-SPI and AX report alerts as dialogs (`nugget_a11y::role`); so does the bench, so the
+        // policy's dialog context is exercised (GG3-25).
+        Role::Alert => A11yRole::Dialog,
     }
 }
 
@@ -855,6 +857,7 @@ mod tests {
         assert_eq!(map_role(Role::TextArea), A11yRole::TextArea);
         assert_eq!(map_role(Role::Switch), A11yRole::CheckBox);
         assert_eq!(map_role(Role::Text), A11yRole::StaticText);
+        assert_eq!(map_role(Role::Alert), A11yRole::Dialog);
         let combo = Node::combo(
             "forms.country",
             "Country",
