@@ -935,6 +935,7 @@ mod tests {
             match f {
                 Found::Conversation(c) => messages += c.messages.len(),
                 Found::Keep(p) => keep_all |= p.is_empty(),
+                Found::Problem { .. } => {}
             }
             true
         })
