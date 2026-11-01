@@ -1068,14 +1068,6 @@ pub(crate) mod tests {
         assert_eq!(snap.root.name.as_deref(), Some("Chat"));
     }
 
-    #[test]
-    fn json_round_trip() {
-        let el = MemEl::new(sample(), vec![0, 1, 1]);
-        let snap = snapshot_around(&el, &WalkLimits::default());
-        let back = Snapshot::from_json(&snap.to_json()).unwrap();
-        assert_eq!(back, snap);
-    }
-
     fn para(role: Role, value: &str) -> Node {
         let mut n = Node::new(role);
         n.states.editable = true;

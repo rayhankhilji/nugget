@@ -189,63 +189,10 @@ cargo clippy -p nugget-a11y --target x86_64-pc-windows-msvc --all-targets -- -D 
 
 The thread heuristics are tested on trees in `tests/fixtures/trees/`:
 
-- `gtk_recorded_atspi.json` was recorded from a real app.
+- `gtk_recorded_atspi.json` and `web_chrome_windows_mail.json` were recorded from real apps.
 - The others are modelled on how Slack, Messages, WhatsApp, Gmail and Apple Mail expose their
   trees. Replace them with real recordings as they become available: `Backend::snapshot()` →
   `Snapshot::to_json()`, after redacting personal content.
-
-### App matrix (`tests/apps_matrix.rs`)
-
-Real browsers and native editors on each OS against the clean-room fixtures in
-`tests/fixtures/apps/` (contract: `PROTOCOL.md`): detection, read-back, thread precision and
-recall, secure fields, six insert payloads with one undo each, and read time. Run by
-`.github/workflows/a11y-apps.yml`; locally with
-`cargo test -p nugget-a11y --test apps_matrix -- --ignored --nocapture --test-threads=1`
-(`NUGGET_A11Y_APPS=chrome,gedit` to pick apps, `NUGGET_A11Y_MATRIX_OUT`, `NUGGET_A11Y_APPS_RECORD`
-for trees). `tests/fixtures/apps/expected.json` lists the metrics that must keep passing;
-`render_matrix.py` renders the JSON Lines results.
-
-### Linux integration tests (`NUGGET_A11Y_IT=1`)
-
-The tests do the following:
-
-1. They start Xvfb and a private `dbus-daemon`. The accessibility bus is started by D-Bus
-   activation.
-2. They re-run the test binary with that environment.
-3. They drive the small GTK 3 app in `tests/fixtures/gtk_test_app.py`. The app prints its own
-   buffer contents, which gives the tests an oracle independent of AT-SPI.
-
-The scenarios are:
-
-- the permission (enable AT-SPI);
-- reading the composer and its thread;
-- accessibility insertion of non-ASCII, multi-line text, verified;
-- clipboard insertion through XTest Ctrl+V, with every saved format restored (including a 300 KB
-  format sent with INCR);
-- secure-field handling;
-- placeholder and search-field detection;
-- the deny list;
-- a real snapshot.
-
-`tests/linux_atspi_computer.rs` drives `tests/fixtures/gtk_computer_app.py` (button, check box,
-entries, combo box, lists, a scrolled list, an expander) through `system_computer_with`:
-window enumeration, snapshots with stable ids and no password value, a press that changes a label,
-check box toggle, set value, typed text, `ctrl+a backspace` and XTest keys, list and combo
-selection, scrolling, expanding, focus, activating the running app, and a screenshot.
-
-Setup on Debian/Ubuntu:
-
-```sh
-sudo apt-get install -y xvfb dbus dbus-x11 at-spi2-core python3-gi gir1.2-gtk-3.0
-NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi_computer -- --nocapture
-```
-
-- If `python3` is not the interpreter that has PyGObject (for example, a newer Python sits ahead of
-  the system one in `PATH`), set `NUGGET_A11Y_IT_PYTHON=/usr/bin/python3.12` or whichever version
-  has `gi`.
-- Without `at-spi2-core` the accessibility bus is never activated; without `gir1.2-gtk-3.0`
-  `gi.require_version('Gtk', '3.0')` fails.
-- Set `NUGGET_A11Y_RECORD=<dir>` to write the recorded tree to `<dir>/gtk_recorded.json`.
 
 ## Known gaps
 
@@ -288,6 +235,6 @@ NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi
   `PasteText`.
 - The AT-SPI tree walk reads each node with several D-Bus calls. The `Cache.GetItems` bulk read is
   a possible optimisation.
-- The thread heuristics are tested on recordings from Chrome (Linux, Windows), Safari and
-  Firefox (Linux) of the app-matrix fixtures (`tests/fixtures/trees/web_*`), and on modelled
-  trees for native chat and mail apps.
+- The thread heuristics are tested on one recording from Chrome (Windows), on web editor trees
+  modelled per platform (`tests/fixtures/trees/web_*`), and on modelled trees for native chat and
+  mail apps.

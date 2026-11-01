@@ -11,9 +11,8 @@
 //! ```
 //!
 //! The fixture is `tests/fixtures/native/linux/gtk4_fixture.py`, started with
-//! `GDK_BACKEND=wayland` (never XWayland). GTK 4 has its own AT-SPI implementation, so this also
-//! covers the GTK 4 accessibility tree, which differs from GTK 3's ATK bridge
-//! (`linux_atspi.rs`). Every scenario runs in one test: they share the compositor's focus.
+//! `GDK_BACKEND=wayland` (never XWayland). GTK 4 has its own AT-SPI implementation (no ATK bridge).
+//! Every scenario runs in one test: they share the compositor's focus.
 
 #![cfg(target_os = "linux")]
 
