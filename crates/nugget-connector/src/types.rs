@@ -81,6 +81,11 @@ pub trait ChangeSink: Send + Sync {
         let _ = (key, message);
         Ok(())
     }
+
+    /// Report what a scan pass found and skipped (latest wins). Default: ignored.
+    async fn report_scan(&self, report: nugget_core::ipc::ScanReport) {
+        let _ = report;
+    }
 }
 
 /// What the store already holds for this source: item key → connector version.

@@ -138,7 +138,7 @@ async fn pass(
         error: None,
     }));
 
-    let sink = PipelineSink::new(tx.clone(), mode, inner.clone());
+    let sink = PipelineSink::new(tx.clone(), mode, inner.clone(), id.clone());
     if sink.begin_pass().await.is_err() {
         return Next::Stop;
     }
@@ -169,7 +169,12 @@ async fn pass(
 
     if connector.supports_watch() {
         inner.set_state(id, SourceState::Watching).await;
-        let live = Arc::new(PipelineSink::new(tx.clone(), Mode::Live, inner.clone()));
+        let live = Arc::new(PipelineSink::new(
+            tx.clone(),
+            Mode::Live,
+            inner.clone(),
+            id.clone(),
+        ));
         let watch_cancel = cancel.child_token();
         let resync = inner.cfg.watch_resync_ms;
         let started = Instant::now();

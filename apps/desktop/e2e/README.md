@@ -21,6 +21,10 @@ It runs these scenarios:
 - **byok**: onboarding's "Bring your own key" form against a mock OpenAI-compatible server on
   localhost: bad key, wrong URL and no network are reported, a good key is saved to the secret
   store (never to `config.toml`) and the egress ledger shows the checks.
+- **byok-keys**: the Models page's "Your providers" against a mock OpenAI-compatible server: a
+  saved key is routed at once (no restart), "Replace key" swaps it (the next chat uses the new
+  key), Remove (confirmed) leaves `config.toml` byte for byte as before, and an `env:VAR`
+  reference works without a keychain.
 - **a11y**: on the indexed home, axe-core audits every page and the main dialogs in light and dark
   and fails on serious or critical violations; each page's accessibility tree is checked too (see
   "What happens: a11y").
@@ -97,7 +101,7 @@ built, plus about 60 s for the i18n scenario and about 40 s for visual. Linux an
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_BACKUP_TIMEOUT_MS` | 120000 | backup: how long one backup, export or restore may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual,backup,messaging,search` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,byok-keys,a11y,prefs,keyboard,visual,backup,messaging,search` | Which scenarios to run, comma-separated. |
 | `E2E_VISUAL_UPDATE=1` | off | visual: write the screenshots as the new baselines instead of comparing (on Linux). |
 | `E2E_VISUAL_TOLERANCE` | 0.005 | visual: the largest fraction of differing pixels a screen may have (0.005 = 0.5%). |
 | `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n: which locales to check, comma-separated (any code in `LOCALES`). |

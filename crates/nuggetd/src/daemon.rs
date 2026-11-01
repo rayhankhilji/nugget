@@ -5,10 +5,11 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use nugget_connector::{Registry, SecretStore};
+use nugget_core::capability::Locality;
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::ProviderId;
 use nugget_core::paths::Paths;
@@ -126,9 +127,10 @@ pub(crate) struct State {
     /// Broadcast notifications to every connection.
     pub hub: Arc<Hub>,
     /// Every configured provider, in config order (including ones that failed to build).
-    pub configs: Vec<ProviderConfig>,
+    /// Changed while running by [`State::set_provider`] / [`State::remove_provider`].
+    pub configs: RwLock<Vec<ProviderConfig>>,
     /// Providers that could not be built, with the reason. They are not in the router.
-    pub unavailable: HashMap<ProviderId, String>,
+    pub unavailable: RwLock<HashMap<ProviderId, String>>,
     /// Result of verifying the audit hash chain; unset until the startup check finishes.
     pub audit_chain_ok: Arc<OnceLock<bool>>,
     pub probes: Arc<Mutex<ProbeCache>>,
@@ -149,11 +151,92 @@ pub(crate) struct State {
 
 impl State {
     /// Config of a provider that was built (and so is in the router).
-    pub fn config_of(&self, id: &ProviderId) -> Option<&ProviderConfig> {
-        if self.unavailable.contains_key(id) {
+    pub fn config_of(&self, id: &ProviderId) -> Option<ProviderConfig> {
+        if self.unavailable_reason(id).is_some() {
             return None;
         }
-        self.configs.iter().find(|c| &c.id == id)
+        self.provider_configs().into_iter().find(|c| &c.id == id)
+    }
+
+    /// Every configured provider, in config order (a snapshot).
+    pub fn provider_configs(&self) -> Vec<ProviderConfig> {
+        self.configs
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Why a configured provider could not be built, if it could not.
+    pub fn unavailable_reason(&self, id: &ProviderId) -> Option<String> {
+        self.unavailable
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned()
+    }
+
+    /// Route `cfg` from now on without a restart: added after the other providers, or replacing
+    /// the one with its id (for example with a new key). `built` is the provider built from it,
+    /// or why it could not be built (it is then listed as unavailable and not routed).
+    pub fn set_provider(
+        &self,
+        cfg: ProviderConfig,
+        built: std::result::Result<Arc<dyn Provider>, String>,
+    ) {
+        let id = cfg.id.clone();
+        {
+            let mut unavailable = self
+                .unavailable
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            match built {
+                Ok(p) => {
+                    unavailable.remove(&id);
+                    // Placed as at startup (`local::tier_map`): on-device and LAN servers
+                    // before the runtime's slots (an unprobed on-device one right after them),
+                    // cloud providers last.
+                    let rank = |loc: Locality, probed: bool| match loc {
+                        Locality::Cloud => 3,
+                        Locality::OnDevice if !probed => 2,
+                        _ => 0,
+                    };
+                    let mine = rank(p.meta().locality, false);
+                    let before = |other: &ProviderId| {
+                        let theirs = if self.slot(other).is_some() {
+                            1
+                        } else {
+                            self.router.provider(other).map_or(3, |o| {
+                                rank(o.meta().locality, self.router.capabilities(other).is_some())
+                            })
+                        };
+                        theirs > mine
+                    };
+                    self.router.set_provider_before(p, &cfg.tiers, &before);
+                }
+                Err(reason) => {
+                    self.router.remove_provider(&id);
+                    unavailable.insert(id.clone(), reason);
+                }
+            }
+        }
+        let mut configs = self.configs.write().unwrap_or_else(PoisonError::into_inner);
+        match configs.iter_mut().find(|c| c.id == id) {
+            Some(c) => *c = cfg,
+            None => configs.push(cfg),
+        }
+    }
+
+    /// Stop routing to provider `id` and forget its config. Returns whether it was configured.
+    pub fn remove_provider(&self, id: &ProviderId) -> bool {
+        self.router.remove_provider(id);
+        self.unavailable
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+        let mut configs = self.configs.write().unwrap_or_else(PoisonError::into_inner);
+        let before = configs.len();
+        configs.retain(|c| &c.id != id);
+        configs.len() != before
     }
 
     pub fn streams(&self) -> MutexGuard<'_, HashMap<String, CancellationToken>> {
@@ -568,8 +651,8 @@ impl Daemon {
             mcp,
             secrets,
             hub,
-            configs,
-            unavailable,
+            configs: RwLock::new(configs),
+            unavailable: RwLock::new(unavailable),
             audit_chain_ok,
             probes: Arc::new(Mutex::new(probes)),
             manifest,

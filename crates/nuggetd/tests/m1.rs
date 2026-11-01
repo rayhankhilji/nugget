@@ -321,6 +321,50 @@ async fn files_source_is_searchable_fresh_and_removable() {
     h.stop().await;
 }
 
+/// GG6-13 / GG6-2: the same folder twice is refused with the existing source's name, and an
+/// empty folder settles with a finished scan report and `nothing_indexable` health.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn duplicate_folders_are_refused_and_empty_folders_settle() {
+    let h = Harness::start(NO_RUNTIME).await;
+    let docs = h.tmp.path().join("docs");
+    std::fs::create_dir_all(docs.join("inner")).unwrap();
+    let info: SourceInfo = h
+        .call(
+            method::SOURCES_ADD,
+            json!({"kind": "files", "name": "Docs", "settings": {"roots": [docs]}}),
+        )
+        .await;
+    for (roots, want) in [
+        (json!([docs]), "This folder is already added as \"Docs\"."),
+        (
+            json!([docs.join("inner")]),
+            "This folder is inside \"Docs\", which is already added.",
+        ),
+        (json!([h.tmp.path()]), "This folder contains \"Docs\""),
+    ] {
+        let (c, msg) = h
+            .call_err(
+                method::SOURCES_ADD,
+                json!({"kind": "files", "name": "Again", "settings": {"roots": roots}}),
+            )
+            .await;
+        assert_eq!(c, code::INVALID_PARAMS, "{msg}");
+        assert!(msg.starts_with(want), "{msg}");
+    }
+    let all: Vec<SourceInfo> = h.call(method::SOURCES_LIST, json!({})).await;
+    assert_eq!(all.len(), 1);
+
+    eventually("empty folder settles", || async {
+        let all: Vec<SourceInfo> = h.call(method::SOURCES_LIST, json!({})).await;
+        let s = all.iter().find(|s| s.id == info.id).unwrap();
+        s.scan.as_ref().is_some_and(|r| r.finished && r.found == 0)
+            && s.health
+                .as_ref()
+                .is_some_and(|h| h.code == "nothing_indexable")
+    })
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn secrets_are_stored_never_echoed_and_cleaned_up() {
     const PASSWORD: &str = "hunter2-very-secret";

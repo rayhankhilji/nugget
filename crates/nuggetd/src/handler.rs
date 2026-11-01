@@ -32,7 +32,7 @@ use crate::ask::{
 };
 use crate::config::tier_name;
 use crate::daemon::{InFlightGuard, State, blocking, spawn_refresh};
-use crate::sources::{client_secret_account, reconcile_settings};
+use crate::sources::{check_duplicate_folders, client_secret_account, reconcile_settings};
 
 /// Upper bounds for list-style requests.
 const MAX_SEARCH_RESULTS: u32 = 200;
@@ -151,11 +151,11 @@ impl RpcHandler {
     fn provider_infos(&self) -> Vec<ProviderInfo> {
         let router = &self.state.router;
         self.state
-            .configs
+            .provider_configs()
             .iter()
             .filter_map(|cfg| {
-                if let Some(reason) = self.state.unavailable.get(&cfg.id) {
-                    return Some(unavailable_info(cfg, reason));
+                if let Some(reason) = self.state.unavailable_reason(&cfg.id) {
+                    return Some(unavailable_info(cfg, &reason));
                 }
                 let p = router.provider(&cfg.id)?;
                 let meta = p.meta();
@@ -206,7 +206,7 @@ impl RpcHandler {
     async fn probe(&self, req: ProbeRequest) -> Result<Value, RpcError> {
         // Runtime slots are probed like any provider, but their results are not persisted (the
         // server's port changes between runs).
-        let cfg = self.state.config_of(&req.provider).cloned();
+        let cfg = self.state.config_of(&req.provider);
         let slot_model = self.state.slot(&req.provider).map(|s| s.model().id.clone());
         let model = match (&cfg, slot_model) {
             (Some(c), _) => c.model.clone(),
@@ -577,6 +577,8 @@ impl RpcHandler {
 
     async fn sources_add(&self, mut spec: SourceSpec) -> Result<Value, RpcError> {
         spec.settings = reconcile_settings(&spec.kind, spec.settings)?;
+        let existing = self.state.ingest.list().await?;
+        check_duplicate_folders(&spec.kind, &spec.settings, &existing, None)?;
         let info = self.state.ingest.add(spec).await?;
         tracing::info!(source = %info.id, kind = %info.kind, "source added");
         self.audit(
@@ -590,8 +592,12 @@ impl RpcHandler {
 
     async fn sources_update(&self, mut update: SourceUpdate) -> Result<Value, RpcError> {
         if let Some(settings) = update.settings.take() {
-            let kind = self.state.ingest.get(&update.id).await?.kind;
-            update.settings = Some(reconcile_settings(&kind, settings)?);
+            let current = self.state.ingest.get(&update.id).await?;
+            let kind = current.kind.clone();
+            let settings = reconcile_settings(&kind, settings)?;
+            let existing = self.state.ingest.list().await?;
+            check_duplicate_folders(&kind, &settings, &existing, Some(&current))?;
+            update.settings = Some(settings);
         }
         let detail = json!({
             "name": update.name,
@@ -799,7 +805,7 @@ impl RpcHandler {
 
     /// Not found, or found in config but unavailable (with the reason).
     fn unknown_provider(&self, id: &ProviderId) -> RpcError {
-        match self.state.unavailable.get(id) {
+        match self.state.unavailable_reason(id) {
             Some(reason) => RpcError::from(Error::NotFound(format!(
                 "provider `{id}` is unavailable: {reason}"
             ))),

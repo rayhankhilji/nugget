@@ -121,6 +121,10 @@ impl FsConnector {
                     Some(f) => sink.checkpoint(f(n)).await,
                     None => Ok(()),
                 },
+                Emit::Scan(report) => {
+                    sink.report_scan(report).await;
+                    Ok(())
+                }
             };
             if let Err(e) = step {
                 forwarded = Err(e);

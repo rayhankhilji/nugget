@@ -401,6 +401,61 @@ pub struct SourceInfo {
     /// daemon from `state`, `last_error` and recent item errors; absent from older daemons.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<SourceHealth>,
+    /// What the last whole-folder scan found and skipped (files sources); absent until a
+    /// connector reports one, after the settings change or the source is turned on or off, and
+    /// from older daemons. Live (watcher) changes do not refresh it, so `found == 0` is only
+    /// meaningful while `items == 0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<ScanReport>,
+}
+
+/// What a source's scan pass found and what it skipped, so "nothing indexed" can be told apart
+/// from "still working" and explained.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanReport {
+    /// The walk of this pass ended (false while it runs).
+    #[serde(default)]
+    pub finished: bool,
+    /// Files that will be (or already are) indexed this pass.
+    #[serde(default)]
+    pub found: u64,
+    /// Changes (new or changed files, plus deletions) this pass sends for indexing; files
+    /// already indexed and unchanged are not counted. The progress total of the pass.
+    #[serde(default)]
+    pub to_index: u64,
+    /// Files skipped because their type is not indexed.
+    #[serde(default)]
+    pub unsupported: u64,
+    /// Files skipped because they are over `max_file_bytes`.
+    #[serde(default)]
+    pub too_large: u64,
+    /// Files or subfolders that could not be read.
+    #[serde(default)]
+    pub unreadable: u64,
+    /// Roots that are not there (unmounted or moved).
+    #[serde(default)]
+    pub roots_missing: u64,
+    /// Roots that exist but cannot be read (permission denied).
+    #[serde(default)]
+    pub roots_denied: u64,
+    #[serde(default)]
+    pub max_file_bytes: u64,
+    /// Up to 5 examples of skipped files, first found first.
+    #[serde(default)]
+    pub skipped: Vec<SkippedFile>,
+}
+
+/// One skipped file in a [`ScanReport`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedFile {
+    /// Relative to its root, `/`-separated.
+    #[serde(default)]
+    pub path: String,
+    /// `unsupported`, `too_large` or `unreadable`.
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
 }
 
 /// A source's sync health, for people rather than logs.
@@ -408,7 +463,8 @@ pub struct SourceInfo {
 pub struct SourceHealth {
     /// Stable machine code (`ok`, `syncing`, `disabled`, `reconnect`, `not_set_up`,
     /// `rate_limited`, `offline`, `server_error`, `too_large`, `disk_full`, `config`,
-    /// `item_errors`, `error`); clients translate it and fall back to `reason`/`fix`.
+    /// `item_errors`, `nothing_indexable`, `unreadable`, `error`); clients translate it and
+    /// fall back to `reason`/`fix`.
     pub code: String,
     /// One sentence on what is going on, in English.
     pub reason: String,

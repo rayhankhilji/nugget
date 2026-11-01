@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use nugget_connector::{CancellationToken, Change, ChangeSink, Content, Document};
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-use nugget_core::ipc::{IngestPhase, IngestProgress};
+use nugget_core::ipc::{IngestPhase, IngestProgress, ScanReport};
 use nugget_core::{Error, Result};
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
 use serde_json::{Map, Value, json};
@@ -77,18 +77,27 @@ pub(crate) struct PipelineSink {
     tx: mpsc::Sender<Op>,
     mode: Mode,
     inner: Arc<Inner>,
+    source: SourceId,
 }
 
 impl PipelineSink {
-    pub fn new(tx: mpsc::Sender<Op>, mode: Mode, inner: Arc<Inner>) -> Self {
-        Self { tx, mode, inner }
+    pub fn new(tx: mpsc::Sender<Op>, mode: Mode, inner: Arc<Inner>, source: SourceId) -> Self {
+        Self {
+            tx,
+            mode,
+            inner,
+            source,
+        }
     }
 
     /// Mark the start of a sync pass (ordered with the queue).
     pub async fn begin_pass(&self) -> Result<()> {
         let (ack, rx) = oneshot::channel();
         self.push(OpKind::BeginPass(ack)).await?;
-        rx.await.map_err(|_| Error::Cancelled)
+        rx.await.map_err(|_| Error::Cancelled)?;
+        // The previous pass's report no longer gives this pass's total.
+        self.inner.scan_pass_begins(&self.source);
+        Ok(())
     }
 
     async fn push(&self, kind: OpKind) -> Result<()> {
@@ -151,6 +160,12 @@ impl ChangeSink for PipelineSink {
     async fn report_problem(&self, key: ItemKey, message: String) -> Result<()> {
         self.push(OpKind::Problem(key, message)).await
     }
+
+    /// Not queued: the report describes the walk, which is done long before its changes are
+    /// applied, and the UI should learn about an empty folder right away.
+    async fn report_scan(&self, report: ScanReport) {
+        self.inner.set_scan(&self.source, report).await;
+    }
 }
 
 enum Outcome {
@@ -177,6 +192,8 @@ pub(crate) struct Worker {
     done: u64,
     last_progress: Instant,
     paused: bool,
+    /// The last change came from the watcher (no scan total applies to it).
+    live: bool,
 }
 
 impl Worker {
@@ -196,6 +213,7 @@ impl Worker {
             done: 0,
             last_progress: Instant::now(),
             paused: false,
+            live: false,
         }
     }
 
@@ -242,6 +260,8 @@ impl Worker {
                 let _ = ack.send(r);
             }
             OpKind::Change(change) => {
+                self.live = op.mode == Mode::Live;
+                let live_upsert = self.live && matches!(change, Change::Upsert(_));
                 if op.mode == Mode::Backfill && !self.wait_for_power(cancel).await {
                     self.inner.metrics.dequeued();
                     return;
@@ -257,6 +277,9 @@ impl Worker {
                 self.inner.metrics.dequeued();
                 match outcome {
                     Outcome::Applied => {
+                        if live_upsert {
+                            self.inner.scan_live_change(&self.source).await;
+                        }
                         self.inner.metrics.record_freshness(op.observed.elapsed());
                         self.done += 1;
                         self.progress(false);
@@ -311,6 +334,17 @@ impl Worker {
         }
     }
 
+    /// What this pass is expected to index, once the connector's scan finished (never below
+    /// `done`: deletes and live changes count too).
+    fn total(&self) -> Option<u64> {
+        if self.live {
+            return None;
+        }
+        self.inner
+            .scan_total(&self.source)
+            .map(|t| t.max(self.done))
+    }
+
     fn progress(&mut self, force: bool) {
         if force
             || self.done == 1
@@ -322,7 +356,7 @@ impl Worker {
                 source: self.source.clone(),
                 phase: IngestPhase::Indexing,
                 done: self.done,
-                total: None,
+                total: self.total(),
                 error: None,
             }));
         }
@@ -334,7 +368,7 @@ impl Worker {
             source: self.source.clone(),
             phase: IngestPhase::Indexing,
             done: self.done,
-            total: None,
+            total: self.total(),
             error: Some(msg),
         }));
     }

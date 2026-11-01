@@ -86,7 +86,8 @@ describe("axe", () => {
   it("the add-source wizard opened from onboarding has no violations", async () => {
     const state: OnboardingState = { version: 1, step: "source", completed: [], skipped: [], ai: null, finished: false };
     const { container } = await render(<Onboarding connected initial={state} onExit={() => {}} />);
-    await click(container.querySelector(".ob-main .btn-primary"));
+    // The folder button: "Add a folder", or "Add another source" once the daemon lists sources.
+    await click(container.querySelector(".ob-main .ob-row-start .btn"));
     expect(document.querySelector("dialog")).not.toBeNull();
     expect(await violations()).toEqual([]);
   });
