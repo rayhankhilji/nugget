@@ -50,6 +50,7 @@ object per line, over a local socket. The protocol types live in `nugget_core::i
 | `models.list` | `{}` | list of `ModelInfo`: `id`, `size_bytes`, `installed`, `recommended`, `family`, `tiers`, `license`, `revision`, `update_available` | yes |
 | `models.install` | `ModelInstallRequest`: `{id}` | `null`, then `models.progress` notifications | yes |
 | `egress.recent` | `EgressRecentRequest`: `{limit}` (at most 1000) | list of `EgressEvent`: `at`, `host`, `feature`, `bytes_sent`, `bytes_received`, `items` | yes |
+| `egress.record` | `EgressRecordRequest`: `host` (bare `host[:port]`), `feature` (`update_check` or `update_download` only), `bytes_sent`, `bytes_received` (default 0), `at` (RFC 3339, default now; at most 5 minutes ahead and 30 days old; stored in UTC) | `null`. A request the desktop app made itself, written to the ledger with no items. Host: a DNS name, an IPv4 address or a bracketed IPv6 address, optional port. At most 60 rows a minute across all clients (`SERVER_BUSY` beyond) | yes |
 | `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat` or `embedding`), `state`, `provider`, `error`. Empty when `[runtime]` is disabled | yes |
 
 `RuntimeInfo.state` is one of `not_installed`, `stopped`, `starting`, `ready`, `failed`.
