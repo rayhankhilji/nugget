@@ -220,55 +220,151 @@ pub fn shows_object(goal: &str, targets: &[String]) -> bool {
     })
 }
 
-/// Labels of steps that destroy data for good.
-const IRREVERSIBLE: &[&str] = &["empty", "erase", "purge", "wipe", "permanently", "shred"];
+/// Steps that destroy data for good, in the nine UI languages (QA GG3-2, MM1-3): emptying the
+/// trash and deleting permanently. Shared with nugget-computer's risk table, which treats any of
+/// them as Destroy. Han and kana terms match as text, the others as whole words.
+#[rustfmt::skip]
+pub const IRREVERSIBLE: &[&str] = &[
+    // English
+    "empty", "erase", "purge", "wipe", "permanently", "shred", "forever", "clear trash",
+    "clear the trash", "clear bin", "clear recycle bin", "delete forever",
+    // German
+    "papierkorb leeren", "leere den papierkorb", "endgültig", "dauerhaft löschen", "unwiderruflich",
+    // Spanish
+    "vaciar papelera", "vaciar la papelera", "vacia la papelera", "definitivamente",
+    "permanentemente", "para siempre",
+    // French
+    "vider la corbeille", "vider corbeille", "vide la corbeille", "videz la corbeille",
+    "définitivement",
+    // Portuguese
+    "esvaziar lixeira", "esvaziar a lixeira", "esvazie a lixeira", "para sempre",
+    // Japanese
+    "ゴミ箱を空", "完全に削除", "完全削除", "永久に削除",
+    // Chinese
+    "清空回收站", "清空废纸篓", "清空垃圾桶", "永久删除", "彻底删除",
+    // Hindi
+    "ट्रैश खाली", "बिन खाली", "स्थायी रूप से", "हमेशा के लिए",
+    // Arabic
+    "إفراغ سلة", "افراغ سلة", "حذف نهائي", "نهائيا",
+];
 
-/// When `label` names an irreversible step (Empty Trash, Erase) that `goal` does not ask for:
-/// the word. Asking for any irreversible step ("empty", "erase", "permanently") allows them.
-pub fn unrequested_irreversible(goal: &str, label: &str) -> Option<&'static str> {
-    let label_words: Vec<String> = words(label).into_iter().map(|(_, l)| l).collect();
-    let word = IRREVERSIBLE
-        .iter()
-        .copied()
-        .find(|w| label_words.iter().any(|l| l == w))?;
-    let goal_words: Vec<String> = words(goal).into_iter().map(|(_, l)| l).collect();
-    let asked = goal_words.iter().any(|g| {
-        IRREVERSIBLE.iter().any(|w| {
-            g == w
-                || g.strip_prefix(w)
-                    .is_some_and(|r| ["s", "ed", "ing"].contains(&r))
+/// Lowercase words: accents and Arabic short vowels dropped, apostrophes removed ("don't" is
+/// `dont`), Devanagari and Arabic marks kept inside their words.
+fn plain_words(text: &str) -> Vec<String> {
+    let folded: String = text
+        .to_lowercase()
+        .chars()
+        .filter(|c| !matches!(c, '\'' | '’' | '\u{064B}'..='\u{0652}'))
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ä' | 'ã' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'ö' | 'õ' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            'أ' | 'إ' | 'آ' => 'ا',
+            c if c.is_alphanumeric() || matches!(c, '\u{0900}'..='\u{097F}') => c,
+            _ => ' ',
         })
-    });
-    (!asked).then_some(word)
+        .collect();
+    folded.split_whitespace().map(str::to_owned).collect()
 }
 
-/// Verbs that need a send, a deletion or a payment to have happened before the request is done.
-const SEND_VERBS: &[&str] = &["send", "reply", "forward", "respond"];
-const DESTROY_VERBS: &[&str] = &["delete", "trash", "remove", "erase"];
-const SPEND_VERBS: &[&str] = &["buy", "pay", "purchase"];
-/// Words that say the request stops short of the act ("draft a reply, don't send it").
-const STOP_SHORT: &[&str] = &["dont", "not", "without", "draft", "never"];
+/// Han and kana: written without spaces, so matched as text.
+fn unspaced(term: &str) -> bool {
+    term.chars()
+        .any(|c| matches!(c, '\u{3040}'..='\u{30FF}' | '\u{3400}'..='\u{9FFF}'))
+}
 
-/// The least risk class some action must have reached for `goal` to be done: [`RiskClass::Send`]
-/// for "reply", "send", "forward" (or a goal that starts with "email"), [`RiskClass::Destroy`]
-/// for "delete", [`RiskClass::Spend`] for "buy" or "pay". `None` when the goal names none of these
-/// or says it stops short.
-pub fn required_risk(goal: &str) -> Option<RiskClass> {
-    let w: Vec<String> = words(goal).into_iter().map(|(_, l)| l).collect();
-    if w.iter().any(|x| STOP_SHORT.contains(&x.as_str())) {
-        return None;
-    }
-    let has = |verbs: &[&str]| w.iter().any(|x| verbs.contains(&x.as_str()));
-    let first_is_mail = w.first().is_some_and(|x| x == "email" || x == "mail");
-    if has(SEND_VERBS) || first_is_mail {
-        Some(RiskClass::Send)
-    } else if has(DESTROY_VERBS) {
-        Some(RiskClass::Destroy)
-    } else if has(SPEND_VERBS) {
-        Some(RiskClass::Spend)
+/// The first of `terms` in `text`: as text for Han and kana, otherwise as whole words (an `s`,
+/// `d`, `ed` or `ing` ending allowed on a one-word Latin term when `inflect`). Accents do not
+/// matter.
+fn find_term(text: &str, terms: &[&'static str], inflect: bool) -> Option<&'static str> {
+    let ws = plain_words(text);
+    let flat = ws.concat();
+    let joined = format!(" {} ", ws.join(" "));
+    terms.iter().copied().find(|t| {
+        let tw = plain_words(t);
+        if unspaced(t) {
+            flat.contains(&tw.concat())
+        } else if let [one] = tw.as_slice() {
+            ws.iter().any(|w| {
+                w.strip_prefix(one.as_str()).is_some_and(|r| {
+                    r.is_empty()
+                        || (inflect && one.is_ascii() && ["s", "d", "ed", "ing"].contains(&r))
+                })
+            })
+        } else {
+            joined.contains(&format!(" {} ", tw.join(" ")))
+        }
+    })
+}
+
+/// When `label` names an irreversible step (Empty Trash, Delete forever, Papierkorb leeren) that
+/// `goal` does not ask for: the matched term. Asking for any irreversible step allows them.
+pub fn unrequested_irreversible(goal: &str, label: &str) -> Option<&'static str> {
+    let word = irreversible(label)?;
+    irreversible(goal).is_none().then_some(word)
+}
+
+/// The irreversible-step term in `text`, if any ([`IRREVERSIBLE`]).
+pub fn irreversible(text: &str) -> Option<&'static str> {
+    find_term(text, IRREVERSIBLE, true)
+}
+
+/// Verbs, in the nine UI languages, that need a send, a deletion or a payment to have happened
+/// before the request is done (QA GG3-8, MM1-2).
+#[rustfmt::skip]
+const SEND_VERBS: &[&str] = &[
+    "send", "reply", "forward", "respond", "sende", "senden", "schicke", "schicken", "verschicke",
+    "antworte", "antworten", "weiterleiten", "leite", "envia", "enviar", "manda", "mandar",
+    "responde", "responder", "reenvia", "reenviar", "envoie", "envoyer", "envoyez", "reponds",
+    "repondre", "repondez", "transfere", "transferer", "transferez", "envie", "responda",
+    "encaminhe", "encaminhar", "mande", "送信", "送って", "送る", "返信", "転送", "发送", "发给", "回复", "转发",
+    "भेजें", "भेजो", "भेज दो", "भेजिए", "जवाब दें", "जवाब दो", "أرسل", "ارسل", "رد على", "ردي على",
+];
+#[rustfmt::skip]
+const DESTROY_VERBS: &[&str] = &[
+    "delete", "trash", "remove", "erase", "losche", "loschen", "entferne", "entfernen", "elimina",
+    "eliminar", "borra", "borrar", "supprime", "supprimer", "supprimez", "efface", "effacer",
+    "exclua", "excluir", "apague", "apagar", "remova", "remover", "削除", "消して", "消去", "删除", "删掉",
+    "移除", "हटाएं", "हटाओ", "हटा दो", "डिलीट", "احذف", "امسح", "أزل",
+];
+#[rustfmt::skip]
+const SPEND_VERBS: &[&str] = &[
+    "buy", "pay", "purchase", "kaufe", "kaufen", "bezahle", "bezahlen", "compra", "comprar", "paga",
+    "pagar", "achete", "acheter", "payer", "payez", "compre", "pague", "購入", "買って", "支払", "购买",
+    "支付", "付款", "खरीदें", "खरीदो", "भुगतान", "اشتر", "ادفع",
+];
+/// Words that may say the request stops short of the act ("draft a reply, don't send it").
+#[rustfmt::skip]
+const STOP_SHORT: &[&str] = &[
+    "dont", "not", "without", "never", "draft", "nicht", "ohne", "nie", "entwurf", "no", "sin",
+    "nunca", "borrador", "ne", "pas", "sans", "jamais", "brouillon", "nao", "sem", "rascunho",
+    "ないで", "しない", "下書き", "不要", "别", "不用", "草稿", "मत", "नहीं", "बिना", "ड्राफ्ट", "لا", "دون",
+    "بدون", "مسودة",
+];
+
+/// What a finished request needed: the least risk class some action must have reached
+/// ([`RiskClass::Send`] for "reply", "sende", "返信"…, [`RiskClass::Destroy`] for "delete",
+/// [`RiskClass::Spend`] for "buy"), and whether the goal may say it stops short of the act.
+/// A model's success claim is not trusted when no such action happened: it is a failure, or
+/// unverified when the goal may stop short. `None` when the goal names none of these verbs.
+pub fn required_risk(goal: &str) -> Option<(RiskClass, bool)> {
+    let first_is_mail = plain_words(goal)
+        .first()
+        .is_some_and(|x| x == "email" || x == "mail");
+    let need = if first_is_mail || find_term(goal, SEND_VERBS, true).is_some() {
+        RiskClass::Send
+    } else if find_term(goal, DESTROY_VERBS, true).is_some() {
+        RiskClass::Destroy
+    } else if find_term(goal, SPEND_VERBS, true).is_some() {
+        RiskClass::Spend
     } else {
-        None
-    }
+        return None;
+    };
+    Some((need, find_term(goal, STOP_SHORT, false).is_some()))
 }
 
 /// A word that can say which item is meant: two characters or more, not a [`STOP_WORDS`] word,
@@ -501,6 +597,38 @@ mod tests {
                 None,
             ),
             ("Permanently delete old.txt", "Empty Trash", None),
+            // MM1-3: other wordings and the other UI languages.
+            ("Delete backup.zip", "Clear Trash", Some("clear trash")),
+            ("Delete backup.zip", "Delete forever", Some("forever")),
+            (
+                "Lösche backup.zip",
+                "Papierkorb leeren",
+                Some("papierkorb leeren"),
+            ),
+            (
+                "Elimina backup.zip",
+                "Vaciar papelera",
+                Some("vaciar papelera"),
+            ),
+            (
+                "Supprime backup.zip",
+                "Vider la corbeille",
+                Some("vider la corbeille"),
+            ),
+            (
+                "Exclua backup.zip",
+                "Excluir permanentemente",
+                Some("permanentemente"),
+            ),
+            (
+                "backup.zipを削除して",
+                "ゴミ箱を空にする",
+                Some("ゴミ箱を空"),
+            ),
+            ("删除 backup.zip", "清空回收站", Some("清空回收站")),
+            ("backup.zip हटाएं", "ट्रैश खाली करें", Some("ट्रैश खाली")),
+            ("احذف backup.zip", "إفراغ سلة المهملات", Some("إفراغ سلة")),
+            ("Vide la corbeille", "Vider la corbeille", None),
         ] {
             assert_eq!(
                 unrequested_irreversible(goal, label),
@@ -509,13 +637,24 @@ mod tests {
             );
         }
 
+        use RiskClass::{Destroy, Send, Spend};
         for (goal, want) in [
-            ("Reply to Sam and tell him yes", Some(RiskClass::Send)),
-            ("Email Bob about Q3", Some(RiskClass::Send)),
-            ("Delete the old newsletter email", Some(RiskClass::Destroy)),
-            ("Buy a USB-C cable", Some(RiskClass::Spend)),
-            ("Draft a reply to Sam but don't send it", None),
+            ("Reply to Sam and tell him yes", Some((Send, false))),
+            ("Email Bob about Q3", Some((Send, false))),
+            ("Delete the old newsletter email", Some((Destroy, false))),
+            ("Buy a USB-C cable", Some((Spend, false))),
+            ("Draft a reply to Sam but don't send it", Some((Send, true))),
             ("Turn on dark mode", None),
+            // MM1-2: the object "draft" still needs a send; other languages count.
+            ("Send the draft to Priya.", Some((Send, true))),
+            ("Sende die E-Mail an Priya.", Some((Send, false))),
+            ("Envoie le message à Priya.", Some((Send, false))),
+            ("Priyaにメールを送信して", Some((Send, false))),
+            ("给Priya回复邮件", Some((Send, false))),
+            ("Priya को ईमेल भेजें", Some((Send, false))),
+            ("أرسل البريد إلى بريا", Some((Send, false))),
+            ("Lösche die alte Datei", Some((Destroy, false))),
+            ("Compra un cable USB-C", Some((Spend, false))),
         ] {
             assert_eq!(required_risk(goal), want, "{goal}");
         }

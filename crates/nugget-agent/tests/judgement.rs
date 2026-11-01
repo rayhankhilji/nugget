@@ -194,16 +194,24 @@ async fn a_control_that_changed_before_the_press_is_not_pressed() {
     ));
 }
 
-/// GG3-8: "done" for a request to send, when nothing was sent, is not success.
+/// GG3-8, MM1-2: "done" for a request to send, when nothing was sent, is not success, whatever
+/// the language and even when the goal mentions a draft.
 #[tokio::test]
 async fn done_without_the_send_the_goal_asks_for_is_not_success() {
-    let turns = vec![one("c1", "set_value", json!({"value": 1})), fin("done")];
-    let (run, _) = exec(registry(&World::new()), turns, "Send Bob the Q3 numbers").await;
-    assert!(
-        matches!(&run.outcome, Outcome::Failed(d) if d.contains("no such action")),
-        "{:?}",
-        run.outcome
-    );
+    for goal in [
+        "Send Bob the Q3 numbers",
+        "Send the draft to Priya.",
+        "Sende die E-Mail an Priya.",
+        "Priyaにメールを送信して",
+    ] {
+        let turns = vec![one("c1", "set_value", json!({"value": 1})), fin("done")];
+        let (run, _) = exec(registry(&World::new()), turns, goal).await;
+        let honest = match &run.outcome {
+            Outcome::Failed(d) | Outcome::Unverified(d) => d.contains("nothing was sent"),
+            _ => false,
+        };
+        assert!(honest, "{goal}: {:?}", run.outcome);
+    }
 }
 
 /// GG3-14: the same failing call three times ends the run.
