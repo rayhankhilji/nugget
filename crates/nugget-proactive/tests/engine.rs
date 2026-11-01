@@ -667,9 +667,17 @@ async fn local_judge_enriches_but_never_invents() {
         provider.requests.lock().unwrap()[0].feature,
         "proactive_judge"
     );
-    // Already enriched cards are not re-sent.
+    // GG4-10: the judge knows today's date and who owes whom.
+    let sent = format!("{:?}", provider.requests.lock().unwrap()[0].messages);
+    assert!(sent.contains("2026-10-28") && sent.contains("has not replied yet"));
+    // Already enriched cards are not re-sent...
     assert_eq!(p.refresh(now()).await.unwrap().judged, 0);
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    // ...until their due date passes (the renewal, 5 days out).
+    let later = now() + Duration::days(6);
+    assert!(p.refresh(later).await.unwrap().judged > 0);
+    let sent = format!("{:?}", provider.requests.lock().unwrap()[1].messages);
+    assert!(sent.contains("(overdue)"), "{sent}");
 
     // A failing judge falls back to the model.
     let provider = FakeProvider::new(Locality::OnDevice, "not json at all");

@@ -193,9 +193,10 @@ impl Proactive {
             let mut pending: Vec<(&Candidate, f64)> = cands
                 .iter()
                 .filter(|c| {
-                    snapshot
-                        .by_dedup_key(&c.dedup_key)
-                        .is_none_or(|card| !card.state.is_terminal() && card.enrichment.is_none())
+                    snapshot.by_dedup_key(&c.dedup_key).is_none_or(|card| {
+                        !card.state.is_terminal()
+                            && card.enrichment.as_ref().is_none_or(|e| e.stale(c.due, now))
+                    })
                 })
                 .filter_map(|c| {
                     let (p, _, effects) = score::learned_score(
@@ -216,7 +217,7 @@ impl Proactive {
                     break;
                 }
                 if judge_allowed(locality, self.cfg.judge_allow_cloud, c.sensitive) {
-                    inputs.push(JudgeInput::from_candidate(c));
+                    inputs.push(JudgeInput::from_candidate(c, self.cfg_now().to_local(now)));
                 } else {
                     report.judge_withheld += 1;
                 }
@@ -250,13 +251,23 @@ impl Proactive {
             let enrichment = enrichments
                 .iter()
                 .find(|e| e.dedup_key == cand.dedup_key)
-                .cloned();
+                .map(|e| Enrichment {
+                    at: Some(now),
+                    ..e.clone()
+                });
             match state.cards.get_mut(&id) {
                 Some(card) if card.state.is_terminal() => report.suppressed += 1,
                 Some(card) => {
                     card.refresh_from(cand, now);
                     if enrichment.is_some() {
                         card.enrichment = enrichment;
+                    } else if card
+                        .enrichment
+                        .as_ref()
+                        .is_some_and(|e| e.stale(card.due, now))
+                    {
+                        // Not redone: the deterministic detail beats an out-of-date summary.
+                        card.enrichment = None;
                     }
                     report.updated += 1;
                 }
