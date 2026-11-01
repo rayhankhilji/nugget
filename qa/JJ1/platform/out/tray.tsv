@@ -1,0 +1,5 @@
+default	alive=yes	window=visible	panics=0	no tray icon; closing the window quits Nugget reason=no StatusNotifier host (org.kde.StatusNotifierWatcher) on the session bus 	
+NUGGET_TRAY=on	alive=yes	window=visible	panics=0		
+NUGGET_TRAY=off --minimized	alive=yes	window=visible	panics=0	no tray icon; closing the window quits Nugget reason=NUGGET_TRAY=off 	
+no host, --minimized	alive=yes	window=visible	panics=0	no tray icon; closing the window quits Nugget reason=no StatusNotifier host (org.kde.StatusNotifierWatcher) on the session bus 	
+no host, close window	alive=yes	window=visible	panics=0	no tray icon; closing the window quits Nugget reason=no StatusNotifier host (org.kde.StatusNotifierWatcher) on the session bus 	after_close_alive=no

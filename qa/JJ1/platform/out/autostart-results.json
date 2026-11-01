@@ -1,0 +1,19 @@
+[
+ {
+  "id": "11",
+  "name": "launch at login toggle writes/removes the XDG autostart entry",
+  "ok": true,
+  "evidence": {
+   "file": "$HOME/xdg-config/autostart/dev.nugget.desktop.desktop",
+   "existed_before": false,
+   "written": true,
+   "exec_line": "\"/tmp/claude-0/qa dir \\\\$HOME \\\\\"q\\\\\" 50%%/nugget-desktop\" --minimized",
+   "app_path": "/tmp/claude-0/qa dir $HOME \"q\" 50%/nugget-desktop",
+   "removed": true,
+   "entry": "[Desktop Entry]\nType=Application\nName=Nugget\nComment=Open Nugget in the tray at login\nExec=\"/tmp/claude-0/qa dir \\\\$HOME \\\\\"q\\\\\" 50%%/nugget-desktop\" --minimized\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+   "settings_files": [
+    "dev.nugget.desktop/settings.json"
+   ]
+  }
+ }
+]

@@ -66,3 +66,22 @@ candidate must be reproduced from this text alone; record the observed output.
 - **C-P1** Some invisible/bidi characters pass the link sanitiser: U+061C, U+00AD, U+2060, U+2028 stay in a
   `nugget://search?q=` query. Repro: `cd qa/JJ1/platform/deeplink-probe && cargo build --offline -q &&
   ./target/debug/jj1-deeplink-probe < ../links.tsv | grep -E 'alm|softhyphen|wordjoiner|linesep'`.
+
+## Round 2: overlay and quick ask in the real app (II3, II4)
+Driver: `qa/JJ1/overlay/run.sh --out DIR --only <ids>` (Xvfb + openbox + session bus; real debug
+`nugget-desktop`, real `nuggetd`, controllable mock provider `qa/JJ1/overlay/mock.mjs`, the GTK
+fixture of `nugget-a11y` as the target). Rebuild first at 44b9e11 if the binaries are older.
+- **C-O1** A complete one-line reply such as `"Sure, I'll email you the slides tomorrow."`,
+  `"Okay, I will reply to Sam today."` or `"Great, the new version looks good to me!"` reaches the
+  overlay as an empty `done` draft ("Draft ready" with no text); Enter does nothing. Scenario s10.
+  Suspected owner: `crates/nugget-draft/src/post.rs` `preamble_len`. Also check the stripping directly
+  with a unit-level call if cheap (e.g. a scratch crate depending on nugget-draft).
+- **C-O2** Trigger in the composer, wait for done, click the fixture's Search entry (the overlay stays),
+  click the overlay, press Enter: the draft goes into the Search entry, not the composer. Scenario s9 (part 9a; run with `--only s9`).
+- **C-O3** Trigger, wait for done, then activate the target window: the overlay stays on top, Esc does
+  nothing, and later double taps fire (probe `trigger`) but produce no views until the overlay is clicked
+  and Esc is pressed. Scenario s9 (part 9c).
+- **C-O4** Pressing S while a draft is still streaming sends a refine request carrying only the text
+  shown so far, and the original stream is cut. Scenario s3 (the streaming part).
+- **C-O6** (low) An autostart Exec path containing `%` (escaped `%%` per spec) makes
+  `Gio.DesktopAppInfo` return NULL. `qa/JJ1/platform/tray.sh` / `out/autostart-results.json`.
