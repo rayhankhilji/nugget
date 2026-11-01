@@ -188,8 +188,14 @@ impl PostProcessor {
             if !complete && could_be_preamble(&lower) {
                 return None;
             }
-            match preamble_len(&lower, complete) {
+            // A whole line is a preamble only when the draft goes on after it: "Sure, I'll
+            // email you the slides tomorrow." on its own is the reply (QA JJ1-4).
+            let more = !rest[line.len()..].trim().is_empty();
+            match preamble_len(&lower, complete, more) {
                 Some(k) => pos = skip_ws(raw, pos + k),
+                None if !last && !more && preamble_len(&lower, complete, true).is_some() => {
+                    return None;
+                }
                 None => break,
             }
         }
@@ -321,7 +327,7 @@ fn could_be_preamble(lower: &str) -> bool {
 
 /// Length in bytes of a preamble at the start of this lower-cased first line, if it is one.
 /// Lower-casing is ASCII-only, so offsets match the original.
-fn preamble_len(lower: &str, complete: bool) -> Option<usize> {
+fn preamble_len(lower: &str, complete: bool, more: bool) -> Option<usize> {
     if !PREAMBLE_STARTS.iter().any(|s| lower.starts_with(s)) {
         return None;
     }
@@ -337,7 +343,7 @@ fn preamble_len(lower: &str, complete: bool) -> Option<usize> {
         return Some(c + 1);
     }
     let t = lower.trim_end();
-    if complete && t.len() <= 120 && has_meta(t) && t.ends_with([':', '.', '!']) {
+    if complete && more && t.len() <= 120 && has_meta(t) && t.ends_with([':', '.', '!']) {
         return Some(lower.len());
     }
     None
@@ -624,9 +630,15 @@ fn strip_signoff(t: &mut String) {
 /// Byte offset just past the last sentence end (`.`, `!`, `?` followed by whitespace, or a
 /// newline).
 fn last_sentence_end(s: &str) -> Option<usize> {
+    sentence_ends(s).next_back()
+}
+
+/// Byte offsets just after each sentence end: a line break, `.`/`!`/`?` before whitespace, or a
+/// CJK full stop, exclamation or question mark.
+fn sentence_ends(s: &str) -> impl DoubleEndedIterator<Item = usize> + '_ {
     s.char_indices()
         .filter(|(i, c)| {
-            *c == '\n'
+            matches!(c, '\n' | '。' | '！' | '？')
                 || (matches!(c, '.' | '!' | '?')
                     && s[i + c.len_utf8()..]
                         .chars()
@@ -634,37 +646,24 @@ fn last_sentence_end(s: &str) -> Option<usize> {
                         .is_some_and(char::is_whitespace))
         })
         .map(|(i, c)| i + c.len_utf8())
-        .next_back()
 }
 
+/// Length in words, counting Chinese, Japanese and Thai by characters (QA GG1-8).
 pub(crate) fn count_words(s: &str) -> usize {
-    s.split_whitespace().count()
+    nugget_voice::word_units(s)
 }
 
 /// Cut `s` to at most `max` words, at the last sentence end inside the limit when there is one
 /// past the half-way mark; never shorter than `min_len` bytes (already emitted).
 fn cut_to_words(s: &str, max: usize, min_len: usize) -> String {
-    let mut limit = s.len();
-    for (n, (i, _)) in s
-        .char_indices()
-        .filter(|(i, c)| !c.is_whitespace() && (*i == 0 || s[..*i].ends_with(char::is_whitespace)))
-        .enumerate()
-    {
-        if n == max {
-            limit = i;
-            break;
-        }
-    }
-    let window = &s[..limit];
-    let half = s
-        .char_indices()
-        .filter(|(i, c)| !c.is_whitespace() && (*i == 0 || s[..*i].ends_with(char::is_whitespace)))
-        .nth(max / 2)
-        .map_or(0, |(i, _)| i);
-    let sentence_end = window
-        .char_indices()
-        .filter(|(i, c)| matches!(c, '.' | '!' | '?' | '\n') && *i >= half)
-        .map(|(i, c)| i + c.len_utf8())
+    let limit = nugget_voice::word_units_until(s, max as f32)
+        .0
+        .unwrap_or(s.len());
+    let half = nugget_voice::word_units_until(s, (max / 2) as f32)
+        .0
+        .unwrap_or(0);
+    let sentence_end = sentence_ends(&s[..limit])
+        .filter(|e| *e > half)
         .rfind(|e| *e >= min_len);
     let end = sentence_end.unwrap_or(limit).max(min_len).min(s.len());
     s[..end].trim_end().to_owned()
@@ -735,6 +734,9 @@ mod tests {
             "p|Thursday works for me.\n\nBest,\nTanuj|Thursday works for me.\n\nBest,\nTanuj",
             "p|Thursday works for me.\n\nLet me know if you'd like any changes!|Thursday works for me.",
             "b|Sure! Here's a draft:\n\n\"Hi Sam,\n\nThursday [1] works.\n\nBest,\nT\"\n\nLet me know if that works!|Thursday works.",
+            // QA JJ1-4: a complete one-line reply is not a preamble.
+            "p|Sure, I'll email you the slides tomorrow.|Sure, I'll email you the slides tomorrow.",
+            "p|Great, the new version looks good to me!|Great, the new version looks good to me!",
         ];
         for case in cases {
             let [o, text, want] = case.splitn(3, '|').collect::<Vec<_>>()[..] else {
@@ -749,6 +751,20 @@ mod tests {
             };
             assert_eq!(by_char(opts, text), want, "{text:?}");
         }
+    }
+
+    /// QA GG1-8: Japanese is measured in characters, and `。` ends a sentence.
+    #[test]
+    fn cjk_drafts_are_measured_and_cut_by_characters() {
+        assert_eq!(count_words("今日は良い天気です"), 5);
+        let opts = PostOptions {
+            plain_text: true,
+            max_words: Some(10),
+            ..Default::default()
+        };
+        let long =
+            "了解です。明日の会議は十時からです。資料は私が準備します。よろしくお願いします。";
+        assert_eq!(by_char(opts, long), "了解です。明日の会議は十時からです。");
     }
 
     #[test]

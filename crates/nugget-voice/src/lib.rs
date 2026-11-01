@@ -32,7 +32,9 @@ pub use profile::{
     RefreshReport, VOICE_CURSOR_SOURCE, VOICE_SNAPSHOT_SOURCE, VoiceConfig, VoiceProfile,
 };
 pub use stats::style_distance;
-pub use text::{normalize_greeting, normalize_signoff};
+pub use text::{
+    normalize_greeting, normalize_signoff, unspaced_weight, word_units, word_units_until,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -744,7 +744,7 @@ impl Drafter {
         };
         let max_tokens = req
             .max_tokens
-            .unwrap_or_else(|| band.max_tokens())
+            .unwrap_or_else(|| band.max_tokens_for(crate::prompt::draft_chars_per_word(ctx)))
             .clamp(16, 4_096);
         let mut chat = build_request(&input, max_tokens, config.temperature);
         if !cloud {
@@ -1444,6 +1444,20 @@ pub fn retrieval_query(ctx: &DraftContext) -> String {
         let name = r.split('<').next().unwrap_or(r).trim();
         let name = if name.is_empty() { r.as_str() } else { name };
         parts.push(name.split('@').next().unwrap_or(name).to_owned());
+    }
+    if parts.is_empty() {
+        // A form field with no thread: what the field asks for (QA GG1-7).
+        parts.extend(
+            [
+                &ctx.field.label,
+                &ctx.field.placeholder,
+                &ctx.app.window_title,
+            ]
+            .into_iter()
+            .flatten()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty()),
+        );
     }
     let q = parts.join("\n");
     q.chars().take(TOTAL).collect::<String>().trim().to_owned()

@@ -62,6 +62,12 @@ been being they them we you she he it of to in on at by or an a as";
 /// The facts in `context`, newest first, with superseded facts marked.
 pub fn facts(context: &ContextResponse) -> Vec<Fact> {
     let mut out = passages(context);
+    // Retrieved text is data (QA GG1-1): a planted instruction never reaches the model, nor
+    // marks another fact superseded (GG1-19: "ignore all previous instructions").
+    for f in &mut out {
+        f.title = neutralise(&f.title);
+        f.body = neutralise(&f.body);
+    }
     // Newest first; undated last; ties keep rank order (the sort is stable).
     out.sort_by(|a, b| match (&a.date, &b.date) {
         (Some(x), Some(y)) => y.cmp(x),
@@ -118,6 +124,90 @@ id, the date it was written and a title. Use them only where relevant; never men
 them:\n<context>\n{}\n</context>\n{FACTS_RULES}\n",
         untrusted(&block, 40_000)
     )
+}
+
+/// Phrases that address an AI model or plant an instruction for one, lower case.
+const INSTRUCTION_MARKERS: &[&str] = &[
+    "ignore all previous",
+    "ignore previous",
+    "ignore the above",
+    "ignore your",
+    "disregard",
+    "instruction for the ai",
+    "instructions for the ai",
+    "ai assistant",
+    "assistant:",
+    "system prompt",
+    "language model",
+    "as an ai",
+    "you are an ai",
+    "llm",
+    "chatbot",
+    "in every reply",
+    "in every email",
+    "in every message",
+    "in all replies",
+    "in your reply",
+    "in your replies",
+    "when you reply",
+    "when replying",
+    "when drafting",
+    "when you draft",
+    "add the line",
+    "add this line",
+    "include the link",
+    "include this link",
+    "always include",
+    "always add",
+    "always mention",
+    "new instructions",
+    "ignoriere",
+    "anweisung",
+    "ignora las",
+    "ignora todas",
+    "instrucciones",
+    "ignorez",
+    "ignore toutes",
+];
+
+/// `text` with every sentence that addresses an AI model or plants an instruction for one
+/// replaced by a marker, so it is never followed, quoted or counted as a fact.
+pub fn neutralise(text: &str) -> String {
+    let lower = text.to_lowercase();
+    if !INSTRUCTION_MARKERS.iter().any(|m| lower.contains(m)) {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut start = 0;
+    let ends: Vec<usize> = text
+        .char_indices()
+        .filter(|(i, c)| {
+            matches!(c, '\n' | '。' | '！' | '？')
+                || (matches!(c, '.' | '!' | '?')
+                    && text[i + 1..].chars().next().is_none_or(char::is_whitespace))
+        })
+        .map(|(i, c)| i + c.len_utf8())
+        .chain(std::iter::once(text.len()))
+        .collect();
+    let mut removed = false;
+    for end in ends {
+        if end <= start {
+            continue;
+        }
+        let sentence = &text[start..end];
+        let l = sentence.to_lowercase();
+        if INSTRUCTION_MARKERS.iter().any(|m| l.contains(m)) {
+            if !removed {
+                out.push_str(" [an instruction to AI was removed here]");
+            }
+            removed = true;
+        } else {
+            removed = false;
+            out.push_str(sentence);
+        }
+        start = end;
+    }
+    out.trim().to_owned()
 }
 
 /// Split the packed text at its `[n] Title (source)` headers.

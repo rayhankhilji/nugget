@@ -1205,7 +1205,7 @@ async fn cloud_drafts_withhold_scanned_thread_and_field_text() {
     let scan: nugget_draft::SensitiveScan = Arc::new(|t: &str| t.contains("4111 1111"));
     for locality in [Locality::Cloud, Locality::OnDevice] {
         let p = Fake::new("p", locality, &["Thanks, I'll take care of the deposit."]);
-        let s = setup(vec![p.clone()], DraftConfig::default(), Arc::new(NoVoice));
+        let s = setup(&[p.clone()], DraftConfig::default());
         let drafter = s.drafter.with_sensitive_scan(scan.clone());
         let mut ctx = slack_ctx("Can you send the Q3 numbers?");
         ctx.thread.push(ThreadMessage {

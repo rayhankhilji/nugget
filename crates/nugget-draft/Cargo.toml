@@ -21,6 +21,7 @@ tracing.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 uuid = { version = "1", features = ["v4"] }
+whatlang = "0.18"
 
 [dev-dependencies]
 tokio = { workspace = true }
