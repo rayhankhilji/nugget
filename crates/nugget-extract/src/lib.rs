@@ -1,60 +1,12 @@
 //! Text extraction and structure-aware chunking.
 //!
-//! **Contract (stable for M1):** [`extract`], [`detect_mime`], [`chunk`], [`estimate_tokens`] and
-//! the types below. Additions since the M1 contract: [`extract_with_ocr`], [`is_supported`],
-//! [`OcrModels`], [`set_ocr_models`], [`ocr_models`], [`ocr_available`] and the `OCR_*` constants;
-//! [`Source::CheckedFile`], [`open_regular`], [`FileExpect`], [`is_file_changed`],
-//! [`FILE_CHANGED`] and [`FILE_CHECK_KEY`].
-//!
-//! Files ([`Source::File`], [`Source::CheckedFile`]) are opened with [`open_regular`]: a final
-//! symlink is not followed, FIFOs and devices never block, and anything but a regular file is
-//! refused with an error [`is_file_changed`] recognises.
-//!
-//! Inputs are hostile: every function enforces the size caps in [`ExtractOptions`] and returns
-//! `Error::Unsupported` / `Error::Invalid` rather than panicking. Extraction is CPU-bound and
-//! synchronous; callers run it on a blocking thread with a timeout.
-//!
-//! # Formats
-//!
-//! | MIME | Notes |
-//! |---|---|
-//! | `text/plain`, `text/*`, source code (`text/x-rust`, `application/json`, ...) | `metadata.language` from the extension or MIME |
-//! | `text/markdown` | frontmatter → `metadata.frontmatter`; headings → sections; wikilinks, links, `#tags` |
-//! | `text/html` | readable text, `<title>`, links, headings → sections; script/style dropped |
-//! | `application/pdf` | text per page; one section per page (`["Page 3"]`) |
-//! | DOCX | paragraphs and tables; heading styles → sections; hyperlinks |
-//! | XLSX, CSV/TSV | one row per line (`a \| b \| c`); one section per sheet; row/column caps |
-//! | `message/rfc822` | headers → metadata; text/plain preferred; quotes and signature → metadata |
-//! | `text/calendar` | events rendered as text; uid/times → metadata |
-//! | `image/png`, `image/jpeg`, `image/webp` | OCR via `ocrs`, only with `ocr` set and models present |
-//!
-//! Markdown frontmatter is removed from [`Extracted::text`] (it is in `metadata.frontmatter`);
-//! otherwise Markdown text is kept as-is, except for text the reader never sees (below).
-//!
-//! # Hidden text
-//!
-//! Text a reader never sees is not extracted, so it is neither indexed nor handed to a model:
-//! Markdown `<!-- -->` comments and `[//]: # (...)`-style comment link definitions (outside code),
-//! HTML comments and elements hidden with the `hidden` attribute, `aria-hidden="true"` or an
-//! inline `display:none` / `visibility:hidden` / `font-size:0` style (HTML files and HTML mail),
-//! and, in every format, invisible format characters (zero-width spaces and joiners, word joiner,
-//! BOM, bidi embeddings / overrides / isolates / marks, Unicode tag characters). Zero-width
-//! (non-)joiners between two non-ASCII characters (emoji sequences, Indic and Arabic-script
-//! shaping) are kept.
-//!
-//! Mail text starts with `From: <sender>` and `Date: <YYYY-MM-DD>` lines (each only when the
-//! header is present and parsable) and a blank line; `metadata.text_header` holds that exact
-//! prefix so consumers that want the body alone can strip it.
-//!
-//! # Panics
-//!
-//! No extractor panics on any input. As a last line of defence (third-party parsers, notably the
-//! PDF one, contain panicking paths), each extraction runs under `catch_unwind` and a caught panic
-//! becomes `Error::Invalid`; this requires the default `panic = "unwind"` strategy.
+//! Inputs are hostile: size caps are enforced, files are opened with [`open_regular`] (no final
+//! symlink, never blocks), text a reader never sees (comments, hidden elements, invisible
+//! characters) is dropped, and a panicking extractor becomes `Error::Invalid` (needs
+//! `panic = "unwind"`).
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
 
 use nugget_core::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -86,7 +38,7 @@ pub enum Source<'a> {
     File(&'a Path),
     /// Like [`File`](Self::File), and the opened file must still have the size and modification
     /// time a connector scanned ([`FileExpect::from_metadata`] reads them from a document's
-    /// metadata). A mismatch fails with an error [`is_file_changed`] recognises.
+    /// metadata).
     CheckedFile {
         path: &'a Path,
         expect: FileExpect,
@@ -141,16 +93,15 @@ pub struct Extracted {
     pub truncated: bool,
 }
 
-/// Environment variable naming a directory that holds the OCR models
-/// ([`OCR_DETECTION_MODEL_FILE`] and [`OCR_RECOGNITION_MODEL_FILE`]).
+/// Environment variable naming a directory that holds the OCR models ([`OCR_DETECTION_MODEL_FILE`]
+/// and [`OCR_RECOGNITION_MODEL_FILE`]).
 pub const OCR_MODELS_ENV: &str = "NUGGET_OCR_MODELS";
 /// File name of the `ocrs` text-detection model inside an OCR model directory.
 pub const OCR_DETECTION_MODEL_FILE: &str = "text-detection.rten";
 /// File name of the `ocrs` text-recognition model inside an OCR model directory.
 pub const OCR_RECOGNITION_MODEL_FILE: &str = "text-recognition.rten";
 
-/// Paths of the two `ocrs` models (`.rten` format). Nugget never downloads them; the user or the
-/// model manager places them on disk.
+/// Paths of the two `ocrs` models (`.rten` format).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OcrModels {
     pub detection: PathBuf,
@@ -182,46 +133,17 @@ impl OcrModels {
     }
 }
 
-static OCR_MODELS: RwLock<Option<OcrModels>> = RwLock::new(None);
-
-/// Set (or clear) the process-wide OCR models used by [`extract`]. When unset, [`extract`] falls
-/// back to [`OCR_MODELS_ENV`].
-pub fn set_ocr_models(models: Option<OcrModels>) {
-    match OCR_MODELS.write() {
-        Ok(mut g) => *g = models,
-        Err(poisoned) => *poisoned.into_inner() = models,
-    }
-}
-
-/// The OCR models [`extract`] would use: those set with [`set_ocr_models`], else
-/// [`OcrModels::from_env`]. Existence is not checked.
-pub fn ocr_models() -> Option<OcrModels> {
-    let set = match OCR_MODELS.read() {
-        Ok(g) => g.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
-    };
-    set.or_else(OcrModels::from_env)
-}
-
-/// Whether [`extract`] can OCR images: the `ocr` feature is compiled in and the model files of
-/// [`ocr_models`] exist.
-pub fn ocr_available() -> bool {
-    cfg!(feature = "ocr") && ocr_models().is_some_and(|m| m.exist())
-}
-
-/// Whether [`extract`] has an extractor for `mime` (parameters are ignored). Images count as
-/// supported even though they also need `ExtractOptions::ocr` and OCR models.
-pub fn is_supported(mime: &str) -> bool {
-    Kind::route(&mime::base(mime)).is_some()
-}
-
 /// Extract text and structure from `source`, interpreted as `mime`.
 pub fn extract(mime: &str, source: Source<'_>, opts: &ExtractOptions) -> Result<Extracted> {
-    let models = if opts.ocr { ocr_models() } else { None };
+    let models = if opts.ocr {
+        OcrModels::from_env()
+    } else {
+        None
+    };
     run(mime, source, opts, models.as_ref())
 }
 
-/// [`extract`] with explicit OCR models instead of the process-wide / environment ones.
+/// [`extract`] with explicit OCR models instead of those in [`OCR_MODELS_ENV`].
 pub fn extract_with_ocr(
     mime: &str,
     source: Source<'_>,
@@ -430,10 +352,6 @@ fn finalize(mut out: Extracted, opts: &ExtractOptions) -> Extracted {
 }
 
 /// Best-effort MIME type from a file name and its first bytes.
-///
-/// Binary signatures (PDF, PNG, JPEG, WebP, GIF, ZIP/OOXML, OLE) win over the extension; then the
-/// extension decides (source files map to `text/x-<language>`, e.g. `text/x-rust`); then the
-/// content is sniffed for HTML, iCalendar, RFC 822 mail and plain text.
 pub fn detect_mime(path: Option<&Path>, head: &[u8]) -> String {
     mime::detect(path, head)
 }
@@ -468,24 +386,13 @@ pub struct ChunkOut {
     pub tokens: usize,
 }
 
-/// Split an extracted document into retrieval-sized chunks. Deterministic: the same input always
-/// yields the same chunks.
-///
-/// Splits by section, then paragraph (blank line), then sentence or line, then word, then
-/// character, and packs the pieces greedily up to `target_tokens`. Guarantees:
-/// - every non-whitespace byte of `doc.text` lies in some chunk's `start..end`;
-/// - `text` is the heading-path prefix (`"Guide > Install\n"`, empty outside sections) followed
-///   by exactly `doc.text[start..end]`;
-/// - `tokens == estimate_tokens(&text) <= max_tokens` (`max_tokens` is treated as at least 1);
-/// - consecutive chunks of one section overlap by at most `overlap_tokens` (capped at half of
-///   `max_tokens`), starting at a word boundary; chunks never overlap across sections.
+/// Split an extracted document into retrieval-sized chunks.
 pub fn chunk(doc: &Extracted, opts: &ChunkOptions) -> Vec<ChunkOut> {
     chunker::chunk(doc, opts)
 }
 
-/// Rough token count: about 4 chars per token for Latin-script text, and 1 token per CJK
-/// ideograph, kana or Hangul syllable. Cheap, deterministic and additive over concatenation up
-/// to rounding (`estimate_tokens(a + b) <= estimate_tokens(a) + estimate_tokens(b)`).
+/// Rough token count: about 4 chars per token for Latin-script text, and 1 token per CJK ideograph,
+/// kana or Hangul syllable.
 pub fn estimate_tokens(text: &str) -> usize {
     chunker::Counts::of(text).tokens()
 }

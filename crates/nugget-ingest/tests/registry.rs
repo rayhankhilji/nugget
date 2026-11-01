@@ -82,7 +82,7 @@ async fn add_generates_ids_validates_and_persists() {
 }
 
 #[tokio::test]
-async fn generated_ids_skip_ids_that_still_have_data() {
+async fn remove_without_purge_keeps_data_and_its_id() {
     let h = start(Opts::default()).await;
     h.factory.state("fake-1").script(vec![
         Step::Send(text_doc("a", "leftover", Some("1"))),
@@ -91,7 +91,9 @@ async fn generated_ids_skip_ids_that_still_have_data() {
     let first = h.ingest.add(spec("fake", json!({}))).await.unwrap();
     eventually("indexed", || h.cursor("fake-1") == Some(json!(1))).await;
     h.ingest.remove(&first.id, false).await.unwrap();
-    // fake-1's items were kept, so the id is not reused.
+    // Removed without purge: fake-1's items were kept, so the id is not reused.
+    assert!(h.item("fake-1", "a").is_some());
+    assert!(h.ingest.list().await.unwrap().is_empty());
     let next = h.ingest.add(spec("fake", json!({}))).await.unwrap();
     assert_eq!(next.id.as_str(), "fake-2");
     h.ingest.shutdown().await;
@@ -299,24 +301,6 @@ async fn remove_with_purge_deletes_data_cursor_and_secrets() {
         }
     }
     assert!(removed);
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
-async fn remove_without_purge_keeps_indexed_data() {
-    let h = start(Opts::default()).await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "keep me", Some("1"))),
-        Step::Return(json!("c")),
-    ]);
-    h.add("fake-1").await;
-    eventually("indexed", || h.cursor("fake-1") == Some(json!("c"))).await;
-    h.ingest
-        .remove(&SourceId::new("fake-1"), false)
-        .await
-        .unwrap();
-    assert!(h.item("fake-1", "a").is_some());
-    assert!(h.ingest.list().await.unwrap().is_empty());
     h.ingest.shutdown().await;
 }
 

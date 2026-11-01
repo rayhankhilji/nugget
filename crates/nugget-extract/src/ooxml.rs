@@ -1,8 +1,4 @@
 //! DOCX and XLSX: ZIP containers of XML parts, parsed with streaming readers.
-//!
-//! Zip-bomb guards: at most [`MAX_ENTRIES`] entries (checked from the end-of-central-directory
-//! record before the archive is opened), every part is inflated through a reader that fails
-//! once the part exceeds its cap, and all parts of one document share [`MAX_TOTAL_INFLATE`].
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -78,8 +74,8 @@ fn xml_err(part: &str, e: impl std::fmt::Display) -> Error {
     }
 }
 
-/// Reject archives that declare more than [`MAX_ENTRIES`] entries, before the ZIP reader
-/// allocates for them.
+/// Reject archives that declare more than [`MAX_ENTRIES`] entries, before the ZIP reader allocates
+/// for them.
 fn check_entry_count(data: &[u8]) -> Result<()> {
     let from = data.len().saturating_sub(22 + 65_535);
     let Some(rel) = data[from..].windows(4).rposition(|w| w == b"PK\x05\x06") else {

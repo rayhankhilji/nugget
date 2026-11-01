@@ -5,8 +5,8 @@ use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE, WINDOWS_1252};
 
 use crate::Section;
 
-/// Decode bytes to text: BOM first (UTF-8, UTF-16 LE/BE), then UTF-8, then the declared
-/// `charset`, then mostly-UTF-8 (lossy), then Windows-1252.
+/// Decode bytes to text: BOM first (UTF-8, UTF-16 LE/BE), then UTF-8, then the declared `charset`,
+/// then mostly-UTF-8 (lossy), then Windows-1252.
 pub(crate) fn decode_text(bytes: &[u8], charset: Option<&str>) -> String {
     if let Some(rest) = bytes.strip_prefix(b"\xEF\xBB\xBF") {
         return String::from_utf8_lossy(rest).into_owned();
@@ -305,7 +305,7 @@ impl SectionTracker {
 
 /// Invisible format characters a reader never sees: zero-width space, LRM/RLM, word joiner and
 /// invisible operators, BOM / zero-width no-break space, bidi embeddings, overrides and isolates,
-/// and Unicode tag characters. Zero-width (non-)joiners are handled by [`strip_invisible`].
+/// and Unicode tag characters.
 pub(crate) fn is_invisible(c: char) -> bool {
     matches!(
         c,
@@ -338,7 +338,7 @@ impl Removed {
 
 /// `text` without [`is_invisible`] characters and without zero-width (non-)joiners unless both
 /// neighbours are visible non-ASCII characters (emoji ZWJ sequences, Indic / Arabic-script
-/// shaping). `None` when nothing was removed.
+/// shaping).
 pub(crate) fn strip_invisible(text: &str) -> Option<(String, Removed)> {
     let keep = |prev: Option<char>, c: char, next: Option<char>| {
         if is_invisible(c) {

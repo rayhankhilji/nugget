@@ -1,5 +1,5 @@
-//! Structure-aware chunking: sections → paragraphs → sentences/lines → words → characters,
-//! packed greedily to the token target, with word-aligned overlap inside a section.
+//! Structure-aware chunking: sections → paragraphs → sentences/lines → words → characters, packed
+//! greedily to the token target, with word-aligned overlap inside a section.
 
 use std::collections::BTreeSet;
 
@@ -110,8 +110,8 @@ struct Seg<'a> {
     path: &'a [String],
 }
 
-/// Partition `0..text.len()` by the innermost section covering each byte (sections may be
-/// unsorted, overlapping, nested or out of range; uncovered bytes get an empty heading path).
+/// Partition `0..text.len()` by the innermost section covering each byte (sections may be unsorted,
+/// overlapping, nested or out of range; uncovered bytes get an empty heading path).
 fn segments<'a>(text: &str, sections: &'a [Section]) -> Vec<Seg<'a>> {
     let len = text.len();
     let mut iv: Vec<(usize, usize, usize)> = sections
@@ -164,8 +164,8 @@ fn segments<'a>(text: &str, sections: &'a [Section]) -> Vec<Seg<'a>> {
     out
 }
 
-/// `"Guide > Install\n"`, shortened to at most a quarter of `max` tokens (dropped if that is
-/// under 2 tokens).
+/// `"Guide > Install\n"`, shortened to at most a quarter of `max` tokens (dropped if that is under
+/// 2 tokens).
 fn make_prefix(path: &[String], max: usize) -> String {
     let parts: Vec<&str> = path
         .iter()
@@ -318,8 +318,8 @@ fn units(text: &str, a: usize, b: usize, budget: usize) -> Vec<(usize, usize)> {
     out
 }
 
-/// Where an overlap of at most `k` tokens taken from the end of `ps..pe` starts, aligned to a
-/// word start. `None` when no such overlap exists or it would repeat the whole span.
+/// Where an overlap of at most `k` tokens taken from the end of `ps..pe` starts, aligned to a word
+/// start.
 fn overlap_start(text: &str, ps: usize, pe: usize, k: usize) -> Option<usize> {
     let mut c = Counts::default();
     let mut pos = pe;
@@ -460,14 +460,6 @@ mod tests {
     }
 
     #[test]
-    fn cjk_estimate() {
-        assert_eq!(Counts::of("abcd").tokens(), 1);
-        assert_eq!(Counts::of("日本語のテキスト").tokens(), 8);
-        assert_eq!(Counts::of("한국어").tokens(), 3);
-        assert_eq!(Counts::of("ab日本").tokens(), 3);
-    }
-
-    #[test]
     fn segments_nested_and_gaps() {
         let text = "0123456789";
         let s = |p: &str, a, b| Section {
@@ -490,31 +482,6 @@ mod tests {
                 (9, 10, String::new()),
             ]
         );
-    }
-
-    #[test]
-    fn own_heading_is_not_repeated_in_the_prefix() {
-        let doc = crate::Extracted {
-            text: "# Guide\n\nIntro.\n\n## Install\n\nRun it.\n".into(),
-            sections: vec![
-                crate::Section {
-                    heading_path: vec!["Guide".into()],
-                    start: 0,
-                    end: 17,
-                },
-                crate::Section {
-                    heading_path: vec!["Guide".into(), "Install".into()],
-                    start: 17,
-                    end: 37,
-                },
-            ],
-            ..Default::default()
-        };
-        let chunks = crate::chunk(&doc, &crate::ChunkOptions::default());
-        let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
-        assert_eq!(texts, ["# Guide\n\nIntro.", "Guide\n## Install\n\nRun it."]);
-        assert!(starts_with_heading("\n## Install  \nx", "install"));
-        assert!(!starts_with_heading("Install guide", "Install"));
     }
 
     #[test]

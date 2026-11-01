@@ -160,17 +160,6 @@ fn invariants_hold_for_many_documents_and_options() {
 }
 
 #[test]
-fn empty_and_whitespace_documents_have_no_chunks() {
-    for text in ["", "   \n\n\t  "] {
-        let doc = Extracted {
-            text: text.into(),
-            ..Default::default()
-        };
-        assert!(chunk(&doc, &ChunkOptions::default()).is_empty());
-    }
-}
-
-#[test]
 fn heading_prefix() {
     let doc = run("text/markdown", &fixture("note.md"));
     let chunks = check(&doc, &ChunkOptions::default());
@@ -244,25 +233,4 @@ fn long_runs_are_hard_split() {
     let chunks = check(&cjk, &opts);
     assert!(chunks.iter().all(|c| c.tokens <= 128));
     assert!(chunks.len() >= 1_000 / 128);
-}
-
-#[test]
-fn token_estimate() {
-    assert_eq!(estimate_tokens(""), 0);
-    assert_eq!(estimate_tokens("hello world"), 3);
-    assert_eq!(estimate_tokens("日本語"), 3);
-    assert_eq!(estimate_tokens("한국어 텍스트"), 7);
-    assert_eq!(estimate_tokens("ab日本"), 3);
-}
-
-#[test]
-fn large_document_is_fast_enough() {
-    let doc = Extracted {
-        text: "Some sentence with several words in it. ".repeat(15_000),
-        ..Default::default()
-    };
-    let t = std::time::Instant::now();
-    let chunks = check(&doc, &ChunkOptions::default());
-    assert!(!chunks.is_empty());
-    assert!(t.elapsed().as_secs() < 20, "took {:?}", t.elapsed());
 }

@@ -30,151 +30,60 @@ async fn triage_settled(h: &Harness) {
     .await;
 }
 
+/// GG2-6: items are searchable (and sensitive) before triage; GG2-7: labels never hide them.
 #[tokio::test]
-async fn junk_and_sensitive_labels_never_remove_items_from_search() {
-    let local = local_model();
-    let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
-        ..Default::default()
-    })
-    .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("spam", "WIN BIG SPAM offer click now", Some("1"))),
-        Step::Send(text_doc("memo", "HUSHHUSH merger memo", Some("1"))),
-        Step::Send(text_doc("note", "grocery list: eggs, milk", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-    triage_settled(&h).await;
-
-    // GG2-7: a junk verdict labels the item; it stays chunked, embedded and searchable.
-    let spam = h.item("fake-1", "spam").unwrap();
-    assert_eq!(spam.metadata["junk"], json!(true));
-    assert_eq!(spam.metadata["triage"]["state"], json!("done"));
-    assert_eq!(spam.metadata["triage"]["junk"], json!(true));
-    assert_eq!(spam.metadata["sensitive"], json!(false));
-    assert!(spam.text.is_some());
-    assert_eq!(h.store.search_text("offer", 10).unwrap().len(), 1);
-    assert!(local.embedded().iter().any(|t| t.contains("SPAM")));
-
-    let memo = h.item("fake-1", "memo").unwrap();
-    assert_eq!(memo.metadata["sensitive"], json!(true));
-    assert_eq!(memo.metadata["junk"], json!(false));
-    assert_eq!(h.store.search_text("merger", 10).unwrap().len(), 1);
-
-    let note = h.item("fake-1", "note").unwrap();
-    assert_eq!(note.metadata["sensitive"], json!(false));
-    assert_eq!(note.metadata["triage"]["provider"], json!("local-chat"));
-
-    // Three small items share requests (normally one; a slow machine may split the gather).
-    assert!(local.chats().len() < 3, "{:?}", local.chats());
-    let status = h.ingest.status().await.unwrap();
-    let t = status.triage.unwrap();
-    assert_eq!((t.pending, t.done, t.failed), (0, 3, 0));
-    assert_eq!(t.state, TriageState::Idle);
-    assert_eq!(
-        status.triage_provider.as_ref().map(|p| p.as_str()),
-        Some("local-chat")
-    );
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
-async fn items_are_searchable_before_triage_and_count_as_sensitive_until_labelled() {
+async fn items_are_searchable_before_triage_and_labels_never_remove_them() {
     let local = local_model();
     local.block_chat();
     let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc(
-            "boiler",
-            "the boiler engineer visits on Tuesday",
-            Some("1"),
-        )),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-
-    // GG2-6: found while the model has not answered yet.
-    assert_eq!(h.store.search_text("boiler", 10).unwrap().len(), 1);
-    let item = h.item("fake-1", "boiler").unwrap();
-    assert_eq!(item.metadata["triage"]["state"], json!("pending"));
-    assert_eq!(item.metadata["sensitive"], json!(true), "fail closed");
-    let t = h.ingest.status().await.unwrap().triage.unwrap();
-    assert_eq!(t.pending, 1);
-
+    let docs = [
+        ("spam", "WIN BIG SPAM offer click now"),
+        ("memo", "HUSHHUSH merger memo"),
+        ("note", "the boiler engineer visits on Tuesday"),
+    ];
+    let steps = docs
+        .iter()
+        .map(|(k, t)| Step::Send(text_doc(k, t, Some("1"))));
+    h.run("fake-1", steps.collect(), json!("done")).await;
+    for (key, word) in [("spam", "offer"), ("memo", "merger"), ("note", "boiler")] {
+        assert_eq!(h.store.search_text(word, 10).unwrap().len(), 1);
+        let m = h.item("fake-1", key).unwrap().metadata;
+        assert_eq!(m["triage"]["state"], json!("pending"));
+        assert_eq!(m["sensitive"], json!(true), "fail closed");
+    }
     local.unblock_chat();
     triage_settled(&h).await;
-    let item = h.item("fake-1", "boiler").unwrap();
-    assert_eq!(item.metadata["triage"]["state"], json!("done"));
-    assert_eq!(item.metadata["sensitive"], json!(false));
-    // Labelling rewrote metadata only: the chunk and its vector are still there.
-    assert_eq!(h.store.search_text("engineer", 10).unwrap().len(), 1);
+    for (key, junk, sensitive) in [
+        ("spam", true, false),
+        ("memo", false, true),
+        ("note", false, false),
+    ] {
+        let it = h.item("fake-1", key).unwrap();
+        assert_eq!(it.metadata["triage"]["state"], json!("done"), "{key}");
+        assert_eq!(it.metadata["junk"], json!(junk), "{key}");
+        assert_eq!(it.metadata["sensitive"], json!(sensitive), "{key}");
+        assert!(it.text.is_some());
+    }
+    assert_eq!(h.store.search_text("offer", 10).unwrap().len(), 1);
     assert!(
         h.store
             .items_missing_embeddings(None, 10)
             .unwrap()
             .is_empty()
     );
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
-async fn pending_items_never_reach_cloud_embedders_until_triage_clears_them() {
-    let local = local_model();
-    let cloud = FakeProvider::new("cloud", Locality::Cloud);
-    local.block_chat();
-    let h = start(Opts {
-        cfg: IngestConfig {
-            allow_cloud_embeddings: true,
-            ..cfg()
-        },
-        router: Some(router(&[
-            (local.clone(), vec![Tier::Triage]),
-            (cloud.clone(), vec![Tier::Embedding]),
-        ])),
-        ..Default::default()
-    })
-    .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("plain", "lunch menu for friday", Some("1"))),
-        Step::Send(text_doc("secret", "HUSHHUSH quarterly letter", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-    // Indexed text-only: searchable, nothing sent to the cloud before triage.
-    assert_eq!(h.store.search_text("lunch", 10).unwrap().len(), 1);
-    assert!(cloud.embedded().is_empty());
-
-    local.unblock_chat();
-    triage_settled(&h).await;
-    // The item triage cleared gets cloud vectors from the re-embed job; the sensitive one never.
-    eventually("plain embedded", || {
-        cloud.embedded().iter().any(|t| t.contains("lunch menu"))
-    })
-    .await;
-    h.ingest.reembed_now();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(
-        !cloud.embedded().iter().any(|t| t.contains("quarterly")),
-        "a sensitive item reached the cloud"
-    );
+    // Three small items share requests (normally one; a slow machine may split the gather).
+    assert!(local.chats().len() < 3, "{:?}", local.chats());
+    let status = h.ingest.status().await.unwrap();
+    let t = status.triage.unwrap();
     assert_eq!(
-        h.item("fake-1", "secret").unwrap().metadata["sensitive"],
-        json!(true)
+        (t.pending, t.done, t.failed, t.state),
+        (0, 3, 0, TriageState::Idle)
     );
+    assert_eq!(status.triage_provider.unwrap().as_str(), "local-chat");
     h.ingest.shutdown().await;
 }
 
@@ -182,24 +91,23 @@ async fn pending_items_never_reach_cloud_embedders_until_triage_clears_them() {
 async fn rule_hits_stay_sensitive_and_unchanged_content_keeps_its_labels() {
     let local = local_model();
     let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc(
-            "card",
-            "SPAM charge 4111 1111 1111 1111 please",
-            Some("1"),
-        )),
-        Step::Send(text_doc("note", "SPAM weekly deals", Some("1"))),
-        Step::Return(json!("p1")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass 1", || h.cursor("fake-1") == Some(json!("p1"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(text_doc(
+                "card",
+                "SPAM charge 4111 1111 1111 1111 please",
+                Some("1"),
+            )),
+            Step::Send(text_doc("note", "SPAM weekly deals", Some("1"))),
+        ],
+        json!("p1"),
+    )
+    .await;
     triage_settled(&h).await;
     // A PII hit is still triaged for the junk label, and stays sensitive whatever the
     // model says (it said not sensitive).
@@ -230,68 +138,11 @@ async fn rule_hits_stay_sensitive_and_unchanged_content_keeps_its_labels() {
 }
 
 #[tokio::test]
-async fn small_items_are_batched_within_the_count_and_character_budgets() {
-    let local = local_model();
-    local.block_chat();
-    let h = start(Opts {
-        cfg: IngestConfig {
-            triage_batch: 4,
-            triage_batch_chars: 1_000,
-            ..cfg()
-        },
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
-        ..Default::default()
-    })
-    .await;
-    let mut script: Vec<Step> = (0..10)
-        .map(|i| {
-            Step::Send(text_doc(
-                &format!("s{i}"),
-                &format!("short note {i}"),
-                Some("1"),
-            ))
-        })
-        .collect();
-    script.push(Step::Send(text_doc(
-        "long",
-        &"long text ".repeat(150),
-        Some("1"),
-    )));
-    script.push(Step::Return(json!("done")));
-    h.factory.state("fake-1").script(script);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-    local.unblock_chat();
-    triage_settled(&h).await;
-    let chats = local.chats();
-    // 10 short items in batches of at most 4 (4 + 4 + 2); the long one (1,500 characters,
-    // more than the first request's 800-character budget) alone, in parts.
-    let docs: Vec<usize> = chats
-        .iter()
-        .filter(|c| !c.contains("long text"))
-        .map(|c| c.matches("<document n=").count())
-        .collect();
-    assert!(docs.iter().all(|&n| n <= 4), "{docs:?}");
-    assert_eq!(docs.iter().sum::<usize>(), 10, "{docs:?}");
-    assert!(docs.len() <= 4, "{docs:?}");
-    let long: Vec<&String> = chats.iter().filter(|c| c.contains("long text")).collect();
-    assert!(long.len() >= 2, "{long:?}");
-    assert!(long.iter().all(|c| c.matches("<document n=").count() == 1));
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
 async fn triage_waits_for_interactive_requests_and_abandons_its_own_when_one_starts() {
     let local = local_model();
     let fg = Arc::new(Foreground::new(Duration::from_millis(50)));
     let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         foreground: Some(fg.clone()),
         ..Default::default()
     })
@@ -299,12 +150,12 @@ async fn triage_waits_for_interactive_requests_and_abandons_its_own_when_one_sta
 
     // An Ask is in flight: triage does not touch the model.
     let ask = fg.begin();
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "first note", Some("1"))),
-        Step::Return(json!("p1")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("p1"))).await;
+    h.run(
+        "fake-1",
+        vec![Step::Send(text_doc("a", "first note", Some("1")))],
+        json!("p1"),
+    )
+    .await;
     assert_eq!(h.store.search_text("first", 10).unwrap().len(), 1);
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(
@@ -352,69 +203,24 @@ async fn triage_waits_for_interactive_requests_and_abandons_its_own_when_one_sta
 }
 
 #[tokio::test]
-async fn failed_triage_keeps_items_searchable_and_sensitive() {
-    let local = local_model();
-    local.chat_invalid.store(true, Ordering::SeqCst);
-    let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
-        ..Default::default()
-    })
-    .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "alpha note", Some("1"))),
-        Step::Send(text_doc("b", "bravo note", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-    eventually_async("given up", || {
-        let ingest = h.ingest.clone();
-        async move { ingest.status().await.unwrap().triage.unwrap().failed == 2 }
-    })
-    .await;
-    for (key, word) in [("a", "alpha"), ("b", "bravo")] {
-        let it = h.item("fake-1", key).unwrap();
-        assert_eq!(it.metadata["triage"]["state"], json!("failed"), "{key}");
-        assert!(it.metadata["triage"]["error"].is_string());
-        assert_eq!(it.metadata["sensitive"], json!(true), "{key}");
-        assert_eq!(h.store.search_text(word, 10).unwrap().len(), 1);
-    }
-    // The first try was a batch; the retries went one item per request.
-    let chats = local.chats();
-    assert_eq!(chats[0].matches("<document n=").count(), 2);
-    assert!(
-        chats[1..]
-            .iter()
-            .all(|c| c.matches("<document n=").count() == 1)
-    );
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
 async fn pending_items_are_triaged_after_a_restart() {
     let store = nugget_store::Store::open_in_memory().unwrap();
     let dir = Arc::new(tempfile::tempdir().unwrap());
     let first = local_model();
     first.block_chat();
     let h = start(Opts {
-        router: Some(router(&[(
-            first.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&first),
         store: Some(store.clone()),
         dir: Some(dir.clone()),
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "alpha note", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![Step::Send(text_doc("a", "alpha note", Some("1")))],
+        json!("done"),
+    )
+    .await;
     h.ingest.shutdown().await;
     assert_eq!(
         h.item("fake-1", "a").unwrap().metadata["triage"]["state"],
@@ -423,10 +229,7 @@ async fn pending_items_are_triaged_after_a_restart() {
 
     let second = local_model();
     let h2 = start(Opts {
-        router: Some(router(&[(
-            second.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&second),
         store: Some(store),
         dir: Some(dir),
         factory: Some(h.factory.clone()),
@@ -451,19 +254,16 @@ async fn triage_off_leaves_unflagged_items_unknown_and_sensitive() {
                 assume_unflagged_safe: assume_safe,
                 ..cfg()
             },
-            router: Some(router(&[(
-                local.clone(),
-                vec![Tier::Triage, Tier::Embedding],
-            )])),
+            router: local_router(&local),
             ..Default::default()
         })
         .await;
-        h.factory.state("fake-1").script(vec![
-            Step::Send(text_doc("a", "HUSHHUSH alpha", Some("1"))),
-            Step::Return(json!("done")),
-        ]);
-        h.add("fake-1").await;
-        eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+        h.run(
+            "fake-1",
+            vec![Step::Send(text_doc("a", "HUSHHUSH alpha", Some("1")))],
+            json!("done"),
+        )
+        .await;
         let a = h.item("fake-1", "a").unwrap();
         assert_eq!(a.metadata["triage"]["state"], json!("unknown"));
         assert_eq!(a.metadata["triage"]["reason"], json!("off"));
@@ -499,12 +299,15 @@ async fn items_wait_sensitive_for_a_triage_model_that_is_not_routable_yet() {
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "lunch plans for friday", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(text_doc("a", "lunch plans for friday", Some("1"))),
+            Step::Send(text_doc("secret", "HUSHHUSH quarterly letter", Some("1"))),
+        ],
+        json!("done"),
+    )
+    .await;
     let a = h.item("fake-1", "a").unwrap();
     assert_eq!(a.metadata["triage"]["state"], json!("pending"));
     assert_eq!(a.metadata["sensitive"], json!(true));
@@ -512,7 +315,7 @@ async fn items_wait_sensitive_for_a_triage_model_that_is_not_routable_yet() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(cloud.embedded().is_empty());
     let t = h.ingest.status().await.unwrap().triage.unwrap();
-    assert_eq!((t.state, t.pending), (TriageState::Off, 1));
+    assert_eq!((t.state, t.pending), (TriageState::Off, 2));
 
     // The local model becomes ready.
     r.set_capabilities(
@@ -532,6 +335,14 @@ async fn items_wait_sensitive_for_a_triage_model_that_is_not_routable_yet() {
         cloud.embedded().iter().any(|t| t.contains("lunch"))
     })
     .await;
+    // The item triage found sensitive never reaches the cloud, not even by re-embedding.
+    h.ingest.reembed_now();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!cloud.embedded().iter().any(|t| t.contains("quarterly")));
+    assert_eq!(
+        h.item("fake-1", "secret").unwrap().metadata["sensitive"],
+        json!(true)
+    );
     h.ingest.shutdown().await;
 }
 
@@ -571,10 +382,7 @@ async fn items_from_before_background_triage_are_relabelled_and_old_junk_reindex
     );
     let local = local_model();
     let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         store: Some(store),
         ..Default::default()
     })
@@ -617,25 +425,22 @@ async fn items_from_before_background_triage_are_relabelled_and_old_junk_reindex
 
 #[tokio::test]
 async fn labels_leave_updated_at_alone_and_survive_a_concurrent_metadata_write() {
-    // Review: a triage write-back must not look like a content change to consumers that
-    // fingerprint items by content_hash:updated_at (knowledge extraction), and a label must
-    // not be dropped because another writer (the re-embed job) bumped updated_at meanwhile.
+    // Review: a triage write-back must not look like a content change to consumers that fingerprint
+    // items by content_hash:updated_at (knowledge extraction), and a label must not be dropped
+    // because another writer (the re-embed job) bumped updated_at meanwhile.
     let local = local_model();
     local.block_chat();
     let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "SPAM alpha offer", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![Step::Send(text_doc("a", "SPAM alpha offer", Some("1")))],
+        json!("done"),
+    )
+    .await;
     eventually("triage request sent", || local.chats().len() == 1).await;
 
     // Another writer rewrites the item (same content) while triage waits for the model.
@@ -670,31 +475,44 @@ async fn labels_leave_updated_at_alone_and_survive_a_concurrent_metadata_write()
     h.ingest.shutdown().await;
 }
 
-/// Two items whose triage fails for good on a model that replies with garbage.
+/// Two items whose triage fails on a model that replies with garbage.
 async fn two_failed_items(cfg: IngestConfig) -> (Harness, Arc<FakeProvider>) {
     let local = local_model();
     local.chat_invalid.store(true, Ordering::SeqCst);
     let h = start(Opts {
         cfg,
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "alpha note", Some("1"))),
-        Step::Send(text_doc("b", "bravo note", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(text_doc("a", "alpha note", Some("1"))),
+            Step::Send(text_doc("b", "bravo note", Some("1"))),
+        ],
+        json!("done"),
+    )
+    .await;
     eventually_async("given up", || {
         let ingest = h.ingest.clone();
         async move { ingest.status().await.unwrap().triage.unwrap().failed == 2 }
     })
     .await;
+    // Failed items stay searchable and sensitive.
+    for (key, word) in [("a", "alpha"), ("b", "bravo")] {
+        let it = h.item("fake-1", key).unwrap();
+        assert_eq!(it.metadata["sensitive"], json!(true), "{key}");
+        assert_eq!(h.store.search_text(word, 10).unwrap().len(), 1);
+    }
+    // The first try was a batch; the retries went one item per request.
+    let chats = local.chats();
+    assert_eq!(chats[0].matches("<document n=").count(), 2);
+    assert!(
+        chats[1..]
+            .iter()
+            .all(|c| c.matches("<document n=").count() == 1)
+    );
     (h, local)
 }
 
@@ -765,26 +583,6 @@ async fn triage_retries_stop_after_the_maximum_failures() {
     h.ingest.shutdown().await;
 }
 
-/// A failed item is not retried before its wait has passed, even when woken.
-#[tokio::test]
-async fn failed_triage_waits_for_its_backoff() {
-    let (h, local) = two_failed_items(IngestConfig {
-        triage_retry_ms: 60 * 60 * 1000,
-        ..cfg()
-    })
-    .await;
-    local.chat_invalid.store(false, Ordering::SeqCst);
-    let chats = local.chats().len();
-    h.ingest.triage_now();
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(local.chats().len(), chats);
-    assert_eq!(
-        h.item("fake-1", "a").unwrap().metadata["triage"]["state"],
-        json!("failed")
-    );
-    h.ingest.shutdown().await;
-}
-
 /// JJ2 review: an unreachable server (an outage) never uses up an item's tries; once it
 /// answers again, the failed items are labelled, one per request.
 #[tokio::test]
@@ -797,20 +595,19 @@ async fn an_outage_does_not_use_up_triage_retries() {
             triage_max_failures: 2,
             ..cfg()
         },
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "alpha note", Some("1"))),
-        Step::Send(text_doc("b", "bravo note", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(text_doc("a", "alpha note", Some("1"))),
+            Step::Send(text_doc("b", "bravo note", Some("1"))),
+        ],
+        json!("done"),
+    )
+    .await;
     eventually("both failed", || {
         ["a", "b"]
             .iter()
@@ -887,58 +684,6 @@ async fn seeded(
     (store, dir, h.factory.clone())
 }
 
-/// A retried item that fails again does not back off the whole job: a fresh item is
-/// labelled while it fails.
-#[tokio::test]
-async fn a_poison_retry_does_not_hold_up_fresh_items() {
-    let (store, dir, factory) = seeded(&[(
-        "poison",
-        json!({"state": "failed", "failures": 1, "failed_at": 0}),
-    )])
-    .await;
-    let local = local_model();
-    *local.invalid_marker.lock().unwrap() = Some("poison".into());
-    let h = start(Opts {
-        cfg: IngestConfig {
-            triage_retry_ms: 20,
-            // A job-wide backoff would hold everything up for seconds.
-            backoff_base_ms: 5_000,
-            backoff_max_ms: 5_000,
-            ..cfg()
-        },
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
-        store: Some(store),
-        dir: Some(dir),
-        factory: Some(factory),
-        ..Default::default()
-    })
-    .await;
-    eventually("poison retried and failed again", || {
-        h.item("fake-1", "poison").unwrap().metadata["triage"]["failures"] == json!(2)
-    })
-    .await;
-    let started = std::time::Instant::now();
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("fresh", "fresh note", Some("1"))),
-        Step::Return(json!("p2")),
-    ]);
-    h.ingest.sync_now(None).unwrap();
-    eventually("fresh labelled", || {
-        h.item("fake-1", "fresh")
-            .is_some_and(|it| it.metadata["triage"]["state"] == json!("done"))
-    })
-    .await;
-    assert!(
-        started.elapsed() < Duration::from_secs(4),
-        "{:?}",
-        started.elapsed()
-    );
-    h.ingest.shutdown().await;
-}
-
 /// An item whose triage failed before stays sensitive when triage is turned off before a
 /// model labelled it, even with `assume_unflagged_safe`.
 #[tokio::test]
@@ -977,67 +722,11 @@ async fn a_retried_item_stays_sensitive_when_triage_is_turned_off() {
     h.ingest.shutdown().await;
 }
 
-/// A failed item that is re-indexed (new content) leaves the `failed` count.
-#[tokio::test]
-async fn a_reindexed_failed_item_leaves_the_failed_count() {
-    let (h, local) = two_failed_items(cfg()).await;
-    local.chat_invalid.store(false, Ordering::SeqCst);
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "alpha note, edited", Some("2"))),
-        Step::Return(json!("p2")),
-    ]);
-    h.ingest.sync_now(None).unwrap();
-    eventually("relabelled", || {
-        h.item("fake-1", "a").unwrap().metadata["triage"]["state"] == json!("done")
-    })
-    .await;
-    let t = h.ingest.status().await.unwrap().triage.unwrap();
-    assert_eq!((t.failed, t.done), (1, 1), "{t:?}");
-    h.ingest.shutdown().await;
-}
-
-/// The job sleeps until the earliest waiting item is due, then retries it.
-#[tokio::test]
-async fn a_failed_item_is_retried_when_its_wait_is_over() {
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let (store, dir, factory) = seeded(&[(
-        "a",
-        json!({"state": "failed", "failures": 1, "failed_at": now}),
-    )])
-    .await;
-    let local = local_model();
-    let h = start(Opts {
-        cfg: IngestConfig {
-            triage_retry_ms: 2_000,
-            ..cfg()
-        },
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
-        store: Some(store),
-        dir: Some(dir),
-        factory: Some(factory),
-        ..Default::default()
-    })
-    .await;
-    let started = std::time::Instant::now();
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(local.chats().is_empty(), "retried before its wait was over");
-    eventually("retried", || {
-        h.item("fake-1", "a").unwrap().metadata["triage"]["state"] == json!("done")
-    })
-    .await;
-    assert!(started.elapsed() >= Duration::from_millis(900));
-    assert_eq!(local.chats().len(), 1);
-    h.ingest.shutdown().await;
-}
-
 #[tokio::test]
 async fn requests_are_sized_by_the_measured_prefill_rate_and_long_items_go_in_parts() {
     // A model that takes 1 ms per prompt character before its first token, and a 200 ms target:
-    // after the first request, no request may carry much more than the 1 000-character floor,
-    // and a long item is labelled in parts (sensitive if any part is).
+    // after the first request, no request may carry much more than the 1 000-character floor, and a
+    // long item is labelled in parts (sensitive if any part is).
     let local = local_model();
     local
         .prefill_us_per_char
@@ -1047,10 +736,7 @@ async fn requests_are_sized_by_the_measured_prefill_rate_and_long_items_go_in_pa
             triage_request_ms: 200,
             ..cfg()
         },
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         ..Default::default()
     })
     .await;

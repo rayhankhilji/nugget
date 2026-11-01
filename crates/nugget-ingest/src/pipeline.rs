@@ -1,34 +1,5 @@
-//! The per-source indexing pipeline: a bounded queue (backpressure) feeding one worker that
-//! applies changes strictly in order.
-//!
-//! For each `Upsert`:
-//! 1. skip if `version` equals the stored version;
-//! 2. extract on a blocking thread with a timeout (on failure or timeout: title-only item, with
-//!    the error in metadata);
-//! 3. deterministic PII scan (counts only; any finding marks the item sensitive);
-//! 4. triage plan: items that need labels are written `triage.state = "pending"` (and count as
-//!    sensitive until labelled) and handed to the background triage job after step 7; triage
-//!    never delays an item or removes it from search (see `triage.rs`);
-//! 5. chunk; 6. embed in batches (local providers; cloud only if allowed and not sensitive;
-//!    vectors with NaN or infinite values count as a failed embedding: text-only);
-//! 7. persist item, chunks and version in one transaction (`upsert_item_with_chunks`, under
-//!    the ingest write lock). On failure nothing changes: the previous item and chunks stay
-//!    searchable, and the pass does not commit its cursor (or the item is rejected).
-//!
-//! **Batched writes (LL1).** While more changes are already waiting in the queue (a first sync
-//! or a large pass), prepared upserts are held back and written together, up to
-//! [`BATCH_MAX`] items in one transaction (`upsert_items_with_chunks`): one commit per run
-//! instead of one per item. A batch is written as soon as the queue runs dry, it is full, its
-//! oldest item waited [`BATCH_MAX_WAIT`], or any other operation (a delete, a checkpoint, a new
-//! pass, a problem report, a power pause) comes next, so order is kept and a single live change
-//! is written at once. If the batch transaction fails, its items are written one by one, so a
-//! bad item is rejected (or fails) alone, exactly as without batching. An item counts as
-//! applied (freshness, progress, the queue gauge, triage) only once its write committed.
-//!
-//! `Delete` removes the item. `checkpoint(cursor)` is queued behind every change sent before it,
-//! so the cursor is stored only after they were applied; if any change since the start of the
-//! pass failed to persist, the checkpoint fails instead (the pass is retried from the last good
-//! cursor). Errors on a single item (bad content, extractor failures) never stop the source.
+//! The per-source indexing pipeline: a bounded queue (backpressure) feeding one worker that applies
+//! changes strictly in order.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -122,9 +93,7 @@ impl PipelineSink {
     }
 }
 
-/// Counts one change in the queue-depth gauge from before it is queued. Unless disarmed (the
-/// change reached the queue, whose worker then accounts for it), dropping it takes the count
-/// back, also when the `send` future is dropped while waiting for queue space.
+/// Counts one change in the queue-depth gauge from before it is queued.
 pub(crate) struct Queued<'a> {
     metrics: &'a Metrics,
     armed: bool,
@@ -208,8 +177,8 @@ pub(crate) struct InFlight {
 
 type Preparing = std::pin::Pin<Box<dyn std::future::Future<Output = InFlight> + Send>>;
 
-/// Upserts prepared at once per source, at most (their extraction also waits for one of the
-/// shared extraction slots).
+/// Upserts prepared at once per source, at most (their extraction also waits for one of the shared
+/// extraction slots).
 pub(crate) const PREPARE_AHEAD: usize = 4;
 
 /// What is left of a [`PendingWrite`] once its item went to the store.
@@ -322,8 +291,6 @@ impl Worker {
                 _ = sleep_until(deadline), if deadline.is_some() => self.flush().await,
             }
             // Write the batch once it is full or nothing more is coming right now.
-            // (The deadline is checked here too: a long run of version-skipped changes keeps
-            // the queue arm ready, so the timer arm above might never be polled.)
             if self.pending.len() >= BATCH_MAX
                 || (!self.pending.is_empty() && self.inflight.is_empty() && self.rx.is_empty())
                 || self
@@ -334,10 +301,8 @@ impl Worker {
                 self.flush().await;
             }
         }
-        // Discard what is left: nothing after the last checkpoint is committed, so the next
-        // pass re-sends it. Dropped checkpoint acks resolve to `Cancelled`. Upserts being
-        // prepared or waiting for their batch are abandoned like an upsert cancelled while
-        // preparing.
+        // Discard what is left: nothing after the last checkpoint is committed, so the next pass
+        // re-sends it.
         for _ in 0..self.pending.len() + self.inflight.len() {
             self.inner.metrics.dequeued();
         }
@@ -352,10 +317,7 @@ impl Worker {
         }
     }
 
-    /// Finish every upsert in preparation and write the batch. What is already prepared is
-    /// written first: it precedes everything still preparing, which may take long.
-    /// Returns `false` if cancelled first: then upserts may be left unwritten, so nothing
-    /// ordered after them (a checkpoint above all) may be applied.
+    /// Finish every upsert in preparation and write the batch.
     async fn drain(&mut self, cancel: &CancellationToken) -> bool {
         self.flush().await;
         loop {
@@ -436,9 +398,9 @@ impl Worker {
                 since: Instant::now(),
                 live_upsert: done.live_upsert,
             }),
-            // A file that changed (or was swapped) since the connector scanned it is skipped,
-            // not stored: nothing is written, so the next pass sees it as new or changed and
-            // resends it.
+            // A file that changed (or was swapped) since the connector scanned it is skipped, not
+            // stored: nothing is written, so the next pass sees it as new or changed and resends
+            // it.
             Err(skip) => {
                 self.finish(
                     done.item.key,
@@ -492,8 +454,8 @@ impl Worker {
         }
     }
 
-    /// Write the pending upserts: in one transaction, or one by one if that fails (so a bad
-    /// item fails alone). Never abandoned half-way.
+    /// Write the pending upserts: in one transaction, or one by one if that fails (so a bad item
+    /// fails alone).
     async fn flush(&mut self) {
         if self.pending.is_empty() {
             return;
@@ -510,8 +472,8 @@ impl Worker {
         .await;
         let results: Vec<Result<()>> = match res {
             Ok(r) => r,
-            // The blocking task panicked: what it wrote is unknown, so every item counts as
-            // failed (the pass does not commit its cursor and re-sends them).
+            // The blocking task panicked: what it wrote is unknown, so every item counts as failed
+            // (the pass does not commit its cursor and re-sends them).
             Err(e) => {
                 let msg = join_err(e).to_string();
                 written
@@ -571,8 +533,8 @@ impl Worker {
         }
     }
 
-    /// What this pass is expected to index, once the connector's scan finished (never below
-    /// `done`: deletes and live changes count too).
+    /// What this pass is expected to index, once the connector's scan finished (never below `done`:
+    /// deletes and live changes count too).
     fn total(&self) -> Option<u64> {
         if self.live {
             return None;
@@ -659,16 +621,15 @@ impl Worker {
         }
     }
 
-    /// Start preparing an upsert (`None`: it joins the batch once prepared), or the outcome
-    /// when it ends here (version skip).
+    /// Start preparing an upsert (`None`: it joins the batch once prepared), or the outcome when it
+    /// ends here (version skip).
     async fn upsert(
         &mut self,
         doc: Document,
         observed: Instant,
         live_upsert: bool,
     ) -> Option<Outcome> {
-        // 1. Version skip. An upsert of the same key still being prepared or waiting for its
-        //    batch counts as stored (the latest one).
+        // 1.
         let queued = self
             .inflight_keys
             .iter()
@@ -697,8 +658,8 @@ impl Worker {
         {
             return Some(Outcome::Skipped);
         }
-        // Known not to be stored (versions loaded, key absent, nothing queued): no earlier
-        // triage labels to look up.
+        // Known not to be stored (versions loaded, key absent, nothing queued): no earlier triage
+        // labels to look up.
         let maybe_stored = stored.is_some() || self.versions.is_none();
         let item = ItemRef {
             source: self.source.clone(),
@@ -708,8 +669,7 @@ impl Worker {
         self.inflight_keys
             .push_back((doc.key.clone(), version.clone()));
 
-        // 2–6. Prepared alongside the next few upserts (results kept in queue order); dropped
-        //      (abandoned) on cancellation, before anything is written.
+        // 2–6.
         let inner = self.inner.clone();
         self.inflight.push_back(Box::pin(async move {
             let result = prepare(&inner, &item, doc, maybe_stored).await;
@@ -773,8 +733,8 @@ async fn prepare(
         url,
         metadata: source_meta,
     } = doc;
-    // The connector's title is sender text like the body: drop what extraction drops from
-    // bodies (see `visible_title`).
+    // The connector's title is sender text like the body: drop what extraction drops from bodies
+    // (see `visible_title`).
     let doc_title = doc_title.map(|t| visible_title(&t));
 
     let expect = nugget_extract::FileExpect::from_metadata(&source_meta);
@@ -800,13 +760,7 @@ async fn prepare(
         .or_else(|| ex.title.clone())
         .filter(|t| !t.trim().is_empty());
 
-    // 4. Triage plan. Triage itself runs in the background after the item is written
-    //    (`triage.rs`): it never delays search and never removes content from it.
-    // Deterministic rules first (GG4-6): PII patterns, then health / money / credentials /
-    // legal words and sensitive senders. They hold with or without a model.
-    // II1: a connector may mark a document sensitive itself (`metadata.sensitive = true`, e.g.
-    // private chats the user asked to keep on this device); an explicit `false` never
-    // overrides the rules or triage.
+    // 4.
     let rule = if !ex.pii.is_empty() {
         Some("pii")
     } else if source_meta.get("sensitive") == Some(&Value::Bool(true)) {
@@ -827,11 +781,10 @@ async fn prepare(
         .as_ref()
         .is_some_and(|r| ai::triage_provider(r).is_some());
     // Unknown counts as sensitive (GG5-2): an item the rules don't flag waits for triage, also
-    // while no local triage model is routable yet (the job picks it up once one is). Only
-    // `assume_unflagged_safe` lets items triage cannot decide now count as not sensitive.
+    // while no local triage model is routable yet (the job picks it up once one is).
     let can_triage = inner.cfg.triage && has_text && (routable || !inner.cfg.assume_unflagged_safe);
-    // With a model, rule hits are triaged too (for the junk label) but stay sensitive whatever
-    // it answers (`triage::apply` reads `sensitive_rule`).
+    // With a model, rule hits are triaged too (for the junk label) but stay sensitive whatever it
+    // answers (`triage::apply` reads `sensitive_rule`).
     let plan = if can_triage {
         match maybe_stored {
             true => earlier_labels(inner, item, &ex.hash).await,
@@ -852,8 +805,8 @@ async fn prepare(
     let (junk, sensitive) = match &plan {
         TriagePlan::Skipped(_) => (false, true),
         TriagePlan::Unknown(_) => (false, !inner.cfg.assume_unflagged_safe),
-        // Until triage has run the item counts as sensitive: searchable locally, never sent
-        // to cloud models.
+        // Until triage has run the item counts as sensitive: searchable locally, never sent to
+        // cloud models.
         TriagePlan::Pending => (false, true),
         TriagePlan::Reused(v) => (
             v.get("junk").and_then(Value::as_bool).unwrap_or(false),
@@ -989,8 +942,7 @@ async fn prepare(
 
 /// How an item gets its triage labels.
 enum TriagePlan {
-    /// Triage cannot decide (off, no text, or no model with `assume_unflagged_safe`): the
-    /// reason. Sensitive unless `assume_unflagged_safe`.
+    /// Triage cannot decide (off, no text, or no model with `assume_unflagged_safe`): the reason.
     Unknown(&'static str),
     /// Sensitive by rule (PII or `sensitivity` rules; the rule's name): no model call.
     Skipped(&'static str),
@@ -1142,10 +1094,9 @@ async fn extract_step(
     }
 }
 
-/// `title` without invisible format characters a reader never sees but a model reads:
-/// zero-width space, LRM/RLM, word joiner and invisible operators, BOM, bidi embeddings,
-/// overrides and isolates, and Unicode tag characters (which spell out hidden ASCII). Joiners
-/// stay (emoji and several scripts need them). Extraction drops the same from bodies.
+/// `title` without invisible format characters a reader never sees but a model reads: zero-width
+/// space, LRM/RLM, word joiner and invisible operators, BOM, bidi embeddings, overrides and
+/// isolates, and Unicode tag characters (which spell out hidden ASCII).
 pub(crate) fn visible_title(title: &str) -> String {
     title
         .chars()
@@ -1174,8 +1125,8 @@ fn fallback_title(key: &ItemKey) -> String {
         .to_owned()
 }
 
-/// Store an item text-only (with a note) when its vectors' dimension is not `dim`, the
-/// database's: never mix embedding dimensions within a database.
+/// Store an item text-only (with a note) when its vectors' dimension is not `dim`, the database's:
+/// never mix embedding dimensions within a database.
 fn fit_dimension(p: &mut Prepared, dim: Option<usize>) {
     let Some(dim) = dim else { return };
     let Some(got) = p
@@ -1203,8 +1154,8 @@ fn fit_dimension(p: &mut Prepared, dim: Option<usize>) {
     }
 }
 
-/// Write an item with its chunks and version in one transaction: on any error the stored item
-/// and its chunks stay as they were.
+/// Write an item with its chunks and version in one transaction: on any error the stored item and
+/// its chunks stay as they were.
 fn persist(store: &Store, mut p: Prepared) -> Result<()> {
     fit_dimension(&mut p, store.embedding_dim()?);
     store.upsert_item_with_chunks(&p.item, &p.chunks)?;
@@ -1212,8 +1163,7 @@ fn persist(store: &Store, mut p: Prepared) -> Result<()> {
 }
 
 /// Write items in order, each with its chunks and version: all in one transaction, or, if that
-/// fails, each in its own (so one bad item fails alone and the others are written). Each item's
-/// result, in order.
+/// fails, each in its own (so one bad item fails alone and the others are written).
 fn persist_all(store: &Store, mut batch: Vec<Prepared>) -> Vec<Result<()>> {
     if batch.len() > 1 {
         // The first vectors written fix the dimension when the database has none yet.
@@ -1338,8 +1288,8 @@ mod tests {
         assert!(ok.iter().all(Result::is_ok), "{ok:?}");
         assert_eq!(store.search_text("heron", 10).unwrap().len(), 2);
 
-        // A non-finite vector makes the batch transaction fail: the other items are still
-        // written, one by one, and only the bad one reports the store's rejection.
+        // A non-finite vector makes the batch transaction fail: the other items are still written,
+        // one by one, and only the bad one reports the store's rejection.
         let res = persist_all(
             &store,
             vec![

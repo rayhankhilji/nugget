@@ -1,5 +1,5 @@
 //! iCalendar (RFC 5545): events and tasks rendered as readable text, one section each; uid and
-//! times in metadata. Hand-rolled line parser (unfolding, parameters, escapes); no recursion.
+//! times in metadata.
 
 use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};

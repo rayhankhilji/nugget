@@ -1,6 +1,4 @@
-//! PDF text per page via `pdf-extract` (on `lopdf`). Runs on a dedicated thread with a large
-//! stack, so deep object graphs cannot overflow the caller's stack and panics in the parser are
-//! contained.
+//! PDF text per page via `pdf-extract` (on `lopdf`).
 
 use nugget_core::{Error, Result};
 use pdf_extract::{Document, Object, PlainTextOutput, output_doc_page};

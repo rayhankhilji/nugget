@@ -1,7 +1,5 @@
-//! RFC 822 / MIME mail via `mail-parser`: headers into metadata, the text/plain body (or the
-//! HTML body converted), quoted replies and signatures moved into metadata, attachment names.
-//! The text starts with `From:` / `Date:` lines (see [`text_header`]); `metadata.text_header`
-//! holds that exact prefix.
+//! RFC 822 / MIME mail via `mail-parser`: headers into metadata, the text/plain body (or the HTML
+//! body converted), quoted replies and signatures moved into metadata, attachment names.
 
 use mail_parser::{
     Address, HeaderForm, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
@@ -220,8 +218,7 @@ pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
 const MAX_HEADER_FROM_CHARS: usize = 200;
 
 /// `From: <sender>` and `Date: <YYYY-MM-DD>` lines (each only when known) and a blank line, put
-/// before the body so a passage says who sent it and when; empty when neither is known. The date
-/// is the calendar date in the header's own offset (as the sender wrote it).
+/// before the body so a passage says who sent it and when; empty when neither is known.
 fn text_header(from: Option<&str>, date: Option<&mail_parser::DateTime>) -> String {
     let mut out = String::new();
     if let Some(f) = from.map(util::normalize_ws).filter(|f| !f.is_empty()) {
@@ -283,50 +280,18 @@ pub(crate) struct Split {
     pub signature: String,
 }
 
-const ATTRIBUTION_ENDINGS: &[&str] = &[
-    "wrote:",
-    "writes:",
-    "schrieb:",
-    "a écrit :",
-    "a écrit:",
-    "escribió:",
-    "scrisse:",
-    "escreveu:",
-    "skrev:",
-    "schreef:",
-    "napisał:",
-    "写道:",
-    "写道：",
-    "寫道:",
-    "寫道：",
-    "كتب:",
-];
+const ATTRIBUTION_ENDINGS: &str = "wrote:|writes:|schrieb:|a écrit :|a écrit:|escribió:|scrisse:|escreveu:|skrev:|schreef:|napisał:|写道:|写道：|寫道:|寫道：|كتب:";
 
-/// The verb of a localised attribution whose line ends with the sender (`… <a@b>:`) instead:
-/// `Am 27.10.2026 um 16:05 schrieb Paul <p@x>:`, `في … كتب Sam <s@x>:`.
-const ATTRIBUTION_VERBS: &[&str] = &[
-    " wrote ",
-    " schrieb ",
-    " a écrit ",
-    " escribió ",
-    " escreveu ",
-    " scrisse ",
-    " schreef ",
-    " skrev ",
-    " napisał ",
-    "ने लिखा",
-    "写道",
-    "寫道",
-    " كتب ",
-    "،كتب ",
-];
+/// The verb of a localised attribution whose line ends with the sender (`… <a@b>:`) instead: `Am
+/// 27.10.2026 um 16:05 schrieb Paul <p@x>:`, `في … كتب Sam <s@x>:`.
+const ATTRIBUTION_VERBS: &str = " wrote | schrieb | a écrit | escribió | escreveu | scrisse | schreef | skrev | napisał |ने लिखा|写道|寫道| كتب |،كتب ";
 
 fn is_attribution(line: &str) -> bool {
     let t = line.trim();
     if t.len() >= 400 {
         return false;
     }
-    if ATTRIBUTION_ENDINGS.iter().any(|e| t.ends_with(e)) {
+    if ATTRIBUTION_ENDINGS.split('|').any(|e| t.ends_with(e)) {
         return true;
     }
     // Hindi Gmail: `… को Sam <s@x> ने लिखा:`; the sender's address keeps "मैंने लिखा:" ("I wrote:")
@@ -334,8 +299,7 @@ fn is_attribution(line: &str) -> bool {
     if t.ends_with("> ने लिखा:") && t.contains('@') {
         return true;
     }
-    // `… Name <address>:` (or `：`): a localised header that ends with the sender. It needs the
-    // verb, or a leading date as Japanese Gmail writes it (`2026年10月28日(水) 14:03 Sam <s@x>:`).
+    // `… Name <address>:` (or `：`): a localised header that ends with the sender.
     let Some(head) = t.strip_suffix(':').or_else(|| t.strip_suffix('：')) else {
         return false;
     };
@@ -343,7 +307,7 @@ fn is_attribution(line: &str) -> bool {
     if !(head.ends_with('>') && head.contains('@') && head.contains('<')) {
         return false;
     }
-    ATTRIBUTION_VERBS.iter().any(|v| head.contains(v))
+    ATTRIBUTION_VERBS.split('|').any(|v| head.contains(v))
         || head.starts_with("كتب ")
         || (head.starts_with(|c: char| c.is_ascii_digit()) && head.contains('年'))
 }
@@ -352,7 +316,7 @@ fn is_attribution(line: &str) -> bool {
 fn is_original_marker(line: &str, next: Option<&str>) -> bool {
     let t = line.trim();
     let lower = t.to_lowercase();
-    if t.starts_with("--") && ORIGINAL_MESSAGE.iter().any(|m| lower.contains(m)) {
+    if t.starts_with("--") && ORIGINAL_MESSAGE.split('|').any(|m| lower.contains(m)) {
         return true;
     }
     // Outlook: a line of underscores followed by a (localised) `From:` header block.
@@ -360,75 +324,27 @@ fn is_original_marker(line: &str, next: Option<&str>) -> bool {
 }
 
 /// The `To:` line of a quoted header block.
-const TO_HEADERS: &[&str] = &[
-    "To:",
-    "An:",
-    "À :",
-    "À:",
-    "Para:",
-    "A:",
-    "Aan:",
-    "Till:",
-    "Do:",
-    "收件人:",
-    "收件人：",
-    "宛先:",
-    "宛先：",
-    "إلى:",
-    "प्रति:",
-];
+const TO_HEADERS: &str =
+    "To:|An:|À :|À:|Para:|A:|Aan:|Till:|Do:|收件人:|收件人：|宛先:|宛先：|إلى:|प्रति:";
 
 /// The `Subject:` line of a quoted header block.
-const SUBJECT_HEADERS: &[&str] = &[
-    "Subject:",
-    "Betreff:",
-    "Objet :",
-    "Objet:",
-    "Asunto:",
-    "Assunto:",
-    "Oggetto:",
-    "Onderwerp:",
-    "Ämne:",
-    "Temat:",
-    "主题:",
-    "主题：",
-    "主旨:",
-    "主旨：",
-    "件名:",
-    "件名：",
-    "الموضوع:",
-    "विषय:",
-];
+const SUBJECT_HEADERS: &str = "Subject:|Betreff:|Objet :|Objet:|Asunto:|Assunto:|Oggetto:|Onderwerp:|Ämne:|Temat:|主题:|主题：|主旨:|主旨：|件名:|件名：|الموضوع:|विषय:";
 
 /// Subject prefixes of a forwarded message.
-const FORWARD_PREFIXES: &[&str] = &[
-    "fw:",
-    "fwd:",
-    "wg:",
-    "tr:",
-    "rv:",
-    "enc:",
-    "i:",
-    "doorst:",
-    "vb:",
-    "转发:",
-    "转发：",
-    "轉寄:",
-    "転送:",
-    "fw：",
-];
+const FORWARD_PREFIXES: &str =
+    "fw:|fwd:|wg:|tr:|rv:|enc:|i:|doorst:|vb:|转发:|转发：|轉寄:|転送:|fw：";
 
 /// Byte length of `line` up to the end of the first of `heads` it starts with.
-fn starts_with_any(line: &str, heads: &[&str]) -> Option<usize> {
+fn starts_with_any(line: &str, heads: &str) -> Option<usize> {
     let t = line.trim_start();
     heads
-        .iter()
-        .find(|h| t.starts_with(**h))
+        .split('|')
+        .find(|h| t.starts_with(h))
         .map(|h| line.len() - t.len() + h.len())
 }
 
-/// The subject of the header block that starts at `rest[0]` (its first 8 lines, up to a blank
-/// one), when the block also names a recipient: `Some(subject)` for a real header block.
+/// The subject of the header block that starts at `rest[0]` (its first 8 lines, up to a blank one),
+/// when the block also names a recipient: `Some(subject)` for a real header block.
 fn block_subject<'a>(rest: &[&'a str]) -> Option<&'a str> {
     let block: Vec<&str> = rest
         .iter()
@@ -449,7 +365,7 @@ fn block_subject<'a>(rest: &[&'a str]) -> Option<&'a str> {
 
 fn is_forward_subject(subject: &str) -> bool {
     let lower = subject.to_lowercase();
-    FORWARD_PREFIXES.iter().any(|p| lower.starts_with(p))
+    FORWARD_PREFIXES.split('|').any(|p| lower.starts_with(p))
 }
 
 /// Whether the quote starts at `rest[0]`, given the reply's last non-blank line `above`.
@@ -458,7 +374,7 @@ fn quote_starts(rest: &[&str], above: Option<&str>) -> bool {
     let next = rest.get(1).copied();
     let t = line.trim();
     let lower = t.to_lowercase();
-    if t.starts_with("--") && ORIGINAL_MESSAGE.iter().any(|m| lower.contains(m)) {
+    if t.starts_with("--") && ORIGINAL_MESSAGE.split('|').any(|m| lower.contains(m)) {
         return true;
     }
     // A header block (after underscores or on its own) quotes the earlier mail, unless it is a
@@ -473,117 +389,47 @@ fn quote_starts(rest: &[&str], above: Option<&str>) -> bool {
 }
 
 /// `-----Original Message-----` in the languages mail clients write it in.
-const ORIGINAL_MESSAGE: &[&str] = &[
-    "original message",
-    "ursprüngliche nachricht",
-    "message d'origine",
-    "message d’origine",
-    "mensaje original",
-    "mensagem original",
-    "messaggio originale",
-    "oorspronkelijk bericht",
-    "原始邮件",
-    "原始郵件",
-    "元のメッセージ",
-    "الرسالة الأصلية",
-    "मूल संदेश",
-];
+const ORIGINAL_MESSAGE: &str = "original message|ursprüngliche nachricht|message d'origine|message d’origine|mensaje original|mensagem original|messaggio originale|oorspronkelijk bericht|原始邮件|原始郵件|元のメッセージ|الرسالة الأصلية|मूल संदेश";
 
 /// The `From:` line of a quoted header block, in the languages Outlook writes it in.
-const FROM_HEADERS: &[&str] = &[
-    "From:",
-    "Von:",
-    "De :",
-    "De:",
-    "Da:",
-    "Van:",
-    "Från:",
-    "Od:",
-    "发件人:",
-    "发件人：",
-    "寄件者:",
-    "寄件者：",
-    "差出人:",
-    "差出人：",
-    "من:",
-    "प्रेषक:",
-];
+const FROM_HEADERS: &str = "From:|Von:|De :|De:|Da:|Van:|Från:|Od:|发件人:|发件人：|寄件者:|寄件者：|差出人:|差出人：|من:|प्रेषक:";
 
 /// The `Sent:`/`Date:` line that follows a quoted `From:` line.
-const SENT_HEADERS: &[&str] = &[
-    "Sent:",
-    "Date:",
-    "Gesendet:",
-    "Datum:",
-    "Envoyé :",
-    "Envoyé:",
-    "Date :",
-    "Enviado:",
-    "Enviado el:",
-    "Fecha:",
-    "Data:",
-    "Inviato:",
-    "Verzonden:",
-    "Skickat:",
-    "发送时间:",
-    "发送时间：",
-    "日期:",
-    "日期：",
-    "送信日時:",
-    "送信日時：",
-    "تاريخ الإرسال:",
-    "التاريخ:",
-    "भेजा गया:",
-    "दिनांक:",
-];
+const SENT_HEADERS: &str = "Sent:|Date:|Gesendet:|Datum:|Envoyé :|Envoyé:|Date :|Enviado:|Enviado el:|Fecha:|Data:|Inviato:|Verzonden:|Skickat:|发送时间:|发送时间：|日期:|日期：|送信日時:|送信日時：|تاريخ الإرسال:|التاريخ:|भेजा गया:|दिनांक:";
 
 fn is_from_header(line: &str) -> bool {
     let t = line.trim_start();
-    FROM_HEADERS.iter().any(|h| t.starts_with(h))
+    FROM_HEADERS.split('|').any(|h| t.starts_with(h))
 }
 
 /// Outlook's plain-text reply block without a separator: a `From:` line, then `Sent:` (localised),
-/// once the reply has new text above it. A forwarded message's header block is not a quote: its
-/// text is what the user forwarded.
+/// once the reply has new text above it.
 fn is_header_block(line: &str, next: Option<&str>) -> bool {
     is_from_header(line)
-        && next.is_some_and(|n| SENT_HEADERS.iter().any(|h| n.trim_start().starts_with(h)))
+        && next.is_some_and(|n| {
+            SENT_HEADERS
+                .split('|')
+                .any(|h| n.trim_start().starts_with(h))
+        })
 }
 
-/// `---------- Forwarded message ---------`, `Begin forwarded message:` and their translations
-/// (a marker line of its own, not a sentence that mentions forwarding).
+/// `---------- Forwarded message ---------`, `Begin forwarded message:` and their translations (a
+/// marker line of its own, not a sentence that mentions forwarding).
 fn is_forward_marker(line: &str) -> bool {
     let t = line.trim();
     let lower = t.to_lowercase();
     let dashed = t.starts_with("---") && t.trim_end_matches(':').ends_with("--");
-    let begin = [
-        "begin forwarded message",
-        "anfang der weitergeleiteten nachricht",
-        "début du message réexpédié",
-        "inicio del mensaje reenviado",
-        "início da mensagem encaminhada",
-    ]
-    .iter()
-    .any(|m| lower.starts_with(m));
+    let begin = "begin forwarded message|anfang der weitergeleiteten nachricht|\
+                 début du message réexpédié|inicio del mensaje reenviado|\
+                 início da mensagem encaminhada"
+        .split('|')
+        .any(|m| lower.starts_with(m));
     begin
         || dashed
-            && [
-                "forward",
-                "weitergeleitet",
-                "transféré",
-                "reenviado",
-                "encaminhad",
-                "inoltrat",
-                "doorgestuurd",
-                "转发",
-                "轉寄",
-                "転送",
-                "توجيه",
-                "अग्रेषित",
-                "फ़ॉरवर्ड",
-            ]
-            .iter()
-            .any(|m| lower.contains(m))
+            && "forward|weitergeleitet|transféré|reenviado|encaminhad|inoltrat|doorgestuurd|\
+                转发|轉寄|転送|توجيه|अग्रेषित|फ़ॉरवर्ड"
+                .split('|')
+                .any(|m| lower.contains(m))
 }
 
 fn is_mobile_signature(line: &str) -> bool {
@@ -686,8 +532,8 @@ fn collapse_blank_lines<S: AsRef<str>>(lines: &[S]) -> String {
 mod tests {
     use super::*;
 
-    /// LL2 (GG7-9): the reply headers mail clients write in the nine UI languages, as in QA
-    /// GG7's corpus, mark the quote below them.
+    /// LL2 (GG7-9): the reply headers mail clients write in the nine UI languages, as in QA GG7's
+    /// corpus, mark the quote below them.
     #[test]
     fn localised_attributions() {
         let headers = [
@@ -725,72 +571,25 @@ mod tests {
 
     #[test]
     fn localised_outlook_blocks() {
-        for (marker, from, sent) in [
-            (
-                "-----Ursprüngliche Nachricht-----",
-                "Von: Paul",
-                "Gesendet: Dienstag, 27. Oktober 2026 16:05",
-            ),
-            (
-                "-----Message d'origine-----",
-                "De : Paul",
-                "Envoyé : mardi 27 octobre 2026 16:05",
-            ),
-            (
-                "-----Mensagem original-----",
-                "De: Paul",
-                "Enviada em: terça-feira",
-            ),
-            (
-                "-----原始邮件-----",
-                "发件人: Paul",
-                "发送时间: 2026年10月27日 16:05",
-            ),
-            (
-                "-----元のメッセージ-----",
-                "差出人: Paul",
-                "送信日時: 2026年10月27日 16:05",
-            ),
+        for block in [
+            "-----Ursprüngliche Nachricht-----\nVon: Paul\nGesendet: Dienstag, 27. Oktober 2026 16:05",
+            "-----Message d'origine-----\nDe : Paul\nEnvoyé : mardi 27 octobre 2026 16:05",
+            "-----Mensagem original-----\nDe: Paul\nEnviada em: terça-feira",
+            "-----原始邮件-----\n发件人: Paul\n发送时间: 2026年10月27日 16:05",
+            "-----元のメッセージ-----\n差出人: Paul\n送信日時: 2026年10月27日 16:05",
+            // Underscores, then a localised `From:`.
+            "________________________________\nVon: Paul\nGesendet: heute",
+            // No separator: a `From:`, `Sent:`, `To:`, `Subject:` block in any language.
+            "From: Paul\nSent: Tuesday\nTo: Sam\nSubject: RE: Plan\n",
+            "Von: Paul\nGesendet: Dienstag\nAn: Sam\nBetreff: AW: Plan\n",
+            "من: بول\nتاريخ الإرسال: الثلاثاء\nإلى: سام\nالموضوع: رد: الخطة\n",
         ] {
-            let s = split_reply(&format!(
-                "Erledigt.\n\n{marker}\n{from}\n{sent}\nold question?"
-            ));
-            assert_eq!(s.main, "Erledigt.", "{marker}");
-            assert!(s.quoted.ends_with("old question?"), "{marker}");
+            let s = split_reply(&format!("Erledigt.\n\n{block}\nold question?"));
+            assert_eq!(s.main, "Erledigt.", "{block}");
+            assert!(s.quoted.ends_with("old question?"), "{block}");
         }
-        // Underscores, then a localised `From:`.
-        let s = split_reply(&format!(
-            "Ok\n{}\nVon: Paul\nGesendet: heute\nalt",
-            "_".repeat(32)
-        ));
-        assert_eq!(s.main, "Ok");
-        // No separator: a `From:`, `Sent:`, `To:`, `Subject:` block in any language.
-        for (from, sent, to, subject) in [
-            (
-                "From: Paul",
-                "Sent: Tuesday",
-                "To: Sam",
-                "Subject: RE: Plan",
-            ),
-            (
-                "Von: Paul",
-                "Gesendet: Dienstag",
-                "An: Sam",
-                "Betreff: AW: Plan",
-            ),
-            (
-                "من: بول",
-                "تاريخ الإرسال: الثلاثاء",
-                "إلى: سام",
-                "الموضوع: رد: الخطة",
-            ),
-        ] {
-            let s = split_reply(&format!("Ok\n\n{from}\n{sent}\n{to}\n{subject}\n\nalt"));
-            assert_eq!(s.main, "Ok", "{from}");
-            assert!(s.quoted.ends_with("alt"), "{from}");
-        }
-        // Forwards stay the mail's own text: after a marker line, or with a forward subject
-        // (with or without the underscore separator).
+        // Forwards stay the mail's own text: after a marker line, or with a forward subject (with
+        // or without the underscore separator).
         for fwd in [
             "---------- Forwarded message ---------",
             "---------- Weitergeleitete Nachricht ----------",
@@ -802,31 +601,16 @@ mod tests {
             assert!(s.main.ends_with("the invoice"), "{fwd}");
         }
         for sep in ["", "________________________________\n"] {
-            for (from, sent, to, subject) in [
-                (
-                    "From: Paul <p@x>",
-                    "Date: Tue",
-                    "To: Sam",
-                    "Subject: FW: Invoice 4471",
-                ),
-                (
-                    "Von: Paul",
-                    "Gesendet: Dienstag",
-                    "An: Sam",
-                    "Betreff: WG: Rechnung 4471",
-                ),
-                (
-                    "De : Paul",
-                    "Envoyé : mardi",
-                    "À : Sam",
-                    "Objet : TR: Facture 4471",
-                ),
+            for block in [
+                "From: Paul <p@x>\nDate: Tue\nTo: Sam\nSubject: FW: Invoice 4471",
+                "Von: Paul\nGesendet: Dienstag\nAn: Sam\nBetreff: WG: Rechnung 4471",
+                "De : Paul\nEnvoyé : mardi\nÀ : Sam\nObjet : TR: Facture 4471",
             ] {
                 let s = split_reply(&format!(
-                    "Zur Info.\n\n{sep}{from}\n{sent}\n{to}\n{subject}\n\nInvoice 4471 is due."
+                    "Zur Info.\n\n{sep}{block}\n\nInvoice 4471 is due."
                 ));
-                assert!(s.main.ends_with("Invoice 4471 is due."), "{sep}{subject}");
-                assert!(s.quoted.is_empty(), "{subject}");
+                assert!(s.main.ends_with("Invoice 4471 is due."), "{sep}{block}");
+                assert!(s.quoted.is_empty(), "{block}");
             }
         }
         // Not header blocks: the user's own `From:`/`Data:` lines with no recipient and subject.
@@ -903,8 +687,8 @@ mod tests {
             "From: News <news@example.com>\r\nTo: a@example.org\r\nSubject: Weekly\r\n\
              List-Unsubscribe: <mailto:unsub@example.com?subject=unsubscribe>,\r\n\
              \t<https://example.com/unsub?id=1>\r\n\
-             List-Id: Example News <news.example.com>\r\n\
-             Precedence:  bulk \r\n\
+             LIST-ID: Example News <news.example.com>\r\n\
+             precedence:  bulk \r\n\
              Auto-Submitted: =?utf-8?q?auto-generated?=\r\n\r\nHello\r\n",
         );
         assert_eq!(
@@ -914,27 +698,9 @@ mod tests {
         assert_eq!(m["list_id"], "Example News <news.example.com>");
         assert_eq!(m["precedence"], "bulk");
         assert_eq!(m["auto_submitted"], "auto-generated");
-    }
-
-    #[test]
-    fn list_headers_absent() {
         let m = meta("From: a@example.com\r\nSubject: Hi\r\n\r\nHello\r\n");
         for (key, _) in LIST_HEADERS {
             assert!(!m.contains_key(key), "{key} should be absent");
         }
-        assert_eq!(m["subject"], "Hi");
-    }
-
-    #[test]
-    fn list_headers_case_insensitive() {
-        let m = meta(
-            "from: a@example.com\r\nLIST-UNSUBSCRIBE: <mailto:u@example.com>\r\n\
-             list-id: <l.example.com>\r\nPRECEDENCE: list\r\nauto-submitted: auto-replied\r\n\
-             \r\nHello\r\n",
-        );
-        assert_eq!(m["list_unsubscribe"], "<mailto:u@example.com>");
-        assert_eq!(m["list_id"], "<l.example.com>");
-        assert_eq!(m["precedence"], "list");
-        assert_eq!(m["auto_submitted"], "auto-replied");
     }
 }

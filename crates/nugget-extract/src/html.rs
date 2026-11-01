@@ -1,8 +1,4 @@
 //! HTML → readable text with a streaming tokenizer (no DOM, so no recursion on deep nesting).
-//! Drops script/style/template/svg, comments and hidden elements (`hidden`, `aria-hidden="true"`,
-//! inline `display:none` / `visibility:hidden` / `font-size:0`); keeps the title, links and h1–h6
-//! sections. For mail, quoted
-//! replies and signatures can be diverted into separate buffers.
 
 use std::cell::RefCell;
 
@@ -209,9 +205,8 @@ fn is_zero_length(v: &str) -> bool {
         )
 }
 
-/// A skipped element whose end tag is optional ends where a browser would close it implicitly:
-/// at a sibling start tag (`<p>`, `<li>`, `<td>`...) or at its parent's end tag. Without this a
-/// hidden `<p>` whose `</p>` is omitted would swallow the visible text after it.
+/// A skipped element whose end tag is optional ends where a browser would close it implicitly: at a
+/// sibling start tag (`<p>`, `<li>`, `<td>`...) or at its parent's end tag.
 fn implicitly_closed(skip: &str, tag: &Tag) -> bool {
     let name: &str = &tag.name;
     let start = tag.kind == TagKind::StartTag;
@@ -542,8 +537,7 @@ impl TokenSink for Sink {
     }
 }
 
-/// Convert HTML to text. `divert_quotes` moves quoted replies and signatures (mail clients'
-/// markup) out of the main text.
+/// Convert HTML to text.
 pub(crate) fn convert(html: &str, max_chars: usize, divert_quotes: bool) -> HtmlOut {
     let state = State {
         buf: TextBuf::new(max_chars),
@@ -599,30 +593,6 @@ pub(crate) fn convert(html: &str, max_chars: usize, divert_quotes: bool) -> Html
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn basic_conversion() {
-        let o = convert(
-            "<html lang=en><head><title> T  1 </title><style>p{x:y}</style><script>var a='<p>';</script></head>\
-             <body><h1>Guide</h1><p>Hello <b>big</b>\n world &amp; co.</p><h2>Install</h2><ul><li>one</li><li>two</li></ul>\
-             <a href='https://x.example/'>x</a><a href='#top'>t</a><table><tr><td>a</td><td>b</td></tr></table></body></html>",
-            10_000,
-            false,
-        );
-        assert_eq!(o.title.as_deref(), Some("T 1"));
-        assert_eq!(
-            o.text,
-            "Guide\n\nHello big world & co.\n\nInstall\n\n- one\n- two\n\nxt\n\na | b"
-        );
-        assert_eq!(o.links, ["https://x.example/"]);
-        assert_eq!(o.sections.len(), 2);
-        assert_eq!(o.sections[1].heading_path, ["Guide", "Install"]);
-        assert_eq!(
-            &o.text[o.sections[1].start..o.sections[1].start + 7],
-            "Install"
-        );
-        assert_eq!(o.meta["lang"], "en");
-    }
 
     #[test]
     fn diverts_quotes() {

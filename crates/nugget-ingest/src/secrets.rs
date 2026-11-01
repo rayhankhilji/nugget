@@ -1,11 +1,4 @@
 //! Credential storage for sources.
-//!
-//! - [`KeyringSecrets`]: the OS keychain (service [`KEYCHAIN_SERVICE`]), keyed by the full
-//!   account name, e.g. `password:imap-1` or `oauth:gmail-1` (see [`nugget_core::secrets`]).
-//! - [`MemorySecrets`]: an in-memory map for tests and headless runs.
-//! - `ScopedSecrets` (internal): what a connector receives. It only lets a source touch accounts
-//!   named `<prefix>:<source id>` or `<prefix>:<source id>:<suffix>` (never `provider:*`), and
-//!   remembers which accounts were written so removing the source can delete them.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,8 +9,6 @@ use nugget_core::secrets::KEYCHAIN_SERVICE;
 use nugget_core::{Error, Result};
 
 /// Secrets in the OS keychain under service [`KEYCHAIN_SERVICE`].
-///
-/// Calls block (D-Bus round trips on Linux); call from a blocking context where possible.
 #[derive(Debug, Clone)]
 pub struct KeyringSecrets {
     service: String,
@@ -167,8 +158,8 @@ impl SecretStore for MemorySecrets {
     }
 }
 
-/// Whether `account` belongs to `source`: `<prefix>:<source>` or `<prefix>:<source>:<rest>`,
-/// with a non-empty prefix free of `:` and not `provider`.
+/// Whether `account` belongs to `source`: `<prefix>:<source>` or `<prefix>:<source>:<rest>`, with a
+/// non-empty prefix free of `:` and not `provider`.
 pub fn account_belongs_to(account: &str, source: &SourceId) -> bool {
     let Some((prefix, rest)) = account.split_once(':') else {
         return false;
@@ -199,9 +190,9 @@ pub(crate) struct ScopedSecrets {
     pub(crate) source: SourceId,
     pub(crate) inner: Arc<dyn SecretStore>,
     pub(crate) on_written: OnAccountWritten,
-    /// Cancelled when the source is removed: from then on nothing may be written for it (a
-    /// late OAuth completion would otherwise leave an orphaned token that a source re-added
-    /// under the same id inherits).
+    /// Cancelled when the source is removed: from then on nothing may be written for it (a late
+    /// OAuth completion would otherwise leave an orphaned token that a source re-added under the
+    /// same id inherits).
     pub(crate) retired: CancellationToken,
 }
 

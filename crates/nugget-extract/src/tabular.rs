@@ -11,7 +11,7 @@ const MAX_COLS: usize = 512;
 const MAX_CELL_CHARS: usize = 2_000;
 
 /// Render a row as `a | b | c`: cells whitespace-normalized and capped, trailing empty cells
-/// dropped. `None` when every cell is empty.
+/// dropped.
 pub(crate) fn render_row<S: AsRef<str>>(cells: &[S]) -> Option<String> {
     let cells: Vec<String> = cells
         .iter()

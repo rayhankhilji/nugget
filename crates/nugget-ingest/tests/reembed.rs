@@ -14,9 +14,8 @@ use nugget_infer::{Provider, Router};
 use nugget_ingest::IngestConfig;
 use serde_json::json;
 
-/// A router whose only member is `p` in the embedding tier, probed **without** embeddings: it
-/// is routable for nothing until [`enable`] (like a local runtime slot before its server is
-/// ready).
+/// A router whose only member is `p` in the embedding tier, probed **without** embeddings: it is
+/// routable for nothing until [`enable`] (like a local runtime slot before its server is ready).
 fn dormant_router(p: &Arc<FakeProvider>) -> Arc<Router> {
     let r = Router::new(
         vec![p.clone() as Arc<dyn Provider>],
@@ -53,17 +52,19 @@ async fn items_indexed_before_an_embedder_is_routable_are_embedded_later() {
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "Pelicans glide over the harbour", Some("1"))),
-        Step::Send(text_doc(
-            "card",
-            "Please charge 4111 1111 1111 1111 for the order",
-            Some("1"),
-        )),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(text_doc("a", "Pelicans glide over the harbour", Some("1"))),
+            Step::Send(text_doc(
+                "card",
+                "Please charge 4111 1111 1111 1111 for the order",
+                Some("1"),
+            )),
+        ],
+        json!("done"),
+    )
+    .await;
 
     // Indexed text-only: nothing could embed it.
     assert!(embedder.embedded().is_empty());
@@ -125,17 +126,19 @@ async fn reembedding_never_sends_sensitive_items_to_cloud_embedders() {
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("public", "Lunch menu for friday", Some("1"))),
-        Step::Send(text_doc(
-            "private",
-            "employee ssn 123-45-6789 on file",
-            Some("1"),
-        )),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(text_doc("public", "Lunch menu for friday", Some("1"))),
+            Step::Send(text_doc(
+                "private",
+                "employee ssn 123-45-6789 on file",
+                Some("1"),
+            )),
+        ],
+        json!("done"),
+    )
+    .await;
 
     enable(&r, &cloud);
     h.ingest.reembed_now();
@@ -186,12 +189,16 @@ async fn nan_embeddings_fall_back_to_text_only_and_are_retried() {
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("n", "Nightjars hunt at dusk", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![Step::Send(text_doc(
+            "n",
+            "Nightjars hunt at dusk",
+            Some("1"),
+        ))],
+        json!("done"),
+    )
+    .await;
 
     // The item is complete and searchable by text; the bad vectors were not stored.
     let n = h.item("fake-1", "n").expect("item stored");

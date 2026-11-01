@@ -1,17 +1,4 @@
 //! Deterministic sensitivity rules (QA GG4-6).
-//!
-//! The PII scan only finds patterns (card numbers, SSNs, IBANs, secrets), and model triage only
-//! runs when a local model is routable and has got to the item. Health, money, credentials and
-//! legal content must be kept away from cloud models even without either, so every item is
-//! also checked against these rules when it is indexed:
-//! - words and phrases about health, therapy, pay, banking, credentials and legal or identity
-//!   matters, in the title, the text and the mail subject;
-//! - folders and tags that name such matters (`Health/`, `Finance/`, `#finance`; GG5-2);
-//! - senders whose mailbox is a role that handles such content (`hr@`, `payroll@`,
-//!   `security@`, ...) or whose domain names it (`…-therapy.example`, `…clinic…`, `…bank…`).
-//!
-//! A hit only marks the item sensitive: it stays searchable and usable locally and is never
-//! sent to cloud models. The rules lean towards recall; a false positive costs only cloud use.
 
 use std::collections::HashSet;
 
@@ -150,8 +137,8 @@ const ROLE_MAILBOXES: &[(&str, &str)] = &[
     ("compliance", "legal"),
 ];
 
-/// Words that name a sensitive kind of organisation when they appear anywhere in a domain
-/// label (`northshorebank`, `albers-counselling`).
+/// Words that name a sensitive kind of organisation when they appear anywhere in a domain label
+/// (`northshorebank`, `albers-counselling`).
 const DOMAIN_STEMS: &[(&str, &str)] = &[
     ("therapy", "health"),
     ("therapist", "health"),
@@ -220,8 +207,7 @@ fn tokens(s: &str) -> Vec<String> {
 }
 
 /// The kind of sensitive content the rules found (`"health"`, `"financial"`, `"credentials"`,
-/// `"legal"`, `"identity"`), if any. `key` is the item key (a path for file sources), `tags`
-/// the extracted tags, `extracted` the extractor's metadata (for mail: `from`, `subject`).
+/// `"legal"`, `"identity"`), if any.
 pub(crate) fn classify(
     key: &str,
     tags: &[String],

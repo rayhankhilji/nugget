@@ -1,25 +1,5 @@
-//! The re-embed job: gives vectors to items that were indexed text-only.
-//!
-//! Items are stored without embeddings when no embedding provider was routable at the time
-//! (typically: the local embedding server was not installed or not started yet), or when
-//! embedding failed. Without this job they would never become reachable by vector search.
-//!
-//! The job runs at start, whenever [`Ingest::reembed_now`](crate::Ingest::reembed_now) is
-//! called (nuggetd calls it when a local runtime becomes ready) and every
-//! [`IngestConfig::reembed_interval_ms`](crate::IngestConfig::reembed_interval_ms). Each run:
-//! 1. does nothing unless embeddings are on, an `Embedding`-tier provider is routable and the
-//!    power policy allows heavy work;
-//! 2. pages through [`Store::items_missing_embeddings`](nugget_store::Store) and, per item,
-//!    embeds every chunk with the providers the pipeline would use (the same privacy rules:
-//!    local providers, `Cloud` ones only when allowed **and** the item is not sensitive; an
-//!    item without a `sensitive: false` flag counts as sensitive);
-//! 3. writes the vectors only if the item is unchanged since it was read, under the ingest
-//!    write lock, atomically with its metadata (`embedding_provider` set, `embed_error`
-//!    cleared). A concurrent pipeline write or delete therefore always wins.
-//!
-//! Items that cannot be embedded (dimension mismatch with the index, or repeated failures) are
-//! remembered by content hash and skipped until their content changes. A run stops after a few
-//! consecutive provider failures and is retried on the next trigger.
+//! The re-embed job: gives vectors to items that were indexed text-only (no embedder was routable,
+//! or embedding failed).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,7 +44,6 @@ pub struct ReembedStats {
 pub(crate) struct ReembedState {
     pub stats: ReembedStats,
     /// Items not to retry until their content hash changes: item → (content hash, failures).
-    /// `u32::MAX` failures means permanently skipped.
     pub skip: HashMap<ItemRef, (String, u32)>,
 }
 
@@ -290,8 +269,7 @@ async fn reembed_item(
     }
 }
 
-/// Store `vectors` for the item read as `stored` with chunk texts `texts`, under the write
-/// lock. Returns `false` (nothing written) if the item changed or disappeared meanwhile.
+/// Store `vectors` for the item read as `stored` with chunk texts `texts`, under the write lock.
 fn write_back(
     inner: &Inner,
     item: &ItemRef,

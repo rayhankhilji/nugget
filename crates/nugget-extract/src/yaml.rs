@@ -1,6 +1,4 @@
-//! Bounded YAML → JSON for frontmatter. Built on the parser's event stream (no recursion in our
-//! code) with caps on nesting depth and total nodes, so alias "billion laughs" inputs and deep
-//! nesting fail cleanly instead of exhausting memory or stack.
+//! Bounded YAML → JSON for frontmatter.
 
 use std::collections::HashMap;
 

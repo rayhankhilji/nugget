@@ -1,16 +1,4 @@
 //! Interactive priority for the local model slot.
-//!
-//! Background triage shares the on-device chat model with interactive features (Ask, Double
-//! Tap, the agent, drafting). A local server usually has one slot, so a triage request in
-//! flight makes an interactive request wait for it. [`Foreground`] lets interactive callers
-//! announce themselves: the daemon wraps its on-device chat providers so that every chat that
-//! is not triage holds a [`ForegroundGuard`] for as long as its stream lives. The triage job
-//! then
-//! - waits until no interactive request is in flight and none ended in the last
-//!   [`Foreground::grace`] (follow-up calls of one interaction, like query rewrite then answer,
-//!   come in quick succession), and
-//! - abandons its own request as soon as an interactive one starts (dropping the stream closes
-//!   the connection, which stops generation on the server); the batch is retried later.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -18,9 +6,8 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-/// `ChatRequest::feature` tags of background model work: triage itself, knowledge
-/// extraction, the proactive judge and capability probes. Triage does not yield to these
-/// (they are not waiting users); every other feature counts as interactive.
+/// `ChatRequest::feature` tags of background model work: triage itself, knowledge extraction, the
+/// proactive judge and capability probes.
 pub const BACKGROUND_FEATURES: &[&str] = &["triage", "knowledge", "proactive_judge", "probe"];
 
 /// Whether a chat with this feature tag is interactive (see [`BACKGROUND_FEATURES`]).
@@ -69,8 +56,8 @@ impl Foreground {
         *self.active.borrow()
     }
 
-    /// Whether background work should hold off now: a request is in flight or one ended less
-    /// than [`grace`](Self::grace) ago.
+    /// Whether background work should hold off now: a request is in flight or one ended less than
+    /// [`grace`](Self::grace) ago.
     pub fn busy(&self) -> bool {
         self.in_flight() > 0 || self.remaining_grace().is_some()
     }

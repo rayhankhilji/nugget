@@ -26,121 +26,47 @@ pub(crate) fn param(mime: &str, name: &str) -> Option<String> {
     })
 }
 
-/// Source-code and data-file extensions: (extension, language, MIME).
-const LANGS: &[(&str, &str, &str)] = &[
-    ("rs", "rust", "text/x-rust"),
-    ("py", "python", "text/x-python"),
-    ("pyi", "python", "text/x-python"),
-    ("js", "javascript", "text/javascript"),
-    ("mjs", "javascript", "text/javascript"),
-    ("cjs", "javascript", "text/javascript"),
-    ("jsx", "jsx", "text/x-jsx"),
-    ("ts", "typescript", "text/x-typescript"),
-    ("mts", "typescript", "text/x-typescript"),
-    ("cts", "typescript", "text/x-typescript"),
-    ("tsx", "tsx", "text/x-tsx"),
-    ("go", "go", "text/x-go"),
-    ("java", "java", "text/x-java"),
-    ("kt", "kotlin", "text/x-kotlin"),
-    ("kts", "kotlin", "text/x-kotlin"),
-    ("scala", "scala", "text/x-scala"),
-    ("swift", "swift", "text/x-swift"),
-    ("c", "c", "text/x-c"),
-    ("h", "c", "text/x-c"),
-    ("cc", "cpp", "text/x-c++"),
-    ("cpp", "cpp", "text/x-c++"),
-    ("cxx", "cpp", "text/x-c++"),
-    ("hpp", "cpp", "text/x-c++"),
-    ("hh", "cpp", "text/x-c++"),
-    ("hxx", "cpp", "text/x-c++"),
-    ("m", "objective-c", "text/x-objective-c"),
-    ("mm", "objective-cpp", "text/x-objective-c++"),
-    ("cs", "csharp", "text/x-csharp"),
-    ("fs", "fsharp", "text/x-fsharp"),
-    ("vb", "vbnet", "text/x-vb"),
-    ("rb", "ruby", "text/x-ruby"),
-    ("php", "php", "text/x-php"),
-    ("pl", "perl", "text/x-perl"),
-    ("pm", "perl", "text/x-perl"),
-    ("lua", "lua", "text/x-lua"),
-    ("r", "r", "text/x-r"),
-    ("jl", "julia", "text/x-julia"),
-    ("hs", "haskell", "text/x-haskell"),
-    ("ml", "ocaml", "text/x-ocaml"),
-    ("mli", "ocaml", "text/x-ocaml"),
-    ("ex", "elixir", "text/x-elixir"),
-    ("exs", "elixir", "text/x-elixir"),
-    ("erl", "erlang", "text/x-erlang"),
-    ("clj", "clojure", "text/x-clojure"),
-    ("cljs", "clojure", "text/x-clojure"),
-    ("el", "elisp", "text/x-elisp"),
-    ("lisp", "lisp", "text/x-lisp"),
-    ("dart", "dart", "text/x-dart"),
-    ("zig", "zig", "text/x-zig"),
-    ("nim", "nim", "text/x-nim"),
-    ("v", "verilog", "text/x-verilog"),
-    ("sol", "solidity", "text/x-solidity"),
-    ("f90", "fortran", "text/x-fortran"),
-    ("sh", "shell", "text/x-shellscript"),
-    ("bash", "shell", "text/x-shellscript"),
-    ("zsh", "shell", "text/x-shellscript"),
-    ("fish", "fish", "text/x-fish"),
-    ("ps1", "powershell", "text/x-powershell"),
-    ("bat", "batch", "text/x-bat"),
-    ("sql", "sql", "text/x-sql"),
-    ("graphql", "graphql", "text/x-graphql"),
-    ("proto", "protobuf", "text/x-protobuf"),
-    ("css", "css", "text/css"),
-    ("scss", "scss", "text/x-scss"),
-    ("sass", "sass", "text/x-sass"),
-    ("less", "less", "text/x-less"),
-    ("vue", "vue", "text/x-vue"),
-    ("svelte", "svelte", "text/x-svelte"),
-    ("json", "json", "application/json"),
-    ("jsonc", "json", "application/json"),
-    ("yaml", "yaml", "application/yaml"),
-    ("yml", "yaml", "application/yaml"),
-    ("toml", "toml", "application/toml"),
-    ("xml", "xml", "application/xml"),
-    ("ini", "ini", "text/x-ini"),
-    ("cfg", "ini", "text/x-ini"),
-    ("tex", "latex", "text/x-tex"),
-    ("nix", "nix", "text/x-nix"),
-    ("tf", "hcl", "text/x-hcl"),
-    ("cmake", "cmake", "text/x-cmake"),
-    ("gradle", "groovy", "text/x-groovy"),
-    ("groovy", "groovy", "text/x-groovy"),
-    ("diff", "diff", "text/x-diff"),
-    ("patch", "diff", "text/x-diff"),
-];
+/// Source-code and data-file extensions: `language MIME: ext ext; ...`.
+const LANGS: &str = "rust text/x-rust: rs; python text/x-python: py pyi; javascript text/javascript: js mjs cjs;\
+jsx text/x-jsx: jsx; typescript text/x-typescript: ts mts cts; tsx text/x-tsx: tsx;\
+go text/x-go: go; java text/x-java: java; kotlin text/x-kotlin: kt kts;\
+scala text/x-scala: scala; swift text/x-swift: swift; c text/x-c: c h;\
+cpp text/x-c++: cc cpp cxx hpp hh hxx; objective-c text/x-objective-c: m;\
+objective-cpp text/x-objective-c++: mm; csharp text/x-csharp: cs; fsharp text/x-fsharp: fs;\
+vbnet text/x-vb: vb; ruby text/x-ruby: rb; php text/x-php: php; perl text/x-perl: pl pm;\
+lua text/x-lua: lua; r text/x-r: r; julia text/x-julia: jl; haskell text/x-haskell: hs;\
+ocaml text/x-ocaml: ml mli; elixir text/x-elixir: ex exs; erlang text/x-erlang: erl;\
+clojure text/x-clojure: clj cljs; elisp text/x-elisp: el; lisp text/x-lisp: lisp;\
+dart text/x-dart: dart; zig text/x-zig: zig; nim text/x-nim: nim; verilog text/x-verilog: v;\
+solidity text/x-solidity: sol; fortran text/x-fortran: f90;\
+shell text/x-shellscript: sh bash zsh; fish text/x-fish: fish;\
+powershell text/x-powershell: ps1; batch text/x-bat: bat; sql text/x-sql: sql;\
+graphql text/x-graphql: graphql; protobuf text/x-protobuf: proto; css text/css: css;\
+scss text/x-scss: scss; sass text/x-sass: sass; less text/x-less: less; vue text/x-vue: vue;\
+svelte text/x-svelte: svelte; json application/json: json jsonc;\
+yaml application/yaml: yaml yml; toml application/toml: toml; xml application/xml: xml;\
+ini text/x-ini: ini cfg; latex text/x-tex: tex; nix text/x-nix: nix; hcl text/x-hcl: tf;\
+cmake text/x-cmake: cmake; groovy text/x-groovy: gradle groovy; diff text/x-diff: diff patch";
 
-/// Well-known extension-less file names.
-const NAMED: &[(&str, &str, &str)] = &[
-    ("dockerfile", "dockerfile", "text/x-dockerfile"),
-    ("containerfile", "dockerfile", "text/x-dockerfile"),
-    ("makefile", "make", "text/x-makefile"),
-    ("gnumakefile", "make", "text/x-makefile"),
-    ("justfile", "just", "text/x-just"),
-    ("rakefile", "ruby", "text/x-ruby"),
-    ("gemfile", "ruby", "text/x-ruby"),
-    ("cmakelists.txt", "cmake", "text/x-cmake"),
-];
+/// Well-known extension-less file names, as in [`LANGS`].
+const NAMED: &str = "dockerfile text/x-dockerfile: dockerfile containerfile;\
+make text/x-makefile: makefile gnumakefile; just text/x-just: justfile;\
+ruby text/x-ruby: rakefile gemfile; cmake text/x-cmake: cmakelists.txt";
 
-/// Other MIME types that are text with a language.
-const MIME_LANGS: &[(&str, &str)] = &[
-    ("application/javascript", "javascript"),
-    ("application/x-javascript", "javascript"),
-    ("application/typescript", "typescript"),
-    ("application/x-yaml", "yaml"),
-    ("text/yaml", "yaml"),
-    ("text/x-yaml", "yaml"),
-    ("text/xml", "xml"),
-    ("application/x-sh", "shell"),
-    ("application/sql", "sql"),
-    ("application/x-toml", "toml"),
-    ("text/x-sh", "shell"),
-    ("text/x-script.python", "python"),
-];
+/// More MIME types that are text with a language (`lang -: mime ...`).
+const MIME_LANGS: &str = "javascript -: application/javascript application/x-javascript;\
+typescript -: application/typescript; yaml -: application/x-yaml text/yaml text/x-yaml;\
+xml -: text/xml; shell -: application/x-sh text/x-sh; sql -: application/sql;\
+toml -: application/x-toml; python -: text/x-script.python";
+
+/// `(key, language, MIME)` rows of a table written `lang mime: key key; ...`.
+fn rows(table: &'static str) -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    table.split(';').flat_map(|group| {
+        let (head, keys) = group.split_once(':').expect("table group");
+        let (lang, mime) = head.trim().split_once(' ').expect("lang and mime");
+        keys.split_whitespace().map(move |k| (k, lang, mime))
+    })
+}
 
 fn file_name_lower(path: &Path) -> Option<String> {
     path.file_name()?.to_str().map(str::to_ascii_lowercase)
@@ -153,27 +79,26 @@ fn ext_lower(path: &Path) -> Option<String> {
 /// Programming/data language of a file, from its name or extension.
 pub(crate) fn language_for_path(path: &Path) -> Option<&'static str> {
     if let Some(name) = file_name_lower(path)
-        && let Some((_, lang, _)) = NAMED.iter().find(|(n, _, _)| *n == name)
+        && let Some((_, lang, _)) = rows(NAMED).find(|(n, _, _)| *n == name)
     {
         return Some(lang);
     }
     let ext = ext_lower(path)?;
-    LANGS.iter().find(|(e, _, _)| *e == ext).map(|(_, l, _)| *l)
+    rows(LANGS).find(|(e, _, _)| *e == ext).map(|(_, l, _)| l)
 }
 
 /// Language implied by a MIME type (`text/x-rust` → `rust`).
 pub(crate) fn language_for_mime(mime: &str) -> Option<&'static str> {
-    LANGS
-        .iter()
-        .chain(NAMED)
+    rows(LANGS)
+        .chain(rows(NAMED))
         .find(|(_, _, m)| *m == mime)
-        .map(|(_, l, _)| *l)
-        .or_else(|| MIME_LANGS.iter().find(|(m, _)| *m == mime).map(|(_, l)| *l))
+        .or_else(|| rows(MIME_LANGS).find(|(m, _, _)| *m == mime))
+        .map(|(_, l, _)| l)
 }
 
 fn mime_for_path(path: &Path) -> Option<&'static str> {
     if let Some(name) = file_name_lower(path)
-        && let Some((_, _, mime)) = NAMED.iter().find(|(n, _, _)| *n == name)
+        && let Some((_, _, mime)) = rows(NAMED).find(|(n, _, _)| *n == name)
     {
         return Some(mime);
     }
@@ -198,7 +123,7 @@ fn mime_for_path(path: &Path) -> Option<&'static str> {
         "webp" => "image/webp",
         "gif" => "image/gif",
         "zip" => "application/zip",
-        _ => return LANGS.iter().find(|(e, _, _)| *e == ext).map(|(_, _, m)| *m),
+        _ => return rows(LANGS).find(|(e, _, _)| *e == ext).map(|(_, _, m)| m),
     })
 }
 
@@ -251,28 +176,7 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
 }
 
 /// Header names that mark the start of an RFC 822 message.
-const MAIL_HEADERS: &[&str] = &[
-    "from",
-    "to",
-    "cc",
-    "date",
-    "subject",
-    "message-id",
-    "received",
-    "return-path",
-    "delivered-to",
-    "mime-version",
-    "reply-to",
-    "in-reply-to",
-    "references",
-    "dkim-signature",
-    "authentication-results",
-    "content-type",
-    "x-mailer",
-    "x-gmail-labels",
-    "x-gm-thrid",
-    "sender",
-];
+const MAIL_HEADERS: &str = "from|to|cc|date|subject|message-id|received|return-path|delivered-to|mime-version|reply-to|in-reply-to|references|dkim-signature|authentication-results|content-type|x-mailer|x-gmail-labels|x-gm-thrid|sender";
 
 fn looks_like_mail(text: &str) -> bool {
     let mut known = 0;
@@ -291,7 +195,7 @@ fn looks_like_mail(text: &str) -> bool {
             return false;
         }
         let name = name.to_ascii_lowercase();
-        if MAIL_HEADERS.contains(&name.as_str()) {
+        if MAIL_HEADERS.split('|').any(|h| h == name) {
             known += 1;
             strong |= matches!(
                 name.as_str(),
