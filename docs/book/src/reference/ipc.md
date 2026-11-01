@@ -1,46 +1,25 @@
 # IPC protocol
 
-The desktop app, the CLI and any other local program talk to `nuggetd` with **JSON-RPC 2.0**, one JSON
-object per line, over a local socket. The protocol types live in `nugget_core::ipc`; the Rust client is
-`nugget_ipc::Client`.
+The desktop app, the CLI and other local programs talk to `nuggetd` with **JSON-RPC 2.0**, one JSON
+object per line (UTF-8, at most 16 MiB, else `-32008`). Types are in `nugget_core::ipc`; the Rust
+client is `nugget_ipc::Client`. Protocol version `1` (reported by `status`).
 
-| | |
-|---|---|
-| Protocol version | `1` (reported by `status`) |
-| Framing | One JSON object per line (`\n`-terminated), UTF-8 |
-| Maximum message | 16 MiB per line; larger messages get error `-32008` |
-| macOS, Linux | Unix domain socket `<data>/ipc/nuggetd.sock`, in a directory with mode `0700`. If that path is too long for a socket, a short private directory `nugget-<hash>` under `$XDG_RUNTIME_DIR` (or the temp directory, ownership- and mode-checked) is used instead |
-| Windows | Named pipe `\\.\pipe\nugget-<user SID>-<hash>-nuggetd.sock`, with an ACL that admits only you and SYSTEM. Clients verify that the server runs as the same user before sending anything |
-| Network | None. There is no TCP listener |
-| Authentication | Being able to open the socket (your user account) is the credential |
+Transport: on macOS and Linux a Unix socket `<data>/ipc/nuggetd.sock` in a `0700` directory (or a short
+private directory under `$XDG_RUNTIME_DIR` if that path is too long); on Windows a named pipe
+`\\.\pipe\nugget-<user SID>-<hash>-nuggetd.sock` admitting only you and SYSTEM. No TCP; opening the
+socket is the credential. `nuggetd status` prints the path.
 
-`nuggetd status` prints the socket path in use.
+**Conventions.** Requests carry an `id` and may run concurrently on one connection. Notifications (no
+`id`) carry streams and events: `chat.delta`, `chat.done` and `models.progress` go to the requesting
+connection; `ingest.progress`, `sources.changed` and `knowledge.changed` are broadcast. Methods without
+parameters take `{}`. Timestamps are RFC 3339; ids are strings; an `ItemRef` is
+`{"source": "<source id>", "key": "<item key>"}`. Tiers: `triage`, `light`, `synthesis`, `agentic`,
+`embedding`, `rerank` (never routed). Localities: `on_device`, `local_network`, `cloud`.
 
-## Conventions
-
-- Requests carry an `id`; calls on one connection may run concurrently and are matched by `id`.
-- **Notifications** (no `id`) carry streaming output and events. `chat.delta`, `chat.done` and
-  `models.progress` go to the connection that started the stream. `ingest.progress`,
-  `sources.changed` and `knowledge.changed` are broadcast to every connection.
-- Methods that take no parameters accept `{}` (or omitted `params`).
-- Timestamps are RFC 3339 strings. Ids (`SourceId`, `ProviderId`, `EntityId`, `ItemKey`) are strings.
-  An `ItemRef` is `{"source": "<source id>", "key": "<item key>"}`.
-- Tiers: `triage`, `light`, `synthesis`, `agentic`, `embedding`, `rerank` (marks rerankers in
-  `models.list` and the `local-rerank` runtime provider; never routed). Localities: `on_device`,
-  `local_network`, `cloud`.
-- The **Daemon** column says whether today's `nuggetd` implements the method:
-  - **yes**: the daemon serves it.
-  - **not yet**: part of the protocol, and the desktop app may be built against it, but the daemon
-    answers `-32601` (method not found).
-  - **in progress**: being wired into the daemon in the current wave of work (wave W) on another
-    branch. The name and the one-line description come from the plan; parameters and results are
-    not final, and some of these names are not in `nugget_core::ipc` yet. Until the work lands, the
-    daemon answers `-32601`.
-
-## Methods
+The **Daemon** column: `yes` = served; `not yet` = in the protocol but the daemon answers `-32601`;
+`in progress` = being wired in on another branch (shape not final).
 
 ### Status, providers and models
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -54,24 +33,10 @@ object per line, over a local socket. The protocol types live in `nugget_core::i
 | `egress.recent` | `EgressRecentRequest`: `{limit}` (at most 1000) | list of `EgressEvent`: `at`, `host`, `feature`, `bytes_sent`, `bytes_received`, `items` | yes |
 | `egress.page` | `EgressPageRequest`: `{limit, cursor}` (`limit` at most 1000; `cursor` optional: the previous page's `next_cursor`) | `{items, next_cursor}`: `items` a list of `EgressEvent`, newest first; `next_cursor` (a string, or `null` after the oldest row) continues after the last of them. Keyset paging on the ledger row: rows recorded while you page never shift later pages, so none is skipped or listed twice. Cursors are opaque; one this daemon did not return is invalid params (`-32602`) | yes |
 | `egress.record` | `EgressRecordRequest`: `host` (bare `host[:port]`), `feature` (`update_check` or `update_download` only), `bytes_sent`, `bytes_received` (default 0), `at` (RFC 3339, default now; at most 5 minutes ahead and 30 days old; stored in UTC) | `null`. A request the desktop app made itself, written to the ledger with no items. Host: a DNS name, an IPv4 address or a bracketed IPv6 address, optional port. At most 60 rows a minute across all clients (`SERVER_BUSY` beyond) | yes |
-| `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat`, `embedding`, `rerank` or `draft`), `state`, `provider`, `error` (one plain sentence), and when present `state_ms` (time in this state: the warm-up so far while `starting`), `expected_ms` (expected load time while `starting`), `retry_in_ms` (next automatic restart while `failed`), `gave_up` (`failed` and waiting for `runtime.retry`), `detail` (the server's last line). Empty when `[runtime]` is disabled | yes |
+| `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat`, `embedding`, `rerank` or `draft`), `state` (`not_installed`, `stopped`, `starting`, `ready`, `failed`), `provider`, `error` (one plain sentence), and when present `state_ms` (time in this state: the warm-up so far while `starting`), `expected_ms` (expected load time while `starting`), `retry_in_ms` (next automatic restart while `failed`), `gave_up` (`failed` and waiting for `runtime.retry`), `detail` (the server's last line). Empty when `[runtime]` is disabled | yes |
 | `runtime.retry` | `RuntimeRetryRequest`: `{role}` | `{started}`: clears a failed start or a give-up and starts the role's server in the background (`false` when its model is not installed) | yes |
 
-`RuntimeInfo.state` is one of `not_installed`, `stopped`, `starting`, `ready`, `failed`.
-
-### Chat
-
-<!-- check-refs: ipc.methods -->
-| Method | Params | Result | Daemon |
-|---|---|---|---|
-| `chat` | `ChatRequest`: `provider` (or `null` to route by tier), `tier`, `messages` (each `{role, text}`, role `system`, `user` or `assistant`; the last must be `user`), `items` (item refs whose content the messages include, for the egress ledger; at most 1024) | `ChatStarted`: `{stream_id, provider}`, then `chat.delta` and `chat.done` | yes |
-| `chat.cancel` | `ChatCancel`: `{stream_id}` | `null` | yes |
-
-When routing by tier, `ChatStarted` arrives after the first token, so that `provider` names the
-provider that actually answered after any fallback.
-
 ### Search
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -81,37 +46,26 @@ provider that actually answered after any fallback.
 | `search.timeline` | `{entity, from, to, limit, utc_offset_minutes, time_zone}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
 | `search.preview` | `{item, chunk_id, utc_offset_minutes, time_zone}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
 
-`time_zone` is an IANA name (`Europe/Berlin`): with it, `from`/`to` days and `months` buckets use
-each date's own offset, so ranges across a daylight-saving change are right. Without it, or for a
-name the daemon's bundled time zone database lacks, `utc_offset_minutes` (the client's current
-offset) applies to every date, and without that the configured `[retrieve] date_utc_offset_minutes`.
+`time_zone` is an IANA name; without it `utc_offset_minutes` applies, then `[retrieve]
+date_utc_offset_minutes`.
 
 ### Retrieval
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `retrieve.context` | `ContextRequest`: `{query, budget_tokens}` (budget at most 131072) | `ContextResponse`: `text` (passages, each under a `[n]` header), `citations`, `excluded_sensitive` | yes |
 | `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten), `general`, `date` (when the question named a date), `partial` (citation numbers of near misses); then `chat.delta` and `chat.done` | yes |
+| `chat` | `ChatRequest`: `provider` (or `null` to route by tier), `tier`, `messages` (each `{role, text}`, role `system`, `user` or `assistant`; the last must be `user`), `items` (item refs whose content the messages include, for the egress ledger; at most 1024) | `ChatStarted`: `{stream_id, provider}`, then `chat.delta` and `chat.done` | yes |
+| `chat.cancel` | `ChatCancel`: `{stream_id}` | `null` | yes |
 
-A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. For `retrieve.ask` the daemon chooses
-the provider first, then packs the context for it: with a `cloud` provider, sensitive items are left out
-and counted in `excluded_sensitive`, and the context is repacked if it falls back to another provider.
-With `history`, a follow-up question is first rewritten into a standalone query for retrieval, by a
-local (never `cloud`) chat model or, without one, a heuristic; the earlier user and assistant turns
-then go to the model before the question (`system` entries are ignored, and the turns are bounded).
-
-`AskStarted.date` reports a date phrase in the question ("last week", "in March"):
-`{phrase, start, end, applied, listed}`, with `start` (inclusive) and `end` (exclusive) as RFC 3339
-at the offset the phrase was read with. `applied: false` means nothing dated in the range matched,
-so the question was searched without it; `listed: true` means the question was generic ("summarise
-last week") and the sources are the period's items by date. `AskStarted.partial` lists the `n` of
-citations whose item lacks most of the question's rare key words: at best a near miss. The desktop
-shows both under the answer ("Searched items from 26 Oct to 1 Nov", a "Partial match" label). Both
-fields are absent when empty and from older daemons.
+`chat` routes by tier unless `provider` is set; `ChatStarted` arrives after the first token, naming the
+provider that answered. A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. The provider is chosen first; with a
+`cloud` provider sensitive items are left out (counted in `excluded_sensitive`), and the context is
+repacked on fallback. With `history`, a follow-up is rewritten into a standalone query by a local
+model (or a heuristic). `AskStarted.date` is `{phrase, start, end, applied, listed}` for a date phrase
+in the question; `partial` lists citations that are near misses. Both are absent when empty.
 
 ### Sources and ingest
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -124,12 +78,10 @@ fields are absent when empty and from older daemons.
 | `sources.secret.set` | `SourceSecret`: `{id, secret}` | `null` | yes |
 | `ingest.status` | `{}` | `IngestStatus`: `queue_depth`, `freshness_p50_ms`, `freshness_p95_ms`, `embedding_provider`, `triage_provider`, `sources` | yes |
 
-`SourceInfo` is `{id, kind, name, enabled, state, items, chunks, last_sync, last_error, settings}`, with
-`state` one of `idle`, `syncing`, `watching`, `needs_auth`, `disabled`, `error`. Settings never
-contain secrets: `sources.add` and `sources.update` refuse a `client_secret` key. Use
-`sources.secret.set`: for `imap` and `caldav` it stores the password, for `gmail`, `gcal` and `gdrive`
-the OAuth client secret (then rebuilds the source). It is write-only, at most 4096 bytes. See
-[Connector settings](connectors.md) for each kind's `settings`.
+`SourceInfo` is `{id, kind, name, enabled, state, items, chunks, last_sync, last_error, settings}`;
+`state` is `idle`, `syncing`, `watching`, `needs_auth`, `disabled` or `error`. Secrets go through the
+write-only `sources.secret.set` (at most 4096 bytes), never `settings`. See
+[Connector settings](connectors.md).
 
 ### Knowledge graph
 
@@ -148,7 +100,6 @@ Entity kinds: `person`, `organization`, `project`, `commitment`, `preference`, `
 | `knowledge.status` | `{}` | `KnowledgeStatus`: `entities`, `claims`, `mentions`, `pending_items`, `last_run`, `extractor_provider`, `vault` | yes |
 
 ### MCP clients
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -156,14 +107,10 @@ Entity kinds: `person`, `organization`, `project`, `commitment`, `preference`, `
 | `mcp.clients.create` | `McpClientCreate`: `{name, scopes}` | `McpClientCreated`: `client`, `token` (returned once), `setup` (list of `McpSetupSnippet`: `app`, `config_path`, `text`) | yes |
 | `mcp.clients.revoke` | `McpClientRef`: `{id}` | `null` | yes |
 
-`McpScopes` is described in [MCP tools and scopes](mcp.md#scopes). The stdio bridge
-(`nuggetd mcp --client <id>`) also talks to the daemon over this socket, with internal
-`mcp.bridge.*` methods that are not part of the public protocol.
+`McpScopes`: see [MCP tools and scopes](mcp.md#scopes). The stdio bridge uses internal, non-public
+bridge methods on this socket.
 
-### Drafting (Double Tap, milestone M3)
-
-Status: being wired in (wave W, Double Tap). The contracts below are already in `nugget_core::ipc`.
-
+### Drafting (Double Tap)
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -178,10 +125,7 @@ Status: being wired in (wave W, Double Tap). The contracts below are already in 
 
 A field with `secure: true` (a password field) is refused, and its value is never read.
 
-### Agent and safety (milestone M4)
-
-Status: being wired in (wave W). The names are planned; parameters and results are not final.
-
+### Agent, safety and plugins
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -200,11 +144,17 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 | `browser.host.attach` | Host registration | Long-lived call from the browser extension's native host; returns when the daemon detaches it | yes |
 | `browser.host.deliver` | An extension message | A reply or event from the extension, delivered by the native host | yes |
 | `browser.status` | `{}` | `BrowserStatus`: whether the extension is connected, its origin and host version, and the browser tools registered for the agent | yes |
+| `plugins.list` | `{}` | Installed plugins | yes |
+| `plugins.inspect` | A plugin | Its manifest, the capabilities it asks for and its signature status | yes |
+| `plugins.install` | A local `.nuggetplugin` path | The capabilities to approve | yes |
+| `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | yes |
+| `plugins.remove` | A plugin | Uninstalls it | yes |
+| `plugins.enable` | A plugin and on or off | Turns it on or off | yes |
+| `plugins.catalog` | `{}` | Signed packages found in the catalog folders, verified but not installed, with their trust, requested access and whether they update an installed plugin | yes |
 
-### Proactive cards and brief (milestone M5)
+### Proactive cards and brief
 
-Types are in the `Proactive (M5)` block of `nugget_core::ipc`. An approval is bound to the exact
-preview it was given for (a keyed digest, valid once), and every action goes through the safety
+An approval is bound to the exact preview (a keyed digest, valid once); every action passes the safety
 policy.
 
 <!-- check-refs: ipc.methods -->
@@ -221,23 +171,7 @@ policy.
 | `proactive.learning` | `{}` | `ProactiveLearning`: what feedback taught the ranking, per sender, domain, kind and thread, strongest adjustment first (answers even when `[proactive] enabled = false`) | yes |
 | `proactive.reset_learning` | `ResetLearningRequest`: `{scope, key}` with `scope` `all`, `sender`, `domain`, `kind` (key: a card kind) or `thread`; `key` required unless `all` | `ResetLearningResult`: `{cleared}`. Recorded in the audit log (`proactive.reset_learning`, target `all` or `<scope>:<key>`) and broadcasts `cards.changed` with reason `reset_learning` | yes |
 
-### Plugins (milestone M6)
-
-Status: being wired in (wave W). The names are planned; parameters and results are not final.
-
-<!-- check-refs: ipc.methods -->
-| Method | Params | Result | Daemon |
-|---|---|---|---|
-| `plugins.list` | `{}` | Installed plugins | yes |
-| `plugins.inspect` | A plugin | Its manifest, the capabilities it asks for and its signature status | yes |
-| `plugins.install` | A local `.nuggetplugin` path | The capabilities to approve | yes |
-| `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | yes |
-| `plugins.remove` | A plugin | Uninstalls it | yes |
-| `plugins.enable` | A plugin and on or off | Turns it on or off | yes |
-| `plugins.catalog` | `{}` | Signed packages found in the catalog folders, verified but not installed, with their trust, requested access and whether they update an installed plugin | yes |
-
 ## Notifications
-
 <!-- check-refs: ipc.notifications -->
 | Notification | Params | Sent when |
 |---|---|---|
@@ -248,23 +182,16 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 | `ingest.progress` | `IngestProgress`: `{source, phase, done, total, error}`, `phase` one of `scanning`, `indexing`, `idle`, `error` | A source's sync progressed |
 | `sources.changed` | A `SourceInfo`; or `{"id": …, "removed": true}`; or `{"lagged": n}` | A source was added, changed (including after sign-in) or removed. Treat anything but a `SourceInfo` as "refetch `sources.list`" |
 | `knowledge.changed` | `KnowledgeChanged`: `{entities}` | Entities changed (after an extraction run, a merge, a claim status change or a vault edit) |
-
-Being wired in (wave W); the names are planned and the parameters not final:
-
-<!-- check-refs: ipc.notifications -->
-| Notification | Params | Sent when | Daemon |
-|---|---|---|---|
-| `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished | yes |
-| `policy.kill.changed` | Whether the kill switch is engaged | The kill switch was engaged or released, from any cause (hotkey, tray, IPC) | yes |
-| `cards.changed` | `CardsChanged`: `{reason, open, created, resolved}` | The set of suggestion cards changed (refresh, feedback, an executed action or a learning reset: `reset_learning`); refetch `cards.list` | yes |
-| `brief.ready` | A `BriefView` | The morning brief is ready, once a day at `[proactive] brief_time` (not sent when it is empty) | yes |
-| `reminder.due` | A `ReminderView` | A reminder the user approved is due; the app shows an OS notification | yes |
-| `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension | yes |
+| `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished |
+| `policy.kill.changed` | Whether the kill switch is engaged | The kill switch was engaged or released, from any cause (hotkey, tray, IPC) |
+| `cards.changed` | `CardsChanged`: `{reason, open, created, resolved}` | The set of suggestion cards changed (refresh, feedback, an executed action or a learning reset: `reset_learning`); refetch `cards.list` |
+| `brief.ready` | A `BriefView` | The morning brief is ready, once a day at `[proactive] brief_time` (not sent when it is empty) |
+| `reminder.due` | A `ReminderView` | A reminder the user approved is due; the app shows an OS notification |
+| `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension |
 
 ## Errors
 
-Errors use JSON-RPC error objects, `{code, message, data?}`. The `message` is meant for people; branch
-on `code`.
+Errors are `{code, message, data?}`; branch on `code`, not `message`.
 
 <!-- check-refs: ipc.errors -->
 | Name | Code | Meaning |
@@ -285,68 +212,3 @@ on `code`.
 | `MESSAGE_TOO_LARGE` | `-32008` | A message exceeded 16 MiB |
 | `UNAUTHORIZED` | `-32009` | A source or provider needs sign-in or a credential |
 | `SERVER_BUSY` | `-32010` | The connection already has its maximum number of requests in flight (`data`: `{"max_in_flight": n}`); retry once an earlier call on the connection has finished. Control methods such as cancel and the kill switch have reserved slots and never get this. |
-
-## Examples
-
-Lines starting with `→` are sent by the client, `←` by the daemon (the arrows are not part of the
-wire format).
-
-### Status
-
-```json
-→ {"jsonrpc":"2.0","id":1,"method":"status","params":{}}
-← {"jsonrpc":"2.0","id":1,"result":{"protocol":1,"version":"0.0.1","uptime_secs":42,"items":1432,"chunks":5210,"providers":[{"id":"local","kind":"openai_compatible","model":"qwen3:4b","locality":"on_device","tiers":["triage","light","synthesis"],"capabilities":null,"error":null}],"audit_chain_ok":true}}
-```
-
-### A streamed Ask
-
-```json
-→ {"jsonrpc":"2.0","id":2,"method":"retrieve.ask","params":{"query":"When is the Acme renewal due?","budget_tokens":4000}}
-← {"jsonrpc":"2.0","id":2,"result":{"stream_id":"s-7","provider":"local-chat","locality":"on_device","citations":[{"n":1,"item":{"source":"gmail-1","key":"18c2f…"},"chunk_id":981,"title":"Renewal quote","url":"https://mail.google.com/mail/u/0/#all/18c2f…","sensitive":false}],"excluded_sensitive":0}}
-← {"jsonrpc":"2.0","method":"chat.delta","params":{"stream_id":"s-7","text":"The renewal is due on 14 November"}}
-← {"jsonrpc":"2.0","method":"chat.delta","params":{"stream_id":"s-7","text":" [1]."}}
-← {"jsonrpc":"2.0","method":"chat.done","params":{"stream_id":"s-7","error":null,"input_tokens":1210,"output_tokens":14}}
-```
-
-### Adding a folder
-
-```json
-→ {"jsonrpc":"2.0","id":3,"method":"sources.add","params":{"kind":"files","name":"Documents","settings":{"roots":["/home/you/Documents"],"exclude":["/archive"]}}}
-← {"jsonrpc":"2.0","id":3,"result":{"id":"files-1","kind":"files","name":"Documents","enabled":true,"state":"syncing","items":0,"chunks":0,"last_sync":null,"last_error":null,"settings":{"roots":["/home/you/Documents"],"exclude":["/archive"]}}}
-← {"jsonrpc":"2.0","method":"ingest.progress","params":{"source":"files-1","phase":"scanning","done":120,"total":null,"error":null}}
-```
-
-### An IMAP source and its password
-
-```json
-→ {"jsonrpc":"2.0","id":4,"method":"sources.add","params":{"kind":"imap","name":"Fastmail","settings":{"host":"imap.fastmail.com","username":"you@fastmail.com"}}}
-← {"jsonrpc":"2.0","id":4,"result":{"id":"imap-1","kind":"imap","name":"Fastmail","enabled":true,"state":"needs_auth","items":0,"chunks":0,"last_sync":null,"last_error":null,"settings":{"host":"imap.fastmail.com","username":"you@fastmail.com"}}}
-→ {"jsonrpc":"2.0","id":5,"method":"sources.secret.set","params":{"id":"imap-1","secret":"<app password>"}}
-← {"jsonrpc":"2.0","id":5,"result":null}
-→ {"jsonrpc":"2.0","id":6,"method":"sources.sync","params":{"id":"imap-1"}}
-← {"jsonrpc":"2.0","id":6,"result":null}
-```
-
-### An error
-
-```json
-→ {"jsonrpc":"2.0","id":7,"method":"cards.nope","params":{}}
-← {"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"method not found: cards.nope"}}
-```
-
-The exact values in these examples (ids, stream ids, message wording, the generated source id) are
-illustrative.
-
-## Using the Rust client
-
-```rust,ignore
-use nugget_core::ipc::{method, SearchHit, SearchRequest};
-
-let paths = nugget_core::paths::Paths::discover()?;
-let client = nugget_ipc::Client::connect(&paths).await?;
-let hits: Vec<SearchHit> = client
-    .call(method::SEARCH, &SearchRequest { query: "renewal".into(), limit: 10 })
-    .await?;
-```
-
-`Client::notifications()` returns a stream of notifications for that connection.

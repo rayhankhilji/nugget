@@ -1,17 +1,13 @@
 # config.toml
 
-`nuggetd` reads `config.toml` from the config directory (see [Data directory](data-dir.md)) once, at
-startup. Restart the daemon after editing it. If the file does not exist, the daemon writes a commented,
-local-first default there (readable only by you) and says so.
+`nuggetd` reads `config.toml` from the config directory ([Data directory](data-dir.md)) once, at
+startup; restart after editing. If it is missing, a commented local-first default is written.
 
-**Never put secrets in this file.** API keys and credential-bearing headers must be references:
-`env:VAR` (an environment variable of the daemon) or `keychain:NAME` (an OS keychain entry, service
-`dev.nugget.Nugget`, account `provider:NAME`). A plaintext key is rejected.
-
-**Validation.** Unknown sections and unknown keys in `[models]`, `[models.selected]`, `[runtime]`,
-`[mcp]` and `[[providers]]` are errors, as are out-of-range values, duplicate provider ids and
-malformed model ids. Unknown keys inside `[ingest]`, `[retrieve]`, `[knowledge]` and `[vault]` are
-currently **ignored**, not rejected, so check their spelling against this page.
+- **No secrets here.** API keys and credential headers must be `env:VAR` or `keychain:NAME` (service
+  `dev.nugget.Nugget`, account `provider:NAME`); a plaintext key is rejected.
+- **Validation.** Unknown keys in `[models]`, `[models.selected]`, `[runtime]`, `[mcp]` and
+  `[[providers]]` are errors, as are out-of-range values and duplicate provider ids. Unknown keys in
+  `[ingest]`, `[retrieve]`, `[knowledge]` and `[vault]` are **ignored**, so check spelling.
 
 <!-- check-refs: config.sections -->
 | Section | What it configures |
@@ -31,10 +27,9 @@ currently **ignored**, not rejected, so check their spelling against this page.
 | `proactive` | Proactive cards and the morning brief. Feature section |
 | `plugins` | WebAssembly plugins. Feature section |
 
-Every key below is optional; an empty file is valid and gives the defaults (with no providers).
+Every key is optional; an empty file gives the defaults (no providers).
 
 ## `[models]`
-
 <!-- check-refs: config.models -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -43,8 +38,7 @@ Every key below is optional; an empty file is valid and gives the defaults (with
 
 ### `[models.selected]`
 
-The local model chosen for each tier, by manifest id (as listed on the Models page or by
-`models.list`). A model id is 1 to 64 characters of lowercase letters, digits, `.`, `_` and `-`.
+The local model per tier, by manifest id (1–64 of `a-z`, `0-9`, `.`, `_`, `-`; see `models.list`).
 
 <!-- check-refs: config.models.selected -->
 | Key | Type | Default | Description |
@@ -57,9 +51,8 @@ The local model chosen for each tier, by manifest id (as listed on the Models pa
 
 ## `[runtime]`
 
-The on-device runtime: `nuggetd` runs installed models with a pinned, verified `llama-server` on
-`127.0.0.1`, as the providers `local-chat` (triage, light, synthesis) and `local-embedding`
-(embedding), plus `local-rerank` (rerank) when `rerank_model` is set.
+Installed models run in a pinned `llama-server` on `127.0.0.1` as providers `local-chat`,
+`local-embedding` and (with `rerank_model`) `local-rerank`.
 
 <!-- check-refs: config.runtime -->
 | Key | Type | Default | Description |
@@ -71,9 +64,6 @@ The on-device runtime: `nuggetd` runs installed models with a pinned, verified `
 | `idle_stop_minutes` | integer, 0 to 10080 | `30` | Stop a server after this many idle minutes; `0` keeps it running. It restarts on the next request |
 
 ## `[ingest]`
-
-Tunables for the indexing pipeline (`nugget_ingest::IngestConfig`). Durations are in milliseconds.
-
 <!-- check-refs: config.ingest -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -111,9 +101,6 @@ Tunables for the indexing pipeline (`nugget_ingest::IngestConfig`). Durations ar
 | `freshness_window` | integer | `1024` | Samples kept for the freshness p50 and p95 |
 
 ## `[retrieve]`
-
-Search and context packing (`nugget_retrieve::RetrieveConfig`).
-
 <!-- check-refs: config.retrieve -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -153,9 +140,8 @@ Search and context packing (`nugget_retrieve::RetrieveConfig`).
 
 ### `[retrieve.recency]`
 
-Off unless present. Multiplies an item's relevance by `1 + weight × 0.5^(age_days / half_life_days)`,
-where the age comes from the item's modification time. When the table is present, both keys are
-required.
+Off unless present; then both keys are required. Relevance is multiplied by
+`1 + weight × 0.5^(age_days / half_life_days)`.
 
 <!-- check-refs: config.retrieve.recency -->
 | Key | Type | Default when used | Description |
@@ -165,28 +151,17 @@ required.
 
 ### `[retrieve.reranker]`
 
-Off unless present. Search sends its top candidates to a reranking server you run, for example
-`llama-server --reranking -m <reranker>.gguf --port 8013`, at `<base_url>/v1/rerank`. Only servers
-on this device or your network are accepted unless `allow_cloud = true` (https only); requests
-that leave the device are recorded in the egress ledger.
+Off unless present: a reranking server you run (e.g. `llama-server --reranking`), called at
+`<base_url>/v1/rerank`. Only local or LAN servers unless `allow_cloud = true` (https only).
 
-```toml
-[retrieve.reranker]
-base_url = "http://127.0.0.1:8013"   # required
-# path = "v1/rerank"
-# timeout_ms = 2000
-```
-
-Without it, search uses the local runtime's reranker when `[runtime] rerank_model` is set, and
-otherwise does not rerank. A reranker that is not running is skipped at once.
+Keys: `base_url` (required), `path`, `model`, `timeout_ms`, `connect_timeout_ms`,
+`max_passage_chars`, `allow_cloud`, `locality`. Without it, search uses
+`[runtime] rerank_model` if set.
 
 ## `[knowledge]`
 
-The knowledge graph: people, organisations, projects and facts extracted from your indexed items,
-every fact cited. Extraction runs after indexing settles, periodically and at start. Deterministic
-extractors (mail headers, calendar attendees, contacts) always run; the LLM extractor uses a
-synthesis-tier model on this device or your network, unless you list sources in `llm.cloud_sources`.
-Sensitive items never go to a cloud model.
+Deterministic extractors always run; the LLM extractor uses a local or LAN synthesis-tier model
+unless sources are listed in `llm.cloud_sources`. Sensitive items never go to a cloud model.
 
 <!-- check-refs: config.knowledge -->
 | Key | Type | Default | Description |
@@ -208,7 +183,6 @@ Sensitive items never go to a cloud model.
 | `max_chunks_per_item` | integer | `512` | Chunks read per item at most (longer items are cut for extraction) |
 
 ### `[knowledge.me]`
-
 <!-- check-refs: config.knowledge.me -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -217,7 +191,6 @@ Sensitive items never go to a cloud model.
 | `infer_from_sent` | bool | `true` | Learn further addresses from the `From` of mail in a sent folder |
 
 ### `[knowledge.llm]`
-
 <!-- check-refs: config.knowledge.llm -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -233,10 +206,9 @@ Sensitive items never go to a cloud model.
 | `max_claims_per_request` | integer | `48` | Claims a provider may return per request (the schema's `maxItems`) |
 | `local` | table | see below | Tighter per-request limits when the item's first-choice provider is local |
 
-`[knowledge.llm.local]` (each applies as the smaller of it and the general limit): `max_input_chars`
+`[knowledge.llm.local]` (the smaller of it and the general limit applies): `max_input_chars`
 (`4000`), `max_chunks_per_request` (`2`), `max_requests_per_item` (`4`), `max_output_tokens`
-(`1024`), `max_entities_per_request` (`12`), `max_claims_per_request` (`10`). A small model on a
-CPU writes a few tokens per second, so local requests stay short and finish inside the timeout.
+(`1024`), `max_entities_per_request` (`12`), `max_claims_per_request` (`10`).
 
 ### `[knowledge.resolution]`
 
@@ -254,8 +226,7 @@ Both steps are off by default and only ever use local models.
 
 ## `[vault]`
 
-One Markdown page per entity, with footnote citations, under `<Kind>/<Name> (<id>).md`. Your edits
-are merged back: changed or added fact lines become facts you asserted. See
+One Markdown page per entity; your edits merge back as facts you asserted. See
 [Data directory](data-dir.md#the-vault).
 
 <!-- check-refs: config.vault -->
@@ -269,8 +240,7 @@ are merged back: changed or added fact lines become facts you asserted. See
 
 ## `[mcp]`
 
-The MCP server that lets AI apps read your knowledge with a per-app token. See
-[Connecting AI apps over MCP](../guide/mcp.md).
+See [Connecting AI apps over MCP](../guide/mcp.md).
 
 <!-- check-refs: config.mcp -->
 | Key | Type | Default | Description |
@@ -285,9 +255,8 @@ The MCP server that lets AI apps read your knowledge with a per-app token. See
 
 ## `[[providers]]`
 
-One table per model provider. Tiers are tried in this order: on-device and local-network providers in
-file order, then the managed runtime, then cloud providers in file order. See
-[Local or bring-your-own-key models](../guide/models.md).
+One table per provider. Order tried: on-device and LAN providers (file order), the managed
+runtime, then cloud providers (file order). See [Models](../guide/models.md).
 
 <!-- check-refs: config.providers -->
 | Key | Type | Default | Description |
@@ -321,135 +290,48 @@ file order, then the managed runtime, then cloud providers in file order. See
 
 ### Locality
 
-| Address | Locality | Egress ledger |
-|---|---|---|
-| Loopback (`127.0.0.1`, `::1`, `localhost`) | `on_device` | Not recorded: nothing leaves the machine |
-| Private ranges (`10/8`, `172.16/12`, `192.168/16`, link-local, ...) | `local_network` | Recorded |
-| Anything else | `cloud` | Recorded |
-
-Host names are resolved once, when the provider is built, and the result is pinned.
+Loopback addresses are `on_device` (not ledgered); private ranges (`10/8`, `172.16/12`, `192.168/16`,
+link-local) are `local_network`; anything else is `cloud`. Host names are resolved once and pinned.
 
 ## Feature sections
 
-Status: being wired in (wave W). `[draft]`, `[agent]`, `[policy]`, `[browser]`, `[proactive]` and
-`[plugins]` are accepted today but not read by anything yet. Each belongs to a daemon feature that
-parses its own section when it starts; a feature whose section is invalid does not start (the error
-is logged) and the rest of the daemon runs normally. The keys are not final; the plan for this wave:
+`[draft]`, `[agent]`, `[policy]`, `[browser]`, `[proactive]` and `[plugins]` are parsed by their
+daemon feature (`crates/nuggetd/src/features/`) at start. A feature whose section is invalid does not
+start (the error is logged); the rest of the daemon runs. Main keys:
 
-| Section | Planned keys |
+| Section | Keys |
 |---|---|
-| `draft` | The model provider per app, apps excluded from Double Tap (password managers and banking apps by default), a context budget |
-| `agent` | Settings of the agent runtime and computer use; not settled yet |
-| `policy` | The safety policy for agent actions; rules are edited from the Safety page (`policy.set`) |
-| `browser` | Settings of the browser extension bridge; not settled yet |
-| `proactive` | `enabled`, the time of the morning brief, and where the card judge may run (its locality) |
-| `plugins` | `trusted_keys` (trusted publisher keys), `dev_mode` (allows unsigned plugins) and `catalog_dirs` (absolute folders whose `.nuggetplugin` files the Plugins page lists as available; default `<data>/plugin-catalog`, plus the folders in the `NUGGET_PLUGIN_CATALOG` environment variable) |
-
-When a feature lands, its keys get their own table on this page.
+| `agent` | `enabled`, `computer_use`, `max_steps`, `deadline_secs`, `max_tokens`, `confirm_timeout_secs`, `max_concurrent`, `triage` (harm triage, default `false`), `triage_override` (default `true`: a refusal asks "Do it anyway") |
+| `policy` | `enabled`; rules are edited on the Safety page (`policy.set`) |
+| `browser` | `enabled` |
+| `plugins` | `enabled`, `trusted_keys`, `dev_mode` (allow unsigned plugins), `catalog_dirs` (default `<data>/plugin-catalog`, plus `NUGGET_PLUGIN_CATALOG`) |
 
 ### `[proactive]`
 
-Proactive cards and the morning brief (the Today page). Unknown keys are an error.
+Proactive cards and the morning brief. Unknown keys are an error.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `true` | `false`: no background refreshes and no brief; `cards.list` reports `enabled: false` |
-| `brief_time` | `"HH:MM"` | `"08:00"` | Local time of the morning brief (`brief.ready`). A brief missed while the daemon was off is sent after the first refresh |
-| `judge` | `"local"`, `"cloud"` or `"off"` | `"local"` | Where the optional card judge may run. `cloud` never receives sensitive candidates |
+| `enabled` | bool | `true` | `false`: no background refreshes and no brief |
+| `brief_time` | `"HH:MM"` | `"08:00"` | Local time of the morning brief (`brief.ready`); a missed brief is sent after the first refresh |
+| `judge` | `"local"`, `"cloud"` or `"off"` | `"local"` | Where the optional card judge runs. `cloud` never gets sensitive candidates |
 | `refresh_minutes` | integer ≥ 1 | `30` | Refresh cards this often (also after ingest and knowledge runs) |
-| `debounce_secs` | integer | `60` | Wait this long after the last ingest or knowledge event before refreshing |
-| `utc_offset` | `"+HH:MM"` | the machine's | The user's offset for "today" and the brief time; read once at start |
+| `debounce_secs` | integer | `60` | Wait after the last ingest or knowledge event before refreshing |
+| `utc_offset` | `"+HH:MM"` | the machine's | Offset for "today" and the brief time; read once at start |
 
-`[proactive.engine]` tunes the card generators and ranking (`nugget_proactive::ProactiveConfig`),
-e.g. `min_score` (`0.45`, cards ranked below it are kept but not offered), `max_inbox`,
-`user_addresses`, `followup_lead_days`, `awaiting_reply_days`, `renewal_horizon_days`.
+`[proactive.engine]` tunes ranking (`nugget_proactive::ProactiveConfig`): `min_score` (`0.45`),
+`max_inbox`, `user_addresses`, `followup_lead_days`, `awaiting_reply_days`, `renewal_horizon_days`.
 
 ### `[draft]`
 
-Double Tap drafting. Only the CC1 keys are listed here; the rest of the section (provider per app,
-excluded apps, budgets, `[draft.voice]`) is described in the daemon's `features/draft.rs` and
-will get its own table when the keys settle.
-
-Grounding (AA3; see `bench/README.md`, "Grounded drafts"):
+Double Tap drafting. Keys below are relative to `[draft]` (`local.model` is `model` in
+`[draft.local]`). Others (provider per app, excluded apps, budgets, `[draft.voice]`) are in
+`crates/nuggetd/src/features/draft.rs`.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `grounding` | bool | `true` | Retrieved context goes into the prompt as dated facts (a superseded draft or proposal marked, sensitive items marked private) and the streamed draft is checked as `grounding_check` says |
-| `grounding_check` | `"secrets"` or `"sentences"` | `"secrets"` | `secrets`: stream word by word and stop the draft before a credential copied from a sensitive item (next to no added latency). `sentences`: hold each sentence (and the greeting) until it ends and drop sentences whose numbers, amounts, dates or times no source supports, or that copy a credential; adds the first sentence's generation time before the first character |
-
-`[draft.local]` (on-device and local-network drafting):
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `model` | string (a manifest model id) | none | Run this model in its own local server (runtime role `draft`, provider id `local-draft`) and draft with it first when the draft goes by tier to a non-cloud provider (not through `app_providers`), falling back to the chat model. Ask, chat and cloud drafting are unchanged. The proposed small models are pending in `manifests/pending/` until they are signed into the manifest |
-
-`[draft.read_ahead]` (prefill a reply's prompt into the local server's cache before the trigger; see
-[Read-ahead](../guide/double-tap.md#read-ahead)):
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | bool | `true` | `false`: `draft.read_ahead` always skips with `"disabled"`, whatever the desktop setting (as it does when `[draft] enabled = false`) |
-| `min_interval_ms` | integer | `5000` | Minimum time between two read-aheads that do work; others skip with `"rate_limited"` |
-
-The desktop app has its own switch, **Read ahead while you reply** on the Double Tap page
-(`read_ahead` in its Double Tap settings, next to `allow_terminals`); read-ahead runs only when both
-are on. Its `read_ahead_on_battery` (default `true`, **Read ahead on battery**) pauses
-read-ahead on battery power when off; low power mode or battery saver always pauses it.
-
-## Example
-
-```toml
-[models]
-download_parts = 4
-
-[models.selected]
-triage = "qwen3-4b-q4km"
-embedding = "nomic-embed-text-v1.5-q8"
-
-[runtime]
-enabled = true
-idle_stop_minutes = 30
-
-[ingest]
-allow_cloud_embeddings = false
-
-[retrieve]
-mmr = true
-
-[retrieve.recency]
-half_life_days = 30
-weight = 0.2
-
-[knowledge]
-interval_minutes = 10
-
-[knowledge.me]
-name = "Ada Example"
-emails = ["ada@example.com"]
-
-[knowledge.llm]
-cloud_sources = []
-
-[vault]
-path = "~/Nugget Vault"
-
-[mcp]
-http = true
-port = 7319
-
-# A LAN server, tried before the managed runtime.
-[[providers]]
-id = "workstation"
-kind = "openai_compatible"
-base_url = "http://192.168.1.20:8080/v1"
-model = "qwen3-8b"
-tiers = ["synthesis"]
-
-# A cloud provider, tried last. The key comes from the daemon's environment.
-[[providers]]
-id = "anthropic"
-kind = "anthropic"
-model = "<model name>"
-api_key = "env:ANTHROPIC_API_KEY"
-tiers = ["synthesis", "agentic"]
-```
+| `grounding` | bool | `true` | Retrieved context goes in as dated facts (superseded and sensitive items marked) and the stream is checked per `grounding_check` |
+| `grounding_check` | `"secrets"` or `"sentences"` | `"secrets"` | `secrets`: stop the draft before a credential copied from a sensitive item. `sentences`: hold each sentence until it ends and drop ones with unsupported numbers, dates or amounts (adds first-sentence latency) |
+| `local.model` | manifest model id | none | Run this model in its own server (provider `local-draft`) and use it first for non-cloud drafting, falling back to the chat model |
+| `read_ahead.enabled` | bool | `true` | Prefill the prompt into the local cache while a reply field has focus ([Read-ahead](../guide/double-tap.md#read-ahead)); `false` makes `draft.read_ahead` skip with `"disabled"`. Also needs the desktop switch **Read ahead while you reply**; low power mode pauses it |
+| `read_ahead.min_interval_ms` | integer | `5000` | Minimum time between read-aheads that do work; others skip with `"rate_limited"` |

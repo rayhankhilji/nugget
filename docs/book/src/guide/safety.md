@@ -1,15 +1,8 @@
 # Safety: rules, confirmations and the kill switch
 
-> **Status:** the policy, confirmations, the kill switch and the action log work in the app: the
-> **Safety** page (its kill switch is always there, also on desktops without a tray), Escape ×3 and
-> the tray's **Stop all agents** item. The daemon serves
-> `policy.get`, `policy.set`, `policy.approvals`, `policy.kill`, `policy.resume` and
-> `policy.log.export`. Escape ×3 needs Accessibility permission on macOS and is not available on
-> Linux Wayland, where a chord is used instead.
-
-Everything that acts on your behalf (the [agent](agent.md), the browser extension and the actions
-on [Today cards](today.md)) asks one safety policy before every action. You manage it on the
-**Safety** page.
+Everything that acts for you (the [agent](agent.md), the browser extension and actions on
+[Today cards](today.md)) asks one safety policy before every action. You manage it on the **Safety**
+page.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/safety-dark.png">
@@ -18,87 +11,60 @@ on [Today cards](today.md)) asks one safety policy before every action. You mana
 
 ## Risk classes
 
-Each action declares a risk class. A deterministic classifier also looks at the action (button
-labels such as "Send" or "Delete", payment and password fields, the app or site) and can only
-**raise** the declared class, never lower it.
+Each action declares a risk class. A fixed classifier also looks at it (buttons such as "Send" or
+"Delete", payment and password fields, the app or site) and can only **raise** the class.
 
 | Class | Covers |
 |---|---|
 | Observe | Reading, navigating, scrolling, focusing |
-| Edit | Typing into a field, selecting, opening a draft: undoable, nothing leaves the device |
-| Send | Sending something to another person or service: email, message, form submit, post |
-| Destroy | Removing or overwriting data: delete, archive, overwrite a file, cancel a subscription |
-| Spend | Spending money or committing to an obligation: purchase, booking, payment, signing |
-| Security | Changing security or system state: passwords, permissions, installs, settings |
+| Edit | Typing, selecting, opening a draft: undoable, nothing leaves the device |
+| Send | Email, message, form submit, post |
+| Destroy | Delete, archive, overwrite a file, cancel a subscription |
+| Spend | Purchase, booking, payment, signing |
+| Security | Passwords, permissions, installs, settings |
 
-## The default rules
+## Rules
 
-| Rule | Effect |
+| Default rule | Effect |
 |---|---|
 | Password managers and keychains | **Deny** |
 | Banking, brokerage and payment apps and sites | **Deny** |
-| OS security and privacy settings, and the security, privacy and account panes of system settings | **Deny** |
+| OS security, privacy and account settings | **Deny** |
 | Send, Destroy, Spend and Security actions | **Confirm** |
 | Observe and Edit actions | **Allow** |
 
-You can turn a default rule off and add your own rules per app or site (allow, confirm or deny,
-optionally for given risk classes). Rules and approvals are kept under the data directory.
+You can turn default rules off and add your own per app or site (allow, confirm or deny, optionally
+for given risk classes). **Deny always wins.** Otherwise an approval you gave in this task applies,
+then your most specific rule, then the defaults; with no match, Send and above need confirmation.
 
-## How a decision is made
-
-In this order:
-
-1. If the kill switch is engaged: **deny**.
-2. The effective risk is the higher of the declared and the classified risk.
-3. Any matching **deny** rule, yours or a default: **deny**. Deny always wins.
-4. An approval you gave earlier in this task for this risk class and target: **allow**.
-5. Your most specific matching allow or confirm rule; on a tie, confirm.
-6. The most specific matching default allow or confirm rule.
-7. Nothing matched: **confirm** for Send and above, **allow** otherwise.
-8. If this task has used up its limit for the risk class: **deny**.
-
-An allow rule that names no risk classes covers only Observe and Edit. To allow sending, deleting,
-spending or security changes without a confirmation, a rule must name that class explicitly.
+An allow rule that names no risk classes covers only Observe and Edit; to skip confirmation for
+sending, deleting, spending or security changes, name that class explicitly.
 
 ## Confirmations
 
-A confirmation shows the risk class, the target and a preview, and offers approve once, approve for
-this task, or deny (see [the agent guide](agent.md#confirmations)). If you do not answer within
-2 minutes, or the kill switch is engaged while it waits, it counts as a denial. The **Safety** page
-lists the approvals currently in force (`policy.approvals`).
+A confirmation shows the risk class, target and a preview (see
+[the agent guide](agent.md#confirmations)). No answer within 2 minutes, or the kill switch engaged
+while it waits, counts as a denial. The **Safety** page lists approvals currently in force.
 
 ## Rate limits
 
-Per task, at most:
-
-| Class | Actions per task |
-|---|---|
-| Send | 25 |
-| Destroy | 25 |
-| Spend | 3 |
-| Security | 3 |
-
-Observe and Edit are not limited. The count includes allowed actions and approved confirmations.
+Per task, at most 25 Send, 25 Destroy, 3 Spend and 3 Security actions (allowed or approved). Observe
+and Edit are unlimited.
 
 ## The kill switch
 
-Press **Escape three times**, each press within half a second of the last, and everything Nugget is
-doing on your behalf stops: every running agent, every pending confirmation (denied) and the browser
-extension. **Stop all agents** in the tray menu, or the kill switch on the **Safety** page, does the
-same. On desktops without a tray icon (stock GNOME, for example), use the **Safety** page.
+Press **Escape three times**, each within half a second, and everything Nugget does for you stops:
+running agents, pending confirmations (denied) and the browser extension. **Stop all agents** in the
+tray, or the switch on the **Safety** page, does the same.
 
-- Checking the switch is one atomic read, done before every step and every action and while waiting.
-- It only ever halts. Resuming is a deliberate action in the app (`policy.resume`), never a key press.
-- The Escape counter recognises Escape and nothing else; no other key is recorded.
-- On macOS it needs the Accessibility permission. On Linux under Wayland, Escape ×3 cannot be
-  observed; use a chord instead.
+- It only halts. Resuming is a deliberate action in the app, never a key press.
+- Only Escape is recognised; no other key is recorded.
+- On macOS it needs Accessibility permission. On Linux Wayland, Escape ×3 can't be observed; use
+  the tray or the **Safety** page.
 
 ## The action log
 
-Every decision and every executed action is written to an append-only action log. Each entry holds
-the SHA-256 hash of the previous one, so editing, inserting, deleting or reordering entries breaks
-the chain and is detected. Text typed into secure fields is replaced by `[redacted]`, card numbers and
-long digit runs are masked, and previews are capped in length.
-
-You can export the log as JSON Lines from the **Safety** page, and verify an exported copy. One limit:
-cutting entries off the end is detectable only against a remembered head of the chain.
+Every decision and action goes to an append-only, hash-chained log, so edits, deletions or reordering
+are detected (cutting entries off the end is detectable only against a remembered chain head).
+Secure-field text is `[redacted]` and card numbers are masked. Export it as JSON Lines from the
+**Safety** page, and verify an exported copy there.

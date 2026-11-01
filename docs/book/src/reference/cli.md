@@ -6,9 +6,8 @@
 nuggetd [--home DIR] [COMMAND]
 ```
 
-With no command, `nuggetd` runs the daemon in the foreground until it receives SIGINT or SIGTERM
-(Ctrl+C, Ctrl+Break or console close on Windows). If another daemon already holds the data directory,
-it prints `nuggetd is already running (<socket>)` and exits with status 0.
+With no command it runs the daemon in the foreground until SIGINT or SIGTERM. If another daemon holds
+the data directory, it says so and exits 0.
 
 <!-- check-refs: cli.commands -->
 | Command | What it does |
@@ -37,75 +36,30 @@ it prints `nuggetd is already running (<socket>)` and exits with status 0.
 | `--version` | none | Print the version |
 | `--help` | every command | Print help |
 
-## `nuggetd status`
-
-```text
-$ nuggetd status
-nuggetd 0.0.1 running (protocol 1), up 1h 2m
-socket:    /home/you/.local/share/nugget/ipc/nuggetd.sock
-store:     1432 items, 5210 chunks
-audit:     chain verified
-providers:
-  local-chat  openai_compatible qwen3-4b-q4km  on-device  tiers: triage, light, synthesis  probed: streaming, json_schema
-  anthropic  anthropic <model>  cloud  tiers: synthesis, agentic  not probed
-```
-
-`audit` is `chain verified`, `not checked yet`, or `CHAIN VERIFICATION FAILED`, which means rows of
-the audit log were changed or removed (see [Security model](../architecture/security.md)). A provider
-that could not be built shows `unavailable:` and the reason.
+Exit status is `0` on success and `1` on any error. `nuggetd status` also reports the audit chain:
+`CHAIN VERIFICATION FAILED` means audit rows were changed or removed.
 
 ## `nuggetd install-service`
 
-| OS | What is installed | Where |
-|---|---|---|
-| macOS | A launchd agent, label `dev.nugget.nuggetd` | `~/Library/LaunchAgents/dev.nugget.nuggetd.plist` |
-| Linux | A `systemd --user` unit, `nuggetd.service` | `$XDG_CONFIG_HOME/systemd/user/` (default `~/.config/systemd/user/`) |
-| Windows | A Task Scheduler logon task, `Nugget Daemon`, least privilege | Task Scheduler root folder |
-
-The service runs the binary you ran `install-service` from, so install from the binary's final
-location. A `--home` or `NUGGET_HOME` set at install time is baked into the service. Running it again
-replaces the previous definition. On macOS and Linux it refuses to run as root, since the service must
-belong to your user.
-
-## Exit status
-
-`0` on success, `1` on any error (the message goes to standard error).
+Installs a launchd agent `dev.nugget.nuggetd` (`~/Library/LaunchAgents/`) on macOS, a
+`systemd --user` unit `nuggetd.service` on Linux, or a least-privilege Task Scheduler logon task
+`Nugget Daemon` on Windows. It runs the binary you ran it from, with any `--home` or `NUGGET_HOME`
+baked in, and refuses to run as root.
 
 ## `nuggetd mcp`
 
-```text
-nuggetd mcp --client <id>
-nuggetd mcp install --client claude-desktop|claude-code|cursor [--name NAME] [--config PATH] [--yes]
-```
+`nuggetd mcp --client <id>` is the stdio bridge an AI app launches (token in `NUGGET_MCP_TOKEN`; logs
+on stderr); see [MCP transports](mcp.md#transports).
 
-See [Connecting AI apps over MCP](../guide/mcp.md) for the whole flow.
-
-### The stdio bridge
-
-`nuggetd mcp --client <id>` is the command an AI app launches. It reads the client's token from
-`NUGGET_MCP_TOKEN` (it refuses to start without one), connects to the running daemon over the IPC
-socket, and copies MCP messages between its standard input and output and the daemon. Standard output
-carries MCP messages only; logs go to standard error. The daemon checks the token and enforces the
-client's scopes, rate limit, revocation and audit; the bridge itself holds no data. When the daemon
-runs with `--home` or `NUGGET_HOME`, the bridge needs the same data root; the setup snippets the
-daemon generates set `NUGGET_HOME` for you.
-
-### `nuggetd mcp install`
-
-Creates an MCP client in the running daemon (with default scopes: all sources, all read-only tools,
-no sensitive items) and sets the app up with it:
+**`nuggetd mcp install`** creates a client in the running daemon (all sources, all read-only tools, no
+sensitive items) and sets the app up:
 
 | `--client` | What happens | Default config file |
 |---|---|---|
-| `claude-desktop` | Adds an `mcpServers.nugget` entry to the app's JSON config | macOS `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows `%APPDATA%\Claude\claude_desktop_config.json`, Linux `~/.config/Claude/claude_desktop_config.json` |
+| `claude-desktop` | Adds an `mcpServers.nugget` entry | macOS `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows `%APPDATA%\Claude\claude_desktop_config.json`, Linux `~/.config/Claude/claude_desktop_config.json` |
 | `cursor` | The same, in Cursor's config | `~/.cursor/mcp.json` (Windows `%USERPROFILE%\.cursor\mcp.json`) |
-| `claude-code` | Prints the `claude mcp add …` command to run; nothing is run or written for you | none (`--config` is ignored) |
+| `claude-code` | Prints the `claude mcp add …` command to run | none |
 
-The config file is merged, never overwritten: other servers and settings stay as they are, a file
-that is not valid JSON is left alone (and the command fails), the previous version is copied to
-`<file>.nugget-backup-<time>`, and the new file is written readable only by you (it holds the token)
-and renamed into place. If a `nugget` entry was already there, the client it named is revoked. If
-the merge fails, the new client is revoked again. Restart the app afterwards.
-
-On a terminal the plan is shown and you are asked to confirm; `--yes` skips that. The daemon must be
-running.
+The config is merged, never overwritten: the old file is kept as `<file>.nugget-backup-<time>`, the new
+one is written readable only by you, and a client named by a previous `nugget` entry is revoked.
+Restart the app afterwards. See [Connecting AI apps over MCP](../guide/mcp.md).
