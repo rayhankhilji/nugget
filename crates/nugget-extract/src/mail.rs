@@ -1,5 +1,7 @@
 //! RFC 822 / MIME mail via `mail-parser`: headers into metadata, the text/plain body (or the
 //! HTML body converted), quoted replies and signatures moved into metadata, attachment names.
+//! The text starts with `From:` / `Date:` lines (see [`text_header`]); `metadata.text_header`
+//! holds that exact prefix.
 
 use mail_parser::{
     Address, HeaderForm, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
@@ -193,6 +195,15 @@ pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
         );
     }
     util::find_urls(&text, |_, u| util::push_unique(&mut links, u, LINK_CAP));
+    let header = text_header(from.first().map(String::as_str), msg.date());
+    if !header.is_empty() {
+        text = if text.is_empty() {
+            header.trim_end().to_owned()
+        } else {
+            format!("{header}{text}")
+        };
+        meta.insert("text_header".into(), Value::String(header));
+    }
 
     Ok(Extracted {
         title: subject.filter(|s| !s.is_empty()),
@@ -203,6 +214,31 @@ pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
         metadata: Value::Object(meta),
         truncated: false,
     })
+}
+
+/// Longest sender kept in the text header.
+const MAX_HEADER_FROM_CHARS: usize = 200;
+
+/// `From: <sender>` and `Date: <YYYY-MM-DD>` lines (each only when known) and a blank line, put
+/// before the body so a passage says who sent it and when; empty when neither is known. The date
+/// is the calendar date in the header's own offset (as the sender wrote it).
+fn text_header(from: Option<&str>, date: Option<&mail_parser::DateTime>) -> String {
+    let mut out = String::new();
+    if let Some(f) = from.map(util::normalize_ws).filter(|f| !f.is_empty()) {
+        out.push_str("From: ");
+        out.push_str(&util::truncate_chars(&f, MAX_HEADER_FROM_CHARS));
+        out.push('\n');
+    }
+    if let Some(d) = date.filter(|d| d.is_valid()) {
+        out.push_str(&format!(
+            "Date: {:04}-{:02}-{:02}\n",
+            d.year, d.month, d.day
+        ));
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
 }
 
 fn append_block(dst: &mut String, src: &str) {

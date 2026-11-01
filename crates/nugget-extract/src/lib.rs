@@ -29,7 +29,22 @@
 //! | `image/png`, `image/jpeg`, `image/webp` | OCR via `ocrs`, only with `ocr` set and models present |
 //!
 //! Markdown frontmatter is removed from [`Extracted::text`] (it is in `metadata.frontmatter`);
-//! otherwise Markdown text is kept as-is.
+//! otherwise Markdown text is kept as-is, except for text the reader never sees (below).
+//!
+//! # Hidden text
+//!
+//! Text a reader never sees is not extracted, so it is neither indexed nor handed to a model:
+//! Markdown `<!-- -->` comments and `[//]: # (...)`-style comment link definitions (outside code),
+//! HTML comments and elements hidden with the `hidden` attribute, `aria-hidden="true"` or an
+//! inline `display:none` / `visibility:hidden` / `font-size:0` style (HTML files and HTML mail),
+//! and, in every format, invisible format characters (zero-width spaces and joiners, word joiner,
+//! BOM, bidi embeddings / overrides / isolates / marks, Unicode tag characters). Zero-width
+//! (non-)joiners between two non-ASCII characters (emoji sequences, Indic and Arabic-script
+//! shaping) are kept.
+//!
+//! Mail text starts with `From: <sender>` and `Date: <YYYY-MM-DD>` lines (each only when the
+//! header is present and parsable) and a blank line; `metadata.text_header` holds that exact
+//! prefix so consumers that want the body alone can strip it.
 //!
 //! # Panics
 //!
@@ -375,6 +390,23 @@ const MAX_LINKS: usize = 2_000;
 const MAX_TAGS: usize = 500;
 
 fn finalize(mut out: Extracted, opts: &ExtractOptions) -> Extracted {
+    // Invisible format characters (zero-width, bidi controls, tag characters) are never shown to
+    // the user, so they are not indexed or handed to a model either.
+    if let Some((clean, removed)) = util::strip_invisible(&out.text) {
+        for s in &mut out.sections {
+            s.start = removed.map(s.start);
+            s.end = removed.map(s.end);
+        }
+        out.text = clean;
+    }
+    if let Some((clean, _)) = out.title.as_deref().and_then(util::strip_invisible) {
+        out.title = Some(clean);
+    }
+    for h in out.sections.iter_mut().flat_map(|s| &mut s.heading_path) {
+        if let Some((clean, _)) = util::strip_invisible(h) {
+            *h = clean;
+        }
+    }
     if let Some((cut, _)) = out.text.char_indices().nth(opts.max_text_chars) {
         out.text.truncate(cut);
         out.truncated = true;

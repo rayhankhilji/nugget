@@ -2591,6 +2591,40 @@ export async function restoreAndRestart(
   return conn;
 }
 
+// ---- EE3: Ask sources early ----
+
+/** Tauri event `ask.restarted` is re-emitted as (see apps/desktop/src-tauri/src/daemon.rs). */
+export const ASK_RESTARTED_EVENT = "nugget:ask-restarted";
+
+/**
+ * `ask.restarted`: the provider a `retrieve.ask` reply named could not answer and the stream moved
+ * on to `provider`, with the context packed for it. Replaces the reply's citations, provider and
+ * `general` flag; it comes before any `chat.delta` of that provider, possibly before the reply.
+ */
+export interface AskRestarted {
+  stream_id: string;
+  provider: string;
+  locality: Locality;
+  citations: Citation[];
+  excluded_sensitive?: number;
+  general?: boolean;
+  /** As `AskStarted.date`, for this provider's context. */
+  date?: AskDateFilter | null;
+  /** As `AskStarted.partial`, for this provider's context. */
+  partial?: number[];
+}
+
+function isAskRestarted(v: unknown): v is AskRestarted {
+  const r = v as Partial<AskRestarted> | null;
+  return !!r && typeof r.stream_id === "string" && typeof r.provider === "string" && Array.isArray(r.citations);
+}
+
+/** `ask.restarted` notifications; malformed payloads are dropped. */
+export const onAskRestarted = (h: (r: AskRestarted) => void) =>
+  on<unknown>(ASK_RESTARTED_EVENT, (p) => {
+    if (isAskRestarted(p)) h(p);
+  });
+
 // ---- II4: quick ask ----
 
 /** `quickask.json` (see `src-tauri/src/quickask.rs`). */
