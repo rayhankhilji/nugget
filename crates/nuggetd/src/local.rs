@@ -88,6 +88,18 @@ pub(crate) fn selected_models(
     selected_models_for_index(cfg, manifest, hw, None)
 }
 
+/// Record [`LEGACY_EMBEDDING_MODEL`] as the embedding model of a store that has vectors but no
+/// recorded model (its vectors predate the record, and v1.5 was the only embedding model the
+/// manifest had). Does nothing otherwise. Returns the model recorded, if this call recorded one.
+pub(crate) fn pin_legacy_embedding_model(store: &nugget_store::Store) -> Result<Option<String>> {
+    if store.embedding_model()?.is_some() || store.embedding_dim()?.is_none() {
+        return Ok(None);
+    }
+    let model = store.adopt_embedding_model(LEGACY_EMBEDDING_MODEL)?;
+    tracing::info!(%model, "recorded the embedding model of an index built before models were recorded");
+    Ok(Some(model))
+}
+
 /// The embedding model `store`'s vectors were built with: the recorded one, or
 /// [`LEGACY_EMBEDDING_MODEL`] for vectors from before models were recorded; `None` for a store
 /// without vectors (or that cannot be read).
@@ -1360,8 +1372,37 @@ mod tests {
             index_embedding_model(&store).as_deref(),
             Some(LEGACY_EMBEDDING_MODEL)
         );
-        store.adopt_embedding_model("recorded").unwrap();
-        assert_eq!(index_embedding_model(&store).as_deref(), Some("recorded"));
+        // Pinned at start (EM-1): a later embedder of the same dimension cannot claim it.
+        assert_eq!(
+            pin_legacy_embedding_model(&store).unwrap().as_deref(),
+            Some(LEGACY_EMBEDDING_MODEL)
+        );
+        assert_eq!(pin_legacy_embedding_model(&store).unwrap(), None);
+        assert_eq!(
+            store.adopt_embedding_model("newer-embedder").unwrap(),
+            LEGACY_EMBEDDING_MODEL
+        );
+        assert_eq!(
+            store.embedding_model().unwrap().as_deref(),
+            Some(LEGACY_EMBEDDING_MODEL)
+        );
+        // A store without vectors stays open, and an existing record is kept.
+        let fresh = nugget_store::Store::open_in_memory().unwrap();
+        assert_eq!(pin_legacy_embedding_model(&fresh).unwrap(), None);
+        assert_eq!(fresh.embedding_model().unwrap(), None);
+        let recorded = nugget_store::Store::open_in_memory().unwrap();
+        recorded
+            .upsert_item_with_chunks(
+                &nugget_store::NewItem::new("src", "a", "h").with_text("a"),
+                &[nugget_store::NewChunk::embedded("a", vec![1.0, 0.0])],
+            )
+            .unwrap();
+        recorded.adopt_embedding_model("recorded").unwrap();
+        assert_eq!(pin_legacy_embedding_model(&recorded).unwrap(), None);
+        assert_eq!(
+            index_embedding_model(&recorded).as_deref(),
+            Some("recorded")
+        );
         assert!(
             m.get(LEGACY_EMBEDDING_MODEL).is_some(),
             "legacy model left the manifest"

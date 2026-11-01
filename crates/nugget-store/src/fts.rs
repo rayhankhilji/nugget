@@ -532,6 +532,40 @@ mod tests {
         match_expr(s)
     }
 
+    /// The index form of a fixed sample, frozen (EM-2): `chunks_fts` deletes by re-deriving it,
+    /// so any change here (code or the pinned `unicode-normalization`) needs a migration that
+    /// rebuilds the FTS tables.
+    #[test]
+    fn index_form_is_stable() {
+        let samples = [
+            "ＬＥＤ照明 ｷｬﾝﾍﾟｰﾝ ①②",
+            "والكراسي فاتورة إلى مُدَرِّسة",
+            "Königstraße Lenkungsausschuss",
+            "मंज़िल रेलगाड़ी",
+            "ﬁle Ⅻ ｶﾞ",
+        ];
+        let want = [
+            ("LED 照明   キャ ャン ンペ ペー ーン  12", ""),
+            (
+                "والكراسي فاتوره الي مدرسه\nالكراسي كراسي اتوره",
+                "يساركلاو هروتاف",
+            ),
+            (
+                "Königstrasse Lenkungsausschuss\nKoenigstrasse",
+                "essartsginöK ssuhcssuasgnukneL",
+            ),
+            (
+                "म\u{902}ज\u{93c}िल र\u{947}लगाड\u{93c}ी",
+                "लि\u{93c}ज\u{902}म ी\u{93c}डागल\u{947}र",
+            ),
+            ("file XII  ガ ", ""),
+        ];
+        for (t, (form, rev)) in samples.iter().zip(want) {
+            assert_eq!(index_form(t), form, "{t}");
+            assert_eq!(reversed_form(t), rev, "{t}");
+        }
+    }
+
     #[test]
     fn plain_words_are_quoted_and_or_ed() {
         assert_eq!(q(""), None);

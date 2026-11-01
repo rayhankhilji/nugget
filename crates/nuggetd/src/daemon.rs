@@ -374,6 +374,13 @@ impl Daemon {
             })
             .await?
         };
+        // A store with vectors but no recorded embedding model (built before models were
+        // recorded) is fixed to the model that built them before anything can embed: otherwise
+        // the first embedder of the same dimension would be recorded and mixed in (EM-1).
+        {
+            let store = store.clone();
+            blocking(move || local::pin_legacy_embedding_model(&store)).await?;
+        }
         // After the store: applying a staged restore may have put the backup's config in place.
         let (mut config, config_created) = Config::load_or_create(&paths)?;
         if config_created {
