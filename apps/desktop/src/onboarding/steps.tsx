@@ -418,6 +418,10 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
   const aiLegacy = withAi && !aiReady && legacyDone(state, "ai");
   const sources = state.sources ?? [];
   const sourcesLegacy = sources.length === 0 && legacyDone(state, "source");
+  // Sources were added but none has anything searchable (an empty folder, only unsupported,
+  // unreadable or too-large files): say so, and don't claim search works or every step is done.
+  const nothingIndexed = sources.length > 0 && !indexed && searchable === 0;
+  const pendingShown = nothingIndexed ? pending.filter((s) => s !== "source") : pending;
   const ai = aiReady
     ? aiReady.ai === "local"
       ? t("onboarding.done.summary.aiLocal", { model: aiReady.what })
@@ -430,8 +434,19 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
   const aiSet = aiReady !== null || aiLegacy;
   return (
     <>
-      <StepHeading headingRef={headingRef}>{t("onboarding.done.heading")}</StepHeading>
-      <p className="ob-lead">{t(aiSet ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}</p>
+      <StepHeading headingRef={headingRef}>
+        {t(nothingIndexed ? "onboarding.done.headingNothingIndexed" : "onboarding.done.heading")}
+      </StepHeading>
+      <p className="ob-lead">
+        {t(nothingIndexed ? "onboarding.done.leadNothingIndexed" : aiSet ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}
+      </p>
+      {nothingIndexed && (
+        <p>
+          <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "goto", step: "source" })}>
+            {t("onboarding.source.addAnother")}
+          </button>
+        </p>
+      )}
       {searchable > 0 && (
         <p className="note ob-index-ready" role="status">
           {t("onboarding.done.searchable", { count: searchable })}
@@ -442,11 +457,14 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
           <dt>{t("onboarding.done.summary.ai")}</dt>
           <dd>{ai}</dd>
         </div>
-        <div className={sources.length || sourcesLegacy ? "ob-summary-set" : "ob-summary-unset"}>
+        <div className={(sources.length && !nothingIndexed) || sourcesLegacy ? "ob-summary-set" : "ob-summary-unset"}>
           <dt>{t("onboarding.done.summary.sources")}</dt>
           <dd>
             {sources.length ? (
-              <bdi>{formatList(sources)}</bdi>
+              <>
+                <bdi>{formatList(sources)}</bdi>
+                {nothingIndexed && <span className="muted"> · {t("onboarding.done.summary.nothingIndexed")}</span>}
+              </>
             ) : sourcesLegacy ? (
               t("onboarding.done.summary.sourcesAdded")
             ) : (
@@ -462,11 +480,11 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
         </div>
       </dl>
       <DesktopOptIns />
-      {pending.length > 0 ? (
+      {pendingShown.length > 0 ? (
         <>
-          <p>{t("onboarding.done.pending", { count: pending.length })}</p>
+          <p>{t("onboarding.done.pending", { count: pendingShown.length })}</p>
           <ul className="ob-pending">
-            {pending.map((s) => (
+            {pendingShown.map((s) => (
               <li key={s}>
                 <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "goto", step: s })}>
                   {t(STEP_TITLE[s])}
@@ -476,7 +494,7 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
           </ul>
         </>
       ) : (
-        <p>{t("onboarding.done.allDone")}</p>
+        !nothingIndexed && <p>{t("onboarding.done.allDone")}</p>
       )}
       <UpdateQuestion />
       <p className="muted">{t("onboarding.done.again")}</p>
