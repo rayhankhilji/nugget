@@ -1,7 +1,7 @@
 # Contributing to Nugget
 
-Nugget is licensed under [Apache-2.0](LICENSE). The book's
-[contributor pages](docs/book/src/contributing/setup.md) cover setup, layout and CI in more depth.
+Nugget is licensed under [Apache-2.0](LICENSE). More detail: the book's
+[contributor pages](docs/book/src/contributing/setup.md).
 
 ## Ground rules
 
@@ -43,18 +43,17 @@ licenses in `apps/desktop` by hand.
 
 ## Setup
 
-- **Rust** via [rustup](https://rustup.rs/); [`rust-toolchain.toml`](rust-toolchain.toml) selects
-  stable with `rustfmt` and `clippy`; MSRV is `rust-version` in [`Cargo.toml`](Cargo.toml).
-- **C toolchain** for SQLCipher and vendored OpenSSL: a C compiler, `make`, `perl`. On Windows, MSVC
-  Build Tools and [Strawberry Perl](https://strawberryperl.com/) (Git's MSYS Perl fails; set
-  `OPENSSL_SRC_PERL=C:\Strawberry\perl\bin\perl.exe` if it comes first on `PATH`).
-- **Desktop app**: Node.js 22, pnpm (`corepack enable`), and the
-  [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/). On Debian/Ubuntu:
+Rust via [rustup](https://rustup.rs/) ([`rust-toolchain.toml`](rust-toolchain.toml); MSRV is
+`rust-version` in [`Cargo.toml`](Cargo.toml)); a C compiler, `make` and `perl` for SQLCipher and
+vendored OpenSSL (Windows: MSVC Build Tools and [Strawberry Perl](https://strawberryperl.com/); if
+Git's MSYS Perl comes first, set `OPENSSL_SRC_PERL=C:\Strawberry\perl\bin\perl.exe`). For the
+desktop app: Node.js 22, pnpm (`corepack enable`) and the
+[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/); on Debian/Ubuntu:
 
-  ```sh
-  sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-    librsvg2-dev libxdo-dev libsoup-3.0-dev libssl-dev build-essential file
-  ```
+```sh
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+  librsvg2-dev libxdo-dev libsoup-3.0-dev libssl-dev build-essential file
+```
 
 ## Build and test only what you touch
 
@@ -86,21 +85,17 @@ the book), [`release.yml`](.github/workflows/release.yml) ([docs/release.md](doc
 
 ## Where code lives
 
-The [crate map](docs/book/src/architecture/crates.md) lists every crate. `apps/desktop` is the Tauri
-shell, `extensions/browser` the browser extension, `bench` the benchmark harness, `manifests` the
-signed model manifest, `packaging` installer and update scripts. `nugget-core` holds shared
-contracts; changes there need agreement from every crate owner.
+The [crate map](docs/book/src/architecture/crates.md) lists every crate (`nugget-core` changes need
+every crate owner's agreement). New crates go under `crates/`, in `members` (usually
+`default-members`), with `version.workspace = true`, the other inherited fields and
+`[lints] workspace = true`, plus a crate-map row (the docs check enforces it). Shared
+dependencies only go in `[workspace.dependencies]`.
 
-- **New crates** go under `crates/`, in `members` (usually `default-members`) of the root
-  `Cargo.toml`, with `version.workspace = true`, the other inherited fields and
-  `[lints] workspace = true`, and need a row in the crate map (the docs check fails otherwise).
-  Put dependencies in the crate's `Cargo.toml`, in `[workspace.dependencies]` only when shared.
-- **Daemon features** (Double Tap, agent, browser bridge, proactive, plugins) each live in one
-  module under [`crates/nuggetd/src/features/`](crates/nuggetd/src/features/mod.rs) owning its
-  state, IPC methods, tasks and `config.toml` section. Implement `Feature` in
-  `features/<name>.rs`, declare it in `features/mod.rs` and add a line to `build`; don't edit
-  `State` or `handler.rs`. A feature that fails to start is logged and its methods answer
-  "method not found".
+Daemon features (Double Tap, agent, browser bridge, proactive, plugins) each live in one module
+under [`crates/nuggetd/src/features/`](crates/nuggetd/src/features/mod.rs) that owns its state, IPC
+methods, tasks and `config.toml` section: implement `Feature` in `features/<name>.rs`, declare it
+in `features/mod.rs` and add a line to `build`, without touching `State` or `handler.rs`. A
+feature that fails to start is logged and its methods answer "method not found".
 
 ## Code expectations
 

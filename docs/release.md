@@ -1,7 +1,8 @@
 # Releases, installers and signed updates
 
-The **checklist** creates every signing key and cuts a release, in order. The **reference**
-(§1 to §8) explains packaging, the workflow, the keys and the in-app updater.
+The **checklist** creates every signing key and cuts a release. The **reference** (§1 to §8)
+explains packaging, the workflow, the keys and the updater. Signing happens only in CI, behind a
+second maintainer's approval; nothing installs on users' machines without consent.
 
 | Piece | Where |
 |---|---|
@@ -14,9 +15,6 @@ The **checklist** creates every signing key and cuts a release, in order. The **
 | Installer smoke tests | `packaging/scripts/smoke-appimage.sh`, `smoke-macos.sh`, `smoke-windows.ps1` |
 | Model manifest signing | `crates/nugget-models/examples/sign-manifest.rs`, [security/manifest-trust.md](security/manifest-trust.md) |
 | In-app updater | `apps/desktop/src-tauri/src/updater.rs`, `settings.rs`, `login.rs`; UI `apps/desktop/src/components/UpdateSettings.tsx` |
-
-Principles: the user picks the update channel, nothing installs without consent, and signing
-happens only in CI behind a second maintainer's approval.
 
 ---
 
@@ -83,13 +81,10 @@ still succeeds, with a warning).
 Azure Trusted Signing (renamed Artifact Signing). CI logs in with GitHub OIDC, so no Azure secret
 is stored. Without this (or a `.pfx`) installers are unsigned and SmartScreen warns.
 
-- [ ] **Account**: `az provider register --namespace Microsoft.CodeSigning`, then create a
-  Trusted Signing account. Its *Account URI* is the endpoint (e.g.
-  `https://eus.codesigning.azure.net`).
-- [ ] **Identity validation**: give yourself *Trusted Signing Identity Verifier*, then
-  *Identity validation* → *New* → *Public*. Can take days; eligibility is limited. The validated
-  name is the publisher users see.
-- [ ] **Certificate profile**: *Public Trust*, linked to the validated identity.
+- [ ] `az provider register --namespace Microsoft.CodeSigning`; create a Trusted Signing account
+  (its *Account URI* is the endpoint, e.g. `https://eus.codesigning.azure.net`); as *Trusted
+  Signing Identity Verifier* request *Identity validation* → *Public* (can take days; eligibility
+  limited; the validated name is the publisher users see); create a *Public Trust* certificate profile.
 - [ ] **Entra app, federated credential, Signer role on the one profile only, and the five
   `release-build` variables** (all or none; a partial set fails the build). If the repository's
   OIDC subject template is customised, match it.
@@ -264,23 +259,15 @@ the beta channel receives.
 
 # Secrets and variables
 
-Everything `release.yml` reads. Dry runs, the rehearsal and the signing proof read none.
-
-| Name | Kind, where | What | When absent |
-|---|---|---|---|
-| `APPLE_CERTIFICATE`, `_PASSWORD` | secret, `release-build` | Developer ID `.p12` (base64) and its password | Ad-hoc signed, not notarized, warning |
-| `APPLE_SIGNING_IDENTITY` | secret, `release-build` | `Developer ID Application: Name (TEAMID)` | Optional; taken from the certificate |
-| `APPLE_API_ISSUER`, `APPLE_API_KEY_ID`, `APPLE_API_KEY_P8` | secret, `release-build` | Notarization API key (`.p8` as plain PEM) | Signed but not notarized, warning |
-| `AZURE_TRUSTED_SIGNING_ENDPOINT`, `_ACCOUNT`, `_PROFILE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` | variable, `release-build` | Trusted Signing config (Step 3) | None: `.pfx` or unsigned with warning. Some: build fails |
-| `WINDOWS_CERTIFICATE`, `_PASSWORD` | secret, `release-build` | Exportable `.pfx` (base64) | Unsigned with warning; ignored if Azure is set |
-| `TAURI_SIGNING_PRIVATE_KEY` | secret, `release` | Updater minisign key (Step 4) | No `.sig`/`latest.json`; feeds don't move |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret, `release` | Its password | `sign` fails |
-| `NUGGET_UPDATER_PUBKEY` | repo variable | `nugget-updater.key.pub` text | App built without an updater; `sign` treats as no key |
-| `NUGGET_MANIFEST_RELEASE_PUBKEY` | repo variable | 64-hex manifest release key (Step 5) | Real release fails in `mode` before building, also if no `.sig` line verifies with it; malformed fails the build |
-| `GITHUB_TOKEN` | automatic | Scoped per job | n/a |
-
-Set by the workflow: `NUGGET_TRUST_DEV_MANIFEST_KEY=1` (dry runs only), `AZURE_TRUSTED_SIGNING_DLIB`.
-`NUGGET_UPDATER_FEED` overrides the feed URL at build time (the rehearsal uses it; releases don't).
+`release.yml` reads only the secrets and variables set in Steps 2 to 5, plus `GITHUB_TOKEN`
+(scoped per job); dry runs, the rehearsal and the signing proof read none. Missing Apple values:
+ad-hoc signed or not notarized, with a warning. Missing Azure variables: the `.pfx`, else unsigned
+with a warning. Missing `TAURI_SIGNING_PRIVATE_KEY`: no `.sig` files or `latest.json`, so feeds
+don't move (a missing password fails `sign`). Missing `NUGGET_UPDATER_PUBKEY`: the app has no
+updater. `NUGGET_MANIFEST_RELEASE_PUBKEY` unset, malformed, or matching no line of
+`manifests/default.json.sig`: a real release fails before building. Set by the workflow:
+`NUGGET_TRUST_DEV_MANIFEST_KEY=1` (dry runs only), `AZURE_TRUSTED_SIGNING_DLIB`.
+`NUGGET_UPDATER_FEED` overrides the feed URL at build time (rehearsal only).
 
 ---
 
@@ -298,26 +285,17 @@ Set by the workflow: `NUGGET_TRUST_DEV_MANIFEST_KEY=1` (dry runs only), `AZURE_T
 
 - macOS minimum is 11.0 (`bundle.macOS.minimumSystemVersion`). Linux needs glibc 2.35; packages
   depend on WebKitGTK 4.1, GTK 3, libayatana-appindicator.
-- A job that never gets a runner (no log, `runner_id` 0) may mean Actions minutes or the
-  spending limit ran out: check Settings → Billing.
-- The updater uses the payload matching how the app was installed (AppImage, `.deb` with a
-  `pkexec` prompt, NSIS, …).
+- A job that never gets a runner (no log) may mean Actions minutes ran out: check Billing.
 - MSI versions must be numeric: `packaging/windows/wix-version.ps1` maps `X.Y.Z-rc.N` to
   `X.Y.Z.N`. Windows Installer ignores the fourth field, so the final release still replaces an RC.
 
 ## 2. The `nuggetd` sidecar
 
-The daemon ships as a Tauri sidecar (`bundle.externalBin: ["binaries/nuggetd"]`): staged as
-`apps/desktop/src-tauri/binaries/nuggetd-<target-triple>[.exe]`, installed next to the app:
-
-| Bundle | Daemon |
-|---|---|
-| macOS | `Nugget.app/Contents/MacOS/nuggetd` (signed with the app) |
-| Windows NSIS / MSI | `%LOCALAPPDATA%\Nugget\nuggetd.exe` / `C:\Program Files\Nugget\nuggetd.exe` |
-| deb / rpm | `/usr/bin/nuggetd` |
-| AppImage | `$APPDIR/usr/bin/nuggetd` |
-
-`daemon::find_nuggetd()` looks next to `current_exe()` first. The sidecar is in an overlay config
+The daemon ships as a Tauri sidecar (`bundle.externalBin`), staged as
+`apps/desktop/src-tauri/binaries/nuggetd-<target-triple>[.exe]` and installed next to the app,
+where `daemon::find_nuggetd()` looks first: `Nugget.app/Contents/MacOS/nuggetd` (signed with the
+app), `%LOCALAPPDATA%\Nugget\nuggetd.exe` (NSIS), `C:\Program Files\Nugget\nuggetd.exe` (MSI),
+`/usr/bin/nuggetd` (deb/rpm), `$APPDIR/usr/bin/nuggetd` (AppImage). It is in an overlay config
 because `tauri-build` refuses to compile when an `externalBin` file is missing.
 
 Local build:
@@ -330,10 +308,9 @@ pnpm tauri build --bundles appimage,deb,rpm --config src-tauri/tauri.bundle.conf
 ls ../../target/release/bundle/*/
 ```
 
-A local build has no updater ("this build can't update itself") and trusts no manifest key
-unless `NUGGET_TRUST_DEV_MANIFEST_KEY=1` was exported for `stage-sidecar.sh`. To test updates,
-`pnpm tauri signer generate -w /tmp/test.key` and export
-`NUGGET_UPDATER_PUBKEY="$(cat /tmp/test.key.pub)"` before building, or use the rehearsal.
+A local build has no updater and trusts no manifest key unless `NUGGET_TRUST_DEV_MANIFEST_KEY=1`
+is exported for `stage-sidecar.sh`. To test updates, export `NUGGET_UPDATER_PUBKEY` from
+`pnpm tauri signer generate -w /tmp/test.key` before building, or use the rehearsal.
 
 Sizes from unsigned dry-run bundles (version 0.0.1); each dry run writes the same tables to its
 job summary (`bundle-report-<target>`):
@@ -355,32 +332,25 @@ job summary (`bundle-report-<target>`):
 `release.yml` has top-level `permissions: {}`; each job asks only for what it needs; actions are
 pinned to commit SHAs.
 
-1. **Tag** (annotated, signed; must match the `tauri.conf.json` version).
-2. **`build`** (matrix; `release-build` env on real releases): stages the sidecar, runs
-   `tauri build`, signs macOS (hardened runtime, notarized and stapled with the API key) and
-   Windows (`sign.ps1` or the `.pfx`); a real release fails if `signtool verify /pa /all` finds an
-   unsigned file. **The updater private key is never here** (third-party build scripts run), only
-   public keys. Uploads `bundle-`, `bundle-report-` and `smoke-<target>`.
+1. **Tag** (annotated, signed, matching `tauri.conf.json`).
+2. **`build`** (matrix, `release-build` env): stages the sidecar, runs `tauri build` with OS
+   signing, and on a real release fails if `signtool verify /pa /all` finds an unsigned Windows
+   file. It gets only public keys: **the updater private key is never in a job that runs
+   third-party build scripts**.
 3. **`sbom`**: CycloneDX via `cargo-cyclonedx` and `cdxgen`.
-4. **`sign`** (`release` env, waits for approval): signs each payload with `tauri signer sign`
-   (locked CLI, `--ignore-scripts`), writes and signs `latest.json`, writes `SHA256SUMS`, records
-   SLSA provenance, and creates a **draft** release (prerelease if the tag has a hyphen).
-5. **Publish** by a maintainer after Step 8.
-6. **`channels`** (on publish, no secrets): copies `latest.json` + `.sig` to the `updater-feed`
-   release as `beta.json` and, unless a prerelease, `stable.json` (§5).
+4. **`sign`** (`release` env, after approval): signs payloads and `latest.json` with
+   `tauri signer sign` (locked CLI, `--ignore-scripts`), writes `SHA256SUMS`, records SLSA
+   provenance, creates a **draft** (prerelease if the tag has a hyphen).
+5. **Publish** (a maintainer, after Step 8), then **`channels`** (no secrets) copies `latest.json`
+   + `.sig` to the `updater-feed` release as `beta.json`, and `stable.json` unless a prerelease (§5).
 
 ### Dry run
 
-```sh
-gh workflow run release.yml --ref <branch> -f dry_run=true
-```
-
-From any branch: builds every target (macOS ad-hoc signed, Windows unsigned), uploads bundles,
-reports and smoke logs (kept 14 days), runs the smoke tests, and builds `nuggetd` with
-`NUGGET_TRUST_DEV_MANIFEST_KEY=1`. It never enters a signing environment or reads a secret, and
-the apps have no updater. `dry_run: false` is accepted only on a `v*` tag ref (re-runs a real
-release). Installing a dry-run build: see the
-[install guide](book/src/guide/install.md#dry-run-installers).
+`gh workflow run release.yml --ref <branch> -f dry_run=true` (the default) builds every target
+from any branch (macOS ad-hoc signed, Windows unsigned), keeps bundles, reports and smoke logs 14
+days, runs the smoke tests, and builds `nuggetd` with `NUGGET_TRUST_DEV_MANIFEST_KEY=1`. It never
+reads a secret, and its apps have no updater. `dry_run: false` works only on a `v*` tag ref.
+Installing one: [install guide](book/src/guide/install.md#dry-run-installers).
 
 ### Smoke tests
 
@@ -391,49 +361,38 @@ close it as a user would, expect a clean exit, stop the daemon (SIGTERM; `CTRL_B
 and require `stopped`. `package-smoke.yml` and `real-os.yml` run them on relevant pull requests.
 The x64 dmg, MSI, `.deb` and `.rpm` are built but not launched.
 
-### Release rehearsal
+### Release rehearsal and Windows signing proof
 
-`gh workflow run release-rehearsal.yml --ref <branch>` (manual only). On Linux x64 (AppImage) and
-Windows x64 (NSIS) it: generates throwaway updater and manifest keys plus wrong ones (never
-stored; the report fails if evidence holds a private key); builds `nuggetd` trusting only the
-throwaway manifest key; builds an old and a new app pointed at a localhost HTTPS feed; signs and
-promotes the new one to beta as `sign`/`channels` would; lets the old app find, verify, download
-and install it (AppImage byte-identical; NSIS ProductVersion updated); and checks that a feed,
-payload or (Linux) manifest signed with a wrong key is refused. Evidence is uploaded as
-`rehearsal-evidence-<os>`. Limits in §8.
+`gh workflow run release-rehearsal.yml --ref <branch>` (manual) runs a whole release on Linux x64
+(AppImage) and Windows x64 (NSIS) with throwaway keys (never stored): builds an old and a new app
+against a localhost HTTPS feed, signs and promotes the new one to beta, lets the old app find,
+verify and install it, and checks that a feed, payload or (Linux) manifest signed with a wrong key
+is refused. Evidence: `rehearsal-evidence-<os>`. Limits in §8.
 
-### Windows signing proof
-
-`windows-signing.yml` (manual, and on PRs touching `packaging/windows/`) uses a throwaway
-self-signed certificate. `sign-script` tests `sign.ps1` modes and failure paths (partial Azure
-config, foreign endpoint, no secret printed); `bundles` builds NSIS and MSI as `release.yml` does
-and checks every signed file fails before the throwaway root is trusted and verifies after. The
-`azure-oidc` job (real OIDC token, fake Azure identity) runs only manually and **has not run yet**.
+`windows-signing.yml` (manual, and on PRs touching `packaging/windows/`) signs with a throwaway
+self-signed certificate, tests `sign.ps1`'s modes and failure paths, and builds NSIS and MSI
+checking every signed file. Its `azure-oidc` job (real OIDC token, fake Azure identity) runs only
+manually and **has not run yet**.
 
 ### Pulling a bad release
 
-Nothing can downgrade anyone; the fix for affected users is always a newer release. Meanwhile:
+Nothing can downgrade anyone, so affected users need a newer release. Meanwhile point the feed
+back at the last good release (`promote` would refuse), hide the bad one with
+`gh release edit vBAD --draft` (keep its assets while a feed points at them), then ship the next
+patch:
 
-1. Point the feed back at the last good release (`promote` would refuse, so upload directly):
-
-   ```sh
-   gh release download vGOOD -p latest.json -p latest.json.sig
-   python3 packaging/scripts/updater_manifest.py channel latest.json stable   # likewise beta
-   gh release upload updater-feed --clobber stable.json stable.json.sig
-   ```
-
-2. `gh release edit vBAD --draft` (or mark prerelease). Don't delete its assets while a feed
-   still points at them.
-3. Fix and release the next patch version.
+```sh
+gh release download vGOOD -p latest.json -p latest.json.sig
+python3 packaging/scripts/updater_manifest.py channel latest.json stable   # likewise beta
+gh release upload updater-feed --clobber stable.json stable.json.sig
+```
 
 If the key was compromised, follow *Rotation* in §4.
 
 ## 4. Signing keys
 
-Release signatures: OS code signatures (Apple, Authenticode), updater signatures (minisign, payloads
-and feed), and the model manifest signature (ed25519). Plugin packages use publisher keys that
-users trust in `[plugins] trusted_keys`; the release pipeline doesn't touch them
-([plugins.md](plugins.md#packaging-and-signing)).
+OS code signatures (Apple, Authenticode), updater signatures (minisign) and the manifest signature
+(ed25519). Plugin publisher keys are separate ([plugins.md](plugins.md#packaging-and-signing)).
 
 ### Updater key: the two-person process
 
@@ -457,23 +416,20 @@ slots, multi-signature files, rollback protection and the signing commands:
 
 ### Windows code signing
 
-`sign.ps1` is called once per file (`%1`) and exits non-zero on failure; SHA-256 with RFC 3161
-timestamps. Modes, first match wins:
+`sign.ps1` runs once per file (`%1`), exits non-zero on failure, and signs SHA-256 with an RFC 3161
+timestamp. Modes, first match wins:
 
-- **Azure Trusted Signing**: `AZURE_TRUSTED_SIGNING_ENDPOINT` (`https://<region>.codesigning.azure.net`),
-  `_ACCOUNT`, `_PROFILE`, `AZURE_TRUSTED_SIGNING_DLIB` (Microsoft's `Azure.CodeSigning.Dlib.dll`
-  from `Microsoft.ArtifactSigning.Client` 1.0.146, fetched by `-InstallDlib`, checksum-pinned,
-  needs .NET 8). Auth, first match: `AZURE_CLIENT_ID` + `AZURE_TENANT_ID` + `AZURE_CLIENT_SECRET`
-  (manual only); `AZURE_CLIENT_ID` + `AZURE_TENANT_ID` with GitHub OIDC, a fresh token per file
-  (CI); else `az login`.
+- **Azure Trusted Signing**: the endpoint (`https://<region>.codesigning.azure.net`), account and
+  profile variables plus `AZURE_TRUSTED_SIGNING_DLIB` (`Microsoft.ArtifactSigning.Client` 1.0.146,
+  checksum-pinned, needs .NET 8). Auth: a client secret (`AZURE_CLIENT_SECRET`, manual only), else
+  GitHub OIDC with a fresh token per file (CI), else `az login`.
 - **Store certificate**: `NUGGET_SIGN_CERT_THUMBPRINT` (`CurrentUser\My`), timestamp
-  `NUGGET_SIGN_TIMESTAMP_URL` (default DigiCert). The `.pfx` path in `release.yml` uses Tauri's
-  own `certificateThumbprint` instead.
+  `NUGGET_SIGN_TIMESTAMP_URL` (default DigiCert). (The `.pfx` path uses Tauri's
+  `certificateThumbprint` instead.)
 
-Optional: `NUGGET_SIGN_DESCRIPTION`, `NUGGET_SIGNTOOL` (or `TAURI_WINDOWS_SIGNTOOL_PATH`),
-`NUGGET_SIGN_DRY_RUN=1`, `NUGGET_SIGN_LOG`. Other services (DigiCert KeyLocker, SSL.com eSigner,
-a USB token on a self-hosted runner) need a new mode. EV certificates no longer skip SmartScreen
-reputation.
+Optional: `NUGGET_SIGN_DESCRIPTION`, `NUGGET_SIGNTOOL` / `TAURI_WINDOWS_SIGNTOOL_PATH`,
+`NUGGET_SIGN_DRY_RUN=1`, `NUGGET_SIGN_LOG`. Other services (DigiCert KeyLocker, SSL.com, USB
+tokens) need a new mode. EV certificates no longer skip SmartScreen reputation.
 
 ### Public keys
 
@@ -483,61 +439,45 @@ reputation.
 
 ## 5. Signed update feed and updater behaviour
 
-Settings live in `settings.json` in the app config dir (e.g. `~/.config/dev.nugget.desktop/`). UI:
-the *Updates* card on the Status page; the tray has *Updates…* (*Update available: vX…*).
+User-facing settings (channel not chosen by default; auto-install off, i.e. notify only) are in
+the [install guide](book/src/guide/install.md#updates). They live in `settings.json` in the app
+config dir (e.g. `~/.config/dev.nugget.desktop/`); while `channel_chosen` is false nothing is
+checked, and builds without an updater key never ask.
 
-| Setting | Default | Effect |
-|---|---|---|
-| Channel | **not chosen** | Nothing contacts the server until the user picks. **Stable** follows `stable.json`, **Beta** `beta.json` (prereleases too), **Off** never checks. |
-| Auto-install | **off** | Off: notify only; nothing downloads until *Install vX and restart*. On: download and verify in the background, install when the user quits. |
+- **Feed verification.** The app fetches `<channel>.json` and `.sig` from `updater-feed` and checks
+  the minisign signature over the exact bytes against the built-in key (`src/updater/feed.rs`)
+  before parsing anything. It accepts `tauri-plugin-updater`'s result only if the plugin saw the
+  same feed ("the update feed changed while it was being checked" otherwise).
+- Payloads are verified against the built-in key; *Install* uses the version whose notes were
+  shown; only newer versions are offered. Windows installs run in passive mode.
+- Every request is recorded via `egress.record` (`update_check`, one row per host;
+  `update_download`); rows queue while the daemon is down and are lost if still queued at quit.
+- The webview has no `updater:` permission: only `updates_status`, `updates_set_settings`,
+  `updates_check`, `updates_install`, `login_set`.
 
-- **Opt-in.** While `channel_chosen` is false no check runs. Setup's last step and the *Updates*
-  card ask once (Stable recommended / Beta / Off). Builds without an updater key never ask. Old
-  settings files count as chosen only for Beta or Off.
-- Checks run right after choosing, 60 s after launch, every 24 h, and on *Check now*. They fetch
-  only static files, with nothing identifying beyond any HTTPS request.
-- **Egress ledger.** Every request is recorded via `egress.record` (`update_check` for feed, `.sig`
-  and the plugin's fetch, one row per host; `update_download` for packages). Rows queue while the
-  daemon is down; rows still queued at quit are lost.
-- **Feed verification.** The app fetches `<channel>.json` and `.sig` and checks the minisign
-  signature over the exact bytes against the built-in key (`src/updater/feed.rs`) before parsing
-  anything. It then accepts `tauri-plugin-updater`'s result only if the plugin saw the same feed
-  ("the update feed changed while it was being checked" otherwise).
-- Every payload is verified against the built-in key. *Install* uses the exact version whose
-  notes were shown. Only newer versions are offered; beta → stable keeps the beta build until a
-  newer stable exists.
-- The webview has no `updater:` permission; everything goes through `updates_status`,
-  `updates_set_settings`, `updates_check`, `updates_install`, `login_set`.
-- Windows installs run in passive mode; NSIS hooks stop `nuggetd.exe` and restart the login task.
-
-**How feeds move.** Nothing reaches users before *Publish* (drafts don't trigger `channels`).
-`channels` runs `updater_manifest.py promote latest.json current.json`, which moves a feed only
-to a **strictly newer** SemVer (or an empty feed), logging `keeping <current>: <new> is not newer`
-otherwise; then `updater_manifest.py channel latest.json <ch>` writes `<ch>.json` + `.sig`
-(refusing without a signature), uploaded together. The first run creates `updater-feed`. A
-release without `latest.json` or its `.sig` leaves feeds unchanged. A check landing between the
-two uploads fails and succeeds next time.
+**How feeds move.** Drafts never trigger `channels`. It runs
+`updater_manifest.py promote latest.json current.json`, which moves a feed only to a **strictly
+newer** SemVer (else logs `keeping <current>: <new> is not newer`), then
+`updater_manifest.py channel latest.json <ch>` writes `<ch>.json` + `.sig` (refusing without a
+signature), uploaded together. A check between the two uploads fails and succeeds next time.
 
 ## 6. Start at login (daemon service)
 
-`nuggetd install-service` / `uninstall-service` registers a per-user launchd agent,
-`systemd --user` unit or Task Scheduler task "Nugget Daemon". Installers don't do it; the app
-asks once on the Status page, and refuses where the daemon path is temporary (AppImage, macOS DMG
-or App Translocation). Windows hooks stop the daemon before replacing files, restart the task
-after install and remove it on uninstall (not during updates). On Linux the running daemon keeps
-its old binary until `systemctl --user restart nuggetd` or the next login.
+`nuggetd install-service` registers a per-user service ([install guide](book/src/guide/install.md#start-at-login)).
+No installer does it (deb/rpm scripts run as root; NSIS would repeat it silently on every update);
+the app asks once, and refuses inside an AppImage or a macOS DMG/App Translocation. Windows hooks
+(`installer-hooks.nsh`) stop the daemon before replacing files, restart the task after install,
+and remove it on uninstall (`$UpdateMode` skips that for updates). On Linux a running daemon
+keeps its old binary until `systemctl --user restart nuggetd` or the next login.
 
 ## 7. Reproducibility
 
-Pinned: `Cargo.lock` (`--locked`), toolchain from `rust-toolchain.toml` (`stable`; use the `rustc -V`
-in the build log; MSRV 1.88), `apps/desktop/pnpm-lock.yaml` (`--frozen-lockfile`), pnpm from
-`packageManager`, Node 22, Tauri 2.11 crates, `tauri-plugin-updater =2.12.0`, CLI
-`@tauri-apps/cli ~2.11.5`, `Microsoft.ArtifactSigning.Client` 1.0.146, actions by SHA, runner labels
-above. Release builds apply `packaging/scripts/repro-env.sh` (`SOURCE_DATE_EPOCH`, path remapping),
-use no build cache, and write the macOS tarball with fixed owner ids.
-
-Only `nuggetd` on x86_64 Linux is verified reproducible (`reproducible.yml`); installers are not.
-Details, commands and gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
+Pinned: `Cargo.lock` (`--locked`), `rust-toolchain.toml` (`stable`; use the build log's `rustc -V`;
+MSRV 1.88), `pnpm-lock.yaml` (`--frozen-lockfile`), Node 22, Tauri 2.11 crates,
+`tauri-plugin-updater =2.12.0`, `@tauri-apps/cli ~2.11.5`, the signtool plugin, actions by SHA,
+the runner labels in §1. Release builds apply `packaging/scripts/repro-env.sh`, use no build cache
+and write the macOS tarball with fixed owner ids. Only `nuggetd` on x86_64 Linux is verified
+reproducible: [security/reproducible-builds.md](security/reproducible-builds.md).
 
 ## 8. Known gaps
 

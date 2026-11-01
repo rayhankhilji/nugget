@@ -1,7 +1,8 @@
 # Connector settings
 
 The `settings` object of each source kind (`sources.add`, `sources.update`, `SourceInfo`). Unknown
-keys are rejected. Secrets never go in settings: use `sources.secret.set` (OS keychain, service
+keys are rejected. Gmail and Outlook poll every 60 s, most other cloud kinds every 5–10 minutes;
+folders and chat exports are watched. Secrets never go in settings: use `sources.secret.set` (OS keychain, service
 `dev.nugget.Nugget`; deleted with the source).
 
 <!-- check-refs: connector.kinds -->
@@ -14,9 +15,21 @@ keys are rejected. Secrets never go in settings: use `sources.secret.set` (OS ke
 | `gdrive` | Google Drive | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
 | `imap` | IMAP mail | password | `password:<source id>` |
 | `caldav` | CalDAV calendar | password | `password:<source id>` |
+| `outlook` | Outlook mail | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` (optional) |
+| `outlook-calendar` | Outlook calendar | OAuth | as for `outlook` |
+| `onedrive` | OneDrive | OAuth | as for `outlook` |
+| `slack` | Slack | password (pasted token) | `password:<source id>` |
+| `notion` | Notion | password (pasted token) | `password:<source id>` |
+| `github` | GitHub | password (pasted token), or the device flow with `client_id` | `password:<source id>`, `oauth:<source id>` (device-flow tokens) |
+| `linear` | Linear | password (pasted API key), or OAuth with `client_id` | `password:<source id>`, `oauth:<source id>`, `oauth_client_secret:<source id>` (optional) |
+| `imessage` | iMessage | none | none |
+| `whatsapp` | WhatsApp exports | none | none |
+| `telegram` | Telegram export | none | none |
+
+Plugin connectors register as `plugin:<plugin id>` ([below](#pluginplugin-id)). SaaS tokens are looked
+up in `token_env`, then `oauth:<source id>`, then `password:<source id>`; none is `needs_auth`.
 
 ## `files`
-
 <!-- check-refs: connector.files -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -33,7 +46,6 @@ Item keys are `<root index>:<relative path>` (e.g. `0:Projects/plan.md`); `.giti
 `.nuggetignore` are honoured.
 
 ## `obsidian`
-
 <!-- check-refs: connector.obsidian -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -62,8 +74,6 @@ Scope `gmail.readonly`. OAuth client setup: [Google sources](../guide/sources-go
 | `include_spam_trash` | bool | `false` | Also index Spam and Trash |
 | `allow_modify` | bool | `false` | Let approved proactive actions archive threads (remove the `INBOX` label). Asks for the `gmail.modify` scope, so reconnect the account after turning it on |
 
-Sync: newest-first backfill, then `history.list` deltas every 60 s.
-
 ## `gcal`
 
 Scope `calendar.readonly`.
@@ -77,8 +87,6 @@ Scope `calendar.readonly`.
 | `calendars` | array of calendar ids | every calendar selected in Google Calendar | Calendar ids to sync, for example `["primary"]` |
 | `past_days` | integer, 0 to 3650 | `365` | Days of past events |
 | `future_days` | integer, 0 to 3650 | `365` | Days of future events |
-
-Sync: `events.list` (recurrences expanded), then `syncToken` deltas every 5 minutes.
 
 ## `gdrive`
 
@@ -94,12 +102,7 @@ Scope `drive.readonly`. See [Google Drive](../guide/sources-google.md#google-dri
 | `include_shared_drives` | bool | `false` | Also index files in shared drives you are a member of |
 | `max_file_mb` | integer, 1 to 200 | `25` | Largest file downloaded or exported. Bigger files are indexed as a stub with their name and a "Not indexed" reason |
 
-Sync: a checkpointed `files.list`, then `changes.list` deltas every 5 minutes. Docs export as
-Markdown, Sheets as CSV, Slides as text with notes; other unsupported files become stubs with
-`metadata.skipped`.
-
 ## `imap`
-
 <!-- check-refs: connector.imap -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -111,35 +114,13 @@ Markdown, Sheets as CSV, Slides as text with notes; other unsupported files beco
 | `window_days` | integer, 0 to 36500 | `365` | Index mail from the last N days; `0` for all |
 | `max_message_mb` | integer, 1 to 512 | `25` | Larger messages are indexed by their headers only |
 
-Sync: UIDs per mailbox with CONDSTORE/QRESYNC when available; mailboxes are opened read-only. Item
-keys are `<mailbox>/<uidvalidity>/<uid>`.
-
 ## `caldav`
-
 <!-- check-refs: connector.caldav -->
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `url` | URL | required | Server root, principal, calendar home or one calendar collection. `https://` only; `http://` is accepted for loopback hosts. Credentials in the URL are refused |
 | `username` | string | required | Login name |
 | `calendars` | array of strings | every calendar holding events or tasks | Calendars to sync, by display name, href, or the last path segment |
-
-Sync: discovery, then RFC 6578 `sync-collection` (or ctag/ETag listing), every 5 minutes.
-
-## Microsoft 365, SaaS and plugin kinds
-
-<!-- check-refs: connector.kinds -->
-| Kind | Display name | Sign-in | Keychain accounts |
-|---|---|---|---|
-| `outlook` | Outlook mail | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` (optional) |
-| `outlook-calendar` | Outlook calendar | OAuth | as for `outlook` |
-| `onedrive` | OneDrive | OAuth | as for `outlook` |
-| `slack` | Slack | password (pasted token) | `password:<source id>` |
-| `notion` | Notion | password (pasted token) | `password:<source id>` |
-| `github` | GitHub | password (pasted token), or the device flow with `client_id` | `password:<source id>`, `oauth:<source id>` (device-flow tokens) |
-| `linear` | Linear | password (pasted API key), or OAuth with `client_id` | `password:<source id>`, `oauth:<source id>`, `oauth_client_secret:<source id>` (optional) |
-
-Plugin connectors register as `plugin:<plugin id>` ([below](#pluginplugin-id)). SaaS tokens are looked
-up in `token_env`, then `oauth:<source id>`, then `password:<source id>`; none is `needs_auth`.
 
 ## `outlook`
 
@@ -156,9 +137,6 @@ Scopes `offline_access`, `User.Read`, `Mail.Read`. App registration:
 | `folders` | array of strings, at most 100 | `["inbox", "sentitems"]` | Well-known folder names (`inbox`, `sentitems`, `archive`, ...) or folder ids |
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index mail on first sync (and on a resync) |
 
-Sync: per-folder `messages/delta`, then delta links every 60 s; drafts and messages over 35 MiB are
-skipped.
-
 ## `outlook-calendar`
 
 Scopes `offline_access`, `User.Read`, `Calendars.Read`.
@@ -172,8 +150,6 @@ Scopes `offline_access`, `User.Read`, `Calendars.Read`.
 | `account_hint` | string | none | As for `outlook` |
 | `past_days` | integer, 0 to 3650 | `365` | Days of past events |
 | `future_days` | integer, 0 to 3650 | `365` | Days of future events. `past_days` and `future_days` cannot both be `0` |
-
-Sync: `calendarView/delta`, then delta links every 5 minutes.
 
 ## `onedrive`
 
@@ -190,11 +166,7 @@ Scopes `offline_access`, `User.Read`, `Files.Read`.
 | `exclude_folders` | array of paths, at most 200 | `[]` | Folder paths never indexed; wins over `include_folders` |
 | `max_file_mb` | integer, 1 to 500 | `25` | Larger files are skipped |
 
-Sync: `drive/root/delta` every 5 minutes; text, Markdown, HTML, CSV, JSON, mail, iCalendar, PDF and
-Office files.
-
 ## `slack`
-
 <!-- check-refs: connector.slack -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -207,10 +179,9 @@ Office files.
 | `recheck_days` | integer, 0 to 30 | `3` | Days re-read every 6 hours to pick up edits, deletions and thread replies |
 
 Token: a user token (`xoxp-…`) with the `*:history` and `*:read` scopes for channels, groups, IMs
-and MPIMs, plus `users:read`. Polled every 5 minutes; one item per channel-day and per thread.
+and MPIMs, plus `users:read`.
 
 ## `notion`
-
 <!-- check-refs: connector.notion -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -219,11 +190,9 @@ and MPIMs, plus `users:read`. Polled every 5 minutes; one item per channel-day a
 | `max_pages` | integer, 1 to 100000 | `5000` | The most recently edited pages kept in the index |
 | `max_depth` | integer, 1 to 12 | `6` | How deeply nested blocks are rendered |
 
-Token: an internal integration secret with **Read content**. Polled every 5 minutes, full listing
-every 6 hours.
+Token: an internal integration secret with **Read content**.
 
 ## `github`
-
 <!-- check-refs: connector.github -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -236,10 +205,9 @@ every 6 hours.
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index on first sync |
 
 Token: fine-grained, read-only Issues, Pull requests, Discussions and Metadata (device flow: `repo`,
-`read:discussion`). Polled every 10 minutes.
+`read:discussion`).
 
 ## `linear`
-
 <!-- check-refs: connector.linear -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -250,67 +218,40 @@ Token: fine-grained, read-only Issues, Pull requests, Discussions and Metadata (
 | `teams` | array of team keys, at most 200 | every team | For example `["ENG"]` |
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index on first sync |
 
-Polled every 5 minutes, ids-only listing every 6 hours.
-
-## Messaging kinds
-
-Local chat history, no network. See [Messaging sources](../guide/sources-messaging.md).
-
-<!-- check-refs: connector.kinds -->
-| Kind | Display name | Sign-in | Keychain accounts |
-|---|---|---|---|
-| `imessage` | iMessage | none | none |
-| `whatsapp` | WhatsApp exports | none | none |
-| `telegram` | Telegram export | none | none |
-
-Every messaging kind also takes these settings:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `private` | bool | `true` | Mark every conversation sensitive (kept from cloud models and cloud embeddings) |
-| `since_days` | integer, at least 1 | none (everything) | Only messages newer than this many days |
-| `include_groups` | bool | `true` | Also index group chats |
-
-Each conversation becomes one item per month, keyed `<conversation id>/<YYYY-MM>`.
-
 ## `imessage`
 
+Messaging kinds read local chat history, no network; one item per conversation per month. See
+[Messaging sources](../guide/sources-messaging.md).
 <!-- check-refs: connector.imessage -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `private` | bool | `true` | As above |
-| `since_days` | integer, at least 1 | none | As above |
-| `include_groups` | bool | `true` | As above |
+| `private` | bool | `true` | Mark every conversation sensitive (kept from cloud models) |
+| `since_days` | integer, at least 1 | none (everything) | Only messages newer than this |
+| `include_groups` | bool | `true` | Also index group chats |
 | `db_path` | path | `~/Library/Messages/chat.db` | The Messages database. Required off macOS, where there is no default |
 | `contacts` | bool | `true` | Show names from the macOS address book instead of phone numbers and addresses |
 | `contacts_dir` | path | `~/Library/Application Support/AddressBook` | Advanced: folder searched for `AddressBook-v22.abcddb` files (also in its `Sources/*/`). Setting it enables contacts off macOS too |
 
-Needs Full Disk Access on macOS. A private copy of the database is read each pass (every 2 minutes).
+Needs Full Disk Access on macOS; a private copy of the database is read each pass.
 
 ## `whatsapp`
-
 <!-- check-refs: connector.whatsapp -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `private` | bool | `true` | As above |
-| `since_days` | integer, at least 1 | none | As above |
-| `include_groups` | bool | `true` | As above |
+| `private` | bool | `true` | As for `imessage` |
+| `since_days` | integer, at least 1 | none | As for `imessage` |
+| `include_groups` | bool | `true` | As for `imessage` |
 | `folder` | path | required | Folder of "Export chat" files (`.zip` or `.txt`, also one subfolder level deep). Symlinks leading out of it are skipped |
 | `me` | string | none | Your WhatsApp profile name as it appears in the exports, so your messages are shown as "Me" |
 
-Watched, plus a check every 5 minutes.
-
 ## `telegram`
-
 <!-- check-refs: connector.telegram -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `private` | bool | `true` | As above |
-| `since_days` | integer, at least 1 | none | As above |
-| `include_groups` | bool | `true` | As above |
+| `private` | bool | `true` | As for `imessage` |
+| `since_days` | integer, at least 1 | none | As for `imessage` |
+| `include_groups` | bool | `true` | As for `imessage` |
 | `path` | path | required | A Telegram Desktop JSON export: its `result.json`, its folder, or a parent folder holding `ChatExport_*` / `DataExport_*` folders. Inside a folder, symlinks leading out of it are skipped |
-
-Watched, plus a check every 5 minutes; duplicates across exports are imported once.
 
 ## `plugin:<plugin id>`
 

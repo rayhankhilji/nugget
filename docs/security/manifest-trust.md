@@ -14,10 +14,9 @@ signature (`manifests/default.json.sig`) and used only after `nugget-models` ver
 
 - Both are read at **build** time; nothing set at runtime adds a key. `build.rs` fails on a
   malformed release key or an opt-in value other than `1`/`true`/`yes`/`0`/`false`/`no`/empty.
-- A release build trusting the dev key logs `this release build trusts the DEVELOPMENT manifest key`.
+- A release build trusting the dev key logs a warning.
 - **A release build with neither slot trusts no key** (fail closed): the daemon logs "bundled
   model manifest failed verification" and offers no model or runtime downloads; everything else works.
-- `select_trusted_keys(release, allow_dev)` makes the choice; tested in `tests/trust.rs`.
 - CI: `release.yml` passes the repository variable to the sidecar build and sets the dev opt-in
   only for dry runs ([release.md §4](../release.md#manifest-release-key)).
 
@@ -54,9 +53,8 @@ the daemon to withdrawn files.
 | Lower version | Refused: `... manifest version 3 is older than version 5 already accepted from key ab12...; refusing a rollback` |
 | Unreadable, invalid JSON, unknown format or fields, malformed key | Refused (fail closed): "manifest trust state ... is corrupt ..." |
 
-- Per key, because release and dev keys sign independent series.
-- Written atomically (temp file, `fsync`, rename); a refused manifest never changes it. Every key
-  with a valid signature must allow the version, and all advance together.
+- Per key (release and dev keys sign independent series). Written atomically; a refused manifest
+  never changes it. Every key with a valid signature must allow the version; all advance together.
 - API: `verify_manifest_checked(bytes, sig, keys, &trust)` and `default_manifest_checked(&paths)`
   (used at daemon start). `verify_manifest` / `default_manifest` skip the rollback check; use them
   only without installation state (tools, tests).

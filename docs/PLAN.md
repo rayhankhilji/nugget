@@ -86,56 +86,15 @@ Bench numbers: [bench/README.md](../bench/README.md). QA findings above override
 
 ## Decisions
 
-| Decision | Choice |
-|---|---|
-| Licence | Apache-2.0, DCO sign-off, no CLA |
-| Scope | v1 = everything: memory, Double Tap, proactive cards, computer use, MCP; beat Sentient on every axis |
-| Clean room | No AGPL code, prompts or distinctive expression. `docs/research/` is the only bridge |
-| Stack | Rust core plus Tauri 2 shell; macOS, Windows and Linux ship together |
-| Default AI | Asked during onboarding, local recommended; small local models always do triage and embeddings |
-| Hosted services | None at v1; a self-hostable E2E relay later |
-| Team | One or two humans directing Claude agents |
+- **Licence:** Apache-2.0, DCO sign-off, no CLA. **Clean room:** no AGPL code, prompts or distinctive expression; `docs/research/` is the only bridge.
+- **Scope:** v1 = everything (memory, Double Tap, proactive cards, computer use, MCP), beating Sentient OS on every axis in [compare/sentient-os.md](compare/sentient-os.md). If we can't measure it, we don't claim it.
+- **Stack:** Rust core plus Tauri 2 shell; macOS, Windows and Linux ship together.
+- **Default AI:** asked during onboarding, local recommended; small local models always do triage and embeddings.
+- **Hosted services:** none at v1; a self-hostable E2E relay later.
+- **Team:** one or two humans directing Claude agents.
+- **Not built, planned:** local-app connectors (Apple Notes, Apple Mail, macOS Calendar and Contacts, Signal, Thunderbird), Logseq, Maildir, CardDAV, MCP servers as sources, a community plugin registry, an OSWorld-style `cua` subset.
 
-## Targets ("if we can't measure it, we don't claim it")
+## Risks and open questions
 
-| Axis | Sentient (observed) | Nugget v1 target |
-|---|---|---|
-| Platforms | macOS 15.4+, Apple Silicon | macOS (Apple Silicon, Intel), Windows 10/11, Linux (X11, Wayland) |
-| Freshness | Nightly batch; edits never re-read | About 60 s; edits and deletions propagate |
-| Time to first value | ~15 min, hours for the full run | Useful search and drafts in under 2 min |
-| Retrieval | Whole vault (600 KB cap, silent truncation) | Hybrid search with reranking; cited context ≤ 8k tokens |
-| Knowledge | Free-text LLM Markdown, no provenance | Typed graph, rendered Markdown, every fact cited |
-| Double Tap p50 | ~2 s claimed (cloud) | < 1.2 s cloud, < 3 s local (4B, 16 GB) |
-| Computer use | Closed helper, no caps, confirmations or kill switch | Own driver, policy engine, verified outcomes, published success rate |
-| Connectors | Vendor-hosted MCP; private SQLite | Direct APIs with your own OAuth, WASM plugins, MCP in and out |
-| Privacy | Telemetry on, closed relay, no encryption at rest | Telemetry off, no first-party cloud, SQLCipher, egress ledger |
-| Updates | Forced, silent, one signing key | User-chosen channel, opt-in, signed in CI |
-
-## Milestones
-
-| Milestone | Exit criteria |
-|---|---|
-| M0 Foundations | `nuggetd` on 3 OSes; local and remote chat; CI green |
-| M1 Memory | Freshness ≤ 60 s; retrieval eval ≥ baseline |
-| M2 Knowledge graph | Every vault fact cited; Claude Desktop and Cursor query over MCP |
-| M3 Double Tap | p50 < 1.2 s cloud, < 3 s local; beats screenshot-only baseline |
-| M4 Agent and computer use | Published `bench/cua` success rate; 0 unconfirmed risky actions |
-| M5 Proactive | Accepted-card precision tracked; dry-run diff on every action |
-| M6 Hardening and v1.0 | Security review; installers for 3 OSes; reproducible README benchmarks |
-
-Planned but not built: local-app connectors (Apple Notes, Apple Mail, macOS Calendar and Contacts, Signal, Thunderbird), Logseq, Maildir, CardDAV, MCP servers as sources, a community plugin registry, an OSWorld-style `cua` subset.
-
-## Risks
-
-| Risk | Mitigation |
-|---|---|
-| "Everything in v1" is very large | v1.0 gates on benchmarks, not dates; cut connectors before quality |
-| Accessibility APIs differ, especially on Wayland | One trait with per-OS capability flags; screenshot fallback |
-| Private Apple formats change | Schema-backed parsers, fuzzing, fixtures per OS version |
-| Local models too weak for agentic work | Tier routing; bring-your-own frontier key; publish per-tier numbers |
-| Google restricted-scope verification | Users bring their own OAuth client meanwhile |
-
-## Open questions
-
-1. Keep the name "Nugget"?
-2. Business model: Apache core plus a paid hosted team tier later?
+- Risks: the v1 scope is very large (gate on benchmarks, not dates; cut connectors before quality); accessibility APIs differ, especially on Wayland (one trait, per-OS flags, screenshot fallback); private Apple formats change (schema-backed parsers, fuzzing); local models are weak for agentic work (tier routing, bring-your-own key, per-tier numbers); Google restricted-scope verification (users bring their own OAuth client).
+- Open questions: keep the name "Nugget"? Business model: Apache core plus a paid hosted team tier later?

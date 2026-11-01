@@ -30,10 +30,9 @@ open issue. Numbers come from [`bench/README.md`](https://github.com/rayhankhilj
   down (mitigated, not fixed); the stdio bridge avoids it.
 - **Knowledge:** vault edits can be overwritten by re-extraction; the vault and graph ignore
   sensitivity.
-- **Wayland:** the Double Tap shortcut works through the portal on KDE Plasma 6 and GNOME 50; elsewhere
-  use the tray or a compositor binding.
-- **Not measured:** battery cost in joules.
-- Google Drive, Microsoft 365, Slack, Notion, GitHub and Linear are tested against mock servers only.
+- **Wayland:** the Double Tap shortcut works via the portal on KDE Plasma 6 and GNOME 50 only.
+- **Not measured:** battery cost in joules. Drive, Microsoft 365, Slack, Notion, GitHub and Linear
+  are tested against mock servers only.
 
 ## Not built yet
 

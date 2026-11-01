@@ -42,11 +42,4 @@ or the desktop app. See the [overview](overview.md) for how they fit together.
 | `nugget-desktop` | M0 | The Tauri shell (`apps/desktop`): typed commands proxying IPC, the React pages, the in-app updater |
 | `nugget-bench` | M0 | The benchmark harness, suites and report schema (`bench/`); see [Benchmarks](benchmarks.md) |
 
-## Rules that hold across crates
-
-- Changes to `nugget-core` need agreement from every crate owner.
-- No hard-coded model ids in logic: route by tier.
-- No `unsafe`, except scoped, commented FFI.
-- Errors convert to `nugget_core::Error` at crate boundaries; library code does not panic on bad input.
-- Every network request goes through a metered client that records egress and never follows
-  cross-host redirects.
+Rules that hold across crates are in [Rules](../contributing/rules.md#tests-and-code).

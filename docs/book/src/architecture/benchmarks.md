@@ -14,17 +14,9 @@ builds. Methodology, metric definitions and full results (including real-model r
 | `cua` | Computer-use success, steps, time, unconfirmed risky actions, injection compliance |
 | `proactive` | Card precision and recall, distractor false positives, dedup, learning, dry-run coverage |
 
-```sh
-cargo run -p nugget-bench -- --list
-cargo run -p nugget-bench -- all --scale smoke --no-write                 # what CI runs
-cargo run --release -p nugget-bench -- memory --backend real              # the M1 gate
-cargo run -p nugget-bench -- cua --cua-agent reference --cua-env xvfb --strict   # Linux only
-```
-
-Scales are `smoke`, `quick`, `standard` (default) and `full`; quote numbers only from `standard` or
-`full`. `--strict` fails when a metric misses its target. Reports validate against
-`bench/schema/report.schema.json`. Fake-index and scripted-model numbers validate the harness and are
-not product numbers.
+Run `cargo run --release -p nugget-bench -- <suite>` (`--list` lists suites; CI runs
+`all --scale smoke --no-write`). Quote numbers only from `standard` or `full` scale; `--strict` fails
+on a missed target. Fake-index and scripted-model numbers validate the harness, not the product.
 
 ## Headline results
 

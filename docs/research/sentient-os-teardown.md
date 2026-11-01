@@ -4,10 +4,8 @@ What was observed in [Sentient-OS-Labs/sentient-os](https://github.com/Sentient-
 (AGPL-3.0, v2.7 source, v2.7.1 release). The shipped DMG is covered in
 [shipped-artifact-findings.md](shipped-artifact-findings.md).
 
-> **Clean room.** Behaviour and architecture in our own words; no AGPL code or prompt text. Implementers
-> may read this document but must not copy code, prompts or distinctive expression from upstream.
-
-Labels: **O** observed in code, docs or artifact; **I** inferred; **U** unknown.
+> **Clean room.** Our own words; no AGPL code, prompts or distinctive expression. Labels: **O**
+> observed, **I** inferred, **U** unknown.
 
 ## 1. Summary
 
@@ -59,13 +57,5 @@ the clipboard. Developed privately and mirrored to GitHub in bulk per release.
 
 ## 3. Structural weaknesses
 
-1. Core capabilities belong to others (OpenAI's helper, Codex, vendor MCP servers).
-2. Undocumented ground: private formats, undocumented CLI keys, impersonated OAuth client.
-3. Shallow memory: no provenance, search, entities, validation or incremental updates.
-4. Nightly batch: edits and deletes missed; needs a root daemon and closed-lid wake.
-5. Trust: telemetry and closed relay on by default, secret in a URL, forced updates, no encryption at
-   rest, no action log.
-6. macOS on Apple Silicon only, English only.
-7. Unmeasured quality: no benchmarks, evals or CI.
-
-See [../PLAN.md](../PLAN.md) for how Nugget answers these.
+Borrowed core capabilities, undocumented foundations, shallow batch memory, weak defaults on trust,
+one platform, and unmeasured quality. [../PLAN.md](../PLAN.md) sets Nugget's targets against these.

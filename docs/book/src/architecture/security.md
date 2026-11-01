@@ -6,16 +6,11 @@ vulnerability, follow [`SECURITY.md`](https://github.com/rayhankhilji/nugget/blo
 
 ## Threat model
 
-**Assets:** your content; secrets (provider keys, connector tokens, the store key, MCP tokens); the
-authority to send, change or delete on your behalf; the integrity of the audit log, egress ledger,
-model files and the app.
-
-**Adversaries:** whoever controls content Nugget ingests (including **prompt injection**); a malicious
-model provider, MCP client, browser peer or plugin; other local users; a network attacker; someone
-with the disk at rest; a compromised dependency or release pipeline.
-
-**Out of scope:** malware running as your user, root or administrator attackers, and content you
-deliberately send to a cloud provider you configured (it is recorded, not prevented).
+Nugget protects your content, secrets, its authority to act for you, and the integrity of its logs,
+models and app against: ingested content (including **prompt injection**); a malicious provider, MCP
+client, browser peer or plugin; other local users; network attackers; disk theft; and a compromised
+dependency or release pipeline. **Out of scope:** malware running as you, root attackers, and content
+you deliberately send to a cloud provider you configured (recorded, not prevented).
 
 ## Controls
 
@@ -35,14 +30,9 @@ deliberately send to a cloud provider you configured (it is recorded, not preven
 Every agent, browser and proactive action carries a risk class and passes the policy gate (Allow,
 Confirm or Deny) first.
 
-| Risk class | Covers |
-|---|---|
-| Observe | Reading, navigating, scrolling, focusing |
-| Edit | Typing, selecting, opening a draft: undoable, nothing leaves the device |
-| Send | Email, message, form submit, post |
-| Destroy | Deleting, archiving, overwriting, cancelling a subscription |
-| Spend | Purchases, bookings, payments, signing |
-| Security | Passwords, permissions, installs, system settings |
+Risk classes: **Observe** (read, navigate), **Edit** (undoable, nothing leaves the device), **Send**,
+**Destroy**, **Spend** (purchases, bookings, payments) and **Security** (passwords, permissions,
+installs, settings).
 
 - Classification can only raise risk; deny rules always win; an Allow rule covers Send and above only
   if it names the class; with no rule, Send and above need confirmation.
@@ -56,11 +46,8 @@ Confirm or Deny) first.
 
 ## Prompt injection
 
-Ingested content is data, not instructions: prompts say so, MCP fences source content in
-`<untrusted-content>` blocks, LLM facts need a verbatim quote, and no model output acts without the
-policy gate. These reduce the risk; they do not remove it. **Open Blocker:** Double Tap obeys an
-instruction planted in a vault note.
-
-The audit log (config changes, sign-ins, secret updates by account name, model installs) is
-hash-chained and verified at startup. **Gap:** the hash is unkeyed, so someone with the store key can
-rewrite it.
+Ingested content is treated as data: prompts say so, MCP fences it in `<untrusted-content>` blocks,
+LLM facts need a verbatim quote, and no model output acts without the policy gate. This reduces the
+risk without removing it. **Open Blocker:** Double Tap obeys an instruction planted in a vault note.
+The audit log of config changes, sign-ins and installs is hash-chained but unkeyed, so someone with the
+store key could rewrite it.

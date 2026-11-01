@@ -34,12 +34,7 @@ All tools are read-only and idempotent.
 `kind` is one of `person`, `organization`, `project`, `commitment`, `preference`, `event`, `place`,
 `topic`.
 
-## Resources
-
-| URI | Content |
-|---|---|
-| `nugget://entity/<id>` | The entity's page, as Markdown |
-| `nugget://item/<source>/<key>` | One item |
+Resources: `nugget://entity/<id>` (the entity's page, Markdown) and `nugget://item/<source>/<key>`.
 
 ## Scopes
 

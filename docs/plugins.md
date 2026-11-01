@@ -43,19 +43,8 @@ The host refuses to call an export the manifest does not list.
 
 ## Imports
 
-```wit
-world plugin {
-    import http;     // send(request) -> response; declared hosts only
-    import kv;       // get / set / delete / keys; scoped to the plugin
-    import secrets;  // get / set; declared names only, stored in the OS keychain
-    import log;      // into Nugget's log, tagged with the plugin id
-    import clock;    // now() -> ms since the Unix epoch; the only clock
-    import fs;       // read-dir / read-file / stat below user-chosen paths; connectors only
-    import sink;     // upsert / delete / checkpoint / known-items / cancelled; during sync only
-    export connector;
-    export tools;
-}
-```
+World `plugin` imports `http`, `kv`, `secrets`, `log`, `clock` (`now()`, ms since the epoch; the
+only clock), `fs` and `sink`, and exports `connector` and `tools`.
 
 Every call is checked against approved capabilities, else `plugin-error::denied`. Errors:
 `invalid`, `unauthorized`, `network`, `rate-limited(ms)`, `not-found`, `denied`, `cancelled`,
@@ -133,15 +122,8 @@ Running out traps the instance and the call fails; an SDK panic is logged as an 
 
 ## Writing one in Rust
 
-```toml
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-nugget-plugin-sdk = { path = ".../crates/nugget-plugin/sdk" }
-```
-
-Implement `Tools { fn tools() -> Vec<Tool>; fn call(&str, Value) -> Result<Value> }` and/or
+Use `crate-type = ["cdylib"]` and depend on `nugget-plugin-sdk` by path
+(`crates/nugget-plugin/sdk`). Implement `Tools { fn tools() -> Vec<Tool>; fn call(&str, Value) -> Result<Value> }` and/or
 `Connector { fn validate(&Value) -> Result<()>; fn sync(&Value, Option<Value>) -> Result<Value> }`,
 then `export_plugin!(tools: T)`, `(connector: C)` or `(connector: C, tools: T)`. `plugins/template`
 and `sdk/examples/text-tools` are complete examples.
@@ -152,19 +134,10 @@ output must be a component, core modules are refused.
 
 ## Files the user chose (`fs`)
 
-`capabilities.file_roots` names **settings fields** that hold a path (folder or file); each must be
-a settings property. The plugin reads only below those paths:
-
-```toml
-[capabilities]
-file_roots = ["vault"]
-
-[connector.settings_schema.properties.vault]
-type = "string"
-title = "Vault folder"
-```
-
-From Rust: `fs::read_dir("vault", "Daily")`, `fs::read_to_string(root, path)`, `fs::stat(root, "")` (`""` is the root).
+`capabilities.file_roots` names **settings fields** that hold a path (folder or file), e.g.
+`file_roots = ["vault"]` plus a string property `vault` in `[connector.settings_schema.properties]`.
+The plugin reads only below those paths. From Rust: `fs::read_dir("vault", "Daily")`,
+`fs::read_to_string(root, path)`, `fs::stat(root, "")` (`""` is the root).
 
 - Read-only (`read-dir` sorted, hidden entries included; `read-file`; `stat`), connectors only.
 - Paths are relative and `/`-separated: no leading `/`, empty, `.`, `..`, `\`, `:`, control
@@ -180,35 +153,22 @@ If a listing fails part-way, skip deletes for that pass.
 
 On non-wasm targets the SDK's host calls go to `nugget_plugin_sdk::testing::TestHost`, so
 `cargo test-native` (`cargo test --target host-tuple`, defined in the SDK, `plugins/` and the
-template) tests plugin logic on Linux, macOS or Windows with no runtime or network.
+template) tests plugin logic on Linux, macOS or Windows with no runtime or network. See
+`plugins/template` for a complete test.
 
-See `plugins/template` for a complete test.
-
-
-| `TestHost` | What it does |
-|---|---|
-| `new()`, `from_manifest(toml)` | Empty host, or one with the manifest's capabilities |
-| `allow_host`, `allow_secret`, `set_kv_max_bytes`, `allow_file_root`, `set_limits` | Adjust capabilities and limits |
-| `respond`, `respond_with`, `requests()` | Canned HTTP by method and exact URL (unmatched → `network`; private IPs denied unless `allow_private_network(true)`); every request sent |
-| `kv_get`, `kv_json`, `kv_set`, `kv_keys`, `tools_kv_set`, `set_secret`, `secret` | Seed or inspect kv and secrets, with the host's namespaces |
-| `set_now`, `advance` | Fake clock (default 1 700 000 000 000) |
-| `mount`, `mount_path`, `edit_mount` | File roots in memory (`MemFs`) or on disk |
-| `seed_item`, `known_items`, `documents`, `document`, `sink_events` | The store behind the sink |
-| `set_cancelled`, `cancel_after_upserts(n)` | Drive `sink::cancelled()` |
-| `validate`, `sync -> SyncPass`, `tools`, `call` | Run the plugin with the host's mode restrictions and checks |
-| `logs()`, `logged(level, text)` | Captured log lines |
-
+`TestHost` can be built `from_manifest(toml)`; adjust capabilities (`allow_host`, `allow_secret`,
+`allow_file_root`, `set_limits`, …); script HTTP (`respond`, `respond_with`; inspect `requests()`);
+seed kv, secrets, the clock (`set_now`, `advance`), file roots (`mount` with `MemFs`, `mount_path`)
+and stored items (`seed_item`); drive cancellation; run `validate`, `sync -> SyncPass`, `tools` and
+`call` under the host's mode restrictions; and read `documents`, `sink_events` and `logs()`.
 It cannot catch WASI traps or fuel, memory and time limits: build the wasm and try it in the app.
 
 ## First-party plugins
 
-- **`plugins/rss`** (connector + tool): a reviewed list of feed hosts (`*.substack.com`,
-  `*.github.io`, `hnrss.org`, …); other feeds fail `denied` (the README explains adding one).
-  Conditional GETs and entry versions in kv, ignoring state from uncommitted passes.
-- **`plugins/obsidian`** (`file_roots = ["vault"]`): versions notes by `<mtime>:<size>`, parses
-  front matter, tags and wikilinks, deletes only after a complete walk.
-- **`plugins/read-later`** (`file_roots = ["export"]`): Pocket HTML/CSV, Instapaper CSV, Netscape
-  bookmarks, keyed by normalised URL.
+`plugins/rss` (connector + tool; a reviewed host list, conditional GETs, state in kv),
+`plugins/obsidian` (`file_roots = ["vault"]`; front matter, tags, wikilinks; deletes only after a
+complete walk) and `plugins/read-later` (Pocket, Instapaper, Netscape bookmarks) are worked
+examples; user-facing details are in the [Plugins guide](book/src/guide/plugins.md#first-party-plugins).
 
 `plugins/build.sh [--out DIR] [--check] [--sign]` builds these and the SDK examples into
 `DIR/<id>/{nugget-plugin.toml,plugin.wasm}` (default `target/plugin-packages`), and with
@@ -240,37 +200,26 @@ NUGGET_PLUGIN_SIGNING_KEY=<64 hex chars> \
 `sign-plugin` validates the manifest, writes `plugin.sig` (and the package with `--out`/`-o`), and
 prints the public key for `trusted_keys`. `NUGGET_PLUGIN_SIGNING_KEY_FILE` works instead.
 
-## Trust model
+## Trust and installing
 
 ```toml
 [plugins]
 enabled = true                         # false: no plugin loads
 trusted_keys = ["<hex ed25519 public key>"]
-dev_mode = false
+dev_mode = false                       # true: accept unsigned packages, signed with a local dev key
 ```
 
-- A plugin loads only if its signer is in `trusted_keys`, or is the local dev key while `dev_mode`
-  is on. Others are listed as `untrusted` with an `error`, not loaded.
-- **Dev mode** accepts unsigned packages and signs them with a local dev key in the keychain; they
-  stop loading when it is off. Point `plugins.install` at your build directory.
-- Installing shows the signer and requested capabilities; nothing installs until approved (per
-  version).
-- **Updates** need the same key and a higher version. An update within the approved capabilities
-  installs silently; one asking for more is approved again. The host enforces the intersection of
-  approved and declared capabilities.
+- A plugin loads only if its signer is in `trusted_keys` (or is the local dev key in `dev_mode`);
+  others are listed as `untrusted`. Dev-mode plugins stop loading when `dev_mode` is off; point
+  `plugins.install` at your build directory to use it.
+- Approval is per version. Updates need the same key and a higher version; one asking for more
+  capabilities is approved again. The host enforces approved ∩ declared capabilities.
 - Packages are stored content-addressed under `<data>/plugins/` and re-verified on load.
-
-## Installing
-
-In the app: **Plugins** → choose a `.nuggetplugin` → review → approve. Over IPC, `plugins.install`
-takes a path the daemon can read, verifies and stages it under a `token` for 10 minutes; if
-`needs_approval` is false it installs at once, otherwise call `plugins.approve`. Method list:
-[IPC reference](book/src/reference/ipc.md). Install, approve, reject, remove, enable and disable
-are audited.
-
-- A connector appears in **Sources** as `plugin:<id>` only **after the daemon restarts**.
-- Tools are available immediately and vanish when the plugin is disabled or removed.
-- Removing a plugin deletes its kv state.
+- `plugins.install` takes a path the daemon can read and stages it under a `token` for 10 minutes;
+  if `needs_approval` is false it installs at once, else call `plugins.approve`
+  ([IPC reference](book/src/reference/ipc.md)). These actions are audited.
+- A connector appears in Sources as `plugin:<id>` only **after the daemon restarts**; tools are
+  available at once. Removing a plugin deletes its kv state.
 
 ## Untrusted content
 

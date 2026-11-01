@@ -20,20 +20,9 @@ native-messaging host `nugget-browser-host`.
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Connectors** turn each source in `sources.toml` into versioned upserts and deletes; they never
-   touch the store.
-2. **Ingest** extracts, scans for PII, triages locally, chunks, embeds and stores, saving the cursor
-   only after the data ([Data flow](data-flow.md)).
-3. **Store**: one SQLCipher database with indexes, egress ledger, audit log and graph.
-4. **Knowledge** extracts cited entities and claims after ingest; the vault re-renders changed pages and
-   merges your edits back.
-5. **Retrieve**: hybrid search, MMR and budgeted packing with `[n]` citations; sensitive items never go
-   to a cloud model.
-6. **Models**: `nugget-infer` routes by tier to local servers, the managed `llama-server`, or cloud
-   providers; every non-local request writes an egress row.
-7. **Features**: subsystems after M2 live in `crates/nuggetd/src/features/`, each owning its IPC
-   methods, tasks, config section and shutdown.
-
-The desktop app depends only on `nugget-core` and `nugget-ipc`: it never opens the store or calls a
-model itself. Connectors depend on `nugget-connector`, never on the store. See the
-[crate map](crates.md).
+Connectors emit versioned changes and never touch the store; ingest stores them in one SQLCipher
+database; knowledge extraction and the vault follow; retrieval packs cited context; `nugget-infer`
+routes every model call by tier and ledgers non-local requests ([Data flow](data-flow.md)). Subsystems
+after M2 are modules in `crates/nuggetd/src/features/`, each owning its IPC methods, tasks, config
+section and shutdown. The desktop app depends only on `nugget-core` and `nugget-ipc`, so it never opens
+the store or calls a model. See the [crate map](crates.md) and [security model](security.md).

@@ -16,26 +16,15 @@ On macOS, data and config share one directory.
 ## Layout
 
 ```text
-<config>/
-  config.toml              daemon configuration (reference/config.md); 0600 on Unix
-  sources.toml             configured sources and their settings (no secrets)
-  probes.json              saved provider capability probes
+<config>/                  config.toml (0600), sources.toml (no secrets), probes.json
 
 <data>/
   nugget.db                the encrypted store (SQLCipher), plus nugget.db-wal and nugget.db-shm
   store.key                only when no OS keychain is usable (0600 on Unix)
-  ipc/
-    nuggetd.sock           the IPC socket (macOS, Linux)
-    nuggetd.lock           held while a daemon runs; one daemon per data directory
-    desktop-owned.json     the daemon the desktop app started (only that one is stopped on quit)
-  logs/
-    nuggetd.<date>.log     daemon log (JSON lines, 14 days kept); also desktop app, llama-server
-                           and launchd logs
-  models/
-    blobs/sha256/<hex>     installed model files, content-addressed
-    staging/               downloads in progress (wiped on hash mismatch)
-    slots.json             active and previous version of each model
-    runtimes/              verified llama-server builds
+  ipc/                     nuggetd.sock, nuggetd.lock (one daemon per data directory),
+                           desktop-owned.json (the daemon the app started and stops on quit)
+  logs/                    daemon (JSON lines, 14 days), desktop, llama-server and launchd logs
+  models/                  content-addressed model files, staging, slots.json, runtimes/
   runtime/                 pid files of running local model servers
   plugins/, plugin-catalog/ installed WebAssembly plugins and the plugin catalog
   vault/                   the vault, only with --home or NUGGET_HOME (see below)

@@ -36,33 +36,20 @@ the data directory, it says so and exits 0.
 | `--version` | none | Print the version |
 | `--help` | every command | Print help |
 
-## `nuggetd status`
-
-Prints version, socket, store counts, the audit chain (`chain verified`, `not checked yet`, or
-`CHAIN VERIFICATION FAILED`: rows were changed or removed) and each provider with its tiers and probed
-capabilities. Exit status is `0` on success and `1` on any error.
+Exit status is `0` on success and `1` on any error. `nuggetd status` also reports the audit chain:
+`CHAIN VERIFICATION FAILED` means audit rows were changed or removed.
 
 ## `nuggetd install-service`
 
-| OS | What is installed | Where |
-|---|---|---|
-| macOS | launchd agent `dev.nugget.nuggetd` | `~/Library/LaunchAgents/dev.nugget.nuggetd.plist` |
-| Linux | `systemd --user` unit `nuggetd.service` | `$XDG_CONFIG_HOME/systemd/user/` (default `~/.config/systemd/user/`) |
-| Windows | Task Scheduler logon task `Nugget Daemon`, least privilege | Task Scheduler root folder |
-
-The service runs the binary you ran it from, with any `--home` or `NUGGET_HOME` baked in. Re-running
-replaces the definition. It refuses to run as root on macOS and Linux.
+Installs a launchd agent `dev.nugget.nuggetd` (`~/Library/LaunchAgents/`) on macOS, a
+`systemd --user` unit `nuggetd.service` on Linux, or a least-privilege Task Scheduler logon task
+`Nugget Daemon` on Windows. It runs the binary you ran it from, with any `--home` or `NUGGET_HOME`
+baked in, and refuses to run as root.
 
 ## `nuggetd mcp`
 
-```text
-nuggetd mcp --client <id>
-nuggetd mcp install --client claude-desktop|claude-code|cursor [--name NAME] [--config PATH] [--yes]
-```
-
-**The stdio bridge** (`nuggetd mcp --client <id>`) is what an AI app launches. It reads the token from
-`NUGGET_MCP_TOKEN`, relays MCP between stdio and the running daemon over the IPC socket (stdout carries
-MCP only; logs go to stderr) and holds no data; the daemon enforces token, scopes, rate limit and audit.
+`nuggetd mcp --client <id>` is the stdio bridge an AI app launches (token in `NUGGET_MCP_TOKEN`; logs
+on stderr); see [MCP transports](mcp.md#transports).
 
 **`nuggetd mcp install`** creates a client in the running daemon (all sources, all read-only tools, no
 sensitive items) and sets the app up:

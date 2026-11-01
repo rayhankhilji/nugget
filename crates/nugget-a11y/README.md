@@ -28,29 +28,24 @@ Calls talk to other processes and are bounded by timeouts: run them in `spawn_bl
 
 ## Behaviour
 
-- **Rich editors.** When focus lands inside a contenteditable, the backend reads the topmost
-  editable ancestor (`tree::editor_root`) as the field; writes still go to the focused element.
-  U+FFFC embedded objects are rebuilt from children (`tree::flatten_text`).
-- **Insertion.** Accessibility first (`AXSelectedText`, `ValuePattern`, `EditableText.InsertText`),
-  then clipboard paste (all formats saved and restored, 1.2 s plus 1.5 s grace). Rich web editors
-  get the clipboard first for multi-line or ≥ 1000-character text (`A11yConfig::rich_paste`). A
-  changed-but-wrong field, failed read-back or possibly-late paste reports `verified: false` and is
-  never retried. Return is never synthesised; `\r` and controls are stripped.
-- **Verification.** The field must match the expected value after normalising line endings,
-  special spaces, zero-width and bidi marks; rich editors are compared loosely (blank lines and
-  spaces collapsed). With unknown selection or truncated reads, the text must appear once more
-  than before.
-- **Threads.** Scores containers near the composer (message-like children, `log`/`list` roles,
-  names like "Messages", same column and above), penalises sidebars and conversation lists, splits
-  author, time and body, and applies app-family rules (Mail, Gmail, Outlook web, Slack, Teams,
-  iMessage, WhatsApp): grouped authors, "You"/"me", quoted mail cut, To/Cc/Bcc and subject. Keeps
-  the newest 30 messages, up to 20 KB.
-- **Safety.** Only the frontmost focused window is read. Secure fields' values are never
-  requested (`secure: true`, insertion refused). In denied apps (`DenyList::defaults()`: password
-  managers, keychains, settings, banking; user rules `id:`, `name:`, `name~`, `host:`, `host~`)
-  nothing is read or inserted. Every string is sanitised and capped; URLs lose userinfo and only
-  `http(s)`/`file` are kept. Temporary clipboard text is hidden from clipboard history and managers
-  (Windows exclusion formats, macOS transient/concealed types, Linux `x-kde-passwordManagerHint`).
+- **Rich editors**: inside a contenteditable, the topmost editable ancestor (`tree::editor_root`)
+  is read as the field; writes go to the focused element; U+FFFC objects are rebuilt
+  (`tree::flatten_text`).
+- **Insertion**: accessibility first, then a clipboard paste with every format saved and restored
+  (rich web editors get the clipboard first for multi-line or ≥ 1000-character text,
+  `A11yConfig::rich_paste`). Anything unconfirmed reports `verified: false` and is never retried.
+  Return is never synthesised.
+- **Verification**: exact match after normalising line endings, special spaces and invisible
+  marks; loose (blank lines and spaces collapsed) for rich editors; an occurrence count when the
+  selection is unknown or reads are truncated.
+- **Threads**: scores containers near the composer, splits author, time and body, and applies
+  app-family rules (Mail, Gmail, Outlook web, Slack, Teams, iMessage, WhatsApp) for authors,
+  "You", quoted mail, recipients and subject. Keeps the newest 30 messages, up to 20 KB.
+- **Safety**: only the frontmost focused window is read; secure fields' values are never
+  requested and insertion is refused; denied apps (`DenyList::defaults()`: password managers,
+  keychains, settings, banking; user rules `id:`, `name:`, `name~`, `host:`, `host~`) are neither
+  read nor written; strings are sanitised and capped; temporary clipboard text is hidden from
+  clipboard history and managers on all three OSes.
 
 ## Platform support
 
@@ -75,14 +70,13 @@ sudo apt-get install -y xvfb dbus dbus-x11 at-spi2-core python3-gi gir1.2-gtk-3.
 NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi_computer -- --nocapture
 ```
 
-- Thread fixtures are in `tests/fixtures/trees/` (`gtk_recorded_atspi.json` and `web_*` are
-  recordings; native chat and mail trees are modelled). Record with `Backend::snapshot()` →
-  `Snapshot::to_json()`, redacted.
-- The app matrix (`tests/apps_matrix.rs`, fixtures in `tests/fixtures/apps/`, contract
-  `PROTOCOL.md`, must-pass metrics in `expected.json`) runs in `.github/workflows/a11y-apps.yml`.
-  Also `NUGGET_A11Y_MATRIX_OUT`, `NUGGET_A11Y_APPS_RECORD`.
-- Linux integration tests start Xvfb and a private D-Bus and drive GTK apps in `tests/fixtures/`.
-  Set `NUGGET_A11Y_IT_PYTHON` if `python3` lacks PyGObject, `NUGGET_A11Y_RECORD=<dir>` to save the tree.
+- Thread fixtures: `tests/fixtures/trees/` (`gtk_recorded_atspi.json`, `web_*` recorded; native
+  chat and mail trees modelled). Record with `Backend::snapshot()` → `Snapshot::to_json()`, redacted.
+- App matrix: `tests/apps_matrix.rs`, fixtures and `PROTOCOL.md` in `tests/fixtures/apps/`,
+  must-pass metrics in `expected.json`; CI `.github/workflows/a11y-apps.yml`. Also
+  `NUGGET_A11Y_MATRIX_OUT`, `NUGGET_A11Y_APPS_RECORD` (trees); `render_matrix.py` renders results.
+- Linux integration tests start Xvfb and a private D-Bus and drive GTK apps in `tests/fixtures/`;
+  set `NUGGET_A11Y_IT_PYTHON` if `python3` lacks PyGObject, `NUGGET_A11Y_RECORD=<dir>` to save trees.
 
 ## Known gaps
 

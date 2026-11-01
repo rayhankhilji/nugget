@@ -1,7 +1,6 @@
 # Environment variables
 
 ## The daemon
-
 <!-- check-refs: env.daemon -->
 | Variable | Meaning |
 |---|---|
@@ -14,14 +13,12 @@
 does not read your shell profile.
 
 ## MCP clients
-
 <!-- check-refs: env.mcp -->
 | Variable | Meaning |
 |---|---|
 | `NUGGET_MCP_TOKEN` | The client token for `nuggetd mcp --client <id>`, set in the AI app's MCP config by `nuggetd mcp install` or the setup snippet. Kept out of the command line so it does not appear in process listings. The bridge refuses to start without it |
 
 ## Desktop app
-
 <!-- check-refs: env.desktop -->
 | Variable | Meaning |
 |---|---|
@@ -30,7 +27,6 @@ does not read your shell profile.
 | `NUGGET_UPDATER_FEED` | Build time: where the updater manifests live, for forks (default: this repository's `updater-feed` release) |
 
 ## Development
-
 <!-- check-refs: env.dev -->
 | Variable | Meaning |
 |---|---|
@@ -46,6 +42,3 @@ does not read your shell profile.
 | `NUGGET_CUA_DISPLAY` | An X display for the computer-use benchmark, instead of starting Xvfb |
 | `NUGGET_CUA_CHROMIUM` | The Chromium binary for the computer-use benchmark |
 | `NUGGET_BENCH_REGEN` | Set to regenerate the proactive benchmark fixtures instead of comparing them |
-
-Build-time: on Windows, `OPENSSL_SRC_PERL` points the vendored OpenSSL build at a native Perl (see
-[Development setup](../contributing/setup.md)).

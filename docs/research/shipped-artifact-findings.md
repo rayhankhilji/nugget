@@ -27,9 +27,7 @@ The Double Tap relay Worker and the MCP mirror server (INFERRED from a bounded s
 and computer-use helper are closed binaries (OBSERVED). The Supabase repo has migrations only.
 
 ## Design consequences for Nugget
-1. Own the agent runtime; don't wrap a pinned third-party CLI.
-2. Native accessibility drivers (AX, UIA, AT-SPI) behind one trait.
-3. Direct-API connectors (IMAP, CalDAV, Gmail, Graph) with no vendor-account gating.
-4. Any relay or mirror self-hostable, end-to-end encrypted, bearer-authenticated, with published source.
-5. No root daemon; incremental indexing instead of waking the machine.
-6. Telemetry off by default, with a local "what left my device" ledger.
+
+Own the agent runtime and native accessibility drivers; direct-API connectors with no vendor-account
+gating; any relay or mirror self-hostable, end-to-end encrypted and bearer-authenticated; no root
+daemon; telemetry off with a local egress ledger.

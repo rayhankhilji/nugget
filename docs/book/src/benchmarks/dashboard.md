@@ -1,11 +1,8 @@
 # Benchmark dashboard
 
-Each chart follows one headline metric of the nightly benchmark run (listed in
-`scripts/bench-runs.json`). `.github/workflows/nightly.yml` runs them as release builds on a shared
-`ubuntu-latest` runner, so timings are noisy: read the trend. Each point is one night (hover for date,
-value and commit; click to open the commit); a dashed line is the target; a gap means no result that
-night. To reproduce a number, check out the commit and run its command from
-[`bench/README.md`](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md).
+Each chart follows one headline metric of the nightly run (`.github/workflows/nightly.yml`, release
+builds on a shared `ubuntu-latest` runner, so read the trend). Points link to their commit; a dashed
+line is the target; a gap means no result. Commands: [`bench/README.md`](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md).
 
 ## Results format
 

@@ -3,10 +3,11 @@
 Nugget is an open-source (Apache-2.0), local-first, cross-platform personal AI. A per-user daemon
 continuously indexes your files, notes, mail and calendars into an encrypted store on your
 machine, builds a knowledge graph in which every fact cites its source, and answers with `[n]`
-citations using local models or your own API keys. Every off-device request is recorded where you
-can see it. Other AI apps read your knowledge through a local MCP server with a scoped token per
-app. It drafts in your voice in any app (Double Tap), runs a computer-use agent under a safety
-policy, prepares proactive cards for your approval, and takes WebAssembly plugins.
+citations using local models or your own API keys. There is no telemetry; every off-device
+request is recorded where you can see it. Other AI apps read your knowledge through a local MCP
+server with a scoped token per app. It drafts in your voice in any app (Double Tap), runs a
+computer-use agent under a safety policy, prepares proactive cards for your approval, and takes
+WebAssembly plugins.
 
 ## Status
 
@@ -27,20 +28,8 @@ and Linux. There is no signed release yet. Details: [What works today](docs/book
 | WASM plugins; Microsoft 365, Slack, Notion, GitHub and Linear connectors | Runs; connectors not yet tried against live accounts |
 | Installers, signed releases, auto-update | Unsigned installers build for all three OSes; the signed update path is rehearsed with throwaway keys; real signing needs release keys |
 
-## Why Nugget
-
-- **Local and encrypted.** One SQLCipher database, key in the OS keychain. No telemetry, no
-  first-party servers.
-- **You see what leaves.** The egress ledger records host, feature, bytes and items for every
-  off-device request. Items flagged sensitive never go to a cloud model.
-- **Memory you can check.** Hybrid search, and a knowledge graph where every claim quotes its
-  source. The Markdown vault is yours to edit; edits merge back.
-- **Safe sharing with AI apps.** Local MCP only, one revocable, scoped token per app, every call audited.
-- **Actions with guard rails.** Risk classes, confirmations, budgets, a kill switch and a
-  hash-chained action log.
-- **Cross-platform and permissive.** macOS, Windows and Linux; Apache-2.0.
-
-Compared with Sentient OS, with sources: [docs/compare/sentient-os.md](docs/compare/sentient-os.md).
+How Nugget compares with Sentient OS, with sources:
+[docs/compare/sentient-os.md](docs/compare/sentient-os.md).
 
 ## Screenshots
 
@@ -112,15 +101,10 @@ the egress ledger, to cloud providers with your key.
 
 **No release has been published yet** (the signing keys don't exist yet). Releases will carry a
 `.dmg` (macOS 11+), NSIS `-setup.exe` or `.msi` (Windows 10/11 x64), and AppImage, `.deb` and
-`.rpm` (Linux x64; arm64 experimental), plus `SHA256SUMS`, SBOMs and build provenance:
-
-```sh
-gh attestation verify <file> -R rayhankhilji/nugget --signer-workflow rayhankhilji/nugget/.github/workflows/release.yml
-```
-
-Updates come through the in-app updater: you pick the channel, and by default it only notifies.
-Until then, use the unsigned installers from a release dry run or build from source; see the
-[install guide](docs/book/src/guide/install.md).
+`.rpm` (Linux x64; arm64 experimental), with `SHA256SUMS`, SBOMs and build provenance
+(`gh attestation verify <file> -R rayhankhilji/nugget`). Updates come through the in-app updater
+on the channel you pick, notify-only by default. Until then, use unsigned dry-run installers or
+build from source: see the [install guide](docs/book/src/guide/install.md).
 
 ### Build from source
 

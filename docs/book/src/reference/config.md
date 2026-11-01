@@ -30,7 +30,6 @@ startup; restart after editing. If it is missing, a commented local-first defaul
 Every key is optional; an empty file gives the defaults (no providers).
 
 ## `[models]`
-
 <!-- check-refs: config.models -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -66,7 +65,6 @@ Installed models run in a pinned `llama-server` on `127.0.0.1` as providers `loc
 | `idle_stop_minutes` | integer, 0 to 10080 | `30` | Stop a server after this many idle minutes; `0` keeps it running. It restarts on the next request |
 
 ## `[ingest]`
-
 <!-- check-refs: config.ingest -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -104,7 +102,6 @@ Installed models run in a pinned `llama-server` on `127.0.0.1` as providers `loc
 | `freshness_window` | integer | `1024` | Samples kept for the freshness p50 and p95 |
 
 ## `[retrieve]`
-
 <!-- check-refs: config.retrieve -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -158,14 +155,9 @@ Off unless present; then both keys are required. Relevance is multiplied by
 Off unless present: a reranking server you run (e.g. `llama-server --reranking`), called at
 `<base_url>/v1/rerank`. Only local or LAN servers unless `allow_cloud = true` (https only).
 
-```toml
-[retrieve.reranker]
-base_url = "http://127.0.0.1:8013"   # required
-# path = "v1/rerank"
-# timeout_ms = 2000
-```
-
-Without it, search uses `[runtime] rerank_model` if set, else no reranker.
+Keys: `base_url` (required), `path`, `model`, `timeout_ms`, `connect_timeout_ms`,
+`max_passage_chars`, `allow_cloud`, `locality`. Without it, search uses
+`[runtime] rerank_model` if set.
 
 ## `[knowledge]`
 
@@ -192,7 +184,6 @@ unless sources are listed in `llm.cloud_sources`. Sensitive items never go to a 
 | `max_chunks_per_item` | integer | `512` | Chunks read per item at most (longer items are cut for extraction) |
 
 ### `[knowledge.me]`
-
 <!-- check-refs: config.knowledge.me -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -201,7 +192,6 @@ unless sources are listed in `llm.cloud_sources`. Sensitive items never go to a 
 | `infer_from_sent` | bool | `true` | Learn further addresses from the `From` of mail in a sent folder |
 
 ### `[knowledge.llm]`
-
 <!-- check-refs: config.knowledge.llm -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -301,13 +291,8 @@ runtime, then cloud providers (file order). See [Models](../guide/models.md).
 
 ### Locality
 
-| Address | Locality | Egress ledger |
-|---|---|---|
-| Loopback (`127.0.0.1`, `::1`, `localhost`) | `on_device` | Not recorded: nothing leaves the machine |
-| Private ranges (`10/8`, `172.16/12`, `192.168/16`, link-local, ...) | `local_network` | Recorded |
-| Anything else | `cloud` | Recorded |
-
-Host names are resolved once, when the provider is built, and pinned.
+Loopback addresses are `on_device` (not ledgered); private ranges (`10/8`, `172.16/12`, `192.168/16`,
+link-local) are `local_network`; anything else is `cloud`. Host names are resolved once and pinned.
 
 ## Feature sections
 
@@ -341,55 +326,14 @@ Proactive cards and the morning brief. Unknown keys are an error.
 
 ### `[draft]`
 
-Double Tap drafting. Other keys (provider per app, excluded apps, budgets, `[draft.voice]`) are in
+Double Tap drafting. Keys below are relative to `[draft]` (`local.model` is `model` in
+`[draft.local]`). Others (provider per app, excluded apps, budgets, `[draft.voice]`) are in
 `crates/nuggetd/src/features/draft.rs`.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `grounding` | bool | `true` | Retrieved context goes in as dated facts (superseded items and sensitive items marked) and the stream is checked per `grounding_check` |
+| `grounding` | bool | `true` | Retrieved context goes in as dated facts (superseded and sensitive items marked) and the stream is checked per `grounding_check` |
 | `grounding_check` | `"secrets"` or `"sentences"` | `"secrets"` | `secrets`: stop the draft before a credential copied from a sensitive item. `sentences`: hold each sentence until it ends and drop ones with unsupported numbers, dates or amounts (adds first-sentence latency) |
-
-`[draft.local]`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `model` | manifest model id | none | Run this model in its own local server (role `draft`, provider `local-draft`) and draft with it first for non-cloud drafting, falling back to the chat model |
-
-`[draft.read_ahead]` (prefill the prompt into the local cache while a reply field has focus; see
-[Read-ahead](../guide/double-tap.md#read-ahead)):
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | bool | `true` | `false`: `draft.read_ahead` always skips with `"disabled"` |
-| `min_interval_ms` | integer | `5000` | Minimum time between read-aheads that do work; others skip with `"rate_limited"` |
-
-Read-ahead also needs the desktop switch **Read ahead while you reply** (and **Read ahead on
-battery** when on battery); low power mode always pauses it.
-
-## Example
-
-```toml
-[models.selected]
-triage = "qwen3-4b-q4km"
-embedding = "nomic-embed-text-v1.5-q8"
-
-[knowledge.me]
-name = "Ada Example"
-emails = ["ada@example.com"]
-
-# A LAN server, tried before the managed runtime.
-[[providers]]
-id = "workstation"
-kind = "openai_compatible"
-base_url = "http://192.168.1.20:8080/v1"
-model = "qwen3-8b"
-tiers = ["synthesis"]
-
-# A cloud provider, tried last. The key comes from the daemon's environment.
-[[providers]]
-id = "anthropic"
-kind = "anthropic"
-model = "<model name>"
-api_key = "env:ANTHROPIC_API_KEY"
-tiers = ["synthesis", "agentic"]
-```
+| `local.model` | manifest model id | none | Run this model in its own server (provider `local-draft`) and use it first for non-cloud drafting, falling back to the chat model |
+| `read_ahead.enabled` | bool | `true` | Prefill the prompt into the local cache while a reply field has focus ([Read-ahead](../guide/double-tap.md#read-ahead)); `false` makes `draft.read_ahead` skip with `"disabled"`. Also needs the desktop switch **Read ahead while you reply**; low power mode pauses it |
+| `read_ahead.min_interval_ms` | integer | `5000` | Minimum time between read-aheads that do work; others skip with `"rate_limited"` |

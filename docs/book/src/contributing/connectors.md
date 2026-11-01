@@ -6,24 +6,16 @@ connectors never touch the store. Connectors are native Rust crates or WebAssemb
 ## The API (`nugget-connector`)
 
 ```rust,ignore
-#[async_trait]
-pub trait Connector: Send + Sync {
+pub trait Connector: Send + Sync {          // #[async_trait]
     fn kind(&self) -> &'static str;
-
-    /// One pass from `cursor` (None = no cursor); returns the cursor to resume from.
     async fn sync(&self, cursor: Option<Value>, sink: &dyn ChangeSink,
-                  cancel: &CancellationToken) -> Result<Value>;
-
-    fn poll_interval(&self) -> Duration { Duration::from_secs(300) }
-    fn supports_watch(&self) -> bool { false }
-    /// Live changes until cancelled; called after a successful sync.
-    async fn watch(&self, sink: Arc<dyn ChangeSink>, cancel: CancellationToken) -> Result<()>;
-    /// Interactive sign-in (OAuth), if the kind needs one.
-    async fn begin_auth(&self) -> Result<AuthFlow>;
+                  cancel: &CancellationToken) -> Result<Value>;   // returns the next cursor
+    fn poll_interval(&self) -> Duration;    // default 300 s
+    fn supports_watch(&self) -> bool;       // then `watch` streams live changes after a sync
+    async fn begin_auth(&self) -> Result<AuthFlow>;               // interactive sign-in, if any
 }
-
 pub trait ConnectorFactory: Send + Sync {
-    fn info(&self) -> KindInfo;   // kind, display_name, auth (None | OAuth | Password), settings_schema
+    fn info(&self) -> KindInfo;             // kind, display_name, auth, settings_schema
     fn validate(&self, settings: &Value) -> Result<()>;
     fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>>;
 }
@@ -36,28 +28,21 @@ source-scoped keychain `secrets` store, and `known` (keys and versions already s
 
 ## The contract
 
-1. **Cursors after persistence.** Call `sink.checkpoint(cursor)` during long passes; it commits only
-   after everything sent before it is stored. Return the final cursor.
-2. **No cursor means reconcile.** Also after a settings change: upsert everything in scope and delete
-   every `ctx.known` key that is no longer in scope.
-3. **Versions** change when content does (mtime and size, ETag, mod-sequence); matching versions are
-   skipped.
-4. **Order and backpressure:** changes apply in order; `.await` the `send`.
-5. **Egress:** use `nugget_connector::http::MeteredHttp` (feature `sync:<kind>`, no redirects).
-6. **Secrets** only through `ctx.secrets` (`password:<source>`, `oauth:<source>`), never in settings,
-   logs or errors. Missing or rejected credentials are `Error::Unauthorized` (`needs_auth`).
-7. **Cancellation:** return `Error::Cancelled` promptly.
-8. **Hostile input:** cap sizes and counts, time out, never panic.
-9. **Read-only:** never change the user's data at the source.
+1. Call `sink.checkpoint(cursor)` during long passes (committed only after earlier changes are stored).
+2. No cursor (first run or changed settings) means **reconcile**: upsert everything in scope and delete
+   every `ctx.known` key no longer in scope.
+3. `version` changes when content does; matching versions are skipped. `.await` every `send`.
+4. Network through `nugget_connector::http::MeteredHttp` (egress feature `sync:<kind>`, no redirects).
+5. Secrets only via `ctx.secrets`, never in settings, logs or errors; bad credentials are
+   `Error::Unauthorized`. Cancellation returns `Error::Cancelled` promptly.
+6. Treat input as hostile (caps, timeouts, no panics) and never change the user's data at the source.
 
 ## Settings and registration
 
-Deserialize settings with `#[serde(deny_unknown_fields)]`, validate in `validate`, publish a JSON
-Schema in `KindInfo::settings_schema` (the app builds forms from it), and never accept secrets. Document
-every key in [Connector settings](../reference/connectors.md) and add the struct to `SOURCES` and the
-file to `CONNECTOR_FILES` in `docs/book/check-refs.py`.
-
-Register the factory in `registry()` in `crates/nuggetd/src/sources.rs`. Credential patterns:
+Settings use `#[serde(deny_unknown_fields)]`, are checked in `validate`, publish a JSON Schema in
+`KindInfo::settings_schema`, and are documented in [Connector settings](../reference/connectors.md)
+(add the struct to `SOURCES` and the file to `CONNECTOR_FILES` in `docs/book/check-refs.py`). Register
+the factory in `registry()` in `crates/nuggetd/src/sources.rs`. Credential patterns:
 
 - **`AuthKind::OAuth`** (Google, Microsoft): `begin_auth` runs PKCE with a loopback redirect
   (`nugget-oauth`); tokens go under `oauth:<source>`, a client secret under
@@ -66,11 +51,9 @@ Register the factory in `registry()` in `crates/nuggetd/src/sources.rs`. Credent
   `password:<source>`; may also offer `begin_auth` (`github` device flow, `linear` PKCE).
 - **`AuthKind::None`** (`files`, `obsidian`).
 
-## Testing
-
-Point HTTP connectors at a mock server (`with_endpoints`, `with_base`) with recorded fixtures. Cover
-first sync, incremental sync, deletes, a reset cursor, an invalid sync token, cancellation, bad
-credentials and egress recording, plus malformed input for every parser.
+**Testing:** point HTTP connectors at a mock server (`with_endpoints`, `with_base`) with recorded
+fixtures; cover first and incremental sync, deletes, a reset cursor, an invalid sync token,
+cancellation, bad credentials, egress recording and malformed input.
 
 ## Plugin connectors (WebAssembly)
 

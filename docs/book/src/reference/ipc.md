@@ -25,7 +25,6 @@ The **Daemon** column: `yes` = served; `not yet` = in the protocol but the daemo
 ## Methods
 
 ### Status, providers and models
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -44,18 +43,7 @@ The **Daemon** column: `yes` = served; `not yet` = in the protocol but the daemo
 
 `RuntimeInfo.state`: `not_installed`, `stopped`, `starting`, `ready`, `failed`.
 
-### Chat
-
-<!-- check-refs: ipc.methods -->
-| Method | Params | Result | Daemon |
-|---|---|---|---|
-| `chat` | `ChatRequest`: `provider` (or `null` to route by tier), `tier`, `messages` (each `{role, text}`, role `system`, `user` or `assistant`; the last must be `user`), `items` (item refs whose content the messages include, for the egress ledger; at most 1024) | `ChatStarted`: `{stream_id, provider}`, then `chat.delta` and `chat.done` | yes |
-| `chat.cancel` | `ChatCancel`: `{stream_id}` | `null` | yes |
-
-When routing by tier, `ChatStarted` arrives after the first token, naming the provider that answered.
-
 ### Search
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -69,21 +57,22 @@ When routing by tier, `ChatStarted` arrives after the first token, naming the pr
 date_utc_offset_minutes`.
 
 ### Retrieval
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `retrieve.context` | `ContextRequest`: `{query, budget_tokens}` (budget at most 131072) | `ContextResponse`: `text` (passages, each under a `[n]` header), `citations`, `excluded_sensitive` | yes |
 | `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten), `general`, `date` (when the question named a date), `partial` (citation numbers of near misses); then `chat.delta` and `chat.done` | yes |
+| `chat` | `ChatRequest`: `provider` (or `null` to route by tier), `tier`, `messages` (each `{role, text}`, role `system`, `user` or `assistant`; the last must be `user`), `items` (item refs whose content the messages include, for the egress ledger; at most 1024) | `ChatStarted`: `{stream_id, provider}`, then `chat.delta` and `chat.done` | yes |
+| `chat.cancel` | `ChatCancel`: `{stream_id}` | `null` | yes |
 
-A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. The provider is chosen first; with a
+`chat` routes by tier unless `provider` is set; `ChatStarted` arrives after the first token, naming the
+provider that answered. A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. The provider is chosen first; with a
 `cloud` provider sensitive items are left out (counted in `excluded_sensitive`), and the context is
 repacked on fallback. With `history`, a follow-up is rewritten into a standalone query by a local
 model (or a heuristic). `AskStarted.date` is `{phrase, start, end, applied, listed}` for a date phrase
 in the question; `partial` lists citations that are near misses. Both are absent when empty.
 
 ### Sources and ingest
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -118,7 +107,6 @@ Entity kinds: `person`, `organization`, `project`, `commitment`, `preference`, `
 | `knowledge.status` | `{}` | `KnowledgeStatus`: `entities`, `claims`, `mentions`, `pending_items`, `last_run`, `extractor_provider`, `vault` | yes |
 
 ### MCP clients
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -130,7 +118,6 @@ Entity kinds: `person`, `organization`, `project`, `commitment`, `preference`, `
 bridge methods on this socket.
 
 ### Drafting (Double Tap)
-
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -145,8 +132,7 @@ bridge methods on this socket.
 
 A field with `secure: true` (a password field) is refused, and its value is never read.
 
-### Agent and safety
-
+### Agent, safety and plugins
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
@@ -165,6 +151,13 @@ A field with `secure: true` (a password field) is refused, and its value is neve
 | `browser.host.attach` | Host registration | Long-lived call from the browser extension's native host; returns when the daemon detaches it | yes |
 | `browser.host.deliver` | An extension message | A reply or event from the extension, delivered by the native host | yes |
 | `browser.status` | `{}` | `BrowserStatus`: whether the extension is connected, its origin and host version, and the browser tools registered for the agent | yes |
+| `plugins.list` | `{}` | Installed plugins | yes |
+| `plugins.inspect` | A plugin | Its manifest, the capabilities it asks for and its signature status | yes |
+| `plugins.install` | A local `.nuggetplugin` path | The capabilities to approve | yes |
+| `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | yes |
+| `plugins.remove` | A plugin | Uninstalls it | yes |
+| `plugins.enable` | A plugin and on or off | Turns it on or off | yes |
+| `plugins.catalog` | `{}` | Signed packages found in the catalog folders, verified but not installed, with their trust, requested access and whether they update an installed plugin | yes |
 
 ### Proactive cards and brief
 
@@ -185,21 +178,7 @@ policy.
 | `proactive.learning` | `{}` | `ProactiveLearning`: what feedback taught the ranking, per sender, domain, kind and thread, strongest adjustment first (answers even when `[proactive] enabled = false`) | yes |
 | `proactive.reset_learning` | `ResetLearningRequest`: `{scope, key}` with `scope` `all`, `sender`, `domain`, `kind` (key: a card kind) or `thread`; `key` required unless `all` | `ResetLearningResult`: `{cleared}`. Recorded in the audit log (`proactive.reset_learning`, target `all` or `<scope>:<key>`) and broadcasts `cards.changed` with reason `reset_learning` | yes |
 
-### Plugins
-
-<!-- check-refs: ipc.methods -->
-| Method | Params | Result | Daemon |
-|---|---|---|---|
-| `plugins.list` | `{}` | Installed plugins | yes |
-| `plugins.inspect` | A plugin | Its manifest, the capabilities it asks for and its signature status | yes |
-| `plugins.install` | A local `.nuggetplugin` path | The capabilities to approve | yes |
-| `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | yes |
-| `plugins.remove` | A plugin | Uninstalls it | yes |
-| `plugins.enable` | A plugin and on or off | Turns it on or off | yes |
-| `plugins.catalog` | `{}` | Signed packages found in the catalog folders, verified but not installed, with their trust, requested access and whether they update an installed plugin | yes |
-
 ## Notifications
-
 <!-- check-refs: ipc.notifications -->
 | Notification | Params | Sent when |
 |---|---|---|
@@ -210,18 +189,12 @@ policy.
 | `ingest.progress` | `IngestProgress`: `{source, phase, done, total, error}`, `phase` one of `scanning`, `indexing`, `idle`, `error` | A source's sync progressed |
 | `sources.changed` | A `SourceInfo`; or `{"id": …, "removed": true}`; or `{"lagged": n}` | A source was added, changed (including after sign-in) or removed. Treat anything but a `SourceInfo` as "refetch `sources.list`" |
 | `knowledge.changed` | `KnowledgeChanged`: `{entities}` | Entities changed (after an extraction run, a merge, a claim status change or a vault edit) |
-
-Agent, safety, proactive and browser notifications:
-
-<!-- check-refs: ipc.notifications -->
-| Notification | Params | Sent when | Daemon |
-|---|---|---|---|
-| `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished | yes |
-| `policy.kill.changed` | Whether the kill switch is engaged | The kill switch was engaged or released, from any cause (hotkey, tray, IPC) | yes |
-| `cards.changed` | `CardsChanged`: `{reason, open, created, resolved}` | The set of suggestion cards changed (refresh, feedback, an executed action or a learning reset: `reset_learning`); refetch `cards.list` | yes |
-| `brief.ready` | A `BriefView` | The morning brief is ready, once a day at `[proactive] brief_time` (not sent when it is empty) | yes |
-| `reminder.due` | A `ReminderView` | A reminder the user approved is due; the app shows an OS notification | yes |
-| `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension | yes |
+| `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished |
+| `policy.kill.changed` | Whether the kill switch is engaged | The kill switch was engaged or released, from any cause (hotkey, tray, IPC) |
+| `cards.changed` | `CardsChanged`: `{reason, open, created, resolved}` | The set of suggestion cards changed (refresh, feedback, an executed action or a learning reset: `reset_learning`); refetch `cards.list` |
+| `brief.ready` | A `BriefView` | The morning brief is ready, once a day at `[proactive] brief_time` (not sent when it is empty) |
+| `reminder.due` | A `ReminderView` | A reminder the user approved is due; the app shows an OS notification |
+| `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension |
 
 ## Errors
 
@@ -246,14 +219,3 @@ Errors are `{code, message, data?}`; branch on `code`, not `message`.
 | `MESSAGE_TOO_LARGE` | `-32008` | A message exceeded 16 MiB |
 | `UNAUTHORIZED` | `-32009` | A source or provider needs sign-in or a credential |
 | `SERVER_BUSY` | `-32010` | The connection already has its maximum number of requests in flight (`data`: `{"max_in_flight": n}`); retry once an earlier call on the connection has finished. Control methods such as cancel and the kill switch have reserved slots and never get this. |
-
-## Example
-
-`→` client, `←` daemon (values illustrative):
-
-```json
-→ {"jsonrpc":"2.0","id":2,"method":"retrieve.ask","params":{"query":"When is the Acme renewal due?","budget_tokens":4000}}
-← {"jsonrpc":"2.0","id":2,"result":{"stream_id":"s-7","provider":"local-chat","locality":"on_device","citations":[{"n":1,"item":{"source":"gmail-1","key":"18c2f…"},"chunk_id":981,"title":"Renewal quote","url":"https://mail.google.com/mail/u/0/#all/18c2f…","sensitive":false}],"excluded_sensitive":0}}
-← {"jsonrpc":"2.0","method":"chat.delta","params":{"stream_id":"s-7","text":"The renewal is due on 14 November [1]."}}
-← {"jsonrpc":"2.0","method":"chat.done","params":{"stream_id":"s-7","error":null,"input_tokens":1210,"output_tokens":14}}
-```

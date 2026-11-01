@@ -21,23 +21,13 @@ python3 docs/book/check-refs.py
 cargo deny check licenses bans sources
 ```
 
-Run a development daemon away from your real data:
+Run a development daemon with `cargo run -p nuggetd -- --home /tmp/nugget-dev` (add `status` to
+query it); `NUGGET_KEYCHAIN=off` keeps it out of your keychain and `NUGGET_LOG=debug` shows what it
+does.
 
-```sh
-cargo run -p nuggetd -- --home /tmp/nugget-dev
-cargo run -p nuggetd -- --home /tmp/nugget-dev status
-```
-
-`NUGGET_KEYCHAIN=off` keeps it out of your keychain; `NUGGET_LOG=debug` shows what it does.
-
-| Path | Contents |
-|---|---|
-| `crates/` | Libraries and `nuggetd` ([crate map](../architecture/crates.md)); daemon features in `crates/nuggetd/src/features/` |
-| `crates/nugget-plugin/sdk` | Plugin guest SDK and examples (separate workspace, `wasm32-wasip2`) |
-| `apps/desktop` | Tauri 2 shell: `src/` (React, TypeScript), `src-tauri/` (Rust) |
-| `extensions/browser` | Browser extension |
-| `bench`, `manifests`, `packaging` | Benchmarks, the signed model manifest, installer scripts |
-| `docs` | The plan, clean-room research, release guide and this book |
+Layout: `crates/` (libraries and `nuggetd`; [crate map](../architecture/crates.md)),
+`crates/nugget-plugin/sdk` (plugin SDK, `wasm32-wasip2`), `apps/desktop` (Tauri shell),
+`extensions/browser`, `bench`, `manifests` (signed model manifest), `packaging`, `docs`.
 
 CI (`ci.yml`) runs fmt, clippy, tests, a benchmark smoke run, the desktop build, `cargo deny` and the
 DCO check on all three OSes; `docs.yml` runs `check-refs.py` and builds the book; `release.yml` builds

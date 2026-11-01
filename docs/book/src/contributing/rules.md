@@ -21,17 +21,14 @@ Sentient OS is AGPL-licensed. To keep Nugget cleanly Apache-2.0:
 
 ## Tests and code
 
-- Every public behaviour has a test; integration tests go in `tests/`.
-- No real network, credentials, keychain or home directory: use `wiremock`, fixtures, `NUGGET_HOME`.
-- Tests pass on Linux, macOS and Windows; gate OS code with `cfg` and keep a fallback.
-- Parsers cap sizes, time out and return errors instead of panicking.
-- A change claimed to be faster or better adds or updates a `nugget-bench` metric.
-- `unsafe` is denied; unavoidable FFI gets one minimal `#[allow(unsafe_code)]` function with a
-  `// SAFETY:` comment. Route models by tier. Record every egress. Never log secrets, or content at
-  `info` or above.
-- New crates join the workspace with `[lints] workspace = true` and a row in the
-  [crate map](../architecture/crates.md). New daemon subsystems are feature modules under
-  `crates/nuggetd/src/features/`.
+- Every public behaviour has a test, on Linux, macOS and Windows (gate OS code with `cfg`, keep a
+  fallback). No real network, credentials, keychain or home: use `wiremock`, fixtures, `NUGGET_HOME`.
+- Parsers cap sizes, time out and return errors. Claims of "faster" or "better" come with a
+  `nugget-bench` metric.
+- `unsafe` only in minimal, commented FFI. Route models by tier; record every egress; never log
+  secrets, or content at `info` or above.
+- New crates use `[lints] workspace = true` and get a row in the [crate map](../architecture/crates.md);
+  daemon subsystems are modules under `crates/nuggetd/src/features/`.
 
 ## Commits and pull requests
 
