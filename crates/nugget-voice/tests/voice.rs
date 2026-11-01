@@ -559,9 +559,22 @@ fn feedback_final_texts_join_the_profile() {
     let r = p.refresh().unwrap();
     assert_eq!(r.fetched, 2);
     assert_eq!(p.status().samples, before + 2);
-    let h = p.hints(Channel::Chat, &["jamie".into()], "can you do 5?");
-    assert_eq!(h.exemplars[0], "sure jamie, 5 works 👍");
-    assert!(h.exemplars.iter().all(|e| !e.contains("vault")));
+    let local = VoiceSource::hints(
+        &p,
+        &VoiceQuery::new(Channel::Chat)
+            .with_recipients(["jamie"])
+            .with_thread("can you do 5?")
+            .allow_sensitive(true),
+    );
+    assert!(local.exemplars.iter().any(|e| e == "sure jamie, 5 works 👍"));
+    // Unjudged until local triage clears it (QA GG8 R2-1): never a cloud exemplar meanwhile.
+    let cloud = p.hints(Channel::Chat, &["jamie".into()], "can you do 5?");
+    assert!(
+        cloud
+            .exemplars
+            .iter()
+            .all(|e| !e.contains("vault") && !e.contains("5 works"))
+    );
     // Stored as a searchable (encrypted at rest) item.
     let hits = store.search_text("jamie works", 5).unwrap();
     assert!(

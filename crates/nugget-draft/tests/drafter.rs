@@ -1196,3 +1196,36 @@ async fn small_model_routing_leaves_cloud_and_explicit_choices_alone() {
     assert!(small.requests().is_empty());
     assert_eq!(cloud.requests().len(), 1);
 }
+
+/// QA GG8-4: a card number in the thread (or the field) never reaches a cloud drafter when the
+/// daemon's sensitive scan is set; the message is withheld whole. Local providers keep it.
+#[tokio::test]
+async fn cloud_drafts_withhold_scanned_thread_and_field_text() {
+    let card = "Use card 4111 1111 1111 1111 for the deposit. GG8CANARY-THREADSENS-1";
+    let scan: nugget_draft::SensitiveScan = Arc::new(|t: &str| t.contains("4111 1111"));
+    for locality in [Locality::Cloud, Locality::OnDevice] {
+        let p = Fake::new("p", locality, &["Thanks, I'll take care of the deposit."]);
+        let s = setup(vec![p.clone()], DraftConfig::default(), Arc::new(NoVoice));
+        let drafter = s.drafter.with_sensitive_scan(scan.clone());
+        let mut ctx = slack_ctx("Can you send the Q3 numbers?");
+        ctx.thread.push(ThreadMessage {
+            author: Some("Priya".into()),
+            text: card.into(),
+            from_me: Some(false),
+            timestamp: None,
+        });
+        ctx.field.value = "Card: 4111 1111 1111 1111".into();
+        let (_, stream) = drafter.begin(request(ctx)).await.unwrap();
+        collect(stream).await;
+        let sent = user_text(&p.last());
+        if locality == Locality::Cloud {
+            assert!(!sent.contains("4111"), "{sent}");
+            assert!(!sent.contains("GG8CANARY"), "{sent}");
+            assert!(sent.contains(nugget_draft::WITHHELD_TEXT), "{sent}");
+            // The rest of the thread still goes.
+            assert!(sent.contains("Q3 numbers"), "{sent}");
+        } else {
+            assert!(sent.contains("GG8CANARY-THREADSENS-1"), "{sent}");
+        }
+    }
+}

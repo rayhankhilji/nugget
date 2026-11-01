@@ -42,7 +42,10 @@ pub struct ScopeFilter {
 impl ScopeFilter {
     /// May content from an item in `source` with this sensitivity be returned?
     pub fn allows(&self, source: &SourceId, sensitive: bool) -> bool {
-        if sensitive && !self.include_sensitive {
+        // Voice samples are never served, whatever the scopes list.
+        if (sensitive && !self.include_sensitive)
+            || nugget_core::ids::is_private_source(source.as_str())
+        {
             return false;
         }
         match &self.sources {
@@ -157,10 +160,12 @@ impl Scope {
     }
 
     fn source_allowed(&self, source: &SourceId) -> bool {
-        self.filter
-            .sources
-            .as_ref()
-            .is_none_or(|l| l.iter().any(|s| s == source))
+        !nugget_core::ids::is_private_source(source.as_str())
+            && self
+                .filter
+                .sources
+                .as_ref()
+                .is_none_or(|l| l.iter().any(|s| s == source))
     }
 
     pub fn entity_visible(&self, origins: &[Origin]) -> bool {

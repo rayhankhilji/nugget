@@ -51,6 +51,20 @@ triage model flags it, or its status is unknown, the item is **sensitive**. Sens
 - never reach the [Markdown vault](knowledge.md#sensitive-items-and-the-vault) once confirmed, and
   are hidden from the graph view unless you turn on **Show sensitive**.
 
+The same scan runs on what a Double Tap draft would send to a cloud model: a thread message, the
+field's text, the subject or your instruction in which it finds anything is withheld whole (the
+model sees "[withheld: …]", never the value), as a sensitive item would be. A local model gets
+them as they are.
+
+## Your Double Tap texts
+
+When you insert a draft, the text you finally send is kept, encrypted, as a sample of your voice.
+Voice samples are a drafting aid only: they are not a source, search, Ask and drafts never use them
+as context, and MCP clients never see them, whatever their scopes. Like any other item nothing has
+judged yet, a new sample counts as sensitive until local triage clears it. Only then can it reach a
+cloud model, and only as a voice example in a cloud Double Tap draft. A text the scan above flags,
+or one whose draft drew on sensitive items, never does.
+
 ## What leaves for each feature
 
 | Feature | With a local model | With a cloud model |
