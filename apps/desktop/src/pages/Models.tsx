@@ -1,10 +1,13 @@
-import { useState } from "react";
-import { api, errorMessage, events, type FitReport, type ModelFit, type ModelInfo, type ModelProgress } from "../api";
+import { useEffect, useId, useRef, useState } from "react";
+import { aiKeysApi, api, errorMessage, events, isMethodNotFound, modelsCancel, type FitReport, type ModelFit, type ModelInfo, type ModelProgress, type SavedKeyProvider } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
-import { Badge, EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
+import { Dialog } from "../components/Dialog";
+import { ByokForm, kindLabel, ReplaceKeyForm } from "../onboarding/ByokForm";
 import { t as translate, useT, type MessageKey } from "../i18n";
 import { FitNotes, loadFit, MachineLine } from "../onboarding/ModelFit";
+import { DownloadFailureNote, isCancelled } from "../onboarding/DownloadFailure";
 
 const PHASES = new Set(["downloading", "verifying", "installed", "failed"]);
 
@@ -110,12 +113,23 @@ export function ModelsPage() {
 
   const install = async (id: string) => {
     setRequestError((e) => ({ ...e, [id]: "" }));
-    setProgress((all) => ({ ...all, [id]: { id, downloaded: 0, total: 0, phase: "downloading", error: null } }));
+    // A retry resumes from the staged bytes: keep showing them until the daemon reports.
+    setProgress((all) => ({ ...all, [id]: { id, downloaded: all[id]?.downloaded ?? 0, total: all[id]?.total ?? 0, phase: "downloading", error: null } }));
     try {
       await api.modelsInstall(id);
     } catch (err) {
       setProgress(({ [id]: _, ...rest }) => rest);
       setRequestError((e) => ({ ...e, [id]: errorMessage(err) }));
+    }
+  };
+
+  // The daemon answers with a final `failed` / `cancelled` progress; staged bytes are kept.
+  const cancel = async (id: string): Promise<boolean> => {
+    try {
+      return (await modelsCancel(id)).cancelled;
+    } catch (err) {
+      setRequestError((e) => ({ ...e, [id]: errorMessage(err) }));
+      return false;
     }
   };
 
@@ -143,6 +157,7 @@ export function ModelsPage() {
       error={requestError[m.id]}
       fit={fit.data}
       onInstall={() => void install(m.id)}
+      onCancel={() => cancel(m.id)}
     />
   );
   const groupClass = models.loading ? "cards pg-stale" : "cards";
@@ -205,7 +220,194 @@ export function ModelsPage() {
           </ul>
         </section>
       )}
+      <YourProviders />
     </div>
+  );
+}
+
+// ---- KK2: providers with a key ----
+
+/**
+ * "Your providers": the cloud and self-hosted providers that use a key (`ai.key.saved`), with
+ * Replace key and Remove, and the form to add one. Every change takes effect without a restart.
+ */
+export function YourProviders() {
+  const t = useT();
+  const titleId = useId();
+  const saved = useAsync(aiKeysApi.saved);
+  const [replacing, setReplacing] = useState<SavedKeyProvider | null>(null);
+  const [removing, setRemoving] = useState<SavedKeyProvider | null>(null);
+  const [notice, setNotice] = useState("");
+  // After a removal the card (and the button that opened the dialog) is gone: focus the heading.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [focusHeading, setFocusHeading] = useState(false);
+  useEffect(() => {
+    if (focusHeading) {
+      heading.current?.focus();
+      setFocusHeading(false);
+    }
+  }, [focusHeading, saved.data]);
+  const list = saved.data ?? [];
+  // An older daemon cannot list or change saved keys.
+  if (isMethodNotFound(saved.error)) return null;
+
+  return (
+    <section className="models-group" aria-labelledby={titleId}>
+      <h2 id={titleId} ref={heading} tabIndex={-1}>
+        {t("models.providers.title")}
+      </h2>
+      <p className="muted small">{t("models.providers.hint")}</p>
+      <ErrorNote error={saved.error} onRetry={saved.reload} />
+      {saved.loading && !saved.data && !saved.error && <Loading label={t("models.providers.loading")} lines={1} />}
+      {saved.data && list.length === 0 && <p className="muted">{t("models.providers.empty")}</p>}
+      {list.length > 0 && (
+        <ul className="cards" aria-label={t("models.providers.title")} aria-busy={saved.loading}>
+          {list.map((p) => (
+            <SavedProviderCard key={p.id} provider={p} onReplace={() => setReplacing(p)} onRemove={() => setRemoving(p)} />
+          ))}
+        </ul>
+      )}
+      <p role="status" className={notice ? "note" : undefined}>
+        {notice}
+      </p>
+      <details className="models-add-provider">
+        <summary>{t("models.providers.add")}</summary>
+        <ByokForm
+          onSaved={() => {
+            setNotice("");
+            saved.reload();
+          }}
+        />
+      </details>
+      {replacing && (
+        <Dialog title={t("models.providers.replaceDialog.title", { name: replacing.id })} onClose={() => setReplacing(null)}>
+          <ReplaceKeyForm
+            provider={replacing}
+            onCancel={() => setReplacing(null)}
+            onDone={() => {
+              setNotice(t("models.providers.replaced", { name: replacing.id }));
+              setReplacing(null);
+              saved.reload();
+            }}
+          />
+        </Dialog>
+      )}
+      {removing && (
+        <RemoveProviderDialog
+          provider={removing}
+          onClose={() => setRemoving(null)}
+          onRemoved={() => {
+            setNotice(t("models.providers.removed", { name: removing.id }));
+            setRemoving(null);
+            setFocusHeading(true);
+            saved.reload();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: SavedKeyProvider; onReplace: () => void; onRemove: () => void }) {
+  const t = useT();
+  const labelId = `provider-${p.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  return (
+    <li className="card model-card" aria-labelledby={labelId} data-provider-id={p.id}>
+      <div className="card-head">
+        <bdi dir="ltr" id={labelId} className="card-title">
+          {p.id}
+        </bdi>
+        <span className="badges">
+          {p.available ? <Badge tone="good">{t("models.providers.inUse")}</Badge> : <Badge tone="warn">{t("models.providers.notInUse")}</Badge>}
+        </span>
+      </div>
+      <p className="small">
+        {t(kindLabel(p.kind))}{" "}
+        <span className="muted">
+          ·{" "}
+          <bdi dir="ltr">
+            <code>{p.model}</code>
+          </bdi>
+        </span>
+      </p>
+      <p className="small muted">
+        {p.key === "env" && p.env_var ? t("models.providers.keyEnv", { name: p.env_var }) : t("models.providers.keyKeychain")}
+      </p>
+      {/* LL2: why it isn't in use, in plain words; the daemon's own line stays under Details. */}
+      {!p.available && (
+        <div className="small">
+          <p>
+            {p.error && /restart/i.test(p.error)
+              ? t("models.providers.restart")
+              : p.key === "env" && p.env_var && (!p.error || /environment variable|env:\S+ (?:is )?(?:not set|empty|missing)/i.test(p.error))
+                ? t("models.providers.envMissing", { name: p.env_var })
+                : t("models.providers.unavailable")}
+          </p>
+          {p.error && (
+            <details className="note-details">
+              <summary>{t("common.details")}</summary>
+              <p className="muted" dir="auto">
+                {p.error}
+              </p>
+            </details>
+          )}
+        </div>
+      )}
+      <div className="card-actions" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+        <button type="button" className="btn" onClick={onReplace} aria-label={t("models.providers.replaceLabel", { name: p.id })}>
+          {t("models.providers.replace")}
+        </button>
+        <button type="button" className="btn btn-danger-ghost" onClick={onRemove} aria-label={t("models.providers.removeLabel", { name: p.id })}>
+          {t("models.providers.remove")}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function RemoveProviderDialog({ provider, onClose, onRemoved }: { provider: SavedKeyProvider; onClose: () => void; onRemoved: () => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [refused, setRefused] = useState("");
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await aiKeysApi.remove(provider.id);
+      if (r.removed) {
+        onRemoved();
+        return;
+      }
+      setRefused(r.reason === "not_found" ? t("onboarding.byok.form.error.not_found") : t("onboarding.byok.form.error.not_editable"));
+    } catch (err) {
+      setError(err);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <Dialog
+      title={t("models.providers.removeDialog.title", { name: provider.id })}
+      description={provider.key === "env" ? t("models.providers.removeDialog.descriptionEnv") : t("models.providers.removeDialog.description")}
+      onClose={onClose}
+    >
+      {refused && (
+        <p role="alert" className="note note-error">
+          {refused}
+        </p>
+      )}
+      <ErrorNote error={error} />
+      <div className="dialog-actions">
+        <button type="button" className="btn" onClick={onClose} disabled={busy} data-autofocus="">
+          {t("common.cancel")}
+        </button>
+        <button type="button" className="btn btn-danger" onClick={() => void remove()} disabled={busy}>
+          {busy ? <Spinner label={t("models.providers.removing")} /> : t("models.providers.remove")}
+        </button>
+      </div>
+    </Dialog>
   );
 }
 
@@ -220,6 +422,7 @@ function ModelCard({
   error,
   fit,
   onInstall,
+  onCancel,
 }: {
   model: ModelInfo;
   role: ModelRole;
@@ -234,11 +437,41 @@ function ModelCard({
   error?: string;
   fit?: FitReport | null;
   onInstall: () => void;
+  /** Resolves `false` if nothing was cancelled (the request failed or the install had ended). */
+  onCancel: () => Promise<boolean>;
 }) {
   const t = useT();
   const busy = progress && (progress.phase === "downloading" || progress.phase === "verifying");
   const failed = progress?.phase === "failed";
+  const cancelled = isCancelled(progress);
+  // After Cancel the button goes away: move focus to Resume so keyboard users keep their place.
+  const [cancelling, setCancelling] = useState(false);
+  const actionRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!busy && cancelling) {
+      setCancelling(false);
+      actionRef.current?.focus();
+    }
+  }, [busy, cancelling]);
   const installed = model.installed || progress?.phase === "installed";
+  // LL2: Install turns into Cancel, and Cancel goes away once installed: keep keyboard focus in
+  // the card (on Cancel, then on the card's title or Retry install) instead of dropping it to the page.
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const focusIn = useRef<"cancel" | "title" | null>(null);
+  useEffect(() => {
+    if (busy) {
+      if (focusIn.current === "cancel") cancelRef.current?.focus();
+      // Remembered while it lasts: Cancel unmounts without a blur event.
+      focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
+    } else if (focusIn.current === "title") {
+      // Installed: the name; failed (the request or the download): its Retry install. Only when
+      // focus went with Cancel, never from wherever the user moved to meanwhile.
+      focusIn.current = null;
+      const at = document.activeElement;
+      if (!at || at === document.body || !at.isConnected) (installed ? titleRef.current : actionRef.current)?.focus();
+    }
+  });
   const pct = progress ? percent(progress.downloaded, progress.total || model.size_bytes) : 0;
   const labelId = `model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   const modelFit = fit?.models.find((f) => f.id === model.id);
@@ -247,7 +480,7 @@ function ModelCard({
     <li className="card model-card" aria-labelledby={labelId} data-model-id={model.id}>
       <div className="card-head">
         <span className="model-title">
-          <span id={labelId} className="card-title">
+          <span id={labelId} ref={titleRef} className="card-title" tabIndex={-1}>
             {name}
           </span>
           <bdi dir="ltr" className="model-id">
@@ -279,18 +512,41 @@ function ModelCard({
               total: formatBytes(progress.total || model.size_bytes),
             })}
           </span>
+          <div className="card-actions">
+            <button
+              ref={cancelRef}
+              type="button"
+              className="btn btn-ghost"
+              aria-label={t("models.cancelLabel", { model: name })}
+              disabled={cancelling}
+              onClick={() => {
+                setCancelling(true);
+                void onCancel().then((ok) => ok || setCancelling(false));
+              }}
+            >
+              {t("models.cancel")}
+            </button>
+          </div>
         </div>
       )}
-      {(failed || error) && (
-        <p className="note note-error" role="alert">
-          {progress?.error || error || t("models.installFailed")}
-        </p>
-      )}
+      <DownloadFailureNote t={t} progress={progress} error={error} fallback={t("models.installFailed")} />
+      {/* LL2: an install that finishes while the page is open is said once. */}
+      <span className="visually-hidden" role="status">
+        {progress?.phase === "installed" ? t("models.installedAnnounce", { model: name }) : ""}
+      </span>
 
       {!installed && !busy && (
         <div className="card-actions">
-          <button type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
-            {failed || error ? t("models.retryInstall") : t("models.install")}
+          <button
+            ref={actionRef}
+            type="button"
+            className={best ? "btn btn-primary" : "btn"}
+            onClick={(e) => {
+              if (document.activeElement === e.currentTarget) focusIn.current = "cancel";
+              onInstall();
+            }}
+          >
+            {cancelled ? t("models.resume") : failed || error ? t("models.retryInstall") : t("models.install")}
           </button>
         </div>
       )}

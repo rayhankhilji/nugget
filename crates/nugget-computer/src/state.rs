@@ -7,18 +7,25 @@ use std::sync::{Arc, Mutex};
 use nugget_a11y::role::Role;
 use nugget_a11y::{ComputerUse, ElementId, UiNode, UiTree, WindowId, WindowInfo, WindowSel};
 use nugget_core::{Error, Result};
+use nugget_policy::preview::{FieldValue, display_text};
 
 use crate::config::ComputerConfig;
 
 /// Longest piece of dialog text kept as risk context, and how many pieces.
 const CONTEXT_TEXT_MAX: usize = 200;
 const CONTEXT_ITEMS_MAX: usize = 24;
+/// How many send confirmations are remembered between `describe` and `call`.
+const FROZEN_MAX: usize = 8;
+/// Longest item name added to a Delete confirmation, in characters.
+const ITEM_NAME_MAX: usize = 80;
 
 pub(crate) struct Shared {
     pub cu: Arc<dyn ComputerUse>,
     pub config: ComputerConfig,
     /// Most recent first; one tree per window.
     cache: Mutex<VecDeque<UiTree>>,
+    /// What a send's confirmation showed, by call (see [`Frozen`]), oldest first.
+    frozen: Mutex<VecDeque<(String, Frozen)>>,
     /// The window that last had keyboard focus as far as a snapshot showed: the one a
     /// `WindowSel::Focused` snapshot returned, or one the backend marked focused. Keyboard tools
     /// without an `element` are described and observed from it, not from whichever window was
@@ -28,6 +35,21 @@ pub(crate) struct Shared {
     /// them even if a later refresh shows them: what appeared after the gate was never
     /// classified. An id leaves the set when a classification finds it.
     unclassified: Mutex<HashSet<ElementId>>,
+}
+
+/// The fields a send or submit was described with, so `call` presses only if they still hold
+/// exactly what the user approved.
+#[derive(Debug, Clone)]
+pub(crate) struct Frozen {
+    /// The control that sends.
+    pub element: ElementId,
+    pub window: WindowId,
+    /// What was shown, for naming what changed.
+    pub fields: Vec<FieldValue>,
+    /// [`FreezeView::digest`] at describe time.
+    pub digest: String,
+    /// The digest binds the item the action applies to (a Delete).
+    pub with_subject: bool,
 }
 
 /// An element found in a cached snapshot.
@@ -53,9 +75,48 @@ impl Shared {
             cu,
             config,
             cache: Mutex::new(VecDeque::new()),
+            frozen: Mutex::new(VecDeque::new()),
             keyboard: Mutex::new(None),
             unclassified: Mutex::new(HashSet::new()),
         })
+    }
+
+    fn frozen(&self) -> std::sync::MutexGuard<'_, VecDeque<(String, Frozen)>> {
+        self.frozen.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Remember what the confirmation of the call `key` showed (replacing an older one).
+    pub fn freeze(&self, key: String, f: Frozen) {
+        let mut q = self.frozen();
+        q.retain(|(k, _)| k != &key);
+        while q.len() >= FROZEN_MAX {
+            q.pop_front();
+        }
+        q.push_back((key, f));
+    }
+
+    /// Take (and forget) what the call `key` was described with.
+    pub fn thaw(&self, key: &str) -> Option<Frozen> {
+        let mut q = self.frozen();
+        let i = q.iter().position(|(k, _)| k == key)?;
+        q.remove(i).map(|(_, f)| f)
+    }
+
+    /// The [`FreezeView`] of `id`, from the cached snapshots.
+    pub fn freeze_view(
+        &self,
+        id: &ElementId,
+        with_subject: bool,
+    ) -> Option<(WindowId, FreezeView)> {
+        let c = self.cache();
+        c.iter()
+            .find_map(|t| freeze_view(t, id, with_subject).map(|v| (t.window.id.clone(), v)))
+    }
+
+    /// The item an action on `id` applies to (see [`subject_item`]), from the cached snapshots.
+    pub fn subject_item(&self, id: &ElementId) -> Option<(&'static str, String)> {
+        let c = self.cache();
+        c.iter().find_map(|t| subject_item(t, id))
     }
 
     fn cache(&self) -> std::sync::MutexGuard<'_, VecDeque<UiTree>> {
@@ -238,6 +299,174 @@ fn found_in(tree: &UiTree, id: &ElementId) -> Option<Found> {
         ancestors,
         fields,
     })
+}
+
+/// The dialog around `path`'s last node, else the window's root.
+fn scope_of<'a>(tree: &'a UiTree, path: &[&'a UiNode]) -> &'a UiNode {
+    path.iter()
+        .rev()
+        .find(|n| n.role == Role::Dialog)
+        .copied()
+        .unwrap_or(&tree.root)
+}
+
+/// What a control at the end of `path` sends: the nearest container around it that holds
+/// fields (its form or pane), stopping at its dialog; the window when nothing nearer does. So a
+/// page-controlled "To" field elsewhere in the window is not mixed in.
+fn send_scope<'a>(tree: &'a UiTree, path: &[&'a UiNode]) -> &'a UiNode {
+    for n in path.iter().rev().skip(1) {
+        if n.role == Role::Dialog || n.iter().any(is_sent_field) {
+            return n;
+        }
+    }
+    &tree.root
+}
+
+/// Is `n` a field whose contents a send or submit carries? Search fields are not.
+fn is_sent_field(n: &UiNode) -> bool {
+    matches!(n.role, Role::TextField | Role::TextArea | Role::ComboBox)
+        || (n.states.editable && matches!(n.role, Role::Document | Role::Unknown))
+}
+
+fn field_value(n: &UiNode) -> FieldValue {
+    let label = [&n.name, &n.placeholder, &n.description]
+        .into_iter()
+        .flatten()
+        .find(|s| !s.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| n.role.as_str().replace('_', " "));
+    let secret = crate::risk::is_secret_field(n);
+    let value = if n.states.secure {
+        None
+    } else {
+        n.value.clone()
+    };
+    FieldValue::new(label, value, secret)
+}
+
+/// The editable fields that activating `id` sends (see [`send_scope`]), all of them, in screen
+/// order, with their full values. `None` when `id` is not in `tree`.
+pub(crate) fn send_fields(tree: &UiTree, id: &ElementId) -> Option<Vec<FieldValue>> {
+    let mut path = Vec::new();
+    if !path_to(&tree.root, id, &mut path) {
+        return None;
+    }
+    Some(
+        send_scope(tree, &path)
+            .iter()
+            .filter(|n| is_sent_field(n))
+            .map(field_value)
+            .collect(),
+    )
+}
+
+/// What a confirmation of an activation of `id` binds: the control itself (role, name and the
+/// item it acts on) and the fields it sends.
+#[derive(Debug, Clone)]
+pub(crate) struct FreezeView {
+    pub control: Vec<String>,
+    pub fields: Vec<FieldValue>,
+}
+
+impl FreezeView {
+    pub fn digest(&self) -> String {
+        let control: Vec<&str> = self.control.iter().map(String::as_str).collect();
+        nugget_policy::preview::freeze_digest(&control, &self.fields)
+    }
+}
+
+/// The [`FreezeView`] of `id` in `tree`, `None` when it is not there.
+/// `with_subject` also binds the item the action applies to ([`subject_item`]), for a Delete.
+pub(crate) fn freeze_view(tree: &UiTree, id: &ElementId, with_subject: bool) -> Option<FreezeView> {
+    let node = tree.find(id)?;
+    let subject = with_subject
+        .then(|| subject_item(tree, id))
+        .flatten()
+        .map(|(how, item)| format!("{how}: {item}"))
+        .unwrap_or_default();
+    Some(FreezeView {
+        control: vec![
+            node.role.as_str().to_string(),
+            node.name.clone().unwrap_or_default(),
+            subject,
+        ],
+        fields: send_fields(tree, id)?,
+    })
+}
+
+/// A row's own name, else the text of its first text children.
+fn row_name(n: &UiNode) -> Option<String> {
+    if let Some(name) = n.name.as_deref().filter(|s| !s.trim().is_empty()) {
+        return Some(name.to_string());
+    }
+    let text: Vec<&str> = n
+        .iter()
+        .skip(1)
+        .filter(|c| c.role.is_text() || c.role == Role::Heading)
+        .filter_map(|c| c.name.as_deref().or(c.value.as_deref()))
+        .filter(|s| !s.trim().is_empty())
+        .take(3)
+        .collect();
+    (!text.is_empty()).then(|| text.join(" "))
+}
+
+const ROW_ROLES: [Role; 3] = [Role::ListItem, Role::Row, Role::Cell];
+const COLLECTION_ROLES: [Role; 5] = [
+    Role::List,
+    Role::ListItem,
+    Role::Table,
+    Role::Row,
+    Role::Cell,
+];
+
+/// What an action on `id` (a Delete, say) applies to, for its confirmation:
+/// - `"in"`: the row the control sits in (a per-row button);
+/// - `"selected"`: the selected row of a list, table or tree in its dialog or window;
+/// - `"open"`: the heading of its dialog, or of the window when the window clearly shows one
+///   item (a single heading and no list or table: a message or document view).
+///
+/// The text is screen text, sanitized and bounded.
+pub(crate) fn subject_item(tree: &UiTree, id: &ElementId) -> Option<(&'static str, String)> {
+    let mut path = Vec::new();
+    if !path_to(&tree.root, id, &mut path) {
+        return None;
+    }
+    let clean = |s: String| {
+        let t = display_text(&s, ITEM_NAME_MAX);
+        (!t.is_empty()).then_some(t)
+    };
+    let own = path.last()?;
+    if let Some(row) = path
+        .iter()
+        .rev()
+        .skip(1)
+        .find(|n| matches!(n.role, Role::ListItem | Role::Row))
+        && let Some(t) = row_name(row).and_then(clean)
+        && own.name.as_deref().is_none_or(|n| n.trim() != t)
+    {
+        return Some(("in", t));
+    }
+    let scope = scope_of(tree, &path);
+    if let Some(t) = scope
+        .iter()
+        .find(|n| n.states.selected && ROW_ROLES.contains(&n.role) && n.id != own.id)
+        .and_then(row_name)
+        .and_then(clean)
+    {
+        return Some(("selected", t));
+    }
+    let heading = |n: &UiNode| n.name.clone().or_else(|| n.value.clone()).and_then(clean);
+    let in_dialog = scope.role == Role::Dialog;
+    let headings: Vec<&UiNode> = scope.iter().filter(|n| n.role == Role::Heading).collect();
+    let item_view = in_dialog
+        || (headings.len() == 1 && !scope.iter().any(|n| COLLECTION_ROLES.contains(&n.role)));
+    if item_view {
+        return headings
+            .first()
+            .and_then(|n| heading(n))
+            .map(|t| ("open", t));
+    }
+    None
 }
 
 /// Run a backend call on the blocking pool (backends talk to the OS synchronously).

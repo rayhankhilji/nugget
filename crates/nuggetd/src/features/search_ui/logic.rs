@@ -84,19 +84,12 @@ impl Zone {
 /// not sorted it yet (pending, off, failed). No PII was found, no sensitivity rule matched, and
 /// no finished triage said sensitive. Such items stay private (never sent to cloud models), but
 /// clients label them more quietly than a confirmed sensitive item.
+/// The same rule as the vault and graph views (`nugget_retrieve::is_confirmed_sensitive`); an
+/// item with no `sensitive` flag at all (not written by ingest) is not called unsorted.
 pub(crate) fn unsorted_private(metadata: &Value) -> bool {
-    if !nugget_retrieve::is_sensitive(metadata) {
-        return false;
-    }
-    let pii = metadata["pii"].as_object().is_some_and(|o| !o.is_empty());
-    let rule = metadata["sensitive_rule"].is_string();
-    let triage = &metadata["triage"];
-    let state = triage["state"].as_str();
-    let judged = matches!(state, Some("done") if triage["sensitive"] == Value::Bool(true))
-        // Items from before triage existed were labelled when they were indexed.
-        || state.is_none()
-        || state == Some("skipped");
-    !(pii || rule || judged)
+    nugget_retrieve::is_sensitive(metadata)
+        && metadata.get("sensitive").is_some()
+        && !nugget_retrieve::is_confirmed_sensitive(metadata)
 }
 
 /// What an item is, for the kind facet and the result badges.
@@ -282,6 +275,9 @@ pub(crate) fn dates_of(item: &Item) -> ItemDates {
     let m = &item.metadata;
     ItemDates {
         extracted_date: text(&m["extracted"]["date"]),
+        frontmatter_date: text(&m["extracted"]["frontmatter"]["date"]),
+        frontmatter_created: text(&m["extracted"]["frontmatter"]["created"]),
+        title: item.title.clone(),
         event_start: text(&m["extracted"]["start"])
             .or_else(|| text(&m["start"]["date_time"]))
             .or_else(|| text(&m["start"]["date"])),
@@ -794,6 +790,9 @@ mod tests {
     ) -> ItemDates {
         ItemDates {
             extracted_date: extracted.map(str::to_owned),
+            frontmatter_date: None,
+            frontmatter_created: None,
+            title: None,
             event_start: event.map(str::to_owned),
             source_modified_at: modified.map(dt),
             created_at: dt("2020-01-01T00:00:00Z"),

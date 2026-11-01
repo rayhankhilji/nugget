@@ -9,6 +9,8 @@
 //!    least the remaining bytes + 10% of the size + 1 GiB, and treats an unreadable free-space value
 //!    as an error.
 //! 3. **Resumable parallel download** with per-part retry and backoff, into a staging directory.
+//!    Failures are reported within seconds with a [`FailReason`] (offline, HTTP error, captive
+//!    portal, stall, ...); [`ModelStore::cancel_install`] stops a download and keeps its bytes.
 //! 4. **Streaming SHA-256** of the staged file; a mismatch wipes the staging directory.
 //! 5. **Atomic install** into content-addressed storage (`blobs/sha256/<hex>`), then a slot update
 //!    that keeps the previous version for [`ModelStore::rollback`]. Egress is recorded.
@@ -49,7 +51,9 @@ mod runtime_store;
 mod store;
 mod trust;
 
-pub use download::{DownloadOptions, EGRESS_FEATURE, Phase, Progress, RUNTIME_EGRESS_FEATURE};
+pub use download::{
+    DownloadOptions, EGRESS_FEATURE, FailReason, Phase, Progress, RUNTIME_EGRESS_FEATURE,
+};
 pub use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 pub use hardware::{GpuKind, Hardware, detect_hardware, recommend};
 pub use manifest::{

@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   api,
   errorMessage,
+  runtimeRetry,
   events,
   isMethodNotFound,
   PROTOCOL_VERSION,
   type Capabilities,
+  type DiskStatus,
   type IngestStatus,
   type KnowledgeStatus,
   type ProviderInfo,
@@ -14,12 +16,13 @@ import {
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { fileUrl, vaultLinks } from "../knowledge";
-import { formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
+import { formatBytes, formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
 import { Announce, useAnnouncer, useIngestAnnouncements } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { UpdateSettings } from "../components/UpdateSettings";
 import { BackupSettings } from "../components/BackupSettings";
+import { NoTrayControls, useShellInfo, VersionBanner } from "../components/DaemonControls";
 import { formatList, formatNumber, Trans, useT, type MessageKey } from "../i18n";
 import { triageLine } from "../triageLine";
 
@@ -30,6 +33,7 @@ export function StatusPage() {
   const ingest = useAsync(api.ingestStatus);
   const runtime = useAsync(api.runtimeStatus);
   const knowledge = useAsync(api.knowledgeStatus);
+  const [shell, setShell] = useShellInfo();
 
   // Light auto-refresh while the page is open. Methods the daemon lacks are not re-polled.
   const { reload } = status;
@@ -48,12 +52,22 @@ export function StatusPage() {
     }, 10_000);
     return () => window.clearInterval(timer);
   }, [reload, reloadIngest, reloadRuntime, reloadKnowledge, ingestMissing, runtimeMissing, knowledgeMissing]);
+  // KK1: while a model warms up or waits to restart, follow it closely (elapsed time, retry).
+  const runtimeBusy = (runtime.data ?? []).some((r) => r.state === "starting" || r.state === "stopping" || (r.state === "failed" && (r.retry_in_ms ?? 0) > 0));
+  useEffect(() => {
+    if (!runtimeBusy || runtimeMissing) return;
+    const timer = window.setInterval(reloadRuntime, 1_000);
+    return () => window.clearInterval(timer);
+  }, [runtimeBusy, runtimeMissing, reloadRuntime]);
   const refreshAll = () => {
     status.reload();
     ingest.reload();
     runtime.reload();
     knowledge.reload();
   };
+
+  // One announcer for the page: indexing passes and local model state changes.
+  const [announcement, announce] = useAnnouncer();
 
   const s = status.data;
   // The main status call stands for the daemon: while it is failing or loading for the first time,
@@ -73,6 +87,7 @@ export function StatusPage() {
           </button>
         }
       />
+      <VersionBanner />
       <ErrorNote error={status.error} onRetry={refreshAll} />
       {firstLoad && <Loading label={t("status.loading")} lines={4} />}
       {s && (
@@ -113,6 +128,7 @@ export function StatusPage() {
               {t("status.auditTampered")}
             </p>
           )}
+          <DiskNote disk={s.disk} />
 
           <h2>{t("status.providers")}</h2>
           {s.providers.length === 0 ? (
@@ -144,18 +160,20 @@ export function StatusPage() {
       )}
 
       {/* While the page shows its one error or loading state, sections with nothing to show are left out. */}
-      {(!quiet || ingest.data) && <IndexingCard data={ingest.data} error={quiet ? null : ingest.error} loading={!quiet && ingest.loading} onRetry={ingest.reload} />}
+      {(!quiet || ingest.data) && <IndexingCard data={ingest.data} error={quiet ? null : ingest.error} loading={!quiet && ingest.loading} onRetry={ingest.reload} announce={announce} />}
       {(!quiet || runtime.data) && (
       <RuntimeCard
         data={runtime.data}
         error={quiet ? null : runtime.error}
         loading={!quiet && runtime.loading}
         onRetry={runtime.reload}
+        announce={announce}
         // "No AI providers" above already offers Go to Models: one button per next step.
         offerModels={!s || s.providers.length > 0}
       />
       )}
       {(!quiet || knowledge.data) && <KnowledgeCard data={knowledge.data} error={quiet ? null : knowledge.error} loading={!quiet && knowledge.loading} onRetry={knowledge.reload} />}
+      {!quiet && shell && <NoTrayControls info={shell} onChange={setShell} />}
       {!quiet && <BackupSettings />}
       <UpdateSettings />
 
@@ -175,8 +193,44 @@ export function StatusPage() {
             }}
           />
         </p>
+        {shell?.logs && (
+          <p className="muted tech-details-body">
+            <Trans
+              k="status.logs"
+              args={{ dir: shell.logs.dir }}
+              tags={{
+                code: (c) => (
+                  <bdi dir="ltr">
+                    <code>{c}</code>
+                  </bdi>
+                ),
+              }}
+            />
+          </p>
+        )}
       </details>
+      <Announce message={announcement} />
     </div>
+  );
+}
+
+/** KK1: a full or nearly full data disk (GG6-25), in plain words; nothing when there is room. */
+function DiskNote({ disk }: { disk: DiskStatus | null | undefined }) {
+  const t = useT();
+  // Unknown levels (a newer daemon) show nothing rather than a false alarm.
+  if (!disk || (disk.level !== "low" && disk.level !== "full")) return null;
+  const free = disk.free_bytes != null ? formatBytes(disk.free_bytes) : null;
+  if (disk.level === "low") {
+    return (
+      <p className="note" role="status">
+        {t("status.disk.low", { free: free ?? "–" })}
+      </p>
+    );
+  }
+  return (
+    <p className="note note-error" role="alert">
+      {free != null ? t("status.disk.full", { free }) : t("status.disk.fullUnknown")}
+    </p>
   );
 }
 
@@ -288,11 +342,13 @@ function IndexingCard({
   error,
   loading,
   onRetry,
+  announce,
 }: {
   data: IngestStatus | undefined;
   error: unknown;
   loading: boolean;
   onRetry: () => void;
+  announce: (text: string) => void;
 }) {
   const t = useT();
   const now = useNow();
@@ -305,14 +361,12 @@ function IndexingCard({
     }
   });
   // The numbers below refresh silently; an indexing pass is announced when it starts and ends.
-  const [announcement, announce] = useAnnouncer();
   useIngestAnnouncements(announce, (id) => data?.sources.find((s) => s.id === id));
 
   const failing = (data?.sources ?? []).filter((s) => s.last_error || s.state === "error");
   return (
     <section className="status-card" aria-labelledby="indexing-title">
       <h2 id="indexing-title">{t("status.indexing")}</h2>
-      <Announce message={announcement} />
       {isMethodNotFound(error) ? (
         <NotAvailable />
       ) : (
@@ -409,20 +463,130 @@ const RUNTIME_STATE: Record<RuntimeState, { label: MessageKey; tone: "neutral" |
   failed: { label: "status.runtime.failed", tone: "bad" },
 };
 
+/** KK1: what a starting or failed local model is doing, with Retry and the server's last words. */
+function RuntimeStateNote({ r, rowId, onChanged }: { r: RuntimeInfo; rowId: string; onChanged: () => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+  // LL2: Retry goes away once the model starts again; keep keyboard focus on its row.
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const hadFocus = useRef(false);
+  useEffect(() => {
+    if (r.state !== "failed" && hadFocus.current) {
+      hadFocus.current = false;
+      // Only when Retry took focus with it: never pull focus back from where the user went since.
+      const at = document.activeElement;
+      if (!at || at === document.body || !at.isConnected) document.getElementById(rowId)?.focus();
+    }
+  }, [r.state, rowId]);
+  if (r.state === "starting") {
+    if (r.state_ms == null) return null;
+    const elapsed = r.state_ms / 1000;
+    const expected = r.expected_ms != null && r.expected_ms > 0 ? r.expected_ms / 1000 : null;
+    const pct = expected ? Math.min(95, Math.round((elapsed / expected) * 100)) : null;
+    const text = expected
+      ? t("status.runtime.warming", { elapsed: formatDuration(elapsed), expected: formatDuration(expected) })
+      : t("status.runtime.warmingNoEstimate", { elapsed: formatDuration(elapsed) });
+    return (
+      <div className="small">
+        <div>{text}</div>
+        {pct != null && <progress max={100} value={pct} aria-label={t("status.runtime.warmingLabel")} aria-valuetext={text} />}
+      </div>
+    );
+  }
+  if (r.state !== "failed") return r.error ? <div className="note note-error small">{r.error}</div> : null;
+  const retry = async () => {
+    if (busy) return;
+    hadFocus.current = document.activeElement === retryRef.current;
+    setBusy(true);
+    setErr(null);
+    try {
+      await runtimeRetry(r.role);
+    } catch (e) {
+      // Retry stays on screen with the error: a later automatic restart moves no focus.
+      hadFocus.current = false;
+      setErr(e);
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
+  const retryIn = r.retry_in_ms != null && r.retry_in_ms > 0 ? Math.ceil(r.retry_in_ms / 1000) : null;
+  return (
+    <>
+      {r.error && <div className="note note-error small">{r.error}</div>}
+      {r.gave_up ? (
+        <div className="small">{t("status.runtime.gaveUp")}</div>
+      ) : (
+        retryIn != null && <div className="small">{t("status.runtime.retryIn", { time: formatDuration(retryIn) })}</div>
+      )}
+      {/* aria-disabled, not disabled: a disabled button would drop keyboard focus to the page. */}
+      <button
+        ref={retryRef}
+        type="button"
+        className="btn btn-small"
+        onClick={() => void retry()}
+        aria-disabled={busy || undefined}
+        aria-busy={busy}
+        aria-label={busy ? undefined : t("status.runtime.retryLabel", { model: r.model_id })}
+      >
+        {busy ? t("status.runtime.retrying") : t("status.runtime.retry")}
+      </button>
+      {r.detail && (
+        <details className="small">
+          <summary>{t("status.runtime.details")}</summary>
+          <bdi dir="ltr">
+            <code>{r.detail}</code>
+          </bdi>
+          <div>{t("status.runtime.logHint", { file: `llama-server-${r.role}.log` })}</div>
+        </details>
+      )}
+      <ErrorNote error={err} />
+    </>
+  );
+}
+
 function RuntimeCard({
   data,
   error,
   loading,
   onRetry,
+  announce,
   offerModels = true,
 }: {
   data: RuntimeInfo[] | undefined;
   error: unknown;
   loading: boolean;
   onRetry: () => void;
+  announce: (text: string) => void;
   offerModels?: boolean;
 }) {
   const t = useT();
+  // LL2: say when a local model becomes ready or fails (the page polls; nothing else would).
+  // Ready, and the first failure since the model was last ready: a crash loop's restarts are
+  // shown on the card, not read out on every cycle.
+  const seen = useRef<Map<string, RuntimeState> | null>(null);
+  const failedSaid = useRef(new Set<string>());
+  useEffect(() => {
+    if (!data) return;
+    const before = seen.current;
+    const key = (r: RuntimeInfo) => `${r.provider}\u0000${r.model_id}`;
+    seen.current = new Map(data.map((r) => [key(r), r.state]));
+    if (!before) return;
+    const changed = data.filter((r) => {
+      const was = before.get(key(r));
+      if (was === undefined || was === r.state) return false;
+      if (r.state === "ready") {
+        failedSaid.current.delete(key(r));
+        return true;
+      }
+      if (r.state !== "failed" || failedSaid.current.has(key(r))) return false;
+      failedSaid.current.add(key(r));
+      return true;
+    });
+    if (changed.length > 0)
+      announce(changed.map((r) => t("status.runtime.announce", { model: r.model_id, state: t(RUNTIME_STATE[r.state]!.label) })).join(" "));
+  }, [data, announce, t]);
   return (
     <section className="status-card" aria-labelledby="runtime-title">
       <h2 id="runtime-title">{t("status.localRuntime")}</h2>
@@ -453,9 +617,10 @@ function RuntimeCard({
                   {data.map((r) => {
                     const known = RUNTIME_STATE[r.state];
                     const st = known ? { label: t(known.label), tone: known.tone } : { label: r.state, tone: "neutral" as const };
+                    const rowId = `runtime-${r.provider}-${r.model_id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
                     return (
                       <tr key={`${r.provider}\u0000${r.model_id}`}>
-                        <th scope="row">
+                        <th scope="row" id={rowId} tabIndex={-1}>
                           <bdi dir="ltr">
                             <code>{r.model_id}</code>
                           </bdi>
@@ -471,7 +636,7 @@ function RuntimeCard({
                         </td>
                         <td>
                           <Badge tone={st.tone}>{st.label}</Badge>
-                          {r.error && <div className="note note-error small">{r.error}</div>}
+                          <RuntimeStateNote r={r} rowId={rowId} onChanged={onRetry} />
                         </td>
                         <td>
                           <code>{r.provider}</code>

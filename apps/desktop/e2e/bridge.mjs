@@ -36,7 +36,7 @@ const updateStatus = {
   last_error: null,
 };
 const chord = { kind: "chord", chord: "Ctrl+Alt+Space" };
-let platformSettings = { notifications: { enabled: false, brief: true, agent: true, quiet: null }, quit_stops_daemon: false, paused_sources: [] };
+let platformSettings = { notifications: { enabled: false, brief: true, agent: true, quiet: null }, quit_daemon: "ask", paused_sources: [] };
 const doubletapSettings = { enabled: false, trigger: chord, app_providers: {}, excluded_apps: [], allow_terminals: false };
 const doubletapStatus = {
   platform: "linux",
@@ -118,6 +118,14 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     platform_settings_get: () => platformSettings,
     platform_settings_set: (a) => (platformSettings = { ...platformSettings, ...(a?.settings ?? {}), paused_sources: platformSettings.paused_sources }),
     shell_labels_set: (a) => Object.keys(a?.labels ?? {}).length,
+    // GG6-8/10/20: a tray, the versions in step, nothing to ask.
+    shell_info: () => ({ has_tray: true, indexing_paused: false, logs: null }),
+    daemon_version: () => ({ app_version: "0.0.1", daemon_version: "0.0.1", state: "in_step", reason: null, detail: null }),
+    daemon_version_recheck: () => ({ app_version: "0.0.1", daemon_version: "0.0.1", state: "in_step", reason: null, detail: null }),
+    quit_answer: () => null,
+    quit_cancel: () => null,
+    quit_ack: () => false,
+    indexing_pause_toggle: () => ({ has_tray: true, indexing_paused: false, logs: null }),
     deeplink_take: () => null,
     quickask_open_main: () => null,
     // JJ2: no quick-ask handover is waiting for the main window.
@@ -126,6 +134,7 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     doubletap_settings_set: (a) => a?.settings ?? doubletapSettings,
     doubletap_status: () => doubletapStatus,
     doubletap_request_permissions: () => doubletapStatus,
+    doubletap_open_privacy_settings: () => false,
     doubletap_default_excluded: () => [],
     doubletap_fire: () => null,
     overlay_state: () => ({ phase: "done", text: "", provider: null, locality: null, citations: 0, excluded_sensitive: 0, message: null, verified: null, method: null }),

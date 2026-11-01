@@ -18,7 +18,7 @@ import { NEW_KIND_TITLE, NewKindForm, isNewKind } from "../sources/forms";
 import { Check } from "../sources/form";
 import { EMPTY_GOOGLE, GDRIVE_SCOPE, GOOGLE_API, googleSettings, type GoogleKind } from "../sources/kinds";
 import { Dialog } from "./Dialog";
-import { Spinner } from "./ui";
+import { describeError, Spinner } from "./ui";
 
 const KIND_BLURB: Record<SourceKind, MessageKey> = {
   files: "addSource.blurb.files",
@@ -170,7 +170,14 @@ function FormError({ error }: { error: unknown }) {
   const e = ApiError.from(error);
   return (
     <p className="note note-error" role="alert">
-      {e.isMethodNotFound ? t("common.notAvailableSentence") : e.isOffline ? t("common.offlineHint") : e.message}
+      {e.isMethodNotFound
+        ? t("common.notAvailableSentence")
+        : e.isOffline
+          ? t("common.offlineHint")
+          : // LL2: the daemon's own sentence (a duplicate folder, a bad path), else a plain one, never a shell's raw text.
+            error instanceof Error && !(error instanceof ApiError) && error.name === "Error"
+            ? e.message
+            : describeError(e, t).headline}
     </p>
   );
 }
@@ -192,12 +199,17 @@ function Actions({ onBack, busy, submitLabel, blocked }: { onBack: () => void; b
       <button type="button" className="btn" onClick={onBack} disabled={busy}>
         {t("common.back")}
       </button>
+      {/* LL2: busy is aria-disabled too (a disabled button would drop keyboard focus to the page
+          while saving); the click, also the one Enter in a field makes, is cancelled instead. */}
       <button
         type="submit"
         className="btn btn-primary"
-        disabled={busy}
-        aria-disabled={blocked ? true : undefined}
+        aria-disabled={blocked || busy ? true : undefined}
+        aria-busy={busy || undefined}
         aria-describedby={blocked ? hintId : undefined}
+        onClick={(e) => {
+          if (busy) e.preventDefault();
+        }}
       >
         {busy ? (
           <>
@@ -231,7 +243,9 @@ function NameField({ value, onChange, placeholder }: { value: string; onChange: 
   );
 }
 
-const isAbsolutePath = (p: string) => p.startsWith("/") || p.startsWith("~") || /^[A-Za-z]:[\\/]/.test(p);
+// `~` and `~/…` are the home folder (the daemon expands them, GG6-22); `~name` is not supported.
+const isAbsolutePath = (p: string) =>
+  p.startsWith("/") || p === "~" || p.startsWith("~/") || p.startsWith("~\\") || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("\\\\");
 
 /** Native folder picker, with a typed path as the fallback. */
 async function pickFolders(multiple: boolean): Promise<{ paths: string[]; error: string | null }> {
@@ -256,6 +270,21 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
   const [busy, setBusy] = useState(false);
   const save = useSaveSource(kind);
   const browseRef = useAutofocus<HTMLButtonElement>();
+  // LL2: a removed folder takes its Remove button with it: focus the next folder's Remove (or
+  // the one before it), else Choose folder.
+  const listRef = useRef<HTMLUListElement>(null);
+  const focusAfterRemove = useRef<number | null>(null);
+  useEffect(() => {
+    const i = focusAfterRemove.current;
+    if (i === null) return;
+    focusAfterRemove.current = null;
+    const buttons = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+    (buttons[Math.min(i, buttons.length - 1)] ?? browseRef.current)?.focus();
+  }, [roots, browseRef]);
+  const removeRoot = (i: number) => {
+    focusAfterRemove.current = i;
+    setRoots((rs) => rs.filter((_, j) => j !== i));
+  };
 
   const addRoots = (paths: string[]) => {
     setRoots((rs) => [...rs, ...paths.filter((p) => !rs.includes(p))]);
@@ -327,11 +356,11 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
       <fieldset className="field" aria-describedby={rootsError ? "roots-err" : undefined}>
         <legend>{t("addSource.folder.legend")}</legend>
         {roots.length > 0 ? (
-          <ul className="path-list">
-            {roots.map((r) => (
+          <ul className="path-list" ref={listRef}>
+            {roots.map((r, i) => (
               <li key={r}>
                 <code dir="ltr">{r}</code>
-                <button type="button" className="btn btn-ghost btn-small" onClick={() => setRoots((rs) => rs.filter((x) => x !== r))} aria-label={t("addSource.folder.removePath", { path: r })}>
+                <button type="button" className="btn btn-ghost btn-small" onClick={() => removeRoot(i)} aria-label={t("addSource.folder.removePath", { path: r })}>
                   {t("addSource.folder.remove")}
                 </button>
               </li>

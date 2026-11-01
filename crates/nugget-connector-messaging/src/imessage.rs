@@ -56,6 +56,38 @@ fn sql_err(e: rusqlite::Error) -> Error {
     Error::Storage(format!("Messages database: {e}"))
 }
 
+/// A text column, whatever SQLite holds there: invalid UTF-8 (which Messages does store) is
+/// decoded lossily instead of failing the whole read; a blob is read as text, a number as its
+/// digits.
+fn text_col(r: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<Option<String>> {
+    use rusqlite::types::ValueRef;
+    Ok(match r.get_ref(i)? {
+        ValueRef::Null => None,
+        ValueRef::Text(b) | ValueRef::Blob(b) => Some(String::from_utf8_lossy(b).into_owned()),
+        ValueRef::Integer(n) => Some(n.to_string()),
+        ValueRef::Real(f) => Some(f.to_string()),
+    })
+}
+
+/// A blob column (also when stored as text).
+fn bytes_col(r: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<Option<Vec<u8>>> {
+    use rusqlite::types::ValueRef;
+    Ok(match r.get_ref(i)? {
+        ValueRef::Text(b) | ValueRef::Blob(b) => Some(b.to_vec()),
+        _ => None,
+    })
+}
+
+/// An integer column; anything else (a stray text or blob) reads as `None`.
+fn int_col(r: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<Option<i64>> {
+    use rusqlite::types::ValueRef;
+    Ok(match r.get_ref(i)? {
+        ValueRef::Integer(n) => Some(n),
+        ValueRef::Real(f) => Some(f as i64),
+        _ => None,
+    })
+}
+
 /// Copy `db` (and its `-wal` / `-shm` companions) into `dir`; returns the copy's path.
 fn copy_db(db: &Path, dir: &Path, map_perm: bool) -> Result<PathBuf> {
     let name = db.file_name().unwrap_or_else(|| "db".as_ref());
@@ -170,9 +202,9 @@ fn read_book(conn: &Connection, book: &mut ContactBook) -> Result<()> {
         .query_map([], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, Option<String>>(2)?,
-                r.get::<_, Option<String>>(3)?,
+                text_col(r, 1)?,
+                text_col(r, 2)?,
+                text_col(r, 3)?,
             ))
         })
         .map_err(sql_err)?;
@@ -202,9 +234,7 @@ fn read_book(conn: &Connection, book: &mut ContactBook) -> Result<()> {
             .prepare("SELECT ZOWNER, ZFULLNUMBER FROM ZABCDPHONENUMBER")
             .map_err(sql_err)?;
         let rows = st
-            .query_map([], |r| {
-                Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?))
-            })
+            .query_map([], |r| Ok((int_col(r, 0)?, text_col(r, 1)?)))
             .map_err(sql_err)?;
         for row in rows {
             if let (Some(owner), Some(num)) = row.map_err(sql_err)?
@@ -227,9 +257,7 @@ fn read_book(conn: &Connection, book: &mut ContactBook) -> Result<()> {
             .prepare(&format!("SELECT ZOWNER, \"{addr}\" FROM ZABCDEMAILADDRESS"))
             .map_err(sql_err)?;
         let rows = st
-            .query_map([], |r| {
-                Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?))
-            })
+            .query_map([], |r| Ok((int_col(r, 0)?, text_col(r, 1)?)))
             .map_err(sql_err)?;
         for row in rows {
             if let (Some(owner), Some(mail)) = row.map_err(sql_err)?
@@ -302,9 +330,7 @@ pub fn read_conversations(
             .prepare("SELECT ROWID, id FROM handle")
             .map_err(sql_err)?;
         let rows = st
-            .query_map([], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
-            })
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, text_col(r, 1)?)))
             .map_err(sql_err)?;
         for row in rows {
             let (id, h) = row.map_err(sql_err)?;
@@ -331,10 +357,10 @@ pub fn read_conversations(
                 Ok((
                     r.get::<_, i64>(0)?,
                     ChatRow {
-                        guid: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                        identifier: r.get(2)?,
-                        display_name: r.get(3)?,
-                        style: r.get(4)?,
+                        guid: text_col(r, 1)?.unwrap_or_default(),
+                        identifier: text_col(r, 2)?,
+                        display_name: text_col(r, 3)?,
+                        style: int_col(r, 4)?,
                     },
                 ))
             })
@@ -352,11 +378,12 @@ pub fn read_conversations(
             .prepare("SELECT chat_id, handle_id FROM chat_handle_join ORDER BY chat_id, handle_id")
             .map_err(sql_err)?;
         let rows = st
-            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+            .query_map([], |r| Ok((int_col(r, 0)?, int_col(r, 1)?)))
             .map_err(sql_err)?;
         for row in rows {
-            let (c, h) = row.map_err(sql_err)?;
-            members.entry(c).or_default().push(h);
+            if let (Some(c), Some(h)) = row.map_err(sql_err)? {
+                members.entry(c).or_default().push(h);
+            }
         }
     }
 
@@ -377,10 +404,10 @@ pub fn read_conversations(
             .query_map([], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
-                    r.get::<_, Option<String>>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<i64>>(4)?,
+                    text_col(r, 1)?,
+                    text_col(r, 2)?,
+                    text_col(r, 3)?,
+                    int_col(r, 4)?,
                 ))
             })
             .map_err(sql_err)?;
@@ -423,16 +450,16 @@ pub fn read_conversations(
             Ok(MsgRow {
                 chat: r.get(0)?,
                 rowid: r.get(1)?,
-                text: r.get(2)?,
-                body: r.get(3)?,
-                date: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
-                from_me: r.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0,
-                handle: r.get::<_, Option<i64>>(6)?.unwrap_or(0),
-                associated: r.get::<_, Option<i64>>(7)?.unwrap_or(0),
-                item_type: r.get::<_, Option<i64>>(8)?.unwrap_or(0),
-                group_title: r.get(9)?,
-                other_handle: r.get::<_, Option<i64>>(10)?.unwrap_or(0),
-                group_action: r.get::<_, Option<i64>>(11)?.unwrap_or(0),
+                text: text_col(r, 2)?,
+                body: bytes_col(r, 3)?,
+                date: int_col(r, 4)?.unwrap_or(0),
+                from_me: int_col(r, 5)?.unwrap_or(0) != 0,
+                handle: int_col(r, 6)?.unwrap_or(0),
+                associated: int_col(r, 7)?.unwrap_or(0),
+                item_type: int_col(r, 8)?.unwrap_or(0),
+                group_title: text_col(r, 9)?,
+                other_handle: int_col(r, 10)?.unwrap_or(0),
+                group_action: int_col(r, 11)?.unwrap_or(0),
             })
         })
         .map_err(sql_err)?;
@@ -463,7 +490,16 @@ pub fn read_conversations(
         if n.is_multiple_of(2000) && cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let m = row.map_err(sql_err)?;
+        let m = match row {
+            Ok(m) => m,
+            // SQLite itself failed (corrupt, busy): the pass fails, nothing is deleted.
+            Err(e @ rusqlite::Error::SqliteFailure(..)) => return Err(sql_err(e)),
+            // One row of an unexpected shape: skip it, keep the rest.
+            Err(e) => {
+                tracing::warn!(error = %e, "unreadable Messages row skipped");
+                continue;
+            }
+        };
         let Some(chat) = chats.get(&m.chat) else {
             continue;
         };
@@ -899,6 +935,7 @@ mod tests {
             match f {
                 Found::Conversation(c) => messages += c.messages.len(),
                 Found::Keep(p) => keep_all |= p.is_empty(),
+                Found::Problem { .. } => {}
             }
             true
         })

@@ -5,7 +5,10 @@
 
 use rusqlite::Connection;
 
-use crate::search::{FIRST_CHUNK_SQL, SNIPPET_SQL, TEXT_SEARCH_SQL, TITLE_SEARCH_SQL};
+use crate::search::{
+    CHUNK_MATCHES_SQL, FIRST_CHUNK_SQL, PREFIX_SEARCH_SQL, SNIPPET_SQL, SUFFIX_SEARCH_SQL,
+    TEXT_SEARCH_SQL, TITLE_SEARCH_SQL,
+};
 use crate::types::{NewChunk, NewItem, content_hash};
 use crate::{Result, Store};
 
@@ -19,6 +22,9 @@ fn statements() -> Vec<(&'static str, String)> {
         ("snippet", SNIPPET_SQL.to_owned()),
         ("title search", TITLE_SEARCH_SQL.to_owned()),
         ("first chunk lookup", FIRST_CHUNK_SQL.to_owned()),
+        ("word-part prefix search", PREFIX_SEARCH_SQL.to_owned()),
+        ("word-part suffix search", SUFFIX_SEARCH_SQL.to_owned()),
+        ("word-part exclusion check", CHUNK_MATCHES_SQL.to_owned()),
         // search::search_vector
         (
             "vector hit detail lookup",

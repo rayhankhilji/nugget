@@ -26,12 +26,25 @@
 //! query (here) go through [`segment`], which rewrites each run of such characters as its
 //! overlapping bigrams (`星商事` → `星商 商事`). A query word becomes the phrase of its bigrams, so
 //! character order matters; a lone character matches as a bigram prefix. Other text is unchanged.
+//!
+//! **Spelling variants.** Before segmenting, indexed text and query words are [`fold`]ed: NFKC
+//! (`ＬＥＤ` → `LED`, `ｷｬﾝﾍﾟｰﾝ` → `キャンペーン`), Arabic light normalisation and ß → ss. The index
+//! (through `fts_normalize`, see [`index_form`]) also holds [`variants`] of some words after the
+//! text: Arabic words without their proclitics (`والكراسي` → `الكراسي`, `كراسي`) and German words
+//! with ä/ö/ü spelled ae/oe/ue, so `Königstraße`, `Konigstrasse` and `Koenigstrasse` all match.
+//!
+//! **Word parts.** When a query finds little, text search retries its words as parts of longer
+//! words ([`fallback_exprs`]): as prefixes in the main index (`sofreír` → `sofreírlo`) and as
+//! suffixes in `chunks_rev`, which holds each longer word spelled backwards ([`reversed_form`],
+//! through `fts_reversed`), so `Ausschuss` finds `Lenkungsausschuss` and `गाड़ी` `रेलगाड़ी`.
 
 use std::borrow::Cow;
 
 use rusqlite::Connection;
 use rusqlite::functions::FunctionFlags;
 use rusqlite::types::{Value, ValueRef};
+use unicode_normalization::char::is_combining_mark;
+use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 /// Most words used from a query (each word of a phrase counts).
 pub(crate) const MAX_QUERY_TERMS: usize = 32;
@@ -126,27 +139,169 @@ pub(crate) fn segment(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// Register `fts_segment(text)` ([`segment`] as SQL; non-text values pass through) on `conn`.
-/// The FTS triggers call it, so every connection that writes items or chunks needs it.
-pub(crate) fn register_functions(conn: &Connection) -> rusqlite::Result<()> {
+/// Arabic marks [`fold`] drops: tashkeel (fathatan to sukun, superscript alef) and tatweel.
+fn is_arabic_mark(c: char) -> bool {
+    matches!(c, '\u{064B}'..='\u{0652}' | '\u{0670}' | '\u{0640}')
+}
+
+/// `text` in NFKC (full-width Latin, half-width kana, ligatures and the like become their usual
+/// forms), with Arabic light normalisation (tashkeel and tatweel dropped, أ إ آ → ا, ة → ه,
+/// ى → ي) and ß → ss. Both the index and query words go through it.
+pub(crate) fn fold(text: &str) -> Cow<'_, str> {
+    let nfkc = if is_nfkc_quick(text.chars()) == IsNormalized::Yes {
+        Cow::Borrowed(text)
+    } else {
+        Cow::Owned(text.nfkc().collect())
+    };
+    let changes =
+        |c: char| is_arabic_mark(c) || matches!(c, 'أ' | 'إ' | 'آ' | 'ة' | 'ى' | 'ß' | 'ẞ');
+    if !nfkc.chars().any(changes) {
+        return nfkc;
+    }
+    let mut out = String::with_capacity(nfkc.len() + 8);
+    for c in nfkc.chars() {
+        match c {
+            c if is_arabic_mark(c) => {}
+            'أ' | 'إ' | 'آ' => out.push('ا'),
+            'ة' => out.push('ه'),
+            'ى' => out.push('ي'),
+            'ß' => out.push_str("ss"),
+            'ẞ' => out.push_str("SS"),
+            c => out.push(c),
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// Extra index forms of the words of [`fold`]ed `text`, space-separated (empty for most text):
+/// Arabic words without their proclitics, German words with ä/ö/ü spelled ae/oe/ue (`Königstrasse`
+/// → `Koenigstrasse`; `unicode61` already matches `Konigstrasse`).
+fn variants(text: &str) -> String {
+    let mut out = String::new();
+    for word in text.split(|c: char| !is_word_char(c)) {
+        if word.contains(['ä', 'ö', 'ü', 'Ä', 'Ö', 'Ü']) {
+            out.push(' ');
+            for c in word.chars() {
+                match c {
+                    'ä' => out.push_str("ae"),
+                    'ö' => out.push_str("oe"),
+                    'ü' => out.push_str("ue"),
+                    'Ä' => out.push_str("Ae"),
+                    'Ö' => out.push_str("Oe"),
+                    'Ü' => out.push_str("Ue"),
+                    c => out.push(c),
+                }
+            }
+        } else if word.starts_with(|c| matches!(c, '\u{0621}'..='\u{064A}')) {
+            arabic_stems(word, &mut out);
+        }
+    }
+    out
+}
+
+/// Append the forms of an Arabic `word` without its proclitics: a conjunction (و ف), a
+/// preposition before the article (ب ك ل), the article (ال, or ل + ال written لل). `والكراسي` →
+/// `الكراسي كراسي`. Like light stemmers, it cannot tell a clitic from a word's own first letter
+/// (`فاتوره` also gives `اتوره`); such extra forms only cost index space.
+fn arabic_stems(word: &str, out: &mut String) {
+    let mut push = |s: &str| {
+        out.push(' ');
+        out.push_str(s);
+    };
+    let mut rest = word;
+    if let Some(r) = rest.strip_prefix(['و', 'ف'])
+        && r.chars().count() >= 3
+    {
+        push(r);
+        rest = r;
+    }
+    if let Some(r) = rest.strip_prefix(['ب', 'ك', 'ل'])
+        && r.starts_with("ال")
+        && r.chars().count() >= 4
+    {
+        push(r);
+        rest = r;
+    }
+    if let Some(r) = rest.strip_prefix("ال").or_else(|| rest.strip_prefix("لل"))
+        && r.chars().count() >= 2
+    {
+        push(r);
+    }
+}
+
+/// What the FTS tables index for `text` (the `fts_normalize` SQL function): [`fold`]ed and
+/// [`segment`]ed, then the [`variants`] of its words on a line of their own (after the text, so
+/// phrases still match). Text needing none of this is returned unchanged.
+pub(crate) fn index_form(text: &str) -> Cow<'_, str> {
+    let folded = fold(text);
+    let extra = variants(&folded);
+    let seg = segment(&folded);
+    if !extra.is_empty() {
+        return Cow::Owned(format!("{seg}\n{}", extra.trim_start()));
+    }
+    if matches!((&folded, &seg), (Cow::Borrowed(_), Cow::Borrowed(_))) {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(seg.into_owned())
+}
+
+/// Whether `text` is indexed as something other than itself (so FTS5 token positions do not
+/// line up with it).
+pub(crate) fn is_rewritten(text: &str) -> bool {
+    index_form(text) != text
+}
+
+/// Shortest word [`reversed_form`] indexes.
+const MIN_SUFFIX_WORD_CHARS: usize = 6;
+
+/// What `chunks_rev` indexes for `text` (the `fts_reversed` SQL function): each [`fold`]ed word
+/// of at least [`MIN_SUFFIX_WORD_CHARS`] characters outside segmented runs, spelled backwards,
+/// so that a prefix query there finds words by their ending.
+pub(crate) fn reversed_form(text: &str) -> String {
+    let folded = fold(text);
+    let mut out = String::new();
+    for word in folded.split(|c: char| !is_word_char(c) || is_segmented(c)) {
+        if word.chars().count() >= MIN_SUFFIX_WORD_CHARS {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.extend(word.chars().rev());
+        }
+    }
+    out
+}
+
+/// Register `name(text)` as `f` on `conn`; non-text values pass through.
+fn register_text_fn(conn: &Connection, name: &str, f: fn(&str) -> String) -> rusqlite::Result<()> {
     conn.create_scalar_function(
-        "fts_segment",
+        name,
         1,
         FunctionFlags::SQLITE_UTF8
             | FunctionFlags::SQLITE_DETERMINISTIC
             | FunctionFlags::SQLITE_INNOCUOUS,
-        |ctx| {
+        move |ctx| {
             Ok(match ctx.get_raw(0) {
-                ValueRef::Text(b) => Value::Text(segment(&String::from_utf8_lossy(b)).into_owned()),
+                ValueRef::Text(b) => Value::Text(f(&String::from_utf8_lossy(b))),
                 raw => Value::try_from(raw)?,
             })
         },
     )
 }
 
-/// Characters that continue a word: alphanumerics, and marks inside a segmented run.
+/// Register Nugget's FTS functions on `conn`: `fts_normalize` ([`index_form`]) and
+/// `fts_reversed` ([`reversed_form`]), which the FTS triggers call, so every connection that
+/// writes items or chunks needs them; and `fts_segment` ([`segment`] alone), the index form
+/// before v12, which migrations use.
+pub(crate) fn register_functions(conn: &Connection) -> rusqlite::Result<()> {
+    register_text_fn(conn, "fts_segment", |t| segment(t).into_owned())?;
+    register_text_fn(conn, "fts_normalize", |t| index_form(t).into_owned())?;
+    register_text_fn(conn, "fts_reversed", reversed_form)
+}
+
+/// Characters that continue a word: alphanumerics and combining marks (Devanagari vowel signs
+/// and nukta, Thai and kana marks inside a segmented run).
 fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || is_run_mark(c)
+    c.is_alphanumeric() || is_run_mark(c) || is_combining_mark(c)
 }
 
 /// Parse `query` into terms (see the module docs).
@@ -230,7 +385,7 @@ fn render(atom: &Atom) -> String {
             let text = words
                 .iter()
                 .flat_map(|w| {
-                    segment(w)
+                    segment(&fold(w))
                         .split_whitespace()
                         .map(str::to_owned)
                         .collect::<Vec<_>>()
@@ -257,7 +412,7 @@ fn render(atom: &Atom) -> String {
             }
         }
         Atom::Prefix(word) => {
-            let text = segment(word)
+            let text = segment(&fold(word))
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
@@ -297,6 +452,73 @@ pub(crate) fn match_expr(query: &str) -> Option<String> {
         positive
     } else {
         format!("({positive}) NOT ({})", any(&neg))
+    })
+}
+
+/// Shortest query word [`fallback_exprs`] looks up as part of longer words.
+const MIN_PART_CHARS: usize = 4;
+
+/// `MATCH` expressions of the word-part fallback of text search (see the module docs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Fallback {
+    /// For `chunks_fts`: words starting with a query word, minus the query's exclusions.
+    pub prefix: String,
+    /// For `chunks_rev`: words ending with a query word.
+    pub suffix: String,
+    /// For `chunks_fts`: the query's exclusions, which `chunks_rev` cannot apply.
+    pub exclude: Option<String>,
+}
+
+/// The word-part fallback of `query`: its positive single words of at least [`MIN_PART_CHARS`]
+/// characters outside segmented scripts (whose bigrams already match inside words) and without
+/// digits, or `None` if it has none.
+pub(crate) fn fallback_exprs(query: &str) -> Option<Fallback> {
+    let terms = parse(query);
+    let words: Vec<String> = terms
+        .iter()
+        .filter_map(|t| match &t.atom {
+            Atom::Words(w) if !t.exclude && w.len() == 1 => Some(fold(&w[0]).into_owned()),
+            _ => None,
+        })
+        // Words with digits are identifiers (`INV-2041`, `crashtok12`): a prefix of one names
+        // other identifiers, not a part of a compound.
+        .filter(|w| {
+            !has_segmented(w)
+                && w.chars().count() >= MIN_PART_CHARS
+                && !w.chars().any(char::is_numeric)
+        })
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    let prefixes = |rev: bool| {
+        words
+            .iter()
+            .map(|w| {
+                let w: String = if rev {
+                    w.chars().rev().collect()
+                } else {
+                    w.clone()
+                };
+                format!("{} *", quoted(&w))
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    };
+    let neg: Vec<String> = terms
+        .iter()
+        .filter(|t| t.exclude)
+        .map(|t| render(&t.atom))
+        .collect();
+    let exclude = (!neg.is_empty()).then(|| neg.join(" OR "));
+    let prefix = match &exclude {
+        Some(n) => format!("({}) NOT ({n})", prefixes(false)),
+        None => prefixes(false),
+    };
+    Some(Fallback {
+        prefix,
+        suffix: prefixes(true),
+        exclude,
     })
 }
 
@@ -340,6 +562,62 @@ mod tests {
         // Thai marks do not split a query word.
         assert_eq!(q("ประชุม"), Some(r#""ปร ระ ะช ชม""#.into()));
         assert_eq!(needles("Hoshi -x 見積り"), ["hoshi", "見積り"]);
+    }
+
+    #[test]
+    fn fold_unifies_width_arabic_and_sharp_s() {
+        assert!(matches!(fold("café über 120"), Cow::Borrowed(_)));
+        assert_eq!(fold("ＬＥＤ照明 ｷｬﾝﾍﾟｰﾝ"), "LED照明 キャンペーン");
+        assert_eq!(fold("فاتورة أحمد إلى مستشفى"), "فاتوره احمد الي مستشفي");
+        assert_eq!(fold("مُحَمَّد ـتـ"), "محمد ت");
+        assert_eq!(fold("Königstraße"), "Königstrasse");
+    }
+
+    #[test]
+    fn index_form_appends_variants_after_the_text() {
+        assert!(matches!(index_form("plain text"), Cow::Borrowed(_)));
+        assert_eq!(
+            index_form("Königstraße 14"),
+            "Königstrasse 14\nKoenigstrasse"
+        );
+        assert_eq!(
+            index_form("والكراسي للبيت"),
+            "والكراسي للبيت\nالكراسي كراسي بيت"
+        );
+        assert_eq!(index_form("بالكتاب"), "بالكتاب\nالكتاب كتاب");
+        assert_eq!(index_form("ＬＥＤ照明"), "LED 照明 ");
+        assert!(is_rewritten("Büro"));
+        assert!(!is_rewritten("Buro"));
+    }
+
+    #[test]
+    fn reversed_form_keeps_longer_words_backwards() {
+        assert_eq!(reversed_form("Der Lenkungsausschuss"), "ssuhcssuasgnukneL");
+        assert_eq!(reversed_form("short 見積書 words"), "");
+        assert_eq!(reversed_form("Straße"), "essartS");
+    }
+
+    #[test]
+    fn fallback_uses_long_single_words() {
+        assert_eq!(fallback_exprs("aus 見積書 \"two words\""), None);
+        assert_eq!(
+            fallback_exprs("Ausschuss sofreír -Bericht"),
+            Some(Fallback {
+                prefix: r#"("Ausschuss" * OR "sofreír" *) NOT ("Bericht")"#.into(),
+                suffix: r#""ssuhcssuA" * OR "ríerfos" *"#.into(),
+                exclude: Some(r#""Bericht""#.into()),
+            })
+        );
+        assert_eq!(fallback_exprs("Straße").unwrap().suffix, r#""essartS" *"#);
+    }
+
+    #[test]
+    fn query_words_are_folded() {
+        assert_eq!(q("ＬＥＤ照明"), Some(r#""LED 照明""#.into()));
+        assert_eq!(q("Königstraße"), Some(r#""Königstrasse""#.into()));
+        assert_eq!(q("فاتورة"), Some(r#""فاتوره""#.into()));
+        // A decomposed nukta does not split a word.
+        assert_eq!(q("ग\u{0921}\u{093C}"), Some("\"ग\u{0921}\u{093C}\"".into()));
     }
 
     #[test]

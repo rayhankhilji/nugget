@@ -27,14 +27,23 @@ installed, and the install refuses to start if your disk is too full. The curren
 | `qwen3-4b-q4km` | triage, light, synthesis | 2.5 GB | 8 GB | Apache-2.0 |
 | `qwen3-8b-q4km` | synthesis, agentic | 5.0 GB | 16 GB | Apache-2.0 |
 | `nomic-embed-text-v1.5-q8` | embedding | 146 MB | 4 GB | Apache-2.0 |
+| `nomic-embed-text-v2-moe-q8` | embedding (multilingual; the pick for new indexes) | 512 MB | 4 GB | Apache-2.0 |
 | `bge-reranker-v2-m3-q4km` | rerank | 438 MB | 4 GB | Apache-2.0 |
+
+A store keeps the embedding model its vectors were built with: vectors of two models cannot be
+compared, so once your index has vectors, `nuggetd` keeps running that model even if a newer
+manifest recommends another, unless `[runtime] embedding_model` names one. If you name a
+different model for an existing index, search falls back to full-text and new items are indexed
+without vectors.
 
 When a selected model is installed, `nuggetd` downloads a pinned, verified build of llama.cpp's
 `llama-server` for your OS and hardware (Metal, Vulkan or CPU), and runs one server for chat and one for
 embeddings on `127.0.0.1`. They appear as the providers `local-chat` (triage, light, synthesis) and
 `local-embedding` (embedding). Each server requires a random API key that changes on every restart.
 Servers stop after 30 idle minutes and start again on the next request
-([`[runtime]`](../reference/config.md#runtime)).
+([`[runtime]`](../reference/config.md#runtime)). A server that crashes or stops answering is
+restarted, and **Status** shows when a model is warming up, has failed, or needs a **Retry** (see
+[Troubleshooting](troubleshooting.md#the-on-device-model-is-warming-up-stopped-or-wont-start)).
 
 The model and runtime downloads are the only network traffic in this setup, and both appear in the
 egress ledger.

@@ -21,6 +21,10 @@ It runs these scenarios:
 - **byok**: onboarding's "Bring your own key" form against a mock OpenAI-compatible server on
   localhost: bad key, wrong URL and no network are reported, a good key is saved to the secret
   store (never to `config.toml`) and the egress ledger shows the checks.
+- **byok-keys**: the Models page's "Your providers" against a mock OpenAI-compatible server: a
+  saved key is routed at once (no restart), "Replace key" swaps it (the next chat uses the new
+  key), Remove (confirmed) leaves `config.toml` byte for byte as before, and an `env:VAR`
+  reference works without a keychain.
 - **a11y**: on the indexed home, axe-core audits every page and the main dialogs in light and dark
   and fails on serious or critical violations; each page's accessibility tree is checked too (see
   "What happens: a11y").
@@ -66,6 +70,16 @@ It runs these scenarios:
   closes it and returns focus to the result; from Knowledge, Ada Wexford's Timeline lists items and
   facts with month headings in time order and Jump to month moves focus to that month; every
   `search_*` command reached the daemon and was accepted (`NN-search-*.png`).
+- **scale**: on the indexed home, long lists at scale (`scale.mjs`). Indexing hundreds of
+  thousands of items would take longer than the whole run, so the large lists are answered by the
+  test (Playwright routes): `knowledge_status` reports 500,000 entities, `knowledge_entities`
+  pages through them by `offset`/`limit`, and `egress_recent` returns as many rows as asked for;
+  every other command goes to the real daemon. Knowledge is scrolled until at least 1,000
+  entities have loaded page by page, then End on a row jumps to the last; the Privacy ledger is
+  set to 1,000 rows and scrolled to its end. A PerformanceObserver collects long tasks and a
+  `requestAnimationFrame` loop times frames during each scroll; the scenario fails when the DOM
+  holds more than 120 rows of a list, or a long task exceeds `E2E_SCALE_MAX_LONGTASK_MS`
+  (`summary.json` → `scale` has frame p50/p95/max and long tasks; `NN-scale-*.png`).
 
 ```
 Chromium (dist/ + tauri-shim.js) --POST /invoke--> bridge.mjs --JSON-RPC over the Unix socket--> nuggetd
@@ -97,7 +111,8 @@ built, plus about 60 s for the i18n scenario and about 40 s for visual. Linux an
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_BACKUP_TIMEOUT_MS` | 120000 | backup: how long one backup, export or restore may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual,backup,messaging,search` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,byok-keys,a11y,prefs,keyboard,visual,backup,messaging,search,sources-setup,scale` | Which scenarios to run, comma-separated. |
+| `E2E_SCALE_MAX_LONGTASK_MS`, `E2E_SCALE_MAX_LONGTASKS` | 250, 5 | scale: the longest main-thread task allowed while a list scrolls, and (Privacy) how many long tasks one scroll may have. |
 | `E2E_VISUAL_UPDATE=1` | off | visual: write the screenshots as the new baselines instead of comparing (on Linux). |
 | `E2E_VISUAL_TOLERANCE` | 0.005 | visual: the largest fraction of differing pixels a screen may have (0.005 = 0.5%). |
 | `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n: which locales to check, comma-separated (any code in `LOCALES`). |
@@ -213,12 +228,18 @@ light and then dark. One check per theme and:
 
 | What | Audited |
 | --- | --- |
-| every page of the `PAGES` registry | the whole document; Search again with results, Knowledge with Ada Wexford's facts open and on the Graph tab, Connected apps with its connect dialog; in light also `treeChecks` from `a11y-tree.mjs` (landmarks, headings, names) |
-| Add source | the kind step and the folder step, opened from Sources |
+| every page of the `PAGES` registry | the whole document; Search again with results and its filters, with a Kind filter ticked, with a result's preview open and on a person's timeline (from the filters); Knowledge with Ada Wexford's facts open and on the Graph tab; Connected apps with its connect dialog; Models with "Add a provider" open; in light also `treeChecks` from `a11y-tree.mjs` (landmarks, headings, names) |
+| Add source | the kind step, the folder step and the WhatsApp (messaging) form, opened from Sources |
 | Merge and Split entity | from Ada Wexford on Knowledge: Merge as it opens and with a candidate picked (preview shown), Split with a fact ticked |
 | a Today card | its sources (expanded) and its action's review dialog (a dry-run preview) |
 | command palette | Ctrl+K, empty and filtered |
 | onboarding | every step walked with Continue, the AI step with each choice, and the folder form from the source step |
+| quick ask window | `quickask.html` empty, then after asking "Tidewater budget" (with no AI provider on this home, its plain "no AI model" alert); no raw text in the answer area |
+| Double Tap overlay | `overlay.html` with a finished draft (the shell's `overlay_state` answered by the test), then with the previous drafts list open (H) |
+
+States the e2e daemon can't reach (a local model warming up, failed or retried; a full disk; a
+model download failing or cancelled; a provider not in use) are covered by vitest axe tests
+instead: `src/pages/Status.a11y.test.tsx`, `src/pages/Models.a11y.test.tsx`.
 
 Dialogs are audited alone (`dialog[open]`, the page behind hidden), so page violations aren't
 counted twice. Before each run the viewport grows to the tallest scroll content, so text below the

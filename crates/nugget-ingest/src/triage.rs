@@ -76,11 +76,12 @@ const MIN_REQUEST_CHARS: usize = 1_000;
 /// Fewest characters per request on hardware so slow that even [`MIN_REQUEST_CHARS`] would take
 /// more than twice `triage_request_ms` (a request must carry some text).
 const SLOWEST_REQUEST_CHARS: usize = 300;
-/// The fixed part of every request, in characters: the instructions and the chat template.
+/// The fixed part of every request, in characters: the instructions, the preamble naming the
+/// request's tag code (EE4 TB-1) and the chat template.
 /// Counted in the measured prefill rate, so the time to the first token is not charged to the
 /// document text alone (that made a short batch look slow and shrank every later one).
 fn fixed_prompt_chars() -> usize {
-    ai::TRIAGE_SYSTEM.chars().count() + 200
+    ai::TRIAGE_SYSTEM.chars().count() + ai::TRIAGE_PREAMBLE.chars().count() + 200
 }
 
 /// How long the job lets a part-filled batch gather more items (a sync writes items quickly).

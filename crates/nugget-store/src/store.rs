@@ -53,6 +53,9 @@ pub(crate) struct Db {
     /// Held while the approximate vector index is built or dropped (see `vector::build_ann`),
     /// so one runs at a time. Shared with the build thread, which holds `Db` only weakly.
     pub(crate) ann_build: Arc<Mutex<()>>,
+    /// The knowledge graph's counts, with the writer connection's `total_changes()` and the
+    /// time they were computed at (see `graph::counts`).
+    pub(crate) graph_counts: Mutex<Option<(u64, std::time::Instant, [u64; 3])>>,
 }
 
 impl Db {
@@ -193,6 +196,7 @@ impl Store {
             encrypted: file.is_some(),
             file: file.map(|(path, key)| (path.to_path_buf(), key.clone())),
             ann_build: Arc::default(),
+            graph_counts: Mutex::new(None),
         });
         let egress = EgressWriter::spawn(db.clone())?;
         let audit = crate::audit::AuditState::ephemeral()?;
@@ -229,6 +233,47 @@ impl Store {
         self.inner.db.with_read_conn(f)
     }
 
+    /// Free space on the disk holding the database, and whether a write recently failed
+    /// because it was full (read at most every few seconds). `None` for in-memory stores.
+    pub fn disk_status(&self) -> Option<nugget_core::ipc::DiskStatus> {
+        let (path, _) = self.inner.db.file.as_ref()?;
+        let dir = path
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        Some(crate::disk::status(dir))
+    }
+
+    /// Copy every committed transaction from the write-ahead log into the database file and
+    /// truncate the log to zero bytes (`PRAGMA wal_checkpoint(TRUNCATE)`). Call it on a clean
+    /// stop, after the last write: the next open then finds no log left over, instead of a
+    /// multi-megabyte one whose stale frames look like a crash tail. Returns whether the whole
+    /// log was checkpointed; `false` when a reader still holds an old snapshot (nothing is lost,
+    /// the log is simply kept). A no-op for in-memory stores.
+    pub fn checkpoint_wal(&self) -> Result<bool> {
+        if self.inner.db.file.is_none() {
+            return Ok(true);
+        }
+        let (busy, log, done): (i64, i64, i64) = self.with_conn(|c| {
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .db("checkpoint the write-ahead log")
+        })?;
+        let complete = busy == 0 && log == done;
+        if complete {
+            tracing::debug!(frames = done, "write-ahead log checkpointed and truncated");
+        } else {
+            tracing::info!(
+                busy,
+                frames = log,
+                checkpointed = done,
+                "write-ahead log only partly checkpointed (a reader is still active)"
+            );
+        }
+        Ok(complete)
+    }
+
     /// Database path and key of a file-backed store; `None` for an in-memory one.
     pub(crate) fn file(&self) -> Option<(&Path, &StoreKey)> {
         self.inner.db.file.as_ref().map(|(p, k)| (p.as_path(), k))
@@ -253,7 +298,10 @@ impl Store {
         self.with_read_conn(|c| {
             let (items, chunks): (i64, i64) = c
                 .query_row(
-                    "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM chunks)",
+                    // The trigger-maintained per-source totals (schema v10): a handful of
+                    // rows, where `count(*)` scanned every item and chunk (tens of ms at 500k).
+                    "SELECT coalesce(sum(max(items, 0)), 0), coalesce(sum(max(chunks, 0)), 0)
+                     FROM source_stats",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -368,6 +416,53 @@ impl Store {
             Ok(p)
         })
     }
+
+    /// The embedding model this database's vectors were built with (the provider's model name,
+    /// [`Store::adopt_embedding_model`]); `None` while no model is recorded (no vectors yet, or
+    /// vectors from before models were recorded). Vectors of two models are not comparable even
+    /// when their dimensions agree, so a query must be embedded by this model.
+    pub fn embedding_model(&self) -> Result<Option<String>> {
+        self.with_read_conn(embedding_model)
+    }
+
+    /// The model to embed with: the one already recorded ([`Store::embedding_model`]), or, when
+    /// none is, `model`, recorded so every later vector and query must come from it. A legacy
+    /// database (vectors, no record) adopts `model` too: its vectors came from whatever embedded
+    /// it before, which callers keep running (nuggetd keeps such a store on the model it shipped
+    /// with). A database's model never changes once recorded.
+    pub fn adopt_embedding_model(&self, model: &str) -> Result<String> {
+        if let Some(m) = self.embedding_model()? {
+            return Ok(m);
+        }
+        self.with_conn(|c| {
+            let tx = c.transaction().db("begin")?;
+            let m = match embedding_model(&tx)? {
+                Some(m) => m,
+                None => {
+                    tx.execute(
+                        "INSERT INTO meta (key, value) VALUES (?1, ?2)",
+                        params![META_EMBEDDING_MODEL, model],
+                    )
+                    .db("record embedding model")?;
+                    model.to_owned()
+                }
+            };
+            tx.commit().db("commit")?;
+            Ok(m)
+        })
+    }
+}
+
+const META_EMBEDDING_MODEL: &str = "embedding_model";
+
+fn embedding_model(conn: &Connection) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = ?1",
+        [META_EMBEDDING_MODEL],
+        |r| r.get(0),
+    )
+    .optional()
+    .db("read embedding model")
 }
 
 const META_EMBEDDING_PREFIXES: &str = "embedding_prefixes";
@@ -617,5 +712,14 @@ mod tests {
             none
         );
         assert_eq!(legacy.embedding_prefixes().unwrap(), Some(none));
+    }
+
+    #[test]
+    fn embedding_model_is_fixed_by_the_first_one() {
+        let s = Store::open_in_memory().unwrap();
+        assert_eq!(s.embedding_model().unwrap(), None);
+        assert_eq!(s.adopt_embedding_model("model-a").unwrap(), "model-a");
+        assert_eq!(s.adopt_embedding_model("model-b").unwrap(), "model-a");
+        assert_eq!(s.embedding_model().unwrap().as_deref(), Some("model-a"));
     }
 }

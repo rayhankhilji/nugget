@@ -10,6 +10,11 @@ name: Perf
 # frontmost-app poll, the desktop shell idle and during scripted focus changes with read-ahead
 # on and off (optionally also for the shell built at `before_ref`, on the same runner), and the
 # read-ahead prefill of the real local models.
+#
+# `scale` (II5): the daemon profile at 250k and 500k items with a mailbox-like size mix
+# (`perf --backend real --perf-phases daemon --perf-items N --perf-sizes mail`), optionally also
+# against `nuggetd` built at `before_ref` on the same runner (same bench, same seeded corpus), for
+# a before/after. Dispatch with `only: scale` to run just this job.
 on:
   workflow_dispatch:
     inputs:
@@ -20,9 +25,20 @@ on:
         type: choice
         options: [smoke, quick, standard, full]
       before_ref:
-        description: "energy: also measure the desktop shell built at this ref, on the same runner (empty: skip)"
+        description: "energy: also measure the desktop shell built at this ref; scale: also the daemon built at this ref (same runner; empty: skip)"
         required: false
         default: ""
+        type: string
+      only:
+        description: Run only this job (all, perf, energy, scale)
+        required: false
+        default: all
+        type: choice
+        options: [all, perf, energy, scale]
+      scale_items:
+        description: "scale: item counts, as a JSON list"
+        required: false
+        default: "[250000, 500000]"
         type: string
   schedule:
     # Mondays 04:17 UTC.
@@ -49,6 +65,7 @@ env:
 jobs:
   perf:
     name: Perf, real backend (Linux)
+    if: ${{ !contains(fromJSON('["energy", "scale"]'), inputs.only || 'all') }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -98,6 +115,7 @@ jobs:
   # reports in energy-results/after/ and energy-results/before/.
   energy:
     name: Energy (${{ matrix.os }})
+    if: ${{ !contains(fromJSON('["perf", "scale"]'), inputs.only || 'all') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 240
     strategy:
@@ -264,6 +282,7 @@ jobs:
   # the signed manifest's default chat model and the small one Double Tap can use.
   energy-prefill:
     name: Energy, read-ahead prefill (${{ matrix.os }})
+    if: ${{ !contains(fromJSON('["perf", "scale"]'), inputs.only || 'all') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
@@ -354,6 +373,118 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-energy-prefill-${{ matrix.os }}
+          path: ${{ env.RESULTS }}/
+          retention-days: 90
+          if-no-files-found: error
+
+  # II5: the daemon at 250k and 500k items (bench/README.md "Scale"). Seeding, the startup
+  # knowledge run over every item, the vault render, then startup, search, Ask retrieval, the
+  # knowledge page and the hot status paths over IPC, RSS and the store's size on disk. With
+  # `before_ref`, the same bench (same corpus, same seed) runs first against `nuggetd` built at
+  # that ref, so before and after share the runner. Not on the weekly schedule (hours per run).
+  scale:
+    name: Scale, ${{ matrix.items }} items (Linux)
+    if: ${{ github.event_name == 'workflow_dispatch' && contains(fromJSON('["all", "scale"]'), inputs.only || 'all') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        items: ${{ fromJSON(inputs.scale_items || '[250000, 500000]') }}
+    env:
+      BEFORE_REF: ${{ inputs.before_ref || '' }}
+      ITEMS: ${{ matrix.items }}
+      RESULTS: ${{ github.workspace }}/scale-results
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ env.BEFORE_REF != '' && '0' || '1' }}
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-rust-perf
+          save-if: false
+
+      - name: Build release binaries
+        run: cargo build --locked --release -p nuggetd -p nugget-bench
+
+      - name: Build nuggetd at ${{ env.BEFORE_REF }} (release)
+        if: env.BEFORE_REF != ''
+        shell: bash
+        run: |
+          src="$RUNNER_TEMP/before-src"
+          git worktree add --detach "$src" "$BEFORE_REF"
+          git -C "$src" log -1 --format='%H %s'
+          cd "$src"
+          CARGO_TARGET_DIR="$RUNNER_TEMP/before-target" cargo build --locked --release -p nuggetd
+          test -x "$RUNNER_TEMP/before-target/release/nuggetd"
+
+      - name: Record hardware
+        shell: bash
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "before_ref: ${BEFORE_REF:-none}"
+            echo "items: ${{ matrix.items }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread' | cut -c1-160
+            free -g
+            df -h "$RUNNER_TEMP" | tail -1
+          } | tee "$RESULTS/hardware.txt"
+
+      # The bench seeds with this commit's store: a `before_ref` older than its schema cannot
+      # open it. The after run happens regardless.
+      - name: Bench scale, nuggetd at ${{ env.BEFORE_REF }}
+        if: env.BEFORE_REF != ''
+        continue-on-error: true
+        shell: bash
+        env:
+          NUGGET_BENCH_NUGGETD: ${{ runner.temp }}/before-target/release/nuggetd
+        run: |
+          target/release/nugget-bench perf --backend real --scale full --perf-phases daemon \
+            --perf-items "$ITEMS" --perf-sizes mail --out-dir "$RESULTS/before"
+
+      - name: Bench scale
+        shell: bash
+        env:
+          NUGGET_BENCH_NUGGETD: ${{ github.workspace }}/target/release/nuggetd
+        run: |
+          target/release/nugget-bench perf --backend real --scale full --perf-phases daemon \
+            --perf-items "$ITEMS" --perf-sizes mail --out-dir "$RESULTS/after"
+
+      - name: Validate bench reports against the schema
+        shell: bash
+        run: |
+          find "$RESULTS" -name '*.json' -print0 \
+            | xargs -0 pipx run check-jsonschema --schemafile bench/schema/report.schema.json
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Scale, ${{ matrix.items }} items${BEFORE_REF:+ (before = $BEFORE_REF)}"
+            echo
+            echo "| run | metric | value | unit |"
+            echo "|---|---|---:|---|"
+            for f in $(find "$RESULTS" -name '*.json' | sort); do
+              run="$(basename "$(dirname "$f")")"
+              jq -r --arg run "$run" '.metrics[]
+                | "| \($run) | `\(.name)` | \(.value * 1000 | round / 1000) | \(.unit) |"' "$f"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scale reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-scale-${{ matrix.items }}
           path: ${{ env.RESULTS }}/
           retention-days: 90
           if-no-files-found: error

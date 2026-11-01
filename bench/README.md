@@ -25,6 +25,9 @@ cargo run -p nugget-bench -- --schema                     # print the report JSO
 | `--scale smoke\|quick\|standard\|full` | Workload size (default `standard`). `smoke` is for CI and tests; publish `standard` or `full` |
 | `--seed N` | Seed for corpus and workload generation (default `42`). The same seed always gives the same workload |
 | `--backend fake\|real` | What `memory` and `perf` run against (default `fake`): the in-crate fake index, or the real stack in process (`memory`: store, ingest pipeline, files watcher and retriever; `perf`: store and retriever, written directly). For `proactive`: the in-crate reference engine (`fake`) or the real `nugget-proactive` crate in process (`real`). Other suites ignore it |
+| `--perf-items N` | `perf --backend real`: items in the store run and the daemon profile instead of the scale's (II5 runs 250,000 and 500,000; waits grow with N) |
+| `--perf-sizes fixed\|mail` | `perf --backend real`: every item 120 words (`fixed`, the default, as W12 and X5 measured) or a mailbox-like log-normal mix (`mail`: median 80 words, 1% over 1,000, capped at 4,000) |
+| `--perf-phases all\|store\|daemon` | `perf --backend real`: the in-process store run, the daemon profile, or both (default) |
 | `--embed-url URL` | Real backend: an OpenAI-compatible embeddings endpoint (e.g. a local `llama-server`, `http://127.0.0.1:8080/v1`) instead of the in-process deterministic embedder |
 | `--embed-model NAME` | Model name sent to `--embed-url` |
 | `--provider-url URL` | `draft`: a real chat provider instead of the deterministic fake model (see [`draft`](#draft-m3)) |
@@ -289,8 +292,9 @@ After the store-level run, `perf --backend real` profiles the real `nuggetd` bin
 The code is `src/suites/perf_daemon.rs`.
 
 **Seeding.** A temporary `NUGGET_HOME` with a key file (`NUGGET_KEYCHAIN=off`, no OS keychain)
-and an encrypted store written directly (`Store::upsert_item_with_chunks`): N synthetic items
-(300 / 2k / 10k / 100k for smoke / quick / standard / full), one chunk each with a 384-d
+and an encrypted store written directly (`Store::upsert_items_with_chunks`, 256 items per
+transaction): N synthetic items (300 / 2k / 10k / 100k for smoke / quick / standard / full, or
+`--perf-items`), in chunks of up to 256 words (one per fixed-size item) each with a 384-d
 deterministic vector, typed as Markdown with frontmatter (project, two people, a topic tag) so
 the deterministic extractors find entities. Config: no model providers (text-only search,
 deterministic extraction, no LLM), `[runtime]` and `[mcp]` off, everything else default.
@@ -310,8 +314,24 @@ all threads per second). Then ingest through the daemon: a files source on an em
 Markdown files dropped in (50 / 200 / 500 / 2k), timed until all are indexed (`ingest.status`)
 and the last is found by `search` (`daemon.ingest.files_per_s`, `daemon.ingest.wall_s`).
 
-**Memory.** `daemon.rss_mib.after_{startup,first_search,extract,idle,ingest}` (VmRSS) and
+**Hot read paths (II5).** After the warm searches, on the full store: `status`, `sources.list`,
+`ingest.status`, `knowledge.status` and `egress.recent` (limit 200, the privacy ledger), 30 calls
+each (`daemon.ipc.<method>.latency.*`); Ask's retrieval step, `retrieve.context` with a
+2,000-token budget for 50 queries (`daemon.ask.retrieve.latency.*`); and the knowledge page: the
+first `knowledge.entities` page (`daemon.knowledge.page_load_ms`), pages at offsets up to 10,000
+(`daemon.knowledge.entities.latency.*`), short name filters (`…entities_filter…`), the detail of
+the first page's entities (`daemon.knowledge.entity.latency.*`) and the graph overview
+(`daemon.knowledge.graph.latency.*`).
+
+**Store and seeding (II5).** `daemon.seed.items_per_s` (store write throughput while seeding,
+embedding included); `daemon.disk.store_mib.{after_seed,after_extract}` and
+`daemon.disk.bytes_per_item.*` (database + WAL + shm on disk).
+
+**Memory.** `daemon.rss_mib.after_{startup,first_search,extract,searches,idle,ingest}` (VmRSS) and
 `daemon.rss_mib.peak_first_start` / `peak` (VmHWM of each start).
+
+`NUGGET_BENCH_KEEP_HOME=1` keeps the temporary home (store, graph, vault) after the run for
+looking into it by hand; the path is printed.
 
 Process metrics come from `/proc` on Linux; macOS reports RSS and CPU time from `ps` (no
 wakeups or peak); Windows skips them. `.github/workflows/perf.yml` runs the full profile on
@@ -487,23 +507,67 @@ Glimmerfen Labs, and the people around them.
 
 | | |
 |---|---|
-| Items | 93: 48 mails (RFC 822, with the IMAP metadata ingest stores: folder, flags, Message-ID, size), 15 calendar events (iCalendar, with CalDAV metadata), 30 Markdown notes (frontmatter, `[[wikilinks]]`, `#tags`, an Obsidian-style vault of people, projects and journal notes) |
-| Gold entities | 85: 25 people, 8 organisations, 10 projects, 15 events, 8 places, 7 commitments, 6 preferences, 6 topics (plus 3 `optional` ones) |
-| Gold claims | 166 scored triples (15 more `optional` event start dates), 3 of them `superseded` |
-| Gold mentions | 515 (item, entity, surface forms) |
-| Scripted LLM | 144 claims: 136 quote-supported, 4 with hallucinated quotes, 4 injected |
+| Items | 106: 57 mails (RFC 822, with the IMAP metadata ingest stores: folder, flags, Message-ID, size), 16 calendar events (iCalendar, with CalDAV metadata), 33 Markdown notes (frontmatter, `[[wikilinks]]`, `#tags`, an Obsidian-style vault of people, projects and journal notes) |
+| Gold entities | 91: 30 people, 8 organisations, 10 projects, 16 events, 8 places, 7 commitments, 6 preferences, 6 topics (plus 5 `optional` ones) |
+| Gold claims | 185 scored triples (16 more `optional` event start dates), 5 of them `superseded` |
+| Gold mentions | 579 (item, entity, surface forms) |
+| Scripted LLM | 168 claims: 160 quote-supported, 4 with hallucinated quotes, 4 injected |
 
-The hard cases are deliberate:
+The hard cases are deliberate. `scenario.json` lists them by kind; each kind's metric passes only
+when every case of that kind is handled (the first case of each kind is the original M2 one; the
+others were added in EE1, items `mail-049`–`mail-057`, `cal-016`, `note-031`–`note-033`):
 
 - **One person, many names.** Margaret Thistlewood is "Margaret" at work
   (`margaret.thistlewood@cindergate.test`), "Maggie T" from a personal address
   (`maggie.t@mail.test`), and "M. Thistlewood" or "Maggie Thistlewood" as a calendar attendee.
   Her person note lists both addresses and the aliases.
+- **Nicknames, display-name variants and initials** (EE1), each with corroboration in the item:
+  Katherine Selkirk (Ostrander Freight, Head of Procurement) writes as "Katherine Selkirk" and
+  signs "Kate" (`mail-049`, Sam Okafor in Cc), replies in the same thread as "Kate S" from the same
+  address (`mail-050`), and is the attendee "K. Selkirk" of a sign-off with her address
+  (`cal-016`). Robert Ferrand (Glimmerfen Labs, Driftwood API) signs "Rob" under his own headers
+  (`mail-051`; "Rob" is also a prefix of the user's name, Robin), and the user's reply, addressed
+  to him alone in that thread, says "Thanks, Bob" (`mail-052`). The scripted model gets "Kate"
+  right and returns "Kate S", "Rob" and "Bob" as names of their own (realistic mistakes the
+  pipeline must cope with). For these cases the majority vote of the resolution score is not
+  enough: every system mention in their items under one of their gold surfaces must be on their
+  single entity, so a "Bob" kept as its own person fails even if the vote goes right. The same
+  stricter rule applies to Maggie (it does not change her pre-EE1 result on the scripted path;
+  `params.hard_case_details` also reports each case's `majority_vote`, the pre-EE1 rule, for
+  comparison with older runs).
+- **The same nickname with nothing to corroborate it** (EE1). `note-031` ("Book club at Kate's on
+  Thursday") names no surname, address, organisation or thread: nothing says this Kate is
+  Katherine Selkirk, a procurement contact. Her gold mention belongs to an `optional` person
+  "Kate" (neither a hit nor a miss), and the case requires that the system does not give that
+  mention to Katherine Selkirk's entity: no system mention in `note-031`, whatever its surface,
+  may land on her.
 - **Two people, one first name.** Sam Okafor (Ostrander Freight) and Sam Whitlock (Marrowbank
   Rowing Club) both sign "Sam"; two notes mention a bare "Sam" whom only context identifies.
+  EE1 adds Tamsin Rook (Quillfeather Systems, Engineering Manager on Quarry Bridge, `mail-056`) and
+  Tamsin Galloway (a reading-mentor volunteer writing from webmail, `mail-057`), both signing
+  "Tamsin"; a standup note says only "Priya and Tamsin from Quillfeather ... sandbox API keys for
+  [[Quarry Bridge]]" (`note-032`: context says Tamsin Rook, and the gold says so); an errands note
+  says "Drop the spare bike lights round to Tamsin" (`note-033`: nothing says which Tamsin, if
+  either, so its mention is an `optional` person "Tamsin" and must be given to neither: no system
+  mention in `note-033` may land on either Tamsin). The EE1 pair also requires each Tamsin to be
+  resolved to one entity of her own, the standup note's bare "Tamsin" on Tamsin Rook's; the
+  original Sam pair keeps the M2 rule (the two resolve apart; the rowing log's bare "Sam" may
+  stay unresolved), so pre-EE1 results stay comparable. The scripted model also makes one
+  quote-supported mistake here: it reads Tamsin Galloway's "I mentor there on Tuesdays myself"
+  as `works_at` Bramblecote Primary School (she volunteers). The gate keeps it (the quote is in
+  the mail), and it counts as a claim false positive.
 - **A job change.** Priya Castellane leaves Cindergate Analytics (Senior Data Scientist) and joins
   Quillfeather Systems (Head of Data) from a new address. The old employer, role and project are
   `superseded` in the gold labels.
+- **A second job change, delivered out of order** (EE1). Delphine Corrigan, an Associate at
+  Vellum & Thistle LLP (`mail-055`, 24 September, from `delphine.corrigan@vellumthistle.test`),
+  is announced as leaving ("Friday 23 October is Delphine Corrigan's last day at Vellum & Thistle
+  LLP", `mail-054`, 16 October) and writes from `delphine.corrigan@glimmerfen.test` that she has
+  joined Glimmerfen Labs as Legal Counsel and that her old address no longer works (`mail-053`,
+  28 October). The manifest delivers them newest first: `mail-055` comes from an `Archive`
+  folder synced after the inbox, so the oldest fact arrives last. Her Vellum & Thistle
+  employment and role are `superseded`; the announcement is a second source of the old employer
+  (true until 23 October), and the scripted model extracts it from there too.
 - **A deletion.** `mail-008` is the only source of a commitment (the venue deposit) and is deleted
   after the first render; `note-025` is one of two sources of another commitment and is deleted
   too. The first commitment's claims must be retracted, the second's must survive.
@@ -530,13 +594,17 @@ The hard cases are deliberate:
   a fingerprint line for requests that carry no item reference. `hallucinated` and `injected`
   flags mark the claims whose quotes are not in the item (the flags are never sent).
 - `scenario.json`: the user (`me`), webmail domains, items to delete, the injection item, the
-  hard cases, the number of pages to edit and the MCP queries.
+  hard cases, the number of pages to edit and the MCP queries. Hard cases are lists:
+  `nickname_identity` `[{entity, unattributed?}]`, `same_first_name` `[{entities,
+  unattributed?}]` and `job_change` `[{superseded, current}]` (claim ids); `unattributed` is
+  `[{item, surface}]`, a name in an item that must not be given to the case's people.
 - `manifest.json`: per item its file, MIME type, store source and key, title, time, version and
   the connector metadata.
 
 The fixtures are static files. A test (`labels_agree_with_ingested_text`) ingests them and checks
 that every gold and scripted quote is in its item's stored chunks, that every hallucinated or
-injected quote is not, that every gold surface form is in its item, and that the labels are
+injected quote is not, that every gold surface form is in its item, that every unattributed name
+is in its item and labelled (if at all) only as an `optional` entity, and that the labels are
 referentially intact; edit them only with that test passing.
 
 **Pipeline under test** (`src/knowledge/wired.rs`, cargo feature `pipeline`, on by default;
@@ -601,7 +669,7 @@ without it the suite reports `not_implemented`):
 | `merge.fidelity` | Share of the 16 user edits still verbatim in their page after the deletions and the re-render. **Target 1.0** |
 | `retraction.correctness` | After the deletions: gold claims supported only by deleted items are gone, and those with support left that were active are still active. **Target 1.0** |
 | `retraction.dangling_refs` | Active claims citing, and mentions in, deleted items. **Target 0** |
-| `hard_cases.{nickname_identity,same_first_name,job_change,deleted_item,injection}` | 1 when the case is handled: all of Maggie's mentions resolve to one entity holding nobody else's; the two Sams resolve apart; the old job and role are inactive and the new ones active; retraction is exact; no injected claim survives |
+| `hard_cases.{nickname_identity,same_first_name,job_change,deleted_item,injection}` | 1 when every case of the kind is handled: each nickname person's mentions (Maggie, Kate, Rob) resolve to one entity holding nobody else's, every system mention under their gold surfaces in their items is on it, and nothing in the unattributed "Kate" item is on it; each same-first-name pair (the Sams, the Tamsins) resolves apart, nothing in the unattributed "Tamsin" item is on either, and (EE1 pair only) each Tamsin resolves strictly to one entity, the context-identified "Tamsin" included; for each job change (Priya, Delphine) the old job and role are inactive and the new ones active; retraction is exact; no injected claim survives. On a subset, a kind is scored over its cases in scope (a nickname case needs two mentions, a pair a mention of each, a job change all its claims); `params.hard_case_details` gives each case's result (`not_in_subset` when out of scope; for nickname cases also `majority_vote`, the pre-EE1 rule; for pairs `one_entity_each`, the strict per-person rule, part of the pass for the EE1 pair only) |
 | `throughput.items_per_s`, `throughput.extract_s` | The extraction run |
 | `mcp.get_context.{p50,p95}_ms`, `mcp.get_context.cited_rate` | In-process round trips, and answers with at least one citation |
 | `llm.calls`, `llm.unmatched`, `vault.pages`, `vault.facts`, `vault.render_ms`, `retraction.checks`, `merge.edits` | Context (`info`) |
@@ -624,6 +692,52 @@ items once more with an LLM that answers nothing, so every false positive says w
 deterministic extractors already produce it (`source: deterministic`) or only the LLM run does
 (`llm`), and every miss whether the deterministic run found it (`in_baseline`). Metric names and
 values are unchanged; `params.knowledge_dump` holds the path and the summary.
+
+**Real-model subsets** (`--local-models`, `src/knowledge/fixture.rs` `select_items`): the deleted
+and injection items and the original case of each hard-case kind are always kept (as before EE1,
+so `smoke`'s 8 items are unchanged); each further hard case is then added whole (every item
+mentioning its people or supporting its claims, and its unattributed names) while it fits, so the
+`quick` 30 hold all 13 EE1 items and 9 evenly spread ones (22 before), so quick-subset numbers
+from before EE1 are not comparable with later ones.
+
+**`--knowledge-corpus original|all`** (default `all`): `original` is the corpus as it was before
+EE1, for before/after runs against a pre-EE1 bench binary. Everything EE1 added is marked
+`"added": "ee1"` (items in `manifest.json`, entities in `gold/entities.json`, hard cases in
+`scenario.json`); `original` drops those, the mentions, scripted answers and claim support of the
+dropped items, and the claims left without support. The result equals the pre-EE1 fixture
+(93 items, 85 gold entities, 166 scored claims, 515 mentions, 144 scripted claims, one case per
+hard-case kind), so every `--knowledge-items N` selects the same items and scores the same gold as
+the pre-EE1 bench (a test pins the `smoke` 8, `quick` 30 and 40-item lists taken from the pre-EE1
+selection), and the scripted run reproduces the 93-item column above exactly. The choice is
+recorded as `params.knowledge_corpus`. `--knowledge-items all` (or any number at or above the
+corpus size) runs every item. The suite's own quality floors are the pre-EE1 ones on `original`
+(subset scores ≥ 0.9 with the scripted answers; entity precision ≥ 0.85 for the simulated noisy
+local model); on `all` they are relaxed while the pipeline fails the EE1 cases (subsets within
+0.07 of the whole corpus and ≥ 0.85; noisy-model entity precision ≥ 0.75, measured 0.78).
+
+**EE1 hard cases, scripted path** (`knowledge --scale smoke`, the corpus before and after the 13
+items; same pipeline, `ee/entity-resolution` at `d643a5a`):
+
+| Metric | 93 items | 106 items |
+|---|---|---|
+| Entity P / R / F1 | 0.934 / 1.0 / 0.966 | 0.867 / 1.0 / 0.929 |
+| Person F1 | 0.980 | 0.870 |
+| Claim P / R / F1 | 0.975 / 0.951 / 0.963 | 0.956 / 0.956 / 0.956 |
+| Resolution B³ F1 / mention recall | 0.988 / 0.791 | 0.979 / 0.782 |
+| `claims.superseded_active` | 1 | 3 |
+| Hard cases: nickname / same first name / job change | pass / pass / pass | **fail** (Rob) / **fail** (Tamsin) / **fail** (Delphine) |
+
+Per case (`--knowledge-dump`): Kate passes (the "Kate S" reply and "K. Selkirk" join her, the
+book-club "Kate" stays apart); **Rob fails**: "Rob" and "Bob" stay people of their own although the
+mails' headers name Robert Ferrand; **the Tamsin pair fails**: they stay apart and the errands
+"Tamsin" is given to neither, but the standup note's "Tamsin" (and "Priya") stays a person of its
+own instead of resolving to Tamsin Rook by context, so its two claims miss too (`one_entity_each`
+is also false for the Sams, where the rowing log's "Sam" has the same problem, but that is not
+part of the original pair's pass); **Delphine fails**: she ends up as three entities (the
+new address, the old address, and the name in the announcement), so nothing supersedes the
+Vellum & Thistle employment and role. Bare "Felix" and "Yusuf" in the new mails also stay
+separate people, and the scripted Tamsin Galloway `works_at` Bramblecote is a claim false positive
+(see above). Every other target still holds.
 
 Not covered yet: embedding-based resolution, the daemon's change-feed path (wave 2), the
 encrypted on-disk store, and graded or partial claim matching.
@@ -2037,6 +2151,113 @@ waiting for a later request on the same connection); over the cap a request gets
 rows now record the store handle that wrote them, and a second process opening the store marks
 only rows whose owner is gone as `interrupted` (per-handle lock files next to the database).
 
+## Scale
+
+II5 measured Nugget at **250,000 and 500,000 items** (X5 stopped at 100k) and fixed what did not
+scale. Method: the daemon profile above (`perf --backend real --perf-phases daemon`) with
+`--perf-items N --perf-sizes mail`: synthetic items with a mailbox-like size mix (log-normal,
+median 80 words, 1% over 1,000, at most 4,000; chunks of up to 256 words), seeded in 256-item
+transactions, then the real `nuggetd` over IPC: startup, the startup knowledge run over every item,
+searches, the hot status paths, Ask's retrieval step, the knowledge page, the vault render, idle,
+ingest, RSS and the store on disk. `.github/workflows/perf.yml` job `scale` (dispatch with
+`only: scale`, `before_ref: <ref>`) runs the same bench against `nuggetd` built at `before_ref` and at
+the branch head, one after the other on the same runner.
+
+```sh
+cargo build --release -p nuggetd -p nugget-bench
+target/release/nugget-bench perf --backend real --scale full --perf-phases daemon \
+  --perf-items 500000 --perf-sizes mail      # ~65 min on 4 vCPUs, ~5 GB of disk
+```
+
+**500,000 items**, GitHub `ubuntu-latest` (AMD EPYC 9V74, 4 vCPUs, 16 GB), seed 42, release
+builds, workflow run 41267784157: before = integration branch `44b9e11`, after = `ii/scale` at
+`ee8764f` (every fix below but the `knowledge.status` cache, measured separately):
+
+| Metric | Before | After |
+|---|---|---|
+| `daemon.startup_ms` (first start on the seeded store) | 8,302 | **483** |
+| `daemon.restart.startup_ms` (after a graceful stop) | 13,886 | **544** |
+| `daemon.ask.retrieve.latency.p50_us` / `p95_us` (`retrieve.context`) | 1,879,429 / 2,650,182 | **224,671 / 389,169** |
+| `daemon.rss_mib.after_extract` | 2,754 | **1,135** |
+| `daemon.rss_mib.peak_first_start` (startup, extraction, searches) | 4,626 | **1,674** |
+| `daemon.rss_mib.after_idle` (second start, vault rendered) | 2,984 | **1,006** |
+| `daemon.rss_mib.peak` (second start) | 3,143 | **1,171** |
+| `daemon.ipc.status.latency.p50_us` / `p95_us` | 302 / 623 | **45 / 81** |
+| `daemon.ipc.sources_list` / `ingest_status` / `egress_recent` p50 (us) | 44 / 45 / 75 | 42 / 45 / 68 |
+| `daemon.ipc.knowledge_status.latency.p50_us` | 13,934 | 158,532 (see below; now cached) |
+| `daemon.first_search_ms` | 182 | 171 |
+| `daemon.search.latency.p50_us` / `p95_us` | 89,326 / 288,881 | 92,983 / 326,857 |
+| `daemon.knowledge.page_load_ms` (first entity page) | 3.4 | 3.2 |
+| `daemon.knowledge.entity.latency.p50_us` (detail page) | 4,526 | 4,448 |
+| `daemon.knowledge.graph.latency.p50_us` (overview) | 64,033 | 66,926 |
+| `daemon.knowledge.extract_s` (startup run, 500k items) | 3,750 (133 items/s) | 3,606 (139 items/s) |
+| `daemon.vault.render_s` (15,040 pages) | 53.5 | 46.9 |
+| `daemon.ingest.files_per_s` (2k files, watched folder) | 678 | 644 |
+| `daemon.seed.items_per_s` (store writes, batched) | 3,056 | 3,056 |
+| `daemon.disk.bytes_per_item.after_seed` / `after_extract` | 4,245 / 9,001 | 4,245 / 10,563 |
+| `daemon.idle.cpu_percent` / `wakeups_per_s` | 0.00 / 0.0 | 0.00 / 0.0 |
+
+At 250k items the "before" daemon (`44b9e11`) did not finish the bench: one `knowledge.status`
+call blocked for more than the bench's 60 s call timeout (reproduced locally: **81 s**), while
+the proactive engine loaded the whole store item by item. The earlier 250k run against `c03b984`
+(run 41245585147, same runner type) gives the 250k baseline: startup 6.5 s, restart 10.6 s,
+`retrieve.context` p50 1.07 s, idle RSS 1.3 GB; after the fixes, measured on a kept 250k home
+(4-vCPU dev container): restart **28 ms**, idle RSS **429 MiB** with the default config.
+
+What changed, by offender:
+
+- **Startup read the whole database.** Every start ran `PRAGMA quick_check` over the encrypted
+  file before opening it (FF1's damage check): ~5 s per GB. `nugget_store::check_file_on_open` now
+  runs the full check before opening only after an exit without a clean close (a non-empty
+  write-ahead log, which SQLite syncs, or an owner lock file left behind) or a failed background
+  check; otherwise the cheap checks (header, whole pages, the WAL scan, decrypting with the key) and
+  the full check in the background 20 s after startup, at most daily, on its own small-cache
+  connection, cancelled at shutdown. Damage found there is logged and recorded, and the next start
+  refuses the file (recovery mode, as before). The daemon exits without dropping its store, so a
+  graceful stop looked like a crash: new `Store::close_cleanly` (flush the ledger, fold in and
+  truncate the WAL, release the owner lock) runs last at shutdown. Trade-off: damage to a cleanly
+  closed file is now found up to ~20 s after start instead of before it (the backup guide says so).
+- **Proactive held the store twice.** `Corpus::load` read every item (text and metadata tree) with
+  one query each into one `Vec`, then parsed it: ~700 MB at 250k on top of everything else, after
+  every run, and it starved other readers (the 81 s `knowledge.status`). New `Store::items_page`
+  walks a source in key order (one key query plus one batched read per 500 items); the corpus keeps
+  only the parsed form. The proactive engine still rescans the store on every run; making it
+  incremental is the crate's own follow-up.
+- **Ask's near-miss check ranked thousands of rows.** For each rare word of a question,
+  `Retriever::partial_matches` asked `search_text` for up to 1% of all chunks (~6,000 at 500k,
+  ranked, joined and snippeted, up to six words) to learn which of ~20 results contain it. New
+  `Store::text_matches_among` answers from the FTS indexes alone, with the same result.
+- **Counts by full scan.** `status` counted every item and chunk; it now sums the trigger-maintained
+  `source_stats` (schema v10). `knowledge.status` ran `count(*)` over every mention (a million at
+  250k, too big for a reader's 32 MiB page cache, so ~130 ms per call; the 500k "after" column above
+  predates the fix and shows 159 ms); the counts are now cached
+  against the writer connection's `total_changes()` (no write can land under the writer lock) and
+  recomputed at least every 60 s: on a settled 250k daemon, **~130 ms to 0.2 ms** p50 (the first
+  call after a write still pays the count).
+- **Bulk writes.** `Store::upsert_items_with_chunks` writes many items in one transaction (the bench
+  seeds with it: 3,056 items/s at 500k). The ingest pipeline still writes one item per transaction
+  (its crate's call); daemon ingest stays at ~650 files/s.
+
+Not fixed, measured:
+
+- **Knowledge extraction is the long pole:** a first run over 500k items takes an hour (139
+  items/s; X5 measured 175 at 100k). Each item is a few SQLite writes; batching across items is
+  `nugget-knowledge`'s call.
+- **Search** is 93 ms p50 / 327 ms p95 at 500k (text-only: the bench has no embedding provider).
+  Full-text ranking over ~600k chunks dominates; within the brief's budget but the next target.
+- **Disk:** 4.2 KB per item for the store and 10.6 KB after extraction (the knowledge graph:
+  200k claims, 2M mentions at 500k); 5 GB at 500k.
+- **Idle RSS at 500k is ~1 GB**, of which ~290 MB is the draft voice profile and ~160 MB SQLite page
+  caches (writer and 4 readers × 32 MiB); the rest is allocator retention after the startup runs.
+- **The graph overview** (`knowledge.graph`, 67 ms) still scans every entity's counts.
+
+**Desktop lists.** Search results (II2's page, 50 at most) stay a plain list; the knowledge entity
+list and the privacy ledger use the shared windowed `VirtualList` (`apps/desktop/src/components/`),
+the entity list loading 50 more on scroll (`usePagedList`). The e2e `scale` scenario
+(`apps/desktop/e2e/scale.mjs`; the daemon answers a 500,000-entity `knowledge.status` and pages the
+entities) scrolled 2,100 entities at 16.7 ms median / 17.2 ms p95 frames, no long tasks, at most 32
+rows in the DOM; the privacy ledger at 1,000 rows at 17 ms p95, no long tasks, at most 41 rows.
+
 ## Energy
 
 DD2 measured what Nugget costs in energy and battery and cut what was wasteful: the daemon idle,
@@ -2267,7 +2488,7 @@ Options (all suites):
 | `--draft-judge-model ID` | `draft`: judge with this manifest model on a second local server next to the drafting one (same `--models-home`), instead of the drafting model; implies `--draft-judge model` (`params.judge.model`, `judge.same_model_as_drafts`) |
 | `--draft-judge-timeout-s N` | `draft`: per-request timeout of the model judge (default 240 with `--draft-judge-model`, else the draft timeout; `params.judge.timeout_s`) |
 | `--draft-judge-grounding` | `draft`: also judge the grounded Nugget arm against the ungrounded one (`draft.judge_grounding.*`; needs `--draft-grounding both`; doubles the judge requests) |
-| `--knowledge-items N` | `knowledge`: items extracted by the real model instead of the scale's subset (`smoke` 8, `quick` 30, `standard` all 93); the scenario items are always kept |
+| `--knowledge-items N` | `knowledge`: items extracted by the real model instead of the scale's subset (`smoke` 8, `quick` 30, `standard` and `all`: every item of the corpus); the scenario items are always kept. `--knowledge-corpus original` restricts the corpus to the 93 items before EE1 |
 | `--knowledge-dump FILE` | `knowledge` (any LLM): write false positives / negatives and, with a real model, every request with its answer and gate verdicts, as JSONL (see the `knowledge` section) |
 | `NUGGET_BENCH_CUA_TASK_TIMEOUT` | `cua`: per-task wall-clock limit in seconds (default 300) |
 
@@ -3021,6 +3242,66 @@ hours on this CPU (was ~15).
 changed from now on go through the new LLM path, but an existing vault is not re-extracted, since
 that would cost one local-model request per item (26–33 s each here) without the user asking.
 
+**Measured (EE1): entity resolution and time-aware claims.** Changes since AA3:
+
+- *Names.* A short form of a person ("Maggie", "Bob", "M. Thistlewood", "Kate S", an address
+  like `maggie.t@`) joins a full-name person only when the names fit (a small clean-room table
+  of English diminutives in `nugget-knowledge/src/names.rs`; names that are also standalone
+  names, like Liam or Nathan, never match another given name) **and** something corroborates
+  it: a shared address, the same item, the same mail thread (Message-ID / In-Reply-To /
+  References), or the same organisation (a header participant at the person's mail domain, or
+  "NAME from/at/of ORG" in the text; for the user's own domain, only internal mail between
+  colleagues already known from other items). Exactly one corroborated candidate is required;
+  never on a first name alone. The result does not depend on item order (tested in several
+  orders and batchings). Every merge records why on the surviving entity (`merge_log`), shown
+  in the vault's "Merged" section, and a user split removes the record. The same full name
+  under two addresses merges only when one address's mail names the other's organisation (a
+  job change).
+- *Time.* Claims carry `valid_from` from their earliest evidence; for single-valued predicates
+  (`works_at`, `has_title`, `lives_in`, ...) the current value is recomputed from the evidence
+  (newest sighting wins; a quote saying the fact ended, such as "last day at" or "moved from",
+  ends it), and the older values get `valid_to`. Vault pages list current facts first and the
+  superseded ones under *Earlier:* with their interval, each cited. Existing graphs are
+  migrated once, without the model.
+- *Model output.* Phrases, job titles and acronyms proposed as names ("Felix tells me",
+  "Senior Data Engineer" as a place, "GP" as a person) become literals; a short name of the
+  wrong kind ("Ostrander" as a place) takes the kind of its longer name; a mail's sender named
+  only in the headers is a valid claim subject.
+
+Before and after on one runner each, local 4B model, one attempt per item, 180 s per request.
+"Before" is the integration branch before EE1 (`4b98b90`); "after" runs this branch on the same
+items (`--knowledge-corpus original` reproduces the 93-item corpus and its 30-item subset), then
+on the whole corpus with the EE1 hard cases (106 items):
+
+| Metric | Run 41189133384 (EPYC 7763): before 30 / 93 → after 30 / 93 / 106 | Run 41113623942 (EPYC 9V45, without the last fixes): before 30 / 93 → after 30 / 93 / 106 |
+|---|---|---|
+| Entity F1 (target ≥ 0.8) | 0.72 / 0.74 → **0.74 / 0.79 / 0.80** | 0.69 / 0.72 → **0.71 / 0.78 / 0.78** |
+| Entity P / R, 93 items | 0.64 / 0.88 → 0.73 / 0.87 | 0.61 / 0.89 → 0.71 / 0.87 |
+| Claim F1 | 0.57 / 0.74 → 0.58 / 0.71 / 0.71 | 0.60 / 0.71 → 0.57 / 0.74 / 0.73 |
+| Unsupported claims, also injection (target 0) | **0** → **0** | **0** → **0** |
+| Resolution B³ F1 | 0.97 / 0.95 → 0.94 / 0.95 / 0.97 | 0.97 / 0.94 → 0.95 / 0.95 / 0.95 |
+| Hard cases (real model) | nickname and job change fail → still fail (Kate, Rob and both same-first-name pairs pass) | same |
+| Requests timed out | 0 → 0 | 0 → 0 |
+| Latency per request p50 / p95 | 24 / 57 → 24 / 56 s | 17 / 44 → 17 / 42 s |
+
+The entity F1 target is **MISSED** on the 30- and 93-item sets of the old corpus (0.74 and 0.79
+on the better run) and met only on the 106-item corpus (0.802), so the honest reading is that
+EE1 moved the local model from about 0.73 to about 0.79, just short of 0.8. Precision rose by
+0.09–0.10 (fewer duplicate people, kind mistakes and junk names) at unchanged recall and
+latency, and no unsupported or injected claim survived. Claim F1 did not move. The real-model
+hard cases still fail for reasons the dump shows. Both job changes now have the right current
+employer and the old one superseded, but the roles miss: the model writes no title for Priya's
+new role ("Head of Data"), and gives Delphine "Tidewater Billing review" instead of "Legal
+Counsel". Maggie fails because first names in the user's own notes ("Maggie", "Priya" in a
+journal) have nothing to corroborate them, so they stay separate people by design. The
+remaining entity false positives on 93 items: such first names (10), kind mistakes, mostly
+projects called organisations or people (9), and names not in the gold set (8). With the scripted model every
+hard case passes on both corpora (entity F1 0.966 / 0.958).
+
+`EXTRACTOR_VERSION` is again not bumped: the new resolution rules and the time-aware lifecycle
+apply to existing graphs through the one-time migration and the end-of-run settle pass, without
+a model request per item.
+
 ### Memory recall with a real embedding model (DD4)
 
 `memory --backend real --local-models` runs the M1 memory benchmark (the real store, ingest
@@ -3188,6 +3469,76 @@ still has no signal on this made-up-word corpus, so hybrid recall@1 and MRR stay
 takes 4 hours (1.4–3.1 files/s depending on the CPU), queries take 30–110 ms instead of 5–20 ms, and
 a single change takes 1.5–3.4 s to become searchable instead of 0.6 s, still far inside the 60 s
 target.
+
+#### A multilingual embedder (GG7-2, 2026-11-01)
+
+QA GG7 found that an English question about non-English mail is not found: `nomic-embed-text`
+v1.5, the manifest's embedder, is English-only. Four local candidates (Q8_0 GGUF, CPU, 2
+threads, inputs truncated at 512 tokens) were compared by dense retrieval alone: cosine top-k over
+GG7's 62-file corpus (GG7's search gold by kind, and its Ask questions with the cited file as
+gold) and over `nugget-retrieve`'s English eval set. Hit rates are @1 / @5 / @10:
+
+| Model (licence, download) | ms/doc GG7 / eval | English Q about other-language mail (10) | GG7 `cross_lingual` (12) | Own-language Ask (29) | English eval set (42) | GG7 `name` (13) |
+|---|---|---|---|---|---|---|
+| `nomic-embed-text-v1.5` (Apache-2.0, 146 MB) | 269 / 53 | 0.40 / 0.50 / 0.60 | 0.25 / 0.50 / 0.83 | 0.76 / 0.97 / 1.00 | 0.95 / 1.00 / 1.00 | 0.31 / 0.69 / 0.85 |
+| `nomic-embed-text-v2-moe` (Apache-2.0, 512 MB) | 357 / 117 | **1.00 / 1.00 / 1.00** | 0.58 / 0.92 / 1.00 | **1.00 / 1.00 / 1.00** | 0.98 / 1.00 / 1.00 | 0.54 / 0.69 / 0.77 |
+| `granite-embedding-107m-multilingual` (Apache-2.0, 121 MB) | 60 / 15 | 0.80 / 0.90 / 1.00 | 0.67 / 0.83 / 0.92 | 0.86 / 0.97 / 0.97 | 0.95 / 1.00 / 1.00 | 0.00 / 0.31 / 0.31 |
+| `multilingual-e5-small` (MIT, 132 MB) | 81 / 18 | 0.00 / 0.10 / 0.20 | 0.00 / 0.17 / 0.33 | 0.21 / 0.52 / 0.62 | 0.12 / 0.45 / 0.57 | 0.00 / 0.08 / 0.23 |
+
+- **`nomic-embed-text-v2-moe` is proposed** (`manifests/pending/multilingual-embed.json`): the
+  best cross-language and own-language recall, no loss on the English eval set, the same task
+  prefixes as v1.5 (`search_query: ` / `search_document: `, matched by the existing
+  `nomic-embed-text` row of `EMBED_PREFIXES`), the same 768 dimensions, and an official GGUF from
+  the model's authors under Apache-2.0. Cost: 3.5× the download (512 MB) and 1.3–2.2× the CPU
+  time per chunk. Its trained context is 512 tokens, the chunker's `max_tokens`.
+- Granite 107M is 4–5× faster and nearly as good across languages, but its names recall is
+  poor and only community GGUF conversions exist. The e5-small GGUF tested is broken
+  (a third-party conversion; mean pooling probably lost); not pursued.
+
+**Memory gate** (`memory --backend real --scale quick --strict --embed-url`, debug build, each
+model served by llama-cpp-python 0.3.16 on 2 CPU threads; the runtime's llama-server could not be
+fetched here): both pass every target with the same recall: eval-set hybrid recall@10 1.00 (MMR
+1.00, convex 1.00, MMR + convex 0.96; target 0.905), synthetic corpus hybrid recall@10 0.97
+(target 0.93), freshness p95 2.3 s (v1.5) and 2.2 s (v2), propagation 1.00. Ingest throughput
+1.85 (v1.5) and 1.79 (v2) chunks/s; this box's embedding server, not the model, sets that pace.
+
+**End to end through `nuggetd`** (GG7 corpus indexed by the files connector, hybrid search over
+IPC, the embedder an on-device `openai_compatible` provider; the runtime's own llama-server could
+not be fetched in this environment). Hit @1 / @5 / @10, same queries:
+
+| Queries | v1.5 | v2-moe | v2-moe, `fusion = "convex"` |
+|---|---|---|---|
+| English question about other-language mail (10) | 0.30 / 0.50 / 0.50 | 0.40 / 0.70 / **1.00** | 0.30 / 0.70 / 1.00 |
+| GG7 `cross_lingual` (12) | 0.25 / 0.42 / 0.58 | 0.25 / 0.58 / **1.00** | 0.33 / 0.75 / 1.00 |
+| Own-language Ask (29) | 0.79 / 0.97 / 1.00 | **1.00 / 1.00 / 1.00** | 1.00 / 1.00 / 1.00 |
+| GG7 `semantic` (10) | 0.40 / 0.90 / 1.00 | 0.50 / 1.00 / 1.00 | 0.30 / 1.00 / 1.00 |
+| GG7 `name` (13) | 0.77 / 1.00 / 1.00 | 0.85 / 0.92 / 1.00 | 0.69 / 0.77 / 0.77 |
+| GG7 `exact` (16) | 0.88 / 1.00 / 1.00 | 0.88 / 1.00 / 1.00 | 0.94 / 0.94 / 0.94 |
+
+Every GG7 query now finds its file in the top 10. The remaining cross-language gap is fusion:
+an English question also matches English mail lexically (`en/04-q4-forecast-deadline.eml` on
+"by when", "deadline"), and RRF ranks those beside the right non-English mail, so @1 stays low
+although dense retrieval alone ranks it first. Convex fusion does not fix it and costs names
+and exact matches, so RRF stays the default.
+
+**Query translation** through the local chat model (the GG7 suggestion) was considered and not
+added: with v2 the dense leg already finds the other-language mail, translating would cost a
+chat-model call (seconds on a CPU) on every query whose language differs from some of the
+corpus (a multilingual mailbox always does), and it would only help the lexical leg, whose
+English matches are the problem above.
+
+**Switching embedders safely.** v1.5 and v2 vectors have the same dimension but are not
+comparable, and the index recorded only the dimension and task prefixes, so a new default would
+have mixed two vector spaces silently. The store now records the embedding model too
+(`Store::embedding_model`, adopted with the first vectors like the prefixes); ingest only embeds
+for an index with a provider serving its model (otherwise the item is indexed text-only), and
+search embeds the query only with that model (otherwise `TextOnlyReason::ModelMismatch`).
+`nuggetd` keeps a store that has vectors on the manifest model that built them (vectors from
+before the record count as `nomic-embed-text-v1.5-q8`, the only embedding model shipped until
+now), unless the config names an embedding model; only a store without vectors takes the
+recommendation. So once v2 is signed into the manifest, new installs get it and existing stores
+keep working on v1.5. Moving an existing store to v2 needs its vectors dropped and re-embedded,
+which no command does yet.
 
 ### Ask answer quality (EE3)
 

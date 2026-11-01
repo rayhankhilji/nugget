@@ -227,14 +227,17 @@ export interface FactActionPlan {
 
 /**
  * The one action a fact offers: a fact the user added is withdrawn (undo of the assertion), a
- * current fact is rejected (sticky), and anything else is restored.
+ * current fact is rejected (sticky), and a rejected or retracted one is restored. A superseded
+ * fact is history (a newer fact replaced it): it offers nothing, since making it current again
+ * would put two values side by side with no way back to "superseded".
  */
-export function factAction(c: Pick<ClaimView, "status" | "evidence">): FactActionPlan {
+export function factAction(c: Pick<ClaimView, "status" | "evidence">): FactActionPlan | null {
   const sourced = c.evidence.length > 0;
   if (c.status === "user_asserted") {
     return { action: "unassert", decision: "unasserted", undo: "user_asserted", next: sourced ? "active" : "retracted" };
   }
   if (c.status === "active") return { action: "reject", decision: "rejected", undo: "active", next: "rejected" };
+  if (c.status === "superseded") return null;
   return { action: "restore", decision: "active", undo: null, next: sourced ? "active" : "user_asserted" };
 }
 

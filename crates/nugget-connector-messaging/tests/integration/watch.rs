@@ -131,3 +131,44 @@ async fn telegram_watch_picks_up_new_exports() {
     )
     .await;
 }
+
+/// Regression (JJ1-5): the live path reports an unreadable export too.
+#[tokio::test]
+async fn whatsapp_watch_reports_unreadable_exports() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("exports");
+    write(
+        &dir,
+        "WhatsApp Chat with Kai.txt",
+        "2026年3月14日 9:06 - Kai: hi\n",
+    );
+    let env = Env::new();
+    let replica = Replica::new();
+    let settings = json!({ "folder": dir });
+    let conn = env.build(Kind::WhatsApp, &settings, replica.clone());
+    let sink = Arc::new(ReplicaSink::new(replica.clone()));
+    let cancel = CancellationToken::new();
+    let task = {
+        let (conn, cancel) = (conn.clone(), cancel.clone());
+        let sink: Arc<dyn ChangeSink> = sink.clone();
+        tokio::spawn(async move { conn.watch(sink, cancel).await })
+    };
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while sink.problems.lock().unwrap().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for the report"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        sink.problems.lock().unwrap()[0].0,
+        "whatsapp:WhatsApp Chat with Kai.txt"
+    );
+    cancel.cancel();
+    let res = tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("watch stops promptly")
+        .unwrap();
+    assert!(matches!(res, Err(Error::Cancelled)), "{res:?}");
+}

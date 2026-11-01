@@ -303,6 +303,78 @@ impl SectionTracker {
     }
 }
 
+/// Invisible format characters a reader never sees: zero-width space, LRM/RLM, word joiner and
+/// invisible operators, BOM / zero-width no-break space, bidi embeddings, overrides and isolates,
+/// and Unicode tag characters. Zero-width (non-)joiners are handled by [`strip_invisible`].
+pub(crate) fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'
+            | '\u{200E}'
+            | '\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+            | '\u{E0000}'..='\u{E007F}'
+    )
+}
+
+fn is_joiner(c: char) -> bool {
+    matches!(c, '\u{200C}' | '\u{200D}')
+}
+
+/// Byte positions removed from a text, to map offsets into the original onto the cleaned text.
+pub(crate) struct Removed(Vec<(usize, usize)>);
+
+impl Removed {
+    /// `at` (a byte offset into the original text) as an offset into the cleaned text.
+    pub fn map(&self, at: usize) -> usize {
+        // Entries are (original position, bytes removed up to and including that char).
+        let i = self.0.partition_point(|&(p, _)| p < at);
+        at - if i == 0 { 0 } else { self.0[i - 1].1 }
+    }
+}
+
+/// `text` without [`is_invisible`] characters and without zero-width (non-)joiners unless both
+/// neighbours are visible non-ASCII characters (emoji ZWJ sequences, Indic / Arabic-script
+/// shaping). `None` when nothing was removed.
+pub(crate) fn strip_invisible(text: &str) -> Option<(String, Removed)> {
+    let keep = |prev: Option<char>, c: char, next: Option<char>| {
+        if is_invisible(c) {
+            return false;
+        }
+        if !is_joiner(c) {
+            return true;
+        }
+        let visible =
+            |x: Option<char>| x.is_some_and(|x| !x.is_ascii() && !is_invisible(x) && !is_joiner(x));
+        visible(prev) && visible(next)
+    };
+    let mut prev = None;
+    let mut it = text.char_indices().peekable();
+    let mut out: Option<(String, Vec<(usize, usize)>)> = None;
+    let mut total = 0;
+    while let Some((i, c)) = it.next() {
+        let next = it.peek().map(|&(_, n)| n);
+        if keep(prev, c, next) {
+            if let Some((s, _)) = out.as_mut() {
+                s.push(c);
+            }
+        } else {
+            let (_, removed) = out.get_or_insert_with(|| {
+                let mut s = String::with_capacity(text.len());
+                s.push_str(&text[..i]);
+                (s, Vec::new())
+            });
+            total += c.len_utf8();
+            removed.push((i, total));
+        }
+        prev = Some(c);
+    }
+    out.map(|(s, r)| (s, Removed(r)))
+}
+
 /// Human-readable message from a caught panic payload.
 pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
@@ -340,6 +412,32 @@ mod tests {
             |_, u| v.push(u.to_owned()),
         );
         assert_eq!(v, ["https://a.example/x?y=1", "http://b.example/p"]);
+    }
+
+    #[test]
+    fn strips_invisible_characters() {
+        let (s, r) =
+            strip_invisible("ig\u{200B}nore\u{202E}x\u{2066}y\u{2069}\u{FEFF}z\u{E0041}!").unwrap();
+        assert_eq!(s, "ignorexyz!");
+        // Offsets after removed chars shift back by the removed bytes.
+        assert_eq!(r.map(0), 0);
+        assert_eq!(r.map(2), 2);
+        assert_eq!(r.map(5), 2);
+        assert_eq!(r.map("ig\u{200B}nore".len()), "ignore".len());
+        for c in [
+            '\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{FEFF}', '\u{202A}', '\u{202B}',
+            '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+        ] {
+            let t = format!("a{c}b");
+            assert_eq!(strip_invisible(&t).unwrap().0, "ab", "U+{:04X}", c as u32);
+        }
+        assert!(strip_invisible("plain text, café").is_none());
+        // Joiners inside emoji sequences and Indic / Persian words stay; between ASCII they go.
+        let family = "👨\u{200D}👩\u{200D}👧";
+        assert!(strip_invisible(family).is_none());
+        assert!(strip_invisible("می\u{200C}خواهم").is_none());
+        assert_eq!(strip_invisible("a\u{200D}\u{200C}é").unwrap().0, "aé");
+        assert_eq!(strip_invisible("日\u{200C}\u{200D}本").unwrap().0, "日本");
     }
 
     #[test]

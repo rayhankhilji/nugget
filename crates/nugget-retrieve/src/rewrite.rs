@@ -280,6 +280,21 @@ mod tests {
     }
 
     #[test]
+    fn thinking_is_never_the_query() {
+        assert_eq!(
+            clean_reply(
+                "<think>\nThe user asks about herons.\n</think>\n\nheron river walk",
+                100
+            )
+            .as_deref(),
+            Some("heron river walk")
+        );
+        assert_eq!(clean_reply("<think>\nThe user asks about", 100), None);
+        assert_eq!(clean_reply("<think>", 100), None);
+        assert_eq!(clean_reply("<answer>heron</answer>", 100), None);
+    }
+
+    #[test]
     fn followups_are_detected() {
         for q in [
             "what about the second one?",

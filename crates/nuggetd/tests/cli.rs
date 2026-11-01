@@ -200,6 +200,81 @@ fn runs_reports_status_and_shuts_down() {
     assert!(!after.status.success());
 }
 
+/// GG6-8: the desktop app's quit path. `daemon.shutdown` over IPC stops the real binary on
+/// every OS (no console signal needed on Windows), with exit code 0 and "stopped" in its log.
+#[test]
+fn ipc_shutdown_exits_cleanly_and_logs_stopped() {
+    use nugget_core::ipc::{DaemonShutdownResponse, StatusResponse, method};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    std::fs::create_dir_all(home.join("config")).unwrap();
+    std::fs::write(
+        home.join("config/config.toml"),
+        "[runtime]\nenabled = false\n",
+    )
+    .unwrap();
+    let child = nuggetd(home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut daemon = Daemon(Some(child));
+    wait_for_status(home, daemon.0.as_mut().unwrap());
+    let pid = daemon.0.as_ref().unwrap().id();
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let answered = rt.block_on(async {
+        let paths = nugget_core::paths::Paths::rooted(home.to_path_buf());
+        let client = nugget_ipc::Client::connect(&paths).await.unwrap();
+        let status: StatusResponse = client.call(method::STATUS, &()).await.unwrap();
+        // Started by a test, not by a service manager.
+        assert_eq!((status.pid, status.service.as_deref()), (Some(pid), None));
+        let r: DaemonShutdownResponse = client
+            .call(
+                method::DAEMON_SHUTDOWN,
+                &serde_json::json!({"reason": "app_quit"}),
+            )
+            .await
+            .unwrap();
+        r
+    });
+    assert!(answered.stopping);
+    assert_eq!(answered.pid, pid);
+
+    let mut child = daemon.0.take().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break s;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "daemon did not stop on daemon.shutdown"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(status.success(), "clean exit, got {status}");
+
+    let log = std::fs::read_dir(home.join("data/logs"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("nuggetd"))
+        .map(|e| std::fs::read_to_string(e.path()).unwrap())
+        .collect::<String>();
+    let messages: Vec<String> = log
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|l| l["fields"]["message"].as_str().map(str::to_owned))
+        .collect();
+    let at = |m: &str| messages.iter().position(|x| x == m);
+    let (asked, stopped) = (at("stop requested over IPC"), at("stopped"));
+    assert!(asked.is_some() && stopped.is_some(), "{log}");
+    assert!(asked < stopped, "{log}");
+    assert!(log.contains("app_quit"), "the reason is logged: {log}");
+    assert!(!run(home, &["status"]).status.success());
+}
+
 /// With the keychain off, source secrets live in daemon memory: they work for the session and
 /// never reach a file (logs, `sources.toml`, config) under the home directory.
 #[cfg(unix)]

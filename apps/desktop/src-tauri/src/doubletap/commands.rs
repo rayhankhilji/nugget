@@ -122,6 +122,57 @@ pub async fn doubletap_request_permissions(
     Ok(status(&app).await)
 }
 
+/// macOS Privacy & Security panes Double Tap may open (GG6-19). The URLs are fixed here and
+/// never built from input, so the general URL allowlist (which refuses
+/// `x-apple.systempreferences:`) stays as strict as it is.
+pub(crate) fn privacy_pane_url(pane: &str) -> Option<&'static str> {
+    match pane {
+        "accessibility" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        }
+        "input_monitoring" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+        }
+        _ => None,
+    }
+}
+
+/// macOS: open System Settings at the Accessibility or Input Monitoring list, so a user who
+/// denied the prompt (which macOS shows only once) can turn Nugget on. Returns `false` where
+/// there is no such pane (Linux, Windows).
+#[tauri::command]
+pub async fn doubletap_open_privacy_settings(
+    window: WebviewWindow,
+    pane: String,
+) -> Result<bool, CmdError> {
+    not_overlay(&window)?;
+    let Some(url) = privacy_pane_url(&pane) else {
+        return Err(CmdError::Other(format!("unknown settings pane `{pane}`")));
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let status = tauri::async_runtime::spawn_blocking(move || {
+            std::process::Command::new("/usr/bin/open")
+                .arg(url)
+                .status()
+        })
+        .await
+        .map_err(|e| CmdError::Other(e.to_string()))?
+        .map_err(|e| CmdError::Other(format!("couldn't open System Settings: {e}")))?;
+        if !status.success() {
+            return Err(CmdError::Other(format!(
+                "couldn't open System Settings ({status})"
+            )));
+        }
+        Ok(true)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = url;
+        Ok(false)
+    }
+}
+
 #[tauri::command]
 pub fn doubletap_default_excluded() -> Vec<String> {
     settings::default_excluded()
@@ -273,4 +324,24 @@ pub fn doubletap_practice(
         .map_err(CmdError::Other)?;
     *lock(&state.practice) = field;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::privacy_pane_url;
+
+    #[test]
+    fn privacy_panes_are_fixed_urls() {
+        assert_eq!(
+            privacy_pane_url("accessibility"),
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        );
+        assert_eq!(
+            privacy_pane_url("input_monitoring"),
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+        );
+        for other in ["", "camera", "../x", "accessibility?x", "Accessibility"] {
+            assert_eq!(privacy_pane_url(other), None, "{other}");
+        }
+    }
 }

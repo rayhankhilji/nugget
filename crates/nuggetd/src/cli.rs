@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use nugget_core::capability::Locality;
-use nugget_core::ipc::StatusResponse;
+use nugget_core::ipc::{DiskLevel, StatusResponse};
 use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
 
@@ -76,6 +76,17 @@ pub fn format_status(s: &StatusResponse, socket: &str) -> String {
         None => "not checked yet",
     };
     let _ = writeln!(out, "audit:     {audit}");
+    if let Some(d) = &s.disk {
+        let free = d.free_bytes.map_or("unknown".to_string(), |b| {
+            format!("{} MB free", b / 1_000_000)
+        });
+        let line = match d.level {
+            DiskLevel::Ok | DiskLevel::Unknown => free,
+            DiskLevel::Low => format!("LOW: {free}"),
+            DiskLevel::Full => format!("FULL: {free}; indexing and saving may fail"),
+        };
+        let _ = writeln!(out, "disk:      {line}");
+    }
     if s.providers.is_empty() {
         let _ = writeln!(out, "providers: none configured");
         return out;
@@ -171,8 +182,15 @@ mod tests {
                 },
             ],
             audit_chain_ok: Some(false),
+            disk: Some(nugget_core::ipc::DiskStatus::classify(
+                Some(150_000_000),
+                false,
+            )),
+            pid: None,
+            service: None,
         };
         let out = format_status(&s, "/tmp/sock");
+        assert!(out.contains("disk:      FULL: 150 MB free"), "{out}");
         assert!(out.starts_with("nuggetd 0.0.1 running (protocol 1), up 1h 2m\n"));
         assert!(out.contains("store:     3 items, 9 chunks"));
         assert!(

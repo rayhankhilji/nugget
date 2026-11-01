@@ -155,10 +155,11 @@ async fn disable_stops_and_enable_restarts() {
         .unwrap();
     assert_eq!(info.state, SourceState::Disabled);
     assert!(!info.enabled);
-    assert_eq!(
-        st.watch_cancelled.load(std::sync::atomic::Ordering::SeqCst),
-        1
-    );
+    // The watcher sees its cancellation on its own task: wait for it rather than race it.
+    eventually("the watch is cancelled", || {
+        st.watch_cancelled.load(std::sync::atomic::Ordering::SeqCst) == 1
+    })
+    .await;
     assert!(h.ingest.sync_now(Some(&SourceId::new("fake-1"))).is_err());
     let calls = st.calls();
 

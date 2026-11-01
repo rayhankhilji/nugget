@@ -25,7 +25,15 @@ this device only.
 In Arabic the whole window is mirrored: the sidebar moves to the right, text is right-aligned and
 arrows that mean "back" or "next" point the other way. Your own content (notes, mail, chat
 messages, names) keeps its own direction, so an English note still reads left to right inside the
-Arabic interface.
+Arabic interface. Answers and Double Tap drafts take the direction of the script most of each
+paragraph is written in, so an Arabic answer that starts with a product name (`iPhone 15 سيصل…`)
+still reads right to left. Dates inside generated text, such as a Today card's "renews 2026-11-03",
+are written the way your language writes them.
+
+Mail replies are split from the quoted earlier message in every interface language's mail-client
+style (`Am … schrieb …:`, `Le … a écrit :`, `… 写道：`, `في … كتب …:`, `2026年10月28日(水) 14:03 … :`,
+and localised Outlook header blocks), so only the new text is indexed as the mail's own; the quote
+is kept with it. Sentences end at `؟`, `。`, `？`, `！` and `।` as well as at `.`, `?` and `!`.
 
 The daemon, the command line and the logs are in English. Your sources and answers are in whatever
 language they were written in; models answer in the language you ask in.

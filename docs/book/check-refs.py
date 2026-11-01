@@ -71,6 +71,9 @@ SOURCES: dict[str, tuple[str, str] | list[tuple[str, str]]] = {
     "connector.notion": ("crates/nugget-connector-saas/src/notion.rs", "NotionSettings"),
     "connector.github": ("crates/nugget-connector-saas/src/github.rs", "GitHubSettings"),
     "connector.linear": ("crates/nugget-connector-saas/src/linear.rs", "LinearSettings"),
+    "connector.imessage": ("crates/nugget-connector-messaging/src/settings.rs", "IMessageSettings"),
+    "connector.whatsapp": ("crates/nugget-connector-messaging/src/settings.rs", "WhatsAppSettings"),
+    "connector.telegram": ("crates/nugget-connector-messaging/src/settings.rs", "TelegramSettings"),
 }
 
 # Config table path (dotted) -> group, for TOML validation and dotted-key references.
@@ -105,6 +108,7 @@ CONNECTOR_FILES = [
     "crates/nugget-connector-saas/src/notion.rs",
     "crates/nugget-connector-saas/src/github.rs",
     "crates/nugget-connector-saas/src/linear.rs",
+    "crates/nugget-connector-messaging/src/lib.rs",
 ]
 
 # Kind constants defined in a crate's lib.rs rather than next to the connector.

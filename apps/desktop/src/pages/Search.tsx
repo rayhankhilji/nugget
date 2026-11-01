@@ -17,7 +17,7 @@ import {
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
-import { usePendingSearch, usePendingSearchState } from "../hooks.nav";
+import { requestPage, usePendingSearch, usePendingSearchState } from "../hooks.nav";
 import { citedNumbers, splitCitations, withheldNotice } from "../citations";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
@@ -25,6 +25,7 @@ import { Highlight, itemFileName, plainSnippet, SourceBadge } from "../component
 import { sourceKindOf } from "../recency";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatDate, formatNumber, useT } from "../i18n";
+import { textDir } from "../bidi";
 import { sourceKindLabel } from "../format";
 import { addRecent } from "../savedSearches";
 import { activeFilters, decode, EMPTY_STATE, encode, hasFilters, normalize, toFilters, type SearchState } from "../searchState";
@@ -195,7 +196,15 @@ export function SearchPage() {
   });
   usePendingSearchState(apply);
 
+  /**
+   * The control that opened the timeline, to hand focus back on Back or Escape: its name and
+   * which of the same-named controls it was (the results list re-renders while the timeline shows).
+   */
+  const timelineOpener = useRef<{ label: string; index: number } | null>(null);
   const openTimeline = (entityId: string) => {
+    const from = document.activeElement;
+    const label = from instanceof HTMLElement ? from.getAttribute("aria-label") : null;
+    timelineOpener.current = label ? { label, index: sameNamed(label).indexOf(from as HTMLElement) } : null;
     setSelected(null);
     stateRef.current = { ...stateRef.current, timeline: entityId };
     setState(stateRef.current);
@@ -208,12 +217,16 @@ export function SearchPage() {
     if (back.q && shownKey.current !== encode(back)) void runState(back);
     focusBack.current = true;
   };
-  // Back on the results: focus their heading (or the box when there are none yet).
+  // Back on the results: focus the control that opened the timeline when it is still there, else
+  // the results heading (or the box when there are none yet).
   const focusBack = useRef(false);
   useEffect(() => {
     if (!focusBack.current || state.timeline) return;
     focusBack.current = false;
-    (headingRef.current ?? inputRef.current)?.focus();
+    const o = timelineOpener.current;
+    timelineOpener.current = null;
+    const opener = o ? sameNamed(o.label)[o.index] : undefined;
+    (opener ?? headingRef.current ?? inputRef.current)?.focus();
   }, [state.timeline]);
 
   const select = (i: number, from: HTMLElement) => {
@@ -496,6 +509,24 @@ const NO_ANSWER: Omit<Answer, "error"> = {
   done: null,
 };
 
+/** The daemon's answer when no model can write (none configured, or the local one not installed). */
+export function isNoAiError(error: string | null | undefined): boolean {
+  return !!error && /no provider is available|is not installed/i.test(error);
+}
+
+/** "No AI is set up yet" with a button to set it up (GG6-14). */
+export function NoAiNote({ alert = false }: { alert?: boolean }) {
+  const t = useT();
+  return (
+    <div className="note note-warn" role={alert ? "alert" : undefined}>
+      <p>{t("search.noAi")}</p>
+      <button type="button" className="btn btn-small btn-primary" onClick={() => requestPage("models")}>
+        {t("search.setUpAi")}
+      </button>
+    </div>
+  );
+}
+
 function AskPanel({
   initialQuestion,
   byId,
@@ -513,6 +544,9 @@ function AskPanel({
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
+  // GG6-14: with no AI set up, say so up front and offer setup instead of a red internal error.
+  const providers = useAsync(api.providersList);
+  const noAi = (providers.data !== undefined && providers.data.length === 0) || isNoAiError(answer?.error);
   // Chat events can arrive before `chat` returns the stream id; buffer them by id.
   const streams = useRef(new Map<string, { text: string; done: ChatDone | null }>());
   const listRef = useRef<HTMLOListElement>(null);
@@ -651,12 +685,16 @@ function AskPanel({
               <CitationItem key={c.n} c={c} source={byId.get(c.item.source)} onOpen={onOpen} />
             ))}
           </ol>
-          <div className="ask-actions">
-            <button type="button" className="btn btn-primary" onClick={() => void ask()} disabled={streaming}>
-              {streaming ? <Spinner label={t("search.answering")} /> : answer ? t("search.askAgain") : t("search.askWithContext")}
-            </button>
-            <span className="muted small">{t("search.askNote")}</span>
-          </div>
+          {noAi && !answer ? (
+            <NoAiNote />
+          ) : (
+            <div className="ask-actions">
+              <button type="button" className="btn btn-primary" onClick={() => void ask()} disabled={streaming}>
+                {streaming ? <Spinner label={t("search.answering")} /> : answer ? t("search.askAgain") : t("search.askWithContext")}
+              </button>
+              <span className="muted small">{t("search.askNote")}</span>
+            </div>
+          )}
         </>
       )}
 
@@ -677,12 +715,14 @@ function AskPanel({
             </p>
           )}
           <AskDateNote date={answer.date} />
-          {answer.error ? (
+          {answer.error && noAi ? (
+            <NoAiNote alert />
+          ) : answer.error ? (
             <p className="note note-error" role="alert">
               {answer.error}
             </p>
           ) : (
-            <div className="answer-text" dir="auto">
+            <div className="answer-text" dir={textDir(answer.text)}>
               {answer.text ? (
                 <CitedText text={answer.text} valid={answerValid} byN={answerByN} onCite={answerCite} />
               ) : (
@@ -787,4 +827,9 @@ function CitationItem({
       )}
     </li>
   );
+}
+
+/** The page's buttons named `label`, in document order. */
+function sameNamed(label: string): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>("main button[aria-label]")).filter((b) => b.getAttribute("aria-label") === label);
 }

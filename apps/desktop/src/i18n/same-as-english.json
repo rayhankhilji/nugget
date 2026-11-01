@@ -112,7 +112,8 @@
     "shell.tray.updates",
     "searchui.kind.chat",
     "searchui.saveName",
-    "searchui.text"
+    "searchui.text",
+    "status.runtime.details"
   ],
   "es": [
     "addSource.linear.include",

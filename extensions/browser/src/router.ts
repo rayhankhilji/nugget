@@ -51,7 +51,7 @@ export class Router {
     if (tab) await this.deps.sendToTab(tab.id, { nugget: "halt" }).catch(() => undefined);
   }
 
-  /** Only the user can resume, from the popup. */
+  /** Only the user can resume: from the popup, or from the desktop's Resume (sent by the host). */
   async resume(): Promise<void> {
     this.halted = false;
     const tab = await this.deps.activeTab();
@@ -98,6 +98,11 @@ export class Router {
       case "halt":
         await this.halt();
         return {};
+      case "resume":
+        // The user pressed Resume in the desktop app; the daemon relays it. A page cannot send
+        // this: host requests come only over the native-messaging port.
+        await this.resume();
+        return {};
       case "snapshot": {
         // Stop means stop: no reading pages either until the user resumes from the popup.
         if (this.halted) throw new ProtocolError("halted", "Nugget was stopped by the user");
@@ -118,7 +123,13 @@ export class Router {
         if (this.halted) throw new ProtocolError("halted", "Nugget was stopped by the user");
         if (req.action.kind === "navigate") return this.navigate(req.tab_id, req.action.url);
         const tab = await this.grantedTab(req.tab_id);
-        const result = (await this.toTab(tab.id, { nugget: "act", snapshot_id: req.snapshot_id, action: req.action })) as ActResult;
+        const result = (await this.toTab(tab.id, {
+          nugget: "act",
+          snapshot_id: req.snapshot_id,
+          action: req.action,
+          ...(req.expect_form ? { expect_form: req.expect_form } : {}),
+          ...(req.expect_scope ? { expect_scope: req.expect_scope } : {}),
+        })) as ActResult;
         await this.checkSnapshotOrigin(result.snapshot);
         this.latest.set(tab.id, result.snapshot);
         return result;

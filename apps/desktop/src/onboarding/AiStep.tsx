@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { api, errorMessage, events, type FitReport, type ModelInfo, type ModelProgress } from "../api";
+import { api, errorMessage, events, modelsCancel, type FitReport, type ModelInfo, type ModelProgress } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Trans, useT, type MessageKey } from "../i18n";
@@ -9,6 +9,7 @@ import type { ModelFit } from "../api";
 import { ByokForm } from "./ByokForm";
 import { detectAiSetup, isSearchModel, sortModels } from "./detect";
 import { FitNotes, loadFit, MachineLine } from "./ModelFit";
+import { DownloadFailureNote, isCancelled } from "./DownloadFailure";
 import { detectOs, type Os } from "./platform";
 import { CommandSnippet, OfflineNote, StepHeading, type StepProps } from "./steps";
 
@@ -22,6 +23,10 @@ export function AiStep({ headingRef, state, dispatch, connected }: StepProps) {
   const t = useT();
   const name = useId();
   const choice = state.ai;
+  // GG6-31: the option badged "Recommended" starts selected; the user can still pick another.
+  useEffect(() => {
+    if (state.ai === null) dispatch({ type: "chooseAi", ai: "local" });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Picking a choice reveals its section below the cards: bring that section's heading into view.
   const picked = useRef(false);
   useEffect(() => {
@@ -108,12 +113,23 @@ function LocalModels({ onReady }: { onReady: (model: string) => void }) {
 
   const install = async (id: string) => {
     setRequestError(({ [id]: _, ...rest }) => rest);
-    setProgress((cur) => ({ ...cur, [id]: { id, downloaded: 0, total: 0, phase: "downloading", error: null } }));
+    // A retry resumes from the staged bytes: keep showing them until the daemon reports.
+    setProgress((cur) => ({ ...cur, [id]: { id, downloaded: cur[id]?.downloaded ?? 0, total: cur[id]?.total ?? 0, phase: "downloading", error: null } }));
     try {
       await api.modelsInstall(id);
     } catch (e) {
       setProgress(({ [id]: _, ...rest }) => rest);
       setRequestError((cur) => ({ ...cur, [id]: errorMessage(e) }));
+    }
+  };
+
+  // The daemon answers with a final `failed` / `cancelled` progress; staged bytes are kept.
+  const cancel = async (id: string): Promise<boolean> => {
+    try {
+      return (await modelsCancel(id)).cancelled;
+    } catch (e) {
+      setRequestError((cur) => ({ ...cur, [id]: errorMessage(e) }));
+      return false;
     }
   };
 
@@ -142,6 +158,7 @@ function LocalModels({ onReady }: { onReady: (model: string) => void }) {
         error={requestError[m.id]}
         fit={fit.data}
         onInstall={() => void install(m.id)}
+        onCancel={() => cancel(m.id)}
       />
     ));
   const shownChat = visible(chat);
@@ -187,6 +204,7 @@ function ModelRow({
   error,
   fit,
   onInstall,
+  onCancel,
 }: {
   model: ModelInfo;
   /** The one model to suggest: badged, explained, and its Install is the primary button. */
@@ -195,21 +213,52 @@ function ModelRow({
   error?: string;
   fit?: FitReport | null;
   onInstall: () => void;
+  /** Resolves `false` if nothing was cancelled (the request failed or the install had ended). */
+  onCancel: () => Promise<boolean>;
 }) {
   const t = useT();
   const busy = progress?.phase === "downloading" || progress?.phase === "verifying";
   const failed = progress?.phase === "failed";
+  const cancelled = isCancelled(progress);
+  // After Cancel the button goes away: move focus to Resume so keyboard users keep their place.
+  const [cancelling, setCancelling] = useState(false);
+  const actionRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!busy && cancelling) {
+      setCancelling(false);
+      actionRef.current?.focus();
+    }
+  }, [busy, cancelling]);
   const installed = model.installed || progress?.phase === "installed";
+  // LL2: Install turns into Cancel, and Cancel goes away once installed: keep keyboard focus in
+  // the card (on Cancel, then on the model's name or Retry install) instead of dropping it to the page.
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLElement>(null);
+  const focusIn = useRef<"cancel" | "title" | null>(null);
+  useEffect(() => {
+    if (busy) {
+      if (focusIn.current === "cancel") cancelRef.current?.focus();
+      // Remembered while it lasts: Cancel unmounts without a blur event.
+      focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
+    } else if (focusIn.current === "title") {
+      // Installed: the name; failed (the request or the download): its Retry install. Only when
+      // focus went with Cancel, never from wherever the user moved to meanwhile.
+      focusIn.current = null;
+      const at = document.activeElement;
+      if (!at || at === document.body || !at.isConnected) (installed ? titleRef.current : actionRef.current)?.focus();
+    }
+  });
   const total = progress?.total || model.size_bytes;
   const pct = progress ? percent(progress.downloaded, total) : 0;
   const labelId = `ob-model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   const phase = progress ? t(PHASE[progress.phase]) : "";
   const modelFit = fit?.models.find((f) => f.id === model.id);
+  const left = useEta(progress, total);
 
   return (
     <li className={best ? "card ob-model-best" : "card"} aria-labelledby={labelId}>
       <div className="card-head">
-        <bdi id={labelId} className="card-title">
+        <bdi id={labelId} ref={titleRef} className="card-title" tabIndex={-1}>
           {model.id}
         </bdi>
         <span className="badges">
@@ -222,6 +271,14 @@ function ModelRow({
         {/* FSI…PDI: the license id keeps its own direction inside right-to-left text. */}
         {model.license && <> · {t("onboarding.models.license", { license: `\u2068${model.license}\u2069` })}</>}
       </p>
+      {!installed && !busy && model.size_bytes > 0 && (
+        <p className="muted small ob-model-estimate">
+          {t("onboarding.models.estimate", {
+            fast: etaText(t, downloadSeconds(model.size_bytes, FAST_MBPS)),
+            slow: etaText(t, downloadSeconds(model.size_bytes, SLOW_MBPS)),
+          })}
+        </p>
+      )}
       {modelFit && <FitNotes fit={modelFit} freeDisk={fit?.free_disk_bytes ?? null} installed={installed} why={best} />}
       {busy && progress && (
         <div className="progress">
@@ -238,23 +295,98 @@ function ModelRow({
               done: formatBytes(progress.downloaded),
               total: formatBytes(total),
             })}
+            {left !== null && progress.phase === "downloading" && <> · {t("onboarding.models.left", { time: etaText(t, left) })}</>}
           </span>
+          <div className="card-actions">
+            <button
+              ref={cancelRef}
+              type="button"
+              className="btn btn-ghost"
+              aria-label={t("models.cancelLabel", { model: model.id })}
+              disabled={cancelling}
+              onClick={() => {
+                setCancelling(true);
+                void onCancel().then((ok) => ok || setCancelling(false));
+              }}
+            >
+              {t("models.cancel")}
+            </button>
+          </div>
         </div>
       )}
-      {(failed || error) && (
-        <p className="note note-error" role="alert">
-          {progress?.error || error || t("onboarding.models.failed")}
-        </p>
-      )}
+      <DownloadFailureNote t={t} progress={progress} error={error} fallback={t("onboarding.models.failed")} />
       {!installed && !busy && (
         <div className="card-actions">
-          <button type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
-            {failed || error ? t("onboarding.models.retry") : t("onboarding.models.install")}
+          <button
+            ref={actionRef}
+            type="button"
+            className={best ? "btn btn-primary" : "btn"}
+            onClick={(e) => {
+              if (document.activeElement === e.currentTarget) focusIn.current = "cancel";
+              onInstall();
+            }}
+          >
+            {cancelled ? t("models.resume") : failed || error ? t("onboarding.models.retry") : t("onboarding.models.install")}
           </button>
         </div>
       )}
     </li>
   );
+}
+
+// ---- download time (GG6-16) ----
+
+/** Typical fast and slow home connections, in megabits per second, for the estimate before a download. */
+export const FAST_MBPS = 100;
+export const SLOW_MBPS = 10;
+
+/** Seconds to download `bytes` at `mbps` megabits per second. */
+export function downloadSeconds(bytes: number, mbps: number): number {
+  return (bytes * 8) / (mbps * 1_000_000);
+}
+
+/** "less than a minute", "about 4 minutes", "about 2 hours". */
+export function etaText(t: ReturnType<typeof useT>, secs: number): string {
+  if (secs < 60) return t("onboarding.models.etaUnderMinute");
+  const min = Math.ceil(secs / 60);
+  if (min < 90) return t("onboarding.models.etaMinutes", { count: min });
+  return t("onboarding.models.etaHours", { count: Math.round(min / 60) });
+}
+
+/**
+ * Time left for a download, from the throughput measured over the last half minute (null until
+ * there are a few seconds of samples, so the first burst doesn't promise too much).
+ */
+export function useEta(progress: ModelProgress | undefined, total: number): number | null {
+  const samples = useRef<{ at: number; bytes: number }[]>([]);
+  const [left, setLeft] = useState<number | null>(null);
+  const downloaded = progress?.phase === "downloading" ? progress.downloaded : null;
+  useEffect(() => {
+    if (downloaded === null) {
+      samples.current = [];
+      setLeft(null);
+      return;
+    }
+    const now = Date.now();
+    const list = samples.current;
+    // A restarted download starts the measurement again.
+    if (list.length > 0 && downloaded < list[list.length - 1]!.bytes) list.length = 0;
+    list.push({ at: now, bytes: downloaded });
+    while (list.length > 2 && now - list[0]!.at > 30_000) list.shift();
+    setLeft(estimateLeft(list, total));
+  }, [downloaded, total]);
+  return left;
+}
+
+/** Seconds left from (time, bytes) samples, or null when they span under 3 s or show no progress. */
+export function estimateLeft(samples: readonly { at: number; bytes: number }[], total: number): number | null {
+  if (samples.length < 2 || total <= 0) return null;
+  const first = samples[0]!;
+  const last = samples[samples.length - 1]!;
+  const ms = last.at - first.at;
+  const bytes = last.bytes - first.bytes;
+  if (ms < 3000 || bytes <= 0) return null;
+  return Math.max(0, total - last.bytes) / (bytes / (ms / 1000));
 }
 
 // ---- bring your own key ----

@@ -311,6 +311,14 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
           </h2>
           <p className="entity-sub">
             <Badge tone="accent">{kindLabel(d.kind)}</Badge>
+            {d.sensitive && (
+              <>
+                {" "}
+                <span title={t("entity.sensitiveEntityTitle")}>
+                  <Badge tone="warn">{t("entity.sensitive")}</Badge>
+                </span>
+              </>
+            )}
           </p>
         </div>
         {onClose && <CloseButton onClose={onClose} />}
@@ -418,7 +426,7 @@ function Facts({
       <h3 id={headingId} className="entity-section">
         <Trans
           k="entity.factsHeading"
-          args={{ n: claims.filter((c) => !isDroppedStatus(c.status)).length }}
+          args={{ n: claims.filter((c) => isCurrentStatus(c.status)).length }}
           tags={{ count: (x) => <span className="muted small">{x}</span> }}
         />
       </h3>
@@ -479,8 +487,9 @@ function Fact({
   const text = claimText(c);
   const retracted = isDroppedStatus(c.status);
   const plan = factAction(c);
-  const [label, aria] =
-    plan.action === "restore"
+  const [label, aria] = !plan
+    ? ["", ""]
+    : plan.action === "restore"
       ? [t("entity.restore"), t("entity.restoreLabel", { text })]
       : plan.action === "unassert"
         ? [t("entity.unassert"), t("entity.unassertLabel", { text })]
@@ -511,6 +520,11 @@ function Fact({
         {!isCurrentStatus(c.status) && (
           <Badge tone={retracted ? "bad" : "neutral"}>{claimStatusLabel(c.status)}</Badge>
         )}
+        {c.sensitive && (
+          <span title={t("entity.sensitiveFactTitle")}>
+            <Badge tone="warn">{t("entity.sensitive")}</Badge>
+          </span>
+        )}
         {seen && (
           <span className="muted small fact-seen">
             <span className="visually-hidden">{t("entity.lastSeen")} </span>
@@ -530,15 +544,17 @@ function Fact({
         ) : (
           <span className="muted small">{c.status === "user_asserted" ? t("entity.fromVaultEdit") : evidenceSummary([])}</span>
         )}
-        <button
-          type="button"
-          className={retracted ? "btn btn-small" : "btn btn-small btn-danger-ghost fact-reject"}
-          disabled={busy}
-          aria-label={aria}
-          onClick={() => onAct(c, plan, original)}
-        >
-          {busy ? <Spinner label={t("entity.saving")} /> : label}
-        </button>
+        {plan && (
+          <button
+            type="button"
+            className={retracted ? "btn btn-small" : "btn btn-small btn-danger-ghost fact-reject"}
+            disabled={busy}
+            aria-label={aria}
+            onClick={() => onAct(c, plan, original)}
+          >
+            {busy ? <Spinner label={t("entity.saving")} /> : label}
+          </button>
+        )}
       </div>
       <div id={evidenceId} hidden={!open}>
         {open && (

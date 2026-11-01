@@ -152,13 +152,34 @@ export function parseHostRequest(raw: unknown): HostRequest {
         },
       };
     }
-    case "act":
-      return { id, type: "act", tab_id, snapshot_id: str(raw, "snapshot_id")!, action: parseAction(raw.action) };
+    case "act": {
+      const expectation = (key: "expect_form" | "expect_scope") => {
+        const e = raw[key];
+        if (e === undefined) return undefined;
+        if (!isObj(e) || typeof e.form !== "string" || typeof e.digest !== "string") {
+          throw new ProtocolError("bad_request", `\`${key}\` must be {form, digest}`);
+        }
+        return { form: e.form, digest: e.digest };
+      };
+      const expect_form = expectation("expect_form");
+      const expect_scope = expectation("expect_scope");
+      return {
+        id,
+        type: "act",
+        tab_id,
+        snapshot_id: str(raw, "snapshot_id")!,
+        action: parseAction(raw.action),
+        ...(expect_form ? { expect_form } : {}),
+        ...(expect_scope ? { expect_scope } : {}),
+      };
+    }
     case "overlay":
       if (typeof raw.active !== "boolean") throw new ProtocolError("bad_request", "`active` must be a boolean");
       return { id, type: "overlay", tab_id, active: raw.active, label: str(raw, "label", true) };
     case "halt":
       return { id, type: "halt" };
+    case "resume":
+      return { id, type: "resume" };
     default:
       throw new ProtocolError("bad_request", `unknown request type \`${String(raw.type)}\``);
   }

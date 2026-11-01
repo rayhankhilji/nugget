@@ -253,7 +253,10 @@ async fn describe_and_redact() {
     let d = kit
         .tool("press_key")
         .describe(&json!({"keys": "cmd+Enter"}));
-    assert_eq!(d.text_preview.as_deref(), Some("meta+enter"));
+    // Cmd+Enter in a compose field sends it: the keys, then what they send (GG3-5).
+    let p = d.text_preview.as_deref().unwrap();
+    assert_eq!(p.lines().next(), Some("meta+enter"), "{p}");
+    assert!(p.contains("To: "), "{p}");
     let d = kit.tool("open_app").describe(&json!({"name": "Notes"}));
     assert_eq!(
         (d.target_app.as_str(), d.verb.as_str()),

@@ -31,6 +31,7 @@
 - [Languages](guide/languages.md)
 - [Accessibility](guide/accessibility.md)
 - [Troubleshooting](guide/troubleshooting.md)
+- [Uninstall](guide/uninstall.md)
 
 # Reference
 

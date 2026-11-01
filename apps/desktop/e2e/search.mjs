@@ -143,7 +143,11 @@ export async function searchScenario({ browser, socket, onboarded }) {
       await detail.getByRole("button", { name: t("searchui.timelineFor").replace("{name}", "Ada Wexford") }).click();
       const h = page.locator("h2#timeline-heading");
       await h.waitFor();
-      expect(((await h.textContent()) ?? "").includes("Ada Wexford"), "the timeline heading does not name Ada Wexford");
+      // The heading reads "Timeline" until the entity's timeline has loaded, then names it.
+      await until("the timeline heading names Ada Wexford", async () => {
+        const text = (await h.textContent()) ?? "";
+        return [text.includes("Ada Wexford"), text];
+      });
       const events = await until("the timeline lists items and facts", async () => {
         const items = await main.locator("li.sr-tl-item").count();
         const facts = await main.locator("li.sr-tl-fact").count();
@@ -161,7 +165,15 @@ export async function searchScenario({ browser, socket, onboarded }) {
         const id = `timeline-month-${target}`;
         await until(`focus moves to ${target}`, async () => [await page.evaluate((id) => document.activeElement?.id === id, id), null]);
       }
-      out.timeline = { ...events, months };
+      // LL2: Escape leaves the timeline for the Search page, with focus on it (not lost to <body>).
+      await page.keyboard.press("Escape");
+      await h.waitFor({ state: "detached" });
+      const focused = await page.evaluate(() => {
+        const a = document.activeElement;
+        return a && a !== document.body && !!a.closest("main") ? `${a.tagName.toLowerCase()}#${a.id}` : null;
+      });
+      expect(focused !== null, "focus was lost after Escape closed the timeline");
+      out.timeline = { ...events, months, escape_focus: focused };
     });
 
     await check("search: every search command reached the daemon and was accepted", async () => {

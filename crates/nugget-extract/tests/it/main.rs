@@ -5,3 +5,4 @@ mod common;
 mod files;
 mod formats;
 mod fuzz;
+mod hidden;

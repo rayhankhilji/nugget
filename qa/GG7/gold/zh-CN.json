@@ -1,0 +1,68 @@
+{
+"lang":"zh-CN",
+"search":[
+{"id":"zh-CN-s1","query":"特装搭建","expect":["zh-CN/06-rongchuang-zhanwei-re.eml"],"kind":"exact"},
+{"id":"zh-CN-s2","query":"糖色","expect":["zh-CN/05-hongshaorou-biji.md"],"kind":"cjk_word"},
+{"id":"zh-CN-s3","query":"民宿","expect":["zh-CN/02-xiaoyu-moganshan.eml"],"kind":"cjk_word"},
+{"id":"zh-CN-s4","query":"紅燒肉","expect":["zh-CN/05-hongshaorou-biji.md"],"kind":"no_diacritics"},
+{"id":"zh-CN-s5","query":"陈婉清","expect":["zh-CN/01-qinghe-huimian-yaoqing.eml"],"kind":"name"},
+{"id":"zh-CN-s6","query":"赵静","expect":["zh-CN/04-erqi-yanshou-cailiao.eml"],"kind":"name"},
+{"id":"zh-CN-s7","query":"江南水乡客栈的留宿单据","expect":["zh-CN/03-gusu-yayuan-yuding.eml"],"kind":"semantic"},
+{"id":"zh-CN-s8","query":"deadline for the acceptance test report","expect":["zh-CN/04-erqi-yanshou-cailiao.eml"],"kind":"cross_lingual"}
+],
+"ask":[
+{"id":"zh-CN-a1","question_lang":"zh-CN","question":"陈婉清约我什么时候、在哪里见面？","facts":[["11月19日","11/19","2026-11-19"],["10:00","上午十点","10点"],["青禾大厦","文三路","901"]],"cite":["zh-CN/01-qinghe-huimian-yaoqing.eml"]},
+{"id":"zh-CN-a2","question_lang":"zh-CN","question":"姑苏雅苑酒店的预订一共多少钱？要在什么时候之前付款？","facts":[["2,376","2376"],["11月9日","11/9","2026-11-09"]],"cite":["zh-CN/03-gusu-yayuan-yuding.eml"]},
+{"id":"zh-CN-a3","question_lang":"zh-CN","question":"李明轩要我在哪天之前交哪些材料？","facts":[["11月13日","11/13","2026-11-13"],["测试报告"],["培训手册"]],"cite":["zh-CN/04-erqi-yanshou-cailiao.eml"]},
+{"id":"zh-CN-a4","question_lang":"en","question":"How much is the exhibition booth construction quote, and by when must the design be confirmed?","facts":[["48,600","48600"],["10 November","November 10","Nov 10","2026-11-10","11月10日"]],"cite":["zh-CN/06-rongchuang-zhanwei-re.eml"]}
+],
+"draft":[
+{"id":"zh-CN-d1","file":"zh-CN/01-qinghe-huimian-yaoqing.eml","register":"formal","instruction":"接受邀请，但希望改到下午两点","accept_lang":["zh-CN"],"formal_markers":["您","贵司","此致","敬礼"],"informal_markers":["你","哈","啦"]},
+{"id":"zh-CN-d2","file":"zh-CN/02-xiaoyu-moganshan.eml","register":"informal","instruction":"","accept_lang":["zh-CN"],"formal_markers":["您","贵","此致"],"informal_markers":["你","哈","啦","呗"]},
+{"id":"zh-CN-d3","file":"zh-CN/06-rongchuang-zhanwei-re.eml","register":"formal","instruction":"同意报价，请对方发合同","accept_lang":["zh-CN"],"formal_markers":["您","贵司","此致","敬礼"],"informal_markers":["你","哈","啦"]}
+],
+"extract":{
+"people":[
+{"name":"陈婉清","aliases":["Chen Wanqing"],"email":"chen.wanqing@qinghe-data.example","file":"zh-CN/01-qinghe-huimian-yaoqing.eml"},
+{"name":"周小雨","aliases":["小雨","Zhou Xiaoyu"],"email":"xiaoyu.zhou@example.com","file":"zh-CN/02-xiaoyu-moganshan.eml"},
+{"name":"阿杰","aliases":["A Jie"],"file":"zh-CN/02-xiaoyu-moganshan.eml"},
+{"name":"李明轩","aliases":["Li Mingxuan"],"email":"li.mingxuan@pengcheng-zhizao.example","file":"zh-CN/04-erqi-yanshou-cailiao.eml"},
+{"name":"赵静","aliases":["Zhao Jing"],"file":"zh-CN/04-erqi-yanshou-cailiao.eml"},
+{"name":"黄嘉怡","aliases":["黄经理","Huang Jiayi"],"email":"huang.jiayi@rongchuang-expo.example","file":"zh-CN/06-rongchuang-zhanwei-re.eml"}
+],
+"orgs":[
+{"name":"杭州青禾数据科技有限公司","file":"zh-CN/01-qinghe-huimian-yaoqing.eml"},
+{"name":"姑苏雅苑酒店","file":"zh-CN/03-gusu-yayuan-yuding.eml"},
+{"name":"深圳鹏程智造有限公司","file":"zh-CN/04-erqi-yanshou-cailiao.eml"},
+{"name":"上海融创会展服务有限公司","file":"zh-CN/06-rongchuang-zhanwei-re.eml"}
+],
+"dates":[
+{"date":"2026-11-19","time":"10:00","text":"11月19日（周四）上午 10:00","file":"zh-CN/01-qinghe-huimian-yaoqing.eml","what":"meeting at Qinghe Data, room 901"},
+{"date":"2026-11-21","text":"11月21日（周六）","file":"zh-CN/02-xiaoyu-moganshan.eml","what":"Moganshan overnight trip"},
+{"date":"2026-11-06","text":"下周五（11月6日）之前","file":"zh-CN/02-xiaoyu-moganshan.eml","what":"answer Xiaoyu before she books"},
+{"date":"2026-11-16","time":"14:00","text":"2026年11月16日（周一）14:00 后","file":"zh-CN/03-gusu-yayuan-yuding.eml","what":"hotel check-in"},
+{"date":"2026-11-09","text":"11月9日（周一）前","file":"zh-CN/03-gusu-yayuan-yuding.eml","what":"prepay hotel booking"},
+{"date":"2026-11-13","text":"11月13日（周五）前","file":"zh-CN/04-erqi-yanshou-cailiao.eml","what":"test report + training manual"},
+{"date":"2026-11-20","text":"11月20日","file":"zh-CN/04-erqi-yanshou-cailiao.eml","what":"phase-2 acceptance"},
+{"date":"2026-11-10","text":"11月10日（周二）前","file":"zh-CN/06-rongchuang-zhanwei-re.eml","what":"confirm booth design"}
+],
+"amounts":[
+{"text":"¥2,376.00","value":2376,"currency":"CNY","file":"zh-CN/03-gusu-yayuan-yuding.eml"},
+{"text":"¥48,600","value":48600,"currency":"CNY","file":"zh-CN/06-rongchuang-zhanwei-re.eml"},
+{"text":"680 元","value":680,"currency":"CNY","file":"zh-CN/02-xiaoyu-moganshan.eml"}
+],
+"ids":[
+{"text":"GSY-20261116-0417","file":"zh-CN/03-gusu-yayuan-yuding.eml"},
+{"text":"B2-118","file":"zh-CN/06-rongchuang-zhanwei-re.eml"}
+]
+},
+"proactive":[
+{"file":"zh-CN/01-qinghe-huimian-yaoqing.eml","expect":"reply_needed","who":"陈婉清"},
+{"file":"zh-CN/01-qinghe-huimian-yaoqing.eml","expect":"event","date":"2026-11-19","time":"10:00","tz":"Asia/Shanghai"},
+{"file":"zh-CN/02-xiaoyu-moganshan.eml","expect":"reply_needed","due":"2026-11-06","who":"周小雨"},
+{"file":"zh-CN/03-gusu-yayuan-yuding.eml","expect":"payment_due","due":"2026-11-09","amount":"¥2,376.00"},
+{"file":"zh-CN/04-erqi-yanshou-cailiao.eml","expect":"commitment","due":"2026-11-13","who":"李明轩"},
+{"file":"zh-CN/06-rongchuang-zhanwei-re.eml","expect":"commitment","due":"2026-11-10","who":"黄嘉怡"},
+{"file":"zh-CN/06-rongchuang-zhanwei-re.eml","expect":"reply_needed","who":"黄嘉怡"}
+]
+}

@@ -1,15 +1,21 @@
 //! Rendering entities, redirect stubs and the index into page documents.
 //!
 //! Output is a pure function of the graph (and the item lookup): claims are grouped by predicate
-//! in byte order, sorted by id within a group, footnotes are numbered in order of first use, and
-//! neighbours are sorted by kind, name and id.
+//! in byte order; within a group the current facts (active, user-asserted) come first, by
+//! validity start descending (unknown last) then id, followed by the superseded claims under
+//! `*Earlier:*`, by validity end (else start) descending then id. Footnotes are numbered in order
+//! of first use in page order (the merge section's after all facts), and neighbours are
+//! sorted by kind, name and id. Every piece of graph or source text goes through [`inline`].
 
 use std::cell::RefCell;
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use nugget_core::Result;
 use nugget_core::ids::{EntityId, ItemRef};
-use nugget_graph::{Claim, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore};
+use nugget_graph::{
+    Claim, ClaimId, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore, Identifier, merge_log,
+};
 use time::UtcOffset;
 use time::format_description::well_known::Rfc3339;
 
@@ -22,9 +28,20 @@ pub(crate) struct Ctx<'a> {
     pub graph: &'a dyn GraphStore,
     pub items: &'a dyn ItemLookup,
     pub cfg: &'a VaultConfig,
+    /// `None`: the item store does not know the item (deleted).
     sources: RefCell<HashMap<ItemRef, SourceInfo>>,
+    /// Items the lookup did not know in this pass (deleted): never cited by a merge record.
+    missing: RefCell<std::collections::HashSet<ItemRef>>,
     entities: RefCell<HashMap<EntityId, Option<Entity>>>,
+    /// [`Ctx::entity_sensitive`] per entity (for this pass).
+    sensitive: RefCell<HashMap<EntityId, bool>>,
+    /// A source lookup failed in this pass (those items count as sensitive).
+    lookup_failed: std::cell::Cell<bool>,
 }
+
+/// Mentions read per entity to decide whether it is sensitive-only (as `nuggetd`'s graph views
+/// and MCP do).
+const SENSITIVE_MENTIONS: usize = 5000;
 
 pub(crate) struct Rendered {
     pub doc: Doc,
@@ -45,6 +62,7 @@ pub(crate) fn inline(s: &str) -> String {
         .replace("[[", "[ [")
         .replace("]]", "] ]")
         .replace("[^", "[ ^")
+        .replace("](", "] (")
 }
 
 /// Text shown inside `[[target|display]]`.
@@ -114,6 +132,108 @@ fn safe_url(url: &str) -> Option<String> {
     Some(out)
 }
 
+/// Zero code points of the Unicode decimal digit blocks other than ASCII that
+/// [`redact_contacts`] reads as digits (Arabic-Indic, the Indic scripts, Thai, Myanmar, Khmer,
+/// fullwidth and others).
+const DIGIT_ZEROS: &[u32] = &[
+    0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6, 0x0D66,
+    0x0DE6, 0x0E50, 0x0ED0, 0x0F20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80, 0x1A90,
+    0x1B50, 0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900, 0xA9D0, 0xA9F0, 0xAA50, 0xABF0, 0xFF10,
+    0x1D7CE, 0x1D7D8, 0x1D7E2, 0x1D7EC, 0x1D7F6,
+];
+
+/// `c` as [`redact_contacts`] classifies it: fullwidth forms (`＠`, `＋`, `（`) as ASCII, other
+/// scripts' decimal digits as ASCII digits, a no-break or other Unicode space as a space.
+fn contact_char(c: char) -> char {
+    let cp = u32::from(c);
+    if (0xFF01..=0xFF5E).contains(&cp) {
+        return char::from_u32(cp - 0xFEE0).unwrap_or(c);
+    }
+    if let Some(d) = DIGIT_ZEROS
+        .iter()
+        .find(|&&z| (z..z + 10).contains(&cp))
+        .and_then(|&z| char::from_digit(cp - z, 10))
+    {
+        return d;
+    }
+    if c.is_whitespace() { ' ' } else { c }
+}
+
+/// `text` with email addresses replaced by "(address)" and phone numbers (9 or more digits,
+/// with spaces, dots, dashes, parentheses or a leading "+") by "(phone)". Dates, times and
+/// amounts have fewer digits or other separators and are kept. Fullwidth forms and other
+/// scripts' digits count as their ASCII forms (security review 3, ER-6).
+pub(crate) fn redact_contacts(text: &str) -> String {
+    // (shown, as classified) pairs.
+    let mut chars: Vec<(char, char)> = Vec::new();
+    let orig: Vec<char> = text.chars().collect();
+    let folded: Vec<char> = orig.iter().copied().map(contact_char).collect();
+    let mut start = 0;
+    while start <= orig.len() {
+        let end = folded[start..]
+            .iter()
+            .position(|&c| c == ' ')
+            .map_or(orig.len(), |p| start + p);
+        let trim = |c: &char| "<>()[]{},;:'\"".contains(*c);
+        let mut a = start;
+        while a < end && trim(&folded[a]) {
+            a += 1;
+        }
+        let mut b = end;
+        while b > a && trim(&folded[b - 1]) {
+            b -= 1;
+        }
+        let core = &folded[a..b];
+        let at = core.iter().position(|&c| c == '@');
+        let is_address = at.is_some_and(|i| i > 0 && core[i + 1..].contains(&'.'));
+        for k in start..end {
+            if is_address && (a..b).contains(&k) {
+                if k == a {
+                    chars.extend("(address)".chars().map(|c| (c, c)));
+                }
+            } else {
+                chars.push((orig[k], folded[k]));
+            }
+        }
+        if end < orig.len() {
+            chars.push((orig[end], ' '));
+        }
+        start = end + 1;
+    }
+    // Phone numbers: runs of digits and separators holding 9+ digits.
+    let mut res = String::new();
+    let mut i = 0;
+    let f = |k: usize| chars.get(k).map(|p| p.1);
+    while i < chars.len() {
+        let c = chars[i].1;
+        let starts = c.is_ascii_digit()
+            || (c == '+' && f(i + 1).is_some_and(|d| d.is_ascii_digit()))
+            || (c == '(' && f(i + 1).is_some_and(|d| d.is_ascii_digit()));
+        if starts && !(i > 0 && chars[i - 1].1.is_alphanumeric()) {
+            let mut j = i;
+            let mut digits = 0;
+            let mut last_digit = i;
+            while j < chars.len() && (chars[j].1.is_ascii_digit() || " .-()+".contains(chars[j].1))
+            {
+                if chars[j].1.is_ascii_digit() {
+                    digits += 1;
+                    last_digit = j;
+                }
+                j += 1;
+            }
+            let after_ok = !f(last_digit + 1).is_some_and(|c| c.is_alphanumeric());
+            if digits >= 9 && after_ok {
+                res.push_str("(phone)");
+                i = last_digit + 1;
+                continue;
+            }
+        }
+        res.push(chars[i].0);
+        i += 1;
+    }
+    res
+}
+
 /// First occurrence of `word` in `hay` on word boundaries.
 fn find_word(hay: &str, word: &str) -> Option<usize> {
     if word.is_empty() {
@@ -132,6 +252,44 @@ fn find_word(hay: &str, word: &str) -> Option<usize> {
     None
 }
 
+/// Whether a superseded claim is shown under `*Earlier:*`. Not when:
+/// - it has no evidence (a replaced user assertion: nothing to cite);
+/// - the user corrected it: the vault records claims superseded by an edit of their fact line
+///   (`corrected`), and, should that record be lost, a superseded claim without an end date
+///   whose group holds a user assertion made at or after the claim last changed is taken to be
+///   such a correction (extraction's own supersessions set `valid_to` when it is known).
+///
+/// A corrected fact was wrong, not true once, so it is not history.
+fn shown_as_history(c: &Claim, current: &[&Claim], corrected: &BTreeSet<ClaimId>) -> bool {
+    if c.evidence.is_empty() || corrected.contains(&c.id) {
+        return false;
+    }
+    let replaced_by_user = c.valid_to.is_none()
+        && current
+            .iter()
+            .any(|u| u.status == ClaimStatus::UserAsserted && u.created_at >= c.updated_at);
+    !replaced_by_user
+}
+
+/// At most this many merge records are listed on a page.
+const MAX_MERGE_RECORDS: usize = 50;
+
+fn date(t: time::OffsetDateTime) -> String {
+    let d = t.to_offset(UtcOffset::UTC).date();
+    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
+}
+
+/// A history line's validity interval in UTC dates: `2026-09-01 – 2026-10-05`,
+/// `until 2026-10-05`, `from 2026-09-01` (start known, end not), or `None` when unknown.
+fn interval(c: &Claim) -> Option<String> {
+    match (c.valid_from, c.valid_to) {
+        (Some(a), Some(b)) => Some(format!("{} – {}", date(a), date(b))),
+        (None, Some(b)) => Some(format!("until {}", date(b))),
+        (Some(a), None) => Some(format!("from {}", date(a))),
+        (None, None) => None,
+    }
+}
+
 fn rfc3339(t: time::OffsetDateTime) -> String {
     t.to_offset(UtcOffset::UTC)
         .format(&Rfc3339)
@@ -145,7 +303,10 @@ impl<'a> Ctx<'a> {
             items,
             cfg,
             sources: RefCell::default(),
+            missing: RefCell::default(),
             entities: RefCell::default(),
+            sensitive: RefCell::default(),
+            lookup_failed: std::cell::Cell::new(false),
         }
     }
 
@@ -174,32 +335,183 @@ impl<'a> Ctx<'a> {
     /// Forget cached entities (after the graph changed under us).
     pub fn forget(&self) {
         self.entities.borrow_mut().clear();
+        self.sensitive.borrow_mut().clear();
     }
 
+    /// Look up every item in `items` not looked up yet in this pass, in one batch
+    /// ([`ItemLookup::source_infos`]), so the per-item checks below hit the cache.
+    pub fn prefetch<'i>(&self, items: impl IntoIterator<Item = &'i ItemRef>) {
+        let want: Vec<ItemRef> = {
+            let cached = self.sources.borrow();
+            let mut seen = std::collections::HashSet::new();
+            items
+                .into_iter()
+                .filter(|i| !cached.contains_key(*i) && seen.insert(*i))
+                .cloned()
+                .collect()
+        };
+        if want.is_empty() {
+            return;
+        }
+        let missing = || SourceInfo {
+            sensitive: self.items.missing_is_sensitive(),
+            ..SourceInfo::default()
+        };
+        // A failed lookup counts as sensitive.
+        let failed = || SourceInfo {
+            sensitive: true,
+            ..SourceInfo::default()
+        };
+        let infos: Vec<(ItemRef, SourceInfo)> = match self.items.source_infos(&want) {
+            Ok(mut f) => want
+                .into_iter()
+                .map(|i| {
+                    let info = f.remove(&i).unwrap_or_else(|| {
+                        self.missing.borrow_mut().insert(i.clone());
+                        missing()
+                    });
+                    (i, info)
+                })
+                .collect(),
+            Err(e) => {
+                // One bad item must not count the whole batch as sensitive: ask one by one.
+                tracing::warn!(error = %e, "vault: batched source lookup failed; retrying per item");
+                want.into_iter()
+                    .map(|i| {
+                        let info = match self.items.source_info(&i) {
+                            Ok(Some(info)) => info,
+                            Ok(None) => {
+                                self.missing.borrow_mut().insert(i.clone());
+                                missing()
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "vault: source lookup failed");
+                                self.lookup_failed.set(true);
+                                failed()
+                            }
+                        };
+                        (i, info)
+                    })
+                    .collect()
+            }
+        };
+        self.sources.borrow_mut().extend(infos);
+    }
+
+    /// Whether a source lookup failed in this pass: its items counted as sensitive, so nothing
+    /// is deleted on that answer.
+    pub fn lookup_failed(&self) -> bool {
+        self.lookup_failed.get()
+    }
+
+    /// Whether the item is sensitive. An item the lookup does not know counts as sensitive when
+    /// the lookup says so ([`ItemLookup::missing_is_sensitive`]); a failed lookup always does.
+    pub fn item_sensitive(&self, item: &ItemRef) -> bool {
+        self.source(item).sensitive
+    }
+
+    /// A claim is sensitive-only when it has evidence and every piece of it is from a sensitive
+    /// item. A claim without evidence (the user's own) is not.
+    pub fn claim_sensitive(&self, c: &Claim) -> bool {
+        !c.evidence.is_empty() && c.evidence.iter().all(|ev| self.item_sensitive(&ev.item))
+    }
+
+    /// An entity is sensitive-only when it has at least one active claim or mention, every
+    /// active claim (as subject or object) is sensitive-only and every mention is from a
+    /// sensitive item. Such an entity gets no page.
+    pub fn entity_sensitive(&self, id: &EntityId) -> Result<bool> {
+        if let Some(s) = self.sensitive.borrow().get(id) {
+            return Ok(*s);
+        }
+        let claims = self.graph.claims_for(id, false)?;
+        self.prefetch(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        );
+        let mut any = !claims.is_empty();
+        let mut sensitive = claims.iter().all(|c| self.claim_sensitive(c));
+        if sensitive {
+            let mentions = self.graph.mentions_for(id, SENSITIVE_MENTIONS)?;
+            self.prefetch(mentions.iter().map(|m| &m.item));
+            any |= !mentions.is_empty();
+            sensitive = mentions.iter().all(|m| self.item_sensitive(&m.item));
+        }
+        let out = any && sensitive;
+        self.sensitive.borrow_mut().insert(id.clone(), out);
+        Ok(out)
+    }
+
+    /// The aliases and identifiers the page may show: all but those whose recorded provenance
+    /// ([`GraphStore::entity_provenance`]) is only sensitive items. A detail without recorded
+    /// provenance (one the user added in the vault, or from a merge) is shown: the page is the
+    /// user's own file.
+    fn shown_details(&self, e: &Entity) -> Result<(Vec<String>, Vec<Identifier>)> {
+        let Some(p) = self.graph.entity_provenance(&e.id)? else {
+            return Ok((e.aliases.clone(), e.identifiers.clone()));
+        };
+        self.prefetch(
+            p.aliases
+                .iter()
+                .flat_map(|(_, items)| items)
+                .chain(p.identifiers.iter().flat_map(|(_, items)| items)),
+        );
+        let hidden =
+            |items: &[ItemRef]| !items.is_empty() && items.iter().all(|i| self.item_sensitive(i));
+        let hidden_aliases: Vec<&String> = p
+            .aliases
+            .iter()
+            .filter(|(_, items)| hidden(items))
+            .map(|(a, _)| a)
+            .collect();
+        let hidden_ids: Vec<&Identifier> = p
+            .identifiers
+            .iter()
+            .filter(|(_, items)| hidden(items))
+            .map(|(i, _)| i)
+            .collect();
+        let aliases = e
+            .aliases
+            .iter()
+            .filter(|a| !hidden_aliases.contains(a))
+            .cloned()
+            .collect();
+        let identifiers = e
+            .identifiers
+            .iter()
+            .filter(|i| !hidden_ids.contains(i))
+            .cloned()
+            .collect();
+        Ok((aliases, identifiers))
+    }
+
+    /// What the item store says about `item` (fetched once per pass). An item it does not know
+    /// counts as sensitive when the lookup says so; a failed lookup always does.
     fn source(&self, item: &ItemRef) -> SourceInfo {
         if let Some(s) = self.sources.borrow().get(item) {
             return s.clone();
         }
-        let info = match self.items.source_info(item) {
-            Ok(i) => i.unwrap_or_default(),
-            Err(e) => {
-                tracing::warn!(error = %e, "vault: source lookup failed");
-                SourceInfo::default()
-            }
-        };
-        self.sources.borrow_mut().insert(item.clone(), info.clone());
-        info
+        self.prefetch([item]);
+        self.sources
+            .borrow()
+            .get(item)
+            .cloned()
+            .unwrap_or_else(|| SourceInfo {
+                sensitive: true,
+                ..SourceInfo::default()
+            })
     }
 
-    fn frontmatter(&self, e: &Entity) -> Vec<String> {
+    fn frontmatter(&self, e: &Entity) -> Result<Vec<String>> {
+        let (aliases, identifiers) = self.shown_details(e)?;
         let mut fm = vec![
             format!("nugget_id: {}", json(e.id.as_str())),
             format!("kind: {}", json(e.kind.as_str())),
-            format!("aliases: {}", json(&e.aliases)),
+            format!("aliases: {}", json(&aliases)),
         ];
-        if self.cfg.include_identifiers && !e.identifiers.is_empty() {
+        if self.cfg.include_identifiers && !identifiers.is_empty() {
             let mut ids: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-            for i in &e.identifiers {
+            for i in &identifiers {
                 ids.entry(i.scheme.as_str())
                     .or_default()
                     .push(i.value.as_str());
@@ -207,27 +519,58 @@ impl<'a> Ctx<'a> {
             fm.push(format!("identifiers: {}", json(ids)));
         }
         fm.push(format!("updated: {}", json(rfc3339(e.updated_at))));
-        fm
+        Ok(fm)
     }
 
-    pub fn render_entity(&self, e: &Entity, claims: &[Claim]) -> Result<Rendered> {
+    /// Render an entity page. `corrected` holds claims the user replaced by editing their fact
+    /// line in the vault; they are never shown as history.
+    pub fn render_entity(
+        &self,
+        e: &Entity,
+        claims: &[Claim],
+        corrected: &BTreeSet<ClaimId>,
+    ) -> Result<Rendered> {
         let mut links = BTreeSet::new();
+        self.prefetch(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        );
 
         // ---- facts ----
-        let mut groups: BTreeMap<&str, Vec<&Claim>> = BTreeMap::new();
-        for c in claims {
-            if c.subject == e.id && c.status.is_active() {
-                groups.entry(c.predicate.as_str()).or_default().push(c);
+        // Per predicate: live facts (active, user-asserted) and history (superseded claims).
+        // Facts supported only by sensitive items are left out, current or history (and so
+        // are their footnotes).
+        let claims: Vec<&Claim> = claims
+            .iter()
+            .filter(|c| {
+                (c.status.is_active() || c.status == ClaimStatus::Superseded)
+                    && !self.claim_sensitive(c)
+            })
+            .collect();
+        type Group<'c> = (Vec<&'c Claim>, Vec<&'c Claim>);
+        let mut groups: BTreeMap<&str, Group> = BTreeMap::new();
+        for &c in claims.iter().filter(|c| c.subject == e.id) {
+            if c.status.is_active() {
+                groups.entry(c.predicate.as_str()).or_default().0.push(c);
+            } else if c.status == ClaimStatus::Superseded {
+                groups.entry(c.predicate.as_str()).or_default().1.push(c);
             }
         }
+        for (current, history) in groups.values_mut() {
+            history.retain(|c| shown_as_history(c, current, corrected));
+        }
+        groups.retain(|_, (current, history)| !current.is_empty() || !history.is_empty());
         let mut notes: Vec<String> = Vec::new();
         let mut note_ids: HashMap<(ItemRef, Option<String>), usize> = HashMap::new();
         let mut facts = vec!["## Facts".to_owned(), String::new()];
         if groups.is_empty() {
             facts.push("_No facts yet._".into());
         }
-        for (pred, mut cs) in groups {
-            cs.sort_by_key(|c| c.id);
+        for (pred, (mut current, mut history)) in groups {
+            // Newest first; unknown dates last; then by id.
+            current.sort_by_key(|c| (Reverse(c.valid_from), c.id));
+            history.sort_by_key(|c| (Reverse(c.valid_to.or(c.valid_from)), c.id));
             if facts.len() > 2 {
                 facts.push(String::new());
             }
@@ -236,14 +579,35 @@ impl<'a> Ctx<'a> {
                 inline(&humanize(pred)),
                 inline(pred).replace("--", "-")
             ));
-            for c in cs {
-                facts.push(self.fact_line(e, c, &mut links, &mut notes, &mut note_ids)?);
+            for c in &current {
+                let (body, cites) = self.fact_body(e, c, &mut links, &mut notes, &mut note_ids)?;
+                let mut line = format!("- {body}{cites}");
+                if c.status == ClaimStatus::UserAsserted {
+                    line.push_str(" (you)");
+                }
+                line.push_str(&format!(" {CLAIM_MARK}{} -->", c.id));
+                facts.push(line);
+            }
+            if history.is_empty() {
+                continue;
+            }
+            if !current.is_empty() {
+                facts.push(String::new());
+            }
+            facts.push(HISTORY_INTRO.into());
+            for c in &history {
+                let (body, cites) = self.fact_body(e, c, &mut links, &mut notes, &mut note_ids)?;
+                let when = match interval(c) {
+                    Some(w) => format!(" ({w})"),
+                    None => String::new(),
+                };
+                facts.push(format!("  - {body}{when}{cites} {HIST_MARK}{} -->", c.id));
             }
         }
 
         // ---- related ----
         let mut nb: BTreeMap<EntityId, (BTreeSet<&str>, BTreeSet<&str>)> = BTreeMap::new();
-        for c in claims.iter().filter(|c| c.status.is_active()) {
+        for c in &claims {
             let ClaimObject::Entity(o) = &c.object else {
                 continue;
             };
@@ -274,11 +638,14 @@ impl<'a> Ctx<'a> {
                 other.name.to_lowercase(),
                 other.id.clone(),
             );
-            links.insert(other.id.clone());
-            rows.push((
-                key,
-                format!("- {}: {}", self.link(&other), preds.join(", ")),
-            ));
+            // A sensitive-only entity has no page: name it without a link.
+            let name = if self.entity_sensitive(&other.id)? {
+                display(&other.name)
+            } else {
+                links.insert(other.id.clone());
+                self.link(&other)
+            };
+            rows.push((key, format!("- {name}: {}", preds.join(", "))));
         }
         rows.sort();
         rows.dedup_by(|a, b| a.1 == b.1);
@@ -288,47 +655,97 @@ impl<'a> Ctx<'a> {
         }
         related.extend(rows.into_iter().map(|(_, l)| l));
 
+        // ---- why merged ----
+        let merged = self.merged_section(e, &mut notes, &mut note_ids);
+
+        let mut segs = vec![
+            Segment::Region {
+                name: R_HEADER.into(),
+                body: vec![format!("# {}", inline(&e.name))],
+            },
+            Segment::User(vec![String::new()]),
+            Segment::Region {
+                name: R_FACTS.into(),
+                body: facts,
+            },
+            Segment::User(vec![String::new()]),
+            Segment::Region {
+                name: R_RELATED.into(),
+                body: related,
+            },
+            Segment::User(vec![String::new()]),
+        ];
+        if let Some(body) = merged {
+            segs.push(Segment::Region {
+                name: R_MERGED.into(),
+                body,
+            });
+            segs.push(Segment::User(vec![String::new()]));
+        }
+        segs.push(Segment::Region {
+            name: R_SOURCES.into(),
+            body: notes,
+        });
+        segs.push(Segment::User(vec![
+            String::new(),
+            "## Notes".into(),
+            String::new(),
+        ]));
         let doc = Doc {
-            fm: Some(self.frontmatter(e)),
-            segs: vec![
-                Segment::Region {
-                    name: R_HEADER.into(),
-                    body: vec![format!("# {}", inline(&e.name))],
-                },
-                Segment::User(vec![String::new()]),
-                Segment::Region {
-                    name: R_FACTS.into(),
-                    body: facts,
-                },
-                Segment::User(vec![String::new()]),
-                Segment::Region {
-                    name: R_RELATED.into(),
-                    body: related,
-                },
-                Segment::User(vec![String::new()]),
-                Segment::Region {
-                    name: R_SOURCES.into(),
-                    body: notes,
-                },
-                Segment::User(vec![String::new(), "## Notes".into(), String::new()]),
-            ],
+            fm: Some(self.frontmatter(e)?),
+            segs,
         };
         Ok(Rendered { doc, links })
     }
 
-    fn fact_line(
+    /// The `[^n]` reference for a citation of `item` (with `quote`), defining the footnote on
+    /// first use.
+    fn cite(
+        &self,
+        item: &ItemRef,
+        quote: Option<&str>,
+        notes: &mut Vec<String>,
+        note_ids: &mut HashMap<(ItemRef, Option<String>), usize>,
+    ) -> String {
+        let key = (item.clone(), quote.map(str::to_owned));
+        let n = match note_ids.get(&key) {
+            Some(n) => *n,
+            None => {
+                let n = notes.len() + 1;
+                notes.push(self.footnote(n, item, quote));
+                note_ids.insert(key, n);
+                n
+            }
+        };
+        format!("[^{n}]")
+    }
+
+    /// A claim's sentence (with the object linked) and its citations (` [^1][^2]`, or empty).
+    fn fact_body(
         &self,
         e: &Entity,
         c: &Claim,
         links: &mut BTreeSet<EntityId>,
         notes: &mut Vec<String>,
         note_ids: &mut HashMap<(ItemRef, Option<String>), usize>,
-    ) -> Result<String> {
+    ) -> Result<(String, String)> {
         let mut body = inline(&c.text);
         let object = match &c.object {
             ClaimObject::Entity(o) if *o != e.id => self.entity(o)?,
             _ => None,
         };
+        // A sentence written at extraction goes stale when its object is merged, split or
+        // renamed (GG5-10: "works at Tessellate" after Tessellate was merged into Lumenfold,
+        // "corresponded with Sam Patel" linking another Sam). Unless the user wrote it, it is
+        // re-generated from the triple when it no longer names the object by its current name.
+        if !body.is_empty()
+            && c.status != ClaimStatus::UserAsserted
+            && object
+                .as_ref()
+                .is_some_and(|o| find_word(&body, &inline(&o.name)).is_none())
+        {
+            body.clear();
+        }
         if body.is_empty() {
             let obj = match (&c.object, &object) {
                 (_, Some(o)) => inline(&o.name),
@@ -339,7 +756,17 @@ impl<'a> Ctx<'a> {
                 .trim()
                 .to_owned();
         }
-        if let Some(o) = object {
+        let object_has_page = match &object {
+            Some(o) => !self.entity_sensitive(&o.id)?,
+            None => false,
+        };
+        if let Some(o) = object.as_ref().filter(|_| !object_has_page) {
+            // A sensitive-only entity has no page to link to: keep the sentence, and add the
+            // name as plain text when the sentence lacks it.
+            if find_word(&body, &inline(&o.name)).is_none() {
+                body = format!("{body} ({})", display(&o.name));
+            }
+        } else if let Some(o) = object {
             links.insert(o.id.clone());
             // Link the entity where the sentence names it (by name, else by its longest alias).
             let mut names: Vec<String> = o.aliases.iter().map(|a| inline(a)).collect();
@@ -358,29 +785,90 @@ impl<'a> Ctx<'a> {
             }
         }
         let mut cites = String::new();
-        for ev in &c.evidence {
-            let key = (ev.item.clone(), ev.quote.clone());
-            let n = match note_ids.get(&key) {
-                Some(n) => *n,
-                None => {
-                    let n = notes.len() + 1;
-                    notes.push(self.footnote(n, &ev.item, ev.quote.as_deref()));
-                    note_ids.insert(key, n);
-                    n
-                }
-            };
-            cites.push_str(&format!("[^{n}]"));
+        // Never cite (or quote) a sensitive item, even next to other evidence.
+        for ev in c
+            .evidence
+            .iter()
+            .filter(|ev| !self.item_sensitive(&ev.item))
+        {
+            cites.push_str(&self.cite(&ev.item, ev.quote.as_deref(), notes, note_ids));
         }
-        let mut line = format!("- {body}");
         if !cites.is_empty() {
-            line.push(' ');
-            line.push_str(&cites);
+            cites.insert(0, ' ');
         }
-        if c.status == ClaimStatus::UserAsserted {
-            line.push_str(" (you)");
+        Ok((body, cites))
+    }
+
+    /// The "Merged" section listing the entity's merge log, or `None` when it has none.
+    fn merged_section(
+        &self,
+        e: &Entity,
+        notes: &mut Vec<String>,
+        note_ids: &mut HashMap<(ItemRef, Option<String>), usize>,
+    ) -> Option<Vec<String>> {
+        let log = merge_log(e);
+        if log.is_empty() {
+            return None;
         }
-        line.push_str(&format!(" {CLAIM_MARK}{} -->", c.id));
-        Ok(line)
+        let noun = match e.kind {
+            EntityKind::Person => "person",
+            EntityKind::Organization => "organization",
+            _ => "thing",
+        };
+        let mut body = vec![
+            "## Merged".to_owned(),
+            String::new(),
+            format!("Nugget recognised these as the same {noun} and combined them into this page:"),
+            String::new(),
+        ];
+        // The newest records (the log is oldest first), in log order.
+        let skip = log.len().saturating_sub(MAX_MERGE_RECORDS);
+        if skip > 0 {
+            body.push(format!("- … and {skip} earlier"));
+        }
+        for r in &log[skip..] {
+            let name = truncate(&inline(&r.name), 120);
+            let mut line = format!(
+                "- {}",
+                if name.is_empty() {
+                    "(unnamed)".into()
+                } else {
+                    name
+                }
+            );
+            let detail = truncate(&inline(&r.detail), 300);
+            if !detail.is_empty() {
+                line.push_str(": ");
+                line.push_str(&detail);
+            }
+            let reasons: Vec<String> = r
+                .reasons
+                .iter()
+                .map(|x| truncate(&inline(&x.replace(['_', '-'], " ")), 40))
+                .filter(|x| !x.is_empty())
+                .take(8)
+                .collect();
+            if !reasons.is_empty() {
+                line.push_str(&format!(" (because: {})", reasons.join(", ")));
+            }
+            // Cite the corroborating item only while the store still has it, and never a
+            // sensitive one.
+            if let Some(item) = &r.item
+                && !self.item_sensitive(item)
+                && !self.missing.borrow().contains(item)
+            {
+                line.push(' ');
+                line.push_str(&self.cite(item, None, notes, note_ids));
+            }
+            body.push(line);
+        }
+        body.push(String::new());
+        body.push(format!(
+            "If any of these is a different {noun}, you can split it off again in Nugget; \
+             the facts it brought will move to a page of its own. This section is generated: \
+             edits to it are not applied, so keep your own notes below."
+        ));
+        Some(body)
     }
 
     fn footnote(&self, n: usize, item: &ItemRef, quote: Option<&str>) -> String {
@@ -395,6 +883,13 @@ impl<'a> Ctx<'a> {
                     .replace('[', "(")
                     .replace(']', ")")
             });
+        // A mail subject or event title can hold an address or a number as much as a quote
+        // (security review 3, ER-6).
+        let title = if self.cfg.include_identifiers {
+            title
+        } else {
+            redact_contacts(&title)
+        };
         let title = truncate(&title, 120);
         let url = info
             .url
@@ -405,18 +900,28 @@ impl<'a> Ctx<'a> {
         if let Some(q) = quote.map(|q| inline(q).replace('"', "'"))
             && !q.is_empty()
         {
+            // Addresses and phone numbers stay out of the vault unless identifiers are shown
+            // (GG5-17: a calendar footnote listed every invitee's address).
+            let q = if self.cfg.include_identifiers {
+                q
+            } else {
+                redact_contacts(&q)
+            };
             line.push_str(&format!(": \"{}\"", truncate(&q, 300)));
         }
         line
     }
 
-    /// Stub for a page whose entity was merged away (`target`) or no longer exists.
+    /// Stub for a page whose entity was merged away (`target`) or no longer exists. With
+    /// `hide_name` (the entity is now known only from sensitive items) the stub does not name
+    /// it: the heading is neutral.
     pub fn render_stub(
         &self,
         id: &EntityId,
         kind: EntityKind,
         name: &str,
         target: Option<&Entity>,
+        hide_name: bool,
     ) -> Rendered {
         let mut fm = vec![
             format!("nugget_id: {}", json(id.as_str())),
@@ -438,12 +943,17 @@ impl<'a> Ctx<'a> {
                     .into()
             }
         };
+        let heading = if hide_name {
+            "# Hidden page".to_owned()
+        } else {
+            format!("# {}", inline(name))
+        };
         Rendered {
             doc: Doc {
                 fm: Some(fm),
                 segs: vec![Segment::Region {
                     name: R_REDIRECT.into(),
-                    body: vec![format!("# {}", inline(name)), String::new(), line],
+                    body: vec![heading, String::new(), line],
                 }],
             },
             links,
@@ -520,6 +1030,48 @@ mod tests {
             inline("a\nb <!-- c:1 --> [[x]] [^1]"),
             "a b &lt;!-- c:1 --&gt; [ [x] ] [ ^1]"
         );
+        assert_eq!(
+            inline("[click](javascript:x) [a]((b)"),
+            "[click] (javascript:x) [a] ((b)"
+        );
         assert_eq!(find_word("Alan met Al", "Al"), Some(9));
+    }
+
+    #[test]
+    fn contacts_are_redacted_from_quotes() {
+        use super::redact_contacts;
+        assert_eq!(
+            redact_contacts("Organizer: Ana <ana.ruiz@lumenfold.example>, call +44 20 7946 0958."),
+            "Organizer: Ana <(address)>, call (phone)."
+        );
+        assert_eq!(
+            redact_contacts("Due 2026-10-30 at 10:00, budget $40,000, ref 12345."),
+            "Due 2026-10-30 at 10:00, budget $40,000, ref 12345."
+        );
+        assert_eq!(
+            redact_contacts("Ring 07700 900123 today"),
+            "Ring (phone) today"
+        );
+    }
+
+    /// Security review 3, ER-6: fullwidth forms and other scripts' digits are redacted too.
+    #[test]
+    fn contacts_in_other_scripts_are_redacted() {
+        use super::redact_contacts;
+        assert_eq!(
+            redact_contacts("電話 ０７７００ ９００１２３ まで ana＠lumenfold.example"),
+            "電話 (phone) まで (address)"
+        );
+        assert_eq!(
+            redact_contacts("اتصل ٠٧٧٠٠ ٩٠٠١٢٣ اليوم"),
+            "اتصل (phone) اليوم"
+        );
+        assert_eq!(redact_contacts("कॉल +९१ ९८७६५ ४३२१० करें"), "कॉल (phone) करें");
+        assert_eq!(
+            redact_contacts("Due ２０２６-10-30, ref 12345."),
+            "Due ２０２６-10-30, ref 12345."
+        );
+        assert_eq!(redact_contacts(""), "");
+        assert_eq!(redact_contacts("a  b "), "a  b ");
     }
 }

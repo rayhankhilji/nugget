@@ -189,6 +189,8 @@ function New-Case([string]$name) {
     # background, install at quit.
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
     [IO.File]::WriteAllText($settingsFile, '{"channel":"beta","auto_install":true}', (New-Object Text.UTF8Encoding($false)))
+    # Quitting stops the daemon the app started, without asking first (platform.json, GG6-8).
+    [IO.File]::WriteAllText((Join-Path $configDir 'platform.json'), '{"quit_daemon":"stop"}', (New-Object Text.UTF8Encoding($false)))
 }
 
 function Launch([string]$logName) {
@@ -382,6 +384,7 @@ try {
         $null = $p.WaitForExit(180 * 1000)
     }
     Remove-Item -LiteralPath $settingsFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $configDir 'platform.json') -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }
 Log "done: $($script:fails) failed check(s)"

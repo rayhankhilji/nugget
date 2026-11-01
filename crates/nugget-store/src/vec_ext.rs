@@ -1,5 +1,5 @@
 //! Registration of the statically linked `sqlite-vec` extension and of Nugget's own SQL
-//! functions (`fts_segment`, see `fts`).
+//! functions (`fts_normalize` and others, see `fts`).
 
 use std::sync::OnceLock;
 
@@ -9,7 +9,7 @@ use rusqlite::ffi;
 
 /// Register `sqlite-vec` and Nugget's SQL functions as auto-extensions so every connection
 /// opened afterwards (in this process) gets the `vec0` virtual table, the `vec_*` functions and
-/// `fts_segment`. Idempotent.
+/// the `fts_*` functions. Idempotent.
 pub(crate) fn ensure_registered() -> Result<()> {
     static REGISTERED: OnceLock<Result<(), String>> = OnceLock::new();
     REGISTERED
@@ -45,8 +45,8 @@ unsafe extern "C" fn init_functions(
     pz_err_msg: *mut *mut std::ffi::c_char,
     _: *const ffi::sqlite3_api_routines,
 ) -> std::ffi::c_int {
-    // SAFETY: SQLite calls this with a freshly opened `db`; the handler only registers a scalar
-    // function on it, through a non-owning `Connection`: it neither opens nor closes a database
+    // SAFETY: SQLite calls this with a freshly opened `db`; the handler only registers scalar
+    // functions on it, through a non-owning `Connection`: it neither opens nor closes a database
     // nor touches the auto-extension list.
     unsafe { init_auto_extension(db, pz_err_msg, |c| crate::fts::register_functions(&c)) }
 }

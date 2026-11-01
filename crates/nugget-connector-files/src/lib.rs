@@ -45,7 +45,7 @@ use serde_json::Value;
 pub use config::{
     ALWAYS_SKIP_DIRS, DEFAULT_DEBOUNCE_MS, DEFAULT_EXTENSIONS, DEFAULT_MAX_FILE_BYTES,
     DEFAULT_RESCAN_INTERVAL_SECS, FilesSettings, OBSIDIAN_ATTACHMENTS, ObsidianSettings,
-    files_schema, obsidian_schema,
+    expand_home, files_schema, obsidian_schema,
 };
 pub use connector::CHECKPOINT_EVERY;
 pub use key::{PathStyle, file_url, item_key, item_key_from_str, obsidian_url, parse_key};

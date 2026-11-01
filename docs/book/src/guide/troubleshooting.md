@@ -4,13 +4,24 @@
 
 1. `nuggetd status` shows whether the daemon is running, its socket, the store, the audit chain and
    every provider (with the reason one is unavailable).
-2. The daemon log: JSON lines in the `logs` folder of the [data directory](../reference/data-dir.md),
-   one file per day (`nuggetd.<date>.log`), 14 kept. Local model servers log to
-   `llama-server-chat.log` and `llama-server-embedding.log` in the same folder.
-3. More detail: start the daemon with `NUGGET_LOG=debug nuggetd`. `NUGGET_LOG` takes the usual
-   `tracing` filter syntax, for example `NUGGET_LOG=info,nugget_ingest=debug`. The MCP SDK
-   (`rmcp`) stays at `info` whatever you set, since at `debug` it would log AI apps' queries and
-   the results returned to them.
+2. The logs, all in the `logs` folder of the [data directory](../reference/data-dir.md). The
+   Status page shows the folder under **Technical details**, and the app's error messages name it.
+
+   | System | Log folder |
+   |---|---|
+   | Linux | `~/.local/share/nugget/logs` |
+   | macOS | `~/Library/Application Support/dev.Nugget.Nugget/logs` |
+   | Windows | `%LOCALAPPDATA%\Nugget\Nugget\data\logs` |
+   | With `NUGGET_HOME=DIR` | `DIR/data/logs` |
+
+   - `nuggetd.<date>.log`: the background service (daemon), JSON lines, one file per day, 14 kept.
+   - `nugget-desktop.<date>.log`: the desktop app itself (starting the service, quitting, updates,
+     the tray), plain text, one file per day, 7 kept.
+   - `llama-server-chat.log` and `llama-server-embedding.log`: the local model servers.
+3. More detail: start the daemon with `NUGGET_LOG=debug nuggetd`, or the app with
+   `NUGGET_LOG=debug nugget-desktop`. `NUGGET_LOG` takes the usual `tracing` filter syntax, for
+   example `NUGGET_LOG=info,nugget_ingest=debug`. The MCP SDK (`rmcp`) stays at `info` whatever you
+   set, since at `debug` it would log AI apps' queries and the results returned to them.
 
 Logs never contain secrets or the content of your items at `info` level or above.
 
@@ -22,6 +33,39 @@ Logs never contain secrets or the content of your items at `info` level or above
   key; fix it, or move `config.toml` aside to get a fresh default.
 - `nuggetd is already running` means another daemon holds the lock for this data directory. Only one
   daemon runs per data directory.
+- "nuggetd exited … before it was ready" or "did not answer": the message names both log files;
+  the end of `nuggetd.<date>.log` says why.
+
+## Nugget is still running after I quit
+
+What quitting does depends on your answer to "When you quit Nugget, also stop background indexing
+and the local AI?". The app asks the first time you quit, and you can change it on **Status →
+Updates → Desktop app**. Until you answer, quitting stops it.
+
+- **Stop everything** (or not answered yet): quitting stops the background service the app started,
+  and with it the local model server. `nugget-desktop.<date>.log` says "nuggetd stopped".
+- **Keep running in the background**: the service keeps indexing after you quit.
+- A service that starts at login (**Start the Nugget background service at login**), or a
+  `nuggetd` you started yourself, is never stopped by quitting the app. The app log says
+  "leaving nuggetd running" and why. Stop it with `systemctl --user stop nuggetd` (Linux),
+  `launchctl bootout gui/$(id -u)/dev.nugget.nuggetd` (macOS) or `schtasks /End /TN "Nugget
+  Daemon"` (Windows), or turn the login option off.
+
+Without a tray icon (stock GNOME, for example), closing the window is the same as quitting.
+
+## The Status page says the background service is another version
+
+After an update the app checks that the background service runs the same version. It replaces an
+older service it started itself, and restarts an older service that starts at login. When it
+can't, or shouldn't, the Status page says why:
+
+- **Started outside the app** (from a terminal or another tool): stop that `nuggetd`, and the app
+  starts the matching one. Then click **Check again**.
+- **Restarting the login service didn't work**: log out and back in, or turn **Start the Nugget
+  background service at login** off and on again. From a terminal: `nuggetd restart-service`.
+- **Nugget couldn't restart it**: quit Nugget and open it again. The app log says what failed.
+- **Newer than this app**: an older copy of Nugget is open (an old AppImage, say). Nugget never
+  replaces the service with an older version: update the app, or open the newer copy.
 
 ## Config errors
 
@@ -41,8 +85,40 @@ hot reload.
 - `keychain:NAME: no OS keychain`: on headless Linux there is no Secret Service. Use `env:VAR`.
 - A local server refuses connections: check it is running (`ollama serve`) and that `base_url` ends in
   `/v1` for OpenAI-compatible servers.
+- A provider `local` at `http://127.0.0.1:11434/v1` disappeared after an update: earlier versions
+  enabled this Ollama example in every new `config.toml`, although most people never set Ollama up.
+  On start, Nugget now comments that block out if it is exactly the untouched example, with a note
+  above it (the daemon log says so too). Any provider you added or changed is left alone. If you do
+  run Ollama with that model, remove the leading `# ` from those lines and restart `nuggetd`.
 - "not probed": the provider only serves plain chat until it is probed. Probe it on the **Status**
   page.
+
+## The on-device model is warming up, stopped, or won't start
+
+**Status** shows each on-device model's state:
+
+- **Starting**, with "Warming up: 12s of about 40s": the model is being loaded into memory. Nugget
+  starts installed models when it starts, and after an idle stop the next request loads it again.
+  On a CPU this takes from a few seconds to a few minutes; the estimate is how long the last load
+  took on this computer. A question asked meanwhile waits for it.
+- **Failed** with "stopped responding; restarting it": the model server stopped answering (this can
+  happen after waking from sleep or when the computer runs out of memory). Nugget checks it every
+  second while a request waits on it, stops it after about 9 seconds without an answer and starts it
+  again. The request that was waiting ends with that message instead of waiting for minutes; ask
+  again once Status says **Ready**.
+- **Failed** with "stopped unexpectedly": the server crashed. A request that had not received
+  anything yet is sent once more to the restarted server; otherwise Nugget restarts it with a
+  growing pause ("Trying again automatically in 4s"), and requests made during the pause fail at
+  once with that message.
+- **Failed** with "couldn't start" or "keeps stopping": the server could not load the model, or
+  crashed several times in a row. Nugget does not try again on every request; press **Retry** when
+  you have freed memory or fixed the cause. **Details** shows the server's last line, and the full
+  log is `llama-server-chat.log` (or `-embedding`, `-rerank`, `-draft`) in the logs folder.
+
+When a Chat answer fails, the message says why and **Retry** under it asks the same question again
+in its place (with the same conversation before it). If the on-device chat model had given up
+restarting, Retry starts it first. **Status details** next to it opens Status, where the model's
+state and its last log line are.
 
 ## Search is text-only
 
@@ -105,7 +181,7 @@ For [Double Tap](double-tap.md), the [agent](agent.md), [Today](today.md) and
 | The Double Tap trigger does nothing on Linux Wayland | Double taps cannot be observed under Wayland. Choose a chord (the default there is `Ctrl+Alt+Space`) |
 | A chord cannot be registered | Another app already holds it. Choose another chord |
 | "drafting is refused in password and secure fields" or "drafting is disabled in …" | Expected: the field is secure, or the app is on the excluded list. Remove an app from the list on the **Double Tap** page if you added it by mistake |
-| Escape ×3 does not stop the agent | On macOS it needs Accessibility; on Wayland it is unsupported. Use **Stop all agents** in the tray, or set a chord as the kill switch |
+| Escape ×3 does not stop the agent | On macOS it needs Accessibility; on Wayland it is unsupported. Use **Stop all agents** in the tray or the kill switch on the **Safety** page (the only one on desktops without a tray), or set a chord as the kill switch |
 | Every agent action is denied | The kill switch may be engaged: resume on the **Safety** page. Otherwise a deny rule matches the app or site, or the task used up its rate limit |
 | A confirmation disappeared | It timed out after 2 minutes and counted as a denial |
 | A plugin will not install | It is unsigned, or signed by a key that is not in your trusted keys. An update is also refused if its version is not higher or it is signed by a different key |
@@ -117,6 +193,12 @@ Model installs refuse to start unless there is room for the model plus 10 % plus
 The store grows by roughly 6 to 8 MB per 1 000 small documents with the test embedder; real embedding
 models add more per chunk.
 
+The **Status** page warns when the disk that holds Nugget's data has less than 1 GiB free, and says
+the disk is full below 200 MiB, or as soon as a write fails for lack of space (`nuggetd status` shows
+the same on its `disk:` line, and the `disk` field of `status` carries it for scripts). While the disk is full,
+indexing and saving stop; nothing already stored is lost or damaged. Free up some space and indexing
+picks up again by itself.
+
 ## Starting over
 
 Stop the daemon, then delete the data, config and cache directories (see
@@ -125,6 +207,7 @@ Stop the daemon, then delete the data, config and cache directories (see
 
 ## Reporting a bug
 
-Open an issue with your OS, the output of `nuggetd status --json`, and the relevant log lines. Check
+Open an issue with your OS, the output of `nuggetd status --json`, and the relevant lines from
+`nuggetd.<date>.log` and `nugget-desktop.<date>.log`. Check
 them for anything private first. Report security problems privately, as described in
 [`SECURITY.md`](https://github.com/rayhankhilji/nugget/blob/main/SECURITY.md).

@@ -79,6 +79,58 @@ pub struct Viewport {
     pub scroll_y: f64,
 }
 
+/// A form some element of the snapshot belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormInfo {
+    pub id: String,
+    /// The resolved `action` URL. Lenient: anything but a string reads as empty, so a page that
+    /// clobbers `form.action` cannot make the snapshot unreadable.
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub action: String,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub method: String,
+    /// The extension's salted digest of everything the form would send (every control, hidden
+    /// ones and full values included). Only equality is meaningful. Absent from older
+    /// extensions, and when the form could not be read.
+    #[serde(
+        default,
+        deserialize_with = "lenient_opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub digest: Option<String>,
+}
+
+/// A dialog, form or region a send's content lives in (a compose window with a contenteditable
+/// body), with the snapshot elements inside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeInfo {
+    pub id: String,
+    /// Ids of the snapshot's elements inside it.
+    #[serde(default)]
+    pub members: Vec<String>,
+    /// The extension's salted digest of its editable contents (full values and text).
+    #[serde(
+        default,
+        deserialize_with = "lenient_opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub digest: Option<String>,
+}
+
+fn lenient_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(s) => s,
+        _ => String::new(),
+    })
+}
+
+fn lenient_opt_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(s) => Some(s),
+        _ => None,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PageSnapshot {
     pub snapshot_id: String,
@@ -95,6 +147,12 @@ pub struct PageSnapshot {
     pub text_truncated: bool,
     #[serde(default)]
     pub frames: Vec<FrameInfo>,
+    /// The forms the elements belong to.
+    #[serde(default)]
+    pub forms: Vec<FormInfo>,
+    /// The send scopes (dialogs, forms, regions) around the elements.
+    #[serde(default)]
+    pub scopes: Vec<ScopeInfo>,
 }
 
 impl PageSnapshot {
@@ -105,6 +163,11 @@ impl PageSnapshot {
     /// The page's host (`example.com`), which is what policy allow/deny lists match on.
     pub fn host(&self) -> Option<String> {
         host_of(&self.url)
+    }
+
+    /// The form with id `form`, if the snapshot lists it.
+    pub fn form(&self, form: &str) -> Option<&FormInfo> {
+        self.forms.iter().find(|f| f.id == form)
     }
 
     /// Elements of the form with id `form`.

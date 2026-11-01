@@ -292,6 +292,38 @@
     ]
   },
   {
+    "id": "e-po-signoff held_at l-depot",
+    "subject": "e-po-signoff",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-depot"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-016",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-po-signoff starts_at '2026-11-03'",
+    "subject": "e-po-signoff",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-11-03"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-016",
+        "quote": null
+      }
+    ]
+  },
+  {
     "id": "e-quarry-planning starts_at '2026-10-28'",
     "subject": "e-quarry-planning",
     "predicate": "starts_at",
@@ -968,6 +1000,22 @@
     ]
   },
   {
+    "id": "p-clem works_on j-tidewater",
+    "subject": "p-clem",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-tidewater"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-054",
+        "quote": "Clem will look after the Tidewater Billing file"
+      }
+    ]
+  },
+  {
     "id": "p-cormac attended e-quarry-planning",
     "subject": "p-cormac",
     "predicate": "attended",
@@ -1032,6 +1080,90 @@
       {
         "item": "mail-022",
         "quote": "Cormac Ellery, our CEO"
+      }
+    ]
+  },
+  {
+    "id": "p-delphine has_role 'Associate'",
+    "subject": "p-delphine",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Associate"
+    },
+    "status": "superseded",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-055",
+        "quote": "I'm an Associate at Vellum & Thistle LLP"
+      }
+    ]
+  },
+  {
+    "id": "p-delphine has_role 'Legal Counsel'",
+    "subject": "p-delphine",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Legal Counsel"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-053",
+        "quote": "I've joined Glimmerfen Labs as Legal Counsel"
+      }
+    ]
+  },
+  {
+    "id": "p-delphine works_at o-glimmerfen",
+    "subject": "p-delphine",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-053",
+        "quote": "I've joined Glimmerfen Labs as Legal Counsel"
+      }
+    ]
+  },
+  {
+    "id": "p-delphine works_at o-vellum",
+    "subject": "p-delphine",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-vellum"
+    },
+    "status": "superseded",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-055",
+        "quote": "I'm an Associate at Vellum & Thistle LLP"
+      },
+      {
+        "item": "mail-054",
+        "quote": "Friday 23 October is Delphine Corrigan's last day at Vellum & Thistle LLP"
+      }
+    ]
+  },
+  {
+    "id": "p-delphine works_on j-tidewater",
+    "subject": "p-delphine",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-tidewater"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-053",
+        "quote": "I'll take over the Tidewater Billing contract review from our side"
       }
     ]
   },
@@ -1168,6 +1300,10 @@
       {
         "item": "note-018",
         "quote": null
+      },
+      {
+        "item": "mail-052",
+        "quote": "Felix Ravensworth owns the Driftwood API"
       }
     ]
   },
@@ -1524,6 +1660,70 @@
     ]
   },
   {
+    "id": "p-kate attended e-po-signoff",
+    "subject": "p-kate",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-po-signoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-016",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-kate has_role 'Head of Procurement'",
+    "subject": "p-kate",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Head of Procurement"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-049",
+        "quote": "I'm Head of Procurement at Ostrander Freight Cooperative"
+      }
+    ]
+  },
+  {
+    "id": "p-kate works_at o-ostrander",
+    "subject": "p-kate",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-ostrander"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-049",
+        "quote": "I'm Head of Procurement at Ostrander Freight Cooperative"
+      }
+    ]
+  },
+  {
+    "id": "p-kate works_on j-harbourline",
+    "subject": "p-kate",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-harbourline"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-049",
+        "quote": "I'll handle the purchase order for Harbourline"
+      }
+    ]
+  },
+  {
     "id": "p-lucia attended e-tidewater-review",
     "subject": "p-lucia",
     "predicate": "attended",
@@ -1572,6 +1772,10 @@
       {
         "item": "mail-009",
         "quote": "Partner, Vellum & Thistle LLP"
+      },
+      {
+        "item": "mail-054",
+        "quote": "Partner, Vellum & Thistle LLP"
       }
     ]
   },
@@ -1587,6 +1791,10 @@
     "support": [
       {
         "item": "mail-009",
+        "quote": "Partner, Vellum & Thistle LLP"
+      },
+      {
+        "item": "mail-054",
         "quote": "Partner, Vellum & Thistle LLP"
       }
     ]
@@ -2060,6 +2268,10 @@
       {
         "item": "note-002",
         "quote": null
+      },
+      {
+        "item": "note-032",
+        "quote": "Standup with Priya and Tamsin from Quillfeather"
       }
     ]
   },
@@ -2100,6 +2312,58 @@
       {
         "item": "note-023",
         "quote": null
+      },
+      {
+        "item": "mail-056",
+        "quote": "I'll be working on Quarry Bridge with Priya"
+      }
+    ]
+  },
+  {
+    "id": "p-rob has_role 'Site Reliability Engineer'",
+    "subject": "p-rob",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Site Reliability Engineer"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-051",
+        "quote": "I've just joined Glimmerfen Labs as a Site Reliability Engineer"
+      }
+    ]
+  },
+  {
+    "id": "p-rob works_at o-glimmerfen",
+    "subject": "p-rob",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-051",
+        "quote": "I've just joined Glimmerfen Labs as a Site Reliability Engineer"
+      }
+    ]
+  },
+  {
+    "id": "p-rob works_on j-driftwood",
+    "subject": "p-rob",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-driftwood"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-051",
+        "quote": "a Site Reliability Engineer on the Driftwood API team"
       }
     ]
   },
@@ -2259,6 +2523,22 @@
     "support": [
       {
         "item": "cal-013",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-po-signoff",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-po-signoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-016",
         "quote": null
       }
     ]
@@ -2644,6 +2924,22 @@
     ]
   },
   {
+    "id": "p-samo attended e-po-signoff",
+    "subject": "p-samo",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-po-signoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-016",
+        "quote": null
+      }
+    ]
+  },
+  {
     "id": "p-samo has_role 'Logistics Manager'",
     "subject": "p-samo",
     "predicate": "has_role",
@@ -2996,6 +3292,62 @@
       {
         "item": "note-015",
         "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-tamsinr has_role 'Engineering Manager'",
+    "subject": "p-tamsinr",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Engineering Manager"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-056",
+        "quote": "I'm the Engineering Manager at Quillfeather Systems"
+      }
+    ]
+  },
+  {
+    "id": "p-tamsinr works_at o-quillfeather",
+    "subject": "p-tamsinr",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-quillfeather"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-056",
+        "quote": "I'm the Engineering Manager at Quillfeather Systems"
+      },
+      {
+        "item": "note-032",
+        "quote": "Standup with Priya and Tamsin from Quillfeather"
+      }
+    ]
+  },
+  {
+    "id": "p-tamsinr works_on j-quarry",
+    "subject": "p-tamsinr",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-quarry"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-056",
+        "quote": "I'll be working on Quarry Bridge with Priya"
+      },
+      {
+        "item": "note-032",
+        "quote": "Tamsin is sorting out the sandbox API keys for [[Quarry Bridge]]"
       }
     ]
   },

@@ -41,12 +41,20 @@ The menu uses the same language as the app.
 - GNOME shows tray icons only with the *AppIndicator and KStatusNotifierItem Support*
   extension. KDE Plasma, Xfce, Cinnamon, MATE, Budgie and sway with waybar show them without
   anything extra.
-- When there is nowhere to show the icon, Nugget runs without one. Closing the window then
-  quits Nugget, and launching it again brings the window back.
+- When there is nowhere to show the icon, Nugget runs without one (see below).
 - `NUGGET_TRAY=on` forces the icon, for trays that only support XEmbed. `NUGGET_TRAY=off`
   turns it off on any system.
 
 With a tray icon, closing the window only hides it. Use **Quit Nugget** to quit.
+
+**Without a tray icon** (stock GNOME, or `NUGGET_TRAY=off`):
+
+- Closing the window quits Nugget, exactly like **Quit Nugget**: what happens to the background
+  service follows [your quit choice](#quitting-sleep-and-a-second-launch).
+- Launching Nugget again brings the window back.
+- The tray's controls are in the window instead: **Status → Background controls** has **Pause
+  indexing** / **Resume indexing**, and the kill switch (**Stop all agents**) is on the **Safety**
+  page.
 
 ## Open at login and start hidden
 
@@ -137,11 +145,28 @@ signature and what it asks to do before anything is installed.
 
 ## Quitting, sleep and a second launch
 
-- **Quit:** by default, the background service keeps indexing after you quit the app. Turn on
-  **Also stop the background service Nugget started** on the Status page if you want quitting
-  to stop it. A service set to start at login, or one you started yourself, is never stopped.
-  On Windows the service is ended directly, because it runs without a console. Its store is
-  crash-safe, and an interrupted sync continues from where it stopped.
+- **Quit:** the first time you quit, Nugget asks: *When you quit Nugget, also stop background
+  indexing and the local AI?* **Stop everything** or **Keep running in the background**. Until you
+  answer, quitting stops them, because quitting is expected to quit and the local AI can hold
+  gigabytes of memory. Change your answer on **Status → Updates → Desktop app**.
+  - Every way to quit counts: **Quit Nugget** in the tray, **Quit Nugget** in the macOS app menu
+    or ⌘Q, and closing the window when there is no tray icon. Quitting from the Dock or by logging
+    out doesn't ask; it uses your answer, or stops them if you haven't answered.
+  - Only the background service the app started itself is stopped. A service set to start at
+    login, or a `nuggetd` you started yourself, is never stopped. If the app can't prove it
+    started the running service (for example one left over from a much older version), it leaves
+    it running and says so in its log.
+  - Stopping is clean: the service finishes in-flight work, stops the local model server and
+    closes its store, on every system. If it doesn't stop within about 15 seconds, it is ended,
+    and its model server goes with it (apps an agent opened keep running). The store is
+    crash-safe, and an interrupted sync continues from where it stopped.
+  - If the window can't show the question (it hasn't loaded, for example), quitting goes ahead
+    after two seconds as if you hadn't answered.
+- **Updates:** the app checks that the background service runs its own version every time it
+  connects. After an update it replaces an older service it started, and restarts an older
+  service that starts at login. A service newer than the app (an older copy of the app was
+  opened) is never replaced with an older one. Otherwise, the Status page says what to do (see
+  [Troubleshooting](troubleshooting.md#the-status-page-says-the-background-service-is-another-version)).
 - **Sleep:** after your computer wakes up, Nugget reconnects to the service, refreshes the tray,
   and registers the Double Tap and quick-ask shortcuts again.
 - **A second launch:** launching Nugget while it is already running brings up the window that's

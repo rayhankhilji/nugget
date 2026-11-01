@@ -5,6 +5,9 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use nugget_core::{Error, Result};
 use rusqlite::{Connection, ErrorCode, OpenFlags};
@@ -58,6 +61,16 @@ pub enum FileHealth {
 /// Errors (rather than a [`FileHealth`]) are for problems unrelated to the file's content, such
 /// as a busy database or an unreadable directory.
 pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth> {
+    let pragma = if full {
+        "PRAGMA integrity_check"
+    } else {
+        "PRAGMA quick_check"
+    };
+    check_with(path, key, Some(pragma))
+}
+
+/// [`check_file`] with SQLite's page check `pragma`, or only the cheap checks when `None`.
+fn check_with(path: &Path, key: &StoreKey, pragma: Option<&str>) -> Result<FileHealth> {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(FileHealth::Missing),
@@ -90,10 +103,8 @@ pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth>
         Err(e) if is_transient(&e) => return Err(Error::Storage(format!("check store: {e}"))),
         Err(e) => return Ok(FileHealth::Corrupt(e.to_string())),
     }
-    let pragma = if full {
-        "PRAGMA integrity_check"
-    } else {
-        "PRAGMA quick_check"
+    let Some(pragma) = pragma else {
+        return Ok(FileHealth::Healthy);
     };
     match check_rows(&db.conn, pragma) {
         Ok(rows) if rows == ["ok"] => {}
@@ -102,6 +113,140 @@ pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth>
         Err(e) => return Ok(FileHealth::Corrupt(e.to_string())),
     }
     Ok(FileHealth::Healthy)
+}
+
+/// Beside the database: when SQLite's full check last passed (Unix seconds, written by
+/// [`check_file_in_background`]).
+const CHECKED_SUFFIX: &str = ".checked";
+/// Beside the database: a background check found damage, so the next open checks in full.
+const CHECK_FAILED_SUFFIX: &str = ".check-failed";
+/// How often [`check_file_in_background`] re-runs SQLite's full check.
+pub const BACKGROUND_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// What [`check_file_on_open`] decided about SQLite's page-by-page check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenCheck {
+    /// It ran before opening (the result is in the [`FileHealth`]).
+    Ran,
+    /// Skipped at open and due in the background ([`check_file_in_background`]): the last one
+    /// is older than [`BACKGROUND_CHECK_INTERVAL`], or there was none.
+    Due,
+    /// Skipped: it passed within [`BACKGROUND_CHECK_INTERVAL`].
+    Recent,
+}
+
+/// [`check_file`] for opening the store at startup, which must not grow with the database.
+///
+/// `PRAGMA quick_check` reads and decrypts every page: ~5 s per GB, so 10–20 s at startup for
+/// a 500k-item store. It runs here, before opening, only when damage is likely: the last
+/// handle on the file did not close cleanly with [`Store::close_cleanly`] (its write-ahead log
+/// is not empty, or a crash or a kill left its owner lock file behind) or a background check
+/// found damage. Otherwise every cheap check still runs (header, whole
+/// pages, the WAL scan, decrypting the first page with `key`), and the full check is left to
+/// [`check_file_in_background`] (at most once per [`BACKGROUND_CHECK_INTERVAL`]), whose
+/// failure makes the next open check in full (and so refuse a damaged file).
+pub fn check_file_on_open(path: &Path, key: &StoreKey) -> Result<(FileHealth, OpenCheck)> {
+    // Evidence of an exit without `Store::close_cleanly`: a write-ahead log with content (SQLite
+    // syncs the log itself, so unlike the lock file this survives a power cut; a clean close
+    // truncates it), or a lock file left behind.
+    let suspect = non_empty(&sidecar(path, "-wal"))
+        || crate::egress::unclean_close_left(path)
+        || sidecar(path, CHECK_FAILED_SUFFIX).exists();
+    if suspect {
+        let health = check_file(path, key, false)?;
+        if health == FileHealth::Healthy {
+            record_check(path, true);
+        }
+        return Ok((health, OpenCheck::Ran));
+    }
+    let health = check_with(path, key, None)?;
+    let recent = last_check(path).is_some_and(|t| {
+        SystemTime::now()
+            .duration_since(t)
+            .is_ok_and(|age| age < BACKGROUND_CHECK_INTERVAL)
+    });
+    Ok((
+        health,
+        if recent {
+            OpenCheck::Recent
+        } else {
+            OpenCheck::Due
+        },
+    ))
+}
+
+/// SQLite's `quick_check` of the database at `path` while a store has it open (on its own
+/// read-only connection with a small page cache, so it neither blocks writers nor grows the
+/// process), stopping early with `Ok(None)` once `cancel` is set. Records the outcome beside
+/// the database: a pass is remembered for [`BACKGROUND_CHECK_INTERVAL`]; damage makes the next
+/// [`check_file_on_open`] run the full check before opening.
+pub fn check_file_in_background(
+    path: &Path,
+    key: &StoreKey,
+    cancel: &Arc<AtomicBool>,
+) -> Result<Option<FileHealth>> {
+    let conn = crate::store::open_keyed(path, key, OpenFlags::empty())?;
+    conn.execute_batch(
+        "PRAGMA query_only = ON; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -2048;
+         PRAGMA busy_timeout = 5000;",
+    )
+    .db("configure check connection")?;
+    let stop = cancel.clone();
+    conn.progress_handler(10_000, Some(move || stop.load(Ordering::Relaxed)))
+        .db("set check progress handler")?;
+    let rows = check_rows(&conn, "PRAGMA quick_check");
+    drop(conn);
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    let health = match rows {
+        Ok(rows) if rows == ["ok"] => FileHealth::Healthy,
+        Ok(rows) => FileHealth::Corrupt(rows.join("; ")),
+        Err(e) if is_transient(&e) => return Err(Error::Storage(format!("check store: {e}"))),
+        Err(e) => FileHealth::Corrupt(e.to_string()),
+    };
+    record_check(path, health == FileHealth::Healthy);
+    Ok(Some(health))
+}
+
+/// Write `bytes` to `path`, readable by its owner only (as the database itself).
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    std::io::Write::write_all(&mut opts.open(path)?, bytes)
+}
+
+/// When SQLite's full check last passed, if recorded.
+fn last_check(path: &Path) -> Option<SystemTime> {
+    let text = fs::read_to_string(sidecar(path, CHECKED_SUFFIX)).ok()?;
+    let secs: u64 = text.trim().parse().ok()?;
+    Some(UNIX_EPOCH + Duration::from_secs(secs))
+}
+
+/// Remember a full check's outcome beside the database. Best effort: a missing record only
+/// makes a later check run sooner.
+fn record_check(path: &Path, healthy: bool) {
+    let checked = sidecar(path, CHECKED_SUFFIX);
+    let failed = sidecar(path, CHECK_FAILED_SUFFIX);
+    let result = if healthy {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        write_private(&checked, now.to_string().as_bytes()).and_then(|()| {
+            match fs::remove_file(&failed) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            }
+        })
+    } else {
+        let _ = fs::remove_file(&checked);
+        write_private(&failed, b"damage found by the background check\n")
+    };
+    if let Err(e) = result {
+        tracing::warn!(db = %path.display(), error = %e, "cannot record the store check");
+    }
 }
 
 fn starts_with_plaintext_header(path: &Path) -> Result<bool> {
@@ -181,26 +326,32 @@ fn read_full(r: &mut impl std::io::Read, buf: &mut [u8]) -> std::io::Result<usiz
 ///   that commit;
 /// - a damaged header with frames after it.
 pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
+    scan_wal(wal).map(|(problem, _)| problem)
+}
+
+/// [`wal_problem`], plus what follows the last commit when the log is sound.
+fn scan_wal(wal: &Path) -> Result<(Option<String>, WalTail)> {
     use std::io::BufReader;
     let len = match fs::metadata(wal) {
         Ok(m) => m.len(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((None, WalTail::None)),
         Err(e) => return Err(e.into()),
     };
     if len == 0 {
-        return Ok(None);
+        return Ok((None, WalTail::None));
     }
     let mut r = BufReader::new(fs::File::open(wal)?);
     let invalid = |valid_end: u64, why: &str| {
-        Some(format!(
+        let problem = format!(
             "write-ahead log has {} bytes of invalid frames after the last valid commit ({why})",
             len - valid_end
-        ))
+        );
+        (Some(problem), WalTail::None)
     };
     let mut hdr = [0u8; WAL_HEADER];
     if read_full(&mut r, &mut hdr)? < WAL_HEADER {
         tracing::info!(path = %wal.display(), "write-ahead log ends inside its header (crash tail)");
-        return Ok(None);
+        return Ok((None, WalTail::Torn(len)));
     }
     let magic = be32(&hdr[0..]);
     let page_size = be32(&hdr[8..]) as usize;
@@ -215,7 +366,7 @@ pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
             return Ok(invalid(0, "damaged header with frames after it"));
         }
         tracing::info!(path = %wal.display(), "write-ahead log header is torn (crash tail)");
-        return Ok(None);
+        return Ok((None, WalTail::Torn(len)));
     }
     let salts = &hdr[16..24];
     let mut cks = (be32(&hdr[24..]), be32(&hdr[28..]));
@@ -224,6 +375,10 @@ pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
     let mut prev_stored = cks;
     let mut offset = WAL_HEADER as u64;
     let mut last_commit_end = offset;
+    // End of the last frame of the unbroken chain, and whether the chain ended at a whole frame
+    // from an earlier generation of the log (other salts) with no frame of the current one after.
+    let mut chain_end = offset;
+    let mut stale_break = false;
     let mut frame = vec![0u8; WAL_FRAME_HEADER + page_size];
     let mut broken = false;
     loop {
@@ -244,29 +399,74 @@ pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
         if !broken {
             if current && checksum_from(cks) == stored {
                 cks = stored;
+                chain_end = offset + frame.len() as u64;
                 if commit {
-                    last_commit_end = offset + frame.len() as u64;
+                    last_commit_end = chain_end;
                 }
             } else {
                 broken = true;
+                stale_break = !current;
             }
         } else if current && commit && checksum_from(prev_stored) == stored {
             return Ok(invalid(
                 last_commit_end,
                 "a damaged frame hides a later commit",
             ));
+        } else if current {
+            stale_break = false;
         }
         prev_stored = stored;
         offset += frame.len() as u64;
     }
-    if len > last_commit_end {
-        tracing::info!(
+    let tail = classify_tail(len, offset, chain_end, last_commit_end, stale_break);
+    match tail {
+        WalTail::None => {}
+        WalTail::Stale(bytes) => tracing::debug!(
             path = %wal.display(),
-            bytes = len - last_commit_end,
+            bytes,
+            "write-ahead log ends with frames from before it was last reused (normal)"
+        ),
+        WalTail::Torn(bytes) => tracing::info!(
+            path = %wal.display(),
+            bytes,
             "write-ahead log has an uncommitted or torn tail (a crash); SQLite rolls it back"
-        );
+        ),
     }
-    Ok(None)
+    Ok((None, tail))
+}
+
+/// What follows the last commit of a sound write-ahead log.
+#[derive(Debug, PartialEq, Eq)]
+enum WalTail {
+    /// Nothing: the log ends at a commit.
+    None,
+    /// Only whole frames from an earlier generation of the log (other salts). SQLite reuses the
+    /// log from the start after a checkpoint without truncating it, so the old frames beyond the
+    /// newest commit are normal on any store that is open or was not checkpointed at close; they
+    /// say nothing about a crash.
+    Stale(u64),
+    /// Frames of an uncommitted transaction, or a torn or partial frame: what a crash (or a
+    /// writer caught mid-transaction) leaves.
+    Torn(u64),
+}
+
+/// Classify the bytes after `last_commit_end` of a `len`-byte log whose whole frames end at
+/// `whole_end`, whose chain of valid frames ends at `chain_end`, and whose first invalid frame
+/// (if any) had other salts, as did every frame after it (`stale_break`).
+fn classify_tail(
+    len: u64,
+    whole_end: u64,
+    chain_end: u64,
+    last_commit_end: u64,
+    stale_break: bool,
+) -> WalTail {
+    if len <= last_commit_end {
+        WalTail::None
+    } else if chain_end == last_commit_end && stale_break && whole_end == len {
+        WalTail::Stale(len - last_commit_end)
+    } else {
+        WalTail::Torn(len - last_commit_end)
+    }
 }
 
 /// Errors that say nothing about the file's content.
@@ -893,6 +1093,80 @@ mod tests {
         assert_eq!(health_with_wal(&copy, b""), FileHealth::Healthy);
     }
 
+    /// After a checkpoint SQLite reuses the log from its start without truncating it, so frames
+    /// of the previous generation (other salts) follow the newest commit. That is no crash tail.
+    #[test]
+    fn stale_frames_after_a_reused_log_are_not_a_crash_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 30);
+        s.with_conn(|c| {
+            c.query_row("PRAGMA wal_checkpoint(RESTART)", [], |_| Ok(()))
+                .db("restart")
+        })
+        .unwrap();
+        put_item(&s, 1000);
+        let wal = sidecar(&path, "-wal");
+        let (problem, tail) = scan_wal(&wal).unwrap();
+        assert_eq!(problem, None);
+        assert!(matches!(tail, WalTail::Stale(n) if n > 0), "{tail:?}");
+
+        // The same log cut inside a frame: a real crash tail.
+        let bytes = fs::read(&wal).unwrap();
+        let cut = dir.path().join("cut-wal");
+        fs::write(&cut, &bytes[..bytes.len() - 100]).unwrap();
+        let (problem, tail) = scan_wal(&cut).unwrap();
+        assert_eq!(problem, None);
+        assert!(matches!(tail, WalTail::Torn(_)), "{tail:?}");
+        drop(s);
+    }
+
+    #[test]
+    fn wal_tails_are_classified() {
+        // No tail.
+        assert_eq!(classify_tail(100, 100, 100, 100, false), WalTail::None);
+        // Old-generation whole frames only.
+        assert_eq!(classify_tail(300, 300, 100, 100, true), WalTail::Stale(200));
+        // Valid but uncommitted frames before the stale ones.
+        assert_eq!(classify_tail(300, 300, 200, 100, true), WalTail::Torn(200));
+        // A partial frame at the end.
+        assert_eq!(classify_tail(350, 300, 100, 100, true), WalTail::Torn(250));
+        // A current frame that fails its checksum.
+        assert_eq!(classify_tail(300, 300, 100, 100, false), WalTail::Torn(200));
+    }
+
+    /// A clean stop checkpoints and truncates the log, so the next start finds no tail even when
+    /// the process exits without closing its connections.
+    #[test]
+    fn checkpoint_on_clean_stop_leaves_no_log_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 30);
+        let wal = sidecar(&path, "-wal");
+        assert!(fs::metadata(&wal).unwrap().len() > 0);
+        assert!(s.checkpoint_wal().unwrap());
+        assert_eq!(fs::metadata(&wal).unwrap().len(), 0);
+        // What a process exit leaves (connections never closed): copy the files as they are.
+        let stopped = dir.path().join("stopped");
+        fs::create_dir(&stopped).unwrap();
+        let copy = stopped.join("nugget.db");
+        for suffix in ["", "-wal", "-shm"] {
+            fs::copy(sidecar(&path, suffix), sidecar(&copy, suffix)).unwrap();
+        }
+        assert_eq!(
+            scan_wal(&sidecar(&copy, "-wal")).unwrap(),
+            (None, WalTail::None)
+        );
+        assert_eq!(check_both(&copy, &key()), FileHealth::Healthy);
+        let reopened = Store::open(&copy, &key()).unwrap();
+        assert_eq!(reopened.counts().unwrap().items, 30);
+        drop(s);
+        // In-memory stores have no log.
+        assert!(Store::open_in_memory().unwrap().checkpoint_wal().unwrap());
+    }
+
     /// Open a fresh copy of `copy`'s database with `wal` as its log (a store that crashed with
     /// that log) and return its item count; the opened store is consistent.
     fn items_after_crash(copy: &Path, wal: &[u8], name: &str) -> u64 {
@@ -1036,6 +1310,117 @@ mod tests {
         assert_eq!(snapshot(&path)[..2], before[..]);
         put_item(&s, 99);
         assert!(s.check_consistency().unwrap().ok);
+    }
+
+    #[test]
+    fn open_check_runs_in_full_only_when_damage_is_likely() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = closed_store(dir.path());
+        // Closed cleanly, never checked: cheap checks only, the full check is due.
+        assert_eq!(
+            check_file_on_open(&path, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Due)
+        );
+        // The cheap checks still catch a wrong key and a truncated file.
+        assert_eq!(
+            check_file_on_open(&path, &StoreKey::from_bytes([8; 32]))
+                .unwrap()
+                .0,
+            FileHealth::WrongKey
+        );
+        let short = dir.path().join("short.db");
+        fs::write(&short, &fs::read(&path).unwrap()[..5000]).unwrap();
+        assert!(matches!(
+            check_file_on_open(&short, &key()).unwrap().0,
+            FileHealth::Corrupt(m) if m.contains("truncated")
+        ));
+
+        // A background pass is remembered: the next open skips the full check.
+        let live = Store::open(&path, &key()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        assert_eq!(
+            check_file_in_background(&path, &key(), &cancel).unwrap(),
+            Some(FileHealth::Healthy)
+        );
+        drop(live);
+        assert_eq!(
+            check_file_on_open(&path, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Recent)
+        );
+        // Cancelled before it starts: no verdict, nothing recorded.
+        cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            check_file_in_background(&path, &key(), &cancel).unwrap(),
+            None
+        );
+
+        // An owner lock left behind by a handle that did not close (a crash): full check.
+        let stale = sidecar(&path, ".egress-00ff00ff.lock");
+        fs::write(&stale, b"").unwrap();
+        assert_eq!(
+            check_file_on_open(&path, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Ran)
+        );
+        fs::remove_file(&stale).unwrap();
+
+        // A held lock (a live handle elsewhere) is not a crash...
+        let held = Store::open(&path, &key()).unwrap();
+        assert!(!crate::egress::unclean_close_left(&path));
+        // ...but a write-ahead log with content is what an exit without a clean close leaves
+        // (and, unlike a lock file, it survives a power cut): full check.
+        populate(&held, 5);
+        assert!(non_empty(&sidecar(&path, "-wal")));
+        assert_eq!(check_file_on_open(&path, &key()).unwrap().1, OpenCheck::Ran);
+        drop(held);
+    }
+
+    #[test]
+    fn a_clean_close_without_drop_is_not_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 20);
+        s.close_cleanly();
+        // Closed cleanly: no lock left, the log folded in and truncated.
+        assert!(!crate::egress::unclean_close_left(&path));
+        assert_eq!(
+            fs::metadata(sidecar(&path, "-wal")).map_or(0, |m| m.len()),
+            0
+        );
+        std::mem::forget(s); // as a daemon exiting without dropping it
+        assert_eq!(
+            check_file_on_open(&path, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Due)
+        );
+    }
+
+    #[test]
+    fn background_damage_makes_the_next_open_check_in_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = closed_store(dir.path());
+        let bad = dir.path().join("bad.db");
+        let mut bytes = fs::read(&path).unwrap();
+        let mid = bytes.len() / 2;
+        for b in &mut bytes[mid..mid + 64] {
+            *b ^= 0x5a;
+        }
+        fs::write(&bad, &bytes).unwrap();
+        // The cheap checks at open cannot see damage in the middle of the file...
+        assert_eq!(
+            check_file_on_open(&bad, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Due)
+        );
+        // ...the background check does, and records it.
+        let cancel = Arc::new(AtomicBool::new(false));
+        assert!(matches!(
+            check_file_in_background(&bad, &key(), &cancel).unwrap(),
+            Some(FileHealth::Corrupt(_))
+        ));
+        assert!(sidecar(&bad, CHECK_FAILED_SUFFIX).exists());
+        // So the next open runs the full check and refuses the file.
+        let (health, check) = check_file_on_open(&bad, &key()).unwrap();
+        assert_eq!(check, OpenCheck::Ran);
+        assert!(matches!(health, FileHealth::Corrupt(_)), "{health:?}");
     }
 
     #[test]

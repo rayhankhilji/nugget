@@ -538,15 +538,16 @@ impl Retriever {
         // Per ranked item: how many of the rare terms it has.
         let mut rare = 0usize;
         let mut has: HashMap<&ItemRef, usize> = HashMap::new();
+        let refs: Vec<ItemRef> = ranked.iter().map(|r| r.cand.item.clone()).collect();
         for t in terms {
-            let hits = self.store.search_text(&t, cap + 1)?;
-            if hits.len() > cap {
+            // Unranked and without snippets (II5): at 250k items a word in 1% of the chunks
+            // cost ~0.15 s per term through `search_text(&t, cap + 1)`.
+            let Some(with) = self.store.text_matches_among(&t, cap, &refs)? else {
                 continue; // Common: says little about what the question is about.
-            }
+            };
             rare += 1;
-            let with: std::collections::HashSet<&ItemRef> = hits.iter().map(|h| &h.item).collect();
-            for r in ranked {
-                if with.contains(&r.cand.item) {
+            for (r, hit) in ranked.iter().zip(with) {
+                if hit {
                     *has.entry(&r.cand.item).or_default() += 1;
                 }
             }
@@ -1037,6 +1038,26 @@ impl Retriever {
             Ok(_) => vec![query.to_owned()],
             Err(e) => return Err(TextOnlyReason::EmbeddingFailed(e.to_string())),
         };
+        // Vectors of another model are not comparable, whatever their dimension.
+        let providers = match self.store.embedding_model() {
+            Ok(Some(model)) => {
+                let (same, other): (Vec<_>, Vec<_>) =
+                    providers.into_iter().partition(|p| p.meta().model == model);
+                if same.is_empty() {
+                    return Err(TextOnlyReason::ModelMismatch(format!(
+                        "the index was built with `{model}`; the embedding providers serve {}",
+                        other
+                            .iter()
+                            .map(|p| format!("`{}`", p.meta().model))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )));
+                }
+                same
+            }
+            Ok(None) => providers,
+            Err(e) => return Err(TextOnlyReason::EmbeddingFailed(e.to_string())),
+        };
         let (p, mut vectors) = embed_first(router, &providers, &text)
             .await
             .map_err(TextOnlyReason::EmbeddingFailed)?;
@@ -1251,9 +1272,75 @@ pub fn is_sensitive(metadata: &serde_json::Value) -> bool {
     metadata.get("sensitive") != Some(&serde_json::Value::Bool(false))
 }
 
+/// Whether an item is *confirmed* sensitive: a PII finding (`pii`), a deterministic or connector
+/// rule (`sensitive_rule`), or local triage that ran and said sensitive (`triage.state` "done"
+/// with `sensitive: true`). An item that is sensitive only because triage has not sorted it yet
+/// (pending, unknown, failed) is not; triage skipped because a rule decided counts as the rule. Items flagged `sensitive: true` by
+/// ingest before triage states existed (no `triage` key) count as confirmed. An explicit
+/// `sensitive: false` is never confirmed.
+///
+/// Local views of the user's own data (the Markdown vault, the graph and entity views) hide
+/// confirmed sensitive items only; anything that can leave the device keeps using
+/// [`is_sensitive`], which also counts unsorted items.
+pub fn is_confirmed_sensitive(metadata: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    if metadata.get("sensitive") != Some(&Value::Bool(true)) {
+        return false;
+    }
+    let pii = metadata
+        .get("pii")
+        .and_then(Value::as_object)
+        .is_some_and(|p| !p.is_empty());
+    let rule = metadata.get("sensitive_rule").is_some_and(Value::is_string);
+    let triage = metadata.get("triage");
+    let triaged = triage.is_some_and(|t| {
+        let state = t.get("state").and_then(Value::as_str);
+        (state == Some("done") && t.get("sensitive") == Some(&Value::Bool(true)))
+            // Skipped because a rule already decided (`triage.reason` names it).
+            || state == Some("skipped")
+    });
+    pii || rule || triaged || triage.is_none()
+}
+
 /// The item's `url` metadata (set by ingest), if it is a sane single-line string.
 fn item_url(item: &Item) -> Option<String> {
     let url = item.metadata.get("url")?.as_str()?.trim();
     let ok = !url.is_empty() && url.len() <= MAX_URL_LEN && !url.chars().any(char::is_control);
     ok.then(|| url.to_owned())
+}
+
+#[cfg(test)]
+mod confirmed_sensitive_tests {
+    use super::{is_confirmed_sensitive, is_sensitive};
+    use serde_json::json;
+
+    #[test]
+    fn only_confirmed_items_are_confirmed_sensitive() {
+        // Unsorted (no local model, triage pending/unknown/failed): sensitive for the cloud,
+        // not confirmed.
+        for state in ["pending", "unknown", "failed"] {
+            let m = json!({"sensitive": true, "triage": {"state": state}});
+            assert!(is_sensitive(&m) && !is_confirmed_sensitive(&m), "{state}");
+        }
+        // PII, a rule (connector included) or a triage verdict: confirmed.
+        for m in [
+            json!({"sensitive": true, "pii": {"card": 1}, "triage": {"state": "skipped"}}),
+            json!({"sensitive": true, "sensitive_rule": "health", "triage": {"state": "pending"}}),
+            json!({"sensitive": true, "sensitive_rule": "connector"}),
+            json!({"sensitive": true, "triage": {"state": "done", "sensitive": true}}),
+            // Flagged before triage states existed.
+            json!({"sensitive": true}),
+        ] {
+            assert!(is_confirmed_sensitive(&m), "{m}");
+        }
+        // Not sensitive, or no flag at all.
+        for m in [
+            json!({"sensitive": false, "pii": {"card": 1}}),
+            json!({"sensitive": false, "triage": {"state": "done", "sensitive": false}}),
+            json!({}),
+            json!({"sensitive": true, "pii": {}, "triage": {"state": "pending"}}),
+        ] {
+            assert!(!is_confirmed_sensitive(&m), "{m}");
+        }
+    }
 }

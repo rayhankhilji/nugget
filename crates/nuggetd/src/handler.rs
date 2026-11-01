@@ -9,11 +9,12 @@ use nugget_connector::AuthKind;
 use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
-    self, AskRequest, AskStarted, AuthBegin, ChatCancel, ChatDelta, ChatDone, ChatStarted,
-    ContextRequest, ContextResponse, EgressRecentRequest, EgressRecordRequest, ModelInfo,
-    ModelInstallRequest, ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo,
-    Role as IpcRole, RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret,
-    SourceSpec, SourceSync, SourceUpdate, StatusResponse, method, notification,
+    self, AskRequest, AskRestarted, AskStarted, AuthBegin, ChatCancel, ChatDelta, ChatDone,
+    ChatStarted, ContextRequest, ContextResponse, EgressRecentRequest, EgressRecordRequest,
+    ModelCancelRequest, ModelCancelResponse, ModelFailReason, ModelInfo, ModelInstallRequest,
+    ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo, Role as IpcRole,
+    RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret, SourceSpec,
+    SourceSync, SourceUpdate, StatusResponse, method, notification,
 };
 use nugget_core::{Error, Result};
 use nugget_infer::{
@@ -32,8 +33,12 @@ use crate::ask::{
 };
 use crate::config::tier_name;
 use crate::daemon::{InFlightGuard, State, blocking, spawn_refresh};
-use crate::sources::{client_secret_account, reconcile_settings};
+use crate::sources::{check_duplicate_folders, client_secret_account, reconcile_settings};
 
+/// Longest `daemon.shutdown` reason logged.
+const MAX_SHUTDOWN_REASON_CHARS: usize = 64;
+/// How long `daemon.shutdown` waits after answering before the daemon starts winding down.
+const SHUTDOWN_REPLY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
 /// Upper bounds for list-style requests.
 const MAX_SEARCH_RESULTS: u32 = 200;
 const MAX_EGRESS_EVENTS: u32 = 1000;
@@ -47,6 +52,8 @@ const MAX_ASK_HISTORY_MESSAGES: usize = 12;
 const MAX_ASK_HISTORY_CHARS: usize = 16_000;
 /// ...each cut to this many characters.
 const MAX_ASK_HISTORY_MESSAGE_CHARS: usize = 4_000;
+/// Longest question `retrieve.ask` accepts, in characters (QA GG2-17).
+const MAX_ASK_QUERY_CHARS: usize = 4_000;
 /// Egress-ledger feature for `retrieve.ask` requests.
 pub(crate) const FEATURE_ASK: &str = "ask";
 /// Longest accepted source secret (passwords, OAuth client secrets), in bytes.
@@ -66,6 +73,7 @@ impl Handler for RpcHandler {
         tracing::debug!(%method, "rpc call");
         match method {
             method::STATUS => self.status().await,
+            method::DAEMON_SHUTDOWN => self.daemon_shutdown(parse_params(params)?),
             method::CHAT => self.chat(parse_params(params)?, notify).await,
             method::CHAT_CANCEL => self.chat_cancel(parse_params(params)?),
             method::SEARCH => self.search(parse_params(params)?).await,
@@ -73,6 +81,7 @@ impl Handler for RpcHandler {
             method::PROVIDERS_PROBE => self.probe(parse_params(params)?).await,
             method::MODELS_LIST => self.models_list().await,
             method::MODELS_INSTALL => self.models_install(parse_params(params)?, notify).await,
+            method::MODELS_CANCEL => self.models_cancel(parse_params(params)?),
             method::EGRESS_RECENT => self.egress_recent(parse_params(params)?).await,
             method::EGRESS_RECORD => self.egress_record(parse_params(params)?).await,
             method::SOURCES_LIST => to_result(self.state.ingest.list().await?),
@@ -130,9 +139,35 @@ impl RpcHandler {
 
     // ---- status / providers ----
 
+    /// `daemon.shutdown`: answer, then cancel `State::shutdown`, which `Daemon::run_until`
+    /// treats like SIGTERM (connections close, ingest and the local model servers stop, the
+    /// store is flushed, then "stopped" is logged and the process exits 0).
+    fn daemon_shutdown(&self, req: ipc::DaemonShutdownRequest) -> Result<Value, RpcError> {
+        let reason: String = req
+            .reason
+            .as_deref()
+            .unwrap_or("unspecified")
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(MAX_SHUTDOWN_REASON_CHARS)
+            .collect();
+        tracing::info!(%reason, "stop requested over IPC");
+        let stop = self.state.shutdown.clone();
+        // Not tracked in `state.tasks` (wind-down waits for those). The pause lets this answer
+        // reach the client before connections start closing.
+        tokio::spawn(async move {
+            tokio::time::sleep(SHUTDOWN_REPLY_DELAY).await;
+            stop.cancel();
+        });
+        to_result(ipc::DaemonShutdownResponse {
+            stopping: true,
+            pid: std::process::id(),
+        })
+    }
+
     async fn status(&self) -> Result<Value, RpcError> {
         let store = self.state.store.clone();
-        let counts = blocking(move || store.counts()).await?;
+        let (counts, disk) = blocking(move || Ok((store.counts()?, store.disk_status()))).await?;
         to_result(StatusResponse {
             protocol: PROTOCOL_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -141,6 +176,9 @@ impl RpcHandler {
             chunks: counts.chunks,
             providers: self.provider_infos(),
             audit_chain_ok: self.state.audit_chain_ok.get().copied(),
+            disk,
+            pid: Some(std::process::id()),
+            service: crate::service::managed_by().map(str::to_owned),
         })
     }
 
@@ -149,11 +187,11 @@ impl RpcHandler {
     fn provider_infos(&self) -> Vec<ProviderInfo> {
         let router = &self.state.router;
         self.state
-            .configs
+            .provider_configs()
             .iter()
             .filter_map(|cfg| {
-                if let Some(reason) = self.state.unavailable.get(&cfg.id) {
-                    return Some(unavailable_info(cfg, reason));
+                if let Some(reason) = self.state.unavailable_reason(&cfg.id) {
+                    return Some(unavailable_info(cfg, &reason));
                 }
                 let p = router.provider(&cfg.id)?;
                 let meta = p.meta();
@@ -204,7 +242,7 @@ impl RpcHandler {
     async fn probe(&self, req: ProbeRequest) -> Result<Value, RpcError> {
         // Runtime slots are probed like any provider, but their results are not persisted (the
         // server's port changes between runs).
-        let cfg = self.state.config_of(&req.provider).cloned();
+        let cfg = self.state.config_of(&req.provider);
         let slot_model = self.state.slot(&req.provider).map(|s| s.model().id.clone());
         let model = match (&cfg, slot_model) {
             (Some(c), _) => c.model.clone(),
@@ -383,6 +421,15 @@ impl RpcHandler {
     /// With `history`, a follow-up is first rewritten into a standalone query for retrieval
     /// (by a local model, or a heuristic; never a cloud model), and the earlier turns go to
     /// the answering model before the question.
+    ///
+    /// The reply ([`AskStarted`]) goes out as soon as the first candidate's context is packed,
+    /// not once its model answers (QA GG2-5: a CPU-only prefill takes tens of seconds). The
+    /// stream task then opens the provider and waits for its first event; on a fallback-class
+    /// error (routing by tier only) it moves on to the next candidate, announcing the new
+    /// provider and its context with `ask.restarted` before that provider's request goes out
+    /// (see [`run_ask`]). A failure of every candidate ends the stream with `chat.done { error }`.
+    /// Invalid requests, an unknown provider, an empty tier and a failure to pack the first
+    /// context remain errors of the call.
     async fn retrieve_ask(&self, req: AskRequest, notify: Notifier) -> Result<Value, RpcError> {
         if self.state.shutdown.is_cancelled() {
             return Err(shutting_down());
@@ -390,6 +437,11 @@ impl RpcHandler {
         let query = req.query.trim().to_owned();
         if query.is_empty() {
             return Err(RpcError::invalid_params("the question is empty"));
+        }
+        if query.chars().count() > MAX_ASK_QUERY_CHARS {
+            return Err(RpcError::invalid_params(format!(
+                "the question is too long (at most {MAX_ASK_QUERY_CHARS} characters)"
+            )));
         }
         let budget = req.budget_tokens.min(MAX_CONTEXT_TOKENS);
         if budget == 0 {
@@ -433,135 +485,73 @@ impl RpcHandler {
         };
         let rewritten = search_query != query;
 
-        // Contexts by "excludes sensitive items", packed at most once each.
-        // The packer's passage blocks go with the context: the prompt and the answer check
-        // read each passage's own text (see `crate::ask`).
-        let mut contexts: [Option<PackedContext>; 2] = [None, None];
-        let start = async {
-            let mut last_err = None;
-            for p in candidates {
-                let cloud = p.meta().locality == Locality::Cloud;
-                let slot = &mut contexts[usize::from(cloud)];
-                let packed = match slot {
-                    Some(c) => c.clone(),
-                    None => {
-                        let retriever = self.state.retriever.clone();
-                        let q = search_query.clone();
-                        let opts = ContextOptions {
-                            exclude_sensitive: cloud,
-                            ..Default::default()
-                        };
-                        let c = on_blocking_thread(async move {
-                            retriever.pack_context_with(&q, budget as usize, opts).await
-                        })
-                        .await?;
-                        slot.insert(c).clone()
-                    }
-                };
-                let PackedContext {
-                    response: ctx,
-                    passages,
-                    date,
-                    ..
-                } = packed;
-                // Belt and braces: nothing marked sensitive is ever sent to a cloud model.
-                if cloud && ctx.citations.iter().any(|c| c.sensitive) {
-                    return Err(RpcError::from(Error::Integrity(
-                        "refusing to send sensitive passages to a cloud provider".into(),
-                    )));
-                }
-                // Earlier turns as they may go to this provider: nothing from a sensitive item
-                // or matching the PII scan reaches a cloud model, and the items earlier answers
-                // came from are provenance.
-                let sent = {
-                    let memory = self
-                        .state
-                        .answers
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner);
-                    safe_history(&history, &memory, cloud)
-                };
-                let mut ask = ask_request_packed(&sent.turns, &query, &ctx, &passages, &opts);
-                for item in &sent.items {
-                    if !ask.items.contains(item) {
-                        ask.items.push(item.clone());
-                    }
-                }
-                match open_stream(p.as_ref(), ask).await {
-                    Ok(stream) => {
-                        router.report_success(p.id());
-                        return Ok((p, stream, ctx, passages, sent, date));
-                    }
-                    Err(e) if !explicit && is_fallback_error(&e) => {
-                        tracing::warn!(provider = %p.id(), error = %e, "ask: provider failed; trying next");
-                        router.report_failure(p.id());
-                        last_err = Some(e);
-                    }
-                    Err(e) => {
-                        if is_provider_failure(&e) {
-                            router.report_failure(p.id());
-                        }
-                        return Err(RpcError::from(e));
-                    }
-                }
-            }
-            Err(RpcError::from(last_err.unwrap_or_else(|| {
-                Error::NotFound("no provider could answer".into())
-            })))
+        let mut plan = AskPlan {
+            state: self.state.clone(),
+            query,
+            search_query,
+            budget,
+            history,
+            opts,
+            contexts: [None, None],
         };
-        let (provider, stream, ctx, passages, sent, date): (_, _, _, _, SafeHistory, _) = tokio::select! {
-            r = start => r?,
+        // Only the first candidate's context is packed before replying (QA GG2-5): the reply
+        // carries its sources while the model is still reading them.
+        let mut candidates = candidates.into_iter();
+        let Some(first) = candidates.next() else {
+            return Err(RpcError::from(Error::NotFound(
+                "no provider could answer".into(),
+            )));
+        };
+        let (first, request) = tokio::select! {
+            r = plan.prepare(first) => r.map_err(RpcError::from)?,
             () = self.state.shutdown.cancelled() => return Err(shutting_down()),
         };
 
         let stream_id = uuid::Uuid::new_v4().to_string();
-        let meta = provider.meta();
-        let general = ctx.citations.is_empty();
+        let meta = first.provider.meta();
         tracing::info!(
             stream = %stream_id,
-            provider = %provider.id(),
-            passages = ctx.citations.len(),
-            general,
-            excluded_sensitive = ctx.excluded_sensitive,
-            history = history.len(),
-            history_withheld = sent.withheld,
+            provider = %first.provider.id(),
+            passages = first.ctx.citations.len(),
+            general = first.general(),
+            excluded_sensitive = first.ctx.excluded_sensitive,
+            history = plan.history.len(),
+            history_withheld = first.sent.withheld,
             rewritten,
             "ask started"
         );
-        self.audit(
-            "retrieve.ask",
-            provider.id().as_str(),
-            json!({
-                "stream_id": stream_id,
-                "tier": req.tier,
-                "explicit_provider": explicit,
-                "model": meta.model,
-                "locality": meta.locality,
-                "passages": ctx.citations.len(),
-                "excluded_sensitive": ctx.excluded_sensitive,
-                "history": history.len(),
-                "history_withheld": sent.withheld,
-                "history_items": sent.items.len(),
-                "rewritten": rewritten,
-                "general": general,
-            }),
-        )
-        .await;
-        // Sourced answers get their markers normalised and are checked at the end.
-        let filter = (!general).then(|| AnswerFilter::packed(&ctx, &passages, opts.today, true));
         let started = AskStarted {
             stream_id: stream_id.clone(),
-            provider: provider.id().clone(),
+            provider: first.provider.id().clone(),
             locality: meta.locality,
-            citations: ctx.citations,
-            excluded_sensitive: ctx.excluded_sensitive,
-            query_rewrite: rewritten.then_some(search_query),
-            general,
-            date: date
-                .map(|d| ask_date_filter(d, self.state.retriever.config().date_utc_offset_minutes)),
-            partial: passages.iter().filter(|p| p.partial).map(|p| p.n).collect(),
+            citations: first.ctx.citations.clone(),
+            excluded_sensitive: first.ctx.excluded_sensitive,
+            query_rewrite: rewritten.then(|| plan.search_query.clone()),
+            general: first.general(),
+            date: first.date.clone(),
+            partial: first.partial(),
         };
-        self.spawn_stream(provider, stream, stream_id, notify, filter);
+        let job = AskJob {
+            plan,
+            rest: candidates,
+            explicit,
+            tier: req.tier,
+            rewritten,
+        };
+        // No `.await` between registering the token and handing its guard to the task: if this
+        // call is dropped (client gone), the guard still removes the token.
+        let token = CancellationToken::new();
+        let guard = StreamGuard::register(self.state.clone(), stream_id.clone(), token.clone());
+        self.state.tasks.spawn(run_ask(
+            self.state.clone(),
+            job,
+            first,
+            request,
+            stream_id,
+            token,
+            guard,
+            notify,
+        ));
         to_result(started)
     }
 
@@ -623,6 +613,8 @@ impl RpcHandler {
 
     async fn sources_add(&self, mut spec: SourceSpec) -> Result<Value, RpcError> {
         spec.settings = reconcile_settings(&spec.kind, spec.settings)?;
+        let existing = self.state.ingest.list().await?;
+        check_duplicate_folders(&spec.kind, &spec.settings, &existing, None)?;
         let info = self.state.ingest.add(spec).await?;
         tracing::info!(source = %info.id, kind = %info.kind, "source added");
         self.audit(
@@ -636,8 +628,12 @@ impl RpcHandler {
 
     async fn sources_update(&self, mut update: SourceUpdate) -> Result<Value, RpcError> {
         if let Some(settings) = update.settings.take() {
-            let kind = self.state.ingest.get(&update.id).await?.kind;
-            update.settings = Some(reconcile_settings(&kind, settings)?);
+            let current = self.state.ingest.get(&update.id).await?;
+            let kind = current.kind.clone();
+            let settings = reconcile_settings(&kind, settings)?;
+            let existing = self.state.ingest.list().await?;
+            check_duplicate_folders(&kind, &settings, &existing, Some(&current))?;
+            update.settings = Some(settings);
         }
         let detail = json!({
             "name": update.name,
@@ -833,6 +829,17 @@ impl RpcHandler {
         Ok(Value::Null)
     }
 
+    /// Idempotent: cancelling an install that is not running is not an error. The install's own
+    /// connection gets the final `failed` progress (reason `cancelled`, staged bytes kept).
+    fn models_cancel(&self, req: ModelCancelRequest) -> Result<Value, RpcError> {
+        let cancelled = self
+            .manifest()?
+            .get(&req.id)
+            .is_some_and(|entry| self.state.models.cancel_install(entry));
+        tracing::info!(model = %req.id, cancelled, "model install cancel requested");
+        to_result(ModelCancelResponse { cancelled })
+    }
+
     fn manifest(&self) -> Result<&nugget_models::Manifest, RpcError> {
         self.state.manifest.as_ref().map_err(|e| {
             RpcError::from(Error::Integrity(format!("model manifest unavailable: {e}")))
@@ -845,7 +852,7 @@ impl RpcHandler {
 
     /// Not found, or found in config but unavailable (with the reason).
     fn unknown_provider(&self, id: &ProviderId) -> RpcError {
-        match self.state.unavailable.get(id) {
+        match self.state.unavailable_reason(id) {
             Some(reason) => RpcError::from(Error::NotFound(format!(
                 "provider `{id}` is unavailable: {reason}"
             ))),
@@ -1025,6 +1032,287 @@ async fn open_stream(p: &dyn Provider, req: ChatRequest) -> Result<ChatStream> {
         )),
         Some(Err(e)) => Err(e),
         None => Err(Error::Provider(format!("{}: empty stream", p.id()))),
+    }
+}
+
+// ---- retrieve.ask streams ----
+
+/// What `retrieve.ask` needs to pack the context for any candidate and build its request.
+struct AskPlan {
+    state: Arc<State>,
+    query: String,
+    /// What retrieval searches (`query`, or the follow-up rewritten).
+    search_query: String,
+    budget: u32,
+    history: Vec<ipc::ChatMessage>,
+    opts: AskOptions,
+    /// Contexts by "excludes sensitive items", packed at most once each.
+    contexts: [Option<PackedContext>; 2],
+}
+
+/// One candidate's context, as packed for its locality, and what of the history it gets.
+struct AskContext {
+    provider: Arc<dyn Provider>,
+    ctx: ContextResponse,
+    /// The packer's passage blocks go with the context: the prompt and the answer check read
+    /// each passage's own text (see `crate::ask`).
+    passages: Vec<nugget_retrieve::PackedPassage>,
+    sent: SafeHistory,
+    /// How a date phrase in the question shaped this context's search.
+    date: Option<ipc::AskDateFilter>,
+}
+
+impl AskContext {
+    /// Nothing relevant was found: the model answers as an ordinary chat.
+    fn general(&self) -> bool {
+        self.ctx.citations.is_empty()
+    }
+
+    /// Citation numbers of near-miss passages.
+    fn partial(&self) -> Vec<u32> {
+        self.passages
+            .iter()
+            .filter(|p| p.partial)
+            .map(|p| p.n)
+            .collect()
+    }
+
+    fn restarted(&self, stream_id: &str) -> AskRestarted {
+        AskRestarted {
+            stream_id: stream_id.to_owned(),
+            provider: self.provider.id().clone(),
+            locality: self.provider.meta().locality,
+            citations: self.ctx.citations.clone(),
+            excluded_sensitive: self.ctx.excluded_sensitive,
+            general: self.general(),
+            date: self.date.clone(),
+            partial: self.partial(),
+        }
+    }
+}
+
+impl AskPlan {
+    /// The context and request for `p`. A `Cloud` provider gets the context packed without
+    /// sensitive items and the history as it may leave the device.
+    async fn prepare(&mut self, p: Arc<dyn Provider>) -> Result<(AskContext, ChatRequest)> {
+        let cloud = p.meta().locality == Locality::Cloud;
+        let slot = &mut self.contexts[usize::from(cloud)];
+        let packed = match slot {
+            Some(c) => c.clone(),
+            None => {
+                let retriever = self.state.retriever.clone();
+                let q = self.search_query.clone();
+                let budget = self.budget as usize;
+                let opts = ContextOptions {
+                    exclude_sensitive: cloud,
+                    ..Default::default()
+                };
+                let c = on_blocking_thread(async move {
+                    retriever.pack_context_with(&q, budget, opts).await
+                })
+                .await?;
+                slot.insert(c).clone()
+            }
+        };
+        let PackedContext {
+            response: ctx,
+            passages,
+            date,
+            ..
+        } = packed;
+        let date =
+            date.map(|d| ask_date_filter(d, self.state.retriever.config().date_utc_offset_minutes));
+        // Belt and braces: nothing marked sensitive is ever sent to a cloud model.
+        if cloud && ctx.citations.iter().any(|c| c.sensitive) {
+            return Err(Error::Integrity(
+                "refusing to send sensitive passages to a cloud provider".into(),
+            ));
+        }
+        // Earlier turns as they may go to this provider: nothing from a sensitive item or
+        // matching the PII scan reaches a cloud model, and the items earlier answers came from
+        // are provenance.
+        let sent = {
+            let memory = self
+                .state
+                .answers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            safe_history(&self.history, &memory, cloud)
+        };
+        let mut request = ask_request_packed(&sent.turns, &self.query, &ctx, &passages, &self.opts);
+        for item in &sent.items {
+            if !request.items.contains(item) {
+                request.items.push(item.clone());
+            }
+        }
+        Ok((
+            AskContext {
+                provider: p,
+                ctx,
+                passages,
+                sent,
+                date,
+            },
+            request,
+        ))
+    }
+}
+
+/// The part of a `retrieve.ask` that runs after its reply.
+struct AskJob {
+    plan: AskPlan,
+    /// Candidates after the first, in routing order (none for an explicit provider).
+    rest: std::vec::IntoIter<Arc<dyn Provider>>,
+    explicit: bool,
+    tier: Tier,
+    rewritten: bool,
+}
+
+/// The stream task of `retrieve.ask`: open the first candidate (whose context `AskStarted`
+/// carried) and wait for its first event; on a fallback-class error move on to the next
+/// candidate (routing by tier only), sending `ask.restarted` with that provider's context before
+/// its request goes out; then forward the answer through an [`AnswerFilter`] for the context
+/// actually used (see [`run_chat`]). The audit row names the provider that serves the answer.
+/// Cancellable like any stream from the moment the reply is sent.
+#[allow(clippy::too_many_arguments)]
+async fn run_ask(
+    state: Arc<State>,
+    mut job: AskJob,
+    first: AskContext,
+    request: ChatRequest,
+    stream_id: String,
+    token: CancellationToken,
+    guard: StreamGuard,
+    notify: Notifier,
+) {
+    let opened = tokio::select! {
+        biased;
+        () = token.cancelled() => Err(ChatEnd::Cancelled),
+        () = state.shutdown.cancelled() => Err(ChatEnd::Shutdown),
+        () = notify.closed() => Err(ChatEnd::Disconnected),
+        r = open_ask(&state, &mut job, first, request, &stream_id, &notify) => r,
+    };
+    let (used, stream, failed) = match opened {
+        Ok(opened) => opened,
+        Err(end) => {
+            let error = match end {
+                ChatEnd::Failed(e) => {
+                    tracing::warn!(stream = %stream_id, error = %e, "ask failed");
+                    e.to_string()
+                }
+                ChatEnd::Cancelled => {
+                    tracing::info!(stream = %stream_id, "ask cancelled");
+                    "cancelled".into()
+                }
+                ChatEnd::Shutdown => "nuggetd is shutting down".into(),
+                ChatEnd::Disconnected | ChatEnd::Done { .. } => {
+                    tracing::info!(stream = %stream_id, "client disconnected; ask stopped");
+                    return;
+                }
+            };
+            let done = ChatDone {
+                stream_id,
+                error: Some(error),
+                input_tokens: None,
+                output_tokens: None,
+                check: None,
+            };
+            let _ = notify.send(notification::CHAT_DONE, &done).await;
+            return;
+        }
+    };
+
+    let meta = used.provider.meta();
+    let general = used.general();
+    tracing::info!(
+        stream = %stream_id,
+        provider = %used.provider.id(),
+        passages = used.ctx.citations.len(),
+        fallbacks = failed,
+        "ask streaming"
+    );
+    append_audit(
+        &state,
+        "retrieve.ask",
+        used.provider.id().as_str(),
+        json!({
+            "stream_id": stream_id,
+            "tier": job.tier,
+            "explicit_provider": job.explicit,
+            "model": meta.model,
+            "locality": meta.locality,
+            "passages": used.ctx.citations.len(),
+            "excluded_sensitive": used.ctx.excluded_sensitive,
+            "history": job.plan.history.len(),
+            "history_withheld": used.sent.withheld,
+            "history_items": used.sent.items.len(),
+            "rewritten": job.rewritten,
+            "general": general,
+            "fallbacks": failed,
+        }),
+    )
+    .await;
+    // Sourced answers get their markers normalised and are checked at the end.
+    let filter = (!general)
+        .then(|| AnswerFilter::packed(&used.ctx, &used.passages, job.plan.opts.today, true));
+    run_chat(
+        state,
+        used.provider,
+        stream,
+        stream_id,
+        token,
+        guard,
+        notify,
+        filter,
+    )
+    .await;
+}
+
+/// Open the first candidate that answers, as [`run_ask`] describes. Returns the context it was
+/// given, its stream (first event held) and how many candidates failed before it.
+async fn open_ask(
+    state: &State,
+    job: &mut AskJob,
+    first: AskContext,
+    request: ChatRequest,
+    stream_id: &str,
+    notify: &Notifier,
+) -> std::result::Result<(AskContext, ChatStream, usize), ChatEnd> {
+    let router = &state.router;
+    let (mut used, mut request) = (first, request);
+    let mut failed = 0;
+    loop {
+        let p = used.provider.clone();
+        match open_stream(p.as_ref(), request).await {
+            Ok(stream) => {
+                router.report_success(p.id());
+                return Ok((used, stream, failed));
+            }
+            Err(e) if !job.explicit && is_fallback_error(&e) => {
+                tracing::warn!(stream = %stream_id, provider = %p.id(), error = %e, "ask: provider failed; trying next");
+                router.report_failure(p.id());
+                let Some(next) = job.rest.next() else {
+                    return Err(ChatEnd::Failed(e));
+                };
+                failed += 1;
+                (used, request) = job.plan.prepare(next).await.map_err(ChatEnd::Failed)?;
+                // The client shows the provider and the sources: tell it before any delta.
+                let restarted = used.restarted(stream_id);
+                if notify
+                    .send(notification::ASK_RESTARTED, &restarted)
+                    .await
+                    .is_err()
+                {
+                    return Err(ChatEnd::Disconnected);
+                }
+            }
+            Err(e) => {
+                if is_provider_failure(&e) {
+                    router.report_failure(p.id());
+                }
+                return Err(ChatEnd::Failed(e));
+            }
+        }
     }
 }
 
@@ -1232,6 +1520,10 @@ fn is_provider_failure(e: &Error) -> bool {
     )
 }
 
+/// How long a stopped install (client gone, shutdown) gets to checkpoint and wind down.
+// Well under the daemon's shutdown grace, so the install's audit row is still written.
+const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 async fn run_install(
     state: Arc<State>,
     entry: ModelEntry,
@@ -1276,6 +1568,14 @@ async fn run_install(
             }
         }
     }
+    if result.is_none() {
+        // Stop the download through its token so it checkpoints every committed byte and
+        // reports `cancelled`, instead of being dropped mid-write; bounded, then dropped anyway.
+        state.models.cancel_install(&entry);
+        if let Ok(r) = tokio::time::timeout(CANCEL_GRACE, &mut install).await {
+            result = Some(r);
+        }
+    }
 
     // Route to the new model before the client hears it is installed: a chat sent right after
     // the final progress (onboarding's first question) must find the slot starting.
@@ -1300,6 +1600,14 @@ async fn run_install(
     }
 
     let detail = match (&result, stop_reason) {
+        (Some(Err(Error::Cancelled)), Some(reason)) => {
+            tracing::info!(model = %entry.id, reason, "model install stopped; staged data kept for resume");
+            json!({"result": "cancelled", "reason": reason})
+        }
+        (Some(Err(Error::Cancelled)), None) => {
+            tracing::info!(model = %entry.id, "model install cancelled; staged data kept for resume");
+            json!({"result": "cancelled", "reason": "models.cancel"})
+        }
         (Some(Ok(m)), _) => {
             tracing::info!(model = %entry.id, sha256 = %m.sha256, "model install finished");
             json!({"result": "installed", "sha256": m.sha256, "revision": m.revision})
@@ -1319,7 +1627,9 @@ async fn run_install(
                         downloaded: state.models.staged_bytes(&entry),
                         total: entry.size,
                         phase: ModelPhase::Failed,
-                        error: Some(format!("cancelled: {reason}")),
+                        error: Some(nugget_models::FailReason::Cancelled.message()),
+                        reason: Some(ModelFailReason::Cancelled),
+                        http_status: None,
                     },
                 )
                 .await;

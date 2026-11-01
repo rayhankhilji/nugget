@@ -124,7 +124,10 @@ impl ModelStore {
             .await;
         match &res {
             Ok(_) => reporter.emit(Phase::Installed, entry.size),
-            Err(e) => reporter.fail(e),
+            Err(e) => reporter.fail(
+                e,
+                staged_bytes(&self.staging_dir(&entry.sha256), &pseudo_model(entry)),
+            ),
         }
         res
     }
@@ -137,7 +140,7 @@ impl ModelStore {
         cancel: &CancelOnDrop,
     ) -> Result<PathBuf> {
         entry.validate()?;
-        let _guard = InstallGuard::acquire(&self.installing, &entry.sha256)?;
+        let _guard = InstallGuard::acquire(&self.installing, &entry.sha256, cancel.token())?;
         if let Some(bin) = self.runtime_binary(entry)? {
             return Ok(bin);
         }
@@ -158,6 +161,7 @@ impl ModelStore {
             reporter: reporter.clone(),
             egress,
             feature: RUNTIME_EGRESS_FEATURE,
+            cancel: cancel.token(),
         }
         .run()
         .await?;

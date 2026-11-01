@@ -67,21 +67,67 @@ use nugget_runtime::{Runtime, provider_id};
 use crate::config::Config;
 use crate::features::draft::local_draft_model;
 
+/// The longest a chat whose server crashed before it streamed anything waits for the restarted
+/// server (its backoff plus reloading the model) before it gives up with a plain error.
+const CHAT_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Tiers the local chat server always serves, whatever else its model lists.
 const CHAT_TIERS: [Tier; 3] = [Tier::Triage, Tier::Light, Tier::Synthesis];
 
+/// The embedding model of a store whose vectors predate the record of their model
+/// ([`nugget_store::Store::embedding_model`]): the only embedding model the manifest had then.
+pub(crate) const LEGACY_EMBEDDING_MODEL: &str = "nomic-embed-text-v1.5-q8";
+
 /// The manifest model each runtime role should run, per config and hardware.
+#[cfg(test)]
 pub(crate) fn selected_models(
     cfg: &Config,
     manifest: &Manifest,
     hw: &Hardware,
 ) -> Vec<(RuntimeRole, ModelEntry)> {
+    selected_models_for_index(cfg, manifest, hw, None)
+}
+
+/// The embedding model `store`'s vectors were built with: the recorded one, or
+/// [`LEGACY_EMBEDDING_MODEL`] for vectors from before models were recorded; `None` for a store
+/// without vectors (or that cannot be read).
+pub(crate) fn index_embedding_model(store: &nugget_store::Store) -> Option<String> {
+    match store.embedding_model() {
+        Ok(Some(m)) => Some(m),
+        Ok(None) => match store.embedding_dim() {
+            Ok(Some(_)) => Some(LEGACY_EMBEDDING_MODEL.to_owned()),
+            _ => None,
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "cannot read the index's embedding model");
+            None
+        }
+    }
+}
+
+/// The manifest model each runtime role should run, per config, hardware and the embedding
+/// model `index_model` the store's vectors were built with ([`index_embedding_model`]).
+///
+/// Without an explicit embedding model in the config, a store that already has vectors keeps
+/// the manifest model that built them, even when the manifest now recommends another: two
+/// models' vectors are not comparable (even at the same dimension), so switching would leave
+/// every stored vector unusable until the whole store is embedded again. Only a store without
+/// vectors (a new install) takes the recommendation.
+pub(crate) fn selected_models_for_index(
+    cfg: &Config,
+    manifest: &Manifest,
+    hw: &Hardware,
+    index_model: Option<&str>,
+) -> Vec<(RuntimeRole, ModelEntry)> {
     let pick = |explicit: Option<&String>, fallback: Option<&String>, tiers: &[Tier]| {
         explicit.or(fallback).map_or_else(
             || {
-                tiers
-                    .iter()
-                    .find_map(|t| recommend(manifest, hw, *t))
+                let built_with = index_model
+                    .filter(|_| tiers.contains(&Tier::Embedding))
+                    .and_then(|id| manifest.get(id))
+                    .filter(|e| e.tiers.contains(&Tier::Embedding));
+                built_with
+                    .or_else(|| tiers.iter().find_map(|t| recommend(manifest, hw, *t)))
                     .cloned()
             },
             |id| {
@@ -446,8 +492,17 @@ impl RuntimeSlot {
     /// The background start [`RuntimeSlot::starting`] announced failed: unless the server was
     /// ready before, the slot is routable for nothing again, so requests go straight to the
     /// next candidate instead of retrying the start each time.
+    ///
+    /// Except when a server was launched and failed (state `failed`, KK1): the runtime then
+    /// fails requests at once with one plain sentence while it backs off or after it gave up,
+    /// so the slot stays routable. The router still falls back to the next candidate on that
+    /// error, and with no other candidate the user sees why (and Status offers Retry) instead
+    /// of "no provider has the required capabilities".
     pub fn start_failed(&self) {
         if starting_capabilities(self.role).is_none() {
+            return;
+        }
+        if self.state() == Some(RuntimeState::Failed) {
             return;
         }
         let active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
@@ -485,6 +540,74 @@ impl RuntimeSlot {
             hook(self.role);
         }
         Ok(provider)
+    }
+
+    /// Start a chat and wait for its first event: an error before anything streamed is
+    /// returned as the error (so the caller can retry), anything else is put back in front.
+    async fn chat_started(&self, req: ChatRequest) -> Result<ChatStream> {
+        use futures::StreamExt;
+        let mut stream = self.ready().await?.chat(req).await?;
+        match stream.next().await {
+            Some(Err(e)) => Err(e),
+            Some(Ok(first)) => Ok(Box::pin(
+                futures::stream::once(async { Ok(first) }).chain(stream),
+            )),
+            None => Ok(Box::pin(futures::stream::empty())),
+        }
+    }
+
+    /// Whether the role's server failed since a request began on the server with
+    /// `pid_before`: it is no longer ready, or another process serves now (restarted).
+    async fn server_failed(&self, pid_before: Option<u32>) -> bool {
+        for attempt in 0..2 {
+            let failed = match self.runtime.details(self.role) {
+                Some(d) => d.info.state != RuntimeState::Ready || d.pid != pid_before,
+                None => false,
+            };
+            if failed {
+                return true;
+            }
+            // The connection can close a moment before the exit can be collected.
+            if attempt == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+        }
+        false
+    }
+
+    /// How long a crashed server is worth waiting for: the supervisor's backoff plus the
+    /// model's expected load time, within [`CHAT_RETRY_BUDGET`] (no point waiting when the
+    /// reload alone takes longer: the user gets the plain error at once instead).
+    fn retry_wait(&self) -> std::time::Duration {
+        use std::time::Duration;
+        let Some(d) = self.runtime.details(self.role) else {
+            return Duration::ZERO;
+        };
+        let backoff = Duration::from_millis(d.info.retry_in_ms.unwrap_or(0));
+        let load = d.expected_load.unwrap_or(CHAT_RETRY_BUDGET);
+        // The supervisor may not have scheduled its restart yet (no `retry_in_ms`): allow for
+        // its first backoff at least.
+        let need = (backoff + load + Duration::from_secs(1)).max(Duration::from_secs(4));
+        if need > CHAT_RETRY_BUDGET {
+            Duration::ZERO
+        } else {
+            need
+        }
+    }
+
+    /// The plain error for a server that failed and is not back yet (from the runtime's
+    /// status, which says whether it crashed, hung or is loading).
+    fn down_error(&self) -> Error {
+        let d = self.runtime.details(self.role);
+        let msg = d
+            .and_then(|d| d.info.error)
+            .unwrap_or_else(|| "The on-device chat model is restarting.".into());
+        // Say what to do once: messages that already name the next step keep theirs.
+        if msg.contains("Open Status") || msg.contains("Try again") {
+            Error::Provider(msg)
+        } else {
+            Error::Provider(format!("{msg} Try again in a moment."))
+        }
     }
 
     fn context_tokens(&self) -> Option<u32> {
@@ -535,7 +658,43 @@ impl Provider for RuntimeSlot {
         }
         let guard = interactive_guard(&self.foreground, &req);
         let feature = req.feature.clone();
-        let stream = self.ready().await?.chat(req).await?;
+        // In flight until the stream ends: the hang watchdog checks the server often meanwhile.
+        let busy = self.runtime.request(self.role);
+        let before = self.runtime.details(self.role);
+        let pid_before = before.as_ref().and_then(|d| d.pid);
+        let hangs_before = before.map_or(0, |d| d.hangs);
+        let stream = match self.chat_started(req.clone()).await {
+            Ok(s) => s,
+            // The server hung and the watchdog killed it: say so at once. No automatic resend:
+            // the same request might hang it again, and the answer is due within seconds.
+            Err(e)
+                if self
+                    .runtime
+                    .details(self.role)
+                    .is_some_and(|d| d.hangs != hangs_before) =>
+            {
+                tracing::warn!(provider = %self.id, error = %e, "local server hung during a chat");
+                return Err(self.down_error());
+            }
+            // The server crashed (and is restarting) before anything streamed: retry once if
+            // it is back within a moment, else say plainly what happened (GG6-17).
+            Err(e) if pid_before.is_some() && self.server_failed(pid_before).await => {
+                tracing::warn!(provider = %self.id, error = %e,
+                    "local server failed before answering; retrying once");
+                match self.runtime.wait_ready(self.role, self.retry_wait()).await {
+                    Some(_) => self.chat_started(req).await?,
+                    None => return Err(self.down_error()),
+                }
+            }
+            Err(e) => return Err(e),
+        };
+        // KK1: the request stays "in flight" for the watchdog until the stream ends. HH2: the
+        // interactive guard is held for the stream's life, and a background judge stream is
+        // preempted when an interactive chat starts.
+        let stream: ChatStream = Box::pin(futures::StreamExt::map(stream, move |ev| {
+            let _held = &busy;
+            ev
+        }));
         Ok(preempt_on_foreground(
             hold_guard(stream, guard),
             fg,
@@ -805,6 +964,11 @@ impl LocalRuntime {
                 },
                 provider: s.id.clone(),
                 error: None,
+                state_ms: None,
+                expected_ms: None,
+                retry_in_ms: None,
+                gave_up: false,
+                detail: None,
             });
         }
         out
@@ -1137,6 +1301,71 @@ mod tests {
         )
         .unwrap();
         assert!(selected_models(&cfg, &m, &hw(64)).is_empty());
+    }
+
+    #[test]
+    fn a_store_with_vectors_keeps_the_embedding_model_that_built_them() {
+        let mut m = manifest();
+        let old = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
+        // A newer, larger embedding model the manifest now recommends.
+        let mut newer = old.clone();
+        newer.id = "newer-embedder".into();
+        newer.size = old.size * 4;
+        m.models.push(newer);
+        assert_eq!(
+            recommend(&m, &hw(64), Tier::Embedding).unwrap().id,
+            "newer-embedder"
+        );
+        let embedder = |cfg: &str, index: Option<&str>| {
+            selected_models_for_index(&Config::parse(cfg).unwrap(), &m, &hw(64), index)
+                .into_iter()
+                .find(|(r, _)| *r == RuntimeRole::Embedding)
+                .map(|(_, e)| e.id)
+        };
+        // New install: the recommendation. A store built with the old model keeps it.
+        assert_eq!(embedder("", None).as_deref(), Some("newer-embedder"));
+        assert_eq!(embedder("", Some(&old.id)), Some(old.id.clone()));
+        // An index model the manifest lacks (a cloud embedder, say): the recommendation.
+        assert_eq!(
+            embedder("", Some("text-embedding-3-small")).as_deref(),
+            Some("newer-embedder")
+        );
+        // Explicit config wins over the index.
+        assert_eq!(
+            embedder(
+                "[runtime]\nembedding_model = \"newer-embedder\"\n",
+                Some(&old.id)
+            )
+            .as_deref(),
+            Some("newer-embedder")
+        );
+        // The chat model is unaffected by the index.
+        let chat = |index| {
+            selected_models_for_index(&Config::parse("").unwrap(), &m, &hw(64), index)
+                .into_iter()
+                .find(|(r, _)| *r == RuntimeRole::Chat)
+                .map(|(_, e)| e.id)
+        };
+        assert_eq!(chat(Some(old.id.as_str())), chat(None));
+        // Legacy stores (vectors, no record) count as built with the manifest's original model.
+        let store = nugget_store::Store::open_in_memory().unwrap();
+        assert_eq!(index_embedding_model(&store), None);
+        store
+            .upsert_item_with_chunks(
+                &nugget_store::NewItem::new("src", "a", "h").with_text("a"),
+                &[nugget_store::NewChunk::embedded("a", vec![1.0, 0.0])],
+            )
+            .unwrap();
+        assert_eq!(
+            index_embedding_model(&store).as_deref(),
+            Some(LEGACY_EMBEDDING_MODEL)
+        );
+        store.adopt_embedding_model("recorded").unwrap();
+        assert_eq!(index_embedding_model(&store).as_deref(), Some("recorded"));
+        assert!(
+            m.get(LEGACY_EMBEDDING_MODEL).is_some(),
+            "legacy model left the manifest"
+        );
     }
 
     #[test]

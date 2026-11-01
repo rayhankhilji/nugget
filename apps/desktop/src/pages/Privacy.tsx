@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { api } from "../api";
+import { api, type EgressEvent } from "../api";
 import { useAsync } from "../hooks";
 import { formatBytes, formatTime } from "../format";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui";
+import { VirtualList } from "../components/VirtualList";
 import { formatNumber, useT } from "../i18n";
 
 const LIMITS = [50, 200, 1000];
+/** Ledger rows have no id; time and position keep keys stable for a loaded ledger. */
+const egressKey = (r: EgressEvent, i: number) => `${r.at}-${i}`;
 
 export function PrivacyPage() {
   const t = useT();
@@ -69,10 +72,11 @@ export function PrivacyPage() {
             </div>
           </dl>
           <div className="table-wrap" tabIndex={0} role="region" aria-label={t("privacy.ledgerLabel")}>
-            <table>
+            {/* Only a window of rows is rendered (II5): the row count tells assistive tech the whole size. */}
+            <table aria-rowcount={rows.length + 1}>
               <caption className="visually-hidden">{t("privacy.ledgerCaption")}</caption>
               <thead>
-                <tr>
+                <tr aria-rowindex={1}>
                   <th scope="col">{t("privacy.col.time")}</th>
                   <th scope="col">{t("privacy.col.host")}</th>
                   <th scope="col">{t("privacy.col.feature")}</th>
@@ -87,9 +91,16 @@ export function PrivacyPage() {
                   </th>
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={`${r.at}-${i}`}>
+              <VirtualList
+                as="tbody"
+                items={rows}
+                itemKey={egressKey}
+                estimateSize={37}
+                columns={6}
+                rowIndexBase={2}
+                focus="none"
+                renderItem={(r) => (
+                  <>
                     <td className="nowrap">{formatTime(r.at)}</td>
                     <td>
                       <bdi dir="ltr">
@@ -102,9 +113,9 @@ export function PrivacyPage() {
                     <td className="num" title={r.items.map((it) => `${it.source}: ${it.key}`).join("\n") || undefined}>
                       {formatNumber(r.items.length)}
                     </td>
-                  </tr>
-                ))}
-              </tbody>
+                  </>
+                )}
+              />
             </table>
           </div>
         </div>

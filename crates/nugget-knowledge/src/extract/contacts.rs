@@ -175,7 +175,31 @@ fn from_json(v: &Value) -> Option<Contact> {
     for e in &c.emails {
         c.lines.push(format!("Email: {e}"));
     }
-    (c.name.is_some() || !c.emails.is_empty()).then_some(c)
+    (c.name.is_some() || !c.emails.is_empty() || !c.phones.is_empty()).then_some(c)
+}
+
+/// Digits a phone number needs before it names a person on its own: SMS short codes
+/// (`72975`, `262966`) and service numbers (`112`) are senders, not people.
+const MIN_PERSON_PHONE_DIGITS: usize = 7;
+
+fn phone_digits(p: &str) -> usize {
+    p.chars().filter(char::is_ascii_digit).count()
+}
+
+/// The name for a contact known only by phone: the number as the source displays it (a name
+/// that is a number, e.g. a chat sender `+49 151 23456789`), else its first phone number.
+/// `None` without a full phone number: a name that is merely a number (`2024`, `007`) with no
+/// phone to identify it would make a new, unmergeable person on every item.
+fn phone_name(c: &Contact) -> Option<String> {
+    let phone = c
+        .phones
+        .iter()
+        .map(|p| p.trim())
+        .find(|p| phone_digits(p) >= MIN_PERSON_PHONE_DIGITS)?;
+    let shown = c.name.as_deref().map(str::trim).filter(|n| {
+        phone_digits(n) >= MIN_PERSON_PHONE_DIGITS && !n.chars().any(char::is_alphabetic)
+    });
+    Some(truncate_chars(shown.unwrap_or(phone), 200))
 }
 
 fn contacts(ctx: &ItemCtx<'_>) -> Vec<Contact> {
@@ -226,8 +250,10 @@ pub(super) fn extract(ctx: &ItemCtx<'_>, ex: &mut Extraction) {
         };
         let (name, weak) = match c.name.as_deref().and_then(clean_person_name) {
             Some(n) => (n, false),
-            None => match c.emails.first() {
-                Some(e) => (e.clone(), true),
+            // No usable name: the person is named by their address or number (weak, so it never
+            // merges by name), identified by it (trusted, so it merges by identifier).
+            None => match c.emails.first().cloned().or_else(|| phone_name(&c)) {
+                Some(n) => (n, true),
                 None => continue,
             },
         };
@@ -291,6 +317,102 @@ pub(super) fn extract(ctx: &ItemCtx<'_>, ex: &mut Extraction) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::collections::HashSet;
+
+    use nugget_core::ids::{ItemKey, ItemRef, SourceId};
+    use nugget_store::{Chunk, Item};
+    use time::OffsetDateTime;
+
+    use crate::config::KnowledgeConfig;
+
+    fn run(metadata: Value) -> Extraction {
+        let r = ItemRef {
+            source: SourceId::new("whatsapp"),
+            key: ItemKey::new("wa:x/2026-05"),
+        };
+        let item = Item {
+            item: r.clone(),
+            title: None,
+            content_hash: "h".into(),
+            mime: Some("text/markdown".into()),
+            text: None,
+            metadata,
+            source_modified_at: None,
+            version: None,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+        };
+        let chunks = vec![Chunk {
+            id: 1,
+            item: r,
+            ord: 0,
+            text: "**+49 151 23456789** · 2026-05-03 09:12\n> hi".into(),
+            title: None,
+        }];
+        let me = HashSet::new();
+        let cfg = KnowledgeConfig::default();
+        let ctx = ItemCtx {
+            item: &item,
+            chunks: &chunks,
+            me_emails: &me,
+            me_label: "Me",
+            cfg: &cfg,
+            now: time::OffsetDateTime::now_utc(),
+        };
+        let mut ex = Extraction::default();
+        extract(&ctx, &mut ex);
+        ex
+    }
+
+    /// Regression (JJ1-13): a contact whose name is only a phone number (a chat sender not in
+    /// the address book) was skipped, so the person never existed. It becomes a person named
+    /// by the number as shown, with the phone as a trusted identifier.
+    #[test]
+    fn phone_only_contacts_become_people_named_by_the_number() {
+        let ex = run(json!({ "source": { "contacts": [
+            { "name": "+49 151 23456789", "phones": ["+4915123456789"], "emails": [] },
+            { "phones": ["+44 7700 900123"] },
+            { "name": "   ", "phones": [] },
+        ]}}));
+        assert_eq!(ex.entities.len(), 2, "{:?}", ex.entities);
+        let a = &ex.entities[0];
+        assert_eq!(a.kind, EntityKind::Person);
+        assert_eq!(a.name, "+49 151 23456789");
+        assert!(a.weak_name && a.trusted_identifiers);
+        assert!(
+            a.identifiers
+                .iter()
+                .any(|i| i.scheme == "phone" && i.value.contains("4915123456789")),
+            "{:?}",
+            a.identifiers
+        );
+        assert_eq!(a.mentions[0].chunk_id, Some(1));
+        assert_eq!(ex.entities[1].name, "+44 7700 900123");
+
+        // A real name still wins; an e-mail-only contact is still named by the address.
+        let ex = run(json!({ "source": { "contacts": [
+            { "name": "Sam Lee", "phones": ["+4915123456789"] },
+            { "name": "+1 555 0100", "emails": ["kim@example.com"] },
+        ]}}));
+        assert_eq!(ex.entities[0].name, "Sam Lee");
+        assert!(!ex.entities[0].weak_name);
+        assert_eq!(ex.entities[1].name, "kim@example.com");
+    }
+
+    /// Review regression: a contact whose name is just a number but which has no phone
+    /// (`2024`, `007`), or whose only phone is an SMS short code, became a person with no
+    /// identifier, a new one on every item.
+    #[test]
+    fn numbers_without_a_full_phone_make_no_person() {
+        let ex = run(json!({ "source": { "contacts": [
+            { "name": "2024" },
+            { "name": "007", "phones": [] },
+            { "name": "72975", "phones": ["72975"] },
+            { "phones": ["112"] },
+        ]}}));
+        assert!(ex.entities.is_empty(), "{:?}", ex.entities);
+    }
 
     #[test]
     fn vcards_parse() {

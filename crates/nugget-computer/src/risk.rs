@@ -92,8 +92,8 @@ const SECRET_FIELD_WORDS: &[&str] = &[
     "passkey",
     "pin",
     "otp",
-    "secret",
-    "token",
+    // "token" and "secret" alone are too common ("Token amount", "Secret Santa"): the policy's
+    // table knows the credential phrases.
     "cvv",
     "cvc",
     "security code",
@@ -231,13 +231,14 @@ pub(crate) fn label_text(node: &UiNode) -> String {
         .join(" ")
 }
 
-/// Is `node` a field whose contents are secret (secure, or labelled like a password)?
+/// Is `node` a field whose contents are secret (secure, or labelled like a password)? Labels
+/// are checked against [`SECRET_FIELD_WORDS`] and the policy's multilingual secure-label table
+/// (Passwort, Mot de passe, Пароль, 密码, one-time and sign-in codes, account keys, ...).
 pub fn is_secret_field(node: &UiNode) -> bool {
+    let label = label_text(node);
     node.states.secure
-        || any_phrase(
-            &words(&label_text(node)),
-            SECRET_FIELD_WORDS.iter().copied(),
-        )
+        || any_phrase(&words(&label), SECRET_FIELD_WORDS.iter().copied())
+        || nugget_policy::redact::is_secure_label(&label)
 }
 
 fn is_affirmative(node: &UiNode) -> bool {
@@ -492,14 +493,89 @@ pub fn keys_risk(
     context: &[String],
     kw: &RiskKeywords,
 ) -> RiskClass {
+    keys_risk_in(chords, target, &[], context, kw)
+}
+
+/// Does this chord, pressed in a text field, move keyboard focus out of it (so a later Space
+/// or Enter in the same call presses some other control)? Outside a text field every chord may
+/// (type-ahead letters pick another menu item or row), see [`keys_risk_in`].
+fn moves_focus_from_text(c: &KeyChord) -> bool {
+    matches!(
+        c.key,
+        Key::Named(
+            NamedKey::Tab
+                | NamedKey::Up
+                | NamedKey::Down
+                | NamedKey::PageUp
+                | NamedKey::PageDown
+                | NamedKey::Escape
+                | NamedKey::F(_)
+        )
+    ) || c.modifiers.alt
+        || ((c.modifiers.ctrl || c.modifiers.meta)
+            && matches!(
+                c.key,
+                Key::Char('f' | 'F' | 'l' | 'L' | 'k' | 'K' | 't' | 'T' | 'w' | 'W' | '`')
+            ))
+}
+
+/// Does `chords` press or submit what it goes to: a Space without Ctrl, Alt or Meta, or an
+/// Enter (Ctrl/Cmd+Enter sends a compose form)?
+pub(crate) fn activates(chords: &[KeyChord]) -> bool {
+    chords.iter().any(|c| match c.key {
+        Key::Named(NamedKey::Space) => !(c.modifiers.ctrl || c.modifiers.meta || c.modifiers.alt),
+        Key::Named(NamedKey::Enter) => !c.modifiers.alt,
+        _ => false,
+    })
+}
+
+/// [`keys_risk`] for an element looked up in the last snapshot, with its containers: Space or
+/// Enter on a pressable control is judged exactly as [`click_risk_found`] judges a click on it.
+pub(crate) fn keys_risk_found(
+    chords: &[KeyChord],
+    found: Option<&crate::state::Found>,
+    kw: &RiskKeywords,
+) -> RiskClass {
+    match found {
+        Some(f) => keys_risk_in(chords, Some(&f.node), &f.ancestors, &f.context, kw),
+        None => keys_risk_in(chords, None, &[], &[], kw),
+    }
+}
+
+fn keys_risk_in(
+    chords: &[KeyChord],
+    target: Option<&UiNode>,
+    ancestors: &[(Role, Option<String>)],
+    context: &[String],
+    kw: &RiskKeywords,
+) -> RiskClass {
     let pressable = target.is_some_and(|n| {
-        n.actions.contains(&UiActionKind::Press) || matches!(n.role, Role::Button | Role::Link)
+        n.actions.contains(&UiActionKind::Press)
+            || matches!(
+                n.role,
+                Role::Button
+                    | Role::Link
+                    | Role::MenuItem
+                    | Role::CheckBox
+                    | Role::Tab
+                    | Role::ListItem
+            )
+            || n.states.checked.is_some()
     });
     let text_input = target.is_some_and(is_text_input);
+    let mut focus_moved = false;
     chords
         .iter()
         .map(|c| {
             let m = c.modifiers;
+            // Once an earlier chord may have moved focus (any chord outside a text field: Tab,
+            // an arrow, a type-ahead letter, Escape, F6, Alt+letter), Space and Enter press
+            // whatever has focus then: unknown, as a click on an unknown element is.
+            let target = if focus_moved { None } else { target };
+            let pressable = pressable && !focus_moved;
+            let text_input = text_input && !focus_moved;
+            focus_moved |= !text_input || moves_focus_from_text(c);
+            let as_click = || click_risk_in(target, ancestors, context, kw);
             match c.key {
                 Key::Named(NamedKey::Enter) => {
                     if m.ctrl || m.meta {
@@ -507,7 +583,7 @@ pub fn keys_risk(
                     } else if target.is_some_and(is_multiline) {
                         RiskClass::Edit
                     } else if pressable {
-                        click_risk(target, context, kw).max(RiskClass::Send)
+                        as_click().max(RiskClass::Send)
                     } else {
                         RiskClass::Send
                     }
@@ -521,7 +597,7 @@ pub fn keys_risk(
                 }
                 Key::Named(NamedKey::Space) if !text_input => match target {
                     None => RiskClass::Send,
-                    Some(_) if pressable => click_risk(target, context, kw),
+                    Some(_) if pressable => as_click(),
                     Some(_) => RiskClass::Edit,
                 },
                 Key::Named(NamedKey::F(4)) if m.alt => RiskClass::Destroy,

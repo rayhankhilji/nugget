@@ -18,11 +18,27 @@
 //!   sets that status: it is a user decision). In particular a rejected fact stays rejected when
 //!   its source is re-extracted. Anything that makes a claim live again (`add_evidence` on a
 //!   retracted claim, `set_claim_status`, a merge) **folds** it into an existing live twin.
-//! - **Fold survivor:** when claims fold, the one with the **oldest (smallest) claim id**
-//!   survives; it gets the union of the evidence, the maximum confidence and the strongest status
-//!   ([`ClaimStatus::strongest`]: `UserAsserted` > `Rejected` > `Active`), except that an explicit
-//!   `set_claim_status` to `UserAsserted` or `Rejected` keeps the requested status. Folded-away
-//!   claim ids are gone (`get_claim` returns `None`) and never reused.
+//! - **Fold survivor:** when claims fold, the **user's own claim** (`UserAsserted`, the oldest
+//!   of them) survives, else the one with the **oldest (smallest) claim id**; it gets the union
+//!   of the evidence, the maximum confidence and the strongest status
+//!   ([`ClaimStatus::strongest`]: `UserAsserted` > `Rejected` > `Active`), except that an
+//!   explicit `set_claim_status` to `UserAsserted` or `Rejected` keeps the requested status.
+//!   Folded-away claim ids are gone (`get_claim` returns `None`) and never reused. `add_claim`
+//!   of a `UserAsserted` claim onto a live twin sets the twin's text: the user's wording is never
+//!   replaced by generated text.
+//! - **Replaced by the user:** [`GraphStore::supersede_by_user`] makes a claim `Superseded` and
+//!   remembers the items it had evidence from. Evidence is *remembered* when it comes from such
+//!   an item and has the quote it had then, or the item is unchanged since (same content; a
+//!   store that keeps no items, like `MemGraph`, never sees one change). While all of a claim's
+//!   evidence is remembered, it stays `Superseded`: [`GraphStore::add_evidence`] leaves a
+//!   `Retracted` or `Superseded` claim `Superseded` (unless its retraction left a live twin,
+//!   such as the user's own claim, which it then folds into as usual), and
+//!   [`GraphStore::add_claim`] of an extracted claim whose evidence is all remembered lands in
+//!   it when no live twin exists. Once it has evidence that is not remembered (the source now
+//!   says it differently), it becomes `Active` and the record is forgotten; the outcome does not
+//!   depend on the order evidence arrives in. Making it live with `set_claim_status`, or the
+//!   user's replacing claim stopping being current (any `set_claim_status` to a status that is
+//!   not current), forgets the record too.
 //! - Quotes are cut to [`MAX_QUOTE_CHARS`] characters on every write.
 //! - **`limit` 0 means unlimited** everywhere a method takes a `limit` (`list_entities`,
 //!   `mentions_for`, `neighbourhood`, `changes_since`); implementations may still apply a
@@ -73,6 +89,43 @@ pub trait GraphStore: Send + Sync {
     /// Set a claim's status. `Active` needs evidence (`Invalid` otherwise). Making a claim live
     /// folds it into a live twin, if any (see the crate invariants for the survivor).
     fn set_claim_status(&self, claim: ClaimId, status: ClaimStatus) -> Result<()>;
+    /// The user replaced `claim` with their own wording (a vault edit): it becomes
+    /// `Superseded`, then `by` (the user's claim) is added as with [`GraphStore::add_claim`],
+    /// in one write. The items `claim` had evidence from are remembered, so that extracting
+    /// them again does not make it current (see the crate invariants), until `by` stops being
+    /// current. Returns the id `by` landed in. `NotFound` for an unknown claim. The default
+    /// sets the status and adds `by`, remembering nothing.
+    fn supersede_by_user(&self, claim: ClaimId, by: &NewClaim) -> Result<ClaimId> {
+        self.set_claim_status(claim, ClaimStatus::Superseded)?;
+        self.add_claim(by)
+    }
+
+    /// Whether `claim` was replaced by the user ([`GraphStore::supersede_by_user`]) and every
+    /// piece of `evidence` (non-empty) is remembered: from an item it had evidence from then,
+    /// with the same quote or with the item unchanged since. Adding such evidence does not make
+    /// the claim current. The default remembers nothing (`false`).
+    fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> Result<bool> {
+        let _ = (claim, evidence);
+        Ok(false)
+    }
+
+    /// Whether the user replaced `claim` ([`GraphStore::supersede_by_user`]) and the record
+    /// is still kept: while it is, evidence that is not remembered makes the claim current
+    /// again (see the crate invariants), whatever evidence the claim has now. The default
+    /// keeps no records (`false`).
+    fn has_user_replacement(&self, claim: ClaimId) -> Result<bool> {
+        let _ = claim;
+        Ok(false)
+    }
+
+    /// When the claim was last made `UserAsserted` (added as such, a user claim folded into it,
+    /// or its status set to it); kept through folds (the latest wins) and later evidence.
+    /// `None` if never, or the store does not keep it (the default).
+    fn asserted_at(&self, claim: ClaimId) -> Result<Option<time::OffsetDateTime>> {
+        let _ = claim;
+        Ok(None)
+    }
+
     /// Claims where the entity is subject or object.
     fn claims_for(&self, entity: &EntityId, include_inactive: bool) -> Result<Vec<Claim>>;
 
@@ -139,7 +192,10 @@ pub trait GraphStore: Send + Sync {
     /// `new.aliases` move too (its name stays). Mentions of `entity` move when their item
     /// supports a moved claim and no claim left on `entity`. Every claim must have `entity` as
     /// subject or object (`Invalid` otherwise); an identifier held by a third entity is
-    /// `Invalid`. Returns the new entity's id.
+    /// `Invalid`. Ids merged into `entity` earlier whose name (as it was when merged) is the new
+    /// entity's name or one of its aliases, and not `entity`'s own name, resolve to the new
+    /// entity afterwards (undoing a mistaken merge redirects the old id to the split-off
+    /// entity); they count as changed. Returns the new entity's id.
     fn split(&self, entity: &EntityId, claims: &[ClaimId], new: &NewEntity) -> Result<EntityId> {
         let _ = (entity, claims, new);
         Err(nugget_core::Error::Unsupported(

@@ -10,7 +10,9 @@ mod daemon;
 mod deeplink;
 mod doubletap;
 mod history;
+mod lifecycle;
 mod login;
+mod logs;
 mod notify;
 mod open;
 mod platform;
@@ -20,8 +22,8 @@ mod tray;
 mod updater;
 mod window_state;
 
-use tauri::{Manager, RunEvent, WindowEvent};
-use tracing_subscriber::EnvFilter;
+use tauri::menu::{Menu, MenuItem, MenuItemKind};
+use tauri::{AppHandle, Manager, RunEvent, Runtime, WindowEvent};
 
 /// Passed by a compositor key binding: start a Double Tap draft in the running Nugget.
 const DOUBLE_TAP_ARG: &str = "--double-tap";
@@ -37,14 +39,47 @@ fn wants_quick_ask(argv: &[String]) -> bool {
     argv.iter().skip(1).any(|a| a == quickask::QUICK_ASK_ARG)
 }
 
-fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_env("NUGGET_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+/// The app menu's own Quit item (macOS), see [`app_menu`].
+const APP_QUIT_ID: &str = "app-quit";
 
-    let app = tauri::Builder::default()
+/// macOS: the default app menu's Quit (and ⌘Q) sends `terminate:`, which ends the app without
+/// `RunEvent::ExitRequested`, so the quit question could never be asked. It is replaced by an
+/// item that quits like the tray's Quit Nugget (`app.exit`). Not used elsewhere: Windows and
+/// Linux windows have no menu bar.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let menu = Menu::default(app)?;
+    if let Some(MenuItemKind::Submenu(first)) = menu.items()?.into_iter().next() {
+        // The app submenu ends with the predefined Quit.
+        let n = first.items()?.len();
+        if n > 0 {
+            first.remove_at(n - 1)?;
+        }
+        let name = app.package_info().name.clone();
+        let quit = MenuItem::with_id(
+            app,
+            APP_QUIT_ID,
+            format!("Quit {name}"),
+            true,
+            Some("CmdOrCtrl+Q"),
+        )?;
+        first.append(&quit)?;
+    }
+    Ok(menu)
+}
+
+fn main() {
+    // Kept until the process ends, so the last lines reach the log file.
+    let _log_guard = logs::init();
+
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(app_menu).on_menu_event(|app, e| {
+        if e.id().as_ref() == APP_QUIT_ID {
+            app.exit(0);
+        }
+    });
+    let app = builder
         // First, so a second launch exits before anything else starts; it focuses this window
         // instead (an autostart launch while Nugget already runs changes nothing).
         // `--double-tap` starts a draft instead, for desktops without a GlobalShortcuts portal
@@ -52,8 +87,8 @@ fn main() {
         // running, since a first launch with it just opens normally.
         // A second launch may also carry a `nugget://` link or a `.nuggetplugin` file (Windows,
         // Linux), or `--quick-ask`.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            let links = deeplink::from_args(&argv);
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            let links = deeplink::from_args_in(&argv, &cwd);
             if wants_double_tap(&argv) {
                 tauri::async_runtime::spawn(doubletap::flow::fire(app.clone()));
             } else if wants_quick_ask(&argv) {
@@ -75,6 +110,7 @@ fn main() {
         // Driven from `commands::notify` only; the webview has no `notification:` permission.
         .plugin(tauri_plugin_notification::init())
         .manage(daemon::Daemon::new())
+        .manage(lifecycle::Lifecycle::default())
         .manage(notify::PendingOpen::default())
         .invoke_handler(tauri::generate_handler![
             commands::connection_info,
@@ -87,6 +123,7 @@ fn main() {
             commands::search,
             commands::models_list,
             commands::models_install,
+            commands::models_cancel,
             commands::egress_recent,
             commands::sources_list,
             commands::sources_add,
@@ -99,8 +136,12 @@ fn main() {
             commands::retrieve_context,
             commands::retrieve_ask,
             commands::runtime_status,
+            commands::runtime_retry,
             commands::ai_key_test,
             commands::ai_key_save,
+            commands::ai_key_update,
+            commands::ai_key_remove,
+            commands::ai_key_saved,
             commands::models_fit,
             commands::knowledge_entities,
             commands::knowledge_entity,
@@ -172,6 +213,7 @@ fn main() {
             doubletap::commands::doubletap_settings_set,
             doubletap::commands::doubletap_status,
             doubletap::commands::doubletap_request_permissions,
+            doubletap::commands::doubletap_open_privacy_settings,
             doubletap::commands::doubletap_default_excluded,
             doubletap::commands::doubletap_fire,
             doubletap::commands::voice_status,
@@ -193,6 +235,13 @@ fn main() {
             platform::platform_settings_get,
             platform::platform_settings_set,
             platform::shell_labels_set,
+            lifecycle::quit_answer,
+            lifecycle::quit_ack,
+            lifecycle::quit_cancel,
+            lifecycle::daemon_version,
+            lifecycle::daemon_version_recheck,
+            lifecycle::shell_info,
+            lifecycle::indexing_pause_toggle,
             deeplink::deeplink_take,
             quickask::quickask_prefill_take,
             quickask::quickask_handover_take,
@@ -254,11 +303,14 @@ fn main() {
                     state.capture(window);
                     state.save();
                     // With a tray, closing the window hides it; Quit lives in the tray menu.
+                    api.prevent_close();
                     if tray::has_tray(window.app_handle()) {
-                        api.prevent_close();
                         let _ = window.hide();
                     } else {
-                        // Hidden helper windows (the Double Tap overlay) would keep the app alive.
+                        // GG6-20: quit the way Quit Nugget does (`lifecycle`), which may first ask
+                        // in this window what to do with the background service; the window stays
+                        // open for that. Hidden helper windows (the Double Tap overlay) would keep
+                        // the app alive, so this exits rather than closing the window.
                         window.app_handle().exit(0);
                     }
                 }
@@ -269,14 +321,18 @@ fn main() {
         .expect("failed to build the Nugget app");
 
     app.run(|handle, event| match event {
-        // An update the user opted to auto-install is applied as Nugget quits.
+        // Every way to quit (tray, app menu, closing the window without a tray) arrives here
+        // first: the first quit that would stop the background service asks what to do.
+        RunEvent::ExitRequested { code, api, .. } => {
+            lifecycle::on_exit_requested(handle, code, &api);
+        }
+        // An update the user opted to auto-install is applied as Nugget quits, and the
+        // background service the app started is stopped unless the user chose to keep it.
         RunEvent::Exit => {
             if let Some(state) = handle.try_state::<window_state::WindowState>() {
                 state.save();
             }
-            handle.state::<updater::Updates>().install_staged();
-            // The daemon keeps running unless the user chose otherwise.
-            platform::on_exit(handle);
+            lifecycle::on_exit(handle);
         }
         // macOS: clicking the Dock icon brings the hidden window back.
         #[cfg(target_os = "macos")]

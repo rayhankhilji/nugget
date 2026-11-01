@@ -321,6 +321,50 @@ async fn files_source_is_searchable_fresh_and_removable() {
     h.stop().await;
 }
 
+/// GG6-13 / GG6-2: the same folder twice is refused with the existing source's name, and an
+/// empty folder settles with a finished scan report and `nothing_indexable` health.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn duplicate_folders_are_refused_and_empty_folders_settle() {
+    let h = Harness::start(NO_RUNTIME).await;
+    let docs = h.tmp.path().join("docs");
+    std::fs::create_dir_all(docs.join("inner")).unwrap();
+    let info: SourceInfo = h
+        .call(
+            method::SOURCES_ADD,
+            json!({"kind": "files", "name": "Docs", "settings": {"roots": [docs]}}),
+        )
+        .await;
+    for (roots, want) in [
+        (json!([docs]), "This folder is already added as \"Docs\"."),
+        (
+            json!([docs.join("inner")]),
+            "This folder is inside \"Docs\", which is already added.",
+        ),
+        (json!([h.tmp.path()]), "This folder contains \"Docs\""),
+    ] {
+        let (c, msg) = h
+            .call_err(
+                method::SOURCES_ADD,
+                json!({"kind": "files", "name": "Again", "settings": {"roots": roots}}),
+            )
+            .await;
+        assert_eq!(c, code::INVALID_PARAMS, "{msg}");
+        assert!(msg.starts_with(want), "{msg}");
+    }
+    let all: Vec<SourceInfo> = h.call(method::SOURCES_LIST, json!({})).await;
+    assert_eq!(all.len(), 1);
+
+    eventually("empty folder settles", || async {
+        let all: Vec<SourceInfo> = h.call(method::SOURCES_LIST, json!({})).await;
+        let s = all.iter().find(|s| s.id == info.id).unwrap();
+        s.scan.as_ref().is_some_and(|r| r.finished && r.found == 0)
+            && s.health
+                .as_ref()
+                .is_some_and(|h| h.code == "nothing_indexable")
+    })
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn secrets_are_stored_never_echoed_and_cleaned_up() {
     const PASSWORD: &str = "hunter2-very-secret";
@@ -666,6 +710,65 @@ async fn local_runtime_serves_embeddings_and_chat_and_starts_after_install() {
     // Shutdown stops the servers.
     h.stop().await;
     assert!(pid_files_gone(&home.join("data").join("runtime")));
+}
+
+/// GG6-8: `daemon.shutdown` answers with the daemon's pid, then winds down as SIGTERM does:
+/// `run_until` returns without its own stop signal, and the local model server is stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn daemon_shutdown_stops_the_daemon_and_its_model_servers() {
+    let tmp = temp_home();
+    let home = tmp.path().join("home");
+    let models_server = wiremock::MockServer::start().await;
+    let manifest = test_manifest(&models_server).await;
+    let paths = Paths::rooted(home.clone());
+    let store = ModelStore::open(&paths, Arc::new(NoEgress)).unwrap();
+    store
+        .install(manifest.get("embed-model").unwrap(), |_| {})
+        .await
+        .unwrap();
+    drop(store);
+    let overrides = RuntimeOverrides {
+        server_binary: Some((fake_server(), RuntimeAccel::Cpu)),
+        options: Some(fast_runtime()),
+        manifest: Some(manifest),
+        hardware: Some(Hardware {
+            total_ram: 16 << 30,
+            available_ram: 8 << 30,
+            cpu_cores: 4,
+            gpu: GpuKind::Unknown,
+        }),
+    };
+    let config = "[runtime]\nembedding_model = \"embed-model\"\nidle_stop_minutes = 0\n";
+    let mut h = Harness::start_in(tmp, config, overrides).await;
+    eventually("embedding runtime ready", || {
+        runtime_ready(&h, RuntimeRole::Embedding)
+    })
+    .await;
+    let runtime_dir = home.join("data").join("runtime");
+    assert!(!pid_files_gone(&runtime_dir), "the model server runs");
+
+    // `status` names this process, which no service manager runs.
+    let status: nugget_core::ipc::StatusResponse = h.call(method::STATUS, json!({})).await;
+    assert_eq!(status.pid, Some(std::process::id()));
+    assert_eq!(status.service, None);
+
+    let done: nugget_core::ipc::DaemonShutdownResponse = h
+        .call(method::DAEMON_SHUTDOWN, json!({"reason": "app_quit"}))
+        .await;
+    assert!(done.stopping);
+    assert_eq!(done.pid, std::process::id());
+    // No stop signal is sent: the method alone ends `run_until`, cleanly.
+    tokio::time::timeout(CALL, h.server.take().unwrap())
+        .await
+        .expect("daemon stops promptly")
+        .unwrap()
+        .unwrap();
+    assert!(pid_files_gone(&runtime_dir), "the model server was stopped");
+    assert!(
+        Client::connect(&h.paths).await.is_err(),
+        "the socket no longer answers"
+    );
+    h.stop.take();
 }
 
 /// `models.install` of an update for a model whose server is running restarts the server on

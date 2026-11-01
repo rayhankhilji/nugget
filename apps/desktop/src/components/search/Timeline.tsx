@@ -2,7 +2,7 @@
  * Everything about one person, project or organisation in time order (`search.timeline`):
  * the items that mention it and its facts, grouped by month, with "Jump to month". When the
  * daemon kept only the newest events, jumping to an older month asks again for a window that
- * ends with that month.
+ * ends with that month. Escape (or Back) returns to the results.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, isCommandMissing, isOpenableUrl, type FacetCount, type Timeline as TimelineData, type TimelineEvent } from "../../api";
@@ -126,7 +126,19 @@ export function Timeline({
   const name = data?.entity.name ?? "";
 
   return (
-    <section className="sr-timeline" aria-labelledby="timeline-heading" aria-busy={loading}>
+    <section
+      className="sr-timeline"
+      aria-labelledby="timeline-heading"
+      aria-busy={loading}
+      onKeyDown={(e) => {
+        // Escape goes back to the results, as Back does (a list box's own Escape comes first).
+        if (e.key === "Escape" && !e.defaultPrevented) {
+          e.preventDefault();
+          e.stopPropagation();
+          onBack();
+        }
+      }}
+    >
       <div className="sr-timeline-head">
         <button type="button" className="btn btn-small" onClick={onBack}>
           {t("searchui.backToResults")}

@@ -54,7 +54,7 @@ async fn single_and_full_exports_are_merged() {
         t.contains("_2024-05-01 09:20 · Alice Example called (61 s)_"),
         "{t}"
     );
-    // `date` without `date_unixtime` is read as UTC.
+    // `date` without `date_unixtime`: the local time as written.
     assert!(
         t.contains("**Alice Example** · 2024-05-02 10:00\n> no unixtime here"),
         "{t}"
@@ -123,6 +123,15 @@ async fn groups_can_be_excluded_and_broken_exports_keep_items() {
         .await;
     assert!(deletes(&sink).is_empty(), "{:?}", sink.summary());
     assert!(keys(&replica).contains("tg:7/2024-01"));
+    // ... and the unreadable file is reported on the source, without quoting its content.
+    let problems = sink.problems.lock().unwrap().clone();
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert_eq!(problems[0].0, "telegram:DataExport_2024-05-03/result.json");
+    assert!(
+        problems[0].1.contains("Couldn't read the Telegram export"),
+        "{problems:?}"
+    );
+    assert!(!problems[0].1.contains("\"li"), "{problems:?}");
 
     // The export removed: its chats go.
     std::fs::remove_dir_all(dir.join("DataExport_2024-05-03")).unwrap();

@@ -913,8 +913,29 @@ fn explain(action: &ActionDescriptor, ctx: &ActionContext, a: &Assessment) -> St
     if let Some(label) = &r.target_label {
         s.push_str(&format!(" “{label}”"));
     }
-    if let Some(preview) = &r.text_preview {
-        s.push_str(&format!(" with “{preview}”"));
+    // The confirmation shows the whole bounded preview (what a Send sends), not the log's cut.
+    // A fields preview is masked field by field already; it is not hidden as a whole because
+    // the button's label mentions a password or a code.
+    let secure = ctx.secure_field
+        || action
+            .target_label
+            .as_deref()
+            .is_some_and(crate::redact::is_secure_label);
+    if let Some(p) = action.text_preview.as_deref() {
+        // Split by the verb, never by the text: a value cannot pose as the "which sends" part.
+        let (keys, sent) = crate::redact::redact_action_preview(
+            &action.verb,
+            p,
+            secure,
+            crate::redact::CONFIRM_PREVIEW_CAP,
+        );
+        if let Some(k) = keys {
+            s.push_str(&format!(" with “{k}”"));
+        }
+        if let Some(f) = &sent {
+            let f = f.strip_prefix(crate::preview::FIELDS_PREFIX).unwrap_or(f);
+            s.push_str(&format!(", which sends {f}"));
+        }
     }
     s.push('.');
     if a.risk > a.declared {
@@ -1674,6 +1695,9 @@ mod tests {
         // GNOME Settings > System > Remote Desktop, and the Sharing panel's master switch.
         assert_remote(&e, &toggle("org.gnome.Settings", "Remote Desktop"), &switch);
         assert_remote(&e, &toggle("gnome-control-center", "Sharing"), &switch);
+        // An app that calls itself just "Settings" (GG3-25).
+        assert_remote(&e, &toggle("settings", "Remote Desktop"), &switch);
+        assert_remote(&e, &toggle("Settings", "Remote access"), &switch);
         // An unnamed switch on a remote-access pane, found by its window title or deep link.
         assert_remote(
             &e,
@@ -1837,5 +1861,109 @@ mod tests {
             &e.assess(&a, &ActionContext::default().with_role("checkbox"))
                 .decision
         ));
+    }
+
+    // GG3-6 (regression): click, Space and Enter on the same control get the same decision.
+    #[test]
+    fn gg3_6_click_space_enter_same_decision() {
+        let e = engine();
+        let ctx = ActionContext::default().with_role("button");
+        for label in [
+            "Löschen",
+            "Supprimer",
+            "Eliminar",
+            "删除",
+            "Senden",
+            "Envoyer",
+            "Bezahlen",
+            "Kaufen",
+            "Revoke",
+            "Admin",
+            "Checkout now",
+        ] {
+            let mut results = Vec::new();
+            for (verb, keys) in [
+                ("click", None),
+                ("press_key", Some("space")),
+                ("press_key", Some("enter")),
+            ] {
+                let mut a = act("mail", verb, Some(label), RiskClass::Edit);
+                a.text_preview = keys.map(Into::into);
+                let out = e.assess(&a, &ctx);
+                results.push((out.risk, is_confirm(&out.decision)));
+            }
+            assert!(results[0].1, "{label}: click must ask ({results:?})");
+            assert!(
+                results.iter().all(|r| *r == results[0]),
+                "{label}: {results:?}"
+            );
+        }
+    }
+
+    // GG3-5: the confirmation names what a Send sends, beyond the log's 80-character cut.
+    #[test]
+    fn gg3_5_confirm_reason_carries_the_send_preview() {
+        let e = engine();
+        let mut a = act("mail", "click", Some("Send"), RiskClass::Send);
+        let body = format!(
+            "Sends: To: “a@b.example” · Subject: “Q3” · Message: “{}END”",
+            "x".repeat(110)
+        );
+        a.text_preview = Some(body);
+        let Decision::Confirm(text) = e.evaluate(&a) else {
+            panic!("a send asks");
+        };
+        assert!(
+            text.contains("click “Send”, which sends To: “a@b.example”"),
+            "{text}"
+        );
+        assert!(text.contains("END"), "{text}");
+    }
+
+    // Review items 8 and 14: a fields preview is not hidden because of the button's label,
+    // and a key press shows its keys, then what they send, with the fields' tail kept.
+    #[test]
+    fn fields_preview_redaction_is_per_field_and_keys_render_cleanly() {
+        let e = engine();
+        let mut a = act(
+            "mail",
+            "click",
+            Some("Send verification code"),
+            RiskClass::Send,
+        );
+        a.text_preview = Some("Sends: Email: “me@ourco.example” · Code: ••••".into());
+        let Decision::Confirm(text) = e.evaluate(&a) else {
+            panic!("asks");
+        };
+        assert!(
+            text.contains("which sends Email: “me@ourco.example” · Code: ••••"),
+            "{text}"
+        );
+        assert!(!text.contains("[redacted]"), "{text}");
+
+        let fields: String = (0..12)
+            .map(|i| format!("F{i}: “{}”", "y".repeat(25)))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let mut k = act("mail", "press_key", Some("Send"), RiskClass::Send);
+        k.text_preview = Some(format!("space\nSends: {fields} · +7 more fields"));
+        let Decision::Confirm(text) = e.evaluate(&k) else {
+            panic!("asks");
+        };
+        assert!(text.contains("with “space”, which sends F0:"), "{text}");
+        assert!(text.contains("+7 more fields"), "{text}");
+        assert!(!text.contains('\n'), "{text}");
+
+        // Second review L1: typed text starting with the marker is still typed text, redacted
+        // for a secure field.
+        let mut t = act("login", "type_text", Some("Password"), RiskClass::Security);
+        t.text_preview = Some("Sends: hunter2".into());
+        let Decision::Confirm(text) = e.evaluate(&t) else {
+            panic!("asks");
+        };
+        assert!(
+            !text.contains("hunter2") && !text.contains("which sends"),
+            "{text}"
+        );
     }
 }
