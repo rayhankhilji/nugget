@@ -231,6 +231,9 @@ impl BrowserController {
         self.authorize(&descriptor, &context).await?;
 
         self.show_overlay().await;
+        // Authorizing and showing the overlay can wait on the user and the extension; Stop may
+        // have been pressed meanwhile. Nothing is sent after it.
+        self.check_halt().await?;
         let value = self
             .bridge
             .request(HostRequest::Act {

@@ -66,6 +66,10 @@ export async function startFakeExtension(socket) {
       switch (m.type) {
         case "hello":
           return reply(m.id, { protocol: 1, extension_version: "qa-fake", browser: "chromium-qa" });
+        case "resume":
+          // HH1: the daemon relays the desktop's Resume (extensions/browser/src/router.ts).
+          st.halted = false;
+          return reply(m.id, {});
         case "halt":
           st.halted = true;
           return reply(m.id, {});
