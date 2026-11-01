@@ -252,6 +252,32 @@ pub fn from_args(argv: &[String]) -> Vec<Result<Link, String>> {
     argv.iter().skip(1).filter_map(|a| parse_arg(a)).collect()
 }
 
+/// As [`from_args`], for a second launch forwarded by the single-instance plugin: a relative
+/// file path names a file in that launch's working directory `cwd`, not in this process's. Where
+/// `cwd` is not an absolute path, a relative file path is refused.
+pub fn from_args_in(argv: &[String], cwd: &str) -> Vec<Result<Link, String>> {
+    let cwd = Path::new(cwd);
+    argv.iter()
+        .skip(1)
+        .filter_map(|a| {
+            let path = Path::new(a);
+            let plain_relative = path.is_relative()
+                && !a.contains(':')
+                && path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case(PLUGIN_EXTENSION));
+            if !plain_relative {
+                parse_arg(a)
+            } else if cwd.is_absolute() {
+                Some(parse_plugin_path(&cwd.join(path)))
+            } else {
+                Some(Err("a relative file path from another launch".into()))
+            }
+        })
+        .collect()
+}
+
 /// The link waiting for the main window, newest wins.
 #[derive(Default)]
 pub struct Pending(Mutex<Option<Link>>);
@@ -495,6 +521,31 @@ mod tests {
             Some(Ok(Link::Plugin { .. }))
         ));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Regression: a second launch's relative `.nuggetplugin` path was resolved against the
+    /// running instance's working directory, which could name a different file.
+    #[test]
+    fn a_second_launch_resolves_relative_files_in_its_own_folder() {
+        let base = std::env::temp_dir().join(format!("nugget-deeplink-cwd-{}", std::process::id()));
+        let theirs = base.join("theirs");
+        std::fs::create_dir_all(&theirs).unwrap();
+        std::fs::write(theirs.join("p.nuggetplugin"), b"pkg").unwrap();
+        let argv: Vec<String> = ["nugget-desktop", "p.nuggetplugin", "nugget://open/chat"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let links = from_args_in(&argv, theirs.to_str().unwrap());
+        assert_eq!(links.len(), 2, "{links:?}");
+        let Ok(Link::Plugin { path }) = &links[0] else {
+            panic!("{links:?}");
+        };
+        assert!(Path::new(path).is_absolute(), "{path}");
+        assert!(Path::new(path).ends_with("theirs/p.nuggetplugin"), "{path}");
+        assert!(matches!(links[1], Ok(Link::Page { .. })));
+        // No usable working directory: refused, never resolved against this process's.
+        assert!(from_args_in(&argv, "")[0].is_err());
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

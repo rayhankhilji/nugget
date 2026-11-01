@@ -151,10 +151,39 @@ fn attachment_label(a: &Attachment) -> String {
     }
 }
 
+/// Whether a name reads as `Me`, the label of the user's own messages (`Me`, `ME.`, `Мe` with a
+/// Cyrillic `М`, ...). Display names in an export are chosen by their owners.
+fn looks_like_me(name: &str) -> bool {
+    let mut letters = name.chars().filter(|c| c.is_alphanumeric());
+    let (m, e) = (letters.next(), letters.next());
+    letters.next().is_none()
+        && matches!(
+            m,
+            Some('M' | 'm' | '\u{41C}' | '\u{43C}' | '\u{39C}' | '\u{FF2D}' | '\u{FF4D}')
+        )
+        && matches!(
+            e,
+            Some(
+                'E' | 'e' | '\u{415}' | '\u{435}' | '\u{395}' | '\u{3B5}' | '\u{FF25}' | '\u{FF45}'
+            )
+        )
+}
+
+/// A participant's name as shown in a document. Someone else named like the user's own `Me`
+/// label is marked, so their messages never read as the user's.
+fn shown_name(p: &Participant) -> String {
+    if p.me {
+        "Me".into()
+    } else if looks_like_me(&p.name) {
+        format!("{} (not you)", p.name)
+    } else {
+        p.name.clone()
+    }
+}
+
 fn author_name(conv: &Conversation, m: &Message) -> String {
     match m.author.and_then(|i| conv.participants.get(i)) {
-        Some(p) if p.me => "Me".into(),
-        Some(p) => p.name.clone(),
+        Some(p) => shown_name(p),
         None => "Unknown".into(),
     }
 }
@@ -169,7 +198,9 @@ fn render_message(conv: &Conversation, m: &Message) -> String {
             .filter(|_| !m.text.is_empty());
         let text = match who {
             // System lines that carry an author but whose text does not name them.
-            Some(p) if !m.text.contains(&p.name) && !p.me => format!("{}: {}", p.name, m.text),
+            Some(p) if !m.text.contains(&p.name) && !p.me => {
+                format!("{}: {}", shown_name(p), m.text)
+            }
             _ => m.text.clone(),
         };
         let _ = writeln!(out, "_{} · {}_", stamp(m.at), md_inline(&cap_text(&text)));
@@ -327,7 +358,7 @@ fn part_doc(
     let names: Vec<String> = people
         .iter()
         .filter(|p| !p.me)
-        .map(|p| yaml_quote(&clean_name(&p.name)))
+        .map(|p| yaml_quote(&clean_name(&shown_name(p))))
         .collect();
     let _ = writeln!(text, "participants: [{}]", names.join(", "));
     let _ = writeln!(text, "period: {period}");
@@ -479,6 +510,37 @@ participants: [\"Alice Smith\"]\nperiod: 2024-05\n---\n# Family — May 2024\n\n
                 "{line:?}"
             );
         }
+    }
+
+    /// Regression: a group member whose display name is `Me` (Telegram and WhatsApp names are
+    /// chosen by their owners) rendered exactly like the user's own messages.
+    #[test]
+    fn others_named_me_never_read_as_the_user() {
+        let mut c = Conversation::new("tg:9", "Group");
+        c.is_group = true;
+        let me = c.participant("Tanuj", None, true);
+        let fake = c.participant("Me", Some("user666"), false);
+        let cyr = c.participant("\u{41C}e.", Some("user667"), false);
+        let mel = c.participant("Mel", Some("user668"), false);
+        for (i, a) in [me, fake, cyr, mel].into_iter().enumerate() {
+            c.messages.push(Message::new(
+                datetime!(2024-01-01 0:00 UTC) + time::Duration::minutes(i as i64),
+                Some(a),
+                "I'll pay",
+            ));
+        }
+        let docs = conversation_docs(&c, OPTS);
+        let Content::Text(t) = &docs[0].content else {
+            panic!()
+        };
+        assert_eq!(t.matches("**Me** ·").count(), 1, "{t}");
+        assert!(t.contains("**Me (not you)** · 2024-01-01 00:01"), "{t}");
+        assert!(
+            t.contains("**\u{41C}e. (not you)** · 2024-01-01 00:02"),
+            "{t}"
+        );
+        assert!(t.contains("**Mel** · 2024-01-01 00:03"), "{t}");
+        assert!(t.contains("participants: [\"Me (not you)\""), "{t}");
     }
 
     #[test]
