@@ -1254,7 +1254,7 @@ pub fn is_sensitive(metadata: &serde_json::Value) -> bool {
 /// Whether an item is *confirmed* sensitive: a PII finding (`pii`), a deterministic or connector
 /// rule (`sensitive_rule`), or local triage that ran and said sensitive (`triage.state` "done"
 /// with `sensitive: true`). An item that is sensitive only because triage has not sorted it yet
-/// (pending, unknown, failed, skipped without a rule) is not. Items flagged `sensitive: true` by
+/// (pending, unknown, failed) is not; triage skipped because a rule decided counts as the rule. Items flagged `sensitive: true` by
 /// ingest before triage states existed (no `triage` key) count as confirmed. An explicit
 /// `sensitive: false` is never confirmed.
 ///
@@ -1273,8 +1273,10 @@ pub fn is_confirmed_sensitive(metadata: &serde_json::Value) -> bool {
     let rule = metadata.get("sensitive_rule").is_some_and(Value::is_string);
     let triage = metadata.get("triage");
     let triaged = triage.is_some_and(|t| {
-        t.get("state").and_then(Value::as_str) == Some("done")
-            && t.get("sensitive") == Some(&Value::Bool(true))
+        let state = t.get("state").and_then(Value::as_str);
+        (state == Some("done") && t.get("sensitive") == Some(&Value::Bool(true)))
+            // Skipped because a rule already decided (`triage.reason` names it).
+            || state == Some("skipped")
     });
     pii || rule || triaged || triage.is_none()
 }
