@@ -229,10 +229,10 @@ export function SearchPage() {
   };
 
   // A search from the command palette: fill the box and run it, keeping focus in the box.
-  usePendingSearch((q) => {
+  usePendingSearch((q, run) => {
     setQuery(q);
     inputRef.current?.focus();
-    void runState({ ...EMPTY_STATE, q }, { record: true });
+    if (run) void runState({ ...EMPTY_STATE, q }, { record: true });
   });
   usePendingSearchState(apply);
 
