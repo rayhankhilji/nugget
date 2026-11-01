@@ -25,6 +25,9 @@ cargo run -p nugget-bench -- --schema                     # print the report JSO
 | `--scale smoke\|quick\|standard\|full` | Workload size (default `standard`). `smoke` is for CI and tests; publish `standard` or `full` |
 | `--seed N` | Seed for corpus and workload generation (default `42`). The same seed always gives the same workload |
 | `--backend fake\|real` | What `memory` and `perf` run against (default `fake`): the in-crate fake index, or the real stack in process (`memory`: store, ingest pipeline, files watcher and retriever; `perf`: store and retriever, written directly). For `proactive`: the in-crate reference engine (`fake`) or the real `nugget-proactive` crate in process (`real`). Other suites ignore it |
+| `--perf-items N` | `perf --backend real`: items in the store run and the daemon profile instead of the scale's (II5 runs 250,000 and 500,000; waits grow with N) |
+| `--perf-sizes fixed\|mail` | `perf --backend real`: every item 120 words (`fixed`, the default, as W12 and X5 measured) or a mailbox-like log-normal mix (`mail`: median 80 words, 1% over 1,000, capped at 4,000) |
+| `--perf-phases all\|store\|daemon` | `perf --backend real`: the in-process store run, the daemon profile, or both (default) |
 | `--embed-url URL` | Real backend: an OpenAI-compatible embeddings endpoint (e.g. a local `llama-server`, `http://127.0.0.1:8080/v1`) instead of the in-process deterministic embedder |
 | `--embed-model NAME` | Model name sent to `--embed-url` |
 | `--provider-url URL` | `draft`: a real chat provider instead of the deterministic fake model (see [`draft`](#draft-m3)) |
@@ -289,8 +292,9 @@ After the store-level run, `perf --backend real` profiles the real `nuggetd` bin
 The code is `src/suites/perf_daemon.rs`.
 
 **Seeding.** A temporary `NUGGET_HOME` with a key file (`NUGGET_KEYCHAIN=off`, no OS keychain)
-and an encrypted store written directly (`Store::upsert_item_with_chunks`): N synthetic items
-(300 / 2k / 10k / 100k for smoke / quick / standard / full), one chunk each with a 384-d
+and an encrypted store written directly (`Store::upsert_items_with_chunks`, 256 items per
+transaction): N synthetic items (300 / 2k / 10k / 100k for smoke / quick / standard / full, or
+`--perf-items`), in chunks of up to 256 words (one per fixed-size item) each with a 384-d
 deterministic vector, typed as Markdown with frontmatter (project, two people, a topic tag) so
 the deterministic extractors find entities. Config: no model providers (text-only search,
 deterministic extraction, no LLM), `[runtime]` and `[mcp]` off, everything else default.
@@ -310,8 +314,24 @@ all threads per second). Then ingest through the daemon: a files source on an em
 Markdown files dropped in (50 / 200 / 500 / 2k), timed until all are indexed (`ingest.status`)
 and the last is found by `search` (`daemon.ingest.files_per_s`, `daemon.ingest.wall_s`).
 
-**Memory.** `daemon.rss_mib.after_{startup,first_search,extract,idle,ingest}` (VmRSS) and
+**Hot read paths (II5).** After the warm searches, on the full store: `status`, `sources.list`,
+`ingest.status`, `knowledge.status` and `egress.recent` (limit 200, the privacy ledger), 30 calls
+each (`daemon.ipc.<method>.latency.*`); Ask's retrieval step, `retrieve.context` with a
+2,000-token budget for 50 queries (`daemon.ask.retrieve.latency.*`); and the knowledge page: the
+first `knowledge.entities` page (`daemon.knowledge.page_load_ms`), pages at offsets up to 10,000
+(`daemon.knowledge.entities.latency.*`), short name filters (`…entities_filter…`), the detail of
+the first page's entities (`daemon.knowledge.entity.latency.*`) and the graph overview
+(`daemon.knowledge.graph.latency.*`).
+
+**Store and seeding (II5).** `daemon.seed.items_per_s` (store write throughput while seeding,
+embedding included); `daemon.disk.store_mib.{after_seed,after_extract}` and
+`daemon.disk.bytes_per_item.*` (database + WAL + shm on disk).
+
+**Memory.** `daemon.rss_mib.after_{startup,first_search,extract,searches,idle,ingest}` (VmRSS) and
 `daemon.rss_mib.peak_first_start` / `peak` (VmHWM of each start).
+
+`NUGGET_BENCH_KEEP_HOME=1` keeps the temporary home (store, graph, vault) after the run for
+looking into it by hand; the path is printed.
 
 Process metrics come from `/proc` on Linux; macOS reports RSS and CPU time from `ps` (no
 wakeups or peak); Windows skips them. `.github/workflows/perf.yml` runs the full profile on
