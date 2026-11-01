@@ -366,6 +366,11 @@ impl Machine {
         self.practice
     }
 
+    /// A draft of this session may draw on items marked sensitive.
+    pub fn sensitive(&self) -> bool {
+        self.sensitive
+    }
+
     #[cfg(test)]
     fn is_active(&self) -> bool {
         self.active

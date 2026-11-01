@@ -518,6 +518,9 @@ async fn prepare(
         url,
         metadata: source_meta,
     } = doc;
+    // The connector's title is sender text like the body: drop what extraction drops from
+    // bodies (see `visible_title`).
+    let doc_title = doc_title.map(|t| visible_title(&t));
 
     let expect = nugget_extract::FileExpect::from_metadata(&source_meta);
     let mut ex = extract_step(
@@ -881,6 +884,29 @@ async fn extract_step(
             title,
         ),
     }
+}
+
+/// `title` without invisible format characters a reader never sees but a model reads:
+/// zero-width space, LRM/RLM, word joiner and invisible operators, BOM, bidi embeddings,
+/// overrides and isolates, and Unicode tag characters (which spell out hidden ASCII). Joiners
+/// stay (emoji and several scripts need them). Extraction drops the same from bodies.
+pub(crate) fn visible_title(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| {
+            !matches!(
+                c,
+                '\u{200B}'
+                    | '\u{200E}'
+                    | '\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{2064}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{FEFF}'
+                    | '\u{E0000}'..='\u{E007F}'
+            )
+        })
+        .collect()
 }
 
 /// Last path-ish segment of a key, as a title of last resort.

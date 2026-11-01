@@ -38,6 +38,8 @@ use crate::text::is_email;
 
 /// Why `s` holds a credential, account or financial value, if it does.
 pub(crate) fn sensitive_value(s: &str) -> Option<&'static str> {
+    let plain = plain(s);
+    let s = plain.as_str();
     if let Some(why) = credential(s) {
         return Some(why);
     }
@@ -64,7 +66,76 @@ pub(crate) fn sensitive_value(s: &str) -> Option<&'static str> {
 
 /// Why a quote may not be shown: it holds a card number, an IBAN or an identifier-like token.
 pub(crate) fn credential_in_quote(q: &str) -> Option<&'static str> {
-    credential(q)
+    credential(&plain(q))
+}
+
+/// Zero code points of the Unicode decimal digit blocks [`plain`] reads as ASCII digits
+/// (Arabic-Indic, Extended Arabic-Indic, NKo, the Indic scripts, Thai, Lao, Tibetan, Myanmar,
+/// Khmer, Mongolian and others, fullwidth, and the mathematical digits).
+const DIGIT_ZEROS: &[u32] = &[
+    0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6, 0x0D66,
+    0x0DE6, 0x0E50, 0x0ED0, 0x0F20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80, 0x1A90,
+    0x1B50, 0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900, 0xA9D0, 0xA9F0, 0xAA50, 0xABF0, 0xFF10,
+    0x1D7CE, 0x1D7D8, 0x1D7E2, 0x1D7EC, 0x1D7F6,
+];
+
+/// `s` as the value checks read it (security review 3, ER-2, ER-3): fullwidth forms and other
+/// scripts' decimal digits as ASCII (`４０００`, `٤٠٠٠`), Unicode dashes as `-`, any whitespace
+/// run (line breaks included) as one space, and without invisible characters, Markdown
+/// emphasis (`**4000** 0566`) or HTML tags (`<b>4000</b>`), so formatting cannot hide a card
+/// number, an IBAN or an account number from the checks. A `<…>` holding `@` is an address,
+/// not a tag, and stays.
+fn plain(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        i += 1;
+        if c == '<' {
+            // `<b>`, `</span>`, `<td class="x">`: dropped.
+            let mut j = i;
+            if chars.get(j) == Some(&'/') {
+                j += 1;
+            }
+            if chars.get(j).is_some_and(char::is_ascii_alphabetic)
+                && let Some(len) = chars[j..]
+                    .iter()
+                    .take(80)
+                    .position(|&d| matches!(d, '>' | '<' | '@'))
+                && chars[j + len] == '>'
+            {
+                i = j + len + 1;
+                if !out.is_empty() && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+                continue;
+            }
+        }
+        let c = match u32::from(c) {
+            0xFF01..=0xFF5E => char::from_u32(u32::from(c) - 0xFEE0).unwrap_or(c),
+            cp => DIGIT_ZEROS
+                .iter()
+                .find(|&&z| (z..z + 10).contains(&cp))
+                .and_then(|&z| char::from_digit(cp - z, 10))
+                .unwrap_or(c),
+        };
+        match c {
+            '\u{00AD}' | '\u{200B}'..='\u{200F}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}' => {}
+            '\u{E0000}'..='\u{E007F}' => {}
+            '*' | '_' | '`' | '~' => {}
+            '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' => out.push('-'),
+            c if c.is_whitespace() => {
+                if !out.is_empty() && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    let trimmed = out.trim_end().len();
+    out.truncate(trimmed);
+    out
 }
 
 fn credential(s: &str) -> Option<&'static str> {
@@ -121,18 +192,25 @@ fn digit_runs(s: &str) -> Vec<Run> {
             let len = run.digits.len() - start;
             run.groups += 1;
             run.longest = run.longest.max(len);
-            // Up to two separators, then more digits: the same run.
+            // Up to three separators, then more digits: the same run. More than one only with
+            // a parenthesis (`(0) 20`) or as one separator spaced out (`4000 - 0566`).
             let mut j = i;
             while j < chars.len()
-                && j - i < 2
+                && j - i < 3
                 && matches!(chars[j], ' ' | '-' | '.' | '/' | '(' | ')')
             {
                 j += 1;
             }
+            let gap = &chars[i..j];
+            let spaced_one = gap.iter().filter(|c| **c != ' ').count() <= 1
+                && gap.first() == Some(&' ')
+                && gap.last() == Some(&' ');
             let joined = j > i
                 && j < chars.len()
                 && chars[j].is_ascii_digit()
-                && (j - i == 1 || chars[i..j].iter().any(|c| matches!(c, '(' | ')')));
+                && (j - i == 1
+                    || (j - i == 2 && gap.iter().any(|c| matches!(c, '(' | ')')))
+                    || (j - i == 3 && spaced_one));
             if !joined {
                 break;
             }
@@ -922,6 +1000,57 @@ mod tests {
         }
         // A number that only looks like a card (Luhn fails) is still a long number.
         assert_eq!(sensitive_value("4000 0566 5566 5557"), Some("long number"));
+    }
+
+    /// Security review 3 (ER-2, ER-3): digits of other scripts, fullwidth forms, spaced
+    /// separators, line breaks and Markdown or HTML formatting do not hide a value.
+    #[test]
+    fn formatting_and_other_digits_do_not_hide_values() {
+        for (s, why) in [
+            ("４０００ ０５６６ ５５６６ ５５５６", "card number"),
+            ("Karte ٤٠٠٠ ٠٥٦٦ ٥٥٦٦ ٥٥٥٦", "card number"),
+            ("कार्ड ४००० ०५६६ ५५६६ ५५५६", "card number"),
+            ("4000 - 0566 - 5566 - 5556", "card number"),
+            (
+                "4000 \u{2013} 0566 \u{2013} 5566 \u{2013} 5556",
+                "card number",
+            ),
+            ("4000\n0566\n5566\n5556", "card number"),
+            ("**4000** **0566** **5566** **5556**", "card number"),
+            ("`4000 0566 5566 5556`", "card number"),
+            (
+                "<b>4000</b> <b>0566</b> <b>5566</b> <b>5556</b>",
+                "card number",
+            ),
+            (
+                "<td>4000</td><td>0566</td><td>5566</td><td>5556</td>",
+                "card number",
+            ),
+            ("4000\u{200B}0566\u{00AD}5566 5556", "card number"),
+            ("IBAN **DE89** 3704 0044 0532 0130 00", "IBAN"),
+            ("ＤＥ８９ ３７０４ ００４４ ０５３２ ０１３０ ００", "IBAN"),
+            ("Kontonummer ０７７００９００１２３", "long number"),
+            ("٠٧٧٠٠ ٩٠٠١٢٣", "phone or account number"),
+            ("＄40,000", "currency amount"),
+        ] {
+            assert_eq!(sensitive_value(s), Some(why), "{s}");
+            if matches!(why, "card number" | "IBAN") {
+                assert_eq!(credential_in_quote(&format!("Sam: {s}.")), Some(why), "{s}");
+            }
+        }
+        // Addresses in angle brackets are not tags.
+        assert_eq!(
+            sensitive_value("Mara <mara@corvid.example>"),
+            Some("email address")
+        );
+        for s in [
+            "<b>Head of Product</b>",
+            "**Staff Engineer**",
+            "2025 to 2026",
+            "Room １０１",
+        ] {
+            assert_eq!(sensitive_value(s), None, "{s}");
+        }
     }
 
     #[test]

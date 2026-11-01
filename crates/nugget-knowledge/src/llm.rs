@@ -56,8 +56,8 @@ use time::{Date, Month, OffsetDateTime};
 use crate::config::LlmConfig;
 use crate::spec::{ClaimSpec, ERef, EntitySpec, Extraction, OSpec};
 use crate::text::{
-    MAX_QUOTE_CHARS, contains_ci, contains_verbatim, has_injection_marker, is_email,
-    normalize_predicate, normalize_ws, parse_address, truncate_chars,
+    MAX_QUOTE_CHARS, contains_ci, contains_verbatim, fold_for_markers, has_injection_marker,
+    is_email, normalize_predicate, normalize_ws, parse_address, truncate_chars,
 };
 
 /// Egress-ledger feature tag for extraction requests.
@@ -638,7 +638,11 @@ const INJECTION_WINDOW: usize = 300;
 /// marker (or an address to AI assistants) within [`INJECTION_WINDOW`] characters before it,
 /// or in it. A quote that cannot be located exactly in a chunk holding a marker counts too.
 fn in_injected_passage(chunk: &str, qlower: &str) -> bool {
-    let lower = chunk.to_lowercase();
+    // Both folded alike, so a look-alike or invisible character hides neither the marker nor
+    // the quote's place (ER-4).
+    let lower = fold_for_markers(chunk, false);
+    let qlower = fold_for_markers(qlower, false);
+    let qlower = qlower.as_str();
     let addressed = |t: &str| {
         has_injection_marker(t)
             || t.contains("ai assistant")
@@ -2161,7 +2165,17 @@ fn validate_capped(
         if injected {
             confidence = confidence.min(0.5);
         }
-        let text = truncate_chars(&normalize_ws(&c.text), 300);
+        let mut text = truncate_chars(&normalize_ws(&c.text), 300);
+        // The model's own sentence (legacy answers) is stored and shown in the vault like the
+        // triple: one holding a value the triple may not hold, a health or finance term, or an
+        // injection marker is dropped, and the sentence is written from the triple instead
+        // (security review 3, ER-1).
+        if values::sensitive_value(&text).is_some()
+            || values::health_or_finance_term(&text).is_some()
+            || has_injection_marker(&text)
+        {
+            text.clear();
+        }
         pending.push(Pending {
             subject,
             predicate,
@@ -2322,6 +2336,13 @@ fn value_problem(
         && let Some(why) = values::sensitive_value(l)
     {
         return Some(why);
+    }
+    // A literal needs only one of its words in the quote (`anchored`): the rest is the model's
+    // own text, which may carry an instruction it read (ER-1).
+    if let CObj::Lit(l) = object
+        && has_injection_marker(l)
+    {
+        return Some("injection marker");
     }
     if !structural && object_text.is_some_and(|o| values::health_or_finance_term(o).is_some()) {
         return Some("health or finance value");
@@ -2645,7 +2666,7 @@ pub(crate) async fn extract(
     run
 }
 
-mod values;
+pub(crate) mod values;
 
 #[cfg(test)]
 mod tests;

@@ -794,7 +794,12 @@ const INTERNAL_ENV: &[&str] = &[
 
 /// Whether `key_ref: "env:VAR"` may read `var`: `NUGGET_…_KEY` (not one of Nugget's own
 /// secrets, nor the runtime's `NUGGET_RUNTIME_…` keys) or a provider's usual variable.
+///
+/// Compared in upper case: Windows looks variables up ignoring case, so
+/// `NUGGET_Plugin_Signing_KEY` there reads `NUGGET_PLUGIN_SIGNING_KEY` and must be refused like it.
 fn env_allowed(var: &str) -> bool {
+    let var = var.to_ascii_uppercase();
+    let var = var.as_str();
     PROVIDER_ENV.contains(&var)
         || (var.starts_with("NUGGET_")
             && var.ends_with("_KEY")
@@ -1968,6 +1973,24 @@ mod tests {
             assert_eq!(generic(v), want, "{v}");
             assert!(!r.message.contains(GOOD));
         }
+        // Windows looks variables up ignoring case: another spelling of a refused variable
+        // must not read it.
+        let windows = |v: &str| env(&v.to_ascii_uppercase());
+        for v in [
+            "NUGGET_Plugin_Signing_KEY",
+            "NUGGET_Manifest_Signing_KEY",
+            "NUGGET_Trust_Dev_Manifest_KEY",
+        ] {
+            let r = KeySpec::Env(v.into()).read(&windows, None).unwrap_err();
+            assert_eq!(r.reason, Reason::EnvMissing, "{v}");
+            assert!(!r.message.contains(GOOD));
+        }
+        assert_eq!(
+            KeySpec::Env("Openai_Api_Key".into())
+                .read(&windows, None)
+                .unwrap(),
+            GOOD
+        );
         // The variable a provider already uses stays usable for it.
         assert_eq!(
             KeySpec::Env("WORK_KEY".into())

@@ -158,3 +158,46 @@ async fn same_person_from_mail_and_calendar_is_one_entity() {
     let items: std::collections::HashSet<_> = mentions.iter().map(|m| m.item.clone()).collect();
     assert_eq!(items.len(), 3);
 }
+
+/// Security review 3, ER-7: an event's location that is a dial-in number or an address is not
+/// a place: no Place entity (a vault page) named after it, no claim sentence carrying it.
+#[tokio::test]
+async fn a_phone_number_or_address_as_location_is_not_a_place() {
+    let env = Env::new();
+    for (key, summary, loc) in [
+        (
+            "cal/dial.ics",
+            "Vendor call",
+            "Dial-in +44 20 7946 0958, PIN 4471",
+        ),
+        ("cal/mail.ics", "Offsite", "ana.ruiz@lumenfold.example"),
+        ("cal/room.ics", "Standup", "Room 4"),
+    ] {
+        let text = format!("Event: {summary}\nLocation: {loc}");
+        env.put(
+            ics(
+                "caldav:work",
+                key,
+                json!([{"kind": "event", "summary": summary, "uid": key,
+                        "start": "2026-04-10T09:00:00", "location": loc}]),
+                &text,
+            ),
+            &[&text],
+        );
+    }
+    let k = env.knowledge(cfg(), None);
+    assert_eq!(run(&k).await.items_failed, 0);
+    let places: Vec<String> = env
+        .entities(EntityKind::Place)
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+    assert_eq!(places, ["Room 4"]);
+    for c in env.all_claims() {
+        assert!(
+            !c.text.contains("7946") && !c.text.contains('@'),
+            "{}",
+            c.text
+        );
+    }
+}
