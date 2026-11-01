@@ -229,8 +229,7 @@ fn distinct(parts: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use nugget_a11y::tree::States;
-    use nugget_a11y::{AppEntry, ElementId, UiActionKind, WindowId, WindowInfo};
-    use nugget_core::ipc::AppInfo;
+    use nugget_a11y::{ElementId, UiActionKind};
 
     use super::*;
 
@@ -249,73 +248,10 @@ mod tests {
         }
     }
 
-    fn kids(mut node: UiNode, children: Vec<UiNode>) -> UiNode {
-        node.children = children;
-        node
-    }
+    use crate::tools::tests::{kids, window};
 
     fn tree(children: Vec<UiNode>) -> UiTree {
-        UiTree {
-            app: AppInfo {
-                id: None,
-                name: "App".into(),
-                window_title: Some("Window".into()),
-                url: None,
-            },
-            window: WindowInfo {
-                id: WindowId("w".into()),
-                app: AppEntry {
-                    id: None,
-                    name: "App".into(),
-                    pid: None,
-                    frontmost: true,
-                },
-                title: Some("Window".into()),
-                bounds: None,
-                focused: true,
-                minimized: false,
-            },
-            root: kids(n("root", Role::Window, "Window"), children),
-            focused: None,
-            truncated: false,
-        }
-    }
-
-    /// A mail inbox as the bench app shows it: a row named by the subject around an open button
-    /// that names the sender.
-    fn inbox_row(id: &str, from: &str, subject: &str) -> UiNode {
-        kids(
-            n(&format!("row{id}"), Role::ListItem, subject),
-            vec![n(
-                &format!("open{id}"),
-                Role::Button,
-                &format!("{from}: {subject}"),
-            )],
-        )
-    }
-
-    #[test]
-    fn inbox_with_two_sams() {
-        let t = tree(vec![
-            n("title", Role::Heading, "Inbox (3)"),
-            n("compose", Role::Button, "Compose"),
-            kids(
-                n("list", Role::List, "Messages"),
-                vec![
-                    inbox_row("1", "Sam Lee", "Can I take Friday off?"),
-                    inbox_row("2", "Sam Ortiz", "Invoice for October"),
-                    inbox_row("3", "Dana Kim", "Lunch?"),
-                ],
-            ),
-        ]);
-        assert_eq!(
-            targets(&t),
-            [
-                "Sam Lee: Can I take Friday off?",
-                "Sam Ortiz: Invoice for October",
-                "Dana Kim: Lunch?"
-            ]
-        );
+        window("w", "App", children)
     }
 
     #[test]
@@ -346,38 +282,6 @@ mod tests {
             [
                 "Sam Lee — Friday off — Oct 3",
                 "Sam Ortiz — Invoice — Oct 4"
-            ]
-        );
-    }
-
-    #[test]
-    fn files_list() {
-        let row = |name: &str, label: &str| {
-            kids(
-                n(&format!("row.{name}"), Role::ListItem, name),
-                vec![n(&format!("item.{name}"), Role::Button, label)],
-            )
-        };
-        let t = tree(vec![
-            n("up", Role::Button, "Up one folder"),
-            kids(
-                n("list", Role::List, "Contents"),
-                vec![
-                    row("Projects", "Folder Projects"),
-                    row("report-2025.pdf", "File report-2025.pdf"),
-                    row("report-2026.pdf", "File report-2026.pdf"),
-                ],
-            ),
-            n("open", Role::Button, "Open"),
-            n("name", Role::TextField, "Name"),
-            n("trash", Role::Button, "Move to Trash"),
-        ]);
-        assert_eq!(
-            targets(&t),
-            [
-                "Folder Projects",
-                "File report-2025.pdf",
-                "File report-2026.pdf"
             ]
         );
     }

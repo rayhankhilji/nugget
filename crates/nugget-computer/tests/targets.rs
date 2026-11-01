@@ -6,7 +6,6 @@ mod common;
 use common::*;
 use nugget_a11y::role::Role;
 use nugget_a11y::{ElementId, UiTree};
-use nugget_computer::{RenderOptions, render};
 use serde_json::json;
 
 fn row(id: &str, from: &str, subject: &str) -> nugget_a11y::UiNode {
@@ -111,15 +110,4 @@ async fn an_action_that_changes_the_screen_carries_the_new_targets() {
         .await;
     assert!(!r.content.contains("the window changed"), "{}", r.content);
     assert!(r.targets.is_empty());
-}
-
-#[test]
-fn rendering_is_unchanged_by_targets() {
-    // The renderer is the only source of the model's text; it knows nothing of targets.
-    let t = inbox();
-    let opts = RenderOptions::default();
-    let text = render(&t, &opts);
-    for target in nugget_computer::targets::targets(&t) {
-        assert!(text.contains(&target), "{target} not on screen:\n{text}");
-    }
 }

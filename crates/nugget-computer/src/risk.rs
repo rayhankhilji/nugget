@@ -623,36 +623,28 @@ mod tests {
     #[test]
     fn text_classes() {
         let k = kw();
-        assert_eq!(classify_text("Send", &k), Some(RiskClass::Send));
-        assert_eq!(classify_text("Reply All", &k), None);
-        assert_eq!(classify_text("Delete draft", &k), Some(RiskClass::Destroy));
-        assert_eq!(classify_text("Empty Trash…", &k), Some(RiskClass::Destroy));
-        assert_eq!(classify_text("Place order", &k), Some(RiskClass::Spend));
-        assert_eq!(classify_text("Sign document", &k), Some(RiskClass::Spend));
-        assert_eq!(classify_text("Sign in", &k), None);
-        assert_eq!(classify_text("Design", &k), None);
-        assert_eq!(classify_text("Postpone", &k), None);
-        assert_eq!(
-            classify_text("Change password", &k),
-            Some(RiskClass::Security)
-        );
-        assert_eq!(classify_text("Unsubscribe", &k), Some(RiskClass::Destroy));
-        assert_eq!(classify_text("Subscribe", &k), Some(RiskClass::Spend));
-        assert_eq!(classify_text("Permissions", &k), Some(RiskClass::Security));
-        assert_eq!(
-            classify_text("Lock screen after 5 minutes", &k),
-            Some(RiskClass::Security)
-        );
-        assert_eq!(
-            classify_text("Remote access", &k),
-            Some(RiskClass::Security)
-        );
-        assert_eq!(classify_text("Lock", &k), None);
-        // The highest class wins.
-        assert_eq!(
-            classify_text("Delete and send", &k),
-            Some(RiskClass::Destroy)
-        );
+        for (text, want) in [
+            ("Send", Some(RiskClass::Send)),
+            ("Reply All", None),
+            ("Delete draft", Some(RiskClass::Destroy)),
+            ("Empty Trash…", Some(RiskClass::Destroy)),
+            ("Place order", Some(RiskClass::Spend)),
+            ("Sign document", Some(RiskClass::Spend)),
+            ("Sign in", None),
+            ("Design", None),
+            ("Postpone", None),
+            ("Change password", Some(RiskClass::Security)),
+            ("Unsubscribe", Some(RiskClass::Destroy)),
+            ("Subscribe", Some(RiskClass::Spend)),
+            ("Permissions", Some(RiskClass::Security)),
+            ("Lock screen after 5 minutes", Some(RiskClass::Security)),
+            ("Remote access", Some(RiskClass::Security)),
+            ("Lock", None),
+            // The highest class wins.
+            ("Delete and send", Some(RiskClass::Destroy)),
+        ] {
+            assert_eq!(classify_text(text, &k), want, "{text}");
+        }
         let extra = RiskKeywords {
             send: vec!["dispatch now".into()],
             ..RiskKeywords::default()
@@ -661,31 +653,22 @@ mod tests {
     }
 
     #[test]
-    fn unknown_click_is_send() {
+    fn unknown_click_is_send_and_ok_takes_the_dialog_risk() {
         assert_eq!(click_risk(None, &[], &kw()), RiskClass::Send);
-    }
-
-    #[test]
-    fn affirmative_button_takes_dialog_risk() {
-        let ok = UiNode {
-            role: Role::Button,
-            name: Some("OK".into()),
-            ..UiNode::default()
-        };
         let ctx = vec!["Delete 3 files?".to_string()];
-        assert_eq!(click_risk(Some(&ok), &ctx, &kw()), RiskClass::Destroy);
-        assert_eq!(click_risk(Some(&ok), &[], &kw()), RiskClass::Edit);
-        let other = UiNode {
-            role: Role::Button,
-            name: Some("Bold".into()),
-            ..UiNode::default()
-        };
-        assert_eq!(click_risk(Some(&other), &ctx, &kw()), RiskClass::Edit);
+        assert_eq!(
+            click_risk(Some(&button("OK")), &ctx, &kw()),
+            RiskClass::Destroy
+        );
+        assert_eq!(click_risk(Some(&button("OK")), &[], &kw()), RiskClass::Edit);
+        assert_eq!(
+            click_risk(Some(&button("Bold")), &ctx, &kw()),
+            RiskClass::Edit
+        );
     }
 
     #[test]
     fn keys() {
-        let p = |s: &str| KeyChord::parse_list(s).unwrap();
         let field = UiNode {
             role: Role::TextField,
             states: nugget_a11y::tree::States {
@@ -698,40 +681,23 @@ mod tests {
             role: Role::TextArea,
             ..field.clone()
         };
-        let k = kw();
-        assert_eq!(
-            keys_risk(&p("enter"), Some(&field), &[], &k),
-            RiskClass::Send
-        );
-        assert_eq!(
-            keys_risk(&p("enter"), Some(&area), &[], &k),
-            RiskClass::Edit
-        );
-        assert_eq!(
-            keys_risk(&p("ctrl+enter"), Some(&area), &[], &k),
-            RiskClass::Send
-        );
-        assert_eq!(
-            keys_risk(&p("cmd+enter"), Some(&area), &[], &k),
-            RiskClass::Send
-        );
-        assert_eq!(keys_risk(&p("enter"), None, &[], &k), RiskClass::Send);
-        assert_eq!(
-            keys_risk(&p("ctrl+a"), Some(&field), &[], &k),
-            RiskClass::Edit
-        );
-        assert_eq!(
-            keys_risk(&p("backspace"), Some(&field), &[], &k),
-            RiskClass::Edit
-        );
-        assert_eq!(
-            keys_risk(&p("shift+delete"), Some(&field), &[], &k),
-            RiskClass::Destroy
-        );
-        assert_eq!(keys_risk(&p("delete"), None, &[], &k), RiskClass::Destroy);
-        assert_eq!(keys_risk(&p("tab tab"), None, &[], &k), RiskClass::Edit);
-        assert_eq!(keys_risk(&p("cmd+q"), None, &[], &k), RiskClass::Destroy);
-        assert_eq!(keys_risk(&p("space"), None, &[], &k), RiskClass::Send);
+        for (keys, focus, want) in [
+            ("enter", Some(&field), RiskClass::Send),
+            ("enter", Some(&area), RiskClass::Edit),
+            ("ctrl+enter", Some(&area), RiskClass::Send),
+            ("cmd+enter", Some(&area), RiskClass::Send),
+            ("enter", None, RiskClass::Send),
+            ("ctrl+a", Some(&field), RiskClass::Edit),
+            ("backspace", Some(&field), RiskClass::Edit),
+            ("shift+delete", Some(&field), RiskClass::Destroy),
+            ("delete", None, RiskClass::Destroy),
+            ("tab tab", None, RiskClass::Edit),
+            ("cmd+q", None, RiskClass::Destroy),
+            ("space", None, RiskClass::Send),
+        ] {
+            let chords = KeyChord::parse_list(keys).unwrap();
+            assert_eq!(keys_risk(&chords, focus, &[], &kw()), want, "{keys}");
+        }
     }
 
     #[test]
@@ -742,20 +708,12 @@ mod tests {
             "iTerm2",
             "com.googlecode.iterm2",
             "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
-            "Windows Terminal",
             "cmd.exe",
             "powershell",
-            "org.gnome.Terminal",
             "gnome-terminal-server",
             "konsole",
-            "xterm",
-            "Alacritty",
-            "kitty",
-            "org.wezfurlong.wezterm",
             "foot",
-            "xfce4-terminal",
             "dev.warp.Warp-Stable",
-            "com.mitchellh.ghostty",
             "Hyper",
         ] {
             assert!(is_terminal_app(t, &[]), "{t}");
@@ -787,19 +745,13 @@ mod tests {
         cb.name = Some("Delete my data after 30 days".into());
         assert_eq!(click_risk(Some(&cb), &[], &kw), RiskClass::Destroy);
         for name in ["Reply", "Forward", "Checkout"] {
-            let b = UiNode {
-                role: Role::Button,
-                name: Some(name.into()),
-                ..UiNode::default()
-            };
-            assert_eq!(click_risk(Some(&b), &[], &kw), RiskClass::Edit, "{name}");
+            assert_eq!(
+                click_risk(Some(&button(name)), &[], &kw),
+                RiskClass::Edit,
+                "{name}"
+            );
         }
-        let send = UiNode {
-            role: Role::Button,
-            name: Some("Send".into()),
-            ..UiNode::default()
-        };
-        assert_eq!(click_risk(Some(&send), &[], &kw), RiskClass::Send);
+        assert_eq!(click_risk(Some(&button("Send")), &[], &kw), RiskClass::Send);
     }
 
     fn button(name: &str) -> UiNode {

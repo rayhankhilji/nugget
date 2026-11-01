@@ -9,8 +9,7 @@
 //! - [`bridge`]: the [`BrowserBridge`] trait the daemon implements, and [`BridgeHub`], a ready
 //!   implementation served over the daemon's IPC socket by [`HubHandler`].
 //! - [`host`]: the relay run by the `nugget-browser-host` binary.
-//! - [`tool`]: the actions as agent tools ([`agent_tools`], [`loop_gated_tools`] for
-//!   `nugget_agent`).
+//! - [`tool`]: the actions as agent tools ([`agent_tools`], [`loop_gated_tools`]).
 //! - [`install`]: native host manifests and registry keys for Chrome, Chromium, Edge and Firefox
 //!   on macOS, Linux and Windows.
 
@@ -29,7 +28,4 @@ pub use bridge::{BridgeError, BridgeHub, BrowserBridge, HubHandler, KillSwitch};
 pub use controller::{ActionOutcome, BrowserController, BrowserError, Confirmer, DeclineAll};
 pub use protocol::{BrowserEvent, ExtensionMessage, HostMessage, HostRequest};
 pub use snapshot::{ElementInfo, PageSnapshot, SnapshotDiff};
-pub use tool::{
-    AgentTool, BrowserAgentTool, LoopApprovals, ToolContext, ToolError, ToolSpec, agent_tools,
-    browser_tools, loop_gated_tools,
-};
+pub use tool::{BrowserAgentTool, LoopApprovals, agent_tools, loop_gated_tools};

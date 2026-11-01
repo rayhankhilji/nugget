@@ -190,6 +190,10 @@ pub struct World {
     pub screenshot: Option<Vec<u8>>,
     /// Runs on each snapshot, with the snapshot count.
     pub on_snapshot: Option<SnapshotHook>,
+    /// Every key input, as `text:<id>:<text>` or `keys:<id>:<chords>`.
+    pub inputs: Vec<String>,
+    /// Cancelled by the next key input (to stop a task in the middle of typing).
+    pub cancel_on_key: Option<CancellationToken>,
 }
 
 impl World {
@@ -244,6 +248,8 @@ impl FakeComputer {
                 wrong_value: None,
                 screenshot: None,
                 on_snapshot: None,
+                inputs: Vec::new(),
+                cancel_on_key: None,
             }),
             effects: Mutex::new(HashMap::new()),
         })
@@ -372,13 +378,31 @@ impl ComputerUse for FakeComputer {
                 self.run_effect(&format!("expand:{id}"), &mut w);
                 Ok(Self::outcome(&w, true, "expanded"))
             }
-            UiAction::Focus | UiAction::Scroll { .. } => Ok(Self::outcome(&w, true, "ok")),
+            UiAction::Focus => {
+                if let Some(t) = w.windows.iter_mut().find(|t| t.find(id).is_some()) {
+                    t.focused = Some(id.clone());
+                }
+                w.node_mut(id.as_str()).unwrap().states.focused = true;
+                Ok(Self::outcome(&w, true, "focused"))
+            }
+            UiAction::Scroll { .. } => Ok(Self::outcome(&w, true, "ok")),
         }
     }
 
     fn key_input(&self, target: Option<&ElementId>, input: &KeyInput) -> Result<ActionOutcome> {
         let mut w = self.world.lock().unwrap();
+        if let Some(t) = w.cancel_on_key.take() {
+            t.cancel();
+        }
         let id = target.cloned().or_else(|| w.focused_id());
+        let to = id.as_ref().map_or("?", |i| i.as_str()).to_string();
+        w.inputs.push(match input {
+            KeyInput::Text(t) => format!("text:{to}:{t}"),
+            KeyInput::Keys(k) => {
+                let k: Vec<_> = k.iter().map(ToString::to_string).collect();
+                format!("keys:{to}:{}", k.join(" "))
+            }
+        });
         match input {
             KeyInput::Text(text) => {
                 let id = id.ok_or_else(|| Error::NotFound("nothing focused".into()))?;
@@ -468,6 +492,19 @@ impl Kit {
         t.call(args, &ctx()).await
     }
 
+    /// A call the loop never described (so never confirmed).
+    pub async fn raw(&self, name: &str, args: Value) -> ToolResult {
+        self.tool(name).call(args, &ctx()).await
+    }
+
+    pub fn risk(&self, name: &str, args: Value) -> nugget_policy::RiskClass {
+        self.tool(name).risk(&args)
+    }
+
+    pub fn inputs(&self) -> Vec<String> {
+        self.cu.with(|w| w.inputs.clone())
+    }
+
     /// Observe the focused window so the cache knows its elements.
     pub async fn look(&self) -> ToolResult {
         self.call("observe", serde_json::json!({})).await
@@ -484,6 +521,21 @@ impl Kit {
         let v = t.verify(&args, &before, &after, &r);
         (r, v)
     }
+}
+
+#[track_caller]
+pub fn refused(r: &ToolResult, needle: &str) {
+    assert!(r.is_error && r.content.contains(needle), "{}", r.content);
+}
+
+#[track_caller]
+pub fn passed(v: &Verification) {
+    assert!(matches!(v, Verification::Passed(_)), "{v:?}");
+}
+
+#[track_caller]
+pub fn failed(v: &Verification) {
+    assert!(matches!(v, Verification::Failed(_)), "{v:?}");
 }
 
 pub fn ctx() -> ToolCtx {

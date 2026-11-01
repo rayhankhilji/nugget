@@ -71,7 +71,7 @@ use nugget_agent::Tool;
 
 pub use config::{ComputerConfig, RiskKeywords};
 pub use render::{RenderOptions, render};
-pub use tools::{ComputerTool, KEYS_MAX, Kind, SCROLL_MAX, TYPE_TEXT_MAX};
+pub use tools::{ComputerTool, KEYS_MAX, Kind, SCROLL_MAX, TYPE_CHUNK, TYPE_TEXT_MAX};
 
 /// The computer-use tools over this OS's accessibility backend.
 pub fn tools(config: ComputerConfig) -> Vec<Arc<dyn Tool>> {

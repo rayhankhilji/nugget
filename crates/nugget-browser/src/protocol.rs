@@ -151,13 +151,6 @@ impl ExtensionMessage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HelloResult {
-    pub protocol: u32,
-    pub extension_version: String,
-    pub browser: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActResult {
     /// Empty when there was no earlier snapshot of the tab (a navigation from a blank tab).

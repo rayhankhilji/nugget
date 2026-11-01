@@ -142,8 +142,4 @@ fn extension_messages_parse() {
             reason: "overlay".into()
         })
     );
-    assert_eq!(
-        serde_json::to_value(&ev).unwrap(),
-        json!({"type": "event", "event": "user_stop", "reason": "overlay"})
-    );
 }

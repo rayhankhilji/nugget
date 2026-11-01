@@ -3,12 +3,13 @@ mod common;
 use std::sync::{Arc, Mutex};
 
 use common::{FakeBridge, FakeGate, ScriptedConfirmer, form, id};
+use nugget_agent::ToolCtx;
+use nugget_browser::agent_tools;
 use nugget_browser::bridge::BridgeError;
 use nugget_browser::protocol::{ErrorCode, SnapshotOptions};
-use nugget_browser::tool::{ToolContext, browser_tools};
 use nugget_browser::{BrowserAction, BrowserController, BrowserError, DeclineAll};
 use nugget_policy::RiskClass;
-use serde_json::json;
+use serde_json::{Value, json};
 
 fn setup(
     gate: FakeGate,
@@ -212,8 +213,8 @@ async fn extension_errors_map_to_controller_errors() {
 #[tokio::test]
 async fn tools_drive_the_controller() {
     let (gate, _, c) = setup(FakeGate::new(), None);
-    let tools = browser_tools(c);
-    let names: Vec<_> = tools.iter().map(|t| t.spec().name).collect();
+    let tools = agent_tools(c);
+    let names: Vec<_> = tools.iter().map(|t| t.name()).collect();
     assert_eq!(
         names,
         [
@@ -227,10 +228,13 @@ async fn tools_drive_the_controller() {
             "browser_wait_for"
         ]
     );
-    let ctx = ToolContext {
+    let ctx = ToolCtx {
         task_id: "task-9".into(),
+        action_id: "a".into(),
+        step: 1,
+        cancel: Default::default(),
     };
-    let snap = tools[0].call(&ctx, json!({})).await.unwrap();
+    let snap: Value = serde_json::from_str(&tools[0].call(json!({}), &ctx).await.content).unwrap();
     let email = snap["elements"]
         .as_array()
         .unwrap()
@@ -238,24 +242,16 @@ async fn tools_drive_the_controller() {
         .find(|e| e["name"] == "Email address")
         .unwrap()["id"]
         .clone();
-    let out = tools[2]
-        .call(&ctx, json!({"element": email, "text": "grace@example.com"}))
-        .await
-        .unwrap();
-    assert_eq!(out["verification"]["status"], "confirmed");
+    let args = json!({"element": email, "text": "grace@example.com"});
+    let out = tools[2].call(args, &ctx).await;
+    assert_eq!(out.data.unwrap()["verification"]["status"], "confirmed");
     let err = tools[5]
-        .call(&ctx, json!({"url": "https://bank.example/"}))
-        .await
-        .unwrap_err();
-    assert!(err.is_mutation_refused());
-    assert!(tools[1].call(&ctx, json!({})).await.is_err());
-    assert!(
-        gate.seen
-            .lock()
-            .unwrap()
-            .iter()
-            .all(|d| d.task_id == "task-9")
-    );
+        .call(json!({"url": "https://bank.example/"}), &ctx)
+        .await;
+    assert_eq!(err.data.unwrap()["refused"], true);
+    assert!(tools[1].call(json!({}), &ctx).await.is_error);
+    let seen = gate.seen.lock().unwrap();
+    assert!(seen.iter().all(|d| d.task_id == "task-9"));
 }
 
 /// Records the context of every check; refuses any check made without one.
@@ -388,7 +384,7 @@ async fn controller_rechecks_with_the_page_context() {
 #[tokio::test]
 async fn controller_context_matches_what_the_agent_tools_give_the_loop() {
     let (gate, c) = context_rig();
-    let tools = nugget_browser::tool::agent_tools(c.clone());
+    let tools = agent_tools(c.clone());
     let s = c.snapshot("t", SnapshotOptions::default()).await.unwrap();
     let tool = tools.iter().find(|t| t.name() == "browser_click").unwrap();
     let args = json!({"element": id(&s, "Create account")});

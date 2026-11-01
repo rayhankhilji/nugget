@@ -126,12 +126,6 @@ impl BrowserAction {
         }
     }
 
-    /// Whether the action needs a snapshot to validate against. Only `navigate` does not (it
-    /// can start from a blank tab).
-    pub fn needs_snapshot(&self) -> bool {
-        !matches!(self, Self::Navigate { .. })
-    }
-
     /// Check the action against `snapshot`, the latest view of the page.
     pub fn validate(&self, snapshot: Option<&PageSnapshot>) -> Result<(), ValidationError> {
         if let Self::Navigate { url } = self {
@@ -254,7 +248,9 @@ impl BrowserAction {
                 let base = form_risk(snapshot, form).max(RiskClass::Send);
                 // A submit button's own label can say more ("Pay now", "Delete account").
                 match element(id) {
-                    Some(e) if is_button(e) => base.max(keyword_risk(&e.name).unwrap_or(base)),
+                    Some(e) if e.role == "button" => {
+                        base.max(keyword_risk(&e.name).unwrap_or(base))
+                    }
                     _ => base,
                 }
             }
@@ -294,8 +290,8 @@ impl BrowserAction {
             Self::Select { value, .. } => Some(preview(value)),
             // A submit, or a click on a form's submit button, shows what the form sends.
             _ => self
-                .sent_fields(snapshot)
-                .and_then(|fields| fields_preview(&fields)),
+                .submitted_form(snapshot)
+                .and_then(|form| fields_preview(&form_fields(snapshot?, form))),
         };
         ActionDescriptor {
             target_app,
@@ -306,9 +302,7 @@ impl BrowserAction {
             task_id: task_id.to_owned(),
         }
     }
-}
 
-impl BrowserAction {
     /// The form this action submits, if it does: a `submit`, or a click on a button that
     /// submits its form.
     pub fn submitted_form<'a>(&self, snapshot: Option<&'a PageSnapshot>) -> Option<&'a str> {
@@ -323,13 +317,6 @@ impl BrowserAction {
             }
             _ => None,
         }
-    }
-
-    /// The fields (with their full values) the form this action submits sends, in page order;
-    /// `None` when the action submits nothing.
-    pub fn sent_fields(&self, snapshot: Option<&PageSnapshot>) -> Option<Vec<FieldValue>> {
-        let form = self.submitted_form(snapshot)?;
-        Some(form_fields(snapshot?, form))
     }
 }
 
@@ -524,10 +511,6 @@ pub fn resolve_url(raw: &str, base: Option<&str>) -> Result<url::Url, Validation
         ));
     }
     Ok(parsed)
-}
-
-fn is_button(e: &ElementInfo) -> bool {
-    e.role == "button"
 }
 
 /// Risk implied by the fields of a form: payment fields mean money, password fields mean
