@@ -393,6 +393,7 @@ jobs:
         items: ${{ fromJSON(inputs.scale_items || '[250000, 500000]') }}
     env:
       BEFORE_REF: ${{ inputs.before_ref || '' }}
+      ITEMS: ${{ matrix.items }}
       RESULTS: ${{ github.workspace }}/scale-results
     steps:
       - uses: actions/checkout@v5
@@ -437,14 +438,17 @@ jobs:
             df -h "$RUNNER_TEMP" | tail -1
           } | tee "$RESULTS/hardware.txt"
 
+      # The bench seeds with this commit's store: a `before_ref` older than its schema cannot
+      # open it. The after run happens regardless.
       - name: Bench scale, nuggetd at ${{ env.BEFORE_REF }}
         if: env.BEFORE_REF != ''
+        continue-on-error: true
         shell: bash
         env:
           NUGGET_BENCH_NUGGETD: ${{ runner.temp }}/before-target/release/nuggetd
         run: |
           target/release/nugget-bench perf --backend real --scale full --perf-phases daemon \
-            --perf-items "${{ matrix.items }}" --perf-sizes mail --out-dir "$RESULTS/before"
+            --perf-items "$ITEMS" --perf-sizes mail --out-dir "$RESULTS/before"
 
       - name: Bench scale
         shell: bash
@@ -452,7 +456,7 @@ jobs:
           NUGGET_BENCH_NUGGETD: ${{ github.workspace }}/target/release/nuggetd
         run: |
           target/release/nugget-bench perf --backend real --scale full --perf-phases daemon \
-            --perf-items "${{ matrix.items }}" --perf-sizes mail --out-dir "$RESULTS/after"
+            --perf-items "$ITEMS" --perf-sizes mail --out-dir "$RESULTS/after"
 
       - name: Validate bench reports against the schema
         shell: bash

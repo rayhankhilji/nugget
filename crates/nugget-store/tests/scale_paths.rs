@@ -188,25 +188,31 @@ fn items_page_walks_a_source_in_key_order() {
     let src = SourceId::new("files:a");
     let mut keys = Vec::new();
     let mut after: Option<ItemKey> = None;
+    let mut pages = 0;
     loop {
-        let page = s.items_page(&src, after.as_ref(), 5).unwrap();
+        let (page, next) = s.items_page(&src, after.as_ref(), 5).unwrap();
+        pages += 1;
         assert!(page.len() <= 5);
         keys.extend(page.iter().map(|it| it.item.key.as_str().to_owned()));
         assert!(
             page.iter()
                 .all(|it| it.text.as_deref().is_some_and(|t| t.starts_with("text")))
         );
-        match page.last() {
-            Some(last) if page.len() == 5 => after = Some(last.item.key.clone()),
-            _ => break,
+        // Deleting an item of the next page mid-walk shortens that page, not the walk.
+        if pages == 1 {
+            assert!(s.delete_item(&iref("files:a", "k06")).unwrap());
+        }
+        match next {
+            Some(k) => after = Some(k),
+            None => break,
         }
     }
-    let want: Vec<String> = (0..23).map(|i| format!("k{i:02}")).collect();
+    let want: Vec<String> = (0..23)
+        .filter(|i| *i != 6)
+        .map(|i| format!("k{i:02}"))
+        .collect();
     assert_eq!(keys, want);
-    assert!(s.items_page(&src, None, 0).unwrap().is_empty());
-    assert!(
-        s.items_page(&SourceId::new("nope"), None, 5)
-            .unwrap()
-            .is_empty()
-    );
+    assert!(s.items_page(&src, None, 0).unwrap().0.is_empty());
+    let (none, next) = s.items_page(&SourceId::new("nope"), None, 5).unwrap();
+    assert!(none.is_empty() && next.is_none());
 }

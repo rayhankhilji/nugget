@@ -139,14 +139,19 @@ pub enum OpenCheck {
 ///
 /// `PRAGMA quick_check` reads and decrypts every page: ~5 s per GB, so 10–20 s at startup for
 /// a 500k-item store. It runs here, before opening, only when damage is likely: the last
-/// handle on the file did not close cleanly (a crash or a kill left its owner lock file behind)
-/// or a background check found damage. Otherwise every cheap check still runs (header, whole
+/// handle on the file did not close cleanly with [`Store::close_cleanly`] (its write-ahead log
+/// is not empty, or a crash or a kill left its owner lock file behind) or a background check
+/// found damage. Otherwise every cheap check still runs (header, whole
 /// pages, the WAL scan, decrypting the first page with `key`), and the full check is left to
 /// [`check_file_in_background`] (at most once per [`BACKGROUND_CHECK_INTERVAL`]), whose
 /// failure makes the next open check in full (and so refuse a damaged file).
 pub fn check_file_on_open(path: &Path, key: &StoreKey) -> Result<(FileHealth, OpenCheck)> {
-    let suspect =
-        crate::egress::unclean_close_left(path) || sidecar(path, CHECK_FAILED_SUFFIX).exists();
+    // Evidence of an exit without `Store::close_cleanly`: a write-ahead log with content (SQLite
+    // syncs the log itself, so unlike the lock file this survives a power cut; a clean close
+    // truncates it), or a lock file left behind.
+    let suspect = non_empty(&sidecar(path, "-wal"))
+        || crate::egress::unclean_close_left(path)
+        || sidecar(path, CHECK_FAILED_SUFFIX).exists();
     if suspect {
         let health = check_file(path, key, false)?;
         if health == FileHealth::Healthy {
@@ -204,6 +209,15 @@ pub fn check_file_in_background(
     Ok(Some(health))
 }
 
+/// Write `bytes` to `path`, readable by its owner only (as the database itself).
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    std::io::Write::write_all(&mut opts.open(path)?, bytes)
+}
+
 /// When SQLite's full check last passed, if recorded.
 fn last_check(path: &Path) -> Option<SystemTime> {
     let text = fs::read_to_string(sidecar(path, CHECKED_SUFFIX)).ok()?;
@@ -220,13 +234,15 @@ fn record_check(path: &Path, healthy: bool) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        fs::write(&checked, now.to_string()).and_then(|()| match fs::remove_file(&failed) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
+        write_private(&checked, now.to_string().as_bytes()).and_then(|()| {
+            match fs::remove_file(&failed) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            }
         })
     } else {
         let _ = fs::remove_file(&checked);
-        fs::write(&failed, b"damage found by the background check\n")
+        write_private(&failed, b"damage found by the background check\n")
     };
     if let Err(e) = result {
         tracing::warn!(db = %path.display(), error = %e, "cannot record the store check");
@@ -1218,9 +1234,14 @@ mod tests {
         );
         fs::remove_file(&stale).unwrap();
 
-        // A held lock (a live handle elsewhere) is not a crash.
+        // A held lock (a live handle elsewhere) is not a crash...
         let held = Store::open(&path, &key()).unwrap();
         assert!(!crate::egress::unclean_close_left(&path));
+        // ...but a write-ahead log with content is what an exit without a clean close leaves
+        // (and, unlike a lock file, it survives a power cut): full check.
+        populate(&held, 5);
+        assert!(non_empty(&sidecar(&path, "-wal")));
+        assert_eq!(check_file_on_open(&path, &key()).unwrap().1, OpenCheck::Ran);
         drop(held);
     }
 

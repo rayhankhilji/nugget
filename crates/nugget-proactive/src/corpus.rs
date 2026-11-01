@@ -257,13 +257,13 @@ impl Corpus {
             }
             let mut after = None;
             loop {
-                let page = store.items_page(&sc.source, after.as_ref(), PAGE)?;
+                let (page, next) = store.items_page(&sc.source, after.as_ref(), PAGE)?;
                 for it in &page {
                     parts.push(it, cfg);
                 }
-                match page.last() {
-                    Some(last) if page.len() == PAGE => after = Some(last.item.key.clone()),
-                    _ => break,
+                match next {
+                    Some(key) => after = Some(key),
+                    None => break,
                 }
             }
         }

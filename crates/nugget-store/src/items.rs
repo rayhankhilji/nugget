@@ -687,18 +687,21 @@ impl Store {
     }
 
     /// Items of `source` in key order, starting after `after` (exclusive; `None` from the
-    /// start), at most `limit`: for walking a whole source in pages without holding it in
-    /// memory. Each page costs one key query on the `(source, key)` index and one
-    /// [`Self::get_items`] batch, instead of a query per item. Items written or deleted between
-    /// pages may or may not be seen (keyset paging never repeats or skips the others).
+    /// start), at most `limit`, and the key to pass as `after` for the next page (`None` once
+    /// the source is done): for walking a whole source in pages without holding it in memory.
+    /// Each page costs one key query on the `(source, key)` index and one [`Self::get_items`]
+    /// batch, instead of a query per item. Items written or deleted while walking may or may
+    /// not be seen (keyset paging never repeats or skips the others); a page can hold fewer
+    /// than `limit` items when some were deleted between its two reads, so go by the cursor,
+    /// not the page's length.
     pub fn items_page(
         &self,
         source: &SourceId,
         after: Option<&ItemKey>,
         limit: usize,
-    ) -> Result<Vec<Item>> {
+    ) -> Result<(Vec<Item>, Option<ItemKey>)> {
         if limit == 0 {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), after.cloned()));
         }
         let lim = limit.min(i64::MAX as usize) as i64;
         let keys: Vec<String> = self.with_read_conn(|c| {
@@ -714,6 +717,9 @@ impl Store {
                 .db("query items_page")?;
             rows.collect::<rusqlite::Result<_>>().db("read items_page")
         })?;
+        let next = (keys.len() >= limit)
+            .then(|| keys.last().map(|k| ItemKey::new(k.clone())))
+            .flatten();
         let refs: Vec<ItemRef> = keys
             .into_iter()
             .map(|k| ItemRef {
@@ -722,7 +728,8 @@ impl Store {
             })
             .collect();
         // An item deleted between the two reads is left out.
-        Ok(self.get_items(&refs)?.into_iter().flatten().collect())
+        let items = self.get_items(&refs)?.into_iter().flatten().collect();
+        Ok((items, next))
     }
 
     /// Delete an item with its chunks, full-text entries and vectors. Returns whether it existed.

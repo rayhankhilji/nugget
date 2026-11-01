@@ -490,21 +490,21 @@ fn mark_interrupted(db: &Db, path: Option<&Path>, me: &str) -> Result<()> {
     Ok(())
 }
 
-/// Whether a handle on the database at `db` ended without closing: a lock file is left beside
-/// it whose owner is gone (a crash or a kill leaves its file behind; a clean close removes it).
-/// Read-only: unlike opening a store, this removes nothing. When in doubt (an I/O error), the
-/// owner counts as alive.
+/// Whether a handle on the database at `db` may have ended without closing: a lock file is
+/// left beside it whose owner is gone (a crash or a kill leaves its file behind; a clean close
+/// removes it). Read-only: unlike opening a store, this removes nothing. When in doubt (the
+/// directory or a lock file cannot be read), yes: the cost is one slower start.
 pub(crate) fn unclean_close_left(db: &Path) -> bool {
     let (Some(dir), Some(name)) = (db.parent(), db.file_name()) else {
-        return false;
+        return true;
     };
     let mut prefix = name.to_owned();
     prefix.push(LOCK_INFIX);
     let Some(prefix) = prefix.to_str().map(str::to_owned) else {
-        return false;
+        return true;
     };
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return false;
+        return true;
     };
     entries.flatten().any(|entry| {
         let file_name = entry.file_name();
@@ -513,22 +513,27 @@ pub(crate) fn unclean_close_left(db: &Path) -> bool {
             .and_then(|n| n.strip_prefix(&prefix))
             .and_then(|n| n.strip_suffix(LOCK_SUFFIX))
             .is_some_and(valid_owner);
-        owned && !lock_held(&entry.path())
+        owned && lock_left_behind(&entry.path())
     })
 }
 
-/// Whether someone holds the lock on `path` (no side effects; an I/O error reads as held).
-fn lock_held(path: &Path) -> bool {
+/// Whether the lock file at `path` was left behind by an owner that is gone: it exists and
+/// nobody holds its lock. No side effects. An I/O error (a file another user owns, a Windows
+/// delete-pending file) counts as left behind.
+fn lock_left_behind(path: &Path) -> bool {
     let file = match OpenOptions::new().write(true).open(path) {
         Ok(f) => f,
-        Err(e) => return e.kind() != ErrorKind::NotFound,
+        // Removed meanwhile: its owner closed cleanly.
+        Err(e) if e.kind() == ErrorKind::NotFound => return false,
+        Err(_) => return true,
     };
     match fs4::FileExt::try_lock(&file) {
         Ok(()) => {
             let _ = fs4::FileExt::unlock(&file);
-            false
+            true
         }
-        Err(_) => true,
+        Err(fs4::TryLockError::WouldBlock) => false,
+        Err(fs4::TryLockError::Error(_)) => true,
     }
 }
 
