@@ -98,9 +98,9 @@ def schema_list(n, topics):
 
 
 VARIANTS = {
-    "A": dict(prompt=PROMPT_A, schema=lambda n: schema_bools(n, TOPICS_A), safe=SAFE_A, per_doc=64),
-    "B": dict(prompt=PROMPT_B, schema=lambda n: schema_bools(n, TOPICS_B), safe=SAFE_B, per_doc=64),
-    "C": dict(prompt=PROMPT_C, schema=lambda n: schema_list(n, TOPICS_B), safe=SAFE_B, per_doc=40),
+    "A": dict(prompt=PROMPT_A, schema=lambda n: schema_bools(n, TOPICS_A), safe=SAFE_A, per_doc=96),
+    "B": dict(prompt=PROMPT_B, schema=lambda n: schema_bools(n, TOPICS_B), safe=SAFE_B, per_doc=96),
+    "C": dict(prompt=PROMPT_C, schema=lambda n: schema_list(n, TOPICS_B), safe=SAFE_B, per_doc=96),
 }
 
 
@@ -155,7 +155,7 @@ def main():
     results = {}
     for name in a.variants.split(","):
         v = VARIANTS[name]
-        rows, tokens, prompt_tokens, wall, failures = [], 0, 0, 0.0, 0
+        rows, tokens, prompt_tokens, wall, failures, max_out = [], 0, 0, 0.0, 0, 0
         for b in batches:
             docs = [read_mail(os.path.join(a.corpus, r["path"])) for r in b]
             body = {"messages": [{"role": "system", "content": v["prompt"]},
@@ -174,6 +174,7 @@ def main():
             wall += time.time() - t
             usage = resp.get("usage") or {}
             tokens += usage.get("completion_tokens", 0)
+            max_out = max(max_out, usage.get("completion_tokens", 0))
             prompt_tokens += usage.get("prompt_tokens", 0)
             text = resp["choices"][0]["message"].get("content") or ""
             try:
@@ -205,14 +206,15 @@ def main():
             "normal_junk": rate("normal", "junk"),
             "planted_junk_junk": rate("junk", "junk"),
             "planted_sensitive_junk": rate("sensitive", "junk"),
-            "output_tokens": tokens, "prompt_tokens": prompt_tokens, "wall_s": round(wall, 1),
+            "output_tokens": tokens, "output_tokens_per_doc": round(tokens / max(1, len(rows)), 1),
+            "max_batch_output_tokens": max_out, "prompt_tokens": prompt_tokens, "wall_s": round(wall, 1),
             "failed_batches": failures, "rows": rows,
         }
     json.dump({"batches": len(batches), "sample": len(sample), "variants": results},
               open(os.path.join(a.out, "prompts.json"), "w"), indent=1, ensure_ascii=False)
     keys = ["planted_sensitive", "planted_sensitive_no_topic_gate", "normal_sensitive",
             "normal_sensitive_no_topic_gate", "normal_junk", "planted_junk_junk", "planted_sensitive_junk",
-            "output_tokens", "prompt_tokens", "wall_s", "failed_batches"]
+            "output_tokens", "output_tokens_per_doc", "max_batch_output_tokens", "prompt_tokens", "wall_s", "failed_batches"]
     lines = [f"# Triage prompt variants ({len(sample)} mails, {len(batches)} batches)", "",
              "| metric | " + " | ".join(results) + " |", "|---|" + "---|" * len(results)]
     for k in keys:
