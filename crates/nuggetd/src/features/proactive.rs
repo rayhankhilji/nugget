@@ -583,7 +583,8 @@ impl Core {
         match out {
             Ok(ExecOutcome::Executed(id)) => {
                 let artifact = self.exec.artifact(&entry.prepared.action, &id);
-                let mut result = convert::outcome(ExecOutcome::Executed(id));
+                let mut result =
+                    convert::outcome(ExecOutcome::Executed(id), &entry.prepared.action);
                 result.artifact = artifact;
                 let open = self.open_count().await.unwrap_or(0);
                 self.announce(&self.changed("execute", open, 0, 1));
@@ -591,8 +592,9 @@ impl Core {
             }
             Ok(other) => {
                 // Needs confirmation, denied or halted: the same preview may be retried.
+                let result = convert::outcome(other, &entry.prepared.action);
                 self.previews().put_back(entry);
-                Ok(convert::outcome(other))
+                Ok(result)
             }
             Err(e) => {
                 self.previews().put_back(entry);
@@ -1089,6 +1091,8 @@ mod tests {
             kind: CandidateKind::FollowUp,
             title: format!("Card {id}"),
             detail: "detail".into(),
+            title_text: None,
+            detail_text: None,
             evidence: Vec::new(),
             people: vec!["ana@example.com".into()],
             due: None,

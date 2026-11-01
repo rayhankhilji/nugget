@@ -1794,6 +1794,34 @@ pub mod proactive_notification {
     pub const REMINDER_DUE: &str = "reminder.due";
 }
 
+/// Text the app writes in the user's language: a message key (`unanswered.title`,
+/// `action.reminder`, ...) and its arguments. Dates are ISO strings (`YYYY-MM-DD`, or RFC 3339
+/// for a time), counts and amounts numbers (an amount comes with its ISO 4217 `currency`); the
+/// app formats them for the locale. Names, subjects and quotes are untrusted source text. A key
+/// the app does not know falls back to the English text sent beside it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalText {
+    pub key: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub args: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl LocalText {
+    pub fn new(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            args: Default::default(),
+        }
+    }
+
+    /// Add an argument.
+    #[must_use]
+    pub fn arg(mut self, name: &str, value: impl Into<serde_json::Value>) -> Self {
+        self.args.insert(name.to_owned(), value.into());
+        self
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CardsListRequest {
     /// Also return snoozed, accepted and closed cards (default: the open inbox only).
@@ -1841,6 +1869,9 @@ pub struct CardActionView {
     pub kind: String,
     /// Short label, e.g. "Draft a reply to Ana".
     pub label: String,
+    /// `label` for the app to localise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_text: Option<LocalText>,
     /// Declared risk: `observe`, `edit`, `send`, `destroy`, `spend`, `security`.
     pub risk: String,
     /// Whether an executor is configured for it (e.g. archiving needs a connector that can).
@@ -1854,6 +1885,12 @@ pub struct CardView {
     pub kind: String,
     pub title: String,
     pub detail: String,
+    /// `title` for the app to localise (the English `title` is the fallback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_text: Option<LocalText>,
+    /// `detail` for the app to localise; unset when the detail is quoted source text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_text: Option<LocalText>,
     /// The judge's one-line summary, when it ran.
     #[serde(default)]
     pub summary: Option<String>,
@@ -1980,6 +2017,9 @@ pub struct CardPreview {
     pub action: u32,
     pub kind: String,
     pub summary: String,
+    /// `summary` for the app to localise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<LocalText>,
     pub risk: String,
     /// Where the change lands, e.g. `mail:drafts`, `calendar`, `vault`.
     pub target: String,
@@ -2024,6 +2064,9 @@ pub struct CardExecuteResult {
     /// The executor's result id, or the policy's reason.
     #[serde(default)]
     pub detail: Option<String>,
+    /// For `needs_confirmation`: what to ask, for the app to localise (`detail` is the English).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_text: Option<LocalText>,
     #[serde(default)]
     pub artifact: Option<ActionArtifact>,
 }
@@ -2034,6 +2077,12 @@ pub struct BriefCardView {
     pub kind: String,
     pub title: String,
     pub summary: String,
+    /// See [`CardView::title_text`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_text: Option<LocalText>,
+    /// `summary` for the app to localise; unset for the judge's summary or quoted source text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_text: Option<LocalText>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub due: Option<time::OffsetDateTime>,
     pub rank: f64,

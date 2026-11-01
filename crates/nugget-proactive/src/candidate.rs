@@ -1,6 +1,7 @@
 //! Candidates: what the deterministic generators found, before scoring and storage.
 
 use nugget_core::ids::ItemRef;
+pub use nugget_core::ipc::LocalText;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -147,6 +148,12 @@ pub struct Candidate {
     pub title: String,
     /// One or two sentences of detail.
     pub detail: String,
+    /// `title` for the app to localise (`title` is the English fallback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_text: Option<LocalText>,
+    /// `detail` for the app to localise; unset when the detail is quoted source text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_text: Option<LocalText>,
     pub evidence: Vec<EvidenceRef>,
     /// The people involved (addresses or names).
     pub people: Vec<String>,

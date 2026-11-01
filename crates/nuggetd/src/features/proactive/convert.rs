@@ -2,8 +2,8 @@
 
 use nugget_core::ipc::{
     BriefCardView, BriefMeetingView, BriefView, CardActionView, CardEvidence, CardExecuteResult,
-    CardFactor, CardLearned, CardPreview, CardView, KindMetricsView, LearnedView, PreviewLine,
-    ProactiveMetrics, ResetLearningRequest,
+    CardFactor, CardLearned, CardPreview, CardView, KindMetricsView, LearnedView, LocalText,
+    PreviewLine, ProactiveMetrics, ResetLearningRequest,
 };
 use nugget_core::{Error, Result};
 use nugget_proactive::actions::risk_name;
@@ -36,6 +36,7 @@ pub(crate) fn action_view(index: usize, a: &Action, supported: bool) -> CardActi
         index: u32::try_from(index).unwrap_or(u32::MAX),
         kind: a.name().to_owned(),
         label: a.preview().summary,
+        label_text: Some(a.summary_text()),
         risk: risk_name(a.risk()).to_owned(),
         supported,
     }
@@ -48,6 +49,8 @@ pub(crate) fn card_view(c: &Card, supports: &dyn Fn(&Action) -> bool) -> CardVie
         kind: c.kind.as_str().to_owned(),
         title: c.title.clone(),
         detail: c.detail.clone(),
+        title_text: c.title_text.clone(),
+        detail_text: c.detail_text.clone(),
         summary: c.enrichment.as_ref().map(|e| e.summary.clone()),
         people: c.people.clone(),
         due: c.due,
@@ -152,6 +155,7 @@ pub(crate) fn preview(p: &PreparedAction, action: u32) -> CardPreview {
         action,
         kind: p.action.name().to_owned(),
         summary: p.preview.summary.clone(),
+        summary_text: Some(p.action.summary_text()),
         risk: risk_name(p.preview.risk).to_owned(),
         target: p.preview.target.clone(),
         diff: p
@@ -167,7 +171,19 @@ pub(crate) fn preview(p: &PreparedAction, action: u32) -> CardPreview {
     }
 }
 
-pub(crate) fn outcome(o: ExecOutcome) -> CardExecuteResult {
+/// `action` is the one that ran, for a localisable confirmation question.
+pub(crate) fn outcome(o: ExecOutcome, action: &Action) -> CardExecuteResult {
+    let detail_text = match &o {
+        ExecOutcome::NeedsConfirmation(r) => Some(
+            action
+                .confirmation_text()
+                .filter(|_| action.requires_confirmation() == Some(r.as_str()))
+                .unwrap_or_else(|| {
+                    LocalText::new("confirm.risk").arg("risk", risk_name(action.risk()))
+                }),
+        ),
+        _ => None,
+    };
     let (outcome, detail) = match o {
         ExecOutcome::Executed(id) => ("executed", Some(id)),
         ExecOutcome::NeedsConfirmation(r) => ("needs_confirmation", Some(r)),
@@ -177,6 +193,7 @@ pub(crate) fn outcome(o: ExecOutcome) -> CardExecuteResult {
     CardExecuteResult {
         outcome: outcome.to_owned(),
         detail,
+        detail_text,
         artifact: None,
     }
 }
@@ -204,6 +221,8 @@ fn brief_card(c: &BriefCard) -> BriefCardView {
         kind: c.kind.as_str().to_owned(),
         title: c.title.clone(),
         summary: c.summary.clone(),
+        title_text: c.title_text.clone(),
+        summary_text: c.summary_text.clone(),
         due: c.due,
         rank: c.rank,
         factors: c.factors.iter().map(factor).collect(),

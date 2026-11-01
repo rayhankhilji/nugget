@@ -121,6 +121,45 @@ async fn state_machine() {
     assert!(p.snooze(&fu.id, now() - Duration::hours(1), now()).is_err());
 }
 
+/// GG7-6: the app localises card and action text from a key and raw arguments (ISO dates, a
+/// number with its currency); cards stored before the fields existed still load.
+#[tokio::test]
+async fn card_and_action_text_is_structured_for_the_app() {
+    let (_f, p) = refreshed().await;
+    let renewal = p.all_cards().unwrap();
+    let renewal = renewal
+        .into_iter()
+        .find(|c| c.title.starts_with("Cloudy Billing renews"))
+        .unwrap();
+    let text = serde_json::to_value(&renewal.title_text).unwrap();
+    assert_eq!(
+        text,
+        serde_json::json!({ "key": "renewal.renews_amount", "args": {
+            "vendor": "Cloudy Billing", "due": "2026-11-02", "amount": 49.0, "currency": "USD" } })
+    );
+    assert_eq!(renewal.detail_text.as_ref().unwrap().key, "renewal.detail");
+    let reminder = renewal
+        .actions
+        .iter()
+        .find(|a| a.name() == "reminder")
+        .unwrap();
+    let label = reminder.summary_text();
+    assert_eq!(label.key, "action.reminder");
+    let Action::Reminder(r) = reminder else {
+        unreachable!()
+    };
+    let at =
+        r.at.format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+    assert_eq!(label.args["at"], at.as_str());
+
+    let mut old = serde_json::to_value(&renewal).unwrap();
+    old.as_object_mut().unwrap().remove("title_text");
+    old.as_object_mut().unwrap().remove("detail_text");
+    let old: Card = serde_json::from_value(old).unwrap();
+    assert_eq!((old.title_text, old.title), (None, renewal.title));
+}
+
 // ---- scoring and metrics ----
 
 #[tokio::test]

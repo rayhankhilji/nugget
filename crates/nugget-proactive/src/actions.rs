@@ -21,6 +21,7 @@ use sha2::Sha256;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use crate::candidate::LocalText;
 use crate::text::truncate;
 
 /// Draft a reply for the user to copy or open in their mail app. Never sends, and nothing is
@@ -205,6 +206,30 @@ impl Action {
             ),
             _ => None,
         }
+    }
+
+    /// [`ActionPreview::summary`] for the app to localise (`at` as RFC 3339, formatted by the
+    /// app).
+    pub fn summary_text(&self) -> LocalText {
+        match self {
+            Self::DraftReply(d) => LocalText::new("action.draft_reply").arg("to", d.to.join(", ")),
+            Self::CreateEvent(e) => {
+                LocalText::new("action.create_event").arg("title", e.title.as_str())
+            }
+            Self::Reminder(r) => LocalText::new("action.reminder").arg("at", fmt_time(r.at)),
+            Self::ArchiveThread(a) => {
+                LocalText::new("action.archive_thread").arg("subject", a.subject.as_str())
+            }
+            Self::ResearchNote(n) => {
+                LocalText::new("action.research_note").arg("title", n.title.as_str())
+            }
+        }
+    }
+
+    /// [`Action::requires_confirmation`] for the app to localise.
+    pub fn confirmation_text(&self) -> Option<LocalText> {
+        self.requires_confirmation()
+            .map(|_| LocalText::new(format!("confirm.{}", self.name())))
     }
 
     fn target(&self) -> (&'static str, &'static str) {

@@ -13,7 +13,9 @@ use serde_json::Value;
 use time::{Duration, OffsetDateTime, PrimitiveDateTime, Time};
 
 use crate::actions::{Action, ArchiveThread, CreateEvent, DraftReply, Reminder, ResearchNote};
-use crate::candidate::{Candidate, CandidateKind, EvidenceRef, Features, freshness, urgency};
+use crate::candidate::{
+    Candidate, CandidateKind, EvidenceRef, Features, LocalText, freshness, urgency,
+};
 use crate::config::{PUBLIC_MAIL_DOMAINS, ProactiveConfig};
 use crate::corpus::{CalEvent, Corpus, MailMessage, NoteDoc};
 use crate::text::{
@@ -199,6 +201,16 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 from.display(),
                 days,
                 if days == 1 { "" } else { "s" }
+            ),
+            title_text: Some(
+                LocalText::new("unanswered.title")
+                    .arg("who", from.display())
+                    .arg("subject", last.subject.as_str()),
+            ),
+            detail_text: Some(
+                LocalText::new("unanswered.detail")
+                    .arg("who", from.display())
+                    .arg("days", days),
             ),
             evidence: evidence_list,
             people: vec![from.email.clone()],
@@ -437,6 +449,20 @@ fn commitment_candidate(
         (_, false, Some(w)) => format!("Due {w}: {name}"),
         (_, _, None) => format!("You committed to: {name}"),
     };
+    let mut title_text = LocalText::new(match (owner, overdue, &when) {
+        (Owner::Them(_), _, Some(_)) => "commitment.waiting_due",
+        (Owner::Them(_), _, None) => "commitment.waiting",
+        (_, true, Some(_)) => "commitment.overdue",
+        (_, false, Some(_)) => "commitment.due",
+        (_, _, None) => "commitment.mine",
+    })
+    .arg("what", name);
+    if let Owner::Them(who) = owner {
+        title_text = title_text.arg("who", who.as_str());
+    }
+    if let Some(w) = &when {
+        title_text = title_text.arg("due", w.as_str());
+    }
     let evidence = claim_evidence(claims, ctx.corpus);
     let sensitive = evidence.iter().any(|ev| {
         ctx.corpus
@@ -470,6 +496,9 @@ fn commitment_candidate(
         dedup_key: format!("commitment:{}", stable_hash(&[id])),
         kind: CandidateKind::Commitment,
         title,
+        title_text: Some(title_text),
+        // The claim's own words.
+        detail_text: None,
         detail: claims
             .first()
             .map(|c| truncate(&c.text, QUOTE_CHARS))
@@ -585,6 +614,17 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 if threads.len() == 1 { "" } else { "s" },
                 notes.len(),
                 if notes.len() == 1 { "" } else { "s" },
+            ),
+            title_text: Some(
+                LocalText::new("meeting.title")
+                    .arg("event", ev.title.as_str())
+                    .arg("hours", hours),
+            ),
+            detail_text: Some(
+                LocalText::new("meeting.detail")
+                    .arg("people", names.join(", "))
+                    .arg("threads", threads.len())
+                    .arg("notes", notes.len()),
             ),
             evidence,
             people: external.clone(),
@@ -1018,6 +1058,19 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
         } else {
             format!("{vendor} renews {date}{money}")
         };
+        let mut title_text = LocalText::new(match (trial, amount.is_some()) {
+            (true, true) => "renewal.trial_amount",
+            (true, false) => "renewal.trial",
+            (false, true) => "renewal.renews_amount",
+            (false, false) => "renewal.renews",
+        })
+        .arg("vendor", vendor.as_str())
+        .arg("due", date.to_string());
+        if let Some(a) = &amount {
+            title_text = title_text
+                .arg("amount", a.minor as f64 / 100.0)
+                .arg("currency", a.currency.as_str());
+        }
         let quote = key_sents.first().map(|s| truncate(s, QUOTE_CHARS));
         let remind = (at - Duration::days(1)).max(ctx.now + Duration::hours(1));
         let cand = Candidate {
@@ -1029,6 +1082,12 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
             } else {
                 "Keep it, or cancel before the charge.".into()
             },
+            title_text: Some(title_text),
+            detail_text: Some(LocalText::new(if trial {
+                "renewal.trial_detail"
+            } else {
+                "renewal.detail"
+            })),
             evidence: vec![evidence(m, quote)],
             people: vec![from.email.clone()],
             due: Some(at),
@@ -1140,6 +1199,20 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
             kind: CandidateKind::FollowUp,
             title: format!("You told {who}: \"{}\"", truncate(promise, 80)),
             detail: format!("In \"{}\" on {}.", m.subject, m.date.date()),
+            title_text: Some(
+                LocalText::new(if recipients.is_empty() {
+                    "follow_up.title_someone"
+                } else {
+                    "follow_up.title"
+                })
+                .arg("who", who.as_str())
+                .arg("promise", truncate(promise, 80)),
+            ),
+            detail_text: Some(
+                LocalText::new("follow_up.detail")
+                    .arg("subject", m.subject.as_str())
+                    .arg("date", m.date.date().to_string()),
+            ),
             evidence: vec![evidence(m, Some(quote))],
             people: recipients.clone(),
             due,
@@ -1209,6 +1282,12 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
             kind: CandidateKind::FollowUp,
             title: format!("No answer from {who}: {}", last.subject),
             detail: format!("You asked {days} days ago and haven't heard back."),
+            title_text: Some(
+                LocalText::new("awaiting.title")
+                    .arg("who", who.as_str())
+                    .arg("subject", last.subject.as_str()),
+            ),
+            detail_text: Some(LocalText::new("awaiting.detail").arg("days", days)),
             evidence: vec![evidence(last, quote)],
             people: emails.clone(),
             due: None,
@@ -1324,6 +1403,19 @@ fn todo_candidate(
             Some(t) => format!("From your note \"{t}\"."),
             None => "From your notes.".into(),
         },
+        title_text: Some(
+            LocalText::new(if left < 0 {
+                "commitment.overdue"
+            } else {
+                "commitment.due"
+            })
+            .arg("what", what.as_str())
+            .arg("due", when.to_string()),
+        ),
+        detail_text: Some(match &n.title {
+            Some(t) => LocalText::new("todo.note").arg("note", t.as_str()),
+            None => LocalText::new("todo.notes"),
+        }),
         evidence: vec![EvidenceRef {
             item: n.item.clone(),
             quote: Some(truncate(task, QUOTE_CHARS)),
