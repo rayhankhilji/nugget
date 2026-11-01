@@ -405,9 +405,12 @@ export async function keyboardScenario({ browser }) {
       // The corpus has an unanswered mail thread; compute cards now rather than on the schedule.
       await rpc(daemon.socket, "proactive.refresh", {});
       const { cards } = await rpc(daemon.socket, "cards.list", {});
-      const card = cards.find((c) => c.actions.some((a) => a.supported));
-      expect(card, `no Today card with a supported action after proactive.refresh: ${JSON.stringify(cards.map((c) => c.title))}`);
-      const action = card.actions.find((a) => a.supported);
+      // A reply draft: the Safety rule below covers mail drafts (meeting prep cards come first and
+      // offer a research note instead).
+      const isDraft = (a) => a.supported && a.kind === "draft_reply";
+      const card = cards.find((c) => c.actions.some(isDraft));
+      expect(card, `no Today card with a supported reply draft after proactive.refresh: ${JSON.stringify(cards.map((c) => c.title))}`);
+      const action = card.actions.find(isDraft);
       // Drafting a reply is allowed by default; a Safety rule makes the policy ask first, so the
       // flow goes through the dialog's confirmation as well as its Approve.
       const policy = await rpc(daemon.socket, "policy.get");
