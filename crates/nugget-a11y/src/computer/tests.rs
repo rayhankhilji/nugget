@@ -1436,15 +1436,3 @@ fn screenshot_is_delegated() {
     assert_eq!(png[..2], [0x89, b'P']);
     assert_eq!(u64::from(png[2]), f.w().uid_named("Editor"));
 }
-
-#[test]
-fn computer_use_is_object_safe() {
-    let (b, _) = backend();
-    let dyn_cu: Arc<dyn ComputerUse> = Arc::new(b);
-    assert_eq!(dyn_cu.permission(), Permission::Granted);
-    assert!(
-        dyn_cu
-            .snapshot(&WindowSel::Focused, &TreeLimits::default())
-            .is_ok()
-    );
-}

@@ -451,7 +451,6 @@ pub fn normalize_signoff(text: &str, my_names: &[String]) -> Option<String> {
         .then(|| MY_NAME.to_owned())
     });
     match name {
-        Some(n) if is_closing(prev) && lines.len() >= 3 => Some(format!("{prev}\n{n}")),
         Some(n) if is_closing(prev) => Some(format!("{prev}\n{n}")),
         Some(n) => Some(n),
         None if is_closing(last) => Some(last.to_owned()),

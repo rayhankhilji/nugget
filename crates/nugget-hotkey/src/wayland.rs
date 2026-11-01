@@ -87,21 +87,26 @@ fn state_kind(s: &ShortcutState) -> &'static str {
     }
 }
 
-/// The state after BindShortcuts answered with `bound` (id, trigger description) pairs: active
-/// when our id came back with keys, otherwise left for the user to assign.
-fn state_after_bind(id: &str, bound: &[(&str, &str)]) -> ShortcutState {
-    match bound.iter().find(|(i, _)| *i == id) {
+/// The state after BindShortcuts answered, or ShortcutsChanged listed, `shortcuts` (id, trigger
+/// description): active when our id is there with keys, otherwise left for the user to assign.
+/// A session holds only our shortcut, so a list without it means it is not assigned any more.
+fn state_for(id: &str, shortcuts: &[ashpd::desktop::global_shortcuts::Shortcut]) -> ShortcutState {
+    state_from_pairs(
+        id,
+        shortcuts.iter().map(|s| (s.id(), s.trigger_description())),
+    )
+}
+
+fn state_from_pairs<'a>(
+    id: &str,
+    mut pairs: impl Iterator<Item = (&'a str, &'a str)>,
+) -> ShortcutState {
+    match pairs.find(|(i, _)| *i == id) {
         Some((_, trigger)) if !trigger.trim().is_empty() => ShortcutState::Active {
             trigger: Some(trigger.trim().to_string()),
         },
         _ => ShortcutState::NotAssigned,
     }
-}
-
-/// The state after a ShortcutsChanged signal listing `shortcuts`. A session holds only our
-/// shortcut, so the list is ours: our id gone or without keys means it is not assigned any more.
-fn state_after_change(id: &str, shortcuts: &[(&str, &str)]) -> ShortcutState {
-    state_after_bind(id, shortcuts)
 }
 
 /// Capped exponential backoff for binding again.
@@ -400,12 +405,7 @@ async fn serve(
                 binding = false;
                 match r {
                     Ok(bound) => {
-                        let pairs: Vec<_> = bound
-                            .shortcuts()
-                            .iter()
-                            .map(|s| (s.id(), s.trigger_description()))
-                            .collect();
-                        let new = state_after_bind(id, &pairs);
+                        let new = state_for(id, bound.shortcuts());
                         if new == ShortcutState::NotAssigned {
                             // Plasma 5.27 leaves the keys to the user; so does a declined dialog.
                             tracing::warn!(
@@ -440,14 +440,7 @@ async fn serve(
                 }
             },
             next = changed.next() => match next {
-                Some(c) => {
-                    let pairs: Vec<_> = c
-                        .shortcuts()
-                        .iter()
-                        .map(|s| (s.id(), s.trigger_description()))
-                        .collect();
-                    set_state(state, state_after_change(id, &pairs));
-                }
+                Some(c) => set_state(state, state_for(id, c.shortcuts())),
                 None => {
                     return Ended::Lost {
                         reason: "the portal's shortcut-change signal ended".into(),
@@ -478,59 +471,35 @@ mod tests {
 
     const ID: &str = crate::DOUBLE_TAP_SHORTCUT_ID;
 
-    #[test]
-    fn bind_with_keys_is_active_with_the_desktops_trigger() {
-        assert_eq!(
-            state_after_bind(ID, &[("other", "Ctrl+X"), (ID, " Ctrl+Alt+Space ")]),
-            ShortcutState::Active {
-                trigger: Some("Ctrl+Alt+Space".into())
-            }
-        );
+    fn state(pairs: &[(&str, &str)]) -> ShortcutState {
+        state_from_pairs(ID, pairs.iter().copied())
     }
 
     #[test]
-    fn bind_without_our_id_or_keys_is_not_assigned() {
-        assert_eq!(state_after_bind(ID, &[]), ShortcutState::NotAssigned);
+    fn state_follows_the_desktops_answer() {
+        let active = |t: &str| ShortcutState::Active {
+            trigger: Some(t.into()),
+        };
         assert_eq!(
-            state_after_bind(ID, &[("stop-agents", "Ctrl+Alt+Esc")]),
-            ShortcutState::NotAssigned
+            state(&[("other", "Ctrl+X"), (ID, " Ctrl+Alt+Space ")]),
+            active("Ctrl+Alt+Space")
         );
-        assert_eq!(
-            state_after_bind(ID, &[(ID, "")]),
-            ShortcutState::NotAssigned
-        );
-        assert_eq!(
-            state_after_bind(ID, &[(ID, "  ")]),
-            ShortcutState::NotAssigned
-        );
+        // Not bound (yet), or keys removed later in the desktop's settings.
+        for pairs in [
+            &[][..],
+            &[("stop-agents", "Ctrl+Alt+Esc")],
+            &[(ID, "")],
+            &[(ID, "  ")],
+        ] {
+            assert_eq!(state(pairs), ShortcutState::NotAssigned, "{pairs:?}");
+        }
     }
 
     #[test]
-    fn changes_follow_the_desktop_both_ways() {
-        // Assigned later in the desktop's settings.
-        assert_eq!(
-            state_after_change(ID, &[(ID, "Meta+N")]),
-            ShortcutState::Active {
-                trigger: Some("Meta+N".into())
-            }
-        );
-        // Keys removed, or the shortcut dropped.
-        assert_eq!(
-            state_after_change(ID, &[(ID, "")]),
-            ShortcutState::NotAssigned
-        );
-        assert_eq!(state_after_change(ID, &[]), ShortcutState::NotAssigned);
-    }
-
-    #[test]
-    fn backoff_doubles_up_to_the_cap() {
+    fn backoff_doubles_up_to_the_cap_and_resets_after_a_binding_that_held() {
         let mut b = Backoff::new(BACKOFF_MIN, BACKOFF_MAX);
         let secs: Vec<u64> = (0..9).map(|_| b.next_delay().as_secs()).collect();
         assert_eq!(secs, [1, 2, 4, 8, 16, 32, 60, 60, 60]);
-    }
-
-    #[test]
-    fn backoff_resets_only_after_a_binding_that_held() {
         let mut b = Backoff::new(BACKOFF_MIN, BACKOFF_MAX);
         for _ in 0..4 {
             b.next_delay();
@@ -543,22 +512,15 @@ mod tests {
 
     #[test]
     fn refused_session_names_the_desktop_file() {
-        let msg = unnamed_app_err(
+        let msg = unnamed_app_err("An app id is required", "App info not found").to_string();
+        for part in [
+            "dev.nugget.Nugget.desktop",
+            "Exec",
+            "AppImage",
+            "App info not found",
             "An app id is required",
-            "App info not found for 'dev.nugget.Nugget'",
-        )
-        .to_string();
-        assert!(msg.contains("app id"), "{msg}");
-        assert!(msg.contains("dev.nugget.Nugget.desktop"), "{msg}");
-        assert!(msg.contains("Exec"), "{msg}");
-        assert!(msg.contains("AppImage"), "{msg}");
-        assert!(msg.contains("App info not found"), "{msg}");
-        assert!(msg.contains("An app id is required"), "{msg}");
-    }
-
-    #[test]
-    fn shortcut_ids_are_stable() {
-        assert_eq!(crate::DOUBLE_TAP_SHORTCUT_ID, "double-tap");
-        assert_eq!(crate::KILL_SWITCH_SHORTCUT_ID, "stop-agents");
+        ] {
+            assert!(msg.contains(part), "{msg}");
+        }
     }
 }

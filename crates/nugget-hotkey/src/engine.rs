@@ -108,23 +108,30 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
-    #[test]
-    fn engine_fires_through_the_dispatcher_and_stops_after_drop() {
+    fn counting() -> (Arc<AtomicUsize>, Dispatcher, Engine) {
         let count = Arc::new(AtomicUsize::new(0));
         let c = count.clone();
         let dispatcher = Dispatcher::spawn(Box::new(move || {
             c.fetch_add(1, Ordering::SeqCst);
         }))
         .unwrap();
-        let mut engine = Engine::new(
-            Detector::Tap(TapDetector::new(Modifier::LeftShift, 2_000)),
-            dispatcher.fire_handle(),
-        );
-        let shift = KeyClass::Modifier(Modifier::LeftShift);
-        for _ in 0..2 {
-            engine.key(shift, true);
-            engine.key(shift, false);
-        }
+        let detector = Detector::Tap(TapDetector::new(Modifier::LeftShift, 2_000));
+        let engine = Engine::new(detector, dispatcher.fire_handle());
+        (count, dispatcher, engine)
+    }
+
+    const SHIFT: KeyClass = KeyClass::Modifier(Modifier::LeftShift);
+
+    fn tap(engine: &mut Engine) {
+        engine.key(SHIFT, true);
+        engine.key(SHIFT, false);
+    }
+
+    #[test]
+    fn engine_fires_through_the_dispatcher_and_stops_after_drop() {
+        let (count, dispatcher, mut engine) = counting();
+        tap(&mut engine);
+        tap(&mut engine);
         let deadline = Instant::now() + Duration::from_secs(5);
         while count.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
@@ -132,10 +139,8 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 1);
 
         drop(dispatcher);
-        for _ in 0..2 {
-            engine.key(shift, true);
-            engine.key(shift, false);
-        }
+        tap(&mut engine);
+        tap(&mut engine);
         std::thread::sleep(Duration::from_millis(50));
         assert_eq!(
             count.load(Ordering::SeqCst),
@@ -146,29 +151,15 @@ mod tests {
 
     #[test]
     fn engine_ignores_other_key_releases_but_not_presses() {
-        let count = Arc::new(AtomicUsize::new(0));
-        let c = count.clone();
-        let dispatcher = Dispatcher::spawn(Box::new(move || {
-            c.fetch_add(1, Ordering::SeqCst);
-        }))
-        .unwrap();
-        let mut engine = Engine::new(
-            Detector::Tap(TapDetector::new(Modifier::LeftShift, 2_000)),
-            dispatcher.fire_handle(),
-        );
-        let shift = KeyClass::Modifier(Modifier::LeftShift);
+        let (count, _dispatcher, mut engine) = counting();
         // The release of a key pressed before the first tap does not spoil it...
-        engine.key(shift, true);
-        engine.key(shift, false);
+        tap(&mut engine);
         engine.key(KeyClass::Other, false);
-        engine.key(shift, true);
-        engine.key(shift, false);
+        tap(&mut engine);
         // ...but a press does.
-        engine.key(shift, true);
-        engine.key(shift, false);
+        tap(&mut engine);
         engine.key(KeyClass::Other, true);
-        engine.key(shift, true);
-        engine.key(shift, false);
+        tap(&mut engine);
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }

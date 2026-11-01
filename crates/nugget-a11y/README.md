@@ -65,24 +65,17 @@ without a shell.
 ```sh
 cargo test -p nugget-a11y
 cargo clippy -p nugget-a11y --target aarch64-apple-darwin --all-targets -- -D warnings      # also x86_64-pc-windows-msvc
-cargo test -p nugget-a11y --test apps_matrix -- --ignored --nocapture --test-threads=1     # NUGGET_A11Y_APPS=chrome,gedit
-sudo apt-get install -y xvfb dbus dbus-x11 at-spi2-core python3-gi gir1.2-gtk-3.0
-NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi_computer -- --nocapture
 ```
 
-- Thread fixtures: `tests/fixtures/trees/` (`gtk_recorded_atspi.json`, `web_*` recorded; native
-  chat and mail trees modelled). Record with `Backend::snapshot()` → `Snapshot::to_json()`, redacted.
-- App matrix: `tests/apps_matrix.rs`, fixtures and `PROTOCOL.md` in `tests/fixtures/apps/`,
-  must-pass metrics in `expected.json`; CI `.github/workflows/a11y-apps.yml`. Also
-  `NUGGET_A11Y_MATRIX_OUT`, `NUGGET_A11Y_APPS_RECORD` (trees); `render_matrix.py` renders results.
-- Linux integration tests start Xvfb and a private D-Bus and drive GTK apps in `tests/fixtures/`;
-  set `NUGGET_A11Y_IT_PYTHON` if `python3` lacks PyGObject, `NUGGET_A11Y_RECORD=<dir>` to save trees.
+- Thread fixtures: `tests/fixtures/trees/` (`gtk_recorded_atspi.json` and
+  `web_chrome_windows_mail.json` recorded; the native chat and mail trees modelled). Record with
+  `Backend::snapshot()` → `Snapshot::to_json()`, redacted.
+- Real-OS suites (`linux_wayland`, `macos_ax`, `windows_uia`) run in `real-os.yml`.
 
 ## Known gaps
 
-- App matrix: no Chrome, Edge or Firefox on macOS (couldn't be brought to front); no focused
-  field in Firefox on Windows; Chrome on Linux needs `--force-renderer-accessibility`; Firefox/Linux
-  thread reads vary.
+- Browsers: Chrome on Linux needs `--force-renderer-accessibility`; Chrome, Edge and Firefox on
+  macOS were never measured.
 - Safari normalises pastes to NFC, so verification falls back to counting occurrences; likewise on
   macOS when a selection can't be placed in text-marker editors.
 - LibreOffice exposes only laid-out paragraphs, so long documents may read partially (not checked

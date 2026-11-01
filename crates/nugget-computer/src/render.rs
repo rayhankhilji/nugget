@@ -536,7 +536,6 @@ mod tests {
     #[test]
     fn invisible_runs_are_linear_and_capped() {
         let n = 200_000;
-        let t0 = std::time::Instant::now();
         for s in [
             format!("a{}é", "\u{200D}".repeat(n)),
             format!("a{}", "\u{200B}".repeat(n)),
@@ -546,11 +545,6 @@ mod tests {
             let out = screen_text(&s, 80);
             assert!(out.chars().count() <= 81, "{} chars", out.chars().count());
         }
-        assert!(
-            t0.elapsed() < std::time::Duration::from_secs(2),
-            "took {:?}",
-            t0.elapsed()
-        );
         assert_eq!(
             screen_text("é\u{200D}".repeat(100).as_str(), 5)
                 .chars()

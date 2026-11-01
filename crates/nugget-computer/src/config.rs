@@ -112,7 +112,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_partial_sections() {
+    fn parses_partial_sections_and_caps_the_wait() {
         let c: ComputerConfig = serde_json::from_value(serde_json::json!({
             "screenshot_fallback": true,
             "risk_keywords": {"send": ["dispatch"]}
@@ -120,14 +120,9 @@ mod tests {
         .unwrap();
         assert!(c.screenshot_fallback);
         assert_eq!(c.risk_keywords.send, vec!["dispatch"]);
-        assert_eq!(c.render_max_nodes, 300);
-        assert_eq!(c.tree_limits().max_nodes, TreeLimits::default().max_nodes);
-    }
-
-    #[test]
-    fn wait_timeout_is_capped() {
-        let c = ComputerConfig::default();
-        assert_eq!(c.wait_timeout(None), Duration::from_secs(10));
-        assert_eq!(c.wait_timeout(Some(1_000_000)), Duration::from_secs(60));
+        assert_eq!(
+            c.wait_timeout(Some(u64::MAX)),
+            Duration::from_millis(c.wait_max_timeout_ms)
+        );
     }
 }

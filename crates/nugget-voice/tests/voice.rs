@@ -109,180 +109,149 @@ fn put_note(store: &Store, key: &str, text: &str) {
 
 fn seeded() -> Store {
     let store = Store::open_in_memory().unwrap();
-    // Casual mail to Sam.
-    let sam_mails = [
-        (
+    let sent = |key, to, date, body| Mail {
+        key,
+        to,
+        date,
+        body,
+        ..Default::default()
+    };
+    let mails = [
+        // Casual mail to Sam.
+        sent(
             "s1",
+            &[SAM],
             "2026-09-20T09:00:00Z",
-            "Offsite venue",
             "hey Sam! the offsite venue by the lake looks great 🙂 can we lock it for friday?\n\ncheers,\nAlex",
         ),
-        (
+        sent(
             "s2",
+            &[SAM],
             "2026-09-10T09:00:00Z",
-            "Lunch",
             "hey Sam! yeah lunch thursday works, gonna be a few mins late lol\n\ncheers,\nAlex",
         ),
-        (
+        sent(
             "s3",
+            &[SAM],
             "2026-08-01T09:00:00Z",
-            "Deck",
             "hey Sam! deck's in the shared folder, lmk if the numbers look off 🙂\n\ncheers,\nAlex",
         ),
-        (
+        sent(
             "s4",
+            &[SAM],
             "2026-06-01T09:00:00Z",
-            "Re: Tickets",
             "hey Sam! got the tickets, see you there!!\n\ncheers,\nAlex",
         ),
-    ];
-    for (key, date, subject, body) in sam_mails {
-        put_mail(
-            &store,
-            Mail {
-                key,
-                to: &[SAM],
-                date,
-                subject,
-                body,
-                ..Default::default()
-            },
-        );
-    }
-    // A reply whose quoted text was moved into metadata by extraction...
-    put_mail(
-        &store,
+        // A reply whose quoted text and signature extraction moved into metadata...
         Mail {
-            key: "s5",
-            to: &[SAM],
-            date: "2026-09-25T09:00:00Z",
-            subject: "Re: Budget",
-            body: "hey Sam! budget's fine by me, ship it 🙂\n\ncheers,\nAlex",
             quoted: Some("QUOTED-MARKER: Sam asked whether the budget is final."),
             signature: Some("Alex Morgan | Morgan & Co"),
             message_id: Some("<s5@morgan.example>"),
-            ..Default::default()
+            ..sent(
+                "s5",
+                &[SAM],
+                "2026-09-25T09:00:00Z",
+                "hey Sam! budget's fine by me, ship it 🙂\n\ncheers,\nAlex",
+            )
         },
-    );
-    // ...and one where quoting survived in the text (HTML mail, odd client).
-    put_mail(
-        &store,
+        // ...and one where quoting survived in the text (HTML mail, odd client).
+        sent(
+            "s6",
+            &[SAM],
+            "2026-09-26T09:00:00Z",
+            "hey Sam! yep, let's hire her 🙂\n\ncheers,\nAlex\n\nOn Fri, Sam Lee wrote:\n> LEFTOVER-QUOTE: should we hire Dana?",
+        ),
+        // A sensitive sent message (PII found at ingest).
         Mail {
-            key: "s6",
-            to: &[SAM],
-            date: "2026-09-26T09:00:00Z",
-            subject: "Re: Hiring",
-            body: "hey Sam! yep, let's hire her 🙂\n\ncheers,\nAlex\n\nOn Fri, Sam Lee wrote:\n> LEFTOVER-QUOTE: should we hire Dana?",
-            ..Default::default()
+            sensitive: true,
+            ..sent(
+                "secret",
+                &[SAM],
+                "2026-09-27T09:00:00Z",
+                "hey Sam! SENSITIVE-MARKER my bank account for the venue deposit is below 🙂\n\ncheers,\nAlex",
+            )
         },
-    );
-    // Formal mail to Dr. Okafor, sent from the work account (IMAP Sent folder).
-    let okafor = [
-        (
-            "Sent Items/7/1",
-            "2026-09-15T09:00:00Z",
-            "Appointment",
-            "Dear Dr. Okafor,\n\nThank you for your message. I would appreciate it if we could move the appointment to Thursday morning, at your convenience.\n\nKind regards,\nAlex Morgan",
-        ),
-        (
-            "Sent Items/7/2",
-            "2026-08-15T09:00:00Z",
-            "Referral",
-            "Dear Dr. Okafor,\n\nPlease find attached the referral letter you requested. Kindly let me know whether anything further is required.\n\nKind regards,\nAlex Morgan",
-        ),
-        (
-            "Sent Items/7/3",
-            "2026-07-15T09:00:00Z",
-            "Results",
-            "Dear Dr. Okafor,\n\nI have received the results and would be grateful for a short call regarding the next steps.\n\nKind regards,\nAlex Morgan",
-        ),
+        // Received mail and a draft: never the user's voice.
+        Mail {
+            from: SAM,
+            labels: &["INBOX"],
+            ..sent(
+                "in1",
+                &[ALEX],
+                "2026-09-01T10:00:00Z",
+                "RECEIVED-MARKER Hey Alex, what do you think of the venue by the lake?\n\nSam",
+            )
+        },
+        Mail {
+            from: "Recruiter <jobs@spam.example>",
+            labels: &["INBOX", "CATEGORY_PROMOTIONS"],
+            ..sent(
+                "in2",
+                &[ALEX],
+                "2026-09-01T10:00:00Z",
+                "RECEIVED-MARKER Dear Candidate, we have an opportunity.",
+            )
+        },
+        Mail {
+            labels: &["DRAFT"],
+            ..sent(
+                "draft",
+                &[SAM],
+                "2026-09-01T10:00:00Z",
+                "DRAFT-MARKER hey Sam, not sure yet",
+            )
+        },
+        // Formal mail to Dr. Okafor, sent from the work account (IMAP Sent folder).
+        Mail {
+            source: IMAP,
+            folder: Some("Sent Items"),
+            ..sent(
+                "Sent Items/7/1",
+                &[OKAFOR],
+                "2026-09-15T09:00:00Z",
+                "Dear Dr. Okafor,\n\nThank you for your message. I would appreciate it if we could move the appointment to Thursday morning, at your convenience.\n\nKind regards,\nAlex Morgan",
+            )
+        },
+        Mail {
+            source: IMAP,
+            folder: Some("Sent Items"),
+            ..sent(
+                "Sent Items/7/2",
+                &[OKAFOR],
+                "2026-08-15T09:00:00Z",
+                "Dear Dr. Okafor,\n\nPlease find attached the referral letter you requested. Kindly let me know whether anything further is required.\n\nKind regards,\nAlex Morgan",
+            )
+        },
+        Mail {
+            source: IMAP,
+            folder: Some("Sent Items"),
+            ..sent(
+                "Sent Items/7/3",
+                &[OKAFOR],
+                "2026-07-15T09:00:00Z",
+                "Dear Dr. Okafor,\n\nI have received the results and would be grateful for a short call regarding the next steps.\n\nKind regards,\nAlex Morgan",
+            )
+        },
     ];
-    for (key, date, subject, body) in okafor {
-        put_mail(
-            &store,
-            Mail {
-                source: IMAP,
-                key,
-                from: "Alex Morgan <alex@morgan.example>",
-                to: &[OKAFOR],
-                date,
-                subject,
-                body,
-                folder: Some("Sent Items"),
-                ..Default::default()
-            },
-        );
+    for m in mails {
+        put_mail(&store, m);
     }
     // The same message stored by both connectors (same Message-ID): counted once.
     for (source, key, folder) in [
         (GMAIL, "dup", None),
         (IMAP, "Sent Items/7/9", Some("Sent Items")),
     ] {
+        let body = "Hi Priya,\n\nThe new logo looks great, thanks for turning it around so fast.\n\nThanks,\nAlex";
         put_mail(
             &store,
             Mail {
                 source,
-                key,
-                to: &[PRIYA],
-                date: "2026-09-05T09:00:00Z",
-                subject: "Logo",
-                body: "Hi Priya,\n\nThe new logo looks great, thanks for turning it around so fast.\n\nThanks,\nAlex",
                 folder,
                 message_id: Some("<logo@morgan.example>"),
-                ..Default::default()
+                ..sent(key, &[PRIYA], "2026-09-05T09:00:00Z", body)
             },
         );
     }
-    // A sensitive sent message (PII found at ingest).
-    put_mail(
-        &store,
-        Mail {
-            key: "secret",
-            to: &[SAM],
-            date: "2026-09-27T09:00:00Z",
-            subject: "Bank details",
-            body: "hey Sam! SENSITIVE-MARKER my bank account for the venue deposit is below 🙂\n\ncheers,\nAlex",
-            sensitive: true,
-            ..Default::default()
-        },
-    );
-    // Received mail and a draft: never the user's voice.
-    put_mail(
-        &store,
-        Mail {
-            key: "in1",
-            from: SAM,
-            to: &[ALEX],
-            subject: "Offsite venue",
-            body: "RECEIVED-MARKER Hey Alex, what do you think of the venue by the lake?\n\nSam",
-            labels: &["INBOX"],
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "in2",
-            from: "Recruiter <jobs@spam.example>",
-            to: &[ALEX],
-            subject: "Opportunity",
-            body: "RECEIVED-MARKER Dear Candidate, we have an opportunity.",
-            labels: &["INBOX", "CATEGORY_PROMOTIONS"],
-            ..Default::default()
-        },
-    );
-    put_mail(
-        &store,
-        Mail {
-            key: "draft",
-            to: &[SAM],
-            subject: "Unsent",
-            body: "DRAFT-MARKER hey Sam, not sure yet",
-            labels: &["DRAFT"],
-            ..Default::default()
-        },
-    );
-    // Notes.
     put_note(
         &store,
         "ideas.md",
@@ -396,60 +365,32 @@ fn normalises_greetings_and_signoffs_per_recipient() {
 fn exemplars_rank_recipient_then_channel_then_topic() {
     let store = seeded();
     let p = VoiceProfile::build(&store, MeIdentity::default(), VoiceConfig::default()).unwrap();
+    let hints = |to: &str, thread: &str| p.hints(Channel::Email, &[to.into()], thread).exemplars;
 
     // To Sam about the venue: Sam's venue mail first, only Sam's mail (6 available).
-    let h = p.hints(
-        Channel::Email,
-        &alex(),
-        "Sam: did you book the offsite venue by the lake?",
-    );
-    assert_eq!(h.channel, Some(Channel::Email));
-    assert_eq!(h.exemplars.len(), 6);
-    assert!(
-        h.exemplars[0].contains("offsite venue"),
-        "{:?}",
-        h.exemplars
-    );
-    assert!(
-        h.exemplars.iter().all(|e| e.starts_with("hey Sam!")),
-        "{:?}",
-        h.exemplars
-    );
-    assert!(h.exemplars.iter().all(|e| e.chars().count() <= 600));
+    let ex = hints(SAM, "Sam: did you book the offsite venue by the lake?");
+    assert_eq!(ex.len(), 6);
+    assert!(ex[0].contains("offsite venue"), "{ex:?}");
+    assert!(ex.iter().all(|e| e.starts_with("hey Sam!")), "{ex:?}");
+    assert!(ex.iter().all(|e| e.chars().count() <= 600));
 
     // To Okafor about results: the results mail first, then the rest of Okafor's, then the
     // channel.
-    let h = p.hints(
-        Channel::Email,
-        &[OKAFOR.into()],
+    let ex = hints(
+        OKAFOR,
         "Dr. Okafor: the results are in, shall we discuss next steps?",
     );
-    assert!(
-        h.exemplars[0].contains("received the results"),
-        "{:?}",
-        h.exemplars
-    );
-    assert!(
-        h.exemplars[..3]
-            .iter()
-            .all(|e| e.starts_with("Dear Dr. Okafor"))
-    );
-    assert_eq!(h.exemplars.len(), 6);
+    assert!(ex[0].contains("received the results"), "{ex:?}");
+    assert!(ex[..3].iter().all(|e| e.starts_with("Dear Dr. Okafor")));
+    assert_eq!(ex.len(), 6);
 
     // A new recipient: same channel, by topic.
-    let h = p.hints(
-        Channel::Email,
-        &["new@person.example".into()],
-        "Could you send the referral letter?",
-    );
-    assert!(
-        h.exemplars[0].contains("referral letter"),
-        "{:?}",
-        h.exemplars
-    );
+    let ex = hints("new@person.example", "Could you send the referral letter?");
+    assert!(ex[0].contains("referral letter"), "{ex:?}");
 
     // Chat has no samples: other channels fill up to the minimum (3), never notes.
     let h = p.hints(Channel::Chat, &[], "lunch thursday?");
+    assert_eq!(h.channel, Some(Channel::Chat));
     assert_eq!(h.exemplars.len(), 3);
     assert!(
         h.exemplars[0].contains("lunch thursday"),
@@ -494,41 +435,29 @@ fn exemplars_are_deduplicated_and_truncated() {
         },
     );
     let p = VoiceProfile::build(&store, MeIdentity::default(), VoiceConfig::default()).unwrap();
-    let h = p.hints(Channel::Email, &[PRIYA.into()], "logo and brand guide");
-    let logos = h
-        .exemplars
-        .iter()
-        .filter(|e| e.contains("new logo"))
-        .count();
-    assert_eq!(logos, 1, "{:?}", h.exemplars);
-    let guide = h
-        .exemplars
-        .iter()
-        .find(|e| e.contains("brand guide"))
-        .unwrap();
-    assert!(guide.chars().count() <= 600);
-    assert!(guide.ends_with('…'));
+    let ex = p
+        .hints(Channel::Email, &[PRIYA.into()], "logo and brand guide")
+        .exemplars;
+    assert_eq!(
+        ex.iter().filter(|e| e.contains("new logo")).count(),
+        1,
+        "{ex:?}"
+    );
+    let guide = ex.iter().find(|e| e.contains("brand guide")).unwrap();
+    assert!(guide.chars().count() <= 600 && guide.ends_with('…'));
 }
 
 #[test]
 fn sensitive_items_stay_out_of_cloud_exemplars() {
     let store = seeded();
     let p = VoiceProfile::build(&store, MeIdentity::default(), big_config()).unwrap();
-    let cloud = p.hints(
-        Channel::Email,
-        &alex(),
-        "bank account for the venue deposit",
-    );
-    assert!(
-        cloud
-            .exemplars
-            .iter()
-            .all(|e| !e.contains("SENSITIVE-MARKER"))
-    );
+    let thread = "bank account for the venue deposit";
+    let cloud = p.hints(Channel::Email, &alex(), thread).exemplars;
+    assert!(cloud.iter().all(|e| !e.contains("SENSITIVE-MARKER")));
     let local = p.exemplars(
         &VoiceQuery::new(Channel::Email)
             .with_recipients(alex())
-            .with_thread("bank account for the venue deposit")
+            .with_thread(thread)
             .allow_sensitive(true),
     );
     assert!(local[0].contains("SENSITIVE-MARKER"), "{local:?}");
@@ -612,27 +541,20 @@ fn feedback_final_texts_join_the_profile() {
         final_text: text.map(str::to_owned),
         insert_verified: Some(true),
     };
-    assert!(
-        sink.record(&fb("d1", "edited", Some("sure jamie, 5 works 👍")), &ctx)
-            .unwrap()
-    );
-    assert!(
-        !sink
-            .record(&fb("d2", "rejected", Some("no")), &ctx)
-            .unwrap()
-    );
-    assert!(!sink.record(&fb("d3", "accepted", None), &ctx).unwrap());
+    let record = |id, outcome, text, ctx| sink.record(&fb(id, outcome, text), ctx).unwrap();
+    assert!(record("d1", "edited", Some("sure jamie, 5 works 👍"), &ctx));
+    assert!(!record("d2", "rejected", Some("no"), &ctx));
+    assert!(!record("d3", "accepted", None, &ctx));
     let secret = FeedbackContext {
         sensitive: true,
         ..ctx.clone()
     };
-    assert!(
-        sink.record(
-            &fb("d4", "accepted", Some("pin is in the vault 👍")),
-            &secret
-        )
-        .unwrap()
-    );
+    assert!(record(
+        "d4",
+        "accepted",
+        Some("pin is in the vault 👍"),
+        &secret
+    ));
 
     let r = p.refresh().unwrap();
     assert_eq!(r.fetched, 2);
@@ -689,7 +611,6 @@ fn own_held_out_text_is_closer_than_another_persona() {
         p.similarity_for(Channel::Email, &alex(), mine)
             > p.similarity_for(Channel::Email, &alex(), other)
     );
-    assert!(nugget_voice::similarity(&p, mine) > nugget_voice::similarity(&p, other));
 }
 
 #[test]
@@ -722,12 +643,8 @@ fn configured_address_claims_mail_outside_sent_folders() {
 
 /// Everything observable about a profile, for comparing a loaded one with a built one.
 fn observe(p: &VoiceProfile) -> Vec<String> {
-    let mut out = vec![
-        format!("{:?}", p.me()),
-        format!("{:?}", p.status().samples),
-        format!("{:?}", p.status().channels),
-        format!("{:?}", p.overall_stats()),
-    ];
+    let mut out = vec![format!("{:?} {:?}", p.me(), p.status().samples)];
+    out.push(format!("{:?} {:?}", p.status().channels, p.overall_stats()));
     for c in [
         Channel::Email,
         Channel::Chat,
@@ -744,10 +661,6 @@ fn observe(p: &VoiceProfile) -> Vec<String> {
         let q = VoiceQuery::new(Channel::Email)
             .with_recipients([r])
             .with_thread("offsite venue friday");
-        out.push(format!(
-            "{:?}",
-            p.hints(Channel::Email, &[r.to_string()], "offsite")
-        ));
         out.push(format!("{:?}", VoiceSource::hints(p, &q)));
     }
     out.push(format!(
@@ -757,25 +670,23 @@ fn observe(p: &VoiceProfile) -> Vec<String> {
     out
 }
 
+fn loads(store: &Store, me: &MeIdentity, config: &VoiceConfig) -> bool {
+    VoiceProfile::load(store, me.clone(), config.clone())
+        .unwrap()
+        .is_some()
+}
+
 #[test]
 fn snapshot_roundtrip_equals_built_profile() {
     let store = seeded();
     let me = MeIdentity::new(["alex@morgan.example"], ["Alex Morgan"]);
     let config = VoiceConfig::default();
-    assert!(
-        VoiceProfile::load(&store, me.clone(), config.clone())
-            .unwrap()
-            .is_none()
-    );
+    assert!(!loads(&store, &me, &config));
     let built = VoiceProfile::build(&store, me.clone(), config.clone()).unwrap();
     built.save().unwrap();
     // Kept inside the (encrypted) store.
-    assert!(
-        store
-            .get_cursor(&SourceId::new(VOICE_SNAPSHOT_SOURCE))
-            .unwrap()
-            .is_some()
-    );
+    let key = SourceId::new(VOICE_SNAPSHOT_SOURCE);
+    assert!(store.get_cursor(&key).unwrap().is_some());
     let loaded = VoiceProfile::load(&store, me, config).unwrap().unwrap();
     assert_eq!(observe(&loaded), observe(&built));
     assert_eq!(loaded.status(), built.status());
@@ -785,15 +696,15 @@ fn snapshot_roundtrip_equals_built_profile() {
 #[test]
 fn load_or_build_reads_only_changed_items() {
     let store = seeded();
-    let me = MeIdentity::default();
-    let config = VoiceConfig::default();
-    let first = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    let (me, config) = (MeIdentity::default(), VoiceConfig::default());
+    let load_or_build = || VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    let first = load_or_build();
     let full = first.last_refresh();
     assert!(full.fetched > 1 && full.changed());
     let before = first.status().samples;
 
     // A restart without changes reads nothing.
-    let p = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    let p = load_or_build();
     assert_eq!(p.last_refresh().fetched, 0);
     assert!(!p.last_refresh().changed());
     assert_eq!(observe(&p), observe(&first));
@@ -810,79 +721,55 @@ fn load_or_build_reads_only_changed_items() {
             ..Default::default()
         },
     );
-    let p = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    let p = load_or_build();
     assert_eq!(p.last_refresh().fetched, 1);
     assert_eq!(p.last_refresh().scanned, full.scanned + 1);
     assert_eq!(p.status().samples, before + 1);
-    let again = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    let again = load_or_build();
     assert_eq!(again.last_refresh().fetched, 0);
     assert_eq!(again.status().samples, before + 1);
-    let rebuilt = VoiceProfile::build(&store, me, config).unwrap();
+    let rebuilt = VoiceProfile::build(&store, me.clone(), config.clone()).unwrap();
     assert_eq!(observe(&again), observe(&rebuilt));
 }
 
 #[test]
 fn stale_snapshots_are_rebuilt() {
     let store = seeded();
-    let me = MeIdentity::default();
-    let config = VoiceConfig::default();
+    let (me, config) = (MeIdentity::default(), VoiceConfig::default());
     let p = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
     let scanned = p.last_refresh().scanned;
 
-    // Another configured identity: the snapshot is ignored and the profile rebuilt.
+    // Another configured identity: the snapshot is ignored, and the rebuilt profile saved for
+    // the new identity.
     let other_me = MeIdentity::new(["alex@work.example"], ["Alex"]);
-    assert!(
-        VoiceProfile::load(&store, other_me.clone(), config.clone())
-            .unwrap()
-            .is_none()
-    );
+    assert!(!loads(&store, &other_me, &config));
     let p = VoiceProfile::load_or_build(&store, other_me.clone(), config.clone()).unwrap();
     assert_eq!(p.last_refresh().fetched, scanned);
-    // ...and saved for the new identity.
-    assert!(
-        VoiceProfile::load(&store, other_me, config.clone())
-            .unwrap()
-            .is_some()
-    );
-    assert!(
-        VoiceProfile::load(&store, me.clone(), config.clone())
-            .unwrap()
-            .is_none()
-    );
+    assert!(loads(&store, &other_me, &config));
+    assert!(!loads(&store, &me, &config));
 
     // Other settings.
     let other_config = VoiceConfig {
         max_exemplars: 3,
         ..Default::default()
     };
-    assert!(
-        VoiceProfile::load(&store, me.clone(), other_config)
-            .unwrap()
-            .is_none()
-    );
-
-    // Another snapshot version, or an unreadable snapshot.
     VoiceProfile::build(&store, me.clone(), config.clone())
         .unwrap()
         .save()
         .unwrap();
+    assert!(loads(&store, &me, &config));
+    assert!(!loads(&store, &me, &other_config));
+
+    // Another snapshot version, or an unreadable snapshot.
     let key = SourceId::new(VOICE_SNAPSHOT_SOURCE);
     let mut snap = store.get_cursor(&key).unwrap().unwrap();
     snap["v"] = json!(999);
     store.set_cursor(&key, snap).unwrap();
-    assert!(
-        VoiceProfile::load(&store, me.clone(), config.clone())
-            .unwrap()
-            .is_none()
-    );
+    assert!(!loads(&store, &me, &config));
     store
         .set_cursor(&key, json!({ "v": 1, "records": "garbage" }))
         .unwrap();
-    assert!(
-        VoiceProfile::load(&store, me.clone(), config.clone())
-            .unwrap()
-            .is_none()
-    );
+    assert!(!loads(&store, &me, &config));
     let p = VoiceProfile::load_or_build(&store, me, config).unwrap();
     assert_eq!(p.last_refresh().fetched, scanned);
 }

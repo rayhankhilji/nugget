@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """A small GTK 4 app for the Wayland integration tests (nugget-a11y, nugget-hotkey).
 
-It mirrors crates/nugget-a11y/tests/fixtures/gtk_test_app.py (GTK 3 on X11) with GTK 4, which
-has its own AT-SPI implementation (no ATK bridge) and runs natively on Wayland: start it with
+GTK 4 has its own AT-SPI implementation (no ATK bridge) and runs natively on Wayland: start it with
 GDK_BACKEND=wayland so it never falls back to XWayland.
 
 Window "Nugget Wayland - chat": a message list (three messages, the last one "from me"), a

@@ -104,10 +104,6 @@ impl TapDetector {
         }
     }
 
-    pub fn target(&self) -> Modifier {
-        self.target
-    }
-
     /// Feed one event at `now_ms`; returns `true` when the double tap fires.
     pub fn on_event(&mut self, event: InputEvent, now_ms: u64) -> bool {
         match event {
@@ -243,23 +239,126 @@ mod tests {
 
     const W: u32 = 350;
 
-    fn run(d: &mut TapDetector, events: &[(u64, InputEvent)]) -> usize {
-        events.iter().filter(|(t, e)| d.on_event(*e, *t)).count()
+    fn modifier(name: &str) -> Modifier {
+        match name {
+            "LCmd" => LeftCommand,
+            "RCmd" => RightCommand,
+            "LCtl" => LeftControl,
+            "RCtl" => RightControl,
+            "LOpt" => LeftOption,
+            "ROpt" => RightOption,
+            "LSh" => LeftShift,
+            "RSh" => RightShift,
+            _ => panic!("unknown modifier {name}"),
+        }
     }
 
-    fn tap(m: Modifier, at: u64) -> [(u64, InputEvent); 2] {
-        [(at, ModifierDown(m)), (at + 60, ModifierUp(m))]
+    /// Events from a spec such as `RCmd@0 key@40 LSh+100 LSh-160`: `<key>+<ms>` presses,
+    /// `<key>-<ms>` releases, `<key>@<ms>` taps (released 60 ms later, Escape 10 ms later);
+    /// `key` is some other key and `click` a mouse button.
+    fn events(spec: &str) -> Vec<(u64, InputEvent)> {
+        let mut out = Vec::new();
+        for tok in spec.split_whitespace() {
+            let (what, rest) = tok.split_at(tok.find(['@', '+', '-']).expect(tok));
+            let t: u64 = rest[1..].parse().expect(tok);
+            match (what, &rest[..1]) {
+                ("key", _) => out.push((t, OtherKey)),
+                ("click", _) => out.push((t, MouseButton)),
+                ("esc", "+") => out.push((t, EscapeDown)),
+                ("esc", "-") => out.push((t, EscapeUp)),
+                ("esc", _) => out.extend([(t, EscapeDown), (t + 10, EscapeUp)]),
+                (m, "+") => out.push((t, ModifierDown(modifier(m)))),
+                (m, "-") => out.push((t, ModifierUp(modifier(m)))),
+                (m, _) => out.extend([
+                    (t, ModifierDown(modifier(m))),
+                    (t + 60, ModifierUp(modifier(m))),
+                ]),
+            }
+        }
+        out
     }
 
-    fn seq(parts: &[&[(u64, InputEvent)]]) -> Vec<(u64, InputEvent)> {
-        parts.iter().flat_map(|p| p.iter().copied()).collect()
+    /// `target: events => fires`.
+    fn check_tap(case: &str) {
+        let (target, rest) = case.split_once(':').unwrap();
+        let (spec, want) = rest.split_once("=>").unwrap();
+        let mut d = TapDetector::new(modifier(target.trim()), W);
+        let got = events(spec)
+            .iter()
+            .filter(|(t, e)| d.on_event(*e, *t))
+            .count();
+        assert_eq!(got, want.trim().parse::<usize>().unwrap(), "{case}");
     }
 
     #[test]
-    fn double_tap_within_window_fires() {
-        let mut d = TapDetector::new(RightCommand, W);
-        let events = seq(&[&tap(RightCommand, 0), &tap(RightCommand, 200)]);
-        assert_eq!(run(&mut d, &events), 1);
+    fn tap_detector_cases() {
+        for case in [
+            "RCmd: RCmd@0 RCmd@200 => 1",
+            // First release at 60: a second press at 60 + 350 is in, one ms later is out.
+            "LSh: LSh@0 LSh@410 => 1",
+            "LSh: LSh@0 LSh@411 => 0",
+            "RCmd: RCmd@0 RCmd@1000 => 0",
+            // A late tap becomes the first of a new pair.
+            "RCmd: RCmd@0 RCmd@1000 RCmd@1200 => 1",
+            // Part of a shortcut (Cmd+C), on either press, or a key in between.
+            "LCmd: LCmd+0 key@40 LCmd-90 LCmd@150 => 0",
+            "LCmd: LCmd@0 LCmd+150 key@180 LCmd-210 => 0",
+            "LCmd: LCmd@0 key@100 LCmd@150 => 0",
+            // A mouse click (Cmd-click) during or between the taps.
+            "LCmd: LCmd+0 click@30 LCmd-60 LCmd@150 => 0",
+            "LCmd: LCmd@0 click@100 LCmd@150 => 0",
+            // Escape is just another key for a tap.
+            "LSh: LSh@0 esc@100 LSh@150 => 0",
+            // Ctrl+Shift twice is a combination, not a tap of Shift; so is another modifier
+            // pressed during the tap. Once it is released, taps work again.
+            "LSh: LCtl+0 LSh@10 LSh@100 LCtl-170 => 0",
+            "LSh: LSh+0 LOpt+20 LOpt-40 LSh-60 LSh@150 => 0",
+            "LSh: LCtl@0 LSh@100 LSh@250 => 1",
+            // Held too long, first or second press.
+            "ROpt: ROpt+0 ROpt-600 ROpt@700 => 0",
+            "ROpt: ROpt@0 ROpt+150 ROpt-900 => 0",
+            // An auto-repeated press inside a quick tap still counts as one press.
+            "RCtl: RCtl+0 RCtl@30 RCtl@150 => 1",
+            // Triple and quadruple taps fire once; a later double fires again.
+            "RCmd: RCmd@0 RCmd@150 RCmd@300 => 1",
+            "RCmd: RCmd@0 RCmd@150 RCmd@300 RCmd@450 RCmd@2000 RCmd@2150 => 2",
+            // Left and right are different keys.
+            "RCmd: LCmd@0 RCmd@150 => 0",
+            "LCmd: LCmd@0 RCmd@150 => 0",
+            // A release whose press was never seen (the listener started mid-hold).
+            "LSh: LSh-0 LSh@50 LSh@200 => 1",
+            "LSh: LSh@0 LSh-80 LSh@150 => 1",
+            // The clock going backwards does not panic.
+            "LSh: LSh+1000 LSh-900 LSh+800 LSh-700 => 1",
+        ] {
+            check_tap(case);
+        }
+        // Windows and X11 repeat modifier presses while held: still one long hold.
+        let repeats: String = (1..20).map(|i| format!(" RCtl+{}", i * 30)).collect();
+        check_tap(&format!("RCtl: RCtl+0{repeats} RCtl-800 RCtl@900 => 0"));
+        // Every modifier is detected only on its own side.
+        for target in Modifier::ALL {
+            for pressed in Modifier::ALL {
+                let mut d = TapDetector::new(target, W);
+                let taps = [(0, true), (60, false), (150, true), (210, false)];
+                let got = taps
+                    .iter()
+                    .filter(|&&(t, down)| {
+                        let e = if down {
+                            ModifierDown(pressed)
+                        } else {
+                            ModifierUp(pressed)
+                        };
+                        d.on_event(e, t)
+                    })
+                    .count();
+                assert_eq!(
+                    got,
+                    usize::from(target == pressed),
+                    "{target:?} {pressed:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -272,326 +371,34 @@ mod tests {
     }
 
     #[test]
-    fn gap_exactly_at_window_fires_and_one_past_does_not() {
-        let mut d = TapDetector::new(LeftShift, W);
-        // First release at 60; second press at 60 + 350.
-        let ok = seq(&[&tap(LeftShift, 0), &tap(LeftShift, 410)]);
-        assert_eq!(run(&mut d, &ok), 1);
-        let mut d = TapDetector::new(LeftShift, W);
-        let late = seq(&[&tap(LeftShift, 0), &tap(LeftShift, 411)]);
-        assert_eq!(run(&mut d, &late), 0);
-    }
-
-    #[test]
-    fn slow_pair_does_not_fire() {
-        let mut d = TapDetector::new(RightControl, W);
-        let events = seq(&[&tap(RightControl, 0), &tap(RightControl, 1_000)]);
-        assert_eq!(run(&mut d, &events), 0);
-    }
-
-    #[test]
-    fn slow_pair_then_quick_tap_fires_from_the_second() {
-        // The late tap becomes the first tap of a new pair.
-        let mut d = TapDetector::new(RightControl, W);
-        let events = seq(&[
-            &tap(RightControl, 0),
-            &tap(RightControl, 1_000),
-            &tap(RightControl, 1_200),
-        ]);
-        assert_eq!(run(&mut d, &events), 1);
-    }
-
-    #[test]
-    fn modifier_used_in_shortcut_does_not_fire() {
-        // Cmd+C, then a clean tap: the first press was a shortcut, not a tap.
-        let mut d = TapDetector::new(LeftCommand, W);
-        let events = [
-            (0, ModifierDown(LeftCommand)),
-            (40, OtherKey),
-            (90, ModifierUp(LeftCommand)),
-            (150, ModifierDown(LeftCommand)),
-            (210, ModifierUp(LeftCommand)),
-        ];
-        assert_eq!(run(&mut d, &events), 0);
-    }
-
-    #[test]
-    fn shortcut_on_the_second_press_does_not_fire() {
-        let mut d = TapDetector::new(LeftCommand, W);
-        let events = [
-            (0, ModifierDown(LeftCommand)),
-            (60, ModifierUp(LeftCommand)),
-            (150, ModifierDown(LeftCommand)),
-            (180, OtherKey),
-            (210, ModifierUp(LeftCommand)),
-        ];
-        assert_eq!(run(&mut d, &events), 0);
-    }
-
-    #[test]
-    fn key_between_the_taps_does_not_fire() {
-        let mut d = TapDetector::new(LeftCommand, W);
-        let events = seq(&[
-            &tap(LeftCommand, 0),
-            &[(100, OtherKey)],
-            &tap(LeftCommand, 150),
-        ]);
-        assert_eq!(run(&mut d, &events), 0);
-    }
-
-    #[test]
-    fn mouse_click_spoils_the_tap() {
-        // Cmd-click, for example.
-        let mut d = TapDetector::new(LeftCommand, W);
-        let events = [
-            (0, ModifierDown(LeftCommand)),
-            (30, MouseButton),
-            (60, ModifierUp(LeftCommand)),
-            (150, ModifierDown(LeftCommand)),
-            (210, ModifierUp(LeftCommand)),
-        ];
-        assert_eq!(run(&mut d, &events), 0);
-        let mut d = TapDetector::new(LeftCommand, W);
-        let events = seq(&[
-            &tap(LeftCommand, 0),
-            &[(100, MouseButton)],
-            &tap(LeftCommand, 150),
-        ]);
-        assert_eq!(run(&mut d, &events), 0);
-    }
-
-    #[test]
-    fn modifier_combination_does_not_fire() {
-        // Ctrl+Shift pressed together twice is a combination, not a tap of Shift.
-        let mut d = TapDetector::new(LeftShift, W);
-        let events = [
-            (0, ModifierDown(LeftControl)),
-            (10, ModifierDown(LeftShift)),
-            (60, ModifierUp(LeftShift)),
-            (100, ModifierDown(LeftShift)),
-            (160, ModifierUp(LeftShift)),
-            (170, ModifierUp(LeftControl)),
-        ];
-        assert_eq!(run(&mut d, &events), 0);
-        // Another modifier pressed during the tap.
-        let mut d = TapDetector::new(LeftShift, W);
-        let events = [
-            (0, ModifierDown(LeftShift)),
-            (20, ModifierDown(LeftOption)),
-            (40, ModifierUp(LeftOption)),
-            (60, ModifierUp(LeftShift)),
-            (150, ModifierDown(LeftShift)),
-            (210, ModifierUp(LeftShift)),
-        ];
-        assert_eq!(run(&mut d, &events), 0);
-    }
-
-    #[test]
-    fn works_again_after_another_modifier_is_released() {
-        let mut d = TapDetector::new(LeftShift, W);
-        let events = seq(&[
-            &[
-                (0, ModifierDown(LeftControl)),
-                (50, ModifierUp(LeftControl)),
-            ],
-            &tap(LeftShift, 100),
-            &tap(LeftShift, 250),
-        ]);
-        assert_eq!(run(&mut d, &events), 1);
-    }
-
-    #[test]
-    fn holding_does_not_fire() {
-        let mut d = TapDetector::new(RightOption, W);
-        // Long first hold.
-        let events = [
-            (0, ModifierDown(RightOption)),
-            (600, ModifierUp(RightOption)),
-            (700, ModifierDown(RightOption)),
-            (760, ModifierUp(RightOption)),
-        ];
-        assert_eq!(run(&mut d, &events), 0);
-        // Clean first tap, long second hold.
-        let mut d = TapDetector::new(RightOption, W);
-        let events = [
-            (0, ModifierDown(RightOption)),
-            (60, ModifierUp(RightOption)),
-            (150, ModifierDown(RightOption)),
-            (900, ModifierUp(RightOption)),
-        ];
-        assert_eq!(run(&mut d, &events), 0);
-    }
-
-    #[test]
-    fn auto_repeat_while_held_is_ignored() {
-        // Windows and X11 repeat modifier presses while held; that is still one long hold.
-        let mut d = TapDetector::new(RightControl, W);
-        let mut events = vec![(0, ModifierDown(RightControl))];
-        events.extend((1..20).map(|i| (i * 30, ModifierDown(RightControl))));
-        events.push((800, ModifierUp(RightControl)));
-        events.extend(tap(RightControl, 900));
-        assert_eq!(run(&mut d, &events), 0);
-        // A quick tap with one repeat in it still counts.
-        let mut d = TapDetector::new(RightControl, W);
-        let events = [
-            (0, ModifierDown(RightControl)),
-            (30, ModifierDown(RightControl)),
-            (60, ModifierUp(RightControl)),
-            (150, ModifierDown(RightControl)),
-            (210, ModifierUp(RightControl)),
-        ];
-        assert_eq!(run(&mut d, &events), 1);
-    }
-
-    #[test]
-    fn triple_tap_fires_once() {
-        let mut d = TapDetector::new(RightCommand, W);
-        let events = seq(&[
-            &tap(RightCommand, 0),
-            &tap(RightCommand, 150),
-            &tap(RightCommand, 300),
-        ]);
-        assert_eq!(run(&mut d, &events), 1);
-    }
-
-    #[test]
-    fn quadruple_tap_fires_once_and_a_later_double_fires_again() {
-        let mut d = TapDetector::new(RightCommand, W);
-        let events = seq(&[
-            &tap(RightCommand, 0),
-            &tap(RightCommand, 150),
-            &tap(RightCommand, 300),
-            &tap(RightCommand, 450),
-            &tap(RightCommand, 2_000),
-            &tap(RightCommand, 2_150),
-        ]);
-        assert_eq!(run(&mut d, &events), 2);
-    }
-
-    #[test]
-    fn left_and_right_are_distinguished() {
-        // Taps of the other side never count.
-        let mut d = TapDetector::new(RightCommand, W);
-        let events = seq(&[&tap(LeftCommand, 0), &tap(LeftCommand, 150)]);
-        assert_eq!(run(&mut d, &events), 0);
-        // Mixed left/right does not make a double tap of either.
-        let mut d = TapDetector::new(RightCommand, W);
-        let events = seq(&[&tap(LeftCommand, 0), &tap(RightCommand, 150)]);
-        assert_eq!(run(&mut d, &events), 0);
-        let mut d = TapDetector::new(LeftCommand, W);
-        let events = seq(&[&tap(LeftCommand, 0), &tap(RightCommand, 150)]);
-        assert_eq!(run(&mut d, &events), 0);
-        // Every modifier is detected only on its own side.
-        let all = [
-            LeftCommand,
-            RightCommand,
-            LeftControl,
-            RightControl,
-            LeftOption,
-            RightOption,
-            LeftShift,
-            RightShift,
-        ];
-        for target in all {
-            for pressed in all {
-                let mut d = TapDetector::new(target, W);
-                let events = seq(&[&tap(pressed, 0), &tap(pressed, 150)]);
-                assert_eq!(
-                    run(&mut d, &events),
-                    usize::from(target == pressed),
-                    "{target:?} {pressed:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn stray_release_is_ignored() {
-        // A release whose press we never saw (the listener started mid-hold).
-        let mut d = TapDetector::new(LeftShift, W);
-        let events = seq(&[
-            &[(0, ModifierUp(LeftShift))],
-            &tap(LeftShift, 50),
-            &tap(LeftShift, 200),
-        ]);
-        assert_eq!(run(&mut d, &events), 1);
-        let mut d = TapDetector::new(LeftShift, W);
-        let events = seq(&[
-            &tap(LeftShift, 0),
-            &[(80, ModifierUp(LeftShift))],
-            &tap(LeftShift, 150),
-        ]);
-        assert_eq!(run(&mut d, &events), 1);
-    }
-
-    #[test]
-    fn escape_counts_as_another_key_for_taps() {
-        let mut d = TapDetector::new(LeftShift, W);
-        let events = seq(&[
-            &tap(LeftShift, 0),
-            &[(100, EscapeDown), (120, EscapeUp)],
-            &tap(LeftShift, 150),
-        ]);
-        assert_eq!(run(&mut d, &events), 0);
-    }
-
-    #[test]
-    fn clock_going_backwards_does_not_panic() {
-        let mut d = TapDetector::new(LeftShift, W);
-        let events = [
-            (1_000, ModifierDown(LeftShift)),
-            (900, ModifierUp(LeftShift)),
-            (800, ModifierDown(LeftShift)),
-            (700, ModifierUp(LeftShift)),
-        ];
-        assert_eq!(run(&mut d, &events), 1);
-    }
-
-    #[test]
     fn from_key_discards_non_modifier_key_identities() {
         // Every non-modifier key maps to the same identity-free event, whatever it was.
-        let classes = [KeyClass::Other, KeyClass::Escape];
-        for class in classes {
+        for class in [KeyClass::Other, KeyClass::Escape] {
             assert_eq!(InputEvent::from_key(class, true, false), Some(OtherKey));
             assert_eq!(InputEvent::from_key(class, false, false), None);
         }
-        assert_eq!(
-            InputEvent::from_key(KeyClass::Escape, true, true),
-            Some(EscapeDown)
-        );
-        assert_eq!(
-            InputEvent::from_key(KeyClass::Escape, false, true),
-            Some(EscapeUp)
-        );
-        assert_eq!(
-            InputEvent::from_key(KeyClass::Other, true, true),
-            Some(OtherKey)
-        );
-        assert_eq!(
-            InputEvent::from_key(KeyClass::Modifier(LeftShift), true, false),
-            Some(ModifierDown(LeftShift))
-        );
+        let k = InputEvent::from_key;
+        assert_eq!(k(KeyClass::Escape, true, true), Some(EscapeDown));
+        assert_eq!(k(KeyClass::Escape, false, true), Some(EscapeUp));
+        assert_eq!(k(KeyClass::Other, true, true), Some(OtherKey));
+        let shift = KeyClass::Modifier(LeftShift);
+        assert_eq!(k(shift, true, false), Some(ModifierDown(LeftShift)));
     }
 
     #[test]
     fn detector_state_holds_no_key_identity() {
         // Two runs that differ only in which other keys were typed leave identical state, so
         // nothing about those keys was kept.
-        let typed_a: Vec<_> = crate::keymap::tests::all_windows_non_modifier_vks()
-            .take(40)
-            .map(|vk| crate::keymap::windows_vk(vk, 0))
-            .collect();
-        let typed_b: Vec<_> = crate::keymap::tests::all_windows_non_modifier_vks()
-            .skip(40)
-            .take(40)
-            .map(|vk| crate::keymap::windows_vk(vk, 0))
-            .collect();
-        let drive = |keys: &[Option<KeyClass>]| {
+        let drive = |skip| {
             let mut d = TapDetector::new(LeftShift, W);
             let mut t = 0;
-            for k in keys.iter().flatten() {
+            let keys = crate::keymap::tests::all_windows_non_modifier_vks()
+                .skip(skip)
+                .take(40)
+                .filter_map(|vk| crate::keymap::windows_vk(vk, 0));
+            for k in keys {
                 for down in [true, false] {
-                    if let Some(e) = InputEvent::from_key(*k, down, false) {
+                    if let Some(e) = InputEvent::from_key(k, down, false) {
                         d.on_event(e, t);
                     }
                     t += 5;
@@ -599,18 +406,28 @@ mod tests {
             }
             format!("{d:?}")
         };
-        assert_eq!(drive(&typed_a), drive(&typed_b));
+        assert_eq!(drive(0), drive(40));
     }
 
     #[test]
-    fn escape_three_times_fires() {
-        let mut d = EscapeRepeatDetector::new(3, 500);
-        let mut fired = 0;
-        for i in 0..3 {
-            fired += usize::from(d.on_event(EscapeDown, i * 200));
-            d.on_event(EscapeUp, i * 200 + 50);
+    fn escape_repeat_cases() {
+        for (spec, want) in [
+            ("esc@0 esc@200 esc@400", 1),
+            ("esc@0 esc@100 esc@200 esc@300 esc@400 esc@500", 2),
+            ("esc@0 esc@700 esc@800", 0),
+            ("esc@0 esc@100 key@150 esc@200", 0),
+            // Auto-repeat while held does not count.
+            ("esc+0 esc+30 esc+60 esc+90", 0),
+            // Modifiers are ignored.
+            ("esc@0 LSh+20 esc@100 LSh-120 esc@200", 1),
+        ] {
+            let mut d = EscapeRepeatDetector::new(3, 500);
+            let got = events(spec)
+                .iter()
+                .filter(|(t, e)| d.on_event(*e, *t))
+                .count();
+            assert_eq!(got, want, "{spec}");
         }
-        assert_eq!(fired, 1);
         // It fires on the third press, before the release.
         let mut d = EscapeRepeatDetector::new(3, 500);
         assert!(!d.on_event(EscapeDown, 0));
@@ -618,71 +435,5 @@ mod tests {
         assert!(!d.on_event(EscapeDown, 100));
         d.on_event(EscapeUp, 110);
         assert!(d.on_event(EscapeDown, 200));
-    }
-
-    #[test]
-    fn escape_too_slow_or_interrupted_does_not_fire() {
-        let mut d = EscapeRepeatDetector::new(3, 500);
-        let slow = [
-            (0, EscapeDown),
-            (10, EscapeUp),
-            (700, EscapeDown),
-            (710, EscapeUp),
-            (800, EscapeDown),
-        ];
-        assert_eq!(slow.iter().filter(|(t, e)| d.on_event(*e, *t)).count(), 0);
-        let mut d = EscapeRepeatDetector::new(3, 500);
-        let interrupted = [
-            (0, EscapeDown),
-            (10, EscapeUp),
-            (100, EscapeDown),
-            (110, EscapeUp),
-            (150, OtherKey),
-            (200, EscapeDown),
-        ];
-        assert_eq!(
-            interrupted
-                .iter()
-                .filter(|(t, e)| d.on_event(*e, *t))
-                .count(),
-            0
-        );
-    }
-
-    #[test]
-    fn escape_held_does_not_count_repeats_and_modifiers_are_ignored() {
-        let mut d = EscapeRepeatDetector::new(3, 500);
-        let held = [
-            (0, EscapeDown),
-            (30, EscapeDown),
-            (60, EscapeDown),
-            (90, EscapeDown),
-        ];
-        assert_eq!(held.iter().filter(|(t, e)| d.on_event(*e, *t)).count(), 0);
-        let mut d = EscapeRepeatDetector::new(3, 500);
-        let with_mods = [
-            (0, EscapeDown),
-            (10, EscapeUp),
-            (20, ModifierDown(LeftShift)),
-            (100, EscapeDown),
-            (110, EscapeUp),
-            (120, ModifierUp(LeftShift)),
-            (200, EscapeDown),
-        ];
-        assert_eq!(
-            with_mods.iter().filter(|(t, e)| d.on_event(*e, *t)).count(),
-            1
-        );
-    }
-
-    #[test]
-    fn six_escapes_fire_twice() {
-        let mut d = EscapeRepeatDetector::new(3, 500);
-        let mut fired = 0;
-        for i in 0..6 {
-            fired += usize::from(d.on_event(EscapeDown, i * 100));
-            d.on_event(EscapeUp, i * 100 + 20);
-        }
-        assert_eq!(fired, 2);
     }
 }

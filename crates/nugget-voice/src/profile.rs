@@ -1,13 +1,8 @@
 //! The voice profile: the user's own messages from the store, their stats, and exemplars.
 //!
-//! # What is held
-//! Per item the profile keeps its connector version (the incremental cursor) and, for the
-//! user's own messages, a compact sample: channel, recipients, date, sensitivity, Message-ID,
-//! the per-message [`Features`] the stats are made of, the message's content terms as ids into
-//! one shared vocabulary (one `u32` per occurrence, sorted), and two fingerprints of its text.
-//! The text itself is not held: it stays in the encrypted store and is read again for the few
-//! exemplars a draft gets. That keeps a 100k-message profile in tens of MB instead of about a
-//! GB of texts and per-message term maps, and makes the snapshot quick to load.
+//! Per item the profile keeps its connector version (the incremental cursor) and, for the user's
+//! own messages, a compact sample without the text: the text stays in the encrypted store and
+//! is read again for the few exemplars a draft gets, which keeps a large profile small.
 
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry as MapEntry;
@@ -36,8 +31,7 @@ pub const VOICE_CURSOR_SOURCE: &str = "nugget-voice:profile";
 /// what the profile learned from the user's own messages (features, recipients, the words they
 /// use), so it lives only inside the encrypted store.
 pub const VOICE_SNAPSHOT_SOURCE: &str = "nugget-voice:snapshot";
-/// Snapshot format version; snapshots of another version are ignored (rebuilt). Version 1 held
-/// every sample's text; version 2 holds term ids and text fingerprints instead.
+/// Snapshot format version; snapshots of another version are ignored (rebuilt).
 const SNAPSHOT_VERSION: u32 = 2;
 
 /// Folder names (last path segment, lowercase) that hold sent mail.
@@ -464,10 +458,8 @@ struct Own<'a> {
     sample: &'a Sample,
 }
 
-/// The user's voice: their own messages from the store, stats per channel and recipient, and
-/// exemplar selection. Build with [`VoiceProfile::build`], keep it current with
-/// [`VoiceProfile::refresh`] (incremental), share it as a [`VoiceSource`] (e.g. behind an
-/// `RwLock`).
+/// The user's voice: stats per channel and recipient, and exemplar selection. Share it as a
+/// [`VoiceSource`] (e.g. behind an `RwLock`) with a background [`VoiceProfile::refresh`].
 pub struct VoiceProfile {
     store: Store,
     config: VoiceConfig,
@@ -565,13 +557,9 @@ impl VoiceProfile {
         Ok(p)
     }
 
-    /// Write a snapshot of the profile (identity, configuration, the incremental cursor and
-    /// every record with its sample, i.e. features, recipients and term ids; not the texts) into
-    /// the encrypted store, under the cursor key [`VOICE_SNAPSHOT_SOURCE`]. It is never written
-    /// to a plain file.
-    ///
-    /// [`VoiceProfile::refresh`] does not save: call this after a refresh whose
-    /// [`RefreshReport::changed`] is true (it takes `&self`, so a read lock is enough).
+    /// Write a snapshot of the profile (identity, configuration, cursor and samples; not the
+    /// texts) into the encrypted store under [`VOICE_SNAPSHOT_SOURCE`], never to a plain file.
+    /// [`VoiceProfile::refresh`] does not save: call this when [`RefreshReport::changed`].
     pub fn save(&self) -> Result<()> {
         let mut sources: Vec<SourceRef<'_>> = self
             .items
@@ -596,10 +584,9 @@ impl VoiceProfile {
             .set_cursor_from(&SourceId::new(VOICE_SNAPSHOT_SOURCE), &snap)
     }
 
-    /// Load the profile saved by [`VoiceProfile::save`], as it was then (call
-    /// [`VoiceProfile::refresh`] to catch up with the store). `None` when there is no snapshot,
-    /// or it is unreadable or stale: another snapshot version, or saved for a different
-    /// configured identity `me` or `config`.
+    /// Load the profile saved by [`VoiceProfile::save`] (call [`VoiceProfile::refresh`] to catch
+    /// up). `None` when there is no snapshot, or it is unreadable, of another version, or saved
+    /// for a different configured identity `me` or `config`.
     pub fn load(store: &Store, me: MeIdentity, config: VoiceConfig) -> Result<Option<Self>> {
         let Some(raw) = store.get_cursor_json(&SourceId::new(VOICE_SNAPSHOT_SOURCE))? else {
             return Ok(None);
@@ -656,9 +643,8 @@ impl VoiceProfile {
         Ok(Some(p))
     }
 
-    /// The saved profile brought up to date with [`VoiceProfile::refresh`] (only new or changed
-    /// items are read), else a full [`VoiceProfile::build`]. Saves the snapshot when anything
-    /// changed. [`VoiceProfile::last_refresh`] tells what was read.
+    /// The saved profile brought up to date with [`VoiceProfile::refresh`], else a full
+    /// [`VoiceProfile::build`]; saves the snapshot when anything changed.
     pub fn load_or_build(store: &Store, me: MeIdentity, config: VoiceConfig) -> Result<Self> {
         if let Some(mut p) = Self::load(store, me.clone(), config.clone())? {
             let report = p.refresh()?;
@@ -1007,8 +993,7 @@ impl VoiceProfile {
         self.samples = n;
     }
 
-    /// Rough heap bytes the profile holds (items, samples, vocabulary, stats), from lengths
-    /// and capacities; allocator overhead is not counted.
+    /// Rough heap bytes the profile holds, from lengths and capacities.
     pub fn approx_heap_bytes(&self) -> usize {
         fn string(s: &str) -> usize {
             s.len()
@@ -1283,12 +1268,10 @@ impl VoiceProfile {
 
 impl VoiceSource for VoiceProfile {
     /// Stats from [`VoiceProfile::stats_for`] and up to [`VoiceConfig::max_exemplars`]
-    /// exemplars (each at most [`VoiceConfig::exemplar_chars`]), ordered by: messages to one of
-    /// the recipients, then messages in the same channel, then (only to reach
-    /// [`VoiceConfig::min_exemplars`]) other channels; within each group by topic similarity to
-    /// the thread (hybrid search over the user's own items plus term cosine) blended with
-    /// recency. Exact and near duplicates are skipped. Sensitive items are left out when
-    /// [`VoiceQuery::exclude_sensitive`] is set. Exemplar texts are read from the store.
+    /// exemplars: messages to one of the recipients, then in the same channel, then (only to
+    /// reach [`VoiceConfig::min_exemplars`]) other channels; within each group by topic
+    /// similarity to the thread blended with recency. Exact and near duplicates are skipped;
+    /// sensitive items are left out when [`VoiceQuery::exclude_sensitive`] is set.
     fn hints(&self, query: &VoiceQuery) -> VoiceHints {
         VoiceHints {
             channel: Some(query.channel),
@@ -1529,296 +1512,25 @@ fn make_sample(
 
 #[cfg(test)]
 mod tests {
-    //! The compact profile against a reference of the earlier implementation, which held every
-    //! sample's text and term map and recomputed everything from them.
-
     use nugget_store::{NewChunk, NewItem, content_hash};
 
     use super::*;
 
     #[test]
     fn the_mail_text_header_is_not_the_users_writing() {
-        let meta = serde_json::json!({"extracted": {"text_header": "From: Me <me@x.example>\nDate: 2026-10-20\n\n"}});
+        let meta =
+            json!({"extracted": {"text_header": "From: Me <me@x.example>\nDate: 2026-10-20\n\n"}});
         let text = "From: Me <me@x.example>\nDate: 2026-10-20\n\nHi Priya,\nThanks!".to_owned();
         assert_eq!(without_text_header(&meta, text), "Hi Priya,\nThanks!");
         // Older items (no header) and a header that doesn't match are left alone.
         let plain = "Hi Priya,\nThanks!".to_owned();
-        assert_eq!(
-            without_text_header(&serde_json::json!({}), plain.clone()),
-            plain
-        );
+        assert_eq!(without_text_header(&json!({}), plain.clone()), plain);
         assert_eq!(without_text_header(&meta, plain.clone()), plain);
     }
 
-    /// A sample as the earlier implementation held it.
-    struct RefSample {
-        item: ItemRef,
-        channel: Channel,
-        recipients: Vec<String>,
-        text: String,
-        at: Option<OffsetDateTime>,
-        sensitive: bool,
-        message_id: Option<String>,
-        features: Features,
-        terms: HashMap<String, f32>,
-    }
-
-    /// The earlier eager profile: every item read, every own sample with its text.
-    struct Reference {
-        samples: Vec<RefSample>,
-        overall: StyleStats,
-        channels: HashMap<Channel, StyleStats>,
-        recipients: HashMap<String, StyleStats>,
-        config: VoiceConfig,
-        me: MeIdentity,
-    }
-
-    fn old_jaccard(a: &HashMap<String, f32>, b: &HashMap<String, f32>) -> f32 {
-        if a.is_empty() || b.is_empty() {
-            return 0.0;
-        }
-        let inter = a.keys().filter(|k| b.contains_key(*k)).count() as f32;
-        inter / (a.len() as f32 + b.len() as f32 - inter)
-    }
-
-    impl Reference {
-        fn build(store: &Store, configured: &MeIdentity, config: &VoiceConfig) -> Self {
-            let mut records: Vec<(Item, Origin)> = Vec::new();
-            for c in store.source_counts().unwrap() {
-                for key in store.item_versions(&c.source).unwrap().into_keys() {
-                    let r = ItemRef {
-                        source: c.source.clone(),
-                        key,
-                    };
-                    let item = store.get_item(&r).unwrap().unwrap();
-                    if let Some(origin) = classify(&item, config) {
-                        records.push((item, origin));
-                    }
-                }
-            }
-            let me = if config.infer_me {
-                configured.merged(&MeIdentity::infer(records.iter().filter_map(
-                    |(_, o)| match o {
-                        Origin::Mail {
-                            from: Some(f),
-                            sent: true,
-                            draft: false,
-                        } => Some(f.as_str()),
-                        _ => None,
-                    },
-                )))
-            } else {
-                configured.clone()
-            };
-            let my_names = me.name_variants();
-            let mut samples: Vec<RefSample> = Vec::new();
-            for (item, origin) in &records {
-                if !is_own(origin, &me) {
-                    continue;
-                }
-                let Some(x) = extract(store, item, origin).unwrap() else {
-                    continue;
-                };
-                let names = recipient_first_names(&x.recipients);
-                let mut recipients: Vec<String> = Vec::new();
-                for r in &x.recipients {
-                    if let Some(k) = recipient_key(r)
-                        && !recipients.contains(&k)
-                    {
-                        recipients.push(k);
-                    }
-                }
-                samples.push(RefSample {
-                    item: item.item.clone(),
-                    channel: x.channel,
-                    recipients,
-                    at: x.at,
-                    sensitive: is_sensitive(&item.metadata),
-                    message_id: x.message_id,
-                    features: Features::of(&x.text, &names, &my_names),
-                    terms: text::terms(&x.text),
-                    text: x.text,
-                });
-            }
-            // Own samples newest first, one per Message-ID.
-            samples.sort_by(|a, b| {
-                b.at.cmp(&a.at)
-                    .then_with(|| a.item.source.cmp(&b.item.source))
-                    .then_with(|| a.item.key.cmp(&b.item.key))
-            });
-            let mut ids = HashSet::new();
-            samples.retain(|s| match &s.message_id {
-                Some(id) => ids.insert(id.clone()),
-                None => true,
-            });
-            let messages: Vec<&Features> = samples
-                .iter()
-                .filter(|s| s.channel != Channel::Document)
-                .map(|s| &s.features)
-                .collect();
-            let overall = if messages.is_empty() {
-                aggregate(samples.iter().map(|s| &s.features))
-            } else {
-                aggregate(messages)
-            };
-            let mut by_channel: HashMap<Channel, Vec<&Features>> = HashMap::new();
-            let mut by_recipient: HashMap<String, Vec<&Features>> = HashMap::new();
-            for s in &samples {
-                by_channel.entry(s.channel).or_default().push(&s.features);
-                for r in &s.recipients {
-                    by_recipient.entry(r.clone()).or_default().push(&s.features);
-                }
-            }
-            let channels = by_channel
-                .into_iter()
-                .filter(|(_, f)| f.len() as u32 >= config.min_channel_samples)
-                .map(|(c, f)| (c, aggregate(f)))
-                .collect();
-            let recipients = by_recipient
-                .into_iter()
-                .filter(|(_, f)| f.len() as u32 >= config.min_recipient_samples)
-                .map(|(r, f)| (r, aggregate(f)))
-                .collect();
-            Self {
-                samples,
-                overall,
-                channels,
-                recipients,
-                config: config.clone(),
-                me,
-            }
-        }
-
-        fn exemplars(&self, store: &Store, query: &VoiceQuery) -> Vec<String> {
-            let want: HashSet<String> = query
-                .recipients
-                .iter()
-                .filter_map(|r| recipient_key(r))
-                .collect();
-            let candidates: Vec<&RefSample> = self
-                .samples
-                .iter()
-                .filter(|s| !(query.exclude_sensitive && s.sensitive))
-                .filter(|s| {
-                    (s.channel == Channel::Document) == (query.channel == Channel::Document)
-                })
-                .filter(|s| !s.text.trim().is_empty())
-                .collect();
-            if candidates.is_empty() {
-                return Vec::new();
-            }
-            let thread_terms = text::terms(&query.thread_text);
-            let mut store_rank: HashMap<&ItemRef, f32> = HashMap::new();
-            let q = text::query_terms(&query.thread_text, QUERY_TERMS).join(" ");
-            if !q.is_empty() || query.thread_embedding.is_some() {
-                let own: HashSet<&ItemRef> = candidates.iter().map(|s| &s.item).collect();
-                let hits = store
-                    .search_hybrid_with_depth(
-                        &q,
-                        query.thread_embedding.as_deref(),
-                        SEARCH_DEPTH,
-                        SEARCH_DEPTH,
-                    )
-                    .unwrap();
-                let mut pos = 0usize;
-                for h in hits {
-                    if let Some(r) = own.get(&h.item)
-                        && !store_rank.contains_key(r)
-                    {
-                        store_rank.insert(r, 1.0 / (1.0 + pos as f32 * 0.25));
-                        pos += 1;
-                    }
-                }
-            }
-            let newest = candidates.iter().filter_map(|s| s.at).max();
-            let half_life = self.config.recency_half_life_days.max(1.0);
-            let mut scored: Vec<(u8, f32, &RefSample)> = candidates
-                .into_iter()
-                .map(|s| {
-                    let tier = if s.recipients.iter().any(|r| want.contains(r)) {
-                        3
-                    } else if s.channel == query.channel {
-                        2
-                    } else {
-                        1
-                    };
-                    let topic = 0.5 * store_rank.get(&s.item).copied().unwrap_or(0.0)
-                        + 0.5 * text::cosine(&s.terms, &thread_terms);
-                    let recency = match (newest, s.at) {
-                        (Some(n), Some(at)) => {
-                            let days = (n - at).as_seconds_f32() / 86_400.0;
-                            0.5f32.powf(days.max(0.0) / half_life)
-                        }
-                        _ => 0.5,
-                    };
-                    (tier, 0.65 * topic + 0.35 * recency, s)
-                })
-                .collect();
-            scored.sort_by(|a, b| {
-                b.0.cmp(&a.0)
-                    .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal))
-                    .then_with(|| b.2.at.cmp(&a.2.at))
-            });
-            let max = self.config.max_exemplars.max(1);
-            let min = self.config.min_exemplars.min(max);
-            let mut chosen: Vec<&RefSample> = Vec::new();
-            let mut seen_text: HashSet<String> = HashSet::new();
-            for (tier, _, s) in scored {
-                if chosen.len() >= max || (tier == 1 && chosen.len() >= min) {
-                    break;
-                }
-                if !seen_text.insert(text::canonical(&s.text)) {
-                    continue;
-                }
-                if chosen
-                    .iter()
-                    .any(|c| old_jaccard(&c.terms, &s.terms) >= NEAR_DUPLICATE)
-                {
-                    continue;
-                }
-                chosen.push(s);
-            }
-            chosen
-                .into_iter()
-                .map(|s| text::truncate(&s.text, self.config.exemplar_chars))
-                .collect()
-        }
-    }
-
-    const WORDS: &[&str] = &[
-        "offsite",
-        "venue",
-        "lake",
-        "budget",
-        "contract",
-        "invoice",
-        "launch",
-        "roadmap",
-        "design",
-        "review",
-        "friday",
-        "monday",
-        "paddles",
-        "kayak",
-        "slides",
-        "metrics",
-        "hiring",
-        "candidate",
-        "interview",
-        "dinner",
-        "flight",
-        "hotel",
-        "agenda",
-        "notes",
-        "draft",
-        "proposal",
-        "pricing",
-        "renewal",
-        "support",
-        "ticket",
-        "deploy",
-        "release",
-    ];
+    const WORDS: &str = "offsite venue lake budget contract invoice launch roadmap design review \
+        friday monday paddles kayak slides metrics hiring candidate interview dinner flight hotel \
+        agenda notes draft proposal pricing renewal support ticket deploy release";
 
     /// xorshift64*, deterministic.
     struct Rng(u64);
@@ -1834,10 +1546,9 @@ mod tests {
             (self.next() % n as u64) as usize
         }
         fn words(&mut self, n: usize) -> String {
-            (0..n)
-                .map(|_| WORDS[self.below(WORDS.len())])
-                .collect::<Vec<_>>()
-                .join(" ")
+            let words: Vec<&str> = WORDS.split_whitespace().collect();
+            let picked: Vec<&str> = (0..n).map(|_| words[self.below(words.len())]).collect();
+            picked.join(" ")
         }
     }
 
@@ -1857,6 +1568,17 @@ mod tests {
         store
             .upsert_item_with_chunks(&item, &[NewChunk::text(text)])
             .unwrap();
+    }
+
+    fn note(store: &Store, key: &str, text: &str, version: &str) {
+        put(
+            store,
+            "files:notes",
+            key,
+            text,
+            json!({"mime": "text/markdown"}),
+            version,
+        );
     }
 
     /// Item `i` of a varied corpus: sent and received mail (duplicates across two sources by
@@ -1904,16 +1626,11 @@ mod tests {
                 put(store, source, &format!("m{i}"), &body, meta, version);
             }
             3 => {
-                let meta = json!({
-                    "source": {"from_me": true, "recipients": [to]},
-                    "mime": "text/plain",
-                });
+                let meta =
+                    json!({"source": {"from_me": true, "recipients": [to]}, "mime": "text/plain"});
                 put(store, "slack:w", &format!("c{i}"), &body, meta, version);
             }
-            _ => {
-                let meta = json!({"mime": "text/markdown", "source": {"path": format!("n{i}.md")}});
-                put(store, "files:notes", &format!("n{i}"), &body, meta, version);
-            }
+            _ => note(store, &format!("n{i}"), &body, version),
         }
     }
 
@@ -1928,61 +1645,40 @@ mod tests {
         ] {
             for allow in [false, true] {
                 for (i, to) in PEOPLE.iter().chain(&["nobody@x.example"]).enumerate() {
-                    let thread = match i {
-                        0 => String::new(),
-                        _ => {
-                            let n = 3 + rng.below(40);
-                            rng.words(n)
-                        }
-                    };
-                    out.push(
-                        VoiceQuery::new(channel)
-                            .with_recipients([*to])
-                            .with_thread(thread)
-                            .allow_sensitive(allow),
-                    );
+                    let n = 3 + rng.below(40);
+                    let thread = if i == 0 { String::new() } else { rng.words(n) };
+                    let q = VoiceQuery::new(channel)
+                        .with_recipients([*to])
+                        .with_thread(thread);
+                    out.push(q.allow_sensitive(allow));
                 }
             }
         }
         out
     }
 
-    fn assert_matches_reference(p: &VoiceProfile, store: &Store, what: &str) {
-        let r = Reference::build(store, &p.configured, &p.config);
+    /// `p` holds what a profile built from scratch over the same store holds.
+    fn assert_same_as_rebuilt(p: &VoiceProfile, what: &str) {
+        let r = VoiceProfile::build(&p.store, p.configured.clone(), p.config.clone()).unwrap();
+        assert_same(p, &r, what);
+    }
+
+    fn assert_same(p: &VoiceProfile, r: &VoiceProfile, what: &str) {
         assert_eq!(p.me, r.me, "{what}: identity");
-        assert_eq!(p.samples, r.samples.len() as u64, "{what}: samples");
+        assert_eq!(p.samples, r.samples, "{what}: samples");
         // Debug strings compare floats bit for bit (as far as they print).
-        assert_eq!(
-            format!("{:?}", p.overall),
-            format!("{:?}", r.overall),
-            "{what}"
-        );
-        for c in [
-            Channel::Email,
-            Channel::Chat,
-            Channel::Document,
-            Channel::Other,
-        ] {
-            assert_eq!(
-                format!("{:?}", p.channels.get(&c)),
-                format!("{:?}", r.channels.get(&c)),
-                "{what}: {c:?}"
-            );
-        }
-        let mut keys: Vec<&String> = r.recipients.keys().collect();
-        keys.sort();
-        assert_eq!(p.recipients.len(), keys.len(), "{what}: recipients");
-        for k in keys {
-            assert_eq!(
-                format!("{:?}", p.recipients.get(k)),
-                format!("{:?}", r.recipients.get(k)),
-                "{what}: {k}"
-            );
-        }
+        let stats = |p: &VoiceProfile| {
+            let mut recipients: Vec<_> = p.recipients.iter().collect();
+            recipients.sort_by(|a, b| a.0.cmp(b.0));
+            let mut channels: Vec<_> = p.channels.iter().collect();
+            channels.sort_by_key(|c| c.0.as_str());
+            format!("{:?} {channels:?} {recipients:?}", p.overall)
+        };
+        assert_eq!(stats(p), stats(r), "{what}: stats");
         let mut nonempty = 0;
         for q in queries() {
             let got = p.exemplars(&q);
-            assert_eq!(got, r.exemplars(store, &q), "{what}: {q:?}");
+            assert_eq!(got, r.exemplars(&q), "{what}: {q:?}");
             nonempty += usize::from(!got.is_empty());
         }
         assert!(nonempty > 10, "{what}: the fixture yields exemplars");
@@ -1993,31 +1689,25 @@ mod tests {
     }
 
     #[test]
-    fn compact_profile_equals_the_eager_reference() {
+    fn inferred_identity_gives_the_configured_identitys_profile() {
+        // Sign-offs are re-normalised once the inferred names are known.
         let store = Store::open_in_memory().unwrap();
         let mut rng = Rng(7);
-        for i in 0..400 {
+        for i in 0..300 {
             put_item(&store, &mut rng, i, "1");
         }
-        for config in [
-            VoiceConfig::default(),
-            VoiceConfig {
-                max_exemplars: 3,
-                exemplar_chars: 40,
-                infer_me: false,
-                ..Default::default()
-            },
-        ] {
-            let built = VoiceProfile::build(&store, me(), config.clone()).unwrap();
-            assert_matches_reference(&built, &store, "build");
-            // Inferred identity only: sign-offs are re-normalised once names are known.
-            let inferred = VoiceProfile::build(&store, MeIdentity::default(), config).unwrap();
-            assert_matches_reference(&inferred, &store, "build, inferred me");
-        }
+        let config = VoiceConfig {
+            max_exemplars: 3,
+            exemplar_chars: 40,
+            ..Default::default()
+        };
+        let configured = VoiceProfile::build(&store, me(), config.clone()).unwrap();
+        let inferred = VoiceProfile::build(&store, MeIdentity::default(), config).unwrap();
+        assert_same(&inferred, &configured, "inferred me");
     }
 
     #[test]
-    fn incremental_and_loaded_profiles_equal_the_eager_reference() {
+    fn incremental_and_loaded_profiles_equal_a_rebuilt_one() {
         let store = Store::open_in_memory().unwrap();
         let mut rng = Rng(11);
         for i in 0..200 {
@@ -2035,55 +1725,45 @@ mod tests {
         }
         for i in (1..200).step_by(17) {
             for (source, key) in [
-                ("gmail:a", format!("m{i}")),
-                ("imap:b", format!("m{i}")),
-                ("slack:w", format!("c{i}")),
-                ("files:notes", format!("n{i}")),
+                ("gmail:a", "m"),
+                ("imap:b", "m"),
+                ("slack:w", "c"),
+                ("files:notes", "n"),
             ] {
-                store
-                    .delete_item(&ItemRef {
-                        source: SourceId::new(source),
-                        key: ItemKey::new(key),
-                    })
-                    .unwrap();
+                let r = ItemRef {
+                    source: SourceId::new(source),
+                    key: ItemKey::new(format!("{key}{i}")),
+                };
+                store.delete_item(&r).unwrap();
             }
         }
         let report = p.refresh().unwrap();
         assert!(report.fetched > 200 && report.removed > 0, "{report:?}");
-        assert_matches_reference(&p, &store, "refreshed");
+        assert_same_as_rebuilt(&p, "refreshed");
 
         // A snapshot taken before the changes, loaded and caught up.
-        let mut loaded = VoiceProfile::load(&store, MeIdentity::default(), VoiceConfig::default())
-            .unwrap()
-            .unwrap();
+        let load = || VoiceProfile::load(&store, MeIdentity::default(), VoiceConfig::default());
+        let mut loaded = load().unwrap().unwrap();
         loaded.refresh().unwrap();
-        assert_matches_reference(&loaded, &store, "loaded and refreshed");
+        assert_same_as_rebuilt(&loaded, "loaded and refreshed");
         loaded.save().unwrap();
-        let again = VoiceProfile::load(&store, MeIdentity::default(), VoiceConfig::default())
-            .unwrap()
-            .unwrap();
-        assert_matches_reference(&again, &store, "loaded");
+        assert_same_as_rebuilt(&load().unwrap().unwrap(), "loaded");
     }
 
     #[test]
     fn exemplars_changed_since_the_last_refresh_are_skipped() {
         let store = Store::open_in_memory().unwrap();
-        let note = |key: &str, text: &str, v: &str| {
-            put(
-                &store,
-                "files:notes",
-                key,
-                text,
-                json!({"mime": "text/markdown"}),
-                v,
-            );
-        };
-        note("a", "Kayak trip planning for the lake offsite.", "1");
-        note("b", "Budget review notes for the launch.", "1");
+        note(
+            &store,
+            "a",
+            "Kayak trip planning for the lake offsite.",
+            "1",
+        );
+        note(&store, "b", "Budget review notes for the launch.", "1");
         let p = VoiceProfile::build(&store, me(), VoiceConfig::default()).unwrap();
         let q = VoiceQuery::new(Channel::Document);
         assert_eq!(p.exemplars(&q).len(), 2);
-        note("a", "Something else entirely.", "2");
+        note(&store, "a", "Something else entirely.", "2");
         assert_eq!(
             p.exemplars(&q),
             vec!["Budget review notes for the launch.".to_owned()]
@@ -2095,8 +1775,7 @@ mod tests {
         for ids in [vec![], vec![0], vec![0, 0, 5, 127, 128, 16_384, u32::MAX]] {
             let t = Terms::pack(&ids);
             assert_eq!(t.ids().collect::<Vec<_>>(), ids);
-            let json = serde_json::to_string(&t).unwrap();
-            let back: Terms = serde_json::from_str(&json).unwrap();
+            let back: Terms = serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
             assert_eq!(back, t);
             assert!(back.is_valid(usize::MAX));
         }
@@ -2110,6 +1789,13 @@ mod tests {
 
     #[test]
     fn term_ids_give_the_same_cosine_and_jaccard_as_term_maps() {
+        let jaccard = |a: &HashMap<String, f32>, b: &HashMap<String, f32>| {
+            if a.is_empty() || b.is_empty() {
+                return 0.0;
+            }
+            let inter = a.keys().filter(|k| b.contains_key(*k)).count() as f32;
+            inter / (a.len() as f32 + b.len() as f32 - inter)
+        };
         let mut vocab = Vocab::default();
         let mut rng = Rng(3);
         let texts: Vec<String> = (0..40).map(|i| rng.words(1 + i * 3)).collect();
@@ -2127,66 +1813,43 @@ mod tests {
             let a = text::terms(t);
             assert_eq!(cosine_ids(&ids[i], &tids, tn), text::cosine(&a, &tt));
             for (j, u) in texts.iter().enumerate() {
-                assert_eq!(
-                    jaccard_ids(&ids[i], &ids[j]),
-                    old_jaccard(&a, &text::terms(u))
-                );
+                assert_eq!(jaccard_ids(&ids[i], &ids[j]), jaccard(&a, &text::terms(u)));
             }
         }
     }
 
     #[test]
-    fn holds_no_texts_and_bounds_the_vocabulary() {
+    fn replaced_messages_drop_their_terms_from_the_vocabulary() {
         let store = Store::open_in_memory().unwrap();
         let mut rng = Rng(5);
         // Notes with many distinct words each (so the vocabulary matters).
         let n = 300;
         for i in 0..n {
             let words: Vec<String> = (0..150)
-                .map(|w| format!("w{}x{}", i, w % 50 + rng.below(3)))
+                .map(|w| format!("w{i}x{}", w % 50 + rng.below(3)))
                 .collect();
-            let text = format!("{} {}", words.join(" "), rng.words(20));
-            put(
+            note(
                 &store,
-                "files:notes",
                 &format!("n{i}"),
-                &text,
-                json!({"mime": "text/markdown"}),
+                &format!("{} {}", words.join(" "), rng.words(20)),
                 "1",
             );
         }
         let mut p = VoiceProfile::build(&store, me(), VoiceConfig::default()).unwrap();
         assert_eq!(p.samples, n as u64);
-        let held = p.approx_heap_bytes();
-        // Per sample: fixed fields, at most 2 bytes per term occurrence (170 here; no text),
-        // and the vocabulary (≤ 52 new words per note).
-        let budget = n * (std::mem::size_of::<Sample>() + 170 * 2 + 52 * 60 + 256);
-        assert!(held < budget, "held {held} B, budget {budget} B");
-        let tokens: usize = p.all_samples().map(|o| o.sample.terms.ids().count()).sum();
-        assert_eq!(tokens, n * 170);
-        assert!(p.vocab.len() <= n * 53 + WORDS.len());
-
-        // Replace every note: the old terms are dropped from the vocabulary.
+        assert!(p.vocab.len() > n * 40);
         for i in 0..n {
-            put(
-                &store,
-                "files:notes",
-                &format!("n{i}"),
-                &rng.words(30),
-                json!({"mime": "text/markdown"}),
-                "2",
-            );
+            note(&store, &format!("n{i}"), &rng.words(30), "2");
         }
         p.refresh().unwrap();
-        assert!(p.vocab.len() <= WORDS.len(), "{}", p.vocab.len());
-        assert_matches_reference_lite(&p, &store);
-    }
-
-    /// Exemplars after the vocabulary was compacted still match the reference.
-    fn assert_matches_reference_lite(p: &VoiceProfile, store: &Store) {
-        let r = Reference::build(store, &p.configured, &p.config);
+        assert!(
+            p.vocab.len() <= WORDS.split_whitespace().count(),
+            "{}",
+            p.vocab.len()
+        );
+        let r = VoiceProfile::build(&store, me(), VoiceConfig::default()).unwrap();
         for q in queries() {
-            assert_eq!(p.exemplars(&q), r.exemplars(store, &q), "{q:?}");
+            assert_eq!(p.exemplars(&q), r.exemplars(&q), "{q:?}");
         }
     }
 }

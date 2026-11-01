@@ -32,44 +32,44 @@ fn config(os: Os) -> InstallConfig {
     }
 }
 
-/// Compare with `tests/golden/<os>.json`; `UPDATE_GOLDEN=1` rewrites the files.
+/// Compare with `tests/golden/<os>.json` (one step per line); `UPDATE_GOLDEN=1` rewrites them.
 fn golden(os: Os) {
     let cfg = config(os);
-    let doc = json!({
-        "install": install::plan(&Browser::ALL, &cfg).unwrap(),
-        "uninstall": install::uninstall_plan(&Browser::ALL, &cfg).unwrap(),
-    });
-    let text = serde_json::to_string_pretty(&doc).unwrap() + "\n";
+    let install = install::plan(&Browser::ALL, &cfg).unwrap();
+    let uninstall = install::uninstall_plan(&Browser::ALL, &cfg).unwrap();
     let path = format!(
         "{}/tests/golden/{}.json",
         env!("CARGO_MANIFEST_DIR"),
         os.name()
     );
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        std::fs::write(&path, &text).unwrap();
+        let lines = |steps: &[Step]| {
+            let s: Vec<_> = steps
+                .iter()
+                .map(|s| serde_json::to_string(s).unwrap())
+                .collect();
+            s.join(",\n    ")
+        };
+        let text = format!(
+            "{{\n  \"install\": [\n    {}\n  ],\n  \"uninstall\": [\n    {}\n  ]\n}}\n",
+            lines(&install),
+            lines(&uninstall)
+        );
+        std::fs::write(&path, text).unwrap();
     }
-    let want = std::fs::read_to_string(&path)
-        .unwrap()
-        .replace("\r\n", "\n");
+    let want: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(
-        text, want,
+        json!({"install": install, "uninstall": uninstall}),
+        want,
         "golden mismatch for {path}; rerun with UPDATE_GOLDEN=1 if intended"
     );
 }
 
 #[test]
-fn golden_macos() {
-    golden(Os::MacOs);
-}
-
-#[test]
-fn golden_linux() {
-    golden(Os::Linux);
-}
-
-#[test]
-fn golden_windows() {
-    golden(Os::Windows);
+fn golden_per_os() {
+    for os in [Os::MacOs, Os::Linux, Os::Windows] {
+        golden(os);
+    }
 }
 
 #[test]

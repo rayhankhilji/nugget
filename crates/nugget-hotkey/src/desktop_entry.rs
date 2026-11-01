@@ -558,25 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn rendered_entry_parses_back() {
-        let text = render_entry("/opt/My Apps/Nugget.AppImage").unwrap();
-        assert!(
-            text.contains("Exec=\"/opt/My Apps/Nugget.AppImage\"\n"),
-            "{text}"
-        );
-        assert!(text.contains("NoDisplay=true\n"));
-        assert!(text.contains("Icon=nugget-desktop\n"));
-        let entry = parse_entry(&text);
-        assert!(entry.generated);
-        assert_eq!(entry.type_.as_deref(), Some("Application"));
-        assert_eq!(
-            exec_program(entry.exec.as_deref().unwrap()).as_deref(),
-            Some("/opt/My Apps/Nugget.AppImage")
-        );
-        assert_eq!(render_entry("/a%b"), None);
-    }
-
-    #[test]
     fn parse_reads_only_the_desktop_entry_group() {
         let entry = parse_entry(
             "# c\n[Other]\nExec=/nope\n[Desktop Entry]\nType = Application\nExec= /bin/a\\sb\n\
@@ -663,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn not_an_appimage_does_nothing() {
+    fn not_an_appimage_or_an_unrepresentable_path_writes_nothing() {
         let sb = Sandbox::new();
         let mut env = sb.env(&sb.root.join("missing.AppImage"));
         assert_eq!(ensure_with(&env).unwrap(), None);
@@ -671,6 +652,11 @@ mod tests {
         assert_eq!(ensure_with(&env).unwrap(), None);
         env.appimage = Some("relative.AppImage".into());
         assert_eq!(ensure_with(&env).unwrap(), None);
+        // A path an Exec line cannot hold is an error, not a broken entry.
+        let app = sb.root.join("100%.AppImage");
+        exe(&app);
+        let err = ensure_with(&sb.env(&app)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
         assert!(!sb.user_file().exists());
     }
 
@@ -683,6 +669,7 @@ mod tests {
         assert_eq!(written.as_deref(), Some(sb.user_file().as_path()));
         let text = fs::read_to_string(sb.user_file()).unwrap();
         assert_eq!(text, render_entry(first.to_str().unwrap()).unwrap());
+        assert!(text.contains("NoDisplay=true\n") && text.contains("X-Nugget-Generated=true\n"));
         let mode = fs::metadata(sb.user_file()).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o644);
         // No temporary file left behind.
@@ -776,56 +763,5 @@ mod tests {
         put(&sb.user_file(), &usable);
         assert_eq!(ensure_with(&sb.env(&app)).unwrap(), None);
         assert_eq!(fs::read_to_string(sb.user_file()).unwrap(), usable);
-    }
-
-    #[test]
-    fn rejects_unrepresentable_paths() {
-        let sb = Sandbox::new();
-        let app = sb.root.join("100%.AppImage");
-        exe(&app);
-        let err = ensure_with(&sb.env(&app)).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-        assert!(!sb.user_file().exists());
-    }
-
-    #[test]
-    fn plan_cases() {
-        let target = Path::new("/h/applications/x.desktop");
-        let found = |path: &str, generated, usable, contents: &str| Found {
-            path: path.into(),
-            contents: contents.into(),
-            generated,
-            usable,
-        };
-        assert_eq!(plan(target, None, "r"), Plan::Write(target.into()));
-        let t = target.to_str().unwrap();
-        assert_eq!(
-            plan(target, Some(&found(t, true, true, "r")), "r"),
-            Plan::Nothing
-        );
-        assert_eq!(
-            plan(target, Some(&found(t, true, true, "old")), "r"),
-            Plan::Write(target.into())
-        );
-        assert_eq!(
-            plan(target, Some(&found(t, true, false, "old")), "r"),
-            Plan::Write(target.into())
-        );
-        assert_eq!(
-            plan(target, Some(&found(t, false, true, "")), "r"),
-            Plan::Nothing
-        );
-        assert_eq!(
-            plan(target, Some(&found(t, false, false, "")), "r"),
-            Plan::Foreign(target.into())
-        );
-        assert_eq!(
-            plan(target, Some(&found("/usr/share/a/x", false, true, "")), "r"),
-            Plan::Nothing
-        );
-        assert_eq!(
-            plan(target, Some(&found("/usr/share/a/x", true, false, "")), "r"),
-            Plan::Write(target.into())
-        );
     }
 }

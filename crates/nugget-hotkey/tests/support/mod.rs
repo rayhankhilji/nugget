@@ -1,5 +1,4 @@
-//! The Double Tap draft-and-insert path, shared by the real-OS integration tests
-//! (`windows_it.rs`, `macos_it.rs`).
+//! The Double Tap draft-and-insert path, shared by the real-OS integration tests.
 //!
 //! It runs the same steps as the desktop shell's `doubletap::flow` and the daemon's `draft.begin`,
 //! through the same library calls, with only the transport (Tauri events, JSON-RPC) left out:
@@ -8,21 +7,14 @@
 //! 2. the focused field is read with `nugget_a11y` (`Accessibility::focused`), refused when it is
 //!    secure, and turned into a `DraftRequest` exactly as `flow::fire` does;
 //! 3. `nugget_draft::Drafter::begin` (the daemon's engine) drafts with a scripted provider that
-//!    streams fixed chunks with no delay, so the numbers measure Nugget's own overhead;
-//! 4. the text is inserted with `Accessibility::insert` (verified read-back, clipboard fallback),
-//!    and read back through `Accessibility::focused`.
-//!
-//! Two insert modes are measured:
-//! - [`Mode::Shell`]: what the shell ships today. The draft streams into the overlay, and the
-//!   whole text is inserted once on accept (`flow::insert`). "First token" is the first delta
-//!   reaching the overlay; "visible" is the inserted text read back from the field.
-//! - [`Mode::Streamed`]: every post-processed delta is inserted into the field as it arrives.
-//!   "First token" is the first chunk read back from the field.
+//!    streams fixed chunks with no delay;
+//! 4. the whole draft is inserted once, as on accept (`flow::insert`), with
+//!    `Accessibility::insert` (verified read-back, clipboard fallback), and read back.
 
 #![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -117,72 +109,43 @@ impl Pipeline {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Shell,
-    Streamed,
-}
-
-impl Mode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Mode::Shell => "shell",
-            Mode::Streamed => "streamed",
-        }
-    }
-}
-
 /// What one draft took, measured from the trigger firing.
 #[derive(Debug, Clone)]
 pub struct Report {
-    pub mode: Mode,
     pub app: AppInfo,
-    pub field_role: String,
     /// The focused-field read (`Accessibility::focused`).
     pub read_field: Duration,
-    /// The `Accessibility::focused` call alone.
-    pub focused_call: Duration,
     /// `draft.begin` returned (provider opened).
     pub draft_started: Duration,
-    /// Shell: first delta in the overlay. Streamed: first chunk read back from the field.
+    /// The first delta reaching the overlay.
     pub first_token: Duration,
-    /// How long the first `Accessibility::insert` call took (it includes its own read-back).
-    pub first_insert: Duration,
+    /// How long the `Accessibility::insert` call took (it includes its own read-back).
+    pub insert_call: Duration,
     /// The whole draft read back from the field.
     pub total: Duration,
-    pub text: String,
     pub chunks: usize,
-    pub methods: Vec<InsertMethod>,
+    pub method: InsertMethod,
     pub verified: bool,
 }
 
 impl Report {
-    pub fn line(&self, os: &str) -> String {
-        format!(
-            "DOUBLETAP-TIMING os={os} mode={} app={:?} role={} read_field_ms={:.1} \
-             focused_call_ms={:.1} \
-             draft_started_ms={:.1} first_token_ms={:.1} first_insert_call_ms={:.1} \
-             total_ms={:.1} chunks={} methods={:?} verified={}",
-            self.mode.as_str(),
-            self.app.name,
-            self.field_role,
-            ms(self.read_field),
-            ms(self.focused_call),
-            ms(self.draft_started),
-            ms(self.first_token),
-            ms(self.first_insert),
-            ms(self.total),
-            self.chunks,
-            self.methods,
-            self.verified,
-        )
-    }
-
-    /// Print the timing line and append it to `$NUGGET_DOUBLETAP_SUMMARY` when set (the
+    /// Print the timing line and append a table row to `$NUGGET_DOUBLETAP_SUMMARY` when set (the
     /// workflow points it at the job summary).
     pub fn publish(&self, os: &str) {
-        let line = self.line(os);
-        println!("{line}");
+        let (app, chunks, method, ok) = (&self.app.name, self.chunks, self.method, self.verified);
+        let [read, started, first, insert, total] = [
+            self.read_field,
+            self.draft_started,
+            self.first_token,
+            self.insert_call,
+            self.total,
+        ]
+        .map(ms);
+        println!(
+            "DOUBLETAP-TIMING os={os} app={app:?} read_field_ms={read:.1} \
+             draft_started_ms={started:.1} first_token_ms={first:.1} insert_call_ms={insert:.1} \
+             total_ms={total:.1} chunks={chunks} method={method:?} verified={ok}"
+        );
         if let Ok(path) = std::env::var("NUGGET_DOUBLETAP_SUMMARY") {
             use std::io::Write as _;
             if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -192,17 +155,9 @@ impl Report {
             {
                 let _ = writeln!(
                     f,
-                    "| {os} | {} | {} | {:.1} | {:.1} | {:.1} | {:.1} | {:.1} | {} | {:?} | {} |",
-                    self.mode.as_str(),
-                    self.app.name,
-                    ms(self.read_field),
-                    ms(self.draft_started),
-                    ms(self.first_token),
-                    ms(self.first_insert),
-                    ms(self.total),
-                    self.chunks,
-                    self.methods,
-                    self.verified
+                    "| {os} | shell | {app} | {read:.1} | {started:.1} | {first:.1} | {insert:.1} \
+                     | {total:.1} | {chunks} | {:?} | {ok} |",
+                    [method]
                 );
             }
         }
@@ -269,29 +224,24 @@ pub fn wait_for_field(
 }
 
 /// Run the draft-and-insert path for a trigger that fired at `fired`, through `backend`, the
-/// accessibility backend the shell uses (the read and the inserts go through its
-/// `Accessibility` API; field values are polled with [`field_value`]).
+/// accessibility backend the shell uses (field values are polled with [`field_value`]).
 pub fn draft_and_insert<P: nugget_a11y::Platform>(
     backend: &nugget_a11y::Backend<P>,
     pipeline: &Pipeline,
     fired: Instant,
-    mode: Mode,
 ) -> std::result::Result<Report, String> {
     let a11y: &dyn Accessibility = backend;
     // flow::fire: read the focused field.
-    let call = Instant::now();
     let focused = a11y
         .focused()
         .map_err(|e| format!("focused(): {e}"))?
         .ok_or("focused(): no focused text field")?;
     let read_field = fired.elapsed();
-    let focused_call = call.elapsed();
     if focused.field.secure {
         return Err("the focused field is a secure field".into());
     }
     let before = norm(&focused.field.value);
     let app = focused.app.clone();
-    let field_role = focused.field.role.clone();
     let request = DraftRequest {
         context: DraftContext {
             app: focused.app,
@@ -316,58 +266,24 @@ pub fn draft_and_insert<P: nugget_a11y::Platform>(
     let mut text = String::new();
     let mut first_token = None;
     let mut chunks = 0usize;
-    let mut methods = Vec::new();
-    let mut verified = true;
-    let mut first_insert = None;
-    let mut insert = |t: &str| -> std::result::Result<(), String> {
-        let started = Instant::now();
-        let out = a11y.insert(t).map_err(|e| format!("insert({t:?}): {e}"))?;
-        first_insert.get_or_insert(started.elapsed());
-        methods.push(out.method);
-        verified &= out.verified;
-        Ok(())
-    };
-
-    loop {
-        let next = pipeline.rt.block_on(stream.next());
-        let Some(event) = next else { break };
-        match event.map_err(|e| format!("draft stream: {e}"))? {
-            ChatEvent::TextDelta(d) if !d.is_empty() => {
-                chunks += 1;
-                text.push_str(&d);
-                match mode {
-                    Mode::Shell => {
-                        first_token.get_or_insert_with(|| fired.elapsed());
-                    }
-                    Mode::Streamed => {
-                        insert(&d)?;
-                        if first_token.is_none() {
-                            let want = format!("{before}{}", norm(&d));
-                            wait_for(Duration::from_secs(5), || {
-                                field_value(backend).filter(|v| v.starts_with(&want))
-                            })
-                            .ok_or_else(|| {
-                                format!(
-                                    "the first chunk {d:?} never showed up in the field (value \
-                                     {:?})",
-                                    field_value(backend)
-                                )
-                            })?;
-                            first_token = Some(fired.elapsed());
-                        }
-                    }
-                }
-            }
-            _ => {}
+    while let Some(event) = pipeline.rt.block_on(stream.next()) {
+        if let ChatEvent::TextDelta(d) = event.map_err(|e| format!("draft stream: {e}"))?
+            && !d.is_empty()
+        {
+            chunks += 1;
+            text.push_str(&d);
+            first_token.get_or_insert_with(|| fired.elapsed());
         }
     }
-    if text.is_empty() {
+    let Some(first_token) = first_token else {
         return Err("the draft stream produced no text".into());
-    }
-    if mode == Mode::Shell {
-        // flow::insert: the whole draft, once, on accept.
-        insert(&text)?;
-    }
+    };
+    // flow::insert: the whole draft, once, on accept.
+    let started = Instant::now();
+    let out = a11y
+        .insert(&text)
+        .map_err(|e| format!("insert({text:?}): {e}"))?;
+    let insert_call = started.elapsed();
     let want = format!("{before}{}", norm(&text));
     wait_for(Duration::from_secs(5), || {
         field_value(backend).filter(|v| v.trim_end() == want.trim_end())
@@ -378,95 +294,40 @@ pub fn draft_and_insert<P: nugget_a11y::Platform>(
             field_value(backend)
         )
     })?;
-    let total = fired.elapsed();
     Ok(Report {
-        mode,
         app,
-        field_role,
         read_field,
-        focused_call,
         draft_started,
-        first_token: first_token.unwrap_or(total),
-        first_insert: first_insert.unwrap_or_default(),
-        total,
-        text,
+        first_token,
+        insert_call,
+        total: fired.elapsed(),
         chunks,
-        methods,
-        verified,
+        method: out.method,
+        verified: out.verified,
     })
 }
 
-/// The scripted drafts: plain sentences, which post-processing passes through, short enough
-/// for every length band. The streamed one has a first line longer than the post-processor's
-/// held-back tail (100 bytes), so its text is released, and inserted, while it streams.
-pub const SHELL_CHUNKS: &[&str] = &[
+/// The scripted draft: plain sentences, which post-processing passes through.
+pub const CHUNKS: &[&str] = &[
     "Thanks for the notes",
     ", I will send",
     " the revised plan",
     " by Friday.",
 ];
-pub const STREAMED_CHUNKS: &[&str] = &[
-    " The revised plan",
-    " moves the launch",
-    " to the second week",
-    " of March, which gives",
-    " the team enough time",
-    " to finish testing.",
-    "\n\nI will share",
-    " the updated timeline",
-    " on Monday morning.",
-];
 
-fn count_nodes(n: &nugget_a11y::tree::Node) -> usize {
-    1 + n.children.iter().map(count_nodes).sum::<usize>()
+/// A callback that sends the fire time, and its receiver.
+pub fn channel_callback() -> (Box<dyn Fn() + Send + Sync>, mpsc::Receiver<Instant>) {
+    let (tx, rx) = mpsc::channel();
+    let tx = std::sync::Mutex::new(tx);
+    let cb = move || {
+        let _ = tx.lock().unwrap().send(Instant::now());
+    };
+    (Box::new(cb), rx)
 }
 
-/// Where the focused-field read spends its time, step by step through the backend the shell
-/// uses (`Accessibility::focused` = focus + read_field + caret + the thread snapshot). Printed,
-/// three times each, so a cold first call shows up.
-pub fn read_breakdown<P: nugget_a11y::Platform>(backend: &nugget_a11y::Backend<P>, os: &str) {
-    let cfg = backend.config().clone();
-    for run in 0..3 {
-        let t = Instant::now();
-        let target = backend.platform().focus();
-        let focus = t.elapsed();
-        let (read, caret) = match &target {
-            Ok(Some(target)) => {
-                let t = Instant::now();
-                let r = backend
-                    .platform()
-                    .read_field(&target.element, cfg.max_value_bytes);
-                let read = t.elapsed();
-                let t = Instant::now();
-                if let Ok(r) = &r {
-                    let _ = backend.platform().caret_bounds(&target.element, &r.state);
-                }
-                (read, t.elapsed())
-            }
-            _ => (Duration::ZERO, Duration::ZERO),
-        };
-        let t = Instant::now();
-        let snap = backend.snapshot();
-        let snapshot = t.elapsed();
-        let (nodes, truncated) = match &snap {
-            Ok(Some((_, s))) => (count_nodes(&s.root), s.truncated),
-            _ => (0, false),
-        };
-        let t = Instant::now();
-        let focused = backend.focused();
-        let whole = t.elapsed();
-        println!(
-            "DOUBLETAP-A11Y os={os} run={run} focus_ms={:.1} read_field_ms={:.1} caret_ms={:.1} \
-             snapshot_ms={:.1} snapshot_nodes={nodes} truncated={truncated} focused_ms={:.1} \
-             ok={}",
-            ms(focus),
-            ms(read),
-            ms(caret),
-            ms(snapshot),
-            ms(whole),
-            matches!(focused, Ok(Some(_))),
-        );
-    }
+/// How many fires arrive until 300 ms pass without one.
+pub fn fired(rx: &mpsc::Receiver<Instant>) -> usize {
+    std::iter::from_fn(|| rx.recv_timeout(Duration::from_millis(300)).ok()).count()
 }
 
 /// Press the trigger with `press` (given the attempt number, at most 3 attempts, each given 2 s
@@ -476,8 +337,7 @@ pub fn read_breakdown<P: nugget_a11y::Platform>(backend: &nugget_a11y::Backend<P
 pub fn trigger_and_draft<P: nugget_a11y::Platform>(
     backend: &nugget_a11y::Backend<P>,
     pipeline: &Pipeline,
-    mode: Mode,
-    fired: std::sync::mpsc::Receiver<Instant>,
+    fired: mpsc::Receiver<Instant>,
     mut press: impl FnMut(u32),
 ) -> std::result::Result<Report, String> {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -489,7 +349,7 @@ pub fn trigger_and_draft<P: nugget_a11y::Platform>(
                 .recv_timeout(Duration::from_secs(8))
                 .map_err(|_| "the trigger did not fire in 3 attempts".to_string())?;
             seen.store(true, Ordering::Release);
-            draft_and_insert(backend, pipeline, at, mode)
+            draft_and_insert(backend, pipeline, at)
         });
         for attempt in 1..=3 {
             press(attempt);

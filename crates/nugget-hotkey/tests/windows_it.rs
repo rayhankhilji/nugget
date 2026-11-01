@@ -13,12 +13,11 @@
 
 mod support;
 
-use std::sync::mpsc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use nugget_hotkey::{KillSwitch, Modifier, Trigger, start, start_kill_switch};
-use support::{Mode, Pipeline};
+use support::{Pipeline, channel_callback, fired};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, SendInput,
 };
@@ -78,26 +77,6 @@ fn chord(keys: &[(u16, u16, bool)]) {
         send(k, false);
     }
     sleep(Duration::from_millis(40));
-}
-
-fn channel_callback() -> (Box<dyn Fn() + Send + Sync>, mpsc::Receiver<Instant>) {
-    let (tx, rx) = mpsc::channel();
-    let tx = std::sync::Mutex::new(tx);
-    (
-        Box::new(move || {
-            let _ = tx.lock().unwrap().send(Instant::now());
-        }),
-        rx,
-    )
-}
-
-/// How many fires arrive until 300 ms pass without one.
-fn fired(rx: &mpsc::Receiver<Instant>) -> usize {
-    let mut n = 0;
-    while rx.recv_timeout(Duration::from_millis(300)).is_ok() {
-        n += 1;
-    }
-    n
 }
 
 fn right_ctrl_double_tap() -> Trigger {
@@ -289,28 +268,22 @@ fn windows_doubletap_into_notepad() {
         nugget_a11y::UiaPlatform::new(),
         nugget_a11y::A11yConfig::default(),
     );
-    support::read_breakdown(&backend, "windows");
     for k in [RCONTROL, LCONTROL, LMENU] {
         send(k, false);
     }
 
-    for (mode, chunks) in [
-        (Mode::Shell, support::SHELL_CHUNKS),
-        (Mode::Streamed, support::STREAMED_CHUNKS),
-    ] {
-        let pipeline = Pipeline::new(chunks);
-        let (cb, rx) = channel_callback();
-        let listener = start(right_ctrl_double_tap(), cb).expect("start the double-tap listener");
-        sleep(Duration::from_millis(200));
-        // The draft starts on its own thread at the fire; the listener stays up meanwhile, as in
-        // the shell.
-        let report = support::trigger_and_draft(&backend, &pipeline, mode, rx, |_| {
-            tap(RCONTROL);
-            tap(RCONTROL);
-        })
-        .unwrap_or_else(|e| panic!("{} mode: {e}", mode.as_str()));
-        drop(listener);
-        report.publish("windows");
-        assert!(is_notepad(&report.app), "{:?}", report.app);
-    }
+    let pipeline = Pipeline::new(support::CHUNKS);
+    let (cb, rx) = channel_callback();
+    let listener = start(right_ctrl_double_tap(), cb).expect("start the double-tap listener");
+    sleep(Duration::from_millis(200));
+    // The draft starts on its own thread at the fire; the listener stays up meanwhile, as in the
+    // shell.
+    let report = support::trigger_and_draft(&backend, &pipeline, rx, |_| {
+        tap(RCONTROL);
+        tap(RCONTROL);
+    })
+    .unwrap_or_else(|e| panic!("{e}"));
+    drop(listener);
+    report.publish("windows");
+    assert!(is_notepad(&report.app), "{:?}", report.app);
 }

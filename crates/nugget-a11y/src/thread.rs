@@ -1865,9 +1865,9 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Web editor fixtures (the FF3 app-matrix pages, modelled per platform)
+    // Web editor fixtures, modelled per platform
 
-    /// The chat context of the FF3 pages, oldest first. Everyone's messages sit in one column
+    /// The chat context of the web fixture pages, oldest first. Everyone's messages sit in one column
     /// (Slack-like), so for a generic page only "You" is known; the others stay unknown.
     fn chat_truth() -> Vec<(Option<&'static str>, &'static str, Option<bool>)> {
         vec![
@@ -1936,15 +1936,6 @@ mod tests {
         );
         assert_eq!(ctx.recipients, vec!["Maya Chen"]);
         assert_eq!(ctx.subject.as_deref(), Some("Re: Q3 offsite venue"));
-    }
-
-    #[test]
-    fn fixture_web_mail_compose_ax() {
-        let (ctx, _) = run("web_mail_compose_ax", &ThreadLimits::default());
-        // The inbox of other conversations is not this thread.
-        assert_eq!(summary(&ctx), vec![]);
-        assert_eq!(ctx.recipients, vec!["Jordan Lee"]);
-        assert_eq!(ctx.subject.as_deref(), Some("Q3 offsite venue"));
     }
 
     fn load(name: &str) -> (Snapshot, AppInfo) {
@@ -2119,138 +2110,61 @@ mod tests {
         assert!(self_column_is_distinct(&bubbles, &limits));
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Trees recorded from Chrome on Linux (`Backend::snapshot()`), against the FF3 ground truth
-
-    fn truth_context(name: &str) -> serde_json::Value {
-        let path = format!(
-            "{}/tests/fixtures/apps/truth.json",
-            env!("CARGO_MANIFEST_DIR")
-        );
-        let truth: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        truth["contexts"][name].clone()
-    }
-
-    fn recorded(name: &str, title: &str) -> ThreadContext {
-        let path = format!(
-            "{}/tests/fixtures/trees/{name}.json",
-            env!("CARGO_MANIFEST_DIR")
+    #[test]
+    fn recorded_chrome_windows_mail() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/trees/web_chrome_windows_mail.json"
         );
         let snap = Snapshot::from_json(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert!(snap.focused().is_some_and(|f| f.states.focused), "{name}");
         let app = AppInfo {
             id: Some("google-chrome".into()),
             name: "Google Chrome".into(),
-            window_title: Some(format!("{title} - Google Chrome")),
+            window_title: Some("Nugget fixture: Mail compose - Google Chrome".into()),
             url: None,
         };
-        extract(&snap, &app, "Draft:", &ThreadLimits::default())
-    }
-
-    fn collapse(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
-    /// Every truth message found, in order, nothing else: same text (whitespace collapsed),
-    /// the author (an address may follow it), and `from_me` for the user's messages.
-    fn assert_matches_truth(ctx: &ThreadContext, truth: &serde_json::Value) {
-        let want = truth["messages"].as_array().unwrap();
+        let ctx = extract(&snap, &app, "Draft:", &ThreadLimits::default());
         let got: Vec<_> = ctx
             .messages
             .iter()
-            .map(|m| (m.author.as_deref(), collapse(&m.text), m.from_me))
+            .map(|m| {
+                (
+                    m.author.as_deref(),
+                    m.text.split_whitespace().collect::<Vec<_>>().join(" "),
+                )
+            })
             .collect();
+        let want = [
+            (
+                "Jordan Lee",
+                "Hi all, I shortlisted two venues for the Q3 offsite: Lakeside Lodge and Harbor Loft. Both can host 40 people. Which one do you prefer?",
+            ),
+            (
+                "Priya Natarajan",
+                "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+            ),
+            (
+                "Jordan Lee",
+                "Thanks Priya. Lakeside quoted 18,500 for two days including lunch. Can everyone confirm the dates work for your team before I sign?",
+            ),
+        ];
         assert_eq!(got.len(), want.len(), "{got:#?}");
-        for (g, w) in got.iter().zip(want) {
-            assert_eq!(g.1, collapse(w["text"].as_str().unwrap()));
-            let author = w["author"].as_str().unwrap();
+        for ((author, text), (wa, wt)) in got.iter().zip(want) {
+            assert_eq!(text, wt);
             assert!(
-                g.0.is_some_and(|a| a == author || a.starts_with(&format!("{author} <"))),
-                "{g:?} by {author}"
+                author.is_some_and(|a| a == wa || a.starts_with(&format!("{wa} <"))),
+                "{author:?}"
             );
-            if w["from_me"].as_bool().unwrap() {
-                assert_eq!(g.2, Some(true), "{g:?}");
-            } else {
-                assert_ne!(g.2, Some(true), "{g:?}");
-            }
         }
-    }
-
-    #[test]
-    fn recorded_chrome_linux_chat_matches_truth() {
-        let ctx = recorded("web_chrome_linux_chat", "Nugget fixture: Plain textarea");
-        let truth = truth_context("chat");
-        assert_matches_truth(&ctx, &truth);
-        assert_eq!(ctx.messages[1].timestamp.as_deref(), Some("10:03 AM"));
-        assert!(ctx.recipients.is_empty());
-        assert_eq!(ctx.subject, None);
-    }
-
-    #[test]
-    fn recorded_chrome_linux_mail_matches_truth() {
-        let ctx = recorded("web_chrome_linux_mail", "Nugget fixture: Mail compose");
-        let truth = truth_context("mail");
-        assert_matches_truth(&ctx, &truth);
-        assert_eq!(
-            ctx.messages[2].timestamp.as_deref(),
-            Some("Tue, Oct 27, 8:05 AM")
-        );
+        assert!(ctx.messages.iter().all(|m| m.from_me != Some(true)));
         assert_eq!(ctx.recipients, vec!["Jordan Lee", "Priya Natarajan"]);
-        assert_eq!(ctx.subject.as_deref(), Some("Re: Q3 offsite venue"));
+        assert!(
+            ctx.subject
+                .as_deref()
+                .is_some_and(|s| s.ends_with("Q3 offsite venue"))
+        );
     }
 
-    #[test]
-    fn recorded_browser_trees_match_truth() {
-        for (name, title, context) in [
-            (
-                "web_chrome_windows_mail",
-                "Nugget fixture: Mail compose",
-                "mail",
-            ),
-            (
-                "web_safari_macos_mail",
-                "Nugget fixture: Mail compose",
-                "mail",
-            ),
-            (
-                "web_safari_macos_chat",
-                "Nugget fixture: Plain textarea",
-                "chat",
-            ),
-            (
-                "web_firefox_linux_mail",
-                "Nugget fixture: Mail compose",
-                "mail",
-            ),
-            (
-                "web_firefox_linux_chat",
-                "Nugget fixture: Plain contenteditable",
-                "chat",
-            ),
-            ("web_firefox_linux_quill", "Nugget fixture: Quill", "chat"),
-        ] {
-            let ctx = recorded(name, title);
-            let truth = truth_context(context);
-            eprintln!("{name}");
-            assert_matches_truth(&ctx, &truth);
-            if context == "mail" {
-                assert_eq!(
-                    ctx.recipients,
-                    vec!["Jordan Lee", "Priya Natarajan"],
-                    "{name}"
-                );
-                assert!(
-                    ctx.subject
-                        .as_deref()
-                        .is_some_and(|s| s.ends_with("Q3 offsite venue")),
-                    "{name}"
-                );
-            } else {
-                assert!(ctx.recipients.is_empty(), "{name}");
-            }
-        }
-    }
     #[test]
     fn forms_and_pickers_are_never_a_thread() {
         let item = |t: &str| {

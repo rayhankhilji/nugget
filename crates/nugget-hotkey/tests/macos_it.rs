@@ -61,7 +61,7 @@ mod mac {
         CGPreflightListenEventAccess, CGPreflightPostEventAccess,
     };
 
-    use crate::support::{self, Mode, Pipeline};
+    use crate::support::{self, Pipeline, channel_callback, fired};
 
     // kVK_* virtual key codes.
     const RIGHT_COMMAND: u16 = 54;
@@ -97,16 +97,14 @@ mod mac {
         sleep(Duration::from_millis(25));
     }
 
-    fn rcmd_tap() {
-        command(RIGHT_COMMAND, DEVICE_RCMD, true);
-        command(RIGHT_COMMAND, DEVICE_RCMD, false);
+    fn cmd_tap(keycode: u16, device_bit: u64) {
+        command(keycode, device_bit, true);
+        command(keycode, device_bit, false);
         sleep(Duration::from_millis(40));
     }
 
-    fn lcmd_tap() {
-        command(LEFT_COMMAND, DEVICE_LCMD, true);
-        command(LEFT_COMMAND, DEVICE_LCMD, false);
-        sleep(Duration::from_millis(40));
+    fn rcmd_tap() {
+        cmd_tap(RIGHT_COMMAND, DEVICE_RCMD);
     }
 
     fn key(keycode: u16, flags: CGEventFlags) {
@@ -117,25 +115,6 @@ mod mac {
             sleep(Duration::from_millis(25));
         }
         sleep(Duration::from_millis(40));
-    }
-
-    fn channel_callback() -> (Box<dyn Fn() + Send + Sync>, mpsc::Receiver<Instant>) {
-        let (tx, rx) = mpsc::channel();
-        let tx = std::sync::Mutex::new(tx);
-        (
-            Box::new(move || {
-                let _ = tx.lock().unwrap().send(Instant::now());
-            }),
-            rx,
-        )
-    }
-
-    fn fired(rx: &mpsc::Receiver<Instant>) -> usize {
-        let mut n = 0;
-        while rx.recv_timeout(Duration::from_millis(300)).is_ok() {
-            n += 1;
-        }
-        n
     }
 
     /// Start a listener from this worker thread. The installation is queued on the main thread,
@@ -179,8 +158,8 @@ mod mac {
         );
         check(fired(&rx) == 0, "one double tap fires once")?;
 
-        lcmd_tap();
-        lcmd_tap();
+        cmd_tap(LEFT_COMMAND, DEVICE_LCMD);
+        cmd_tap(LEFT_COMMAND, DEVICE_LCMD);
         check(
             fired(&rx) == 0,
             "left Command must not fire a right-Command listener",
@@ -317,50 +296,42 @@ mod mac {
             nugget_a11y::AxPlatform::new(),
             nugget_a11y::A11yConfig::default(),
         );
-        support::read_breakdown(&ax, "macos");
         let front = || {
             ax.frontmost_app()
                 .map(|f| format!("{:?}", f.map(|(a, _)| (a.name, a.window_title))))
                 .unwrap_or_else(|e| format!("error: {e}"))
         };
         let result = (|| -> Result<(), String> {
-            for (mode, chunks) in [
-                (Mode::Shell, support::SHELL_CHUNKS),
-                (Mode::Streamed, support::STREAMED_CHUNKS),
-            ] {
-                let pipeline = Pipeline::new(chunks);
-                let report = if p.post {
-                    let t = Instant::now();
-                    let (listener, rx) = listen(Trigger::default());
-                    println!(
-                        "macos_it: listener installed in {:.0} ms; frontmost {}",
-                        support::ms(t.elapsed()),
-                        front()
-                    );
-                    // The draft starts on its own thread at the fire, and the listener stays up
-                    // meanwhile, as in the shell. A missed double tap is retried and reported.
-                    let report = support::trigger_and_draft(&ax, &pipeline, mode, rx, |attempt| {
-                        if attempt > 1 {
-                            println!("macos_it: frontmost before attempt {attempt}: {}", front());
-                            sleep(Duration::from_millis(500));
-                        }
-                        rcmd_tap();
-                        rcmd_tap();
-                    });
-                    drop(listener);
-                    report
-                } else {
-                    println!(
-                        "macos_it: key events cannot be posted; the draft starts as `doubletap_fire` \
-                         does (no key press)"
-                    );
-                    support::draft_and_insert(&ax, &pipeline, Instant::now(), mode)
-                }
-                .map_err(|e| format!("{} mode: {e}", mode.as_str()))?;
-                report.publish("macos");
-                check(is_textedit(&report.app), "the draft was read from TextEdit")?;
-            }
-            Ok(())
+            let pipeline = Pipeline::new(support::CHUNKS);
+            let report = if p.post {
+                let t = Instant::now();
+                let (listener, rx) = listen(Trigger::default());
+                println!(
+                    "macos_it: listener installed in {:.0} ms; frontmost {}",
+                    support::ms(t.elapsed()),
+                    front()
+                );
+                // The draft starts on its own thread at the fire, and the listener stays up
+                // meanwhile, as in the shell. A missed double tap is retried and reported.
+                let report = support::trigger_and_draft(&ax, &pipeline, rx, |attempt| {
+                    if attempt > 1 {
+                        println!("macos_it: frontmost before attempt {attempt}: {}", front());
+                        sleep(Duration::from_millis(500));
+                    }
+                    rcmd_tap();
+                    rcmd_tap();
+                });
+                drop(listener);
+                report
+            } else {
+                println!(
+                    "macos_it: key events cannot be posted; the draft starts as `doubletap_fire` \
+                     does (no key press)"
+                );
+                support::draft_and_insert(&ax, &pipeline, Instant::now())
+            }?;
+            report.publish("macos");
+            check(is_textedit(&report.app), "the draft was read from TextEdit")
         })();
         if let Err(e) = &result {
             println!("macos_it: insert failed ({e}); frontmost {}", front());

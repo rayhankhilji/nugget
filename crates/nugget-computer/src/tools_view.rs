@@ -176,10 +176,7 @@ mod tests {
         }
     }
 
-    fn kids(mut node: UiNode, children: Vec<UiNode>) -> UiNode {
-        node.children = children;
-        node
-    }
+    use crate::tools::tests::kids;
 
     fn tree(children: Vec<UiNode>) -> UiTree {
         crate::tools::tests::window("w", "App", children)

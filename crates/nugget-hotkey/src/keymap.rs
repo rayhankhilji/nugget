@@ -92,49 +92,24 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn windows_left_and_right_modifiers() {
-        assert_eq!(
-            windows_vk(0xA2, 0x1D),
-            Some(KeyClass::Modifier(Modifier::LeftControl))
-        );
-        assert_eq!(
-            windows_vk(0xA3, 0x1D),
-            Some(KeyClass::Modifier(Modifier::RightControl))
-        );
-        assert_eq!(
-            windows_vk(0xA4, 0x38),
-            Some(KeyClass::Modifier(Modifier::LeftOption))
-        );
-        assert_eq!(
-            windows_vk(0xA5, 0x38),
-            Some(KeyClass::Modifier(Modifier::RightOption))
-        );
-        assert_eq!(
-            windows_vk(0xA0, 0x2A),
-            Some(KeyClass::Modifier(Modifier::LeftShift))
-        );
-        assert_eq!(
-            windows_vk(0xA1, 0x36),
-            Some(KeyClass::Modifier(Modifier::RightShift))
-        );
-        assert_eq!(
-            windows_vk(0x5B, 0),
-            Some(KeyClass::Modifier(Modifier::LeftCommand))
-        );
-        assert_eq!(
-            windows_vk(0x5C, 0),
-            Some(KeyClass::Modifier(Modifier::RightCommand))
-        );
+    fn windows_vks() {
+        use Modifier::*;
+        for (vk, scan, m) in [
+            (0xA2, 0x1D, LeftControl),
+            (0xA3, 0x1D, RightControl),
+            (0xA4, 0x38, LeftOption),
+            (0xA5, 0x38, RightOption),
+            (0xA0, 0x2A, LeftShift),
+            (0xA1, 0x36, RightShift),
+            (0x5B, 0, LeftCommand),
+            (0x5C, 0, RightCommand),
+        ] {
+            assert_eq!(windows_vk(vk, scan), Some(KeyClass::Modifier(m)), "{vk:#x}");
+        }
         assert_eq!(windows_vk(0x1B, 1), Some(KeyClass::Escape));
-    }
-
-    #[test]
-    fn windows_altgr_fake_ctrl_is_ignored() {
+        // AltGr's fake Left Ctrl is dropped.
         assert_eq!(windows_vk(0xA2, 0x21D), None);
-    }
-
-    #[test]
-    fn windows_other_keys_carry_no_identity() {
+        // Every other key carries no identity.
         for vk in all_windows_non_modifier_vks() {
             assert_eq!(windows_vk(vk, 0), Some(KeyClass::Other), "vk {vk:#x}");
         }
@@ -153,47 +128,26 @@ pub(crate) mod tests {
 
     #[test]
     fn mac_flag_diffs_tell_left_from_right() {
+        let changes = |a, b| mac_flag_changes(a, b).collect::<Vec<_>>();
         // Right Command down: device bit 0x10 plus the device-independent Command bit.
         let down = 0x0010_0000 | 0x10;
-        assert_eq!(
-            mac_flag_changes(0, down).collect::<Vec<_>>(),
-            vec![(Modifier::RightCommand, true)]
-        );
-        assert_eq!(
-            mac_flag_changes(down, 0).collect::<Vec<_>>(),
-            vec![(Modifier::RightCommand, false)]
-        );
+        assert_eq!(changes(0, down), [(Modifier::RightCommand, true)]);
+        assert_eq!(changes(down, 0), [(Modifier::RightCommand, false)]);
         // Left Command joins while right is held.
-        let both = down | 0x08;
-        assert_eq!(
-            mac_flag_changes(down, both).collect::<Vec<_>>(),
-            vec![(Modifier::LeftCommand, true)]
-        );
+        assert_eq!(changes(down, down | 0x08), [(Modifier::LeftCommand, true)]);
         // Device-independent bits alone change nothing.
-        assert_eq!(mac_flag_changes(0, 0x0010_0000).count(), 0);
-        // Every modifier has its own bit.
+        assert!(changes(0, 0x0010_0000).is_empty());
         for (bit, m) in MAC_DEVICE_BITS {
-            assert_eq!(
-                mac_flag_changes(0, bit).collect::<Vec<_>>(),
-                vec![(m, true)]
-            );
+            assert_eq!(changes(0, bit), [(m, true)]);
         }
     }
 
     #[test]
     fn x11_keysyms() {
-        assert_eq!(
-            x11_keysym(0xffe4),
-            KeyClass::Modifier(Modifier::RightControl)
-        );
-        assert_eq!(
-            x11_keysym(0xfe03),
-            KeyClass::Modifier(Modifier::RightOption)
-        );
-        assert_eq!(
-            x11_keysym(0xffec),
-            KeyClass::Modifier(Modifier::RightCommand)
-        );
+        use Modifier::*;
+        assert_eq!(x11_keysym(0xffe4), KeyClass::Modifier(RightControl));
+        assert_eq!(x11_keysym(0xfe03), KeyClass::Modifier(RightOption)); // AltGr
+        assert_eq!(x11_keysym(0xffec), KeyClass::Modifier(RightCommand));
         assert_eq!(x11_keysym(0xff1b), KeyClass::Escape);
         assert_eq!(x11_keysym(u32::from(b'a')), KeyClass::Other);
         assert_eq!(x11_keysym(0xff0d), KeyClass::Other); // Return

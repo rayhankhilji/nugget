@@ -196,20 +196,11 @@ is rule-based, on the raw model text; an optional judge answers in both orders. 
 
 ## Double Tap app matrix (FF3)
 
-`nugget-a11y` against real apps on GitHub's runners: browsers on local fixture pages (textarea,
-contenteditable, a Gmail-like compose, ProseMirror, Quill, Draft.js, Lexical, CKEditor 5, beside a
-thread and a password field; `tests/fixtures/apps/PROTOCOL.md`) and native editors. Per cell:
-detect, read, thread precision/recall, secure, six insert payloads (ASCII, newlines, emoji, RTL,
-combining marks, 5,000 characters) checked by the page's own text model, one-step undo, read time.
-
-```sh
-cargo test -p nugget-a11y --test apps_matrix -- --ignored --nocapture --test-threads=1
-python3 crates/nugget-a11y/tests/fixtures/apps/render_matrix.py <results.jsonl> --stdout
-```
-
-The `A11y apps` workflow runs it weekly, on dispatch and on pull requests touching `nugget-a11y`,
-with the full matrix in its job summary; `tests/fixtures/apps/expected.json` is the regression
-gate. Latest, 2026-10-31, run 41190942813:
+`nugget-a11y` against real apps on GitHub's runners (browsers on local fixture pages with common
+rich-text editors beside a thread and a password field, and native editors): detect, read, thread
+precision/recall, secure, six insert payloads checked by the page's own text model, one-step undo
+and read time. Measured on 2026-10-31 (run 41190942813) by a harness since removed in the debloat;
+the per-platform suites in `real-os.yml` still cover the same code paths.
 
 | OS | App | Detect, read, secure | Thread P/R | Insert | Undo | Read p50 |
 |---|---|---|---|---|---|---|

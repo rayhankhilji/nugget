@@ -33,7 +33,6 @@ does not read your shell profile.
 | `NUGGET_PLUGIN_SIGNING_KEY` | Signing key for the plugin signing example (`cargo run -p nugget-plugin --example sign-plugin -- <package dir>`). Never commit it |
 | `NUGGET_PLUGIN_SIGNING_KEY_FILE` | The same key, read from a file |
 | `NUGGET_PLUGIN_REQUIRE_GUESTS` | `1` makes the `nugget-plugin` tests fail, instead of skipping, when the WebAssembly guest plugins cannot be built |
-| `NUGGET_A11Y_IT` | `1` runs the Linux accessibility integration tests in `nugget-a11y` |
 | `NUGGET_HOTKEY_IT` | `1` runs the X11 integration test in `nugget-hotkey` (needs `DISPLAY`) |
 | `NUGGET_CUA_DISPLAY` | An X display for the computer-use benchmark, instead of starting Xvfb |
 | `NUGGET_CUA_CHROMIUM` | The Chromium binary for the computer-use benchmark |

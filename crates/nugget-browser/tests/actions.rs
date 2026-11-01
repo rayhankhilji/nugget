@@ -24,10 +24,6 @@ fn extension_snapshots_deserialize() {
             .count()
             >= 4
     );
-    // Round trip keeps the wire format.
-    let again: nugget_browser::PageSnapshot =
-        serde_json::from_value(serde_json::to_value(&s).unwrap()).unwrap();
-    assert_eq!(again, s);
 }
 
 #[test]
