@@ -10,6 +10,12 @@ name: HH2 GG6-1 before/after (real 4B, Linux onboarding)
 # Results: the step summary (qa/HH2/gg6_compare.py) and the hh2-gg6-<run id> artifact.
 
 on:
+  # TEMPORARY: the workflow is not on the default branch yet, so it cannot be dispatched;
+  # remove before the final push.
+  push:
+    branches: [hh/ingest-triage]
+    paths:
+      - ".github/workflows/hh2-gg6.yml"
   workflow_dispatch:
     inputs:
       before_ref:
