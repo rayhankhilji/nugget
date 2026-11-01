@@ -311,14 +311,14 @@ pub(crate) fn parse_triage(raw: &str, n: usize) -> Result<Vec<Triage>> {
 /// per item keeps the vector dimension consistent). Returns the provider used.
 ///
 /// Texts get the document task prefix of `store`'s index
-/// ([`nugget_store::Store::embedding_prefixes`]); an index whose scheme is still open adopts the
-/// first provider's ([`Provider::embed_prefixes`]), so one index never mixes schemes and an index
-/// built without prefixes keeps embedding without them.
-///
-/// Likewise the index records the first provider's model
-/// ([`nugget_store::Store::adopt_embedding_model`]) and only providers serving that model embed
-/// for it: two models' vectors are not comparable even at the same dimension, so an item no
-/// provider of the index's model can embed stays text-only rather than mixing vector spaces.
+/// ([`nugget_store::Store::embedding_prefixes`]), and only providers serving the index's model
+/// ([`nugget_store::Store::embedding_model`]) embed for it: two models' vectors are not
+/// comparable even at the same dimension, so an item no provider of the index's model can embed
+/// stays text-only rather than mixing vector spaces. An index whose scheme or model is still
+/// open records those of the provider that first **returns vectors** (each provider meanwhile
+/// uses its own prefixes): one that fails (offline, timed out, out of quota) must not fix the
+/// index to a model nothing serves (EM-1). A concurrent record wins; this provider's vectors
+/// are then discarded unless they match it.
 pub(crate) async fn embed(
     store: &nugget_store::Store,
     router: &Router,
@@ -328,30 +328,32 @@ pub(crate) async fn embed(
     batch: usize,
     timeout: Duration,
 ) -> Result<(ProviderId, Vec<Vec<f32>>)> {
-    let Some(first) = providers.first() else {
+    if providers.is_empty() {
         return Err(Error::NotFound("no allowed embedding provider".into()));
-    };
-    let (query, document) = first.embed_prefixes();
-    let (_, document) = store.adopt_embedding_prefixes(&query, &document)?;
-    let model = store.adopt_embedding_model(&first.meta().model)?;
-    let prefixed;
-    let texts = if document.is_empty() {
-        texts
-    } else {
-        prefixed = nugget_infer::with_prefix(&document, texts);
-        &prefixed[..]
-    };
+    }
+    let recorded_prefixes = store.embedding_prefixes()?;
+    let recorded_model = store.embedding_model()?;
     let batch = batch.max(1);
     let mut last_err = None;
     'providers: for p in providers {
         let served = p.meta().model;
-        if served != model {
-            last_err = Some(Error::Invalid(format!(
-                "{}: serves embedding model `{served}`, the index was built with `{model}`",
-                p.id()
-            )));
+        if let Some(model) = recorded_model.as_deref()
+            && served != model
+        {
+            last_err = Some(mismatch(p.id(), &served, model));
             continue;
         }
+        let (query, document) = match &recorded_prefixes {
+            Some(r) => r.clone(),
+            None => p.embed_prefixes(),
+        };
+        let prefixed;
+        let texts = if document.is_empty() {
+            texts
+        } else {
+            prefixed = nugget_infer::with_prefix(&document, texts);
+            &prefixed[..]
+        };
         let mut out = Vec::with_capacity(texts.len());
         for part in texts.chunks(batch) {
             // Every chunk is the item's: the egress ledger lists it.
@@ -402,10 +404,33 @@ pub(crate) async fn embed(
             )));
             continue;
         }
+        // Record what an open index was missing; a concurrent embed may have recorded first.
+        if recorded_prefixes.is_none()
+            && store.adopt_embedding_prefixes(&query, &document)? != (query.clone(), document)
+        {
+            last_err = Some(Error::Invalid(format!(
+                "{}: the index adopted other task prefixes meanwhile",
+                p.id()
+            )));
+            continue;
+        }
+        if recorded_model.is_none() {
+            let model = store.adopt_embedding_model(&served)?;
+            if model != served {
+                last_err = Some(mismatch(p.id(), &served, &model));
+                continue;
+            }
+        }
         router.report_success(p.id());
         return Ok((p.id().clone(), out));
     }
     Err(last_err.unwrap_or_else(|| Error::NotFound("no embedding provider".into())))
+}
+
+fn mismatch(provider: &ProviderId, served: &str, model: &str) -> Error {
+    Error::Invalid(format!(
+        "{provider}: serves embedding model `{served}`, the index was built with `{model}`"
+    ))
 }
 
 #[cfg(test)]

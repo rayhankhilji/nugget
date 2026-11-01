@@ -296,6 +296,8 @@ pub struct FakeProvider {
     pub nan: AtomicBool,
     /// The task prefixes it reports as `(query, document)` (none by default).
     pub prefixes: Mutex<(String, String)>,
+    /// The model it reports serving (`fake-model` by default).
+    pub model: Mutex<String>,
     /// Chat requests wait while this is `false` (see [`FakeProvider::block_chat`]).
     chat_open: tokio::sync::watch::Sender<bool>,
     /// Chat requests that returned a reply (others were dropped while blocked).
@@ -323,6 +325,7 @@ impl FakeProvider {
             dim: 4,
             nan: AtomicBool::new(false),
             prefixes: Mutex::new((String::new(), String::new())),
+            model: Mutex::new("fake-model".into()),
             chat_open: tokio::sync::watch::channel(true).0,
             chats_completed: AtomicUsize::new(0),
             chat_invalid: AtomicBool::new(false),
@@ -369,7 +372,7 @@ impl Provider for FakeProvider {
     fn meta(&self) -> ProviderMeta {
         ProviderMeta {
             kind: ProviderKind::OpenaiCompatible,
-            model: "fake-model".into(),
+            model: self.model.lock().unwrap().clone(),
             locality: self.locality,
             context_tokens: None,
         }

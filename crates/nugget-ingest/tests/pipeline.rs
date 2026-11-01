@@ -705,6 +705,57 @@ async fn documents_follow_the_index_prefix_scheme() {
     }
 }
 
+/// EM-1: an open index records the scheme and model of the provider that returns vectors, not
+/// of the first one tried. A first provider that fails (here: NaN vectors) does not fix the
+/// index to its model, which would leave every later item text-only and search lexical.
+#[tokio::test]
+async fn a_failing_first_embedder_does_not_claim_the_index() {
+    let broken = FakeProvider::new("lan-embed", Locality::OnDevice);
+    *broken.model.lock().unwrap() = "lan-model".into();
+    *broken.prefixes.lock().unwrap() =
+        ("search_query: ".to_owned(), "search_document: ".to_owned());
+    broken.nan.store(true, std::sync::atomic::Ordering::SeqCst);
+    let local = FakeProvider::new("local-embed", Locality::OnDevice);
+    let store = nugget_store::Store::open_in_memory().unwrap();
+    let h = start(Opts {
+        router: Some(router(&[
+            (broken.clone(), vec![Tier::Embedding]),
+            (local.clone(), vec![Tier::Embedding]),
+        ])),
+        store: Some(store.clone()),
+        ..Default::default()
+    })
+    .await;
+    h.factory.state("fake-1").script(vec![
+        Step::Send(text_doc("1", "hello world", Some("v"))),
+        Step::Return(json!(1)),
+    ]);
+    h.add("fake-1").await;
+    eventually("item 1 indexed", || h.item("fake-1", "1").is_some()).await;
+    eventually("item 1 embedded", || {
+        store.embedding_dim().unwrap().is_some()
+    })
+    .await;
+    // The broken provider was tried first, with its own prefixes; nothing of it was recorded.
+    assert!(
+        broken
+            .embedded()
+            .iter()
+            .all(|t| t.starts_with("search_document: "))
+    );
+    assert!(!broken.embedded().is_empty());
+    assert!(local.embedded().iter().all(|t| !t.starts_with("search_")));
+    assert_eq!(
+        store.embedding_model().unwrap().as_deref(),
+        Some("fake-model")
+    );
+    assert_eq!(
+        store.embedding_prefixes().unwrap(),
+        Some((String::new(), String::new()))
+    );
+    h.ingest.shutdown().await;
+}
+
 /// An index built with another embedding model is never given this provider's vectors (not
 /// comparable, even at the same dimension): the item is indexed text-only.
 #[tokio::test]
