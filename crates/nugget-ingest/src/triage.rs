@@ -67,16 +67,21 @@ pub(crate) const MAX_ATTEMPTS: u32 = 3;
 const PAGE: usize = 256;
 /// Characters of document text per request before any prefill has been measured.
 const FIRST_REQUEST_CHARS: usize = 2_000;
-/// Fewest characters of document text per request, whatever the measured rate. Every request
+/// Fewest characters of document text per request unless the hardware is very slow (see
+/// [`request_budget`]). Every request
 /// pays the fixed part of the prompt (instructions, schema, chat template) again, so requests of
 /// one or two short items spend most of their time on it (HH2 JJ1-1 run 41269745457: about
 /// 6.5 s per item with the 4B, against about 1 s per item in batches of 8).
 const MIN_REQUEST_CHARS: usize = 1_000;
-/// The fixed part of every request, in characters: the instructions and the chat template.
+/// Fewest characters per request on hardware so slow that even [`MIN_REQUEST_CHARS`] would take
+/// more than twice `triage_request_ms` (a request must carry some text).
+const SLOWEST_REQUEST_CHARS: usize = 300;
+/// The fixed part of every request, in characters: the instructions, the preamble naming the
+/// request's tag code (EE4 TB-1) and the chat template.
 /// Counted in the measured prefill rate, so the time to the first token is not charged to the
 /// document text alone (that made a short batch look slow and shrank every later one).
 fn fixed_prompt_chars() -> usize {
-    ai::TRIAGE_SYSTEM.chars().count() + 200
+    ai::TRIAGE_SYSTEM.chars().count() + ai::TRIAGE_PREAMBLE.chars().count() + 200
 }
 
 /// How long the job lets a part-filled batch gather more items (a sync writes items quickly).
@@ -720,13 +725,27 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
 /// [`IngestConfig::triage_request_ms`]: crate::IngestConfig::triage_request_ms
 /// [`IngestConfig::triage_batch_chars`]: crate::IngestConfig::triage_batch_chars
 pub(crate) fn request_budget(inner: &Inner) -> usize {
-    let cap = inner.cfg.triage_batch_chars.max(MIN_REQUEST_CHARS);
-    let chars = match lock(&inner.triage).ms_per_char {
-        Some(rate) if rate > 0.0 => ((inner.cfg.triage_request_ms as f64 / rate) as usize)
-            .saturating_sub(fixed_prompt_chars()),
-        _ => FIRST_REQUEST_CHARS,
+    let rate = lock(&inner.triage).ms_per_char;
+    budget_chars(
+        rate,
+        inner.cfg.triage_request_ms,
+        inner.cfg.triage_batch_chars,
+    )
+}
+
+/// [`request_budget`] for a measured prefill rate (ms per prompt character), a target in ms and
+/// a cap in characters.
+fn budget_chars(ms_per_char: Option<f64>, target_ms: u64, cap: usize) -> usize {
+    let cap = cap.max(MIN_REQUEST_CHARS);
+    let Some(rate) = ms_per_char.filter(|r| *r > 0.0) else {
+        return FIRST_REQUEST_CHARS.min(cap);
     };
-    chars.clamp(MIN_REQUEST_CHARS, cap)
+    let fits = |ms: f64| ((ms / rate) as usize).saturating_sub(fixed_prompt_chars());
+    // The floor keeps batches large enough to label well, but on very slow hardware it may
+    // stretch a request to at most twice the target; beyond that requests get smaller, down
+    // to `SLOWEST_REQUEST_CHARS` (EE4 security review TB-2).
+    let floor = fits(2.0 * target_ms as f64).clamp(SLOWEST_REQUEST_CHARS, MIN_REQUEST_CHARS);
+    fits(target_ms as f64).clamp(floor, cap)
 }
 
 /// Fold one request's prefill into the measured rate.
@@ -1103,4 +1122,36 @@ fn reopen(inner: &Inner, r: &ItemRef) -> Result<bool> {
     }
     // Still sensitive (it was while failed): pending items count as sensitive until labelled.
     store.set_item_metadata(&item.item, &item.content_hash, &metadata)
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn requests_fit_the_target_but_never_shrink_below_what_labels_well_unless_very_slow() {
+        let fixed = fixed_prompt_chars();
+        // Not measured yet.
+        assert_eq!(budget_chars(None, 8_000, 6_000), FIRST_REQUEST_CHARS);
+        // Fast: capped by triage_batch_chars.
+        assert_eq!(budget_chars(Some(0.1), 8_000, 6_000), 6_000);
+        // About 2 ms per character (a 4-core CPU with the 4B): what fits in 8 s.
+        assert_eq!(budget_chars(Some(2.0), 8_000, 6_000), 4_000 - fixed);
+        // Slower: the 1 000-character floor holds while it costs at most twice the target.
+        let r = 16_000.0 / (fixed + 1_000) as f64;
+        assert_eq!(
+            budget_chars(Some(r * 0.99), 8_000, 6_000),
+            MIN_REQUEST_CHARS
+        );
+        // Slower still: the floor gives way (at most twice the target), down to 300 characters.
+        let slow = r * 1.2;
+        let b = budget_chars(Some(slow), 8_000, 6_000);
+        let twice = ((16_000.0 / slow) as usize).saturating_sub(fixed);
+        assert!(b < MIN_REQUEST_CHARS, "{b}");
+        assert_eq!(b, twice.max(SLOWEST_REQUEST_CHARS));
+        assert_eq!(
+            budget_chars(Some(100.0), 8_000, 6_000),
+            SLOWEST_REQUEST_CHARS
+        );
+    }
 }

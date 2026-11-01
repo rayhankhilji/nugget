@@ -1,16 +1,10 @@
 name: HH2 triage prompt variants (real 4B, JJ1 corpus sample)
 
-# TEMPORARY experiment for JJ1-1: labels a sample of JJ1's triage corpus (every planted sensitive
+# JJ1-1 experiment: labels a sample of JJ1's triage corpus (every planted sensitive
 # and junk mail plus 40 normal mails per language) with each triage prompt/schema variant in
 # qa/HH2/triage_prompts.py, on the daemon's own chat llama-server and model (qa/HH2/serve_chat.py).
-# Removed before the final push.
 
 on:
-  push:
-    branches: [hh/ingest-triage]
-    paths:
-      - ".github/workflows/hh2-prompts.yml"
-      - "qa/HH2/triage_prompts.py"
   workflow_dispatch:
 
 permissions:

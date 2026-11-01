@@ -10,12 +10,6 @@ name: HH2 JJ1-1 before/after (real 4B triage, sensitive labels)
 # Results: the step summary (qa/HH2/jj1_compare.py) and the hh2-jj1-<run id> artifact.
 
 on:
-  # TEMPORARY: the workflow is not on the default branch yet, so it cannot be dispatched;
-  # a push that changes this file runs it with the defaults. Remove before the final push.
-  push:
-    branches: [hh/ingest-triage]
-    paths:
-      - ".github/workflows/hh2-jj1.yml"
   workflow_dispatch:
     inputs:
       before_ref:

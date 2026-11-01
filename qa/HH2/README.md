@@ -104,15 +104,13 @@ health, money and legal mail, and the rules missed most non-English ones. Commit
 multilingual rules and asks the model per category. `.github/workflows/hh2-jj1.yml` reruns JJ1's
 own measurement before and after on one `ubuntu-latest` runner. The harness (`qa/JJ1/harness`,
 `qa/JJ1/triage`) is extracted at run time from QA commit `2cfd682` with `git archive`, and it is
-not copied into this branch. Until the workflow is on the default branch, a push that changes the
-workflow file runs it with the defaults (a temporary trigger).
+not copied into this branch. It runs on `workflow_dispatch` only (so only once it is on the
+default branch); the temporary push trigger used for run 41269745457 is gone.
 
 - **Builds:** `nuggetd --release` (with the dev manifest key trusted, as in `qa-JJ1.yml`) is built
-  twice. BEFORE comes from a `git worktree` of `before_ref` (default `fae923d`) with its own
+  twice. BEFORE comes from a `git worktree` of `before_ref` (default `adc2ee50`) with its own
   `--target-dir`, and AFTER comes from the pushed head. The job fails if the two binaries are
-  identical. `fae923d` also predates 079122f8 (bounded triage prefill) and 8a417132 (interactive
-  chats first), so timings and Ask during the sync move for those reasons too. Pass
-  `before_ref` = `8f606a20^` to isolate the JJ1-1 change.
+  identical. `adc2ee50` is `8f606a20^`, which isolates the JJ1-1 change.
 - **Runs:** BEFORE, then AFTER, each with a fresh home and JJ1's exact invocation:
   `realmodel.py --nuggetd BIN --home H --out O --part triage --chat-model qwen3-4b-q4km
   --models-cache $RUNNER_TEMP/models-cache`. This uses 1200 mails (`gen_corpus.py`, seed 7) and
@@ -128,3 +126,17 @@ workflow file runs it with the defaults (a temporary trigger).
   searchable, the full-triage time, first search, Ask during the sync and when idle, and the CPU
   from `lscpu`. Everything goes in the `hh2-jj1-<run id>` artifact, with the export reduced to
   `labels-before.jsonl` and `labels-after.jsonl`.
+
+## Triage prompt variants (`triage_prompts.py`, `hh2-prompts.yml`)
+
+`triage_prompts.py --server URL --corpus DIR --out DIR [--normal-per-lang 40] [--batch 8]
+[--variants A,B,C]` sends the request `nugget-ingest`'s `ai::triage_batch` sends (instructions,
+numbered `<document>` elements, JSON schema, temperature 0, thinking off) straight to a
+llama-server with the chat model, for several prompt/schema variants, on a sample of a JJ1 triage
+corpus (every planted sensitive and junk mail plus N normal mails per language, seed 7). It
+reports the model's recall on the planted sensitive mails, normal mails flagged sensitive or
+junk, and output tokens and wall time per variant (`prompts.md`, `prompts.json`). `--batch`
+fixes the batch size, which is how the small-batch effect behind the JJ1-1 junk regression was
+found. `serve_chat.py` starts the daemon's own chat llama-server and model outside the daemon
+for it, and `hh2-prompts.yml` (dispatch only) runs both on a runner. Locally, any llama-server
+with the manifest's Qwen3-4B Q4_K_M works the same way.
