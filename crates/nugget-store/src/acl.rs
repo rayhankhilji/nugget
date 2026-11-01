@@ -1,13 +1,4 @@
 //! Owner-only access control for the data directory, the key file and the database files.
-//!
-//! On Unix this is handled with modes (`0700`/`0600`) where those files are created, so these
-//! functions are no-ops there. On Windows they replace the object's DACL with a **protected**
-//! one (no ACEs inherited from the parent) that grants full control to the current user and
-//! `SYSTEM` only; a directory's ACEs are inherited by everything created inside it.
-//!
-//! Best effort: a failure is logged, never returned. The store content is encrypted either way,
-//! and refusing to start on an unusual volume would be worse. Volumes without persistent ACLs
-//! (FAT, exFAT, some network shares) cannot be protected at all; that is logged as a warning.
 
 use std::path::Path;
 
@@ -115,8 +106,7 @@ mod win {
     }
 
     /// Replace the DACL of `path` (NUL-terminated) with a protected one granting full control to
-    /// the current user and `SYSTEM`. For a directory the ACEs are inherited by files and
-    /// subdirectories.
+    /// the current user and `SYSTEM`.
     fn set_protected_dacl(path: &[u16], dir: bool) -> io::Result<()> {
         let user = current_token_user()?;
         let system = system_sid()?;

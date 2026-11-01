@@ -8,18 +8,13 @@ use rusqlite::{Connection, OptionalExtension, params};
 use unicode_normalization::char::{decompose_compatible, is_combining_mark};
 
 use crate::Store;
-use crate::error::DbExt;
+use crate::error::{ConnExt, DbExt};
 use crate::fts;
 use crate::items::item_ref;
 use crate::types::{ChunkId, Hit};
 
-/// Weight of an item's title bm25 score, added to the bm25 score of each of its matching chunks
-/// in text search. Kept low on purpose: titles are often uninformative (file names, "Re: quick
-/// question"). Measured (M1-J): on the `nugget-retrieve` eval fixtures (informative titles) 0.25
-/// lifts every metric over title-less search (hybrid MRR@10 0.758 → 0.780) and higher weights
-/// help further (1.0: 0.812); on the synthetic benchmark corpus (titles of random topic words,
-/// queries from bodies) hybrid recall@10 falls from 0.936 (0) to 0.930 (0.25), 0.920 (0.5) and
-/// 0.896 (1.0). 0.5 and 0.75 also cost text-only recall@5 on the fixtures.
+/// Weight of an item's title bm25 score, added to the bm25 score of each of its matching chunks in
+/// text search.
 pub const TITLE_WEIGHT: f64 = 0.25;
 /// RRF damping constant (Cormack et al. 2009).
 const RRF_K: f64 = 60.0;
@@ -54,20 +49,6 @@ pub(crate) fn excerpt(text: &str) -> String {
 
 impl Store {
     /// Full-text search over chunks **and item titles**, ranked by bm25 (best first).
-    ///
-    /// The query is plain words (OR-ed, so chunks matching more of them rank higher) plus a small
-    /// syntax: `"quoted phrases"`, `word*` prefixes (2+ characters) and `-word` / `-"phrase"`
-    /// exclusions (only alongside a positive term). Anything else, FTS5 operators included, is
-    /// treated as plain text; see the `fts` module for the exact rules. At most 32 words are
-    /// used. Words are stemmed (Porter) and diacritics folded, and common spelling variants
-    /// match (width, Arabic letter forms and proclitics, German ß and umlauts). When the chunks
-    /// matched are fewer than 3, query words also match as the start or end of longer words
-    /// (compound parts, attached clitics), at half their bm25 score.
-    ///
-    /// Titles live in their own FTS5 index. A title match adds [`TITLE_WEIGHT`] × its bm25 score
-    /// to every matching chunk of that item, and an item whose title matches but none of whose
-    /// chunks do is represented by its first chunk (snippet: the chunk's opening text). Items
-    /// without chunks cannot be returned (a hit is a chunk).
     pub fn search_text(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
         let Some(parts) = fts::match_parts(query) else {
             return Ok(Vec::new());
@@ -81,13 +62,8 @@ impl Store {
     }
 
     /// Which of `among` match the full-text `query` (in a chunk's text or the item's title, as
-    /// [`Store::search_text`] matches), provided the query is rare: `None` when more than
-    /// `at_most` chunks and title-only items match it.
-    ///
-    /// For "does this question's key word occur in these few results" checks. Unlike
-    /// `search_text(query, at_most + 1)` it neither ranks the matches nor loads or snippets
-    /// them, so its cost is the index lookup alone (~1% of a 500k-item store matched by a word
-    /// costs ~40 µs per match through `search_text`).
+    /// [`Store::search_text`] matches), provided the query is rare: `None` when more than `at_most`
+    /// chunks and title-only items match it.
     pub fn text_matches_among(
         &self,
         query: &str,
@@ -146,11 +122,7 @@ impl Store {
     }
 
     /// Hybrid search: full-text and (if an embedding is given) vector results fused with
-    /// reciprocal-rank fusion, `score = Σ 1 / (60 + rank)`. Chunks found by both lists rise to
-    /// the top. Snippets come from the full-text hit when there is one.
-    ///
-    /// Each list contributes its top `max(4 × limit, 50)` hits; see
-    /// [`Store::search_hybrid_with_depth`] to choose that depth.
+    /// reciprocal-rank fusion, `score = Σ 1 / (60 + rank)`.
     pub fn search_hybrid(
         &self,
         query: &str,
@@ -165,13 +137,6 @@ impl Store {
 
     /// [`Store::search_hybrid`] with an explicit fusion depth: each list (full-text, and vector
     /// when `embedding` is given) contributes its top `depth` hits (the vector list at most
-    /// 4096), and the best `limit` fused hits are returned.
-    ///
-    /// Depth matters for quality, not just cost: with RRF, a chunk ranked moderately in *both*
-    /// lists outscores one ranked first in only one of them, so the deeper the lists, the more
-    /// such middling chunks can push a strong single-list match down. Callers that over-fetch
-    /// (to group chunks by item, say) should keep `depth` tied to the number of results they
-    /// will show and pass the larger number as `limit`.
     pub fn search_hybrid_with_depth(
         &self,
         query: &str,
@@ -192,11 +157,6 @@ impl Store {
 }
 
 /// Chunk leg of text search: `?1` an FTS5 query, `?2` the limit.
-///
-/// Ranking happens on the FTS table alone and only the top `?2` rows are joined, so the cost of
-/// the join (and of the snippet, taken separately by [`SNIPPET_SQL`]) does not grow with the
-/// number of matching chunks. Computing `snippet()` in the ranked query made SQLite build a
-/// snippet for every match before sorting: 415 ms p50 per query at 100k chunks.
 pub(crate) const TEXT_SEARCH_SQL: &str = "
     WITH top AS (
         SELECT rowid AS id, bm25(chunks_fts) AS rank
@@ -303,10 +263,7 @@ fn loose_chars(c: char, out: &mut impl FnMut(char)) {
 }
 
 /// Snippet of a chunk whose index entry is not its text (see `fts::is_rewritten`: CJK or Thai
-/// bigrams, folded spellings, variant forms) or that matched as word parts. FTS5 token
-/// positions do not line up with the stored text there and `snippet()` would cut the wrong
-/// window: take the text around the first query word instead (compared loosely, so `LED` finds
-/// `ＬＥＤ` and `Koenigstrasse` `Königstraße`), or its opening when none occurs.
+/// bigrams, folded spellings, variant forms) or that matched as word parts.
 fn located_snippet(text: &str, needles: &[String]) -> String {
     let chars: Vec<char> = text.chars().collect();
     // Loose characters, each with the index of the character it came from.
@@ -374,26 +331,10 @@ const CHUNK_ITEM_SQL: &str = "
     FROM chunks ch JOIN items i ON i.id = ch.item_id
     WHERE ch.id = ?1";
 
-/// The exact top `limit` rows of `index` for the OR-ed query `parts` by bm25 (`(rowid, rank)`,
-/// best first, ties by rowid: what [`TEXT_SEARCH_SQL`] and [`TITLE_SEARCH_SQL`] rank), computed
-/// without ranking every row that matches a very common term; or `None` when that cannot be
-/// shown exact, or would not be cheaper (the caller then runs the plain query).
-///
-/// An OR query makes FTS5 score every row matching any term: a word in most chunks of a large
-/// store means ranking most of the store (LL1: ~300 ms at 600k chunks), though such a word adds
-/// almost nothing to bm25. So the terms are split by how many chunks match them into *rare*
-/// `R` and *common* `C` ones (at least 1/[`COMMON_TERM_DIVISOR`] of all chunks), and:
-///
-/// - bm25 is a sum over the query's phrases, each with its own idf (from the whole table) and
-///   frequency in the row. So for every row matching a rare term, the query `R` gives its
-///   rare part `r` and the query `(R) AND (R OR C)` gives `2r + c` (the rare phrases appear
-///   twice): its full score is the difference. FTS5 evaluates the `AND` by seeking in the
-///   common terms' lists, not walking them.
-/// - A row matching only common terms scores at most `Σ_C idf · (k1 + 1)` (bm25's limit as a
-///   term's frequency grows). If the `limit`-th score found beats that bound, no such row can
-///   be in the top `limit`: the answer is exact. Otherwise (or with fewer than `limit` rows
-///   matching rare terms) the least common of the common terms moves to the rare side and
-///   the check runs again, up to [`PRUNE_RETRIES`] times; then `None`.
+/// The exact top `limit` rows of `index` for the OR-ed query `parts` by bm25 (`(rowid, rank)`, best
+/// first, ties by rowid: what [`TEXT_SEARCH_SQL`] and [`TITLE_SEARCH_SQL`] rank), computed without
+/// ranking every row that matches a very common term; or `None` when that cannot be shown exact, or
+/// would not be cheaper (the caller then runs the plain query).
 fn pruned_ranks(
     c: &Connection,
     index: FtsIndex,
@@ -555,9 +496,7 @@ fn text_hit_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, Hit, f64)> {
     ))
 }
 
-/// Chunk and title full-text legs, fused (see [`Store::search_text`]). `parts` is the query
-/// from [`fts::match_parts`], `fallback` its word-part fallback (from [`fts::fallback_exprs`])
-/// and `needles` its words (from [`fts::needles`]).
+/// Chunk and title full-text legs, fused (see [`Store::search_text`]).
 fn text_hits(
     c: &Connection,
     parts: &fts::MatchParts,
@@ -591,13 +530,12 @@ fn text_hits(
         }
         out
     } else {
-        let mut stmt = c
-            .prepare_cached(TEXT_SEARCH_SQL)
-            .db("prepare text search")?;
-        let rows = stmt
-            .query_map(params![q, lim], |r| text_hit_row(r).map(|(i, h, _)| (i, h)))
-            .db("text search")?;
-        rows.collect::<rusqlite::Result<_>>().db("text search")?
+        c.rows(
+            TEXT_SEARCH_SQL,
+            params![q, lim],
+            |r| text_hit_row(r).map(|(i, h, _)| (i, h)),
+            "text search",
+        )?
     };
     if !hits.is_empty() {
         let mut snip = c.prepare_cached(SNIPPET_SQL).db("prepare snippet")?;
@@ -657,15 +595,12 @@ fn text_hits(
                 .map(|(id, rank)| (id, -rank * TITLE_WEIGHT))
                 .collect()
         } else {
-            let mut stmt = c
-                .prepare_cached(TITLE_SEARCH_SQL)
-                .db("prepare title search")?;
-            let rows = stmt
-                .query_map(params![q, lim], |r| {
-                    Ok((r.get::<_, i64>(0)?, -r.get::<_, f64>(1)? * TITLE_WEIGHT))
-                })
-                .db("title search")?;
-            rows.collect::<rusqlite::Result<_>>().db("title search")?
+            c.rows(
+                TITLE_SEARCH_SQL,
+                params![q, lim],
+                |r| Ok((r.get::<_, i64>(0)?, -r.get::<_, f64>(1)? * TITLE_WEIGHT)),
+                "title search",
+            )?
         };
     let title_score: HashMap<i64, f64> = titles.iter().copied().collect();
     let mut with_chunk_hits: HashSet<i64> = HashSet::new();
@@ -707,8 +642,7 @@ fn text_hits(
     Ok(out)
 }
 
-/// Reciprocal-rank fusion of ranked lists (each best-first). The first list's hit wins for the
-/// snippet; ties break on chunk id for determinism.
+/// Reciprocal-rank fusion of ranked lists (each best-first).
 fn rrf_fuse<const N: usize>(lists: [Vec<Hit>; N], limit: usize) -> Vec<Hit> {
     let mut fused: HashMap<ChunkId, (f64, Hit)> = HashMap::new();
     for list in lists {
@@ -762,7 +696,6 @@ mod tests {
         use crate::{NewChunk, NewItem, Store, content_hash};
 
         let store = Store::open_in_memory().unwrap();
-        // Zipf-like words: `w0` is in nearly every chunk, `w1` in half, ...
         let mut rng = 0x2545_f491_4f6c_dd1du64;
         let mut next = move || {
             rng ^= rng << 13;
@@ -847,7 +780,6 @@ mod tests {
             applied >= 10,
             "the pruned plan applied only {applied} times"
         );
-        // Below the size floor it never applies.
         store
             .with_read_conn(|c| {
                 let parts = fts::match_parts("w0 w37").unwrap();
@@ -855,7 +787,6 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        // And search_text gives the same hits as before.
         assert!(!store.search_text("w0 w37", 10).unwrap().is_empty());
     }
 
@@ -865,7 +796,6 @@ mod tests {
         let ids: Vec<_> = fused.iter().map(|h| h.chunk_id).collect();
         assert_eq!(ids[0], 2, "found by both lists");
         assert_eq!(ids.len(), 4);
-        // 1 and 4 are both rank 1 in one list: equal score, tie broken by id.
         assert_eq!(&ids[1..3], &[1, 4]);
         assert!((fused[0].score - (1.0 / 62.0 + 1.0 / 62.0) as f32).abs() < 1e-6);
         assert_eq!(rrf_fuse([vec![hit(1), hit(2)]], 1).len(), 1);

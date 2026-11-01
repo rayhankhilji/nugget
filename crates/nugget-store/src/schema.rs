@@ -1,28 +1,11 @@
 //! Versioned schema migrations, tracked with `PRAGMA user_version`.
-//!
-//! Each migration runs in its own transaction together with the `user_version` bump, so a crash
-//! leaves the database at a well-defined version and re-running is a no-op. Statements also use
-//! `IF NOT EXISTS` as a second line of defence.
-//!
-//! The `sqlite-vec` table (`chunk_vec`) is not created here: its dimension is only known when the
-//! first embedding arrives (see `items::ensure_vec_table`).
 
 use nugget_core::{Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
 
 use crate::error::DbExt;
 
-/// User decisions on claims that must outlive re-extraction (see `GraphStore`):
-/// - `claim_replacements`: claims the user replaced in the vault
-///   (`GraphStore::supersede_by_user`), with the user's claim that replaced them (the record
-///   goes when either claim does);
-/// - `claim_replacement_evidence`: per replaced claim, the evidence it had then: item, quote
-///   ('' for none) and the item's content hash at the time (NULL: no item row);
-/// - `claim_assertions`: when a claim was last made `user_asserted` (its `updated_at` moves with
-///   every fold and evidence add); existing user-asserted claims are backfilled from
-///   `updated_at`, the best time known.
-///
-/// Every statement is idempotent, so v13 can repeat it for stores that ran an earlier v12.
+/// User decisions on claims that must outlive re-extraction (see `GraphStore`).
 const USER_DECISIONS: &str = r#"
     DROP TABLE IF EXISTS claim_user_replaced;
     CREATE TABLE IF NOT EXISTS claim_replacements (
@@ -48,21 +31,7 @@ const USER_DECISIONS: &str = r#"
 
 /// Per-entity counts kept exact by triggers, so "most connected entities first"
 /// (`GraphStore::top_entities`, the graph overview) is an index range instead of counting every
-/// entity's claims and mentions. The counts are those of `list_entities`:
-/// - `claims`: active claims (`active`, `user_asserted`) with the entity as subject, plus active
-///   claims with it as `object_entity` and another subject (a self-loop counts once);
-/// - `mentions`: mentions with that `entity_id`.
-///
-/// A table of its own rather than columns on `entities`: every mention written bumps a count,
-/// and a narrow row keyed by entity id is cheaper to rewrite than a wide entity row (attributes
-/// JSON), leaves the entity rows, their indexes and readers that list their columns untouched,
-/// and needs no `ALTER TABLE`. Every entity has a row (insert trigger, backfill here); increments
-/// upsert, so a row also appears for a claim or mention written before its entity (only possible
-/// with foreign keys off). `entity_stats_rank` serves `ORDER BY claims DESC, mentions DESC`;
-/// the name and id tie-breaks are a partial sort. Tombstones (merged or pruned) keep their row
-/// and are filtered by joining `entities`. Counts are maintained by triggers only, so they hold
-/// for every write path (merges, folds, retractions, purges, imports). A future rebuild of
-/// `claims` or `mentions` (drop and rename) drops their triggers and must recreate them.
+/// entity's claims and mentions.
 pub(crate) const ENTITY_STATS: &str = r#"
     CREATE TABLE IF NOT EXISTS entity_stats (
         entity_id TEXT PRIMARY KEY,
@@ -227,9 +196,6 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS items_source ON items (source);
     "#,
     // v3: full-text index over item titles, fused into text search (see `search::search_text`).
-    // External-content table over `items`, kept in sync by triggers. A missing title is indexed
-    // as '' so the insert, delete and update triggers always see the same values (an FTS5
-    // 'delete' must be given exactly what was indexed). Existing rows are backfilled.
     r#"
     CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5 (
         title,
@@ -252,23 +218,7 @@ const MIGRATIONS: &[&str] = &[
     END;
     INSERT INTO items_fts (rowid, title) SELECT id, coalesce(title, '') FROM items;
     "#,
-    // v4: knowledge graph (see `graph`). Purely additive: no existing table changes, so a v3
-    // store with data migrates in place. Everything lives in the same SQLCipher database.
-    //
-    // - `entities` rows are never deleted: a merged entity stays as a tombstone whose
-    //   `merged_into` points at the survivor (chains are flattened on merge), so ids are never
-    //   reused and old ids keep resolving. `name_lower` is the Unicode-lowercased name (SQLite's
-    //   `lower()` is ASCII-only) used for ordering.
-    // - `entity_aliases` holds every name an entity answers to: its current name (`is_name = 1`,
-    //   kept in step with `entities.name`) and its aliases. One index on `alias_norm` therefore
-    //   serves name lookup, and `entity_names_fts` (trigram, external content) serves substring
-    //   search over names and aliases.
-    // - Claim ids use AUTOINCREMENT so a claim folded away by a merge never has its id reused.
-    // - `claim_evidence` and `mentions` reference items by `(source, key)` (not `items.id`) so
-    //   provenance survives an item being re-ingested, and `retract_item` is one index range.
-    //   `chunk_id` is deliberately not a foreign key: chunks are replaced on re-chunking.
-    // - `graph_changes` keeps the latest change seq per entity; `graph_seq` is the monotonic
-    //   counter behind it.
+    // v4: knowledge graph (see `graph`).
     r#"
     CREATE TABLE IF NOT EXISTS entities (
         id          TEXT PRIMARY KEY,
@@ -396,19 +346,6 @@ const MIGRATIONS: &[&str] = &[
     CREATE UNIQUE INDEX IF NOT EXISTS graph_changes_seq ON graph_changes (seq);
     "#,
     // v5: knowledge-graph contract additions (M2 wave 2) and the item change feed.
-    //
-    // - `claims` is rebuilt so its status CHECK admits 'rejected' (SQLite cannot alter a CHECK).
-    //   `migrate` runs migrations with foreign keys off, so dropping the old table does not
-    //   cascade into `claim_evidence`; the AUTOINCREMENT high-water mark is carried over so claim
-    //   ids are still never reused. `PRAGMA foreign_key_check` runs before the commit.
-    // - `entities.deleted_at` marks entities removed by `prune_orphans` (tombstones: the row and
-    //   its id stay, so ids are never reused; lookups treat it as gone).
-    // - `entity_detail_sources`: which item supplied each alias / identifier of an entity
-    //   (provenance for scoped MCP clients). Keyed by kind, scheme and normalised value.
-    // - `item_changes`: one row per item key with the seq of its latest insert, update or delete
-    //   (`deleted = 1`: a tombstone), maintained by triggers on `items` so every write path
-    //   (upserts, `delete_item`, `delete_source`) is covered. Existing items are backfilled in id
-    //   order.
     r#"
     CREATE TABLE claims_v5 (
         id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -486,24 +423,14 @@ const MIGRATIONS: &[&str] = &[
             ON CONFLICT (source, key) DO UPDATE SET seq = excluded.seq, deleted = 1;
     END;
     "#,
-    // v6: two-phase egress ledger (see `egress`). A row is written `open` before the first byte
-    // is sent and becomes `done` when the exchange ends; rows still `open` when a store is
-    // opened were left by a crash and become `interrupted`. Existing rows were one-shot: `done`.
-    // `egress.state` is added by `ADDED_COLUMNS`, its index by `AFTER_COLUMNS`.
+    // v6: two-phase egress ledger (see `egress`).
     "",
-    // v7: keyed audit chain (see `audit`). Entries from `audit_v2_from` on are linked with an
-    // HMAC keyed from the store key; the SHA-256 entries written before this migration keep
-    // their v1 links and are still verified as such.
+    // v7: keyed audit chain (see `audit`).
     r#"
     INSERT OR IGNORE INTO meta (key, value)
         SELECT 'audit_v2_from', coalesce(max(seq), 0) + 1 FROM audit;
     "#,
-    // v8: item text stored once. When an item's chunks cover its text, the text is kept as a
-    // compact layout over the chunks (literal gaps + chunk byte ranges, see `items::text_layout`)
-    // in `item_text`, and `items.text` is NULL. A row here always takes precedence over
-    // `items.text`; it goes away with the item. Existing rows keep their text in `items.text`.
-    // Kept in a side table (not a column on `items`) so re-chunking an item rewrites its layout
-    // without touching the `items` row, its `updated_at` or the item change feed.
+    // v8: item text stored once.
     r#"
     CREATE TABLE IF NOT EXISTS item_text (
         item_id INTEGER PRIMARY KEY REFERENCES items (id) ON DELETE CASCADE,
@@ -511,18 +438,11 @@ const MIGRATIONS: &[&str] = &[
     );
     "#,
     // v9: egress rows record their owner, the store handle that wrote them (see `egress`), so
-    // opening the store only marks `interrupted` the `open` rows whose owner is gone, not those
-    // of another process (the daemon) that still has the database open. `egress.owner` is added
-    // by `ADDED_COLUMNS`; rows written before it have none and count as orphaned.
+    // opening the store only marks `interrupted` the `open` rows whose owner is gone, not those of
+    // another process (the daemon) that still has the database open.
     "",
-    // v10: per-source item and chunk counts kept by triggers, so `Store::source_counts` reads a
-    // row per source instead of aggregating every chunk (tens to hundreds of milliseconds at
-    // 100k items, on every source state change). Backfilled from the tables.
-    //
-    // Chunk deletes count against their item's source. When an item is deleted, its chunks go
-    // by `ON DELETE CASCADE` after the item row is gone, so their trigger finds no source and
-    // does nothing; the item's `BEFORE DELETE` trigger subtracts its chunks instead. Rows whose
-    // counts drop to zero stay (readers skip sources without items).
+    // v10: per-source item and chunk counts kept by triggers, so `Store::source_counts` reads a row
+    // per source instead of aggregating every chunk (tens to hundreds of milliseconds at
     r#"
     CREATE TABLE IF NOT EXISTS source_stats (
         source TEXT PRIMARY KEY,
@@ -575,9 +495,7 @@ const MIGRATIONS: &[&str] = &[
     "#,
     // v11: CJK and Thai text is indexed as overlapping bigrams (see `fts::segment`), so
     // `chunks_fts` and `items_fts` hold `fts_segment(text)` while their content tables keep the
-    // original text. The triggers are replaced, and only rows the function changes are
-    // re-indexed: their index entries were made from the raw text, which is what the 'delete'
-    // must be given. Other rows' entries are already what `fts_segment` would produce.
+    // original text.
     r#"
     DROP TRIGGER IF EXISTS chunks_fts_ai;
     DROP TRIGGER IF EXISTS chunks_fts_ad;
@@ -629,12 +547,7 @@ const MIGRATIONS: &[&str] = &[
     // an obsolete `claim_user_replaced` table instead).
     USER_DECISIONS,
     // v14: spelling variants (see `fts::index_form`): the FTS tables hold `fts_normalize(text)`,
-    // which folds width, Arabic and ß spellings and adds variant forms of some words. As in v11,
-    // only rows whose index form changes are re-indexed; every row's current entry is
-    // `fts_segment(text)`. `chunks_rev` (new) holds each chunk's longer words spelled backwards
-    // (`fts_reversed`) for suffix matches; it is contentless, so its triggers delete by rowid.
-    // Nothing here depends on the version number: the entry can move if migrations land before
-    // it.
+    // which folds width, Arabic and ß spellings and adds variant forms of some words.
     r#"
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_rev USING fts5 (
         text,
@@ -702,9 +615,7 @@ const MIGRATIONS: &[&str] = &[
     ENTITY_STATS,
 ];
 
-/// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
-/// missing, so these migrations stay idempotent (`ALTER TABLE ADD COLUMN` cannot be made
-/// conditional in SQL).
+/// Columns a migration adds, as `(version, table, column, type)`.
 const ADDED_COLUMNS: &[(u32, &str, &str, &str)] = &[
     (5, "entities", "deleted_at", "TEXT"),
     (
@@ -745,8 +656,7 @@ pub(crate) fn user_version(conn: &Connection) -> Result<u32> {
         .db("read schema version")
 }
 
-/// Bring the schema up to [`LATEST_VERSION`]. Returns how many migrations were applied
-/// (0 when already current). Refuses databases written by a newer build.
+/// Bring the schema up to [`LATEST_VERSION`].
 pub(crate) fn migrate(conn: &mut Connection) -> Result<u32> {
     // The FTS triggers and migrations call the `fts_*` functions; register them even where the
     // auto-extension (see `vec_ext`) has not been.
@@ -820,7 +730,11 @@ fn apply_migrations(conn: &mut Connection, current: u32) -> Result<u32> {
 
 #[cfg(test)]
 mod tests {
+    use nugget_core::ids::{EntityId, ItemKey, ItemRef, SourceId};
+    use nugget_graph::{ClaimObject, ClaimStatus, GraphStore, NewClaim};
+
     use super::*;
+    use crate::{Store, StoreKey};
 
     fn schema_snapshot(conn: &Connection) -> Vec<(String, String)> {
         let mut stmt = conn
@@ -832,31 +746,18 @@ mod tests {
             .unwrap()
     }
 
-    #[test]
-    fn migrate_twice_is_a_noop() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        assert_eq!(user_version(&conn).unwrap(), 0);
-        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION);
-        let before = schema_snapshot(&conn);
-        assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
-
-        assert_eq!(migrate(&mut conn).unwrap(), 0);
-        assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
-        assert_eq!(schema_snapshot(&conn), before);
+    fn rows<T: rusqlite::types::FromSql>(conn: &Connection, sql: &str) -> Vec<T> {
+        let mut stmt = conn.prepare(sql).unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
     }
 
-    #[test]
-    fn create_statements_are_idempotent_even_without_version_tracking() {
-        // v1 is pure `CREATE ... IF NOT EXISTS`; later migrations may use `ALTER TABLE`, which
-        // SQLite cannot make conditional, so they rely on `user_version` tracking alone.
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(MIGRATIONS[0]).unwrap();
-        conn.execute_batch(MIGRATIONS[0]).unwrap();
-    }
-
-    /// Apply migrations up to (and including) version `to` only, as an older build would.
+    /// Apply the migrations after the current version up to `to`, as an older build would.
     fn migrate_to(conn: &mut Connection, to: u32) {
-        for (idx, sql) in MIGRATIONS.iter().enumerate().take(to as usize) {
+        let from = user_version(conn).unwrap() as usize;
+        for (idx, sql) in MIGRATIONS.iter().enumerate().take(to as usize).skip(from) {
             conn.execute_batch(sql).unwrap();
             for (_, t, c, ty) in ADDED_COLUMNS.iter().filter(|c| c.0 == idx as u32 + 1) {
                 ensure_column(conn, t, c, ty).unwrap();
@@ -869,251 +770,120 @@ mod tests {
         }
     }
 
-    /// v10 backfills the per-source counts from existing items and chunks.
     #[test]
-    fn v9_database_migrates_to_v10_with_backfilled_source_counts() {
+    fn migrate_twice_is_a_noop_and_newer_schemas_are_refused() {
         let mut conn = Connection::open_in_memory().unwrap();
-        migrate_to(&mut conn, 9);
-        for i in 0..20 {
-            conn.execute(
-                "INSERT INTO items (source, key, content_hash, created_at, updated_at)
-                 VALUES (?1, ?2, 'h', 'x', 'x')",
-                [format!("src{}", i % 3), format!("k{i}")],
-            )
-            .unwrap();
-            let id = conn.last_insert_rowid();
-            for ord in 0..(i % 4) {
-                conn.execute(
-                    "INSERT INTO chunks (item_id, ord, text) VALUES (?1, ?2, 't')",
-                    [id, ord],
-                )
-                .unwrap();
-            }
-        }
-        migrate(&mut conn).unwrap();
-        let read = |sql: &str| -> Vec<(String, i64, i64)> {
-            let mut stmt = conn.prepare(sql).unwrap();
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        };
-        let kept = read("SELECT source, items, chunks FROM source_stats ORDER BY source");
-        let aggregate = read(
-            "SELECT i.source, COUNT(DISTINCT i.id), COUNT(c.id)
-             FROM items i LEFT JOIN chunks c ON c.item_id = i.id
-             GROUP BY i.source ORDER BY i.source",
-        );
-        assert_eq!(kept.len(), 3);
-        assert_eq!(kept, aggregate);
-    }
-
-    /// v11 re-indexes existing CJK chunks and titles as bigrams and leaves other rows alone.
-    #[test]
-    fn v10_database_migrates_to_v11_with_searchable_cjk() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        migrate_to(&mut conn, 10);
-        conn.execute_batch(
-            "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at)
-                 VALUES (1, 's', 'a', '見積書の送付', 'h', 't', 't'),
-                        (2, 's', 'b', 'Rechnung', 'h', 't', 't'),
-                        (3, 's', 'c', NULL, 'h', 't', 't');
-             INSERT INTO chunks (id, item_id, ord, text) VALUES
-                 (10, 1, 0, '我们下周二在上海开会讨论预算'),
-                 (20, 2, 0, 'Rechnung über 120 Euro'),
-                 (30, 3, 0, 'x');",
-        )
-        .unwrap();
-        let ids = |conn: &Connection, table: &str, q: &str| -> Vec<i64> {
-            let expr = crate::fts::match_expr(q).unwrap();
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid"
-                ))
-                .unwrap();
-            stmt.query_map([expr], |r| r.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        };
-        assert!(
-            ids(&conn, "chunks_fts", "上海").is_empty(),
-            "v10: one token"
-        );
-
-        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 10);
-        assert_eq!(ids(&conn, "chunks_fts", "上海"), [10]);
-        assert_eq!(ids(&conn, "chunks_fts", "预算"), [10]);
-        assert_eq!(ids(&conn, "chunks_fts", "uber"), [20]);
-        assert_eq!(ids(&conn, "items_fts", "見積書"), [1]);
-        assert_eq!(ids(&conn, "items_fts", "rechnung"), [2]);
-        conn.execute_batch(
-            "INSERT INTO chunks_fts (chunks_fts) VALUES ('integrity-check');
-             INSERT INTO items_fts (items_fts) VALUES ('integrity-check');",
-        )
-        .unwrap();
-
-        // The new triggers' 'delete' matches what v11 indexed.
-        conn.execute_batch(
-            "UPDATE chunks SET text = '北京的天气' WHERE id = 10;
-             UPDATE items SET title = '预算' WHERE id = 1;
-             DELETE FROM chunks WHERE id = 20;",
-        )
-        .unwrap();
-        assert!(ids(&conn, "chunks_fts", "上海").is_empty());
-        assert_eq!(ids(&conn, "chunks_fts", "北京"), [10]);
-        assert!(ids(&conn, "chunks_fts", "uber").is_empty());
-        assert!(ids(&conn, "items_fts", "見積書").is_empty());
-        assert_eq!(ids(&conn, "items_fts", "预算"), [1]);
-        let docs: i64 = conn
-            .query_row("SELECT count(*) FROM chunks_fts_docsize", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(docs, 2);
-        conn.execute_batch(
-            "INSERT INTO chunks_fts (chunks_fts) VALUES ('integrity-check');
-             INSERT INTO items_fts (items_fts) VALUES ('integrity-check');",
-        )
-        .unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION);
+        let before = schema_snapshot(&conn);
         assert_eq!(migrate(&mut conn).unwrap(), 0);
-    }
-
-    /// v12 re-indexes rows with spelling variants, keeps v11's CJK entries, and fills the suffix
-    /// index.
-    #[test]
-    fn v11_database_migrates_to_v12_with_spelling_variants() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        crate::fts::register_functions(&conn).unwrap();
-        migrate_to(&mut conn, 11);
-        conn.execute_batch(
-            "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at)
-                 VALUES (1, 's', 'a', 'Königstraße', 'h', 't', 't'),
-                        (2, 's', 'b', '上海', 'h', 't', 't'),
-                        (3, 's', 'c', 'plain', 'h', 't', 't');
-             INSERT INTO chunks (id, item_id, ord, text) VALUES
-                 (10, 1, 0, 'Lenkungsausschuss in der Königstraße'),
-                 (20, 2, 0, '我们在上海开会 والكراسي'),
-                 (30, 3, 0, 'he booked it');",
-        )
-        .unwrap();
-        let ids = |conn: &Connection, table: &str, expr: &str| -> Vec<i64> {
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid"
-                ))
-                .unwrap();
-            stmt.query_map([expr], |r| r.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        };
-        let q = |s: &str| crate::fts::match_expr(s).unwrap();
-        assert!(ids(&conn, "chunks_fts", &q("Koenigstrasse")).is_empty());
-
-        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 11);
-        for word in ["Koenigstrasse", "Konigstrasse", "Königstraße"] {
-            assert_eq!(ids(&conn, "chunks_fts", &q(word)), [10], "{word}");
-            assert_eq!(ids(&conn, "items_fts", &q(word)), [1], "{word}");
-        }
-        assert_eq!(ids(&conn, "chunks_fts", &q("上海")), [20]);
-        assert_eq!(ids(&conn, "chunks_fts", &q("كراسي")), [20]);
-        assert_eq!(ids(&conn, "chunks_fts", &q("book")), [30]);
-        assert_eq!(ids(&conn, "items_fts", &q("上海")), [2]);
-        let suffix = |w: &str| crate::fts::fallback_exprs(w).unwrap().suffix;
-        assert_eq!(ids(&conn, "chunks_rev", &suffix("Ausschuss")), [10]);
-        assert_eq!(
-            ids(&conn, "chunks_rev", &suffix("raasi")),
-            Vec::<i64>::new()
-        );
-
-        // The new triggers' 'delete' matches what v12 indexed.
-        conn.execute_batch(
-            "UPDATE chunks SET text = 'Prüfungsausschuss' WHERE id = 10;
-             UPDATE items SET title = 'plain' WHERE id = 1;
-             DELETE FROM chunks WHERE id = 20;",
-        )
-        .unwrap();
-        assert!(ids(&conn, "chunks_fts", &q("Koenigstrasse")).is_empty());
-        assert_eq!(ids(&conn, "chunks_fts", &q("Pruefungsausschuss")), [10]);
-        assert!(ids(&conn, "items_fts", &q("Koenigstrasse")).is_empty());
-        assert!(ids(&conn, "chunks_fts", &q("上海")).is_empty());
-        assert_eq!(ids(&conn, "chunks_rev", &suffix("Ausschuss")), [10]);
-        let rev_docs: i64 = conn
-            .query_row("SELECT count(*) FROM chunks_rev_docsize", [], |r| r.get(0))
+        assert_eq!(schema_snapshot(&conn), before);
+        conn.pragma_update(None, "user_version", LATEST_VERSION + 1)
             .unwrap();
-        assert_eq!(rev_docs, 2, "20 is gone");
-        conn.execute_batch(
-            "INSERT INTO chunks_fts (chunks_fts) VALUES ('integrity-check');
-             INSERT INTO items_fts (items_fts) VALUES ('integrity-check');
-             INSERT INTO chunks_rev (chunks_rev) VALUES ('integrity-check');",
-        )
-        .unwrap();
-        assert_eq!(migrate(&mut conn).unwrap(), 0);
+        assert!(matches!(migrate(&mut conn), Err(Error::Unsupported(_))));
     }
 
+    /// An encrypted v2 store with graph rows added at v4 opens at the latest version with every
+    /// backfill done (titles v3, claims rebuild v5, feed v5, counts v10/v15, CJK v11,
+    /// assertions v12, variants v14).
     #[test]
-    fn v4_graph_migrates_to_v5_keeping_claims_evidence_and_ids() {
-        use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-        use nugget_graph::{
-            ClaimObject, ClaimStatus, EntityKind, Evidence, GraphStore, NewClaim, NewEntity,
-        };
-
+    fn encrypted_v2_store_migrates_to_latest_keeping_data() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nugget.db");
-        let key = [9u8; 32];
+        let key = [5u8; 32];
         {
             let mut conn = Connection::open(&path).unwrap();
             conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", hex::encode(key)))
                 .unwrap();
-            conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-            migrate_to(&mut conn, 4);
-            // Claim 2 was folded away by a merge: the AUTOINCREMENT mark (3) is above max(id).
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+            crate::fts::register_functions(&conn).unwrap();
+            migrate_to(&mut conn, 2);
             conn.execute_batch(
-                "INSERT INTO items (id, source, key, content_hash, created_at, updated_at)
-                     VALUES (1, 'mail', 'm1', 'h1', 't', 't'), (2, 'mail', 'm2', 'h2', 't', 't');
-                 INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
-                     VALUES ('ent_a', 'person', 'Sam', 'sam', '2026-01-01T00:00:00Z',
-                             '2026-01-01T00:00:00Z');
-                 INSERT INTO entity_aliases (entity_id, alias, alias_norm, alias_lower, is_name)
-                     VALUES ('ent_a', 'Sam', 'sam', 'sam', 1);
-                 INSERT INTO claims (id, subject, predicate, object_literal, text, confidence,
-                                     status, created_at, updated_at)
-                     VALUES (1, 'ent_a', 'likes', 'tea', 'Sam likes tea', 0.8, 'active',
-                             '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-                            (3, 'ent_a', 'likes', 'jazz', 'Sam likes jazz', 0.7, 'superseded',
-                             '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-                 UPDATE sqlite_sequence SET seq = 3 WHERE name = 'claims';
-                 INSERT INTO claim_evidence (claim_id, source, key, chunk_id, quote, created_at)
-                     VALUES (1, 'mail', 'm1', 1, 'tea please', 't'),
-                            (3, 'mail', 'm2', NULL, NULL, 't');",
+                "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at,
+                                    version)
+                     VALUES (1, 'mail', 'm1', 'Boiler repair notes', 'h1', 't', 't', 'v1'),
+                            (2, 'mail', 'm2', '見積書の送付', 'h2', 't', 't', NULL),
+                            (3, 'files', 'f1', 'Königstraße', 'h3', 't', 't', NULL);
+                 INSERT INTO chunks (id, item_id, ord, text) VALUES
+                     (10, 1, 0, 'gas valve'),
+                     (20, 2, 0, '我们下周二在上海开会讨论预算'),
+                     (30, 3, 0, 'Lenkungsausschuss in der Königstraße'),
+                     (31, 3, 1, 'second');
+                 INSERT INTO cursors (source, value, updated_at) VALUES ('mail', '{\"n\":1}', 't');",
             )
             .unwrap();
+            migrate_to(&mut conn, 4);
+            let t = "2026-01-01T00:00:00Z";
+            conn.execute_batch(&format!(
+                "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
+                     VALUES ('ent_a', 'person', 'Sam', 'sam', '{t}', '{t}'),
+                            ('ent_b', 'organization', 'Acme', 'acme', '{t}', '{t}');
+                 INSERT INTO entity_aliases (entity_id, alias, alias_norm, alias_lower, is_name)
+                     VALUES ('ent_a', 'Sam', 'sam', 'sam', 1);
+                 INSERT INTO claims (id, subject, predicate, object_entity, object_literal, text,
+                                     confidence, status, created_at, updated_at)
+                     VALUES (1, 'ent_a', 'likes', NULL, 'tea', 'x', 0.8, 'active', '{t}', '{t}'),
+                            (3, 'ent_a', 'works_at', 'ent_b', NULL, 'x', 1.0, 'user_asserted',
+                             '{t}', '2026-02-01T00:00:00Z'),
+                            (4, 'ent_a', 'likes', NULL, 'jazz', 'x', 0.7, 'superseded',
+                             '{t}', '{t}');
+                 UPDATE sqlite_sequence SET seq = 5 WHERE name = 'claims';
+                 INSERT INTO claim_evidence (claim_id, source, key, chunk_id, quote, created_at)
+                     VALUES (1, 'mail', 'm1', 10, 'tea please', '{t}');
+                 INSERT INTO mentions (entity_id, source, key, surface, confidence, created_at)
+                     VALUES ('ent_a', 'mail', 'm1', 'Sam', 1, '{t}'),
+                            ('ent_a', 'mail', 'm2', 'Sam', 1, '{t}');"
+            ))
+            .unwrap();
         }
-        let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
+        assert!(
+            !std::fs::read(&path)
+                .unwrap()
+                .starts_with(b"SQLite format 3")
+        );
+
+        let store = Store::open(&path, &StoreKey::from_bytes(key)).unwrap();
         assert_eq!(store.schema_version().unwrap(), LATEST_VERSION);
+        let found = |q: &str| -> Vec<String> {
+            let hits = store.search_text(q, 5).unwrap();
+            hits.into_iter().map(|h| h.item.key.to_string()).collect()
+        };
+        assert_eq!(found("boiler"), ["m1"]);
+        assert_eq!(found("上海"), ["m2"]);
+        assert_eq!(found("見積書"), ["m2"]);
+        assert_eq!(found("Koenigstrasse"), ["f1"]);
+        assert_eq!(
+            store.get_cursor(&SourceId::new("mail")).unwrap(),
+            Some(serde_json::json!({"n": 1}))
+        );
+        let counts: Vec<(String, u64, u64)> = store
+            .source_counts()
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.source.to_string(), c.items, c.chunks))
+            .collect();
+        assert_eq!(counts, [("files".into(), 1, 2), ("mail".into(), 2, 2)]);
+        let (changes, head) = store.items_changed_since(0, 0).unwrap();
+        let keys: Vec<&str> = changes.iter().map(|c| c.item.key.as_str()).collect();
+        assert_eq!((keys, head), (vec!["m1", "m2", "f1"], 3));
+
         let g = store.graph();
         let tea = g.get_claim(1).unwrap().unwrap();
-        assert_eq!(
-            tea.evidence.len(),
-            1,
-            "evidence survived the claims rebuild"
-        );
         assert_eq!(tea.evidence[0].quote.as_deref(), Some("tea please"));
         assert_eq!(
-            g.get_claim(3).unwrap().unwrap().status,
+            g.get_claim(4).unwrap().unwrap().status,
             ClaimStatus::Superseded
         );
-        // The new status is accepted, and ids keep counting from the old high-water mark.
         g.set_claim_status(1, ClaimStatus::Rejected).unwrap();
-        let sam = nugget_core::ids::EntityId::new("ent_a");
         let next = g
             .add_claim(&NewClaim {
-                subject: sam.clone(),
+                subject: EntityId::new("ent_a"),
                 predicate: "plays".into(),
                 object: ClaimObject::Literal("chess".into()),
                 text: "Sam plays chess".into(),
                 confidence: 0.5,
                 status: ClaimStatus::Active,
-                evidence: vec![Evidence {
+                evidence: vec![nugget_graph::Evidence {
                     item: ItemRef {
                         source: SourceId::new("mail"),
                         key: ItemKey::new("m1"),
@@ -1125,246 +895,59 @@ mod tests {
                 valid_to: None,
             })
             .unwrap();
-        assert_eq!(next, 4, "claim ids are never reused across the rebuild");
-        // Existing items were backfilled into the change feed, in id order.
-        let (changes, head) = store.items_changed_since(0, 0).unwrap();
-        let keys: Vec<&str> = changes.iter().map(|c| c.item.key.as_str()).collect();
-        assert_eq!(keys, ["m1", "m2"]);
-        assert_eq!(head, 2);
-        // Foreign keys hold and cascade again after the migration.
+        assert_eq!(next, 6, "claim ids are never reused across the rebuild");
         store
             .with_conn(|c| {
-                let fk: bool = c
-                    .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
-                    .db("fk")?;
-                assert!(fk, "foreign keys re-enabled");
-                c.execute_batch("PRAGMA foreign_key_check;").db("fk check")
-            })
-            .unwrap();
-        assert!(g.prune_orphans(None).unwrap().is_empty());
-        g.create_entity(&NewEntity::new(EntityKind::Topic, "Tea"))
-            .unwrap();
-        drop(g);
-        drop(store);
-        let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
-        assert_eq!(store.migrate().unwrap(), 0);
-    }
-
-    fn title_matches(conn: &Connection, q: &str) -> Vec<i64> {
-        let mut stmt = conn
-            .prepare("SELECT rowid FROM items_fts WHERE items_fts MATCH ?1 ORDER BY rowid")
-            .unwrap();
-        stmt.query_map([q], |r| r.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap()
-    }
-
-    #[test]
-    fn v2_database_with_data_migrates_to_v3_with_searchable_titles() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        migrate_to(&mut conn, 2);
-        assert_eq!(user_version(&conn).unwrap(), 2);
-        conn.execute_batch(
-            "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at, version)
-                 VALUES (1, 's', 'a', 'Boiler repair notes', 'h1', 't', 't', 'v1'),
-                        (2, 's', 'b', NULL, 'h2', 't', 't', NULL),
-                        (3, 's', 'c', 'Garden plan', 'h3', 't', 't', NULL);
-             INSERT INTO chunks (item_id, ord, text) VALUES (1, 0, 'gas valve'), (2, 0, 'x');",
-        )
-        .unwrap();
-
-        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 2);
-        assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
-        // Existing rows were backfilled; data and v2 columns are intact.
-        assert_eq!(title_matches(&conn, "boiler"), vec![1]);
-        assert_eq!(title_matches(&conn, "gardens"), vec![3], "stemmed");
-        let version: String = conn
-            .query_row("SELECT version FROM items WHERE id = 1", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(version, "v1");
-        conn.execute_batch("INSERT INTO items_fts (items_fts) VALUES ('integrity-check');")
-            .unwrap();
-
-        // Triggers keep the index in step: title change, NULL ↔ text, delete.
-        conn.execute_batch(
-            "UPDATE items SET title = 'Kitchen boiler' WHERE id = 3;
-             UPDATE items SET title = 'Untitled draft' WHERE id = 2;
-             UPDATE items SET title = NULL WHERE id = 1;
-             UPDATE items SET content_hash = 'h4' WHERE id = 3;",
-        )
-        .unwrap();
-        assert_eq!(title_matches(&conn, "boiler"), vec![3]);
-        assert_eq!(title_matches(&conn, "draft"), vec![2]);
-        assert!(title_matches(&conn, "garden").is_empty());
-        conn.execute_batch("DELETE FROM items WHERE id = 3;")
-            .unwrap();
-        assert!(title_matches(&conn, "boiler").is_empty());
-        conn.execute_batch("INSERT INTO items_fts (items_fts) VALUES ('integrity-check');")
-            .unwrap();
-
-        // Re-running is a no-op.
-        assert_eq!(migrate(&mut conn).unwrap(), 0);
-    }
-
-    #[test]
-    fn encrypted_v3_store_with_data_migrates_to_v4_graph() {
-        use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-        use nugget_graph::{
-            ClaimObject, ClaimStatus, EntityKind, Evidence, GraphStore, NewClaim, NewEntity,
-        };
-
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nugget.db");
-        let key = [5u8; 32];
-        // A v3 database exactly as the previous build left it: encrypted, with items, chunks,
-        // title/chunk FTS, a cursor and an audit entry.
-        {
-            let mut conn = Connection::open(&path).unwrap();
-            conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", hex::encode(key)))
-                .unwrap();
-            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
-            migrate_to(&mut conn, 3);
-            conn.execute_batch(
-                "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at)
-                     VALUES (1, 'mail', 'm1', 'Quarterly boiler review', 'h1', 't', 't'),
-                            (2, 'mail', 'm2', 'Garden plan', 'h2', 't', 't');
-                 INSERT INTO chunks (item_id, ord, text)
-                     VALUES (1, 0, 'Sam from Acme serviced the boiler'), (2, 0, 'tulips');
-                 INSERT INTO cursors (source, value, updated_at) VALUES ('mail', '{\"n\":1}', 't');",
-            )
-            .unwrap();
-        }
-        assert!(
-            !std::fs::read(&path)
-                .unwrap()
-                .starts_with(b"SQLite format 3"),
-            "fixture is encrypted"
-        );
-
-        let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
-        assert_eq!(store.schema_version().unwrap(), LATEST_VERSION);
-        assert_eq!(store.counts().unwrap().items, 2);
-        assert_eq!(store.search_text("boiler", 5).unwrap().len(), 1);
-        assert_eq!(
-            store.get_cursor(&SourceId::new("mail")).unwrap(),
-            Some(serde_json::json!({"n": 1}))
-        );
-        store
-            .with_conn(|c| {
+                let asserted: Vec<String> = rows(c, "SELECT asserted_at FROM claim_assertions");
+                assert_eq!(asserted, ["2026-02-01T00:00:00Z"]);
+                let stats: Vec<String> = rows(
+                    c,
+                    "SELECT entity_id || ':' || claims || ':' || mentions FROM entity_stats
+                     ORDER BY entity_id",
+                );
+                assert_eq!(stats, ["ent_a:2:2", "ent_b:1:0"]);
+                assert!(
+                    c.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, bool>(0))
+                        .db("fk")?
+                );
                 c.execute_batch(
-                    "INSERT INTO items_fts (items_fts) VALUES ('integrity-check');
-                 INSERT INTO entity_names_fts (entity_names_fts) VALUES ('integrity-check');
-                 PRAGMA foreign_key_check;",
+                    "PRAGMA foreign_key_check;
+                     INSERT INTO chunks_fts (chunks_fts) VALUES ('integrity-check');
+                     INSERT INTO items_fts (items_fts) VALUES ('integrity-check');
+                     INSERT INTO chunks_rev (chunks_rev) VALUES ('integrity-check');",
                 )
                 .db("integrity")
             })
             .unwrap();
-
-        // The new graph works against the migrated items and their delete path.
-        let g = store.graph();
-        let m1 = ItemRef {
-            source: SourceId::new("mail"),
-            key: ItemKey::new("m1"),
-        };
-        let sam = g
-            .create_entity(&NewEntity::new(EntityKind::Person, "Sam"))
-            .unwrap();
-        let claim = g
-            .add_claim(&NewClaim {
-                subject: sam.clone(),
-                predicate: "services".into(),
-                object: ClaimObject::Literal("the boiler".into()),
-                text: "Sam services the boiler".into(),
-                confidence: 0.8,
-                status: ClaimStatus::Active,
-                evidence: vec![Evidence {
-                    item: m1.clone(),
-                    chunk_id: Some(1),
-                    quote: Some("serviced the boiler".into()),
-                }],
-                valid_from: None,
-                valid_to: None,
-            })
-            .unwrap();
-        assert!(store.delete_item(&m1).unwrap());
-        assert_eq!(
-            g.get_claim(claim).unwrap().unwrap().status,
-            ClaimStatus::Retracted
-        );
         drop(g);
         drop(store);
-
-        // Still encrypted after migration, and re-opening is a no-op migration.
-        assert!(
-            !std::fs::read(&path)
-                .unwrap()
-                .starts_with(b"SQLite format 3")
-        );
-        assert!(
-            crate::Store::open(&path, &crate::StoreKey::from_bytes([6u8; 32])).is_err(),
-            "wrong key"
-        );
-        let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
+        assert!(Store::open(&path, &StoreKey::from_bytes([6u8; 32])).is_err());
+        let store = Store::open(&path, &StoreKey::from_bytes(key)).unwrap();
         assert_eq!(store.migrate().unwrap(), 0);
-        assert_eq!(store.graph().get_entity(&sam).unwrap().unwrap().name, "Sam");
     }
 
-    /// v12 makes the user-decision tables and backfills assertion times; v13 repairs a store
-    /// that ran an earlier v12 (an obsolete table, the new ones missing).
+    /// v13 repairs a store that ran an earlier v12 (an obsolete table, the new ones missing).
     #[test]
-    fn v11_database_migrates_to_v12_and_an_early_v12_is_repaired() {
-        let seed = "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
+    fn an_early_v12_is_repaired() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::fts::register_functions(&conn).unwrap();
+        migrate_to(&mut conn, 11);
+        conn.execute_batch(
+            "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
                  VALUES ('ent_a', 'person', 'Sam', 'sam', 't', 't');
              INSERT INTO claims (id, subject, predicate, object_literal, text, confidence,
                                  status, created_at, updated_at)
                  VALUES (1, 'ent_a', 'likes', 'tea', 'Sam likes tea', 1.0, 'user_asserted',
-                         '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z'),
-                        (2, 'ent_a', 'likes', 'coffee', 'Sam likes coffee', 0.8, 'active',
-                         '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z');";
-        let asserted = |conn: &Connection| -> Vec<(i64, String)> {
-            let mut stmt = conn
-                .prepare("SELECT claim_id, asserted_at FROM claim_assertions ORDER BY claim_id")
-                .unwrap();
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        };
-        let want = vec![(1, "2026-02-01T00:00:00Z".to_string())];
-
-        let mut conn = Connection::open_in_memory().unwrap();
-        crate::fts::register_functions(&conn).unwrap();
-        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        migrate_to(&mut conn, 11);
-        conn.execute_batch(seed).unwrap();
-        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 11);
-        assert_eq!(asserted(&conn), want);
-        // The record goes with the user's claim that replaced it.
-        conn.execute_batch(
-            "INSERT INTO claim_replacements (claim_id, replaced_by) VALUES (2, 1);
-             DELETE FROM claims WHERE id = 1;",
-        )
-        .unwrap();
-        let n: i64 = conn
-            .query_row("SELECT count(*) FROM claim_replacements", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(n, 0);
-
-        // A store that ran the earlier v12.
-        let mut conn = Connection::open_in_memory().unwrap();
-        crate::fts::register_functions(&conn).unwrap();
-        migrate_to(&mut conn, 11);
-        conn.execute_batch(seed).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE claim_user_replaced (claim_id INTEGER, source TEXT, key TEXT,
+                         '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z');
+             CREATE TABLE claim_user_replaced (claim_id INTEGER, source TEXT, key TEXT,
                                                quote TEXT);",
         )
         .unwrap();
         conn.pragma_update(None, "user_version", 12).unwrap();
         assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 12);
-        assert_eq!(asserted(&conn), want);
-        let names: Vec<String> = schema_snapshot(&conn).into_iter().map(|(n, _)| n).collect();
+        let asserted: Vec<String> = rows(&conn, "SELECT asserted_at FROM claim_assertions");
+        assert_eq!(asserted, ["2026-02-01T00:00:00Z"]);
+        let names: Vec<String> = rows(&conn, "SELECT name FROM sqlite_master");
         assert!(!names.contains(&"claim_user_replaced".to_string()));
         for t in [
             "claim_replacements",
@@ -1373,98 +956,5 @@ mod tests {
         ] {
             assert!(names.contains(&t.to_string()), "{t}");
         }
-    }
-
-    /// v15 backfills the per-entity counts (active claims as subject, or as object with another
-    /// subject; mentions) and keeps them from then on, with the rank index serving the order.
-    #[test]
-    fn v13_graph_migrates_to_latest_with_backfilled_entity_counts() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        crate::fts::register_functions(&conn).unwrap();
-        migrate_to(&mut conn, 13);
-        conn.execute_batch(
-            "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
-                 VALUES ('ent_a', 'person', 'Sam', 'sam', 't', 't'),
-                        ('ent_b', 'organization', 'Acme', 'acme', 't', 't'),
-                        ('ent_c', 'person', 'Ana', 'ana', 't', 't');
-             INSERT INTO claims (subject, predicate, object_entity, object_literal, text,
-                                 confidence, status, created_at, updated_at)
-                 VALUES ('ent_a', 'works_at', 'ent_b', NULL, 'x', 1, 'active', 't', 't'),
-                        ('ent_a', 'self', 'ent_a', NULL, 'x', 1, 'user_asserted', 't', 't'),
-                        ('ent_a', 'likes', NULL, 'tea', 'x', 1, 'active', 't', 't'),
-                        ('ent_c', 'knows', 'ent_a', NULL, 'x', 1, 'retracted', 't', 't'),
-                        ('ent_c', 'knows', 'ent_b', NULL, 'x', 1, 'rejected', 't', 't'),
-                        ('ent_c', 'met', 'ent_b', NULL, 'x', 1, 'superseded', 't', 't');
-             INSERT INTO mentions (entity_id, source, key, surface, confidence, created_at)
-                 VALUES ('ent_a', 's', 'k1', 'Sam', 1, 't'), ('ent_a', 's', 'k2', 'Sam', 1, 't'),
-                        ('ent_c', 's', 'k1', 'Ana', 1, 't');",
-        )
-        .unwrap();
-        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 13);
-        let stats = |conn: &Connection| -> Vec<(String, i64, i64)> {
-            let mut stmt = conn
-                .prepare("SELECT entity_id, claims, mentions FROM entity_stats ORDER BY entity_id")
-                .unwrap();
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        };
-        let row = |id: &str, c: i64, m: i64| (id.to_owned(), c, m);
-        assert_eq!(
-            stats(&conn),
-            vec![row("ent_a", 3, 2), row("ent_b", 1, 0), row("ent_c", 0, 1)]
-        );
-        // Maintained from now on.
-        conn.execute_batch(
-            "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
-                 VALUES ('ent_d', 'topic', 'Budget', 'budget', 't', 't');
-             UPDATE claims SET status = 'active' WHERE predicate = 'knows';
-             DELETE FROM mentions WHERE entity_id = 'ent_a' AND key = 'k2';",
-        )
-        .unwrap();
-        assert_eq!(
-            stats(&conn),
-            vec![
-                row("ent_a", 4, 1),
-                row("ent_b", 2, 0),
-                row("ent_c", 2, 1),
-                row("ent_d", 0, 0)
-            ]
-        );
-        // The overview order walks the rank index (no full sort of the table).
-        let plan: Vec<String> = {
-            let mut stmt = conn
-                .prepare(
-                    "EXPLAIN QUERY PLAN
-                     SELECT e.id FROM entity_stats s CROSS JOIN entities e ON e.id = s.entity_id
-                     WHERE e.merged_into IS NULL AND e.deleted_at IS NULL
-                     ORDER BY s.claims DESC, s.mentions DESC, e.name, e.id LIMIT 10",
-                )
-                .unwrap();
-            stmt.query_map([], |r| r.get::<_, String>(3))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        };
-        assert!(
-            plan.iter().any(|p| p.contains("entity_stats_rank")),
-            "{plan:?}"
-        );
-        // A partial sort for the name and id tie-breaks only ("LAST 2 TERMS" or "RIGHT PART",
-        // depending on the SQLite version), never a sort of the whole order.
-        assert!(
-            plan.iter()
-                .any(|p| p.contains("LAST 2 TERMS OF ORDER BY") || p.contains("RIGHT PART")),
-            "{plan:?}"
-        );
-    }
-
-    #[test]
-    fn newer_schema_is_refused() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "user_version", LATEST_VERSION + 1)
-            .unwrap();
-        assert!(matches!(migrate(&mut conn), Err(Error::Unsupported(_))));
     }
 }

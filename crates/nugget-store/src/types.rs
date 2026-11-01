@@ -14,8 +14,7 @@ pub fn content_hash(bytes: impl AsRef<[u8]>) -> String {
     hex::encode(Sha256::digest(bytes.as_ref()))
 }
 
-/// An item to insert or update. `content_hash` identifies the content: re-upserting the same
-/// item with the same hash and fields is a no-op.
+/// An item to insert or update.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewItem {
     pub item: ItemRef,
@@ -115,15 +114,13 @@ pub struct Item {
 pub enum UpsertOutcome {
     /// The item did not exist.
     Inserted,
-    /// The item existed and something changed. If the content hash changed, its (now stale)
-    /// chunks were removed and the caller should re-chunk.
+    /// The item existed and something changed.
     Updated,
     /// The item existed with the same content hash and fields; nothing was written.
     Unchanged,
 }
 
-/// A chunk to store for an item. Embeddings are optional, but all embeddings in one database
-/// must have the same dimension.
+/// A chunk to store for an item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewChunk {
     pub text: String,
@@ -146,11 +143,7 @@ impl NewChunk {
     }
 }
 
-/// A search result. Higher `score` is better; scores are only comparable within one call.
-///
-/// - text search: `-bm25` (positive, unbounded),
-/// - vector search: cosine similarity (`1 - cosine distance`, in `[-1, 1]`),
-/// - hybrid search: reciprocal-rank-fusion score.
+/// A search result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hit {
     pub item: ItemRef,

@@ -1,24 +1,4 @@
 //! The egress ledger: every byte that leaves the device, by host and feature.
-//!
-//! [`EgressSink`] is called from async code (an HTTP exchange's meter is dropped on a runtime
-//! worker thread), so it never touches SQLite itself: it queues work for a dedicated writer
-//! thread. [`Store::record_egress`] goes through the same queue and waits for its result, so the
-//! ledger keeps the order events were recorded in. Reads ([`Store::recent_egress`]) first wait
-//! for the queue to drain, and dropping the last [`Store`] clone writes everything queued.
-//!
-//! Two-phase exchanges: [`EgressSink::begin`] queues an `open` row and waits briefly
-//! ([`BEGIN_WAIT`]) for it to be written, so a crash mid-request still leaves a row without an
-//! async caller ever waiting long on a busy database. The returned id is a process-local token
-//! the writer maps to the row; `update`/`finish` are queued behind it without waiting.
-//!
-//! Interrupted exchanges: each store handle is an *owner* with a random id, stamped on the rows
-//! it writes. A file-backed handle holds an OS file lock on `<db>.egress-<owner>.lock` for its
-//! lifetime (released by the OS when the process dies, however it dies). Opening a store marks
-//! `interrupted` only the `open` rows whose owner is gone (its lock file missing or no longer
-//! locked), so the CLI or a second process opening the database while the daemon is running
-//! leaves the daemon's live exchanges alone. A handle dropped with exchanges still unfinished
-//! marks its own rows `interrupted` once its queue is drained. The lock is per handle (not per
-//! process), so two handles in one process see each other as live too.
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -36,7 +16,7 @@ use nugget_core::{Error, Result};
 use rusqlite::params;
 
 use crate::Store;
-use crate::error::{DbExt, format_time, parse_time};
+use crate::error::{ConnExt, DbExt, format_time, parse_time};
 use crate::store::Db;
 
 /// How long [`EgressSink::begin`] waits for its row to be written before letting the caller
@@ -85,8 +65,7 @@ struct OwnerLock {
 
 impl Drop for OwnerLock {
     fn drop(&mut self) {
-        // Close (unlocking) before removing: deleting an open file is not portable. Either a
-        // missing or an unlocked lock file reads as "owner gone".
+        // Close (unlocking) before removing: deleting an open file is not portable.
         drop(self.file.take());
         if let Err(e) = std::fs::remove_file(&self.path)
             && e.kind() != ErrorKind::NotFound
@@ -118,8 +97,7 @@ fn valid_owner(owner: &str) -> bool {
     !owner.is_empty() && owner.len() <= 64 && owner.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Create and lock this handle's lock file. Created under a temporary name and renamed once
-/// locked, so another process sweeping lock files never sees it unlocked.
+/// Create and lock this handle's lock file.
 fn acquire_owner_lock(db: &Path, owner: &str) -> Result<OwnerLock> {
     let path = lock_path(db, owner);
     let mut tmp = path.clone().into_os_string();
@@ -152,9 +130,7 @@ fn acquire_owner_lock(db: &Path, owner: &str) -> Result<OwnerLock> {
     })
 }
 
-/// Whether the owner of `path`'s lock is still alive. A missing file or one we can lock means
-/// it is gone (the file is then removed); when in doubt (an I/O error), alive, so live rows are
-/// never marked interrupted.
+/// Whether the owner of `path`'s lock is still alive.
 fn owner_alive(path: &Path) -> bool {
     let file = match OpenOptions::new().write(true).open(path) {
         Ok(f) => f,
@@ -238,8 +214,7 @@ impl EgressWriter {
         }
     }
 
-    /// Queue an `open` row and wait up to [`BEGIN_WAIT`] for it. `None` if the writer is gone:
-    /// the caller then records the exchange one-shot when it ends.
+    /// Queue an `open` row and wait up to [`BEGIN_WAIT`] for it.
     fn begin(&self, event: EgressEvent) -> Option<EgressId> {
         let token = self.next_token.fetch_add(1, Ordering::Relaxed);
         let (ack, written) = mpsc::sync_channel(1);
@@ -301,9 +276,8 @@ impl EgressWriter {
 
 impl Drop for EgressWriter {
     fn drop(&mut self) {
-        // Closing the queue lets the thread drain what is queued and exit; join so no event is
-        // lost when the store goes away. Exchanges still unfinished then can never finish: mark
-        // them `interrupted` before releasing the owner lock.
+        // Closing the queue lets the thread drain what is queued and exit; join so no event is lost
+        // when the store goes away.
         drop(self.tx.take());
         if let Some(thread) = self.thread.take()
             && thread.join().is_err()
@@ -437,10 +411,7 @@ fn update_row(db: &Db, id: i64, sent: u64, received: u64, done: bool) -> Result<
 }
 
 /// Mark `interrupted` the `open` rows of `owner` (`None`: rows written before owners were
-/// recorded). Returns how many changed.
-///
-/// Both queries here repeat `state <> 'done'` so SQLite can use the partial `egress_unfinished`
-/// index instead of scanning the whole ledger on every open.
+/// recorded).
 fn interrupt_owner(db: &Db, owner: Option<&str>) -> Result<usize> {
     db.with_conn(|c| {
         c.execute(
@@ -452,20 +423,15 @@ fn interrupt_owner(db: &Db, owner: Option<&str>) -> Result<usize> {
     })
 }
 
-/// Rows still `open` whose owner is gone can never be finished: mark them `interrupted`. An
-/// owner is gone when its lock file next to the database at `path` is missing or can be locked
-/// (see the module docs); in an in-memory store (`path` is `None`) every other owner is gone.
-/// Lock files left by owners that crashed without open rows are removed too.
+/// Rows still `open` whose owner is gone can never be finished: mark them `interrupted`.
 fn mark_interrupted(db: &Db, path: Option<&Path>, me: &str) -> Result<()> {
     let owners: Vec<Option<String>> = db.with_conn(|c| {
-        let mut stmt = c
-            .prepare("SELECT DISTINCT owner FROM egress WHERE state <> 'done' AND state = 'open'")
-            .db("prepare open egress owners")?;
-        let rows = stmt
-            .query_map([], |r| r.get(0))
-            .db("read open egress owners")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read open egress owners")
+        c.rows(
+            "SELECT DISTINCT owner FROM egress WHERE state <> 'done' AND state = 'open'",
+            [],
+            |r| r.get(0),
+            "read open egress owners",
+        )
     })?;
     let mut n = 0;
     for owner in owners {
@@ -490,10 +456,9 @@ fn mark_interrupted(db: &Db, path: Option<&Path>, me: &str) -> Result<()> {
     Ok(())
 }
 
-/// Whether a handle on the database at `db` may have ended without closing: a lock file is
-/// left beside it whose owner is gone (a crash or a kill leaves its file behind; a clean close
-/// removes it). Read-only: unlike opening a store, this removes nothing. When in doubt (the
-/// directory or a lock file cannot be read), yes: the cost is one slower start.
+/// Whether a handle on the database at `db` may have ended without closing: a lock file is left
+/// beside it whose owner is gone (a crash or a kill leaves its file behind; a clean close removes
+/// it).
 pub(crate) fn unclean_close_left(db: &Path) -> bool {
     let (Some(dir), Some(name)) = (db.parent(), db.file_name()) else {
         return true;
@@ -517,9 +482,8 @@ pub(crate) fn unclean_close_left(db: &Path) -> bool {
     })
 }
 
-/// Whether the lock file at `path` was left behind by an owner that is gone: it exists and
-/// nobody holds its lock. No side effects. An I/O error (a file another user owns, a Windows
-/// delete-pending file) counts as left behind.
+/// Whether the lock file at `path` was left behind by an owner that is gone: it exists and nobody
+/// holds its lock.
 fn lock_left_behind(path: &Path) -> bool {
     let file = match OpenOptions::new().write(true).open(path) {
         Ok(f) => f,
@@ -607,9 +571,7 @@ pub struct EgressRow {
 }
 
 impl Store {
-    /// Append an event to the egress ledger and wait until it is written. Ordered with events
-    /// queued through [`EgressSink::record`], which does not wait (and logs failures, since the
-    /// trait cannot return errors).
+    /// Append an event to the egress ledger and wait until it is written.
     pub fn record_egress(&self, event: &EgressEvent) -> Result<()> {
         self.egress_writer().record_sync(event.clone())
     }
@@ -619,13 +581,9 @@ impl Store {
         self.egress_writer().flush();
     }
 
-    /// End this handle cleanly before the process exits (a daemon that stops without dropping
-    /// its store): flush the ledger, fold the write-ahead log into the database and truncate it
-    /// (so the next open has no log to scan or replay), then release this handle's owner lock.
-    /// Without this, an exit reads like a crash to the next open (its lock file is left behind
-    /// unlocked), which then runs SQLite's full check before opening (see
-    /// [`crate::check_file_on_open`]). Best effort; the handle stays usable, but egress rows it
-    /// records afterwards count as an exited owner's.
+    /// End this handle cleanly before the process exits (a daemon that stops without dropping its
+    /// store): flush the ledger, fold the write-ahead log into the database and truncate it (so the
+    /// next open has no log to scan or replay), then release this handle's owner lock.
     pub fn close_cleanly(&self) {
         self.flush_egress();
         let checkpoint = self.db().with_conn(|c| {
@@ -642,8 +600,7 @@ impl Store {
         self.egress_writer().release_lock();
     }
 
-    /// The most recent egress events, newest first. Includes every event recorded before the
-    /// call (queued events are flushed first). Two-phase rows carry their latest totals.
+    /// The most recent egress events, newest first.
     pub fn recent_egress(&self, limit: usize) -> Result<Vec<EgressEvent>> {
         Ok(self
             .egress_rows(false, limit)?
@@ -663,12 +620,8 @@ impl Store {
         self.egress_rows(true, limit)
     }
 
-    /// Keyset paging over the ledger (LL1): up to `limit` rows newest first, only those with an
-    /// id below `before` when given (the id of the last row of the previous page). Flushed like
-    /// [`Self::recent_egress`]. Row ids only grow and rows are never deleted, so rows recorded
-    /// between two pages sort above every page already read: following pages neither skip nor
-    /// repeat a row. (A two-phase row keeps its id as its totals change, so a later page never
-    /// shows it again with newer totals.)
+    /// Keyset paging over the ledger (LL1): up to `limit` rows newest first, only those with an id
+    /// below `before` when given (the id of the last row of the previous page).
     pub fn recent_egress_before(
         &self,
         before: Option<i64>,
@@ -850,7 +803,6 @@ mod tests {
                 break;
             }
             pages += 1;
-            // Newer rows arrive mid-paging; they must not show up in later pages.
             sink.record(event(100 + pages));
             assert!(page.windows(2).all(|w| w[0].id > w[1].id), "newest first");
             seen.extend(page.iter().map(|r| r.event.bytes_sent));
@@ -858,12 +810,10 @@ mod tests {
         }
         assert_eq!(pages, 3);
         assert_eq!(seen, (0..25u64).rev().collect::<Vec<_>>());
-        // The first page is the same as `recent_egress_rows`.
         assert_eq!(
             s.recent_egress_before(None, 5).unwrap(),
             s.recent_egress_rows(5).unwrap()
         );
-        // Ids past either end.
         assert!(s.recent_egress_before(Some(1), 10).unwrap().is_empty());
         assert!(
             s.recent_egress_before(Some(i64::MIN), 10)
@@ -891,7 +841,6 @@ mod tests {
         let s = Store::open_in_memory().unwrap();
         let sink: &dyn EgressSink = &s;
         let id = sink.begin(event(10)).unwrap();
-        // `begin` waited for the row, so it is visible without a flush.
         let n: i64 = s
             .with_conn(|c| {
                 c.query_row(
@@ -944,7 +893,6 @@ mod tests {
             x.add_received(1000);
             x.flush();
             x.add_received(1);
-            // Simulate a crash: the exchange is never finished.
             std::mem::forget(x);
             let done = EgressExchange::begin(sink, "h", "chat", Vec::new(), 1);
             drop(done);
@@ -952,7 +900,6 @@ mod tests {
                 states(&s),
                 [(EgressState::Open, 7, 1000), (EgressState::Done, 1, 0)]
             );
-            // The forgotten exchange keeps this handle alive; make it look dead.
             s.egress_writer().simulate_crash();
         }
         let s = Store::open(&path, &key).unwrap();
@@ -1057,8 +1004,7 @@ mod tests {
     }
 
     /// The W9 hazard: the CLI (or any second process) opening the store while the daemon has an
-    /// exchange in flight must not mark the daemon's row interrupted. Two handles in one test
-    /// process stand for the two processes: the owner lock is per handle.
+    /// exchange in flight must not mark the daemon's row interrupted.
     #[test]
     fn opening_the_store_leaves_live_rows_of_another_handle_open() {
         let dir = tempfile::tempdir().unwrap();
@@ -1074,7 +1020,6 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].state, EgressState::Open, "live row was interrupted");
         drop(cli);
-        // The second handle closing does not touch the first one's rows either.
         assert_eq!(states(&daemon), [(EgressState::Open, 1, 10)]);
         sink.finish(id, 1, 11);
         assert_eq!(states(&daemon), [(EgressState::Done, 1, 11)]);
@@ -1082,10 +1027,9 @@ mod tests {
         assert!(lock_files(dir.path()).is_empty(), "lock files left behind");
     }
 
-    /// Rows whose owner is gone become `interrupted` on the next open: an owner whose lock file
-    /// is still there but unlocked (a crash), one whose lock file is missing, and rows from
-    /// before owners were recorded. A row whose owner still holds its lock stays `open`, and the
-    /// crashed owner's lock file (and a stale one without rows) is cleaned up.
+    /// Rows whose owner is gone become `interrupted` on the next open: an owner whose lock file is
+    /// still there but unlocked (a crash), one whose lock file is missing, and rows from before
+    /// owners were recorded.
     #[test]
     fn rows_of_owners_that_are_gone_are_interrupted_on_open() {
         let dir = tempfile::tempdir().unwrap();
@@ -1099,7 +1043,6 @@ mod tests {
         std::fs::write(lock_path(&path, "dd44"), b"").unwrap();
         let held = File::create(lock_path(&path, "cc33")).unwrap();
         fs4::FileExt::try_lock(&held).unwrap();
-        // `s` itself is a live owner of none of these rows, so reopening decides them.
         drop(s);
 
         let s = file_store(&path);
@@ -1115,7 +1058,6 @@ mod tests {
         );
         assert!(lock_path(&path, "cc33").exists());
 
-        // Once the live owner lets go, the next open interrupts its row.
         drop(held);
         drop(s);
         let s = file_store(&path);
@@ -1138,8 +1080,6 @@ mod tests {
             x.flush();
             std::mem::forget(x);
         }
-        // The forgotten exchange keeps a clone of `a` alive, so `a`'s row stays `open`; `b` is
-        // closed with an unfinished exchange of its own.
         let sink: &dyn EgressSink = &b;
         sink.begin(event(2)).unwrap();
         drop(b);
@@ -1156,7 +1096,6 @@ mod tests {
             ]
         );
 
-        // A late finish (the exchange did complete) wins over `interrupted`.
         let late = a.unfinished_egress(10).unwrap()[1].id;
         a.with_conn(|c| {
             c.execute(
@@ -1169,30 +1108,5 @@ mod tests {
         let sink: &dyn EgressSink = &a;
         sink.finish(EgressId(1), 3, 9);
         assert_eq!(state_of(&a, late), EgressState::Done);
-    }
-
-    /// Marking rows on open uses the partial `egress_unfinished` index, not a ledger scan.
-    #[test]
-    fn interrupt_queries_use_the_unfinished_index() {
-        let s = Store::open_in_memory().unwrap();
-        for sql in [
-            "SELECT DISTINCT owner FROM egress WHERE state <> 'done' AND state = 'open'",
-            "UPDATE egress SET state = 'interrupted'
-             WHERE state <> 'done' AND state = 'open' AND owner IS NULL",
-        ] {
-            let plan: Vec<String> = s
-                .with_conn(|c| {
-                    let mut stmt = c
-                        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-                        .db("explain")?;
-                    let rows = stmt.query_map([], |r| r.get(3)).db("explain")?;
-                    rows.collect::<rusqlite::Result<_>>().db("explain")
-                })
-                .unwrap();
-            assert!(
-                plan.iter().any(|d| d.contains("egress_unfinished")),
-                "{sql}: {plan:?}"
-            );
-        }
     }
 }

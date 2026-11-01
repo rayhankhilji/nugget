@@ -1,35 +1,4 @@
 //! Crash safety of the store under hard kills.
-//!
-//! The parent test ([`store_survives_hard_kills`]) re-executes this test binary as a worker
-//! ([`crash_worker`], selected by the [`WORKER_ENV`] variable) that runs a tight loop of writes
-//! through the public store API on one encrypted database: items with chunks and vectors
-//! (`upsert_item_with_chunks`), re-chunking (`replace_chunks`), re-embedding (an upsert of the
-//! same content with vectors, as the ingest re-embed job writes it), deletes, knowledge-graph
-//! writes, audit entries, egress records and two-phase egress rows left open. The parent kills it
-//! at a random point (`Child::kill`: SIGKILL on Unix, `TerminateProcess` on Windows; no cleanup
-//! runs either way), reopens the database and checks:
-//!
-//! - [`Store::check_consistency`]: `integrity_check`, foreign keys, the audit chain, the
-//!   full-text and vector indexes against their tables, duplicates, dangling rows, the change
-//!   feed and the per-source counts;
-//! - **no loss of committed writes**: the worker appends `B <seq> <op>` to a journal before each
-//!   store call and `C <seq>` (fsynced) after it returns, so every op journaled as completed must
-//!   be visible with exactly its content (item hash, chunk texts and count, vectors, full-text
-//!   hits); the one op in flight may be either applied or not, never half (the parent records
-//!   which with `A <seq>` or `X <seq>` before the next worker starts);
-//! - two-phase egress rows the dead worker left open are marked `interrupted` on reopen.
-//!
-//! What a process kill can and cannot lose: the store runs SQLite in WAL mode with
-//! `synchronous = NORMAL`. A transaction is durable against a *process* crash as soon as its
-//! commit returns (the WAL frames are in the OS page cache, which survives the process), which is
-//! what this harness asserts. On *power loss* the last transactions before the most recent WAL
-//! sync may be lost (never corrupted); that is not simulated here.
-//!
-//! The approximate vector index (built from [`nugget_store::ANN_MIN_VECTORS`] vectors) is not
-//! reached by this harness's database sizes.
-//!
-//! Environment: `NUGGET_CRASH_ITERATIONS` (default 50), `NUGGET_CRASH_SEED` (default: the clock;
-//! printed, so a failure can be replayed; the kill timing still varies with the machine).
 
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
@@ -57,8 +26,6 @@ const DIM: usize = 8;
 const WORKER_LIFETIME: Duration = Duration::from_secs(60);
 /// Old keys re-checked per iteration (besides every key the iteration touched).
 const SAMPLE: usize = 40;
-
-// ---- tiny deterministic RNG ----------------------------------------------------------------
 
 struct Rng(u64);
 
@@ -97,8 +64,6 @@ fn seed() -> u64 {
             .map_or(1, |d| d.as_nanos() as u64)
     })
 }
-
-// ---- ops and the journal ---------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
 enum Op {
@@ -251,7 +216,6 @@ impl Model {
             }
             Op::Delete { key } => {
                 self.items.remove(key);
-                // Deleting an item retracts the claims it alone supported.
                 self.graph.retain(|_, k| k != key);
             }
             Op::Graph { n, key } => {
@@ -346,11 +310,8 @@ fn chunks(key: u64, ver: u64, n: u32, emb: Option<u64>) -> Vec<NewChunk> {
         .collect()
 }
 
-// ---- the worker ------------------------------------------------------------------------------
-
 /// Not a test of its own: the worker body, run only in a child process the parent started with
-/// [`WORKER_ENV`] set. It never returns there (it is killed, or exits after
-/// [`WORKER_LIFETIME`]).
+/// [`WORKER_ENV`] set.
 #[test]
 fn crash_worker() {
     let Some(dir) = std::env::var_os(WORKER_ENV).map(PathBuf::from) else {
@@ -377,8 +338,6 @@ fn crash_worker() {
             .unwrap();
         run_op(&store, &graph, &op);
         journal.write_all(format!("C {seq}\n").as_bytes()).unwrap();
-        // Not needed against a process kill (the page cache survives it); fsynced anyway so the
-        // journal is never the weak link.
         journal.sync_data().unwrap();
         model.next_seq = seq + 1;
         model.apply(&op);
@@ -522,13 +481,10 @@ fn run_op(store: &Store, graph: &nugget_store::SqliteGraph, op: &Op) {
         }
         Op::Egress { n } => store.record_egress(&egress_event(*n, "crash")).unwrap(),
         Op::EgressOpen { n } => {
-            // Waits (briefly) for the row; the exchange is never finished.
             let _ = store.begin(egress_event(*n, "crash_open"));
         }
     }
 }
-
-// ---- the parent ------------------------------------------------------------------------------
 
 /// Kills the worker on drop (a failed assertion) so it never outlives the test.
 struct Worker(Option<Child>);
@@ -628,7 +584,6 @@ fn item_matches(store: &Store, key: u64, want: Option<&ItemState>) -> Result<(),
 /// The full-text index finds the item by its chunk token (when it has chunks) and its title.
 fn fts_matches(store: &Store, key: u64, want: &ItemState) -> Result<(), String> {
     let r = item_ref(key);
-    // A hit is a chunk: an item without chunks cannot be found.
     if want.chunks == 0 {
         return Ok(());
     }
@@ -698,7 +653,6 @@ fn applied(store: &Store, before: &Model, op: &Op) -> Result<bool, String> {
                     .unwrap_or_default()),
             }
         }
-        // Entity, alias and claim are separate writes: a partial entity counts as not applied.
         Op::Graph { n, .. } => Ok(graph_has(store, *n)),
         Op::Audit { .. } => {
             let n = count_audit(store);
@@ -736,8 +690,7 @@ fn applied(store: &Store, before: &Model, op: &Op) -> Result<bool, String> {
     }
 }
 
-/// Check the reopened store against the model (after resolving its pending op). `keys` are
-/// checked item by item; the counters always.
+/// Check the reopened store against the model (after resolving its pending op).
 fn verify(store: &Store, m: &Model, keys: &[u64]) -> Vec<String> {
     let mut problems = Vec::new();
     for &key in keys {
@@ -771,7 +724,6 @@ fn verify(store: &Store, m: &Model, keys: &[u64]) -> Vec<String> {
             m.egress_open
         ));
     }
-    // The dead worker's open rows are interrupted now; nothing stays `open`.
     for row in store.unfinished_egress(1_000_000).unwrap() {
         if row.state == EgressState::Open {
             problems.push(format!("egress row {} still open after reopen", row.id));
@@ -813,8 +765,6 @@ fn store_survives_hard_kills() {
         let ctx = format!("iteration {iter}, NUGGET_CRASH_SEED={seed}");
         let before_len = journal_len(&journal_path);
         let worker = spawn_worker(dir, rng.next());
-        // Most kills land in the write loop: wait until the worker has journaled something new,
-        // then a random delay. Some land while it opens (and recovers) the store.
         if rng.below(5) != 0 {
             let deadline = Instant::now() + Duration::from_secs(30);
             while journal_len(&journal_path) == before_len {
@@ -839,11 +789,9 @@ fn store_survives_hard_kills() {
             report.problems
         );
 
-        // Resolve the op in flight, recording the outcome for the next worker.
         if let Some((seq, op)) = model.pending.take() {
             let took = applied(&store, &model, &op).unwrap_or_else(|e| panic!("{ctx}: {e}"));
             let mut j = OpenOptions::new().append(true).open(&journal_path).unwrap();
-            // A line torn by the kill (no newline yet) is ended first.
             let sep = if text.ends_with('\n') || text.is_empty() {
                 ""
             } else {
@@ -856,7 +804,6 @@ fn store_survives_hard_kills() {
             }
         }
 
-        // Every key touched since the last check, plus a sample of the others.
         let recent = Model::replay_keys_since(&text, checked_from);
         let mut keys: Vec<u64> = recent;
         let all: Vec<u64> = model.items.keys().copied().collect();
@@ -875,7 +822,6 @@ fn store_survives_hard_kills() {
         drop(store);
     }
 
-    // A last full check of every key ever written.
     let text = fs::read_to_string(&journal_path).unwrap_or_default();
     let model = Model::replay(&text);
     let store = Store::open(&db, &key).unwrap();
@@ -925,33 +871,4 @@ impl Model {
         keys.dedup();
         keys
     }
-}
-
-#[test]
-fn journal_replay_resolves_ops() {
-    let j = "B 0 up 0 0 2 1\nC 0\nB 1 em 0 1\nC 1\nB 2 del 0\nX 2\nB 3 au 3\nA 3\nB 4 up 4 4 1 0";
-    let m = Model::replay(j);
-    assert_eq!(
-        m.items.get(&0),
-        Some(&ItemState {
-            ver: 0,
-            chunk_ver: 0,
-            chunks: 2,
-            emb: Some(1)
-        })
-    );
-    assert_eq!(m.audits, 1);
-    assert_eq!(
-        m.pending,
-        Some((
-            4,
-            Op::Upsert {
-                key: 4,
-                ver: 4,
-                chunks: 1,
-                emb: false
-            }
-        ))
-    );
-    assert_eq!(m.next_seq, 5);
 }

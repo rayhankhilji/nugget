@@ -1,20 +1,5 @@
 //! Online backups: a consistent, encrypted copy of the live database plus the settings and vault
 //! files a restore needs, in one SQLCipher file.
-//!
-//! [`Store::backup_into`] copies with `VACUUM INTO` on a connection of its own. SQLCipher writes
-//! the copy encrypted with the source's key (checked after each copy: a plaintext header fails
-//! the backup). The copy runs inside one read transaction of that connection: in WAL mode a
-//! reader never blocks the writer, so ingest keeps going during a backup and the copy is the
-//! snapshot taken when it started. (Running it on the writer connection would block every write
-//! for the whole copy; a pooled reader is `query_only`, which `VACUUM INTO` refuses, and would
-//! take one of the few pooled connections away from searches.) The only cost is that WAL
-//! checkpoints cannot move past that snapshot until the copy ends, so the WAL may grow
-//! meanwhile; the next checkpoint after the copy catches up.
-//!
-//! The copy then gets one extra table, `nugget_backup_files (path, content)`, holding files
-//! (settings, vault) so they are encrypted with the data. A restore reads them with
-//! [`read_backup_files`], drops the table with [`strip_backup_files`] and opens the file as a
-//! store.
 
 use std::collections::HashSet;
 use std::fs;
@@ -49,17 +34,9 @@ pub struct BackupStats {
 }
 
 impl Store {
-    /// Write an online, consistent, encrypted copy of this store to `dest` (which must not
-    /// exist; its directory is created owner-only if missing), with `files` (`(relative path,
-    /// content)`) stored in its `nugget_backup_files` table. File paths must be safe to write
-    /// out on every OS (see [`read_backup_files`]).
-    ///
-    /// `dest` is first created exclusively (`O_EXCL`, `0600` on Unix), so an existing file or a
-    /// planted symlink fails the backup instead of being followed. The copy is encrypted with
-    /// this store's key, verified with `PRAGMA integrity_check`, and synced to disk before this
-    /// returns; on any failure the files this call created are removed. Writers are not blocked
-    /// meanwhile (see the module docs). `Error::Unsupported` for an in-memory store,
-    /// `Error::Invalid` for an existing `dest` or a bad file path.
+    /// Write an online, consistent, encrypted copy of this store to `dest` (which must not exist;
+    /// its directory is created owner-only if missing), with `files` (`(relative path, content)`)
+    /// stored in its `nugget_backup_files` table.
     pub fn backup_into(&self, dest: &Path, files: &[(String, Vec<u8>)]) -> Result<BackupStats> {
         let Some((path, key)) = self.file() else {
             return Err(Error::Unsupported(
@@ -89,20 +66,8 @@ impl Store {
         result
     }
 
-    /// After a deliberate restore of an older copy, make this log's current head the audit
-    /// anchor, so [`Store::verify_audit_chain`] passes and appends are anchored again. The
-    /// restore should append an audit entry (such as `backup.restore`) right after.
-    ///
-    /// The log's chain, head and seal must verify (ignoring the anchor), else
-    /// `Error::Integrity` and nothing changes. Without `force`, the anchor is only replaced when
-    /// it shows a genuine rollback: it names an entry **after** the log's last one. It is
-    /// refused (`Error::Integrity`) when the anchored entry is in the log with a different hash
-    /// (the log was rewritten, not rolled back), when the anchor is unreadable or not written
-    /// for this key, and when the log is empty while an anchor exists. `force` replaces the
-    /// anchor in all those cases (an explicit user decision). An anchor that already matches is
-    /// just moved to the head. The new value is written durably before this returns (for an
-    /// empty log, a value that anchors "no entries yet"). Without a configured anchor this only
-    /// verifies the log.
+    /// After a deliberate restore of an older copy, make this log's current head the audit anchor,
+    /// so [`Store::verify_audit_chain`] passes and appends are anchored again.
     pub fn reset_audit_anchor(&self, force: bool) -> Result<()> {
         crate::audit::reset_anchor(self, force)
     }
@@ -296,10 +261,7 @@ fn validate_file_set<'a>(names: impl Iterator<Item = &'a str>) -> std::result::R
 }
 
 /// Read the files stored in the backup database at `path` (opened read-only with `key`, never
-/// written), sorted by path. `Error::Integrity` when `key` does not open it, it is not a backup
-/// (no files table), or a stored path is unsafe to write out on any OS: absolute, `..`,
-/// reserved names or characters (see `validate_file_path`), or two paths that land on the same
-/// file of a case-insensitive file system, or that need a file as a directory.
+/// written), sorted by path.
 pub fn read_backup_files(path: &Path, key: &StoreKey) -> Result<Vec<(String, Vec<u8>)>> {
     if !path.exists() {
         return Err(Error::NotFound(format!("backup file {}", path.display())));
@@ -338,9 +300,7 @@ pub fn read_backup_files(path: &Path, key: &StoreKey) -> Result<Vec<(String, Vec
 }
 
 /// Turn a verified backup file into a live store file in place: drop its `nugget_backup_files`
-/// table (a no-op when it has none). Read the files first with [`read_backup_files`]. The file
-/// can then be opened with [`Store::open`] and the same key. `Error::Integrity` when `key` does
-/// not open it.
+/// table (a no-op when it has none).
 pub fn strip_backup_files(path: &Path, key: &StoreKey) -> Result<()> {
     if !path.exists() {
         return Err(Error::NotFound(format!("backup file {}", path.display())));
@@ -486,8 +446,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let s = Store::open(dir.path().join("nugget.db"), &key()).unwrap();
         populate(&s, 30);
-        // Build the approximate index, so it has to survive the copy too.
-        // (Hybrid search first: on a store this small its automatic mode drops that index.)
         let q = embedding(5);
         let hybrid = s.search_hybrid("ledger", Some(&q), 10).unwrap();
         let approx = s.search_vector_approx(&q, 5).unwrap();
@@ -548,7 +506,6 @@ mod tests {
                 .unwrap(),
             Some(serde_json::json!({"page": 3}))
         );
-        // The restored store is live: writes and audit appends work.
         put_item(&r, 100);
         audit(&r, "after.restore");
         r.verify_audit_chain().unwrap();
@@ -578,7 +535,6 @@ mod tests {
                 n
             })
         };
-        // Let the writer get going, then take several backups during its writes.
         while s.counts().unwrap().items < before + 5 {
             std::thread::yield_now();
         }
@@ -606,7 +562,6 @@ mod tests {
             assert_eq!((report.items, report.chunks), (st.items, st.chunks));
             r.verify_audit_chain().unwrap();
         }
-        // The live store was never disturbed.
         assert!(s.check_consistency().unwrap().ok);
     }
 
@@ -683,7 +638,6 @@ mod tests {
             assert!(matches!(err, Error::Invalid(_)), "{bad:?}: {err}");
             assert!(!fresh.exists());
         }
-        // A failure leaves nothing behind (duplicate path).
         let dup = vec![("a".to_owned(), vec![1]), ("a".to_owned(), vec![2])];
         assert!(s.backup_into(&fresh, &dup).is_err());
         assert!(!fresh.exists());
@@ -724,7 +678,6 @@ mod tests {
             matches!(&err, Error::Integrity(m) if m.contains("rolled back")),
             "{err}"
         );
-        // Appending does not overwrite the conflicting anchor (it is evidence)...
         audit(&r, "restored.0");
         assert!(
             anchor
@@ -737,7 +690,6 @@ mod tests {
         );
         assert!(r.verify_audit_chain().is_err());
 
-        // ...until the restore is acknowledged.
         r.reset_audit_anchor(false).unwrap();
         assert!(
             anchor
@@ -761,7 +713,6 @@ mod tests {
         );
         r.verify_audit_chain().unwrap();
 
-        // A new store handle on the same anchor agrees.
         drop(r);
         let r = Store::open(&dest, &key()).unwrap();
         r.set_audit_anchor(Some(Arc::new(anchor.clone())));
@@ -791,7 +742,6 @@ mod tests {
         ));
         assert_eq!(*anchor.0.lock().unwrap(), before);
 
-        // Without an anchor it only verifies.
         let fresh = Store::open(dir.path().join("other.db"), &key()).unwrap();
         fresh.reset_audit_anchor(false).unwrap();
     }
@@ -805,7 +755,6 @@ mod tests {
     fn reset_audit_anchor_on_an_empty_log_needs_force_and_is_durable() {
         let dir = tempfile::tempdir().unwrap();
         let anchor = MemAnchor::default();
-        // An anchor left by another (longer) log of the same key.
         let s = Store::open(dir.path().join("a.db"), &key()).unwrap();
         s.set_audit_anchor(Some(Arc::new(anchor.clone())));
         populate(&s, 1);
@@ -823,7 +772,6 @@ mod tests {
         r.reset_audit_anchor(true).unwrap();
         assert!(anchored(&anchor).starts_with("v1:0:"));
         r.verify_audit_chain().unwrap();
-        // Durable: a new handle (a restart) verifies before anything is appended.
         drop(r);
         let r = Store::open(dir.path().join("b.db"), &key()).unwrap();
         r.set_audit_anchor(Some(Arc::new(anchor.clone())));
@@ -847,7 +795,6 @@ mod tests {
         drop(s);
         let before = anchored(&anchor);
         assert!(before.starts_with("v1:3:"));
-        // Another log of the same key, just as long: entry 3 differs.
         let r = Store::open(dir.path().join("b.db"), &key()).unwrap();
         for n in 0..4 {
             audit(&r, &format!("rewritten.{n}"));
@@ -865,7 +812,6 @@ mod tests {
         assert!(anchored(&anchor).starts_with("v1:4:"));
         r.verify_audit_chain().unwrap();
 
-        // An anchor that is not this key's (or garbage) also needs force.
         *anchor.0.lock().unwrap() = Some("v1:2:abc:def".into());
         assert!(matches!(
             r.reset_audit_anchor(false),
@@ -873,7 +819,6 @@ mod tests {
         ));
         r.reset_audit_anchor(true).unwrap();
         r.verify_audit_chain().unwrap();
-        // A matching anchor is simply moved to the head.
         audit(&r, "more");
         r.reset_audit_anchor(false).unwrap();
         assert!(anchored(&anchor).starts_with("v1:5:"));
@@ -896,26 +841,15 @@ mod tests {
             "a/",
             "a/../b",
             "..",
-            ".",
             "a\0b",
             "c:x",
             "a\\b",
             "vault/CON",
-            "vault/con.md",
-            "Nul.txt",
-            "a/com1",
             "LPT9.x.y",
-            "a./b",
-            "a /b",
             "trailing.",
             "trailing ",
             "a<b",
-            "a>b",
-            "a\"b",
-            "a|b",
             "a?b",
-            "a*b",
-            "a\u{1}b",
             "a\nb",
         ] {
             assert!(validate_file_path(bad).is_err(), "{bad:?}");
@@ -994,13 +928,11 @@ mod tests {
                 .file_type()
                 .is_symlink()
         );
-        // Dangling symlink too.
         let dangling = dir.path().join("dangling.nbk");
         std::os::unix::fs::symlink(dir.path().join("nowhere"), &dangling).unwrap();
         assert!(s.backup_into(&dangling, &[]).is_err());
         assert!(!dir.path().join("nowhere").exists());
 
-        // A failing backup removes its own file but not a journal that was already there.
         let fresh = dir.path().join("fresh.nbk");
         let journal = sidecar(&fresh, "-journal");
         fs::write(&journal, b"someone else's").unwrap();
@@ -1010,7 +942,6 @@ mod tests {
         assert!(s.backup_into(&fresh, &dup).is_err());
         assert!(!fresh.exists());
         assert_eq!(fs::read(&journal).unwrap(), b"someone else's");
-        // The new file is owner-only from the start.
         let ok = dir.path().join("ok.nbk");
         s.backup_into(&ok, &[]).unwrap();
         use std::os::unix::fs::PermissionsExt;

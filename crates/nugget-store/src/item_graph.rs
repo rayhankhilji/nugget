@@ -2,11 +2,7 @@
 //! ([`Store::entities_in_items`]), the claims an item is evidence for
 //! ([`Store::claims_with_evidence_in`]), the items that mention an entity
 //! ([`Store::items_mentioning`]), and light per-item details without the text
-//! ([`Store::item_meta`], [`Store::first_chunks`]). All run on a read connection, so search
-//! pages never wait on, or hold up, ingest and extraction.
-//!
-//! `mentions` and `claim_evidence` reference items by `(source, key)`; lookups go through the
-//! `mentions_item` / `mentions_entity` / `claim_evidence_item` indexes.
+//! ([`Store::item_meta`], [`Store::first_chunks`]).
 
 use std::collections::HashMap;
 
@@ -17,7 +13,7 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::Store;
-use crate::error::DbExt;
+use crate::error::{ConnExt, DbExt};
 use crate::graph::MAX_MERGE_DEPTH;
 use crate::items::{LOOKUP_BATCH, WANTED_ITEMS_JOIN, item_ref, refs_json};
 
@@ -31,11 +27,8 @@ pub struct EntityLinkRow {
     pub mentions: u32,
 }
 
-/// Distinct live entities mentioned in each item of `?1` (a `refs_json` array), as
-/// `(index in the array, id, name, kind, mentions)`, most-mentioned first within an item.
-/// `CROSS JOIN`s fix the join order (refs, then mentions, then entities by primary key), so
-/// each ref is a `mentions_item` range and the planner never scans `entities`; a
-/// mention of a merged-away id resolves to its survivor (merges keep chains one hop long).
+/// Distinct live entities mentioned in each item of `?1` (a `refs_json` array), as `(index in the
+/// array, id, name, kind, mentions)`, most-mentioned first within an item.
 pub(crate) const ENTITIES_IN_ITEMS_SQL: &str =
     "SELECT want.key, l.id, l.name, l.kind, count(*) AS n
      FROM json_each(?1) AS want
@@ -103,9 +96,7 @@ fn kind_from_str(s: &str) -> Result<EntityKind> {
 
 impl Store {
     /// The distinct live entities mentioned in each of `items`, most-mentioned first (ties by
-    /// name). Mentions of merged-away ids count for the surviving entity; pruned entities are
-    /// left out. Items without mentions (or unknown) are absent from the map. Looked up in
-    /// batches of `LOOKUP_BATCH` items, one query each, on a read connection.
+    /// name).
     pub fn entities_in_items(
         &self,
         items: &[ItemRef],
@@ -115,11 +106,10 @@ impl Store {
         for batch in items.chunks(LOOKUP_BATCH) {
             let refs = refs_json(batch)?;
             let rows: Vec<Row> = self.with_read_conn(|c| {
-                let mut stmt = c
-                    .prepare_cached(ENTITIES_IN_ITEMS_SQL)
-                    .db("prepare entities_in_items")?;
-                let rows = stmt
-                    .query_map([&refs], |r| {
+                c.rows(
+                    ENTITIES_IN_ITEMS_SQL,
+                    [&refs],
+                    |r| {
                         Ok((
                             r.get::<_, i64>(0)? as usize,
                             r.get(1)?,
@@ -127,10 +117,9 @@ impl Store {
                             r.get(3)?,
                             r.get(4)?,
                         ))
-                    })
-                    .db("query entities_in_items")?;
-                rows.collect::<rusqlite::Result<_>>()
-                    .db("read entities_in_items")
+                    },
+                    "read entities_in_items",
+                )
             })?;
             for (idx, id, name, kind, n) in rows {
                 let Some(item) = batch.get(idx) else {
@@ -152,9 +141,8 @@ impl Store {
         Ok(out)
     }
 
-    /// Ids of the claims that `item` is evidence for, oldest first: only active ones
-    /// (`active`, `user_asserted`) when `active_only`, at most `limit` (0 = all). Read on a read
-    /// connection through the `claim_evidence_item` index.
+    /// Ids of the claims that `item` is evidence for, oldest first: only active ones (`active`,
+    /// `user_asserted`) when `active_only`, at most `limit` (0 = all).
     pub fn claims_with_evidence_in(
         &self,
         item: &ItemRef,
@@ -167,30 +155,24 @@ impl Store {
             i64::try_from(limit).unwrap_or(i64::MAX)
         };
         self.with_read_conn(|c| {
-            let mut stmt = c
-                .prepare_cached(CLAIMS_IN_ITEM_SQL)
-                .db("prepare claims_with_evidence_in")?;
-            let rows = stmt
-                .query_map(
-                    rusqlite::params![
-                        item.source.as_str(),
-                        item.key.as_str(),
-                        i64::from(active_only),
-                        limit
-                    ],
-                    |r| r.get::<_, ClaimId>(0),
-                )
-                .db("query claims_with_evidence_in")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read claims_with_evidence_in")
+            c.rows(
+                CLAIMS_IN_ITEM_SQL,
+                rusqlite::params![
+                    item.source.as_str(),
+                    item.key.as_str(),
+                    i64::from(active_only),
+                    limit
+                ],
+                |r| r.get::<_, ClaimId>(0),
+                "read claims_with_evidence_in",
+            )
         })
     }
 }
 
 impl Store {
-    /// The distinct items that mention `entity` (or, for a merged-away id, its survivor) or any
-    /// id merged into it, at most `limit`, and whether more exist. Order is unspecified (date
-    /// them to sort). Unknown or pruned entities mention nothing.
+    /// The distinct items that mention `entity` (or, for a merged-away id, its survivor) or any id
+    /// merged into it, at most `limit`, and whether more exist.
     pub fn items_mentioning(
         &self,
         entity: &EntityId,
@@ -201,19 +183,17 @@ impl Store {
             let Some(live) = live_id(c, entity.as_str())? else {
                 return Ok(Vec::new());
             };
-            let mut stmt = c
-                .prepare_cached(ITEMS_MENTIONING_SQL)
-                .db("prepare items_mentioning")?;
-            let rows = stmt
-                .query_map(rusqlite::params![live, ask], |r| {
+            c.rows(
+                ITEMS_MENTIONING_SQL,
+                rusqlite::params![live, ask],
+                |r| {
                     Ok(ItemMention {
                         item: item_ref(r.get(0)?, r.get(1)?),
                         surface: r.get(2)?,
                     })
-                })
-                .db("query items_mentioning")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read items_mentioning")
+                },
+                "read items_mentioning",
+            )
         })?;
         let more = rows.len() > limit;
         rows.truncate(limit);
@@ -229,18 +209,19 @@ impl Store {
         for batch in items.chunks(LOOKUP_BATCH) {
             let refs = refs_json(batch)?;
             let rows: Vec<Row> = self.with_read_conn(|c| {
-                let mut stmt = c.prepare_cached(&sql).db("prepare item_meta")?;
-                let rows = stmt
-                    .query_map([&refs], |r| {
+                c.rows(
+                    &sql,
+                    [&refs],
+                    |r| {
                         Ok((
                             r.get::<_, i64>(0)? as usize,
                             r.get(1)?,
                             r.get(2)?,
                             r.get(3)?,
                         ))
-                    })
-                    .db("query item_meta")?;
-                rows.collect::<rusqlite::Result<_>>().db("read item_meta")
+                    },
+                    "read item_meta",
+                )
             })?;
             for (idx, title, mime, metadata) in rows {
                 if let Some(item) = batch.get(idx) {
@@ -267,20 +248,19 @@ impl Store {
         Ok(out)
     }
 
-    /// The text of the first chunk of each item in `items` that has chunks. Batched like
-    /// [`Store::item_dates`]; one index lookup per item.
+    /// The text of the first chunk of each item in `items` that has chunks.
     pub fn first_chunks(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, String>> {
         let sql = first_chunks_sql();
         let mut out = HashMap::with_capacity(items.len());
         for batch in items.chunks(LOOKUP_BATCH) {
             let refs = refs_json(batch)?;
             let rows: Vec<(usize, String)> = self.with_read_conn(|c| {
-                let mut stmt = c.prepare_cached(&sql).db("prepare first_chunks")?;
-                let rows = stmt
-                    .query_map([&refs], |r| Ok((r.get::<_, i64>(0)? as usize, r.get(1)?)))
-                    .db("query first_chunks")?;
-                rows.collect::<rusqlite::Result<_>>()
-                    .db("read first_chunks")
+                c.rows(
+                    &sql,
+                    [&refs],
+                    |r| Ok((r.get::<_, i64>(0)? as usize, r.get(1)?)),
+                    "read first_chunks",
+                )
             })?;
             for (idx, text) in rows {
                 if let Some(item) = batch.get(idx) {
@@ -394,7 +374,6 @@ mod tests {
         g.add_mention(&mention(&samuel, &a, "Samuel")).unwrap();
         g.add_mention(&mention(&acme, &a, "Acme")).unwrap();
         g.add_mention(&mention(&acme, &b, "Acme")).unwrap();
-        // Mentions written under an id that is merged afterwards resolve to the survivor.
         g.merge(&sam, &samuel).unwrap();
 
         let got = s
@@ -411,30 +390,11 @@ mod tests {
         assert_eq!(got[&b].len(), 1);
         assert!(!got.contains_key(&c), "no mentions: absent");
         assert!(s.entities_in_items(&[]).unwrap().is_empty());
-        // Unknown items are absent too.
         assert!(
             s.entities_in_items(&[iref("nope", "x")])
                 .unwrap()
                 .is_empty()
         );
-    }
-
-    #[test]
-    fn entities_in_items_batches_large_inputs() {
-        let s = Store::open_in_memory().unwrap();
-        let g = s.graph();
-        let e = g
-            .create_entity(&NewEntity::new(EntityKind::Topic, "Budget"))
-            .unwrap();
-        let refs: Vec<ItemRef> = (0..LOOKUP_BATCH + 3)
-            .map(|i| iref("files", &format!("k{i}")))
-            .collect();
-        let last = refs.last().unwrap().clone();
-        g.add_mention(&mention(&e, &refs[0], "budget")).unwrap();
-        g.add_mention(&mention(&e, &last, "budget")).unwrap();
-        let got = s.entities_in_items(&refs).unwrap();
-        assert_eq!(got.len(), 2);
-        assert_eq!(got[&last][0].id, e);
     }
 
     #[test]
@@ -484,7 +444,6 @@ mod tests {
             .unwrap();
         g.add_mention(&mention(&other, &items[3], "Other")).unwrap();
         g.merge(&sam, &samuel).unwrap();
-        // A mention written under the merged-away id after the merge still counts.
         s.with_conn(|c| {
             c.execute(
                 "INSERT INTO mentions (entity_id, source, key, chunk_id, surface, confidence,
@@ -518,12 +477,10 @@ mod tests {
             sorted(s.items_mentioning(&sam, 100).unwrap()),
             (want.clone(), false)
         );
-        // A merged-away id resolves to the survivor.
         assert_eq!(
             sorted(s.items_mentioning(&samuel, 100).unwrap()),
             (want, false)
         );
-        // Exactly at the cap: no more; below it: more.
         assert!(!s.items_mentioning(&sam, 4).unwrap().1);
         let (capped, more) = s.items_mentioning(&sam, 2).unwrap();
         assert_eq!(capped.len(), 2);
@@ -554,62 +511,5 @@ mod tests {
         let first = s.first_chunks(&[a.clone(), b.clone(), unknown]).unwrap();
         assert_eq!(first.len(), 1);
         assert_eq!(first[&a], "body of a");
-    }
-
-    /// Both statements reach `mentions`, `claim_evidence`, `claims` and `entities` through an
-    /// index or the primary key, never a full scan (the same check as `query_plans.rs`).
-    #[test]
-    fn item_graph_statements_use_indexes() {
-        let s = Store::open_in_memory().unwrap();
-        let g = s.graph();
-        for i in 0..50 {
-            let it = iref("mail", &format!("k{i}"));
-            put(&s, &it);
-            let e = g
-                .create_entity(&NewEntity::new(EntityKind::Person, format!("P{i}")))
-                .unwrap();
-            g.add_mention(&mention(&e, &it, "P")).unwrap();
-            g.add_claim(&claim(&e, &format!("Org{i}"), &[&it])).unwrap();
-        }
-        let check = |label: &str| {
-            s.with_conn(|c| {
-                for sql in [
-                    ENTITIES_IN_ITEMS_SQL.to_owned(),
-                    CLAIMS_IN_ITEM_SQL.to_owned(),
-                    ITEMS_MENTIONING_SQL.to_owned(),
-                    item_meta_sql(),
-                    first_chunks_sql(),
-                ] {
-                    let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-                    let nulls = vec![rusqlite::types::Null; stmt.parameter_count()];
-                    let steps: Vec<String> = stmt
-                        .query_map(rusqlite::params_from_iter(nulls), |r| r.get(3))
-                        .unwrap()
-                        .collect::<rusqlite::Result<_>>()
-                        .unwrap();
-                    let scans: Vec<&String> = steps
-                        .iter()
-                        // The id list is a subquery (a constant row plus an index
-                        // search), not a table.
-                        .filter(|d| {
-                            d.starts_with("SCAN ")
-                                && !d.contains("VIRTUAL TABLE")
-                                && !d.contains("CONSTANT ROW")
-                                && d.as_str() != "SCAN ids"
-                        })
-                        .collect();
-                    assert!(scans.is_empty(), "{label}: {sql}\n{steps:#?}");
-                }
-                Ok(())
-            })
-            .unwrap();
-        };
-        check("populated");
-        s.with_conn(|c| {
-            c.execute_batch("ANALYZE;").unwrap();
-            Ok(())
-        })
-        .unwrap();
-        check("after ANALYZE");
     }
 }

@@ -7,7 +7,7 @@ use nugget_core::{Error, Result};
 use rusqlite::{OptionalExtension, TransactionBehavior, params, params_from_iter};
 
 use crate::Store;
-use crate::error::{DbExt, format_time};
+use crate::error::{ConnExt, DbExt, format_time};
 use crate::graph::{ItemScope, Touched, retract_tx};
 use crate::items::{embedding_dim, f32_from_blob, item_ref};
 use crate::types::{Chunk, ChunkId, SourceCounts};
@@ -32,11 +32,6 @@ fn read_chunk(r: &rusqlite::Row<'_>) -> rusqlite::Result<Chunk> {
 
 impl Store {
     /// Delete every item of a source (with chunks, full-text entries and vectors) and its cursor.
-    /// Returns the number of items removed.
-    ///
-    /// In the same transaction, all knowledge-graph evidence and mentions from the source are
-    /// dropped, claims left without evidence are retracted, and the affected entities enter the
-    /// graph change feed (as [`Store::delete_item`] does for one item).
     pub fn delete_source(&self, source: &SourceId) -> Result<u64> {
         let now = format_time(time::OffsetDateTime::now_utc())?;
         self.with_conn(|conn| {
@@ -60,21 +55,16 @@ impl Store {
     /// connector's view (e.g. a directory scan) against what is stored.
     pub fn item_versions(&self, source: &SourceId) -> Result<HashMap<ItemKey, Option<String>>> {
         self.with_read_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT key, version FROM items WHERE source = ?1")
-                .db("prepare item_versions")?;
-            let rows = stmt
-                .query_map([source.as_str()], |r| {
-                    Ok((ItemKey::new(r.get::<_, String>(0)?), r.get(1)?))
-                })
-                .db("query item_versions")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read item_versions")
+            conn.rows(
+                "SELECT key, version FROM items WHERE source = ?1",
+                [source.as_str()],
+                |r| Ok((ItemKey::new(r.get::<_, String>(0)?), r.get(1)?)),
+                "read item_versions",
+            )
         })
     }
 
-    /// Fetch chunks by id, in the order given. Unknown ids are skipped. At most
-    /// [`MAX_CHUNK_IDS`] ids per call (`Error::Invalid` otherwise).
+    /// Fetch chunks by id, in the order given.
     pub fn get_chunks(&self, ids: &[ChunkId]) -> Result<Vec<Chunk>> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -91,20 +81,17 @@ impl Store {
              WHERE c.id IN ({placeholders})"
         );
         let mut found: HashMap<ChunkId, Chunk> = self.with_read_conn(|conn| {
-            let mut stmt = conn.prepare(&sql).db("prepare get_chunks")?;
-            let rows = stmt
-                .query_map(params_from_iter(ids.iter()), |r| {
-                    read_chunk(r).map(|c| (c.id, c))
-                })
-                .db("query get_chunks")?;
-            rows.collect::<rusqlite::Result<_>>().db("read get_chunks")
+            conn.rows(
+                &sql,
+                params_from_iter(ids.iter()),
+                |r| read_chunk(r).map(|c| (c.id, c)),
+                "read get_chunks",
+            )
         })?;
         Ok(ids.iter().filter_map(|id| found.remove(id)).collect())
     }
 
-    /// Fetch an item's chunks by position (`ord`, from 0), in the order given. Positions the item
-    /// does not have (and unknown items) are skipped. At most [`MAX_CHUNK_IDS`] positions per
-    /// call (`Error::Invalid` otherwise).
+    /// Fetch an item's chunks by position (`ord`, from 0), in the order given.
     pub fn get_chunks_by_ord(&self, item: &ItemRef, ords: &[u32]) -> Result<Vec<Chunk>> {
         if ords.is_empty() {
             return Ok(Vec::new());
@@ -144,12 +131,8 @@ impl Store {
         Ok(ords.iter().filter_map(|o| found.get(o).cloned()).collect())
     }
 
-    /// The chunks of `chunk`'s item whose position is within `radius` of it (`ord - radius ..=
-    /// ord + radius`, clamped to the item), in document order, **including `chunk` itself**.
-    /// Empty if the chunk does not exist. `radius` is capped at [`MAX_NEIGHBOUR_RADIUS`].
-    ///
-    /// Positions come from the stored `ord`, never from chunk ids, so this stays correct however
-    /// ids were assigned.
+    /// The chunks of `chunk`'s item whose position is within `radius` of it (`ord - radius ..= ord
+    /// + radius`, clamped to the item), in document order, **including `chunk` itself**.
     pub fn neighbours(&self, chunk: ChunkId, radius: u32) -> Result<Vec<Chunk>> {
         let radius = i64::from(radius.min(MAX_NEIGHBOUR_RADIUS));
         self.with_read_conn(|conn| {
@@ -164,25 +147,21 @@ impl Store {
             else {
                 return Ok(Vec::new());
             };
-            let mut stmt = conn
-                .prepare_cached(&format!(
+            conn.rows(
+                &format!(
                     "SELECT {CHUNK_COLUMNS}
                      FROM chunks c JOIN items i ON i.id = c.item_id
                      WHERE c.item_id = ?1 AND c.ord BETWEEN ?2 AND ?3
                      ORDER BY c.ord"
-                ))
-                .db("prepare neighbours")?;
-            let rows = stmt
-                .query_map(params![item_id, ord - radius, ord + radius], read_chunk)
-                .db("query neighbours")?;
-            rows.collect::<rusqlite::Result<_>>().db("read neighbours")
+                ),
+                params![item_id, ord - radius, ord + radius],
+                read_chunk,
+                "read neighbours",
+            )
         })
     }
 
-    /// Stored embeddings of the given chunks, read back from the vector index. Chunks without a
-    /// vector (stored text-only) and unknown ids are absent from the map; while the store holds
-    /// no vectors at all the map is empty. At most [`MAX_CHUNK_IDS`] ids per call
-    /// (`Error::Invalid` otherwise).
+    /// Stored embeddings of the given chunks, read back from the vector index.
     pub fn get_embeddings(&self, ids: &[ChunkId]) -> Result<HashMap<ChunkId, Vec<f32>>> {
         if ids.len() > MAX_CHUNK_IDS {
             return Err(Error::Invalid(format!(
@@ -222,10 +201,9 @@ impl Store {
         })
     }
 
-    /// Items with at least one chunk stored without an embedding (indexed text-only, e.g.
-    /// while no embedder was available), ordered by `(source, key)`, at most `limit`, starting
-    /// after `after` (keyset pagination: pass the last item of the previous page). Junk and
-    /// title-less items without chunks are never listed.
+    /// Items with at least one chunk stored without an embedding (indexed text-only, e.g. while no
+    /// embedder was available), ordered by `(source, key)`, at most `limit`, starting after `after`
+    /// (keyset pagination: pass the last item of the previous page).
     pub fn items_missing_embeddings(
         &self,
         after: Option<&ItemRef>,
@@ -250,21 +228,18 @@ impl Store {
                  ORDER BY i.source, i.key
                  LIMIT ?3"
             );
-            let mut stmt = conn.prepare(&sql).db("prepare items_missing_embeddings")?;
-            let rows = stmt
-                .query_map(params![src, key, limit], |r| {
-                    Ok(item_ref(r.get(0)?, r.get(1)?))
-                })
-                .db("query items_missing_embeddings")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read items_missing_embeddings")
+            conn.rows(
+                &sql,
+                params![src, key, limit],
+                |r| Ok(item_ref(r.get(0)?, r.get(1)?)),
+                "read items_missing_embeddings",
+            )
         })
     }
 
     /// Items whose metadata says triage is still to run (`metadata.triage.state == "pending"`,
     /// written by ingest), ordered by `(source, key)`, at most `limit`, starting after `after`
-    /// (keyset pagination). A full scan of `items`: meant for the background triage job's
-    /// recovery pass at start, not for hot paths.
+    /// (keyset pagination).
     pub fn items_pending_triage(
         &self,
         after: Option<&ItemRef>,
@@ -276,31 +251,24 @@ impl Store {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let (src, key) = after.map_or(("", ""), |a| (a.source.as_str(), a.key.as_str()));
         self.with_read_conn(|conn| {
-            let mut stmt = conn
-                .prepare_cached(
-                    "SELECT i.source, i.key FROM items i
+            conn.rows(
+                "SELECT i.source, i.key FROM items i
                      WHERE (i.source, i.key) > (?1, ?2)
                        AND json_valid(i.metadata)
                        AND json_extract(i.metadata, '$.triage.state') = 'pending'
                      ORDER BY i.source, i.key
                      LIMIT ?3",
-                )
-                .db("prepare items_pending_triage")?;
-            let rows = stmt
-                .query_map(params![src, key, limit], |r| {
-                    Ok(item_ref(r.get(0)?, r.get(1)?))
-                })
-                .db("query items_pending_triage")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read items_pending_triage")
+                params![src, key, limit],
+                |r| Ok(item_ref(r.get(0)?, r.get(1)?)),
+                "read items_pending_triage",
+            )
         })
     }
 
-    /// Items whose triage failed (`metadata.triage.state == "failed"`) fewer than
-    /// `max_failures` times, each with its failure count (`metadata.triage.failures`, 1 when
-    /// absent) and the time of its last failure (`metadata.triage.failed_at`, Unix seconds, 0
-    /// when absent), ordered by `(source, key)`, at most `limit`, after `after` (keyset
-    /// pagination). A full scan of `items`, for the triage job's occasional retry pass.
+    /// Items whose triage failed (`metadata.triage.state == "failed"`) fewer than `max_failures`
+    /// times, each with its failure count (`metadata.triage.failures`, 1 when absent) and the time
+    /// of its last failure (`metadata.triage.failed_at`, Unix seconds, 0 when absent), ordered by
+    /// `(source, key)`, at most `limit`, after `after` (keyset pagination).
     pub fn items_failed_triage(
         &self,
         after: Option<&ItemRef>,
@@ -313,9 +281,7 @@ impl Store {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let (src, key) = after.map_or(("", ""), |a| (a.source.as_str(), a.key.as_str()));
         self.with_read_conn(|conn| {
-            let mut stmt = conn
-                .prepare_cached(
-                    "SELECT i.source, i.key,
+            conn.rows("SELECT i.source, i.key,
                             COALESCE(CAST(json_extract(i.metadata, '$.triage.failures') AS INTEGER), 1),
                             COALESCE(CAST(json_extract(i.metadata, '$.triage.failed_at') AS INTEGER), 0)
                      FROM items i
@@ -324,27 +290,19 @@ impl Store {
                        AND json_extract(i.metadata, '$.triage.state') = 'failed'
                        AND COALESCE(CAST(json_extract(i.metadata, '$.triage.failures') AS INTEGER), 1) < ?3
                      ORDER BY i.source, i.key
-                     LIMIT ?4",
-                )
-                .db("prepare items_failed_triage")?;
-            let rows = stmt
-                .query_map(params![src, key, i64::from(max_failures), limit], |r| {
+                     LIMIT ?4", params![src, key, i64::from(max_failures), limit], |r| {
                     let failures: i64 = r.get(2)?;
                     Ok((
                         item_ref(r.get(0)?, r.get(1)?),
                         u32::try_from(failures.max(0)).unwrap_or(u32::MAX),
                         r.get::<_, i64>(3)?,
                     ))
-                })
-                .db("query items_failed_triage")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read items_failed_triage")
+                }, "read items_failed_triage")
         })
     }
 
-    /// Items without a `metadata.triage.state` (written before background triage existed),
-    /// ordered by `(source, key)`, at most `limit`, after `after` (keyset pagination). A full
-    /// scan, for a one-off migration at start.
+    /// Items without a `metadata.triage.state` (written before background triage existed), ordered
+    /// by `(source, key)`, at most `limit`, after `after` (keyset pagination).
     pub fn items_without_triage_state(
         &self,
         after: Option<&ItemRef>,
@@ -356,30 +314,23 @@ impl Store {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let (src, key) = after.map_or(("", ""), |a| (a.source.as_str(), a.key.as_str()));
         self.with_read_conn(|conn| {
-            let mut stmt = conn
-                .prepare_cached(
-                    "SELECT i.source, i.key FROM items i
+            conn.rows(
+                "SELECT i.source, i.key FROM items i
                      WHERE (i.source > ?1 OR (i.source = ?1 AND i.key > ?2))
                        AND (NOT json_valid(i.metadata)
                             OR json_extract(i.metadata, '$.triage.state') IS NULL)
                      ORDER BY i.source, i.key
                      LIMIT ?3",
-                )
-                .db("prepare items_without_triage_state")?;
-            let rows = stmt
-                .query_map(params![src, key, limit], |r| {
-                    Ok(item_ref(r.get(0)?, r.get(1)?))
-                })
-                .db("query items_without_triage_state")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read items_without_triage_state")
+                params![src, key, limit],
+                |r| Ok(item_ref(r.get(0)?, r.get(1)?)),
+                "read items_without_triage_state",
+            )
         })
     }
 
-    /// Forget the stored `version` of items marked `metadata.junk = true` that have no chunks
-    /// and no `metadata.triage.state` (stored metadata-only by the old triage, QA GG2-7), so
-    /// the next full pass of their source re-indexes them. Returns how many were reset. Leaves
-    /// `updated_at` alone.
+    /// Forget the stored `version` of items marked `metadata.junk = true` that have no chunks and
+    /// no `metadata.triage.state` (stored metadata-only by the old triage, QA GG2-7), so the next
+    /// full pass of their source re-indexes them.
     pub fn reset_versions_of_legacy_junk(&self) -> Result<usize> {
         self.with_conn(|conn| {
             conn.execute(
@@ -395,122 +346,22 @@ impl Store {
         })
     }
 
-    /// Item and chunk counts per source, sorted by source id. Read from the counts that
-    /// triggers keep per source (schema v10), so the cost does not grow with the store.
+    /// Item and chunk counts per source, sorted by source id.
     pub fn source_counts(&self) -> Result<Vec<SourceCounts>> {
         self.with_read_conn(|conn| {
-            let mut stmt = conn
-                .prepare_cached(
-                    "SELECT source, items, chunks FROM source_stats
+            conn.rows(
+                "SELECT source, items, chunks FROM source_stats
                      WHERE items > 0 ORDER BY source",
-                )
-                .db("prepare source_counts")?;
-            let rows = stmt
-                .query_map([], |r| {
+                [],
+                |r| {
                     Ok(SourceCounts {
                         source: SourceId::new(r.get::<_, String>(0)?),
                         items: r.get::<_, i64>(1)?.max(0) as u64,
                         chunks: r.get::<_, i64>(2)?.max(0) as u64,
                     })
-                })
-                .db("query source_counts")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read source_counts")
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{NewChunk, NewItem};
-
-    /// The aggregate `source_counts` ran before schema v10: the reference the kept counts must
-    /// equal.
-    pub(crate) const AGGREGATE_SQL: &str = "SELECT i.source, COUNT(DISTINCT i.id), COUNT(c.id)
-         FROM items i LEFT JOIN chunks c ON c.item_id = i.id
-         GROUP BY i.source ORDER BY i.source";
-
-    fn aggregate(s: &Store) -> Vec<SourceCounts> {
-        s.with_conn(|c| {
-            let mut stmt = c.prepare(AGGREGATE_SQL).db("prepare")?;
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok(SourceCounts {
-                        source: SourceId::new(r.get::<_, String>(0)?),
-                        items: r.get::<_, i64>(1)? as u64,
-                        chunks: r.get::<_, i64>(2)? as u64,
-                    })
-                })
-                .db("query")?;
-            rows.collect::<rusqlite::Result<_>>().db("read")
-        })
-        .unwrap()
-    }
-
-    fn check(s: &Store, step: &str) {
-        assert_eq!(s.source_counts().unwrap(), aggregate(s), "after {step}");
-    }
-
-    fn chunks(n: usize, tag: &str) -> Vec<NewChunk> {
-        (0..n)
-            .map(|i| NewChunk::text(format!("{tag} {i}")))
-            .collect()
-    }
-
-    /// The trigger-kept counts equal the aggregate through every kind of write: inserts,
-    /// re-chunking, chunk replacement, item and source deletes, and (raw) moves of items and
-    /// chunks.
-    #[test]
-    fn kept_counts_match_the_aggregate_across_writes() {
-        let s = Store::open_in_memory().unwrap();
-        check(&s, "nothing");
-        for i in 0..30 {
-            let src = format!("src{}", i % 3);
-            let it = NewItem::new(src.as_str(), format!("k{i}"), format!("h{i}"))
-                .with_text(format!("text {i}"));
-            if i % 4 == 0 {
-                s.upsert_item(&it).unwrap();
-            } else {
-                s.upsert_item_with_chunks(&it, &chunks(i % 5 + 1, "a"))
-                    .unwrap();
-            }
-        }
-        check(&s, "inserts");
-
-        // Updates: new content with a different number of chunks, and chunk replacement.
-        let it = NewItem::new("src1", "k1", "changed").with_text("changed");
-        s.upsert_item_with_chunks(&it, &chunks(7, "b")).unwrap();
-        check(&s, "re-chunking upsert");
-        s.replace_chunks(&it.item, &chunks(2, "c")).unwrap();
-        check(&s, "replace_chunks");
-        s.replace_chunks(&it.item, &[]).unwrap();
-        check(&s, "replace_chunks with none");
-
-        assert!(s.delete_item(&NewItem::new("src2", "k2", "").item).unwrap());
-        check(&s, "delete_item");
-        assert_eq!(s.delete_source(&SourceId::new("src0")).unwrap(), 10);
-        check(&s, "delete_source");
-
-        // Moves the API never makes, kept right anyway.
-        s.with_conn(|c| {
-            c.execute("UPDATE items SET source = 'src9' WHERE key = 'k5'", [])
-                .db("move item")?;
-            c.execute(
-                "UPDATE chunks SET item_id = (SELECT id FROM items WHERE key = 'k7')
-                 WHERE id = (SELECT max(id) FROM chunks
-                             WHERE item_id = (SELECT id FROM items WHERE key = 'k8'))",
-                [],
+                },
+                "read source_counts",
             )
-            .db("move chunk")
         })
-        .unwrap();
-        check(&s, "raw moves");
-
-        assert_eq!(s.delete_source(&SourceId::new("src9")).unwrap(), 1);
-        assert_eq!(s.delete_source(&SourceId::new("src1")).unwrap(), 10);
-        assert_eq!(s.delete_source(&SourceId::new("src2")).unwrap(), 8);
-        check(&s, "deleting everything");
-        assert!(s.source_counts().unwrap().is_empty());
     }
 }

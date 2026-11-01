@@ -1,18 +1,4 @@
 //! Item text stored as a layout over the item's chunks, so chunked text is not stored twice.
-//!
-//! A layout is a compact recipe that rebuilds an item's text byte for byte: a sequence of
-//! literal runs (bytes not covered by any chunk, typically the whitespace between paragraphs)
-//! and references to byte ranges of the item's chunks (by `ord`). Chunks may overlap and may
-//! carry a heading-path prefix line before their body (see `nugget-extract`'s chunker); only
-//! the part of each chunk that matches the text and is not yet covered is referenced.
-//!
-//! Layouts live in the `item_text` table (schema v8) with `items.text` set to NULL. A layout
-//! is only written after decoding it back and comparing with the original text, so a stored
-//! layout always reproduces the exact text as long as the chunks it references are unchanged;
-//! `items.rs` re-plans the layout whenever an item's chunks are rewritten.
-//!
-//! Encoding (all integers unsigned LEB128): `FORMAT`, total text length, then ops:
-//! `OP_LITERAL len bytes` or `OP_CHUNK ord from to` (a byte range of chunk `ord`'s text).
 
 use nugget_core::{Error, Result};
 
@@ -20,9 +6,7 @@ const FORMAT: u8 = 1;
 const OP_LITERAL: u8 = 0;
 const OP_CHUNK: u8 = 1;
 
-/// How far past the expected position a chunk body is searched for. Bounds planning cost when
-/// a chunk does not occur in the text (e.g. normalised by the caller): such chunks are skipped
-/// and their bytes are stored as literals instead.
+/// How far past the expected position a chunk body is searched for.
 const SEARCH_SLACK: usize = 16 * 1024;
 
 /// A layout is only worth storing when it saves at least this many bytes over the plain text
@@ -135,9 +119,8 @@ pub(super) fn decode<'a>(layout: &[u8], chunk: impl Fn(u64) -> Option<&'a str>) 
     String::from_utf8(text).map_err(|_| bad("invalid UTF-8"))
 }
 
-/// Find where `chunk` (or its body after a first-line prefix) occurs in `text`, starting the
-/// search at `from` (the previous chunk's start: chunks come in text order but may overlap).
-/// Returns `(body offset in chunk, start in text)`.
+/// Find where `chunk` (or its body after a first-line prefix) occurs in `text`, starting the search
+/// at `from` (the previous chunk's start: chunks come in text order but may overlap).
 fn locate(text: &str, chunk: &str, from: usize, cursor: usize) -> Option<(usize, usize)> {
     let prefixed = chunk.find('\n').map(|i| i + 1);
     for body in [Some(0), prefixed].into_iter().flatten() {

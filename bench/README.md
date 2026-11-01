@@ -1965,7 +1965,6 @@ cargo build --release -p nugget-bench
 ./target/release/nugget-bench perf --backend real --scale standard     # real store, 10k items
 ./target/release/nugget-bench memory --backend real --scale standard   # real pipeline, 5k files
 cargo test --release -p nugget-bench --test scale -- --ignored --nocapture   # 100k items, ~10 min
-cargo test --release -p nugget-store --test vector_ann -- --ignored --nocapture  # ANN, 100k dense vectors
 ```
 
 **100k items** (`tests/scale.rs`: 100,000 items written directly with
