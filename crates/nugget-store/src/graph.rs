@@ -45,6 +45,10 @@ const ACTIVE: &str = "status IN ('active', 'user_asserted')";
 /// SQL condition for live claims ([`ClaimStatus::is_live`]): at most one per triple.
 const LIVE: &str = "status IN ('active', 'user_asserted', 'rejected')";
 
+/// Longest a cached [`GraphStore::counts`] is reused without a commit by this process (writes
+/// by another process, such as the CLI, show up within this).
+const GRAPH_COUNTS_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// The knowledge graph stored in a [`Store`]. Cheap to clone; clones share the store's
 /// connection. Obtain one with [`Store::graph`].
 ///
@@ -1642,7 +1646,30 @@ impl GraphStore for SqliteGraph {
     }
 
     fn counts(&self) -> Result<GraphCounts> {
+        // `count(*)` over every mention (a million rows at 250k items) decrypts its whole index
+        // on each call: ~100 ms, polled by every open knowledge page. The counts only change when
+        // something is written, so they are cached against the writer connection's
+        // `total_changes()` (rows inserted, updated or deleted through it, triggers included;
+        // every write in this process goes through it), read under the writer lock so no write
+        // lands meanwhile, and recomputed at least every `GRAPH_COUNTS_MAX_AGE` for writes made
+        // by another process.
+        let db = self.store.db().clone();
         self.read(|c| {
+            let changes = c.total_changes();
+            let mut cache = db
+                .graph_counts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((at, when, [entities, claims, mentions])) = *cache
+                && at == changes
+                && when.elapsed() < GRAPH_COUNTS_MAX_AGE
+            {
+                return Ok(GraphCounts {
+                    entities,
+                    claims,
+                    mentions,
+                });
+            }
             let (entities, claims, mentions): (i64, i64, i64) = c
                 .query_row(
                     &format!(
@@ -1655,10 +1682,12 @@ impl GraphStore for SqliteGraph {
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .db("count graph")?;
+            let counts = [entities as u64, claims as u64, mentions as u64];
+            *cache = Some((changes, std::time::Instant::now(), counts));
             Ok(GraphCounts {
-                entities: entities as u64,
-                claims: claims as u64,
-                mentions: mentions as u64,
+                entities: counts[0],
+                claims: counts[1],
+                mentions: counts[2],
             })
         })
     }

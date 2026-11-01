@@ -53,6 +53,9 @@ pub(crate) struct Db {
     /// Held while the approximate vector index is built or dropped (see `vector::build_ann`),
     /// so one runs at a time. Shared with the build thread, which holds `Db` only weakly.
     pub(crate) ann_build: Arc<Mutex<()>>,
+    /// The knowledge graph's counts, with the writer connection's `total_changes()` and the
+    /// time they were computed at (see `graph::counts`).
+    pub(crate) graph_counts: Mutex<Option<(u64, std::time::Instant, [u64; 3])>>,
 }
 
 impl Db {
@@ -193,6 +196,7 @@ impl Store {
             encrypted: file.is_some(),
             file: file.map(|(path, key)| (path.to_path_buf(), key.clone())),
             ann_build: Arc::default(),
+            graph_counts: Mutex::new(None),
         });
         let egress = EgressWriter::spawn(db.clone())?;
         let audit = crate::audit::AuditState::ephemeral()?;
