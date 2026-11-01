@@ -202,12 +202,32 @@ pub fn cloud_allowed(cfg: &LlmConfig, item: &Item) -> bool {
             .any(|s| s == item.item.source.as_str())
 }
 
-/// Whether the item is flagged sensitive (`metadata.sensitive == true`: the ingest PII scan
-/// or triage said so). No model extracts from it, local ones included; the deterministic
-/// extractors still run (QA GG5-1). Unknown sensitivity is not this: it only keeps the item away
-/// from cloud providers ([`is_sensitive`]).
+/// `metadata.triage.state` of an item, if ingest recorded one.
+fn triage_state(item: &Item) -> Option<&str> {
+    item.metadata
+        .get("triage")
+        .and_then(|t| t.get("state"))
+        .and_then(Value::as_str)
+}
+
+/// Whether the item is flagged sensitive by a rule, the PII scan or a triage verdict
+/// (`metadata.sensitive == true` and its triage state is not `pending` or `unknown`). No model
+/// extracts from it, local ones included; the deterministic extractors still run (QA GG5-1).
+///
+/// Ingest also writes `sensitive: true` for items whose sensitivity is not known yet (GG5-2:
+/// unknown counts as sensitive). Those are not this: an item whose triage is still
+/// [`triage_pending`] waits for the verdict; one triage cannot decide (`unknown`: triage off,
+/// no text) goes to local models only ([`is_sensitive`] keeps it from cloud ones), as before.
 pub fn flagged_sensitive(item: &Item) -> bool {
     item.metadata.get("sensitive") == Some(&Value::Bool(true))
+        && !matches!(triage_state(item), Some("pending" | "unknown"))
+}
+
+/// Whether the item counts as sensitive only until its background triage runs: the model
+/// step waits (and is retried) instead of extracting from an item that may turn out sensitive.
+pub fn triage_pending(item: &Item) -> bool {
+    item.metadata.get("sensitive") == Some(&Value::Bool(true))
+        && triage_state(item) == Some("pending")
 }
 
 /// Synthesis providers allowed for this item, best first (see the module docs). None for an

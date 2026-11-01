@@ -1032,6 +1032,10 @@ impl<'a> Session<'a> {
                 &crate::llm::json_caps(),
             )
             .is_empty();
+        if any && crate::llm::triage_pending(item) {
+            // Sensitive until triage says otherwise: ask again on a later run.
+            return LLM_PENDING + attempts;
+        }
         let providers = crate::llm::allowed_providers(&router, cfg, item);
         if providers.is_empty() {
             if any {
