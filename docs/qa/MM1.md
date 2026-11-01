@@ -175,8 +175,8 @@ All of them were reproduced by a separate verification agent from the written re
 
 None of these are product bugs. The originals were left alone; adapted copies or patches are in `qa/MM1/`.
 
-- **GG5 `nugget_qa.py` settle()** ignores background triage (HH2), so it snapshots before the model has extracted anything. The copy `qa/MM1/gg5/nugget_qa_mm1.py` also waits for `ingest.status.triage` to be idle with nothing pending, or off.
-- **GG5 vault-edits `run_main.py`** matches "works at" case-sensitively; 0b1feab5 renders single-valued facts as "Works at [[…]]". It also expects a page for Jonas Albers, which GG5-3's fix now hides. Copy: `qa/MM1/gg5/vault_edits_mm1.py`.
+- **GG5 `nugget_qa.py` settle()** ignores background triage (HH2), so it snapshots before the model has extracted anything. The copy `qa/MM1/gg5/nugget_qa_mm1.py` (built by `sh qa/MM1/gg5/make.sh` from the original and `nugget_qa_mm1.patch`) also waits for `ingest.status.triage` to be idle with nothing pending, or off.
+- **GG5 vault-edits `run_main.py`** matches "works at" case-sensitively; 0b1feab5 renders single-valued facts as "Works at [[…]]". It also expects a page for Jonas Albers, which GG5-3's fix now hides. Copy: `qa/MM1/gg5/vault_edits_mm1.py` (same `make.sh`, `vault_edits_mm1.patch`).
 - **GG5 truth-sensitive `s2_flagged_item_in_vault.py`** crashes because the flagged item's page no longer exists. That is the fix.
 - **GG3 kill-switch `s8_computer_use_linux` and ks-probe part B** relied on an unknown id asking for confirmation. Since GG3-13's fix it never asks. Adapted: `qa/MM1/gg3/killswitch-mm1/`.
 - **GG6 `s3-model-crash.mjs`** crashes at line 118 (`kill ESRCH`) because the daemon now restarts the hung server itself (`qa/MM1/gg6/s3-mm1.patch`).

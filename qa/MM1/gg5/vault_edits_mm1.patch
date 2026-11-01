@@ -1,0 +1,36 @@
+--- qa/GG5/scenarios/vault-edits/run_main.py	2026-11-01 10:20:05.106863161 +0000
++++ qa/MM1/gg5/vault_edits_mm1.py	2026-11-01 20:10:07.100116057 +0000
+@@ -15,7 +15,7 @@
+ import time
+ from pathlib import Path
+ 
+-ROOT = Path(__file__).resolve().parents[4]
++ROOT = Path(__file__).resolve().parents[3]  # MM1 copy of qa/GG5/scenarios/vault-edits/run_main.py
+ sys.path.insert(0, str(ROOT / "qa/GG5/harness"))
+ import nugget_qa as q  # noqa: E402
+ 
+@@ -78,7 +78,7 @@
+ 
+ def first_fact(text, pred_heading=None, contains=None):
+     for i, m in q.fact_lines(text):
+-        if contains and contains not in m["text"]:
++        if contains and contains.lower() not in m["text"].lower():  # MM1: 0b1feab5 renders "Works at [[…]]"
+             continue
+         return i, m
+     return None, None
+@@ -211,9 +211,12 @@
+     REC["S9a_rename"] = {"eid": th["id"], "page_text": ["# Theo"]}
+     jo = entity_by_name("Jonas Albers")
+     jop = page_of(jo["id"])
+-    d.note("edit", page=str(jop), what="Jonas: S9b delete page file")
+-    jop.unlink()
+-    REC["S9b_delete_page"] = {"eid": jo["id"], "page_text": ["# Jonas"], "files": [str(jop)]}
++    if jop is None:  # MM1: since GG5-3's fix (3fc731f0) Jonas (only in the sensitive counselling item) has no page
++        d.note("edit.skipped", what="Jonas: S9b, no vault page (hidden as sensitive)")
++    else:
++        d.note("edit", page=str(jop), what="Jonas: S9b delete page file")
++        jop.unlink()
++        REC["S9b_delete_page"] = {"eid": jo["id"], "page_text": ["# Jonas"], "files": [str(jop)]}
+ 
+     # ---------------- S6 two edits on one page in quick succession, JSON alias spacing (Ife)
+     ife = entity_by_name("Ife Okafor")

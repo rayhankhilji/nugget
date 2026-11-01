@@ -1,0 +1,26 @@
+--- qa/GG5/harness/nugget_qa.py	2026-11-01 10:20:04.935066658 +0000
++++ qa/MM1/gg5/nugget_qa_mm1.py	2026-11-01 20:00:35.407760848 +0000
+@@ -30,7 +30,7 @@
+ import time
+ from pathlib import Path
+ 
+-HERE = Path(__file__).resolve().parent
++HERE = Path(__file__).resolve().parents[2] / "GG5" / "harness"  # MM1: corpus etc. from qa/GG5
+ CORPUS = HERE.parent / "corpus"
+ 
+ 
+@@ -233,8 +233,12 @@
+             ing = self.call("ingest.status")
+             ks = self.call("knowledge.status")
+             busy = any(s.get("state") == "syncing" for s in self.call("sources.list"))
+-            sig = (ing.get("queue_depth"), ks.get("pending_items"), ks.get("entities"), ks.get("claims"), ks.get("last_run"), ks["vault"].get("last_render"), busy)
+-            idle = (ing.get("queue_depth") or 0) == 0 and (ks.get("pending_items") or 0) == 0 and not busy and ks.get("last_run")
++            tri = ing.get("triage") or {}
++            # MM1: background triage (HH2, 08a0cce) runs before LLM extraction of an item; GG5's
++            # harness predates it and settled while items still waited for triage.
++            tri_busy = bool(tri) and tri.get("state") != "off" and (tri.get("state") != "idle" or (tri.get("pending") or 0) > 0)
++            sig = (tri.get("pending"), tri.get("done"), ing.get("queue_depth"), ks.get("pending_items"), ks.get("entities"), ks.get("claims"), ks.get("last_run"), ks["vault"].get("last_render"), busy)
++            idle = (ing.get("queue_depth") or 0) == 0 and (ks.get("pending_items") or 0) == 0 and not busy and not tri_busy and ks.get("last_run")
+             if idle and sig == last_sig:
+                 stable_since = stable_since or time.time()
+                 if time.time() - stable_since >= quiet_s:
