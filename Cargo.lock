@@ -4171,6 +4171,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-winrt-notification",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",

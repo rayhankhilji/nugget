@@ -723,6 +723,11 @@
     "searchui.renameSaved",
     "searchui.renameTitle",
     "searchui.renamed",
-    "searchui.nameTaken"
+    "searchui.nameTaken",
+    "onboarding.welcome.leaves4",
+    "updates.ask.title",
+    "updates.ask.body",
+    "updates.ask.stable",
+    "updates.ask.chosen"
   ]
 }

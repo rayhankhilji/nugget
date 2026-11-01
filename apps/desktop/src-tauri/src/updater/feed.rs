@@ -15,6 +15,9 @@
 //!    only if it read the very feed that was verified: the same version and, when it offers an
 //!    update, the same JSON document. A feed that changed between the two requests (a move by
 //!    the release workflow, or tampering) fails the check, and the next check tries again.
+//!
+//! Every request made here is reported as an [`Exchange`] (host and byte counts, including any
+//! host a redirect led to), so the caller can put it in the egress ledger.
 
 use std::time::Duration;
 
@@ -50,6 +53,34 @@ pub struct VerifiedFeed {
     pub json: Value,
     /// `version` from the feed, without a leading `v`.
     pub version: String,
+    /// The requests that fetched the feed itself (not its `.sig`), redirects included: the
+    /// plugin's own check repeats them. Empty when the feed didn't come from [`fetch_verified`].
+    pub fetched_by: Vec<Exchange>,
+}
+
+/// One HTTP request, for the egress ledger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exchange {
+    pub host: String,
+    /// The request line and typical headers: an estimate, as for model downloads.
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+}
+
+impl Exchange {
+    /// A request to `url` about to be sent, nothing received yet.
+    pub fn request(url: &reqwest::Url) -> Self {
+        Self {
+            host: host_of(url),
+            bytes_sent: url.as_str().len() as u64 + 160,
+            bytes_received: 0,
+        }
+    }
+}
+
+/// The host a URL names (no port: the ledger records hosts), or `unknown`.
+pub fn host_of(url: &reqwest::Url) -> String {
+    url.host_str().unwrap_or("unknown").to_owned()
 }
 
 /// Where a feed's detached signature lives.
@@ -92,7 +123,11 @@ pub fn verify(feed: &[u8], sig_file: &[u8], pubkey_b64: &str) -> Result<Verified
         .ok_or_else(|| FeedError::Manifest("no version".to_owned()))?
         .trim_start_matches('v')
         .to_owned();
-    Ok(VerifiedFeed { json, version })
+    Ok(VerifiedFeed {
+        json,
+        version,
+        fetched_by: Vec::new(),
+    })
 }
 
 /// Did the plugin act on the feed that was verified? `seen_version` is the version the plugin
@@ -112,16 +147,29 @@ pub fn consistent(
     }
 }
 
-/// GET `url` into memory, refusing a non-success status or a body over `limit` bytes.
-async fn get(client: &reqwest::Client, url: &str, limit: usize) -> Result<Vec<u8>, FeedError> {
+/// GET `url` into memory, refusing a non-success status or a body over `limit` bytes. The
+/// request is added to `log` before it is sent, and a host a redirect led to gets its own entry.
+async fn get(
+    client: &reqwest::Client,
+    url: &str,
+    limit: usize,
+    log: &mut Vec<Exchange>,
+) -> Result<Vec<u8>, FeedError> {
     let fetch = |e: reqwest::Error| FeedError::Fetch(e.without_url().to_string());
-    let mut resp = client.get(url).send().await.map_err(fetch)?;
+    let parsed = reqwest::Url::parse(url).map_err(|e| FeedError::Fetch(format!("{url}: {e}")))?;
+    log.push(Exchange::request(&parsed));
+    let mut resp = client.get(parsed.clone()).send().await.map_err(fetch)?;
+    if host_of(resp.url()) != host_of(&parsed) {
+        log.push(Exchange::request(resp.url()));
+    }
+    let entry = log.len() - 1;
     let status = resp.status();
     if !status.is_success() {
         return Err(FeedError::Fetch(format!("{url}: HTTP {status}")));
     }
     let mut body = Vec::new();
     while let Some(chunk) = resp.chunk().await.map_err(fetch)? {
+        log[entry].bytes_received += chunk.len() as u64;
         if body.len() + chunk.len() > limit {
             return Err(FeedError::Fetch(format!(
                 "{url}: larger than {limit} bytes"
@@ -132,11 +180,13 @@ async fn get(client: &reqwest::Client, url: &str, limit: usize) -> Result<Vec<u8
     Ok(body)
 }
 
-/// Download the feed at `url` and its `.sig`, and verify it (see [`verify`]).
+/// Download the feed at `url` and its `.sig`, and verify it (see [`verify`]). Every request
+/// made, failed ones included, is added to `log`.
 pub async fn fetch_verified(
     url: &str,
     pubkey_b64: &str,
     timeout: Duration,
+    log: &mut Vec<Exchange>,
 ) -> Result<VerifiedFeed, FeedError> {
     // Same TLS setup as the updater plugin: rustls with the `ring` provider, installed as the
     // process default if nothing else has been (the plugin does exactly this before its request).
@@ -148,9 +198,14 @@ pub async fn fetch_verified(
         .timeout(timeout)
         .build()
         .map_err(|e| FeedError::Fetch(e.to_string()))?;
-    let feed = get(&client, url, MAX_FEED_BYTES).await?;
-    let sig = get(&client, &sig_url(url), MAX_SIG_BYTES).await?;
-    verify(&feed, &sig, pubkey_b64)
+    let start = log.len();
+    let feed = get(&client, url, MAX_FEED_BYTES, log).await?;
+    let fetched_by = log[start..].to_vec();
+    let sig = get(&client, &sig_url(url), MAX_SIG_BYTES, log).await?;
+    Ok(VerifiedFeed {
+        fetched_by,
+        ..verify(&feed, &sig, pubkey_b64)?
+    })
 }
 
 #[cfg(test)]
@@ -302,5 +357,85 @@ mod tests {
             sig_url("https://example.invalid/feed/stable.json"),
             "https://example.invalid/feed/stable.json.sig"
         );
+    }
+
+    /// A loopback HTTP server: `/redirect` sends to `/body` on `localhost` (another host name for
+    /// the ledger), `/body` answers five bytes, anything else 404. Returns its port.
+    async fn serve() -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 4096];
+                    let mut got = 0;
+                    while !buf[..got].windows(4).any(|w| w == b"\r\n\r\n") {
+                        match sock.read(&mut buf[got..]).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => got += n,
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&buf[..got]).into_owned();
+                    let reply = if head.starts_with("GET /redirect ") {
+                        format!(
+                            "HTTP/1.1 302 Found\r\nLocation: http://localhost:{port}/body\r\nContent-Length: 0\r\n\r\n"
+                        )
+                    } else if head.starts_with("GET /body ") {
+                        "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello".to_owned()
+                    } else {
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_owned()
+                    };
+                    let _ = sock.write_all(reply.as_bytes()).await;
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        port
+    }
+
+    fn client() -> reqwest::Client {
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        }
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn every_request_is_logged_with_its_hosts_and_bytes() {
+        let port = serve().await;
+        let client = client();
+        let mut log = Vec::new();
+
+        let url = format!("http://127.0.0.1:{port}/body");
+        assert_eq!(get(&client, &url, 100, &mut log).await.unwrap(), b"hello");
+        assert_eq!(log.len(), 1);
+        assert_eq!(
+            (log[0].host.as_str(), log[0].bytes_received),
+            ("127.0.0.1", 5)
+        );
+        assert_eq!(log[0].bytes_sent, url.len() as u64 + 160);
+
+        // A redirect to another host: both are in the log, the body counted where it came from.
+        log.clear();
+        let url = format!("http://127.0.0.1:{port}/redirect");
+        assert_eq!(get(&client, &url, 100, &mut log).await.unwrap(), b"hello");
+        let hosts: Vec<_> = log
+            .iter()
+            .map(|e| (e.host.as_str(), e.bytes_received))
+            .collect();
+        assert_eq!(hosts, [("127.0.0.1", 0), ("localhost", 5)]);
+
+        // Failed requests went out too.
+        log.clear();
+        let url = format!("http://127.0.0.1:{port}/missing");
+        assert!(matches!(
+            get(&client, &url, 100, &mut log).await,
+            Err(FeedError::Fetch(_))
+        ));
+        assert_eq!(log.len(), 1);
+        let url = format!("http://127.0.0.1:{port}/body");
+        assert!(get(&client, &url, 2, &mut log).await.is_err());
+        assert_eq!(log.len(), 2);
     }
 }

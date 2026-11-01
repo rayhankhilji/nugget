@@ -24,14 +24,14 @@ OSes come out of the release workflow's dry run, and you can build from source.
 | Search, Ask and Chat with citations | Runs |
 | Knowledge graph and Markdown vault | Runs |
 | MCP server (stdio and loopback HTTP, scoped per-client tokens) | Runs |
-| Double Tap: drafting in any text field | Runs; tested on Linux, macOS and Windows desktop runs in progress |
-| Agent, computer use and the safety policy engine | Runs; computer use tested on Linux (AT-SPI), macOS and Windows runs in progress |
+| Double Tap: drafting in any text field | Runs; tested on Linux, macOS and Windows (GitHub runners); Wayland global shortcut not yet |
+| Agent, computer use and the safety policy engine | Runs; computer use tested on Linux (AT-SPI), macOS (AX) and Windows (UI Automation) runners |
 | Proactive cards and the morning brief (Today) | Runs |
 | WASM plugins; Microsoft 365, Slack, Notion, GitHub and Linear connectors | Runs; connectors not yet tried against live accounts |
-| Installers, signed releases, auto-update | Unsigned installers build for all three OSes; signing needs release keys |
+| Installers, signed releases, auto-update | Unsigned installers build for all three OSes; the full release (signed update, install, update) is rehearsed with throwaway keys; real signing needs release keys |
 
-Benchmark numbers so far come from scripted or fake models (labelled below); runs with real local
-models are in progress. The book's [What works today](docs/book/src/status.md) page has the details.
+Benchmark numbers come from scripted or fake models and from real local models on CI runners; each
+result says which. The book's [What works today](docs/book/src/status.md) page has the details.
 
 ## Why Nugget
 
