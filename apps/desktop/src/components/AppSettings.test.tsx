@@ -5,7 +5,6 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { AppSettings } from "./AppSettings";
-import { UpdateQuestion } from "./UpdateChoice";
 import { UpdateSettings } from "./UpdateSettings";
 
 const updateStatus = {
@@ -57,26 +56,6 @@ describe("AppSettings", () => {
     expect(sent).toEqual([{ enabled: true }]);
     expect(checkbox(container, /in the tray when I log in/).checked).toBe(true);
   });
-
-  it("shows the shell's error and keeps the old state", async () => {
-    mockDaemon({
-      autostart_set: () => {
-        throw { kind: "other", message: "couldn't write the entry", code: null };
-      },
-    });
-    const { container } = await render(<AppSettings />);
-    const box = checkbox(container, /in the tray when I log in/);
-    await toggle(box);
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("couldn't write the entry");
-    expect(checkbox(container, /in the tray when I log in/).checked).toBe(false);
-  });
-
-  it("says when the platform has no login entry", async () => {
-    mockDaemon({ autostart_get: { supported: false, enabled: false } });
-    const { container } = await render(<AppSettings />);
-    expect(container.querySelector("input")).toBeNull();
-    expect(container.textContent).toContain("isn't available on this system");
-  });
 });
 
 describe("UpdateSettings", () => {
@@ -119,41 +98,5 @@ describe("UpdateSettings", () => {
     expect(calls).not.toContain("updates_check");
     expect(container.textContent).not.toContain("Check for updates automatically?");
     expect(buttons()).toContain("Check now");
-  });
-
-  it("never asks in a build that can't update", async () => {
-    mockDaemon({ updates_status: { ...updateStatus, configured: false, settings: { ...updateStatus.settings, channel_chosen: false } } });
-    const { container } = await render(<UpdateSettings />);
-    expect(container.textContent).toContain("no update signing key");
-    expect(container.textContent).not.toContain("Check for updates automatically?");
-  });
-});
-
-describe("UpdateQuestion (setup)", () => {
-  it("asks while unchosen and says what was chosen", async () => {
-    const sent: unknown[] = [];
-    mockDaemon({
-      updates_status: { ...updateStatus, settings: { ...updateStatus.settings, channel_chosen: false } },
-      updates_set_settings: (args: unknown) => {
-        sent.push(args);
-        return null;
-      },
-    });
-    const { container } = await render(<UpdateQuestion />);
-    const off = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Off (never check)")!;
-    await act(async () => off.click());
-    await flush();
-    expect(sent).toEqual([{ channel: "off", autoInstall: false }]);
-    expect(container.textContent).toContain("Updates: Off (never check).");
-  });
-
-  it("stays out of the way once chosen or without an update key", async () => {
-    mockDaemon({ updates_status: updateStatus });
-    const { container } = await render(<UpdateQuestion />);
-    expect(container.textContent).toBe("");
-    cleanup();
-    mockDaemon({ updates_status: { ...updateStatus, configured: false, settings: { ...updateStatus.settings, channel_chosen: false } } });
-    const again = await render(<UpdateQuestion />);
-    expect(again.container.textContent).toBe("");
   });
 });

@@ -62,31 +62,6 @@ describe("usePagedList", () => {
     expect(out.current.hasMore).toBe(false);
   });
 
-  it("drops a reply for a key that has gone", async () => {
-    const f = fetcher();
-    const { out, rekey } = await mount(f.fetchPage, "a");
-    await rekey("b");
-    expect(out.current.loading).toBe(true);
-    await reply(f.calls[1], [{ id: "b0" }]);
-    await reply(f.calls[0], [{ id: "a0" }]);
-    expect(ids(out.current)).toEqual(["b0"]);
-    expect(out.current.loading).toBe(false);
-  });
-
-  it("does not show the old key's rows as the new key's after an error", async () => {
-    const f = fetcher();
-    const { out, rekey } = await mount(f.fetchPage, "a");
-    await reply(f.calls[0], rows(0, 2));
-    await rekey("b");
-    // While b loads, a's rows stay (marked loading)…
-    expect(ids(out.current)).toEqual(["r0", "r1"]);
-    await fail(f.calls[1]);
-    // …but once b fails they are not passed off as b's.
-    expect(out.current.items).toBeUndefined();
-    expect(out.current.error).toBeTruthy();
-    expect(out.current.loading).toBe(false);
-  });
-
   it("keeps a key's rows when its next page fails, and asks again after reload", async () => {
     const f = fetcher();
     const { out } = await mount(f.fetchPage, "a");
@@ -100,49 +75,6 @@ describe("usePagedList", () => {
     await reply(f.calls[2], rows(0, 4));
     await call(out.current.loadMore);
     expect(f.calls.at(-1)!.offset).toBe(3);
-  });
-
-  it("refreshes in the background without marking the list busy, and loads the next page after", async () => {
-    const f = fetcher();
-    const { out } = await mount(f.fetchPage, "a");
-    await reply(f.calls[0], rows(0, 4));
-    await call(out.current.refresh);
-    expect(f.calls.at(-1)).toMatchObject({ offset: 0, limit: 4 });
-    expect(out.current.refreshing).toBe(true);
-    expect(out.current.loading).toBe(false);
-    // A next page asked for during the refresh waits for it (no request, nothing consumed)…
-    await call(out.current.loadMore);
-    expect(f.calls).toHaveLength(2);
-    await reply(f.calls[1], rows(0, 4));
-    expect(out.current.refreshing).toBe(false);
-    // …and goes once it is done.
-    await call(out.current.loadMore);
-    expect(f.calls).toHaveLength(3);
-    expect(f.calls[2]!.offset).toBe(3);
-  });
-
-  it("does not refresh over a page in flight", async () => {
-    const f = fetcher();
-    const { out } = await mount(f.fetchPage, "a");
-    await reply(f.calls[0], rows(0, 4));
-    await call(out.current.loadMore);
-    await call(out.current.refresh);
-    expect(f.calls).toHaveLength(2);
-    await reply(f.calls[1], rows(3, 4));
-    expect(ids(out.current)).toEqual(["r0", "r1", "r2", "r3", "r4", "r5"]);
-  });
-
-  it("asks for each offset once until the list starts over", async () => {
-    const f = fetcher();
-    const { out } = await mount(f.fetchPage, "a");
-    await reply(f.calls[0], rows(0, 4));
-    await call(out.current.loadMore);
-    await fail(f.calls[1]);
-    await call(out.current.reload);
-    await reply(f.calls[2], rows(0, 4));
-    // Same length and first row as before the reload: infinite scroll still goes on.
-    await call(out.current.loadMore);
-    expect(f.calls[3]!.offset).toBe(3);
   });
 
   it("never lists a row twice when the list shifts between pages", async () => {

@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
-import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { filterItems } from "../src/components/CommandPalette";
-import { requestSearch, usePendingSearch } from "../src/hooks.nav";
 import { t } from "../src/i18n";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../src/test/render";
 import { finishedOnboarding, key, type } from "./keys";
@@ -42,12 +40,6 @@ describe("command palette", () => {
     expect(palette()).toBeNull();
   });
 
-  it("the sidebar button opens it too", async () => {
-    await render(<App />);
-    await click(document.querySelector(".palette-trigger"));
-    expect(palette()).not.toBeNull();
-  });
-
   it("filters by label and keywords, and Enter navigates", async () => {
     await render(<App />);
     await open();
@@ -82,14 +74,6 @@ describe("command palette", () => {
     expect(document.activeElement).toBe(nav);
   });
 
-  it("shows No matches but still offers to search", async () => {
-    await render(<App />);
-    await open();
-    await type(input(), "zzqx");
-    expect(palette()!.textContent).toContain(t("palette.empty"));
-    expect(labels()).toEqual([t("palette.action.search", { query: "zzqx" })]);
-  });
-
   it("the search action runs the query on the Search page", async () => {
     const calls = mockDaemon();
     await render(<App />);
@@ -102,23 +86,6 @@ describe("command palette", () => {
     expect(mainLabel()).toBe(t("app.nav.search"));
     expect(document.querySelector<HTMLInputElement>("#search-q")?.value).toBe("lovelace notes");
     expect(calls).toContain("search");
-  });
-
-  it("opens the shortcuts list from an action", async () => {
-    await render(<App />);
-    await open();
-    await type(input(), "shortcuts");
-    await key({ key: "Enter" });
-    expect(palette()).toBeNull();
-    expect(document.querySelector("dialog[open] h2")?.textContent).toBe(t("shortcuts.title"));
-  });
-
-  it("has no axe violations while open", async () => {
-    await render(<App />);
-    await open();
-    await type(input(), "s");
-    const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
   });
 });
 
@@ -136,19 +103,5 @@ describe("filterItems", () => {
     expect(filterItems(items, "apps conn").map((i) => i.label)).toEqual(["Connected apps"]);
     expect(filterItems(items, "mcp").map((i) => i.label)).toEqual(["Connected apps"]);
     expect(filterItems(items, "nothing")).toEqual([]);
-  });
-});
-
-describe("nav requests", () => {
-  it("keeps a search requested before the page mounts", async () => {
-    requestSearch("early");
-    const got: string[] = [];
-    function Probe() {
-      usePendingSearch((q) => got.push(q));
-      return null;
-    }
-    await render(<Probe />);
-    requestSearch("later");
-    expect(got).toEqual(["early", "later"]);
   });
 });

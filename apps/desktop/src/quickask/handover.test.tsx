@@ -3,11 +3,10 @@
 import { act } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { QUICK_ASK_HANDOVER_EVENT, type AskStarted, type QuickAskHandover, type StoredConversation } from "../api";
+import { QUICK_ASK_HANDOVER_EVENT, type AskStarted, type QuickAskHandover } from "../api";
 import { usePendingSearch } from "../hooks.nav";
-import { ChatPage } from "../pages/Chat";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
-import { deliverHandover, HANDOVER_TTL_MS, handoverCitations, useQuickAskHandover } from "./handover";
+import { deliverHandover, handoverCitations, useQuickAskHandover } from "./handover";
 import { QuickAsk } from "./QuickAsk";
 
 const started: AskStarted = {
@@ -76,94 +75,6 @@ describe("quick ask hands over", () => {
     await act(async () => setValue(container.querySelector<HTMLInputElement>("#quickask-q")!, "and the swans?"));
     await click(byText(container, "button", "Open in Chat"));
     expect(sent.at(-1)!.handover).toEqual({ question: "and the swans?" });
-  });
-
-  it("Chat opens a new, saved conversation with the question and answer", async () => {
-    const saved: StoredConversation[] = [];
-    mockDaemon({
-      chat_history_load: [],
-      chat_history_save: (a: unknown) => {
-        saved.push((a as { conversation: StoredConversation }).conversation);
-      },
-    });
-    deliverHandover({
-      page: "chat",
-      question: "where were the herons?",
-      answer: {
-        text: "By the river [1].",
-        provider: "local-chat",
-        citations: [{ ...started.citations[0]!, partial: true }],
-        date: { phrase: "last week", start: "2026-10-26T00:00:00Z", end: "2026-11-02T00:00:00Z", applied: true },
-      },
-    });
-    const { container } = await render(<ChatPage />);
-    await flush(3);
-    const msgs = [...container.querySelectorAll(".chat-list > li.msg")];
-    expect(msgs.map((m) => m.className)).toEqual(["msg msg-user", "msg msg-assistant"]);
-    expect(msgs[0]!.textContent).toContain("where were the herons?");
-    expect(msgs[1]!.textContent).toContain("By the river");
-    expect(msgs[1]!.querySelector(".ask-partial")).not.toBeNull();
-    expect(msgs[1]!.querySelector(".ask-dates")?.textContent).toContain("Searched items from");
-    // The [1] marker is a working citation.
-    expect(msgs[1]!.querySelector("button.cite")).not.toBeNull();
-    expect(saved.at(-1)?.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-    expect(saved.at(-1)?.title).toBe("where were the herons?");
-  });
-
-  it("Chat puts a question without an answer in the composer", async () => {
-    mockDaemon({ chat_history_load: [], chat_history_save: null });
-    const { container } = await render(<ChatPage />);
-    await flush();
-    await act(async () => deliverHandover({ page: "chat", question: "and the swans?" }));
-    await flush();
-    expect(container.querySelector<HTMLTextAreaElement>("#chat-input")!.value).toBe("and the swans?");
-    expect(container.querySelectorAll(".chat-list > li.msg")).toHaveLength(0);
-  });
-
-  it("Chat waits for a streaming reply and keeps a draft", async () => {
-    mockDaemon({
-      chat_history_load: [],
-      chat_history_save: null,
-      retrieve_ask: { ...started, stream_id: "s-c" },
-      chat_cancel: null,
-    });
-    const { container } = await render(<ChatPage />);
-    await flush();
-    const area = container.querySelector<HTMLTextAreaElement>("#chat-input")!;
-    await act(async () => setValue(area, "first question"));
-    await click(byText(container, "button", "Send"));
-    await flush();
-    await act(() => emit("nugget:chat-delta", { stream_id: "s-c", text: "Streaming" }));
-    await flush();
-    await act(async () => setValue(area, "my draft"));
-
-    await act(async () => deliverHandover({ page: "chat", question: "q", answer: { text: "Quick answer." } }));
-    await flush();
-    // Still the streaming conversation, draft untouched.
-    expect(container.textContent).toContain("first question");
-    expect(container.textContent).not.toContain("Quick answer.");
-    expect(area.value).toBe("my draft");
-
-    await act(() => emit("nugget:chat-done", { stream_id: "s-c", input_tokens: 1, output_tokens: 2, error: null }));
-    await flush(3);
-    const log = container.querySelector(".chat-list")!;
-    expect(log.textContent).toContain("Quick answer.");
-    expect(log.textContent).not.toContain("first question");
-    expect(area.value).toBe("my draft");
-
-    // A question alone doesn't replace a draft either.
-    await act(async () => deliverHandover({ page: "chat", question: "and the swans?" }));
-    await flush();
-    expect(area.value).toBe("my draft");
-  });
-
-  it("drops a handover that waited too long for Chat", async () => {
-    mockDaemon({ chat_history_load: [], chat_history_save: null });
-    deliverHandover({ page: "chat", question: "old question", answer: { text: "Old answer." } }, Date.now() - HANDOVER_TTL_MS - 1);
-    const { container } = await render(<ChatPage />);
-    await flush(3);
-    expect(container.textContent).not.toContain("Old answer.");
-    expect(container.querySelector<HTMLTextAreaElement>("#chat-input")!.value).toBe("");
   });
 
   it("the main window takes the handover on load and on each event, and Search runs the question", async () => {

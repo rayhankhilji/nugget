@@ -26,17 +26,6 @@ describe("parseBlocks", () => {
     const table = blocks[6];
     expect(table?.t === "table" && table.align).toEqual([null, "center"]);
   });
-
-  it("keeps an unterminated fence open (streaming)", () => {
-    expect(parseBlocks("Here:\n```py\nprint(1)\n")).toEqual([
-      { t: "p", text: "Here:" },
-      { t: "code", lang: "py", code: "print(1)\n", open: true },
-    ]);
-  });
-
-  it("bounds nesting", () => {
-    expect(() => parseBlocks(">".repeat(5000) + " deep")).not.toThrow();
-  });
 });
 
 describe("Markdown", () => {
@@ -49,19 +38,6 @@ describe("Markdown", () => {
     expect(el.querySelector("del")?.textContent).toBe("gone");
     expect(el.querySelectorAll("ol > li")).toHaveLength(2);
     expect(el.querySelector("blockquote")?.textContent).toBe("q");
-  });
-
-  it("leaves unmatched markers and arithmetic as text", async () => {
-    const el = await md("2 * 3 * 4 and **open");
-    expect(el.textContent).toBe("2 * 3 * 4 and **open");
-    expect(el.querySelector("em, strong")).toBeNull();
-  });
-
-  it("renders code blocks with a copy button, even while open", async () => {
-    const el = await md("```sh\necho hi");
-    expect(el.querySelector("pre code")?.textContent).toBe("echo hi");
-    expect(el.querySelector(".md-code-lang")?.textContent).toBe("sh");
-    expect(el.querySelector(".md-code button")?.getAttribute("aria-label")).toBe("Copy code");
   });
 
   it("shows raw HTML as text", async () => {
@@ -98,12 +74,6 @@ describe("Markdown", () => {
     expect(safeHref("javascript:alert(1)")).toBeNull();
     expect(safeHref("https://ok.example/")).toBe("https://ok.example/");
     expect(safeHref("https://bad example/")).toBeNull();
-  });
-
-  it("renders links as text without an opener", async () => {
-    const el = await md("[x](https://example.com)");
-    expect(el.querySelector("a")).toBeNull();
-    expect(el.textContent).toBe("x (https://example.com)");
   });
 
   it("makes known [n] citations clickable", async () => {

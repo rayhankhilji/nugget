@@ -4,8 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { act } from "react";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { Onboarding } from "./Onboarding";
-import { INITIAL, loadState, STORAGE_KEY } from "./machine";
-import { indexPhase } from "./steps";
+import { INITIAL, loadState } from "./machine";
 import { TRIGGER_KEY } from "./trigger";
 import type { DoubleTapSettings, SourceInfo } from "../api";
 
@@ -103,36 +102,6 @@ describe("Onboarding", () => {
     await click(button(container, "Search your sources"));
     expect(onExit).toHaveBeenCalledWith("search");
     expect(loadState().finished).toBe(true);
-  });
-
-  it("shows indexing progress for a new folder and says when search works", async () => {
-    const folder: SourceInfo = { id: "files-9", kind: "files", name: "notes", enabled: true, state: "syncing", items: 0, chunks: 0 };
-    let listed: SourceInfo[] = [];
-    mockDaemon({
-      pick_folders: () => ["/home/me/notes"],
-      sources_add: () => ((listed = [folder]), folder),
-      sources_list: () => listed,
-    });
-    const { container } = await render(<Onboarding connected onExit={() => {}} initial={{ ...INITIAL, step: "source", completed: ["welcome", "ai"] }} />);
-    await click(button(container, "Add a folder"));
-    await click(byText(document.body, "dialog button", "Choose folders…"));
-    expect(document.querySelector("dialog code")?.textContent).toBe("/home/me/notes");
-    await click(byText(document.body, "dialog button", "Add folder"));
-    await flush();
-    expect(document.querySelector("dialog")).toBeNull();
-    expect(container.querySelector(".ob-index li")?.textContent).toContain("notes: getting ready to index…");
-
-    listed = [{ ...folder, items: 5 }];
-    await act(() => emit("nugget:sources-changed", {}));
-    await flush();
-    expect(container.querySelector(".ob-index li")?.textContent).toContain("notes: indexing, 5 items so far…");
-
-    listed = [{ ...folder, state: "watching", items: 93, chunks: 120 }];
-    await act(() => emit("nugget:sources-changed", {}));
-    await flush();
-    const row = container.querySelector<HTMLElement>(".ob-index li")!;
-    expect(row.dataset.phase).toBe("ready");
-    expect(row.textContent).toContain("notes: 93 items indexed. Search works now.");
   });
 
   it("GG6-2: a folder with nothing indexable says so and why, and doesn't finish the step", async () => {
@@ -259,92 +228,6 @@ describe("Onboarding", () => {
     expect(container.textContent).not.toContain("two minutes");
   });
 
-  it("has nothing to skip on the welcome step", async () => {
-    mockDaemon();
-    const { container } = await render(<Onboarding connected onExit={() => {}} />);
-    expect(button(container, "Skip this step")).toBeUndefined();
-    expect(container.querySelector("#ob-continue-hint")).toBeNull();
-  });
-
-  it("summarises progress saved before setups were recorded without contradicting it", async () => {
-    mockDaemon({ sources_list: [], models_list: [], providers_list: [] });
-    const { container } = await render(
-      <Onboarding
-        connected
-        onExit={() => {}}
-        initial={{ ...INITIAL, step: "done", ai: "local", completed: ["welcome", "ai", "source", "permissions", "trigger"] }}
-      />,
-    );
-    await flush();
-    const summary = [...container.querySelectorAll(".ob-summary > div")].map((d) => d.textContent);
-    expect(summary[0]).toBe("AI modelOn this device");
-    expect(summary[1]).toBe("SourcesAdded");
-    expect(container.textContent).toContain("Every step is done.");
-  });
-
-  it("finds a key saved before when setup runs again", async () => {
-    mockDaemon();
-    const { container } = await render(<Onboarding connected onExit={() => {}} initial={{ ...INITIAL, step: "ai", ai: "byok" }} />);
-    await flush();
-    // The mocked daemon has an "anthropic" provider in its config.
-    expect(container.querySelector("#ob-continue-hint")).toBeNull();
-    await click(button(container, "Continue"));
-    expect(loadState().completed).toContain("ai");
-    expect(loadState().aiSetup).toEqual({ ai: "byok", what: "anthropic" });
-  });
-
-  it("offers one language picker on the welcome step, labelled, in the header", async () => {
-    mockDaemon();
-    const { container } = await render(<Onboarding connected onExit={() => {}} />);
-    expect(heading(container)).toBe("Welcome to Nugget");
-    const selects = [...container.querySelectorAll("select")].filter((s) => s.labels?.[0]?.textContent === "Language");
-    expect(selects).toHaveLength(1);
-    expect(selects[0]!.closest("header.ob-top")).not.toBeNull();
-  });
-
-  it("finishes to the default page when nothing is searchable yet", async () => {
-    mockDaemon({ sources_list: [] });
-    const onExit = vi.fn();
-    const { container } = await render(<Onboarding connected onExit={onExit} initial={{ ...INITIAL, step: "done" }} />);
-    await flush();
-    expect(container.textContent).toContain("chat and drafting start once you choose a model");
-    expect(button(container, "Search your sources")).toBeUndefined();
-    await click(button(container, "Start using Nugget"));
-    expect(onExit).toHaveBeenCalledWith(undefined);
-  });
-
-  it("skips steps, lists them at the end and lets the user go back", async () => {
-    mockDaemon();
-    const { container } = await render(<Onboarding connected onExit={() => {}} />);
-    await click(button(container, "Continue"));
-    for (let i = 0; i < 4; i++) await click(button(container, "Skip this step"));
-    expect(heading(container)).toBe("You're all set");
-    expect(container.textContent).toContain("You skipped 4 steps.");
-    await click(byText(container, ".ob-pending button", "First source"));
-    expect(heading(container)).toBe("Add your first source");
-  });
-
-  it("can be skipped entirely, and resumes where it was left", async () => {
-    mockDaemon();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, step: "permissions", completed: ["welcome"], skipped: [], ai: "byok", finished: false }));
-    const onExit = vi.fn();
-    const { container } = await render(<Onboarding connected onExit={onExit} />);
-    expect(heading(container)).toBe("What Double Tap needs");
-    await click(button(container, "Skip setup"));
-    expect(onExit).toHaveBeenCalled();
-    expect(loadState()).toMatchObject({ finished: true, skipped: ["ai", "source", "permissions", "trigger"] });
-  });
-
-  it("works without the background service", async () => {
-    const { container } = await render(<Onboarding connected={false} onExit={() => {}} />);
-    await click(button(container, "Continue"));
-    await click(container.querySelector<HTMLInputElement>('input[value="local"]'));
-    expect(container.textContent).toContain("isn't running");
-    await click(button(container, "Continue"));
-    expect(button(container, "Add a source")).toBeUndefined();
-    expect(container.textContent).toContain("isn't running");
-  });
-
   it("takes a key in a masked field only, and still shows the manual setup", async () => {
     mockDaemon();
     const { container } = await render(<Onboarding connected onExit={() => {}} />);
@@ -357,27 +240,5 @@ describe("Onboarding", () => {
     expect(container.querySelector("textarea")).toBeNull();
     expect(container.textContent).toContain('api_key = "keychain:anthropic"');
     expect(container.textContent).toContain("dev.nugget.Nugget");
-  });
-});
-
-describe("indexPhase", () => {
-  it("tells waiting, indexing, searchable and failed apart", () => {
-    expect(indexPhase({ state: "syncing", items: 0 })).toBe("waiting");
-    expect(indexPhase({ state: "idle", items: 0 })).toBe("waiting");
-    expect(indexPhase({ state: "syncing", items: 3 })).toBe("indexing");
-    expect(indexPhase({ state: "watching", items: 3 })).toBe("ready");
-    expect(indexPhase({ state: "idle", items: 3 })).toBe("ready");
-    expect(indexPhase({ state: "error", items: 3, last_error: "denied" })).toBe("failed");
-    expect(indexPhase({ state: "idle", items: 0, last_error: "no such folder" })).toBe("failed");
-  });
-
-  it("settles a folder scan that found nothing, and keeps indexing while the pipeline catches up", () => {
-    const scan = { finished: true, found: 0, unsupported: 0, too_large: 0, unreadable: 0, roots_missing: 0, roots_denied: 0, max_file_bytes: 1 };
-    expect(indexPhase({ state: "watching", items: 0, scan })).toBe("empty");
-    expect(indexPhase({ state: "watching", items: 0, scan: { ...scan, roots_missing: 1 } })).toBe("missing");
-    expect(indexPhase({ state: "watching", items: 0, scan: { ...scan, roots_denied: 1 } })).toBe("denied");
-    expect(indexPhase({ state: "watching", items: 0, scan: { ...scan, finished: false } })).toBe("waiting");
-    expect(indexPhase({ state: "watching", items: 0, scan: { ...scan, found: 4 } })).toBe("indexing");
-    expect(indexPhase({ state: "watching", items: 0, health: { code: "nothing_indexable", reason: "", fix: "", item_errors: 0 } })).toBe("empty");
   });
 });

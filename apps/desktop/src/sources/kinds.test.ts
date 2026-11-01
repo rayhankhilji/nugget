@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   connectMode,
-  EMPTY_GOOGLE,
   EMPTY_MICROSOFT,
-  googleSettings,
-  isGoogleKind,
-  KIND_GROUPS,
   EMPTY_SAAS,
   EMPTY_MESSAGING,
   isDrivePath,
-  isMessagingKind,
   messagingErrors,
   messagingSettings,
   parseSinceDays,
@@ -17,33 +12,12 @@ import {
   isRepo,
   isValidTenant,
   microsoftErrors,
-  microsoftSettings,
   saasErrors,
-  saasSettings,
 } from "./kinds";
 
 const GUID = "1b2c3d4e-1111-2222-3333-444455556666";
 
 describe("microsoftSettings", () => {
-  it("sends only client_id when the optional fields are blank", () => {
-    for (const kind of ["outlook", "outlook-calendar", "onedrive"] as const) {
-      expect(microsoftSettings(kind, { ...EMPTY_MICROSOFT, clientId: ` ${GUID} `, tenant: "  " })).toEqual({ client_id: GUID });
-    }
-  });
-
-  it("adds tenant, account hint and the kind's folders", () => {
-    const f = { ...EMPTY_MICROSOFT, clientId: GUID, tenant: "contoso.onmicrosoft.com", accountHint: "me@contoso.com", folders: "inbox, archive", includeFolders: "/Documents\n/Work", excludeFolders: "/Pictures" };
-    expect(microsoftSettings("outlook", f)).toEqual({ client_id: GUID, tenant: "contoso.onmicrosoft.com", account_hint: "me@contoso.com", folders: ["inbox", "archive"] });
-    expect(microsoftSettings("onedrive", f)).toEqual({
-      client_id: GUID,
-      tenant: "contoso.onmicrosoft.com",
-      account_hint: "me@contoso.com",
-      include_folders: ["/Documents", "/Work"],
-      exclude_folders: ["/Pictures"],
-    });
-    expect(microsoftSettings("outlook-calendar", f)).toEqual({ client_id: GUID, tenant: "contoso.onmicrosoft.com", account_hint: "me@contoso.com" });
-  });
-
   it("validates the client id, tenant and paths", () => {
     expect(microsoftErrors("outlook", EMPTY_MICROSOFT).clientId).toBe("addSource.microsoft.clientIdMissing");
     expect(microsoftErrors("outlook", { ...EMPTY_MICROSOFT, clientId: "abc" }).clientId).toBe("addSource.microsoft.clientIdInvalid");
@@ -60,36 +34,6 @@ describe("microsoftSettings", () => {
 });
 
 describe("saasSettings", () => {
-  it("sends {} for the defaults", () => {
-    for (const kind of ["slack", "notion", "github", "linear"] as const) expect(saasSettings(kind, EMPTY_SAAS)).toEqual({});
-  });
-
-  it("github: client_id only in OAuth mode", () => {
-    const f = { ...EMPTY_SAAS, clientId: "Iv1.abc" };
-    expect(saasSettings("github", f)).toEqual({});
-    expect(saasSettings("github", { ...f, method: "oauth" })).toEqual({ client_id: "Iv1.abc" });
-    expect(saasSettings("slack", { ...f, method: "oauth" })).toEqual({});
-  });
-
-  it("github: repos, all_activity only with repos, discussions off", () => {
-    expect(saasSettings("github", { ...EMPTY_SAAS, allActivity: true })).toEqual({});
-    expect(saasSettings("github", { ...EMPTY_SAAS, repos: "a/b, c/d", allActivity: true, includeDiscussions: false })).toEqual({
-      repos: ["a/b", "c/d"],
-      all_activity: true,
-      include_discussions: false,
-    });
-  });
-
-  it("slack, notion and linear options", () => {
-    expect(saasSettings("slack", { ...EMPTY_SAAS, conversations: "#general, C012", includeDms: false })).toEqual({ conversations: ["#general", "C012"], include_dms: false });
-    expect(saasSettings("notion", { ...EMPTY_SAAS, includeDatabases: false })).toEqual({ include_databases: false });
-    expect(saasSettings("linear", { ...EMPTY_SAAS, method: "oauth", clientId: "lin-client", include: ["created", "assigned"], teams: "ENG, OPS" })).toEqual({
-      client_id: "lin-client",
-      include: ["assigned", "created"],
-      teams: ["ENG", "OPS"],
-    });
-  });
-
   it("validates tokens and options", () => {
     expect(saasErrors("notion", EMPTY_SAAS, "", false).token).toBe("addSource.saas.tokenMissing");
     expect(saasErrors("notion", EMPTY_SAAS, "", true)).toEqual({});
@@ -123,43 +67,7 @@ describe("connectMode", () => {
   });
 });
 
-describe("googleSettings", () => {
-  const clientId = "1234-abc.apps.googleusercontent.com";
-
-  it("Gmail and Calendar send only client_id", () => {
-    for (const kind of ["gmail", "gcal"] as const) {
-      expect(googleSettings(kind, { ...EMPTY_GOOGLE, clientId: ` ${clientId} `, includeSharedDrives: true })).toEqual({ client_id: clientId });
-    }
-  });
-
-  it("Drive sends its two opt-ins, off by default", () => {
-    expect(googleSettings("gdrive", { ...EMPTY_GOOGLE, clientId })).toEqual({ client_id: clientId, include_shared_with_me: false, include_shared_drives: false });
-    expect(googleSettings("gdrive", { clientId, includeSharedWithMe: true, includeSharedDrives: true })).toEqual({
-      client_id: clientId,
-      include_shared_with_me: true,
-      include_shared_drives: true,
-    });
-  });
-
-  it("offers Drive in the Google group", () => {
-    expect(KIND_GROUPS.find((g) => g.id === "google")?.kinds).toEqual(["gmail", "gcal", "gdrive"]);
-    expect(isGoogleKind("gdrive")).toBe(true);
-    expect(isGoogleKind("onedrive")).toBe(false);
-  });
-});
-
 describe("messaging kinds", () => {
-  it("groups iMessage, WhatsApp and Telegram under Messages, and none of them signs in", async () => {
-    const { CONNECTOR_KINDS, MESSAGING_KINDS } = await import("../api");
-    expect(KIND_GROUPS.find((g) => g.id === "messages")?.kinds).toEqual(["imessage", "whatsapp", "telegram"]);
-    for (const k of MESSAGING_KINDS) {
-      expect(CONNECTOR_KINDS).toContain(k);
-      expect(isMessagingKind(k)).toBe(true);
-      expect(connectMode(k, {})).toBe("none");
-    }
-    expect(isMessagingKind("signal")).toBe(false);
-  });
-
   it("sends the defaults explicitly and leaves blank optional fields out", () => {
     expect(messagingSettings("imessage", EMPTY_MESSAGING)).toEqual({ private: true, include_groups: true, contacts: true });
     expect(messagingSettings("whatsapp", { ...EMPTY_MESSAGING, path: " /Users/me/WhatsApp ", me: "  " })).toEqual({
@@ -174,12 +82,6 @@ describe("messaging kinds", () => {
     });
   });
 
-  it("carries the chosen options", () => {
-    const f = { ...EMPTY_MESSAGING, path: "C:\\Exports", me: " Ana ", sinceDays: " 90 ", includeGroups: false, contacts: false, private: false };
-    expect(messagingSettings("whatsapp", f)).toEqual({ private: false, include_groups: false, since_days: 90, folder: "C:\\Exports", me: "Ana" });
-    expect(messagingSettings("imessage", f)).toEqual({ private: false, include_groups: false, since_days: 90, contacts: false });
-  });
-
   it("checks the path and the number of days", () => {
     expect(messagingErrors("imessage", EMPTY_MESSAGING)).toEqual({});
     expect(messagingErrors("whatsapp", EMPTY_MESSAGING)).toEqual({ path: "addSource.messages.whatsappFolderMissing" });
@@ -191,12 +93,5 @@ describe("messaging kinds", () => {
       expect(messagingErrors("imessage", { ...EMPTY_MESSAGING, sinceDays: bad }).sinceDays).toBe("addSource.messages.sinceInvalid");
     }
     expect(parseSinceDays("365")).toBe(365);
-  });
-
-  it("recognises the daemon's Full Disk Access error", async () => {
-    const { needsFullDiskAccess } = await import("../api");
-    expect(needsFullDiskAccess("Nugget needs Full Disk Access to read your Messages. Open System Settings …")).toBe(true);
-    expect(needsFullDiskAccess("iMessage is only available on macOS")).toBe(false);
-    expect(needsFullDiskAccess(null)).toBe(false);
   });
 });

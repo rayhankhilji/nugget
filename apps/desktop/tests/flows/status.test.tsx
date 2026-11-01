@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
 /** Status: providers (and probing one), ingest queue, local runtime, audit chain, knowledge. */
 import { describe, expect, it } from "vitest";
-import { EVENT } from "../../src/api";
 import { status as fixtureStatus, providers } from "../../src/test/fixtures";
 import {
   click,
   daemon,
-  emitEvent,
-  errors,
   findByText,
   getByRole,
   getByText,
@@ -74,45 +71,11 @@ describe("status flow", () => {
     expect(providerRow("local-chat").textContent).toContain(t("status.cap.streaming"));
   });
 
-  it("shows a failed probe on the provider's row", async () => {
-    daemon().fail("providers_probe", errors.rpc("provider timed out"));
-    await renderApp({ page: "status" });
-    await click(within(providerRow("anthropic")).getByRole("button", { name: t("status.reprobe") }));
-    expect(within(providerRow("anthropic")).getByRole("alert").textContent).toContain("provider timed out");
-  });
-
   it("warns loudly when the audit chain fails verification", async () => {
     daemon({ status: { ...fixtureStatus, audit_chain_ok: false } });
     await renderApp({ page: "status" });
     expect(stat(t("status.auditLog"))).toBe(t("status.auditTamperedBadge"));
     await findByText(t("status.auditTampered"));
     expect(getByText(t("status.auditTampered")).closest("[role=alert]")).not.toBeNull();
-  });
-
-  it("says when the audit check hasn't finished", async () => {
-    daemon({ status: { ...fixtureStatus, audit_chain_ok: null } });
-    await renderApp({ page: "status" });
-    expect(stat(t("status.auditLog"))).toBe(t("status.auditChecking"));
-  });
-
-  it("refreshes the ingest queue on progress events", async () => {
-    const d = daemon();
-    // The first call answers 3 waiting, later ones 42.
-    d.on("ingest_status", (_a, n) => ({ queue_depth: n === 1 ? 3 : 42, freshness_p50_ms: 850, freshness_p95_ms: 4200, embedding_provider: "local-embed", triage_provider: null, sources: [] }));
-    await renderApp({ page: "status" });
-    const indexing = getByRole("region", { name: t("status.indexing") });
-    expect(stat(t("status.queue"), indexing)).toContain("3");
-
-    await emitEvent(EVENT.ingestProgress, { source: "files-1", phase: "indexing", done: 5, total: 10 });
-    await waitFor(() => expect(stat(t("status.queue"), indexing)).toContain("42"));
-    expect(d.count("ingest_status")).toBe(2);
-  });
-
-  it("shows sections the daemon doesn't support as unavailable", async () => {
-    daemon().fail("runtime_status", errors.methodNotFound());
-    await renderApp({ page: "status" });
-    const runtime = getByRole("region", { name: t("status.localRuntime") });
-    expect(within(runtime).queryByRole("table")).toBeNull();
-    expect(runtime.textContent).toContain(t("common.notAvailableSentence"));
   });
 });

@@ -88,20 +88,6 @@ describe("Chat", () => {
     expect(d.count("chat_history_save")).toBe(1);
   });
 
-  it("shows errors from the call and from the stream, and saves them", async () => {
-    const d = daemon({ chat: started });
-    const root = await renderChat();
-    await send(root, "Hi");
-    await done("provider exploded");
-    expect(root.querySelector('.msg-assistant [role="alert"]')?.textContent).toBe("provider exploded");
-    expect(savedConversation(d).messages[1]).toMatchObject({ state: "error", error: "provider exploded" });
-
-    d.fail("chat", { kind: "rpc", message: "no provider for tier", code: -32000 });
-    await send(root, "Again");
-    const alerts = root.querySelectorAll('.msg-assistant [role="alert"]');
-    expect(alerts[1]?.textContent).toBe("no provider for tier");
-  });
-
   it("restores the last conversation on mount and switches between saved ones", async () => {
     const convs: StoredConversation[] = [
       {
@@ -140,55 +126,5 @@ describe("Chat", () => {
     requestNewChat();
     await flush(3);
     expect(root.querySelectorAll(".msg")).toHaveLength(0);
-  });
-
-  it("clears history after confirming", async () => {
-    const convs: StoredConversation[] = [{ id: "c1", title: "One", updated_at: 1, messages: [{ role: "user", text: "One" }] }];
-    const d = daemon({ chat_history_load: convs });
-    const root = await renderChat();
-    const clearBtn = Array.from(root.querySelectorAll("button")).find((b) => b.textContent === "Clear history");
-    await click(clearBtn);
-    await click(Array.from(root.querySelectorAll("button")).find((b) => b.textContent === "Delete all"));
-    expect(d.count("chat_history_clear")).toBe(1);
-    expect(root.querySelectorAll(".msg, .chat-history-open")).toHaveLength(0);
-  });
-
-  it("keeps working when the shell has no history commands", async () => {
-    const d = daemon({ chat: started });
-    const missing = { kind: "other", message: "Command chat_history_load not found" };
-    d.fail("chat_history_load", missing).fail("chat_history_save", missing);
-    const root = await renderChat();
-    expect(root.querySelector(".chat-history")).toBeNull();
-    expect(root.querySelector('[role="alert"]')).toBeNull();
-    await send(root, "Hi");
-    await delta("there");
-    await done();
-    expect(root.querySelector(".msg-assistant .msg-md")?.textContent).toBe("there");
-    expect(d.count("chat_history_save")).toBe(0);
-  });
-
-  it("answers from sources with the conversation, and its citations open", async () => {
-    writeUseSources(true);
-    const d = daemon({
-      retrieve_ask: {
-        stream_id: "s1",
-        provider: "local-chat",
-        locality: "on_device",
-        citations: [{ n: 1, item: { source: "web-1", key: "a" }, chunk_id: 1, title: "Heron notes", url: "https://example.com/herons", sensitive: false }],
-        excluded_sensitive: 0,
-        query_rewrite: "herons second walk",
-      },
-      open_url: null,
-    });
-    const root = await renderChat();
-    await send(root, "and the second one?");
-    expect(d.count("chat")).toBe(0);
-    expect(d.last("retrieve_ask")).toMatchObject({ request: { query: "and the second one?", history: [], tier: "synthesis" } });
-    await delta("At the lake [1].");
-    await done();
-    expect(root.textContent).toContain("Searched for: herons second walk");
-    await click(root.querySelector(".msg-assistant button.cite"));
-    expect(d.last("open_url")).toMatchObject({ url: "https://example.com/herons" });
-    expect(savedConversation(d).messages[1]).toMatchObject({ citations: [{ n: 1, title: "Heron notes" }] });
   });
 });

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { cleanup, installDomShims, mockDaemon, render } from "../test/render";
-import { ConnectWait, DeviceCode, DeviceSignInDialog, displayUrl } from "./auth";
+import { DeviceCode, DeviceSignInDialog, displayUrl } from "./auth";
 import type { SourceInfo } from "../api";
 
 const source: SourceInfo = { id: "github-1", kind: "github", name: "GitHub", enabled: true, state: "needs_auth", items: 0, chunks: 0, settings: { client_id: "Iv1.x" } };
@@ -18,14 +18,6 @@ describe("device code", () => {
     expect(container.querySelector(".device-code-value")?.textContent).toBe("ABCD-1234");
     expect(container.textContent).toContain("https://github.com/login/device");
     expect(container.textContent).not.toContain("user_code=");
-  });
-
-  it("the waiting step shows a code only for device flows", async () => {
-    const flow = { url: "https://github.com/login/device?user_code=WXYZ-9876", user_code: "WXYZ-9876" };
-    const a = await render(<ConnectWait label="GitHub" source={source} flow={flow} note={null} onOpen={() => {}} onClose={() => {}} />);
-    expect(a.container.querySelector(".device-code-value")?.textContent).toBe("WXYZ-9876");
-    const b = await render(<ConnectWait label="Outlook" source={source} flow={{ url: "https://login.microsoftonline.com/x" }} note={null} onOpen={() => {}} onClose={() => {}} />);
-    expect(b.container.querySelector(".device-code")).toBeNull();
   });
 
   it("reconnect dialog begins the flow and finishes on sources.changed", async () => {

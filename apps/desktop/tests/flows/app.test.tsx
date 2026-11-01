@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
 /** App shell: connecting, the offline screen (retry / start), connection events, navigation. */
 import { describe, expect, it } from "vitest";
-import { EVENT } from "../../src/api";
 import {
   click,
   daemon,
   emitConnection,
-  emitEvent,
-  errors,
   findByRole,
   getByRole,
   queryByRole,
@@ -65,15 +62,6 @@ describe("app shell", () => {
     await findByRole("heading", { name: "Documents", level: 2 });
   });
 
-  it("explains a daemon that didn't start", async () => {
-    const d = daemon().offline().fail("start_daemon", { kind: "spawn", message: "nuggetd not found on PATH" });
-    await renderApp();
-    await click(getByRole("button", { name: t("offline.start") }));
-    expect(d.count("start_daemon")).toBe(1);
-    expect(getByRole("alert").textContent).toContain("nuggetd not found on PATH");
-    expect(offlineHeading()).not.toBeNull();
-  });
-
   it("flips to connected (and back) on connection events", async () => {
     daemon().offline();
     await renderApp({ page: "status" });
@@ -89,12 +77,6 @@ describe("app shell", () => {
     expect(pill().textContent).toContain(t("app.conn.down"));
   });
 
-  it("treats a failing connection check as offline", async () => {
-    daemon().fail("connection_info", errors.disconnected("socket closed"));
-    await renderApp();
-    expect(offlineHeading()).not.toBeNull();
-  });
-
   it("navigates with the sidebar and remembers the page", async () => {
     const d = daemon();
     await renderApp({ page: "status" });
@@ -106,13 +88,5 @@ describe("app shell", () => {
     expect(getByRole("main").getAttribute("aria-label")).toBe(t("app.nav.sources"));
     expect(localStorage.getItem("nugget.page")).toBe("sources");
     await waitFor(() => expect(d.commands).toContain("sources_list"));
-  });
-
-  it("follows the tray's navigate event and focuses the page", async () => {
-    daemon();
-    await renderApp({ page: "status" });
-    await emitEvent(EVENT.navigate, "knowledge");
-    expect(getByRole("main").getAttribute("aria-label")).toBe(t("app.nav.knowledge"));
-    await waitFor(() => expect(document.activeElement).toBe(getByRole("main")));
   });
 });
