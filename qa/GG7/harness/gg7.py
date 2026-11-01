@@ -146,7 +146,7 @@ def config_toml(a):
         + [
             "",
             "[knowledge]",
-            "enabled = true",
+            f"enabled = {'false' if a.no_knowledge else 'true'}",
             "debounce_ms = 500",
             "[knowledge.me]",
             f'name = "{ME[0]}"',
@@ -402,6 +402,8 @@ def main():
     ap.add_argument("--chat-model", default="")
     ap.add_argument("--embed-model", default="")
     ap.add_argument("--no-models", action="store_true")
+    # Extraction shares the chat server; jobs that time Ask and Double Tap turn it off.
+    ap.add_argument("--no-knowledge", action="store_true")
     ap.add_argument("--suites", default="search,ask,draft,knowledge,proactive")
     ap.add_argument("--langs", default=",".join(LANGS))
     ap.add_argument("--timeout", type=int, default=900)

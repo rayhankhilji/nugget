@@ -14,8 +14,8 @@ on:
   workflow_dispatch:
     inputs:
       suites:
-        description: "Comma-separated suites"
-        default: "search,ask,draft,knowledge,proactive"
+        description: "Comma-separated suites (empty: each job's own)"
+        default: ""
         type: string
       langs:
         description: "Comma-separated corpus folders"
@@ -37,7 +37,6 @@ env:
   CARGO_NET_RETRY: "10"
   RUSTUP_MAX_RETRIES: "10"
   RUST_BACKTRACE: "1"
-  SUITES: ${{ inputs.suites || 'search,ask,draft,knowledge,proactive' }}
   LANGS: ${{ inputs.langs || 'en,de,es,fr,hi,ja,pt-BR,zh-CN,ar,mixed' }}
   # The models directory is shared with evals.yml's cache (same path, same key).
   QA_HOME: ${{ github.workspace }}/bench/.local-models
@@ -52,10 +51,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: 4b
+          # Ask and Double Tap without background extraction competing for the CPU; extraction
+          # and cards in their own jobs. The 8B is too slow on 4 CPUs for everything in one job.
+          - label: 4b-gen
             chat_model: qwen3-4b-q4km
-          - label: 8b
+            suites: search,ask,draft
+            extra: --no-knowledge
+          - label: 4b-know
+            chat_model: qwen3-4b-q4km
+            suites: knowledge,proactive
+          - label: 8b-ask
             chat_model: qwen3-8b-q4km
+            suites: ask
+            extra: --no-knowledge
+          - label: 8b-draft
+            chat_model: qwen3-8b-q4km
+            suites: draft
+            extra: --no-knowledge
+          - label: 8b-know
+            chat_model: qwen3-8b-q4km
+            suites: knowledge,proactive
     steps:
       - uses: actions/checkout@v5
         with:
@@ -93,7 +108,8 @@ jobs:
         run: |
           python3 qa/GG7/harness/gg7.py run --nuggetd target/release/nuggetd --home "$QA_HOME" \
             --out "$RESULTS" --chat-model "${{ matrix.chat_model }}" \
-            --embed-model nomic-embed-text-v1.5-q8 --suites "$SUITES" --langs "$LANGS" --knowledge-wait 3600
+            --embed-model nomic-embed-text-v1.5-q8 --suites "${{ inputs.suites || matrix.suites }}" --langs "$LANGS" \
+            --knowledge-wait 15000 ${{ matrix.extra }}
 
       - name: Score
         if: always()
