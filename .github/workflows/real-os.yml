@@ -8,18 +8,19 @@ name: Real OS
 
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
+        required: false
+        default: self-hosted
+        type: string
   workflow_call:
-  pull_request:
-    paths:
-      - "crates/nugget-a11y/**"
-      - "crates/nugget-hotkey/**"
-      - "crates/nugget-computer/**"
-      - "apps/desktop/src-tauri/**"
-      - "packaging/**"
-      - "tests/fixtures/native/**"
-      - "bench/src/suites/cua/**"
-      - "apps/desktop/e2e-native/**"
-      - ".github/workflows/real-os.yml"
+    inputs:
+      runner:
+        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
+        required: false
+        default: self-hosted
+        type: string
 
 # Least privilege: every job only reads the repository.
 permissions:
@@ -41,7 +42,7 @@ jobs:
   # See packaging/scripts/smoke-macos.sh and smoke-windows.ps1.
   smoke-macos:
     name: Installer smoke (macOS dmg)
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'macos-latest' || fromJSON(format('["{0}","macOS"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 60
     env:
       TARGET: aarch64-apple-darwin
@@ -103,7 +104,7 @@ jobs:
 
   smoke-windows:
     name: Installer smoke (Windows NSIS)
-    runs-on: windows-latest
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-latest' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 75
     env:
       TARGET: x86_64-pc-windows-msvc
@@ -178,7 +179,7 @@ jobs:
   # select, type, and insert with read-back (accessibility and clipboard paths).
   a11y-windows:
     name: Accessibility (Windows UIA)
-    runs-on: windows-latest
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-latest' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -223,7 +224,7 @@ jobs:
 
   a11y-macos:
     name: Accessibility (macOS AX)
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'macos-latest' || fromJSON(format('["{0}","macOS"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -266,7 +267,7 @@ jobs:
   # to the first inserted token. Tests: crates/nugget-hotkey/tests/{windows_it,macos_it}.rs.
   doubletap:
     name: Double Tap (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -391,7 +392,7 @@ jobs:
   # uploaded. See apps/desktop/e2e-native/README.md.
   overlay:
     name: Double Tap overlay (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
     timeout-minutes: 75
     strategy:
       fail-fast: false
@@ -710,7 +711,7 @@ jobs:
   # of the harness. --strict fails the job when a target is missed; any harness error fails it.
   cua-windows:
     name: Computer use over UIA (windows-latest)
-    runs-on: windows-latest
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-latest' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -795,7 +796,7 @@ jobs:
   # --strict as cua-windows.
   cua-macos:
     name: Computer use over AX (macos-latest)
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'macos-latest' || fromJSON(format('["{0}","macOS"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -883,7 +884,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -936,7 +937,7 @@ jobs:
 
   notify-windows:
     name: Notification click (Windows toast)
-    runs-on: windows-latest
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-latest' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 50
     env:
       NOTIFY_RECORD: ${{ github.workspace }}\notify-record
@@ -1151,7 +1152,7 @@ jobs:
 
   notify-macos:
     name: Notification click (macOS)
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'macos-latest' || fromJSON(format('["{0}","macOS"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0

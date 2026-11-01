@@ -19,9 +19,11 @@ on:
         description: "Manifest id of the chat model (empty: qwen3-4b-q4km, the app's default on 8–16 GB)"
         default: ""
         type: string
-  schedule:
-    # Weekly, Monday 03:17 UTC.
-    - cron: "17 3 * * 1"
+      runner:
+        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
+        required: false
+        default: self-hosted
+        type: string
 
 # Least privilege: the job only reads the repository.
 permissions:
@@ -49,7 +51,7 @@ env:
 jobs:
   eval:
     name: ${{ matrix.suite }} (real model)
-    # The expensive general suites run on schedule and on demand only, never on push.
+    # The expensive general suites run on demand only, never on push.
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 330
@@ -276,7 +278,7 @@ jobs:
   # bench arguments. The `chat_model` input does not apply here: every run names its model.
   doubletap:
     name: ${{ matrix.suite }} (real model)
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
     timeout-minutes: 340
     strategy:
       fail-fast: false

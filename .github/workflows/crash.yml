@@ -10,9 +10,6 @@ name: Crash safety
 # varies). See crates/nugget-store/tests/crash.rs and crates/nuggetd/tests/crash.rs.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
     inputs:
       store_iterations:
@@ -23,6 +20,11 @@ on:
         description: "Kills of the daemon harness"
         required: false
         default: "150"
+      runner:
+        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
+        required: false
+        default: self-hosted
+        type: string
 
 permissions:
   contents: read
@@ -41,7 +43,7 @@ env:
 jobs:
   crash:
     name: Crash harness (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
     timeout-minutes: 90
     strategy:
       fail-fast: false

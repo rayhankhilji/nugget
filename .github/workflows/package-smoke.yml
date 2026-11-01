@@ -6,21 +6,6 @@ name: Package smoke
 # See packaging/scripts/smoke-appimage.sh.
 
 on:
-  pull_request:
-    paths:
-      - "apps/desktop/**"
-      - "crates/**"
-      - "packaging/**"
-      - "Cargo.lock"
-      - ".github/workflows/package-smoke.yml"
-  push:
-    branches: [main, x/release]
-    paths:
-      - "apps/desktop/**"
-      - "crates/**"
-      - "packaging/**"
-      - "Cargo.lock"
-      - ".github/workflows/package-smoke.yml"
   workflow_dispatch:
   # From another workflow (e.g. release.yml): pass the name of an artifact of the calling run
   # that holds a Linux x86_64 .AppImage to smoke-test it instead of building one.

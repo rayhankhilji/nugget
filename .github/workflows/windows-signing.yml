@@ -16,14 +16,12 @@ name: Windows signing
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "packaging/windows/**"
-      - ".github/workflows/windows-signing.yml"
-      - ".github/workflows/release.yml"
-      - "apps/desktop/package.json"
-      - "apps/desktop/pnpm-lock.yaml"
-      - "apps/desktop/src-tauri/tauri*.conf.json"
+    inputs:
+      runner:
+        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
+        required: false
+        default: self-hosted
+        type: string
 
 permissions:
   contents: read
@@ -42,7 +40,7 @@ env:
 jobs:
   sign-script:
     name: sign.ps1 checks
-    runs-on: windows-2022
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-2022' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -204,7 +202,7 @@ jobs:
   azure-oidc:
     name: sign.ps1 Azure OIDC (fake identity)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-2022
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-2022' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
     permissions:
       contents: read
       id-token: write
@@ -260,7 +258,7 @@ jobs:
 
   bundles:
     name: Signed bundles (throwaway certificate)
-    runs-on: windows-2022
+    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-2022' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0

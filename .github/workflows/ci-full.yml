@@ -1,0 +1,283 @@
+name: CI (full, all OSes)
+
+# The full cross-OS matrix that ci.yml used to run on every push and pull request: fmt, clippy and
+# tests on Linux, macOS and Windows, MSRV, bench smoke on all three OSes, the desktop app on all
+# three OSes, and cargo-deny. Manual only, to stay inside the GitHub Free minutes (CONTRIBUTING.md,
+# "CI on the free tier"); ci.yml runs the lean Linux subset automatically. macOS and Windows jobs
+# go to a self-hosted runner unless `runner` is `github-hosted`:
+#   gh workflow run ci-full.yml --ref <branch> [-f runner=github-hosted]
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
+        required: false
+        default: self-hosted
+        type: string
+
+# Least privilege: every job only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+  # Wall time: Linux clippies and tests every crate. macOS and Windows clippy every crate (cheap:
+  # check-mode builds) but test only the crates with per-OS code paths (paths, permissions,
+  # keychain, sockets/pipes, process supervision, hotkeys, accessibility, file watching); the rest
+  # is pure Rust whose behaviour does not depend on the OS. nugget-desktop needs the webview system
+  # libraries and a built frontend, so the desktop job covers it on all three OSes.
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      PLATFORM_CRATES: >-
+        -p nugget-core -p nugget-store -p nugget-ipc -p nugget-runtime -p nugget-infer
+        -p nugget-models -p nugget-hotkey -p nugget-a11y -p nuggetd -p nugget-vault
+        -p nugget-voice -p nugget-ingest -p nugget-connector-files
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # rust-toolchain.toml pins the channel and components; this makes sure they are present.
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy
+
+      # SQLCipher's vendored OpenSSL needs a Windows-native Perl; Git's MSYS Perl breaks its build.
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      # NASM for the x86_64 assembly in vendored OpenSSL (openssl-src) and aws-lc-sys. Both can
+      # fall back without it, but with it the build is the same one release.yml ships.
+      - uses: ilammy/setup-nasm@v1
+        if: runner.os == 'Windows'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: cargo clippy
+        run: cargo clippy --locked --workspace --all-targets --exclude nugget-desktop --keep-going -- -D warnings
+
+      - name: cargo test (workspace)
+        if: runner.os == 'Linux'
+        run: cargo test --locked --workspace --exclude nugget-desktop
+
+      - name: cargo test (platform-sensitive crates)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          # shellcheck disable=SC2086 # PLATFORM_CRATES is a list of `-p` flags and must word-split.
+          cargo test --locked $PLATFORM_CRATES
+
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # `cargo +1.88` overrides the stable channel pinned in rust-toolchain.toml. Keep the version
+      # in step with `rust-version` in the root Cargo.toml.
+      - name: Install Rust 1.88
+        run: rustup toolchain install 1.88 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-rust-msrv
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # nugget-desktop is left out for the same reason as in the rust job (webview libraries, built
+      # frontend); it has no MSRV-sensitive code of its own beyond what its dependencies check.
+      - name: cargo check
+        run: cargo +1.88 check --locked --workspace --all-targets --exclude nugget-desktop
+
+  bench:
+    name: Bench smoke (${{ matrix.os }})
+    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@v1
+        if: runner.os == 'Windows'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # `all` includes `knowledge` (the real M2 pipeline on the fixture corpus, about 2 s).
+      - name: Bench smoke run
+        shell: bash
+        run: cargo run --locked -p nugget-bench -- all --scale smoke --out-dir "$RUNNER_TEMP/bench-results"
+
+      # The M2 knowledge targets are gates: a missed target fails the job.
+      - name: Bench knowledge (strict)
+        shell: bash
+        run: cargo run --locked -p nugget-bench -- knowledge --strict --out-dir "$RUNNER_TEMP/bench-results"
+
+      # The real stack in process (encrypted store, ingest, files watcher, retriever): about 15 s
+      # at smoke scale on a debug build. A failed run fails the job; target verdicts are in the
+      # report (no --strict: at smoke scale the recall gate can tie its baseline).
+      - name: Bench memory, real backend (smoke)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo run --locked -p nugget-bench -- memory --backend real --scale smoke --out-dir "$RUNNER_TEMP/bench-results"
+
+      - name: Validate bench reports against the schema
+        if: runner.os == 'Linux'
+        shell: bash
+        run: pipx run check-jsonschema --schemafile bench/schema/report.schema.json "$RUNNER_TEMP"/bench-results/*.json
+
+      - name: Upload bench reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-smoke-${{ matrix.os }}
+          path: ${{ runner.temp }}/bench-results/
+          retention-days: 14
+          if-no-files-found: error
+
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            file \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@v1
+        if: runner.os == 'Windows'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The pnpm version comes from `packageManager` in apps/desktop/package.json.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # Unit and component tests (vitest). `--if-present` keeps this step valid while the test
+      # scripts change; UI tests that need a browser belong under their own script.
+      - name: Frontend tests
+        working-directory: apps/desktop
+        run: pnpm run --if-present test
+
+      - name: cargo clippy (desktop)
+        run: cargo clippy --locked -p nugget-desktop --all-targets -- -D warnings
+
+      - name: cargo build (desktop)
+        run: cargo build --locked -p nugget-desktop
+
+      - name: cargo test (desktop)
+        run: cargo test --locked -p nugget-desktop
+
+  deny:
+    name: cargo-deny (${{ matrix.checks }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    # A new upstream advisory should not block unrelated PRs; it still shows as a failed job.
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.checks }}
