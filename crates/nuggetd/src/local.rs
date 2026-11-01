@@ -67,10 +67,9 @@ use nugget_runtime::{Runtime, provider_id};
 use crate::config::Config;
 use crate::features::draft::local_draft_model;
 
-/// How long a chat whose server crashed or hung before it streamed anything waits for the
-/// restarted server before it gives up with a plain error (KK1: an answer or an actionable
-/// error within 15 s of a hang; the watchdog needs up to about 9 s to notice one).
-const CHAT_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+/// The longest a chat whose server crashed before it streamed anything waits for the restarted
+/// server (its backoff plus reloading the model) before it gives up with a plain error.
+const CHAT_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Tiers the local chat server always serves, whatever else its model lists.
 const CHAT_TIERS: [Tier; 3] = [Tier::Triage, Tier::Light, Tier::Synthesis];
@@ -475,6 +474,26 @@ impl RuntimeSlot {
         false
     }
 
+    /// How long a crashed server is worth waiting for: the supervisor's backoff plus the
+    /// model's expected load time, within [`CHAT_RETRY_BUDGET`] (no point waiting when the
+    /// reload alone takes longer: the user gets the plain error at once instead).
+    fn retry_wait(&self) -> std::time::Duration {
+        use std::time::Duration;
+        let Some(d) = self.runtime.details(self.role) else {
+            return Duration::ZERO;
+        };
+        let backoff = Duration::from_millis(d.info.retry_in_ms.unwrap_or(0));
+        let load = d.expected_load.unwrap_or(CHAT_RETRY_BUDGET);
+        // The supervisor may not have scheduled its restart yet (no `retry_in_ms`): allow for
+        // its first backoff at least.
+        let need = (backoff + load + Duration::from_secs(1)).max(Duration::from_secs(4));
+        if need > CHAT_RETRY_BUDGET {
+            Duration::ZERO
+        } else {
+            need
+        }
+    }
+
     /// The plain error for a server that failed and is not back yet (from the runtime's
     /// status, which says whether it crashed, hung or is loading).
     fn down_error(&self) -> Error {
@@ -482,7 +501,12 @@ impl RuntimeSlot {
         let msg = d
             .and_then(|d| d.info.error)
             .unwrap_or_else(|| "The on-device chat model is restarting.".into());
-        Error::Provider(format!("{msg} Try again in a moment."))
+        // Say what to do once: messages that already name the next step keep theirs.
+        if msg.contains("Open Status") || msg.contains("Try again") {
+            Error::Provider(msg)
+        } else {
+            Error::Provider(format!("{msg} Try again in a moment."))
+        }
     }
 
     fn context_tokens(&self) -> Option<u32> {
@@ -545,7 +569,7 @@ impl Provider for RuntimeSlot {
             Err(e) if pid_before.is_some() && self.server_failed(pid_before).await => {
                 tracing::warn!(provider = %self.id, error = %e,
                     "local server failed before answering; retrying once");
-                match self.runtime.wait_ready(self.role, CHAT_RETRY_WAIT).await {
+                match self.runtime.wait_ready(self.role, self.retry_wait()).await {
                     Some(_) => self.chat_started(req).await?,
                     None => return Err(self.down_error()),
                 }

@@ -107,6 +107,11 @@ impl RollingLog {
         self.line(NOTE_STREAM, text);
     }
 
+    /// Forget the server lines seen so far (a new server process starts).
+    pub(crate) fn clear_server_tail(&mut self) {
+        self.server_tail.clear();
+    }
+
     /// The last non-empty line the server itself printed (already redacted), if any.
     pub(crate) fn last_server_line(&self) -> Option<String> {
         self.server_tail

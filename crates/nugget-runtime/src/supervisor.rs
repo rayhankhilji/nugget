@@ -23,7 +23,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::args::{LaunchPlan, Tuning};
 use crate::health::{
-    Health, ProcSlot, StartFailure, Target, activity, loopback_client, probe_within, wait_ready,
+    Health, ProcSlot, StartFailure, Target, activity, activity_within, loopback_client,
+    probe_within, wait_ready,
 };
 use crate::logs::{RollingLog, SharedLog, lock as lock_log};
 use crate::orphan::{self, PidRecord};
@@ -210,6 +211,9 @@ pub struct RuntimeDetails {
     /// Hangs the watchdog detected (a server that stopped answering, then was killed) over the
     /// runtime's life: callers compare it around a request to tell a hang from a crash.
     pub hangs: u32,
+    /// How long loading this role's model is expected to take (the last load on this
+    /// machine, else an estimate), once known.
+    pub expected_load: Option<Duration>,
     pub accel: Option<RuntimeAccel>,
     pub binary: Option<PathBuf>,
     pub log_file: PathBuf,
@@ -402,6 +406,8 @@ struct RoleState {
     load_file: PathBuf,
     /// Requests in flight ([`Runtime::request`]): the hang watchdog probes often while busy.
     inflight: AtomicUsize,
+    /// Cuts a restart backoff short ([`Runtime::retry`]).
+    wake: tokio::sync::Notify,
 }
 
 /// The last successful load of a role's model, persisted for the warm-up estimate.
@@ -579,10 +585,22 @@ impl RoleState {
 }
 
 /// An error as the one sentence the status shows (without the error kind's prefix).
-fn plain(e: &Error) -> String {
+fn plain(role: RuntimeRole, e: &Error) -> String {
+    let what = role_what(role);
     match e {
         Error::Provider(m) => m.clone(),
-        other => other.to_string(),
+        Error::Network(_) => format!(
+            "The {what} couldn't start: the model server could not be downloaded. Check your \
+             connection, then open Status to retry."
+        ),
+        Error::InsufficientSpace { .. } => format!(
+            "The {what} couldn't start: there is not enough disk space for the model server."
+        ),
+        Error::NotFound(_) | Error::Integrity(_) | Error::Io(_) | Error::Unsupported(_) => format!(
+            "The {what} couldn't start: the model server is missing or damaged. Open Status to \
+             retry or to see its log."
+        ),
+        _ => format!("The {what} couldn't start. Open Status to retry or to see its log."),
     }
 }
 
@@ -690,6 +708,7 @@ impl Runtime {
                     .join("runtime")
                     .join(format!("{}.load.json", role_name(role))),
                 inflight: AtomicUsize::new(0),
+                wake: tokio::sync::Notify::new(),
             })
         };
         Ok(Self {
@@ -1129,6 +1148,7 @@ impl Runtime {
             pid: rs.pid(),
             restarts: st.restarts,
             hangs: st.hangs,
+            expected_load: st.expected_load,
             accel: st.accel,
             binary: st.binary,
             log_file: rs.log_file.clone(),
@@ -1159,6 +1179,8 @@ impl Runtime {
             st.gave_up = false;
             st.start_failures = 0;
         });
+        // A supervisor backing off before a restart restarts now.
+        rs.wake.notify_one();
     }
 
     /// Wait up to `timeout` for `role`'s server to be ready (a restart in progress, say) and
@@ -1174,7 +1196,16 @@ impl Runtime {
                 let st = lock(&rs.status);
                 match st.state {
                     Some(RuntimeState::Ready) if st.config.is_some() => return st.config.clone(),
-                    Some(RuntimeState::Starting | RuntimeState::Failed) if !st.gave_up => {}
+                    Some(RuntimeState::Starting) => {}
+                    // Only a live supervisor restarts a failed server; otherwise nothing comes.
+                    Some(RuntimeState::Failed) if !st.gave_up => {
+                        let supervised = lock(&rs.task)
+                            .as_ref()
+                            .is_some_and(|t| !t.handle.is_finished());
+                        if !supervised {
+                            return None;
+                        }
+                    }
                     _ => return None,
                 }
             }
@@ -1286,7 +1317,10 @@ async fn start_new(
             let backoff = opts.backoff(start_failures + 1);
             rs.set(|st| {
                 st.state = Some(RuntimeState::Failed);
-                st.error = Some(plain(&e));
+                st.error = Some(plain(rs.role, &e));
+                if st.detail.is_none() && !matches!(e, Error::Provider(_)) {
+                    st.detail = Some(truncate_chars(&e.to_string(), 300));
+                }
                 st.start_failures = start_failures + 1;
                 st.retry_at = Some(Instant::now() + backoff);
             });
@@ -1465,6 +1499,8 @@ async fn start_once(
         // Left behind by an earlier server of ours that died; the new one binds afresh.
         socket::remove_stale(sock);
     }
+    // A new process: what an earlier one printed is not this one's detail.
+    lock_log(log).clear_server_tail();
     lock_log(log).note(&format!(
         "starting {} on {} (ctx {}x{}, ngl {}, accel {})",
         launch.entry.id,
@@ -1571,6 +1607,8 @@ async fn supervise(
     let mut last_counters: Option<f64> = None;
     let mut last_probe = Instant::now();
     let mut strikes = 0u32;
+    // The token counters at the watchdog's last look (see the hang check).
+    let mut watch_counters: Option<f64> = None;
     let Ok(log) = rs.log(opts, &key) else {
         return;
     };
@@ -1610,8 +1648,25 @@ async fn supervise(
                     last_probe = Instant::now();
                     if health == Health::Ready {
                         strikes = 0;
-                    } else {
-                        strikes += 1;
+                    } else if health == Health::Down {
+                        // No answer in time. A server that is merely swamped (every HTTP worker
+                        // busy, or swapping) still makes progress: its token counters move.
+                        let counters = tokio::select! {
+                            _ = cancel.cancelled() => return,
+                            a = activity_within(&server, &key, opts.hang_probe_timeout) => a,
+                        };
+                        let progressed = match (counters, watch_counters) {
+                            (Some((now, _)), Some(before)) => now != before,
+                            _ => false,
+                        };
+                        if let Some((now, _)) = counters {
+                            watch_counters = Some(now);
+                        }
+                        if progressed {
+                            strikes = 0;
+                        } else {
+                            strikes += 1;
+                        }
                         tracing::debug!(
                             role = role_name(rs.role),
                             strikes,
@@ -1687,6 +1742,7 @@ async fn supervise(
                 Err(_) => return,
             }
             last_counters = None;
+            watch_counters = None;
             last_probe = Instant::now();
             continue;
         }
@@ -1771,6 +1827,8 @@ async fn restart(
         tokio::select! {
             _ = cancel.cancelled() => return None,
             _ = tokio::time::sleep(backoff) => {}
+            // The user pressed Retry: restart now.
+            _ = rs.wake.notified() => {}
         }
         // Keep the port unless something else took it. Whoever holds it now, the new server
         // must turn out to be the listener before it is trusted (see `wait_ready`). A socket
@@ -1826,7 +1884,10 @@ async fn restart(
                 *failures += 1;
                 rs.set(|st| {
                     st.state = Some(RuntimeState::Failed);
-                    st.error = Some(plain(&e));
+                    st.error = Some(plain(rs.role, &e));
+                    if st.detail.is_none() && !matches!(e, Error::Provider(_)) {
+                        st.detail = Some(truncate_chars(&e.to_string(), 300));
+                    }
                 });
             }
         }

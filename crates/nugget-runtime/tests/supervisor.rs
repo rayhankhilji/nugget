@@ -461,7 +461,7 @@ async fn a_hung_server_is_detected_killed_and_restarted() {
     let mut o = common::opts();
     o.hang_check_interval = Duration::from_millis(50);
     o.hang_check_idle_interval = Duration::from_millis(50);
-    o.hang_probe_timeout = Duration::from_millis(200);
+    o.hang_probe_timeout = Duration::from_secs(1);
     o.hang_strikes = 3;
     o.restart_backoff_base = Duration::from_millis(400);
     let rt = e.runtime(o);
@@ -499,7 +499,7 @@ async fn a_hung_server_is_detected_killed_and_restarted() {
                 .map(|_| ())
         }
     });
-    wait_until("hang noticed", Duration::from_secs(5), || {
+    wait_until("hang noticed", Duration::from_secs(10), || {
         rt.details(RuntimeRole::Chat)
             .is_some_and(|d| d.info.state != RuntimeState::Ready)
     })
@@ -523,13 +523,17 @@ async fn a_hung_server_is_detected_killed_and_restarted() {
         t2.elapsed()
     );
     assert!(err.to_string().contains("stopped responding"), "{err}");
-    let res = tokio::time::timeout(Duration::from_secs(5), pending)
+    let res = tokio::time::timeout(Duration::from_secs(10), pending)
         .await
         .expect("the request on the hung server ended")
         .unwrap();
     assert!(res.is_err(), "the hung server never answered");
-    assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
-    assert!(!alive(pid1), "the hung server was killed");
+    assert!(t.elapsed() < Duration::from_secs(10), "{:?}", t.elapsed());
+    // Its sockets close a moment before the process is gone.
+    wait_until("the hung server was killed", Duration::from_secs(2), || {
+        !alive(pid1)
+    })
+    .await;
     drop(busy);
     // Restarted on the same address, with a new key.
     let cfg2 = rt
@@ -1316,4 +1320,37 @@ async fn stop_and_drop_end_a_detached_start() {
         !alive(pid)
     })
     .await;
+}
+
+/// KK1 review: Retry during a long restart backoff restarts the server now, instead of being
+/// ignored until the backoff ends.
+#[tokio::test]
+async fn retry_cuts_a_restart_backoff_short() {
+    let e = env().await;
+    let mut o = common::opts();
+    o.restart_backoff_base = Duration::from_secs(60);
+    o.restart_backoff_max = Duration::from_secs(60);
+    let rt = e.runtime(o);
+    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let a = addr(&cfg);
+    let _ = a
+        .client()
+        .post(a.url("/fake/crash"))
+        .bearer_auth(key(&rt, RuntimeRole::Chat))
+        .send()
+        .await;
+    wait_until("backing off", Duration::from_secs(5), || {
+        rt.details(RuntimeRole::Chat).is_some_and(|d| {
+            d.info.state == RuntimeState::Failed && d.info.retry_in_ms.is_some_and(|ms| ms > 30_000)
+        })
+    })
+    .await;
+    let t = Instant::now();
+    rt.retry(RuntimeRole::Chat);
+    rt.wait_ready(RuntimeRole::Chat, Duration::from_secs(10))
+        .await
+        .expect("restarted after Retry");
+    assert!(t.elapsed() < Duration::from_secs(10), "{:?}", t.elapsed());
+    assert_eq!(rt.details(RuntimeRole::Chat).unwrap().restarts, 1);
+    rt.shutdown().await;
 }

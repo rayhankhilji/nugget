@@ -207,13 +207,24 @@ pub(crate) async fn wait_ready(
 /// A fingerprint of the server's request counters from `/metrics` (Prometheus text), plus
 /// whether a request is in flight. `None` if metrics are unavailable.
 pub(crate) async fn activity(target: &Target, key: &Secret) -> Option<(f64, bool)> {
-    let resp = target
-        .client
-        .get(target.url("/metrics"))
-        .bearer_auth(key.expose())
-        .send()
-        .await
-        .ok()?;
+    activity_req(target.client.get(target.url("/metrics")), key).await
+}
+
+/// [`activity`], giving up after `timeout`.
+pub(crate) async fn activity_within(
+    target: &Target,
+    key: &Secret,
+    timeout: Duration,
+) -> Option<(f64, bool)> {
+    activity_req(
+        target.client.get(target.url("/metrics")).timeout(timeout),
+        key,
+    )
+    .await
+}
+
+async fn activity_req(req: reqwest::RequestBuilder, key: &Secret) -> Option<(f64, bool)> {
+    let resp = req.bearer_auth(key.expose()).send().await.ok()?;
     if !resp.status().is_success() {
         return None;
     }

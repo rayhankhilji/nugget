@@ -51,7 +51,7 @@ export function StatusPage() {
     return () => window.clearInterval(timer);
   }, [reload, reloadIngest, reloadRuntime, reloadKnowledge, ingestMissing, runtimeMissing, knowledgeMissing]);
   // KK1: while a model warms up or waits to restart, follow it closely (elapsed time, retry).
-  const runtimeBusy = (runtime.data ?? []).some((r) => r.state === "starting" || r.state === "stopping" || (r.state === "failed" && !r.gave_up));
+  const runtimeBusy = (runtime.data ?? []).some((r) => r.state === "starting" || r.state === "stopping" || (r.state === "failed" && (r.retry_in_ms ?? 0) > 0));
   useEffect(() => {
     if (!runtimeBusy || runtimeMissing) return;
     const timer = window.setInterval(reloadRuntime, 1_000);
