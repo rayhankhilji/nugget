@@ -242,7 +242,7 @@ function TimelineRow({ e, onOpen }: { e: TimelineEvent; onOpen: (url: string, la
       <div className="sr-tl-meta">
         <span className="badge">{kindLabel(t, e.kind)}</span>
         <When at={e.at} />
-        {e.sensitive && (
+        {e.sensitive && !e.unsorted && (
           <span className="badge badge-warn" title={t("search.sensitiveTitle")}>
             {t("search.sensitive")}
           </span>

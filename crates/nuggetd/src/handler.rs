@@ -492,6 +492,8 @@ impl RpcHandler {
             excluded_sensitive: first.ctx.excluded_sensitive,
             query_rewrite: rewritten.then(|| plan.search_query.clone()),
             general: first.general(),
+            date: first.date.clone(),
+            partial: first.partial(),
         };
         let job = AskJob {
             plan,
@@ -923,6 +925,20 @@ fn to_infer_request(messages: Vec<ipc::ChatMessage>) -> Result<ChatRequest, RpcE
     Ok(req)
 }
 
+/// The retriever's date filter as Ask reports it to clients, its bounds at the offset the
+/// phrase was read with (the retriever keeps them in UTC), so their dates are the user's days.
+fn ask_date_filter(d: nugget_retrieve::DateFilter, offset_minutes: i32) -> ipc::AskDateFilter {
+    let offset = time::UtcOffset::from_whole_seconds(offset_minutes.clamp(-18 * 60, 18 * 60) * 60)
+        .unwrap_or(time::UtcOffset::UTC);
+    ipc::AskDateFilter {
+        phrase: d.phrase,
+        start: d.range.start.to_offset(offset),
+        end: d.range.end.to_offset(offset),
+        applied: d.applied,
+        listed: d.listed,
+    }
+}
+
 /// The earlier turns of a `retrieve.ask` conversation that are sent on: the client's text is
 /// untrusted, so `System` entries are dropped (only the daemon writes the system prompt), as
 /// are empty ones; long turns are cut, then the newest turns within
@@ -989,12 +1005,23 @@ struct AskContext {
     /// each passage's own text (see `crate::ask`).
     passages: Vec<nugget_retrieve::PackedPassage>,
     sent: SafeHistory,
+    /// How a date phrase in the question shaped this context's search.
+    date: Option<ipc::AskDateFilter>,
 }
 
 impl AskContext {
     /// Nothing relevant was found: the model answers as an ordinary chat.
     fn general(&self) -> bool {
         self.ctx.citations.is_empty()
+    }
+
+    /// Citation numbers of near-miss passages.
+    fn partial(&self) -> Vec<u32> {
+        self.passages
+            .iter()
+            .filter(|p| p.partial)
+            .map(|p| p.n)
+            .collect()
     }
 
     fn restarted(&self, stream_id: &str) -> AskRestarted {
@@ -1005,6 +1032,8 @@ impl AskContext {
             citations: self.ctx.citations.clone(),
             excluded_sensitive: self.ctx.excluded_sensitive,
             general: self.general(),
+            date: self.date.clone(),
+            partial: self.partial(),
         }
     }
 }
@@ -1035,8 +1064,11 @@ impl AskPlan {
         let PackedContext {
             response: ctx,
             passages,
+            date,
             ..
         } = packed;
+        let date =
+            date.map(|d| ask_date_filter(d, self.state.retriever.config().date_utc_offset_minutes));
         // Belt and braces: nothing marked sensitive is ever sent to a cloud model.
         if cloud && ctx.citations.iter().any(|c| c.sensitive) {
             return Err(Error::Integrity(
@@ -1066,6 +1098,7 @@ impl AskPlan {
                 ctx,
                 passages,
                 sent,
+                date,
             },
             request,
         ))
@@ -1802,6 +1835,27 @@ mod tests {
         assert!(!is_provider_failure(&Error::Invalid("x".into())));
         assert!(!is_provider_failure(&Error::Cancelled));
     }
+    #[test]
+    fn ask_date_filter_is_written_at_the_phrase_offset() {
+        use time::format_description::well_known::Rfc3339;
+        let at = |s: &str| time::OffsetDateTime::parse(s, &Rfc3339).unwrap();
+        // "last week" read at +01:00: the retriever keeps 26 Oct–2 Nov local midnights in UTC.
+        let d = nugget_retrieve::DateFilter {
+            phrase: "last week".into(),
+            range: nugget_retrieve::DateRange {
+                start: at("2026-10-25T23:00:00Z"),
+                end: at("2026-11-01T23:00:00Z"),
+            },
+            applied: true,
+            listed: false,
+        };
+        let f = ask_date_filter(d, 60);
+        let json = serde_json::to_value(&f).unwrap();
+        assert_eq!(json["start"], "2026-10-26T00:00:00+01:00");
+        assert_eq!(json["end"], "2026-11-02T00:00:00+01:00");
+        assert!(f.applied && !f.listed);
+    }
+
     #[test]
     fn ask_history_drops_system_and_keeps_the_newest_turns() {
         let h = ask_history(vec![

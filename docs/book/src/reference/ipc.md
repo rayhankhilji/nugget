@@ -72,9 +72,14 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `search` | `SearchRequest`: `{query, limit}` (`limit` at most 200) | list of `SearchHit`: `item`, `chunk_id`, `title`, `snippet`, `score`, `url` | yes |
-| `search.faceted` | `{query, limit, offset, filters, utc_offset_minutes}`: `filters` has `sources`, `kinds` (`mail`, `event`, `chat`, `file`), `people`, `from`, `to`; `limit` at most 100 | Hits (each with its item date, kind, `sensitive` and people) and facet counts for `sources`, `kinds`, `people` and `months` | yes |
-| `search.timeline` | `{entity, from, to, limit}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
-| `search.preview` | `{item, chunk_id}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
+| `search.faceted` | `{query, limit, offset, filters, utc_offset_minutes, time_zone}`: `filters` has `sources`, `kinds` (`mail`, `event`, `chat`, `file`), `people`, `from`, `to`; `limit` at most 100 | Hits (each with its item date, kind, `sensitive` and people) and facet counts for `sources`, `kinds`, `people` and `months` | yes |
+| `search.timeline` | `{entity, from, to, limit, utc_offset_minutes, time_zone}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
+| `search.preview` | `{item, chunk_id, utc_offset_minutes, time_zone}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
+
+`time_zone` is an IANA name (`Europe/Berlin`): with it, `from`/`to` days and `months` buckets use
+each date's own offset, so ranges across a daylight-saving change are right. Without it, or for a
+name the daemon's bundled time zone database lacks, `utc_offset_minutes` (the client's current
+offset) applies to every date, and without that the configured `[retrieve] date_utc_offset_minutes`.
 
 ### Retrieval
 
@@ -82,7 +87,7 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `retrieve.context` | `ContextRequest`: `{query, budget_tokens}` (budget at most 131072) | `ContextResponse`: `text` (passages, each under a `[n]` header), `citations`, `excluded_sensitive` | yes |
-| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten); then `chat.delta` and `chat.done` | yes |
+| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten), `general`, `date` (when the question named a date), `partial` (citation numbers of near misses); then `chat.delta` and `chat.done` | yes |
 
 A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. For `retrieve.ask` the daemon chooses
 the provider first, then packs the context for it: with a `cloud` provider, sensitive items are left out
@@ -90,6 +95,15 @@ and counted in `excluded_sensitive`, and the context is repacked if it falls bac
 With `history`, a follow-up question is first rewritten into a standalone query for retrieval, by a
 local (never `cloud`) chat model or, without one, a heuristic; the earlier user and assistant turns
 then go to the model before the question (`system` entries are ignored, and the turns are bounded).
+
+`AskStarted.date` reports a date phrase in the question ("last week", "in March"):
+`{phrase, start, end, applied, listed}`, with `start` (inclusive) and `end` (exclusive) as RFC 3339
+at the offset the phrase was read with. `applied: false` means nothing dated in the range matched,
+so the question was searched without it; `listed: true` means the question was generic ("summarise
+last week") and the sources are the period's items by date. `AskStarted.partial` lists the `n` of
+citations whose item lacks most of the question's rare key words: at best a near miss. The desktop
+shows both under the answer ("Searched items from 26 Oct to 1 Nov", a "Partial match" label). Both
+fields are absent when empty and from older daemons.
 
 ### Sources and ingest
 
@@ -223,6 +237,7 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 |---|---|---|
 | `chat.delta` | `ChatDelta`: `{stream_id, text}` | A chat, Ask or draft stream produced text |
 | `chat.done` | `ChatDone`: `{stream_id, error, input_tokens, output_tokens}`; `error` is `null` on success | The stream ended, failed or was cancelled |
+| `ask.restarted` | `AskRestarted`: `{stream_id, provider, locality, citations, excluded_sensitive, general, date, partial}` | An Ask fell back to another provider before its first delta: replace the sources shown so far with these citations; deltas of the new provider follow |
 | `models.progress` | `ModelProgress`: `{id, downloaded, total, phase, error}`, `phase` one of `downloading`, `verifying`, `installed`, `failed` | A model install progressed |
 | `ingest.progress` | `IngestProgress`: `{source, phase, done, total, error}`, `phase` one of `scanning`, `indexing`, `idle`, `error` | A source's sync progressed |
 | `sources.changed` | A `SourceInfo`; or `{"id": …, "removed": true}`; or `{"lagged": n}` | A source was added, changed (including after sign-in) or removed. Treat anything but a `SourceInfo` as "refetch `sources.list`" |

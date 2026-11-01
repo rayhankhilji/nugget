@@ -1,7 +1,7 @@
 //! State shared by the tools: the backend, the configuration and the last snapshot of each
 //! window, so `risk` and `describe` can look an element up by id without touching the OS.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use nugget_a11y::role::Role;
@@ -19,6 +19,15 @@ pub(crate) struct Shared {
     pub config: ComputerConfig,
     /// Most recent first; one tree per window.
     cache: Mutex<VecDeque<UiTree>>,
+    /// The window that last had keyboard focus as far as a snapshot showed: the one a
+    /// `WindowSel::Focused` snapshot returned, or one the backend marked focused. Keyboard tools
+    /// without an `element` are described and observed from it, not from whichever window was
+    /// observed last.
+    keyboard: Mutex<Option<WindowId>>,
+    /// Element ids the latest risk classification could not find in the cache. `call` refuses
+    /// them even if a later refresh shows them: what appeared after the gate was never
+    /// classified. An id leaves the set when a classification finds it.
+    unclassified: Mutex<HashSet<ElementId>>,
 }
 
 /// An element found in a cached snapshot.
@@ -44,6 +53,8 @@ impl Shared {
             cu,
             config,
             cache: Mutex::new(VecDeque::new()),
+            keyboard: Mutex::new(None),
+            unclassified: Mutex::new(HashSet::new()),
         })
     }
 
@@ -53,6 +64,9 @@ impl Shared {
 
     /// Keep `tree` as the latest snapshot of its window.
     pub fn remember(&self, tree: UiTree) {
+        if tree.window.focused {
+            self.set_keyboard(&tree.window.id);
+        }
         let mut c = self.cache();
         c.retain(|t| t.window.id != tree.window.id);
         c.push_front(tree);
@@ -69,11 +83,57 @@ impl Shared {
         c.iter().find_map(|t| found_in(t, id))
     }
 
-    /// The focused element of the most recent snapshot, if it is known.
-    pub fn focused(&self) -> Option<Found> {
+    /// Is `id` in a cached snapshot?
+    pub fn knows(&self, id: &ElementId) -> bool {
+        self.cache().iter().any(|t| t.find(id).is_some())
+    }
+
+    /// Record what a risk classification saw for an explicit element id: found in the cache,
+    /// or not (see [`Shared::unclassified`]).
+    pub fn note_classified(&self, id: &ElementId, found: bool) {
+        let mut u = self.unclassified.lock().unwrap_or_else(|e| e.into_inner());
+        if found {
+            u.remove(id);
+        } else {
+            u.insert(id.clone());
+        }
+    }
+
+    /// Was `id` unknown when it was last classified?
+    pub fn was_unclassified(&self, id: &ElementId) -> bool {
+        self.unclassified
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(id)
+    }
+
+    fn set_keyboard(&self, id: &WindowId) {
+        *self.keyboard.lock().unwrap_or_else(|e| e.into_inner()) = Some(id.clone());
+    }
+
+    /// The cached snapshot of the window that has keyboard focus (as last seen), else the most
+    /// recent snapshot.
+    fn keyboard_tree<R>(&self, f: impl FnOnce(&UiTree) -> Option<R>) -> Option<R> {
+        let k = self
+            .keyboard
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let c = self.cache();
-        let t = c.front()?;
-        found_in(t, t.focused.as_ref()?)
+        let t = k
+            .and_then(|k| c.iter().find(|t| t.window.id == k))
+            .or_else(|| c.front())?;
+        f(t)
+    }
+
+    /// The focused element of the keyboard window's snapshot, if it is known.
+    pub fn focused(&self) -> Option<Found> {
+        self.keyboard_tree(|t| found_in(t, t.focused.as_ref()?))
+    }
+
+    /// The window keyboard input goes to, as last seen (else the most recent snapshot's).
+    pub fn keyboard_window(&self) -> Option<WindowInfo> {
+        self.keyboard_tree(|t| Some(t.window.clone()))
     }
 
     /// The window of the most recent snapshot.
@@ -81,9 +141,13 @@ impl Shared {
         self.cache().front().map(|t| t.window.clone())
     }
 
-    /// A fresh, bounded snapshot (blocking; call from a blocking task). Kept in the cache.
+    /// A fresh, bounded snapshot (blocking; call from a blocking task). Kept in the cache; a
+    /// snapshot of the focused window also records it as the keyboard window.
     pub fn snapshot(&self, sel: &WindowSel) -> Result<UiTree> {
         let tree = self.cu.snapshot(sel, &self.config.tree_limits())?;
+        if matches!(sel, WindowSel::Focused) {
+            self.set_keyboard(&tree.window.id);
+        }
         self.remember(tree.clone());
         Ok(tree)
     }
