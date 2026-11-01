@@ -10,17 +10,20 @@ import {
   isCommandMissing,
   isOpenableUrl,
   type AnswerCheck,
+  type AskDateFilter,
   type AskStarted,
   type ChatDone,
   type ChatMessage,
   type Citation,
   type ProviderInfo,
+  type QuickAskHandover,
   type StoredChatMessage,
   type StoredConversation,
   type Tier,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
-import { usePendingNewChat } from "../hooks.nav";
+import { usePendingChatHandover, usePendingNewChat } from "../hooks.nav";
+import { handoverCitations, handoverExpired } from "../quickask/handover";
 import { localityLabel, tierLabel } from "../format";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
@@ -29,6 +32,8 @@ import { Announce, useAnnouncer } from "../components/Announce";
 import { Markdown, type CitationLinks } from "../components/Markdown";
 import { citedNumbers, groupSources, stripCitationMarkers, withheldNotice, type SourceEntry } from "../citations";
 import { Trans, useT } from "../i18n";
+import { askCitations } from "../askSearch";
+import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
 import "../styles-chat.css";
 
 interface Turn {
@@ -47,6 +52,8 @@ interface Turn {
   queryRewrite?: string;
   /** Sensitive items withheld from a cloud model (not saved). */
   excludedSensitive?: number;
+  /** JJ2: the question's date range and how it filtered the search (not saved). */
+  dateFilter?: AskDateFilter;
   /** Sources were on but none matched, so this is a plain chat answer. */
   generalAnswer?: boolean;
   /** The daemon's post-check of a sourced answer (`chat.done`), when it came with one. */
@@ -395,12 +402,14 @@ export function ChatPage() {
             state: buffered?.text ? "streaming" : "pending",
           };
           if (asked) {
-            next.citations = asked.citations;
+            next.citations = askCitations(asked);
             next.queryRewrite = asked.query_rewrite ?? undefined;
             next.excludedSensitive = asked.excluded_sensitive ?? 0;
+            next.dateFilter = asked.date ?? undefined;
           } else if (general) {
             next.generalAnswer = true;
             next.excludedSensitive = general.excluded_sensitive ?? 0;
+            next.dateFilter = general.date ?? undefined;
           }
           if (buffered?.done) next = finish(next, buffered.done);
           return next;
@@ -440,6 +449,53 @@ export function ChatPage() {
     inputRef.current?.focus();
   };
   usePendingNewChat(startNew);
+
+  // JJ2: quick ask's "Open in Chat": a new conversation with its question and finished answer
+  // (saved like any other), or with the question in the composer when there was no answer yet.
+  // While a reply streams it waits for it to end; a draft in the composer is never replaced.
+  const queuedHandover = useRef<QuickAskHandover | null>(null);
+  const applyHandover = (h: QuickAskHandover) => {
+    const question = h.question.trim();
+    if (!question) return;
+    freshChat.current = true;
+    setConvId(newConversationId());
+    setConfirmClear(false);
+    lastSaved.current = "";
+    const a = h.answer;
+    if (a && a.text.trim()) {
+      const citations = handoverCitations(a.citations);
+      setTurns([
+        { id: nextTurnId++, role: "user", text: question },
+        {
+          id: nextTurnId++,
+          role: "assistant",
+          text: a.text,
+          state: "done",
+          provider: a.provider ?? undefined,
+          citations: citations.length ? citations : undefined,
+          generalAnswer: a.general === true || undefined,
+          dateFilter: a.date ?? undefined,
+        },
+      ]);
+    } else {
+      setTurns([]);
+      setInput((draft) => (draft.trim() ? draft : question));
+    }
+    inputRef.current?.focus();
+  };
+  usePendingChatHandover((h) => {
+    if (handoverExpired(h)) return;
+    if (active) queuedHandover.current = h;
+    else applyHandover(h);
+  });
+  useEffect(() => {
+    const h = queuedHandover.current;
+    if (active || !h) return;
+    queuedHandover.current = null;
+    applyHandover(h);
+    // Once the reply that held it back has ended.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   const open = (c: StoredConversation) => {
     if (active || c.id === convId) return;
@@ -761,6 +817,7 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
           <span className="citation-title" dir="auto">
             {title}
           </span>
+          {e.citations.some((c) => c.partial) && <PartialBadge />}
         </span>
         {url && isOpenableUrl(url) && (
           <button
@@ -803,6 +860,7 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         </div>
       )}
       {turn.queryRewrite && <p className="muted small chat-rewrite">{t("chat.searchedFor", { query: turn.queryRewrite })}</p>}
+      <AskDateNote date={turn.dateFilter} className="chat-dates" />
       {turn.generalAnswer && <p className="muted small chat-general">{t("chat.generalAnswer")}</p>}
       {check?.not_found && <p className="muted small chat-not-found">{t("chat.notFound")}</p>}
       {flagged.length > 0 && (

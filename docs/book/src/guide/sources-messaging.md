@@ -106,7 +106,9 @@ again at any time in the same place; the source then stops updating and shows th
 
 Nugget never opens the live database. On each pass it copies the database files into a temporary
 folder in its own data directory, reads the copy, and deletes the copy afterwards. Messages keeps
-working normally while Nugget reads.
+working normally while Nugget reads. When the database files have not changed since the last pass
+(same size and modification time), the pass copies and reads nothing; Nugget still copies the
+database at least once an hour, and once after each restart.
 
 ### Options
 

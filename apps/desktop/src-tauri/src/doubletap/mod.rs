@@ -156,6 +156,13 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
     {
         *lock(&state.practice) = None;
     }
+    // The user clicked or switched away from an open draft: close it (Esc in the target app
+    // never reaches an overlay that lost the keyboard).
+    if let WindowEvent::Focused(false) = event
+        && window.label() == OVERLAY_LABEL
+    {
+        flow::on_overlay_blur(window.app_handle());
+    }
     if let WindowEvent::CloseRequested { api, .. } = event
         && window.label() == OVERLAY_LABEL
     {

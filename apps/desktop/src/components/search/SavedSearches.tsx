@@ -4,7 +4,7 @@
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useT } from "../../i18n";
-import { clearRecent, deleteSaved, saveSearch, useRecentSearches, useSavedSearches, type SavedSearch } from "../../savedSearches";
+import { clearRecent, deleteSaved, renameSaved, saveSearch, useRecentSearches, useSavedSearches, type SavedSearch } from "../../savedSearches";
 import { activeFilters, decode } from "../../searchState";
 import { Dialog } from "../Dialog";
 
@@ -39,10 +39,12 @@ interface ListProps {
   onEmpty?: () => void;
 }
 
-/** Search page: saved searches (run, delete). Deleting moves focus to a neighbour. */
+/** Search page: saved searches (run, rename, delete). Deleting moves focus to a neighbour. */
 export function SavedSearchList({ onRun, announce, onEmpty }: ListProps) {
   const t = useT();
   const saved = useSavedSearches();
+  /** JJ2: the saved search being renamed. */
+  const [renaming, setRenaming] = useState<SavedSearch | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
   /** The saved search to focus after a delete re-renders the list. */
   const focusNext = useRef<string | null>(null);
@@ -74,12 +76,23 @@ export function SavedSearchList({ onRun, announce, onEmpty }: ListProps) {
             <button type="button" className="chip" data-saved-id={s.id} onClick={() => onRun(s.state)} aria-label={t("searchui.runSaved", { name: s.name })}>
               <bdi>{s.name}</bdi>
             </button>
+            <button type="button" className="btn btn-ghost btn-small" onClick={() => setRenaming(s)} aria-label={t("searchui.renameSaved", { name: s.name })} aria-haspopup="dialog">
+              {t("searchui.rename")}
+            </button>
             <button type="button" className="btn btn-ghost btn-small" onClick={() => remove(i)} aria-label={t("searchui.deleteSaved", { name: s.name })}>
               {t("searchui.delete")}
             </button>
           </li>
         ))}
       </ul>
+      {renaming && (
+        <RenameSearchDialog
+          search={renaming}
+          others={saved.filter((x) => x.id !== renaming.id)}
+          onClose={() => setRenaming(null)}
+          onRenamed={(name) => announce?.(t("searchui.renamed", { name }))}
+        />
+      )}
     </section>
   );
 }
@@ -123,6 +136,67 @@ export function RecentSearchList({ onRun, announce, onEmpty }: ListProps) {
         })}
       </ul>
     </section>
+  );
+}
+
+/** JJ2: asks for a new name for a saved search; a name another one has is refused. */
+export function RenameSearchDialog({
+  search,
+  others,
+  onClose,
+  onRenamed,
+}: {
+  search: SavedSearch;
+  others: readonly SavedSearch[];
+  onClose: () => void;
+  onRenamed: (name: string) => void;
+}) {
+  const t = useT();
+  const [name, setName] = useState(search.name);
+  const inputId = useId();
+  const errorId = useId();
+  const n = name.trim();
+  const taken = others.some((s) => s.name.toLocaleLowerCase() === n.toLocaleLowerCase());
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!n || taken) return;
+    if (n !== search.name) {
+      renameSaved(search.id, n);
+      onRenamed(n);
+    }
+    onClose();
+  };
+  return (
+    <Dialog title={t("searchui.renameTitle")} onClose={onClose}>
+      <form onSubmit={submit} className="sr-save-form">
+        <label htmlFor={inputId}>{t("searchui.saveName")}</label>
+        <input
+          id={inputId}
+          type="text"
+          dir="auto"
+          value={name}
+          maxLength={120}
+          onChange={(e) => setName(e.target.value)}
+          data-autofocus
+          required
+          aria-invalid={taken || undefined}
+          aria-describedby={taken ? errorId : undefined}
+        />
+        {taken && (
+          <p id={errorId} className="note note-error small" role="alert">
+            {t("searchui.nameTaken", { name: n })}
+          </p>
+        )}
+        <div className="dialog-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            {t("common.cancel")}
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={!n || taken}>
+            {t("searchui.rename")}
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

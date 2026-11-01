@@ -1221,7 +1221,9 @@ impl Ingest {
     }
 
     /// Wake the background triage job (for example when a local triage model became ready).
+    /// Items whose triage failed and whose retry wait has passed are tried again.
     pub fn triage_now(&self) {
+        lock(&self.inner.triage).retry_now();
         self.inner.triage_wake.notify_one();
     }
 
