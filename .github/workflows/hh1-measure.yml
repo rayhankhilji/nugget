@@ -1,0 +1,86 @@
+name: HH1 measure (temporary)
+
+# Temporary (package HH1, removed before the final push): GG3's real-model harness
+# (qa/GG3/harness) on the safety-relevant tasks, before (branch base) and after (this commit) on
+# the SAME runner job, 4B chat model, temperature 0, seed 42, as qa-GG3.yml runs it.
+
+on:
+  push:
+    branches: [hh/agent-safety]
+
+permissions:
+  contents: read
+
+env:
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
+  RESULTS: ${{ github.workspace }}/hh1-results
+  BASE: 4b656ac
+  TASKS: calendar-inject-cleanup,calendar-invite-decline,cross-inject-mail-buys-giftcard,files-ambiguous-q3-report-delete,files-delete-backup,files-delete-decline,files-inject-notes-wipe,files-unambiguous-q3-report-final-delete,forms-inject-banner-email,forms-submit-decline,gg3-delete-decline,gg3-fakelogin-mail-reply,gg3-fakelogin-shop-checkout,gg3-files-delete-receipt,gg3-impossible-missing-file,gg3-impossible-reply-jordan,gg3-impossible-saturday,gg3-impossible-vpn,gg3-inject-calendar-exfil,gg3-inject-file-exfil,gg3-inject-mail-exfil,gg3-mail-delete-two,gg3-slow-settings,mail-ambiguous-chris-delete,mail-delete-newsletter,mail-inject-forward-reset,mail-inject-prize-delete,mail-reply-decline,mail-unambiguous-chris-novak-delete,settings-dark-mode,settings-erase-for-sale,settings-firewall-decline,settings-firewall-off,settings-inject-remote-access,settings-refuse-coworker-laptop,settings-wifi-bluetooth,shop-inject-banner-pay,shop-inject-giftcard-upsell,shop-pay-decline
+
+jobs:
+  measure:
+    name: shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          { echo "shard ${{ matrix.shard }} commit ${{ github.sha }} base $BASE"; lscpu | grep -E 'Model name|^CPU\(s\)'; } | tee "$RESULTS/hardware-${{ matrix.shard }}.txt"
+
+      - name: Build after
+        run: cargo build --release --manifest-path qa/GG3/harness/Cargo.toml --target-dir target
+
+      - name: Build before
+        run: |
+          git worktree add before "$BASE"
+          cp -r qa before/
+          cp before/Cargo.lock before/qa/GG3/harness/Cargo.lock
+          cargo build --release --manifest-path before/qa/GG3/harness/Cargo.toml --target-dir target-before
+
+      - name: Run before and after
+        run: |
+          for arm in before after; do
+            bin=./target/release/gg3-cua; [ "$arm" = before ] && bin=./target-before/release/gg3-cua
+            "$bin" --agent real --local-models --local-chat-model qwen3-4b-q4km \
+              --tasks "$TASKS" --shard ${{ matrix.shard }} --shard-count 4 --task-timeout-s 300 \
+              --out "$RESULTS/$arm-${{ matrix.shard }}.json" || echo "$arm exited $?"
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          for f in "$RESULTS"/*.json; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            jq -r '.results[] | "\(if .gg3_pass then "PASS" else "FAIL" end) \(.id) outcome=\(.outcome) conf=\(.confirmations) unconf=\(.unconfirmed_risky_actions) inj=\(.injection_complied)"' "$f"
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hh1-${{ matrix.shard }}
+          path: ${{ env.RESULTS }}
+          retention-days: 30
