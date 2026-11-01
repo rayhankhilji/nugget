@@ -1,16 +1,11 @@
 //! Server side: accept connections and dispatch requests to a [`Handler`].
 //!
-//! Each request runs as its own task, so one connection's calls run concurrently and answer
-//! in completion order. A connection runs at most [`ServerOptions::max_in_flight`] calls at
-//! once; past that it keeps reading and answers each extra request with
-//! [`code::SERVER_BUSY`](crate::code::SERVER_BUSY) (it never stops reading, which would
-//! deadlock a call waiting for a later request on the same connection). Control requests
-//! (cancel, confirm, answer, kill; see [`DEFAULT_CONTROL_METHODS`]) get [`CONTROL_RESERVE`]
-//! extra slots so they still run when every regular slot is taken. The client does not retry
-//! busy calls itself: a busy call never ran, so the caller may retry once one of its
-//! earlier calls on that connection has finished. Memory per connection stays bounded: running
-//! calls by the caps above, queued output by a fixed-size outbox (when it is full, because the
-//! client is not reading, the server stops reading too).
+//! Each request runs as its own task. A connection runs at most
+//! [`ServerOptions::max_in_flight`] calls at once; past that it keeps reading and answers each
+//! extra request with [`code::SERVER_BUSY`](crate::code::SERVER_BUSY) (never running it), since
+//! a paused reader would deadlock a call waiting for a later request on the same connection.
+//! Control requests ([`DEFAULT_CONTROL_METHODS`]) get [`CONTROL_RESERVE`] extra slots. Queued
+//! output is bounded by a fixed-size outbox.
 
 use std::future::Future;
 use std::io;
@@ -31,7 +26,7 @@ use tokio_util::codec::LinesCodecError;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{IpcError, RpcError};
-use crate::wire::{self, EncodeError, Incoming, JSONRPC, OutRequest};
+use crate::wire::{self, Incoming, JSONRPC, OutRequest};
 
 /// Outgoing messages queued per connection before [`Notifier::send`] applies backpressure.
 const OUTBOX: usize = 1024;
@@ -73,23 +68,14 @@ impl Default for ServerOptions {
 }
 
 impl ServerOptions {
-    /// Cap on requests one connection may have running at once (default
-    /// [`DEFAULT_MAX_IN_FLIGHT`]; 0 is treated as 1). The server keeps reading at the cap:
-    /// a further request is answered at once with [`code::SERVER_BUSY`](crate::code::SERVER_BUSY)
-    /// without running (a further client notification is dropped), except that
-    /// [control methods](Self::control_methods) may use [`CONTROL_RESERVE`] extra slots.
-    /// So at most `max_in_flight + CONTROL_RESERVE` calls run per connection, and a call may
-    /// safely wait for a later control request on its own connection.
+    /// Cap on requests one connection may have running at once (0 is treated as 1).
     #[must_use]
     pub fn max_in_flight(mut self, max: usize) -> Self {
         self.max_in_flight = max.max(1);
         self
     }
 
-    /// Replace the control methods (default [`DEFAULT_CONTROL_METHODS`]). A control request
-    /// is still run when the connection is at its in-flight cap, in one of
-    /// [`CONTROL_RESERVE`] extra slots, so a call waiting for it can be released. Only list
-    /// methods whose handlers return promptly.
+    /// Replace the control methods. Only list methods whose handlers return promptly.
     #[must_use]
     pub fn control_methods<I, S>(mut self, methods: I) -> Self
     where
@@ -113,10 +99,8 @@ pub trait Handler: Send + Sync + 'static {
     /// spawned task).
     async fn call(&self, method: &str, params: Value, notify: Notifier) -> Result<Value, RpcError>;
 
-    /// Called once per connection, when it opens and before any of its requests is read, with
-    /// that connection's notifier (for example to subscribe it to broadcast notifications).
-    /// The notifier fails with [`IpcError::Disconnected`] once the connection is gone. Default:
-    /// nothing.
+    /// Called once per connection before any of its requests is read (e.g. to subscribe it to
+    /// broadcasts).
     fn connected(&self, _notify: &Notifier) {}
 }
 
@@ -143,10 +127,6 @@ impl Notifier {
             jsonrpc: JSONRPC,
             id: None,
             method,
-        })
-        .map_err(|e| match e {
-            EncodeError::TooLarge(n) => IpcError::TooLarge(n),
-            EncodeError::Serde(e) => IpcError::Serde(e),
         })?;
         tokio::select! {
             res = self.tx.send(line) => res.map_err(|_| IpcError::Disconnected),
@@ -254,10 +234,7 @@ async fn handle_connection(stream: Stream, handler: Arc<dyn Handler>, options: S
         options,
     };
 
-    // The reader never pauses for the in-flight cap (see `Connection::dispatch`), so a call
-    // that waits for a later request on this connection can always receive it. With nothing
-    // arriving and no call running, this loop is parked on the socket and the close token:
-    // no timers, no wakeups.
+    // The reader never pauses for the in-flight cap (see `Connection::dispatch`).
     loop {
         tokio::select! {
             line = lines.next() => match line {

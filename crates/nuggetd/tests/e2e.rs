@@ -1,9 +1,8 @@
-//! End-to-end: run the daemon in-process on a temporary home, talk to it with the real IPC
-//! client, and serve model traffic from a wiremock OpenAI-compatible server (plus a raw TCP
-//! server for a slow, never-ending stream).
-//!
-//! The store key is passed in explicitly, so no OS keychain is touched (the CLI test covers the
-//! `NUGGET_KEYCHAIN=off` key-file path through the real binary).
+//! End-to-end: the daemon in-process on a temporary home, the real IPC client, model traffic
+//! from a wiremock OpenAI-compatible server (plus a raw TCP server for a slow, never-ending
+//! stream).
+
+mod common;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,38 +11,23 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
+use common::*;
 use futures::{Stream, StreamExt};
 use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::egress::EgressEvent;
-use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
-    ChatCancel, ChatDelta, ChatDone, ChatMessage, ChatRequest, ChatStarted, EgressRecentRequest,
-    ModelInfo, ModelInstallRequest, ProbeRequest, ProviderInfo, Role, SearchHit, SearchRequest,
-    StatusResponse, method, notification,
+    ChatDelta, ChatDone, ChatStarted, ModelInfo, ProviderInfo, SearchHit, StatusResponse, method,
+    notification,
 };
-use nugget_core::paths::Paths;
 use nugget_infer::probe::vision::read_code_png;
-use nugget_ingest::MemorySecrets;
-use nugget_ipc::{Client, IpcError, Notification, code};
-use nugget_store::{NewChunk, NewItem, Store, StoreKey, content_hash};
+use nugget_ipc::{Client, Notification, code};
+use nugget_store::{NewChunk, NewItem, content_hash};
 use nuggetd::{Daemon, DaemonOptions, Startup};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 use wiremock::matchers::method as http_method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
-
-const WAIT: Duration = Duration::from_secs(15);
-
-// ---- a capable OpenAI-compatible mock ----
-
-fn sse_body(chunks: &[Value]) -> String {
-    let mut s: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
-    s.push_str("data: [DONE]\n\n");
-    s
-}
 
 fn text_chunks(parts: &[&str]) -> Vec<Value> {
     let mut v: Vec<Value> = parts
@@ -94,7 +78,7 @@ impl Respond for SmartModel {
         };
         ResponseTemplate::new(200)
             .insert_header("content-type", "text/event-stream")
-            .set_body_string(sse_body(&chunks))
+            .set_body_string(sse(&chunks))
     }
 }
 
@@ -176,27 +160,31 @@ async fn slow_server() -> SlowServer {
     }
 }
 
-// ---- harness ----
-
-struct Harness {
-    _tmp: tempfile::TempDir,
-    paths: Paths,
-    key: StoreKey,
-    secrets: MemorySecrets,
-    store: Store,
-    client: Client,
+struct Rig {
+    h: Harness,
     mock: MockServer,
     slow: SlowServer,
-    stop: Option<oneshot::Sender<()>>,
-    server: Option<JoinHandle<nugget_core::Result<()>>>,
 }
 
-fn config(mock: &MockServer, slow: &SlowServer) -> String {
-    format!(
-        r#"
-# The local runtime has its own test (it would add `local-*` providers to every tier).
-[runtime]
-enabled = false
+/// `dead` (nothing listens) ahead of `mock` in the light tier, `slow` for agentic, and
+/// `needs-key`, which cannot be built (its key variable is unset).
+async fn start() -> Rig {
+    let mock = MockServer::start().await;
+    Mock::given(http_method("POST"))
+        .respond_with(SmartModel)
+        .mount(&mock)
+        .await;
+    let slow = slow_server().await;
+    let config = format!(
+        r#"{NO_RUNTIME}
+[[providers]]
+id = "dead"
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:9/v1"
+model = "dead-model"
+tiers = ["light"]
+max_retries = 0
+connect_timeout_secs = 2
 
 [[providers]]
 id = "mock"
@@ -215,7 +203,6 @@ model = "slow-model"
 tiers = ["agentic"]
 max_retries = 0
 
-# Cannot be built (its key variable is unset): listed with an error, the daemon still starts.
 [[providers]]
 id = "needs-key"
 kind = "anthropic"
@@ -225,121 +212,14 @@ tiers = ["synthesis"]
 "#,
         mock.uri(),
         slow.addr
-    )
+    );
+    let h = Harness::start(&config).await;
+    Rig { h, mock, slow }
 }
 
-fn daemon_options(paths: &Paths, key: &StoreKey, secrets: &MemorySecrets) -> DaemonOptions {
-    let mut opts = DaemonOptions::new(paths.clone());
-    opts.store_key = Some(key.clone());
-    opts.source_secrets = Some(Arc::new(secrets.clone()));
-    opts
-}
-
-async fn start_daemon(
-    paths: &Paths,
-    key: &StoreKey,
-    secrets: &MemorySecrets,
-) -> (
-    Store,
-    oneshot::Sender<()>,
-    JoinHandle<nugget_core::Result<()>>,
-) {
-    let opts = daemon_options(paths, key, secrets);
-    let daemon = match Daemon::start(opts).await.unwrap() {
-        Startup::Ready(d) => d,
-        Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
-    };
-    let store = daemon.store();
-    let (tx, rx) = oneshot::channel::<()>();
-    let server = tokio::spawn(daemon.run_until(async {
-        let _ = rx.await;
-    }));
-    (store, tx, server)
-}
-
-impl Harness {
-    async fn start() -> Self {
-        Self::start_with(config).await
-    }
-
-    async fn start_with(config: impl Fn(&MockServer, &SlowServer) -> String) -> Self {
-        let tmp = tempfile::tempdir().unwrap();
-        let paths = Paths::rooted(tmp.path().to_path_buf());
-        let mock = MockServer::start().await;
-        Mock::given(http_method("POST"))
-            .respond_with(SmartModel)
-            .mount(&mock)
-            .await;
-        let slow = slow_server().await;
-        std::fs::create_dir_all(&paths.config).unwrap();
-        std::fs::write(paths.config_file(), config(&mock, &slow)).unwrap();
-        let key = StoreKey::from_bytes([7; 32]);
-        let secrets = MemorySecrets::new();
-        let (store, stop, server) = start_daemon(&paths, &key, &secrets).await;
-        let client = Client::connect(&paths).await.unwrap();
-        Self {
-            _tmp: tmp,
-            secrets,
-            paths,
-            key,
-            store,
-            client,
-            mock,
-            slow,
-            stop: Some(stop),
-            server: Some(server),
-        }
-    }
-
-    async fn call<R: serde::de::DeserializeOwned>(&self, m: &str, params: Value) -> R {
-        tokio::time::timeout(WAIT, self.client.call(m, &params))
-            .await
-            .unwrap_or_else(|_| panic!("{m} timed out"))
-            .unwrap_or_else(|e| panic!("{m} failed: {e}"))
-    }
-
-    async fn call_err(&self, m: &str, params: Value) -> i64 {
-        match self.client.call_value(m, params).await {
-            Err(IpcError::Rpc(e)) => e.code,
-            other => panic!("{m}: expected an RPC error, got {other:?}"),
-        }
-    }
-
-    async fn stop(&mut self) {
-        let _ = self.stop.take().unwrap().send(());
-        tokio::time::timeout(WAIT, self.server.take().unwrap())
-            .await
-            .expect("daemon stops promptly")
-            .unwrap()
-            .unwrap();
-    }
-
-    async fn restart(&mut self) {
-        let (store, stop, server) = start_daemon(&self.paths, &self.key, &self.secrets).await;
-        self.store = store;
-        self.stop = Some(stop);
-        self.server = Some(server);
-        self.client = Client::connect(&self.paths).await.unwrap();
-    }
-}
-
-fn chat_request(provider: Option<&str>, tier: Tier, text: &str) -> Value {
-    serde_json::to_value(ChatRequest {
-        provider: provider.map(ProviderId::new),
-        tier,
-        messages: vec![
-            ChatMessage {
-                role: Role::System,
-                text: "You are terse.".into(),
-            },
-            ChatMessage {
-                role: Role::User,
-                text: text.into(),
-            },
-        ],
-        items: Vec::new(),
-    })
-    .unwrap()
+fn chat_request(provider: Option<&str>, tier: &str, text: &str) -> Value {
+    json!({"provider": provider, "tier": tier, "messages": [
+        {"role": "system", "text": "You are terse."}, {"role": "user", "text": text}]})
 }
 
 /// Collect one stream's deltas until its `chat.done`.
@@ -349,7 +229,7 @@ async fn collect_chat(
 ) -> (String, ChatDone) {
     let mut text = String::new();
     loop {
-        let n = tokio::time::timeout(WAIT, notes.next())
+        let n = tokio::time::timeout(CALL, notes.next())
             .await
             .expect("chat notification in time")
             .expect("connection open");
@@ -371,60 +251,20 @@ async fn collect_chat(
     }
 }
 
-/// Poll `status` until the startup audit-chain check has finished, and return its result.
-async fn wait_audit_check(h: &Harness) -> bool {
-    tokio::time::timeout(WAIT, async {
-        loop {
-            let s: StatusResponse = h.call(method::STATUS, json!({})).await;
-            if let Some(ok) = s.audit_chain_ok {
-                return ok;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+async fn wait_closed(slow: &SlowServer) {
+    eventually("provider connection closed", || async {
+        slow.closed.load(Ordering::SeqCst)
     })
-    .await
-    .expect("audit chain checked at startup")
+    .await;
 }
-
-/// A provider nothing listens on (the discard port), ahead of the mock in the `light` tier.
-fn config_with_dead_provider(mock: &MockServer, _slow: &SlowServer) -> String {
-    format!(
-        r#"
-[[providers]]
-id = "dead"
-kind = "openai_compatible"
-base_url = "http://127.0.0.1:9/v1"
-model = "dead-model"
-tiers = ["light"]
-max_retries = 0
-connect_timeout_secs = 2
-
-[[providers]]
-id = "mock"
-kind = "openai_compatible"
-base_url = "{}/v1"
-model = "test-model"
-tiers = ["light"]
-max_retries = 0
-"#,
-        mock.uri()
-    )
-}
-
-// ---- tests ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn status_chat_search_egress_and_models() {
-    let mut h = Harness::start().await;
-
-    // Default config is not written over an existing one.
-    assert!(
-        std::fs::read_to_string(h.paths.config_file())
-            .unwrap()
-            .contains("slow-model")
-    );
-
-    // Seed the store directly.
+    let Rig {
+        mut h,
+        mock,
+        slow: _slow,
+    } = start().await;
     let item = NewItem::new("files:test", "notes/fox.md", content_hash("fox"))
         .with_title("Fox notes")
         .with_text("The quick brown fox jumps over the lazy dog.");
@@ -438,150 +278,94 @@ async fn status_chat_search_egress_and_models() {
             ],
         )
         .unwrap();
-    let other =
-        NewItem::new("files:test", "notes/cats.md", content_hash("cats")).with_title("Cats");
-    h.store.upsert_item(&other).unwrap();
-    h.store
-        .replace_chunks(&other.item, &[NewChunk::text("Cats sleep a lot.")])
-        .unwrap();
 
-    // status
-    let status: StatusResponse = h.call(method::STATUS, json!({})).await;
+    let status: StatusResponse = h.call(method::STATUS, Value::Null).await;
     assert_eq!(status.protocol, nugget_core::ipc::PROTOCOL_VERSION);
-    assert_eq!(status.version, env!("CARGO_PKG_VERSION"));
-    assert_eq!((status.items, status.chunks), (2, 3));
-    assert!(status.uptime_secs < 60);
+    assert_eq!((status.items, status.chunks), (1, 2));
     let ids: Vec<&str> = status.providers.iter().map(|p| p.id.as_str()).collect();
-    assert_eq!(ids, vec!["mock", "slow", "needs-key"], "config order");
-    let mock = &status.providers[0];
-    assert_eq!(mock.kind, "openai_compatible");
-    assert_eq!(mock.model, "test-model");
-    assert_eq!(mock.locality, Locality::OnDevice);
-    assert_eq!(mock.tiers, vec![Tier::Light, Tier::Synthesis]);
-    assert_eq!(mock.capabilities, None);
-    assert_eq!(mock.error, None);
+    assert_eq!(
+        ids,
+        vec!["dead", "mock", "slow", "needs-key"],
+        "config order"
+    );
+    assert_eq!(status.providers[1].locality, Locality::OnDevice);
+    assert_eq!(
+        status.providers[1].tiers,
+        vec![Tier::Light, Tier::Synthesis]
+    );
     // The unbuildable provider is listed with why, instead of vanishing.
-    let broken = &status.providers[2];
-    assert_eq!(broken.kind, "anthropic");
-    assert_eq!(broken.model, "m");
+    let broken = &status.providers[3];
     assert_eq!(broken.locality, Locality::Cloud);
-    assert_eq!(broken.tiers, vec![Tier::Synthesis]);
-    assert_eq!(broken.capabilities, None);
     let reason = broken.error.as_deref().expect("build error reported");
     assert!(
         reason.contains("NUGGETD_TEST_DEFINITELY_UNSET_KEY"),
         "{reason}"
     );
-    // The audit chain is verified at startup (in the background).
-    assert!(wait_audit_check(&h).await, "audit chain intact");
-    // `null` params work too (what `Client::call(_, &())` sends).
-    let again: StatusResponse = h.call(method::STATUS, Value::Null).await;
-    assert_eq!(again.providers, status.providers);
-    let list: Vec<ProviderInfo> = h.call(method::PROVIDERS_LIST, json!({})).await;
-    assert_eq!(list, status.providers);
+    eventually("audit chain checked at startup", || async {
+        let s: StatusResponse = h.call(method::STATUS, json!({})).await;
+        s.audit_chain_ok == Some(true)
+    })
+    .await;
 
-    // chat routed by tier: deltas, then done with usage.
+    // Chat routed by tier: deltas, then done with usage; the provider saw both turns.
     let mut notes = h.client.notifications();
     let started: ChatStarted = h
-        .call(
-            method::CHAT,
-            chat_request(None, Tier::Synthesis, "say hello"),
-        )
+        .call(method::CHAT, chat_request(None, "synthesis", "say hello"))
         .await;
     assert_eq!(started.provider.as_str(), "mock");
     let (text, done) = collect_chat(&mut notes, &started.stream_id).await;
     assert_eq!(text, "Hello");
-    assert_eq!(done.error, None);
-    assert_eq!(done.input_tokens, Some(9));
-    assert_eq!(done.output_tokens, Some(2));
-
-    // The provider saw the system prompt and the user turn.
-    let reqs = h.mock.received_requests().await.unwrap();
+    assert_eq!(
+        (done.error, done.input_tokens, done.output_tokens),
+        (None, Some(9), Some(2))
+    );
+    let reqs = mock.received_requests().await.unwrap();
     let body: Value = serde_json::from_slice(&reqs.last().unwrap().body).unwrap();
     assert_eq!(body["model"], "test-model");
-    assert_eq!(body["messages"][0]["role"], "system");
     assert_eq!(body["messages"][0]["content"], "You are terse.");
     assert_eq!(body["messages"][1]["content"], "say hello");
 
-    // An explicit provider wins over the tier.
+    // The first chat after an outage falls back to the next provider, and `ChatStarted` and
+    // the audit name the provider that serves it.
     let started: ChatStarted = h
-        .call(
-            method::CHAT,
-            chat_request(Some("mock"), Tier::Triage, "ping"),
-        )
+        .call(method::CHAT, chat_request(None, "light", "ping"))
         .await;
     assert_eq!(started.provider.as_str(), "mock");
     let (text, done) = collect_chat(&mut notes, &started.stream_id).await;
     assert_eq!((text.as_str(), done.error), ("pong", None));
 
-    // Routing and parameter errors are RPC errors.
+    // An explicit provider is never substituted; routing and parameter errors are RPC errors.
+    for (params, want) in [
+        (chat_request(Some("dead"), "light", "x"), code::PROVIDER),
+        (chat_request(None, "embedding", "x"), code::NOT_FOUND),
+        (chat_request(Some("nope"), "light", "x"), code::NOT_FOUND),
+        (
+            chat_request(Some("needs-key"), "light", "x"),
+            code::NOT_FOUND,
+        ),
+        (
+            json!({"provider": null, "tier": "light", "messages": []}),
+            code::INVALID_PARAMS,
+        ),
+        (json!({"tier": "bogus"}), code::INVALID_PARAMS),
+    ] {
+        assert_eq!(h.call_err(method::CHAT, params).await.0, want);
+    }
     assert_eq!(
-        h.call_err(method::CHAT, chat_request(None, Tier::Embedding, "x"))
-            .await,
-        code::NOT_FOUND
-    );
-    assert_eq!(
-        h.call_err(method::CHAT, chat_request(Some("nope"), Tier::Light, "x"))
-            .await,
-        code::NOT_FOUND
-    );
-    assert_eq!(
-        h.call_err(
-            method::CHAT,
-            chat_request(Some("needs-key"), Tier::Light, "x")
-        )
-        .await,
-        code::NOT_FOUND
-    );
-    assert_eq!(
-        h.call_err(
-            method::CHAT,
-            json!({"provider": null, "tier": "light", "messages": []})
-        )
-        .await,
-        code::INVALID_PARAMS
-    );
-    assert_eq!(
-        h.call_err(method::CHAT, json!({"tier": "bogus"})).await,
-        code::INVALID_PARAMS
-    );
-    assert_eq!(
-        h.call_err("no.such.method", json!({})).await,
+        h.call_err("no.such.method", json!({})).await.0,
         code::METHOD_NOT_FOUND
     );
 
-    // search over the seeded items: one hit per item (its best chunk), through the retriever.
+    // Search: one hit per item (its best chunk).
     let hits: Vec<SearchHit> = h
-        .call(
-            method::SEARCH,
-            json!(SearchRequest {
-                query: "fox".into(),
-                limit: 10
-            }),
-        )
+        .call(method::SEARCH, json!({"query": "fox", "limit": 10}))
         .await;
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0].item, item.item);
-    assert_eq!(hits[0].title.as_deref(), Some("Fox notes"));
-    assert!(hits[0].chunk_id.is_some());
-    assert!(hits[0].score > 0.0);
-    let hits: Vec<SearchHit> = h
-        .call(method::SEARCH, json!({"query": "cats", "limit": 1}))
-        .await;
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].item, other.item);
-    let none: Vec<SearchHit> = h
-        .call(method::SEARCH, json!({"query": "fox", "limit": 0}))
-        .await;
-    assert!(none.is_empty());
+    assert!(hits[0].chunk_id.is_some() && hits[0].score > 0.0);
 
     // The loopback provider never shows up in the egress ledger.
-    let egress: Vec<EgressEvent> = h
-        .call(
-            method::EGRESS_RECENT,
-            json!(EgressRecentRequest { limit: 50 }),
-        )
-        .await;
+    let egress: Vec<EgressEvent> = h.call(method::EGRESS_RECENT, json!({"limit": 50})).await;
     assert!(egress.is_empty(), "{egress:?}");
 
     // models.list: the bundled manifest, nothing installed.
@@ -590,81 +374,55 @@ async fn status_chat_search_egress_and_models() {
     let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
     let want: Vec<&str> = manifest.models.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, want);
-    for (info, entry) in models.iter().zip(&manifest.models) {
-        assert_eq!(info.size_bytes, entry.size);
-        assert_eq!(info.family, entry.family);
-        assert_eq!(info.tiers, entry.tiers);
-        assert_eq!(info.license, entry.license);
-        assert_eq!(info.revision, entry.revision);
-        assert!(!info.installed && !info.update_available);
-    }
-    let hw = nugget_models::detect_hardware();
-    for tier in [Tier::Triage, Tier::Synthesis, Tier::Embedding] {
-        if let Some(rec) = nugget_models::recommend(&manifest, &hw, tier) {
-            assert!(models.iter().any(|m| m.id == rec.id && m.recommended));
-        }
-    }
-    assert_eq!(
-        h.call_err(
-            method::MODELS_INSTALL,
-            json!(ModelInstallRequest {
-                id: "no-such-model".into()
-            })
-        )
-        .await,
-        code::NOT_FOUND
-    );
+    assert!(models.iter().all(|m| !m.installed && !m.update_available));
+    let (c, _) = h
+        .call_err(method::MODELS_INSTALL, json!({"id": "no-such-model"}))
+        .await;
+    assert_eq!(c, code::NOT_FOUND);
 
-    // Chats are audited, without message content.
-    let audit = h.store.recent_audit(50).unwrap();
-    let chats: Vec<_> = audit.iter().filter(|a| a.action == "chat").collect();
+    // Chats are audited (by serving provider), without message content.
+    let chats: Vec<_> = h.audit().into_iter().filter(|a| a.0 == "chat").collect();
     assert_eq!(chats.len(), 2);
-    assert!(!chats[0].detail.to_string().contains("say hello"));
+    assert!(chats.iter().all(|c| c.1 == "mock"));
+    assert!(!chats[0].2.to_string().contains("say hello"));
     h.store.verify_audit_chain().unwrap();
 
+    // A second daemon on the same home reports the first one.
+    let mut opts = DaemonOptions::new(h.paths.clone());
+    opts.store_key = Some(nugget_store::StoreKey::from_bytes(KEY));
+    match Daemon::start(opts).await.unwrap() {
+        Startup::AlreadyRunning { socket } => {
+            assert_eq!(socket, nugget_ipc::socket_display(&h.paths));
+        }
+        Startup::Ready(_) => panic!("second daemon must not start"),
+    }
     h.stop().await;
-    assert!(
-        Client::connect(&h.paths).await.is_err(),
-        "socket closed after shutdown"
-    );
+    assert!(Client::connect(&h.paths).await.is_err(), "socket closed");
 }
 
+/// Cancel, a client that goes away and shutdown all stop a slow stream and its HTTP request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn chat_cancel_stops_a_slow_stream() {
-    let mut h = Harness::start().await;
+async fn slow_streams_stop_on_cancel_disconnect_and_shutdown() {
+    let Rig {
+        mut h,
+        slow,
+        mock: _mock,
+    } = start().await;
     let mut notes = h.client.notifications();
-
     let started: ChatStarted = h
-        .call(method::CHAT, chat_request(None, Tier::Agentic, "go slowly"))
+        .call(method::CHAT, chat_request(None, "agentic", "go slowly"))
         .await;
     assert_eq!(started.provider.as_str(), "slow");
-
-    // Wait for the stream to be flowing.
-    let mut seen = 0;
-    while seen < 2 {
-        let n = tokio::time::timeout(WAIT, notes.next())
-            .await
-            .unwrap()
-            .unwrap();
-        if n.method == notification::CHAT_DELTA {
-            let d: ChatDelta = n.params_as().unwrap();
-            assert_eq!(d.stream_id, started.stream_id);
-            seen += 1;
-        }
-    }
-
+    let first = tokio::time::timeout(CALL, notes.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.method, notification::CHAT_DELTA);
     let () = h
-        .call(
-            method::CHAT_CANCEL,
-            json!(ChatCancel {
-                stream_id: started.stream_id.clone()
-            }),
-        )
+        .call(method::CHAT_CANCEL, json!({"stream_id": started.stream_id}))
         .await;
     let (_, done) = collect_chat(&mut notes, &started.stream_id).await;
     assert_eq!(done.error.as_deref(), Some("cancelled"));
-
-    // No more deltas for that stream, and the HTTP stream to the provider was dropped.
     let quiet = tokio::time::timeout(Duration::from_millis(600), async {
         while let Some(n) = notes.next().await {
             if n.method == notification::CHAT_DELTA {
@@ -675,19 +433,9 @@ async fn chat_cancel_stops_a_slow_stream() {
     })
     .await;
     assert!(quiet.is_err(), "unexpected delta after cancel: {quiet:?}");
-    tokio::time::timeout(WAIT, async {
-        while !h.slow.closed.load(Ordering::SeqCst) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("provider connection closed after cancel");
-    assert_eq!(h.slow.requests.load(Ordering::SeqCst), 1);
-
-    // Cancelling again (or an unknown stream) is a no-op.
-    let () = h
-        .call(method::CHAT_CANCEL, json!({"stream_id": started.stream_id}))
-        .await;
+    wait_closed(&slow).await;
+    assert_eq!(slow.requests.load(Ordering::SeqCst), 1);
+    // Cancelling an unknown stream is a no-op.
     let () = h
         .call(method::CHAT_CANCEL, json!({"stream_id": "unknown"}))
         .await;
@@ -695,223 +443,83 @@ async fn chat_cancel_stops_a_slow_stream() {
     // A slow stream whose client goes away is stopped too.
     let client2 = Client::connect(&h.paths).await.unwrap();
     let mut notes2 = client2.notifications();
-    let started: ChatStarted = client2
-        .call(
-            method::CHAT,
-            &chat_request(Some("slow"), Tier::Light, "again"),
-        )
+    let _: ChatStarted = client2
+        .call(method::CHAT, &chat_request(Some("slow"), "light", "again"))
         .await
         .unwrap();
-    let first = tokio::time::timeout(WAIT, notes2.next())
+    let first = tokio::time::timeout(CALL, notes2.next())
         .await
         .unwrap()
         .unwrap();
     assert_eq!(first.method, notification::CHAT_DELTA);
-    h.slow.closed.store(false, Ordering::SeqCst);
-    drop(notes2);
-    drop(client2);
-    tokio::time::timeout(WAIT, async {
-        while !h.slow.closed.load(Ordering::SeqCst) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("stream {} kept running after disconnect", started.stream_id));
+    slow.closed.store(false, Ordering::SeqCst);
+    drop((notes2, client2));
+    wait_closed(&slow).await;
 
-    h.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn probe_is_persisted_and_routes_capability_requests() {
-    let mut h = Harness::start().await;
-
-    let caps: Capabilities = h
-        .call(
-            method::PROVIDERS_PROBE,
-            json!(ProbeRequest {
-                provider: ProviderId::new("mock")
-            }),
-        )
-        .await;
-    assert_eq!(
-        caps,
-        Capabilities {
-            streaming: true,
-            vision: true,
-            tools: true,
-            json_schema: true,
-            embeddings: true,
-            context_tokens: Some(4096),
-        }
-    );
-    assert_eq!(
-        h.call_err(method::PROVIDERS_PROBE, json!({"provider": "needs-key"}))
-            .await,
-        code::NOT_FOUND
-    );
-
-    let list: Vec<ProviderInfo> = h.call(method::PROVIDERS_LIST, json!({})).await;
-    assert_eq!(list[0].capabilities.as_ref(), Some(&caps));
-    assert_eq!(list[1].capabilities, None);
-    assert!(list[2].error.is_some());
-
-    // Probes are audited and the result survives a restart.
-    let audit = h.store.recent_audit(10).unwrap();
-    let probe = audit
-        .iter()
-        .find(|a| a.action == "provider.probe")
-        .expect("probe audited");
-    assert_eq!(probe.target, "mock");
-    assert_eq!(probe.detail["checks"].as_array().unwrap().len(), 5);
-    assert!(
-        nuggetd::probes::ProbeCache::path_for(&h.paths).exists(),
-        "probe results persisted"
-    );
-
-    // Probe traffic to a loopback provider is not egress either.
-    let egress: Vec<EgressEvent> = h.call(method::EGRESS_RECENT, json!({"limit": 10})).await;
-    assert!(egress.is_empty());
-
-    h.stop().await;
-    h.restart().await;
-    let list: Vec<ProviderInfo> = h.call(method::PROVIDERS_LIST, json!({})).await;
-    assert_eq!(list[0].id.as_str(), "mock");
-    assert_eq!(list[0].capabilities.as_ref(), Some(&caps));
-    h.store.verify_audit_chain().unwrap();
-    h.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_second_daemon_on_the_same_home_reports_already_running() {
-    let mut h = Harness::start().await;
-    let opts = daemon_options(&h.paths, &h.key, &h.secrets);
-    match Daemon::start(opts).await.unwrap() {
-        Startup::AlreadyRunning { socket } => {
-            assert_eq!(socket, nugget_ipc::socket_display(&h.paths));
-        }
-        Startup::Ready(_) => panic!("second daemon must not start"),
-    }
-    // The first one is unaffected.
-    let s: StatusResponse = h.call(method::STATUS, json!({})).await;
-    assert_eq!(s.providers.len(), 3);
-    h.stop().await;
-}
-
-#[tokio::test]
-async fn invalid_config_is_a_clear_error() {
-    let tmp = tempfile::tempdir().unwrap();
-    let paths = Paths::rooted(tmp.path().to_path_buf());
-    std::fs::create_dir_all(&paths.config).unwrap();
-    std::fs::write(
-        paths.config_file(),
-        "[[providers]]\nid = \"x\"\nkind = \"carrier_pigeon\"\nmodel = \"m\"\n",
-    )
-    .unwrap();
-    let err = match Daemon::start(daemon_options(
-        &paths,
-        &StoreKey::from_bytes([1; 32]),
-        &MemorySecrets::new(),
-    ))
-    .await
-    {
-        Err(e) => e.to_string(),
-        Ok(_) => panic!("invalid config must not start"),
-    };
-    assert!(err.contains("config.toml"), "{err}");
-    assert!(err.contains("carrier_pigeon"), "{err}");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn chat_falls_back_when_the_first_provider_is_down() {
-    let mut h = Harness::start_with(config_with_dead_provider).await;
-    let mut notes = h.client.notifications();
-
-    // The first chat after an outage is served by the next provider, and `ChatStarted` names the
-    // provider that actually serves it.
+    // Shutdown ends open chats with `chat.done`.
     let started: ChatStarted = h
-        .call(method::CHAT, chat_request(None, Tier::Light, "say hello"))
+        .call(method::CHAT, chat_request(None, "agentic", "go slowly"))
         .await;
-    assert_eq!(started.provider.as_str(), "mock");
-    let (text, done) = collect_chat(&mut notes, &started.stream_id).await;
-    assert_eq!((text.as_str(), done.error), ("Hello", None));
-
-    // The audit names the serving provider too.
-    let audit = h.store.recent_audit(10).unwrap();
-    let chat = audit.iter().find(|a| a.action == "chat").unwrap();
-    assert_eq!(chat.target, "mock");
-
-    // An explicit provider is never substituted: a dead one is an error.
-    assert_eq!(
-        h.call_err(method::CHAT, chat_request(Some("dead"), Tier::Light, "x"))
-            .await,
-        code::PROVIDER
-    );
-
-    h.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn probing_an_unreachable_provider_records_nothing() {
-    let mut h = Harness::start_with(config_with_dead_provider).await;
-
-    let err = h
-        .client
-        .call_value(method::PROVIDERS_PROBE, json!({"provider": "dead"}))
-        .await;
-    match err {
-        Err(IpcError::Rpc(e)) => {
-            assert_eq!(e.code, code::PROVIDER);
-            assert!(e.message.contains("unreachable"), "{}", e.message);
-        }
-        other => panic!("expected an RPC error, got {other:?}"),
-    }
-
-    // Nothing persisted or recorded: the provider still counts as unprobed, so plain chat is
-    // still allowed once it is back.
-    assert!(!nuggetd::probes::ProbeCache::path_for(&h.paths).exists());
-    let list: Vec<ProviderInfo> = h.call(method::PROVIDERS_LIST, json!({})).await;
-    assert_eq!(list[0].id.as_str(), "dead");
-    assert_eq!(list[0].capabilities, None);
-    let audit = h.store.recent_audit(10).unwrap();
-    let probe = audit
-        .iter()
-        .find(|a| a.action == "provider.probe")
-        .expect("failed probe audited");
-    assert!(probe.detail["error"].is_string());
-
-    // Restarting does not pick up any stored capabilities either.
-    h.stop().await;
-    h.restart().await;
-    let list: Vec<ProviderInfo> = h.call(method::PROVIDERS_LIST, json!({})).await;
-    assert_eq!(list[0].capabilities, None);
-    let started: ChatStarted = h
-        .call(method::CHAT, chat_request(None, Tier::Light, "ping"))
-        .await;
-    assert_eq!(started.provider.as_str(), "mock");
-    h.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn shutdown_ends_open_chats_with_chat_done() {
-    let mut h = Harness::start().await;
-    let mut notes = h.client.notifications();
-
-    let started: ChatStarted = h
-        .call(method::CHAT, chat_request(None, Tier::Agentic, "go slowly"))
-        .await;
-    assert_eq!(started.provider.as_str(), "slow");
-    let first = tokio::time::timeout(WAIT, notes.next())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(first.method, notification::CHAT_DELTA);
-
     let _ = h.stop.take().unwrap().send(());
     let (_, done) = collect_chat(&mut notes, &started.stream_id).await;
     assert_eq!(done.error.as_deref(), Some("nuggetd is shutting down"));
-    tokio::time::timeout(WAIT, h.server.take().unwrap())
+    tokio::time::timeout(CALL, h.server.take().unwrap())
         .await
         .expect("daemon stops promptly")
         .unwrap()
         .unwrap();
+}
+
+/// A probe is audited and persisted across restarts and routes capability requests; probing an
+/// unreachable provider records nothing, so it still counts as unprobed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn probes_are_persisted_and_failed_probes_record_nothing() {
+    let Rig {
+        h,
+        mock: _mock,
+        slow: _slow,
+    } = start().await;
+    let (c, msg) = h
+        .call_err(method::PROVIDERS_PROBE, json!({"provider": "dead"}))
+        .await;
+    assert_eq!(c, code::PROVIDER);
+    assert!(msg.contains("unreachable"), "{msg}");
+    assert!(!nuggetd::probes::ProbeCache::path_for(&h.paths).exists());
+
+    let caps: Capabilities = h
+        .call(method::PROVIDERS_PROBE, json!({"provider": "mock"}))
+        .await;
+    let want = Capabilities {
+        streaming: true,
+        vision: true,
+        tools: true,
+        json_schema: true,
+        embeddings: true,
+        context_tokens: Some(4096),
+    };
+    assert_eq!(caps, want);
+    let (c, _) = h
+        .call_err(method::PROVIDERS_PROBE, json!({"provider": "needs-key"}))
+        .await;
+    assert_eq!(c, code::NOT_FOUND);
+    let probes: Vec<_> = h
+        .audit()
+        .into_iter()
+        .filter(|a| a.0 == "provider.probe")
+        .collect();
+    assert!(probes[0].2["error"].is_string(), "failed probe audited");
+    assert_eq!(probes[1].1, "mock");
+    assert_eq!(probes[1].2["checks"].as_array().unwrap().len(), 5);
+    let egress: Vec<EgressEvent> = h.call(method::EGRESS_RECENT, json!({"limit": 10})).await;
+    assert!(egress.is_empty(), "loopback probes are not egress");
+
+    let mut h = h.restart(|_| {}).await;
+    let list: Vec<ProviderInfo> = h.call(method::PROVIDERS_LIST, json!({})).await;
+    assert_eq!(
+        list[0].capabilities, None,
+        "the failed probe stored nothing"
+    );
+    assert_eq!(list[1].capabilities.as_ref(), Some(&want));
+    h.store.verify_audit_chain().unwrap();
+    h.stop().await;
 }

@@ -5,7 +5,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::capability::{Capabilities, Locality, Tier};
-use crate::egress::EgressEvent;
 use crate::ids::{EntityId, ItemRef, ProviderId, SourceId};
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -13,61 +12,15 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// Socket name; `nugget-ipc` maps it to a platform path/pipe name.
 pub const SOCKET_NAME: &str = "nuggetd.sock";
 
-/// Request → response types, by method:
-///
-/// | method | params | result |
-/// |---|---|---|
-/// | `status` | `{}` | [`StatusResponse`] |
-/// | `daemon.shutdown` | [`DaemonShutdownRequest`] | [`DaemonShutdownResponse`], then the daemon winds down and exits |
-/// | `chat` | [`ChatRequest`] | [`ChatStarted`], then `chat.delta`/`chat.done` notifications |
-/// | `chat.cancel` | [`ChatCancel`] | `null` |
-/// | `search` | [`SearchRequest`] | `Vec<`[`SearchHit`]`>` |
-/// | `search.page` | [`SearchPageRequest`] | [`Page`]`<`[`SearchHit`]`>` |
-/// | `providers.list` | `{}` | `Vec<`[`ProviderInfo`]`>` |
-/// | `providers.probe` | [`ProbeRequest`] | [`Capabilities`] |
-/// | `models.list` | `{}` | `Vec<`[`ModelInfo`]`>` |
-/// | `models.install` | [`ModelInstallRequest`] | `null`, then `models.progress` notifications |
-/// | `models.cancel` | [`ModelCancelRequest`] | [`ModelCancelResponse`] (the install's connection gets a final `failed` progress with reason `cancelled`) |
-/// | `egress.recent` | [`EgressRecentRequest`] | [`EgressRecentResponse`] |
-/// | `egress.page` | [`EgressPageRequest`] | [`Page`]`<`[`EgressEvent`]`>` |
-/// | `egress.record` | [`EgressRecordRequest`] | `null` |
-/// | `sources.list` | `{}` | `Vec<`[`SourceInfo`]`>` |
-/// | `sources.add` | [`SourceSpec`] | [`SourceInfo`] |
-/// | `sources.update` | [`SourceUpdate`] | [`SourceInfo`] |
-/// | `sources.remove` | [`SourceRemove`] | `null` |
-/// | `sources.sync` | [`SourceSync`] | `null` (progress via `ingest.progress`) |
-/// | `sources.auth.begin` | [`SourceRef`] | [`AuthBegin`] (completion via `sources.changed`) |
-/// | `sources.secret.set` | [`SourceSecret`] | `null` |
-/// | `ingest.status` | `{}` | [`IngestStatus`] |
-/// | `retrieve.context` | [`ContextRequest`] | [`ContextResponse`] |
-/// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications (and `ask.restarted` ([`AskRestarted`]) before them when the stream falls back to another provider) |
-/// | `runtime.status` | `{}` | `Vec<`[`RuntimeInfo`]`>` |
-/// | `runtime.retry` | [`RuntimeRetryRequest`] | `{started: bool}` (served by the `runtime_retry` feature) |
-/// | `knowledge.entities` | [`EntitiesRequest`] | `Vec<`[`EntitySummaryView`]`>` |
-/// | `knowledge.entity` | [`EntityRef`] | [`EntityDetail`] |
-/// | `knowledge.graph` | [`GraphRequest`] | [`GraphViewIpc`] |
-/// | `knowledge.merge` | [`MergeRequest`] | `null` |
-/// | `knowledge.claim.status` | [`ClaimStatusRequest`] | `null` |
-/// | `knowledge.split` | [`SplitRequest`] | [`EntityRef`] (the new entity) |
-/// | `knowledge.status` | `{}` | [`KnowledgeStatus`] |
-/// | `mcp.clients.list` | `{}` | `Vec<`[`McpClientInfo`]`>` |
-/// | `mcp.clients.create` | [`McpClientCreate`] | [`McpClientCreated`] (token shown once) |
-/// | `mcp.clients.revoke` | [`McpClientRef`] | `null` |
-/// | `draft.begin` | [`DraftRequest`] | [`DraftStarted`], then `chat.delta`/`chat.done` notifications |
-/// | `draft.cancel` | [`ChatCancel`] | `null` |
-/// | `draft.feedback` | [`DraftFeedback`] | `null` |
-/// | `voice.status` | `{}` | [`VoiceStatus`] |
+/// Request methods. Params and results per method: docs/book/src/reference/ipc.md.
 pub mod method {
     pub const STATUS: &str = "status";
-    /// Stop the daemon cleanly, as SIGTERM would (ingest, the local model servers, then the
-    /// store), after answering. Sent by the desktop app when it quits or replaces a daemon of
-    /// another version. Like every method it is served on the local IPC socket only, which only
-    /// the same OS user can open; no MCP, HTTP or browser-extension surface forwards it.
+    /// Stop the daemon cleanly, as SIGTERM would. Local IPC socket only: no MCP, HTTP or
+    /// browser-extension surface forwards it.
     pub const DAEMON_SHUTDOWN: &str = "daemon.shutdown";
     pub const CHAT: &str = "chat";
     pub const CHAT_CANCEL: &str = "chat.cancel";
     pub const SEARCH: &str = "search";
-    /// LL1: `search` a page at a time ([`super::SearchPageRequest`] → [`super::Page`]).
     pub const SEARCH_PAGE: &str = "search.page";
     pub const PROVIDERS_LIST: &str = "providers.list";
     pub const PROVIDERS_PROBE: &str = "providers.probe";
@@ -76,8 +29,6 @@ pub mod method {
     /// Stop a running `models.install`; staged bytes are kept and the next install resumes.
     pub const MODELS_CANCEL: &str = "models.cancel";
     pub const EGRESS_RECENT: &str = "egress.recent";
-    /// LL1: the ledger a page at a time, newest first ([`super::EgressPageRequest`] →
-    /// [`super::Page`]).
     pub const EGRESS_PAGE: &str = "egress.page";
     /// A request the desktop app made itself (update checks), for the daemon's ledger.
     pub const EGRESS_RECORD: &str = "egress.record";
@@ -105,14 +56,13 @@ pub mod method {
     pub const DRAFT_BEGIN: &str = "draft.begin";
     pub const DRAFT_CANCEL: &str = "draft.cancel";
     pub const DRAFT_FEEDBACK: &str = "draft.feedback";
-    /// II3: whether a text holds something sensitive (the ingest PII scan: cards, IBANs, SSNs,
-    /// credentials). The desktop asks before keeping a draft in its history.
+    /// Whether a text holds something sensitive (the ingest PII scan), before the desktop
+    /// keeps a draft in its history.
     pub const DRAFT_CHECK_SENSITIVE: &str = "draft.check_sensitive";
     /// Sent when the trigger fires, before `draft.begin`: warm the provider, retrieval and voice.
     pub const DRAFT_PREWARM: &str = "draft.prewarm";
-    /// Sent while a reply field keeps focus (Double Tap read-ahead, local providers only):
-    /// prefill the coming draft's whole prompt into the local server's cache, generating
-    /// nothing. Params: `DraftRequest`; result `{ "started": bool, "skipped": reason? }`.
+    /// Prefill the coming draft's prompt into the local server's cache while a reply field
+    /// keeps focus. Params: `DraftRequest`; result `{ "started": bool, "skipped": reason? }`.
     pub const DRAFT_READ_AHEAD: &str = "draft.read_ahead";
     /// Cancel a read-ahead in progress (the field lost focus). Result `{ "cancelled": bool }`.
     pub const DRAFT_READ_AHEAD_CANCEL: &str = "draft.read_ahead_cancel";
@@ -125,9 +75,7 @@ pub mod notification {
     pub const MODELS_PROGRESS: &str = "models.progress";
     pub const INGEST_PROGRESS: &str = "ingest.progress";
     pub const SOURCES_CHANGED: &str = "sources.changed";
-    /// [`KnowledgeChanged`].
     pub const KNOWLEDGE_CHANGED: &str = "knowledge.changed";
-    /// [`AskRestarted`]: a `retrieve.ask` stream moved on to another provider (EE3).
     pub const ASK_RESTARTED: &str = "ask.restarted";
 }
 
@@ -144,28 +92,22 @@ pub struct StatusResponse {
     /// Result of verifying the audit hash chain at startup. `None` if not checked.
     #[serde(default)]
     pub audit_chain_ok: Option<bool>,
-    /// Free space on the disk that holds the data directory. `None` from older daemons, or when
-    /// it is not known (an in-memory store).
+    /// Free space on the data disk; `None` when unknown.
     #[serde(default)]
     pub disk: Option<DiskStatus>,
-    /// The daemon's process id (absent from daemons before GG6-10).
+    /// The daemon's process id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
-    /// The service manager running this daemon, when it can tell: [`SERVICE_SYSTEMD`] or
-    /// [`SERVICE_LAUNCHD`]. Absent: started by an app, by hand, or by the Windows task (which
-    /// it cannot tell apart).
+    /// [`SERVICE_SYSTEMD`] or [`SERVICE_LAUNCHD`] when a service manager runs this daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
 }
 
-/// [`StatusResponse::service`]: the systemd user unit runs this daemon.
 pub const SERVICE_SYSTEMD: &str = "systemd";
-/// [`StatusResponse::service`]: the launchd LaunchAgent runs this daemon.
 pub const SERVICE_LAUNCHD: &str = "launchd";
 
 // ---- daemon.shutdown ----
 
-/// `daemon.shutdown` params.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DaemonShutdownRequest {
@@ -173,23 +115,17 @@ pub struct DaemonShutdownRequest {
     pub reason: Option<String>,
 }
 
-/// `daemon.shutdown` result, sent before the daemon starts winding down.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonShutdownResponse {
     pub stopping: bool,
-    /// The process that is stopping, so the caller can wait for it to exit.
     pub pid: u32,
 }
 
-/// Below this many free bytes the data disk counts as full ([`DiskLevel::Full`]): 200 MiB.
 pub const DISK_FULL_BYTES: u64 = 200 * 1024 * 1024;
-/// Below this many free bytes the data disk counts as low ([`DiskLevel::Low`]): 1 GiB.
 pub const DISK_LOW_BYTES: u64 = 1024 * 1024 * 1024;
 
-/// `status.disk`: free space on the disk that holds Nugget's data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskStatus {
-    /// Bytes available on that disk; `None` when they could not be read.
     #[serde(default)]
     pub free_bytes: Option<u64>,
     pub level: DiskLevel,
@@ -198,16 +134,12 @@ pub struct DiskStatus {
     pub recent_full_error: bool,
 }
 
-/// How much room is left on the data disk.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiskLevel {
     #[default]
     Ok,
-    /// Under [`DISK_LOW_BYTES`] free.
     Low,
-    /// Under [`DISK_FULL_BYTES`] free, or a write just failed for lack of space while under
-    /// [`DISK_LOW_BYTES`]: indexing and other writes are failing or about to.
     Full,
     /// A level this build does not know (a newer daemon): show nothing.
     #[serde(other)]
@@ -215,7 +147,7 @@ pub enum DiskLevel {
 }
 
 impl DiskStatus {
-    /// Classify `free_bytes` (unknown counts as `Ok` unless a write failed for lack of space).
+    /// Unknown free space counts as `Ok` unless a write failed for lack of space.
     pub fn classify(free_bytes: Option<u64>, recent_full_error: bool) -> Self {
         let level = match free_bytes {
             Some(f) if f < DISK_FULL_BYTES => DiskLevel::Full,
@@ -241,11 +173,8 @@ pub struct ProviderInfo {
     pub kind: String,
     pub model: String,
     pub locality: Locality,
-    /// Tiers this provider is assigned to in config.
     pub tiers: Vec<Tier>,
-    /// `None` until a probe has run.
     pub capabilities: Option<Capabilities>,
-    /// Why this provider is unavailable (e.g. it failed to build from config), if it is.
     #[serde(default)]
     pub error: Option<String>,
 }
@@ -277,8 +206,7 @@ pub struct ChatRequest {
     pub provider: Option<ProviderId>,
     pub tier: Tier,
     pub messages: Vec<ChatMessage>,
-    /// Items whose content the messages include (for example passages pasted from
-    /// `retrieve.context`). Recorded in the egress ledger when the request leaves the device.
+    /// Items whose content the messages include; recorded in the egress ledger.
     #[serde(default)]
     pub items: Vec<ItemRef>,
 }
@@ -302,8 +230,7 @@ pub struct ChatDone {
     pub error: Option<String>,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
-    /// What the daemon's post-check found in a sourced `retrieve.ask` answer; absent on plain
-    /// chats, general answers and failed streams.
+    /// Post-check of a sourced `retrieve.ask` answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<AnswerCheck>,
 }
@@ -370,16 +297,12 @@ pub struct SearchHit {
     pub url: Option<String>,
 }
 
-/// `search.page`: one page of a `search` ranking. Without `cursor`, the first `limit` hits;
-/// with the `next_cursor` of the previous page (same `query`), the next ones. Every page ranks
-/// the query to the same fixed depth (500 hits, where paging stops) and returns its slice; items
-/// indexed between two pages can still shift the ranking, so clients merge pages by item and
-/// chunk.
+/// `search.page`: every page ranks to the same depth (500 hits); items indexed between pages can
+/// shift the ranking, so clients merge pages by item and chunk.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchPageRequest {
     pub query: String,
     pub limit: u32,
-    /// Opaque; only a `next_cursor` the daemon returned for this same query is accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
 }
@@ -420,22 +343,17 @@ pub struct ModelInstallRequest {
     pub id: String,
 }
 
-/// Params of `models.cancel`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelCancelRequest {
     pub id: String,
 }
 
-/// Result of `models.cancel`. Idempotent: `cancelled` is `false` if no install of `id` was
-/// running.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelCancelResponse {
     pub cancelled: bool,
 }
 
-/// One `models.progress` notification. In `failed`, `downloaded` is the number of bytes staged
-/// (kept, so the next install resumes), `error` a short plain-language message, and `reason` /
-/// `http_status` say why in machine-readable form (clients localise by `reason`).
+/// `models.progress`. In `failed`, `downloaded` counts the staged bytes (kept for resuming).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelProgress {
     pub id: String,
@@ -491,35 +409,21 @@ pub struct EgressRecentRequest {
     pub limit: u32,
 }
 
-pub type EgressRecentResponse = Vec<EgressEvent>;
-
-/// `egress.page`: ledger rows newest first, `limit` at a time. Without `cursor`, the newest;
-/// with the previous page's `next_cursor`, the rows recorded before that page's last one. Rows
-/// recorded while paging never shift later pages (they are newer than every cursor), so no row is
-/// skipped or listed twice.
+/// `egress.page`: ledger rows newest first; rows recorded while paging never shift later pages.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EgressPageRequest {
     pub limit: u32,
-    /// Opaque; only a `next_cursor` the daemon returned is accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
 }
 
-/// Ledger features a client may record with `egress.record`: requests the desktop app makes
-/// itself, outside the daemon's network layer. Anything else is refused.
-pub const CLIENT_EGRESS_FEATURES: &[&str] = &[
-    // The updater's channel feed and its signature.
-    "update_check",
-    // An update package.
-    "update_download",
-];
+/// The only ledger features a client may record with `egress.record` (the desktop updater).
+pub const CLIENT_EGRESS_FEATURES: &[&str] = &["update_check", "update_download"];
 
-/// `egress.record`: one request a client made off the device, written to the ledger as is
-/// (no items: these requests carry none of the user's content).
+/// `egress.record`: one request a client made off the device (carrying no user content).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EgressRecordRequest {
-    /// When the request started; the daemon's clock when absent. Rows queued while the daemon
-    /// was not running carry the time they were made.
+    /// When the request started; the daemon's clock when absent.
     #[serde(default, with = "time::serde::rfc3339::option")]
     pub at: Option<time::OffsetDateTime>,
     /// Destination host (`host` or `host:port`).
@@ -534,7 +438,6 @@ pub struct EgressRecordRequest {
 
 // ---- sources ----
 
-/// Connector kinds shipped in M1: `files`, `obsidian`, `gmail`, `gcal`, `imap`, `caldav`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceSpec {
     /// Chosen by the daemon when `None` (e.g. `files-1`).
@@ -581,20 +484,15 @@ pub struct SourceInfo {
     /// Same shape as [`SourceSpec::settings`]; never contains secrets.
     #[serde(default)]
     pub settings: serde_json::Value,
-    /// Plain-language sync health: what is wrong (if anything) and how to fix it. Filled by the
-    /// daemon from `state`, `last_error` and recent item errors; absent from older daemons.
+    /// Plain-language sync health: what is wrong and how to fix it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<SourceHealth>,
-    /// What the last whole-folder scan found and skipped (files sources); absent until a
-    /// connector reports one, after the settings change or the source is turned on or off, and
-    /// from older daemons. Live (watcher) changes do not refresh it, so `found == 0` is only
-    /// meaningful while `items == 0`.
+    /// What the last whole-folder scan found and skipped (files sources). Watcher changes do
+    /// not refresh it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan: Option<ScanReport>,
 }
 
-/// What a source's scan pass found and what it skipped, so "nothing indexed" can be told apart
-/// from "still working" and explained.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScanReport {
     /// The walk of this pass ended (false while it runs).
@@ -603,8 +501,7 @@ pub struct ScanReport {
     /// Files that will be (or already are) indexed this pass.
     #[serde(default)]
     pub found: u64,
-    /// Changes (new or changed files, plus deletions) this pass sends for indexing; files
-    /// already indexed and unchanged are not counted. The progress total of the pass.
+    /// New, changed or deleted files this pass sends for indexing (its progress total).
     #[serde(default)]
     pub to_index: u64,
     /// Files skipped because their type is not indexed.
@@ -698,15 +595,12 @@ pub struct SourceSync {
     pub id: Option<SourceId>,
 }
 
-/// Start of an interactive authorization: the client opens `url` in the user's browser; the
-/// daemon listens on a loopback redirect (or polls, for a device flow) and emits
-/// `sources.changed` when done. For an RFC 8628 device flow `user_code` is set and the client
-/// shows it so the user can type it on the verification page.
+/// Start of an interactive authorization: the client opens `url`; completion arrives as
+/// `sources.changed`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthBegin {
     pub url: String,
-    /// The code the user enters on the verification page (device flows only); absent for
-    /// redirect flows.
+    /// RFC 8628 device flows only: the code the user types on the verification page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_code: Option<String>,
 }
@@ -765,8 +659,7 @@ pub struct IngestStatus {
     #[serde(default)]
     pub triage_provider: Option<ProviderId>,
     pub sources: Vec<SourceInfo>,
-    /// Background triage progress. Items are searchable as soon as they are indexed; triage
-    /// (junk / sensitive labels) runs afterwards at low priority. Absent from older daemons.
+    /// Background triage progress (items are searchable before triage).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triage: Option<TriageProgress>,
 }
@@ -798,8 +691,7 @@ pub struct TriageProgress {
     /// Items labelled by rule without a model call (e.g. PII already found).
     #[serde(default)]
     pub skipped: u64,
-    /// Items whose triage failed and is not being retried right now (they stay searchable and
-    /// count as sensitive; they are retried with backoff, up to `triage_max_failures`).
+    /// Items whose triage failed; they count as sensitive and are retried with backoff.
     #[serde(default)]
     pub failed: u64,
 }
@@ -840,9 +732,8 @@ pub struct ContextResponse {
     pub excluded_sensitive: u32,
 }
 
-/// Answer a question from retrieved context (`retrieve.ask`). The daemon picks the provider
-/// first, then packs the context for it: sensitive items are left out when the provider is a
-/// `Cloud` one, and the cited items are recorded in the egress ledger.
+/// `retrieve.ask`: sensitive items are left out of the context for a `Cloud` provider, and the
+/// cited items are recorded in the egress ledger.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AskRequest {
     pub query: String,
@@ -853,13 +744,10 @@ pub struct AskRequest {
     pub provider: Option<ProviderId>,
     #[serde(default = "default_ask_tier")]
     pub tier: Tier,
-    /// Earlier turns of the conversation, oldest first, for a follow-up question: the query
-    /// is rewritten into a standalone one for retrieval (by a local model only) and the turns
-    /// are forwarded to the answering model. Untrusted text: `System` entries are ignored.
+    /// Earlier turns, oldest first. Untrusted: `System` entries are ignored.
     #[serde(default)]
     pub history: Vec<ChatMessage>,
-    /// The client's current UTC offset, in minutes (clamped to ±18 hours): the daemon dates
-    /// "today" in the answer prompt with it. Without it, the daemon's configured offset.
+    /// The client's UTC offset in minutes (clamped to ±18 h), for "today" in the prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub utc_offset_minutes: Option<i32>,
 }
@@ -868,12 +756,8 @@ fn default_ask_tier() -> Tier {
     Tier::Synthesis
 }
 
-/// Result of `retrieve.ask`: the stream (as for `chat`) plus the context it was given.
-///
-/// Returned as soon as the context for the first provider tried is packed, before that
-/// provider answers (EE3): a provider failure then ends the stream with `chat.done { error }`,
-/// or, routing by tier, moves it on to the next provider with an `ask.restarted`
-/// ([`AskRestarted`]) notification.
+/// Result of `retrieve.ask`, sent before the provider answers; a later fallback to another
+/// provider is announced with [`AskRestarted`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AskStarted {
     pub stream_id: String,
@@ -887,16 +771,13 @@ pub struct AskStarted {
     /// The standalone query actually searched, when the follow-up was rewritten.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_rewrite: Option<String>,
-    /// Nothing relevant was found in the sources, so the model answers as an ordinary chat
-    /// (no passages, no citations). Clients should say so on the reply.
+    /// Nothing relevant was found: the model answers as an ordinary chat.
     #[serde(default)]
     pub general: bool,
-    /// The date phrase found in the question and how it shaped the search ("Searched items from
-    /// 26 Oct to 1 Nov"). Absent when the question named no date, and from older daemons.
+    /// The date phrase found in the question and how it shaped the search.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub date: Option<AskDateFilter>,
-    /// Citation numbers (`Citation::n`) of passages that are at best a near miss: the item
-    /// lacks one of the question's rare key terms. Clients label them "partial match".
+    /// Citation numbers of near-miss passages (missing a rare key term of the question).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub partial: Vec<u32>,
 }
@@ -909,27 +790,19 @@ pub struct AskDateFilter {
     /// Start of the range (inclusive), at the offset the phrase was read with.
     #[serde(with = "time::serde::rfc3339")]
     pub start: time::OffsetDateTime,
-    /// End of the range (exclusive): a range of whole days ends at the midnight after its last
-    /// day.
+    /// End of the range (exclusive).
     #[serde(with = "time::serde::rfc3339")]
     pub end: time::OffsetDateTime,
-    /// `true`: only items dated in the range were searched. `false`: nothing in the range
-    /// matched, so the whole question was searched without the date (the sources are not from
-    /// that period).
+    /// `false`: nothing in the range matched, so the search ran without the date.
     pub applied: bool,
-    /// The question was generic ("summarise last week"), so the sources are the period's items
-    /// by date rather than search matches.
+    /// A generic question: the sources are the period's items by date.
     #[serde(default)]
     pub listed: bool,
 }
 
-/// `ask.restarted` notification: the provider [`AskStarted`] named could not answer and the
-/// `retrieve.ask` stream `stream_id` moved on to `provider` (routing by tier only; an explicit
-/// provider is never substituted). The context is the one packed for that provider's locality,
-/// so `citations`, `excluded_sensitive` and `general` replace the earlier ones: the answer's
-/// `[n]` markers refer to these. Sent before the new provider's request goes out, so before any
-/// `chat.delta` of it, at most once per provider tried; it can arrive before the
-/// `retrieve.ask` reply. The searched query (`AskStarted::query_rewrite`) is unchanged.
+/// `ask.restarted`: the stream moved on to `provider` (tier routing only). The context was
+/// repacked for its locality, so these fields replace [`AskStarted`]'s. Sent before any of its
+/// `chat.delta`s, possibly before the `retrieve.ask` reply.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AskRestarted {
     pub stream_id: String,
@@ -940,10 +813,8 @@ pub struct AskRestarted {
     pub excluded_sensitive: u32,
     #[serde(default)]
     pub general: bool,
-    /// As [`AskStarted::date`], for this provider's context.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub date: Option<AskDateFilter>,
-    /// As [`AskStarted::partial`], for this provider's context.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub partial: Vec<u32>,
 }
@@ -955,12 +826,10 @@ pub struct AskRestarted {
 pub enum RuntimeRole {
     Chat,
     Embedding,
-    /// A cross-encoder reranker (`llama-server --reranking`), used by retrieval only: never
-    /// routed for a model tier.
+    /// Cross-encoder reranker, used by retrieval only.
     Rerank,
-    /// The small model local Double Tap drafts with, opt-in via `[draft.local] model`: its own
-    /// server, so drafting never waits behind (or evicts the prompt cache of) Chat. Never routed
-    /// for a model tier; only the draft feature calls it, by provider id (`local-draft`).
+    /// Local Double Tap draft model (`[draft.local] model`), in its own server so drafting
+    /// never waits behind Chat. Called by provider id only.
     Draft,
 }
 
@@ -972,8 +841,6 @@ pub enum RuntimeState {
     Stopped,
     Starting,
     Ready,
-    /// Asked to stop: no longer accepting requests, the server process is shutting down.
-    /// Becomes `Stopped` once it exited.
     Stopping,
     /// Crashed or failed health checks; restarting with backoff.
     Failed,
@@ -989,29 +856,24 @@ pub struct RuntimeInfo {
     /// What went wrong, as one short sentence for the user (`failed`).
     #[serde(default)]
     pub error: Option<String>,
-    /// Milliseconds spent in the current state; while `starting`, how long the model has been
-    /// warming up.
+    /// Milliseconds spent in the current state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_ms: Option<u64>,
-    /// While `starting`: how long loading the model is expected to take, in ms (the last load
-    /// on this machine, or an estimate from its size).
+    /// While `starting`: expected load time in ms.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_ms: Option<u64>,
-    /// While `failed`: ms until the next automatic restart (or until a request may start the
-    /// server again). Absent when nothing is scheduled.
+    /// While `failed`: ms until the next automatic restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_in_ms: Option<u64>,
     /// While `failed`: the supervisor gave up after repeated failures and waits for
     /// `runtime.retry`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gave_up: bool,
-    /// The last line the model server printed before it failed (technical detail for the log
-    /// view; never needed to understand `error`).
+    /// The server's last output line before it failed (for the log view).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
-/// `runtime.retry`: start a role's model server again after it failed or gave up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeRetryRequest {
     pub role: RuntimeRole,
@@ -1095,8 +957,7 @@ pub struct ClaimView {
     pub evidence: Vec<EvidenceView>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub updated_at: Option<time::OffsetDateTime>,
-    /// Sensitive-only: the claim has evidence and all of it is from sensitive items (missing
-    /// items count as sensitive). Such claims are not in the vault or default-scope MCP.
+    /// All evidence is from sensitive items: kept out of the vault and default-scope MCP.
     #[serde(default)]
     pub sensitive: bool,
 }
@@ -1127,9 +988,8 @@ pub struct EntityDetail {
     /// The entity's vault page, relative to the vault root.
     #[serde(default)]
     pub vault_path: Option<String>,
-    /// Sensitive-only: the entity has at least one active claim or mention, and all of them
-    /// come from sensitive items. It has no vault page and is left out of `knowledge.graph`
-    /// unless `include_sensitive` is set.
+    /// Every active claim and mention comes from sensitive items: no vault page, and hidden
+    /// from `knowledge.graph` unless `include_sensitive`.
     #[serde(default)]
     pub sensitive: bool,
 }
@@ -1143,12 +1003,10 @@ pub struct GraphRequest {
     pub limit: u32,
     #[serde(default)]
     pub kinds: Vec<String>,
-    /// Only nodes and edges supported by items of this source: an edge whose claim has evidence
-    /// from it, a node with a mention or an active claim backed by it (the centre always stays).
+    /// Only nodes and edges supported by items of this source (the centre always stays).
     #[serde(default)]
     pub source: Option<SourceId>,
-    /// Also show sensitive-only entities (see [`EntityDetail::sensitive`]) and claims. Off by
-    /// default: they and their edges are left out (the centre always stays, marked).
+    /// Also show sensitive-only entities and claims.
     #[serde(default)]
     pub include_sensitive: bool,
 }
@@ -1237,9 +1095,7 @@ pub struct KnowledgeStatus {
     pub entities: u64,
     pub claims: u64,
     pub mentions: u64,
-    /// Items changed but not yet processed by extraction: what is left of the current or
-    /// carried-over plan, items changed since that plan was made, and items waiting for the
-    /// model.
+    /// Items changed but not yet processed by extraction.
     pub pending_items: u64,
     /// An extraction run is in progress.
     #[serde(default)]
@@ -1324,9 +1180,6 @@ impl std::fmt::Debug for McpClientCreated {
 }
 
 // ---- Double Tap drafting (M3) ----
-//
-// The desktop app reads the focused field through the OS accessibility APIs (`nugget-a11y`),
-// sends a `DraftContext` to the daemon, streams the draft, inserts it and reports feedback.
 
 /// The application that owns the focused field.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1434,13 +1287,13 @@ pub struct DraftFeedback {
     pub insert_verified: Option<bool>,
 }
 
-/// `draft.check_sensitive` params (II3).
+/// `draft.check_sensitive` params.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SensitiveCheck {
     pub text: String,
 }
 
-/// `draft.check_sensitive` result (II3).
+/// `draft.check_sensitive` result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SensitiveVerdict {
     pub sensitive: bool,
@@ -1456,17 +1309,13 @@ pub struct VoiceStatus {
     pub last_built: Option<time::OffsetDateTime>,
 }
 
-// ---- Local runtime retry (KK1) ----
+// ---- Feature method names ----
 
-/// IPC method names of the `runtime_retry` feature (nuggetd `features/runtime_retry.rs`).
 pub mod runtime_retry_method {
     pub const RETRY: &str = "runtime.retry";
 }
 
-// ---- Search UI (II2) ----
-
-/// IPC method names of the search UI feature (`nuggetd` `features/search_ui`); their request and
-/// response types live in that feature module.
+/// Request and response types live in nuggetd's `features/search_ui`.
 pub mod search_ui_method {
     pub const FACETED: &str = "search.faceted";
     pub const TIMELINE: &str = "search.timeline";
@@ -1475,7 +1324,6 @@ pub mod search_ui_method {
 
 // ---- Plugins (M6) ----
 
-/// IPC method names of the plugins feature.
 pub mod plugin_method {
     pub const LIST: &str = "plugins.list";
     pub const INSPECT: &str = "plugins.inspect";
@@ -1570,9 +1418,8 @@ pub struct PluginInstallParams {
     pub path: String,
 }
 
-/// The verified package, staged under `token` (10 minutes) until `plugins.approve`. When
-/// `needs_approval` is false (an update within the approved capabilities) it was committed at
-/// once and `installed` is true.
+/// The verified package, staged under `token` (10 minutes) until `plugins.approve`, or
+/// committed at once (`installed`) when no approval is needed.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PluginInstallResult {
     pub token: String,
@@ -1616,9 +1463,8 @@ pub struct PluginEnableParams {
     pub enabled: bool,
 }
 
-/// One `.nuggetplugin` file found in a catalog directory (`plugins.catalog`). Verified as
-/// `plugins.install` would, but not installed. When `error` is set the package cannot be
-/// installed and only `path` and `file_name` are reliable.
+/// One `.nuggetplugin` in a catalog directory, verified but not installed. With `error` set
+/// only `path` and `file_name` are reliable.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PluginCatalogEntry {
     /// Absolute path to pass to `plugins.install`.
@@ -1671,28 +1517,8 @@ pub struct PluginCatalogResult {
 
 // ---- Agent (M4) ----
 //
-// The agent runtime (`nugget-agent`), the safety policy (`nugget-policy`) and the browser bridge
-// (`nugget-browser`), served by the daemon's `agent`, `policy` and `browser` features. Types
-// owned by those crates travel as JSON values (`serde_json::Value`); each field names the type
-// whose serialized form it carries.
-//
-// | Method | Params | Result |
-// |---|---|---|
-// | `agent.run` | [`AgentRunRequest`] | [`AgentStarted`], then `agent.event` notifications |
-// | `agent.cancel` | [`AgentTaskRef`] | `null` |
-// | `agent.confirm` | [`AgentConfirm`] | `null` |
-// | `agent.answer` | [`AgentAnswer`] | `null` (resumes a run waiting on `ask_user`) |
-// | `agent.list` | [`AgentListRequest`] | `Vec<`[`AgentTaskSummary`]`>`, newest first |
-// | `agent.get` | [`AgentTaskRef`] | [`AgentTaskDetail`] (with `explain`) |
-// | `policy.get` | `{}` | [`PolicyState`] |
-// | `policy.set` | [`PolicySet`] | [`PolicyState`] |
-// | `policy.approvals` | `{}` | [`PolicyApprovals`] |
-// | `policy.kill` | `{}` | [`KillState`] |
-// | `policy.resume` | `{}` | [`KillState`] |
-// | `policy.log.export` | `{}` | [`PolicyLogExport`] |
-// | `browser.status` | `{}` | [`BrowserStatus`] |
-// | `browser.host.attach` | `nugget_browser::bridge::AttachInfo` | `null` when detached; `browser.host.request` notifications meanwhile |
-// | `browser.host.deliver` | `nugget_browser::ExtensionMessage` | `null` |
+// Served by the daemon's `agent`, `policy` and `browser` features. Types owned by those crates
+// travel as JSON values; each field names the type whose serialized form it carries.
 
 pub mod agent_method {
     pub const AGENT_RUN: &str = "agent.run";
@@ -1715,9 +1541,9 @@ pub mod agent_method {
 }
 
 pub mod agent_notification {
-    /// [`AgentEventNotice`], broadcast to every connection.
+    /// [`super::AgentEventNotice`], broadcast to every connection.
     pub const AGENT_EVENT: &str = "agent.event";
-    /// [`KillState`], broadcast when the kill switch is engaged or released.
+    /// [`super::KillState`], broadcast when the kill switch is engaged or released.
     pub const POLICY_KILL_CHANGED: &str = "policy.kill.changed";
     /// Daemon → native host: a `nugget_browser::HostMessage` to forward to the extension.
     pub const BROWSER_HOST_REQUEST: &str = "browser.host.request";
@@ -1942,23 +1768,8 @@ pub struct BrowserStatus {
 
 // ---- Proactive (M5) ----
 //
-// The daemon refreshes cards after ingest and knowledge runs and on a schedule. The desktop lists
-// them (`cards.list`), records feedback (`cards.feedback`), previews an action as a dry-run diff
-// (`cards.preview`) and executes it with an approval bound to that preview's digest
-// (`cards.execute`), through the policy gate. Wire shapes mirror `nugget-proactive`'s types.
-//
-// | method | params | result |
-// |---|---|---|
-// | `cards.list` | [`CardsListRequest`] | [`CardsList`] |
-// | `cards.feedback` | [`CardFeedbackRequest`] | [`CardView`] |
-// | `cards.preview` | [`CardPreviewRequest`] | [`CardPreview`] |
-// | `cards.execute` | [`CardExecuteRequest`] | [`CardExecuteResult`] |
-// | `brief.get` | `{}` | [`BriefView`] (today's, composed on demand) |
-// | `proactive.metrics` | `{}` | [`ProactiveMetrics`] |
-// | `proactive.refresh` | `{}` | [`CardsChanged`] (runs a refresh now) |
-// | `reminders.list` | `{}` | `Vec<`[`ReminderView`]`>` (pending, soonest first) |
-// | `proactive.learning` | `{}` | [`ProactiveLearning`] (what feedback taught the ranking) |
-// | `proactive.reset_learning` | [`ResetLearningRequest`] | [`ResetLearningResult`] (audited) |
+// Cards, the daily brief and reminders. `cards.execute` takes an approval bound to the digest of
+// the `cards.preview` the user saw, and runs through the policy gate.
 
 pub mod proactive_method {
     pub const CARDS_LIST: &str = "cards.list";
@@ -2069,8 +1880,7 @@ pub struct CardView {
     pub learned: Vec<CardLearned>,
 }
 
-/// One way feedback changed a card's ranking, e.g. "shown less often: you dismissed 3 similar
-/// cards from this sender". Structured so the app can phrase it in the user's language.
+/// One way feedback changed a card's ranking (the app phrases it).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CardLearned {
     /// `sender`, `domain`, `kind`, `thread`.
@@ -2342,144 +2152,6 @@ mod tests {
         assert_eq!(
             v,
             serde_json::json!({"free_bytes": 5, "level": "full", "recent_full_error": true})
-        );
-    }
-
-    #[test]
-    fn model_progress_failure_fields_are_additive() {
-        // An older daemon's progress (no reason) still parses.
-        let old: ModelProgress = serde_json::from_value(serde_json::json!({
-            "id": "m", "downloaded": 5, "total": 10, "phase": "failed", "error": "x"
-        }))
-        .unwrap();
-        assert_eq!((old.reason, old.http_status), (None, None));
-        // No new keys on the wire unless set.
-        let v = serde_json::to_value(&old).unwrap();
-        assert!(v.get("reason").is_none() && v.get("http_status").is_none());
-        let p = ModelProgress {
-            reason: Some(ModelFailReason::HttpError),
-            http_status: Some(500),
-            ..old
-        };
-        let v = serde_json::to_value(&p).unwrap();
-        assert_eq!(
-            (v["reason"].as_str(), v["http_status"].as_u64()),
-            (Some("http_error"), Some(500))
-        );
-        // A reason from a newer daemon is not an error.
-        let newer: ModelFailReason =
-            serde_json::from_value(serde_json::json!("solar_flare")).unwrap();
-        assert_eq!(newer, ModelFailReason::Unknown);
-    }
-
-    #[test]
-    fn auth_begin_user_code_is_optional_on_the_wire() {
-        let redirect = AuthBegin {
-            url: "https://example.com/authorize".into(),
-            user_code: None,
-        };
-        let v = serde_json::to_value(&redirect).unwrap();
-        assert_eq!(
-            v,
-            serde_json::json!({"url": "https://example.com/authorize"})
-        );
-        assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), redirect);
-
-        let device = AuthBegin {
-            url: "https://example.com/device".into(),
-            user_code: Some("WDJB-MJHT".into()),
-        };
-        let v = serde_json::to_value(&device).unwrap();
-        assert_eq!(
-            v,
-            serde_json::json!({"url": "https://example.com/device", "user_code": "WDJB-MJHT"})
-        );
-        assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), device);
-    }
-
-    #[test]
-    fn page_requests_take_an_optional_cursor() {
-        let r: SearchPageRequest =
-            serde_json::from_value(serde_json::json!({"query": "q", "limit": 5})).unwrap();
-        assert_eq!(r.cursor, None);
-        // Without a cursor, the params are exactly those of `search`.
-        assert_eq!(
-            serde_json::to_value(&r).unwrap(),
-            serde_json::json!({"query": "q", "limit": 5})
-        );
-        let r: EgressPageRequest =
-            serde_json::from_value(serde_json::json!({"limit": 5, "cursor": "abc"})).unwrap();
-        assert_eq!(r.cursor.as_deref(), Some("abc"));
-        let p: Page<u32> = serde_json::from_value(serde_json::json!({"items": [1, 2]})).unwrap();
-        assert_eq!(p.next_cursor, None);
-        assert_eq!(
-            serde_json::to_value(Page {
-                items: vec![1u32],
-                next_cursor: Some("c".into())
-            })
-            .unwrap(),
-            serde_json::json!({"items": [1], "next_cursor": "c"})
-        );
-    }
-
-    #[test]
-    fn egress_record_time_and_bytes_are_optional() {
-        let r: EgressRecordRequest = serde_json::from_value(
-            serde_json::json!({"host": "github.com", "feature": "update_check"}),
-        )
-        .unwrap();
-        assert_eq!((r.at, r.bytes_sent, r.bytes_received), (None, 0, 0));
-        let at = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
-        let r = EgressRecordRequest {
-            at: Some(at),
-            host: "github.com".into(),
-            feature: "update_download".into(),
-            bytes_sent: 0,
-            bytes_received: 42,
-        };
-        let v = serde_json::to_value(&r).unwrap();
-        assert_eq!(v["at"], "2026-09-21T14:13:20Z");
-        assert_eq!(serde_json::from_value::<EgressRecordRequest>(v).unwrap(), r);
-        assert!(CLIENT_EGRESS_FEATURES.contains(&"update_check"));
-    }
-
-    #[test]
-    fn status_pid_and_service_are_additive() {
-        // A daemon from before GG6-10 sends neither.
-        let old = serde_json::json!({
-            "protocol": 1, "version": "0.0.1", "uptime_secs": 3, "items": 0, "chunks": 0,
-            "providers": [],
-        });
-        let s: StatusResponse = serde_json::from_value(old).unwrap();
-        assert_eq!((s.pid, s.service.as_deref()), (None, None));
-        let v = serde_json::to_value(&s).unwrap();
-        assert!(v.get("pid").is_none() && v.get("service").is_none());
-        let new = StatusResponse {
-            pid: Some(42),
-            service: Some(SERVICE_SYSTEMD.into()),
-            ..s
-        };
-        let v = serde_json::to_value(&new).unwrap();
-        assert_eq!(
-            (v["pid"].as_u64(), v["service"].as_str()),
-            (Some(42), Some("systemd"))
-        );
-    }
-
-    #[test]
-    fn shutdown_params_are_optional() {
-        let r: DaemonShutdownRequest = serde_json::from_value(serde_json::json!({})).unwrap();
-        assert_eq!(r.reason, None);
-        let r: DaemonShutdownRequest =
-            serde_json::from_value(serde_json::json!({"reason": "app_quit"})).unwrap();
-        assert_eq!(r.reason.as_deref(), Some("app_quit"));
-        let done = DaemonShutdownResponse {
-            stopping: true,
-            pid: 7,
-        };
-        assert_eq!(
-            serde_json::to_value(&done).unwrap(),
-            serde_json::json!({"stopping": true, "pid": 7})
         );
     }
 }

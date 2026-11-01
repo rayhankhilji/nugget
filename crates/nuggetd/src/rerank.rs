@@ -1,15 +1,4 @@
 //! Which reranker search uses (see `nugget_retrieve::rerank`).
-//!
-//! 1. `[retrieve.reranker]`: an [`HttpReranker`] for a server the user runs (e.g.
-//!    `llama-server --reranking`), egress recorded to the store's ledger when it is not on this
-//!    device.
-//! 2. Otherwise the local runtime's `rerank` slot (`[runtime] rerank_model`): a [`LocalReranker`]
-//!    that calls the runtime's server while it is ready. When it is not (not installed, stopped
-//!    when idle, starting, crashed) a rerank fails at once, without any request, so search keeps
-//!    its first-stage order instead of waiting for the reranker timeout; a stopped server is
-//!    started in the background for the next search, the way chat and embedding slots start on
-//!    demand.
-//! 3. Otherwise no reranker.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -26,7 +15,6 @@ use tokio_util::task::TaskTracker;
 
 use crate::local::{LocalRuntime, RuntimeSlot};
 
-/// Starts a slot's server in the background (not awaited).
 pub(crate) type Starter = Arc<dyn Fn(Arc<RuntimeSlot>) + Send + Sync>;
 
 /// Least time between two background starts of a server that is not running.
@@ -73,7 +61,6 @@ pub(crate) fn reranker(
     None
 }
 
-/// Starts slots through the daemon's task tracker, cancelled at shutdown.
 fn starter(tasks: TaskTracker, shutdown: CancellationToken) -> Starter {
     Arc::new(move |slot: Arc<RuntimeSlot>| {
         let stop = shutdown.clone();
@@ -88,7 +75,6 @@ fn starter(tasks: TaskTracker, shutdown: CancellationToken) -> Starter {
     })
 }
 
-/// The local runtime's reranker (see the module docs).
 pub(crate) struct LocalReranker {
     slot: Arc<RuntimeSlot>,
     egress: Arc<dyn EgressSink>,
@@ -112,8 +98,7 @@ impl LocalReranker {
         }
     }
 
-    /// Start the server in the background if it is installed and not running (at most every
-    /// [`START_INTERVAL`]).
+    /// Start the server in the background if installed and stopped (at most every interval).
     fn start_if_stopped(&self) {
         if !self.slot.is_installed() {
             return;
@@ -171,7 +156,6 @@ impl Reranker for LocalReranker {
         &self.name
     }
 
-    /// The runtime's own server, on this device.
     fn locality(&self) -> nugget_core::capability::Locality {
         nugget_core::capability::Locality::OnDevice
     }
@@ -207,8 +191,6 @@ mod tests {
     use nugget_models::ModelStore;
     use nugget_runtime::Runtime;
     use nugget_store::{NewChunk, NewItem, Store, content_hash};
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
 
@@ -220,7 +202,6 @@ mod tests {
             .unwrap();
     }
 
-    /// Full-text ranks `a` first (most term hits).
     fn store() -> Store {
         let store = Store::open_in_memory().unwrap();
         add(&store, "a", "Boiler boiler boiler: the boiler manual.");
@@ -235,7 +216,6 @@ mod tests {
     fn cfg() -> RetrieveConfig {
         RetrieveConfig {
             mmr: false,
-            // A reranker that made search wait would be obvious.
             rerank_timeout_ms: 20_000,
             ..Default::default()
         }
@@ -256,59 +236,7 @@ mod tests {
         r.items.iter().map(|i| i.item.key.as_str()).collect()
     }
 
-    #[tokio::test]
-    async fn an_external_reranker_reorders_results() {
-        let server = MockServer::start().await;
-        // Scores in passage order; whichever passage mentions the electrode wins.
-        Mock::given(method("POST"))
-            .and(path("/v1/rerank"))
-            .respond_with(|req: &wiremock::Request| {
-                let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
-                let results: Vec<serde_json::Value> = v["documents"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .enumerate()
-                    .map(|(i, d)| {
-                        let s = if d.as_str().unwrap().contains("electrode") {
-                            0.95
-                        } else {
-                            0.05
-                        };
-                        serde_json::json!({"index": i, "relevance_score": s})
-                    })
-                    .collect();
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({"results": results}))
-            })
-            .mount(&server)
-            .await;
-        let store = store();
-        let base = Retriever::new(store.clone(), None, cfg());
-        let first = base.search("boiler", 5).await.unwrap();
-        assert_eq!(keys(&first), ["a", "b"]);
-        assert!(!first.reranked);
-
-        let mut c = cfg();
-        c.reranker = Some(HttpRerankerConfig {
-            base_url: server.uri(),
-            ..Default::default()
-        });
-        let (start, _) = no_start();
-        let r = reranker(&c, None, Arc::new(NullEgress), start).expect("a reranker");
-        let retriever = Retriever::new(store, None, c).with_reranker(r);
-        let res = retriever.search("boiler", 5).await.unwrap();
-        assert!(res.reranked);
-        assert_eq!(keys(&res), ["b", "a"]);
-    }
-
-    #[test]
-    fn no_configuration_means_no_reranker() {
-        let (start, _) = no_start();
-        assert!(reranker(&cfg(), None, Arc::new(NullEgress), start).is_none());
-    }
-
-    /// A local reranker whose server is not ready fails at once (no request, no timeout), and
-    /// asks for the server to be started only once it is installed, at most every interval.
+    /// A local reranker that is not ready fails at once and starts its server only when installed.
     #[tokio::test]
     async fn a_local_reranker_that_is_not_ready_fails_fast() {
         let tmp = tempfile::tempdir().unwrap();

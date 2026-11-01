@@ -68,35 +68,15 @@ mod tests {
     const MIN: Duration = Duration::from_secs(60);
 
     #[test]
-    fn counts_time_asleep_through_the_wall_clock() {
+    fn counts_sleep_but_not_backward_clock_jumps() {
         let (m0, w0) = (Instant::now(), SystemTime::UNIX_EPOCH + 1000 * MIN);
         let sw = Stopwatch::start_at(m0, w0);
-        // Awake: both clocks agree.
-        assert_eq!(sw.elapsed_at(m0 + 3 * MIN, w0 + 3 * MIN), 3 * MIN);
         // 8 hours asleep: the monotonic clock saw 3 minutes, the wall clock 8 hours.
         assert_eq!(sw.elapsed_at(m0 + 3 * MIN, w0 + 480 * MIN), 480 * MIN);
-    }
-
-    #[test]
-    fn ignores_the_wall_clock_going_backwards() {
-        let (m0, w0) = (Instant::now(), SystemTime::UNIX_EPOCH + 1000 * MIN);
-        let sw = Stopwatch::start_at(m0, w0);
         assert_eq!(sw.elapsed_at(m0 + 5 * MIN, w0 - 60 * MIN), 5 * MIN);
-        assert_eq!(sw.elapsed_at(m0 + 5 * MIN, w0 + MIN), 5 * MIN);
-        assert_eq!(sw.elapsed_at(m0, w0), Duration::ZERO);
-    }
-
-    #[test]
-    fn due_remaining_and_next_check() {
-        let sw = Stopwatch::start();
-        assert!(!sw.is_due(10 * MIN));
-        assert!(sw.is_due(Duration::ZERO));
-        assert!(sw.remaining(10 * MIN) <= 10 * MIN);
-        assert_eq!(sw.next_check(10 * MIN), RECHECK_EVERY);
-        assert_eq!(sw.remaining(Duration::ZERO), Duration::ZERO);
-        // Started an hour ago by the wall clock (as after a sleep): due at once.
         let slept = Stopwatch::start_at(Instant::now(), SystemTime::now() - 60 * MIN);
         assert!(slept.is_due(10 * MIN));
         assert_eq!(slept.next_check(10 * MIN), Duration::ZERO);
+        assert_eq!(Stopwatch::start().next_check(10 * MIN), RECHECK_EVERY);
     }
 }

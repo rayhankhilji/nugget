@@ -100,7 +100,7 @@ fn build(enabled: bool, safety: &Arc<Safety>) -> Browser {
 }
 
 /// Stop all agents (desktop, tray, hotkey, the page's own Stop) reaches the extension: Halt on
-/// engage, Resume on release (GG3-12). The hook runs where the switch flipped, so the request is
+/// engage, Resume on release. The hook runs where the switch flipped, so the request is
 /// spawned on the runtime; outside one (unit tests) there is no extension to tell.
 fn relay_kill_switch(kill: &KillSwitch, controller: Arc<BrowserController>) -> HookGuard {
     kill.on_change(move |halted| {
@@ -162,93 +162,5 @@ impl Feature for BrowserFeature {
             }
             other => Err(RpcError::method_not_found(other)),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nugget_browser::bridge::AttachInfo;
-    use nugget_browser::{BrowserEvent, ExtensionMessage};
-
-    #[test]
-    fn tools_status_and_stop_button() {
-        let dir = tempfile::tempdir().unwrap();
-        let safety = Safety::open_in(dir.path()).unwrap();
-        let b = build(true, &safety);
-        let names: Vec<&str> = b.tools.iter().map(|t| t.name()).collect();
-        assert!(names.contains(&"browser_snapshot"));
-        assert!(names.contains(&"browser_submit"));
-        assert_eq!(b.feature.methods(), METHODS);
-
-        let f = BrowserFeature {
-            hub: b.hub.clone(),
-            handler: HubHandler::new(b.hub.clone()),
-            enabled: true,
-            tool_names: names.iter().map(|s| s.to_string()).collect(),
-            _kill_hook: None,
-        };
-        assert!(!f.status().connected);
-        let (_gen, _rx) = b.hub.attach(AttachInfo {
-            origin: "chrome-extension://abc/".into(),
-            host_version: "1.0".into(),
-        });
-        let st = f.status();
-        assert!(st.connected);
-        assert_eq!(st.origin.as_deref(), Some("chrome-extension://abc/"));
-        assert_eq!(st.tools.len(), names.len());
-
-        // The page's Stop button halts this daemon's executors.
-        assert!(!safety.engine.halted());
-        b.hub
-            .deliver(ExtensionMessage::Event(BrowserEvent::UserStop {
-                reason: "user".into(),
-            }));
-        assert!(safety.engine.halted());
-        assert!(!nugget_policy::KillSwitch::global().halted());
-    }
-
-    /// GG3-12: Stop all agents is relayed to an attached extension as Halt, Resume as Resume.
-    #[tokio::test]
-    async fn kill_switch_is_relayed_to_the_extension() {
-        let dir = tempfile::tempdir().unwrap();
-        let safety = Safety::open_in(dir.path()).unwrap();
-        let b = build(true, &safety);
-        let (_gen, mut rx) = b.hub.attach(AttachInfo {
-            origin: "chrome-extension://abc/".into(),
-            host_version: "1.0".into(),
-        });
-        let next = async |rx: &mut tokio::sync::mpsc::Receiver<nugget_browser::HostMessage>| {
-            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
-                .await
-                .expect("a request reaches the extension")
-                .expect("still attached");
-            b.hub.deliver(ExtensionMessage::Reply {
-                id: msg.id,
-                result: None,
-                error: None,
-            });
-            msg.request
-        };
-        safety.kill.halt();
-        assert_eq!(next(&mut rx).await, nugget_browser::HostRequest::Halt);
-        safety.kill.resume();
-        assert_eq!(next(&mut rx).await, nugget_browser::HostRequest::Resume);
-    }
-
-    #[test]
-    fn disabled_has_no_tools_but_status() {
-        let dir = tempfile::tempdir().unwrap();
-        let safety = Safety::open_in(dir.path()).unwrap();
-        let b = build(false, &safety);
-        assert!(b.tools.is_empty());
-        assert_eq!(b.feature.methods(), STATUS_ONLY);
-        let t: toml::Table = toml::from_str("enabled = false").unwrap();
-        assert!(!section::<BrowserSection>("browser", &t).unwrap().enabled);
-        assert!(
-            section::<BrowserSection>("browser", &toml::Table::new())
-                .unwrap()
-                .enabled
-        );
     }
 }

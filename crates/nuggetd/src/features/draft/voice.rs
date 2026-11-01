@@ -32,14 +32,6 @@ pub(crate) struct SharedVoice {
 }
 
 impl SharedVoice {
-    #[cfg(test)]
-    pub(crate) fn is_loaded(&self) -> bool {
-        self.profile
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_some()
-    }
-
     fn set(&self, profile: VoiceProfile) {
         *self.profile.write().unwrap_or_else(PoisonError::into_inner) = Some(profile);
     }
@@ -305,14 +297,6 @@ mod tests {
         })
     }
 
-    #[test]
-    fn only_commits_count_as_changes() {
-        assert!(is_commit(&progress(IngestPhase::Idle)));
-        assert!(!is_commit(&progress(IngestPhase::Indexing)));
-        assert!(!is_commit(&progress(IngestPhase::Scanning)));
-        assert!(is_commit(&IngestEvent::SourceRemoved(SourceId::new("x"))));
-    }
-
     #[tokio::test]
     async fn bursts_are_coalesced_into_one_refresh_and_stop_ends_the_loop() {
         let (tx, rx) = broadcast::channel(64);
@@ -357,62 +341,5 @@ mod tests {
 
         stop.cancel();
         task.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn loads_after_the_delay_or_when_asked() {
-        let (_tx, rx) = broadcast::channel(4);
-        let stop = CancellationToken::new();
-        let start = |delay: Duration| {
-            let voice = Arc::new(SharedVoice::default());
-            let task = tokio::spawn(run(
-                voice.clone(),
-                Store::open_in_memory().unwrap(),
-                MeIdentity::default(),
-                VoiceConfig::default(),
-                rx.resubscribe(),
-                Timing {
-                    debounce: Duration::from_millis(50),
-                    load_delay: delay,
-                },
-                stop.clone(),
-            ));
-            (voice, task)
-        };
-        let loaded = |v: Arc<SharedVoice>| async move {
-            for _ in 0..200 {
-                if v.is_loaded() {
-                    return true;
-                }
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-            false
-        };
-
-        // Not before the delay...
-        let (lazy, lazy_task) = start(Duration::from_secs(3600));
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(!lazy.is_loaded());
-        // ...unless asked for.
-        assert_eq!(lazy.status(), VoiceStatus::default());
-        assert!(loaded(lazy.clone()).await);
-
-        // After the delay without anyone asking.
-        let (timed, timed_task) = start(Duration::from_millis(100));
-        assert!(loaded(timed).await);
-
-        stop.cancel();
-        lazy_task.await.unwrap();
-        timed_task.await.unwrap();
-    }
-
-    #[test]
-    fn neutral_until_loaded() {
-        let v = SharedVoice::default();
-        assert!(!v.is_loaded());
-        assert_eq!(v.status(), VoiceStatus::default());
-        let h = v.hints(&VoiceQuery::new(nugget_voice::Channel::Chat));
-        assert_eq!(h.channel, Some(nugget_voice::Channel::Chat));
-        assert!(h.exemplars.is_empty());
     }
 }

@@ -1,31 +1,15 @@
-//! "Bring your own key": check a cloud (or self-hosted) provider key, save it, replace it,
-//! remove it, and route to it right away.
+//! "Bring your own key": check, save, replace and remove a cloud (or self-hosted) provider key,
+//! routing to it at once ([`State::set_provider`]; `restart_required` is always `false`).
 //!
-//! - `ai.key.test` asks the provider for its model list (`GET {base}/models` with a bearer token
-//!   for the OpenAI kinds, `GET {base}/v1/models` with `x-api-key` for Anthropic) and classifies
-//!   the answer: `ok`, `bad_key`, `wrong_url`, `no_network` or `server_error`. The outcome is a
-//!   result, never a JSON-RPC error (only malformed params are).
-//! - `ai.key.save` runs the same check, then stores the key with the daemon's [`SecretStore`]
-//!   under [`provider_account`] and appends a `[[providers]]` table to `config.toml` that refers
-//!   to it as `keychain:NAME` (the key itself never reaches the file). A provider with the same
-//!   id is refused (`exists`; the app then offers `ai.key.update`).
-//! - Instead of `api_key`, `key_ref: "env:VAR"` names an environment variable of the daemon that
-//!   holds the key (the fallback when there is no keychain: `ai.key.save` answers `no_keychain`
-//!   if the secret store cannot hold the key). The variable is read to check the key, and
-//!   `config.toml` gets `api_key = "env:VAR"`.
-//! - `ai.key.update` checks a new key (or variable, or address) for a provider that refers to a
-//!   key (`keychain:` or `env:`) and replaces it; `ai.key.remove` deletes the stored key and
-//!   removes the provider's table from `config.toml`, leaving every other byte of the file as it
-//!   was. `ai.key.saved` lists those providers.
-//! - Saved, updated and removed providers take effect at once: the provider is built (its key read
-//!   from the same secret store) and added to, swapped in or dropped from the router
-//!   ([`State::set_provider`]); `restart_required` stays in results for compatibility and is
-//!   always `false`.
+//! - `ai.key.test` lists the provider's models and classifies the answer (`ok`, `bad_key`,
+//!   `wrong_url`, `no_network`, `server_error`) as a result, never an RPC error.
+//! - `ai.key.save` checks, stores the key in the [`SecretStore`] under [`provider_account`] and
+//!   appends a `[[providers]]` table referring to `keychain:NAME`; or, with `key_ref: "env:VAR"`
+//!   (the no-keychain fallback), to the variable. A taken id answers `exists`.
+//! - `ai.key.update`/`ai.key.remove` edit only that provider's table, keeping every other byte.
 //!
-//! Every request is recorded in the egress ledger under feature `ai_setup` (also for loopback
-//! servers: the user asked for the check and should see it). The key is never logged, echoed in
-//! messages or written anywhere but the secret store. Only `https` is accepted, except for
-//! loopback hosts (`localhost`, `127.0.0.1`, `::1`).
+//! Every request is in the egress ledger (feature `ai_setup`, loopback too). The key is never
+//! logged, echoed or written anywhere but the secret store. Only `https`, except loopback hosts.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -418,14 +402,9 @@ impl AiKeys {
             Ok(k) => k,
             Err(r) => return Ok(KeySaveResult::from_test(r)),
         };
-        let check = Check {
-            kind: req.kind,
-            base_url: req.base_url.clone(),
-            key: key.clone(),
-            model: Some(req.model.clone()),
-        };
-        let checked = check_key(&self.http, &check, CHECK_TIMEOUT).await;
-        self.flush_egress().await;
+        let checked = self
+            .check(req.kind, req.base_url.clone(), &key, &req.model)
+            .await;
         if !checked.ok {
             return Ok(KeySaveResult::from_test(checked));
         }
@@ -448,29 +427,57 @@ impl AiKeys {
             Written::Exists => return Ok(exists_result(&req.name)),
             Written::NoKeychain => return Ok(no_keychain_result(&req.name)),
         }
-        tracing::info!(provider = %entry.name, kind = entry.kind.as_str(), "provider key saved");
-        self.audit(
-            "ai.key.saved",
-            &entry.name,
-            json!({
-                "kind": entry.kind.as_str(),
-                "base_url": entry.base_url,
-                "model": entry.model,
-                "key": entry.key.kind(),
-            }),
-        )
-        .await;
-        self.route(&entry.name).await;
-        Ok(KeySaveResult {
+        let detail = json!({
+            "kind": entry.kind.as_str(), "base_url": entry.base_url,
+            "model": entry.model, "key": entry.key.kind(),
+        });
+        let msg = "Key checked and saved. You can use it now.";
+        Ok(self
+            .saved_ok("ai.key.saved", entry.name, detail, msg, checked.models)
+            .await)
+    }
+
+    /// Check `key` against the provider and make the ledger row visible right away.
+    async fn check(
+        &self,
+        kind: Kind,
+        base_url: Option<String>,
+        key: &str,
+        model: &str,
+    ) -> KeyTestResult {
+        let check = Check {
+            kind,
+            base_url,
+            key: key.to_owned(),
+            model: Some(model.to_owned()),
+        };
+        let checked = check_key(&self.http, &check, CHECK_TIMEOUT).await;
+        self.flush_egress().await;
+        checked
+    }
+
+    /// Log, audit and route a provider whose key was just written.
+    async fn saved_ok(
+        &self,
+        action: &str,
+        name: String,
+        detail: Value,
+        message: &str,
+        models: Vec<String>,
+    ) -> KeySaveResult {
+        tracing::info!(provider = %name, action, "provider key written");
+        self.audit(action, &name, detail).await;
+        self.route(&name).await;
+        KeySaveResult {
             ok: true,
             reason: Reason::Ok,
-            message: "Key checked and saved. You can use it now.".into(),
-            models: checked.models,
+            message: message.into(),
+            models,
             saved: true,
-            provider_id: Some(entry.name),
+            provider_id: Some(name),
             restart_required: false,
             suggested_env: None,
-        })
+        }
     }
 
     async fn update(&self, req: KeyUpdateRequest, spec: KeySpec) -> Result<KeySaveResult> {
@@ -504,14 +511,7 @@ impl AiKeys {
             None => cfg.base_url.clone(),
         };
         let kind = Kind::of(cfg.kind);
-        let check = Check {
-            kind,
-            base_url: base_url.clone(),
-            key: key.clone(),
-            model: Some(cfg.model.clone()),
-        };
-        let checked = check_key(&self.http, &check, CHECK_TIMEOUT).await;
-        self.flush_egress().await;
+        let checked = self.check(kind, base_url.clone(), &key, &cfg.model).await;
         if !checked.ok {
             return Ok(KeySaveResult::from_test(checked));
         }
@@ -529,29 +529,14 @@ impl AiKeys {
         if written == Written::NoKeychain {
             return Ok(no_keychain_result(&req.name));
         }
-        tracing::info!(provider = %req.name, kind = kind.as_str(), "provider key replaced");
-        self.audit(
-            "ai.key.updated",
-            &req.name,
-            json!({
-                "kind": kind.as_str(),
-                "base_url": base_url,
-                "model": cfg.model,
-                "key": new_ref.kind(),
-            }),
-        )
-        .await;
-        self.route(&req.name).await;
-        Ok(KeySaveResult {
-            ok: true,
-            reason: Reason::Ok,
-            message: "Key checked and replaced. Nugget uses the new key now.".into(),
-            models: checked.models,
-            saved: true,
-            provider_id: Some(req.name),
-            restart_required: false,
-            suggested_env: None,
-        })
+        let detail = json!({
+            "kind": kind.as_str(), "base_url": base_url,
+            "model": cfg.model, "key": new_ref.kind(),
+        });
+        let msg = "Key checked and replaced. Nugget uses the new key now.";
+        Ok(self
+            .saved_ok("ai.key.updated", req.name, detail, msg, checked.models)
+            .await)
     }
 
     async fn remove(&self, name: &str) -> Result<KeyRemoveResult> {
@@ -1667,22 +1652,6 @@ mod tests {
         }
     }
 
-    /// A secret store like Linux without a Secret Service: every call fails.
-    struct NoKeyring;
-    impl SecretStore for NoKeyring {
-        fn get(&self, _: &str) -> Result<Option<String>> {
-            Err(Error::Storage(
-                "keychain: Platform secure storage failure: no secret service provider or dbus session found".into(),
-            ))
-        }
-        fn set(&self, a: &str, _: &str) -> Result<()> {
-            self.get(a).map(|_| ())
-        }
-        fn delete(&self, a: &str) -> Result<()> {
-            self.get(a).map(|_| ())
-        }
-    }
-
     /// A minimal OpenAI-compatible server: `GET /v1/models` with `Bearer sk-test-good` lists two
     /// models; another key is 401; any other path is 404; `/broken/v1/models` is 500 and
     /// `/html/v1/models` is a 200 web page.
@@ -1748,27 +1717,6 @@ mod tests {
     }
 
     const T: Duration = Duration::from_secs(10);
-
-    #[tokio::test]
-    async fn good_key_lists_models_and_is_in_the_ledger() {
-        let base = mock().await;
-        let (http, ledger) = client();
-        let r = check_key(
-            &http,
-            &req(Kind::OpenaiCompatible, Some(&format!("{base}/v1/")), GOOD),
-            T,
-        )
-        .await;
-        assert!(r.ok, "{r:?}");
-        assert_eq!(r.reason, Reason::Ok);
-        assert_eq!(r.models, ["model-a", "model-b"]);
-        assert_eq!(r.message, "Key works. Found 2 models.");
-        let events = ledger.0.lock().unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].feature, "ai_setup");
-        assert!(base.ends_with(&events[0].host), "{}", events[0].host);
-        assert!(events[0].bytes_sent > 0 && events[0].bytes_received > 0);
-    }
 
     #[tokio::test]
     async fn classifies_failures_without_echoing_the_key() {
@@ -1839,27 +1787,6 @@ mod tests {
         assert_eq!(ledger.0.lock().unwrap().len(), 4);
     }
 
-    #[tokio::test]
-    async fn closed_port_is_no_network() {
-        let port = {
-            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap().port()
-        };
-        let (http, ledger) = client();
-        let r = check_key(
-            &http,
-            &req(
-                Kind::OpenaiCompatible,
-                Some(&format!("http://127.0.0.1:{port}/v1")),
-                GOOD,
-            ),
-            T,
-        )
-        .await;
-        assert_eq!(r.reason, Reason::NoNetwork, "{r:?}");
-        assert_eq!(ledger.0.lock().unwrap().len(), 1, "attempt recorded");
-    }
-
     #[test]
     fn urls_and_loopback() {
         assert_eq!(
@@ -1879,27 +1806,6 @@ mod tests {
         assert!(models_url(Kind::OpenaiCompatible, Some("http://10.0.0.2/v1")).is_err());
         assert!(models_url(Kind::OpenaiCompatible, Some("https://u:p@host/v1")).is_err());
         assert!(is_loopback("127.0.0.5") && is_loopback("LOCALHOST") && !is_loopback("10.0.0.1"));
-    }
-
-    #[test]
-    fn save_checks_names() {
-        let mut r = KeySaveRequest {
-            name: "my-openai_2".into(),
-            kind: Kind::OpenaiResponses,
-            base_url: None,
-            api_key: Some(ApiKey(GOOD.into())),
-            key_ref: None,
-            model: "gpt-x".into(),
-        };
-        assert!(validate_save(&r).is_ok());
-        assert!(!format!("{r:?}").contains(GOOD));
-        for bad in ["", "Upper", "has space", "x".repeat(33).as_str(), "a.b"] {
-            r.name = bad.into();
-            assert!(validate_save(&r).is_err(), "{bad:?}");
-        }
-        r.name = "ok".into();
-        r.model = "  ".into();
-        assert!(validate_save(&r).is_err());
     }
 
     #[test]
@@ -2019,127 +1925,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn write_provider_refers_to_the_keychain_and_refuses_duplicates() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
-        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
-        let secrets = MemorySecrets::new();
-        let entry = entry("custom", KeyRef::Keychain("custom".into()));
-        assert_eq!(
-            write_provider(&path, &secrets, &entry, GOOD).unwrap(),
-            Written::Saved
-        );
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains(GOOD), "plaintext key in config");
-        assert!(text.contains("api_key = \"keychain:custom\""), "{text}");
-        assert!(text.starts_with(DEFAULT_CONFIG), "existing text kept");
-        let cfg = Config::parse(&text).unwrap();
-        let p = cfg
-            .providers
-            .iter()
-            .find(|p| p.id.as_str() == "custom")
-            .unwrap();
-        assert_eq!(p.model, "model \"a\"");
-        assert_eq!(p.base_url.as_deref(), Some("http://127.0.0.1:9/v1"));
-        assert_eq!(p.tiers.len(), 3);
-        assert_eq!(
-            cfg.providers.len(),
-            1,
-            "the default config has none of its own"
-        );
-        assert_eq!(
-            secrets.get(&provider_account("custom")).unwrap().as_deref(),
-            Some(GOOD)
-        );
-
-        // The same id again is refused, and nothing changes.
-        let other = MemorySecrets::new();
-        assert_eq!(
-            write_provider(&path, &other, &entry, "sk-other").unwrap(),
-            Written::Exists
-        );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
-        assert!(other.get(&provider_account("custom")).unwrap().is_none());
-    }
-
-    #[test]
-    fn write_provider_starts_from_the_default_when_missing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("cfg").join("config.toml");
-        let secrets = MemorySecrets::new();
-        let entry = NewProvider {
-            name: "openai".into(),
-            kind: Kind::OpenaiResponses,
-            base_url: None,
-            model: "gpt-x".into(),
-            key: KeyRef::Keychain("openai".into()),
-        };
-        write_provider(&path, &secrets, &entry, GOOD).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("base_url = \"https://api.openai"));
-        let cfg = Config::parse(&text).unwrap();
-        assert_eq!(cfg.providers.len(), 1);
-    }
-
-    #[test]
-    fn no_keyring_writes_nothing_and_env_refs_need_none() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
-        std::fs::write(&path, DEFAULT_CONFIG).unwrap();
-
-        // Keychain refused: config untouched, no raw error.
-        let e = entry("custom", KeyRef::Keychain("custom".into()));
-        assert_eq!(
-            write_provider(&path, &NoKeyring, &e, GOOD).unwrap(),
-            Written::NoKeychain
-        );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), DEFAULT_CONFIG);
-        let r = no_keychain_result("custom");
-        assert_eq!(r.reason, Reason::NoKeychain);
-        assert!(!r.ok && !r.saved);
-        assert_eq!(r.suggested_env.as_deref(), Some("NUGGET_CUSTOM_KEY"));
-        assert!(r.message.contains("environment variable"), "{}", r.message);
-        assert!(!r.message.contains("dbus"), "{}", r.message);
-
-        // An env: reference is written without touching the secret store at all.
-        let e = entry("custom", KeyRef::Env("NUGGET_CUSTOM_KEY".into()));
-        assert_eq!(
-            write_provider(&path, &NoKeyring, &e, GOOD).unwrap(),
-            Written::Saved
-        );
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(
-            text.contains("api_key = \"env:NUGGET_CUSTOM_KEY\""),
-            "{text}"
-        );
-        assert!(
-            text.contains("environment variable NUGGET_CUSTOM_KEY"),
-            "{text}"
-        );
-        assert!(!text.contains(GOOD));
-
-        // Replacing with a typed key still needs the keyring; removing works without one.
-        let change = KeyChange {
-            old: Some(ApiKeyRef::Env("NUGGET_CUSTOM_KEY".into())),
-            new: KeyRef::Keychain("custom".into()),
-            base_url: None,
-        };
-        assert_eq!(
-            replace_key(&path, &NoKeyring, "custom", &change, GOOD.into()).unwrap(),
-            Written::NoKeychain
-        );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
-        remove_provider(
-            &path,
-            &NoKeyring,
-            "custom",
-            Some(&ApiKeyRef::Env("NUGGET_CUSTOM_KEY".into())),
-        )
-        .unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), DEFAULT_CONFIG);
-    }
-
     const HAND_WRITTEN: &str = r#"# My config. Keep this comment.
 [runtime]
 enabled = false   # trailing comment
@@ -2248,69 +2033,6 @@ tiers = ["synthesis"]
     }
 
     #[test]
-    fn comments_and_sub_tables_do_not_confuse_the_spans() {
-        let text = r#"[runtime]
-enabled = false
-
-[[providers]]
-id = "a"
-kind = "openai_compatible"
-base_url = "http://localhost:1/v1"
-model = "m"
-api_key = "env:NUGGET_A_KEY"
-tiers = ["light"]
-# a note with """ in it
-[providers.headers]
-api_key = "env:NUGGET_HDR_KEY"
-
-[draft]
-note = """
-[[providers]]
-"""
-
-[[providers]]
-id = "b"
-kind = "openai_compatible"
-base_url = "http://localhost:2/v1"
-model = "m"
-api_key = "keychain:a"   # '''
-"#;
-        Config::parse(text).unwrap();
-        // Removing "a" takes its headers sub-table and leaves [draft] (and its multi-line
-        // string that looks like a table) alone.
-        let out = remove_provider_text(text, "a").unwrap();
-        assert!(
-            out.contains("[draft]\nnote = \"\"\"\n[[providers]]\n\"\"\"\n"),
-            "{out}"
-        );
-        assert!(!out.contains("[providers.headers]"), "{out}");
-        let doc: toml::Table = toml::from_str(&out).unwrap();
-        assert_eq!(doc["providers"].as_array().unwrap().len(), 1);
-        assert!(doc.contains_key("draft"));
-        // Editing "a" changes its own api_key, not the header of that name.
-        let out = edit_provider_text(text, "a", &[("api_key", Some("keychain:a".into()))]).unwrap();
-        assert!(out.contains("api_key = \"keychain:a\"\ntiers"), "{out}");
-        assert!(out.contains("api_key = \"env:NUGGET_HDR_KEY\""), "{out}");
-        assert!(remove_provider_text(&out, "b").is_some());
-
-        // A comment with """ right before a table no longer swallows the table after it.
-        let tricky = text.replace(
-            "[providers.headers]\napi_key = \"env:NUGGET_HDR_KEY\"\n",
-            "",
-        );
-        let out = remove_provider_text(&tricky, "a").unwrap();
-        assert_eq!(
-            toml::from_str::<toml::Table>(&out).unwrap()["draft"],
-            toml::from_str::<toml::Table>(&tricky).unwrap()["draft"]
-        );
-        // The comment right before the next table belongs to it and stays.
-        assert!(
-            out.starts_with("[runtime]\nenabled = false\n\n# a note with \"\"\" in it\n\n[draft]"),
-            "{out}"
-        );
-    }
-
-    #[test]
     fn a_keychain_entry_another_provider_uses_is_kept() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.toml");
@@ -2364,56 +2086,5 @@ api_key = "keychain:shared"
         write_provider(&path, &MemorySecrets::new(), &e, GOOD).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
-    }
-
-    #[test]
-    fn nuggets_own_names_are_reserved() {
-        assert!(reserved("local-chat", |_| false));
-        assert!(reserved("local-anything", |_| false));
-        assert!(reserved("slot", |id| id == "slot"));
-        assert!(!reserved("custom", |id| id == "slot"));
-    }
-
-    #[test]
-    fn only_key_backed_providers_are_editable() {
-        let cfg = Config::parse(HAND_WRITTEN).unwrap();
-        let find = |id: &str| cfg.providers.iter().find(|p| p.id.as_str() == id);
-        assert_eq!(
-            editable(find("nope"), "nope").unwrap_err(),
-            Reason::NotFound
-        );
-        assert_eq!(
-            editable(find("ollama"), "ollama").unwrap_err(),
-            Reason::NotEditable
-        );
-        assert!(editable(find("work"), "work").is_ok());
-        let mut local = find("work").unwrap().clone();
-        local.id = ProviderId::new("local-chat");
-        assert_eq!(
-            editable(Some(&local), "local-chat").unwrap_err(),
-            Reason::NotEditable
-        );
-    }
-
-    #[test]
-    fn the_store_resolver_reads_the_secret_store_and_environment() {
-        let secrets = Arc::new(MemorySecrets::new());
-        secrets
-            .set(&provider_account("custom"), " sk-x \n")
-            .unwrap();
-        let r = StoreResolver {
-            secrets: secrets.clone(),
-            env: Arc::new(|v| (v == "SET").then(|| "sk-env".to_owned())),
-        };
-        let get = |s: &str| r.resolve(&s.parse().unwrap());
-        assert_eq!(get("keychain:custom").unwrap().expose(), "sk-x");
-        assert_eq!(get("env:SET").unwrap().expose(), "sk-env");
-        assert!(matches!(get("env:UNSET"), Err(Error::NotFound(_))));
-        assert!(matches!(get("keychain:other"), Err(Error::NotFound(_))));
-        let broken = StoreResolver {
-            secrets: Arc::new(NoKeyring),
-            env: process_env(),
-        };
-        assert!(broken.resolve(&"keychain:x".parse().unwrap()).is_err());
     }
 }

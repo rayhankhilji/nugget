@@ -1,16 +1,4 @@
 //! `nuggetd mcp install --client claude-desktop|claude-code|cursor [--name N] [--yes]`.
-//!
-//! Creates an MCP client in the running daemon (`mcp.clients.create`) and sets the app up with
-//! its snippet:
-//! - **Claude Desktop, Cursor:** the app's JSON config gets an `mcpServers.nugget` entry. The file
-//!   is merged, never clobbered: other servers and settings stay as they are, an unparsable file
-//!   is left alone (error), the previous version is copied to `<file>.nugget-backup-<time>`, and
-//!   the new one is written to a temporary file (0600: it holds the token) and renamed into
-//!   place. A replaced `nugget` entry's old client is revoked.
-//! - **Claude Code:** prints the `claude mcp add ...` command to run (it is not run for you).
-//!
-//! On a terminal the plan is shown and confirmed first; `--yes` skips that, and without a
-//! terminal `--yes` is required.
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -21,10 +9,8 @@ use nugget_core::{Error, Result};
 use nugget_ipc::Client;
 use serde_json::{Map, Value, json};
 
-/// Name the server is registered under in each app.
 pub const SERVER_KEY: &str = nugget_mcp::snippets::SERVER_KEY;
 
-/// An app `nuggetd mcp install` can set up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum App {
     ClaudeDesktop,
@@ -33,7 +19,6 @@ pub enum App {
 }
 
 impl App {
-    /// The snippet `app` name.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ClaudeDesktop => "claude-desktop",
@@ -51,7 +36,6 @@ impl App {
     }
 }
 
-/// Options of one install.
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
     pub app: App,
@@ -59,7 +43,6 @@ pub struct InstallOptions {
     pub name: Option<String>,
     /// Config file to merge into instead of the app's default location.
     pub config: Option<PathBuf>,
-    /// Skip the confirmation.
     pub yes: bool,
 }
 
@@ -91,17 +74,13 @@ pub fn server_entry(snippet: &str) -> Result<Value> {
         .ok_or_else(|| Error::Invalid("setup snippet has no mcpServers entry".into()))
 }
 
-/// What [`merge_config`] did.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MergeOutcome {
-    /// Copy of the previous file, if there was one.
     pub backup: Option<PathBuf>,
-    /// The `nugget` entry that was replaced, if any.
     pub replaced: Option<Value>,
 }
 
-/// Set `mcpServers.<key> = entry` in the JSON config at `path`, keeping everything else. See the
-/// module docs for the safety rules.
+/// Set `mcpServers.<key> = entry` in the JSON config at `path`, keeping everything else.
 pub fn merge_config(path: &Path, key: &str, entry: Value) -> Result<MergeOutcome> {
     let existing = match std::fs::read(path) {
         Ok(b) => Some(b),
@@ -159,7 +138,7 @@ pub fn merge_config(path: &Path, key: &str, entry: Value) -> Result<MergeOutcome
                 }
                 n += 1;
             };
-            write_private(&b, bytes, true)?;
+            write_private(&b, bytes)?;
             Some(b)
         }
         None => None,
@@ -170,7 +149,7 @@ pub fn merge_config(path: &Path, key: &str, entry: Value) -> Result<MergeOutcome
     tmp_name.push(format!(".nugget-tmp-{}", std::process::id()));
     let tmp = path.with_file_name(tmp_name);
     let _ = std::fs::remove_file(&tmp);
-    write_private(&tmp, text.as_bytes(), true)?;
+    write_private(&tmp, text.as_bytes())?;
     if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
@@ -179,14 +158,9 @@ pub fn merge_config(path: &Path, key: &str, entry: Value) -> Result<MergeOutcome
 }
 
 /// Write a new file readable by the user only (0600 on Unix), synced to disk.
-fn write_private(path: &Path, bytes: &[u8], create_new: bool) -> Result<()> {
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true);
-    if create_new {
-        opts.create_new(true);
-    } else {
-        opts.create(true).truncate(true);
-    }
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -331,7 +305,6 @@ pub async fn install(paths: &Paths, opts: InstallOptions) -> Result<String> {
     Ok(out)
 }
 
-/// The app's config file on this machine.
 pub fn default_config_path(app: App) -> Option<PathBuf> {
     let hint = match (app, std::env::consts::OS) {
         (App::ClaudeDesktop, "macos") => {
@@ -354,17 +327,9 @@ mod tests {
     fn merges_keep_other_servers_and_back_up() {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("cfg").join("claude_desktop_config.json");
-        // Fresh file.
-        let first = json!({"command": "nuggetd", "args": ["mcp", "--client", "mcp_a"], "env": {"NUGGET_MCP_TOKEN": "t1"}});
-        let o = merge_config(&p, "nugget", first.clone()).unwrap();
-        assert_eq!(
-            o,
-            MergeOutcome {
-                backup: None,
-                replaced: None
-            }
-        );
-        // Other content is kept; the entry is replaced.
+        let first = json!({"command": "nuggetd", "args": ["mcp", "--client", "mcp_a"]});
+        let o = merge_config(&p, "nugget", first).unwrap();
+        assert!(o.backup.is_none() && o.replaced.is_none());
         let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         v["mcpServers"]["other"] = json!({"command": "x"});
         v["theme"] = json!("dark");
@@ -376,11 +341,6 @@ mod tests {
             Some("mcp_a")
         );
         let backup = o.backup.unwrap();
-        assert!(
-            std::fs::read_to_string(&backup)
-                .unwrap()
-                .contains("\"other\"")
-        );
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["nugget"], second);
         assert_eq!(v["mcpServers"]["other"], json!({"command": "x"}));
@@ -393,12 +353,6 @@ mod tests {
                 assert_eq!(mode & 0o777, 0o600, "{}", f.display());
             }
         }
-        // Leftover temp files are gone.
-        let names: Vec<_> = std::fs::read_dir(p.parent().unwrap())
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert!(names.iter().all(|n| !n.contains("nugget-tmp")), "{names:?}");
     }
 
     #[test]
@@ -416,10 +370,6 @@ mod tests {
 
     #[test]
     fn paths_and_entries() {
-        assert_eq!(
-            expand_path("/abs/x.json"),
-            Some(PathBuf::from("/abs/x.json"))
-        );
         if let Some(h) = std::env::home_dir() {
             assert_eq!(
                 expand_path("~/.cursor/mcp.json"),

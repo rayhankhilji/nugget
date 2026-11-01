@@ -18,7 +18,7 @@ use tokio_util::codec::LinesCodecError;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::IpcError;
-use crate::wire::{self, EncodeError, Incoming, JSONRPC, Notification, OutRequest};
+use crate::wire::{self, Incoming, JSONRPC, Notification, OutRequest};
 
 /// Notifications buffered per subscriber before the oldest are dropped.
 const NOTIFICATION_BUFFER: usize = 4096;
@@ -96,16 +96,8 @@ impl Client {
     }
 
     /// Wrap an already-connected local socket stream. Must be called inside a Tokio runtime.
-    pub fn from_stream(stream: LocalStream) -> Self {
-        Self::from_io(stream)
-    }
-
-    /// Wrap any byte stream (useful for in-memory transports in tests).
-    pub fn from_io<S>(io: S) -> Self
-    where
-        S: AsyncRead + AsyncWrite + Send + 'static,
-    {
-        let (read, write) = tokio::io::split(io);
+    fn from_stream(stream: LocalStream) -> Self {
+        let (read, write) = tokio::io::split(stream);
         let (notif_tx, _) = broadcast::channel(NOTIFICATION_BUFFER);
         let shared = Arc::new(Shared {
             pending: Mutex::new(HashMap::new()),
@@ -158,10 +150,6 @@ impl Client {
             jsonrpc: JSONRPC,
             id: Some(id),
             method,
-        })
-        .map_err(|e| match e {
-            EncodeError::TooLarge(n) => IpcError::TooLarge(n),
-            EncodeError::Serde(e) => IpcError::Serde(e),
         })?;
         if !wire::params_shape_ok(&line) {
             return Err(IpcError::Protocol(

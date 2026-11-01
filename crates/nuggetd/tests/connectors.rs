@@ -3,31 +3,25 @@
 //! credential (`sources.secret.set`, or a seeded OAuth token set) → `sources.sync` → search
 //! finds the mocked document. Every endpoint is a wiremock server; nothing leaves the machine.
 
+mod common;
+
 use std::sync::Arc;
 use std::time::Duration;
 
+use common::*;
 use nugget_connector::{Registry, SecretStore};
 use nugget_connector_microsoft::{
     MicrosoftEndpoints, OneDriveFactory, OutlookCalendarFactory, OutlookFactory,
 };
 use nugget_connector_saas::{Endpoints, GitHubFactory, LinearFactory, NotionFactory, SlackFactory};
-use nugget_core::ids::SourceId;
-use nugget_core::ipc::{SearchHit, SourceInfo, SourceState, method};
-use nugget_core::paths::Paths;
+use nugget_core::ipc::{SourceInfo, SourceState, method};
 use nugget_core::secrets::oauth_account;
-use nugget_ingest::MemorySecrets;
-use nugget_ipc::Client;
-use nugget_store::StoreKey;
-use nuggetd::{Daemon, DaemonOptions, Startup};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use wiremock::matchers::{body_string_contains, method as http_method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const CALL: Duration = Duration::from_secs(20);
-const EVENTUALLY: Duration = Duration::from_secs(45);
-const NO_RUNTIME: &str = "[runtime]\nenabled = false\n";
 const ENTRA_APP: &str = "00000000-1111-2222-3333-444444444444";
 
 /// The shipped registry's new kinds, pointed at `base` with fast retries.
@@ -313,72 +307,6 @@ async fn mount_saas(server: &MockServer) {
         .await;
 }
 
-struct Daemonised {
-    client: Client,
-    secrets: MemorySecrets,
-    stop: tokio::sync::oneshot::Sender<()>,
-    server: tokio::task::JoinHandle<nugget_core::Result<()>>,
-    _tmp: tempfile::TempDir,
-}
-
-async fn start(base: &str) -> Daemonised {
-    let tmp = tempfile::Builder::new()
-        .prefix("nugget-connectors-")
-        .tempdir()
-        .unwrap();
-    let paths = Paths::rooted(tmp.path().join("home"));
-    std::fs::create_dir_all(&paths.config).unwrap();
-    std::fs::write(paths.config_file(), NO_RUNTIME).unwrap();
-    let secrets = MemorySecrets::new();
-    let mut opts = DaemonOptions::new(paths.clone());
-    opts.store_key = Some(StoreKey::from_bytes([7; 32]));
-    opts.source_secrets = Some(Arc::new(secrets.clone()));
-    opts.connectors = Some(mocked_registry(base));
-    let daemon = match Daemon::start(opts).await.unwrap() {
-        Startup::Ready(d) => d,
-        Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
-    };
-    let (stop, rx) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(daemon.run_until(async {
-        let _ = rx.await;
-    }));
-    let client = Client::connect(&paths).await.unwrap();
-    Daemonised {
-        client,
-        secrets,
-        stop,
-        server,
-        _tmp: tmp,
-    }
-}
-
-impl Daemonised {
-    async fn call<R: serde::de::DeserializeOwned>(&self, m: &str, params: Value) -> R {
-        tokio::time::timeout(CALL, self.client.call(m, &params))
-            .await
-            .unwrap_or_else(|_| panic!("{m} timed out"))
-            .unwrap_or_else(|e| panic!("{m} failed: {e}"))
-    }
-
-    async fn search(&self, q: &str) -> Vec<SearchHit> {
-        self.call(method::SEARCH, json!({"query": q, "limit": 10}))
-            .await
-    }
-
-    async fn sources(&self) -> Vec<SourceInfo> {
-        self.call(method::SOURCES_LIST, json!({})).await
-    }
-
-    /// A valid OAuth token set, as `sources.auth.begin` would have stored it.
-    fn seed_oauth_token(&self, id: &SourceId) {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        let t = json!({"access_token": "at", "refresh_token": "rt", "expires_at": now + 3600});
-        self.secrets
-            .set(&oauth_account(id.as_str()), &t.to_string())
-            .unwrap();
-    }
-}
-
 /// How each kind gets its credential.
 enum Credential {
     /// Microsoft: an OAuth token set (from the sign-in flow) and, optionally, a client secret
@@ -400,7 +328,9 @@ async fn every_new_kind_syncs_mocked_documents_into_search() {
     let mock = MockServer::start().await;
     mount_microsoft(&mock).await;
     mount_saas(&mock).await;
-    let d = start(&mock.uri()).await;
+    let base = mock.uri();
+    let mut d =
+        Harness::start_with(NO_RUNTIME, |o| o.connectors = Some(mocked_registry(&base))).await;
 
     // The settings are what the desktop wizard sends, blank optional fields included.
     let cases = [
@@ -488,7 +418,12 @@ async fn every_new_kind_syncs_mocked_documents_into_search() {
                         Some(*cs)
                     );
                 }
-                d.seed_oauth_token(&info.id);
+                // A valid OAuth token set, as `sources.auth.begin` would have stored it.
+                let now = OffsetDateTime::now_utc().unix_timestamp();
+                let t =
+                    json!({"access_token": "at", "refresh_token": "rt", "expires_at": now + 3600});
+                let account = oauth_account(info.id.as_str());
+                d.secrets.set(&account, &t.to_string()).unwrap();
             }
             Credential::Pasted(token) => {
                 let () = d
@@ -511,30 +446,18 @@ async fn every_new_kind_syncs_mocked_documents_into_search() {
     }
 
     for (id, case) in &added {
-        let deadline = tokio::time::Instant::now() + EVENTUALLY;
-        loop {
-            let hits = d.search(case.word).await;
-            if hits.iter().any(|h| h.item.source == *id) {
-                break;
-            }
-            if tokio::time::Instant::now() >= deadline {
-                let state: Vec<_> = d
-                    .sources()
-                    .await
-                    .into_iter()
-                    .map(|s| format!("{} {:?} {:?}", s.id, s.state, s.last_error))
-                    .collect();
-                panic!(
-                    "{}: `{}` never became searchable; sources: {state:#?}",
-                    case.kind, case.word
-                );
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        eventually(case.kind, || async {
+            d.search(case.word)
+                .await
+                .iter()
+                .any(|h| h.item.source == *id)
+        })
+        .await;
     }
 
     // Every source finished its pass without needing more credentials.
-    for s in d.sources().await {
+    let sources: Vec<SourceInfo> = d.call(method::SOURCES_LIST, json!({})).await;
+    for s in sources {
         assert_ne!(s.state, SourceState::NeedsAuth, "{}", s.id);
     }
     // Pasted tokens and the client secret reached the APIs (and nowhere else).
@@ -564,10 +487,5 @@ async fn every_new_kind_syncs_mocked_documents_into_search() {
         "a valid token set needs no refresh"
     );
 
-    let _ = d.stop.send(());
-    tokio::time::timeout(CALL, d.server)
-        .await
-        .expect("daemon stops promptly")
-        .unwrap()
-        .unwrap();
+    d.stop().await;
 }

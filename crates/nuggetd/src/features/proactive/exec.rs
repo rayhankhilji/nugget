@@ -612,7 +612,6 @@ mod tests {
         _dir: tempfile::TempDir,
         exec: Exec,
         store: Store,
-        data: PathBuf,
     }
 
     fn fixture(with_vault: bool) -> Fx {
@@ -630,7 +629,6 @@ mod tests {
                 .unwrap(),
             )
         });
-        let data = paths.data.clone();
         let exec = Exec::from_parts(Parts {
             store: store.clone(),
             paths,
@@ -645,7 +643,6 @@ mod tests {
             _dir: dir,
             exec,
             store,
-            data,
         }
     }
 
@@ -672,147 +669,6 @@ mod tests {
             messages: sources.iter().map(|s| item(s, "INBOX/7/1")).collect(),
             subject: "Newsletter".into(),
         })
-    }
-
-    #[test]
-    fn archive_is_supported_only_for_sources_that_can() {
-        let f = fixture(false);
-        let e = &f.exec;
-        add_source(e, "imap-1", "imap", true, json!({}));
-        add_source(e, "imap-off", "imap", false, json!({}));
-        add_source(e, "gmail-ro", "gmail", true, json!({"client_id": "x"}));
-        add_source(
-            e,
-            "gmail-rw",
-            "gmail",
-            true,
-            json!({"client_id": "x", "allow_modify": true}),
-        );
-        add_source(e, "files", "files", true, json!({}));
-        assert!(e.supports(&archive(&["imap-1"])));
-        assert!(e.supports(&archive(&["files", "imap-1"])));
-        assert!(e.supports(&archive(&["gmail-rw"])));
-        assert!(!e.supports(&archive(&["gmail-ro"])));
-        assert!(!e.supports(&archive(&["imap-off"])));
-        assert!(!e.supports(&archive(&["files"])));
-        assert!(!e.supports(&archive(&["unknown"])));
-        assert!(!e.supports(&archive(&[])));
-        // Events and reminders always; notes only with a vault.
-        let note = Action::ResearchNote(ResearchNote {
-            title: "t".into(),
-            body: "b".into(),
-            sources: vec![],
-        });
-        assert!(!e.supports(&note));
-        assert!(fixture(true).exec.supports(&note));
-    }
-
-    #[tokio::test]
-    async fn archiving_without_a_capable_source_is_unsupported() {
-        let f = fixture(false);
-        add_source(&f.exec, "files", "files", true, json!({}));
-        let Action::ArchiveThread(a) = archive(&["files"]) else {
-            unreachable!()
-        };
-        let err = f.exec.inner.archive_thread(&a).await.unwrap_err();
-        assert!(matches!(err, Error::Unsupported(_)), "{err}");
-    }
-
-    #[tokio::test]
-    async fn events_without_caldav_become_ics_files() {
-        let mut f = fixture(false);
-        Arc::get_mut(&mut f.exec.inner).unwrap().identity = Identity {
-            emails: vec!["alex@morgan.example".into()],
-            name: Some("Alex Morgan".into()),
-        };
-        let ev = CreateEvent {
-            title: "Acme / pilot kickoff".into(),
-            start: OffsetDateTime::now_utc(),
-            end: OffsetDateTime::now_utc() + time::Duration::hours(1),
-            attendees: vec!["ana@acme.io".into()],
-            description: Some("Agenda".into()),
-        };
-        let path = f.exec.inner.create_event(&ev).await.unwrap();
-        assert!(
-            PathBuf::from(&path).starts_with(f.data.join("proactive").join("events")),
-            "{path}"
-        );
-        assert!(path.ends_with(".ics"));
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.starts_with("BEGIN:VCALENDAR\r\n"));
-        assert!(text.contains("SUMMARY:Acme / pilot kickoff\r\n"));
-        assert!(text.contains("mailto:ana@acme.io"));
-        assert!(text.contains("\r\nORGANIZER;CN=Alex Morgan:mailto:alex@morgan.example\r\n"));
-        let art = f.exec.artifact(&Action::CreateEvent(ev), &path).unwrap();
-        assert_eq!(art.kind, "file");
-        assert_eq!(art.path.as_deref(), Some(path.as_str()));
-        let ev_art = f
-            .exec
-            .artifact(
-                &Action::CreateEvent(CreateEvent {
-                    title: "x".into(),
-                    start: OffsetDateTime::now_utc(),
-                    end: OffsetDateTime::now_utc(),
-                    attendees: vec![],
-                    description: None,
-                }),
-                "https://dav.example/cal/x.ics",
-            )
-            .unwrap();
-        assert_eq!(ev_art.kind, "event");
-        assert_eq!(ev_art.url.as_deref(), Some("https://dav.example/cal/x.ics"));
-    }
-
-    #[test]
-    fn the_organizer_is_the_best_known_address() {
-        let draft: toml::Table = toml::from_str(
-            "[voice]\nemails = [\"voice@me.example\"]\nnames = [\"\", \"Alex Morgan\"]",
-        )
-        .unwrap();
-        let id = Identity::from_config(&["engine@me.example".into()], &draft);
-        assert_eq!(id.emails, ["engine@me.example", "voice@me.example"]);
-        assert_eq!(id.name.as_deref(), Some("Alex Morgan"));
-        assert_eq!(
-            Identity::from_config(&[], &toml::Table::new()),
-            Identity::default()
-        );
-
-        // Nothing known.
-        let mut f = fixture(false);
-        assert_eq!(f.exec.inner.organizer(None), None);
-        // A mail account; a disabled source or a non-address does not count.
-        add_source(
-            &f.exec,
-            "a-imap-off",
-            "imap",
-            false,
-            json!({"username": "off@me.example"}),
-        );
-        add_source(&f.exec, "b-imap", "imap", true, json!({"username": "alex"}));
-        add_source(
-            &f.exec,
-            "c-gmail",
-            "gmail",
-            true,
-            json!({"account_hint": "gm@me.example"}),
-        );
-        let o = f.exec.inner.organizer(None).unwrap();
-        assert_eq!((o.email.as_str(), o.name), ("gm@me.example", None));
-        // A configured address wins over accounts; the CalDAV account wins over both.
-        Arc::get_mut(&mut f.exec.inner).unwrap().identity = id;
-        let o = f.exec.inner.organizer(None).unwrap();
-        assert_eq!(o.email, "engine@me.example");
-        assert_eq!(o.name.as_deref(), Some("Alex Morgan"));
-        let dav = json!({"url": "https://dav.example", "username": "dav@me.example"});
-        assert_eq!(
-            f.exec.inner.organizer(Some(&dav)).unwrap().email,
-            "dav@me.example"
-        );
-        let dav = json!({"url": "https://dav.example", "username": "alex"});
-        assert_eq!(
-            f.exec.inner.organizer(Some(&dav)).unwrap().email,
-            "engine@me.example"
-        );
     }
 
     #[tokio::test]

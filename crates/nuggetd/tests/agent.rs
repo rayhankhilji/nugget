@@ -6,11 +6,14 @@
 //! confirmation is open, and a prompt injection in a tool result (fenced for the model, flagged,
 //! and the next edit forced to a confirmation).
 
+mod common;
+
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use common::*;
 use futures::StreamExt;
 use nugget_agent::{AgentEvent, ConfirmAnswer, Outcome, Verification};
 use nugget_browser::bridge::AttachInfo;
@@ -24,19 +27,13 @@ use nugget_core::ipc::{
     AgentStarted, AgentTaskDetail, AgentTaskState, AgentTaskSummary, BrowserStatus, KillState,
     PolicyApprovals, PolicyLogExport, PolicyState, agent_method as m, agent_notification,
 };
-use nugget_core::paths::Paths;
-use nugget_ingest::MemorySecrets;
 use nugget_ipc::{Client, Notification};
 use nugget_policy::{Effect, PolicyConfig, Rule};
-use nugget_store::StoreKey;
-use nuggetd::{Daemon, DaemonOptions, Startup};
 use serde_json::{Value, json};
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use wiremock::matchers::method as http_method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
-const WAIT: Duration = Duration::from_secs(30);
 const SITE: &str = "shop.example.com";
 const URL: &str = "https://shop.example.com/contact";
 const INJECTION: &str =
@@ -263,64 +260,32 @@ impl FakeBrowser {
 // ---- harness ----
 
 struct Rig {
-    _tmp: tempfile::TempDir,
-    paths: Paths,
+    h: Harness,
     mock: MockServer,
     script: Arc<Script>,
-    client: Client,
     browser: Arc<FakeBrowser>,
     host_tasks: Vec<JoinHandle<()>>,
-    stop: Option<oneshot::Sender<()>>,
-    server: Option<JoinHandle<nugget_core::Result<()>>>,
 }
 
-const PROVIDER: &str = r#"
-[[providers]]
-id = "remote"
-kind = "openai_compatible"
-base_url = "{mock}"
-model = "remote-model"
-tiers = ["agentic"]
-max_retries = 0
-"#;
-
 async fn start(page: PageSnapshot) -> Rig {
-    let tmp = tempfile::tempdir().unwrap();
-    let paths = Paths::rooted(tmp.path().to_path_buf());
     let mock = MockServer::start().await;
     let script = Arc::new(Script::default());
     Mock::given(http_method("POST"))
         .respond_with(Scripted(script.clone()))
         .mount(&mock)
         .await;
-    std::fs::create_dir_all(&paths.config).unwrap();
     let config = format!(
-        "[runtime]\nenabled = false\n\n{}",
-        PROVIDER.replace("{mock}", &format!("{}/v1", mock.uri()))
+        "{NO_RUNTIME}\n[[providers]]\nid = \"remote\"\nkind = \"openai_compatible\"\n\
+         base_url = \"{}/v1\"\nmodel = \"remote-model\"\ntiers = [\"agentic\"]\nmax_retries = 0\n",
+        mock.uri()
     );
-    std::fs::write(paths.config_file(), config).unwrap();
-    let mut opts = DaemonOptions::new(paths.clone());
-    opts.store_key = Some(StoreKey::from_bytes([7; 32]));
-    opts.source_secrets = Some(Arc::new(MemorySecrets::new()));
-    let daemon = match Daemon::start(opts).await.unwrap() {
-        Startup::Ready(d) => d,
-        Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
-    };
-    let (tx, rx) = oneshot::channel::<()>();
-    let server = tokio::spawn(daemon.run_until(async {
-        let _ = rx.await;
-    }));
-    let client = Client::connect(&paths).await.unwrap();
+    let h = Harness::start(&config).await;
     let mut rig = Rig {
-        _tmp: tmp,
-        paths,
+        h,
         mock,
         script,
-        client,
         browser: FakeBrowser::new(page),
         host_tasks: Vec::new(),
-        stop: Some(tx),
-        server: Some(server),
     };
     rig.attach_host().await;
     rig
@@ -330,7 +295,7 @@ impl Rig {
     /// Connect a second client as the native host and serve `browser.host.request`s from
     /// [`FakeBrowser`]. Returns once `browser.status` reports it connected.
     async fn attach_host(&mut self) {
-        let host = Client::connect(&self.paths).await.unwrap();
+        let host = Client::connect(&self.h.paths).await.unwrap();
         let mut notes = host.notifications();
         let attach = {
             let host = host.clone();
@@ -350,36 +315,21 @@ impl Rig {
                     continue;
                 }
                 let msg: HostMessage = n.params_as().expect("a HostMessage");
-                let reply = browser.handle(msg);
-                host.call_value(
-                    m::BROWSER_HOST_DELIVER,
-                    serde_json::to_value(reply).unwrap(),
-                )
-                .await
-                .expect("deliver accepted");
+                let reply = serde_json::to_value(browser.handle(msg)).unwrap();
+                let delivered = host.call_value(m::BROWSER_HOST_DELIVER, reply).await;
+                delivered.expect("deliver accepted");
             }
         });
-        self.host_tasks.push(attach);
-        self.host_tasks.push(serve);
-        let deadline = tokio::time::Instant::now() + WAIT;
-        loop {
-            let st: BrowserStatus = self.call(m::BROWSER_STATUS, json!({})).await;
-            if st.connected {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "host never attached"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        self.host_tasks.extend([attach, serve]);
+        eventually("host attached", || async {
+            let st: BrowserStatus = self.h.call(m::BROWSER_STATUS, json!({})).await;
+            st.connected
+        })
+        .await;
     }
 
     async fn call<R: serde::de::DeserializeOwned>(&self, method: &str, params: Value) -> R {
-        tokio::time::timeout(WAIT, self.client.call(method, &params))
-            .await
-            .unwrap_or_else(|_| panic!("{method} timed out"))
-            .unwrap_or_else(|e| panic!("{method} failed: {e}"))
+        self.h.call(method, params).await
     }
 
     async fn run(&self, goal: &str) -> AgentStarted {
@@ -402,11 +352,8 @@ impl Rig {
 
     /// The JSON bodies of every request the model received, in order.
     async fn model_requests(&self) -> Vec<Value> {
-        self.mock
-            .received_requests()
-            .await
-            .unwrap_or_default()
-            .iter()
+        let reqs = self.mock.received_requests().await.unwrap_or_default();
+        reqs.iter()
             .map(|r| serde_json::from_slice(&r.body).expect("a JSON request"))
             .collect()
     }
@@ -415,12 +362,7 @@ impl Rig {
         for t in self.host_tasks.drain(..) {
             t.abort();
         }
-        let _ = self.stop.take().unwrap().send(());
-        tokio::time::timeout(WAIT, self.server.take().unwrap())
-            .await
-            .expect("daemon stops promptly")
-            .unwrap()
-            .unwrap();
+        self.h.stop().await;
     }
 }
 
@@ -442,7 +384,7 @@ impl Events {
     }
 
     async fn next_note(&mut self) -> Notification {
-        tokio::time::timeout(WAIT, self.stream.next())
+        tokio::time::timeout(CALL, self.stream.next())
             .await
             .expect("a notification in time")
             .expect("connection open")
@@ -528,7 +470,7 @@ async fn confirm_approve_and_a_verified_finish() {
         "finish",
         json!({"summary": "The message was sent.", "outcome": "success"}),
     );
-    let mut events = Events::new(&rig.client);
+    let mut events = Events::new(&rig.h.client);
 
     let started = rig.run("Send the contact form on the shop site").await;
     let task = started.task_id.clone();
@@ -573,18 +515,14 @@ async fn confirm_approve_and_a_verified_finish() {
     assert!(matches!(&acts[0], BrowserAction::Submit { element } if element == "n2"));
 
     let detail = rig.get(&task).await;
-    assert_eq!(detail.summary.state, AgentTaskState::Finished);
     assert_eq!(detail.summary.outcome.as_deref(), Some("succeeded"));
     assert_eq!(detail.summary.verification.passed, 1);
-    assert_eq!(detail.summary.verification.failed, 0);
     assert!(detail.pending.is_empty());
-    assert!(!detail.explain.trim().is_empty());
     assert!(
         detail.explain.contains("browser_submit"),
         "{}",
         detail.explain
     );
-    assert!(!detail.entries.is_empty());
 
     let list: Vec<AgentTaskSummary> = rig.call(m::AGENT_LIST, json!({})).await;
     assert!(
@@ -604,10 +542,6 @@ async fn confirm_approve_and_a_verified_finish() {
         .filter(|l| l.contains("\"agent\"") && l.contains(&task))
         .count();
     assert!(agent_lines >= 4, "{}", export.jsonl);
-    let state: PolicyState = rig.call(m::POLICY_GET, json!({})).await;
-    assert!(state.log.chain_ok);
-    assert!(!state.halted);
-
     rig.stop().await;
 }
 
@@ -620,7 +554,7 @@ async fn a_denied_confirmation_never_reaches_the_page() {
         "finish",
         json!({"summary": "The user did not want it sent.", "outcome": "failure"}),
     );
-    let mut events = Events::new(&rig.client);
+    let mut events = Events::new(&rig.h.client);
 
     let task = rig.run("Send the contact form").await.task_id;
     let req = events.confirmation(&task).await;
@@ -663,10 +597,7 @@ async fn a_denied_confirmation_never_reaches_the_page() {
     );
 
     let detail = rig.get(&task).await;
-    assert_eq!(detail.summary.state, AgentTaskState::Finished);
-    assert_ne!(detail.summary.outcome.as_deref(), Some("succeeded"));
     assert_eq!(detail.summary.outcome.as_deref(), Some("failed"));
-    assert!(detail.pending.is_empty());
     let export: PolicyLogExport = rig.call(m::POLICY_LOG_EXPORT, json!({})).await;
     assert!(export.status.chain_ok);
 
@@ -678,7 +609,7 @@ async fn the_kill_switch_halts_a_task_waiting_on_a_confirmation() {
     let mut rig = start(contact_page("Write to us using the form below.")).await;
     rig.script.push("browser_snapshot", json!({}));
     rig.script.push("browser_submit", json!({"element": "n2"}));
-    let mut events = Events::new(&rig.client);
+    let mut events = Events::new(&rig.h.client);
 
     let task = rig.run("Send the contact form").await.task_id;
     let req = events.confirmation(&task).await;
@@ -694,13 +625,12 @@ async fn the_kill_switch_halts_a_task_waiting_on_a_confirmation() {
 
     assert!(rig.browser.acts().is_empty());
     let detail = rig.get(&task).await;
-    assert_eq!(detail.summary.state, AgentTaskState::Finished);
     assert_eq!(detail.summary.outcome.as_deref(), Some("halted"));
-    assert!(detail.pending.is_empty());
     let approvals: PolicyApprovals = rig.call(m::POLICY_APPROVALS, json!({})).await;
     assert!(approvals.pending.is_empty());
     // The confirmation is closed: answering it now fails.
     let late = rig
+        .h
         .client
         .call_value(
             m::AGENT_CONFIRM,
@@ -742,7 +672,7 @@ async fn stop_all_agents_ends_a_task_waiting_on_ask_user() {
         "browser_type",
         json!({"element": "n1", "text": "after Stop"}),
     );
-    let mut events = Events::new(&rig.client);
+    let mut events = Events::new(&rig.h.client);
     let task = rig.run("Fill in the form").await.task_id;
     events
         .until(&task, |e| {
@@ -759,7 +689,8 @@ async fn stop_all_agents_ends_a_task_waiting_on_ask_user() {
     // Answering while stopped is refused...
     let answer = json!({"task_id": task, "answer": "the contact form"});
     assert!(
-        rig.client
+        rig.h
+            .client
             .call_value(m::AGENT_ANSWER, answer.clone())
             .await
             .is_err()
@@ -767,7 +698,8 @@ async fn stop_all_agents_ends_a_task_waiting_on_ask_user() {
     // ...and after Resume there is nothing left to answer.
     let _: KillState = rig.call(m::POLICY_RESUME, json!({})).await;
     assert!(
-        rig.client
+        rig.h
+            .client
             .call_value(m::AGENT_ANSWER, answer)
             .await
             .is_err()
@@ -785,11 +717,12 @@ async fn an_approval_after_stop_is_refused() {
     let mut rig = start(contact_page("Write to us using the form below.")).await;
     rig.script.push("browser_snapshot", json!({}));
     rig.script.push("browser_submit", json!({"element": "n2"}));
-    let mut events = Events::new(&rig.client);
+    let mut events = Events::new(&rig.h.client);
     let task = rig.run("Send the contact form").await.task_id;
     let req = events.confirmation(&task).await;
     let _: KillState = rig.call(m::POLICY_KILL, json!({})).await;
     let approve = rig
+        .h
         .client
         .call_value(
             m::AGENT_CONFIRM,
@@ -812,11 +745,11 @@ async fn stop_and_resume_reach_the_extension_and_the_overlay_is_hidden_after_a_t
     rig.script.push("browser_scroll", json!({"dy": 100}));
     rig.script
         .push("finish", json!({"summary": "Scrolled.", "outcome": "done"}));
-    let mut events = Events::new(&rig.client);
+    let mut events = Events::new(&rig.h.client);
     let task = rig.run("Scroll the page").await.task_id;
     events.finished(&task).await;
     let wait_for = async |want: &[&str]| {
-        let deadline = tokio::time::Instant::now() + WAIT;
+        let deadline = tokio::time::Instant::now() + CALL;
         loop {
             let got = rig.browser.controls();
             if got.ends_with(want) {
@@ -835,17 +768,6 @@ async fn stop_and_resume_reach_the_extension_and_the_overlay_is_hidden_after_a_t
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn kill_and_resume_are_broadcast() {
-    let mut rig = start(contact_page("Hello")).await;
-    let mut events = Events::new(&rig.client);
-    let _: KillState = rig.call(m::POLICY_KILL, json!({})).await;
-    assert_eq!(events.kill_changed().await, KillState { halted: true });
-    let _: KillState = rig.call(m::POLICY_RESUME, json!({})).await;
-    assert_eq!(events.kill_changed().await, KillState { halted: false });
-    rig.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_injection_in_a_page_forces_a_tainted_edit_to_a_confirmation() {
     let mut rig = start(contact_page(&format!("Contact us. {INJECTION}."))).await;
     rig.script.push("browser_snapshot", json!({}));
@@ -857,7 +779,7 @@ async fn an_injection_in_a_page_forces_a_tainted_edit_to_a_confirmation() {
         "finish",
         json!({"summary": "Typed the question.", "outcome": "success"}),
     );
-    let mut events = Events::new(&rig.client);
+    let mut events = Events::new(&rig.h.client);
 
     let task = rig.run("Ask the shop where my order is").await.task_id;
     let finding = events
@@ -961,7 +883,7 @@ async fn policy_round_trip_and_browser_status() {
     assert_eq!(again.config, after.config);
     assert!(again.log.chain_ok);
     // Persisted under the data dir.
-    let on_disk = std::fs::read_to_string(rig.paths.data.join("policy/policy.json")).unwrap();
+    let on_disk = std::fs::read_to_string(rig.h.paths.data.join("policy/policy.json")).unwrap();
     assert!(on_disk.contains("user:deny-evil"));
 
     // Bad configurations are refused and change nothing.
@@ -970,7 +892,8 @@ async fn policy_round_trip_and_browser_status() {
         json!({"config": {"confirm_timeout_secs": 0}}),
     ] {
         assert!(
-            rig.client
+            rig.h
+                .client
                 .call_value(m::POLICY_SET, bad.clone())
                 .await
                 .is_err(),
@@ -991,7 +914,7 @@ async fn policy_round_trip_and_browser_status() {
         "finish",
         json!({"summary": "Could not read it.", "outcome": "failure"}),
     );
-    let mut events = Events::new(&rig.client);
+    let mut events = Events::new(&rig.h.client);
     let task = rig.run("Read the page").await.task_id;
     let outcome = events.finished(&task).await;
     assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");

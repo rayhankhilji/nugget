@@ -3,19 +3,10 @@
 
 use std::io;
 
-use interprocess::local_socket::Name;
 use interprocess::local_socket::tokio::{Listener, Stream};
 use interprocess::local_socket::traits::tokio::Stream as _;
 use nugget_core::ipc::SOCKET_NAME;
 use nugget_core::paths::Paths;
-
-/// The local socket name for the daemon described by `paths`.
-///
-/// Pure: does not touch the filesystem. Use [`bind`] on the server side, which also prepares the
-/// socket directory.
-pub fn socket_name(paths: &Paths) -> io::Result<Name<'static>> {
-    imp::name(paths)
-}
 
 /// Human-readable socket location (a path on Unix, a pipe name on Windows), for logs and UI.
 pub fn socket_display(paths: &Paths) -> String {
@@ -24,16 +15,10 @@ pub fn socket_display(paths: &Paths) -> String {
 
 /// Bind the daemon's listener.
 ///
-/// First takes an exclusive lock on `<data>/ipc/nuggetd.lock` (see [`LOCK_FILE`]), before the
-/// socket or pipe is touched, so two daemons starting at once cannot both claim the name; if
-/// another process holds it, this fails with [`io::ErrorKind::AddrInUse`]. The lock is kept
-/// until the process exits ([`Listener`] cannot carry it); a later `bind` in the same process
-/// reuses it once the earlier listener is gone.
-///
-/// On Unix this creates the socket directory with mode 0700 (and refuses to use one that is
-/// not private to the current user). A stale socket file left by a crashed daemon is
-/// replaced; if another daemon is still answering on it, this fails with
-/// [`io::ErrorKind::AddrInUse`].
+/// First takes an exclusive lock on [`lock_path`] before touching the socket, so two daemons
+/// starting at once cannot both claim it ([`io::ErrorKind::AddrInUse`]). The lock is kept until
+/// the process exits. On Unix the socket directory must be private to the current user (0700);
+/// a stale socket file is replaced unless a daemon still answers on it.
 pub async fn bind(paths: &Paths) -> io::Result<Listener> {
     let lock = daemon_lock::acquire(paths)?;
     let listener = imp::bind(paths).await?;
@@ -41,12 +26,9 @@ pub async fn bind(paths: &Paths) -> io::Result<Listener> {
     Ok(listener)
 }
 
-/// Name of the daemon lock file inside `<data>/ipc/`.
-pub const LOCK_FILE: &str = "nuggetd.lock";
-
 /// Path of the lock file [`bind`] holds while a daemon runs.
 pub fn lock_path(paths: &Paths) -> std::path::PathBuf {
-    paths.data.join("ipc").join(LOCK_FILE)
+    paths.data.join("ipc").join("nuggetd.lock")
 }
 
 /// Connect a raw stream to the daemon. Most callers want [`Client::connect`](crate::Client::connect).
@@ -55,7 +37,7 @@ pub fn lock_path(paths: &Paths) -> std::path::PathBuf {
 /// returned (another account could have created a pipe with the expected name).
 pub async fn connect_stream(paths: &Paths) -> io::Result<Stream> {
     imp::check_before_connect(paths)?;
-    let stream = Stream::connect(socket_name(paths)?).await?;
+    let stream = Stream::connect(imp::name(paths)?).await?;
     imp::verify_server(&stream)?;
     Ok(stream)
 }
@@ -623,14 +605,6 @@ mod tests {
         assert!(!imp::peer_uid_allowed(Some(502), 501));
         assert!(!imp::peer_uid_allowed(Some(0), 501));
         assert!(!imp::peer_uid_allowed(None, 501));
-    }
-
-    #[test]
-    fn long_data_dirs_fall_back_to_short_socket_paths() {
-        let paths = Paths::rooted(std::path::PathBuf::from("/").join("x".repeat(200)));
-        let dir = imp::socket_dir(&paths);
-        assert!(dir.join(SOCKET_NAME).as_os_str().len() <= 100);
-        assert!(dir.starts_with(std::env::temp_dir()));
     }
 
     #[tokio::test]

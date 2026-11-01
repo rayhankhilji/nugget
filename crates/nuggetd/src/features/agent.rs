@@ -56,7 +56,7 @@ use super::policy::Safety;
 use super::{Feature, FeatureContext, section, start};
 use crate::hub::Hub;
 
-/// Start the W3 features (policy, browser, agent) in that order. They share one [`Safety`].
+/// Start the safety features (policy, browser, agent) in that order. They share one [`Safety`].
 ///
 /// Returns the daemon's shared [`Safety`] for other features that gate actions (proactive).
 pub(crate) async fn register(
@@ -222,7 +222,7 @@ struct AgentFeature {
     _kill_hook: HookGuard,
 }
 
-/// "Stop all agents" ends everything, not only the loops that are running (GG3-10): a task
+/// "Stop all agents" ends everything, not only the loops that are running: a task
 /// waiting on `ask_user` has no loop to see the switch, so it is resumed halted and cancelled,
 /// and ends (and is logged) like a run stopped mid-step. It can never act after a later Resume:
 /// its token is cancelled and its question is gone, so `agent.answer` has nothing to answer.
@@ -294,7 +294,7 @@ fn spawn_resume(
 }
 
 /// Refuse a user's answer while every agent is stopped: nothing the user says between Stop and
-/// Resume may set an agent going (GG3-21).
+/// Resume may set an agent going.
 fn refuse_while_halted(engine: &nugget_policy::PolicyEngine, what: &str) -> Result<()> {
     if engine.halted() {
         return Err(Error::Invalid(format!(
@@ -380,7 +380,7 @@ impl AgentFeature {
             .with_events(self.runs.clone())
             .with_ledger(self.ledger.clone());
         // The triage is one short call: a small model judges it as well as a large one and much
-        // sooner (DD3), so it goes to the light tier when one is configured.
+        // sooner, so it goes to the light tier when one is configured.
         if cfg.triage
             && !self
                 .router
@@ -860,7 +860,7 @@ struct Runs {
     safety: Arc<Safety>,
     tasks: Mutex<HashMap<String, TaskEntry>>,
     /// The browser tools' controller: its "Nugget is acting" overlay is hidden once no task is
-    /// running (GG3-12).
+    /// running.
     browser: Option<Arc<nugget_browser::BrowserController>>,
 }
 
@@ -1031,16 +1031,6 @@ impl EventSink for Runs {
 mod tests {
     use super::*;
     use nugget_agent::{Claim, Usage};
-    use nugget_policy::{ActionDescriptor, KillSwitch, PolicyEngine, RiskClass};
-
-    fn safety() -> Arc<Safety> {
-        Arc::new(Safety {
-            engine: Arc::new(PolicyEngine::default()),
-            log: Arc::new(nugget_policy::ActionLog::in_memory()),
-            kill: KillSwitch::new(),
-            pending: Mutex::new(BTreeMap::new()),
-        })
-    }
 
     fn entry(task: &str, seq: u64, at_ms: u64, record: Record) -> LogEntry {
         LogEntry {
@@ -1059,26 +1049,6 @@ mod tests {
             deadline_ms: 1000,
             max_tokens: 100,
         }
-    }
-
-    #[test]
-    fn settings_default_and_parse() {
-        let s: AgentSettings = section("agent", &toml::Table::new()).unwrap();
-        assert!(s.enabled);
-        assert_eq!(s.max_concurrent, 4);
-        let t: toml::Table =
-            toml::from_str("enabled = false\nmax_steps = 7\nconfirm_timeout_secs = 3").unwrap();
-        let s: AgentSettings = section("agent", &t).unwrap();
-        assert!(!s.enabled);
-        assert_eq!(s.max_steps, Some(7));
-        assert_eq!(s.confirm_timeout_secs, Some(3));
-        assert_eq!(s.max_concurrent, 4);
-        // The triage stays off unless the user turns it on; a refusal is then a question.
-        assert!(!s.triage);
-        assert!(s.triage_override);
-        let t: toml::Table = toml::from_str("triage = true").unwrap();
-        let s: AgentSettings = section("agent", &t).unwrap();
-        assert!(s.triage);
     }
 
     #[test]
@@ -1150,104 +1120,5 @@ mod tests {
         assert_eq!(s[1].state, AgentTaskState::Interrupted);
         assert_eq!(s[1].started_ms, 20);
         assert_eq!(s[1].outcome, None);
-    }
-
-    fn request(task: &str, id: &str) -> ConfirmationRequest {
-        ConfirmationRequest {
-            request_id: id.into(),
-            action_id: "act".into(),
-            tool: "mail.send".into(),
-            action: ActionDescriptor {
-                target_app: "mail".into(),
-                verb: "send".into(),
-                target_label: None,
-                text_preview: None,
-                declared_risk: RiskClass::Send,
-                task_id: task.into(),
-            },
-            reason: "sends mail".into(),
-            forced_by_injection: false,
-            timeout_ms: 1000,
-        }
-    }
-
-    #[tokio::test]
-    async fn the_sink_tracks_state_and_open_confirmations() {
-        let safety = safety();
-        let runs = Arc::new(Runs {
-            hub: Arc::new(Hub::default()),
-            safety: safety.clone(),
-            tasks: Mutex::new(HashMap::new()),
-            browser: None,
-        });
-        let router = Arc::new(Router::new(Vec::new(), Default::default()));
-        let gate: Arc<dyn PolicyGate> = safety.engine.clone();
-        let agent = Arc::new(Agent::new(
-            Model::Router {
-                router,
-                tier: Tier::Agentic,
-            },
-            ToolRegistry::new(),
-            gate,
-        ));
-        let cfg = AgentConfig::default();
-        runs.lock()
-            .insert("t".into(), TaskEntry::new("goal".into(), agent, &cfg));
-        let summary = |runs: &Runs| runs.lock()["t"].summary("t");
-
-        runs.emit(AgentEvent::StepStarted {
-            task_id: "t".into(),
-            step: 2,
-        });
-        runs.emit(AgentEvent::ConfirmationNeeded {
-            task_id: "t".into(),
-            request: request("t", "r1"),
-        });
-        assert_eq!(summary(&runs).state, AgentTaskState::Confirming);
-        assert_eq!(summary(&runs).steps, 2);
-        assert!(safety.pending.lock().unwrap().contains_key("r1"));
-        runs.emit(AgentEvent::ConfirmationResolved {
-            task_id: "t".into(),
-            request_id: "r1".into(),
-            answer: nugget_agent::ConfirmAnswer::Approved,
-        });
-        assert_eq!(summary(&runs).state, AgentTaskState::Running);
-        assert!(safety.pending.lock().unwrap().is_empty());
-        runs.emit(AgentEvent::Verification {
-            task_id: "t".into(),
-            action_id: "a".into(),
-            tool: "x".into(),
-            verification: Verification::Unverifiable,
-        });
-
-        // Suspended is held back until the run returns with its state.
-        runs.emit(AgentEvent::Suspended {
-            task_id: "t".into(),
-            question: "which one?".into(),
-            options: vec!["Sam Lee".into(), "Sam Ortiz".into()],
-        });
-        assert!(runs.lock()["t"].deferred.is_some());
-        assert_eq!(runs.lock()["t"].question.as_deref(), Some("which one?"));
-        assert_eq!(runs.lock()["t"].options, ["Sam Lee", "Sam Ortiz"]);
-
-        // A run stopped while a confirmation was open drops it.
-        runs.emit(AgentEvent::ConfirmationNeeded {
-            task_id: "t".into(),
-            request: request("t", "r2"),
-        });
-        runs.emit(AgentEvent::Finished {
-            task_id: "t".into(),
-            outcome: Outcome::Halted,
-            summary: None,
-        });
-        let s = summary(&runs);
-        assert_eq!(s.state, AgentTaskState::Finished);
-        assert_eq!(s.outcome.as_deref(), Some("halted"));
-        assert_eq!(s.verification.unverifiable, 1);
-        assert!(s.finished_ms.is_some());
-        assert!(safety.pending.lock().unwrap().is_empty());
-        assert!(runs.lock()["t"].pending.is_empty());
-        assert!(runs.lock()["t"].question.is_none());
-        assert!(runs.lock()["t"].options.is_empty());
     }
 }

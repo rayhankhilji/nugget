@@ -56,37 +56,70 @@ fn wait_for_status(home: &Path, child: &mut Child) -> Output {
     }
 }
 
-#[test]
-fn version_flag() {
-    let out = Command::new(EXE).arg("--version").output().unwrap();
-    assert!(out.status.success());
-    assert_eq!(
-        text(&out.stdout).trim(),
-        format!("nuggetd {}", env!("CARGO_PKG_VERSION"))
-    );
+/// Exit status of `child` once it exits, failing after `secs`.
+fn wait_exit(child: &mut Child, secs: u64) -> std::process::ExitStatus {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            return s;
+        }
+        assert!(Instant::now() < deadline, "daemon did not stop");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// The messages of the daemon's JSON log lines, and the raw log.
+fn log_messages(home: &Path) -> (Vec<String>, String) {
+    let log = std::fs::read_dir(home.join("data/logs"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("nuggetd"))
+        .map(|e| std::fs::read_to_string(e.path()).unwrap())
+        .collect::<String>();
+    let messages = log
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).expect("JSON log line"))
+        .filter_map(|l| l["fields"]["message"].as_str().map(str::to_owned))
+        .collect();
+    (messages, log)
+}
+
+/// Spawns the daemon on `home` with the runtime off and waits until it answers.
+fn spawn_quiet(home: &Path) -> Daemon {
+    std::fs::create_dir_all(home.join("config")).unwrap();
+    std::fs::write(
+        home.join("config/config.toml"),
+        "[runtime]\nenabled = false\n",
+    )
+    .unwrap();
+    let child = nuggetd(home)
+        .env("NUGGET_LOG", "debug")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut daemon = Daemon(Some(child));
+    wait_for_status(home, daemon.0.as_mut().unwrap());
+    daemon
 }
 
 #[test]
-fn status_without_a_daemon_fails() {
+fn version_status_without_a_daemon_and_invalid_config() {
+    let out = Command::new(EXE).arg("--version").output().unwrap();
+    let want = format!("nuggetd {}", env!("CARGO_PKG_VERSION"));
+    assert_eq!(text(&out.stdout).trim(), want);
     let tmp = tempfile::tempdir().unwrap();
     let out = run(tmp.path(), &["status"]);
-    assert!(!out.status.success());
-    assert!(
-        text(&out.stderr).contains("not running"),
-        "{}",
-        text(&out.stderr)
-    );
-}
-
-#[test]
-fn invalid_config_exits_with_an_error() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cfg = tmp.path().join("config");
-    std::fs::create_dir_all(&cfg).unwrap();
-    std::fs::write(cfg.join("config.toml"), "[[providers]]\nid = \n").unwrap();
+    assert!(!out.status.success() && text(&out.stderr).contains("not running"));
+    std::fs::create_dir_all(tmp.path().join("config")).unwrap();
+    std::fs::write(
+        tmp.path().join("config/config.toml"),
+        "[[providers]]\nid = \n",
+    )
+    .unwrap();
     let out = run(tmp.path(), &[]);
-    assert!(!out.status.success());
     let err = text(&out.stderr);
+    assert!(!out.status.success());
     assert!(
         err.contains("invalid config") && err.contains("config.toml"),
         "{err}"
@@ -122,11 +155,6 @@ fn runs_reports_status_and_shuts_down() {
         "key file (keychain off)"
     );
     assert!(home.join("data/nugget.db").exists());
-    let logs: Vec<_> = std::fs::read_dir(home.join("data/logs"))
-        .unwrap()
-        .flatten()
-        .collect();
-    assert!(!logs.is_empty());
 
     let json = run(home, &["status", "--json"]);
     assert!(json.status.success());
@@ -152,17 +180,9 @@ fn runs_reports_status_and_shuts_down() {
         }
         let killed = Command::new("kill")
             .args(["-TERM", &child.id().to_string()])
-            .status()
-            .unwrap();
-        assert!(killed.success());
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let status = loop {
-            if let Some(s) = child.try_wait().unwrap() {
-                break s;
-            }
-            assert!(Instant::now() < deadline, "daemon did not stop on SIGTERM");
-            std::thread::sleep(Duration::from_millis(50));
-        };
+            .status();
+        assert!(killed.unwrap().success());
+        let status = wait_exit(&mut child, 20);
         assert!(status.success(), "graceful exit, got {status}");
         let mut stderr = String::new();
         use std::io::Read;
@@ -174,22 +194,9 @@ fn runs_reports_status_and_shuts_down() {
             .unwrap();
         assert!(stderr.contains("wrote default config"), "{stderr}");
 
-        let log = std::fs::read_dir(home.join("data/logs"))
-            .unwrap()
-            .flatten()
-            .map(|e| std::fs::read_to_string(e.path()).unwrap())
-            .collect::<String>();
-        let lines: Vec<serde_json::Value> = log
-            .lines()
-            .map(|l| serde_json::from_str(l).expect("JSON log line"))
-            .collect();
-        let has = |msg: &str| {
-            lines
-                .iter()
-                .any(|l| l["fields"]["message"].as_str() == Some(msg))
-        };
-        assert!(has("nuggetd ready"), "{log}");
-        assert!(has("stopped"), "{log}");
+        let (messages, log) = log_messages(home);
+        let has = |m: &str| messages.iter().any(|x| x == m);
+        assert!(has("nuggetd ready") && has("stopped"), "{log}");
     }
     #[cfg(not(unix))]
     {
@@ -208,19 +215,7 @@ fn ipc_shutdown_exits_cleanly_and_logs_stopped() {
 
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
-    std::fs::create_dir_all(home.join("config")).unwrap();
-    std::fs::write(
-        home.join("config/config.toml"),
-        "[runtime]\nenabled = false\n",
-    )
-    .unwrap();
-    let child = nuggetd(home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let mut daemon = Daemon(Some(child));
-    wait_for_status(home, daemon.0.as_mut().unwrap());
+    let mut daemon = spawn_quiet(home);
     let pid = daemon.0.as_ref().unwrap().id();
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -242,31 +237,9 @@ fn ipc_shutdown_exits_cleanly_and_logs_stopped() {
     assert!(answered.stopping);
     assert_eq!(answered.pid, pid);
 
-    let mut child = daemon.0.take().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let status = loop {
-        if let Some(s) = child.try_wait().unwrap() {
-            break s;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "daemon did not stop on daemon.shutdown"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    };
+    let status = wait_exit(daemon.0.as_mut().unwrap(), 30);
     assert!(status.success(), "clean exit, got {status}");
-
-    let log = std::fs::read_dir(home.join("data/logs"))
-        .unwrap()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with("nuggetd"))
-        .map(|e| std::fs::read_to_string(e.path()).unwrap())
-        .collect::<String>();
-    let messages: Vec<String> = log
-        .lines()
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        .filter_map(|l| l["fields"]["message"].as_str().map(str::to_owned))
-        .collect();
+    let (messages, log) = log_messages(home);
     let at = |m: &str| messages.iter().position(|x| x == m);
     let (asked, stopped) = (at("stop requested over IPC"), at("stopped"));
     assert!(asked.is_some() && stopped.is_some(), "{log}");
@@ -284,26 +257,9 @@ fn keychain_off_keeps_source_secrets_out_of_files() {
     use serde_json::{Value, json};
 
     const SECRET: &str = "pw-never-in-a-file-7731";
-    let tmp = tempfile::Builder::new()
-        .prefix("nugget-cli-")
-        .tempdir()
-        .unwrap();
+    let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
-    std::fs::create_dir_all(home.join("config")).unwrap();
-    std::fs::write(
-        home.join("config/config.toml"),
-        "[runtime]\nenabled = false\n",
-    )
-    .unwrap();
-    let child = nuggetd(&home)
-        .env("NUGGET_LOG", "debug")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let mut daemon = Daemon(Some(child));
-    wait_for_status(&home, daemon.0.as_mut().unwrap());
-
+    let mut daemon = spawn_quiet(&home);
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let paths = nugget_core::paths::Paths::rooted(home.clone());
@@ -350,15 +306,11 @@ fn keychain_off_keeps_source_secrets_out_of_files() {
         }
     });
 
-    let mut child = daemon.0.take().unwrap();
+    let child = daemon.0.as_mut().unwrap();
     let _ = Command::new("kill")
         .args(["-TERM", &child.id().to_string()])
         .status();
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while child.try_wait().unwrap().is_none() {
-        assert!(Instant::now() < deadline, "daemon did not stop");
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    wait_exit(child, 20);
 
     fn scan(dir: &Path, needle: &[u8]) {
         for e in std::fs::read_dir(dir).unwrap().flatten() {

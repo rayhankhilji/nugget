@@ -1,6 +1,5 @@
-//! Logging: JSON lines to a daily-rolling file under `Paths::data/logs`, plus human-readable
-//! stderr when attached to a terminal. The level comes from `NUGGET_LOG` (or `RUST_LOG`) and
-//! defaults to `info`. Whatever the level, the MCP SDK is capped at `info` ([`content_cap`]).
+//! Logging: JSON lines to a daily-rolling file under `Paths::data/logs`, plus human-readable stderr
+//! when attached to a terminal.
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -14,7 +13,6 @@ use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// Log files kept before the oldest is deleted.
 const MAX_LOG_FILES: usize = 14;
 
 pub fn log_dir(paths: &Paths) -> PathBuf {
@@ -33,17 +31,13 @@ fn filter_for(spec: &str) -> EnvFilter {
         .unwrap_or_else(|_| EnvFilter::new("info"))
 }
 
-/// A second filter, applied after `NUGGET_LOG`'s, that no directive can loosen: the MCP SDK
-/// logs whole tool-call requests and results (queries, passage text) at `debug`, so its targets
-/// stop at `info`. Our own MCP code logs metadata only.
+/// A cap no `NUGGET_LOG` directive can loosen: the MCP SDK logs tool-call content at `debug`.
 fn content_cap() -> Targets {
     Targets::new()
         .with_default(LevelFilter::TRACE)
         .with_target("rmcp", LevelFilter::INFO)
 }
 
-/// Install the daemon's global subscriber. Keep the guard alive until exit so buffered lines are
-/// flushed.
 pub fn init_daemon(paths: &Paths) -> Result<WorkerGuard> {
     let dir = log_dir(paths);
     crate::fsutil::create_private_dir(&dir)?;
@@ -75,10 +69,7 @@ pub fn init_daemon(paths: &Paths) -> Result<WorkerGuard> {
     Ok(guard)
 }
 
-/// A log file writer that keeps lines whole across failed writes: a write that fails part way
-/// (the disk is full) leaves a partial line in the file, so the next write starts with a line
-/// break and later lines stay parseable once space is back (QA GG6-25). Each write is one
-/// whole event from the non-blocking worker.
+/// After a partial write (disk full), the next write starts on a new line (GG6-25).
 struct LineSafe<W> {
     inner: W,
     /// The last write failed: the file may end inside a line.

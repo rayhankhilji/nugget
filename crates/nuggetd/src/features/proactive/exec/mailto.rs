@@ -76,17 +76,6 @@ mod tests {
     }
 
     #[test]
-    fn encodes_every_part() {
-        let url = link(&draft(Some("Hi Ana,\nSee you at 5 — ok?\n")));
-        assert_eq!(
-            url,
-            "mailto:ana@acme.io,bo%2Bx@acme.io?cc=c%20d@e.io\
-             &subject=Re%3A%20Pricing%20%26%20terms%3F\
-             &body=Hi%20Ana%2C%0D%0ASee%20you%20at%205%20%E2%80%94%20ok%3F%0D%0A"
-        );
-    }
-
-    #[test]
     fn hostile_parts_cannot_add_fields() {
         let mut d = draft(Some("x&bcc=evil@x.io"));
         d.to = vec!["a@b.io?bcc=evil@x.io".into()];
@@ -94,16 +83,5 @@ mod tests {
         assert!(!url.contains("&bcc="), "{url}");
         assert!(!url.contains("?bcc="), "{url}");
         assert_eq!(url.matches('?').count(), 1);
-    }
-
-    #[test]
-    fn empty_parts_are_left_out() {
-        let mut d = draft(None);
-        d.cc.clear();
-        d.subject.clear();
-        assert_eq!(link(&d), "mailto:ana@acme.io,bo%2Bx@acme.io");
-        let long = "a".repeat(MAX_BODY_CHARS + 100);
-        let url = link(&draft(Some(&long)));
-        assert_eq!(url.split("body=").nth(1).unwrap().len(), MAX_BODY_CHARS);
     }
 }

@@ -25,20 +25,13 @@ pub struct EgressEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EgressId(pub u64);
 
-/// Sink for egress events. Implemented by the store; called by anything that does network I/O.
-///
-/// Two ways to record:
-/// - one-shot: [`record`](Self::record) once the exchange is over;
-/// - two-phase: [`begin`](Self::begin) before the first byte is sent, so a crash mid-request
-///   still leaves a row, then [`update`](Self::update) with running totals and
-///   [`finish`](Self::finish) with the final ones. Prefer [`EgressExchange`], which does this
-///   and falls back to one-shot for sinks without two-phase support.
+/// Sink for egress events, implemented by the store. Records one-shot ([`record`](Self::record))
+/// or two-phase ([`begin`](Self::begin) before the first byte, so a crash mid-request still
+/// leaves a row); prefer [`EgressExchange`], which picks the right one.
 pub trait EgressSink: Send + Sync {
     fn record(&self, event: EgressEvent);
 
-    /// Open a ledger row for an exchange that is about to start. `event` carries the bytes known
-    /// so far (usually the request size, received 0). Returns `None` if this sink only supports
-    /// one-shot records; the caller then calls [`record`](Self::record) at the end instead.
+    /// Open a ledger row; `None` if this sink only supports one-shot records.
     fn begin(&self, event: EgressEvent) -> Option<EgressId> {
         let _ = event;
         None
@@ -62,12 +55,8 @@ impl EgressSink for NullEgress {
     fn record(&self, _event: EgressEvent) {}
 }
 
-/// One network exchange in the ledger, recorded two-phase when the sink supports it.
-///
-/// Created with [`EgressExchange::begin`] before the first byte is sent. Byte counts are
-/// accumulated with [`add_sent`](Self::add_sent) / [`add_received`](Self::add_received);
-/// [`flush`](Self::flush) pushes running totals to the sink (call it periodically for long
-/// transfers). Dropping the exchange finishes it exactly once.
+/// One network exchange in the ledger, recorded two-phase when the sink supports it. Call
+/// [`flush`](Self::flush) periodically for long transfers; dropping it finishes it once.
 pub struct EgressExchange {
     sink: Option<Arc<dyn EgressSink>>,
     id: Option<EgressId>,
@@ -77,8 +66,7 @@ pub struct EgressExchange {
 }
 
 impl EgressExchange {
-    /// Start recording an exchange to `host` for `feature`. `bytes_sent` is the request size if
-    /// already known.
+    /// Start recording, before the first byte is sent.
     pub fn begin(
         sink: Arc<dyn EgressSink>,
         host: impl Into<String>,
@@ -239,13 +227,5 @@ mod tests {
             *sink.0.lock().unwrap(),
             ["begin 10", "update 7 10 5", "finish 7 10 6"]
         );
-    }
-
-    #[test]
-    fn disabled_exchange_records_nothing() {
-        let mut x = EgressExchange::disabled();
-        x.add_sent(3);
-        x.flush();
-        drop(x);
     }
 }

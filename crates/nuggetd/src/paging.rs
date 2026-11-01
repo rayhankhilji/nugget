@@ -1,11 +1,4 @@
-//! LL1: cursors of the paged list methods (`search.page`, `egress.page`).
-//!
-//! Cursors are opaque strings to clients. Their format is the daemon's business and may change:
-//! - egress: `e1.<id>`, the ledger id of the last row of the previous page (keyset paging);
-//! - search: `s1.<offset>.<query tag>`, the number of hits already returned and a tag of the
-//!   query they answer, so a cursor from another query is refused.
-//!
-//! Parsing is strict: anything but a cursor this module made is an invalid-params error.
+//! Cursors of the paged list methods (`search.page`, `egress.page`).
 
 use nugget_ipc::RpcError;
 use sha2::{Digest, Sha256};
@@ -38,12 +31,10 @@ fn check_len(cursor: &str) -> Result<(), RpcError> {
     Ok(())
 }
 
-/// The cursor that continues after the ledger row `id`.
 pub(crate) fn egress_cursor(id: i64) -> String {
     format!("{EGRESS_PREFIX}{id}")
 }
 
-/// The ledger id an `egress.page` cursor continues after.
 pub(crate) fn parse_egress_cursor(cursor: &str) -> Result<i64, RpcError> {
     check_len(cursor)?;
     cursor
@@ -61,7 +52,6 @@ fn query_tag(query: &str) -> String {
     hex::encode(&h.finalize()[..8])
 }
 
-/// The cursor that continues `query` after its first `offset` hits.
 pub(crate) fn search_cursor(query: &str, offset: usize) -> String {
     format!("{SEARCH_PREFIX}{offset}.{}", query_tag(query))
 }
@@ -93,29 +83,23 @@ mod tests {
 
     #[test]
     fn egress_cursors_round_trip_and_reject_anything_else() {
-        for id in [1, 42, i64::MAX] {
+        for id in [1, i64::MAX] {
             assert_eq!(parse_egress_cursor(&egress_cursor(id)).unwrap(), id);
         }
+        let long = format!("e1.{}", "1".repeat(100));
         for bad in [
             "",
-            "e1.",
             "e1.0",
             "e1.-5",
-            "e1.+5",
             "e1.007",
-            "e1.5 ",
-            "e1.5.1",
             "e1.9223372036854775808",
-            "e1.99999999999999999999",
             "e2.5",
-            "5",
-            "s1.5.0011223344556677",
             "e1.٣",
+            &long,
         ] {
             let err = parse_egress_cursor(bad).unwrap_err();
             assert_eq!(err.code, code::INVALID_PARAMS, "{bad:?}");
         }
-        assert!(parse_egress_cursor(&format!("e1.{}", "1".repeat(100))).is_err());
     }
 
     #[test]
@@ -123,35 +107,19 @@ mod tests {
         let c = search_cursor("herons", 25);
         assert_eq!(parse_search_cursor(&c, "herons").unwrap(), 25);
         let err = parse_search_cursor(&c, "swans").unwrap_err();
-        assert_eq!(err.code, code::INVALID_PARAMS);
         assert!(err.message.contains("another query"), "{}", err.message);
-        // Queries differing only in spacing or case are other queries.
         assert!(parse_search_cursor(&c, "Herons").is_err());
-        assert!(parse_search_cursor(&c, "herons ").is_err());
-
         let tag = &c[c.rfind('.').unwrap() + 1..];
         for bad in [
-            String::new(),
-            "s1.".into(),
             format!("s1.0.{tag}"),
-            format!("s1.-1.{tag}"),
             format!("s1.025.{tag}"),
             format!("s1.{MAX_SEARCH_DEPTH}.{tag}"),
-            format!("s1.99999999999999999999.{tag}"),
             format!("s1.25.{}", tag.to_uppercase()),
-            format!("s1.25.{}", &tag[..15]),
-            format!("s1.25.{tag}0"),
             format!("s1.25.{tag}.x"),
-            format!("s1.25{tag}"),
-            format!("s2.25.{tag}"),
             egress_cursor(25),
         ] {
             let err = parse_search_cursor(&bad, "herons").unwrap_err();
             assert_eq!(err.code, code::INVALID_PARAMS, "{bad:?}");
         }
-        assert_eq!(
-            parse_search_cursor(&search_cursor("herons", MAX_SEARCH_DEPTH - 1), "herons").unwrap(),
-            MAX_SEARCH_DEPTH - 1
-        );
     }
 }

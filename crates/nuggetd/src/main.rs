@@ -1,15 +1,4 @@
 //! `nuggetd` command line.
-//!
-//! - `nuggetd`: run the daemon in the foreground until SIGINT/SIGTERM (Ctrl+C on Windows).
-//! - `nuggetd status [--json]`: ask the running daemon for its status.
-//! - `nuggetd install-service` / `uninstall-service`: run at login as a per-user service.
-//! - `nuggetd restart-service`: restart that service (the desktop app does this after an update).
-//! - `nuggetd mcp --client <id>`: the stdio MCP bridge apps launch (token in `NUGGET_MCP_TOKEN`).
-//! - `nuggetd mcp install --client claude-desktop|claude-code|cursor`: set an app up.
-//! - `nuggetd backup [--to DIR]` / `nuggetd backup set-passphrase`: back up now, or set the
-//!   backup passphrase (through the daemon when it runs, offline otherwise).
-//! - `nuggetd restore --from DIR [--passphrase-file FILE]`: restore a backup (daemon stopped).
-//! - `nuggetd export --to DIR`: export everything in open formats.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -117,41 +106,28 @@ fn main() -> ExitCode {
     let args = Args::parse();
     let paths = match cli::resolve_paths(args.home.clone()) {
         Ok(p) => p,
-        Err(e) => {
-            eprintln!("nuggetd: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(e) => return fail(format!("nuggetd: {e}")),
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
     {
         Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("nuggetd: cannot start async runtime: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(e) => return fail(format!("nuggetd: cannot start async runtime: {e}")),
     };
     let home = args.home.clone();
+    if args.command.is_some() {
+        // stdout carries command output (MCP messages for the bridge); logs go to stderr.
+        logging::init_cli();
+    }
     let code = match args.command {
         None => runtime.block_on(run(paths, home)),
-        Some(Command::Status { json }) => {
-            logging::init_cli();
-            runtime.block_on(status(paths, json))
-        }
+        Some(Command::Status { json }) => runtime.block_on(status(paths, json)),
         Some(Command::InstallService) => {
-            logging::init_cli();
-            let result = cli::service_spec(&paths, args.home).and_then(|s| service::install(&s));
-            report(result)
+            report(cli::service_spec(&paths, args.home).and_then(|s| service::install(&s)))
         }
-        Some(Command::UninstallService) => {
-            logging::init_cli();
-            report(service::uninstall())
-        }
-        Some(Command::RestartService) => {
-            logging::init_cli();
-            report(service::restart())
-        }
+        Some(Command::UninstallService) => report(service::uninstall()),
+        Some(Command::RestartService) => report(service::restart()),
         Some(Command::Mcp {
             action:
                 Some(McpAction::Install {
@@ -162,7 +138,6 @@ fn main() -> ExitCode {
                 }),
             ..
         }) => {
-            logging::init_cli();
             let opts = InstallOptions {
                 app: client,
                 name,
@@ -174,31 +149,19 @@ fn main() -> ExitCode {
         Some(Command::Mcp {
             client: Some(client),
             action: None,
-        }) => {
-            // stdout carries MCP messages only; logs go to stderr.
-            logging::init_cli();
-            match std::env::var(nugget_mcp::TOKEN_ENV) {
-                Ok(token) if !token.trim().is_empty() => {
-                    match runtime.block_on(nuggetd::mcp_bridge::run(&paths, &client, token.trim()))
-                    {
-                        Ok(()) => ExitCode::SUCCESS,
-                        Err(e) => {
-                            eprintln!("nuggetd mcp: {e}");
-                            ExitCode::FAILURE
-                        }
-                    }
-                }
-                _ => {
-                    eprintln!(
-                        "nuggetd mcp: set {} to the client's token",
-                        nugget_mcp::TOKEN_ENV
-                    );
-                    ExitCode::FAILURE
+        }) => match std::env::var(nugget_mcp::TOKEN_ENV) {
+            Ok(token) if !token.trim().is_empty() => {
+                match runtime.block_on(nuggetd::mcp_bridge::run(&paths, &client, token.trim())) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(e) => fail(format!("nuggetd mcp: {e}")),
                 }
             }
-        }
+            _ => fail(format!(
+                "nuggetd mcp: set {} to the client's token",
+                nugget_mcp::TOKEN_ENV
+            )),
+        },
         Some(Command::Backup { to, action }) => {
-            logging::init_cli();
             let vault = default_vault(&paths, args.home);
             report(runtime.block_on(async {
                 match action {
@@ -213,7 +176,6 @@ fn main() -> ExitCode {
             from,
             passphrase_file,
         }) => {
-            logging::init_cli();
             let vault = default_vault(&paths, args.home);
             report(runtime.block_on(backup_cli::restore(
                 &paths,
@@ -223,19 +185,14 @@ fn main() -> ExitCode {
             )))
         }
         Some(Command::Export { to }) => {
-            logging::init_cli();
             let vault = default_vault(&paths, args.home);
             report(runtime.block_on(backup_cli::export(&paths, to, &vault)))
         }
-        Some(Command::Mcp { .. }) => {
-            eprintln!(
-                "nuggetd mcp: use `nuggetd mcp --client <id>` (the stdio bridge) or `nuggetd mcp install --client <app>`"
-            );
-            ExitCode::FAILURE
-        }
+        Some(Command::Mcp { .. }) => fail(
+            "nuggetd mcp: use `nuggetd mcp --client <id>` (the stdio bridge) or `nuggetd mcp install --client <app>`",
+        ),
     };
-    // Dropping the runtime would wait for every `spawn_blocking` job (a multi-GB model hash can
-    // take minutes); give them a bounded grace period instead.
+    // Don't wait for every `spawn_blocking` job (a model hash can take minutes).
     runtime.shutdown_timeout(RUNTIME_SHUTDOWN_GRACE);
     code
 }
@@ -246,11 +203,13 @@ fn report(result: nugget_core::Result<String>) -> ExitCode {
             println!("{msg}");
             ExitCode::SUCCESS
         }
-        Err(e) => {
-            eprintln!("nuggetd: {e}");
-            ExitCode::FAILURE
-        }
+        Err(e) => fail(format!("nuggetd: {e}")),
     }
+}
+
+fn fail(msg: impl std::fmt::Display) -> ExitCode {
+    eprintln!("{msg}");
+    ExitCode::FAILURE
 }
 
 async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
@@ -261,9 +220,7 @@ async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
             None
         }
     };
-    // Register the stop signals before anything else can take time: a signal that arrives while
-    // no listener exists gets the OS default, which kills the process without a clean shutdown
-    // (exit 0xC000013A on Windows).
+    // Register stop signals first: without a listener the OS default kills the process uncleanly.
     let shutdown = shutdown_signal();
     let mut opts = DaemonOptions::new(paths);
     match cli::home_override(home_flag) {
@@ -283,8 +240,7 @@ async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
         }
         Err(e) => {
             tracing::error!(error = %e, "startup failed");
-            eprintln!("nuggetd: {e}");
-            return ExitCode::FAILURE;
+            return fail(format!("nuggetd: {e}"));
         }
     };
     if daemon.config_created() {
@@ -297,8 +253,7 @@ async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!(error = %e, "daemon failed");
-            eprintln!("nuggetd: {e}");
-            ExitCode::FAILURE
+            fail(format!("nuggetd: {e}"))
         }
     }
 }
@@ -318,8 +273,9 @@ async fn status(paths: Paths, json: bool) -> ExitCode {
     let client = match nugget_ipc::Client::connect(&paths).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("nuggetd is not running (no answer on {socket}: {e})");
-            return ExitCode::FAILURE;
+            return fail(format!(
+                "nuggetd is not running (no answer on {socket}: {e})"
+            ));
         }
     };
     match client.call::<_, StatusResponse>(method::STATUS, &()).await {
@@ -328,19 +284,13 @@ async fn status(paths: Paths, json: bool) -> ExitCode {
                 println!("{text}");
                 ExitCode::SUCCESS
             }
-            Err(e) => {
-                eprintln!("nuggetd: {e}");
-                ExitCode::FAILURE
-            }
+            Err(e) => fail(format!("nuggetd: {e}")),
         },
         Ok(s) => {
             print!("{}", cli::format_status(&s, &socket));
             ExitCode::SUCCESS
         }
-        Err(e) => {
-            eprintln!("nuggetd: status failed: {e}");
-            ExitCode::FAILURE
-        }
+        Err(e) => fail(format!("nuggetd: status failed: {e}")),
     }
 }
 
@@ -378,8 +328,7 @@ fn shutdown_signal() -> impl std::future::Future<Output = ()> {
     #[cfg(windows)]
     {
         use tokio::signal::windows;
-        // Each listener registers with the console handler when it is created, here, not when
-        // the future is first polled.
+        // Listeners register when created here, not when the future is first polled.
         fn listen<T>(name: &str, r: std::io::Result<T>) -> Option<T> {
             r.map_err(
                 |e| tracing::warn!(signal = name, error = %e, "cannot listen for a console signal"),

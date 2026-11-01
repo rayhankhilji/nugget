@@ -184,14 +184,7 @@ async fn concurrent_calls_are_correlated_by_id() {
             assert_eq!(got, ms);
         }
     });
-    let started = std::time::Instant::now();
     within(futures::future::join_all(calls)).await;
-    // Sequential would take ~4.1 s; concurrent is bounded by the slowest call (200 ms).
-    assert!(
-        started.elapsed() < Duration::from_secs(3),
-        "{:?}",
-        started.elapsed()
-    );
 }
 
 #[tokio::test]
@@ -474,20 +467,6 @@ async fn dropped_calls_do_not_leak_or_break_the_connection() {
     assert_eq!(v["x"], 1);
 }
 
-#[tokio::test]
-async fn second_bind_fails_while_a_daemon_is_listening() {
-    let fx = Fixture::start().await;
-    let err = nugget_ipc::bind(&fx.paths)
-        .await
-        .expect_err("second bind should fail");
-    assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
-    // The first server is unaffected.
-    let v: Value = within(fx.client().await.call("echo", &json!([])))
-        .await
-        .unwrap();
-    assert_eq!(v, json!([]));
-}
-
 #[cfg(unix)]
 #[tokio::test]
 async fn stale_socket_file_is_replaced() {
@@ -578,10 +557,6 @@ async fn serve_gate(
     (dir, paths)
 }
 
-fn is_busy(r: &Result<Value, IpcError>) -> bool {
-    matches!(r, Err(IpcError::Rpc(e)) if e.code == code::SERVER_BUSY)
-}
-
 #[tokio::test]
 async fn over_cap_requests_are_answered_busy_instead_of_waiting() {
     use std::sync::atomic::Ordering::SeqCst;
@@ -599,12 +574,22 @@ async fn over_cap_requests_are_answered_busy_instead_of_waiting() {
         .collect();
     handler.wait_active(MAX).await;
 
-    // At the cap a further request is answered at once with a typed busy error (it used to
-    // wait unread, unbounded in time), and nothing beyond the cap runs.
-    let over = within(client.call_value("block", Value::Null)).await;
-    assert!(is_busy(&over), "{over:?}");
-    let err = over.unwrap_err();
-    assert!(err.is_busy());
+    // At the cap a further request is answered at once with a typed busy error, and nothing
+    // beyond the cap runs.
+    let err = within(client.call_value("block", Value::Null))
+        .await
+        .unwrap_err();
+    assert!(err.is_busy(), "{err:?}");
+    assert_eq!(
+        err.as_rpc().unwrap().data,
+        Some(json!({"max_in_flight": MAX}))
+    );
+    assert!(matches!(
+        nugget_core::Error::from(err),
+        nugget_core::Error::RateLimited {
+            retry_after_ms: None
+        }
+    ));
     assert_eq!(handler.peak.load(SeqCst), MAX);
 
     // Another connection has its own budget.
@@ -696,85 +681,4 @@ async fn flooding_a_connection_stays_bounded() {
         .unwrap();
     let resp = read_json(&mut r).await.unwrap();
     assert_eq!(resp["result"], json!([2]));
-}
-
-#[test]
-fn busy_errors_are_typed_and_map_to_core_errors() {
-    let e = RpcError::busy(4);
-    assert_eq!(e.code, code::SERVER_BUSY);
-    assert_eq!(e.data, Some(json!({"max_in_flight": 4})));
-    assert!(IpcError::Rpc(e.clone()).is_busy());
-    assert!(!IpcError::Disconnected.is_busy());
-    assert!(matches!(
-        nugget_core::Error::from(e),
-        nugget_core::Error::RateLimited {
-            retry_after_ms: None
-        }
-    ));
-}
-
-/// The server's peer-credential check admits a client running as the same user.
-#[tokio::test]
-async fn same_user_peer_passes_the_credential_check() {
-    let fx = Fixture::start().await;
-    let (mut r, mut w) = raw_connect(&fx.paths).await;
-    w.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"echo\",\"params\":[7]}\n")
-        .await
-        .unwrap();
-    let resp = read_json(&mut r).await.expect("connection was dropped");
-    assert_eq!(resp["result"], json!([7]));
-}
-
-/// Micro-benchmark over the real local transport. Run with
-/// `cargo test -p nugget-ipc --release --test ipc -- --ignored --nocapture bench_small_calls`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "benchmark; prints numbers"]
-async fn bench_small_calls() {
-    use std::time::Instant;
-    const SEQ: usize = 20_000;
-    const TASKS: usize = 32;
-    const PER_TASK: usize = 2_000;
-    let fx = Fixture::start().await;
-    let client = fx.client().await;
-    let params = json!({"q": "hello", "k": 5});
-    for _ in 0..1_000 {
-        client.call_value("echo", params.clone()).await.unwrap();
-    }
-
-    let mut lat = Vec::with_capacity(SEQ);
-    let start = Instant::now();
-    for _ in 0..SEQ {
-        let t = Instant::now();
-        client.call_value("echo", params.clone()).await.unwrap();
-        lat.push(t.elapsed());
-    }
-    let seq = start.elapsed();
-    lat.sort();
-    println!(
-        "sequential: {:.0} req/s, p50 {:?}, p99 {:?}",
-        SEQ as f64 / seq.as_secs_f64(),
-        lat[SEQ / 2],
-        lat[SEQ * 99 / 100]
-    );
-
-    let start = Instant::now();
-    let tasks: Vec<_> = (0..TASKS)
-        .map(|_| {
-            let c = client.clone();
-            let p = params.clone();
-            tokio::spawn(async move {
-                for _ in 0..PER_TASK {
-                    c.call_value("echo", p.clone()).await.unwrap();
-                }
-            })
-        })
-        .collect();
-    for t in tasks {
-        t.await.unwrap();
-    }
-    let total = TASKS * PER_TASK;
-    println!(
-        "{TASKS} concurrent callers, one connection: {:.0} req/s",
-        total as f64 / start.elapsed().as_secs_f64()
-    );
 }

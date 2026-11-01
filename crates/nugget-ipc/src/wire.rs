@@ -45,6 +45,15 @@ pub(crate) enum EncodeError {
     TooLarge(usize),
 }
 
+impl From<EncodeError> for crate::IpcError {
+    fn from(e: EncodeError) -> Self {
+        match e {
+            EncodeError::TooLarge(n) => Self::TooLarge(n),
+            EncodeError::Serde(e) => Self::Serde(e),
+        }
+    }
+}
+
 /// Coalesce up to this many bytes of queued lines into one write.
 const WRITE_BATCH: usize = 64 * 1024;
 

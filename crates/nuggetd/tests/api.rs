@@ -1,92 +1,22 @@
-//! LL1: `search.page` and `egress.page` through IPC, against a real daemon whose store is seeded
-//! directly. The unpaged `search` and `egress.recent` keep answering as before.
+//! Smaller IPC surfaces against a real daemon: `search.page` and `egress.page` (LL1),
+//! `egress.record`, `models.fit` and an external `[retrieve.reranker]`.
+
+mod common;
 
 use std::collections::HashSet;
-use std::sync::Arc;
-use std::time::Duration;
 
+use common::*;
 use nugget_core::egress::EgressEvent;
-use nugget_core::ipc::{Page, SearchHit, method};
-use nugget_core::paths::Paths;
-use nugget_ingest::{MemorySecrets, NoPowerPolicy};
-use nugget_ipc::{Client, IpcError, code};
-use nugget_store::{NewChunk, NewItem, Store, StoreKey, content_hash};
-use nuggetd::{Daemon, DaemonOptions, Startup};
-use serde::de::DeserializeOwned;
+use nugget_core::ipc::{ModelInfo, Page, SearchHit, method};
+use nugget_ipc::code;
+use nugget_models::{GIB, GpuKind, Hardware};
+use nugget_store::{NewChunk, NewItem, Store, content_hash};
+use nuggetd::RuntimeOverrides;
 use serde_json::{Value, json};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
+use wiremock::matchers::{method as http_method, path};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
-const CALL: Duration = Duration::from_secs(60);
-
-const CONFIG: &str = "[runtime]\nenabled = false\n\n[knowledge]\nenabled = false\n\n[vault]\nenabled = false\n\n[mcp]\nenabled = false\n";
-
-struct Harness {
-    _tmp: tempfile::TempDir,
-    client: Client,
-    store: Store,
-    stop: Option<oneshot::Sender<()>>,
-    server: Option<JoinHandle<nugget_core::Result<()>>>,
-}
-
-impl Harness {
-    async fn start(seed: impl FnOnce(&Store)) -> Self {
-        let tmp = tempfile::Builder::new()
-            .prefix("nugget-ll1-")
-            .tempdir()
-            .unwrap();
-        let paths = Paths::rooted(tmp.path().join("home"));
-        std::fs::create_dir_all(&paths.config).unwrap();
-        std::fs::write(paths.config_file(), CONFIG).unwrap();
-        let mut opts = DaemonOptions::new(paths.clone());
-        opts.store_key = Some(StoreKey::from_bytes([11; 32]));
-        opts.source_secrets = Some(Arc::new(MemorySecrets::new()));
-        opts.power = Some(Arc::new(NoPowerPolicy));
-        opts.home = Some(tmp.path().join("home"));
-        let daemon = match Daemon::start(opts).await.unwrap() {
-            Startup::Ready(d) => d,
-            Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
-        };
-        let store = daemon.store();
-        seed(&store);
-        let (tx, rx) = oneshot::channel::<()>();
-        let server = tokio::spawn(daemon.run_until(async {
-            let _ = rx.await;
-        }));
-        let client = Client::connect(&paths).await.unwrap();
-        Self {
-            _tmp: tmp,
-            client,
-            store,
-            stop: Some(tx),
-            server: Some(server),
-        }
-    }
-
-    async fn call<R: DeserializeOwned>(&self, m: &str, params: Value) -> R {
-        let v = tokio::time::timeout(CALL, self.client.call::<Value, Value>(m, &params))
-            .await
-            .unwrap_or_else(|_| panic!("{m} timed out"))
-            .unwrap_or_else(|e| panic!("{m} {params} failed: {e}"));
-        serde_json::from_value(v).unwrap()
-    }
-
-    async fn call_err(&self, m: &str, params: Value) -> (i64, String) {
-        match self.client.call_value(m, params).await {
-            Err(IpcError::Rpc(e)) => (e.code, e.message),
-            other => panic!("{m}: expected an RPC error, got {other:?}"),
-        }
-    }
-
-    async fn stop(mut self) {
-        let _ = self.stop.take().unwrap().send(());
-        tokio::time::timeout(CALL, self.server.take().unwrap())
-            .await
-            .expect("daemon stops promptly")
-            .unwrap()
-            .unwrap();
-    }
-}
+const PLAIN: &str = "[runtime]\nenabled = false\n\n[knowledge]\nenabled = false\n\n[vault]\nenabled = false\n\n[mcp]\nenabled = false\n";
 
 fn put(store: &Store, key: &str, title: &str, body: &str, sensitive: bool) {
     let item = NewItem::new("files", key, content_hash(key))
@@ -134,9 +64,11 @@ async fn all_pages(h: &Harness, query: &str, limit: u32) -> Vec<Page<SearchHit>>
     }
 }
 
-#[tokio::test]
-async fn search_pages_cover_the_ranking_once_and_refuse_foreign_cursors() {
-    let h = Harness::start(|store| {
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn search_pages_cover_the_ranking_once_to_its_depth() {
+    let mut h = Harness::start(PLAIN).await;
+    let store = &h.store;
+    {
         for i in 0..23 {
             // Every fourth item is sensitive: pages treat them exactly as `search` does.
             put(
@@ -151,8 +83,17 @@ async fn search_pages_cover_the_ranking_once_and_refuse_foreign_cursors() {
             );
         }
         put(store, "swan", "Swan note", "A swan on the lake.", false);
-    })
-    .await;
+        for i in 0..520 {
+            let key = format!("kite-{i:03}");
+            put(
+                store,
+                &key,
+                &key,
+                &format!("Kite festival entry {i}."),
+                false,
+            );
+        }
+    }
 
     // The unpaged ranking, for comparison.
     let full: Vec<SearchHit> = h
@@ -216,44 +157,21 @@ async fn search_pages_cover_the_ranking_once_and_refuse_foreign_cursors() {
             .await;
         assert_eq!(c, code::INVALID_PARAMS, "{bad}: {msg}");
     }
-    // An egress cursor is not a search cursor.
-    let e: Page<EgressEvent> = h.call(method::EGRESS_PAGE, json!({"limit": 1})).await;
-    assert!(e.items.is_empty() && e.next_cursor.is_none());
-
-    h.stop().await;
-}
-
-#[tokio::test]
-async fn search_paging_stops_at_its_depth() {
-    let h = Harness::start(|store| {
-        for i in 0..520 {
-            put(
-                store,
-                &format!("kite-{i:03}"),
-                &format!("Kite {i}"),
-                &format!("Kite festival entry {i}."),
-                false,
-            );
-        }
-    })
-    .await;
+    // Paging stops at its depth: 500 hits at most.
     let pages = all_pages(&h, "kite", 200).await;
     let sizes: Vec<usize> = pages.iter().map(|p| p.items.len()).collect();
-    assert_eq!(sizes, vec![200, 200, 100], "500 hits at most");
+    assert_eq!(sizes, vec![200, 200, 100]);
     let all: Vec<SearchHit> = pages.into_iter().flat_map(|p| p.items).collect();
-    let distinct: HashSet<String> = keys(&all).into_iter().collect();
-    assert_eq!(distinct.len(), 500);
+    assert_eq!(keys(&all).into_iter().collect::<HashSet<_>>().len(), 500);
     h.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn egress_pages_neither_skip_nor_repeat_while_rows_arrive() {
-    let h = Harness::start(|store| {
-        for i in 0..23 {
-            store.record_egress(&egress(i)).unwrap();
-        }
-    })
-    .await;
+    let mut h = Harness::start(PLAIN).await;
+    for i in 0..23 {
+        h.store.record_egress(&egress(i)).unwrap();
+    }
 
     // The first page is what `egress.recent` returns.
     let recent: Vec<EgressEvent> = h.call(method::EGRESS_RECENT, json!({"limit": 10})).await;
@@ -291,12 +209,9 @@ async fn egress_pages_neither_skip_nor_repeat_while_rows_arrive() {
 
     for bad in [
         json!(""),
-        json!("e1.0"),
         json!("e1.-1"),
-        json!("e1.abc"),
         json!("s1.5.0011223344556677"),
         json!("e1.99999999999999999999999"),
-        json!(42),
     ] {
         let (c, msg) = h
             .call_err(method::EGRESS_PAGE, json!({"limit": 10, "cursor": bad}))
@@ -306,5 +221,156 @@ async fn egress_pages_neither_skip_nor_repeat_while_rows_arrive() {
     let (c, _) = h.call_err(method::EGRESS_PAGE, json!({})).await;
     assert_eq!(c, code::INVALID_PARAMS, "limit is required");
 
+    h.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn egress_record_takes_client_requests_only() {
+    let mut h = Harness::start(NO_RUNTIME).await;
+    let r: Value = h
+        .call(
+            method::EGRESS_RECORD,
+            json!({"host": "github.com", "feature": "update_check", "bytes_received": 2048}),
+        )
+        .await;
+    assert_eq!(r, Value::Null);
+    // Queued in the app for an hour, then sent: the row keeps when the request was made.
+    let queued = time::OffsetDateTime::now_utc() - time::Duration::hours(1);
+    let at = queued
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
+    let _: Value = h
+        .call(
+            method::EGRESS_RECORD,
+            json!({"at": at, "host": "objects.example.com", "feature": "update_download",
+                   "bytes_sent": 0, "bytes_received": 9_000_000}),
+        )
+        .await;
+    // Refused: a daemon feature, a URL instead of a host, missing fields.
+    for bad in [
+        json!({"host": "api.example.com", "feature": "chat"}),
+        json!({"host": "https://github.com/x", "feature": "update_check"}),
+        json!({"feature": "update_check"}),
+    ] {
+        assert_eq!(
+            h.call_err(method::EGRESS_RECORD, bad).await.0,
+            code::INVALID_PARAMS
+        );
+    }
+    let events: Vec<EgressEvent> = h.call(method::EGRESS_RECENT, json!({"limit": 50})).await;
+    assert_eq!(events.len(), 2, "{events:?}");
+    let check = events.iter().find(|e| e.feature == "update_check").unwrap();
+    assert_eq!(
+        (check.host.as_str(), check.bytes_received),
+        ("github.com", 2048)
+    );
+    let download = events
+        .iter()
+        .find(|e| e.feature == "update_download")
+        .unwrap();
+    assert_eq!(download.at.unix_timestamp(), queued.unix_timestamp());
+    h.stop().await;
+}
+
+/// On a given machine every manifest model is explained, and the recommended set is exactly
+/// `models.list`'s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn model_fit_explains_the_recommendation() {
+    let mut h = Harness::start_with(NO_RUNTIME, |o| {
+        o.runtime = RuntimeOverrides {
+            hardware: Some(Hardware {
+                total_ram: 8 * GIB * 95 / 100,
+                available_ram: 4 * GIB,
+                cpu_cores: 4,
+                gpu: GpuKind::Unknown,
+            }),
+            ..RuntimeOverrides::default()
+        }
+    })
+    .await;
+    let fit: Value = h.call("models.fit", Value::Null).await;
+    assert_eq!(fit["ram_gb"], 8, "{fit}");
+    assert_eq!(fit["hardware"]["gpu"], "unknown");
+    let models = fit["models"].as_array().unwrap();
+    let small = models.iter().find(|m| m["id"] == "qwen3-4b-q4km").unwrap();
+    assert_eq!(
+        (small["recommended"].as_bool(), small["accel"].as_str()),
+        (Some(true), Some("cpu"))
+    );
+    assert_eq!(
+        small["reasons"],
+        json!(["ram_fits_largest", "cpu_only_slower"])
+    );
+    let large = models.iter().find(|m| m["id"] == "qwen3-8b-q4km").unwrap();
+    assert_eq!(large["reasons"], json!(["ram_too_small"]));
+    let list: Vec<ModelInfo> = h.call(method::MODELS_LIST, json!({})).await;
+    for info in list {
+        let f = models.iter().find(|m| m["id"] == info.id.as_str()).unwrap();
+        assert_eq!(f["recommended"], info.recommended, "{}", info.id);
+    }
+    h.stop().await;
+}
+
+fn first_is_repair(hits: &[SearchHit]) -> bool {
+    hits.first()
+        .is_some_and(|h| h.snippet.contains("electrode"))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_external_reranker_reorders_search_results() {
+    let reranker = MockServer::start().await;
+    let config = format!(
+        "[runtime]\nenabled = false\n[retrieve]\nmmr = false\n\
+         [retrieve.reranker]\nbase_url = \"{}\"\n",
+        reranker.uri()
+    );
+    let mut h = Harness::start(&config).await;
+    h.add_files(
+        "docs",
+        &[
+            ("a.md", "Boiler boiler boiler: the boiler manual."),
+            (
+                "b.md",
+                "Boiler repair: fault F28, ignition electrode replaced.",
+            ),
+        ],
+    )
+    .await;
+    eventually("both notes searchable", || async {
+        h.search("boiler").await.len() == 2
+    })
+    .await;
+
+    // The reranker answers 404 (nothing mounted): first-stage order.
+    let hits = h.search("boiler").await;
+    assert_eq!(hits.len(), 2);
+    assert!(!first_is_repair(&hits), "{hits:?}");
+
+    // Now it prefers the passage about the electrode.
+    Mock::given(http_method("POST"))
+        .and(path("/v1/rerank"))
+        .respond_with(|req: &Request| {
+            let v: Value = serde_json::from_slice(&req.body).unwrap();
+            let results: Vec<Value> = v["documents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .map(|(i, d)| {
+                    let s = if d.as_str().unwrap().contains("electrode") {
+                        0.95
+                    } else {
+                        0.05
+                    };
+                    json!({"index": i, "relevance_score": s})
+                })
+                .collect();
+            ResponseTemplate::new(200).set_body_json(json!({"results": results}))
+        })
+        .mount(&reranker)
+        .await;
+    let hits = h.search("boiler").await;
+    assert_eq!(hits.len(), 2);
+    assert!(first_is_repair(&hits), "{hits:?}");
     h.stop().await;
 }

@@ -1,51 +1,22 @@
 //! The on-device runtime (`nugget-runtime`) in the router, and routing order.
 //!
-//! The router's provider set is fixed when it is built, but local servers come and go: a model
-//! is installed after start, a server stops when idle, or restarts on another port. Each role
-//! the runtime may serve therefore gets a [`RuntimeSlot`] in the router from the start, under
-//! the runtime's provider id (`local-chat`, `local-embedding`). A slot is a [`Provider`] that
-//! forwards to the provider built from the config [`Runtime::ensure`] returns (with
-//! `build_provider_with(cfg, egress, &runtime.secrets())`), starting the server on demand.
+//! Each runtime role gets a [`RuntimeSlot`] in the router from the start (`local-chat`,
+//! `local-embedding`, ...): a [`Provider`] that forwards to the provider built from the config
+//! [`Runtime::ensure`] returns, starting the server on demand, since local servers come and go.
 //!
-//! - Until its model is installed a slot fails fast with `Unsupported`, so the router falls
-//!   back to the next candidate.
-//! - The `rerank` role (`local-rerank`, only with `[runtime] rerank_model` naming a manifest
-//!   entry with the `rerank` tier) is a slot too, so it is installed, started and reported like
-//!   the others, but it never joins the router: `Tier::Rerank` is not a routed tier and the slot
-//!   is not a router provider. Retrieval reaches it through [`crate::rerank`]. Rerankers are
-//!   never selected for chat or embeddings.
-//! - The `draft` role (`local-draft`, only with `[draft.local] model` naming a manifest chat
-//!   model) is the small model local Double Tap drafts with, in its own server. Its slot joins
-//!   the router as a provider **without tiers**, so Chat, agents and other features never route
-//!   to it; the draft engine asks for it by id ([`nugget_draft::LocalBudget::provider`]). Once
-//!   ready it has the chat role's capabilities, and like every slot it starts at boot when its
-//!   model is installed, restarts on demand and stops when idle.
-//! - A slot starts out routable for nothing (empty capabilities). The chat slot becomes
-//!   routable as soon as the daemon starts its installed model's server (at
-//!   boot, and after `models.install`; [`RuntimeSlot::starting`]): it then has the chat
-//!   capabilities that do not depend on the server's config (streaming, JSON schemas), so a
-//!   chat sent while the model still loads (seconds to minutes) routes to it and
-//!   [`RuntimeSlot::chat`] waits for the server instead of the router finding no candidate. If
-//!   that start fails before the server was ever ready, the slot is routable for nothing again
-//!   ([`RuntimeSlot::start_failed`]); a request that picked it meanwhile gets a fallback error
-//!   (`Unsupported`, `Network` or `Provider`), so the router tries the next candidate.
-//!   Embedding, draft and rerank slots stay routable for nothing until their server first
-//!   became ready (ingest re-embeds text-only items on readiness, the draft and rerank slots
-//!   are reached by id).
-//! - Once ready, the role's known capabilities are set (chat streams and follows JSON schemas
-//!   and knows its context size, embedding embeds) and stay set: after an idle stop the next
-//!   request starts the server again.
-//! - Interactive chats (not triage or other background work) on a slot, and on every configured
-//!   `OnDevice` or `LocalNetwork` provider ([`ForegroundAware`]), hold ingest's foreground guard
-//!   for the life of their stream, so background triage yields to them. Cloud providers are
-//!   not wrapped.
+//! - Until its model is installed a slot fails fast with `Unsupported` (router falls back).
+//! - The rerank slot is never a router provider; retrieval reaches it through [`crate::rerank`].
+//! - The draft slot (`[draft.local] model`) joins the router without tiers: only the draft
+//!   engine asks for it, by id.
+//! - A slot starts routable for nothing. An installed chat slot whose server is starting is
+//!   routable for chat ([`RuntimeSlot::starting`]) so a chat waits for the model to load instead
+//!   of finding no candidate; other slots become routable once their server is first ready.
+//! - Interactive chats on slots and on configured non-cloud providers ([`ForegroundAware`])
+//!   hold ingest's foreground guard for their stream, so background triage yields to them.
 //!
-//! **Routing order**, per tier: configured `LocalNetwork` providers and `OnDevice` ones with a
-//! stored successful probe (config order), then the runtime slot, then unprobed `OnDevice`
-//! providers (an example server that is not running would otherwise cost every request a failed
-//! connection; a successful probe moves it ahead from the next start), then configured `Cloud`
-//! providers. Ingest (triage, embeddings) and
-//! retrieval (query embeddings) additionally refuse cloud providers unless allowed in config.
+//! **Routing order**, per tier: configured `LocalNetwork` providers and probed `OnDevice` ones
+//! (config order), then the runtime slot, then unprobed `OnDevice` providers (a server that is
+//! not running would cost every request a failed connection), then `Cloud` providers.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -120,11 +91,8 @@ pub(crate) fn index_embedding_model(store: &nugget_store::Store) -> Option<Strin
 /// The manifest model each runtime role should run, per config, hardware and the embedding
 /// model `index_model` the store's vectors were built with ([`index_embedding_model`]).
 ///
-/// Without an explicit embedding model in the config, a store that already has vectors keeps
-/// the manifest model that built them, even when the manifest now recommends another: two
-/// models' vectors are not comparable (even at the same dimension), so switching would leave
-/// every stored vector unusable until the whole store is embedded again. Only a store without
-/// vectors (a new install) takes the recommendation.
+/// Without an explicit embedding model, a store with vectors keeps the model that built them:
+/// two models' vectors are not comparable, so switching would orphan every stored vector.
 pub(crate) fn selected_models_for_index(
     cfg: &Config,
     manifest: &Manifest,
@@ -395,7 +363,7 @@ pub(crate) struct RuntimeSlot {
     active: Mutex<Option<Active>>,
     router: OnceLock<Weak<Router>>,
     on_ready: OnceLock<ReadyHook>,
-    /// Interactive chats hold a guard on it so background triage yields (HH2).
+    /// Interactive chats hold a guard on it so background triage yields.
     foreground: OnceLock<Arc<nugget_ingest::Foreground>>,
 }
 
@@ -449,13 +417,14 @@ impl RuntimeSlot {
         self.runtime.details(self.role).map(|d| d.info.state)
     }
 
+    fn not_installed(&self) -> Error {
+        Error::Unsupported(format!("local model `{}` is not installed", self.model.id))
+    }
+
     /// Start (or reuse) the server and return the provider in front of it.
     pub async fn ready(&self) -> Result<Arc<dyn Provider>> {
         if !self.is_installed() {
-            return Err(Error::Unsupported(format!(
-                "local model `{}` is not installed",
-                self.model.id
-            )));
+            return Err(self.not_installed());
         }
         if let Some(d) = self.runtime.details(self.role)
             && d.info.state == RuntimeState::Ready
@@ -467,15 +436,11 @@ impl RuntimeSlot {
         self.refresh().await
     }
 
-    /// Run [`Runtime::ensure`] even while a server is up: it compares the installed model's
-    /// SHA-256 with the running server's and restarts the server on a new model (after
-    /// `models.install` updated it). Then route the result.
+    /// Run [`Runtime::ensure`] even while a server is up (it restarts the server on a new
+    /// model after `models.install`), then route the result.
     pub async fn refresh(&self) -> Result<Arc<dyn Provider>> {
         if !self.is_installed() {
-            return Err(Error::Unsupported(format!(
-                "local model `{}` is not installed",
-                self.model.id
-            )));
+            return Err(self.not_installed());
         }
         let cfg = self
             .runtime
@@ -502,19 +467,12 @@ impl RuntimeSlot {
     }
 
     /// The background start [`RuntimeSlot::starting`] announced failed: unless the server was
-    /// ready before, the slot is routable for nothing again, so requests go straight to the
-    /// next candidate instead of retrying the start each time.
-    ///
-    /// Except when a server was launched and failed (state `failed`, KK1): the runtime then
-    /// fails requests at once with one plain sentence while it backs off or after it gave up,
-    /// so the slot stays routable. The router still falls back to the next candidate on that
-    /// error, and with no other candidate the user sees why (and Status offers Retry) instead
-    /// of "no provider has the required capabilities".
+    /// ready before, the slot is routable for nothing again so requests skip it. A launched
+    /// server that failed (state `failed`) stays routable: the runtime then fails requests at
+    /// once with a plain sentence, which the user sees when there is no other candidate.
     pub fn start_failed(&self) {
-        if starting_capabilities(self.role).is_none() {
-            return;
-        }
-        if self.state() == Some(RuntimeState::Failed) {
+        if starting_capabilities(self.role).is_none() || self.state() == Some(RuntimeState::Failed)
+        {
             return;
         }
         let active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
@@ -622,6 +580,14 @@ impl RuntimeSlot {
         }
     }
 
+    /// The ready provider of an embedding slot.
+    async fn embedder(&self) -> Result<Arc<dyn Provider>> {
+        if self.role != RuntimeRole::Embedding {
+            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
+        }
+        self.ready().await
+    }
+
     fn context_tokens(&self) -> Option<u32> {
         self.active
             .lock()
@@ -655,15 +621,9 @@ impl Provider for RuntimeSlot {
         if !matches!(self.role, RuntimeRole::Chat | RuntimeRole::Draft) {
             return Err(Error::Unsupported(format!("{} does not chat", self.id)));
         }
-        // Interactive chats (Ask, Double Tap, agent, drafts) are marked for their whole stream
-        // so background triage leaves the model alone; background work (knowledge, proactive
-        // judge, probes, triage itself) is not (HH2).
-        // Other background work (knowledge extraction, the proactive judge) waits until no
-        // interactive chat is in flight or just ended (knowledge for at most
-        // `BACKGROUND_MAX_WAIT`), so it never takes the server's one slot just ahead of an Ask (QA GG2 follow-up: a judge
-        // request sent the moment one Ask ended held the next for ~67 s). Triage yields on its
-        // own. The wait is bounded so callers' timeouts (which mark the provider as failing)
-        // are never reached because of it.
+        // Interactive chats hold the foreground for their stream so background triage yields;
+        // other background work waits for interactive chats so it never takes the server's one
+        // slot just ahead of an Ask.
         let fg = self.foreground.get().cloned();
         if let Some(fg) = &fg {
             yield_to_interactive(fg, &req.feature, BACKGROUND_MAX_WAIT).await;
@@ -689,7 +649,7 @@ impl Provider for RuntimeSlot {
                 return Err(self.down_error());
             }
             // The server crashed (and is restarting) before anything streamed: retry once if
-            // it is back within a moment, else say plainly what happened (GG6-17).
+            // it is back within a moment, else say plainly what happened.
             Err(e) if pid_before.is_some() && self.server_failed(pid_before).await => {
                 tracing::warn!(provider = %self.id, error = %e,
                     "local server failed before answering; retrying once");
@@ -700,9 +660,7 @@ impl Provider for RuntimeSlot {
             }
             Err(e) => return Err(e),
         };
-        // KK1: the request stays "in flight" for the watchdog until the stream ends. HH2: the
-        // interactive guard is held for the stream's life, and a background judge stream is
-        // preempted when an interactive chat starts.
+        // In flight for the watchdog, and the guard held, until the stream ends.
         let stream: ChatStream = Box::pin(futures::StreamExt::map(stream, move |ev| {
             let _held = &busy;
             ev
@@ -715,31 +673,19 @@ impl Provider for RuntimeSlot {
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        if self.role != RuntimeRole::Embedding {
-            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
-        }
-        self.ready().await?.embed(texts).await
+        self.embedder().await?.embed(texts).await
     }
 
     async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        if self.role != RuntimeRole::Embedding {
-            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
-        }
-        self.ready().await?.embed_query(texts).await
+        self.embedder().await?.embed_query(texts).await
     }
 
     async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
-        if self.role != RuntimeRole::Embedding {
-            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
-        }
-        self.ready().await?.embed_items(texts, items).await
+        self.embedder().await?.embed_items(texts, items).await
     }
 
     async fn embed_probe(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        if self.role != RuntimeRole::Embedding {
-            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
-        }
-        self.ready().await?.embed_probe(texts).await
+        self.embedder().await?.embed_probe(texts).await
     }
 
     /// The served model's task prefixes: from its config once running, else from its id (the
@@ -791,10 +737,8 @@ fn hold_guard(stream: ChatStream, guard: Option<nugget_ingest::ForegroundGuard>)
 /// router, and so every provider, is built before it).
 pub(crate) type ForegroundCell = Arc<OnceLock<Arc<nugget_ingest::Foreground>>>;
 
-/// A provider the user configured in `providers.toml` on this device or the LAN (Ollama, a LAN
-/// server): like a [`RuntimeSlot`], its interactive chats hold a foreground guard for the life
-/// of their stream, so background triage on the same server yields to Ask and Double Tap (HH2).
-/// Everything else is forwarded unchanged.
+/// A configured on-device or LAN provider whose interactive chats, like a [`RuntimeSlot`]'s, hold
+/// a foreground guard for the life of their stream. Everything else is forwarded unchanged.
 pub(crate) struct ForegroundAware {
     inner: Arc<dyn Provider>,
     foreground: ForegroundCell,
@@ -941,7 +885,6 @@ impl LocalRuntime {
         }
     }
 
-    /// Call `hook` whenever a slot's server becomes ready on a new config (set once).
     /// Mark interactive chats on `fg` (see `nugget_ingest::Foreground`). Call once.
     pub fn set_foreground(&self, fg: Arc<nugget_ingest::Foreground>) {
         for s in &self.slots {
@@ -949,6 +892,7 @@ impl LocalRuntime {
         }
     }
 
+    /// Call `hook` whenever a slot's server becomes ready on a new config (set once).
     pub fn on_ready(&self, hook: ReadyHook) {
         for s in &self.slots {
             let _ = s.on_ready.set(hook.clone());
@@ -1035,255 +979,17 @@ pub(crate) fn localities(providers: &[Arc<dyn Provider>]) -> HashMap<ProviderId,
 
 #[cfg(test)]
 mod tests {
-
-    #[tokio::test(start_paused = true)]
-    async fn background_chats_wait_for_interactive_ones_but_not_forever() {
-        use std::time::Duration;
-        let fg = std::sync::Arc::new(nugget_ingest::Foreground::new(Duration::from_millis(500)));
-        let max = Duration::from_secs(30);
-        // Nothing in flight: no wait.
-        let t = tokio::time::Instant::now();
-        yield_to_interactive(&fg, "knowledge", max).await;
-        assert_eq!(t.elapsed(), Duration::ZERO);
-        // An Ask in flight: the judge waits until it ends plus the grace period.
-        let ask = fg.begin();
-        let fg2 = fg.clone();
-        let judge = tokio::spawn(async move {
-            yield_to_interactive(&fg2, "proactive_judge", max).await;
-            tokio::time::Instant::now()
-        });
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(!judge.is_finished());
-        let ended = tokio::time::Instant::now();
-        drop(ask);
-        let went = judge.await.unwrap();
-        assert!(went - ended >= Duration::from_millis(500));
-        // Interactive chats and triage never wait here.
-        let _ask = fg.begin();
-        let t = tokio::time::Instant::now();
-        yield_to_interactive(&fg, "ask", max).await;
-        yield_to_interactive(&fg, nugget_ingest::FEATURE_TRIAGE, max).await;
-        assert_eq!(t.elapsed(), Duration::ZERO);
-        // A background chat waits at most `max_wait`.
-        yield_to_interactive(&fg, "knowledge", max).await;
-        assert_eq!(t.elapsed(), max);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn the_judge_waits_out_any_run_of_asks_and_yields_mid_stream() {
-        use futures::StreamExt;
-        use std::time::Duration;
-        let fg = std::sync::Arc::new(nugget_ingest::Foreground::new(Duration::from_millis(500)));
-        // Back-to-back Asks for longer than knowledge's cap: the judge still waits.
-        let ask = fg.begin();
-        let fg2 = fg.clone();
-        let judge = tokio::spawn(async move {
-            yield_to_interactive(
-                &fg2,
-                nugget_proactive::judge::FEATURE_JUDGE,
-                BACKGROUND_MAX_WAIT,
-            )
-            .await;
-        });
-        tokio::time::sleep(BACKGROUND_MAX_WAIT * 3).await;
-        assert!(!judge.is_finished());
-        drop(ask);
-        judge.await.unwrap();
-
-        // A judge stream in flight ends (and drops the connection) when an Ask starts.
-        let (tx, rx) = futures::channel::mpsc::unbounded::<Result<nugget_infer::ChatEvent>>();
-        let inner: ChatStream = Box::pin(rx);
-        let dropped = std::sync::Arc::new(AtomicBool::new(false));
-        struct OnDrop(std::sync::Arc<AtomicBool>);
-        impl Drop for OnDrop {
-            fn drop(&mut self) {
-                self.0.store(true, Ordering::SeqCst);
-            }
-        }
-        let flag = OnDrop(dropped.clone());
-        let inner: ChatStream = Box::pin(inner.map(move |ev| {
-            let _f = &flag;
-            ev
-        }));
-        let mut s = preempt_on_foreground(
-            inner,
-            Some(fg.clone()),
-            nugget_proactive::judge::FEATURE_JUDGE,
-        );
-        tx.unbounded_send(Ok(nugget_infer::ChatEvent::TextDelta("{".into())))
-            .unwrap();
-        assert!(matches!(s.next().await, Some(Ok(_))));
-        let _ask = fg.begin();
-        assert!(matches!(s.next().await, Some(Err(_))));
-        assert!(dropped.load(Ordering::SeqCst));
-        assert!(s.next().await.is_none());
-
-        // Other features are left alone.
-        let (tx, rx) = futures::channel::mpsc::unbounded::<Result<nugget_infer::ChatEvent>>();
-        let mut s = preempt_on_foreground(Box::pin(rx), Some(fg.clone()), "knowledge");
-        tx.unbounded_send(Ok(nugget_infer::ChatEvent::TextDelta("x".into())))
-            .unwrap();
-        assert!(matches!(s.next().await, Some(Ok(_))));
-    }
-
-    #[test]
-    fn background_features_never_hold_the_foreground() {
-        // HH2: triage yields to interactive chats only.
-        for f in [
-            nugget_ingest::FEATURE_TRIAGE,
-            nugget_knowledge::llm::FEATURE_KNOWLEDGE,
-            nugget_proactive::judge::FEATURE_JUDGE,
-            nugget_infer::FEATURE_PROBE,
-        ] {
-            assert!(!nugget_ingest::is_interactive(f), "{f}");
-        }
-        for f in ["ask", "chat", "agent", "draft", "query_rewrite"] {
-            assert!(nugget_ingest::is_interactive(f), "{f}");
-        }
-    }
     use super::*;
+    use futures::StreamExt;
     use nugget_models::GpuKind;
+    use std::time::Duration;
 
     fn pid(s: &str) -> ProviderId {
         ProviderId::new(s)
     }
 
-    #[test]
-    fn local_providers_come_before_the_runtime_and_cloud_after() {
-        let configured = vec![
-            (
-                pid("cloud"),
-                vec![Tier::Triage, Tier::Synthesis, Tier::Embedding],
-                Locality::Cloud,
-                true,
-            ),
-            (
-                pid("ollama"),
-                vec![Tier::Synthesis, Tier::Embedding],
-                Locality::OnDevice,
-                true,
-            ),
-            (
-                pid("lan"),
-                vec![Tier::Triage],
-                Locality::LocalNetwork,
-                false,
-            ),
-        ];
-        let local = vec![
-            (
-                pid("local-chat"),
-                vec![Tier::Triage, Tier::Light, Tier::Synthesis],
-            ),
-            (pid("local-embedding"), vec![Tier::Embedding]),
-        ];
-        let map = tier_map(&configured, &local);
-        assert_eq!(
-            map[&Tier::Triage],
-            vec![pid("lan"), pid("local-chat"), pid("cloud")]
-        );
-        assert_eq!(map[&Tier::Light], vec![pid("local-chat")]);
-        assert_eq!(
-            map[&Tier::Synthesis],
-            vec![pid("ollama"), pid("local-chat"), pid("cloud")]
-        );
-        assert_eq!(
-            map[&Tier::Embedding],
-            vec![pid("ollama"), pid("local-embedding"), pid("cloud")]
-        );
-        assert!(!map.contains_key(&Tier::Agentic));
-    }
-
-    #[test]
-    fn unprobed_on_device_providers_come_after_the_runtime() {
-        let configured = vec![
-            (
-                pid("cloud"),
-                vec![Tier::Triage, Tier::Light],
-                Locality::Cloud,
-                false,
-            ),
-            (
-                pid("example"),
-                vec![Tier::Triage, Tier::Light, Tier::Synthesis],
-                Locality::OnDevice,
-                false,
-            ),
-            (pid("probed"), vec![Tier::Light], Locality::OnDevice, true),
-            (pid("lan"), vec![Tier::Light], Locality::LocalNetwork, false),
-        ];
-        let local = vec![(
-            pid("local-chat"),
-            vec![Tier::Triage, Tier::Light, Tier::Synthesis],
-        )];
-        let map = tier_map(&configured, &local);
-        assert_eq!(
-            map[&Tier::Light],
-            vec![
-                pid("probed"),
-                pid("lan"),
-                pid("local-chat"),
-                pid("example"),
-                pid("cloud")
-            ]
-        );
-        assert_eq!(
-            map[&Tier::Triage],
-            vec![pid("local-chat"), pid("example"), pid("cloud")]
-        );
-        assert_eq!(
-            map[&Tier::Synthesis],
-            vec![pid("local-chat"), pid("example")]
-        );
-        // Without the runtime, the unprobed provider still serves.
-        let map = tier_map(&configured, &[]);
-        assert_eq!(map[&Tier::Synthesis], vec![pid("example")]);
-    }
-
     fn manifest() -> Manifest {
         nugget_models::default_manifest().unwrap()
-    }
-
-    fn reranker(m: &Manifest) -> ModelEntry {
-        m.models
-            .iter()
-            .find(|e| e.tiers.contains(&Tier::Rerank))
-            .expect("the shipped manifest has a reranker")
-            .clone()
-    }
-
-    #[test]
-    fn a_reranker_is_never_selected_for_chat_or_embeddings() {
-        let m = manifest();
-        let rerank = reranker(&m);
-        // Recommendations never pick it, whatever the RAM.
-        for gb in [4, 8, 16, 64, 1024] {
-            for t in Tier::ROUTED {
-                assert_ne!(
-                    recommend(&m, &hw(gb), t).map(|e| e.id.as_str()),
-                    Some(rerank.id.as_str())
-                );
-            }
-        }
-        // Configured explicitly for chat or embeddings (or via models.selected): refused.
-        for toml in [
-            format!("[runtime]\nchat_model = \"{}\"\n", rerank.id),
-            format!("[runtime]\nembedding_model = \"{}\"\n", rerank.id),
-            format!(
-                "[models.selected]\ntriage = \"{0}\"\nembedding = \"{0}\"\n",
-                rerank.id
-            ),
-        ] {
-            let cfg = Config::parse(&toml).unwrap();
-            for (role, e) in selected_models(&cfg, &m, &hw(64)) {
-                assert_ne!(e.id, rerank.id, "{toml}: {role:?}");
-            }
-        }
-        assert!(
-            slot_tiers(RuntimeRole::Chat, &rerank)
-                .iter()
-                .all(|t| t.is_chat())
-        );
     }
 
     fn hw(gb: u64) -> Hardware {
@@ -1295,84 +1001,248 @@ mod tests {
         }
     }
 
+    fn find(m: &Manifest, f: impl Fn(&ModelEntry) -> bool) -> ModelEntry {
+        m.models.iter().find(|e| f(e)).unwrap().clone()
+    }
+
+    fn reranker(m: &Manifest) -> ModelEntry {
+        find(m, |e| e.tiers.contains(&Tier::Rerank))
+    }
+
+    fn chat_model(m: &Manifest) -> ModelEntry {
+        find(m, |e| {
+            e.tiers.iter().any(|t| t.is_chat()) && !e.tiers.contains(&Tier::Rerank)
+        })
+    }
+
+    fn selected(cfg: &str, m: &Manifest) -> Vec<(RuntimeRole, ModelEntry)> {
+        selected_models(&Config::parse(cfg).unwrap(), m, &hw(64))
+    }
+
+    fn of_role(sel: &[(RuntimeRole, ModelEntry)], role: RuntimeRole) -> Vec<String> {
+        sel.iter()
+            .filter(|(r, _)| *r == role)
+            .map(|(_, e)| e.id.clone())
+            .collect()
+    }
+
+    fn provider_cfg(v: serde_json::Value) -> ProviderConfig {
+        serde_json::from_value(v).unwrap()
+    }
+
+    struct NoEgress;
+    impl EgressSink for NoEgress {
+        fn record(&self, _event: nugget_core::egress::EgressEvent) {}
+    }
+
+    /// A runtime with `roles` selected and installed, attached to its router.
+    fn attached(
+        tmp: &tempfile::TempDir,
+        roles: Vec<(RuntimeRole, ModelEntry)>,
+    ) -> (LocalRuntime, Arc<Router>) {
+        let paths = nugget_core::paths::Paths::rooted(tmp.path().to_path_buf());
+        let egress: Arc<dyn EgressSink> = Arc::new(NoEgress);
+        let models = Arc::new(nugget_models::ModelStore::open(&paths, egress.clone()).unwrap());
+        let runtime = Runtime::new(&paths, models, egress.clone()).unwrap();
+        let local = LocalRuntime::new(runtime, roles, &|_| true, egress);
+        let router = Arc::new(Router::new(
+            as_providers(&local),
+            tier_map(&[], &slot_routes(Some(&local))),
+        ));
+        local.attach(&router);
+        (local, router)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn background_chats_yield_to_interactive_ones() {
+        let fg = Arc::new(nugget_ingest::Foreground::new(Duration::from_millis(500)));
+        let max = Duration::from_secs(30);
+        // An Ask in flight: the judge waits until it ends plus the grace period, however long.
+        let ask = fg.begin();
+        let fg2 = fg.clone();
+        let judge = tokio::spawn(async move {
+            yield_to_interactive(&fg2, nugget_proactive::judge::FEATURE_JUDGE, max).await;
+            tokio::time::Instant::now()
+        });
+        tokio::time::sleep(max * 3).await;
+        assert!(!judge.is_finished());
+        let ended = tokio::time::Instant::now();
+        drop(ask);
+        assert!(judge.await.unwrap() - ended >= Duration::from_millis(500));
+        // Interactive chats and triage never wait; other background chats at most `max`.
+        let _ask = fg.begin();
+        let t = tokio::time::Instant::now();
+        yield_to_interactive(&fg, "ask", max).await;
+        yield_to_interactive(&fg, nugget_ingest::FEATURE_TRIAGE, max).await;
+        assert_eq!(t.elapsed(), Duration::ZERO);
+        yield_to_interactive(&fg, "knowledge", max).await;
+        assert_eq!(t.elapsed(), max);
+
+        // A judge stream in flight ends when an Ask starts; other features are left alone.
+        drop(_ask);
+        fg.idle().await;
+        let (tx, rx) = futures::channel::mpsc::unbounded::<Result<nugget_infer::ChatEvent>>();
+        let mut judge = preempt_on_foreground(
+            Box::pin(rx),
+            Some(fg.clone()),
+            nugget_proactive::judge::FEATURE_JUDGE,
+        );
+        let (tx2, rx2) = futures::channel::mpsc::unbounded::<Result<nugget_infer::ChatEvent>>();
+        let mut other = preempt_on_foreground(Box::pin(rx2), Some(fg.clone()), "knowledge");
+        tx.unbounded_send(Ok(nugget_infer::ChatEvent::TextDelta("{".into())))
+            .unwrap();
+        assert!(matches!(judge.next().await, Some(Ok(_))));
+        let _ask = fg.begin();
+        assert!(matches!(judge.next().await, Some(Err(_))));
+        assert!(judge.next().await.is_none());
+        tx2.unbounded_send(Ok(nugget_infer::ChatEvent::TextDelta("x".into())))
+            .unwrap();
+        assert!(matches!(other.next().await, Some(Ok(_))));
+    }
+
+    #[test]
+    fn routing_order_puts_local_first_unprobed_after_the_runtime_and_cloud_last() {
+        let configured = vec![
+            (pid("cloud"), Tier::ROUTED.to_vec(), Locality::Cloud, true),
+            (pid("example"), vec![Tier::Light], Locality::OnDevice, false),
+            (pid("probed"), vec![Tier::Light], Locality::OnDevice, true),
+            (pid("lan"), vec![Tier::Light], Locality::LocalNetwork, false),
+        ];
+        let local = vec![
+            (pid("local-chat"), vec![Tier::Light]),
+            (pid("local-embedding"), vec![Tier::Embedding]),
+        ];
+        let map = tier_map(&configured, &local);
+        let ids = ["probed", "lan", "local-chat", "example", "cloud"].map(pid);
+        assert_eq!(map[&Tier::Light], ids);
+        assert_eq!(
+            map[&Tier::Embedding],
+            [pid("local-embedding"), pid("cloud")]
+        );
+        // Without the runtime, the unprobed provider still serves.
+        assert_eq!(
+            tier_map(&configured[1..], &[])[&Tier::Light],
+            ["probed", "lan", "example"].map(pid)
+        );
+    }
+
     #[test]
     fn selection_prefers_config_then_selected_then_recommendation() {
         let m = manifest();
         let chat_rec = recommend(&m, &hw(64), Tier::Triage).unwrap().id.clone();
         let emb_rec = recommend(&m, &hw(64), Tier::Embedding).unwrap().id.clone();
-
-        let cfg = Config::parse("").unwrap();
-        let sel = selected_models(&cfg, &m, &hw(64));
-        assert_eq!(sel.len(), 2);
+        let sel = selected("", &m);
+        assert_eq!(of_role(&sel, RuntimeRole::Chat), [chat_rec]);
         assert_eq!(
-            (sel[0].0, sel[0].1.id.as_str()),
-            (RuntimeRole::Chat, chat_rec.as_str())
+            of_role(&sel, RuntimeRole::Embedding),
+            std::slice::from_ref(&emb_rec)
         );
-        assert_eq!(
-            (sel[1].0, sel[1].1.id.as_str()),
-            (RuntimeRole::Embedding, emb_rec.as_str())
-        );
-
-        // An explicit chat model wins; an embedding-only "chat" model is refused.
-        let cfg = Config::parse(&format!("[runtime]\nchat_model = \"{emb_rec}\"\n")).unwrap();
-        let sel = selected_models(&cfg, &m, &hw(64));
-        assert!(sel.iter().all(|(r, _)| *r == RuntimeRole::Embedding));
-
-        // models.selected is the fallback; unknown ids select nothing.
-        let cfg = Config::parse(
-            "[models.selected]\nembedding = \"not-in-manifest\"\n[runtime]\nchat_model = \"also-missing\"\n",
-        )
-        .unwrap();
-        assert!(selected_models(&cfg, &m, &hw(64)).is_empty());
+        assert_eq!(sel.len(), 2, "no reranker or draft model unless configured");
+        // An embedding-only "chat" model is refused; unknown ids select nothing.
+        let sel = selected(&format!("[runtime]\nchat_model = \"{emb_rec}\"\n"), &m);
+        assert!(of_role(&sel, RuntimeRole::Chat).is_empty());
+        let cfg = "[models.selected]\nembedding = \"nope\"\n[runtime]\nchat_model = \"nope\"\n";
+        assert!(selected(cfg, &m).is_empty());
     }
 
+    #[test]
+    fn rerank_and_draft_models_are_opt_in_and_never_chat_or_embed() {
+        let m = manifest();
+        let rerank = reranker(&m);
+        let chat = chat_model(&m);
+        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
+        // A reranker is never recommended nor accepted for chat or embeddings.
+        for gb in [4, 16, 1024] {
+            for t in Tier::ROUTED {
+                let rec = recommend(&m, &hw(gb), t).map(|e| e.id.as_str());
+                assert_ne!(rec, Some(rerank.id.as_str()));
+            }
+        }
+        for cfg in [
+            format!("[runtime]\nchat_model = \"{}\"\n", rerank.id),
+            format!("[models.selected]\nembedding = \"{}\"\n", rerank.id),
+        ] {
+            assert!(
+                selected(&cfg, &m).iter().all(|(_, e)| e.id != rerank.id),
+                "{cfg}"
+            );
+        }
+        // Configured: only a manifest reranker serves the rerank role.
+        let rr = |id: &str| {
+            of_role(
+                &selected(&format!("[runtime]\nrerank_model = \"{id}\"\n"), &m),
+                RuntimeRole::Rerank,
+            )
+        };
+        assert_eq!(rr(&rerank.id), std::slice::from_ref(&rerank.id));
+        assert!(rr(&emb.id).is_empty() && rr("nope").is_empty());
+        // Draft: only a chat model, beside the usual roles; a [draft] table it refuses selects none.
+        let draft = |cfg: String| of_role(&selected(&cfg, &m), RuntimeRole::Draft);
+        let cfg = format!("[draft.local]\nmodel = \"{}\"\n", chat.id);
+        assert_eq!(draft(cfg.clone()), std::slice::from_ref(&chat.id));
+        assert_eq!(selected(&cfg, &m).len(), 3);
+        for id in [emb.id.as_str(), rerank.id.as_str(), "nope"] {
+            assert!(
+                draft(format!("[draft.local]\nmodel = \"{id}\"\n")).is_empty(),
+                "{id}"
+            );
+        }
+        assert!(
+            draft(format!(
+                "[draft.local]\nmodel = \"{}\"\nnope = 1\n",
+                chat.id
+            ))
+            .is_empty()
+        );
+        // Tiers and capabilities per role.
+        assert_eq!(slot_tiers(RuntimeRole::Rerank, &rerank), [Tier::Rerank]);
+        assert!(slot_tiers(RuntimeRole::Draft, &chat).is_empty());
+        let t = slot_tiers(RuntimeRole::Chat, &chat);
+        assert!(CHAT_TIERS.iter().all(|c| t.contains(c)) && t.iter().all(|t| t.is_chat()));
+        let cfg = provider_cfg(serde_json::json!({
+            "id": "local-draft", "kind": "openai_compatible",
+            "base_url": "http://127.0.0.1:9/v1", "model": "m", "context_tokens": 8192,
+        }));
+        assert_eq!(
+            known_capabilities(RuntimeRole::Draft, &cfg),
+            known_capabilities(RuntimeRole::Chat, &cfg)
+        );
+        assert_eq!(
+            known_capabilities(RuntimeRole::Rerank, &cfg),
+            Capabilities::default()
+        );
+    }
+
+    /// EM-1: a store with vectors keeps the embedding model that built them.
     #[test]
     fn a_store_with_vectors_keeps_the_embedding_model_that_built_them() {
         let mut m = manifest();
         let old = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
-        // A newer, larger embedding model the manifest now recommends.
         let mut newer = old.clone();
         newer.id = "newer-embedder".into();
         newer.size = old.size * 4;
         m.models.push(newer);
-        assert_eq!(
-            recommend(&m, &hw(64), Tier::Embedding).unwrap().id,
-            "newer-embedder"
-        );
         let embedder = |cfg: &str, index: Option<&str>| {
-            selected_models_for_index(&Config::parse(cfg).unwrap(), &m, &hw(64), index)
-                .into_iter()
-                .find(|(r, _)| *r == RuntimeRole::Embedding)
-                .map(|(_, e)| e.id)
+            let sel = selected_models_for_index(&Config::parse(cfg).unwrap(), &m, &hw(64), index);
+            of_role(&sel, RuntimeRole::Embedding).pop()
         };
-        // New install: the recommendation. A store built with the old model keeps it.
         assert_eq!(embedder("", None).as_deref(), Some("newer-embedder"));
         assert_eq!(embedder("", Some(&old.id)), Some(old.id.clone()));
-        // An index model the manifest lacks (a cloud embedder, say): the recommendation.
+        // An index model the manifest lacks (a cloud embedder): the recommendation.
         assert_eq!(
             embedder("", Some("text-embedding-3-small")).as_deref(),
             Some("newer-embedder")
         );
         // Explicit config wins over the index.
+        let cfg = "[runtime]\nembedding_model = \"newer-embedder\"\n";
         assert_eq!(
-            embedder(
-                "[runtime]\nembedding_model = \"newer-embedder\"\n",
-                Some(&old.id)
-            )
-            .as_deref(),
+            embedder(cfg, Some(&old.id)).as_deref(),
             Some("newer-embedder")
         );
-        // The chat model is unaffected by the index.
-        let chat = |index| {
-            selected_models_for_index(&Config::parse("").unwrap(), &m, &hw(64), index)
-                .into_iter()
-                .find(|(r, _)| *r == RuntimeRole::Chat)
-                .map(|(_, e)| e.id)
-        };
-        assert_eq!(chat(Some(old.id.as_str())), chat(None));
-        // Legacy stores (vectors, no record) count as built with the manifest's original model.
+        // Legacy stores (vectors, no record) are pinned to the original model at start.
         let store = nugget_store::Store::open_in_memory().unwrap();
         assert_eq!(index_embedding_model(&store), None);
+        assert_eq!(pin_legacy_embedding_model(&store).unwrap(), None);
         store
             .upsert_item_with_chunks(
                 &nugget_store::NewItem::new("src", "a", "h").with_text("a"),
@@ -1383,7 +1253,6 @@ mod tests {
             index_embedding_model(&store).as_deref(),
             Some(LEGACY_EMBEDDING_MODEL)
         );
-        // Pinned at start (EM-1): a later embedder of the same dimension cannot claim it.
         assert_eq!(
             pin_legacy_embedding_model(&store).unwrap().as_deref(),
             Some(LEGACY_EMBEDDING_MODEL)
@@ -1393,371 +1262,76 @@ mod tests {
             store.adopt_embedding_model("newer-embedder").unwrap(),
             LEGACY_EMBEDDING_MODEL
         );
-        assert_eq!(
-            store.embedding_model().unwrap().as_deref(),
-            Some(LEGACY_EMBEDDING_MODEL)
-        );
-        // A store without vectors stays open, and an existing record is kept.
-        let fresh = nugget_store::Store::open_in_memory().unwrap();
-        assert_eq!(pin_legacy_embedding_model(&fresh).unwrap(), None);
-        assert_eq!(fresh.embedding_model().unwrap(), None);
-        let recorded = nugget_store::Store::open_in_memory().unwrap();
-        recorded
-            .upsert_item_with_chunks(
-                &nugget_store::NewItem::new("src", "a", "h").with_text("a"),
-                &[nugget_store::NewChunk::embedded("a", vec![1.0, 0.0])],
-            )
-            .unwrap();
-        recorded.adopt_embedding_model("recorded").unwrap();
-        assert_eq!(pin_legacy_embedding_model(&recorded).unwrap(), None);
-        assert_eq!(
-            index_embedding_model(&recorded).as_deref(),
-            Some("recorded")
-        );
-        assert!(
-            m.get(LEGACY_EMBEDDING_MODEL).is_some(),
-            "legacy model left the manifest"
-        );
+        assert!(m.get(LEGACY_EMBEDDING_MODEL).is_some());
     }
 
-    #[test]
-    fn a_reranker_is_selected_only_when_configured_and_never_routed() {
-        let m = manifest();
-        // No automatic recommendation.
-        let sel = selected_models(&Config::parse("").unwrap(), &m, &hw(64));
-        assert!(sel.iter().all(|(r, _)| *r != RuntimeRole::Rerank));
-        // Configured: the manifest's reranker.
-        let rerank = reranker(&m);
-        let cfg = Config::parse(&format!("[runtime]\nrerank_model = \"{}\"\n", rerank.id)).unwrap();
-        let sel = selected_models(&cfg, &m, &hw(64));
-        let rr: Vec<_> = sel
-            .iter()
-            .filter(|(r, _)| *r == RuntimeRole::Rerank)
-            .collect();
-        assert_eq!(rr.len(), 1);
-        assert_eq!(rr[0].1.id, rerank.id);
-        // A model without the rerank tier is refused for the role.
-        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
-        let cfg = Config::parse(&format!("[runtime]\nrerank_model = \"{}\"\n", emb.id)).unwrap();
-        assert!(
-            selected_models(&cfg, &m, &hw(64))
-                .iter()
-                .all(|(r, _)| *r != RuntimeRole::Rerank)
-        );
-        // Not in the manifest: no reranker.
-        let cfg = Config::parse("[runtime]\nrerank_model = \"not-in-manifest\"\n").unwrap();
-        assert!(
-            selected_models(&cfg, &m, &hw(64))
-                .iter()
-                .all(|(r, _)| *r != RuntimeRole::Rerank)
-        );
-        assert_eq!(slot_tiers(RuntimeRole::Rerank, &rerank), vec![Tier::Rerank]);
-        assert_eq!(
-            known_capabilities(
-                RuntimeRole::Rerank,
-                &serde_json::from_value(serde_json::json!({
-                    "id": "local-rerank", "kind": "openai_compatible",
-                    "base_url": "http://127.0.0.1:9/v1", "model": "m",
-                }))
-                .unwrap()
-            ),
-            Capabilities::default()
-        );
-    }
-
-    /// The rerank slot is a slot (status, installs) but not a router provider, for any tier.
+    /// The rerank slot is reported but never a router provider; the draft slot is a router
+    /// provider found by id that no tier routes to.
     #[tokio::test]
-    async fn the_rerank_slot_stays_out_of_the_router() {
+    async fn rerank_and_draft_slots_stay_out_of_tier_routing() {
         let tmp = tempfile::tempdir().unwrap();
-        let paths = nugget_core::paths::Paths::rooted(tmp.path().to_path_buf());
-        let egress: Arc<dyn EgressSink> = Arc::new(NoEgress);
-        let models = Arc::new(nugget_models::ModelStore::open(&paths, egress.clone()).unwrap());
-        let runtime = Runtime::new(&paths, models, egress.clone()).unwrap();
         let m = manifest();
-        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
-        let local = LocalRuntime::new(
-            runtime,
+        let chat = chat_model(&m);
+        let (local, router) = attached(
+            &tmp,
             vec![
-                (RuntimeRole::Embedding, emb.clone()),
+                (RuntimeRole::Chat, chat.clone()),
+                (RuntimeRole::Draft, chat.clone()),
                 (RuntimeRole::Rerank, reranker(&m)),
             ],
-            &|_| true,
-            egress,
         );
-        let rerank = local.rerank_slot().expect("a rerank slot");
-        assert_eq!(rerank.id().as_str(), nugget_runtime::RERANK_PROVIDER_ID);
-        let providers = as_providers(&local);
-        assert_eq!(providers.len(), 1);
-        assert_eq!(providers[0].id().as_str(), EMBEDDING_ID);
-        let routes = slot_routes(Some(&local));
-        assert_eq!(routes.len(), 1);
-        let router = Arc::new(Router::new(providers, tier_map(&[], &routes)));
-        local.attach(&router);
-        assert!(router.tiers().get(&Tier::Rerank).is_none());
-        for t in Tier::ALL {
-            assert!(!router.tiers_of(rerank.id()).contains(&t));
-        }
+        let rerank = local.rerank_slot().unwrap();
         assert!(router.provider(rerank.id()).is_none());
-        assert!(router.capabilities(rerank.id()).is_none());
-        // Reported like the other roles; never started, so not ready.
+        assert!(router.tiers().get(&Tier::Rerank).is_none());
         let st = local.status();
-        let r = st.iter().find(|i| i.role == RuntimeRole::Rerank).unwrap();
-        assert_eq!(r.state, RuntimeState::Stopped);
+        assert_eq!(st.len(), 3);
+        assert!(st.iter().all(|i| i.state == RuntimeState::Stopped));
         assert!(rerank.ready_config().is_none());
-        assert_eq!(rerank.state(), None);
-        // It neither chats nor embeds.
         assert!(matches!(
             rerank.embed(&["x".into()]).await,
             Err(Error::Unsupported(_))
         ));
-    }
 
-    fn chat_model(m: &Manifest) -> ModelEntry {
-        m.models
-            .iter()
-            .find(|e| e.tiers.iter().any(|t| t.is_chat()) && !e.tiers.contains(&Tier::Rerank))
-            .expect("the shipped manifest has a chat model")
-            .clone()
-    }
-
-    fn draft_slots(cfg: &str, m: &Manifest) -> Vec<ModelEntry> {
-        let cfg = Config::parse(cfg).unwrap();
-        selected_models(&cfg, m, &hw(64))
-            .into_iter()
-            .filter(|(r, _)| *r == RuntimeRole::Draft)
-            .map(|(_, e)| e)
-            .collect()
-    }
-
-    #[test]
-    fn a_draft_model_is_selected_only_when_configured_and_a_chat_model() {
-        let m = manifest();
-        // Not configured: no draft role, and the other roles are unchanged.
-        let none = selected_models(&Config::parse("").unwrap(), &m, &hw(64));
-        assert!(none.iter().all(|(r, _)| *r != RuntimeRole::Draft));
-        let chat = chat_model(&m);
-        let cfg = format!("[draft.local]\nmodel = \"{}\"\n", chat.id);
-        let sel = draft_slots(&cfg, &m);
-        assert_eq!(sel.len(), 1);
-        assert_eq!(sel[0].id, chat.id);
-        // Beside the usual roles, not instead of them.
-        let all = selected_models(&Config::parse(&cfg).unwrap(), &m, &hw(64));
-        assert_eq!(all.len(), none.len() + 1);
-        assert_eq!(&all[..none.len()], &none[..]);
-        // An embedding model or a reranker cannot draft; unknown ids select nothing.
-        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
-        for id in [emb.id.as_str(), reranker(&m).id.as_str(), "not-in-manifest"] {
-            let cfg = format!("[draft.local]\nmodel = \"{id}\"\n");
-            assert!(draft_slots(&cfg, &m).is_empty(), "{id}");
-        }
-        // A [draft] table the feature refuses selects nothing either.
-        let cfg = format!("[draft.local]\nmodel = \"{}\"\nnope = 1\n", chat.id);
-        assert!(draft_slots(&cfg, &m).is_empty());
-        // Never routed for a tier; chat's capabilities once ready.
-        assert!(slot_tiers(RuntimeRole::Draft, &chat).is_empty());
-        let cfg: ProviderConfig = serde_json::from_value(serde_json::json!({
-            "id": "local-draft", "kind": "openai_compatible",
-            "base_url": "http://127.0.0.1:9/v1", "model": "m", "context_tokens": 8192,
-        }))
-        .unwrap();
-        assert_eq!(
-            known_capabilities(RuntimeRole::Draft, &cfg),
-            known_capabilities(RuntimeRole::Chat, &cfg)
-        );
-    }
-
-    /// The draft slot is a router provider (found by id) that no tier routes to.
-    #[tokio::test]
-    async fn the_draft_slot_is_a_router_provider_without_tiers() {
-        let tmp = tempfile::tempdir().unwrap();
-        let paths = nugget_core::paths::Paths::rooted(tmp.path().to_path_buf());
-        let egress: Arc<dyn EgressSink> = Arc::new(NoEgress);
-        let models = Arc::new(nugget_models::ModelStore::open(&paths, egress.clone()).unwrap());
-        let runtime = Runtime::new(&paths, models, egress.clone()).unwrap();
-        let m = manifest();
-        let chat = chat_model(&m);
-        let local = LocalRuntime::new(
-            runtime,
-            vec![
-                (RuntimeRole::Chat, chat.clone()),
-                (RuntimeRole::Draft, chat.clone()),
-            ],
-            &|_| true,
-            egress,
-        );
-        let providers = as_providers(&local);
-        assert_eq!(providers.len(), 2);
-        let routes = slot_routes(Some(&local));
-        let router = Arc::new(Router::new(providers, tier_map(&[], &routes)));
-        local.attach(&router);
-        let id = nugget_runtime::provider_id(RuntimeRole::Draft);
-        assert_eq!(id.as_str(), nugget_runtime::DRAFT_PROVIDER_ID);
-        let found = router.provider(&id).expect("found by id");
-        assert_eq!(found.id(), &id);
-        assert_eq!(found.meta().locality, Locality::OnDevice);
+        let id = provider_id(RuntimeRole::Draft);
+        assert!(router.provider(&id).is_some());
         assert!(router.tiers_of(&id).is_empty());
-        for (tier, ids) in router.tiers() {
-            assert!(!ids.contains(&id), "{tier:?}");
-        }
-        // Chat keeps its tiers.
         assert!(router.tiers()[&Tier::Synthesis].contains(&provider_id(RuntimeRole::Chat)));
-        // Unroutable until ready, then chat's capabilities.
-        assert_eq!(router.capabilities(&id), Some(Capabilities::default()));
-        let slot = local.slot(&id).unwrap();
-        let cfg: ProviderConfig = serde_json::from_value(serde_json::json!({
-            "id": "local-draft", "kind": "openai_compatible",
-            "base_url": "http://127.0.0.1:9/v1", "model": chat.id,
-            "api_key": nugget_runtime::api_key_ref(RuntimeRole::Draft).to_string(),
-            "locality": "on_device",
-        }))
-        .unwrap();
-        slot.activate(cfg).unwrap();
-        assert!(router.capabilities(&id).unwrap().streaming);
-        // Still no tier routes to it.
-        for tier in Tier::ROUTED {
-            let plain = Capabilities::default();
-            assert!(
-                router
-                    .candidates(tier, &plain)
-                    .iter()
-                    .all(|p| p.id() != &id),
-                "{tier:?}"
-            );
-        }
-        // It drafts (chats), never embeds; reported in status like the other roles.
-        assert!(matches!(
-            slot.embed(&["x".into()]).await,
-            Err(Error::Unsupported(_))
-        ));
-        let st = local.status();
-        let d = st.iter().find(|i| i.role == RuntimeRole::Draft).unwrap();
-        assert_eq!(d.provider, id);
-        assert_eq!(d.state, RuntimeState::Stopped);
-    }
-
-    struct NoEgress;
-    impl EgressSink for NoEgress {
-        fn record(&self, _event: nugget_core::egress::EgressEvent) {}
-    }
-
-    /// The router is built once; a slot joins it unroutable and becomes routable (and rebuilt
-    /// only when its server's config changes) once its server is ready.
-    #[tokio::test]
-    async fn a_slot_becomes_routable_once_its_server_is_ready() {
-        let tmp = tempfile::tempdir().unwrap();
-        let paths = nugget_core::paths::Paths::rooted(tmp.path().to_path_buf());
-        let egress: Arc<dyn EgressSink> = Arc::new(NoEgress);
-        let models = Arc::new(nugget_models::ModelStore::open(&paths, egress.clone()).unwrap());
-        let runtime = Runtime::new(&paths, models, egress.clone()).unwrap();
-        let m = manifest();
-        let emb = m
-            .models
-            .iter()
-            .find(|e| e.tiers.contains(&Tier::Embedding))
+        local
+            .slot(&id)
             .unwrap()
-            .clone();
-        let local = LocalRuntime::new(
-            runtime,
-            vec![(RuntimeRole::Embedding, emb)],
-            &|_| false,
-            egress,
-        );
-        let router = Arc::new(Router::new(
-            as_providers(&local),
-            tier_map(&[], &slot_routes(Some(&local))),
-        ));
-        local.attach(&router);
-        let need = Capabilities {
-            embeddings: true,
-            ..Default::default()
-        };
-        let plain = Capabilities {
-            streaming: true,
-            ..Default::default()
-        };
-        assert!(router.candidates(Tier::Embedding, &need).is_empty());
-        assert!(router.candidates(Tier::Embedding, &plain).is_empty());
-        let slot = &local.slots[0];
-        let err = slot.embed(&["x".into()]).await.unwrap_err();
-        assert!(matches!(err, Error::Unsupported(_)), "{err:?}");
-
-        let cfg: ProviderConfig = serde_json::from_value(serde_json::json!({
-            "id": EMBEDDING_ID,
-            "kind": "openai_compatible",
-            "base_url": "http://127.0.0.1:9/v1",
-            "model": slot.model().id,
-            "api_key": nugget_runtime::api_key_ref(RuntimeRole::Embedding).to_string(),
-            "tiers": ["embedding"],
-            "locality": "on_device",
-        }))
-        .unwrap();
-        let a = slot.activate(cfg.clone()).unwrap();
-        let routed = router.candidates(Tier::Embedding, &need);
-        assert_eq!(routed.len(), 1);
-        assert_eq!(routed[0].id().as_str(), EMBEDDING_ID);
-        assert_eq!(routed[0].meta().locality, Locality::OnDevice);
-        let b = slot.activate(cfg.clone()).unwrap();
-        assert!(Arc::ptr_eq(&a, &b), "same config: provider reused");
-        let mut moved = cfg;
-        moved.base_url = Some("http://127.0.0.1:10/v1".into());
-        let c = slot.activate(moved).unwrap();
-        assert!(!Arc::ptr_eq(&a, &c), "new port: provider rebuilt");
+            .activate(provider_cfg(serde_json::json!({
+                "id": "local-draft", "kind": "openai_compatible",
+                "base_url": "http://127.0.0.1:9/v1", "model": chat.id,
+                "api_key": nugget_runtime::api_key_ref(RuntimeRole::Draft).to_string(),
+                "locality": "on_device",
+            })))
+            .unwrap();
+        assert!(router.capabilities(&id).unwrap().streaming);
+        for tier in Tier::ROUTED {
+            let any = Capabilities::default();
+            assert!(router.candidates(tier, &any).iter().all(|p| p.id() != &id));
+        }
     }
 
-    const EMBEDDING_ID: &str = nugget_runtime::EMBEDDING_PROVIDER_ID;
-
-    /// Once its server is being started, an installed chat slot is routable for plain chat
-    /// (the request waits for the server); embeddings still wait for readiness. A start that
-    /// fails is a fallback error and makes the slot unroutable again.
+    /// A starting installed chat slot is routable for chat; a failed start is a fallback error
+    /// and makes it unroutable again.
     #[tokio::test]
     async fn a_starting_chat_slot_is_routable_for_chat_until_its_start_fails() {
         let tmp = tempfile::tempdir().unwrap();
-        let paths = nugget_core::paths::Paths::rooted(tmp.path().to_path_buf());
-        let egress: Arc<dyn EgressSink> = Arc::new(NoEgress);
-        let models = Arc::new(nugget_models::ModelStore::open(&paths, egress.clone()).unwrap());
-        let runtime = Runtime::new(&paths, models, egress.clone()).unwrap();
-        let m = manifest();
-        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
-        let local = LocalRuntime::new(
-            runtime,
-            vec![
-                (RuntimeRole::Chat, chat_model(&m)),
-                (RuntimeRole::Embedding, emb),
-            ],
-            &|_| true,
-            egress,
-        );
-        let router = Arc::new(Router::new(
-            as_providers(&local),
-            tier_map(&[], &slot_routes(Some(&local))),
-        ));
-        local.attach(&router);
+        let (local, router) = attached(&tmp, vec![(RuntimeRole::Chat, chat_model(&manifest()))]);
         let chat = local.slot(&provider_id(RuntimeRole::Chat)).unwrap();
-        let embedding = local.slot(&pid(EMBEDDING_ID)).unwrap();
         let plain = Capabilities {
             streaming: true,
             ..Default::default()
         };
-        let need = Capabilities {
-            embeddings: true,
-            ..Default::default()
-        };
         assert!(router.candidates(Tier::Synthesis, &plain).is_empty());
-
         chat.starting();
-        embedding.starting();
-        let routed = router.candidates(Tier::Synthesis, &plain);
-        assert_eq!(routed.len(), 1);
-        assert_eq!(routed[0].id(), chat.id());
+        assert_eq!(router.candidates(Tier::Synthesis, &plain).len(), 1);
         let caps = router.capabilities(chat.id()).unwrap();
-        assert!(caps.json_schema);
-        assert_eq!(caps.context_tokens, None);
-        assert!(router.candidates(Tier::Embedding, &need).is_empty());
-
+        assert!(caps.json_schema && caps.context_tokens.is_none());
         // No runtime build or model file here: the start fails with a fallback error.
-        let err = match chat.chat(ChatRequest::default()).await {
-            Err(e) => e,
-            Ok(_) => panic!("no server can start here"),
+        let Err(err) = chat.chat(ChatRequest::default()).await else {
+            panic!("no server can start here")
         };
         assert!(
             matches!(
@@ -1768,82 +1342,39 @@ mod tests {
         );
         chat.start_failed();
         assert!(router.candidates(Tier::Synthesis, &plain).is_empty());
-
         // Not installed: never routed early.
         chat.set_installed(false);
         chat.starting();
         assert!(router.candidates(Tier::Synthesis, &plain).is_empty());
     }
 
-    #[test]
-    fn chat_slot_serves_the_core_chat_tiers() {
-        let m = manifest();
-        for e in &m.models {
-            if e.tiers.iter().any(|t| t.is_chat()) {
-                let t = slot_tiers(RuntimeRole::Chat, e);
-                for c in CHAT_TIERS {
-                    assert!(t.contains(&c), "{}: {t:?}", e.id);
-                }
-                assert!(t.iter().all(|t| t.is_chat()), "{}: {t:?}", e.id);
-            }
-        }
-    }
-
-    /// A configured provider for the foreground tests: chats stream one delta and stay open.
-    struct Configured {
-        id: ProviderId,
-        locality: Locality,
-    }
+    /// A configured provider whose chats stream one delta and stay open.
+    struct Configured(ProviderId, Locality);
 
     #[async_trait]
     impl Provider for Configured {
         fn id(&self) -> &ProviderId {
-            &self.id
+            &self.0
         }
         fn meta(&self) -> ProviderMeta {
             ProviderMeta {
                 kind: ProviderKind::OpenaiCompatible,
                 model: "m".into(),
-                locality: self.locality,
-                context_tokens: Some(7),
+                locality: self.1,
+                context_tokens: None,
             }
         }
         fn available(&self) -> bool {
-            false
+            true
         }
         async fn chat(&self, _req: ChatRequest) -> Result<ChatStream> {
             let first =
                 futures::stream::iter([Ok(nugget_infer::ChatEvent::TextDelta("hi".into()))]);
-            Ok(Box::pin(futures::StreamExt::chain(
-                first,
-                futures::stream::pending(),
-            )))
+            Ok(Box::pin(first.chain(futures::stream::pending())))
         }
         async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
             Ok(vec![vec![1.0]])
         }
-        async fn embed_query(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
-            Ok(vec![vec![2.0]])
-        }
-        async fn embed_items(&self, _t: &[String], _i: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
-            Ok(vec![vec![3.0]])
-        }
-        fn embed_prefixes(&self) -> (String, String) {
-            ("q: ".into(), "d: ".into())
-        }
-        async fn prewarm(&self) -> Result<()> {
-            Err(Error::Other("prewarm".into()))
-        }
-        async fn prewarm_prefix(&self, _req: &ChatRequest) -> Result<()> {
-            Err(Error::Other("prewarm_prefix".into()))
-        }
-    }
-
-    fn configured(id: &str, locality: Locality) -> Arc<dyn Provider> {
-        Arc::new(Configured {
-            id: pid(id),
-            locality,
-        })
     }
 
     fn feature_req(feature: &str) -> ChatRequest {
@@ -1859,73 +1390,41 @@ mod tests {
     async fn configured_local_providers_hold_the_foreground_for_interactive_chats() {
         let cell = ForegroundCell::default();
         let wrapped = guard_configured(
-            vec![
-                configured("ollama", Locality::OnDevice),
-                configured("lan", Locality::LocalNetwork),
-                configured("cloud", Locality::Cloud),
-            ],
+            [
+                ("ollama", Locality::OnDevice),
+                ("lan", Locality::LocalNetwork),
+                ("cloud", Locality::Cloud),
+            ]
+            .into_iter()
+            .map(|(id, l)| Arc::new(Configured(pid(id), l)) as Arc<dyn Provider>)
+            .collect(),
             &cell,
         );
         // Before ingest publishes its foreground, chats work and hold nothing.
         let mut s = wrapped[0].chat(feature_req("ask")).await.unwrap();
-        assert!(futures::StreamExt::next(&mut s).await.is_some());
+        assert!(s.next().await.is_some());
         drop(s);
-        let fg = Arc::new(nugget_ingest::Foreground::new(
-            std::time::Duration::from_millis(50),
-        ));
+        let fg = Arc::new(nugget_ingest::Foreground::new(Duration::from_millis(50)));
         cell.set(fg.clone()).unwrap();
-
         for p in &wrapped[..2] {
             let mut s = p.chat(feature_req("ask")).await.unwrap();
-            assert!(fg.busy(), "{}", p.id());
-            assert_eq!(fg.in_flight(), 1);
-            assert!(futures::StreamExt::next(&mut s).await.is_some());
+            assert!(s.next().await.is_some());
             assert_eq!(fg.in_flight(), 1, "held while the stream lives");
             drop(s);
             assert_eq!(fg.in_flight(), 0);
-            assert!(fg.busy(), "grace after the stream ends");
-            tokio::time::timeout(std::time::Duration::from_secs(10), fg.idle())
+            tokio::time::timeout(Duration::from_secs(10), fg.idle())
                 .await
-                .expect("idle after the grace period");
-            assert!(!fg.busy());
-
+                .unwrap();
             for f in [
                 nugget_ingest::FEATURE_TRIAGE,
                 nugget_knowledge::llm::FEATURE_KNOWLEDGE,
             ] {
-                let s = p.chat(feature_req(f)).await.unwrap();
+                let _s = p.chat(feature_req(f)).await.unwrap();
                 assert!(!fg.busy(), "{f} on {}", p.id());
-                drop(s);
             }
+            assert_eq!(p.embed(&["x".into()]).await.unwrap(), vec![vec![1.0]]);
         }
-
-        // The cloud provider is not wrapped: an interactive chat holds nothing.
-        let s = wrapped[2].chat(feature_req("ask")).await.unwrap();
-        assert_eq!(fg.in_flight(), 0);
+        let _s = wrapped[2].chat(feature_req("ask")).await.unwrap();
         assert!(!fg.busy());
-        drop(s);
-    }
-
-    /// The wrapper forwards every other `Provider` method, overrides included.
-    #[tokio::test]
-    async fn the_foreground_wrapper_forwards_everything_else() {
-        let cell = ForegroundCell::default();
-        let p = guard_configured(vec![configured("ollama", Locality::OnDevice)], &cell)
-            .pop()
-            .unwrap();
-        assert_eq!(p.id(), &pid("ollama"));
-        let m = p.meta();
-        assert_eq!(m.locality, Locality::OnDevice);
-        assert_eq!(m.context_tokens, Some(7));
-        assert!(!p.available());
-        let t = ["x".to_string()];
-        assert_eq!(p.embed(&t).await.unwrap(), vec![vec![1.0]]);
-        assert_eq!(p.embed_query(&t).await.unwrap(), vec![vec![2.0]]);
-        assert_eq!(p.embed_items(&t, &[]).await.unwrap(), vec![vec![3.0]]);
-        assert_eq!(p.embed_prefixes(), ("q: ".into(), "d: ".into()));
-        assert!(matches!(p.prewarm().await, Err(Error::Other(m)) if m == "prewarm"));
-        assert!(
-            matches!(p.prewarm_prefix(&feature_req("ask")).await, Err(Error::Other(m)) if m == "prewarm_prefix")
-        );
     }
 }

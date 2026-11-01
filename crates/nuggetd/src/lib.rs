@@ -1,9 +1,4 @@
 //! `nuggetd`, the Nugget background daemon.
-//!
-//! It loads `config.toml`, opens the encrypted store, builds the model providers, the on-device
-//! runtime and the router, runs the ingest pipeline over the configured sources, and serves the
-//! app over local IPC (`nugget_core::ipc`). The binary (`src/main.rs`) adds the
-//! CLI, signal handling and logging; this library exists so tests can run the daemon in-process.
 
 pub mod ask;
 pub mod backup_cli;

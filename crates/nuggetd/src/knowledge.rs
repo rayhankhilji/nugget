@@ -1,22 +1,14 @@
 //! Knowledge extraction and the Markdown vault, wired into the daemon.
 //!
-//! - **Extraction** ([`Knowledge::run_once`]) runs on its own task: at startup, after ingest
-//!   commits changes (debounced; woken by [`Ingest::subscribe_committed`]), periodically (`interval_minutes`, which also retries pending LLM
-//!   extraction), and again right away while a run leaves planned items behind. While the power
-//!   policy is constrained, runs make no LLM requests (deterministic extractors still keep the
-//!   graph fresh) and periodic runs are skipped.
-//! - **Notifications.** Entity ids changed by each run are broadcast as `knowledge.changed`
-//!   ([`KnowledgeChanged`]); so are entities touched by `knowledge.merge`,
-//!   `knowledge.claim.status` and by vault edits picked up by the watcher.
-//! - **Vault.** After every run (and after merges and claim-status changes), pages of entities
-//!   changed in the graph's change feed are re-rendered with `Vault::render_changed`; the
-//!   high-water mark is persisted in the store (cursor key [`VAULT_MARK_KEY`], with the vault
-//!   root, so moving the vault re-renders everything; a vault last rendered under older render
-//!   rules, `Vault::needs_full_render`, is rendered in full once even with no graph change).
-//!   `Vault::watch` applies user edits and signals them (`Vault::subscribe_edits`), which
-//!   triggers that pass.
-//! - **No polling.** The worker sleeps until one of those events or a deadline (debounce,
-//!   `interval_minutes`), so an idle daemon spends no wakeups here.
+//! - **Extraction** ([`Knowledge::run_once`]) runs at startup, after ingest commits (debounced),
+//!   every `interval_minutes`, and again right away while a run leaves planned items behind.
+//!   While the power policy is constrained, runs make no LLM requests and periodic runs skip.
+//! - Entity ids changed by runs, merges, claim-status changes and vault edits are broadcast as
+//!   `knowledge.changed` ([`KnowledgeChanged`]).
+//! - **Vault.** After each run, pages of entities changed in the graph's change feed are
+//!   re-rendered; the high-water mark is stored under [`VAULT_MARK_KEY`] with the vault root, so
+//!   moving the vault re-renders everything. `Vault::watch` applies user edits.
+//! - **No polling.** The worker sleeps until one of those events or a deadline.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -204,7 +196,7 @@ impl KnowledgeService {
             .then(|| Duration::from_secs(self.cfg.interval_minutes * 60));
         // Startup run: pick up whatever was indexed while extraction was not running.
         let mut due: Option<Instant> = self.cfg.enabled.then(Instant::now);
-        // Counts system sleep (GG6-29); checked at least every `RECHECK_EVERY`.
+        // Counts system sleep (GG6-29).
         let mut periodic = interval.map(|_| Stopwatch::start());
         // The commit counter when the current chain of runs started. A run that cannot finish
         // its plan carries the rest over to the next run, which does not plan again, so commits
@@ -535,7 +527,7 @@ mod tests {
         assert!(run_again(&carried, 7, 7, false));
         // Chain over, nothing committed since it started: sleep.
         assert!(!run_again(&done, 7, 7, false));
-        // Chain over, commits arrived while it ran (QA GG5-7): plan again now.
+        // GG5-7: chain over, commits arrived while it ran: plan again now.
         assert!(run_again(&done, 7, 9, false));
         // Items deferred somewhere in the chain because the request budget ran out.
         assert!(run_again(&done, 7, 7, true));

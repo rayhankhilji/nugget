@@ -1,14 +1,5 @@
-//! `nuggetd backup [--to DIR]`, `nuggetd backup set-passphrase`, `nuggetd restore --from DIR`
-//! and `nuggetd export --to DIR`.
-//!
-//! Backup, set-passphrase and export go through the running daemon's IPC when one answers, and
-//! otherwise work offline on the store directly, with the same library code; while offline the
-//! command holds the daemon's IPC socket so no daemon can open the store meanwhile. Restore is
-//! offline only (it refuses while a daemon answers): it verifies and stages the backup and
-//! applies it at once, exactly as a daemon does at start.
-//!
-//! The backup passphrase comes from `--passphrase-file`, else `NUGGET_BACKUP_PASSPHRASE`, else
-//! a no-echo prompt when stdin is a terminal (Unix; elsewhere use the file or the variable).
+//! `nuggetd backup [--to DIR]`, `nuggetd backup set-passphrase`, `nuggetd restore --from DIR` and
+//! `nuggetd export --to DIR`.
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -26,8 +17,6 @@ use crate::features::backup::{disk, export, restore};
 /// Environment variable holding the backup passphrase (scripts).
 pub const PASSPHRASE_ENV: &str = "NUGGET_BACKUP_PASSPHRASE";
 
-/// `nuggetd backup [--to DIR]`. `default_vault` is the vault directory when `[vault] path` is
-/// unset (as the daemon would use).
 pub async fn backup(paths: &Paths, to: Option<PathBuf>, default_vault: &Path) -> Result<String> {
     let to = to.map(absolute).transpose()?;
     if let Some(client) = daemon(paths).await {
@@ -87,7 +76,6 @@ fn backup_line(info: &disk::BackupInfo) -> String {
     )
 }
 
-/// `nuggetd backup set-passphrase [--passphrase-file FILE]`.
 pub async fn set_passphrase(paths: &Paths, file: Option<&Path>) -> Result<String> {
     let passphrase = passphrase(file, true)?.ok_or_else(no_passphrase)?;
     disk::check_passphrase(&passphrase)?;
@@ -111,7 +99,6 @@ pub async fn set_passphrase(paths: &Paths, file: Option<&Path>) -> Result<String
     Ok("backup passphrase set".into())
 }
 
-/// `nuggetd export --to DIR`.
 pub async fn export(paths: &Paths, to: PathBuf, default_vault: &Path) -> Result<String> {
     let to = absolute(to)?;
     if let Some(client) = daemon(paths).await {
@@ -216,7 +203,6 @@ pub async fn restore(
     .await
 }
 
-/// A client of the running daemon, if one answers.
 async fn daemon(paths: &Paths) -> Option<Client> {
     Client::connect(paths).await.ok()
 }
@@ -231,8 +217,7 @@ async fn rpc(client: &Client, method: &str, params: Value) -> Result<Value> {
         })
 }
 
-/// Bind the daemon's socket for the duration of an offline command, so no daemon starts on
-/// this home meanwhile.
+/// Hold the daemon's socket during an offline command, so no daemon starts meanwhile.
 async fn hold_socket(paths: &Paths) -> Result<Listener> {
     nugget_ipc::bind(paths).await.map_err(|e| {
         Error::Other(format!(
@@ -299,8 +284,7 @@ fn no_passphrase() -> Error {
     ))
 }
 
-/// The passphrase from `file`, the environment, or a no-echo prompt (asked twice when
-/// `confirm`). `None` when none of them is available.
+/// The passphrase from `file`, the environment, or a no-echo prompt (asked twice when `confirm`).
 fn passphrase(file: Option<&Path>, confirm: bool) -> Result<Option<Zeroizing<String>>> {
     if let Some(f) = file {
         let s = Zeroizing::new(
@@ -334,9 +318,7 @@ fn strip_newline(s: &str) -> &str {
         .unwrap_or(s)
 }
 
-/// Read a line from the terminal without echo (Unix, through `stty`). `None` where that is
-/// not possible. (Interrupted with Ctrl-C, the terminal keeps echo off until `stty echo` or
-/// `reset`.)
+/// Read a line from the terminal without echo (Unix, through `stty`).
 #[cfg(unix)]
 fn prompt(label: &str) -> Result<Option<Zeroizing<String>>> {
     use std::io::Write;

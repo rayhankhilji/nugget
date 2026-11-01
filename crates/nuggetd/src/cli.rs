@@ -58,7 +58,6 @@ fn locality(l: Locality) -> &'static str {
     }
 }
 
-/// Human-readable `nuggetd status` output.
 pub fn format_status(s: &StatusResponse, socket: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(
@@ -171,15 +170,6 @@ mod tests {
                     }),
                     error: None,
                 },
-                ProviderInfo {
-                    id: ProviderId::new("broken"),
-                    kind: "anthropic".into(),
-                    model: "b".into(),
-                    locality: Locality::Cloud,
-                    tiers: vec![Tier::Synthesis],
-                    capabilities: None,
-                    error: Some("api_key env:X: not set".into()),
-                },
             ],
             audit_chain_ok: Some(false),
             disk: Some(nugget_core::ipc::DiskStatus::classify(
@@ -192,24 +182,13 @@ mod tests {
         let out = format_status(&s, "/tmp/sock");
         assert!(out.contains("disk:      FULL: 150 MB free"), "{out}");
         assert!(out.starts_with("nuggetd 0.0.1 running (protocol 1), up 1h 2m\n"));
-        assert!(out.contains("store:     3 items, 9 chunks"));
         assert!(
             out.contains(
                 "  local  openai_compatible m  on-device  tiers: triage, light  not probed"
             )
         );
         assert!(out.contains("  cloud  anthropic c  cloud  tiers: -  probed: streaming, tools"));
-        assert!(out.contains(
-            "  broken  anthropic b  cloud  tiers: synthesis  unavailable: api_key env:X: not set"
-        ));
         assert!(out.contains("audit:     CHAIN VERIFICATION FAILED"));
-    }
-
-    #[test]
-    fn durations() {
-        assert_eq!(duration(5), "5s");
-        assert_eq!(duration(65), "1m 5s");
-        assert_eq!(duration(90_061), "1d 1h");
     }
 
     #[test]

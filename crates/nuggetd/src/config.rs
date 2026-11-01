@@ -478,21 +478,15 @@ impl Config {
     }
 
     fn load_at(path: &Path, rewrite: bool) -> Result<(Self, bool)> {
-        let created = match std::fs::read_to_string(path) {
-            Ok(_) => false,
+        let cannot_read = |e| Error::Invalid(format!("cannot read {}: {e}", path.display()));
+        let (text, created) = match std::fs::read_to_string(path) {
+            Ok(text) => (text, false),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 write_default(path)?;
-                true
+                (std::fs::read_to_string(path).map_err(cannot_read)?, true)
             }
-            Err(e) => {
-                return Err(Error::Invalid(format!(
-                    "cannot read {}: {e}",
-                    path.display()
-                )));
-            }
+            Err(e) => return Err(cannot_read(e)),
         };
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| Error::Invalid(format!("cannot read {}: {e}", path.display())))?;
         let (text, skip) = if created {
             (text, None)
         } else {
@@ -519,7 +513,7 @@ impl Config {
 }
 
 /// The `[[providers]]` block that builds before the on-device runtime wrote, enabled, into every
-/// new config: an Ollama server most users never installed (QA GG6-4). Compared as TOML values.
+/// new config: an Ollama server most users never installed (GG6-4). Compared as TOML values.
 const OLD_DEFAULT_OLLAMA: &str = r#"id = "local"
 kind = "openai_compatible"
 base_url = "http://127.0.0.1:11434/v1"
@@ -774,21 +768,15 @@ fn write_default(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nugget_core::capability::Locality;
-    use nugget_infer::ProviderKind;
 
     #[test]
-    fn default_config_is_local_first() {
-        let cfg = Config::default_local();
-        assert_eq!(cfg.models, ModelsConfig::default());
-        assert_eq!(cfg.runtime, RuntimeConfig::default());
-        assert!(cfg.runtime.enabled);
-        // The runtime serves everything; no provider is routed to until the user adds one.
-        assert!(cfg.providers.is_empty());
-    }
-
-    #[test]
-    fn default_config_has_no_secrets() {
+    fn default_config_has_no_providers_and_no_secrets() {
+        for cfg in [Config::default_local(), Config::parse("").unwrap()] {
+            assert!(cfg.providers.is_empty());
+            assert_eq!(cfg.runtime, RuntimeConfig::default());
+            assert!(cfg.runtime.enabled);
+            assert_eq!(cfg.mcp, McpSection::default());
+        }
         for line in DEFAULT_CONFIG.lines() {
             let l = line.trim_start_matches('#').trim();
             if let Some(v) = l.strip_prefix("api_key = ") {
@@ -802,160 +790,19 @@ mod tests {
         assert!(!DEFAULT_CONFIG.contains("sk-"));
     }
 
-    /// The commented-out provider examples are valid once uncommented.
     #[test]
-    fn commented_examples_parse_when_uncommented() {
-        let start = DEFAULT_CONFIG.find("# [[providers]]").unwrap();
-        let (head, tail) = DEFAULT_CONFIG.split_at(start);
-        let mut text = head.to_string();
-        for line in tail.lines() {
-            let is_setting = line
-                .strip_prefix("# ")
-                .is_some_and(|l| l == "[[providers]]" || l.split_once(" = ").is_some());
-            text.push_str(if is_setting { &line[2..] } else { line });
-            text.push('\n');
-        }
-        let cfg = Config::parse(&text).unwrap();
-        let kinds: Vec<_> = cfg.providers.iter().map(|p| p.kind).collect();
-        assert_eq!(
-            kinds,
-            vec![
-                ProviderKind::OpenaiCompatible,
-                ProviderKind::Anthropic,
-                ProviderKind::OpenaiResponses
-            ]
-        );
-        // The commented on-device example.
-        let p = &cfg.providers[0];
-        assert_eq!(p.base_url.as_deref(), Some("http://127.0.0.1:11434/v1"));
-        assert_eq!(p.effective_locality().unwrap(), Locality::OnDevice);
-        assert_eq!(p.tiers, vec![Tier::Triage, Tier::Light, Tier::Synthesis]);
-        assert!(p.api_key.is_none());
-        for p in &cfg.providers[1..] {
-            assert_eq!(p.effective_locality().unwrap(), Locality::Cloud);
-            assert!(p.api_key.is_some());
-        }
-    }
-
-    #[test]
-    fn empty_file_gives_defaults_without_providers() {
-        let cfg = Config::parse("").unwrap();
-        assert!(cfg.providers.is_empty());
-        assert_eq!(cfg.models.download_parts, 4);
-        assert_eq!(cfg.models.selected.iter().count(), 0);
-    }
-
-    #[test]
-    fn mcp_http_limits_default_to_nugget_mcp_and_parse() {
-        let defaults = nugget_mcp::HttpConfig::default();
-        for cfg in [
-            Config::parse("").unwrap(),
-            Config::parse("[mcp]\nport = 7400\n").unwrap(),
-            Config::default_local(),
-        ] {
-            assert_eq!(cfg.mcp.max_connections, defaults.max_connections);
-            assert_eq!(cfg.mcp.header_timeout_ms, defaults.header_timeout_ms);
-            assert_eq!(cfg.mcp.body_timeout_ms, defaults.body_timeout_ms);
-        }
-        // The documented (commented-out) keys parse to the same defaults once uncommented.
-        let uncommented: String = DEFAULT_CONFIG
-            .lines()
-            .map(|l| {
-                let keys = ["max_connections", "header_timeout_ms", "body_timeout_ms"];
-                match l.strip_prefix("# ") {
-                    Some(rest) if keys.iter().any(|k| rest.starts_with(&format!("{k} = "))) => rest,
-                    _ => l,
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert_ne!(uncommented, DEFAULT_CONFIG.trim_end_matches('\n'));
-        assert_eq!(
-            Config::parse(&uncommented).unwrap().mcp,
-            McpSection::default()
-        );
-
-        let cfg = Config::parse(
-            "[mcp]\nmax_connections = 8\nheader_timeout_ms = 2500\nbody_timeout_ms = 60000\n",
-        )
-        .unwrap();
-        assert_eq!(cfg.mcp.max_connections, 8);
-        assert_eq!(cfg.mcp.header_timeout_ms, 2500);
-        assert_eq!(cfg.mcp.body_timeout_ms, 60_000);
-        assert_eq!(cfg.mcp.port, DEFAULT_MCP_PORT);
-    }
-
-    #[test]
-    fn mcp_http_limits_out_of_range_are_rejected() {
-        for bad in [
-            "max_connections = 0",
-            "max_connections = 4097",
-            "header_timeout_ms = 0",
-            "header_timeout_ms = 600001",
-            "body_timeout_ms = 0",
-            "body_timeout_ms = 600001",
-            "max_connections = -1",
-            "body_timeout_ms = \"slow\"",
-        ] {
-            let err = Config::parse(&format!("[mcp]\n{bad}\n")).unwrap_err();
-            let key = bad.split(' ').next().unwrap();
-            assert!(msg(err).contains(key), "{bad}");
-        }
-        assert!(Config::parse("[mcp]\nmax_connections = 4096\nbody_timeout_ms = 600000\n").is_ok());
-    }
-
-    #[test]
-    fn parses_models_section() {
-        let cfg = Config::parse(
-            "[models]\ndownload_parts = 2\n[models.selected]\ntriage = \"qwen3-4b-q4km\"\n",
-        )
-        .unwrap();
-        assert_eq!(cfg.models.download_parts, 2);
-        let sel: Vec<_> = cfg.models.selected.iter().collect();
-        assert_eq!(sel, vec![(Tier::Triage, "qwen3-4b-q4km")]);
-    }
-
-    #[test]
-    fn parses_runtime_ingest_and_retrieve_sections() {
-        let cfg = Config::parse(
-            "[runtime]\nenabled = false\nchat_model = \"qwen3-4b-q4km\"\nidle_stop_minutes = 0\n\
-             [ingest]\nqueue_capacity = 8\n[retrieve]\nmmr = false\n",
-        )
-        .unwrap();
-        assert!(!cfg.runtime.enabled);
-        assert_eq!(cfg.runtime.chat_model.as_deref(), Some("qwen3-4b-q4km"));
-        assert_eq!(cfg.runtime.embedding_model, None);
-        assert_eq!(cfg.runtime.rerank_model, None);
-        assert_eq!(cfg.runtime.idle_stop_minutes, 0);
-        assert_eq!(cfg.ingest.queue_capacity, 8);
-        assert!(!cfg.ingest.allow_cloud_embeddings);
-        assert!(!cfg.retrieve.mmr);
-        assert!(!cfg.retrieve.allow_cloud_embedding);
-        let empty = Config::parse("").unwrap();
-        assert_eq!(empty.runtime, RuntimeConfig::default());
-        assert_eq!(empty.retrieve.reranker, None);
-    }
-
-    #[test]
-    fn parses_the_rerank_model_and_an_external_reranker() {
-        let cfg = Config::parse(
-            "[runtime]\nrerank_model = \"bge-reranker-v2-m3-q4km\"\n\
-             [retrieve]\nrerank_pool = 20\n[retrieve.reranker]\nbase_url = \"http://127.0.0.1:8013\"\n",
-        )
-        .unwrap();
-        assert_eq!(
-            cfg.runtime.rerank_model.as_deref(),
-            Some("bge-reranker-v2-m3-q4km")
-        );
-        assert_eq!(cfg.retrieve.rerank_pool, 20);
-        let r = cfg.retrieve.reranker.unwrap();
-        assert_eq!(r.base_url, "http://127.0.0.1:8013");
-        assert_eq!(r.timeout_ms, 2_000, "unset fields keep their defaults");
-        for (text, needle) in [
+    fn rejects_invalid_configs_with_clear_errors() {
+        let cases = [
+            ("bogus = 1", "unknown field"),
+            ("[models]\ndownload_parts = 0", "download_parts"),
+            ("[models.selected]\nfast = \"x\"", "unknown field"),
+            ("[models.selected]\ntriage = \"Bad Id\"", "not a model id"),
+            ("[runtime]\nchat_model = \"../x\"", "runtime.chat_model"),
             (
                 "[runtime]\nrerank_model = \"Bad Id\"",
                 "runtime.rerank_model",
             ),
+            ("[runtime]\nidle_stop_minutes = 99999", "idle_stop_minutes"),
             (
                 "[retrieve.reranker]\ntimeout_ms = 5",
                 "base_url is required",
@@ -968,23 +815,10 @@ mod tests {
                 "[retrieve.reranker]\nbase_url = \"https://rerank.example.com\"",
                 "not on this device",
             ),
-        ] {
-            let err = Config::parse(text).unwrap_err().to_string();
-            assert!(err.contains(needle), "{text:?}: {err}");
-        }
-    }
-
-    #[test]
-    fn rejects_invalid_configs_with_clear_errors() {
-        let cases = [
-            ("bogus = 1", "unknown field"),
-            ("[models]\ndownload_parts = 0", "download_parts"),
-            ("[models]\nparts = 2", "unknown field"),
-            ("[models.selected]\nfast = \"x\"", "unknown field"),
-            ("[models.selected]\ntriage = \"Bad Id\"", "not a model id"),
-            ("[runtime]\nchat_model = \"../x\"", "runtime.chat_model"),
-            ("[runtime]\nidle_stop_minutes = 99999", "idle_stop_minutes"),
-            ("[runtime]\nbogus = 1", "unknown field"),
+            ("[mcp]\nmax_connections = 0", "max_connections"),
+            ("[mcp]\nmax_connections = 4097", "max_connections"),
+            ("[mcp]\nheader_timeout_ms = 600001", "header_timeout_ms"),
+            ("[mcp]\nbody_timeout_ms = \"slow\"", "body_timeout_ms"),
             (
                 "[[providers]]\nid = \"a\"\nkind = \"anthropic\"\nmodel = \"m\"\napi_key = \"sk-plain\"",
                 "api_key",
@@ -1003,6 +837,7 @@ mod tests {
             let err = Config::parse(text).unwrap_err().to_string();
             assert!(err.contains(needle), "{text:?}: {err}");
         }
+        assert!(Config::parse("[mcp]\nmax_connections = 4096\nbody_timeout_ms = 600000\n").is_ok());
     }
 
     #[test]
@@ -1129,37 +964,11 @@ mod tests {
     }
 
     #[test]
-    fn migration_keeps_crlf_and_other_providers() {
-        let text = "[[providers]]\r\nid = \"anthropic\"\r\nkind = \"anthropic\"\r\nmodel = \"m\"\r\napi_key = \"env:K\"\r\n\r\n[[providers]] # mine\r\nid = \"local\"\r\nkind = \"openai_compatible\"\r\nbase_url = \"http://127.0.0.1:11434/v1\"\r\nmodel = \"qwen3:4b\"\r\ntiers = [\"triage\", \"light\", \"synthesis\"]\r\n\r\n[mcp]\r\nport = 1\r\n";
-        let Migration::Rewritten(new) = migrate_old_default_provider(text) else {
-            panic!("not migrated");
-        };
-        let cfg = Config::parse(&new).unwrap();
-        assert_eq!(cfg.providers.len(), 1);
-        assert_eq!(cfg.providers[0].id.as_str(), "anthropic");
-        assert_eq!(cfg.mcp.port, 1);
-        assert!(
-            new.contains("# [[providers]] # mine\r\n# id = \"local\"\r\n"),
-            "{new}"
-        );
-        assert!(!new.replace("\r\n", "").contains('\n'), "{new:?}");
-    }
-
-    #[test]
     fn migration_leaves_edited_or_user_added_providers_alone() {
         let old = old_default_config();
         let variants = [
             old.replace("model = \"qwen3:4b\"", "model = \"qwen3:8b\""),
-            old.replace("127.0.0.1:11434/v1", "127.0.0.1:11435/v1"),
             old.replace("id = \"local\"\nkind", "id = \"ollama\"\nkind"),
-            old.replace(
-                "tiers = [\"triage\", \"light\", \"synthesis\"]\n",
-                "tiers = [\"triage\", \"light\", \"synthesis\"]\ncontext_tokens = 8192\n",
-            ),
-            old.replace(
-                "tiers = [\"triage\", \"light\", \"synthesis\"]\n",
-                "tiers = [\"triage\"]\n",
-            ),
             old.replace(
                 "tiers = [\"triage\", \"light\", \"synthesis\"]\n",
                 "tiers = [\"triage\", \"light\", \"synthesis\"]\n[providers.headers]\nx-a = \"b\"\n",

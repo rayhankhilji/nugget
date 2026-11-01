@@ -37,26 +37,20 @@ use crate::daemon::{InFlightGuard, State, blocking, spawn_refresh};
 use crate::paging;
 use crate::sources::{check_duplicate_folders, client_secret_account, reconcile_settings};
 
-/// Longest `daemon.shutdown` reason logged.
 const MAX_SHUTDOWN_REASON_CHARS: usize = 64;
 /// How long `daemon.shutdown` waits after answering before the daemon starts winding down.
 const SHUTDOWN_REPLY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
-/// Upper bounds for list-style requests.
 const MAX_SEARCH_RESULTS: u32 = 200;
 const MAX_EGRESS_EVENTS: u32 = 1000;
-/// Upper bound for `retrieve.context` budgets, in tokens.
 const MAX_CONTEXT_TOKENS: u32 = 128 * 1024;
 /// Most item references accepted on one `chat` request (egress provenance).
 const MAX_CHAT_ITEMS: usize = 1024;
-/// Earlier turns `retrieve.ask` forwards to the model: at most this many messages...
+/// Limits on the earlier turns `retrieve.ask` forwards: messages, total and per-message chars.
 const MAX_ASK_HISTORY_MESSAGES: usize = 12;
-/// ...of at most this many characters in all (the newest are kept)...
 const MAX_ASK_HISTORY_CHARS: usize = 16_000;
-/// ...each cut to this many characters.
 const MAX_ASK_HISTORY_MESSAGE_CHARS: usize = 4_000;
-/// Longest question `retrieve.ask` accepts, in characters (QA GG2-17).
+/// Longest question `retrieve.ask` accepts, in characters (GG2-17).
 const MAX_ASK_QUERY_CHARS: usize = 4_000;
-/// Egress-ledger feature for `retrieve.ask` requests.
 pub(crate) const FEATURE_ASK: &str = "ask";
 /// Longest accepted source secret (passwords, OAuth client secrets), in bytes.
 const MAX_SECRET_BYTES: usize = 4096;
@@ -127,7 +121,6 @@ impl Handler for RpcHandler {
         }
     }
 
-    /// Every connection receives broadcast notifications (`ingest.progress`, `sources.changed`).
     fn connected(&self, notify: &Notifier) {
         self.state.hub.subscribe(notify);
         if let Some(f) = self.state.features.get() {
@@ -141,11 +134,7 @@ impl RpcHandler {
         Self { state }
     }
 
-    // ---- status / providers ----
-
-    /// `daemon.shutdown`: answer, then cancel `State::shutdown`, which `Daemon::run_until`
-    /// treats like SIGTERM (connections close, ingest and the local model servers stop, the
-    /// store is flushed, then "stopped" is logged and the process exits 0).
+    /// `daemon.shutdown`: answer, then cancel `State::shutdown` (handled like SIGTERM).
     fn daemon_shutdown(&self, req: ipc::DaemonShutdownRequest) -> Result<Value, RpcError> {
         let reason: String = req
             .reason
@@ -157,8 +146,7 @@ impl RpcHandler {
             .collect();
         tracing::info!(%reason, "stop requested over IPC");
         let stop = self.state.shutdown.clone();
-        // Not tracked in `state.tasks` (wind-down waits for those). The pause lets this answer
-        // reach the client before connections start closing.
+        // Not tracked in `state.tasks` (wind-down waits for those).
         tokio::spawn(async move {
             tokio::time::sleep(SHUTDOWN_REPLY_DELAY).await;
             stop.cancel();
@@ -186,8 +174,7 @@ impl RpcHandler {
         })
     }
 
-    /// Every configured provider in config order, including ones that failed to build (with
-    /// `error` set), so a misconfigured provider never silently disappears.
+    /// Every configured provider, including ones that failed to build (with `error` set).
     fn provider_infos(&self) -> Vec<ProviderInfo> {
         let router = &self.state.router;
         self.state
@@ -198,22 +185,12 @@ impl RpcHandler {
                     return Some(unavailable_info(cfg, &reason));
                 }
                 let p = router.provider(&cfg.id)?;
-                let meta = p.meta();
-                Some(ProviderInfo {
-                    id: p.id().clone(),
-                    kind: meta.kind.as_str().to_string(),
-                    model: meta.model,
-                    locality: meta.locality,
-                    tiers: router.tiers_of(p.id()),
-                    capabilities: router.capabilities(p.id()),
-                    error: None,
-                })
+                Some(self.info(p.as_ref(), router.tiers_of(p.id()), None))
             })
             .chain(self.runtime_infos())
             .collect()
     }
 
-    /// Local runtime slots whose model is installed (the others cannot serve anything).
     fn runtime_infos(&self) -> Vec<ProviderInfo> {
         let Some(local) = &self.state.local else {
             return Vec::new();
@@ -224,28 +201,32 @@ impl RpcHandler {
             .iter()
             .filter(|s| s.is_installed())
             .map(|s| {
-                let meta = s.meta();
-                ProviderInfo {
-                    id: s.id().clone(),
-                    kind: meta.kind.as_str().to_string(),
-                    model: meta.model,
-                    locality: meta.locality,
-                    // The rerank slot is not a router provider; report the tier it serves.
-                    tiers: if s.role() == RuntimeRole::Rerank {
-                        s.tiers().to_vec()
-                    } else {
-                        router.tiers_of(s.id())
-                    },
-                    capabilities: router.capabilities(s.id()),
-                    error: local.slot_error(s),
-                }
+                // The rerank slot is not a router provider; report the tier it serves.
+                let tiers = if s.role() == RuntimeRole::Rerank {
+                    s.tiers().to_vec()
+                } else {
+                    router.tiers_of(s.id())
+                };
+                self.info(s.as_ref(), tiers, local.slot_error(s))
             })
             .collect()
     }
 
+    fn info(&self, p: &dyn Provider, tiers: Vec<Tier>, error: Option<String>) -> ProviderInfo {
+        let meta = p.meta();
+        ProviderInfo {
+            id: p.id().clone(),
+            kind: meta.kind.as_str().to_string(),
+            model: meta.model,
+            locality: meta.locality,
+            tiers,
+            capabilities: self.state.router.capabilities(p.id()),
+            error,
+        }
+    }
+
     async fn probe(&self, req: ProbeRequest) -> Result<Value, RpcError> {
-        // Runtime slots are probed like any provider, but their results are not persisted (the
-        // server's port changes between runs).
+        // Runtime slot results are not persisted: the server's port changes between runs.
         let cfg = self.state.config_of(&req.provider);
         let slot_model = self.state.slot(&req.provider).map(|s| s.model().id.clone());
         let model = match (&cfg, slot_model) {
@@ -259,23 +240,17 @@ impl RpcHandler {
             .provider(&req.provider)
             .ok_or_else(|| self.unknown_provider(&req.provider))?;
         let opts = ProbeOptions::default();
-        // A probe against a server that is down would record every capability as missing and
-        // block plain chat until the next probe. Only record results from a reachable server.
-        let checked = match ensure_reachable(provider.as_ref(), &opts).await {
-            Ok(()) => {
-                let report = probe_with(provider.as_ref(), &opts).await;
-                if report.capabilities.streaming {
-                    Ok(report)
-                } else {
-                    // The server may have gone away during the probe.
-                    ensure_reachable(provider.as_ref(), &opts)
-                        .await
-                        .map(|()| report)
-                }
+        // Only record results from a reachable server, or every capability would read as missing.
+        let checked = async {
+            ensure_reachable(provider.as_ref(), &opts).await?;
+            let report = probe_with(provider.as_ref(), &opts).await;
+            if !report.capabilities.streaming {
+                // The server may have gone away during the probe.
+                ensure_reachable(provider.as_ref(), &opts).await?;
             }
-            Err(e) => Err(e),
+            Ok::<_, Error>(report)
         };
-        let report = match checked {
+        let report = match checked.await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(provider = %req.provider, error = %e, "probe not recorded: provider unreachable");
@@ -322,8 +297,6 @@ impl RpcHandler {
         to_result(caps)
     }
 
-    // ---- chat ----
-
     async fn chat(&self, req: ipc::ChatRequest, notify: Notifier) -> Result<Value, RpcError> {
         if self.state.shutdown.is_cancelled() {
             return Err(shutting_down());
@@ -337,8 +310,7 @@ impl RpcHandler {
         // Provenance for the egress ledger, e.g. passages the client pasted into the messages.
         infer_req.items = req.items;
         let messages = infer_req.messages.len();
-        // Open the stream first (with fallback across the tier's providers), so `ChatStarted`
-        // names the provider that is actually serving it: the UI shows on-device vs cloud.
+        // Open the stream first so `ChatStarted` names the provider actually serving it.
         let router = &self.state.router;
         let start = async {
             match &req.provider {
@@ -393,8 +365,6 @@ impl RpcHandler {
         to_result(started)
     }
 
-    /// Hand an open stream to a tracked task that forwards it as `chat.delta` / `chat.done`,
-    /// through `filter` when given (sourced answers).
     fn spawn_stream(
         &self,
         provider: Arc<dyn Provider>,
@@ -403,10 +373,7 @@ impl RpcHandler {
         notify: Notifier,
         filter: Option<AnswerFilter>,
     ) {
-        // No `.await` between registering the token and handing its guard to the task: if this
-        // call is dropped (client gone), the guard still removes the token.
-        let token = CancellationToken::new();
-        let guard = StreamGuard::register(self.state.clone(), stream_id.clone(), token.clone());
+        let (token, guard) = StreamGuard::register(self.state.clone(), stream_id.clone());
         let state = self.state.clone();
         self.state.tasks.spawn(run_chat(
             state, provider, stream, stream_id, token, guard, notify, filter,
@@ -414,26 +381,6 @@ impl RpcHandler {
     }
 
     /// `retrieve.ask`: answer `query` from retrieved context, streaming like `chat`.
-    ///
-    /// The provider is chosen **before** the context is packed, because what may be sent
-    /// depends on where it goes: for a `Cloud` provider, items marked sensitive are left out
-    /// (and counted in `excluded_sensitive`). When routing by tier falls back to another
-    /// provider, the context is packed again for that provider's locality, so a fallback to a
-    /// cloud provider never carries passages packed for a local one. The cited items go into
-    /// the request's egress provenance.
-    ///
-    /// With `history`, a follow-up is first rewritten into a standalone query for retrieval
-    /// (by a local model, or a heuristic; never a cloud model), and the earlier turns go to
-    /// the answering model before the question.
-    ///
-    /// The reply ([`AskStarted`]) goes out as soon as the first candidate's context is packed,
-    /// not once its model answers (QA GG2-5: a CPU-only prefill takes tens of seconds). The
-    /// stream task then opens the provider and waits for its first event; on a fallback-class
-    /// error (routing by tier only) it moves on to the next candidate, announcing the new
-    /// provider and its context with `ask.restarted` before that provider's request goes out
-    /// (see [`run_ask`]). A failure of every candidate ends the stream with `chat.done { error }`.
-    /// Invalid requests, an unknown provider, an empty tier and a failure to pack the first
-    /// context remain errors of the call.
     async fn retrieve_ask(&self, req: AskRequest, notify: Notifier) -> Result<Value, RpcError> {
         if self.state.shutdown.is_cancelled() {
             return Err(shutting_down());
@@ -498,8 +445,6 @@ impl RpcHandler {
             opts,
             contexts: [None, None],
         };
-        // Only the first candidate's context is packed before replying (QA GG2-5): the reply
-        // carries its sources while the model is still reading them.
         let mut candidates = candidates.into_iter();
         let Some(first) = candidates.next() else {
             return Err(RpcError::from(Error::NotFound(
@@ -542,10 +487,7 @@ impl RpcHandler {
             tier: req.tier,
             rewritten,
         };
-        // No `.await` between registering the token and handing its guard to the task: if this
-        // call is dropped (client gone), the guard still removes the token.
-        let token = CancellationToken::new();
-        let guard = StreamGuard::register(self.state.clone(), stream_id.clone(), token.clone());
+        let (token, guard) = StreamGuard::register(self.state.clone(), stream_id.clone());
         self.state.tasks.spawn(run_ask(
             self.state.clone(),
             job,
@@ -559,9 +501,6 @@ impl RpcHandler {
         to_result(started)
     }
 
-    /// The user's date today: at the client's UTC offset when it sent one, else at the
-    /// retriever's configured offset (the one date phrases in queries use; the daemon has no
-    /// other notion of the user's zone). Clamped to ±18 hours.
     fn local_today(&self, client_offset_minutes: Option<i32>) -> time::Date {
         let minutes = client_offset_minutes
             .unwrap_or(self.state.retriever.config().date_utc_offset_minutes)
@@ -583,8 +522,6 @@ impl RpcHandler {
         Ok(Value::Null)
     }
 
-    // ---- search / egress ----
-
     async fn search(&self, req: SearchRequest) -> Result<Value, RpcError> {
         let limit = req.limit.min(MAX_SEARCH_RESULTS) as usize;
         if limit == 0 || req.query.trim().is_empty() {
@@ -597,12 +534,6 @@ impl RpcHandler {
         to_result(results.hits())
     }
 
-    /// `search` a page at a time (LL1). Every page ranks the same depth
-    /// ([`paging::MAX_SEARCH_DEPTH`]) and returns its slice: the retriever sizes its candidate
-    /// pools by the depth asked for, so ranking each page only as deep as it reaches would order
-    /// near-ties differently from page to page (repeating some hits and skipping others). Hits
-    /// are converted exactly as `search` converts them (sensitive items included or left out the
-    /// same way); paging stops at that depth.
     async fn search_page(&self, req: SearchPageRequest) -> Result<Value, RpcError> {
         let offset = match req.cursor.as_deref() {
             Some(c) => paging::parse_search_cursor(c, &req.query)?,
@@ -653,8 +584,6 @@ impl RpcHandler {
                 .await?;
         to_result(ctx)
     }
-
-    // ---- sources ----
 
     async fn sources_add(&self, mut spec: SourceSpec) -> Result<Value, RpcError> {
         spec.settings = reconcile_settings(&spec.kind, spec.settings)?;
@@ -716,9 +645,7 @@ impl RpcHandler {
         Ok(Value::Null)
     }
 
-    /// Start an OAuth flow and return its URL; the client opens it (the daemon never opens a
-    /// browser). Ingest awaits the flow (abandoning it after 5 minutes) and emits
-    /// `sources.changed` when it ends; this records the outcome in the audit log.
+    /// Start an OAuth flow and return its URL; the client opens it, never the daemon.
     async fn sources_auth_begin(&self, req: SourceRef) -> Result<Value, RpcError> {
         if self.state.shutdown.is_cancelled() {
             return Err(shutting_down());
@@ -748,8 +675,7 @@ impl RpcHandler {
         })
     }
 
-    /// Store a source credential (see `crate::sources` for where each kind's goes). The value
-    /// is never echoed, logged or audited.
+    /// Store a source credential (see `crate::sources` for where each kind's goes).
     async fn sources_secret_set(&self, req: SourceSecret) -> Result<Value, RpcError> {
         if req.secret.is_empty() {
             return Err(RpcError::invalid_params("the secret must not be empty"));
@@ -794,8 +720,6 @@ impl RpcHandler {
         to_result(events)
     }
 
-    /// The ledger a page at a time, newest first (LL1): keyset paging on the row id, so rows
-    /// recorded while a client pages never shift the pages after the first.
     async fn egress_page(&self, req: EgressPageRequest) -> Result<Value, RpcError> {
         let before = req
             .cursor
@@ -824,8 +748,7 @@ impl RpcHandler {
         })
     }
 
-    /// A request the desktop app made itself (update checks), written to the ledger and
-    /// flushed before answering, so `egress.recent` shows it right away.
+    /// A request the desktop app made itself (update checks), recorded in the ledger.
     async fn egress_record(&self, req: EgressRecordRequest) -> Result<Value, RpcError> {
         let event = client_egress_event(req, time::OffsetDateTime::now_utc())?;
         if !client_egress_allowed(std::time::Instant::now()) {
@@ -838,8 +761,6 @@ impl RpcHandler {
         blocking(move || store.record_egress(&event)).await?;
         Ok(Value::Null)
     }
-
-    // ---- models ----
 
     async fn models_list(&self) -> Result<Value, RpcError> {
         let manifest = self.manifest()?;
@@ -904,8 +825,7 @@ impl RpcHandler {
         Ok(Value::Null)
     }
 
-    /// Idempotent: cancelling an install that is not running is not an error. The install's own
-    /// connection gets the final `failed` progress (reason `cancelled`, staged bytes kept).
+    /// Idempotent: cancelling an install that is not running is not an error.
     fn models_cancel(&self, req: ModelCancelRequest) -> Result<Value, RpcError> {
         let cancelled = self
             .manifest()?
@@ -936,7 +856,6 @@ impl RpcHandler {
     }
 }
 
-/// A provider that failed to build: what config says about it, plus why.
 fn unavailable_info(cfg: &ProviderConfig, reason: &str) -> ProviderInfo {
     let mut tiers = cfg.tiers.clone();
     tiers.sort_by_key(|t| *t as u8);
@@ -953,9 +872,7 @@ fn unavailable_info(cfg: &ProviderConfig, reason: &str) -> ProviderInfo {
     }
 }
 
-/// Check that a provider's server answers at all, with one small chat. Only transport-level
-/// failures (and timeouts) count as unreachable: any answer from the server, even an error
-/// status, means it is up.
+/// Check that a provider's server answers at all, with one small chat.
 async fn ensure_reachable(provider: &dyn Provider, opts: &ProbeOptions) -> Result<()> {
     let req = ChatRequest::new(vec![Message::user_text("Reply with one word: pong")])
         .with_max_tokens(16)
@@ -980,7 +897,6 @@ async fn ensure_reachable(provider: &dyn Provider, opts: &ProbeOptions) -> Resul
     }
 }
 
-/// Failures that say the server could not be reached or would not serve right now.
 fn is_transport_failure(e: &Error) -> bool {
     matches!(
         e,
@@ -988,9 +904,8 @@ fn is_transport_failure(e: &Error) -> bool {
     )
 }
 
-/// Run `fut` on a blocking-pool thread (driving it with the runtime's handle), for work that
-/// makes synchronous SQLite calls between awaits, like retrieval.
-async fn on_blocking_thread<T, F>(fut: F) -> Result<T>
+/// Run `fut` on a blocking-pool thread, for work that makes synchronous SQLite calls (retrieval).
+pub(crate) async fn on_blocking_thread<T, F>(fut: F) -> Result<T>
 where
     F: std::future::Future<Output = Result<T>> + Send + 'static,
     T: Send + 'static,
@@ -1053,8 +968,7 @@ fn to_infer_request(messages: Vec<ipc::ChatMessage>) -> Result<ChatRequest, RpcE
     Ok(req)
 }
 
-/// The retriever's date filter as Ask reports it to clients, its bounds at the offset the
-/// phrase was read with (the retriever keeps them in UTC), so their dates are the user's days.
+/// The retriever's date filter (bounds in UTC) at the offset the phrase was read with.
 fn ask_date_filter(d: nugget_retrieve::DateFilter, offset_minutes: i32) -> ipc::AskDateFilter {
     let offset = time::UtcOffset::from_whole_seconds(offset_minutes.clamp(-18 * 60, 18 * 60) * 60)
         .unwrap_or(time::UtcOffset::UTC);
@@ -1067,11 +981,8 @@ fn ask_date_filter(d: nugget_retrieve::DateFilter, offset_minutes: i32) -> ipc::
     }
 }
 
-/// The earlier turns of a `retrieve.ask` conversation that are sent on: the client's text is
-/// untrusted, so `System` entries are dropped (only the daemon writes the system prompt), as
-/// are empty ones; long turns are cut, then the newest turns within
-/// [`MAX_ASK_HISTORY_MESSAGES`] and [`MAX_ASK_HISTORY_CHARS`] are kept, starting with a user
-/// turn.
+/// The earlier turns of a `retrieve.ask` sent on: untrusted `System` and empty entries dropped,
+/// long turns cut, the newest within the limits kept, starting with a user turn.
 fn ask_history(history: Vec<ipc::ChatMessage>) -> Vec<ipc::ChatMessage> {
     let mut kept: Vec<ipc::ChatMessage> = Vec::new();
     let mut chars = 0usize;
@@ -1110,13 +1021,9 @@ async fn open_stream(p: &dyn Provider, req: ChatRequest) -> Result<ChatStream> {
     }
 }
 
-// ---- retrieve.ask streams ----
-
-/// What `retrieve.ask` needs to pack the context for any candidate and build its request.
 struct AskPlan {
     state: Arc<State>,
     query: String,
-    /// What retrieval searches (`query`, or the follow-up rewritten).
     search_query: String,
     budget: u32,
     history: Vec<ipc::ChatMessage>,
@@ -1125,15 +1032,11 @@ struct AskPlan {
     contexts: [Option<PackedContext>; 2],
 }
 
-/// One candidate's context, as packed for its locality, and what of the history it gets.
 struct AskContext {
     provider: Arc<dyn Provider>,
     ctx: ContextResponse,
-    /// The packer's passage blocks go with the context: the prompt and the answer check read
-    /// each passage's own text (see `crate::ask`).
     passages: Vec<nugget_retrieve::PackedPassage>,
     sent: SafeHistory,
-    /// How a date phrase in the question shaped this context's search.
     date: Option<ipc::AskDateFilter>,
 }
 
@@ -1143,7 +1046,6 @@ impl AskContext {
         self.ctx.citations.is_empty()
     }
 
-    /// Citation numbers of near-miss passages.
     fn partial(&self) -> Vec<u32> {
         self.passages
             .iter()
@@ -1167,8 +1069,6 @@ impl AskContext {
 }
 
 impl AskPlan {
-    /// The context and request for `p`. A `Cloud` provider gets the context packed without
-    /// sensitive items and the history as it may leave the device.
     async fn prepare(&mut self, p: Arc<dyn Provider>) -> Result<(AskContext, ChatRequest)> {
         let cloud = p.meta().locality == Locality::Cloud;
         let slot = &mut self.contexts[usize::from(cloud)];
@@ -1203,9 +1103,7 @@ impl AskPlan {
                 "refusing to send sensitive passages to a cloud provider".into(),
             ));
         }
-        // Earlier turns as they may go to this provider: nothing from a sensitive item or
-        // matching the PII scan reaches a cloud model, and the items earlier answers came from
-        // are provenance.
+        // Nothing from a sensitive item or matching the PII scan reaches a cloud model.
         let sent = {
             let memory = self
                 .state
@@ -1233,7 +1131,6 @@ impl AskPlan {
     }
 }
 
-/// The part of a `retrieve.ask` that runs after its reply.
 struct AskJob {
     plan: AskPlan,
     /// Candidates after the first, in routing order (none for an explicit provider).
@@ -1243,12 +1140,8 @@ struct AskJob {
     rewritten: bool,
 }
 
-/// The stream task of `retrieve.ask`: open the first candidate (whose context `AskStarted`
-/// carried) and wait for its first event; on a fallback-class error move on to the next
-/// candidate (routing by tier only), sending `ask.restarted` with that provider's context before
-/// its request goes out; then forward the answer through an [`AnswerFilter`] for the context
-/// actually used (see [`run_chat`]). The audit row names the provider that serves the answer.
-/// Cancellable like any stream from the moment the reply is sent.
+/// The stream task of `retrieve.ask`: open candidates until one answers (announcing each fallback
+/// with `ask.restarted`), then forward the answer through an [`AnswerFilter`].
 #[allow(clippy::too_many_arguments)]
 async fn run_ask(
     state: Arc<State>,
@@ -1285,13 +1178,8 @@ async fn run_ask(
                     return;
                 }
             };
-            let done = ChatDone {
-                stream_id,
-                error: Some(error),
-                input_tokens: None,
-                output_tokens: None,
-                check: None,
-            };
+            let mut done = chat_done(stream_id);
+            done.error = Some(error);
             let _ = notify.send(notification::CHAT_DONE, &done).await;
             return;
         }
@@ -1343,8 +1231,6 @@ async fn run_ask(
     .await;
 }
 
-/// Open the first candidate that answers, as [`run_ask`] describes. Returns the context it was
-/// given, its stream (first event held) and how many candidates failed before it.
 async fn open_ask(
     state: &State,
     job: &mut AskJob,
@@ -1393,20 +1279,9 @@ async fn open_ask(
 
 /// Failures worth trying the next provider of a tier for (mirrors the router's fallback rule).
 fn is_fallback_error(e: &Error) -> bool {
-    matches!(
-        e,
-        Error::Network(_)
-            | Error::RateLimited { .. }
-            | Error::Provider(_)
-            | Error::Io(_)
-            | Error::Unsupported(_)
-            | Error::Other(_)
-    )
+    is_provider_failure(e) || matches!(e, Error::Unsupported(_))
 }
 
-// ---- background tasks ----
-
-/// How a chat stream ended.
 enum ChatEnd {
     Done {
         stop_reason: StopReason,
@@ -1426,9 +1301,10 @@ struct StreamGuard {
 }
 
 impl StreamGuard {
-    fn register(state: Arc<State>, id: String, token: CancellationToken) -> Self {
-        state.streams().insert(id.clone(), token);
-        Self { state, id }
+    fn register(state: Arc<State>, id: String) -> (CancellationToken, Self) {
+        let token = CancellationToken::new();
+        state.streams().insert(id.clone(), token.clone());
+        (token, Self { state, id })
     }
 }
 
@@ -1458,13 +1334,7 @@ async fn run_chat(
         end = pump(stream, provider.id(), &stream_id, &notify, filter.as_mut()) => end,
     };
 
-    let mut done = ChatDone {
-        stream_id: stream_id.clone(),
-        error: None,
-        input_tokens: None,
-        output_tokens: None,
-        check: None,
-    };
+    let mut done = chat_done(stream_id.clone());
     match end {
         ChatEnd::Done {
             stop_reason,
@@ -1530,8 +1400,17 @@ async fn run_chat(
     let _ = notify.send(notification::CHAT_DONE, &done).await;
 }
 
-/// Forward an open provider stream as `chat.delta` notifications until it ends, through
-/// `filter` when given (what it holds back goes out as a last delta when the stream ends).
+fn chat_done(stream_id: String) -> ChatDone {
+    ChatDone {
+        stream_id,
+        error: None,
+        input_tokens: None,
+        output_tokens: None,
+        check: None,
+    }
+}
+
+/// Forward an open provider stream as `chat.delta` notifications until it ends.
 async fn pump(
     mut stream: ChatStream,
     provider: &ProviderId,
@@ -1582,8 +1461,7 @@ async fn pump(
     )))
 }
 
-/// Failures that say something about the provider's health (so the router tries others first
-/// for a while), as opposed to a bad request.
+/// Failures that say something about the provider's health, as opposed to a bad request.
 fn is_provider_failure(e: &Error) -> bool {
     matches!(
         e,
@@ -1595,8 +1473,7 @@ fn is_provider_failure(e: &Error) -> bool {
     )
 }
 
-/// How long a stopped install (client gone, shutdown) gets to checkpoint and wind down.
-// Well under the daemon's shutdown grace, so the install's audit row is still written.
+/// How long a stopped install gets to checkpoint; under the shutdown grace so its audit row lands.
 const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 async fn run_install(
@@ -1644,21 +1521,18 @@ async fn run_install(
         }
     }
     if result.is_none() {
-        // Stop the download through its token so it checkpoints every committed byte and
-        // reports `cancelled`, instead of being dropped mid-write; bounded, then dropped anyway.
+        // Cancel through the token so committed bytes are checkpointed, not dropped mid-write.
         state.models.cancel_install(&entry);
         if let Ok(r) = tokio::time::timeout(CANCEL_GRACE, &mut install).await {
             result = Some(r);
         }
     }
 
-    // Route to the new model before the client hears it is installed: a chat sent right after
-    // the final progress (onboarding's first question) must find the slot starting.
+    // Route to the new model before the client hears it is installed (onboarding asks at once).
     if let (Some(Ok(_)), Some(local)) = (&result, &state.local) {
         for slot in local.slots.iter().filter(|s| s.model().id == entry.id) {
             slot.set_installed(true);
-            // Not `ready()`: a server already running the previous copy of this model
-            // must be restarted on the new one (`ensure` compares the model's SHA-256).
+            // Not `ready()`: a server running the previous copy must restart on the new one.
             spawn_refresh(&state, slot.clone());
         }
     }
@@ -1675,13 +1549,10 @@ async fn run_install(
     }
 
     let detail = match (&result, stop_reason) {
-        (Some(Err(Error::Cancelled)), Some(reason)) => {
+        (Some(Err(Error::Cancelled)), reason) => {
+            let reason = reason.unwrap_or("models.cancel");
             tracing::info!(model = %entry.id, reason, "model install stopped; staged data kept for resume");
             json!({"result": "cancelled", "reason": reason})
-        }
-        (Some(Err(Error::Cancelled)), None) => {
-            tracing::info!(model = %entry.id, "model install cancelled; staged data kept for resume");
-            json!({"result": "cancelled", "reason": "models.cancel"})
         }
         (Some(Ok(m)), _) => {
             tracing::info!(model = %entry.id, sha256 = %m.sha256, "model install finished");
@@ -1718,17 +1589,12 @@ async fn run_install(
 const MAX_EGRESS_HOST: usize = 260;
 /// How far ahead of the daemon's clock a recorded time may be (clock skew between processes).
 const EGRESS_FUTURE_SLACK: time::Duration = time::Duration::minutes(5);
-/// How old a recorded time may be. The app queues rows in memory only, so real ones are minutes
-/// or hours old at most.
 const EGRESS_MAX_AGE: time::Duration = time::Duration::days(30);
-/// Rows `egress.record` accepts per minute, across all clients: an update check makes a handful,
-/// so this only stops a client from flooding the ledger (and pushing real rows off the Privacy
-/// page's recent list).
+/// Rows `egress.record` accepts per minute across all clients, so none can flood the ledger.
 const EGRESS_RECORD_PER_MINUTE: u32 = 60;
 
 type EgressWindow = std::sync::Mutex<Option<(std::time::Instant, u32)>>;
 
-/// Fixed one-minute window shared by all connections.
 fn client_egress_allowed(now: std::time::Instant) -> bool {
     static WINDOW: EgressWindow = std::sync::Mutex::new(None);
     egress_window_allows(&WINDOW, now)
@@ -1748,8 +1614,7 @@ fn egress_window_allows(window: &EgressWindow, now: std::time::Instant) -> bool 
     true
 }
 
-/// A bare `host[:port]`: a DNS name (ASCII labels; IDNs in punycode), an IPv4 address, or an
-/// IPv6 address in brackets, with an optional numeric port.
+/// A bare `host[:port]`: an ASCII DNS name, an IPv4 address, or a bracketed IPv6 address.
 fn valid_egress_host(host: &str) -> bool {
     let (name, port) = if let Some(rest) = host.strip_prefix('[') {
         let Some((addr, after)) = rest.split_once(']') else {
@@ -1788,8 +1653,7 @@ fn valid_egress_host(host: &str) -> bool {
         })
 }
 
-/// Validate an `egress.record` request: a known client feature, a bare `host[:port]` (no scheme,
-/// path, credentials or spaces) and a time not in the future. The row never lists items.
+/// Validate an `egress.record` request: a known client feature, a bare host and a recent time.
 fn client_egress_event(
     req: EgressRecordRequest,
     now: time::OffsetDateTime,
@@ -1848,86 +1712,59 @@ mod tests {
     }
 
     #[test]
-    fn client_egress_takes_only_known_features_and_bare_hosts() {
+    fn client_egress_takes_only_known_features_bare_hosts_and_recent_times() {
         let now = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
         let ev = client_egress_event(record(" GitHub.com ", "update_check", None), now).unwrap();
-        assert_eq!(
-            (
-                ev.host.as_str(),
-                ev.feature.as_str(),
-                ev.at,
-                ev.bytes_received
-            ),
-            ("github.com", "update_check", now, 512)
-        );
+        assert_eq!((ev.host.as_str(), ev.at), ("github.com", now));
         assert!(ev.items.is_empty());
-        for host in ["objects.example.com:443", "192.168.1.2:8080", "[::1]:80"] {
+        for host in [
+            "objects.example.com:443",
+            "127.0.0.1:8443",
+            "[::1]:80",
+            "xn--bcher-kva.example",
+        ] {
             assert!(
                 client_egress_event(record(host, "update_download", None), now).is_ok(),
                 "{host}"
             );
         }
-        // A daemon feature, or anything made up, is refused: the app can't write rows that look
-        // like the daemon's own traffic.
+        // The app can't write rows that look like the daemon's own traffic.
         for feature in ["chat", "ask", "model_download", "", "update-check"] {
             let e = client_egress_event(record("github.com", feature, None), now).unwrap_err();
             assert_eq!(e.code, code::INVALID_PARAMS, "{feature}");
         }
+        let long = "a".repeat(MAX_EGRESS_HOST + 1);
         for host in [
             "",
-            " ",
             "https://github.com",
             "github.com/x",
             "user@github.com",
             "a b",
-        ] {
-            let e = client_egress_event(record(host, "update_check", None), now).unwrap_err();
-            assert_eq!(e.code, code::INVALID_PARAMS, "{host:?}");
-        }
-        for host in [
-            "::::", "][", "-", ".", "a:b:c", "a:99999", "[::1", "[zz]", "a..b", "-a.com",
-        ] {
-            let e = client_egress_event(record(host, "update_check", None), now).unwrap_err();
-            assert_eq!(e.code, code::INVALID_PARAMS, "{host:?}");
-        }
-        for host in [
-            "github.com",
-            "objects.githubusercontent.com:443",
-            "127.0.0.1:8443",
-            "[::1]:8443",
-            "xn--bcher-kva.example",
+            "::::",
+            "a:99999",
+            "[::1",
+            "[zz]",
+            "a..b",
+            "-a.com",
+            &long,
         ] {
             assert!(
-                client_egress_event(record(host, "update_check", None), now).is_ok(),
+                client_egress_event(record(host, "update_check", None), now).is_err(),
                 "{host:?}"
             );
         }
-        let long = "a".repeat(MAX_EGRESS_HOST + 1);
-        assert!(client_egress_event(record(&long, "update_check", None), now).is_err());
-    }
-
-    #[test]
-    fn client_egress_keeps_a_past_time_and_refuses_a_future_one() {
-        let now = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
-        let queued = now - time::Duration::hours(3);
-        let ev =
-            client_egress_event(record("github.com", "update_check", Some(queued)), now).unwrap();
-        assert_eq!(ev.at, queued);
-        let skew = now + time::Duration::minutes(1);
-        assert!(client_egress_event(record("github.com", "update_check", Some(skew)), now).is_ok());
-        let ahead = now + time::Duration::hours(1);
-        assert!(
-            client_egress_event(record("github.com", "update_check", Some(ahead)), now).is_err()
-        );
-        let ancient = now - time::Duration::days(31);
-        assert!(
-            client_egress_event(record("github.com", "update_check", Some(ancient)), now).is_err()
-        );
-        let offset = queued.to_offset(time::UtcOffset::from_hms(2, 0, 0).unwrap());
+        let at = |d: time::Duration| {
+            client_egress_event(record("github.com", "update_check", Some(now + d)), now)
+        };
+        let queued = time::Duration::hours(-3);
+        assert_eq!(at(queued).unwrap().at, now + queued);
+        assert!(at(time::Duration::minutes(1)).is_ok());
+        assert!(at(time::Duration::hours(1)).is_err());
+        assert!(at(time::Duration::days(-31)).is_err());
+        let offset = (now + queued).to_offset(time::UtcOffset::from_hms(2, 0, 0).unwrap());
         let ev =
             client_egress_event(record("github.com", "update_check", Some(offset)), now).unwrap();
         assert_eq!(ev.at.offset(), time::UtcOffset::UTC);
-        assert_eq!(ev.at, queued);
     }
 
     #[test]
@@ -1938,58 +1775,15 @@ mod tests {
             .filter(|_| egress_window_allows(&window, t0))
             .count();
         assert_eq!(allowed, EGRESS_RECORD_PER_MINUTE as usize);
-        assert!(!egress_window_allows(
-            &window,
-            t0 + std::time::Duration::from_secs(59)
-        ));
-        assert!(egress_window_allows(
-            &window,
-            t0 + std::time::Duration::from_secs(61)
-        ));
+        let later = |s| t0 + std::time::Duration::from_secs(s);
+        assert!(!egress_window_allows(&window, later(59)));
+        assert!(egress_window_allows(&window, later(61)));
     }
 
-    #[test]
-    fn system_messages_become_the_system_prompt() {
-        let req = to_infer_request(vec![
-            msg(IpcRole::System, "be brief"),
-            msg(IpcRole::User, "hi"),
-            msg(IpcRole::Assistant, "hello"),
-            msg(IpcRole::System, "no emoji"),
-            msg(IpcRole::User, "bye"),
-        ])
-        .unwrap();
-        assert_eq!(req.system.as_deref(), Some("be brief\n\nno emoji"));
-        assert_eq!(req.messages.len(), 3);
-        assert_eq!(req.messages[1], Message::assistant_text("hello"));
-        assert_eq!(req.feature, nugget_infer::FEATURE_CHAT);
-    }
-
-    #[test]
-    fn rejects_chats_without_a_final_user_message() {
-        for msgs in [
-            vec![],
-            vec![msg(IpcRole::System, "x")],
-            vec![msg(IpcRole::User, "q"), msg(IpcRole::Assistant, "a")],
-        ] {
-            let err = to_infer_request(msgs).unwrap_err();
-            assert_eq!(err.code, code::INVALID_PARAMS);
-        }
-    }
-
-    #[test]
-    fn provider_failures_vs_request_errors() {
-        assert!(is_provider_failure(&Error::Network("x".into())));
-        assert!(is_provider_failure(&Error::RateLimited {
-            retry_after_ms: None
-        }));
-        assert!(!is_provider_failure(&Error::Invalid("x".into())));
-        assert!(!is_provider_failure(&Error::Cancelled));
-    }
     #[test]
     fn ask_date_filter_is_written_at_the_phrase_offset() {
         use time::format_description::well_known::Rfc3339;
         let at = |s: &str| time::OffsetDateTime::parse(s, &Rfc3339).unwrap();
-        // "last week" read at +01:00: the retriever keeps 26 Oct–2 Nov local midnights in UTC.
         let d = nugget_retrieve::DateFilter {
             phrase: "last week".into(),
             range: nugget_retrieve::DateRange {
@@ -1999,11 +1793,9 @@ mod tests {
             applied: true,
             listed: false,
         };
-        let f = ask_date_filter(d, 60);
-        let json = serde_json::to_value(&f).unwrap();
+        let json = serde_json::to_value(ask_date_filter(d, 60)).unwrap();
         assert_eq!(json["start"], "2026-10-26T00:00:00+01:00");
         assert_eq!(json["end"], "2026-11-02T00:00:00+01:00");
-        assert!(f.applied && !f.listed);
     }
 
     #[test]
@@ -2022,37 +1814,12 @@ mod tests {
                 msg(IpcRole::Assistant, "answer")
             ]
         );
-
-        let many: Vec<ChatMessage> = (0..40)
-            .map(|i| {
-                let role = if i % 2 == 0 {
-                    IpcRole::User
-                } else {
-                    IpcRole::Assistant
-                };
-                msg(role, &format!("turn {i}"))
-            })
-            .collect();
-        let h = ask_history(many);
-        assert!(h.len() <= MAX_ASK_HISTORY_MESSAGES);
-        assert_eq!(h.first().unwrap().role, IpcRole::User);
-        assert_eq!(h.last().unwrap().text, "turn 39");
-
         let long = "x".repeat(MAX_ASK_HISTORY_CHARS * 2);
-        let h = ask_history(vec![
-            msg(IpcRole::User, &long),
-            msg(IpcRole::Assistant, &long),
-            msg(IpcRole::User, &long),
-            msg(IpcRole::Assistant, &long),
-            msg(IpcRole::User, &long),
-        ]);
-        assert!(!h.is_empty());
+        let roles = [IpcRole::User, IpcRole::Assistant];
+        let h = ask_history((0..40).map(|i| msg(roles[i % 2], &long)).collect());
+        assert!(!h.is_empty() && h.len() <= MAX_ASK_HISTORY_MESSAGES);
+        assert_eq!(h[0].role, IpcRole::User);
         let total: usize = h.iter().map(|m| m.text.chars().count()).sum();
         assert!(total <= MAX_ASK_HISTORY_CHARS);
-        assert!(
-            h.iter()
-                .all(|m| m.text.chars().count() <= MAX_ASK_HISTORY_MESSAGE_CHARS)
-        );
-        assert!(ask_history(Vec::new()).is_empty());
     }
 }

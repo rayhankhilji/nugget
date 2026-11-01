@@ -3,7 +3,6 @@
 use std::path::Path;
 
 /// Create `dir` (and missing parents) readable only by the current user on Unix (0700).
-/// Existing directories are left as they are; Windows relies on the per-user profile ACLs.
 pub(crate) fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     let mut b = std::fs::DirBuilder::new();
     b.recursive(true);

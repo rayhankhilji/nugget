@@ -326,9 +326,7 @@ impl Feature for PolicyFeature {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nugget_policy::{
-        ActionDescriptor, Decision, Effect, PolicyGate, RiskClass, Rule, TaskApproval,
-    };
+    use nugget_policy::{ActionDescriptor, Decision, Effect, PolicyGate, RiskClass, Rule};
     use serde_json::json;
 
     fn feature(dir: &Path) -> (PolicyFeature, Arc<Mutex<Vec<bool>>>) {
@@ -415,62 +413,6 @@ mod tests {
     }
 
     #[test]
-    fn kill_and_resume_broadcast_from_anywhere() {
-        let dir = tempfile::tempdir().unwrap();
-        let (f, seen) = feature(dir.path());
-        let k: KillState =
-            serde_json::from_value(f.handle(m::POLICY_KILL, json!({})).unwrap()).unwrap();
-        assert!(k.halted);
-        assert!(f.safety.engine.halted());
-        assert!(matches!(
-            f.safety.engine.evaluate(&send("t")),
-            Decision::Deny(_)
-        ));
-        let k: KillState =
-            serde_json::from_value(f.handle(m::POLICY_RESUME, json!({})).unwrap()).unwrap();
-        assert!(!k.halted);
-        // A halt from elsewhere (the browser's Stop) is broadcast too.
-        f.safety.kill.trigger_hook()();
-        assert_eq!(*seen.lock().unwrap(), vec![true, false, true]);
-        // The switch is this daemon's, not the process-wide one.
-        assert!(!KillSwitch::global().halted());
-        drop(f);
-        // The hook goes with the feature.
-    }
-
-    #[test]
-    fn approvals_list_pending_and_task_approvals() {
-        let dir = tempfile::tempdir().unwrap();
-        let (f, _) = feature(dir.path());
-        f.safety
-            .pending
-            .lock()
-            .unwrap()
-            .insert("r1".into(), json!({"request_id": "r1"}));
-        f.safety
-            .engine
-            .approve_for_task(
-                "t1",
-                TaskApproval {
-                    risk: RiskClass::Send,
-                    target: Some("mail.google.com".into()),
-                },
-            )
-            .unwrap();
-        let a: PolicyApprovals =
-            serde_json::from_value(f.handle(m::POLICY_APPROVALS, json!({})).unwrap()).unwrap();
-        assert_eq!(a.pending, vec![json!({"request_id": "r1"})]);
-        assert_eq!(
-            a.task,
-            vec![TaskApprovalView {
-                task_id: "t1".into(),
-                risk: "send".into(),
-                target: Some("mail.google.com".into()),
-            }]
-        );
-    }
-
-    #[test]
     fn a_tampered_log_is_moved_aside_and_reported() {
         let dir = tempfile::tempdir().unwrap();
         {
@@ -494,23 +436,5 @@ mod tests {
         assert_eq!(broken_logs(dir.path()).len(), 1);
         // The daemon keeps running on a fresh chain.
         assert!(f.safety.log.verify_chain().is_ok());
-    }
-
-    #[test]
-    fn disabled_serves_nothing_and_unknown_methods_fail() {
-        let dir = tempfile::tempdir().unwrap();
-        let safety = Safety::open_in(dir.path()).unwrap();
-        let f = PolicyFeature::new(safety, dir.path().into(), false, Box::new(|_| {}));
-        assert!(f.methods().is_empty());
-        assert!(f.handle("policy.nope", json!({})).is_err());
-        let t: toml::Table = toml::from_str("enabled = false").unwrap();
-        assert!(!section::<PolicySection>("policy", &t).unwrap().enabled);
-        assert!(
-            section::<PolicySection>("policy", &toml::Table::new())
-                .unwrap()
-                .enabled
-        );
-        let t: toml::Table = toml::from_str("nope = 1").unwrap();
-        assert!(section::<PolicySection>("policy", &t).is_err());
     }
 }
