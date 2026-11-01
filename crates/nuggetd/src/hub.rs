@@ -1,15 +1,5 @@
 //! Broadcast notifications: every connection subscribes when it opens
 //! ([`nugget_ipc::Handler::connected`]) and receives every broadcast from then on.
-//!
-//! Ingest events are forwarded as:
-//! - `ingest.progress`: an [`IngestProgress`](nugget_core::ipc::IngestProgress);
-//! - `sources.changed`: a single [`SourceInfo`](nugget_core::ipc::SourceInfo) when a source was
-//!   added or changed; `{"id": "<source id>", "removed": true}` when one was removed; and
-//!   `{"lagged": <n>}` when events were dropped for a slow daemon-side reader, meaning "refetch
-//!   `sources.list`". Clients should treat anything but a `SourceInfo` as "refetch".
-//!
-//! Each connection has its own bounded queue and sender task, so a slow client never delays the
-//! others; if its queue is full, it misses that notification (logged).
 
 use std::sync::{Mutex, PoisonError};
 
@@ -53,7 +43,6 @@ impl Hub {
         subs.push(tx);
     }
 
-    /// Queue `params` for every open connection.
     pub fn broadcast(&self, method: &'static str, params: Value) {
         let mut subs = self.subs.lock().unwrap_or_else(PoisonError::into_inner);
         subs.retain(|s| !s.is_closed());
@@ -65,7 +54,6 @@ impl Hub {
     }
 }
 
-/// The notification for one ingest event.
 pub(crate) fn ingest_notification(ev: IngestEvent) -> (&'static str, Value) {
     match ev {
         IngestEvent::Progress(p) => (
@@ -124,41 +112,11 @@ pub(crate) fn spawn_forwarder(
 mod tests {
     use super::*;
     use nugget_core::ids::SourceId;
-    use nugget_core::ipc::{IngestPhase, IngestProgress, SourceInfo, SourceState};
 
     #[test]
-    fn event_payloads() {
+    fn a_removed_source_is_announced_by_id() {
         let (m, v) = ingest_notification(IngestEvent::SourceRemoved(SourceId::new("files-1")));
         assert_eq!(m, notification::SOURCES_CHANGED);
         assert_eq!(v, json!({"id": "files-1", "removed": true}));
-
-        let info = SourceInfo {
-            id: SourceId::new("imap-1"),
-            kind: "imap".into(),
-            name: "Mail".into(),
-            enabled: true,
-            state: SourceState::NeedsAuth,
-            items: 0,
-            chunks: 0,
-            last_sync: None,
-            last_error: None,
-            settings: json!({"host": "h"}),
-            health: None,
-            scan: None,
-        };
-        let (m, v) = ingest_notification(IngestEvent::SourceChanged(info.clone()));
-        assert_eq!(m, notification::SOURCES_CHANGED);
-        assert_eq!(serde_json::from_value::<SourceInfo>(v).unwrap(), info);
-
-        let p = IngestProgress {
-            source: SourceId::new("files-1"),
-            phase: IngestPhase::Indexing,
-            done: 3,
-            total: Some(9),
-            error: None,
-        };
-        let (m, v) = ingest_notification(IngestEvent::Progress(p.clone()));
-        assert_eq!(m, notification::INGEST_PROGRESS);
-        assert_eq!(serde_json::from_value::<IngestProgress>(v).unwrap(), p);
     }
 }

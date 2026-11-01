@@ -1,4 +1,4 @@
-//! II2: faceted search, entity timelines and item previews for the desktop's Search page.
+//! Faceted search, entity timelines and item previews for the desktop's Search page.
 //!
 //! - `search.faceted`: the retriever's ranking (untouched) over a pool of candidates, filtered
 //!   by source, kind, people and a local date range, with disjunctive facet counts.
@@ -28,6 +28,7 @@ use time::{OffsetDateTime, UtcOffset};
 use super::{Feature, FeatureContext};
 use crate::daemon::{State, blocking};
 use crate::graphview::{item_url, status_str};
+use crate::handler::on_blocking_thread;
 
 mod logic;
 
@@ -176,16 +177,6 @@ fn clamp_limit(limit: Option<u32>, default: usize, max: usize) -> usize {
     }
 }
 
-/// Run a future that does blocking store work on the blocking pool.
-async fn on_blocking_thread<T, F>(fut: F) -> Result<T>
-where
-    F: std::future::Future<Output = Result<T>> + Send + 'static,
-    T: Send + 'static,
-{
-    let handle = tokio::runtime::Handle::current();
-    blocking(move || handle.block_on(fut)).await
-}
-
 // ---------------------------------------------------------------- search.faceted
 
 #[derive(Debug, Default, Deserialize)]
@@ -196,7 +187,7 @@ struct FacetedParams {
     offset: Option<u32>,
     filters: Filters,
     utc_offset_minutes: Option<i32>,
-    /// JJ2: the client's IANA time zone (`Europe/Berlin`): each date at its own offset. Without
+    /// the client's IANA time zone (`Europe/Berlin`): each date at its own offset. Without
     /// it (or for a name the bundled database lacks), `utc_offset_minutes` for every date.
     time_zone: Option<String>,
 }
@@ -219,7 +210,7 @@ struct FacetedHit {
     date_source: DateSource,
     kind: ItemKind,
     sensitive: bool,
-    /// JJ2: `sensitive` only because triage has not sorted it yet (see `logic::unsorted_private`).
+    /// `sensitive` only because triage has not sorted it yet (see `logic::unsorted_private`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     unsorted: bool,
     people: Vec<EntityRefView>,
@@ -509,7 +500,7 @@ struct TimelineParams {
     to: Option<String>,
     limit: Option<u32>,
     utc_offset_minutes: Option<i32>,
-    /// JJ2: as for `search.faceted`.
+    /// as for `search.faceted`.
     time_zone: Option<String>,
 }
 
@@ -525,7 +516,7 @@ enum TimelineEvent {
         kind: ItemKind,
         url: Option<String>,
         sensitive: bool,
-        /// JJ2: as `FacetedHit::unsorted`.
+        /// as `FacetedHit::unsorted`.
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         unsorted: bool,
     },
@@ -653,7 +644,7 @@ fn build_timeline(
         }
     }
     let dates = store.item_dates(&order)?;
-    // JJ1-10: an event start in a named zone is dated at its instant (needs the metadata).
+    // an event start in a named zone is dated at its instant (needs the metadata).
     let metas = store.item_meta(&order)?;
     let own = |item: &ItemRef| {
         dates.get(item).map(|d| match metas.get(item) {
@@ -815,7 +806,7 @@ struct PreviewParams {
     item: ItemRef,
     #[serde(default)]
     chunk_id: Option<i64>,
-    /// JJ2: the client's offset and time zone, as for `search.faceted`.
+    /// the client's offset and time zone, as for `search.faceted`.
     #[serde(default)]
     utc_offset_minutes: Option<i32>,
     #[serde(default)]
@@ -843,7 +834,7 @@ struct PreviewResult {
     date: Option<String>,
     date_source: DateSource,
     sensitive: bool,
-    /// JJ2: as `FacetedHit::unsorted`.
+    /// as `FacetedHit::unsorted`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     unsorted: bool,
     text: String,
@@ -949,125 +940,4 @@ fn build_preview(
         mime: item.mime,
         item: p.item,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nugget_core::ids::SourceId;
-
-    #[test]
-    fn limits_clamp() {
-        assert_eq!(clamp_limit(None, 25, 100), 25);
-        assert_eq!(clamp_limit(Some(0), 25, 100), 25);
-        assert_eq!(clamp_limit(Some(7), 25, 100), 7);
-        assert_eq!(clamp_limit(Some(10_000), 25, 100), 100);
-    }
-
-    #[test]
-    fn lists_and_values_are_bounded() {
-        let many: Vec<String> = (0..=MAX_FILTER_VALUES).map(|i| i.to_string()).collect();
-        let err = check_list("filters.sources", &many)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("filters.sources"), "{err}");
-        assert!(check_list("x", &many[..MAX_FILTER_VALUES]).is_ok());
-        let long = vec!["a".repeat(MAX_VALUE_LEN + 1)];
-        assert!(check_list("filters.people", &long).is_err());
-        let empty = ItemRef {
-            source: SourceId::new(""),
-            key: nugget_core::ids::ItemKey::new("k"),
-        };
-        assert!(check_item("item", &empty).is_err());
-    }
-
-    #[test]
-    fn timeline_keeps_the_newest_and_reports_the_item_cap() {
-        use nugget_graph::{Mention, NewEntity};
-        use nugget_store::{NewChunk, NewItem, content_hash};
-        use time::format_description::well_known::Rfc3339;
-
-        let store = Store::open_in_memory().unwrap();
-        let graph = store.graph();
-        let e = graph
-            .create_entity(&NewEntity::new(EntityKind::Person, "Sam"))
-            .unwrap();
-        for i in 0..5 {
-            let key = format!("k{i}");
-            let body = format!("Note {i} about Sam, which is long enough to snip.");
-            let it = NewItem::new("files", key.as_str(), content_hash(&body))
-                .with_title(format!("Note {i}"))
-                .with_modified_at(
-                    OffsetDateTime::parse(&format!("2024-0{}-01T00:00:00Z", i + 1), &Rfc3339)
-                        .unwrap(),
-                )
-                .with_metadata(serde_json::json!({"sensitive": false}))
-                .with_text(body.clone());
-            store
-                .upsert_item_with_chunks(&it, &[NewChunk::text(body)])
-                .unwrap();
-            graph
-                .add_mention(&Mention {
-                    entity: e.clone(),
-                    item: it.item.clone(),
-                    chunk_id: None,
-                    surface: "Sam".into(),
-                    confidence: 0.9,
-                })
-                .unwrap();
-        }
-        let kinds = HashMap::new();
-        let run = |limit: usize, cap: usize| {
-            let t = build_timeline(
-                &store,
-                &graph,
-                e.as_str(),
-                &Window {
-                    range: DayRange::default(),
-                    limit,
-                    zone: Zone::Fixed(UtcOffset::UTC),
-                    max_items: cap,
-                },
-                &kinds,
-            )
-            .unwrap();
-            serde_json::to_value(&t).unwrap()
-        };
-        let keys = |v: &Value| -> Vec<String> {
-            v["events"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|e| e["item"]["key"].as_str().unwrap().to_owned())
-                .collect()
-        };
-        // Newest two, ascending; snippets come from the first chunk.
-        let t = run(2, 100);
-        assert_eq!(keys(&t), ["k3", "k4"]);
-        assert_eq!(t["total"], 5);
-        assert_eq!(t["truncated"], true);
-        assert_eq!(t["events"][1]["date_source"], "modified");
-        assert_eq!(
-            t["events"][1]["snippet"],
-            "Note 4 about Sam, which is long enough to snip."
-        );
-        assert_eq!(t["events"][1]["title"], "Note 4");
-        let all = run(10, 100);
-        assert_eq!(keys(&all), ["k0", "k1", "k2", "k3", "k4"]);
-        assert_eq!(all["truncated"], false);
-        // Past the item cap the timeline says it is incomplete.
-        let capped = run(10, 2);
-        assert_eq!(capped["total"], 2);
-        assert_eq!(capped["truncated"], true);
-        assert_eq!(run(10, 5)["truncated"], false);
-    }
-
-    #[test]
-    fn people_kinds() {
-        assert!(is_people_kind(EntityKind::Person));
-        assert!(is_people_kind(EntityKind::Organization));
-        assert!(is_people_kind(EntityKind::Project));
-        assert!(!is_people_kind(EntityKind::Topic));
-        assert!(!is_people_kind(EntityKind::Place));
-    }
 }

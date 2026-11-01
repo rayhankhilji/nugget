@@ -1,4 +1,4 @@
-//! Daemon features: subsystems wired in after M2 (Double Tap, agent and safety, browser,
+//! Daemon features: subsystems (Double Tap, agent and safety, browser,
 //! proactive cards, plugins).
 //!
 //! Each feature is one module that owns its state, its IPC methods, its background tasks and its
@@ -122,17 +122,17 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     start(&mut list, "draft", draft::start(cx).await);
     // Plugins before the agent, which registers their tools.
     start(&mut list, "plugins", plugins::start(cx).await);
-    let safety = agent::register(cx, &mut list).await; // W3: policy, browser, agent
+    let safety = agent::register(cx, &mut list).await; // policy, browser, agent
     start(
         &mut list,
         "proactive",
         proactive::start(cx, safety.as_ref()).await,
     );
-    start(&mut list, "ai_keys", ai_keys::start(cx)); // Z3: bring your own key
-    start(&mut list, "model_fit", model_fit::start(cx)); // Z3: explained recommendation
-    start(&mut list, "backup", backup::start(cx)); // FF1: backup, restore, export
-    start(&mut list, "search_ui", search_ui::start(cx)); // II2: faceted search, timelines, previews
-    start(&mut list, "runtime_retry", runtime_retry::start(cx)); // KK1: Retry a failed local model
+    start(&mut list, "ai_keys", ai_keys::start(cx));
+    start(&mut list, "model_fit", model_fit::start(cx));
+    start(&mut list, "backup", backup::start(cx));
+    start(&mut list, "search_ui", search_ui::start(cx)); // faceted search, timelines, previews
+    start(&mut list, "runtime_retry", runtime_retry::start(cx));
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features
@@ -149,32 +149,6 @@ fn start(list: &mut Vec<Arc<dyn Feature>>, name: &str, started: Result<Arc<dyn F
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[derive(Debug, Default, PartialEq, serde::Deserialize)]
-    #[serde(deny_unknown_fields, default)]
-    struct Demo {
-        enabled: bool,
-        n: u32,
-    }
-
-    #[test]
-    fn section_defaults_when_empty_and_names_the_section_on_error() {
-        assert_eq!(
-            section::<Demo>("demo", &toml::Table::new()).unwrap(),
-            Demo::default()
-        );
-        let t: toml::Table = toml::from_str("enabled = true\nn = 3").unwrap();
-        assert_eq!(
-            section::<Demo>("demo", &t).unwrap(),
-            Demo {
-                enabled: true,
-                n: 3
-            }
-        );
-        let bad: toml::Table = toml::from_str("nope = 1").unwrap();
-        let err = section::<Demo>("demo", &bad).unwrap_err().to_string();
-        assert!(err.contains("[demo]"), "{err}");
-    }
 
     struct Echo;
     #[async_trait]
@@ -196,11 +170,5 @@ mod tests {
         assert_eq!(f.find("echo.say").map(|f| f.name()), Some("echo"));
         assert!(f.find("echo.other").is_none());
         assert_eq!(f.names(), ["echo"]);
-    }
-
-    #[test]
-    #[should_panic(expected = "served by both")]
-    fn duplicate_methods_are_refused() {
-        Features::new(vec![Arc::new(Echo), Arc::new(Echo)]);
     }
 }

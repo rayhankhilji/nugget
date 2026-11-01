@@ -1,17 +1,7 @@
 //! `nuggetd-e2e`: the daemon exactly as `nuggetd` runs it (no subcommand), plus the test hooks of
 //! [`RuntimeOverrides`] read from the environment, for the desktop end-to-end test
-//! (`apps/desktop/e2e`). Built only with the `fake-runtime` feature; never shipped.
-//!
-//! - `NUGGET_E2E_MANIFEST` + `NUGGET_E2E_MANIFEST_SIG` + `NUGGET_E2E_MANIFEST_PUBKEY`: a model
-//!   manifest (JSON file), its detached signature (hex file) and the hex ed25519 public key it must
-//!   verify against. Only that key is trusted (never the built-in ones); a manifest that fails
-//!   verification stops the daemon from starting.
-//! - `NUGGET_E2E_LLAMA_SERVER`: the `llama-server` executable to run (CPU), e.g. the repo's
-//!   `nuggetd-fake-llama-server`.
-//! - `NUGGET_E2E_RAM_GB` / `NUGGET_E2E_GPU` (`apple_silicon`, `nvidia`, `amd`, `intel`,
-//!   `unknown`): the hardware the recommendation sees.
-//!
-//! `--home DIR` keeps everything under DIR, like `nuggetd --home`.
+//! (`apps/desktop/e2e`): `NUGGET_E2E_MANIFEST{,_SIG,_PUBKEY}`, `NUGGET_E2E_LLAMA_SERVER`,
+//! `NUGGET_E2E_RAM_GB` and `NUGGET_E2E_GPU`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;

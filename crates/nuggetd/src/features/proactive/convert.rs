@@ -1,4 +1,4 @@
-//! `nugget-proactive` types to the wire DTOs in `nugget_core::ipc` (`---- Proactive (M5) ----`).
+//! `nugget-proactive` types to the wire DTOs in `nugget_core::ipc` (`---- Proactive ----`).
 
 use nugget_core::ipc::{
     BriefCardView, BriefMeetingView, BriefView, CardActionView, CardEvidence, CardExecuteResult,

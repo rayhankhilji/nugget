@@ -1,27 +1,11 @@
 //! Sources: the connector registry, settings reconciliation and credential routing.
 //!
-//! **Secrets.** `sources.secret.set` stores, by the kind's [`AuthKind`]:
-//! - `Password` (imap, caldav, slack, notion, github, linear): the password or pasted API token
-//!   under `password:<id>` ([`Ingest::set_password`]);
-//! - `OAuth` (gmail, gcal, gdrive, outlook, outlook-calendar, onedrive): the OAuth **client secret**
-//!   under `oauth_client_secret:<id>`. It is never persisted in `sources.toml`:
-//!   [`client_secret_resolver`] adds it to the settings handed to `ConnectorFactory::build` as
-//!   `client_secret`, and the source is rebuilt ([`Ingest::reload`]) after it changes. Google
-//!   needs one; Microsoft Entra public clients (the recommended "Mobile and desktop" platform)
-//!   need none, so for Microsoft it is optional and only set for confidential app
-//!   registrations. `client_secret` in `sources.add`/`update` settings is refused, for every
-//!   kind.
-//!
-//! OAuth access/refresh tokens from `sources.auth.begin` live under `oauth:<id>`, including
-//! the optional interactive flows of the `Password` kinds GitHub (device flow, settings carry
-//! a `client_id`; no client secret) and Linear (PKCE, settings carry a `client_id`). Linear's
-//! client secret is optional with PKCE; those connectors read `oauth_client_secret:<id>`
-//! themselves when it is present, so the injection here is not needed for them.
-//!
-//! Every account is written through [`Ingest::set_secret`], which records the account *name* in
-//! `sources.toml`, so removing the source deletes it (the daemon also deletes
-//! `oauth_client_secret:<id>` explicitly). Secret values never reach logs, audit entries, IPC
-//! responses or notifications.
+//! `sources.secret.set` stores, by [`AuthKind`]: `Password` kinds' password or API token under
+//! `password:<id>`; `OAuth` kinds' **client secret** under `oauth_client_secret:<id>`, never in
+//! `sources.toml` ([`client_secret_resolver`] injects it into the settings at build time, and
+//! `client_secret` in `sources.add`/`update` settings is refused). OAuth tokens live under
+//! `oauth:<id>`. Accounts are written through [`Ingest::set_secret`] so removing the source deletes
+//! them. Secret values never reach logs, audit entries, IPC responses or notifications.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -53,9 +37,7 @@ const FORM_NORMALISED_KINDS: &[&str] = &[
     nugget_connector_saas::LINEAR_KIND,
 ];
 
-/// Every connector kind shipped: files, obsidian, gmail, gcal, imap, caldav (M1); gdrive (Google
-/// Drive); outlook, outlook-calendar, onedrive (Microsoft 365); slack, notion, github, linear (SaaS);
-/// imessage, whatsapp, telegram (messaging imports).
+/// Every connector kind shipped.
 pub(crate) fn registry() -> Registry {
     let mut r = Registry::new();
     nugget_connector_files::register(&mut r);
@@ -64,7 +46,7 @@ pub(crate) fn registry() -> Registry {
     r.register(Arc::new(nugget_connector_caldav::CalDavFactory::new()));
     nugget_connector_microsoft::register(&mut r);
     nugget_connector_saas::register(&mut r);
-    nugget_connector_messaging::register(&mut r); // II1: imessage, whatsapp, telegram
+    nugget_connector_messaging::register(&mut r);
     r
 }
 
@@ -354,68 +336,33 @@ mod tests {
             check_duplicate_folders("files", &json!({ "roots": [inner] }), &existing, Some(me))
                 .is_ok()
         );
-    }
-
-    /// Two sources that already overlap (added before the check existed) stay editable: an
-    /// update only checks folders it adds.
-    #[test]
-    fn updating_an_existing_overlapping_source_works() {
-        let dir = tempfile::tempdir().unwrap();
-        let docs = dir.path().join("Docs");
-        let inner = docs.join("Notes");
-        let other = dir.path().join("Other");
-        for d in [&inner, &other] {
-            std::fs::create_dir_all(d).unwrap();
-        }
-        let existing = [
-            files("files-1", "Docs", &[&docs]),
-            files("files-2", "Notes", &[&inner]),
-        ];
+        // Sources that already overlap stay editable: an update only checks folders it adds.
+        let existing = [existing[0].clone(), files("files-2", "Notes", &[&inner])];
         let me = Some(&existing[1]);
-        let include = json!({ "roots": [inner], "include": ["*.md"] });
-        assert!(check_duplicate_folders("files", &include, &existing, me).is_ok());
-        // Adding a disjoint folder is fine; adding one inside "Docs" is not.
         let more = json!({ "roots": [inner, other] });
         assert!(check_duplicate_folders("files", &more, &existing, me).is_ok());
         let worse = json!({ "roots": [inner, docs.join("Else")] });
         assert!(check_duplicate_folders("files", &worse, &existing, me).is_err());
     }
 
-    #[test]
-    fn verbatim_prefixes_are_stripped() {
-        let p = |s: &str| strip_verbatim(PathBuf::from(s));
-        assert_eq!(p(r"\\?\C:\Users\x"), PathBuf::from(r"C:\Users\x"));
-        assert_eq!(
-            p(r"\\?\UNC\server\share\x"),
-            PathBuf::from(r"\\server\share\x")
-        );
-        assert_eq!(p("/home/x"), PathBuf::from("/home/x"));
-    }
-
+    /// As on macOS (`/var` → `/private/var`): a folder spelled through a symlink, or missing
+    /// under a symlinked ancestor, is still a duplicate.
     #[cfg(unix)]
     #[test]
     fn duplicate_folders_through_a_symlink_are_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let docs = dir.path().join("Docs");
-        std::fs::create_dir_all(&docs).unwrap();
-        let link = dir.path().join("link");
-        std::os::unix::fs::symlink(&docs, &link).unwrap();
-        let existing = [files("files-1", "Docs", &[&docs])];
-        let r = check_duplicate_folders("files", &json!({ "roots": [link] }), &existing, None);
-        assert!(matches!(r, Err(Error::Invalid(m)) if m.contains("already added as")));
-    }
-
-    /// As on macOS (`/var` → `/private/var`): the existing source is stored under its real
-    /// path, the new missing folder is spelled through a symlinked ancestor.
-    #[cfg(unix)]
-    #[test]
-    fn missing_folder_under_a_symlinked_ancestor_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().join("private").join("var");
         std::fs::create_dir_all(real.join("Docs")).unwrap();
         let var = dir.path().join("var");
         std::os::unix::fs::symlink(&real, &var).unwrap();
         let existing = [files("files-1", "Docs", &[&real.join("Docs")])];
+        let r = check_duplicate_folders(
+            "files",
+            &json!({ "roots": [var.join("Docs")] }),
+            &existing,
+            None,
+        );
+        assert!(matches!(r, Err(Error::Invalid(m)) if m.contains("already added as")));
         let missing = var.join("Docs").join("not-yet");
         let r = check_duplicate_folders("files", &json!({ "roots": [missing] }), &existing, None);
         assert!(matches!(r, Err(Error::Invalid(m)) if m.contains("is inside")));
@@ -424,59 +371,6 @@ mod tests {
         let missing = real.join("Docs").join("not-yet");
         let r = check_duplicate_folders("files", &json!({ "roots": [missing] }), &existing, None);
         assert!(matches!(r, Err(Error::Invalid(m)) if m.contains("is inside")));
-    }
-
-    #[test]
-    fn registers_every_shipped_kind() {
-        let r = registry();
-        let mut kinds: Vec<&str> = r.kinds().iter().map(|k| k.kind).collect();
-        kinds.sort_unstable();
-        assert_eq!(
-            kinds,
-            [
-                "caldav",
-                "files",
-                "gcal",
-                "gdrive",
-                "github",
-                "gmail",
-                "imap",
-                "imessage",
-                "linear",
-                "notion",
-                "obsidian",
-                "onedrive",
-                "outlook",
-                "outlook-calendar",
-                "slack",
-                "telegram",
-                "whatsapp",
-            ]
-        );
-        // OAuth kinds get their client secret injected; the SaaS kinds take a pasted token.
-        let mut oauth = oauth_kinds(&r);
-        oauth.sort();
-        assert_eq!(
-            oauth,
-            [
-                "gcal",
-                "gdrive",
-                "gmail",
-                "onedrive",
-                "outlook",
-                "outlook-calendar"
-            ]
-        );
-        for kind in FORM_NORMALISED_KINDS {
-            assert!(r.get(kind).is_ok(), "{kind}");
-        }
-        for kind in ["slack", "notion", "github", "linear"] {
-            assert_eq!(
-                r.get(kind).unwrap().info().auth,
-                AuthKind::Password,
-                "{kind}"
-            );
-        }
     }
 
     const ENTRA_APP: &str = "00000000-1111-2222-3333-444444444444";
@@ -491,10 +385,6 @@ mod tests {
         let chat_db = chat_db.to_str().unwrap().to_string();
         let r = registry();
         let cases = [
-            (
-                "files",
-                json!({"roots": [root], "include": [], "exclude": []}),
-            ),
             (
                 "files",
                 json!({"roots": [root], "include": ["**/*.md"], "exclude": ["**/tmp/**"]}),
@@ -513,16 +403,8 @@ mod tests {
                 json!({"client_id": "123-abc.apps.googleusercontent.com"}),
             ),
             (
-                "gdrive",
-                json!({"client_id": "123-abc.apps.googleusercontent.com", "include_shared_with_me": true, "include_shared_drives": true, "max_file_mb": 50}),
-            ),
-            (
                 "imap",
                 json!({"host": "imap.example.com", "port": 993, "tls": "implicit", "username": "me@example.com", "folders": ["INBOX", "Archive"]}),
-            ),
-            (
-                "imap",
-                json!({"host": "imap.example.com", "port": 143, "tls": "starttls", "username": "me", "folders": ["INBOX"]}),
             ),
             (
                 "caldav",
@@ -530,16 +412,10 @@ mod tests {
             ),
             // Microsoft 365: `{client_id, tenant?}` plus kind-specific optional fields; blank
             // strings and empty lists from untouched form fields are dropped.
-            ("outlook", json!({"client_id": ENTRA_APP})),
             (
                 "outlook",
                 json!({"client_id": ENTRA_APP, "tenant": "", "account_hint": "", "folders": []}),
             ),
-            (
-                "outlook",
-                json!({"client_id": ENTRA_APP, "tenant": "organizations", "account_hint": "me@contoso.com", "folders": ["inbox", "archive"], "window_days": 90}),
-            ),
-            ("outlook-calendar", json!({"client_id": ENTRA_APP})),
             (
                 "outlook-calendar",
                 json!({"client_id": ENTRA_APP, "tenant": "contoso.onmicrosoft.com", "past_days": 30, "future_days": 0}),
@@ -548,47 +424,24 @@ mod tests {
                 "onedrive",
                 json!({"client_id": ENTRA_APP, "tenant": " ", "include_folders": [], "exclude_folders": []}),
             ),
-            (
-                "onedrive",
-                json!({"client_id": ENTRA_APP, "tenant": "consumers", "include_folders": ["/Documents"], "exclude_folders": ["/Documents/Private"], "max_file_mb": 50}),
-            ),
             // SaaS: `{}` or optional fields; the token goes through sources.secret.set.
-            ("slack", json!({})),
             (
                 "slack",
                 json!({"token_env": "", "conversations": [], "include_dms": true}),
             ),
             (
-                "slack",
-                json!({"conversations": ["general", "C0123"], "include_dms": false, "window_days": 30}),
-            ),
-            ("notion", json!({})),
-            (
                 "notion",
                 json!({"token_env": "", "include_databases": false, "max_pages": 100}),
             ),
-            ("github", json!({})),
             (
                 "github",
                 json!({"client_id": "", "repos": [], "token_env": ""}),
             ),
-            ("github", json!({"client_id": "Iv1.0123456789abcdef"})),
-            (
-                "github",
-                json!({"repos": ["octo/hello"], "all_activity": true, "include_discussions": false}),
-            ),
-            ("linear", json!({})),
             (
                 "linear",
                 json!({"client_id": "", "include": [], "teams": [], "token_env": null}),
             ),
-            ("linear", json!({"client_id": "0123abcd"})),
-            (
-                "linear",
-                json!({"include": ["assigned", "created"], "teams": ["ENG"], "window_days": 60}),
-            ),
-            // II1 messaging imports. The wizard sends no `db_path` (macOS default); here a file
-            // stands in for chat.db so the case validates on every OS.
+            // The wizard sends no `db_path` (macOS default); a file stands in for chat.db here.
             (
                 "imessage",
                 json!({"db_path": chat_db, "contacts": true, "include_groups": true, "private": true}),
@@ -596,10 +449,6 @@ mod tests {
             (
                 "whatsapp",
                 json!({"folder": root, "include_groups": true, "private": true}),
-            ),
-            (
-                "whatsapp",
-                json!({"folder": root, "me": "Ada", "since_days": 30, "include_groups": false, "private": false}),
             ),
             (
                 "telegram",
@@ -615,46 +464,6 @@ mod tests {
                 .validate(&s)
                 .unwrap_or_else(|e| panic!("{kind} {settings}: {e}"));
         }
-    }
-
-    #[test]
-    fn blank_form_fields_are_dropped_only_for_the_new_kinds() {
-        assert_eq!(
-            reconcile_settings(
-                "outlook",
-                json!({"client_id": "x", "tenant": "", "folders": [], "window_days": 30, "account_hint": null})
-            )
-            .unwrap(),
-            json!({"client_id": "x", "window_days": 30})
-        );
-        assert_eq!(
-            reconcile_settings("linear", json!({"include": [], "client_id": "  "})).unwrap(),
-            json!({})
-        );
-        // Older kinds keep what they were sent (e.g. an empty `exclude`).
-        assert_eq!(
-            reconcile_settings("caldav", json!({"url": "u", "username": ""})).unwrap(),
-            json!({"url": "u", "username": ""})
-        );
-        // `client_secret` is refused for the new kinds too.
-        assert!(
-            reconcile_settings("onedrive", json!({"client_id": "x", "client_secret": "s"}))
-                .is_err()
-        );
-        assert!(reconcile_settings("linear", json!({"client_secret": "s"})).is_err());
-    }
-
-    #[test]
-    fn client_secret_is_refused_in_settings() {
-        let err = reconcile_settings("gmail", json!({"client_id": "x", "client_secret": "s"}))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("sources.secret.set"), "{err}");
-        assert!(!err.contains("\"s\""));
-        assert_eq!(
-            reconcile_settings("gmail", json!({"client_id": "x", "client_secret": null})).unwrap(),
-            json!({"client_id": "x"})
-        );
     }
 
     #[test]

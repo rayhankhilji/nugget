@@ -18,7 +18,6 @@ const DEFAULT_ENTITY_LIMIT: u32 = 50;
 const MAX_ENTITY_LIMIT: u32 = 500;
 const DEFAULT_GRAPH_LIMIT: u32 = 100;
 const MAX_GRAPH_DEPTH: u32 = 3;
-/// Mentions shown on an entity's detail page.
 const DETAIL_MENTIONS: usize = 100;
 
 /// Longest entity name, alias or identifier a split accepts.
@@ -31,13 +30,10 @@ fn kinds(list: &[String]) -> Result<Vec<EntityKind>> {
 /// A user's decision about a fact (`ClaimStatusRequest::status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decision {
-    /// `rejected` (or the older `retracted`): sticky rejection.
+    /// `rejected` (or the older `retracted`): sticky.
     Reject,
-    /// `active`: restore a fact that is not current.
     Restore,
-    /// `user_asserted`: the user vouches for the fact.
     Assert,
-    /// `unasserted`: undo the user's assertion.
     Unassert,
 }
 
@@ -52,7 +48,6 @@ impl Decision {
         })
     }
 
-    /// The status `c` ends up with.
     fn target(self, c: &Claim) -> Result<ClaimStatus> {
         let sourced = !c.evidence.is_empty();
         Ok(match self {
@@ -94,8 +89,6 @@ impl RpcHandler {
             ))
         })
     }
-
-    // ---- knowledge ----
 
     pub(crate) async fn knowledge_entities(&self, req: EntitiesRequest) -> Result<Value, RpcError> {
         let limit = match req.limit {
@@ -178,30 +171,13 @@ impl RpcHandler {
             let source = req.source.as_ref();
             let graph = k.graph.as_ref();
             let mut lk = Lookups::new(&k.store, graph);
-            let all = req.include_sensitive;
+            let sens = graphview::Sensitivity {
+                items: &mut lk,
+                include: req.include_sensitive,
+            };
             match &req.center {
-                Some(c) => graphview::neighbourhood(
-                    graph,
-                    c,
-                    depth,
-                    limit,
-                    &kinds,
-                    source,
-                    graphview::Sensitivity {
-                        items: &mut lk,
-                        include: all,
-                    },
-                ),
-                None => graphview::overview(
-                    graph,
-                    &kinds,
-                    limit,
-                    source,
-                    graphview::Sensitivity {
-                        items: &mut lk,
-                        include: all,
-                    },
-                ),
+                Some(c) => graphview::neighbourhood(graph, c, depth, limit, &kinds, source, sens),
+                None => graphview::overview(graph, &kinds, limit, source, sens),
             }
         })
         .await?;
@@ -375,8 +351,6 @@ impl RpcHandler {
         })
     }
 
-    // ---- MCP clients ----
-
     pub(crate) async fn mcp_clients_list(&self) -> Result<Value, RpcError> {
         let reg = self.mcp()?.registry.clone();
         to_result(blocking(move || reg.list()).await?)
@@ -408,8 +382,6 @@ impl RpcHandler {
         self.audit("mcp.client.revoke", &req.id, json!({})).await;
         Ok(Value::Null)
     }
-
-    // ---- bridge (`nuggetd mcp --client`) ----
 
     pub(crate) async fn mcp_bridge_open(
         &self,
@@ -443,18 +415,14 @@ mod tests {
     use nugget_graph::{ClaimObject, Evidence};
 
     fn claim(status: ClaimStatus, sourced: bool) -> Claim {
-        let evidence = if sourced {
-            vec![Evidence {
-                item: ItemRef {
-                    source: SourceId::new("notes"),
-                    key: ItemKey::new("a.md"),
-                },
-                chunk_id: None,
-                quote: None,
-            }]
-        } else {
-            Vec::new()
-        };
+        let evidence = Vec::from_iter(sourced.then(|| Evidence {
+            item: ItemRef {
+                source: SourceId::new("notes"),
+                key: ItemKey::new("a.md"),
+            },
+            chunk_id: None,
+            quote: None,
+        }));
         Claim {
             id: 7,
             subject: EntityId::new("ent_a"),

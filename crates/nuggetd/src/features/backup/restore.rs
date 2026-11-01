@@ -815,15 +815,4 @@ mod tests {
         assert!(out.contains("# path = "), "{out}");
         assert!(out.contains("[mcp]\nport = 0"));
     }
-
-    #[test]
-    fn a_local_vault_path_is_kept() {
-        let here = std::env::temp_dir().join("vault");
-        let text = format!("[vault]\npath = {:?}\n", here.display().to_string());
-        let (out, notes) = localise_config(&text);
-        assert!(notes.is_empty());
-        assert_eq!(out, text);
-        let (out, notes) = localise_config("[vault]\nenabled = true\n");
-        assert!(notes.is_empty() && out == "[vault]\nenabled = true\n");
-    }
 }

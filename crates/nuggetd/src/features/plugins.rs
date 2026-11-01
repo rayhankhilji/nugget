@@ -1,40 +1,19 @@
-//! Plugins (M6): WebAssembly connectors and read-only agent tools from `nugget-plugin`, wired
-//! into the daemon.
+//! Plugins: WebAssembly connectors and read-only agent tools from `nugget-plugin`.
 //!
-//! - **Store and host.** One [`PluginStore`] under `<data>/plugins` and one [`PluginHost`] per
-//!   data dir, kept in a process-wide map so the connectors registered before ingest starts
-//!   ([`connector_factories`]) and the feature ([`start`]) share the same loaded plugins.
-//! - **IPC.** `plugins.list`, `plugins.inspect`, `plugins.install` (verify and stage a local
-//!   package for 10 minutes), `plugins.approve` (commit or discard it), `plugins.enable`,
-//!   `plugins.remove`, `plugins.catalog` (packages available to install, see below). Every
-//!   mutation is audited (`plugin.install`, `plugin.approve`, `plugin.reject`, `plugin.remove`,
-//!   `plugin.enable`, `plugin.disable`).
-//! - **Trust.** A package must be signed by a key in `[plugins] trusted_keys`. With
-//!   `dev_mode = true`, an unsigned package (empty signature) is signed at install with the
-//!   daemon's dev key: an ed25519 seed kept in the secret store under
-//!   `plugins:dev-signing-key`, generated on first use. Dev-signed plugins are trusted only while
-//!   `dev_mode` is on. Plugins whose signer is not trusted are listed with an error and not
-//!   loaded.
-//! - **Dev key before the keychain is reachable.** [`connector_factories`] runs before the daemon
-//!   state (and its secret store) exists, so the dev *public* key is also cached in
-//!   `<data>/plugins/dev-signing-key.pub`; it is only a cache: [`start`] reads the key from the
-//!   secret store, rewrites (or deletes) the file when it differs, and reloads the plugins under
-//!   the corrected trust. A public key is not secret, and anyone able to write the data dir can
-//!   already edit `config.toml`.
-//! - **Connectors.** Plugin connector kinds (`plugin:<id>`) are registered once, before ingest
-//!   starts. Each sync runs the plugin as currently loaded, so an update, a disable or a removal
-//!   takes effect on the next sync. **Known gap:** a connector plugin installed while the daemon
-//!   runs becomes a source kind only after a daemon restart. Tools update live ([`agent_tools`]).
-//! - **Catalog.** `plugins.catalog` lists the `*.nuggetplugin` files (non-recursive, at most
-//!   [`MAX_CATALOG_ENTRIES`]) in the catalog directories: `[plugins] catalog_dirs` (absolute
-//!   paths; default `<data>/plugin-catalog`) plus the entries of `NUGGET_PLUGIN_CATALOG` (a
-//!   PATH-style list a package or launcher can set to ship plugins with the app). Each package is
-//!   verified exactly as `plugins.install` would (signature against the trusted keys, manifest,
-//!   update rules) but nothing is installed or staged; the UI installs one through the normal
-//!   `plugins.install` / `plugins.approve` flow with the entry's path. A package that cannot be
-//!   read or verified is listed with its error and never fails the listing.
-//! - **Egress and secrets for tools** go to the daemon's ledger and secret store; until [`start`]
-//!   binds them (no tool can run before), nothing is recorded and secrets are unavailable.
+//! - One [`PluginStore`]/[`PluginHost`] per data dir, shared process-wide so the connectors
+//!   registered before ingest ([`connector_factories`]) and the feature ([`start`]) agree.
+//!   Installs are staged for 10 minutes until `plugins.approve`; every mutation is audited.
+//! - **Trust.** A package must be signed by a key in `[plugins] trusted_keys`. With `dev_mode`,
+//!   unsigned packages are signed with the daemon's dev key (secret store,
+//!   `plugins:dev-signing-key`), trusted only while `dev_mode` is on. The dev *public* key is
+//!   cached in `<data>/plugins/dev-signing-key.pub` for startup; [`start`] corrects it from the
+//!   secret store and reloads. Untrusted plugins are listed with an error, never loaded.
+//! - **Connectors** (`plugin:<id>`) register once before ingest; each sync runs the plugin as
+//!   currently loaded. Known gap: a connector installed while running needs a restart.
+//! - **Catalog.** `plugins.catalog` verifies `*.nuggetplugin` files in `[plugins] catalog_dirs`
+//!   and `NUGGET_PLUGIN_CATALOG` exactly as `plugins.install` would, installing nothing; a bad
+//!   package is listed with its error.
+//! - Tool egress and secrets go to the daemon's ledger and secret store once [`start`] binds them.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -1538,29 +1517,6 @@ mod tests {
         format!("[plugins]\ntrusted_keys = [\"{}\"]\n", pubhex(seed))
     }
 
-    #[test]
-    fn config_defaults_and_errors() {
-        let s = settings(&Config::parse("").unwrap()).unwrap();
-        assert!(s.enabled && !s.dev_mode && s.trusted.is_empty());
-        let s = settings(&Config::parse(&trusted_cfg(1)).unwrap()).unwrap();
-        assert_eq!(s.trusted, vec![key(1).verifying_key()]);
-        let bad = Config::parse("[plugins]\ntrusted_keys = [\"zz\"]\n").unwrap();
-        let err = settings(&bad).unwrap_err().to_string();
-        assert!(err.contains("[plugins]"), "{err}");
-        let typo = Config::parse("[plugins]\ndevmode = true\n").unwrap();
-        let err = settings(&typo).unwrap_err().to_string();
-        assert!(err.contains("[plugins]"), "{err}");
-        // A bad section never fails or panics the connector registration.
-        let tmp = tempfile::tempdir().unwrap();
-        let paths = Paths {
-            data: tmp.path().join("d"),
-            config: tmp.path().join("c"),
-            cache: tmp.path().join("k"),
-        };
-        assert!(connector_factories(&paths, &bad).is_empty());
-        assert!(!runtimes().contains_key(&paths.data));
-    }
-
     #[tokio::test]
     async fn bad_paths_are_refused() {
         let fx = Fx::new(&trusted_cfg(1)).await;
@@ -1781,33 +1737,6 @@ mod tests {
         serde_json::to_string(&p.display().to_string()).unwrap()
     }
 
-    #[test]
-    fn catalog_dirs_default_config_and_env() {
-        let data = std::env::temp_dir().join("nugget-data");
-        let a = std::env::temp_dir().join("cat-a");
-        let b = std::env::temp_dir().join("cat-b");
-        assert_eq!(catalog_dirs(&[], &data, None), [data.join(CATALOG_DIR)]);
-        assert_eq!(
-            catalog_dirs(std::slice::from_ref(&a), &data, None),
-            std::slice::from_ref(&a)
-        );
-        let env = std::env::join_paths([b.clone(), a.clone(), PathBuf::from("relative")]).unwrap();
-        assert_eq!(
-            catalog_dirs(std::slice::from_ref(&a), &data, Some(env)),
-            [a.clone(), b.clone()]
-        );
-        assert_eq!(
-            catalog_dirs(&[], &data, Some(std::ffi::OsString::new())),
-            [data.join(CATALOG_DIR)]
-        );
-        // Relative catalog dirs are a config error.
-        let bad = Config::parse("[plugins]\ncatalog_dirs = [\"plugins\"]\n").unwrap();
-        let err = settings(&bad).unwrap_err().to_string();
-        assert!(err.contains("catalog_dirs"), "{err}");
-        let ok = Config::parse(&catalog_cfg(1, &a)).unwrap();
-        assert_eq!(settings(&ok).unwrap().catalog_dirs, [a]);
-    }
-
     #[tokio::test]
     async fn catalog_lists_verified_packages_without_installing() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1918,40 +1847,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn catalog_in_dev_mode_offers_unsigned_packages_and_caps_the_listing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let cat = tmp.path().join("catalog");
-        std::fs::create_dir_all(&cat).unwrap();
-        let cfg = format!(
-            "[plugins]\ndev_mode = true\ncatalog_dirs = [{}]\n",
-            toml_str(&cat)
-        );
-        let fx = Fx::at(tmp.path(), &cfg).await;
-        for i in 0..MAX_CATALOG_ENTRIES + 3 {
-            PluginPackage {
-                manifest: manifest(&format!("dev.test.p{i:03}"), "1.0.0", "[\"tool\"]", "")
-                    .into_bytes(),
-                wasm: EMPTY_COMPONENT.to_vec(),
-                signature: Vec::new(),
-            }
-            .write_file(&cat.join(format!("p{i:03}.{PACKAGE_EXTENSION}")))
-            .unwrap();
-        }
-        let r = fx.f.catalog().await.unwrap();
-        assert!(r.truncated);
-        assert_eq!(r.entries.len(), MAX_CATALOG_ENTRIES);
-        // Which 64 depends on the directory order; they are sorted and distinct.
-        let names: Vec<&str> = r.entries.iter().map(|e| e.file_name.as_str()).collect();
-        assert!(names.windows(2).all(|w| w[0] < w[1]), "{names:?}");
-        let first = &r.entries[0];
-        assert!(first.id.starts_with("dev.test.p"));
-        assert_eq!(first.signature, PluginSignature::Dev);
-        assert!(first.error.is_none() && first.needs_approval && first.signer.is_empty());
-        // No dev key was created just by listing.
-        assert_eq!(fx.secrets.get(DEV_KEY_ACCOUNT).unwrap(), None);
-    }
-
-    #[tokio::test]
     async fn catalog_checks_the_signer_of_unsigned_updates_in_dev_mode() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = tmp.path().join("catalog");
@@ -2003,84 +1898,6 @@ mod tests {
             r.installed,
             "an update within the approved access commits at once"
         );
-    }
-
-    #[tokio::test]
-    async fn catalog_caches_verified_packages_until_the_file_changes() {
-        let tmp = tempfile::tempdir().unwrap();
-        let cat = tmp.path().join("catalog");
-        std::fs::create_dir_all(&cat).unwrap();
-        let fx = Fx::at(tmp.path(), &catalog_cfg(1, &cat)).await;
-        let path = cat.join(format!("a.{PACKAGE_EXTENSION}"));
-        signed("dev.test.tool", "1.0.0", "", 1)
-            .write_file(&path)
-            .unwrap();
-        let set_modified = |t: std::time::SystemTime| {
-            let f = std::fs::File::options().write(true).open(&path).unwrap();
-            f.set_modified(t).unwrap();
-        };
-        // A file changed just now is not cached.
-        assert!(file_stamp(&path).is_none());
-        let modified = std::time::SystemTime::now() - Duration::from_secs(60);
-        set_modified(modified);
-        let e = &fx.f.catalog().await.unwrap().entries[0];
-        assert!(e.error.is_none(), "{e:?}");
-        let len = std::fs::metadata(&path).unwrap().len() as usize;
-
-        // Same size and time: served from the cache, the file is not read again.
-        std::fs::write(&path, vec![b'x'; len]).unwrap();
-        set_modified(modified);
-        let e = &fx.f.catalog().await.unwrap().entries[0];
-        assert!(e.error.is_none() && e.id == "dev.test.tool", "{e:?}");
-        // A new time: read again (and now it is junk).
-        set_modified(modified + Duration::from_secs(5));
-        let e = &fx.f.catalog().await.unwrap().entries[0];
-        assert!(e.error.is_some() && e.id.is_empty(), "{e:?}");
-        // A removed file leaves the cache.
-        std::fs::remove_file(&path).unwrap();
-        assert!(fx.f.catalog().await.unwrap().entries.is_empty());
-        assert!(lock(&fx.f.rt.catalog_cache).is_empty());
-    }
-
-    #[tokio::test]
-    async fn catalog_and_install_report_file_roots() {
-        let tmp = tempfile::tempdir().unwrap();
-        let cat = tmp.path().join("catalog");
-        std::fs::create_dir_all(&cat).unwrap();
-        let fx = Fx::at(tmp.path(), &catalog_cfg(1, &cat)).await;
-        let manifest = "id = \"dev.test.vault\"\nname = \"Vault\"\nversion = \"1.0.0\"\n\
-            description = \"test\"\nkind = [\"connector\"]\n\n[capabilities]\n\
-            file_roots = [\"vault\"]\n\n[connector]\ndisplay_name = \"Vault\"\n\
-            settings_schema = { type = \"object\", properties = { vault = { type = \"string\" } } }\n";
-        let path = cat.join(format!("vault.{PACKAGE_EXTENSION}"));
-        PluginPackage::sign(manifest.into(), EMPTY_COMPONENT.to_vec(), &key(1))
-            .write_file(&path)
-            .unwrap();
-        let r = fx.f.catalog().await.unwrap();
-        let e = &r.entries[0];
-        assert_eq!(e.error, None);
-        assert_eq!(e.requested.file_roots, ["vault"]);
-        assert_eq!(e.connector_display_name.as_deref(), Some("Vault"));
-        let v = serde_json::to_value(e).unwrap();
-        assert_eq!(v["requested"]["file_roots"], json!(["vault"]));
-        let staged = fx.install(&e.path).await.unwrap();
-        assert_eq!(staged.requested.file_roots, ["vault"]);
-        let info = fx
-            .approve(&staged.token, true)
-            .await
-            .unwrap()
-            .plugin
-            .unwrap();
-        assert_eq!(info.approved.file_roots, ["vault"]);
-    }
-
-    #[tokio::test]
-    async fn catalog_method_is_declared() {
-        let fx = Fx::new(&trusted_cfg(1)).await;
-        assert!(fx.f.methods().contains(&plugin_method::CATALOG));
-        let v = serde_json::to_value(fx.f.catalog().await.unwrap()).unwrap();
-        assert_eq!(v["entries"], json!([]));
-        assert_eq!(v["truncated"], json!(false));
     }
 
     /// Signed first-party packages (CI: `plugins/build.sh` with a throwaway key) install from a

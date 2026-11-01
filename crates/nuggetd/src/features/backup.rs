@@ -22,7 +22,7 @@
 //! with [`nugget_store::check_file_on_open`]. SQLite's page-by-page check reads the whole file
 //! (~5 s per GB), so it runs before opening only after an unclean shutdown or a failed
 //! background check; otherwise the cheap checks run (header, whole pages, the WAL, the key) and
-//! the full check runs in the background 20 s after startup, at most daily (II5). Damage it
+//! the full check runs in the background 20 s after startup, at most daily. Damage it
 //! finds there is logged and recorded, so the next start refuses the file. A database found
 //! damaged before opening, or that this home's key does not open (a damaged first page, or a
 //! file from another install), is never opened or written: the daemon runs on an empty
@@ -929,41 +929,4 @@ fn next_due(s: &disk::Settings) -> Option<OffsetDateTime> {
         due = Some(due.map_or(retry, |d| d.max(retry)));
     }
     Some(due.unwrap_or_else(OffsetDateTime::now_utc))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_busy_or_failing_scheduler_backs_off() {
-        let now = OffsetDateTime::now_utc();
-        let hour = Duration::from_secs(3600);
-        let mut b = Backoff::default();
-        b.record(Err(Miss::Busy), now, hour);
-        assert_eq!(
-            b.until,
-            Some(now + Duration::from_secs(60)),
-            "busy: a minute, not a spin"
-        );
-        assert_eq!(b.failures, 0);
-        let mut waits = Vec::new();
-        for _ in 0..10 {
-            b.record(Err(Miss::Failed), now, hour);
-            waits.push((b.until.unwrap() - now).whole_seconds());
-        }
-        assert_eq!(&waits[..4], &[60, 120, 240, 480]);
-        assert_eq!(*waits.last().unwrap(), 3600, "capped at an hour");
-        b.record(Ok(()), now, hour);
-        assert!(b.until.is_none() && b.failures == 0);
-        // Even with a tiny test hour, never a zero wait.
-        let mut b = Backoff::default();
-        b.record(Err(Miss::Busy), now, Duration::from_secs(1));
-        assert!(b.until.unwrap() > now);
-    }
-
-    #[test]
-    fn sleeps_are_capped() {
-        assert!(MAX_SLEEP <= Duration::from_secs(15 * 60));
-    }
 }

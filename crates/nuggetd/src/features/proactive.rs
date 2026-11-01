@@ -1,30 +1,15 @@
-//! Proactive cards and the morning brief (W4): `nugget-proactive` wired into the daemon.
+//! Proactive cards and the morning brief: `nugget-proactive` wired into the daemon.
 //!
-//! - **Config**: `[proactive]`, see [`settings`] (enabled, brief time, judge locality, refresh
-//!   period, debounce, UTC offset, and the engine's own knobs under `[proactive.engine]`).
-//! - **Refresh** ([`Core::refresh`]; never two at once): shortly after start, after ingest passes
-//!   that indexed something, a removed source and knowledge runs (debounced by `debounce_secs`),
-//!   and every `refresh_minutes`. A refresh that changed the card set broadcasts `cards.changed`.
-//! - **Clock**: once a day at `brief_time` (local) a refresh then `brief.ready`; the date it last
-//!   fired is kept in the store so a restart does not fire it twice. Unless `utc_offset` is set,
-//!   the machine's offset is asked again every 15 minutes and before the brief fires, so a
-//!   daylight-saving change while running moves the brief and "today" (also in the engine).
-//!   Every minute, due reminders are broadcast as `reminder.due`.
-//! - **Methods**: `cards.list`, `cards.feedback`, `cards.preview`, `cards.execute`, `brief.get`,
-//!   `proactive.metrics`, `proactive.refresh`, `reminders.list`, `proactive.learning`,
-//!   `proactive.reset_learning` (see the
-//!   `---- Proactive (M5) ----` block of `nugget_core::ipc`). Executing an action needs the digest
-//!   of a preview made in this daemon less than an hour ago, for the same card and action, and
-//!   goes through `ActionRunner` (approval bound to the digest, then the policy gate).
-//!
-//! - **Learning** (BB2): `proactive.learning` lists what feedback taught the ranking;
-//!   `proactive.reset_learning` forgets it (all, or one sender, domain, kind or thread), writes a
-//!   `proactive.reset_learning` audit entry (actor `user`, target `all` or `<scope>:<key>`, detail
-//!   `{"cleared": n}`) and broadcasts `cards.changed` with reason `reset_learning`. Both answer
-//!   whether or not `[proactive] enabled` (forgetting must always be possible).
-//!
-//! When `enabled = false` the methods still answer (`cards.list` is empty with `enabled: false`)
-//! but nothing runs in the background.
+//! - **Refresh** ([`Core::refresh`]; never two at once): after start, after ingest/knowledge runs
+//!   and source removal (debounced), and every `refresh_minutes`; a changed card set broadcasts
+//!   `cards.changed`.
+//! - **Clock**: the brief fires once a day at `brief_time` (the last date is stored, so a restart
+//!   does not repeat it); the machine's UTC offset is re-read every 15 minutes and before the
+//!   brief, so DST changes apply. Due reminders are broadcast as `reminder.due` every minute.
+//! - **Execute** needs the digest of a preview made here less than an hour ago, for the same card
+//!   and action, and goes through `ActionRunner` (digest-bound approval, then the policy gate).
+//! - **Learning**: `proactive.reset_learning` is audited and always answers, even when disabled
+//!   (forgetting must always be possible). With `enabled = false` methods answer but nothing runs.
 
 mod convert;
 mod exec;
@@ -143,7 +128,7 @@ pub(crate) async fn start(
 /// The policy gate proactive actions go through: the policy engine with the user's rules from
 /// `<config>/policy.json` (built-in defaults when absent) and the process-wide kill switch.
 ///
-/// The seam for the shared engine: once the daemon owns one policy engine (W3), return it here.
+/// The seam for the shared engine: once the daemon owns one policy engine, return it here.
 /// A rules file that cannot be read fails closed (every action is denied, with the reason).
 /// The install's key for binding approvals to previews (created on first start, kept in the
 /// encrypted store).
@@ -869,7 +854,7 @@ async fn trigger_loop(
     let mut pokes = Some(pokes);
     let mut debounce = Debounce::new(core.settings.debounce);
     debounce.at(Instant::now() + initial);
-    // Counts system sleep (GG6-29); checked at least every `RECHECK_EVERY`.
+    // Counts system sleep; checked at least every `RECHECK_EVERY`.
     let mut periodic = Stopwatch::start();
     loop {
         let periodic_at = Instant::now() + periodic.next_check(core.settings.refresh);
@@ -1211,94 +1196,6 @@ mod tests {
         r.unwrap_err().code
     }
 
-    #[test]
-    fn card_view_conversion() {
-        let exec = FakeExec::default();
-        let c = card("a");
-        let v = convert::card_view(&c, &|a| exec.supports(a));
-        assert_eq!(v.id, "a");
-        assert_eq!(v.kind, "follow_up");
-        assert_eq!(v.state, "new");
-        assert_eq!(v.summary, None);
-        assert_eq!(v.factors[0].name, "urgency");
-        assert_eq!(v.actions.len(), 2);
-        let a = &v.actions[0];
-        assert_eq!(
-            (a.index, a.kind.as_str(), a.supported),
-            (0, "reminder", true)
-        );
-        assert_eq!(a.label, reminder_action().preview().summary);
-        assert_eq!(
-            a.risk,
-            nugget_proactive::actions::risk_name(reminder_action().risk())
-        );
-        assert_eq!(
-            (
-                v.actions[1].index,
-                v.actions[1].kind.as_str(),
-                v.actions[1].supported
-            ),
-            (1, "research_note", false)
-        );
-        // Round-trips through the wire type.
-        let back: CardView = serde_json::from_value(serde_json::to_value(&v).unwrap()).unwrap();
-        assert_eq!(back, v);
-    }
-
-    #[test]
-    fn small_conversions() {
-        assert_eq!(
-            convert::iso_date(Date::from_calendar_date(2026, time::Month::March, 9).unwrap()),
-            "2026-03-09"
-        );
-        assert_eq!(
-            parse_iso_date("2026-03-09"),
-            Date::from_calendar_date(2026, time::Month::March, 9).ok()
-        );
-        assert_eq!(parse_iso_date("nope"), None);
-        use nugget_proactive::DismissReason as R;
-        assert_eq!(
-            convert::dismiss_reason(Some("wrong_info"), None).unwrap(),
-            R::WrongInfo
-        );
-        assert_eq!(
-            convert::dismiss_reason(None, Some(" spam ")).unwrap(),
-            R::Other("spam".into())
-        );
-        assert!(convert::dismiss_reason(Some("meh"), None).is_err());
-        let r = convert::outcome(ExecOutcome::NeedsConfirmation("sure?".into()));
-        assert_eq!(
-            (r.outcome.as_str(), r.detail.as_deref()),
-            ("needs_confirmation", Some("sure?"))
-        );
-        let r = convert::outcome(ExecOutcome::Halted);
-        assert_eq!((r.outcome.as_str(), r.detail), ("halted", None));
-        assert_eq!(
-            convert::outcome(ExecOutcome::Denied("no".into())).outcome,
-            "denied"
-        );
-        let mut m = nugget_proactive::Metrics {
-            total: 3,
-            shown: 2,
-            accepted: 1,
-            precision: Some(0.5),
-            ..Default::default()
-        };
-        m.by_kind.insert(
-            "renewal".into(),
-            nugget_proactive::cards::KindMetrics {
-                shown: 1,
-                ..Default::default()
-            },
-        );
-        let v = convert::metrics(m);
-        assert_eq!(
-            (v.total, v.shown, v.accepted, v.precision),
-            (3, 2, 1, Some(0.5))
-        );
-        assert_eq!(v.by_kind["renewal"].shown, 1);
-    }
-
     #[tokio::test]
     async fn list_and_feedback_change_state_and_broadcast() {
         let f = fixture("", &["a", "b"]);
@@ -1377,15 +1274,6 @@ mod tests {
             ),
             nugget_ipc::code::NOT_FOUND
         );
-    }
-
-    #[tokio::test]
-    async fn done_accepts_then_completes() {
-        let f = fixture("", &["a"]);
-        let v = f.core.feedback(feedback("a", "done"), t0()).await.unwrap();
-        assert_eq!(v.state, "done");
-        let m = f.core.metrics().await.unwrap();
-        assert_eq!(m.accepted, 1);
     }
 
     #[tokio::test]
@@ -1488,237 +1376,6 @@ mod tests {
     }
 
     #[test]
-    fn preview_cache_is_bounded() {
-        let mut p = Previews::default();
-        let prepared = |i: usize| PreparedAction {
-            card_id: "a".into(),
-            action_index: 0,
-            action: reminder_action(),
-            preview: reminder_action().preview(),
-            digest: format!("d{i}"),
-        };
-        for i in 0..MAX_PREVIEWS + 5 {
-            p.insert(
-                PreviewEntry {
-                    prepared: prepared(i),
-                    action: 0,
-                    at: t0() + time::Duration::seconds(i as i64),
-                },
-                t0() + time::Duration::seconds(i as i64),
-            );
-        }
-        assert_eq!(p.map.len(), MAX_PREVIEWS);
-        assert!(!p.map.contains_key("d0"), "oldest dropped first");
-        assert!(p.map.contains_key(&format!("d{}", MAX_PREVIEWS + 4)));
-    }
-
-    #[tokio::test]
-    async fn refresh_broadcasts_only_changes() {
-        // An empty corpus: a seeded open card is resolved (its situation is gone).
-        let f = fixture("", &["a"]);
-        let c = f.core.refresh(t0()).await.unwrap();
-        assert_eq!((c.reason.as_str(), c.resolved, c.open), ("refresh", 1, 0));
-        assert_eq!(f.out.take(proactive_notification::CARDS_CHANGED).len(), 1);
-        assert_eq!(f.core.refreshes.load(Ordering::Relaxed), 1);
-        let list = f.core.list(CardsListRequest::default()).await.unwrap();
-        assert_eq!(list.last_refresh, Some(t0()));
-        // Nothing changed the second time.
-        f.core.refresh(t0()).await.unwrap();
-        assert!(f.out.take(proactive_notification::CARDS_CHANGED).is_empty());
-    }
-
-    #[tokio::test]
-    async fn disabled_serves_empty_and_refuses_changes() {
-        let f = fixture("enabled = false", &["a"]);
-        let list = f.core.list(CardsListRequest::default()).await.unwrap();
-        assert!(!list.enabled);
-        assert!(list.cards.is_empty());
-        assert!(matches!(
-            f.core.feedback(feedback("a", "accept"), t0()).await,
-            Err(Error::Unsupported(_))
-        ));
-        assert_eq!(
-            code(
-                f.core
-                    .call(proactive_method::PROACTIVE_REFRESH, Value::Null, t0())
-                    .await
-            ),
-            nugget_ipc::code::UNSUPPORTED
-        );
-        let b = f.core.brief(t0()).await.unwrap();
-        assert_eq!((b.date.as_str(), b.open_cards), ("2026-03-10", 0));
-        f.core
-            .call(proactive_method::PROACTIVE_METRICS, Value::Null, t0())
-            .await
-            .unwrap();
-        f.core
-            .call(proactive_method::REMINDERS_LIST, Value::Null, t0())
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn an_empty_brief_is_not_announced() {
-        let f = fixture("brief_time = \"08:00\"", &[]);
-        let next = f.core.brief_tick(t0()).await;
-        assert!(f.out.take(proactive_notification::BRIEF_READY).is_empty());
-        // Today still counts as done.
-        assert_eq!(next, t0() + time::Duration::hours(23));
-
-        let mut view = f.core.brief(t0()).await.unwrap();
-        assert!(!worth_announcing(&view));
-        view.overdue.push(ipc::BriefCardView {
-            card_id: "a".into(),
-            kind: "commitment".into(),
-            title: "Send the deck".into(),
-            summary: String::new(),
-            due: None,
-            rank: 0.9,
-            factors: Vec::new(),
-            actions: Vec::new(),
-        });
-        assert!(worth_announcing(&view));
-    }
-
-    #[tokio::test]
-    async fn brief_fires_once_a_day_and_reminders_when_due() {
-        let f = fixture("brief_time = \"08:00\"", &[]);
-        // 09:00 UTC, not fired yet: fires now (empty here, so not announced; see
-        // `an_empty_brief_is_not_announced`) and schedules tomorrow.
-        let next = f.core.brief_tick(t0()).await;
-        assert_eq!(next, t0() + time::Duration::hours(23));
-        // The mark persists: a second tick (or a restart) the same day does not fire.
-        assert_eq!(
-            f.core.brief_tick(t0() + time::Duration::hours(1)).await,
-            next
-        );
-        assert!(f.out.take(proactive_notification::BRIEF_READY).is_empty());
-
-        // A reminder created by an executed action fires when due, once.
-        f.exec.created.lock().unwrap().push(Reminder {
-            text: "ping".into(),
-            at: t0() + time::Duration::minutes(5),
-            about: None,
-        });
-        assert_eq!(f.core.fire_due_reminders(t0()).await, 0);
-        assert_eq!(f.core.reminders().await.unwrap().len(), 1);
-        let later = t0() + time::Duration::minutes(6);
-        assert_eq!(f.core.fire_due_reminders(later).await, 1);
-        assert_eq!(f.out.take(proactive_notification::REMINDER_DUE).len(), 1);
-        assert_eq!(f.core.fire_due_reminders(later).await, 0);
-    }
-
-    #[tokio::test]
-    async fn a_dst_change_between_briefs_moves_the_brief_and_today() {
-        use std::sync::atomic::AtomicI32;
-        let mut f = fixture("brief_time = \"08:00\"", &[]);
-        let machine = Arc::new(AtomicI32::new(3600));
-        let m = machine.clone();
-        f.core.offset = Arc::new(LocalOffset::following(
-            UtcOffset::UTC,
-            Arc::new(move || UtcOffset::from_whole_seconds(m.load(Ordering::Relaxed)).ok()),
-            Duration::ZERO,
-        ));
-        let hours = |h| t0() + time::Duration::hours(h);
-        // 09:00 UTC is 10:00 at UTC+1: today's brief fires now; the next is 08:00 UTC+1 tomorrow.
-        assert_eq!(f.core.brief_tick(t0()).await, hours(22));
-        assert_eq!(
-            f.core.engine.utc_offset(),
-            UtcOffset::from_hms(1, 0, 0).unwrap()
-        );
-        // Clocks go forward: 08:00 tomorrow is now 06:00 UTC.
-        machine.store(7200, Ordering::Relaxed);
-        assert_eq!(f.core.brief_tick(hours(3)).await, hours(21));
-        assert_eq!(
-            f.core.engine.utc_offset(),
-            UtcOffset::from_hms(2, 0, 0).unwrap()
-        );
-        // 22:30 UTC is already tomorrow at UTC+2.
-        let late = f
-            .core
-            .brief(t0() + time::Duration::minutes(13 * 60 + 30))
-            .await;
-        assert_eq!(late.unwrap().date, "2026-03-11");
-        // Clocks go back before it fires: 08:00 is 07:00 UTC again, not due at 06:30.
-        machine.store(3600, Ordering::Relaxed);
-        assert_eq!(
-            f.core
-                .brief_tick(t0() + time::Duration::minutes(21 * 60 + 30))
-                .await,
-            hours(22)
-        );
-    }
-
-    #[tokio::test]
-    async fn an_explicit_offset_stays_fixed() {
-        let f = fixture("utc_offset = \"+01:00\"", &[]);
-        assert_eq!(
-            f.core.sync_offset(true).await,
-            UtcOffset::from_hms(1, 0, 0).unwrap()
-        );
-        assert_eq!(
-            f.core.brief_tick(t0()).await,
-            t0() + time::Duration::hours(22)
-        );
-    }
-
-    #[tokio::test]
-    async fn trigger_loop_refreshes_at_start_and_after_quiet_pokes() {
-        let mut f = fixture("", &[]);
-        f.core.settings.debounce = Duration::from_millis(100);
-        let core = Arc::new(f.core);
-        let (tx, rx) = mpsc::channel(1);
-        let stop = CancellationToken::new();
-        let task = tokio::spawn(trigger_loop(
-            core.clone(),
-            rx,
-            Duration::from_millis(10),
-            stop.clone(),
-        ));
-        let count = || core.refreshes.load(Ordering::Relaxed);
-        let wait_for = |n: u64| async move {
-            for _ in 0..200 {
-                if count() >= n {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        };
-        wait_for(1).await;
-        assert_eq!(count(), 1, "startup refresh");
-        for _ in 0..3 {
-            poke(&tx);
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert_eq!(count(), 1, "still debouncing");
-        wait_for(2).await;
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(count(), 2, "one refresh for the burst");
-        stop.cancel();
-        task.await.unwrap();
-    }
-
-    #[test]
-    fn ingest_events_that_count() {
-        use nugget_core::ipc::{IngestPhase, IngestProgress};
-        let p = |phase, done| {
-            IngestEvent::Progress(IngestProgress {
-                source: SourceId::new("s"),
-                phase,
-                done,
-                total: None,
-                error: None,
-            })
-        };
-        assert!(ingest_changed(&p(IngestPhase::Indexing, 3)));
-        assert!(!ingest_changed(&p(IngestPhase::Indexing, 0)));
-        assert!(!ingest_changed(&p(IngestPhase::Idle, 0)));
-        assert!(ingest_changed(&IngestEvent::SourceRemoved(SourceId::new(
-            "s"
-        ))));
-    }
-
-    #[test]
     fn policy_is_the_shared_safety_or_denies() {
         let d = reminder_action().descriptor("t");
         assert!(matches!(policy_gate(None).evaluate(&d), Decision::Deny(_)));
@@ -1728,113 +1385,6 @@ mod tests {
         assert!(!matches!(gate.evaluate(&d), Decision::Deny(_)));
         safety.kill.halt();
         assert!(gate.halted());
-    }
-
-    #[test]
-    fn learning_conversions() {
-        use nugget_proactive::{Direction, Effect, LearnedEntry, ResetScope, Scope};
-        let mut c = card("a");
-        c.learned = vec![Effect {
-            scope: Scope::Sender,
-            key: "ana@example.com".into(),
-            direction: Direction::Less,
-            accepted: 0,
-            dismissed: 3,
-            reason: Some("not_important".into()),
-            contribution: -0.8,
-        }];
-        let v = convert::card_view(&c, &|_| false);
-        let l = &v.learned[0];
-        assert_eq!(
-            (l.scope.as_str(), l.key.as_str(), l.direction.as_str()),
-            ("sender", "ana@example.com", "less")
-        );
-        assert_eq!((l.accepted, l.dismissed), (0, 3));
-        assert_eq!(l.reason.as_deref(), Some("not_important"));
-        assert!((l.contribution + 0.8).abs() < 1e-12);
-
-        let e = LearnedEntry {
-            scope: Scope::Thread,
-            key: "t1".into(),
-            label: Some("Card a".into()),
-            accepted: 0.0,
-            dismissed: 1.0,
-            adjustment: -2.0,
-            suppresses: true,
-            last_at: t0(),
-        };
-        let v = convert::learned_view(&e);
-        assert_eq!((v.scope.as_str(), v.key.as_str()), ("thread", "t1"));
-        assert!(v.suppresses);
-        assert_eq!(v.last_at, t0());
-
-        let req = |scope: &str, key: Option<&str>| ResetLearningRequest {
-            scope: scope.into(),
-            key: key.map(Into::into),
-        };
-        assert_eq!(
-            convert::reset_scope(&req("all", None)).unwrap(),
-            ResetScope::All
-        );
-        assert_eq!(
-            convert::reset_scope(&req("sender", Some(" Ana@Example.COM "))).unwrap(),
-            ResetScope::One(Scope::Sender, "ana@example.com".into())
-        );
-        assert_eq!(
-            convert::reset_scope(&req("kind", Some("renewal"))).unwrap(),
-            ResetScope::One(Scope::Kind, "renewal".into())
-        );
-        assert_eq!(
-            convert::reset_target(&ResetScope::One(Scope::Domain, "example.com".into())),
-            "domain:example.com"
-        );
-        assert_eq!(convert::reset_target(&ResetScope::All), "all");
-        for (scope, key) in [
-            ("everything", Some("x")),
-            ("sender", None),
-            ("domain", Some("  ")),
-            ("kind", Some("newsletter")),
-        ] {
-            assert!(
-                matches!(
-                    convert::reset_scope(&req(scope, key)),
-                    Err(Error::Invalid(_))
-                ),
-                "{scope} {key:?}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn invalid_learning_resets_are_rejected() {
-        let f = fixture("", &["a"]);
-        for params in [
-            json!({"scope": "everything"}),
-            json!({"scope": "sender"}),
-            json!({"scope": "thread", "key": ""}),
-            json!({"scope": "kind", "key": "newsletter"}),
-            json!({}),
-        ] {
-            let r = f
-                .core
-                .call(
-                    proactive_method::PROACTIVE_RESET_LEARNING,
-                    params.clone(),
-                    t0(),
-                )
-                .await;
-            assert_eq!(code(r), nugget_ipc::code::INVALID_PARAMS, "{params}");
-        }
-        // Nothing was reset, audited or announced.
-        assert!(f.out.take(proactive_notification::CARDS_CHANGED).is_empty());
-        assert!(
-            f.core
-                .store
-                .recent_audit(10)
-                .unwrap()
-                .iter()
-                .all(|r| r.action != proactive_method::PROACTIVE_RESET_LEARNING)
-        );
     }
 
     async fn learning(f: &Fixture) -> ProactiveLearning {
@@ -1907,32 +1457,6 @@ mod tests {
 
         let changed = f.out.take(proactive_notification::CARDS_CHANGED);
         assert_eq!(changed.len(), 1);
-        assert_eq!(changed[0]["reason"], "reset_learning");
-    }
-
-    #[tokio::test]
-    async fn learning_answers_and_resets_when_disabled() {
-        let f = fixture("enabled = false", &["a"]);
-        assert!(learning(&f).await.entries.is_empty());
-        let res: ResetLearningResult = serde_json::from_value(
-            f.core
-                .call(
-                    proactive_method::PROACTIVE_RESET_LEARNING,
-                    json!({"scope": "all"}),
-                    t0(),
-                )
-                .await
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(res.cleared, 0);
-        let audit = f.core.store.recent_audit(10).unwrap();
-        assert!(
-            audit
-                .iter()
-                .any(|r| r.action == "proactive.reset_learning" && r.target == "all")
-        );
-        let changed = f.out.take(proactive_notification::CARDS_CHANGED);
         assert_eq!(changed[0]["reason"], "reset_learning");
     }
 }

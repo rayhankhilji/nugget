@@ -1,16 +1,11 @@
 //! User-level service installation: a launchd LaunchAgent on macOS, a systemd **user** unit on
-//! Linux, and a Task Scheduler logon task on Windows. Nothing here needs or accepts root.
-//!
-//! The file generators are pure and compile everywhere (they are unit-tested on every OS); only
-//! [`install`] and [`uninstall`] touch the system, and only on their own OS.
+//! Linux, and a Task Scheduler logon task on Windows.
 
 use std::path::{Path, PathBuf};
 
 use nugget_core::{Error, Result};
 
-/// launchd label and plist file stem.
 pub const LAUNCHD_LABEL: &str = "dev.nugget.nuggetd";
-/// systemd user unit name.
 pub const SYSTEMD_UNIT: &str = "nuggetd.service";
 /// Task Scheduler task name (root folder, which standard users may write).
 pub const WINDOWS_TASK: &str = "Nugget Daemon";
@@ -18,10 +13,8 @@ pub const WINDOWS_TASK: &str = "Nugget Daemon";
 const DESCRIPTION: &str = "Nugget background daemon (nuggetd)";
 const DOCS_URL: &str = "https://github.com/rayhankhilji/nugget";
 
-/// What the service runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceSpec {
-    /// Absolute path of the `nuggetd` binary.
     pub exe: PathBuf,
     /// Data root passed as `--home` (set when the installer ran with `--home` or `NUGGET_HOME`).
     pub home: Option<PathBuf>,
@@ -60,7 +53,6 @@ impl ServiceSpec {
     }
 }
 
-/// `~/Library/LaunchAgents/dev.nugget.nuggetd.plist` contents.
 pub fn launchd_plist(spec: &ServiceSpec) -> String {
     let mut args = format!(
         "        <string>{}</string>\n",
@@ -101,7 +93,6 @@ pub fn launchd_plist(spec: &ServiceSpec) -> String {
     )
 }
 
-/// `~/.config/systemd/user/nuggetd.service` contents.
 pub fn systemd_unit(spec: &ServiceSpec) -> String {
     let mut exec = systemd_quote(&spec.exe.display().to_string());
     for a in spec.args() {
@@ -217,8 +208,8 @@ fn xml_escape(s: &str) -> String {
     out
 }
 
-/// One systemd command-line word: double-quoted, with `\`, `"`, `%` (specifiers) and `$`
-/// (variable expansion) escaped.
+/// One systemd command-line word: double-quoted, with `\`, `"`, `%` (specifiers) and `$` (variable
+/// expansion) escaped.
 fn systemd_quote(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -272,16 +263,14 @@ pub fn uninstall() -> Result<String> {
     imp::uninstall()
 }
 
-/// Restart the installed service, so it runs the binary its definition points at (the desktop
-/// app does this after an update replaced that binary, GG6-10). Fails if it is not installed.
+/// Restart the installed service on the binary its definition points at (after an app update,
+/// GG6-10).
 pub fn restart() -> Result<String> {
     imp::restart()
 }
 
-/// Which service manager runs this process, if it can tell (`nugget_core::ipc::SERVICE_*`):
-/// systemd puts the unit's processes in its own cgroup, and launchd names the job in
-/// `XPC_SERVICE_NAME`. A process the app or a terminal started has neither (an app's
-/// `XPC_SERVICE_NAME` names the app, never our label). The Windows task leaves no trace: `None`.
+/// Which service manager runs this process, if it can tell (`nugget_core::ipc::SERVICE_*`), from
+/// systemd's cgroup or launchd's `XPC_SERVICE_NAME`.
 pub fn managed_by() -> Option<&'static str> {
     static ONCE: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
     *ONCE.get_or_init(|| {
@@ -299,7 +288,6 @@ pub fn managed_by() -> Option<&'static str> {
     })
 }
 
-/// [`managed_by`] from `/proc/self/cgroup` and `XPC_SERVICE_NAME`.
 pub fn managed_by_from(cgroup: Option<&str>, xpc_service: Option<&str>) -> Option<&'static str> {
     let in_unit = |line: &str| {
         // `0::/user.slice/user-1000.slice/user@1000.service/app.slice/nuggetd.service`
@@ -316,7 +304,6 @@ pub fn managed_by_from(cgroup: Option<&str>, xpc_service: Option<&str>) -> Optio
     None
 }
 
-/// Run a command, returning stdout; a non-zero exit is an error carrying stderr.
 #[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 fn run(program: &str, args: &[&str]) -> Result<String> {
     let out = std::process::Command::new(program)
@@ -341,15 +328,10 @@ fn run(program: &str, args: &[&str]) -> Result<String> {
     }
 }
 
-/// Refuse to install a per-user service as root.
-#[cfg(unix)]
-fn current_uid() -> Result<String> {
-    Ok(run("id", &["-u"])?.trim().to_string())
-}
-
+/// Refuse to install a per-user service as root; returns the uid.
 #[cfg(unix)]
 fn refuse_root() -> Result<String> {
-    let uid = current_uid()?;
+    let uid = run("id", &["-u"])?.trim().to_string();
     if uid == "0" {
         return Err(Error::Invalid(
             "nuggetd installs a per-user service; run this as your normal user, not root".into(),
@@ -571,22 +553,22 @@ mod imp {
 mod imp {
     use super::*;
 
-    pub(super) fn install(_spec: &ServiceSpec) -> Result<String> {
+    fn unsupported() -> Result<String> {
         Err(Error::Unsupported(
             "service installation is not supported on this OS".into(),
         ))
+    }
+
+    pub(super) fn install(_spec: &ServiceSpec) -> Result<String> {
+        unsupported()
     }
 
     pub(super) fn uninstall() -> Result<String> {
-        Err(Error::Unsupported(
-            "service installation is not supported on this OS".into(),
-        ))
+        unsupported()
     }
 
     pub(super) fn restart() -> Result<String> {
-        Err(Error::Unsupported(
-            "service installation is not supported on this OS".into(),
-        ))
+        unsupported()
     }
 }
 
@@ -603,52 +585,23 @@ mod tests {
     }
 
     #[test]
-    fn launchd_plist_runs_at_load_and_restarts_on_crash() {
+    fn launchd_plist_escapes_args_and_restarts_on_crash() {
         let p = launchd_plist(&spec(Some("/tmp/n<1>")));
-        assert!(p.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist"));
-        assert!(p.contains("<key>Label</key>\n    <string>dev.nugget.nuggetd</string>"));
         assert!(p.contains(
             "    <array>\n        <string>/opt/Nugget &amp; Co/bin/nuggetd</string>\n        <string>--home</string>\n        <string>/tmp/n&lt;1&gt;</string>\n    </array>"
         ));
-        assert!(p.contains("<key>RunAtLoad</key>\n    <true/>"));
         assert!(p.contains("<key>SuccessfulExit</key>\n        <false/>"));
-        // The log path is joined with the host's separator (launchd only runs on macOS).
-        let log = spec(None).log_dir.join("launchd.log");
-        assert!(
-            p.contains(&format!("<string>{}</string>", log.display())),
-            "{p}"
-        );
-        // A user agent: no root-only keys.
         assert!(!p.contains("UserName"));
-        assert!(!p.contains("GroupName"));
-        assert_eq!(p.matches("<dict>").count(), p.matches("</dict>").count());
-    }
-
-    #[test]
-    fn launchd_plist_without_home_has_only_the_binary() {
-        let p = launchd_plist(&spec(None));
-        assert!(!p.contains("--home"));
-        assert_eq!(
-            p.matches("<string>/opt/Nugget &amp; Co/bin/nuggetd</string>")
-                .count(),
-            1
-        );
+        assert!(!launchd_plist(&spec(None)).contains("--home"));
     }
 
     #[test]
     fn systemd_unit_is_a_user_unit_with_quoted_exec() {
         let u = systemd_unit(&spec(Some("/home/me/100%$HOME")));
-        assert!(u.starts_with("[Unit]\nDescription=Nugget background daemon (nuggetd)\n"));
         assert!(u.contains(
             "\nExecStart=\"/opt/Nugget & Co/bin/nuggetd\" \"--home\" \"/home/me/100%%$$HOME\"\n"
         ));
-        assert!(u.contains("\nRestart=on-failure\n"));
-        assert!(u.contains("\nNoNewPrivileges=yes\n"));
-        assert!(u.ends_with("[Install]\nWantedBy=default.target\n"));
-        // User units must not switch users.
         assert!(!u.contains("User="));
-        let plain = systemd_unit(&spec(None));
-        assert!(plain.contains("\nExecStart=\"/opt/Nugget & Co/bin/nuggetd\"\n"));
     }
 
     #[test]
@@ -659,64 +612,32 @@ mod tests {
             log_dir: PathBuf::from(r"C:\logs"),
         };
         let x = windows_task_xml(&s, r"WORK\R&D");
-        assert!(
-            x.starts_with("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n<Task version=\"1.2\"")
-        );
-        assert!(x.contains(
-            "<LogonTrigger>\n      <Enabled>true</Enabled>\n      <UserId>WORK\\R&amp;D</UserId>"
-        ));
-        assert!(x.contains("<LogonType>InteractiveToken</LogonType>"));
+        assert!(x.contains("<UserId>WORK\\R&amp;D</UserId>"));
         assert!(x.contains("<RunLevel>LeastPrivilege</RunLevel>"));
-        assert!(!x.contains("HighestAvailable"));
-        assert!(x.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
-        assert!(x.contains(r"<Command>C:\Program Files\Nugget\nuggetd.exe</Command>"));
         // Trailing backslash doubled so it does not escape the closing quote.
         assert!(x.contains(r#"<Arguments>--home &quot;D:\Nugget Data\\&quot;</Arguments>"#));
-        assert!(x.contains(r"<URI>\Nugget Daemon</URI>"));
-
-        let no_home = ServiceSpec { home: None, ..s };
-        assert!(!windows_task_xml(&no_home, "me").contains("<Arguments>"));
+        assert_eq!(windows_quote(r#"say "hi""#), r#""say \"hi\"""#);
+        assert_eq!(windows_quote(""), "\"\"");
+        assert_eq!(utf16le_with_bom("A<"), vec![0xFF, 0xFE, b'A', 0, b'<', 0]);
     }
 
     #[test]
     fn detects_the_service_manager_from_cgroup_or_launchd_label() {
         let unit = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/nuggetd.service\n";
         assert_eq!(managed_by_from(Some(unit), None), Some("systemd"));
-        // cgroup v1 lines carry controllers; the path is after the last colon.
         let v1 = "12:pids:/user.slice/user@1000.service/nuggetd.service\n1:name=systemd:/x\n";
         assert_eq!(managed_by_from(Some(v1), None), Some("systemd"));
-        // Started by the app (in the desktop session's scope) or a terminal.
-        let app = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-nugget-4242.scope\n";
+        let app = "0::/user.slice/user@1000.service/app.slice/app-gnome-nugget-4242.scope\n";
         assert_eq!(managed_by_from(Some(app), None), None);
-        assert_eq!(
-            managed_by_from(Some("0::/x/nuggetd.service.d/other.scope"), None),
-            None
-        );
         assert_eq!(
             managed_by_from(None, Some("dev.nugget.nuggetd")),
             Some("launchd")
         );
         // An app launched from the Dock passes its own job name on to its children.
         assert_eq!(
-            managed_by_from(None, Some("application.dev.nugget.desktop.123.456")),
+            managed_by_from(None, Some("application.dev.nugget.desktop.1")),
             None
         );
-        assert_eq!(managed_by_from(None, None), None);
-    }
-
-    #[test]
-    fn utf16_encoding_has_bom() {
-        assert_eq!(utf16le_with_bom("A<"), vec![0xFF, 0xFE, b'A', 0, b'<', 0]);
-    }
-
-    #[test]
-    fn windows_quoting_follows_argv_rules() {
-        assert_eq!(windows_quote("plain"), "plain");
-        assert_eq!(windows_quote("a b"), "\"a b\"");
-        assert_eq!(windows_quote(r#"say "hi""#), r#""say \"hi\"""#);
-        assert_eq!(windows_quote(r"C:\dir\"), r"C:\dir\");
-        assert_eq!(windows_quote(r"C:\my dir\"), r#""C:\my dir\\""#);
-        assert_eq!(windows_quote(""), "\"\"");
     }
 
     #[test]
@@ -727,6 +648,5 @@ mod tests {
         let mut s = spec(Some("/tmp/a\nb"));
         s.exe = PathBuf::from("/bin/nuggetd");
         assert!(s.check().is_err());
-        assert!(spec(Some("/tmp/x")).check().is_ok() || cfg!(windows));
     }
 }

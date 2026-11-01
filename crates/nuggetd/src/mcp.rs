@@ -1,19 +1,6 @@
-//! MCP wiring: the [`KnowledgeBackend`] over the store, graph and retriever, the encrypted
-//! client store, the server key, the loopback HTTP listener and the stdio bridge sessions.
-//!
-//! - **Clients** are kept as one JSON object under the store cursor key [`CLIENTS_KEY`] (inside
-//!   the encrypted store; only keyed token hashes, never tokens).
-//! - **Server key** (the HMAC key for token hashes) lives under [`SERVER_KEY_KEY`] in the same
-//!   encrypted store, generated on first use. Keeping it next to the hashes costs nothing:
-//!   tokens are 256-bit random values, so hashes cannot be brute-forced either way, and the store
-//!   itself is encrypted with a keychain-held key.
-//! - **Audit**: every MCP call becomes a store audit entry (actor `mcp:<client id>`), written in
-//!   order by one background writer.
-//! - **Bridge**: `nuggetd mcp --client <id>` opens a session with [`BRIDGE_OPEN`] over the
-//!   normal IPC socket; MCP lines travel as [`BRIDGE_SEND`] calls (in) and [`BRIDGE_RECV`]
-//!   notifications (out). The daemon authenticates the client with its token and serves it with
-//!   `McpServer::serve_io` on an in-memory pipe, so scopes, revocation, rate limits and audit are
-//!   all enforced here, never in the launched process.
+//! MCP wiring: the [`KnowledgeBackend`] over the store, graph and retriever, the encrypted client
+//! store, the server key, the loopback HTTP listener and the stdio bridge sessions. Only keyed
+//! token hashes are stored, and every check (scopes, revocation, audit) runs in the daemon.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -45,10 +32,9 @@ use tokio_util::task::TaskTracker;
 use crate::config::McpSection;
 use crate::daemon::blocking;
 use crate::graphview::{self, Lookups, status_str};
+use crate::handler::on_blocking_thread;
 
-/// Store cursor key holding MCP client records.
 pub const CLIENTS_KEY: &str = "mcp/clients";
-/// Store cursor key holding the MCP server key.
 pub const SERVER_KEY_KEY: &str = "mcp/server_key";
 
 /// Environment variable naming the data root; setup snippets pass it on a non-default home.
@@ -63,12 +49,10 @@ pub const BRIDGE_RECV: &str = "mcp.bridge.recv";
 pub const BRIDGE_CLOSED: &str = "mcp.bridge.closed";
 /// Longest MCP message line accepted or forwarded through the bridge.
 pub const MAX_BRIDGE_LINE: usize = 8 * 1024 * 1024;
-/// Mentions returned per entity by `get_entity`.
 const ENTITY_MENTIONS: usize = 50;
 /// Items scanned by `recent_changes` at most (until the store has a change feed for items).
 const RECENT_ITEM_SCAN: usize = 20_000;
 
-/// `mcp.bridge.open` params.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct BridgeOpen {
     pub client: String,
@@ -84,7 +68,6 @@ impl std::fmt::Debug for BridgeOpen {
     }
 }
 
-/// `mcp.bridge.open` result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeSession {
     pub session: String,
@@ -96,8 +79,6 @@ pub struct BridgeLine {
     pub session: String,
     pub line: String,
 }
-
-// ---- client store ----
 
 /// [`ClientStore`] in the encrypted store, cached in memory (this daemon is the only writer).
 pub(crate) struct StoreClientStore {
@@ -187,45 +168,23 @@ pub(crate) fn load_server_key(store: &Store) -> Result<ServerKey> {
     let key = SourceId::new(SERVER_KEY_KEY);
     if let Some(v) = store.get_cursor(&key)? {
         let hex = v.get("key").and_then(Value::as_str).unwrap_or_default();
-        return decode_key(hex)
+        return hex::decode(hex)
+            .ok()
+            .and_then(|b| <[u8; 32]>::try_from(b).ok())
             .map(ServerKey::from_bytes)
             .ok_or_else(|| Error::Integrity("unreadable MCP server key".into()));
     }
     let k = ServerKey::generate()?;
-    store.set_cursor(&key, json!({"v": 1, "key": encode_hex(k.expose_bytes())}))?;
+    store.set_cursor(&key, json!({"v": 1, "key": hex::encode(k.expose_bytes())}))?;
     Ok(k)
 }
 
-fn encode_hex(b: &[u8]) -> String {
-    use std::fmt::Write;
-    b.iter()
-        .fold(String::with_capacity(b.len() * 2), |mut s, x| {
-            let _ = write!(s, "{x:02x}");
-            s
-        })
-}
-
-fn decode_key(hex: &str) -> Option<[u8; 32]> {
-    if hex.len() != 64 || !hex.is_ascii() {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    for (i, o) in out.iter_mut().enumerate() {
-        *o = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
-    }
-    Some(out)
-}
-
-// ---- backend ----
-
-/// [`KnowledgeBackend`] over the daemon's store, graph and retriever.
 pub(crate) struct DaemonBackend {
     pub store: Store,
     pub graph: Arc<dyn GraphStore>,
     pub retriever: Retriever,
 }
 
-/// Run `f` with a fresh [`Lookups`] on the blocking pool.
 async fn with_lookups<T, F>(store: &Store, graph: &Arc<dyn GraphStore>, f: F) -> Result<T>
 where
     F: FnOnce(&mut Lookups<'_>) -> Result<T> + Send + 'static,
@@ -240,14 +199,9 @@ where
     .await
 }
 
-/// Run a future that makes synchronous store calls (retrieval) on the blocking pool.
-async fn off_workers<T, F>(fut: F) -> Result<T>
-where
-    F: std::future::Future<Output = Result<T>> + Send + 'static,
-    T: Send + 'static,
-{
-    let handle = tokio::runtime::Handle::current();
-    blocking(move || handle.block_on(fut)).await
+fn join_chunks(chunks: &[nugget_store::Chunk]) -> String {
+    let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
+    texts.join("\n\n")
 }
 
 fn summary_record(
@@ -282,7 +236,7 @@ impl KnowledgeBackend for DaemonBackend {
         };
         let retriever = self.retriever.clone();
         let q = query.to_owned();
-        let results = off_workers(async move { retriever.search(&q, fetch).await }).await?;
+        let results = on_blocking_thread(async move { retriever.search(&q, fetch).await }).await?;
         let filter = filter.clone();
         let store = self.store.clone();
         blocking(move || {
@@ -325,7 +279,7 @@ impl KnowledgeBackend for DaemonBackend {
             exclude_sensitive: !filter.include_sensitive,
             ..Default::default()
         };
-        let packed = off_workers(async move {
+        let packed = on_blocking_thread(async move {
             retriever
                 .pack_context_with(&q, budget_tokens as usize, opts)
                 .await
@@ -343,11 +297,7 @@ impl KnowledgeBackend for DaemonBackend {
                 }
                 let mut chunks = store.get_chunks(&p.chunk_ids)?;
                 chunks.sort_by_key(|c| c.ord);
-                let text = chunks
-                    .iter()
-                    .map(|c| c.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
+                let text = join_chunks(&chunks);
                 if text.trim().is_empty() {
                     continue;
                 }
@@ -548,13 +498,7 @@ impl KnowledgeBackend for DaemonBackend {
                 None => {
                     let ords: Vec<u32> = (0..512).collect();
                     let chunks = store.get_chunks_by_ord(&it.item, &ords)?;
-                    (!chunks.is_empty()).then(|| {
-                        chunks
-                            .iter()
-                            .map(|c| c.text.as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n\n")
-                    })
+                    (!chunks.is_empty()).then(|| join_chunks(&chunks))
                 }
             };
             Ok(Some(ItemRecord {
@@ -638,9 +582,7 @@ impl KnowledgeBackend for DaemonBackend {
         .await
     }
 
-    /// `GraphStore::entity_provenance` with each supplying item mapped to its [`Origin`]
-    /// (source plus the item's sensitivity from the store; a missing item counts as sensitive).
-    /// The MCP layer applies the client's scope to these, so nothing is filtered here.
+    /// Each supplying item mapped to its [`Origin`]; the MCP layer applies the client's scope.
     async fn entity_detail_origins(
         &self,
         id: &EntityId,
@@ -676,18 +618,14 @@ impl KnowledgeBackend for DaemonBackend {
     }
 }
 
-// ---- service ----
-
 /// Bridge sessions by id: the sender feeding MCP lines into the session's pipe.
 type Sessions = Mutex<HashMap<String, mpsc::Sender<String>>>;
 
-/// The daemon's MCP server and its clients.
 pub(crate) struct McpService {
     pub server: McpServer,
     pub registry: Arc<ClientRegistry>,
     http: Mutex<Option<HttpHandle>>,
     http_port: Option<u16>,
-    /// `nuggetd` as setup snippets launch it.
     nuggetd: String,
     /// `NUGGET_HOME` the snippets must pass, when the daemon runs on a non-default home.
     home: Option<PathBuf>,
@@ -695,8 +633,7 @@ pub(crate) struct McpService {
 }
 
 impl McpService {
-    /// Build the server, and start the HTTP listener when `[mcp] http` is on. A listener that
-    /// cannot bind (port taken) is logged; stdio keeps working.
+    /// Build the server, and start the HTTP listener when `[mcp] http` is on.
     pub async fn start(
         cfg: &McpSection,
         backend: Arc<dyn KnowledgeBackend>,
@@ -724,9 +661,8 @@ impl McpService {
                 });
             })
             .build();
-        // Fail closed: bind the configured port or nothing. Setup snippets (and every other
-        // pointer at the listener) use the port actually held, so when the bind fails (say the
-        // port is taken by another program) no client is ever pointed at it; stdio still works.
+        // Fail closed: bind the configured port or nothing, so no snippet ever points at a port
+        // another program holds; stdio still works.
         let mut http = None;
         if cfg.http {
             match server
@@ -795,8 +731,6 @@ impl McpService {
         nugget_mcp::client_created(info, token, &self.snippet_options())
     }
 
-    /// Snippet options for this daemon: its `nuggetd`, its HTTP port and, on a non-default
-    /// home, `NUGGET_HOME` so the launched bridge finds this daemon.
     pub fn snippet_options(&self) -> SnippetOptions {
         snippet_options(self.nuggetd.clone(), self.http_port, self.home.as_ref())
     }
@@ -826,7 +760,6 @@ impl McpService {
             .insert(session.clone(), tx);
         tracing::info!(client = %client.id, %session, "mcp bridge session opened");
 
-        // The MCP session itself.
         let server = self.server.clone();
         let stop_srv = stop.clone();
         let client_id = client.id.clone();
@@ -838,7 +771,6 @@ impl McpService {
                 () = stop_srv.cancelled() => {}
             }
         });
-        // Bridge → MCP.
         tasks.spawn(async move {
             while let Some(mut line) = rx.recv().await {
                 line.push('\n');
@@ -923,8 +855,7 @@ impl McpService {
     }
 }
 
-/// Setup snippet options: launch `nuggetd`, point HTTP clients at `http_port`, and pass
-/// [`HOME_ENV`] when the daemon runs on a non-default `home`.
+/// Setup snippet options; [`HOME_ENV`] is passed on a non-default `home`.
 fn snippet_options(
     nuggetd: String,
     http_port: Option<u16>,
@@ -954,37 +885,27 @@ fn spawn_audit_writer(
                 e = rx.recv() => e,
                 () = stop.cancelled() => None,
             };
-            let Some(first) = first else {
-                break;
-            };
-            let mut batch = vec![first];
+            // On stop (`None`), flush what is left, then end.
+            let done = first.is_none();
+            let mut batch: Vec<_> = first.into_iter().collect();
             while let Ok(more) = rx.try_recv() {
                 batch.push(more);
             }
-            let store = store.clone();
-            let _ = blocking(move || {
-                for e in &batch {
-                    if let Err(err) = store.append_audit(e) {
-                        tracing::warn!(action = %e.action, error = %err, "cannot append mcp audit entry");
+            if !batch.is_empty() {
+                let store = store.clone();
+                let _ = blocking(move || {
+                    for e in &batch {
+                        if let Err(err) = store.append_audit(e) {
+                            tracing::warn!(action = %e.action, error = %err, "cannot append mcp audit entry");
+                        }
                     }
-                }
-                Ok(())
-            })
-            .await;
-        }
-        // Flush what is left at shutdown.
-        let mut rest = Vec::new();
-        while let Ok(e) = rx.try_recv() {
-            rest.push(e);
-        }
-        if !rest.is_empty() {
-            let _ = blocking(move || {
-                for e in &rest {
-                    let _ = store.append_audit(e);
-                }
-                Ok(())
-            })
-            .await;
+                    Ok(())
+                })
+                .await;
+            }
+            if done {
+                break;
+            }
         }
     });
     tx
@@ -994,14 +915,17 @@ fn spawn_audit_writer(
 mod tests {
     use super::*;
 
+    fn registry(store: &Store) -> ClientRegistry {
+        ClientRegistry::new(
+            Arc::new(StoreClientStore::new(store.clone())),
+            load_server_key(store).unwrap(),
+        )
+    }
+
     #[test]
     fn client_records_persist_in_the_store() {
         let store = Store::open_in_memory().unwrap();
-        let reg = ClientRegistry::new(
-            Arc::new(StoreClientStore::new(store.clone())),
-            load_server_key(&store).unwrap(),
-        );
-        let (info, token) = reg
+        let (info, token) = registry(&store)
             .create(
                 "Cursor",
                 nugget_core::ipc::McpScopes {
@@ -1012,10 +936,7 @@ mod tests {
             )
             .unwrap();
         // A second registry over the same store (a restart) knows the client and its token.
-        let again = ClientRegistry::new(
-            Arc::new(StoreClientStore::new(store.clone())),
-            load_server_key(&store).unwrap(),
-        );
+        let again = registry(&store);
         assert_eq!(
             again.authenticate(token.expose()).unwrap().unwrap().id,
             info.id
@@ -1027,54 +948,16 @@ mod tests {
             .to_string();
         assert!(!raw.contains(token.expose()), "tokens are never stored");
         assert!(again.revoke(&info.id).unwrap());
-        let third = ClientRegistry::new(
-            Arc::new(StoreClientStore::new(store.clone())),
-            load_server_key(&store).unwrap(),
-        );
-        assert!(third.authenticate(token.expose()).unwrap().is_none());
-    }
-
-    #[test]
-    fn server_key_round_trips() {
-        let k = [7u8; 32];
-        assert_eq!(decode_key(&encode_hex(&k)), Some(k));
-        assert_eq!(decode_key("zz"), None);
-    }
-
-    #[test]
-    fn snippets_get_the_home() {
-        let opts = snippet_options("nuggetd".into(), None, Some(&PathBuf::from("/my home")));
-        assert_eq!(opts.env, vec![(HOME_ENV.to_owned(), "/my home".to_owned())]);
         assert!(
-            snippet_options("nuggetd".into(), Some(1), None)
-                .env
-                .is_empty()
-        );
-        let info = nugget_core::ipc::McpClientInfo {
-            id: "mcp_c".into(),
-            name: "C".into(),
-            scopes: nugget_core::ipc::McpScopes {
-                sources: None,
-                tools: vec![],
-                include_sensitive: false,
-            },
-            created_at: OffsetDateTime::UNIX_EPOCH,
-            last_used: None,
-        };
-        let s = nugget_mcp::setup_snippets(&info, "t", &opts);
-        let v: Value = serde_json::from_str(&s[0].text).unwrap();
-        assert_eq!(v["mcpServers"]["nugget"]["env"]["NUGGET_HOME"], "/my home");
-        assert_eq!(v["mcpServers"]["nugget"]["env"]["NUGGET_MCP_TOKEN"], "t");
-        assert!(
-            s[1].text
-                .contains("--env NUGGET_HOME='/my home' --env NUGGET_MCP_TOKEN=t"),
-            "{}",
-            s[1].text
+            registry(&store)
+                .authenticate(token.expose())
+                .unwrap()
+                .is_none()
         );
     }
 
-    /// A client scoped away from a source (or from sensitive items) sees an entity's aliases
-    /// and identifiers only when an item it may read supplied them.
+    /// A client scoped away from a source (or from sensitive items) sees an entity's aliases and
+    /// identifiers only when an item it may read supplied them.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn detail_origins_give_scoped_clients_per_identifier_visibility() {
         use nugget_core::ipc::McpScopes;

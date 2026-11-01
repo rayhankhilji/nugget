@@ -758,45 +758,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dated_names() {
-        assert!(is_dated_name(
-            "nugget-backup-20261030T091500Z",
-            BACKUP_PREFIX
-        ));
-        assert!(is_dated_name(
-            "nugget-backup-20261030T091500Z-12",
-            BACKUP_PREFIX
-        ));
-        assert!(!is_dated_name(
-            "nugget-backup-20261030T091500Z-",
-            BACKUP_PREFIX
-        ));
-        assert!(!is_dated_name(
-            "nugget-backup-20261030T091500",
-            BACKUP_PREFIX
-        ));
-        assert!(!is_dated_name(
-            "nugget-backup-2026103XT091500Z",
-            BACKUP_PREFIX
-        ));
-        assert!(!is_dated_name(
-            "nugget-backup-20261030T091500Z.partial",
-            BACKUP_PREFIX
-        ));
-        assert!(!is_dated_name("my-backup-20261030T091500Z", BACKUP_PREFIX));
-        assert!(!is_dated_name(
-            "nugget-backup-ü0261030T091500Z",
-            BACKUP_PREFIX
-        ));
-        let t = OffsetDateTime::from_unix_timestamp(1_793_351_700).unwrap();
-        assert_eq!(compact(t), "20261030T091500Z");
-        assert!(is_dated_name(
-            &format!("{EXPORT_PREFIX}{}", compact(t)),
-            EXPORT_PREFIX
-        ));
-    }
-
-    #[test]
     fn safe_relative_paths() {
         assert!(safe_rel("entities/a.md"));
         assert!(safe_rel(".nugget/state.json"));

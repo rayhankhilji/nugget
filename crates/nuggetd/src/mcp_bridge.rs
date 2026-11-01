@@ -1,11 +1,4 @@
 //! `nuggetd mcp --client <id>`: the stdio bridge MCP apps launch.
-//!
-//! It reads the client's token from `NUGGET_MCP_TOKEN`, connects to the running daemon over the
-//! local IPC socket, opens a bridge session ([`crate::mcp::BRIDGE_OPEN`]) and then copies MCP
-//! messages: each stdin line becomes a [`crate::mcp::BRIDGE_SEND`] call (sent one at a time, so
-//! order is kept), and each [`crate::mcp::BRIDGE_RECV`] notification becomes a stdout line. All
-//! checks (token, scopes, revocation, rate limits, audit) happen in the daemon; this process
-//! holds no state. Nothing but MCP messages is ever written to stdout; diagnostics go to stderr.
 
 use futures::StreamExt;
 use nugget_core::paths::Paths;
@@ -41,7 +34,6 @@ pub async fn run(paths: &Paths, client: &str, token: &str) -> Result<()> {
     .await
 }
 
-/// [`run`] over any byte streams.
 pub async fn run_with<R, W>(
     paths: &Paths,
     client: &str,

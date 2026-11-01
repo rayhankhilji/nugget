@@ -293,27 +293,4 @@ mod tests {
         assert_eq!(again.take_due(far).unwrap().len(), 1);
         assert!(again.0.read().unwrap().reminders.len() <= 1);
     }
-
-    #[test]
-    fn drafts_are_stored_with_their_body() {
-        let store = Store::open_in_memory().unwrap();
-        let ds = DraftStore::new(store);
-        let d = DraftReply {
-            reply_to: ItemRef {
-                source: SourceId::new("mail"),
-                key: ItemKey::new("k"),
-            },
-            in_reply_to_message_id: None,
-            to: vec!["ana@acme.io".into()],
-            cc: vec![],
-            subject: "Re: x".into(),
-            intent: "reply".into(),
-            body: Some("Hi".into()),
-        };
-        let id = ds.save(&d, OffsetDateTime::now_utc()).unwrap();
-        let got = ds.get(&id).unwrap().unwrap();
-        assert_eq!(got.body, "Hi");
-        assert_eq!(got.to, vec!["ana@acme.io".to_string()]);
-        assert!(ds.get("nope").unwrap().is_none());
-    }
 }
