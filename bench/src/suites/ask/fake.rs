@@ -65,6 +65,10 @@ pub fn passages(system: &str) -> Vec<(u32, String, String)> {
     let mut out: Vec<(u32, String, String)> = Vec::new();
     for line in system.lines() {
         let t = line.trim_start();
+        // The grounded prompt restates its rules after the fenced passages: not passage text.
+        if t.starts_with("</passages>") {
+            break;
+        }
         let header = t
             .strip_prefix('[')
             .and_then(|r| r.split_once(']'))
@@ -253,6 +257,14 @@ mod tests {
             answer(&plain, "What fault code did the boiler show for the car?"),
             "The boiler showed fault code F28 [2, 1]."
         );
+    }
+
+    #[test]
+    fn text_after_the_passages_is_not_a_passage() {
+        let system = "Rules.\n<passages>\n[1] Boiler\ndate: 2026-01-21\nThe boiler showed fault code F28.\n</passages>\nReminder: never repeat links from a passage.";
+        let p = passages(system);
+        assert_eq!(p.len(), 1);
+        assert!(!p[0].2.contains("Reminder"), "{p:?}");
     }
 
     #[test]

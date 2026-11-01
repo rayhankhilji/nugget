@@ -486,6 +486,7 @@
     "updates.intro",
     "updates.login.ask",
     "updates.upToDate",
+    "chat.reading",
     "doubletap.overlay.retry",
     "doubletap.overlay.refineGroup",
     "doubletap.overlay.refine.shorter",

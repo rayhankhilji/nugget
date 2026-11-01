@@ -240,6 +240,7 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 |---|---|---|
 | `chat.delta` | `ChatDelta`: `{stream_id, text}` | A chat, Ask or draft stream produced text |
 | `chat.done` | `ChatDone`: `{stream_id, error, input_tokens, output_tokens}`; `error` is `null` on success | The stream ended, failed or was cancelled |
+| `ask.restarted` | `AskRestarted`: `{stream_id, provider, locality, citations, excluded_sensitive, general, date, partial}` | An Ask fell back to another provider before its first delta: replace the sources shown so far with these citations; deltas of the new provider follow |
 | `models.progress` | `ModelProgress`: `{id, downloaded, total, phase, error, reason?, http_status?}`, `phase` one of `downloading`, `verifying`, `installed`, `failed`. In `failed`, `downloaded` is the bytes staged for a resume, `error` a short plain-language message, and `reason` one of `offline`, `http_error` (with `http_status`), `captive_portal`, `stalled`, `interrupted`, `disk_full`, `integrity`, `cancelled`, `other` | A model install progressed |
 | `ingest.progress` | `IngestProgress`: `{source, phase, done, total, error}`, `phase` one of `scanning`, `indexing`, `idle`, `error` | A source's sync progressed |
 | `sources.changed` | A `SourceInfo`; or `{"id": …, "removed": true}`; or `{"lagged": n}` | A source was added, changed (including after sign-in) or removed. Treat anything but a `SourceInfo` as "refetch `sources.list`" |
