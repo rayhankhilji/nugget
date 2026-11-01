@@ -497,6 +497,76 @@ const MIGRATIONS: &[&str] = &[
         SELECT id, fts_segment(title) FROM items
         WHERE title IS NOT NULL AND fts_segment(title) IS NOT title;
     "#,
+    // v12: spelling variants (see `fts::index_form`): the FTS tables hold `fts_normalize(text)`,
+    // which folds width, Arabic and ß spellings and adds variant forms of some words. As in v11,
+    // only rows whose index form changes are re-indexed; every row's current entry is
+    // `fts_segment(text)`. `chunks_rev` (new) holds each chunk's longer words spelled backwards
+    // (`fts_reversed`) for suffix matches; it is contentless, so its triggers delete by rowid.
+    // Nothing here depends on the version number: the entry can move if migrations land before
+    // it.
+    r#"
+    CREATE VIRTUAL TABLE IF NOT EXISTS chunks_rev USING fts5 (
+        text,
+        content = '',
+        contentless_delete = 1,
+        tokenize = 'unicode61 remove_diacritics 2 categories ''L* N* Co M*'''
+    );
+    DROP TRIGGER IF EXISTS chunks_fts_ai;
+    DROP TRIGGER IF EXISTS chunks_fts_ad;
+    DROP TRIGGER IF EXISTS chunks_fts_au;
+    CREATE TRIGGER chunks_fts_ai AFTER INSERT ON chunks BEGIN
+        INSERT INTO chunks_fts (rowid, text) VALUES (new.id, fts_normalize(new.text));
+        INSERT INTO chunks_rev (rowid, text)
+            SELECT new.id, r FROM (SELECT fts_reversed(new.text) AS r) WHERE r <> '';
+    END;
+    CREATE TRIGGER chunks_fts_ad AFTER DELETE ON chunks BEGIN
+        INSERT INTO chunks_fts (chunks_fts, rowid, text)
+            VALUES ('delete', old.id, fts_normalize(old.text));
+        DELETE FROM chunks_rev WHERE rowid = old.id;
+    END;
+    CREATE TRIGGER chunks_fts_au AFTER UPDATE OF text ON chunks BEGIN
+        INSERT INTO chunks_fts (chunks_fts, rowid, text)
+            VALUES ('delete', old.id, fts_normalize(old.text));
+        INSERT INTO chunks_fts (rowid, text) VALUES (new.id, fts_normalize(new.text));
+        DELETE FROM chunks_rev WHERE rowid = old.id;
+        INSERT INTO chunks_rev (rowid, text)
+            SELECT new.id, r FROM (SELECT fts_reversed(new.text) AS r) WHERE r <> '';
+    END;
+    INSERT INTO chunks_fts (chunks_fts, rowid, text)
+        SELECT 'delete', id, fts_segment(text) FROM chunks
+        WHERE fts_normalize(text) IS NOT fts_segment(text);
+    INSERT INTO chunks_fts (rowid, text)
+        SELECT id, fts_normalize(text) FROM chunks
+        WHERE fts_normalize(text) IS NOT fts_segment(text);
+    DELETE FROM chunks_rev;
+    INSERT INTO chunks_rev (rowid, text)
+        SELECT id, r FROM (SELECT id, fts_reversed(text) AS r FROM chunks) WHERE r <> '';
+
+    DROP TRIGGER IF EXISTS items_fts_ai;
+    DROP TRIGGER IF EXISTS items_fts_ad;
+    DROP TRIGGER IF EXISTS items_fts_au;
+    CREATE TRIGGER items_fts_ai AFTER INSERT ON items BEGIN
+        INSERT INTO items_fts (rowid, title)
+            VALUES (new.id, fts_normalize(coalesce(new.title, '')));
+    END;
+    CREATE TRIGGER items_fts_ad AFTER DELETE ON items BEGIN
+        INSERT INTO items_fts (items_fts, rowid, title)
+            VALUES ('delete', old.id, fts_normalize(coalesce(old.title, '')));
+    END;
+    CREATE TRIGGER items_fts_au AFTER UPDATE OF title ON items
+        WHEN old.title IS NOT new.title BEGIN
+        INSERT INTO items_fts (items_fts, rowid, title)
+            VALUES ('delete', old.id, fts_normalize(coalesce(old.title, '')));
+        INSERT INTO items_fts (rowid, title)
+            VALUES (new.id, fts_normalize(coalesce(new.title, '')));
+    END;
+    INSERT INTO items_fts (items_fts, rowid, title)
+        SELECT 'delete', id, fts_segment(title) FROM items
+        WHERE title IS NOT NULL AND fts_normalize(title) IS NOT fts_segment(title);
+    INSERT INTO items_fts (rowid, title)
+        SELECT id, fts_normalize(title) FROM items
+        WHERE title IS NOT NULL AND fts_normalize(title) IS NOT fts_segment(title);
+    "#,
 ];
 
 /// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
@@ -545,8 +615,8 @@ pub(crate) fn user_version(conn: &Connection) -> Result<u32> {
 /// Bring the schema up to [`LATEST_VERSION`]. Returns how many migrations were applied
 /// (0 when already current). Refuses databases written by a newer build.
 pub(crate) fn migrate(conn: &mut Connection) -> Result<u32> {
-    // The FTS triggers (and v11) call `fts_segment`; register it even where the auto-extension
-    // (see `vec_ext`) has not been.
+    // The FTS triggers and migrations call the `fts_*` functions; register them even where the
+    // auto-extension (see `vec_ext`) has not been.
     crate::fts::register_functions(conn).db("register SQL functions")?;
     let current = user_version(conn)?;
     if current > LATEST_VERSION {
@@ -738,7 +808,7 @@ mod tests {
             "v10: one token"
         );
 
-        assert_eq!(migrate(&mut conn).unwrap(), 1);
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 10);
         assert_eq!(ids(&conn, "chunks_fts", "上海"), [10]);
         assert_eq!(ids(&conn, "chunks_fts", "预算"), [10]);
         assert_eq!(ids(&conn, "chunks_fts", "uber"), [20]);
@@ -769,6 +839,79 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO chunks_fts (chunks_fts) VALUES ('integrity-check');
              INSERT INTO items_fts (items_fts) VALUES ('integrity-check');",
+        )
+        .unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), 0);
+    }
+
+    /// v12 re-indexes rows with spelling variants, keeps v11's CJK entries, and fills the suffix
+    /// index.
+    #[test]
+    fn v11_database_migrates_to_v12_with_spelling_variants() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::fts::register_functions(&conn).unwrap();
+        migrate_to(&mut conn, 11);
+        conn.execute_batch(
+            "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at)
+                 VALUES (1, 's', 'a', 'Königstraße', 'h', 't', 't'),
+                        (2, 's', 'b', '上海', 'h', 't', 't'),
+                        (3, 's', 'c', 'plain', 'h', 't', 't');
+             INSERT INTO chunks (id, item_id, ord, text) VALUES
+                 (10, 1, 0, 'Lenkungsausschuss in der Königstraße'),
+                 (20, 2, 0, '我们在上海开会 والكراسي'),
+                 (30, 3, 0, 'he booked it');",
+        )
+        .unwrap();
+        let ids = |conn: &Connection, table: &str, expr: &str| -> Vec<i64> {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid"
+                ))
+                .unwrap();
+            stmt.query_map([expr], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let q = |s: &str| crate::fts::match_expr(s).unwrap();
+        assert!(ids(&conn, "chunks_fts", &q("Koenigstrasse")).is_empty());
+
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 11);
+        for word in ["Koenigstrasse", "Konigstrasse", "Königstraße"] {
+            assert_eq!(ids(&conn, "chunks_fts", &q(word)), [10], "{word}");
+            assert_eq!(ids(&conn, "items_fts", &q(word)), [1], "{word}");
+        }
+        assert_eq!(ids(&conn, "chunks_fts", &q("上海")), [20]);
+        assert_eq!(ids(&conn, "chunks_fts", &q("كراسي")), [20]);
+        assert_eq!(ids(&conn, "chunks_fts", &q("book")), [30]);
+        assert_eq!(ids(&conn, "items_fts", &q("上海")), [2]);
+        let suffix = |w: &str| crate::fts::fallback_exprs(w).unwrap().suffix;
+        assert_eq!(ids(&conn, "chunks_rev", &suffix("Ausschuss")), [10]);
+        assert_eq!(
+            ids(&conn, "chunks_rev", &suffix("raasi")),
+            Vec::<i64>::new()
+        );
+
+        // The new triggers' 'delete' matches what v12 indexed.
+        conn.execute_batch(
+            "UPDATE chunks SET text = 'Prüfungsausschuss' WHERE id = 10;
+             UPDATE items SET title = 'plain' WHERE id = 1;
+             DELETE FROM chunks WHERE id = 20;",
+        )
+        .unwrap();
+        assert!(ids(&conn, "chunks_fts", &q("Koenigstrasse")).is_empty());
+        assert_eq!(ids(&conn, "chunks_fts", &q("Pruefungsausschuss")), [10]);
+        assert!(ids(&conn, "items_fts", &q("Koenigstrasse")).is_empty());
+        assert!(ids(&conn, "chunks_fts", &q("上海")).is_empty());
+        assert_eq!(ids(&conn, "chunks_rev", &suffix("Ausschuss")), [10]);
+        let rev_docs: i64 = conn
+            .query_row("SELECT count(*) FROM chunks_rev_docsize", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rev_docs, 2, "20 is gone");
+        conn.execute_batch(
+            "INSERT INTO chunks_fts (chunks_fts) VALUES ('integrity-check');
+             INSERT INTO items_fts (items_fts) VALUES ('integrity-check');
+             INSERT INTO chunks_rev (chunks_rev) VALUES ('integrity-check');",
         )
         .unwrap();
         assert_eq!(migrate(&mut conn).unwrap(), 0);
