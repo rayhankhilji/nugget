@@ -223,6 +223,9 @@ fn fold(c: char) -> char {
         '\u{0660}'..='\u{0669}' => shift(0x0660, 0x30),
         '\u{06f0}'..='\u{06f9}' => shift(0x06f0, 0x30),
         '\u{0966}'..='\u{096f}' => shift(0x0966, 0x30),
+        // Arabic thousands and decimal separators.
+        '\u{066c}' => ',',
+        '\u{066b}' => '.',
         c => c,
     }
 }
@@ -785,6 +788,18 @@ impl Grounder {
         })
     }
 
+    /// Whether `text` ends with the first four or more letters and digits of a credential.
+    fn ends_with_secret_start(&self, text: &str) -> bool {
+        let sq: Vec<char> = squash(text).chars().collect();
+        self.corpus.secrets.iter().any(|s| {
+            let n = s.chars().count();
+            (4..n.min(sq.len() + 1)).any(|k| {
+                let tail: String = sq[sq.len() - k..].iter().collect();
+                s.starts_with(&tail)
+            })
+        })
+    }
+
     /// Note emitted (or accepted) text in `tail`.
     fn remember(&mut self, text: &str) {
         if self.corpus.secrets.is_empty() {
@@ -832,7 +847,14 @@ impl Grounder {
 
     /// Whether every value in the sentence is supported; counts values and names.
     fn check(&mut self, sentence: &str) -> bool {
-        // A credential from a sensitive source never goes into a message, whoever asked.
+        // A credential from a sensitive source never goes into a message, whoever asked; nor
+        // does its start at the end of a line ("the password is Heron-58-" ⏎ "quill").
+        if self.ends_with_secret_start(sentence) {
+            // Its rest, in the next line, is then caught as a copy too.
+            self.remember(sentence);
+            self.report.secrets_dropped += 1;
+            return false;
+        }
         if self.copies_secret(sentence) {
             self.report.secrets_dropped += 1;
             return false;
@@ -1229,6 +1251,9 @@ const CURRENCY_WORDS: &[&str] = &[
 
 /// Values in `text`, in order.
 pub(crate) fn values(text: &str) -> Vec<Value> {
+    // Arabic-Indic and other digits read as ASCII ("١٢٬٣٤٥" is 12,345).
+    let folded: String = text.chars().map(fold).collect();
+    let text = folded.as_str();
     let toks = tokenize(text);
     let mut out = Vec::new();
     // Dates whose year is known, for weekday keys; and the latest year, for the others.
@@ -1377,6 +1402,29 @@ pub(crate) fn values(text: &str) -> Vec<Value> {
                 {
                     i += 1;
                     continue;
+                }
+                // Dotted day.month dates: "03.12.2026", "03.12." (QA GG1-37).
+                let parts: Vec<&str> = n.split('.').collect();
+                if (parts.len() == 3 || (parts.len() == 2 && sym(i + 1, '.')))
+                    && let (Some(d), Some(m)) = (plain_int(parts[0], 2), plain_int(parts[1], 2))
+                    && let Some(key) = date_key(m, d)
+                {
+                    let year = parts
+                        .get(2)
+                        .and_then(|y| plain_int(y, 4))
+                        .filter(|y| *y > 1900)
+                        .map(|y| y as i32);
+                    if parts.len() == 2 || year.is_some() {
+                        dated.push((year, m, d, out.len()));
+                        out.push(Value {
+                            kind: ValueKind::Date,
+                            raw: n.to_owned(),
+                            keys: vec![key],
+                            extra: date_extra(year, d),
+                        });
+                        i += 1;
+                        continue;
+                    }
                 }
                 // ISO date 2026-11-14.
                 if let (Some(y), true, Some(m), true, Some(d)) = (
@@ -2249,8 +2297,9 @@ ravi.menon@northwind.example.com.",
             &mut g,
             &["The team has 12 people. tangerine. Otter-42. Thanks!"],
         );
-        assert!(!squash(&out).contains("tangerineotter42"), "{out:?}");
-        assert_eq!(g.report().secrets_dropped, 1);
+        // Neither its start nor its rest goes out.
+        assert_eq!(out, "The team has 12 people. Thanks!");
+        assert_eq!(g.report().secrets_dropped, 2);
     }
 
     /// QA GG1-13 and GG1-18: Arabic-Indic digits of a secret are caught; a number the thread
@@ -2276,6 +2325,13 @@ ravi.menon@northwind.example.com.",
         let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default());
         let out = stream(&mut g, &["Yes, it is still on for 2026-11-20."]);
         assert_eq!(out, "Yes, it is still on for 2026-11-20.");
+        // QA GG1-37: local formats a fact uses support the draft's values.
+        assert_eq!(keys("am 03.12. um"), keys("Donnerstag, 03.12.2026"));
+        assert_eq!(keys("12,345 درهم"), keys("١٢٬٣٤٥ درهم"));
+        // The start of a credential at the end of a line is held back with it.
+        let mut g = with_secrets();
+        let out = stream(&mut g, &["Sure, it is tangerine-\nOtter-42. We are 12."]);
+        assert_eq!(out, "We are 12.");
     }
 
     #[test]
