@@ -126,6 +126,17 @@ impl EventSink for broadcast::Sender<AgentEvent> {
     }
 }
 
+/// How [`Confirmations::answer_unless_halted`] went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answered {
+    /// The run got the answer.
+    Yes,
+    /// No such open request.
+    Unknown,
+    /// An approval after the kill switch: the request was denied instead.
+    Halted,
+}
+
 /// Pending confirmation requests, answered by the UI (through IPC) by request id. Cheap to clone.
 #[derive(Debug, Clone, Default)]
 pub struct Confirmations {
@@ -139,9 +150,28 @@ impl Confirmations {
 
     /// Answer a pending request. Returns `false` if it is unknown or already resolved.
     pub fn answer(&self, request_id: &str, approve: bool) -> bool {
-        match self.lock().remove(request_id) {
-            Some(tx) => tx.send(approve).is_ok(),
-            None => false,
+        self.answer_unless_halted(request_id, approve, || false) == Answered::Yes
+    }
+
+    /// Answer a pending request, checking `halted` (the kill switch) while the request is held:
+    /// an approval that arrives once all agents are stopped resolves the request as a denial
+    /// and reports [`Answered::Halted`] (QA MM1-4).
+    pub fn answer_unless_halted(
+        &self,
+        request_id: &str,
+        approve: bool,
+        halted: impl Fn() -> bool,
+    ) -> Answered {
+        let mut pending = self.lock();
+        let Some(tx) = pending.remove(request_id) else {
+            return Answered::Unknown;
+        };
+        let stopped = approve && halted();
+        let delivered = tx.send(approve && !stopped).is_ok();
+        match (stopped, delivered) {
+            (true, _) => Answered::Halted,
+            (false, true) => Answered::Yes,
+            (false, false) => Answered::Unknown,
         }
     }
 
@@ -164,5 +194,32 @@ impl Confirmations {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, oneshot::Sender<bool>>> {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MM1-4: an approval that arrives after the kill is a denial, reported as such.
+    #[test]
+    fn an_approval_after_the_kill_is_denied() {
+        let c = Confirmations::new();
+        let mut rx = c.register("r1");
+        assert_eq!(
+            c.answer_unless_halted("r1", true, || true),
+            Answered::Halted
+        );
+        assert_eq!(rx.try_recv(), Ok(false));
+        assert_eq!(
+            c.answer_unless_halted("r1", true, || true),
+            Answered::Unknown
+        );
+        let mut rx = c.register("r2");
+        assert_eq!(c.answer_unless_halted("r2", false, || true), Answered::Yes);
+        assert_eq!(rx.try_recv(), Ok(false));
+        let mut rx = c.register("r3");
+        assert!(c.answer("r3", true));
+        assert_eq!(rx.try_recv(), Ok(true));
     }
 }

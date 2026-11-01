@@ -590,6 +590,9 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
                     q.retrying.remove(r);
                 }
             }
+            if applied.0 > 0 {
+                inner.metrics.signal_relabelled();
+            }
             // Items now known not to be sensitive may use cloud embedders if allowed.
             if applied.1 && inner.cfg.allow_cloud_embeddings {
                 inner.reembed.notify_one();
@@ -826,6 +829,9 @@ async fn resolve_without_model(inner: &Arc<Inner>) {
     .await
     .unwrap_or(0);
     lock(&inner.triage).skipped += n;
+    if n > 0 {
+        inner.metrics.signal_relabelled();
+    }
 }
 
 /// The item if it is still pending, with the text triage reads (the stored text, else its chunks).

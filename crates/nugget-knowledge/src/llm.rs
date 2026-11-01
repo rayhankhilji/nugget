@@ -169,6 +169,17 @@ pub(crate) fn unsorted(item: &Item) -> bool {
     item.metadata.get("sensitive") == Some(&Value::Bool(true)) && !flagged_sensitive(item)
 }
 
+/// Whether the item is [`unsorted`] because triage has it queued (not unknown or failed): the
+/// model step waits for a verdict that is on its way.
+pub(crate) fn awaiting_triage(item: &Item) -> bool {
+    unsorted(item)
+        && item
+            .metadata
+            .pointer("/triage/state")
+            .and_then(Value::as_str)
+            == Some("pending")
+}
+
 /// Synthesis providers allowed for this item, best first (see the module docs).
 pub(crate) fn allowed_providers(
     router: &Router,

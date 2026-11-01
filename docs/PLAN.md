@@ -25,7 +25,8 @@ v1 needs every Blocker and High fixed and re-verified by the same QA scenarios o
 
 **Blockers**
 - **GG1-1, still open:** Double Tap obeys an instruction planted in a vault note (attacker link in 62 drafts). Fix paused until the user says continue.
-- GG2-1 (Ask obeys planted instructions), GG5-1 (card and account numbers written into the vault) and GG6-1 (onboarding indexed at LLM speed) are fixed; **re-verification on real models is pending.**
+- GG2-1 (Ask obeys planted instructions), GG5-1 (card and account numbers written into the vault) and GG6-1 (onboarding indexed at LLM speed) are **fixed and re-verified on the real 4B** (QA MM1, one 4-core Linux runner). GG6-1 was verified on Linux only.
+- MM1 did not cover: the 8B, GG6-1 on macOS and Windows, a real-model GG3 agent run, and JJ1's 1200-mail triage run. MM1 found partial fixes: GG3-2 and GG3-4 (leftovers MM1-3 and MM1-2, now fixed but not re-run by QA) and GG7-2 (the right mail is cited 8/8, but the 4B answers 5/8 correctly).
 
 **Open Highs**
 - Double Tap: non-English password, one-time-code and card fields are drafted into; the newest question in long threads is cut; drafts glue to typed text; one-line and German drafts (fix paused).

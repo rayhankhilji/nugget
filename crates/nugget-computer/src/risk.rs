@@ -216,7 +216,10 @@ pub fn classify_text(text: &str, extra: &RiskKeywords) -> Option<RiskClass> {
     ];
     lists.into_iter().find_map(|(class, builtin, extra)| {
         let hit = any_phrase(&w, builtin.iter().copied())
-            || any_phrase(&w, extra.iter().map(String::as_str));
+            || any_phrase(&w, extra.iter().map(String::as_str))
+            // Emptying the trash or deleting for good, in the nine UI languages (MM1-3).
+            || (class == RiskClass::Destroy
+                && nugget_agent::clarify::irreversible(text).is_some());
         hit.then_some(class)
     })
 }
@@ -628,6 +631,18 @@ mod tests {
             ("Reply All", None),
             ("Delete draft", Some(RiskClass::Destroy)),
             ("Empty Trash…", Some(RiskClass::Destroy)),
+            // MM1-3: other wordings and languages of emptying the trash or deleting for good.
+            ("Clear Trash", Some(RiskClass::Destroy)),
+            ("Delete forever", Some(RiskClass::Destroy)),
+            ("Papierkorb leeren", Some(RiskClass::Destroy)),
+            ("Vaciar papelera", Some(RiskClass::Destroy)),
+            ("Vider la corbeille", Some(RiskClass::Destroy)),
+            ("Esvaziar lixeira", Some(RiskClass::Destroy)),
+            ("ゴミ箱を空にする", Some(RiskClass::Destroy)),
+            ("清空回收站", Some(RiskClass::Destroy)),
+            ("ट्रैश खाली करें", Some(RiskClass::Destroy)),
+            ("إفراغ سلة المهملات", Some(RiskClass::Destroy)),
+            ("Clear search", None),
             ("Place order", Some(RiskClass::Spend)),
             ("Sign document", Some(RiskClass::Spend)),
             ("Sign in", None),

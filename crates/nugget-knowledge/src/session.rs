@@ -885,6 +885,7 @@ impl<'a> Session<'a> {
         self.restore_superseded()?;
         self.ledger(&item.source).remove(&item.key);
         self.undefer(item);
+        self.state.awaiting_triage.remove(item);
         self.since_flush += 1;
         self.stats.items_deleted += 1;
         Ok(())
@@ -945,7 +946,12 @@ impl<'a> Session<'a> {
         let fp = fingerprint(&item);
         if let Some(p) = &w.prev
             && p.fingerprint == fp
-            && (p.failures >= MAX_FAILURES || (p.failures == 0 && !w.llm_retry))
+            && (p.failures >= MAX_FAILURES
+                || (p.failures == 0
+                    && (!w.llm_retry
+                        // Still queued for triage: extracting again would change nothing.
+                        || (self.state.awaiting_triage.contains(&w.item)
+                            && crate::llm::awaiting_triage(&item)))))
         {
             let entry = Entry {
                 version: w.version.clone(),
@@ -975,6 +981,11 @@ impl<'a> Session<'a> {
             }
             Ok(Some(llm)) => {
                 self.undefer(&w.item);
+                if llm >= LLM_PENDING && crate::llm::awaiting_triage(&item) {
+                    self.state.awaiting_triage.insert(w.item.clone());
+                } else {
+                    self.state.awaiting_triage.remove(&w.item);
+                }
                 self.stats.items_processed += 1;
                 self.record(
                     &w.item,

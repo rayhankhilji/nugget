@@ -1942,8 +1942,11 @@ fn judge(st: &RunState, claim: Claim, summary: &str) -> Outcome {
         )),
         Claim::Partial => Outcome::Partial,
         Claim::Success => {
-            // A request needing a send, delete or payment that never happened (GG3-8).
-            if let Some(need) = clarify::required_risk(&st.task.goal)
+            // A request needing a send, delete or payment that never happened (GG3-8). A goal
+            // that may stop short ("draft it, don't send") cannot be told from one about a
+            // draft ("send the draft") in every language: say what happened, not success
+            // (MM1-2).
+            if let Some((need, may_stop_short)) = clarify::required_risk(&st.task.goal)
                 && !st.actions.iter().any(|a| {
                     (a.executed || a.decision == GateOutcome::Replayed)
                         && !a.is_error
@@ -1951,15 +1954,18 @@ fn judge(st: &RunState, claim: Claim, summary: &str) -> Outcome {
                         && !matches!(a.verification, Some(Verification::Failed(_)))
                 })
             {
-                return Outcome::Failed(format!(
-                    "the model reported success, but the request asks to {} and no such action \
-                     was done",
-                    match need {
-                        RiskClass::Send => "send something",
-                        RiskClass::Spend => "pay or buy",
-                        _ => "delete something",
-                    }
-                ));
+                let what = match need {
+                    RiskClass::Send => "nothing was sent",
+                    RiskClass::Spend => "nothing was paid or bought",
+                    _ => "nothing was deleted",
+                };
+                return if may_stop_short {
+                    Outcome::Unverified(format!("the model reported success; {what}"))
+                } else {
+                    Outcome::Failed(format!(
+                        "the model reported success, but the request asks for it and {what}"
+                    ))
+                };
             }
             let unverified: Vec<&str> = st
                 .mutations

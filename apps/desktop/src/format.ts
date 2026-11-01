@@ -3,13 +3,16 @@ import { dateFormat, numberFormat } from "./i18n/icu";
 
 const UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
 
-/** Decimal (SI) units, named and spaced for the current locale ("1.5 GB", "1,5 GB", "1.5 GB"). */
+/**
+ * Binary (1024) units with the usual short names, as the daemon counts them (its 50 MiB file
+ * limit reads "50 MB" in both), named and spaced for the current locale ("1.5 GB", "1,5 GB").
+ */
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "–";
   let i = 0;
   let v = n;
-  while (v >= 1000 && i < UNITS.length - 1) {
-    v /= 1000;
+  while (v >= 1024 && i < UNITS.length - 1) {
+    v /= 1024;
     i++;
   }
   const digits = i === 0 ? 0 : v < 10 ? 1 : 0;
