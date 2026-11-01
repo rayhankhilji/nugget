@@ -19,8 +19,8 @@ use crate::candidate::{
 use crate::config::{PUBLIC_MAIL_DOMAINS, ProactiveConfig};
 use crate::corpus::{CalEvent, Corpus, MailMessage, NoteDoc};
 use crate::text::{
-    asks_something, deadline_in, find_amounts, find_dates, find_promises, is_promise, own_text,
-    parse_iso_date, relative_days, sentences, stable_hash, truncate,
+    asks_something, deadline_in, en_date, find_amounts, find_dates, find_promises, is_promise,
+    own_text, parse_iso_date, relative_days, sentences, stable_hash, truncate,
 };
 
 const QUOTE_CHARS: usize = 240;
@@ -480,7 +480,8 @@ fn commitment_candidate(
     }
     let overdue = due.is_some_and(|d| d < ctx.now);
     let when = due.map(|d| d.date().to_string());
-    let title = match (owner, overdue, &when) {
+    let shown = due.map(|d| en_date(d.date()));
+    let title = match (owner, overdue, &shown) {
         (Owner::Them(who), _, Some(w)) => format!("Waiting on {who}: {name} (due {w})"),
         (Owner::Them(who), _, None) => format!("Waiting on {who}: {name}"),
         (_, true, Some(w)) => format!("Overdue since {w}: {name}"),
@@ -645,7 +646,11 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 stable_hash(&[&key_id, &ev.start.unix_timestamp().to_string()])
             ),
             kind: CandidateKind::MeetingPrep,
-            title: format!("Prepare for {} (in {hours} h)", ev.title),
+            title: format!(
+                "Prepare for {} (in {hours} hour{})",
+                ev.title,
+                if hours == 1 { "" } else { "s" }
+            ),
             detail: format!(
                 "With {}. {} related thread{}, {} note{}.",
                 names.join(", "),
@@ -1091,10 +1096,11 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
             .as_ref()
             .map(|a| format!(" — {a}"))
             .unwrap_or_default();
+        let shown = en_date(date);
         let title = if trial {
-            format!("{vendor} trial ends {date}{money}")
+            format!("{vendor} trial ends {shown}{money}")
         } else {
-            format!("{vendor} renews {date}{money}")
+            format!("{vendor} renews {shown}{money}")
         };
         let mut title_text = LocalText::new(match (trial, amount.is_some()) {
             (true, true) => "renewal.trial_amount",
@@ -1233,8 +1239,12 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 stable_hash(&[m.item.source.as_str(), m.item.key.as_str(), promise])
             ),
             kind: CandidateKind::FollowUp,
-            title: format!("You told {who}: \"{}\"", truncate(promise, 80)),
-            detail: format!("In \"{}\" on {}.", m.subject, m.date.date()),
+            title: if recipients.is_empty() {
+                format!("You promised: “{}”", truncate(promise, 80))
+            } else {
+                format!("You told {who}: “{}”", truncate(promise, 80))
+            },
+            detail: format!("In “{}” on {}.", m.subject, en_date(m.date.date())),
             title_text: Some(
                 LocalText::new(if recipients.is_empty() {
                     "follow_up.title_someone"
@@ -1416,9 +1426,9 @@ fn todo_candidate(
     let what = truncate(task, 120);
     let when = ctx.cfg.to_local(due).date();
     let title = if left < 0 {
-        format!("Overdue since {when}: {what}")
+        format!("Overdue since {}: {what}", en_date(when))
     } else {
-        format!("Due {when}: {what}")
+        format!("Due {}: {what}", en_date(when))
     };
     let remind_at = if due - Duration::days(1) > ctx.now {
         due - Duration::days(1)
@@ -1436,7 +1446,7 @@ fn todo_candidate(
         kind: CandidateKind::Commitment,
         title,
         detail: match &n.title {
-            Some(t) => format!("From your note \"{t}\"."),
+            Some(t) => format!("From your note “{t}”."),
             None => "From your notes.".into(),
         },
         title_text: Some(

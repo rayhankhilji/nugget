@@ -37,21 +37,17 @@ pub struct BriefCard {
 
 impl BriefCard {
     fn of(c: &Card) -> Self {
+        let judged = c
+            .enrichment
+            .as_ref()
+            .filter(|e| !c.sensitive && e.confidence >= 0.5);
         Self {
             card_id: c.id.clone(),
             kind: c.kind,
             title: c.title.clone(),
-            summary: c
-                .enrichment
-                .as_ref()
-                .filter(|e| !c.sensitive && e.confidence >= 0.5)
-                .map_or_else(|| c.detail.clone(), |e| e.summary.clone()),
+            summary: judged.map_or_else(|| c.detail.clone(), |e| e.summary.clone()),
             title_text: c.title_text.clone(),
-            summary_text: c
-                .enrichment
-                .is_none()
-                .then(|| c.detail_text.clone())
-                .flatten(),
+            summary_text: judged.is_none().then(|| c.detail_text.clone()).flatten(),
             due: c.due,
             rank: c.rank,
             factors: c.factors.clone(),

@@ -68,7 +68,7 @@ fn commitments_from_graph() {
     // Far-future and done commitments are out.
     assert_eq!(c.len(), 2, "{c:#?}");
     let mine = c.iter().find(|c| c.title.contains("SOC 2")).unwrap();
-    assert!(mine.title.starts_with("Due 2026-10-30"), "{}", mine.title);
+    assert!(mine.title.starts_with("Due Oct 30, 2026"), "{}", mine.title);
     assert_eq!(mine.features.direct, 1.0);
     let quote = Some("send the SOC 2 report");
     assert!(mine.evidence.iter().any(|e| e.quote.as_deref() == quote));
@@ -114,7 +114,7 @@ fn renewals_trials_and_follow_ups() {
     let c = by_kind(&p, CandidateKind::Renewal);
     assert_eq!(c.len(), 2, "{c:#?}");
     let renew = c.iter().find(|c| c.evidence[0].item == f.renewal).unwrap();
-    assert!(renew.title.contains("renews 2026-11-02") && renew.title.contains("$49.00"));
+    assert!(renew.title.contains("renews Nov 2, 2026") && renew.title.contains("$49.00"));
     let trial = c.iter().find(|c| c.evidence[0].item == f.trial).unwrap();
     assert!(trial.title.contains("trial ends") && trial.title.contains("€9.99"));
     assert_eq!(
@@ -224,7 +224,7 @@ plants\n- [x] Submit the expenses (due 2026-10-29)\n- [ ] Book flights (due 2026
     let p = Proactive::new(store, cfg());
     let c = by_kind(&p, CandidateKind::Commitment);
     assert_eq!(keys(&c), ["admin.md"]);
-    assert!(c[0].title.starts_with("Due 2026-10-30") && c[0].title.contains("lease extension"));
+    assert!(c[0].title.starts_with("Due Oct 30, 2026") && c[0].title.contains("lease extension"));
     assert!(c[0].dedup_key.starts_with("todo:"));
 }
 

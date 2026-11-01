@@ -22,7 +22,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::candidate::LocalText;
-use crate::text::truncate;
+use crate::text::{en_date, en_time, truncate};
 
 /// Draft a reply for the user to copy or open in their mail app. Never sends, and nothing is
 /// written to the mailbox.
@@ -281,18 +281,22 @@ impl Action {
                     diff.push(ctx("Invitations will be sent to the attendees."));
                 }
                 (
-                    format!("Create calendar event \"{}\"", e.title),
+                    format!("Create calendar event “{}”", e.title),
                     "calendar".to_owned(),
                     diff,
                 )
             }
             Self::Reminder(r) => (
-                format!("Remind me {}", fmt_time(r.at)),
+                format!(
+                    "Remind me on {} at {}",
+                    en_date(r.at.date()),
+                    en_time(r.at.time())
+                ),
                 "reminders".to_owned(),
                 vec![add(format!("Reminder at {}: {}", fmt_time(r.at), r.text))],
             ),
             Self::ArchiveThread(a) => (
-                format!("Archive \"{}\"", a.subject),
+                format!("Archive “{}”", a.subject),
                 "mail:inbox".to_owned(),
                 vec![
                     rm(format!(
@@ -309,7 +313,7 @@ impl Action {
                 let mut diff = vec![add(format!("New note: {}", n.title))];
                 diff.extend(n.body.lines().map(add));
                 (
-                    format!("Write note \"{}\"", n.title),
+                    format!("Write note “{}”", n.title),
                     "vault".to_owned(),
                     diff,
                 )
