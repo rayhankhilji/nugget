@@ -3376,6 +3376,73 @@ after `adc2ee50`; 4 vCPUs, AMD EPYC 9V74.
 | GG6 checks passed | 18/18 | 18/18 |
 | Chat answers correct | 10/10 | 10/10 |
 
+#### JJ1-1: sensitivity in the UI languages, and what the model may clear
+
+QA JJ1-1 found that real 4B triage cleared 13 of 22 planted sensitive mails: the model was asked
+one "sensitive?" question and answered no for health, money and legal mail. Changes:
+deterministic rules in the nine UI languages (`nugget-ingest/src/sensitivity_terms.rs`; Arabic
+matched as words with clitics, CJK as substrings, a CJK character ends a Latin word), and a
+triage schema that asks about each category (health, money, legal, identity, credentials) plus a
+topic. **A model's "not sensitive" clears an item only when all five categories are false and
+the topic is a named safe one** (work, social, shopping, travel, events, news or marketing); a
+rule hit always stays sensitive, and unknown, pending or failed triage count as sensitive.
+
+Rules only, no model (`nugget-ingest` tests, through the ingest pipeline):
+
+| | Before (`44b9e11`, QA GG7-3) | After |
+|---|---|---|
+| GG7's 45 sensitive situations, 9 languages × 5 | 5/5 en; non-English 3/40 | **45/45** |
+| GG7's ordinary mails and 61-item corpus flagged | 0 | 0/79 |
+| JJ1's 1,200-mail corpus: planted / normal / junk flagged | 8/22 / – / – | **22/22** / 0/1,157 / 0/21 |
+
+With the real 4B, JJ1's harness on a GitHub runner, run
+[41269745457](https://github.com/rayhankhilji/nugget/actions/runs/41269745457): before
+`adc2ee50`, after `5635ba58` (rules and per-category schema), 1,200 mails. Planted sensitive mails
+that stay sensitive went from 14/22 to **22/22**. **Misses:** 258 of 1,157 normal mails were
+labelled junk (22 before), 91 were kept sensitive by the model, and triage did not finish within
+the harness's 7,200 s (118 items pending, which count as sensitive; 4,172 s before).
+
+Cause, measured with the 4B in llama-server outside the daemon (`qa/HH2/triage_prompts.py`, a
+143-mail sample of the same corpus, 4-core CPU): the prefill budget charged the time to the first
+token to the document text only, so the instructions every request repeats made short batches look
+slow and the budget shrank requests to one or two mails. The 4B labels much worse in tiny batches:
+
+| Same prompt, same mails | Batches of 2 | Batches of 8 |
+|---|---|---|
+| Normal mails labelled junk | 10/40 | **0/100** |
+| Normal mails the model kept sensitive | 7/40 | **2/100** |
+| Planted sensitive the model flagged | 22/22 | 21/22 |
+
+Two other prompt variants were tried on that sample and dropped: saying "when unsure, true" only
+for the categories and "when unsure, false" for junk labelled 44/100 normal mails junk; one list
+of categories instead of five booleans cut the output from 56 to 36 tokens per item but kept 28/100
+normal mails sensitive. `0005ab51` counts the instructions in the measured rate and keeps requests
+at 1,000+ characters of documents (about 8 short mails here), within `triage_request_ms` (now
+8 s, instructions included; on very slow hardware a request may take twice that before batches
+shrink).
+
+GitHub Actions jobs failed at start-up for the whole repository while this was measured, so the
+re-run used JJ1's own harness (`realmodel.py --part triage`) locally: 300 mails (`--triage-n
+300`; 22 planted sensitive, 21 junk, 257 normal), 4 vCPUs, both builds on the same machine,
+the manifest's llama-server and models.
+
+| | Before (`5635ba58`) | After (`0005ab51`) |
+|---|---|---|
+| Planted sensitive that stay sensitive | 22/22 | 22/22 |
+| … the model also said sensitive | 22/22 | 22/22 |
+| Normal mails that end sensitive | 6/257 | **4/257** |
+| Normal mails labelled junk | 20/257 | **12/257** |
+| Junk mails labelled junk / still searchable | 21/21 / 7/7 | 21/21 / 7/7 |
+| Junk mails the model kept sensitive | 0/21 | 5/21 |
+| Fully triaged | 2,418 s | **2,285 s** |
+
+Caveats, not hidden: the full 1,200-mail run with these fixes has not run on a runner yet. The
+explicit questions make the model write about 56 output tokens per item (the 4B pretty-prints the
+JSON whatever the prompt says), more than twice the old two-boolean reply, so full triage stays
+slower than before JJ1-1 even with full batches; decode, not prefill, dominates on a CPU. In the
+local runs the four Asks during the sync are too few to compare (first-token medians 9.3 s and
+10.7 s), and the after run shared the CPU with a test build for part of the time.
+
 ### Bugs the real models exposed
 
 - **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).
