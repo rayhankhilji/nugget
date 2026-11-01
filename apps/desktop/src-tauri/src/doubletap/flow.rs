@@ -454,7 +454,14 @@ async fn redraft(app: AppHandle, generation: u64, refine: Option<RefineRequest>)
         );
     };
     let request = match refine {
-        Some(r) => refined_request(&request, &r),
+        Some(r) => {
+            let (provider, sensitive) = {
+                let dt = app.state::<DoubleTap>();
+                let m = lock(&dt.machine);
+                (m.view().provider.clone(), m.sensitive())
+            };
+            pin_refinement(refined_request(&request, &r), sensitive, provider)
+        }
         None => request,
     };
     // The kept request stays the original: a second refinement rewrites the new draft from the
@@ -492,6 +499,21 @@ pub(super) fn refined_request(original: &DraftRequest, refine: &RefineRequest) -
     r.context.field.selection = Some((start, end));
     r.instruction = Some(kind.instruction(units, refine.strict));
     r.max_tokens = Some(kind.max_tokens(units));
+    r
+}
+
+/// A refinement sends the shown draft as the field's text. When the session's draft drew on
+/// items marked sensitive (possible with a local model only), it goes to the provider that
+/// wrote that draft and is never routed again: routing could fall back to a cloud model, and
+/// the draft text would carry the sensitive items there.
+pub(super) fn pin_refinement(
+    mut r: DraftRequest,
+    sensitive: bool,
+    provider: Option<String>,
+) -> DraftRequest {
+    if sensitive && let Some(p) = provider {
+        r.provider = Some(ProviderId::new(p));
+    }
     r
 }
 
@@ -1122,6 +1144,22 @@ mod tests {
         let bare = sig("text_area", None, None, 900.0);
         assert!(bare.matches(&sig("text_area", None, None, 940.0)));
         assert!(!bare.matches(&sig("text_area", None, None, 80.0)));
+    }
+
+    #[test]
+    fn refinements_of_a_sensitive_draft_stay_with_its_provider() {
+        let rr = rr("A draft that quoted a private note.", Refinement::Shorter);
+        let mut original = request("", None);
+        original.provider = None;
+        let r = refined_request(&original, &rr);
+        assert_eq!(r.provider, None, "routed as usual");
+        let pinned = pin_refinement(r.clone(), true, Some("local".into()));
+        assert_eq!(pinned.provider, Some(ProviderId::new("local")));
+        assert_eq!(
+            pin_refinement(r.clone(), false, Some("local".into())).provider,
+            None
+        );
+        assert_eq!(pin_refinement(r, true, None).provider, None);
     }
 
     #[test]
