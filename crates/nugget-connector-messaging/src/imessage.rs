@@ -3,10 +3,22 @@
 //! The live database is never opened: `chat.db` with its `-wal` and `-shm` files is copied into
 //! a fresh private temp dir under the cache dir, the copy is read and then removed. Columns
 //! vary across macOS versions, so the queries are built from `PRAGMA table_info`.
+//!
+//! Polling is cheap while nothing changes: each pass first takes a [`Fingerprint`] of the
+//! files it would copy (size, modification time and, on Unix, inode and change time of
+//! `chat.db`, `chat.db-wal` and the address books). When it equals the one taken before the last
+//! pass that succeeded end to end, the pass copies and reads nothing and keeps every known
+//! document. Any change to any of these files (a WAL appearing or disappearing too) forces the
+//! copy; so does a file modified in the last [`SETTLE`] (coarse timestamps could hide a second
+//! write), and a full pass runs at least every [`FULL_PASS_EVERY`] whatever the fingerprint
+//! says (`since_days` moves with time). The fingerprint lives in memory only: after a restart
+//! the first pass copies.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime};
 
 use nugget_connector::CancellationToken;
 use nugget_core::{Error, Result};
@@ -232,8 +244,10 @@ fn read_book(conn: &Connection, book: &mut ContactBook) -> Result<()> {
     Ok(())
 }
 
-/// Read every address book under `dir` (copies in `tmp`). Failures are logged, never fatal.
-pub fn load_contacts(dir: &Path, tmp: &Path) -> ContactBook {
+/// Read every address book under `dir` (copies in `tmp`), and whether every one could be
+/// read. Failures are logged, never fatal.
+fn load_contacts_checked(dir: &Path, tmp: &Path) -> (ContactBook, bool) {
+    let mut complete = true;
     let mut book = ContactBook::default();
     for (i, path) in address_books(dir).into_iter().enumerate() {
         let sub = tmp.join(format!("ab{i}"));
@@ -243,10 +257,11 @@ pub fn load_contacts(dir: &Path, tmp: &Path) -> ContactBook {
             .and_then(|copy| open_copy(&copy))
             .and_then(|conn| read_book(&conn, &mut book));
         if let Err(e) = res {
+            complete = false;
             tracing::warn!(book = %path.display(), error = %e, "cannot read address book; showing handles instead");
         }
     }
-    book
+    (book, complete)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -573,11 +588,145 @@ pub fn remove_stale_copies(scratch: &Path) {
     }
 }
 
+/// A file modified more recently than this is not trusted to be unchanged by its stamp alone:
+/// file systems with coarse timestamps could hide a second write within the same tick.
+pub(crate) const SETTLE: Duration = Duration::from_secs(2);
+
+/// Copy and read the database at least this often even when its fingerprint is unchanged.
+pub(crate) const FULL_PASS_EVERY: Duration = Duration::from_secs(3600);
+
+/// Cheap identity of one file: `None` when it does not exist (a missing WAL is a valid state).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    /// Inode and change time (Unix): a file replaced by another, or rewritten with its old
+    /// modification time restored, still differs.
+    #[cfg(unix)]
+    ino: u64,
+    #[cfg(unix)]
+    ctime: (i64, i64),
+}
+
+/// Stamps of every file a pass copies, in a fixed order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Fingerprint(Vec<(PathBuf, Option<FileStamp>)>);
+
+/// `path` and its `-wal` companion.
+fn with_wal(path: &Path) -> [PathBuf; 2] {
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    [path.to_path_buf(), PathBuf::from(wal)]
+}
+
+/// The fingerprint of `db` and the address books in `contacts_dir`, if every file could be
+/// stamped and none was modified within [`SETTLE`] of now. `None` means: copy.
+fn fingerprint(db: &Path, contacts_dir: Option<&Path>) -> Option<Fingerprint> {
+    let mut files: Vec<PathBuf> = with_wal(db).into();
+    if let Some(dir) = contacts_dir {
+        for book in address_books(dir) {
+            files.extend(with_wal(&book));
+        }
+    }
+    let now = SystemTime::now();
+    let mut out = Vec::with_capacity(files.len());
+    for f in files {
+        let stamp = match std::fs::metadata(&f) {
+            Ok(m) => {
+                let modified = m.modified().ok();
+                // Unknown or recent (or in the future): not settled.
+                let settled = modified
+                    .and_then(|t| now.duration_since(t).ok())
+                    .is_some_and(|age| age >= SETTLE);
+                if !settled {
+                    return None;
+                }
+                #[cfg(unix)]
+                let stamp = {
+                    use std::os::unix::fs::MetadataExt;
+                    FileStamp {
+                        len: m.len(),
+                        modified,
+                        ino: m.ino(),
+                        ctime: (m.ctime(), m.ctime_nsec()),
+                    }
+                };
+                #[cfg(not(unix))]
+                let stamp = FileStamp {
+                    len: m.len(),
+                    modified,
+                };
+                Some(stamp)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) => return None,
+        };
+        out.push((f, stamp));
+    }
+    Some(Fingerprint(out))
+}
+
+#[derive(Default)]
+struct PollState {
+    /// Taken before the last pass that succeeded end to end, and when that pass ran.
+    last: Option<(Fingerprint, SystemTime)>,
+    /// Taken before the current pass's copy; becomes `last` if the pass succeeds.
+    pending: Option<Fingerprint>,
+}
+
 pub(crate) struct IMessageReader {
     pub db: PathBuf,
     pub contacts_dir: Option<PathBuf>,
     /// Parent of the per-pass temp dirs (under the cache dir).
     pub scratch: PathBuf,
+    state: Mutex<PollState>,
+    /// Passes that copied the database (for tests).
+    copies: AtomicUsize,
+    /// [`FULL_PASS_EVERY`] (shorter in tests).
+    full_pass_every: Duration,
+}
+
+impl IMessageReader {
+    pub fn new(db: PathBuf, contacts_dir: Option<PathBuf>, scratch: PathBuf) -> Self {
+        Self {
+            db,
+            contacts_dir,
+            scratch,
+            state: Mutex::new(PollState::default()),
+            copies: AtomicUsize::new(0),
+            full_pass_every: FULL_PASS_EVERY,
+        }
+    }
+
+    /// How many passes copied the database so far.
+    #[cfg(test)]
+    pub(crate) fn copies(&self) -> usize {
+        self.copies.load(Ordering::SeqCst)
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, PollState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Whether this pass may skip the copy; otherwise forget the last fingerprint (a failed
+    /// pass must not let the next one skip) and remember this one as pending.
+    fn unchanged(&self, fp: Option<Fingerprint>) -> bool {
+        let mut st = self.state();
+        st.pending = None;
+        if let (Some(fp), Some((last, at))) = (&fp, &st.last)
+            && fp == last
+            // Wall-clock time, which (unlike `Instant` on macOS) also runs while the Mac
+            // sleeps; a clock that went backwards makes a full pass due.
+            && at.elapsed().is_ok_and(|age| age < self.full_pass_every)
+        {
+            return true;
+        }
+        st.last = None;
+        st.pending = fp;
+        false
+    }
 }
 
 impl Reader for IMessageReader {
@@ -593,13 +742,26 @@ impl Reader for IMessageReader {
         crate::settings::check_db_readable(&self.db)?;
         std::fs::create_dir_all(&self.scratch)?;
         remove_stale_copies(&self.scratch);
+        if self.unchanged(fingerprint(&self.db, self.contacts_dir.as_deref())) {
+            tracing::trace!("Messages database unchanged; skipping the copy");
+            let _ = found(Found::Keep(String::new()));
+            return Ok(());
+        }
+        self.copies.fetch_add(1, Ordering::SeqCst);
         // Removed (with the copies) when dropped, also on errors.
         let tmp = tempfile::Builder::new()
             .prefix("imessage-")
             .tempdir_in(&self.scratch)?;
         let copy = copy_db(&self.db, tmp.path(), true)?;
         let contacts = match &self.contacts_dir {
-            Some(dir) => load_contacts(dir, tmp.path()),
+            Some(dir) => {
+                let (book, complete) = load_contacts_checked(dir, tmp.path());
+                if !complete {
+                    // Names may be missing this time: do not let later passes skip the read.
+                    self.state().pending = None;
+                }
+                book
+            }
             None => ContactBook::default(),
         };
         let conn = open_copy(&copy)?;
@@ -618,6 +780,17 @@ impl Reader for IMessageReader {
 
     fn poll_interval(&self) -> Duration {
         Duration::from_secs(120)
+    }
+
+    fn remembers_passes(&self) -> bool {
+        true
+    }
+
+    fn pass_succeeded(&self) {
+        let mut st = self.state();
+        if let Some(fp) = st.pending.take() {
+            st.last = Some((fp, SystemTime::now()));
+        }
     }
 }
 
@@ -673,5 +846,208 @@ mod tests {
         assert_eq!(b.name_for("(555) 123 4567"), Some("Alice"));
         assert_eq!(b.name_for("Bob@Example.com"), Some("Bob"));
         assert_eq!(b.name_for("+44 20 7946 0000"), None);
+    }
+
+    /// A WAL-mode chat.db (old schema) with one message, written while `conn` stays open.
+    fn wal_db(dir: &Path) -> (PathBuf, Connection) {
+        let path = dir.join("chat.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
+             CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+             CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, guid TEXT, chat_identifier TEXT);
+             CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
+             CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, handle_id INTEGER, date INTEGER, is_from_me INTEGER);
+             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+             INSERT INTO handle VALUES (1, 'dan@example.com');
+             INSERT INTO chat VALUES (1, 'iMessage;-;dan@example.com', 'dan@example.com');
+             INSERT INTO chat_handle_join VALUES (1, 1);",
+        )
+        .unwrap();
+        add_message(&conn, 1);
+        (path, conn)
+    }
+
+    fn add_message(conn: &Connection, id: i64) {
+        conn.execute_batch(&format!(
+            "INSERT INTO message VALUES ({id}, 'message {id}', 1, {}, 0);
+             INSERT INTO chat_message_join VALUES (1, {id});",
+            700_000_000 + id
+        ))
+        .unwrap();
+    }
+
+    /// Set the database files' modification time an hour back, so they count as settled.
+    fn settle(db: &Path) {
+        let past = std::time::SystemTime::now() - Duration::from_secs(3600);
+        for f in with_wal(db) {
+            if f.exists() {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&f)
+                    .unwrap()
+                    .set_modified(past)
+                    .unwrap();
+            }
+        }
+    }
+
+    /// One read: (messages read, whether everything known was kept without reading).
+    fn read(r: &IMessageReader) -> (usize, bool) {
+        let (mut messages, mut keep_all) = (0, false);
+        r.read(&CancellationToken::new(), &mut |f| {
+            match f {
+                Found::Conversation(c) => messages += c.messages.len(),
+                Found::Keep(p) => keep_all |= p.is_empty(),
+            }
+            true
+        })
+        .unwrap();
+        (messages, keep_all)
+    }
+
+    fn reader(db: &Path, scratch: &Path) -> IMessageReader {
+        IMessageReader::new(db.to_path_buf(), None, scratch.to_path_buf())
+    }
+
+    /// JJ2: a poll pass copies chat.db only when it or its WAL changed since the last pass
+    /// that succeeded.
+    #[test]
+    fn unchanged_database_is_not_copied_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let scratch = tmp.path().join("scratch");
+        let (db, conn) = wal_db(tmp.path());
+        assert!(with_wal(&db)[1].exists());
+        settle(&db);
+        let r = reader(&db, &scratch);
+
+        assert_eq!(read(&r), (1, false));
+        r.pass_succeeded();
+        assert_eq!(r.copies(), 1);
+        assert_eq!(read(&r), (0, true), "unchanged: nothing read, all kept");
+        assert_eq!(read(&r), (0, true));
+        assert_eq!(r.copies(), 1);
+
+        // A write to the WAL forces the copy.
+        add_message(&conn, 2);
+        settle(&db);
+        assert_eq!(read(&r), (2, false));
+        r.pass_succeeded();
+        assert_eq!(read(&r), (0, true));
+        assert_eq!(r.copies(), 2);
+
+        // Closing checkpoints into chat.db and removes the WAL: a change, then a valid state.
+        drop(conn);
+        assert!(!with_wal(&db)[1].exists());
+        settle(&db);
+        assert_eq!(read(&r), (2, false));
+        r.pass_succeeded();
+        assert_eq!(
+            read(&r),
+            (0, true),
+            "a missing WAL is a fingerprint like any other"
+        );
+        assert_eq!(r.copies(), 3);
+
+        // A WAL appearing forces the copy too.
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch("PRAGMA wal_autocheckpoint=0;").unwrap();
+        add_message(&conn, 3);
+        assert!(with_wal(&db)[1].exists());
+        settle(&db);
+        assert_eq!(read(&r), (3, false));
+        assert_eq!(r.copies(), 4);
+        let left: Vec<_> = std::fs::read_dir(&scratch).unwrap().collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    /// A fingerprint counts only once the whole pass succeeded: until then (a pass whose
+    /// changes failed to reach the index) every pass copies again.
+    #[test]
+    fn only_a_successful_pass_records_the_fingerprint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (db, _conn) = wal_db(tmp.path());
+        settle(&db);
+        let r = reader(&db, &tmp.path().join("scratch"));
+        assert_eq!(read(&r), (1, false));
+        // No `pass_succeeded`.
+        assert_eq!(read(&r), (1, false));
+        r.pass_succeeded();
+        assert_eq!(read(&r), (0, true));
+        // A skipped pass's success refreshes nothing.
+        r.pass_succeeded();
+        assert_eq!(read(&r), (0, true));
+        assert_eq!(r.copies(), 2);
+        // A forced pass (here: a full pass is due) forgets the old fingerprint, so if it fails
+        // the next pass copies again.
+        let mut r = r;
+        r.full_pass_every = Duration::ZERO;
+        assert_eq!(read(&r), (1, false));
+        assert!(r.state().last.is_none());
+        r.full_pass_every = FULL_PASS_EVERY;
+        assert_eq!(read(&r), (1, false));
+        r.pass_succeeded();
+        assert_eq!(read(&r), (0, true));
+        assert_eq!(r.copies(), 4);
+    }
+
+    /// A pass with an address book that could not be read is not a complete pass: the next
+    /// one reads again.
+    #[test]
+    fn an_unreadable_address_book_keeps_the_next_pass_reading() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (db, _conn) = wal_db(tmp.path());
+        settle(&db);
+        let ab = tmp.path().join("AB");
+        std::fs::create_dir_all(&ab).unwrap();
+        let book = ab.join("AddressBook-v22.abcddb");
+        // Readable, but a row that cannot be read (a text primary key).
+        Connection::open(&book)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE ZABCDRECORD (Z_PK TEXT, ZFIRSTNAME TEXT);
+                 INSERT INTO ZABCDRECORD VALUES ('x', 'Ann');",
+            )
+            .unwrap();
+        settle(&book);
+        let r = IMessageReader::new(db.clone(), Some(ab), tmp.path().join("scratch"));
+        for _ in 0..2 {
+            assert_eq!(read(&r), (1, false));
+            r.pass_succeeded();
+        }
+        assert_eq!(r.copies(), 2);
+    }
+
+    /// A full pass is due once `full_pass_every` has passed by the wall clock, also when the
+    /// clock went backwards.
+    #[test]
+    fn a_full_pass_is_due_after_the_interval_or_a_clock_jump() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (db, _conn) = wal_db(tmp.path());
+        settle(&db);
+        let r = reader(&db, &tmp.path().join("scratch"));
+        assert_eq!(read(&r), (1, false));
+        r.pass_succeeded();
+        assert_eq!(read(&r), (0, true));
+        r.state().last.as_mut().unwrap().1 = SystemTime::now() - FULL_PASS_EVERY;
+        assert_eq!(read(&r), (1, false));
+        r.pass_succeeded();
+        assert_eq!(read(&r), (0, true));
+        r.state().last.as_mut().unwrap().1 = SystemTime::now() + Duration::from_secs(3600);
+        assert_eq!(read(&r), (1, false));
+        assert_eq!(r.copies(), 3);
+    }
+
+    /// A file modified just now is not trusted to be unchanged by its stamp alone.
+    #[test]
+    fn recently_modified_files_are_always_copied() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (db, _conn) = wal_db(tmp.path());
+        let r = reader(&db, &tmp.path().join("scratch"));
+        for _ in 0..3 {
+            assert_eq!(read(&r), (1, false));
+            r.pass_succeeded();
+        }
+        assert_eq!(r.copies(), 3);
     }
 }

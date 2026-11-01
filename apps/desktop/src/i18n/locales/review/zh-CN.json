@@ -1,6 +1,6 @@
 {
   "wave": "Z2",
-  "note": "Machine-translated in waves Z2, BB1, FF1 II1 and II2; a native speaker should review these keys.",
+  "note": "Machine-translated in waves Z2, BB1, FF1, II1, II2 and JJ2; a native speaker should review these keys.",
   "keys": [
     "addSource.addTitle.gdrive",
     "addSource.blurb.gcal",
@@ -617,10 +617,32 @@
     "searchui.recentWithFilters",
     "searchui.resultsFiltered",
     "searchui.savedDeleted",
+    "ask.dates.applied",
+    "ask.dates.appliedDay",
+    "ask.dates.listed",
+    "ask.dates.listedDay",
+    "ask.dates.notApplied",
+    "ask.dates.notAppliedDay",
+    "ask.partial",
+    "ask.partialHint",
+    "searchui.rename",
+    "searchui.renameSaved",
+    "searchui.renameTitle",
+    "searchui.renamed",
+    "searchui.nameTaken",
     "onboarding.welcome.leaves4",
     "updates.ask.title",
     "updates.ask.body",
     "updates.ask.stable",
-    "updates.ask.chosen"
+    "updates.ask.chosen",
+    "search.unsorted",
+    "search.unsortedTitle",
+    "status.triageOffNone",
+    "status.triageOffPending",
+    "status.triageRunning",
+    "status.triageYielding",
+    "status.triagePaused",
+    "status.triageIdle",
+    "status.triageFailed"
   ]
 }

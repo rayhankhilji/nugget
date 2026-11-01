@@ -94,11 +94,11 @@ impl ConnectorFactory for IMessageFactory {
 
     fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
         let s = IMessageSettings::parse(settings)?;
-        let reader = imessage::IMessageReader {
-            db: s.db_path()?,
-            contacts_dir: s.contacts_dir(),
-            scratch: ctx.paths.cache.join("messaging"),
-        };
+        let reader = imessage::IMessageReader::new(
+            s.db_path()?,
+            s.contacts_dir(),
+            ctx.paths.cache.join("messaging"),
+        );
         Ok(Arc::new(MessagingConnector::new(
             Arc::new(reader),
             s.common(),

@@ -805,6 +805,67 @@ mod sources {
     }
 
     #[test]
+    fn items_failed_triage_lists_retryable_failures_in_pages() {
+        let store = Store::open_in_memory().unwrap();
+        for (s, k, m) in [
+            (
+                "b",
+                "two",
+                serde_json::json!({"triage": {"state": "failed", "failures": 2, "failed_at": 100}}),
+            ),
+            (
+                "a",
+                "one",
+                serde_json::json!({"triage": {"state": "failed"}}),
+            ),
+            (
+                "a",
+                "gone",
+                serde_json::json!({"triage": {"state": "failed", "failures": 3, "failed_at": 5}}),
+            ),
+            (
+                "a",
+                "done",
+                serde_json::json!({"triage": {"state": "done"}}),
+            ),
+            (
+                "a",
+                "pending",
+                serde_json::json!({"triage": {"state": "pending", "failures": 1}}),
+            ),
+        ] {
+            store
+                .upsert_item(&NewItem::new(s, k, "h").with_metadata(m))
+                .unwrap();
+        }
+        let r = |s: &str, k: &str| nugget_core::ids::ItemRef {
+            source: SourceId::new(s),
+            key: ItemKey::new(k),
+        };
+        assert_eq!(
+            store.items_failed_triage(None, 3, 10).unwrap(),
+            vec![(r("a", "one"), 1, 0), (r("b", "two"), 2, 100)]
+        );
+        assert_eq!(
+            store.items_failed_triage(None, 4, 10).unwrap().len(),
+            3,
+            "under a higher cap the third failure is retryable"
+        );
+        assert_eq!(
+            store.items_failed_triage(None, 3, 1).unwrap(),
+            vec![(r("a", "one"), 1, 0)]
+        );
+        assert_eq!(
+            store
+                .items_failed_triage(Some(&r("a", "one")), 3, 10)
+                .unwrap(),
+            vec![(r("b", "two"), 2, 100)]
+        );
+        assert!(store.items_failed_triage(None, 3, 0).unwrap().is_empty());
+        assert!(store.items_failed_triage(None, 1, 10).unwrap().is_empty());
+    }
+
+    #[test]
     fn items_missing_embeddings_lists_text_only_items_in_pages() {
         let store = Store::open_in_memory().unwrap();
         // No vector table yet: every item with chunks is listed; chunkless items never are.
