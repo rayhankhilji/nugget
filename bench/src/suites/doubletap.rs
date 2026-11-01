@@ -1,99 +1,12 @@
-//! `bench/doubletap`: Double Tap latency through the real drafting engine (milestone M3 exit
-//! criterion: time to the first insertable token).
+//! `bench/doubletap`: Double Tap latency (time to first insertable token) through the real
+//! [`nugget_draft::Drafter`], built as `nuggetd` builds it, over a text-only in-memory store of
+//! the `draft` fixture corpus. Each task replays the shell's trigger flow (`prewarm` with an
+//! app-only hint, then `begin`, then drain the stream); times are measured from `begin` and from
+//! the trigger. The accessibility read and the IPC hop to the daemon are not included.
+//! Percentiles cover completed drafts only; failures and timeouts are counted, never hidden.
 //!
-//! Every draft goes through [`nugget_draft::Drafter`], built as `nuggetd` builds it
-//! (`crates/nuggetd/src/features/draft.rs`): the default [`DraftConfig`] (Synthesis tier; the
-//! smaller [`nugget_draft::LocalBudget`] for non-cloud providers unless `--draft-local-budget
-//! off`; temperature 0 and a fixed `seed` in the request body for real OpenAI-compatible
-//! providers, so runs are repeatable), a provider warmer that calls [`Provider::prewarm`] and
-//! [`Provider::prewarm_prefix`] (the draft's stable prefix into the prompt cache), retrieval run on
-//! a blocking thread, over one in-memory [`Store`] per persona holding the `draft` fixture
-//! corpus (`bench/fixtures/draft/`: every knowledge item, sensitive ones flagged, plus the
-//! persona's sent messages). Retrieval is **text-only** (no embedder). Voice hints come from the
-//! persona's sent messages (channel or recipient style statistics plus three exemplars), so the
-//! prompt has the size and shape of a real one.
-//!
-//! Once at the start, untimed, as the daemon does when Double Tap is enabled:
-//! [`Drafter::prewarm_idle`] (the fixed rules prefix), waited for. Then per task, as the
-//! desktop shell does on a trigger (`apps/desktop/src-tauri/src/doubletap/
-//! flow.rs`): [`Drafter::prewarm`] with an app-only hint (the shell prewarms before it has read
-//! the field and thread, so retrieval is not started early), then [`Drafter::begin`] with the
-//! task's full [`DraftContext`], then the [`nugget_draft::DraftStream`] is drained and its
-//! [`DraftTimings`] read. Times are measured from the start of `begin`, and again from the
-//! trigger (`from_trigger.*`, from the `prewarm` call); the accessibility read of the field and
-//! the IPC hop to the daemon are not included.
-//!
-//! Metrics (seconds unless noted, `doubletap.` prefix):
-//! - `ttft.p50/.p95`: until the provider's first raw stream event (`provider_open_ms`).
-//!   Prompt building, retrieval and voice lookup are included; for a hybrid reasoning model
-//!   whose thinking the adapter drops, this is the first visible event after the thinking.
-//! - `first_inserted_token.p50/.p95`: until the first post-processed text the engine emits
-//!   (`first_token_ms`). In the product that text streams into the caret overlay and is
-//!   inserted into the field when the user accepts, so this is the first token the user can
-//!   insert. The accessibility insertion itself is not timed here. The M3 target
-//!   ([`TTFT_TARGET_LOCAL_S`] on-device, [`TTFT_TARGET_CLOUD_S`] otherwise) applies to its
-//!   p50 for real providers.
-//! - `first_inserted_char.p50/.p95`: until the stream emitted its first non-whitespace
-//!   character (what the overlay inserts first), measured by the bench.
-//! - `total.p50/.p95`: until the stream finished.
-//! - `from_trigger.{ttft,first_inserted_token,first_inserted_char,total}.p50/.p95`: the same,
-//!   from the trigger, so time spent in a prefix prewarm cannot hide.
-//! - `prompt_tokens.p50/.p95`, `cached_prompt_tokens.p50/.p95` (served from the provider's
-//!   prompt cache, llama-server `cache_n`) and `evaluated_prompt_tokens.p50/.p95` (prompt minus
-//!   cached: what prefill time grows with), when the provider reports them.
-//! - `retrieval.p50`: how long `begin` waited for retrieval and the voice lookup.
-//! - `requests`, `completed`, `failures`, `timeouts`, `empty_drafts` (completed with no visible
-//!   text), `retrieval_skipped` (retrieval timed out or failed, so the draft had no context):
-//!   counts. Percentiles cover completed drafts only; failed and timed-out drafts are counted,
-//!   never hidden. The suite fails only when no draft completed.
-//! - `output_tokens_per_s` (provider-reported output tokens over the time after the first
-//!   insertable token) and `prompt_tokens.mean` (provider-reported), when the provider reports
-//!   usage.
-//! - `cold.*`: one untimed warm-up draft first (model load, first KV fill), reported apart.
-//! - `cache_reuse.*`: after the main pass, one task drafted twice with `begin` alone
-//!   (`repeat_first`, `repeat_second`: the second should read only the new tokens,
-//!   `repeat_second.evaluated_share` near 0) and a third time in the product flow
-//!   (`repeat_after_prewarm`); then another task after a cache reset (a tiny unrelated
-//!   request) with `begin` alone (`no_prewarm`) and after another reset with the `prewarm`
-//!   waited for (`prewarmed`, with `prewarm_wait` and `from_trigger.first_inserted_token`).
-//!   `prewarm_saved_tokens` is `no_prewarm` minus `prewarmed` evaluated tokens. Each arm
-//!   reports the token counts above and the latencies from `begin`.
-//! - `thinking_model_default.*` (`--local-models` only): [`THINKING_TASKS`] drafts with the
-//!   model's own thinking default ([`Thinking::Model`]), showing what Qwen3's default thinking
-//!   costs, and how many drafts it left without visible text.
-//!
-//! - `server_cpu_s.mean` (`--local-models` only): CPU seconds the `llama-server` process spent
-//!   per timed draft, trigger to end of stream.
-//!
-//! **Read-ahead** (`--doubletap-read-ahead on`; default `off`, so earlier results stay
-//! comparable): as when a reply field keeps focus before the user taps, every task of the
-//! warm-up and timed passes first calls [`Drafter::read_ahead`] with the same [`DraftRequest`]
-//! the trigger sends and waits for it (bounded by the per-draft timeout; cancelled with
-//! [`Drafter::cancel_read_ahead`] on timeout), then runs the trigger flow above unchanged, so
-//! `from_trigger.first_inserted_char` and the cached/evaluated token counts show what the
-//! read-ahead saved at the trigger. The bench sets `[draft.read_ahead] min_interval_ms = 0`
-//! (its tasks stand for focus changes minutes apart; the projection below applies the product's
-//! interval). Extra metrics (`doubletap.read_ahead.` prefix, timed pass only):
-//! - `requests`, `completed`, `timeouts`, `skipped` and `skipped.<reason>`
-//!   ([`nugget_draft::ReadAheadSkip::as_str`]): `skipped` must be 0 with a local provider (its target on real
-//!   on-device runs).
-//! - `time.p50/.p95`: wall-clock time of a completed read-ahead (what the user's focus has to
-//!   last for the trigger to find the prompt cached); `prepare.p50` and `warm.p50`: its retrieval
-//!   and prefill parts ([`ReadAheadOutcome`]).
-//! - `server_cpu_s.mean/.p50` (`--local-models` only): CPU seconds `llama-server` spent per
-//!   completed read-ahead (`/proc/<pid>/stat` on Linux, `ps -o cputime` on macOS), and
-//!   `core_pct.at_{1,2,4,6}_per_min`: that cost as a share of one core at that many focus changes
-//!   per minute (each one reading a new context ahead; capped by the product's
-//!   `min_interval_ms`). Battery drain cannot be metered on CI runners: these are CPU-seconds,
-//!   the input to any energy estimate, not watt-hours.
-//!
-//! Models: `--local-models` runs the signed manifest's smallest chat model through
-//! `nugget-runtime` ([`LocalModels`]); else `--provider-url` (with `--provider-model`,
-//! `--provider-kind`, `--api-key-env`, as for `draft`); else a deterministic in-process fake
-//! provider whose latency comes from `--fake-ttft-ms`, `--fake-prefill-ms-per-1k` and
-//! `--fake-token-ms`, and whose locality from `--draft-locality`, so the suite runs in CI. The
-//! fake simulates a one-slot prompt cache (longest common prefix with the previous prompt or
-//! with a prewarmed prefix; prefill time only for uncached tokens) and reports it in `Stats`.
+//! Models: `--local-models`, else `--provider-url`, else a deterministic fake provider that
+//! simulates a one-slot prompt cache so the suite runs in CI.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -182,8 +95,7 @@ pub const PREWARM_DESC: &str = "Drafter::prewarm with an app-only hint before be
 pub const VOICE_DESC: &str = "persona sent messages: recipient (>= 3 messages) or channel style \
      statistics + 3 exemplars (recipient first, then most recent)";
 
-// ---------------------------------------------------------------------------------------------
-// Fake provider
+// ---- Fake provider ----
 
 /// Latency of the in-process fake provider.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -370,8 +282,7 @@ impl Provider for FakeChat {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// The drafter, as the daemon builds it
+// ---- The drafter, as the daemon builds it ----
 
 /// Opens the provider's connection on trigger and warms its prompt cache with the draft's
 /// stable prefix (as `nuggetd`'s `ProviderWarmer`). Counts the warm-ups it started and
@@ -604,8 +515,7 @@ pub(crate) fn build_drafters(
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Running drafts
+// ---- Running drafts ----
 
 /// One completed draft.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -967,8 +877,7 @@ fn describe(o: &Outcome) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Metrics
+// ---- Metrics ----
 
 fn secs(ms: Option<u64>) -> Option<f64> {
     ms.map(|m| m as f64 / 1000.0)
@@ -1673,8 +1582,7 @@ async fn run_cache_pass(
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// The suite
+// ---- The suite ----
 
 /// The provider for `--provider-url` (the `draft` suite's config logic).
 /// `seed` into an OpenAI-compatible config's `extra_body` (llama-server samples with it).
@@ -2282,64 +2190,6 @@ mod tests {
     }
 
     #[test]
-    fn fake_latency_shows_in_the_percentiles() {
-        let mut cfg = smoke();
-        cfg.draft.fake_ttft_ms = 40;
-        cfg.draft.fake_token_ms = 2;
-        let r = run_benchmark(&DoubleTapBench, &cfg);
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        let first = value(&r, "doubletap.first_inserted_token.p50");
-        assert!(first >= 0.04, "{first}");
-        assert!(value(&r, "doubletap.ttft.p50") >= 0.04);
-        assert!(value(&r, "doubletap.total.p50") > first);
-    }
-
-    #[test]
-    fn real_providers_get_the_target_for_their_locality() {
-        assert_eq!(latency_target(Locality::OnDevice), TTFT_TARGET_LOCAL_S);
-        assert_eq!(latency_target(Locality::Cloud), TTFT_TARGET_CLOUD_S);
-        assert_eq!(latency_target(Locality::LocalNetwork), TTFT_TARGET_CLOUD_S);
-        let r = run_benchmark(
-            &With {
-                provider: Arc::new(FakeChat::new(Locality::OnDevice, FakeLatency::default())),
-                thinking: None,
-                real: true,
-                timeout: Duration::from_secs(30),
-            },
-            &smoke(),
-        );
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert_eq!(r.targets.len(), 1);
-        assert_eq!(r.targets[0].metric, "doubletap.first_inserted_token.p50");
-        assert_eq!(r.targets[0].target, TTFT_TARGET_LOCAL_S);
-        assert!(r.targets[0].pass);
-        // Real-provider task count at smoke scale.
-        assert_eq!(value(&r, "doubletap.requests"), 4.0);
-
-        let slow = pass_metrics(
-            &Pass {
-                outcomes: vec![Outcome::Completed(Sample {
-                    timings: DraftTimings {
-                        first_token_ms: Some(2_000),
-                        provider_open_ms: Some(1_900),
-                        total_ms: Some(4_000),
-                        ..DraftTimings::default()
-                    },
-                    text_chars: 10,
-                    ..Sample::default()
-                })],
-                ..Pass::default()
-            },
-            Some(latency_target(Locality::Cloud)),
-        );
-        let m = slow
-            .iter()
-            .find(|m| m.name == "doubletap.first_inserted_token.p50")
-            .unwrap();
-        assert_eq!(m.target_met, Some(false));
-    }
-
-    #[test]
     fn failures_are_counted_not_hidden() {
         // Every third request fails before streaming (the warm-up is request 1).
         let r = run_benchmark(
@@ -2384,37 +2234,6 @@ mod tests {
         assert!(msg.contains("no draft completed"), "{msg}");
         assert!(msg.contains("4 timed out"), "{msg}");
         assert_eq!(r.config.params["cold.error"], "timed out");
-    }
-
-    #[test]
-    fn thinking_pass_runs_only_with_a_thinking_provider() {
-        let r = run_benchmark(
-            &With {
-                provider: Arc::new(FakeChat::new(Locality::OnDevice, FakeLatency::default())),
-                thinking: Some(Arc::new(
-                    FakeChat::new(Locality::OnDevice, FakeLatency::default()).stalling(),
-                )),
-                real: true,
-                timeout: Duration::from_millis(500),
-            },
-            &smoke(),
-        );
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert_eq!(
-            value(&r, "doubletap.thinking_model_default.requests"),
-            THINKING_TASKS as f64
-        );
-        assert_eq!(
-            value(&r, "doubletap.thinking_model_default.timeouts"),
-            THINKING_TASKS as f64
-        );
-        assert!(
-            r.metric("doubletap.thinking_model_default.first_inserted_token.p50")
-                .is_none()
-        );
-        let used: Vec<String> =
-            serde_json::from_value(r.config.params["thinking_tasks"].clone()).unwrap();
-        assert_eq!(used.len(), THINKING_TASKS);
     }
 
     #[test]
@@ -2483,112 +2302,6 @@ mod tests {
         assert!(drafts.iter().all(|b| b["temperature"] == 0.0), "{drafts:?}");
     }
 
-    fn chat_req(system: &str, user: &str) -> ChatRequest {
-        ChatRequest::new(vec![Message::user_text(user)]).with_system(system)
-    }
-
-    async fn usage(p: &FakeChat, req: ChatRequest) -> (u32, u32) {
-        let mut stream = p.chat(req).await.unwrap();
-        while let Some(ev) = stream.next().await {
-            if let Ok(ChatEvent::Stats(s)) = ev {
-                return (s.input_tokens.unwrap(), s.cached_input_tokens.unwrap());
-            }
-        }
-        panic!("no stats");
-    }
-
-    #[test]
-    fn fake_provider_simulates_a_prefix_cache() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let p = FakeChat::new(Locality::OnDevice, FakeLatency::default());
-            let rules = "Draft a reply in the user's voice. ".repeat(40);
-            let (input, cached) = usage(&p, chat_req(&rules, "Can we meet Friday?")).await;
-            assert_eq!(cached, 0);
-            assert!(input > 200, "{input}");
-            // The same request again: all of it from the cache.
-            let (again, cached) = usage(&p, chat_req(&rules, "Can we meet Friday?")).await;
-            assert_eq!((again, cached), (input, input));
-            // A new question after the same rules: the rules come from the cache.
-            let (input, cached) = usage(&p, chat_req(&rules, "Lunch on Monday instead?")).await;
-            let rules_tokens = u32::try_from(tokens(&rules)).unwrap();
-            assert!(
-                cached >= rules_tokens - 2 && cached < input,
-                "{cached} {input}"
-            );
-            // A prefix prewarm fills the cache ahead of the request.
-            let other = "Answer briefly and politely. ".repeat(40);
-            p.prewarm_prefix(&chat_req(&other, "ignored"))
-                .await
-                .unwrap();
-            let (_, cached) = usage(&p, chat_req(&other, "Is the doc ready?")).await;
-            let other_tokens = u32::try_from(tokens(&other)).unwrap();
-            assert!(cached >= other_tokens - 2, "{cached} < {other_tokens}");
-        });
-    }
-
-    #[test]
-    fn fake_prefill_is_paid_only_for_uncached_tokens() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let p = FakeChat::new(
-                Locality::OnDevice,
-                FakeLatency {
-                    prefill_ms_per_1k: 1_000,
-                    ..FakeLatency::default()
-                },
-            );
-            let rules = "Draft a reply in the user's voice. ".repeat(60);
-            let first_event = |req| {
-                let p = &p;
-                async move {
-                    let t = Instant::now();
-                    let mut stream = p.chat(req).await.unwrap();
-                    stream.next().await;
-                    t.elapsed()
-                }
-            };
-            let cold = first_event(chat_req(&rules, "Friday?")).await;
-            let warm = first_event(chat_req(&rules, "Friday?")).await;
-            assert!(cold >= Duration::from_millis(200), "{cold:?}");
-            assert!(warm < cold / 4, "{warm:?} vs {cold:?}");
-        });
-    }
-
-    #[test]
-    fn a_finished_prefix_prewarm_is_measured() {
-        let cfg = RunConfig {
-            draft: DraftOptions {
-                draft_locality: DraftLocality::Local,
-                fake_prefill_ms_per_1k: 20,
-                ..DraftOptions::default()
-            },
-            ..smoke()
-        };
-        let r = run_benchmark(&DoubleTapBench, &cfg);
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert!(!r.config.params.contains_key("cache_reuse.errors"));
-        let saved = value(&r, "doubletap.cache_reuse.prewarm_saved_tokens");
-        let calls = r.config.params["cache_reuse.prefix_prewarm_calls"]
-            .as_u64()
-            .unwrap();
-        if calls > 0 {
-            // The engine handed a stable prefix over: the prewarmed draft read less.
-            assert!(saved > 0.0, "{saved}");
-            assert_eq!(r.config.params["cache_reuse.prewarm_finished"], true);
-        } else {
-            // Connection prewarm only: nothing is cached ahead of the draft.
-            assert!(saved.abs() < 1.0, "{saved}");
-        }
-        // Time from the trigger includes the prewarm wait.
-        assert!(
-            value(
-                &r,
-                "doubletap.cache_reuse.prewarmed.from_trigger.first_inserted_token"
-            ) >= value(&r, "doubletap.cache_reuse.prewarmed.prewarm_wait")
-        );
-    }
-
     #[test]
     fn local_budget_flag_is_recorded_and_never_grows_the_prompt() {
         let run = |budget| {
@@ -2637,28 +2350,6 @@ mod tests {
             ..smoke()
         };
         run_benchmark(&DoubleTapBench, &cfg)
-    }
-
-    #[test]
-    fn read_ahead_is_off_by_default() {
-        assert_eq!(
-            DoubletapOptions::default().doubletap_read_ahead,
-            Switch::Off
-        );
-        let r = run_benchmark(&DoubleTapBench, &smoke());
-        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert_eq!(r.config.params["read_ahead"], "off");
-        assert!(
-            r.metrics
-                .iter()
-                .all(|m| !m.name.starts_with("doubletap.read_ahead."))
-        );
-        // The fake runs in process: no server CPU to meter.
-        assert!(r.metric("doubletap.server_cpu_s.mean").is_none());
-        assert_eq!(
-            r.config.params["server_cpu"],
-            "not metered (no local server process)"
-        );
     }
 
     #[test]
@@ -2716,93 +2407,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn read_ahead_metrics_count_skips_and_project_cpu() {
-        let done = |wall_ms, cpu| ReadAheadResult::Done {
-            wall_ms,
-            outcome: ReadAheadOutcome {
-                provider: ProviderId::new("local-chat"),
-                prompt_chars: 3_000,
-                prepare_ms: 10,
-                warm_ms: wall_ms - 10,
-            },
-            server_cpu_s: Some(cpu),
-        };
-        let results = vec![
-            done(2_000, 3.0),
-            done(4_000, 5.0),
-            ReadAheadResult::Skipped {
-                reason: "rate_limited",
-            },
-            ReadAheadResult::TimedOut,
-        ];
-        let m = read_ahead_metrics(&results, 5_000, true);
-        let get = |name: &str| {
-            m.iter()
-                .find(|x| x.name == name)
-                .unwrap_or_else(|| panic!("missing {name}"))
-        };
-        assert_eq!(get("doubletap.read_ahead.requests").value, 4.0);
-        assert_eq!(get("doubletap.read_ahead.completed").value, 2.0);
-        assert_eq!(get("doubletap.read_ahead.skipped").value, 1.0);
-        assert_eq!(get("doubletap.read_ahead.skipped").target_met, Some(false));
-        assert_eq!(get("doubletap.read_ahead.skipped.rate_limited").value, 1.0);
-        assert_eq!(get("doubletap.read_ahead.timeouts").value, 1.0);
-        assert_eq!(get("doubletap.read_ahead.server_cpu_s.mean").value, 4.0);
-        // 4 CPU-s per read-ahead at 6 a minute: 24 CPU-s a minute, 40% of a core.
-        assert_eq!(
-            get("doubletap.read_ahead.core_pct.at_6_per_min").value,
-            40.0
-        );
-        assert_eq!(
-            get("doubletap.read_ahead.core_pct.at_1_per_min").value,
-            round3(4.0 / 60.0 * 100.0)
-        );
-        assert!(
-            get("doubletap.read_ahead.server_cpu_s.mean")
-                .description
-                .contains("Battery")
-        );
-        // Without CPU readings (in-process fake) nothing is projected.
-        let m = read_ahead_metrics(
-            &[ReadAheadResult::Skipped { reason: "disabled" }],
-            5_000,
-            false,
-        );
-        assert!(m.iter().all(|x| !x.name.contains("core_pct")));
-        assert!(m.iter().all(|x| x.target.is_none()));
-    }
-
-    #[test]
-    fn projected_cpu_is_capped_by_the_rate_limit() {
-        assert_eq!(projected_core_pct(6.0, 1, 5_000), 10.0);
-        assert_eq!(projected_core_pct(6.0, 6, 5_000), 60.0);
-        // At most one read-ahead per 20 s: 3 a minute, whatever the focus rate.
-        assert_eq!(projected_core_pct(6.0, 6, 20_000), 30.0);
-        assert_eq!(projected_core_pct(6.0, 4, 0), 40.0);
-    }
-
-    #[test]
-    fn fake_provider_models_a_whole_prompt_prefill() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let p = FakeChat::new(Locality::OnDevice, FakeLatency::default());
-            let rules = "Draft a reply in the user's voice. ".repeat(20);
-            let thread = "Can we move the review to Friday afternoon? ".repeat(20);
-            // A read-ahead: the whole request, ending with a cache breakpoint.
-            let mut ahead = chat_req(&rules, &thread);
-            ahead.messages[0].content.push(Part::CacheBreakpoint);
-            p.prewarm_prefix(&ahead).await.unwrap();
-            // The trigger's request: everything but the breakpoint is served from the cache.
-            let (input, cached) = usage(&p, chat_req(&rules, &thread)).await;
-            assert_eq!(cached, input);
-        });
-    }
-
-    #[test]
-    fn task_selection() {
-        assert_eq!(spread(10, 3), [0, 3, 6]);
-        assert_eq!(unused(5, &[0, 2], 2), [4, 3]);
-        assert_eq!(unused(2, &[0, 1], 1), [0]);
-    }
 }

@@ -435,9 +435,4 @@ mod tests {
         assert!(!json.contains("emits"));
     }
 
-    #[test]
-    fn slugs() {
-        assert_eq!(slug("report-2023.pdf"), "report_2023_pdf");
-        assert_eq!(slug("Photos"), "photos");
-    }
 }

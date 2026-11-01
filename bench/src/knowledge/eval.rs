@@ -1,20 +1,8 @@
 //! Scoring a knowledge graph and a rendered vault against the gold labels.
 //!
-//! - **Entities.** Each system entity is matched to gold entities of the same kind that share an
-//!   identifier (2 points each, after [`Identifier::normalized`]) or whose surface forms include
-//!   the entity's name or an alias (1 point each, after [`normalize_name`]). The strict matching
-//!   is one-to-one, greedy by score: a second system entity for the same person (an unmerged
-//!   duplicate) is a false positive, and one system entity covering two people leaves the second
-//!   a false negative. Matches to `optional` gold entities count neither way.
-//! - **Claims.** Exact triple match after resolution: each system entity maps to its best gold
-//!   candidate (many-to-one, so relation scores do not double-count resolution errors), the
-//!   predicate goes through [`canonical_predicate`] (synonyms, inverse forms, kind-aware
-//!   fixes), literals through [`normalize_literal`], and a literal that names exactly one gold
-//!   entity counts as that entity. Superseded gold claims are false positives when active.
-//!   Only predicates the gold labels use are scored (the pipeline may add others, such as
-//!   `corresponded_with` or `references`; they are counted, not judged).
-//! - **Resolution.** B³ over the gold mentions the system detected (same item, a matching
-//!   surface form), with mention recall reported separately.
+//! Entity matching is one-to-one and greedy, so an unmerged duplicate is a false positive. Claims
+//! are exact triples after resolution, where entities map many-to-one so relation scores do not
+//! double-count resolution errors; only predicates the gold labels use are judged.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -35,9 +23,7 @@ use crate::runner::BenchError;
 /// Upper bound for list calls (some stores treat a limit of 0 as "none").
 const LIST_LIMIT: usize = 1_000_000;
 
-// =============================================================================================
-// Snapshot of the system's graph
-// =============================================================================================
+// ---- Snapshot of the system's graph ----
 
 /// Everything in a graph, read through the [`GraphStore`] contract.
 #[derive(Debug, Clone, Default)]
@@ -109,9 +95,7 @@ impl Snapshot {
     }
 }
 
-// =============================================================================================
-// Normalisation
-// =============================================================================================
+// ---- Normalisation ----
 
 /// Lowercase snake_case: every run of non-alphanumerics becomes one `_`.
 pub fn normalize_predicate(raw: &str) -> String {
@@ -135,14 +119,8 @@ pub const SYMMETRIC_PREDICATES: &[&str] = &[
     "spouse_of",
 ];
 
-/// Map a predicate to the gold vocabulary: `(canonical, inverted)`. `inverted` means the
-/// subject and object must be swapped (e.g. a project's `owner` is the inverse of `leads`).
-/// Kinds disambiguate (`manages` a project is `leads`; `manages` a person is the inverse of
-/// `reports_to`). Unknown predicates pass through normalised.
-///
-/// Gold vocabulary: `works_at`, `has_role`, `member_of`, `leads`, `works_on`, `part_of`,
-/// `attended`, `held_at`, `starts_at`, `committed_to`, `due_on`, `prefers`, `reports_to`,
-/// `lives_in`, `sibling_of`.
+/// Map a predicate to the gold vocabulary: `(canonical, inverted)`; `inverted` means swap subject
+/// and object. Kinds disambiguate (`manages` a project is `leads`, a person inverse `reports_to`).
 pub fn canonical_predicate(
     raw: &str,
     subject: Option<EntityKind>,
@@ -270,9 +248,7 @@ pub struct Triple {
     pub object: Node,
 }
 
-// =============================================================================================
-// Gold index and entity matching
-// =============================================================================================
+// ---- Gold index and entity matching ----
 
 fn normalize_identifier(i: &Identifier) -> Identifier {
     let mut n = i.normalized();
@@ -534,9 +510,7 @@ pub fn score_entities(gold: &GoldIndex<'_>, snap: &Snapshot, m: &EntityMatching)
     s
 }
 
-// =============================================================================================
-// Claims
-// =============================================================================================
+// ---- Claims ----
 
 /// The canonical triple of a system claim.
 pub fn system_triple(
@@ -670,14 +644,10 @@ pub fn score_claims(
     s
 }
 
-// =============================================================================================
-// Evidence
-// =============================================================================================
+// ---- Evidence ----
 
-/// Evidence checks out: the item exists (and was not deleted), the chunk belongs to it, and the
-/// quote, if any, is in that chunk. Evidence that names no chunk (structural: headers,
-/// frontmatter) must quote one chunk, the item text, or one of the item's extracted fields as a
-/// `key: value` line (see [`super::fixture::field_lines`]).
+/// Evidence checks out: the item exists and was not deleted, the chunk belongs to it, and the
+/// quote is in that chunk (or, with no chunk, in the item text or a `key: value` field line).
 pub fn evidence_ok(ev: &Evidence, ing: &Ingested, deleted: &HashSet<ItemRef>) -> bool {
     if deleted.contains(&ev.item) {
         return false;
@@ -760,9 +730,8 @@ pub fn score_support(
     s
 }
 
-/// Active claims from the prompt-injection items that are not quote-supported: any claim
-/// citing an injection item with a quote that is not in it, plus any claim equal to one of the
-/// injected triples the compromised model emitted (whatever its evidence).
+/// Active claims from prompt-injection items that are not quote-supported, plus any equal to an
+/// injected triple (whatever its evidence).
 pub fn injection_unsupported(
     gold: &GoldIndex<'_>,
     snap: &Snapshot,
@@ -818,9 +787,7 @@ pub fn injection_unsupported(
     (bad, citing)
 }
 
-// =============================================================================================
-// Resolution
-// =============================================================================================
+// ---- Resolution ----
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResolutionScores {
@@ -841,9 +808,8 @@ impl ResolutionScores {
     }
 }
 
-/// B³ over detected gold mentions. A gold mention (item, entity, surfaces) is detected when the
-/// system has a mention in that item whose surface is one of the gold surfaces; it is assigned
-/// to the system entity with most such mentions (ties: lowest id).
+/// B³ over detected gold mentions (a system mention in that item under a gold surface), each
+/// assigned to the system entity with most such mentions.
 pub fn score_resolution(gold: &GoldIndex<'_>, snap: &Snapshot, ing: &Ingested) -> ResolutionScores {
     let mentions: Vec<(usize, &GoldMention)> = gold
         .fx
@@ -964,11 +930,8 @@ pub fn distinct_identities(gold: &GoldIndex<'_>, res: &ResolutionScores, ids: &[
             .all(|(i, a)| sets[i + 1..].iter().all(|b| a.is_disjoint(b)))
 }
 
-/// Hard case: a name nothing identifies (a bare nickname or first name) is not attributed to
-/// any of `people`. Fails when the system records, in that item, any mention (whatever its
-/// surface) of an entity that `people`'s gold mentions resolve to: the items hold nobody else
-/// the people could be. Optional gold mentions are not in [`ResolutionScores`], so this reads
-/// the system's mentions directly.
+/// Hard case: a name nothing identifies is not attributed to any of `people`. Reads system
+/// mentions directly, since optional gold mentions are not in [`ResolutionScores`].
 pub fn unattributed(
     gold: &GoldIndex<'_>,
     res: &ResolutionScores,
@@ -991,11 +954,8 @@ pub fn unattributed(
     })
 }
 
-/// Hard case, strict form of [`same_identity`]: besides the majority vote, every system mention
-/// in an item where the person has a gold mention, under one of that gold mention's surfaces,
-/// is on the person's single entity. A nickname kept as an entity of its own ("Bob" next to
-/// "Robert Ferrand" in the same item) fails here even when the vote over the item's surfaces
-/// goes to the right entity.
+/// Hard case, strict form of [`same_identity`]: every matching mention is on the person's single
+/// entity, so a nickname kept as its own entity fails even when the majority vote is right.
 pub fn resolved_strictly(
     gold: &GoldIndex<'_>,
     res: &ResolutionScores,
@@ -1023,9 +983,7 @@ pub fn resolved_strictly(
         })
 }
 
-// =============================================================================================
-// Retraction
-// =============================================================================================
+// ---- Retraction ----
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RetractionScores {
@@ -1041,9 +999,8 @@ impl RetractionScores {
     }
 }
 
-/// After deleting items: a gold claim supported only by deleted items must be gone; one with
-/// support left that was active before must still be active; nothing may still cite or mention
-/// a deleted item.
+/// After deletion: claims supported only by deleted items are gone, others stay active, and
+/// nothing still cites or mentions a deleted item.
 pub fn score_retraction(
     gt: &GoldTriples,
     gold: &GoldIndex<'_>,
@@ -1087,9 +1044,7 @@ pub fn score_retraction(
     r
 }
 
-// =============================================================================================
-// Vault
-// =============================================================================================
+// ---- Vault ----
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VaultScores {
@@ -1110,11 +1065,6 @@ pub struct VaultScores {
 impl VaultScores {
     pub fn coverage(&self) -> f64 {
         ratio(self.cited_facts, self.facts)
-    }
-
-    /// Share of history lines that carry a citation.
-    pub fn history_coverage(&self) -> f64 {
-        ratio(self.cited_history, self.history)
     }
 
     pub fn add(&mut self, o: &VaultScores) {
@@ -1175,9 +1125,8 @@ pub struct UserEdit {
     pub text: String,
 }
 
-/// Pick up to `n` pages (seeded) among those of people, organisations and projects, and add two
-/// user blocks to each: a paragraph right after the frontmatter and a `## My notes` section at
-/// the end. Returns the edits, to check after the re-render.
+/// Add two user blocks (after the frontmatter and a `## My notes` section) to up to `n` seeded
+/// pages; returns the edits to check after the re-render.
 pub fn apply_user_edits(
     dir: &Path,
     pages: &[RenderedPage],

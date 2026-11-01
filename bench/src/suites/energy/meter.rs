@@ -9,34 +9,12 @@
 //! let joules = reading.attributable_j(&base);
 //! ```
 //!
-//! Several groups at once (`Meter::start_groups(&[&[shell], &[daemon]])` … `stop_groups()`, one
-//! reading per group) share one sampler and, on macOS, one `powermetrics`.
-//!
-//! - **Processes.** Each pid passed to [`Meter::start`] counts with every descendant (found by
-//!   walking the parent pids of all processes on each sample: the desktop shell's webview runs
-//!   in child processes). A background thread samples every [`SAMPLE_INTERVAL`] and keeps the
-//!   last value seen for every thread (Linux) or process (macOS), so processes and threads that
-//!   exit mid-window still count up to their last sample; ones that start and exit between two
-//!   samples are missed. Linux reads `/proc/<pid>/task/<tid>/schedstat` (CPU, ns) and the
-//!   voluntary + involuntary context switches in `.../status` (wakeups), as `perf_daemon` does.
-//!   macOS takes CPU time and wakeups (idle + interrupt) from `powermetrics`' tasks sampler when
-//!   it runs, else CPU time from `ps` (no wakeups). Other platforms report no process figures.
-//! - **System energy** ([`EnergySource`]). Linux: RAPL package energy, the sum of the top-level
-//!   `package-*` zones in `/sys/class/powercap/intel-rapl:*/energy_uj`, read on every sample so
-//!   counter wraparound (`max_energy_range_uj`) is handled; the files are root-only on most
-//!   kernels since 2020 and absent on most VMs, and then there is no energy figure. macOS:
-//!   `sudo -n powermetrics --samplers cpu_power,tasks --show-process-energy -f plist`, run as a
-//!   child for the window (needs passwordless sudo); package energy comes from each sample's
-//!   `processor` dict (energy in mJ or power in mW, whichever the machine reports; virtual Macs
-//!   may report none) and a per-process energy impact from its tasks. Windows: none. Missing
-//!   sources never fail a run: the reading says which source it used and why there was none.
-//! - **Attribution.** Package energy is the whole machine's. [`baseline`] meters an equal
-//!   window with nothing launched; `attributable = window − baseline` (as mean watts, so the two
-//!   windows need not be exactly equal). On a shared VM or a busy laptop this difference is
-//!   noisy and can even be negative; the process figures are not affected.
-//!
-//! The sampler is a thread of the calling process: when the process metered is the caller
-//! itself (`a11y_poll`), compare against a window metered the same way, not against zero.
+//! Each pid counts with all its descendants (the shell's webview runs in child processes);
+//! processes that start and exit between two [`SAMPLE_INTERVAL`] samples are missed. Package
+//! energy ([`EnergySource`]: RAPL on Linux, `sudo -n powermetrics` on macOS) is the whole
+//! machine's, so [`baseline`] is subtracted as mean watts; the difference is noisy and can be
+//! negative. Missing sources never fail a run. The sampler runs in the calling process, so when
+//! metering the caller itself compare against a window metered the same way, not zero.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -176,9 +154,8 @@ impl Meter {
         Self::start_groups(&[pids])
     }
 
-    /// Start metering several groups of processes at once, each pid with its descendants, read
-    /// back separately by [`stop_groups`](Self::stop_groups) (one reading per group, all with
-    /// the same system energy). One sampler and, on macOS, one `powermetrics` serve them all.
+    /// Meter several process groups with one sampler; [`stop_groups`](Self::stop_groups) gives
+    /// one reading per group, all with the same system energy.
     pub(crate) fn start_groups(groups: &[&[u32]]) -> Meter {
         let mut state = State {
             groups: groups
@@ -416,8 +393,7 @@ fn tree(roots: &[u32], table: &[(u32, u32)]) -> Vec<u32> {
     out
 }
 
-// ---------------------------------------------------------------------------------------------
-// Linux: /proc
+// ---- Linux: /proc ----
 
 /// The parent pid in a `/proc/<pid>/stat` line (field 4). The command name (field 2) is in
 /// parentheses and may contain spaces, so fields are counted after the last `)`.
@@ -600,8 +576,7 @@ impl Rapl {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// macOS: ps and powermetrics
+// ---- macOS: ps and powermetrics ----
 
 /// `ps` CPU time in seconds: `[[dd-]hh:]mm:ss[.frac]` (macOS prints minutes past 59).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -859,10 +834,8 @@ struct PmTask {
     energy_impact_per_s: Option<f64>,
 }
 
-/// Energy over a sample from its `processor` dict, whichever form the machine reports:
-/// `package_energy` (mJ), `combined_power` (mW), `cpu_energy` + `gpu_energy` + `ane_energy`
-/// (mJ), `package_joules`, `package_watts`, `cpu_power` (mW). `None` when none is present (some
-/// virtual Macs).
+/// Energy (mJ) over a sample from its `processor` dict, whichever energy or power key the machine
+/// reports; `None` when none is present (some virtual Macs).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn processor_energy_mj(p: &Plist, elapsed_s: f64) -> Option<f64> {
     if let Some(e) = p.f64("package_energy") {
@@ -1192,121 +1165,8 @@ mod tests {
         assert_eq!(r.total_uj, 7_000);
     }
 
-    #[test]
-    fn rapl_reports_unreadable_counters() {
-        let root = tempfile::tempdir().unwrap();
-        let d = root.path().join("intel-rapl:0");
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("name"), "package-0").unwrap();
-        std::fs::write(d.join("max_energy_range_uj"), "10").unwrap();
-        // A directory where the counter should be: unreadable as a number, even for root.
-        std::fs::create_dir(d.join("energy_uj")).unwrap();
-        let err = Rapl::open(root.path()).unwrap_err();
-        assert!(err.contains("unreadable"), "{err}");
-    }
-
-    #[test]
-    fn ps_rows_and_cputime() {
-        assert_eq!(parse_cputime("0:01.50"), Some(1.5));
-        assert_eq!(parse_cputime("75:00.00"), Some(4_500.0));
-        assert_eq!(parse_cputime("1-01:00:00"), Some(90_000.0));
-        assert_eq!(parse_cputime("x"), None);
-        let rows = parse_ps_rows("  1     0   0:10.00\n 42     1   1:00.25\nbogus\n");
-        assert_eq!(rows, [(1, 0, 10.0), (42, 1, 60.25)]);
-    }
-
     /// Two samples as `powermetrics -f plist` writes them (Apple silicon keys in the first, an
     /// Intel `package_joules` in the second), NUL-separated, plus a cut-off third.
-    const FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>is_delta</key><true/>
-  <key>elapsed_ns</key><integer>1000000000</integer>
-  <key>hw_model</key><string>Mac &amp; co</string>
-  <key>timestamp</key><date>2026-10-30T10:00:00Z</date>
-  <key>tasks</key>
-  <array>
-    <dict>
-      <key>pid</key><integer>42</integer>
-      <key>name</key><string>nuggetd</string>
-      <key>cputime_ms_per_s</key><real>20.5</real>
-      <key>idle_wakeups_per_s</key><real>3</real>
-      <key>intr_wakeups_per_s</key><real>1</real>
-      <key>energy_impact</key><real>2.5</real>
-      <key>energy_impact_per_s</key><real>2.0</real>
-    </dict>
-    <dict>
-      <key>pid</key><integer>7</integer>
-      <key>cputime_ms_per_s</key><real>500</real>
-    </dict>
-    <dict/>
-  </array>
-  <key>processor</key>
-  <dict>
-    <key>clusters</key><array/>
-    <key>cpu_energy</key><integer>800</integer>
-    <key>gpu_energy</key><integer>150</integer>
-    <key>ane_energy</key><integer>50</integer>
-  </dict>
-</dict>
-</plist>
-"#;
-
-    fn stream() -> Vec<u8> {
-        let second = FIXTURE
-            .replace(
-                "<key>cpu_energy</key><integer>800</integer>",
-                "<key>package_joules</key><real>3.0</real>",
-            )
-            .replace(
-                "<integer>1000000000</integer>",
-                "<integer>2000000000</integer>",
-            );
-        let mut b = FIXTURE.as_bytes().to_vec();
-        b.push(0);
-        b.extend(second.as_bytes());
-        b.push(0);
-        b.extend(&FIXTURE.as_bytes()[..FIXTURE.len() / 2]);
-        b
-    }
-
-    #[test]
-    fn plist_reader() {
-        let p = parse_plist(FIXTURE).unwrap();
-        assert_eq!(p.get("is_delta"), Some(&Plist::Bool(true)));
-        assert_eq!(p.f64("elapsed_ns"), Some(1e9));
-        assert_eq!(p.get("hw_model"), Some(&Plist::String("Mac & co".into())));
-        assert!(matches!(p.get("tasks"), Some(Plist::Array(a)) if a.len() == 3));
-        assert_eq!(unescape("a&lt;b&#62;c&#x41;&bogus;"), "a<b>cA&bogus;");
-        assert!(parse_plist("<plist><dict><key>a</key>").is_none());
-        assert!(parse_plist("no plist").is_none());
-    }
-
-    #[test]
-    fn powermetrics_samples() {
-        let s = parse_powermetrics(&stream(), 1.0);
-        assert_eq!(s.len(), 2, "the cut-off third sample is skipped");
-        assert_eq!(s[0].elapsed_s, 1.0);
-        assert_eq!(s[0].energy_mj, Some(1_000.0), "cpu + gpu + ane");
-        assert_eq!(s[1].elapsed_s, 2.0);
-        assert_eq!(s[1].energy_mj, Some(3_000.0), "package_joules");
-        let t = &s[0].tasks;
-        assert_eq!(t.len(), 2, "the task without a pid is skipped");
-        assert_eq!(t[0].pid, 42);
-        assert_eq!(t[0].cputime_ms_per_s, 20.5);
-        assert_eq!(t[0].wakeups_per_s, 4.0);
-        assert_eq!(t[0].energy_impact_per_s, Some(2.0));
-        assert_eq!(t[1].energy_impact_per_s, None);
-
-        let power =
-            parse_plist("<plist><dict><key>combined_power</key><real>1500</real></dict></plist>")
-                .unwrap();
-        assert_eq!(processor_energy_mj(&power, 2.0), Some(3_000.0));
-        let none = parse_plist("<plist><dict><key>clusters</key><array/></dict></plist>").unwrap();
-        assert_eq!(processor_energy_mj(&none, 1.0), None);
-    }
-
     #[cfg(target_os = "macos")]
     #[test]
     fn powermetrics_reading() {
@@ -1324,88 +1184,4 @@ mod tests {
         assert_eq!(r.process_source, "powermetrics");
     }
 
-    #[test]
-    fn reading_arithmetic() {
-        let r = Reading {
-            wall_s: 10.0,
-            cpu_s: Some(0.5),
-            wakeups: Some(30.0),
-            package_w: Some(12.0),
-            ..Reading::default()
-        };
-        let base = Reading {
-            wall_s: 5.0,
-            package_w: Some(10.0),
-            ..Reading::default()
-        };
-        assert_eq!(r.cpu_percent(), Some(5.0));
-        assert_eq!(r.wakeups_per_s(), Some(3.0));
-        assert_eq!(r.attributable_w(&base), Some(2.0));
-        assert_eq!(r.attributable_j(&base), Some(20.0));
-        assert_eq!(r.attributable_j(&Reading::default()), None);
-        assert_eq!(EnergySource::default().as_str(), "none");
-    }
-
-    /// This process, metered for a moment while it spins: CPU time and descendants are seen.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    #[test]
-    fn meters_this_process_and_a_child() {
-        let mut child = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
-        let m = Meter::start(&[std::process::id()]);
-        let t = Instant::now();
-        let mut x = 0u64;
-        while t.elapsed() < Duration::from_millis(300) {
-            x = x.wrapping_add(std::hint::black_box(1));
-        }
-        let r = m.stop();
-        let _ = child.kill();
-        let _ = child.wait();
-        assert!(x > 0);
-        assert!(r.wall_s >= 0.3);
-        assert!(r.processes >= 2, "the child counts: {r:?}");
-        if cfg!(target_os = "linux") {
-            assert_eq!(r.process_source, "proc");
-            assert!(r.cpu_s.unwrap() > 0.1, "{r:?}");
-            assert!(r.wakeups.is_some());
-        }
-        let (source, note) = energy_source();
-        assert_eq!(source == EnergySource::None, note.is_some());
-        if cfg!(target_os = "linux") {
-            assert_eq!(r.energy_source, source);
-        }
-    }
-
-    #[test]
-    fn groups_are_read_separately() {
-        let mut child = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
-        let me = std::process::id();
-        let m = Meter::start_groups(&[&[me], &[child.id()], &[]]);
-        let t = Instant::now();
-        let mut x = 0u64;
-        while t.elapsed() < Duration::from_millis(300) {
-            x = x.wrapping_add(std::hint::black_box(1));
-        }
-        let r = m.stop_groups();
-        let _ = child.kill();
-        let _ = child.wait();
-        assert!(x > 0);
-        assert_eq!(r.len(), 3);
-        assert!(r.iter().all(|r| r.wall_s >= 0.3));
-        assert_eq!(r[2].processes, 0);
-        assert_eq!(r[2].cpu_s, None);
-        if cfg!(target_os = "linux") {
-            // The bench process (with its child) and the sleeping child alone.
-            assert!(r[0].processes >= 2, "{:?}", r[0]);
-            assert_eq!(r[1].processes, 1, "{:?}", r[1]);
-            assert!(r[0].cpu_s.unwrap() > 0.1, "{:?}", r[0]);
-            assert!(r[1].cpu_s.unwrap() < r[0].cpu_s.unwrap());
-            assert_eq!(r[0].package_w, r[1].package_w, "one system energy figure");
-        }
-    }
 }

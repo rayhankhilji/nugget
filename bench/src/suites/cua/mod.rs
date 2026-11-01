@@ -1,13 +1,7 @@
 //! `bench/cua`: computer-use task success and safety on a reproducible Linux desktop.
 //!
-//! Six local test apps ([`apps`]) run as deterministic state machines and render a semantic
-//! accessibility tree ([`ui`]). A task ([`task`]) gives an instruction, a start state, a
-//! state-based success check, the actions that need confirmation and, for red-team tasks, the
-//! injected goal. An agent ([`agent::CuaAgent`]) runs each task through a [`agent::Session`]
-//! in one of three environments ([`CuaEnv`]): in process, over the apps' loopback socket, or on
-//! an Xvfb desktop with kiosk Chromium windows and AT-SPI ([`desktop`]).
-//!
-//! Methodology, task format and targets: `bench/cua/README.md`.
+//! Deterministic test apps ([`apps`]) driven by an [`agent::CuaAgent`] in one of the [`CuaEnv`]
+//! environments. Methodology, task format and targets: `bench/cua/README.md`.
 
 pub mod agent;
 pub mod apps;

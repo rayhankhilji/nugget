@@ -1,14 +1,8 @@
 //! The fixture world: one fictional user's mail, calendar, notes and receipts over 30 days, and
 //! the gold labels that say which cards a good engine shows on which days.
 //!
-//! The world lives in `bench/fixtures/proactive/world.json` and the labels in `gold.json`. Both
-//! are produced by [`super::generate`] and committed, so they can be read and reviewed; a test
-//! fails if the committed files and the generator drift apart (set `NUGGET_BENCH_REGEN=1` to
-//! rewrite them). Engines only ever see [`World`]; [`Gold`] is for scoring.
-//!
-//! Days are integers: day 1 is [`START_DATE`] and the benchmark runs days `1..=DAYS`. Items with a
-//! day of 0 or less are history the engine has already seen before day 1. Every address uses
-//! `example.com` (the user's employer) or a `.test` domain.
+//! Engines only ever see [`World`]; [`Gold`] is for scoring. Items with day ≤ 0 are history seen
+//! before day 1.
 
 use serde::{Deserialize, Serialize};
 
@@ -319,11 +313,6 @@ pub fn day_of(iso: &str) -> Option<i32> {
     Some((date - start()).whole_days() as i32 + 1)
 }
 
-/// Monday is 0. Day 1 (2026-09-01) is a Tuesday.
-pub fn weekday(day: i32) -> u8 {
-    calendar_date(day).weekday().number_days_from_monday()
-}
-
 fn start() -> time::Date {
     let (y, m, d) = START_DATE;
     time::Date::from_calendar_date(y, time::Month::try_from(m).expect("month"), d)
@@ -334,29 +323,3 @@ fn calendar_date(day: i32) -> time::Date {
     start() + time::Duration::days(i64::from(day) - 1)
 }
 
-/// Render a value as JSON with each element of the named top-level arrays on its own line, so
-/// the fixture files diff line by line.
-pub fn to_fixture_json<T: Serialize>(value: &T, arrays: &[&str]) -> String {
-    let v = serde_json::to_value(value).expect("serializable");
-    let obj = v.as_object().expect("object");
-    let mut out = String::from("{\n");
-    let n = obj.len();
-    for (i, (k, val)) in obj.iter().enumerate() {
-        out.push_str(&format!("  {}: ", serde_json::to_string(k).expect("key")));
-        match val.as_array() {
-            Some(items) if arrays.contains(&k.as_str()) => {
-                out.push_str("[\n");
-                for (j, item) in items.iter().enumerate() {
-                    out.push_str("    ");
-                    out.push_str(&serde_json::to_string(item).expect("item"));
-                    out.push_str(if j + 1 < items.len() { ",\n" } else { "\n" });
-                }
-                out.push_str("  ]");
-            }
-            _ => out.push_str(&serde_json::to_string(val).expect("value")),
-        }
-        out.push_str(if i + 1 < n { ",\n" } else { "\n" });
-    }
-    out.push_str("}\n");
-    out
-}

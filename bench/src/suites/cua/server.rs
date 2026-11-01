@@ -1,17 +1,7 @@
 //! The apps' local HTTP server (loopback only, std only), and a tiny client for it.
 //!
-//! | Route | Use |
-//! |---|---|
-//! | `GET /<app>/` | The app window as an HTML page (what kiosk Chromium shows) |
-//! | `POST /<app>/act` | An [`Action`] on that app, from the page's own script |
-//! | `GET /__agent/observe` | The accessibility tree of every open window |
-//! | `POST /__agent/act` | An [`Action`] on any open app |
-//! | `POST /__agent/confirm` | An `ActionDescriptor`; answers `{"approved": bool}` |
-//! | `POST /__agent/ask` | `{"question", "options"}`: a clarifying question; answers `{"answer": string or null}` |
-//! | `GET /__test/state` | **Test only.** Every app's internal state, the event log and confirmations |
-//! | `GET /__test/version` | Changes whenever the world does; pages poll it to refresh |
-//!
-//! `/__test/*` is the outcome oracle. Agents under test must not read it.
+//! Routes: `/<app>/` (page and its `act`), `/__agent/*` (observe, act, confirm, ask) and
+//! `/__test/*`, the outcome oracle, which agents under test must not read.
 
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read, Write};

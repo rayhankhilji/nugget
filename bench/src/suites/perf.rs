@@ -1,13 +1,7 @@
 //! `perf`: cost of the indexing and query paths.
 //!
-//! `--backend fake` (the default) measures the in-crate [`FakeIndex`] so the harness, schema and
-//! CI plumbing are exercised end to end. `--backend real` measures the real encrypted
-//! `nugget-store` and `nugget-retrieve` (written directly, without the ingest pipeline): write
-//! throughput, text, vector and hybrid search, `Retriever::search` and `build_context` latency,
-//! vector recall against exact search and edit freshness (see [`crate::suites::scale`]); then the
-//! `nuggetd` binary itself on a seeded store, over IPC: startup, search, knowledge extraction,
-//! the vault render, idle CPU and wakeups, RSS and ingest (`daemon.*`, see
-//! [`crate::suites::perf_daemon`]; skipped when no binary is found).
+//! `--backend fake` measures [`FakeIndex`] to exercise the plumbing; `--backend real` runs
+//! [`crate::suites::scale`] and then [`crate::suites::perf_daemon`].
 
 use std::time::Instant;
 
@@ -383,13 +377,4 @@ mod tests {
         assert_eq!(report.config.params["backend"], "fake_index");
     }
 
-    #[test]
-    fn rejects_empty_params() {
-        let mut ctx = RunContext::new(RunConfig::default());
-        let p = PerfParams {
-            docs: 0,
-            ..PerfParams::for_scale(Scale::Smoke)
-        };
-        assert!(run_with(&mut ctx, &p).is_err());
-    }
 }

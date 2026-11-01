@@ -1,11 +1,6 @@
-//! `--ask-dump`: one JSON line per (question, arm), written and flushed as soon as that answer
-//! is scored, so a run that is killed keeps every finished answer. Each line holds everything
-//! scoring needs (the full packed context, raw and filtered text, the product's check, timings,
-//! server stats and the failure). The judge runs after all answers and appends each verdict, as
-//! soon as it has it, to a sidecar file next to the dump ([`verdict_path`]: `<dump>.judge.jsonl`).
-//! `--ask-rescore` ([`read`], [`read_verdicts`]) merges the two and recomputes every metric
-//! without a model, so a run killed while judging still reports every answer metric plus the
-//! judge on what it reached.
+//! `--ask-dump`: one flushed JSON line per (question, arm), so a killed run keeps every finished
+//! answer; verdicts go to a sidecar ([`verdict_path`]). `--ask-rescore` ([`read`]) recomputes every
+//! metric from both without a model.
 
 use std::io::{BufRead, Write};
 

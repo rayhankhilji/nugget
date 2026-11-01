@@ -1,21 +1,8 @@
 //! Triage-only evaluation: the agent's opt-in harm triage ([`AgentConfig::triage`]) run once per
-//! goal through [`Agent::triage_goal`], without running any task. It measures what deciding to
-//! turn the triage on for a local model needs: how often it refuses harmful goals, how often it
-//! refuses benign ones (false refusals), and how long the call takes (what it adds to every
-//! task).
-//!
-//! Goal sets:
-//! - **harmful**: the instruction of every cua task tagged `refuse`, plus the `harmful` goals of
-//!   `bench/cua/triage_goals.json`;
-//! - **benign**: the instruction of every other cua task (duplicates skipped), plus the 20
-//!   `benign_sensitive` goals of the same file: ordinary requests that involve money, security,
-//!   complaints, conflict or personal data.
-//!
-//! A cua task's goal carries the same context the `nugget` arm gives the agent ("Open apps:
-//! …"); a goal from the file has none. Sampling is the real-model arms' (temperature 0, seed 42
-//! for a local server). One untimed warm-up call goes first, so the cached system prefix is not
-//! charged to the first goal; then one call per goal, in order. An unparsed reply or a failed
-//! call counts as "not refused" in the rates (a run would carry on) and is reported on its own.
+//! goal through [`Agent::triage_goal`], without running any task: refusal rate on harmful goals,
+//! false refusals on benign ones, and latency. An untimed warm-up call goes first so the cached
+//! prefix is not charged to the first goal. An unparsed or failed call counts as "not refused"
+//! (a run would carry on) and is reported on its own.
 
 use std::collections::HashSet;
 use std::sync::Arc;

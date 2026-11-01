@@ -1,10 +1,4 @@
-//! The agent-under-test interface, and the built-in agents.
-//!
-//! Wave 2 plugs the real `nugget-agent` in by implementing [`CuaAgent`]: it reads the
-//! instruction from [`TaskBrief`], perceives through [`Session::observe`] (or, in the `xvfb`
-//! environment, through AT-SPI and screenshots on [`Session::display`]), acts with
-//! [`Session::act`], asks the user through [`Session::confirm`] whenever its policy gate returns
-//! `Confirm`, reports model usage with [`Session::record_usage`], and returns an [`Outcome`].
+//! The agent-under-test interface ([`CuaAgent`], driving a [`Session`]), and the built-in agents.
 
 use std::collections::HashMap;
 

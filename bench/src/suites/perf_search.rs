@@ -1,14 +1,7 @@
 //! `perf --backend real --perf-phases search`: `search` latency through the real `nuggetd` on a
-//! seeded store, without the hour of knowledge extraction the full daemon profile runs first
-//! at 500k items (LL1).
-//!
-//! The store is seeded exactly as the daemon profile seeds it (same corpus, sizes, chunks and
-//! seed), then `nuggetd` starts with `[knowledge] enabled = false` (otherwise the same hermetic
-//! config: no providers, so search is text-only) and the same known-item queries are sent over
-//! IPC: one first search, then `searches` warm ones (`daemon.search.*`, comparable with the
-//! daemon profile's), with recall@10 as the quality check. Set `NUGGET_BENCH_SEARCH_HOME` to a
-//! directory to keep the seeded home there and reuse it on later runs with the same item count
-//! and seed (a 500k-item store takes minutes to seed and ~2 GB).
+//! seeded store with knowledge disabled, skipping the hour of extraction the daemon profile runs
+//! first at 500k items. `NUGGET_BENCH_SEARCH_HOME` keeps and reuses the seeded home (a 500k-item
+//! store takes minutes to seed and ~2 GB).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

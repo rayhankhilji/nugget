@@ -1,32 +1,10 @@
 //! `memory --backend real`: the memory benchmark against the real stack, in process.
 //!
-//! Everything a user's data goes through, minus the daemon and IPC:
-//! an encrypted [`nugget_store::Store`] in a temporary `NUGGET_HOME`, [`nugget_ingest::Ingest`]
-//! with the `files` connector (registered through [`nugget_connector_files::register`]) watching
-//! a temporary folder, and [`nugget_retrieve::Retriever`] for every query. Embeddings come from
-//! an in-process deterministic embedder ([`HashEmbedder`], on-device locality) routed through a
-//! [`Router`] as the `Embedding` tier, from an OpenAI-compatible server given with
-//! `--embed-url`, or with `--local-models` from the manifest's embedding model served by
-//! `nugget-runtime`'s `llama-server`, as the app runs it ([`crate::local::LocalModels`]; task
-//! prefixes per `--memory-embed-prefixes`, and the manifest's reranker with
-//! `--memory-rerank local`).
-//!
-//! Phases:
-//! 1. **Eval set.** `nugget-retrieve`'s labelled fixtures are written as Markdown files, ingested
-//!    through the pipeline and queried text-only, hybrid and hybrid+MMR (`retrieval.eval.*`).
-//!    The same set indexed directly into an in-memory store (`eval::index`, one chunk per
-//!    paragraph) is reported alongside (`baseline.eval_direct.*`).
-//! 2. **Initial ingest.** The synthetic corpus of the fake backend (same scale and seed, so the
-//!    same documents) is written as files, then the source is added and timed until every file
-//!    is indexed (`ingest.*`).
-//! 3. **Known-item retrieval** on that corpus (`retrieval.{bm25,vector,hybrid,hybrid_mmr}.*`),
-//!    with the fake index's numbers on the identical corpus and queries as the baseline
-//!    (`baseline.fake.*`): the M1 gate is hybrid recall@10 at or above it.
-//! 4. **Freshness.** Edits, creates, deletes and renames hit the watched folder at random
-//!    (exponential gaps). For each, the clock starts when the file operation returns and stops
-//!    when `Retriever::search` reflects it (new content found, old content and old keys gone),
-//!    probed every few milliseconds (`freshness.*`, `propagation.*`). The M1 gate is p95 ≤ 60 s.
-//! 5. **Resources**: database size on disk and (Linux) the process's peak RSS.
+//! Everything a user's data goes through, minus the daemon and IPC: an encrypted store,
+//! [`nugget_ingest::Ingest`] with the `files` connector watching a temp folder, and
+//! [`nugget_retrieve::Retriever`]. Embeddings come from [`HashEmbedder`], `--embed-url` or
+//! `--local-models`. Freshness is timed from the file operation returning until search reflects
+//! it.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};

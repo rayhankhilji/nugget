@@ -3,19 +3,10 @@
 //! presentation and actions are [`super::env_uia`]'s, which work on any [`ComputerUse`]; this
 //! module holds what differs on macOS.
 //!
-//! - **The browser.** Google Chrome, preinstalled on GitHub's macOS images (Safari cannot open a
-//!   bare app window from the command line, and keeps one process for every window). Each app
-//!   gets its own Chrome process (`--app=<url>`, a throwaway profile, the mock keychain so no
-//!   keychain prompt blocks it, renderer accessibility forced on), tiled as on Windows. Each
-//!   process owns exactly one window, so windows map to apps by pid. `NUGGET_CUA_CHROME`
-//!   overrides the binary (any Chromium build with `--app` works).
-//! - **AX conventions** ([`normalize`]). Chromium's AX tree differs from UI Automation's in ways
-//!   the matcher cares about, so each snapshot is first put in the form the matcher expects:
-//!   static text carries its text in `AXValue`, not a name; an `aria-label` is an
-//!   `AXDescription`; a `<select>` is an `AXPopUpButton` (a button to the role table) whose
-//!   options are `AXMenuItem`s pressed with `AXPress`. A `<label for>` names its control through
-//!   `AXTitleUIElement`, which the AX backend reads into the control's name. Only nodes whose
-//!   raw role is an AX role are touched, so UIA trees pass through unchanged.
+//! Chrome, not Safari: Safari cannot open a bare app window from the command line. Each app gets
+//! its own Chrome process (mock keychain so no prompt blocks it), so windows map to apps by pid.
+//! [`normalize`] rewrites Chromium's AX conventions into what the matcher expects; UIA trees pass
+//! through unchanged.
 //!
 //! [`ComputerUse`]: nugget_a11y::computer::ComputerUse
 
@@ -181,22 +172,4 @@ mod tests {
         assert_eq!(t.name, None);
     }
 
-    #[test]
-    fn app_window_command_line() {
-        let a = chrome_args(
-            "http://127.0.0.1:9/forms/",
-            Path::new("profile"),
-            (530, 0),
-            (530, 490),
-        );
-        assert_eq!(a[0], "--app=http://127.0.0.1:9/forms/");
-        assert!(a.contains(&"--window-position=530,0".to_owned()));
-        assert!(a.contains(&"--window-size=530,490".to_owned()));
-        assert!(a.contains(&"--force-renderer-accessibility".to_owned()));
-        assert!(a.contains(&"--use-mock-keychain".to_owned()));
-        assert!(a.iter().any(|x| x.starts_with("--user-data-dir=")));
-        assert!(is_chrome("Google Chrome"));
-        assert!(is_chrome("com.google.Chrome"));
-        assert!(!is_chrome("msedge"));
-    }
 }

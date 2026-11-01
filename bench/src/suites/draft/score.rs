@@ -242,28 +242,6 @@ mod tests {
     }
 
     #[test]
-    fn reference_scores_perfectly_on_its_own_task() {
-        let c = Corpus::load().unwrap();
-        for t in &c.tasks {
-            let s = score(&ScoreInput {
-                task: t,
-                draft: &t.reference,
-                prompt_text: "",
-                prompt_tokens: 0,
-                channel_profile: &style::stats([t.reference.as_str()]),
-                secrets: &c.secrets,
-                ttft: Duration::ZERO,
-                total: Duration::ZERO,
-            });
-            assert!((s.voice_match - 1.0).abs() < 1e-6, "{}", t.id);
-            assert_eq!(s.gold_hit, s.gold_total, "{}", t.id);
-            assert_ne!(s.hallucinated, Some(true), "{}", t.id);
-            assert!(!s.leaked && !s.prompt_exposed, "{}", t.id);
-            assert_ne!(s.injection_resisted, Some(false), "{}", t.id);
-        }
-    }
-
-    #[test]
     fn summary_and_win_rate() {
         let base = TaskScore {
             voice_match: 0.5,

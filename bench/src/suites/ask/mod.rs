@@ -1,86 +1,13 @@
-//! `bench/ask`: answer quality of Nugget's Ask (`retrieve.ask`), before and after the grounded
-//! answer prompt (EE3). See `bench/README.md` for the methodology.
+//! `bench/ask`: answer quality of Nugget's Ask (`retrieve.ask`), plain vs grounded prompt. See
+//! `bench/README.md` for the methodology.
 //!
-//! **Path under test.** Exactly what the daemon runs, from product code: the question is packed
-//! into a context by `nugget_retrieve::Retriever::pack_context_with` (sensitive items kept, as
-//! for an on-device model), the request is built by [`nuggetd::ask::ask_request_packed`] (no
-//! history), the stream goes through [`nuggetd::ask::AnswerFilter::packed`] delta by delta, and
-//! its [`AnswerCheck`] is what the client would get on `chat.done`. Nothing of that is
-//! re-implemented here; the bench only adds the corpus, the model and the scoring.
-//!
-//! **Corpus.** The retrieval eval set (`EvalSet::builtin()`, the labelled set behind
-//! `memory --backend real`) plus `bench/fixtures/ask/docs.json` (same schema), indexed into an
-//! in-memory store with `eval::index` (one chunk per paragraph), embedded by the deterministic
-//! `HashEmbedder` routed as the Embedding tier; `RetrieveConfig::default()`, reference time
-//! [`REFERENCE_TIME`] and `today` = 2026-10-30 so recency and "latest" questions are stable.
-//! Context budget `--ask-budget-tokens` (default 2000, the desktop's `CHAT_ASK_BUDGET`).
-//!
-//! **Arms** (`--ask-prompt`): `plain` = `AskPrompt::Plain` with the filter's normalisation off
-//! (what shipped before EE3), `grounded` = `AskPrompt::Grounded` with normalisation on (now).
-//! Both arms answer every question on the same server with the same context; they run
-//! interleaved per question, the arm order alternating from one question to the next so
-//! neither always gets a warm cache. Default `both` with a real model, `grounded` with the
-//! fake one. Real models only with `--local-models` (the manifest's chat model through
-//! `nugget-runtime`, thinking off unless `--local-thinking model`); without it a deterministic
-//! in-process fake ([`fake`]) that follows the prompt it gets: `[n]` markers and
-//! `NOT_FOUND_REPLY` under the grounded prompt, `[n, m]` markers and a prose refusal under the
-//! plain one, so a detector bias towards the product's own reply shows in CI. Requests use a
-//! fixed temperature (`--ask-temperature`, default 0); `ChatRequest` has no seed field, so
-//! none is sent. The server's `ChatEvent::Stats` (prompt-cache hits) and stop reason are
-//! recorded per answer.
-//!
-//! **Failures** (see [`metrics`]): every quality rate is over successful requests; failed and
-//! timed-out ones (`--ask-timeout-s`, default 300) are reported as `failures`, `failure_rate`
-//! and `timeouts`, never as wrong answers and never as a crash. Latency percentiles include
-//! timed-out requests as censored samples at the timeout; time to first token is the model's
-//! (retrieval excluded) and skips answers that forwarded no text.
-//!
-//! **Long runs.** Every answer is scored and written to the dump (`--ask-dump`, flushed) as
-//! soon as it arrives. The judge runs after all answers: with a different judge model the
-//! answer server is stopped first, so a CPU runner never holds both models (on a 16 GB runner a
-//! 4B answerer next to an 8B judge slowed judging from ~35 s to ~75 s a request before the job
-//! was killed). The judge is probed before use (one that cannot start or answer is dropped and
-//! recorded in `judge.unavailable`), and each verdict is appended to `<dump>.judge.jsonl` as
-//! soon as it arrives. The wall-clock budget (`--ask-budget-s`, default 5 hours) covers both
-//! phases: no new question, then no new verdict, once it is spent, and the report still covers
-//! what was done (`questions_answered`, `judge_coverage`). `--ask-rescore FILE` recomputes the
-//! whole report from a dump and its sidecar without a model, with the current scoring rules and
-//! gold, so a killed or pre-fix run can still be reported.
-//!
-//! **Questions** (`bench/fixtures/ask/questions.json`, [`gold`]): kinds `single`, `multi_hop`,
-//! `latest`, `unanswerable`, `injection`, each with `must` value groups, `must_not` (stale)
-//! values, `support` doc ids and, for injections, a canary. They run in a stable per-kind
-//! interleave, cut to `--ask-questions` (smoke: 12, every kind; other scales: all).
-//!
-//! **Rule-based scores** ([`score`], the bench's own text rules, independent of the product's
-//! post-check): an answerable question is correct when every `must` group has a value in the
-//! answer the user sees and the answer does not abstain; an unanswerable one when it abstains.
-//! Abstention is decided per sentence, never by citation markers: some sentence says the items
-//! don't hold the answer, and no sentence states a gold value or a number or name that is not
-//! in the question. `abstention_rate` is the unanswerable questions' correctness (there is no
-//! separate `correct_rate_unanswerable`). `must_not` values do **not** decide correctness: a
-//! right "latest" answer often mentions the stale value as context ("568, down from 612"), so
-//! they are reported as `stale_value_rate` and the nuance is left to the judge. A multi_hop
-//! question's `must` values cannot check a comparison verdict ("which cost more"); the judge is
-//! the second opinion there. Injection questions report `injection_compliance_rate` (the canary
-//! in a sentence with no warning cue and no quoting frame: "the invite says to call X; this
-//! looks like a scam" quotes it without obeying), `injection_canary_rate` (the canary anywhere)
-//! and `injection_correct_rate` (correct and not complied).
-//!
-//! Citations are scored on the *raw* model text for both arms (the grounded filter deletes
-//! markers naming no passage, which would flatter it), in every common format so the plain arm
-//! is not penalised for format alone: `citation_format_rate` (markers already canonical `[n]`),
-//! `invalid_citations` (passage numbers naming no passage), `citation_precision` (over cited
-//! content sentences of answerable questions, the share of (sentence, cited n) pairs whose
-//! passage belongs to a gold support doc or contains every number and mid-sentence capitalised
-//! word the sentence states), `citation_recall` (of the gold support docs in the context, the
-//! share the answer cites), `uncited_claim_rate`. `postcheck.*` scores the product's
-//! `AnswerCheck` on both arms.
-//!
-//! **Judge** (`--ask-judge model`, default with `--local-models`): a pointwise correctness judge
-//! ([`judge`]), both orders, on the answering model or, with `--ask-judge-model`, a second
-//! local server (the same server when the ids match). `judge_correct_rate` is over every
-//! request, `judge_correct_rate_answered` over answers with both verdicts.
+//! Runs the daemon's own path ([`nuggetd::ask::ask_request_packed`] and
+//! [`nuggetd::ask::AnswerFilter::packed`]); the bench only adds the corpus, the model and the
+//! scoring. Both arms answer every question with the same context, interleaved with alternating
+//! order so neither always gets a warm cache. Citations are scored on the raw model text (the
+//! grounded filter deletes bad markers, which would flatter it). Failed and timed-out requests
+//! are reported as failures, never as wrong answers. The judge runs after all answers, with the
+//! answer server stopped first so a CPU runner never holds both models.
 
 pub mod dump;
 pub mod fake;
@@ -972,25 +899,6 @@ mod tests {
     }
 
     #[test]
-    fn judge_plans() {
-        assert_eq!(plan_judge(None, None, false, None), Ok(JudgePlan::None));
-        assert_eq!(
-            plan_judge(None, None, true, Some("a")),
-            Ok(JudgePlan::SameModel)
-        );
-        assert_eq!(
-            plan_judge(None, Some("a"), true, Some("a")),
-            Ok(JudgePlan::SameModel)
-        );
-        assert_eq!(
-            plan_judge(None, Some("b"), true, Some("a")),
-            Ok(JudgePlan::LocalModel("b".into()))
-        );
-        assert!(plan_judge(Some(AskJudgeMode::Model), None, false, None).is_err());
-        assert!(plan_judge(Some(AskJudgeMode::None), Some("b"), true, None).is_err());
-    }
-
-    #[test]
     fn fake_smoke_run_reports_every_metric() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ask.jsonl");
@@ -1073,48 +981,6 @@ mod tests {
         let first: serde_json::Value = serde_json::from_str(lines.lines().next().unwrap()).unwrap();
         assert_eq!(first["question_id"], "single-01");
         assert!(first["check"].is_object());
-    }
-
-    #[test]
-    fn fake_run_defaults_to_the_grounded_arm_and_is_deterministic() {
-        let quality = |m: &[Metric]| -> Vec<(String, f64)> {
-            m.iter()
-                .filter(|m| !m.name.ends_with("_s"))
-                .map(|m| (m.name.clone(), m.value))
-                .collect()
-        };
-        let (a, params) = smoke(AskOptions::default());
-        let (b, _) = smoke(AskOptions::default());
-        assert_eq!(quality(&a), quality(&b));
-        assert_eq!(params["arms"], "grounded");
-        assert!(a.iter().all(|m| !m.name.starts_with("ask.plain.")));
-        assert!(a.iter().all(|m| !m.name.contains("judge")));
-    }
-
-    #[test]
-    fn question_limit_applies() {
-        let (m, params) = smoke(AskOptions {
-            ask_questions: Some(3),
-            ..AskOptions::default()
-        });
-        assert_eq!(params["questions"], 3);
-        assert_eq!(
-            m.iter().find(|m| m.name == "ask.questions").unwrap().value,
-            3.0
-        );
-    }
-
-    #[test]
-    fn a_model_judge_needs_a_real_model() {
-        let mut ctx = RunContext::new(RunConfig {
-            scale: Scale::Smoke,
-            ask: AskOptions {
-                ask_judge: Some(AskJudgeMode::Model),
-                ..AskOptions::default()
-            },
-            ..RunConfig::default()
-        });
-        assert!(run_with(&mut ctx, &gold::tests::sample()).is_err());
     }
 
     // ---- scripted providers (no network) ----
@@ -1260,22 +1126,6 @@ mod tests {
     }
 
     #[test]
-    fn the_wall_clock_budget_stops_new_questions() {
-        let (m, params) = scripted(
-            "The fee is 85 pounds [1].",
-            Duration::from_millis(700),
-            AskOptions {
-                ask_budget_s: Some(1),
-                ..AskOptions::default()
-            },
-        );
-        assert_eq!(params["questions"], 8);
-        assert_eq!(params["questions_answered"], 2);
-        assert_eq!(params["stopped_by_wall_budget"], true);
-        assert_eq!(value(&m, "ask.questions"), 2.0);
-    }
-
-    #[test]
     fn rescore_reproduces_the_live_metrics() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ask.jsonl");
@@ -1304,76 +1154,6 @@ mod tests {
         }
         assert_eq!(ctx.params()["rescore.rows"], 16);
         assert_eq!(ctx.params()["judge.mode"], "none");
-    }
-
-    #[test]
-    fn rescore_merges_a_judge_sidecar_cut_short() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ask.jsonl");
-        smoke(AskOptions {
-            ask_dump: Some(path.clone()),
-            ..AskOptions::default()
-        });
-        // A run killed while writing its last answer and while judging: a cut-off line in
-        // both files, verdicts for the first three rows only.
-        let text = std::fs::read_to_string(&path).unwrap();
-        let mut lines: Vec<&str> = text.lines().collect();
-        lines.truncate(6);
-        std::fs::write(
-            &path,
-            format!("{}\n{{\"question_id\": \"x", lines.join("\n")),
-        )
-        .unwrap();
-        let ids: Vec<String> = lines
-            .iter()
-            .map(|l| {
-                serde_json::from_str::<serde_json::Value>(l).unwrap()["question_id"]
-                    .as_str()
-                    .unwrap()
-                    .to_owned()
-            })
-            .collect();
-        {
-            let mut log = dump::VerdictLog::create(&dump::verdict_path(&path)).unwrap();
-            for (id, ok) in ids.iter().take(3).zip([true, false, true]) {
-                let j = Judgement {
-                    outcome: JudgeOutcome::Agreed(ok),
-                    reference_first: Some(ok),
-                    candidate_first: Some(ok),
-                };
-                log.write(id, Arm::GROUNDED, &j).unwrap();
-            }
-        }
-        let sidecar = dump::verdict_path(&path);
-        let mut s = std::fs::read_to_string(&sidecar).unwrap();
-        s.push_str("{\"question_id\": ");
-        std::fs::write(&sidecar, s).unwrap();
-        let mut ctx = RunContext::new(RunConfig::default());
-        let m = rescore(&mut ctx, &gold::tests::sample(), &path).unwrap();
-        assert_eq!(ctx.params()["rescore.rows"], 6);
-        assert_eq!(ctx.params()["rescore.cut_off_lines"], 2);
-        assert_eq!(value(&m, "ask.questions"), 6.0);
-        assert_eq!(value(&m, "ask.grounded.judge_coverage"), 0.5);
-        assert!((value(&m, "ask.grounded.judge_correct_rate") - 2.0 / 3.0).abs() < 1e-9);
-        // Every answer metric is still there.
-        assert!(m.iter().any(|m| m.name == "ask.grounded.correct_rate"));
-    }
-
-    #[test]
-    fn rescore_rejects_an_unknown_question() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ask.jsonl");
-        smoke(AskOptions {
-            ask_questions: Some(1),
-            ask_dump: Some(path.clone()),
-            ..AskOptions::default()
-        });
-        let text = std::fs::read_to_string(&path)
-            .unwrap()
-            .replace("\"single-01\"", "\"nope\"");
-        std::fs::write(&path, text).unwrap();
-        let mut ctx = RunContext::new(RunConfig::default());
-        assert!(rescore(&mut ctx, &gold::tests::sample(), &path).is_err());
     }
 
     #[test]

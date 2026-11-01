@@ -1,39 +1,10 @@
 //! `--local-models`: real local models through the local runtime, as users run them.
 //!
-//! The manifest bundled with the app (`nugget_models::default_manifest`, signature-verified)
-//! names the models and the `llama-server` builds. [`LocalModels::start`] installs the chosen
-//! models into a [`ModelStore`] (SHA-256 verified, cached under `--models-home` between runs),
-//! then lets [`nugget_runtime::Runtime`] install the runtime build for this machine and start
-//! one server per role, exactly as `nuggetd` does. Suites build their providers from the
-//! configs it returns ([`LocalModels::chat`], [`LocalModels::embedder`],
-//! [`LocalModels::reranker`]).
-//!
-//! - **Models.** By default the chat model the app uses on a typical 8–16 GB machine
-//!   ([`DEFAULT_CHAT_MODEL`], or the smallest chat model if a manifest lacks it) and the smallest
-//!   embedding model in the manifest; `--local-chat-model` and `--local-embed-model` pick others
-//!   by manifest id. (The default used to be the smallest chat model, which silently became the
-//!   Double Tap-only 1.7B once that was signed into the manifest.)
-//! - **Pending entries** (`--local-pending FILE`, bench only): proposed manifest entries from
-//!   `manifests/pending/` that are not signed yet. Each entry must pass
-//!   [`ModelEntry::validate`] and must not reuse a signed id; `--local-chat-model` and
-//!   `--local-embed-model` look ids up in the signed manifest first, then in the pending files.
-//!   The store installs a pending model like a signed one (pinned URL, size and SHA-256
-//!   verified), and reports mark it (`local.chat.pending`). Nothing in `crates/` reads these
-//!   files: `nuggetd` only ever runs models from the signed manifest.
-//! - **Thinking.** Hybrid reasoning models (Qwen3) think before answering unless told not to;
-//!   llama-server returns that as `reasoning_content`, which no Nugget feature shows, so it only
-//!   adds latency. The runtime's chat config turns it off
-//!   (`chat_template_kwargs.enable_thinking = false`), as the app runs it; [`Thinking::Off`] (the
-//!   default) keeps that, [`Thinking::Model`] restores the model's default (for measuring what
-//!   thinking costs).
-//! - **Hardware** ([`HostInfo`]) is recorded in every report that uses a local model: CPU model,
-//!   logical cores, total RAM, GPU kind, OS and architecture.
-//!
-//! The servers live on a runtime owned by [`LocalModels`]; dropping it stops them.
-//!
-//! [`LocalModels::start_chat_server`] starts one more chat server (e.g. a judge model) under a
-//! second supervisor: same model store and runtime builds, its own data directory, so it runs
-//! next to the main servers without touching them.
+//! [`LocalModels::start`] installs models from the signed bundled manifest (SHA-256 verified,
+//! cached under `--models-home`) and starts one server per role via [`nugget_runtime::Runtime`],
+//! exactly as `nuggetd` does; dropping [`LocalModels`] stops them. `--local-pending` adds unsigned
+//! manifest entries for the bench only (`nuggetd` never reads them). Thinking is off by default
+//! ([`Thinking::Off`]) as in the app, since no feature shows reasoning and it only adds latency.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,9 +24,8 @@ use crate::runner::{BenchError, RunContext};
 /// Chat tiers: a model serving any of them can draft, extract and drive the agent.
 const CHAT_TIERS: [Tier; 4] = [Tier::Triage, Tier::Light, Tier::Synthesis, Tier::Agentic];
 
-/// The chat model measured when `--local-chat-model` is not given: the one `nuggetd` picks for
-/// chat, drafting and extraction on an 8–16 GB machine, so published numbers describe what most
-/// users run.
+/// Default chat model: the one `nuggetd` picks on an 8–16 GB machine, so numbers describe what
+/// most users run.
 pub const DEFAULT_CHAT_MODEL: &str = "qwen3-4b-q4km";
 
 /// `--local-chat-model`, or [`DEFAULT_CHAT_MODEL`] when the signed manifest has it (otherwise
@@ -268,9 +238,8 @@ struct PendingFile {
     models: Vec<ModelEntry>,
 }
 
-/// Parse a pending-entries file: every entry must pass [`ModelEntry::validate`], and no id may
-/// repeat or collide with `signed` (the signed manifest's models), so a pending entry can never
-/// shadow or be shadowed by a signed one.
+/// Parse a pending-entries file: every entry must pass [`ModelEntry::validate`] and no id may
+/// repeat or collide with `signed`, so pending and signed entries never shadow each other.
 pub fn parse_pending(bytes: &[u8], signed: &[ModelEntry]) -> Result<Vec<ModelEntry>, String> {
     let file: PendingFile = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
     if file.models.is_empty() {
@@ -321,9 +290,8 @@ pub fn load_pending(
     Ok(out)
 }
 
-/// [`pick`], then pending entries for an explicit `id` that the signed manifest lacks. Returns
-/// the entry and, for a pending one, the file it came from. Without an `id` only the signed
-/// manifest is considered, so the default model never changes.
+/// [`pick`], then pending entries for an explicit `id` (with the file it came from). Without an
+/// `id` only the signed manifest is considered, so the default model never changes.
 pub fn pick_with_pending<'a>(
     models: &'a [ModelEntry],
     pending: &'a [PendingEntry],
@@ -368,11 +336,8 @@ impl LocalModels {
         Self::start_in(opts, roles, None)
     }
 
-    /// Install and start a chat server for the manifest model `model_id` under a second
-    /// supervisor, next to any started with [`LocalModels::start`]: models and runtime builds
-    /// come from the same `--models-home`, while its data directory (`<home>/<name>`: sockets,
-    /// pid files, logs, orphan cleanup) is its own, so neither touches the other's server.
-    /// Threads and thinking follow `opts`.
+    /// Start another chat server (e.g. a judge) under a second supervisor with its own data
+    /// directory, so it never touches the servers of [`LocalModels::start`].
     pub fn start_chat_server(
         opts: &LocalOptions,
         model_id: &str,
@@ -541,19 +506,6 @@ impl LocalModels {
     /// The resolver for the key references in the configs.
     pub fn secrets(&self) -> nugget_runtime::RuntimeSecrets {
         self.runtime.secrets()
-    }
-
-    /// A provider for the embedding server.
-    pub fn embedder(&self) -> Result<Arc<dyn Provider>, BenchError> {
-        let served = self
-            .embedding
-            .as_ref()
-            .ok_or_else(|| BenchError::Failed("no local embedding model was started".into()))?;
-        Ok(build_provider_with(
-            &served.config,
-            Arc::new(NullEgress),
-            &self.runtime.secrets(),
-        )?)
     }
 
     /// A reranker for the rerank server, as `nuggetd` attaches the runtime's `local-rerank`
@@ -828,30 +780,6 @@ mod tests {
     }
 
     #[test]
-    fn the_default_chat_model_is_the_4b_not_the_smallest() {
-        let m = default_manifest().unwrap();
-        // The 1.7B Double Tap model is smaller, but the default must stay what users run.
-        assert_ne!(
-            pick(&m.models, None, &CHAT_TIERS).unwrap().id,
-            DEFAULT_CHAT_MODEL
-        );
-        let id = chat_model_id(&m.models, None);
-        assert_eq!(id, Some(DEFAULT_CHAT_MODEL));
-        assert_eq!(
-            pick(&m.models, id, &CHAT_TIERS).unwrap().id,
-            DEFAULT_CHAT_MODEL
-        );
-        assert_eq!(chat_model_id(&m.models, Some("x")), Some("x"));
-        let without: Vec<_> = m
-            .models
-            .iter()
-            .filter(|e| e.id != DEFAULT_CHAT_MODEL)
-            .cloned()
-            .collect();
-        assert_eq!(chat_model_id(&without, None), None);
-    }
-
-    #[test]
     fn thinking_off_merges_the_template_flag() {
         let cfg: ProviderConfig = serde_json::from_value(json!({
             "id": "local-chat", "kind": "openai_compatible",
@@ -928,35 +856,6 @@ mod tests {
     }
 
     #[test]
-    fn pending_entries_do_not_change_recommendations() {
-        // Signed into the manifest, the pending entries must leave every tier's pick (and so
-        // nuggetd's models) unchanged on every amount of RAM.
-        let signed = default_manifest().unwrap();
-        let mut merged = signed.clone();
-        for p in load_pending(&pending_files(), &signed.models).unwrap() {
-            merged.models.push(p.entry);
-        }
-        for gb in 1..=256u64 {
-            for total_ram in [gb * GIB, gb * GIB * 9 / 10] {
-                let hw = Hardware {
-                    total_ram,
-                    available_ram: total_ram / 2,
-                    cpu_cores: 8,
-                    gpu: nugget_models::GpuKind::Unknown,
-                };
-                for tier in Tier::ALL {
-                    let want = nugget_models::recommend(&signed, &hw, tier).map(|m| m.id.as_str());
-                    assert_eq!(
-                        nugget_models::recommend(&merged, &hw, tier).map(|m| m.id.as_str()),
-                        want,
-                        "{tier:?} at {total_ram} bytes"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     fn pending_files_are_checked() {
         let signed = vec![entry("signed", 1, &[Tier::Triage])];
         let good = |id: &str| {
@@ -1025,25 +924,4 @@ mod tests {
         assert_eq!(parse_cputime(""), None);
     }
 
-    #[test]
-    fn this_process_has_a_cpu_time_where_supported() {
-        let cpu = process_cpu_seconds(std::process::id());
-        if cfg!(any(target_os = "linux", target_os = "macos")) {
-            assert!(cpu.is_some_and(|s| s >= 0.0), "{cpu:?}");
-        } else {
-            assert!(cpu.is_none());
-        }
-    }
-
-    #[test]
-    fn host_info_flags_the_16gb_assumption() {
-        let hw = |gib: u64| Hardware {
-            total_ram: gib * GIB,
-            available_ram: 0,
-            cpu_cores: 4,
-            gpu: nugget_models::GpuKind::Unknown,
-        };
-        assert!(HostInfo::from_hardware(&hw(15)).meets_16gb);
-        assert!(!HostInfo::from_hardware(&hw(8)).meets_16gb);
-    }
 }

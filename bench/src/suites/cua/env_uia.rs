@@ -4,31 +4,11 @@
 //! specific to one OS: it works on any [`ComputerUse`]. Each snapshot is first put in the
 //! matcher's conventions by [`super::env_ax::normalize`] (a no-op for UIA trees).
 //!
-//! - **Matching.** A web page's accessibility tree has no bench ids (`UiNode` carries no
-//!   automation id), so the real tree of an app window is matched to the app's bench tree
-//!   ([`super::ui::Node`], from the session's observation) by **role class, accessible name and
-//!   document order** ([`match_tree`]): bench nodes are visited depth first and each takes the
-//!   next real node, after the previous match, whose role class (press, check, edit, combo or
-//!   other) and name agree. Extra real nodes (the `<h1>`, labels, the browser frame) are
-//!   skipped; the subtree of a matched control is not searched again (a button's own text). A
-//!   name matches exactly after collapsing whitespace, or with a CSS suffix such as ` (on)`, or
-//!   as a prefix the accessibility layer cut with `…`. A real window is **consistent** with the
-//!   bench tree when every named bench node matched and every control shows the bench state
-//!   (text value, checked, selected option): an old page that has not reloaded yet is not.
-//! - **Presentation.** [`present`] builds the tree the model sees: the bench structure, ids
-//!   [`encode_id`]d from the bench ids (so tool results show `[shop-pay]`), and everything else
-//!   (role, name, value, states, actions, bounds) read from the real element. A combo box lists
-//!   its options as `<combo>.opt<n>` children, as in the socket environments.
-//! - **Actions** ([`UiaDriver::perform`]): the bench action's target is located in the real
-//!   window and acted on through UI Automation: Invoke or Toggle for a click, ValuePattern for
-//!   text, SelectionItem for an option (falling back to keyboard input when a page ignores the
-//!   pattern). The page itself posts the change to the apps server, so the world changes exactly
-//!   as it would for a user; the action succeeded when the world version moves, and failed
-//!   (with the page's status line as the message) when it does not.
-//! - **The agent's backend** ([`UiaComputer`]): a [`ComputerUse`] whose snapshots are real
-//!   snapshots presented with bench ids, whose element actions are real UIA actions (performed
-//!   by the session, which counts the step), and whose outcomes are verified by reading the
-//!   real window again.
+//! Real trees carry no bench ids, so they are matched to the bench tree by role class, name and
+//! document order ([`match_tree`]); a stale page that has not reloaded is not consistent.
+//! [`present`] shows the model the bench structure with real element properties. Actions
+//! ([`UiaDriver::perform`]) succeed only when the page posts the change and the world version
+//! moves, exactly as for a user.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -74,8 +54,7 @@ fn option_id(combo: &str, i: usize) -> String {
     format!("{combo}{OPTION}{i}")
 }
 
-// ---------------------------------------------------------------------------------------------
-// Matching
+// ---- Matching ----
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Class {
@@ -376,8 +355,7 @@ fn present_node(b: &Node, m: &Match) -> Vec<UiNode> {
     vec![n]
 }
 
-// ---------------------------------------------------------------------------------------------
-// The driver: real windows of the apps
+// ---- The driver: real windows of the apps ----
 
 /// Which real window shows which app.
 pub trait WindowMap: Send + Sync {
@@ -789,8 +767,7 @@ pub fn diagnose(app: &str, l: &Located) -> String {
     s
 }
 
-// ---------------------------------------------------------------------------------------------
-// The agent's backend
+// ---- The agent's backend ----
 
 #[derive(Default)]
 struct Focus {

@@ -1,22 +1,9 @@
 //! [`MeteredProvider`]: a [`Provider`] decorator that counts, times and bounds every chat
 //! request a real model gets from the knowledge pipeline (`knowledge --local-models`).
 //!
-//! Each request is run to completion inside a per-request timeout (the bench's, which is
-//! shorter than the pipeline's own so it always fires first), then classified once:
-//!
-//! | Outcome | Meaning |
-//! |---|---|
-//! | `timeouts` | No complete answer within the timeout (the request is dropped). |
-//! | `failures` | The provider returned an error, the stream failed or ended without `Done`, or the model refused. |
-//! | `unparseable` | A complete answer with no JSON object in it (the pipeline's own tolerance: the whole text, or the outermost `{…}`). |
-//! | `schema_invalid` | JSON, but not valid against the request's JSON schema (the pipeline may still salvage parts). |
-//! | `ok` | Valid JSON under the schema. |
-//!
-//! `truncated` counts answers that stopped at the output-token cap, whatever their class.
-//! Latency is wall time per request, timeouts included (at the timeout). The answer is replayed
-//! to the pipeline unchanged, so the decorator never alters what the model said; timeouts reach
-//! the pipeline as a provider error. Item contents are not touched here: they reach the model
-//! only through `nugget-knowledge`'s own prompt (untrusted-data boundaries, quote gate).
+//! The bench's per-request timeout is shorter than the pipeline's own so it always fires first.
+//! Each request is classified once (ok, timeout, failure, unparseable, schema-invalid) and its
+//! answer replayed to the pipeline unchanged.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -146,10 +133,6 @@ impl MeteredProvider {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(entry);
-    }
-
-    pub fn timeout(&self) -> Duration {
-        self.timeout
     }
 
     /// A copy of the counters so far.

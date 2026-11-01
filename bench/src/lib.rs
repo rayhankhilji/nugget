@@ -4,20 +4,8 @@
 //! [`Benchmark`], is registered in [`registry`], and produces a [`Report`] that conforms to the
 //! stable JSON schema in `bench/schema/report.schema.json`.
 //!
-//! The `memory` and `perf` suites run by default against [`index::FakeIndex`], an in-crate
-//! stand-in for `nugget-store` with the same shape (content-hash dedup, delete, BM25, vector kNN
-//! and hybrid fusion). `memory --backend real` ([`real`]) runs the real stack in process: an
-//! encrypted `nugget-store`, `nugget-ingest` with the `files` connector watching a temporary
-//! folder, and `nugget-retrieve`.
-//! `cua` runs computer-use tasks on local test apps ([`suites::cua`]).
-//! `draft` compares Nugget's drafting prompt with a Sentient-style whole-vault baseline on a
-//! fictional fixture corpus, against a deterministic fake model or a real provider.
-//! `proactive` scores proactive cards over a 30-day fixture world (the reference engine, or the
-//! real `nugget-proactive` crate with `--backend real`).
-//! `knowledge` ([`suites::knowledge`]) scores the M2 knowledge pipeline on a labelled fixture
-//! corpus ([`knowledge`]); built without the `pipeline` feature it reports `not_implemented`.
-//! `energy` ([`suites::energy`]) meters CPU time, wakeups and system energy of the real daemon,
-//! the desktop shell's accessibility poll and local read-ahead.
+//! `memory` and `perf` default to [`index::FakeIndex`], an in-crate stand-in for `nugget-store`;
+//! `--backend real` ([`real`]) runs the real stack in process. See `bench/README.md` for suites.
 
 pub mod corpus;
 pub mod index;

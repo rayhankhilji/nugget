@@ -1,31 +1,10 @@
 //! `knowledge --knowledge-dump FILE`: what the system got wrong, one JSON object per line, so a
 //! real-model run says where its precision and recall went.
 //!
-//! | `type` | One line per |
-//! |---|---|
-//! | `summary` | run (first line): counts of everything below by kind, source and reason |
-//! | `entity_fp` | system entity that matches no gold entity (or is a second match: a duplicate) |
-//! | `entity_fn` | gold entity no system entity matched |
-//! | `claim_fp` | active system triple not in the gold labels (in the gold vocabulary) |
-//! | `claim_fn` | active gold triple the system does not have |
-//! | `request` | real-model extraction request: latency, tokens, the answer, and the quote gate's verdict on every proposed entity and claim |
-//!
-//! **Source.** With a deterministic baseline (the same corpus extracted with an LLM that
-//! answers nothing, [`Baseline`]), each false positive says whether the deterministic
-//! extractors already produce it (`deterministic`) or only the LLM run does (`llm`), and each
-//! false negative whether the baseline found it (`in_baseline`). Entities compare by kind and
-//! normalised name, triples by their canonical form with unmatched entities by name.
-//!
-//! **Reasons.** `entity_fp`: `duplicate` (its best gold entity is taken by another system
-//! entity), `kind_mismatch` (a gold entity of another kind has this name), else `not_in_gold`.
-//! `claim_fp`: `superseded`, `subject_unmatched`, `object_unmatched`, `wrong_object` (the gold
-//! labels have this subject and predicate with another object), `wrong_predicate` (this subject
-//! and object under another predicate), else `not_in_gold`. `claim_fn`: `subject_missing` /
-//! `object_missing` (no system entity matched it), `wrong_predicate`, `wrong_object`, else
-//! `absent`.
-//!
-//! Existing metric names are untouched: the dump only writes the file and records its path and
-//! summary in the report's parameters.
+//! Lines are a `summary`, then entity/claim false positives and negatives with a reason, and
+//! real-model `request`s with the quote gate's verdicts. A [`Baseline`] (same corpus, LLM that
+//! answers nothing) tells whether each error comes from the deterministic extractors or the LLM.
+//! Metrics are unchanged.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;

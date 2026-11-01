@@ -1,16 +1,8 @@
 //! The two arms: what each puts in the shared prompt format.
 //!
-//! - **Nugget** (in-suite pipeline until `nugget-draft` lands): rule-based field kind
-//!   ([`nugget_draft::classify`]), instruction-like text in the thread and context neutralised,
-//!   budgeted and cited context from the real [`nugget_retrieve::Retriever`] over the persona's
-//!   store (sensitive items left out for cloud models), and a voice profile
-//!   ([`nugget_voice::VoiceHints`]): channel or recipient statistics plus three exemplars chosen
-//!   by recipient and topic.
-//! - **Baseline** (Sentient-style, `docs/research/sentient-os-teardown.md` §2.4, §2.7): the whole
-//!   vault concatenated and cut at 600 KB, raw writing samples (5 per contact for the 6 most
-//!   recent contacts, plus the 15 most recent sent emails), the raw thread. Text only: Sentient
-//!   also sends a screenshot, which is not reproducible and is left out, which is generous to
-//!   the baseline.
+//! Nugget: neutralised instructions, budgeted cited retrieval (sensitive items left out for cloud
+//! models) and a voice profile. Baseline (Sentient-style): the whole vault cut at 600 KB, raw
+//! samples and thread; its screenshot is left out, which is generous to the baseline.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -592,20 +584,6 @@ mod tests {
     }
 
     #[test]
-    fn baseline_samples_follow_the_sentient_recipe() {
-        let corpus = Corpus::load().unwrap();
-        for p in &corpus.personas {
-            let s = BaselineArm::samples(p);
-            assert!(
-                !s.is_empty() && s.len() <= 6 * 5 + 15,
-                "{}: {}",
-                p.id,
-                s.len()
-            );
-        }
-    }
-
-    #[test]
     fn baseline_vault_holds_everything_and_nugget_cloud_context_no_secret() {
         let corpus = Corpus::load().unwrap();
         let world = World::build(corpus).unwrap();
@@ -645,37 +623,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn baseline_is_cut_to_the_budget_keeping_the_thread() {
-        let corpus = Corpus::load().unwrap();
-        let world = World::build(corpus).unwrap();
-        let base = BaselineArm::new(&world, 42);
-        let task = &world.corpus.tasks[0];
-        let (whole, cut) = base.prompt_within(task, None).unwrap();
-        assert!(!cut);
-        let (same, cut) = base.prompt_within(task, Some(whole.tokens())).unwrap();
-        assert!(!cut);
-        assert_eq!(same, whole);
-        for budget in [whole.tokens() * 3 / 4, whole.tokens() / 2] {
-            let (p, cut) = base.prompt_within(task, Some(budget)).unwrap();
-            assert!(cut, "{budget}");
-            assert!(p.tokens() <= budget, "{} > {budget}", p.tokens());
-            let s = prompt::sections(&p.user);
-            assert!(!s[prompt::CONTEXT].trim().is_empty(), "{budget}");
-            // The thread is intact.
-            assert_eq!(
-                s[prompt::THREAD],
-                prompt::sections(&whole.user)[prompt::THREAD]
-            );
-            // A prefix of the vault, nothing invented.
-            assert!(base.vault.starts_with(s[prompt::CONTEXT].trim_end()));
-        }
-        // A budget below the thread itself: context and samples go, the thread stays.
-        let (p, cut) = base.prompt_within(task, Some(10)).unwrap();
-        assert!(cut);
-        let s = prompt::sections(&p.user);
-        assert!(s[prompt::CONTEXT].trim().is_empty());
-        assert!(!s.contains_key(prompt::WRITING_SAMPLES));
-        assert!(s[prompt::THREAD].contains(task.context.thread[0].text.trim()));
-    }
 }

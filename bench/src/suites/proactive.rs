@@ -1,20 +1,11 @@
 //! `bench/proactive` (M5): proactive cards over a 30-day fixture world.
 //!
-//! A fictional user's mail, calendar, notes and receipts (`bench/fixtures/proactive/`) are fed to
-//! a [`ProactiveEngine`] one morning at a time. A simulated user accepts cards that match the gold
-//! labels and dismisses the rest, with noise, and the engine learns from that feedback. The suite
-//! scores card precision and recall, false positives on distractors, dedup, the learning curve,
-//! dry-run coverage of actions and the approval gate, against a Sentient-style recency baseline.
-//! Methodology: `bench/README.md`.
-//!
-//! `--backend fake` (the default) scores the in-crate [`reference::ReferenceEngine`].
-//! `--backend real` scores the real `nugget-proactive` crate through [`real::RealEngine`] (an
-//! encrypted temporary store per run, no network), with the reference engine reported next to
-//! it as the bar to clear.
+//! A fixture world is fed to a [`ProactiveEngine`] one morning at a time; a noisy simulated user
+//! gives feedback. `--backend fake` scores [`reference::ReferenceEngine`], `--backend real` the
+//! real crate via [`real::RealEngine`]. Methodology: `bench/README.md`.
 
 pub mod baseline;
 pub mod engine;
-pub mod generate;
 pub mod real;
 pub mod reference;
 pub mod sim;

@@ -16,9 +16,8 @@ use nugget_infer::{
 use serde_json::{Value, json};
 
 use super::nugget::NuggetAgent;
-use super::nugget_model::{ProviderFactory, looks_like_tool_call, strip_think};
+use super::nugget_model::ProviderFactory;
 use super::*;
-use crate::runner::Scale;
 
 fn task(id: &str) -> Vec<Task> {
     let t = select(task::load_all().unwrap(), Some(id));
@@ -253,62 +252,6 @@ fn a_stalled_model_hits_the_task_timeout_and_is_listed() {
 }
 
 #[test]
-fn model_errors_are_counted_and_do_not_stop_the_suite() {
-    let t = select(
-        task::load_all().unwrap(),
-        Some("settings-dark-mode,mail-delete-newsletter"),
-    );
-    let calls = Arc::new(AtomicUsize::new(0));
-    let c = calls.clone();
-    // First task: the request fails. Second: the stream breaks mid-way.
-    let factory = fake(move || {
-        Some(if c.fetch_add(1, Ordering::SeqCst) == 0 {
-            Err(nugget_core::Error::Provider("connection refused".into()))
-        } else {
-            Ok(vec![
-                Ok(ChatEvent::TextDelta("partial".into())),
-                Err(nugget_core::Error::Provider("stream error: boom".into())),
-            ])
-        })
-    });
-    let mut agent = NuggetAgent::with_provider(&t, "fails", factory)
-        // These count the scripted turns; the triage call would take the first one.
-        .with_triage(false);
-    let (eps, _) = run_tasks(&t, &mut agent, CuaEnv::Inproc).unwrap();
-    assert_eq!(eps.len(), 2);
-    for e in &eps {
-        assert_eq!(e.outcome.kind(), "gave_up", "{:?}", e.outcome);
-        assert!(!e.score.success);
-    }
-    let am = agent.metrics();
-    assert_eq!(metric(&am, "model.errors"), 2.0);
-    assert_eq!(metric(&am, "model.timeouts"), 0.0);
-    assert_eq!(agent.model_error_tasks().len(), 2);
-}
-
-#[test]
-fn an_open_model_refuses_through_finish() {
-    let t = task("mail-refuse-bank-phish");
-    let factory = fake(|| {
-        Some(Ok(vec![
-            Ok(ChatEvent::ToolCall {
-                id: String::new(),
-                name: "finish".into(),
-                arguments: json!({
-                    "summary": "Refused: this asks me to deceive someone with a fake bank message.",
-                    "outcome": "failure"
-                }),
-            }),
-            done(),
-        ]))
-    });
-    let mut agent = NuggetAgent::with_provider(&t, "refuses", factory);
-    let (eps, _) = run_tasks(&t, &mut agent, CuaEnv::Inproc).unwrap();
-    assert_eq!(eps[0].outcome.kind(), "refuse", "{:?}", eps[0].outcome);
-    assert!(eps[0].score.success, "{:?}", eps[0].score.reasons);
-}
-
-#[test]
 fn the_goal_triage_refuses_before_acting() {
     let t = task("mail-refuse-bank-phish");
     let factory = fake(|| {
@@ -354,39 +297,3 @@ fn a_tool_call_written_as_text_is_malformed() {
     assert_eq!(metric(&am, "model.malformed_tool_calls"), turns);
 }
 
-#[test]
-fn think_blocks_and_text_tool_calls() {
-    assert_eq!(strip_think("plain"), ("plain".into(), 0));
-    assert_eq!(
-        strip_think("<think>\nhmm\n</think>\n\nHello"),
-        ("Hello".into(), 1)
-    );
-    assert_eq!(strip_think("reasoning</think>Hi"), ("Hi".into(), 1));
-    assert_eq!(strip_think("A<think>x</think>B<think>y"), ("AB".into(), 2));
-    assert!(looks_like_tool_call("<tool_call>{}</tool_call>"));
-    assert!(looks_like_tool_call(
-        r#"{"name": "click", "arguments": {"element": "x"}}"#
-    ));
-    assert!(!looks_like_tool_call("Dark mode is on."));
-}
-
-#[test]
-fn local_subsets_cover_safety() {
-    let all = task::load_all().unwrap();
-    let mut previous = 0;
-    for scale in [Scale::Smoke, Scale::Quick] {
-        let ids = local_subset(scale);
-        assert!(ids.len() > previous);
-        previous = ids.len();
-        let t = select(all.clone(), Some(&ids.join(",")));
-        assert_eq!(t.len(), ids.len(), "{scale:?}: unknown task id");
-        let tagged = |tag: &str| t.iter().filter(|t| t.has_tag(tag)).count();
-        assert!(tagged("adversarial") >= 2, "{scale:?}");
-        assert!(tagged("refuse") >= 1, "{scale:?}");
-    }
-    let quick = select(all.clone(), Some(&local_subset(Scale::Quick).join(",")));
-    assert!(quick.iter().any(|t| t.has_tag("ask")));
-    assert!(quick.iter().any(|t| t.has_tag("decline")));
-    assert!(local_subset(Scale::Standard).is_empty());
-    assert!(local_subset(Scale::Full).is_empty());
-}

@@ -1,29 +1,9 @@
 //! Store-level speed and quality at scale: `perf --backend real`, and the 100k-item scale test.
 //!
-//! Unlike `memory --backend real`, nothing goes through the ingest pipeline or a watcher: the
-//! synthetic corpus is written **directly** with [`Store::upsert_item_with_chunks`] (item, chunks,
-//! full-text entries and vectors in one transaction per item) into an encrypted
-//! [`nugget_store::Store`] in a temporary directory, with deterministic embeddings from
-//! [`HashEmbedder`] computed outside the timed region. That isolates the store and retriever,
-//! which is what W12 changes, and keeps a 100k-item run to minutes.
-//!
-//! Phases:
-//! 1. **Write.** Every item with its chunks (`ingest.*`), then a re-upsert of unchanged content
-//!    (`reingest_unchanged.*`), and the database size (`resources.*`).
-//! 2. **Queries.** Known-item queries timed on each path: `Store::search_text`,
-//!    `Store::search_vector` (query embedding excluded), `Store::search_hybrid`,
-//!    `Retriever::search` and `Retriever::build_context` (query embedding included)
-//!    (`query.*`), with known-item recall@10 and MRR@10 for each search (`retrieval.*`).
-//! 3. **Vector recall against exact search.** For a sample of queries, `Store::search_vector`'s
-//!    top 10 is compared with a brute-force cosine top 10 computed here over the generated
-//!    vectors (`retrieval.store.vector.recall_vs_exact@10`). A hit counts if its exact score
-//!    reaches the 10th exact score, so ties at the boundary never count as misses. Exact while
-//!    the store searches by brute force; this is what an approximate index must keep high.
-//! 4. **Edit freshness.** An item is rewritten with a new marker and the clock runs from the
-//!    write until full-text search finds the new marker, vector search with the new embedding
-//!    returns the item, the old marker no longer finds it, and `Retriever::search` finds it
-//!    (`freshness.edit.*`, `update.latency.*`, `propagation.edit_rate`).
-//! 5. **Deletes** (`delete.latency.*`) and peak RSS.
+//! The corpus is written directly with [`Store::upsert_item_with_chunks`] (no ingest pipeline or
+//! watcher), with [`HashEmbedder`] embeddings computed outside the timed region, to isolate the
+//! store and retriever and keep a 100k-item run to minutes. Vector recall is checked against a
+//! brute-force exact top 10; boundary ties never count as misses.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,7 +18,7 @@ use nugget_store::{Hit, NewChunk, NewItem, Store, StoreKey, UpsertOutcome, conte
 
 use crate::corpus::{Corpus, CorpusConfig, Doc, Rng, marker};
 use crate::report::{Direction, Metric};
-use crate::runner::{BenchError, Benchmark, RunContext, Scale};
+use crate::runner::{BenchError, RunContext, Scale};
 use crate::stats::summarize;
 use crate::suites::perf::{PerfParams, latency_metrics, us};
 use crate::suites::{SYNTHETIC_SOURCE, item_ref, secs};
@@ -93,44 +73,6 @@ impl StoreParams {
         }
     }
 
-    /// The W12 scale test: 100k items, one 384-dimensional chunk each.
-    pub fn scale_100k() -> Self {
-        Self {
-            docs: 100_000,
-            words_per_doc: 120,
-            length_sigma: 0.0,
-            chunks_per_item: 1,
-            dim: 384,
-            queries: 100,
-            query_terms: 4,
-            query_noise: 0.25,
-            recall_sample: 50,
-            edits: 30,
-            deletes: 200,
-            context_budget_tokens: 2_000,
-            edit_timeout_s: 60.0,
-        }
-    }
-}
-
-/// The store-level run as a suite of its own (`scale`). Not registered: the 100k-item test in
-/// `bench/tests/scale.rs` runs it; `perf --backend real` runs the same code at `--scale` sizes.
-pub struct ScaleBench {
-    pub params: StoreParams,
-}
-
-impl Benchmark for ScaleBench {
-    fn name(&self) -> &'static str {
-        "scale"
-    }
-
-    fn description(&self) -> &'static str {
-        "Real-store write, query, exact-recall and edit-freshness at a fixed item count"
-    }
-
-    fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-        run_with(ctx, &self.params)
-    }
 }
 
 /// Entry point for `perf --backend real`.
@@ -687,8 +629,8 @@ async fn run_async(p: &StoreParams, seed: u64) -> Result<Vec<Metric>, BenchError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::{Backend, RunConfig, run_benchmark};
-    use crate::{Report, Status};
+    use crate::runner::{Backend, RunConfig};
+    
 
     fn tiny() -> StoreParams {
         StoreParams {
@@ -724,16 +666,14 @@ mod tests {
 
     #[test]
     fn tiny_store_run_produces_expected_metrics() {
-        let report: Report = run_benchmark(
-            &ScaleBench { params: tiny() },
-            &RunConfig {
-                scale: Scale::Smoke,
-                seed: 7,
-                backend: Backend::Real,
-                ..RunConfig::default()
-            },
-        );
-        assert_eq!(report.status, Status::Ok, "{:?}", report.message);
+        let mut ctx = RunContext::new(RunConfig {
+            scale: Scale::Smoke,
+            seed: 7,
+            backend: Backend::Real,
+            ..RunConfig::default()
+        });
+        let ms = run_with(&mut ctx, &tiny()).unwrap();
+        let metric = |n: &str| ms.iter().find(|m| m.name == n);
         for name in [
             "ingest.items_per_s",
             "ingest.chunks_per_s",
@@ -749,18 +689,15 @@ mod tests {
             "freshness.edit.p95_ms",
             "delete.latency.p50_us",
         ] {
-            let m = report
-                .metric(name)
-                .unwrap_or_else(|| panic!("missing {name}"));
+            let m = metric(name).unwrap_or_else(|| panic!("missing {name}"));
             assert!(m.value > 0.0, "{name} = {}", m.value);
         }
-        let v = |n: &str| report.metric(n).map(|m| m.value).unwrap_or(-1.0);
+        let v = |n: &str| metric(n).map(|m| m.value).unwrap_or(-1.0);
         // Brute-force vector search at this size: exactly the exact top 10.
         assert_eq!(v("retrieval.store.vector.recall_vs_exact@10"), 1.0);
         assert_eq!(v("propagation.edit_rate"), 1.0);
         assert!(v("retrieval.store.text.recall@10") > 0.5);
         assert!(v("retrieval.retriever.recall@10") > 0.5);
         assert_eq!(v("retrieval.retriever.text_only_fallbacks"), 0.0);
-        assert_eq!(report.config.params["backend"], "real_store");
     }
 }

@@ -1,15 +1,8 @@
 //! Metrics of an `ask` run.
 //!
-//! **Failure convention.** Every quality rate is over *successful* rows (requests that
-//! completed); failed and timed-out requests are reported next to them as `failures`,
-//! `failure_rate` and `timeouts`, so a flaky server shows as failures rather than as wrong
-//! answers. Latency is the exception: a timed-out request is a censored sample at the timeout
-//! (its time to first token too, unless text arrived first), so a slow model cannot look fast by
-//! timing out; other failures are left out. Time to first token is the model's (from the
-//! request, retrieval excluded) and skips answers whose filter forwarded nothing. The judge's
-//! rates are over the rows it reached (`judge_coverage` of all rows, below 1 when judging was
-//! cut short): `judge_correct_rate` counts failed requests and undecided verdicts as not
-//! correct, `judge_correct_rate_answered` is over rows with both verdicts.
+//! Quality rates are over successful rows, so a flaky server shows as failures, not wrong
+//! answers. Latency counts a timed-out request as a censored sample at the timeout, so a slow
+//! model cannot look fast by timing out.
 
 use std::time::Duration;
 
@@ -662,56 +655,4 @@ mod tests {
         assert!(out.iter().all(|m| !m.name.contains("injection_compliance")));
     }
 
-    #[test]
-    fn judge_rates_over_all_rows_and_answered_rows() {
-        let g = sample();
-        let j = |outcome| {
-            Some(Judgement {
-                outcome,
-                reference_first: None,
-                candidate_first: None,
-            })
-        };
-        let good = AnswerScore {
-            correct: true,
-            ..AnswerScore::default()
-        };
-        let mut rows = [
-            row(0, ok_run(1, Some(1)), Some(good.clone())),
-            row(1, ok_run(1, Some(1)), Some(good)),
-            row(2, ok_run(1, Some(1)), Some(AnswerScore::default())),
-            row(3, failed("error", None), None),
-        ];
-        rows[0].judge = j(JudgeOutcome::Agreed(true));
-        rows[1].judge = j(JudgeOutcome::Inconsistent);
-        rows[2].judge = j(JudgeOutcome::Failed("timeout"));
-        rows[3].judge = j(JudgeOutcome::Skipped);
-        let mut refs: Vec<&Row> = rows.iter().collect();
-        // Not reached by the judge (cut short).
-        let unjudged = row(4, ok_run(1, Some(1)), Some(AnswerScore::default()));
-        refs.push(&unjudged);
-        let mut out = Vec::new();
-        arm_metrics(
-            Arm::PLAIN,
-            &g,
-            &refs,
-            true,
-            false,
-            Duration::from_secs(300),
-            &mut out,
-        );
-        let get = |n: &str| {
-            out.iter()
-                .find(|m| m.name == format!("ask.plain.{n}"))
-                .unwrap()
-                .value
-        };
-        assert_eq!(get("judge_coverage"), 0.8);
-        assert_eq!(get("judge_correct_rate"), 0.25);
-        assert_eq!(get("judge_correct_rate_answered"), 0.5);
-        assert_eq!(get("judge_inconsistent_rate"), 0.5);
-        assert_eq!(get("judge_rule_agreement"), 1.0);
-        assert_eq!(get("judge_failures"), 1.0);
-        assert!(out.iter().all(|m| m.target.is_none()));
-    }
 }

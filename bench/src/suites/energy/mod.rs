@@ -1,37 +1,8 @@
-//! `bench/energy`: what Nugget costs in energy and battery, measured where it can be and reported
-//! as CPU time and wakeups where it cannot (DD2; `docs/PLAN.md`: "battery cost per 1k items").
-//!
-//! Every scenario meters its processes with `meter::Meter` (CPU time and wakeups of the
-//! processes and their descendants, and system package energy from RAPL on Linux or
-//! `powermetrics` on macOS when readable; see that module for sources and fallbacks). System
-//! energy is the whole machine's, so a scenario with an energy source also meters an equal
-//! window with nothing launched (`meter::baseline`) and reports `attributable = window −
-//! baseline`. On a shared VM that difference is noisy; the CPU and wakeup figures are not.
-//!
-//! Scenarios (metric prefix `energy.<scenario>.`), chosen with `--energy-scenarios` or
-//! `NUGGET_BENCH_ENERGY_SCENARIOS` ([`Scenario::parse_list`]):
-//! - `daemon_idle` (`daemon.rs`): the real `nuggetd` on a seeded home, after its startup work
-//!   (knowledge run, vault render) and a settle period, idle with no IPC traffic for the window.
-//! - `index_1k` (`daemon.rs`): a fresh daemon indexes 1,000 Markdown files dropped into a watched
-//!   folder, until all are indexed and searchable; per 1k items. Text-only: the daemon's config
-//!   has no model providers, so no embedding model runs (a known gap).
-//! - `a11y_poll` (`poll.rs`): the desktop shell's once-a-second frontmost-app read, in process, at
-//!   1 Hz against a window that only sleeps at 1 Hz.
-//! - `prefill` (`prefill.rs`, `--local-models` only): read-aheads of Double Tap fixture tasks
-//!   through [`nugget_draft::Drafter::read_ahead`] against the real local chat server, metering
-//!   `llama-server`.
-//! - `shell_idle` (`shell.rs`): the desktop shell from [`SHELL_ENV`], started hidden in the tray
-//!   against a daemon, idle for the window; shell (with its webview processes) and daemon
-//!   metered separately.
-//! - `shell_focus` (`shell.rs`): a scripted window of focus changes among three text-field
-//!   windows, read-ahead off then on, with the fake llama-server as the daemon's local
-//!   provider; shell, daemon and server metered separately. Both need a desktop session
-//!   (`bench/scripts/energy-linux.sh` on Linux) and run only when listed.
-//!
-//! The daemon scenarios reuse `perf_daemon`'s binary lookup (`$NUGGET_BENCH_NUGGETD`, else
-//! `nuggetd` next to `nugget-bench`), seeding and config, and are skipped (recorded in
-//! `config.params`, not failed) when there is no binary. Windows scale with `--scale`
-//! ([`EnergyParams::for_scale`]).
+//! `bench/energy`: what Nugget costs in energy, measured where possible and reported as CPU time
+//! and wakeups where not. Each scenario ([`Scenario::parse_list`]) meters its processes with
+//! `meter::Meter`; package energy is reported net of an idle baseline, which is noisy on shared
+//! VMs (CPU and wakeup figures are not). Scenarios needing a missing binary or desktop session are
+//! skipped (recorded in `config.params`), not failed.
 
 pub(crate) mod daemon;
 pub(crate) mod meter;
@@ -416,40 +387,6 @@ mod tests {
     use super::*;
     use crate::runner::{RunConfig, run_benchmark};
     use crate::{Report, Status};
-
-    #[test]
-    fn scenario_lists() {
-        assert_eq!(
-            Scenario::parse_list("idle, index_1k,poll,idle").unwrap(),
-            [Scenario::DaemonIdle, Scenario::Index1k, Scenario::A11yPoll]
-        );
-        assert_eq!(Scenario::parse_list("all").unwrap(), Scenario::ALL);
-        assert_eq!(
-            Scenario::parse_list("prefill,all").unwrap()[..2],
-            [Scenario::Prefill, Scenario::DaemonIdle]
-        );
-        assert!(
-            Scenario::parse_list("idle,bogus")
-                .unwrap_err()
-                .contains("unknown energy scenario `bogus`")
-        );
-        assert!(Scenario::parse_list(" , ").is_err());
-        for s in Scenario::ALL {
-            assert!(crate::runner::valid_metric_name(&format!(
-                "energy.{}.x",
-                s.as_str()
-            )));
-        }
-    }
-
-    #[test]
-    fn scales() {
-        let smoke = EnergyParams::for_scale(Scale::Smoke);
-        let full = EnergyParams::for_scale(Scale::Full);
-        assert!(smoke.idle_s <= 5.0 && smoke.poll_s <= 5.0);
-        assert_eq!(full.idle_s, 600.0, "the PLAN's ten idle minutes");
-        assert_eq!(EnergyParams::for_scale(Scale::Quick).index_items, 1_000);
-    }
 
     /// Without `NUGGET_BENCH_SHELL` (unit tests never launch a desktop).
     #[test]

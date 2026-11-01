@@ -2,17 +2,9 @@
 //! read in one sitting. It exists so the benchmark has something to score before the real crate
 //! lands, and so the real crate has a bar to clear.
 //!
-//! - **Deterministic candidate store.** Rules over threads, notes, calendar and receipts produce
-//!   candidates of the five card kinds, each keyed by `(kind, subject)`. A key is shown at most
-//!   once (dedup).
-//! - **Filters before scoring.** Header-flagged bulk mail (`List-Unsubscribe`, `Auto-Submitted`,
-//!   no-reply style senders) never becomes a candidate, nor does a renewal or charge notice from a
-//!   merchant the user has no receipt from, nor a cancelled meeting.
-//! - **Feedback-learned score.** A fixed prior per kind and for known correspondents, plus learned
-//!   weights on a few features (sender, kind, internal or recurring meeting, renewal cadence),
-//!   updated by logistic SGD on each accept or dismiss. Cards scoring below zero are not shown.
-//! - **Typed actions with dry-run diffs.** Every card carries an action whose diff is computed
-//!   before it is shown, and execution refuses without an approval for that exact card.
+//! Rule-based candidates keyed by `(kind, subject)` and shown at most once, bulk mail filtered
+//! out, a logistic-SGD feedback score, and dry-run actions that refuse without an approval for
+//! that exact card.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 

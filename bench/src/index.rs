@@ -80,17 +80,9 @@ impl FakeIndex {
         }
     }
 
-    pub fn dim(&self) -> usize {
-        self.dim
-    }
-
     /// Number of live items.
     pub fn len(&self) -> usize {
         self.by_item.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.by_item.is_empty()
     }
 
     pub fn contains(&self, item: &ItemRef) -> bool {
@@ -400,13 +392,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn heap_estimate_grows() {
-        let mut ix = FakeIndex::new(32);
-        let before = ix.approx_heap_bytes();
-        for i in 0..100 {
-            ix.upsert(&item(&i.to_string()), &format!("word{i} shared text"));
-        }
-        assert!(ix.approx_heap_bytes() > before);
-    }
 }

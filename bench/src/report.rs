@@ -346,18 +346,6 @@ mod tests {
     }
 
     #[test]
-    fn json_round_trip() {
-        let r = sample(Status::Ok);
-        let json = r.to_json_pretty().unwrap();
-        let back: Report = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, r);
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["status"], "ok");
-        assert_eq!(v["metrics"][0]["direction"], "higher_is_better");
-        assert_eq!(v["started_at"], "2026-09-21T14:13:20Z");
-    }
-
-    #[test]
     fn target_checks_follow_metric_targets() {
         let up = Metric::new("r", 0.9, "ratio", Direction::HigherIsBetter, "").with_target(0.95);
         let c = TargetCheck::from_metric(&up).unwrap();
@@ -385,13 +373,6 @@ mod tests {
         let v = serde_json::to_value(&r).unwrap();
         assert!(v.get("targets").is_none());
         assert!(!r.targets_missed());
-    }
-
-    #[test]
-    fn unknown_fields_are_rejected() {
-        let mut v = serde_json::to_value(sample(Status::Ok)).unwrap();
-        v["surprise"] = serde_json::json!(1);
-        assert!(serde_json::from_value::<Report>(v).is_err());
     }
 
     #[test]

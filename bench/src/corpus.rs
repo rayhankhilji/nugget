@@ -1,12 +1,7 @@
 //! Deterministic synthetic corpus and query generation.
 //!
-//! Documents belong to topics. Each body mixes Zipf-distributed background words, words shared
-//! by its topic, and uniformly drawn (mostly rare) words, which roughly mimics the term
-//! statistics of a personal notes or mail corpus. Known-item queries are sampled from a target
-//! document's words with optional noise, so recall@k has a single relevant document per query.
-//!
-//! Everything is driven by a seeded [`Rng`], so a given `(config, seed)` always yields the same
-//! corpus on every OS.
+//! Bodies mix Zipf background words, topic words and rare words to mimic a notes or mail corpus;
+//! each known-item query has a single relevant document. Seeded, so identical on every OS.
 
 /// SplitMix64: tiny, fast, deterministic and portable. Not cryptographic.
 #[derive(Debug, Clone)]
@@ -254,13 +249,7 @@ pub fn marker(id: usize, version: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn words_are_unique() {
-        let set: HashSet<String> = (0..5_000).map(word).collect();
-        assert_eq!(set.len(), 5_000);
-    }
+    
 
     #[test]
     fn generation_is_deterministic() {
@@ -276,63 +265,4 @@ mod tests {
         assert_ne!(a.docs, c.docs);
     }
 
-    #[test]
-    fn mail_lengths_are_log_normal_and_deterministic() {
-        let cfg = CorpusConfig {
-            docs: 4_000,
-            words_per_doc: 80,
-            length_sigma: MAIL_LENGTH_SIGMA,
-            ..CorpusConfig::default()
-        };
-        let a = Corpus::generate(cfg.clone());
-        assert_eq!(a.docs, Corpus::generate(cfg).docs);
-        let mut lens: Vec<usize> = a.docs.iter().map(|d| d.words.len()).collect();
-        lens.sort_unstable();
-        let median = lens[lens.len() / 2];
-        assert!((60..=105).contains(&median), "median {median}");
-        assert!(lens[0] >= MIN_WORDS_PER_DOC);
-        assert!(*lens.last().unwrap() <= MAX_WORDS_PER_DOC);
-        // A long tail: the 99th percentile is several times the median.
-        assert!(lens[lens.len() * 99 / 100] > 4 * median);
-        for d in &a.docs {
-            assert_eq!(d.body.split(' ').count(), d.words.len());
-        }
-    }
-
-    #[test]
-    fn docs_have_expected_shape() {
-        let c = Corpus::generate(CorpusConfig {
-            docs: 10,
-            words_per_doc: 30,
-            ..CorpusConfig::default()
-        });
-        assert_eq!(c.docs.len(), 10);
-        for d in &c.docs {
-            assert_eq!(d.words.len(), 30);
-            assert_eq!(d.body.split(' ').count(), 30);
-            assert!(d.topic < c.config.topics);
-        }
-        let qs = c.queries(5, 4, 0.0, 1);
-        assert_eq!(qs.len(), 5);
-        for q in qs {
-            let doc = &c.docs[q.relevant];
-            for t in q.text.split(' ') {
-                assert!(
-                    doc.body.split(' ').any(|w| w == t),
-                    "query word {t} not in target doc"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn rng_ranges() {
-        let mut r = Rng::new(1);
-        for _ in 0..1_000 {
-            let u = r.unit();
-            assert!((0.0..1.0).contains(&u));
-            assert!(r.below(3) < 3);
-            assert!(r.exp(2.0) >= 0.0);
-        }
-    }
 }

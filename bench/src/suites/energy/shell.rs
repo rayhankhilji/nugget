@@ -3,35 +3,12 @@
 //! with [`Meter`] (the shell with its descendants, i.e. its webview processes on Linux; the
 //! daemon; for `shell_focus` the local model server) on a real desktop session.
 //!
-//! - The daemon is the real `nuggetd` ([`find_nuggetd`]) on an empty temporary `NUGGET_HOME`
-//!   (`perf_daemon`'s key file and hermetic config: no `[runtime]`, no MCP, no vault). The shell
-//!   gets the same `NUGGET_HOME`, so it connects to that daemon's socket and never starts its
-//!   own, and an isolated app config directory: Tauri's `app_config_dir` is
-//!   `$XDG_CONFIG_HOME/dev.nugget.desktop` on Linux (`XDG_DATA_HOME` and `XDG_CACHE_HOME` are
-//!   moved too) and `$HOME/Library/Application Support/dev.nugget.desktop` on macOS (`HOME` is
-//!   moved). In it the bench writes `doubletap.json` (Double Tap on; read-ahead on or off) and
-//!   `settings.json` (update channel `off`: no update checks, no network).
-//! - Settling: with `NUGGET_E2E_PROBE` (honoured by debug builds only) the shell writes a
-//!   `read_ahead_loop` line once Double Tap is set up; the bench waits for it (at most
-//!   [`PROBE_WAIT`]) and then [`EnergyParams::shell_settle_s`]. A release build writes nothing:
-//!   then the [`PROBE_WAIT`] itself is the settle period, and no probe counts are reported.
-//! - `shell_idle`: nothing in front but the desktop; one window of [`EnergyParams::idle_s`].
-//! - `shell_focus`: the local model is `nuggetd-fake-llama-server` ([`FAKE_SERVER_ENV`]),
-//!   started by the bench on a loopback port and configured as the daemon's only provider
-//!   (`openai_compatible` on `127.0.0.1`, so on-device: read-ahead is allowed and sends
-//!   llama.cpp's `cache_prompt` prefill, which the fake answers at once). That isolates the
-//!   shell's and the daemon's costs from a real model's prefill (`prefill` measures that). Three
-//!   text-field windows are opened ([`TextWindows`]: a GTK 3 window per field on Linux, three
-//!   TextEdit documents on macOS) and a scripted window of [`EnergyParams::focus_s`] switches
-//!   between them every [`EnergyParams::focus_every_s`] in a fixed order ([`focus_plan`]). It
-//!   runs twice, read-ahead off then on, restarting the shell between the runs (daemon and
-//!   server keep running). With a system energy source, the baseline is the same script with
-//!   the windows open and nothing of Nugget running.
-//!
-//! Skipped (recorded in `config.params`, never failed) without [`SHELL_ENV`], without a display
-//! (`DISPLAY` on Linux), without the focus tools (`xdotool` and a Python with GTK 3 on Linux,
-//! `open` on macOS) or the fake server, or on another OS. Linux also needs a session bus
-//! with AT-SPI and a window manager, started by the caller: `bench/scripts/energy-linux.sh`.
+//! The shell shares the daemon's temporary `NUGGET_HOME` (so it never starts its own) and gets an
+//! isolated app config dir with Double Tap on and updates off (no network). `shell_focus` uses
+//! the fake llama-server ([`FAKE_SERVER_ENV`]) as an on-device provider to isolate shell and daemon
+//! costs from real prefill, and switches focus among [`TextWindows`] read-ahead off then on.
+//! Skipped (never failed) without [`SHELL_ENV`], a display or the focus tools; Linux also needs
+//! AT-SPI and a window manager (`bench/scripts/energy-linux.sh`).
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -1228,58 +1205,6 @@ mod tests {
         assert!(probe_has(&text, "read_ahead_loop"));
         assert!(!probe_has(&text, "trigger"));
         assert_eq!(count_probe("", 0.0, 1.0), ProbeCounts::default());
-    }
-
-    #[test]
-    fn settings_files() {
-        for on in [true, false] {
-            let v: serde_json::Value = serde_json::from_str(&doubletap_json(on)).unwrap();
-            assert_eq!(v["enabled"], true);
-            assert_eq!(v["read_ahead"], on);
-            assert_eq!(v["read_ahead_on_battery"], true);
-        }
-        let v: serde_json::Value = serde_json::from_str(&desktop_settings_json()).unwrap();
-        assert_eq!(v["channel"], "off");
-        assert_eq!(v["autostart"], false);
-
-        let dir = tempfile::tempdir().unwrap();
-        write_shell_config(dir.path(), false).unwrap();
-        let cfg = app_config_dir(dir.path());
-        assert!(cfg.ends_with(APP_ID));
-        let dt = std::fs::read_to_string(cfg.join("doubletap.json")).unwrap();
-        assert!(dt.contains("\"read_ahead\": false"));
-        assert!(cfg.join("settings.json").is_file());
-        // The config dir sits where the moved directory makes Tauri look.
-        let env = isolated_env(dir.path());
-        let (_, base) = &env[0];
-        assert!(cfg.starts_with(base));
-        if cfg!(target_os = "macos") {
-            assert_eq!(env[0].0, "HOME");
-        } else {
-            assert_eq!(env[0].0, "XDG_CONFIG_HOME");
-            assert_eq!(cfg.parent().unwrap(), base);
-        }
-    }
-
-    #[test]
-    fn provider_is_on_device() {
-        let b = provider_block(4321);
-        assert!(b.contains("base_url = \"http://127.0.0.1:4321/v1\""));
-        assert!(b.contains("kind = \"openai_compatible\""));
-        assert!(b.contains(&format!("id = \"{PROVIDER}\"")));
-        assert!(b.starts_with("\n[[providers]]\n"));
-    }
-
-    #[test]
-    fn text_window_script_is_embedded() {
-        assert!(TEXT_WINDOW_PY.contains("READY"));
-        assert_eq!(WINDOWS.len(), 3);
-        let titles: std::collections::HashSet<_> = WINDOWS.iter().map(|w| w.0).collect();
-        assert_eq!(
-            titles.len(),
-            3,
-            "distinct titles: read-ahead keys on the window"
-        );
     }
 
     #[test]

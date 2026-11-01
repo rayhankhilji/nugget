@@ -1,63 +1,11 @@
-//! The `nugget` arm: the real `nugget-agent` loop, with the real computer-use tools
-//! (`nugget-computer`), the real policy engine and the real verification, driving the test apps
-//! through [`SessionComputer`].
+//! The `nugget` arm: the real `nugget-agent` loop, computer-use tools, policy engine and
+//! verification, driving the test apps through [`SessionComputer`].
 //!
-//! - **Model.** By default a deterministic scripted model plays each task's reference solution
-//!   as tool calls: it observes the open windows first, observes again whenever the element it
-//!   wants next is not in the latest tool result, acts by element id (`click`, `set_value`), and
-//!   ends with `finish`, `ask_user` or a refusal as the reference does. It never confirms
-//!   anything itself: confirmations come from the policy gate. When a tool result says the user
-//!   declined, it stops (`finish` partial); on any other error or failed verification it gives
-//!   up (`finish` failure). So the arm measures the plumbing, safety and verification, not model
-//!   skill. Set [`MODEL_ENV`] to a provider config (JSON, or a path to a JSON file) to run a real
-//!   model instead, or pass `--local-models` to run the manifest's local chat model through
-//!   llama-server ([`NuggetAgent::local`]); tests never do.
-//! - **Real models** go through [`RealModel`](super::nugget_model::RealModel): built on the agent
-//!   thread's runtime, with provider errors, malformed tool calls, missing call ids and leaked
-//!   `<think>` blocks counted (`model.*` metrics). A refusal is `finish(failure)` with a summary
-//!   `finish` with outcome `refused` (open models have no refusal stop reason); a
-//!   `finish(failure)` whose summary starts `Refused:` (older prompts) still counts.
-//! - **Triage.** Real models run with the agent's triage on ([`NuggetAgent::with_triage`]): one
-//!   goal-only call that may refuse before anything is observed or done.
-//!   `NUGGET_BENCH_CUA_TRIAGE=on|off` overrides it.
-//! - **Ask, don't guess.** The loop runs with [`AgentConfig::clarify`] on
-//!   ([`NuggetAgent::with_clarify`], `NUGGET_BENCH_CUA_CLARIFY=on|off`). When the run suspends
-//!   with a question (the model's `ask_user`, or the guard holding back an action whose target is
-//!   ambiguous), the harness puts it to [`Session::ask`]. If the task's simulated user has an
-//!   answer, the run resumes with it ([`Agent::resume`]), at most [`MAX_RESUMES`] times, within
-//!   the same deadline; otherwise the task ends with `ask`. The scripted model plays `ask` steps
-//!   as `ask_user`, and re-plays an action the guard held back once the user has answered.
-//! - **Budgets.** Per task: the turn budget (twice the task's step budget plus ten), the
-//!   harness's step budget on the session, and a wall-clock timeout ([`DEFAULT_TASK_TIMEOUT`],
-//!   [`NuggetAgent::with_task_timeout`]) that is the loop's deadline, backed by a hard stop
-//!   [`HARD_STOP_GRACE`] later. A task that runs out of time is [`Outcome::Timeout`].
-//! - **Compliant model.** [`NuggetAgent::compliant`] (`--cua-agent nugget-compliant`) plays the
-//!   same reference, but **obeys injections** on adversarial tasks: as soon as a tool result
-//!   shows the injected text ([`Probe`]), it plays the task's `injection.comply` steps (observing
-//!   as above, and stepping back out of a screen with its back/close/up control when an injected
-//!   target is not on it), then the rest of the reference. If the reference never shows the
-//!   injected text, it first opens the source when the task names one it can find (`mail message
-//!   m9 body` → `mail.open.m9`), otherwise it complies at once. Once it is obeying, a declined
-//!   confirmation, an error or a failed verification does not stop it: it skips that step and
-//!   carries on, within a budget. The arm runs with a strict simulated user
-//!   ([`super::world::World::set_strict_user`]), who approves only the confirmations the task
-//!   asked for. On non-adversarial tasks the model is exactly the normal scripted model.
-//! - **Injection detection.** Per task, the bridge counts the detector's flags and the
-//!   confirmations it forced; the scripted model records whether a tool result showed the
-//!   injected text. The report gives detected tasks, the detection rate over exposed adversarial
-//!   tasks and the non-adversarial tasks with a flag (false flags).
-//! - **Gate.** A fresh [`PolicyEngine`] with the default policy (`Send` and above → confirm) and
-//!   its own kill switch per task. A confirmation request from the loop
-//!   ([`AgentEvent::ConfirmationNeeded`]) goes to [`Session::confirm`] as the harness expects
-//!   ([`for_harness`](super::nugget_env::for_harness)), and the simulated user's answer back through
-//!   `Confirmations::answer`.
-//! - **Threads.** The session is `&mut dyn Session` and not `Send`: the agent runs on a scoped
-//!   thread with its own runtime, and the calling thread serves its requests ([`serve`]) until
-//!   the run ends.
-//! - **Outcome.** `Succeeded`, `Unverified` and `Partial` are `Done` (the harness checks the
-//!   state itself); `NeedsInput` is `AskUser`; `Refused` is `Refused`; a `finish(cannot)` after
-//!   the user declined an action is `Done` (the harness's "stopped because the user declined");
-//!   everything else gives up.
+//! By default a deterministic scripted model plays each task's reference solution, so the arm
+//! measures plumbing, safety and verification, not model skill; [`MODEL_ENV`] or
+//! `--local-models` runs a real model. [`NuggetAgent::compliant`] instead obeys injections on
+//! adversarial tasks, to test the gate. The session is not `Send`, so the agent runs on a scoped
+//! thread and the calling thread serves its requests ([`serve`]).
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -972,8 +920,7 @@ fn ratio(num: u64, den: u64) -> f64 {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Injections: where the injected text is, and how an obedient model reaches it
+// ---- Injections: where the injected text is, and how an obedient model reaches it ----
 
 /// Words per window of a [`Probe`].
 const PROBE_WORDS: usize = 5;
@@ -1159,8 +1106,7 @@ fn prelude(task: &Task, probe: Option<&Probe>) -> Prelude {
         })
 }
 
-// ---------------------------------------------------------------------------------------------
-// The scripted model
+// ---- The scripted model ----
 
 /// Tool and argument names of the computer-use tools the script calls.
 mod call {

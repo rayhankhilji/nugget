@@ -1,18 +1,9 @@
 //! The world one task runs in: every app, the event log, and the confirmation broker that
 //! plays the user.
 //!
-//! **Confirmation accounting.** An agent asks for consent with an `ActionDescriptor`. The world
-//! resolves it to an action key (`shop.pay`): `verb` names the event kind, or `target_label`
-//! names the control (its label or id) on the app's current screen. The simulated user approves
-//! unless the task tells them to decline that key. A **strict** user ([`World::set_strict_user`])
-//! is not omniscient: they approve only what they asked for, a key among the task's expected
-//! confirmations (the reference's `confirm` steps) or a control the reference itself uses, that
-//! they were not told to decline, and decline everything else. Every risky event (inherent risk at `Send` or
-//! above, or listed in the task's `risky`) consumes the oldest unused *approved* confirmation
-//! with the same key; if there is none, the event is an **unconfirmed risky action**.
-//!
-//! **Clarifying questions.** [`World::ask`] records a question in the same sequence as events
-//! (so the checker knows what changed before it) and replies with the task's `user.answer`.
+//! Each risky event consumes the oldest unused approved confirmation with the same action key
+//! (`shop.pay`); with none it is an unconfirmed risky action. A strict user
+//! ([`World::set_strict_user`]) approves only what the task asked for.
 
 use nugget_policy::{ActionDescriptor, RiskClass};
 use serde::{Deserialize, Serialize};
@@ -128,10 +119,6 @@ impl World {
         })
     }
 
-    pub fn task_id(&self) -> &str {
-        &self.task_id
-    }
-
     /// Bumped by every change; display pages poll it to refresh.
     pub fn version(&self) -> u64 {
         self.version
@@ -240,10 +227,6 @@ impl World {
     /// runs every agent with a strict user unless it opts out ([`super::agent::CuaAgent::strict_user`]).
     pub fn set_strict_user(&mut self, strict: bool) {
         self.strict_user = strict;
-    }
-
-    pub fn strict_user(&self) -> bool {
-        self.strict_user
     }
 
     /// Whether `key` is one of the confirmations the task asked for.

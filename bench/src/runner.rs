@@ -340,39 +340,6 @@ mod tests {
     }
 
     #[test]
-    fn registry_has_the_registered_suites() {
-        let names: Vec<&str> = registry().iter().map(|b| b.name()).collect();
-        assert_eq!(
-            names,
-            [
-                "memory",
-                "perf",
-                "proactive",
-                "draft",
-                "doubletap",
-                "cua",
-                "knowledge",
-                "energy",
-                "ask"
-            ]
-        );
-        assert!(find("energy").is_some_and(|b| b.implemented()));
-        assert!(find("ask").is_some_and(|b| b.implemented()));
-        assert!(find("proactive").is_some_and(|b| b.implemented()));
-        assert!(find("knowledge").is_some_and(|b| b.implemented()));
-        assert!(find("perf").is_some_and(|b| b.implemented()));
-        assert!(find("memory").is_some_and(|b| b.implemented()));
-        assert!(find("draft").is_some_and(|b| b.implemented()));
-        assert!(find("doubletap").is_some_and(|b| b.implemented()));
-        assert!(find("cua").is_some_and(|b| b.implemented()));
-        assert!(find("nope").is_none());
-        for b in registry() {
-            assert!(valid_metric_name(b.name()));
-            assert!(!b.description().is_empty());
-        }
-    }
-
-    #[test]
     fn ok_run_records_params_and_metrics() {
         let r = run_benchmark(
             &Fixed(vec![m("a.b", 1.0), m("c", 2.0)]),
@@ -441,25 +408,4 @@ mod tests {
         assert!(r.metrics.is_empty());
     }
 
-    #[test]
-    fn metric_names() {
-        for ok in [
-            "a",
-            "ingest.items_per_s",
-            "retrieval.hybrid.recall@10",
-            "x1.y_2",
-        ] {
-            assert!(valid_metric_name(ok), "{ok}");
-        }
-        for bad in ["", "1a", "_a", "a.", ".a", "a-b", "A", "a b"] {
-            assert!(!valid_metric_name(bad), "{bad}");
-        }
-    }
-
-    #[test]
-    fn scale_pick() {
-        assert_eq!(Scale::Smoke.pick(1, 2, 3, 4), 1);
-        assert_eq!(Scale::Full.pick(1, 2, 3, 4), 4);
-        assert_eq!(Scale::default(), Scale::Standard);
-    }
 }

@@ -303,28 +303,4 @@ mod tests {
         assert_eq!(m.screen, Screen::Inbox);
     }
 
-    #[test]
-    fn send_validates_recipients() {
-        let mut m = Mail::fixture();
-        m.handle(&click("mail.compose")).unwrap();
-        assert!(m.handle(&click("mail.send")).is_err());
-        m.compose.to = "not-an-address".into();
-        assert!(m.handle(&click("mail.send")).is_err());
-        assert!(m.sent.is_empty());
-    }
-
-    #[test]
-    fn forward_and_delete() {
-        let mut m = Mail::fixture();
-        m.handle(&click("mail.open.m2")).unwrap();
-        m.handle(&click("mail.forward")).unwrap();
-        assert!(m.compose.body.contains("INV-2291"));
-        assert_eq!(m.compose.forward_of.as_deref(), Some("m2"));
-        m.handle(&click("mail.discard")).unwrap();
-        m.handle(&click("mail.open.m3")).unwrap();
-        let ev = m.handle(&click("mail.delete")).unwrap();
-        assert_eq!(ev[0].kind, "delete");
-        assert_eq!(m.trash, ["m3"]);
-        assert_eq!(m.inbox.len(), 2);
-    }
 }

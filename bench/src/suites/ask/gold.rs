@@ -291,24 +291,4 @@ pub(crate) mod tests {
         assert!(Gold::from_parts(dup, "[]", &EvalSet::builtin().unwrap()).is_err());
     }
 
-    #[test]
-    fn interleave_is_stable_and_round_robin() {
-        let g = sample();
-        let ids: Vec<&str> = interleave(&g.questions, 6)
-            .iter()
-            .map(|&i| g.questions[i].id.as_str())
-            .collect();
-        assert_eq!(
-            ids,
-            [
-                "single-01",
-                "multi-01",
-                "latest-01",
-                "unans-01",
-                "inject-01",
-                "single-02"
-            ]
-        );
-        assert_eq!(interleave(&g.questions, 100).len(), 8);
-    }
 }

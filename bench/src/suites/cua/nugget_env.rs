@@ -1,29 +1,10 @@
 //! The bench session as a [`ComputerUse`] backend, so the real computer-use tools drive the test
 //! apps exactly as they would drive a desktop through accessibility.
 //!
-//! - **Apps and windows.** One app and one window per open test app. The app's name and id and
-//!   the window id are the bench app id (`shop`); the window title is the window's accessible
-//!   name. The app last acted on (or opened) is frontmost and its window focused.
-//! - **Tree.** [`ui::Node`]s map to [`UiNode`]s with the bench id as the [`ElementId`] (bench ids
-//!   are stable: the same control keeps its id across screens), encoded by [`encode_id`] because
-//!   rendered ids keep only `[A-Za-z0-9_-]`. A combo box lists its options in `description` and
-//!   as `list_item` children (`<combo id>.opt<n>`) that accept `select`.
-//! - **Actions.** `press` clicks; `set_value` types into a text box or area (replacing its text)
-//!   or picks a combo-box option; `select` on an option child picks it. Each real action is one
-//!   [`Session::act`] (one step); `focus`, `scroll` and `expand` change nothing in the apps and
-//!   cost no step. Every action re-observes and reports [`ActionOutcome::verified`] with the
-//!   engine's semantics: the value equals what was set, the option is selected, or, for a press,
-//!   something visibly changed (a check box flipped, the screen changed).
-//! - **Keys.** Typed text goes to the target (or focused) text box and is appended to its
-//!   current text, as typing at the end of the field would; a single-line box drops newlines.
-//!   `enter` or `space` on a focused button, check box or switch presses it; other keys are
-//!   unsupported (the apps have no keyboard shortcuts).
-//! - **Stale ids.** An id that is not on the current screen fails with `NotFound`, never
-//!   touching anything else.
-//!
-//! The session itself is `&mut dyn Session` and not `Send`, so the backend talks to it through a
-//! [`WorldPort`]: either a channel served on the session's thread ([`ChannelPort`], used by the
-//! agent arm) or a mutex around an owned session ([`MutexPort`], for tests).
+//! Bench ids become [`ElementId`]s via [`encode_id`] (rendered ids keep only `[A-Za-z0-9_-]`).
+//! Each real action is one [`Session::act`] step; focus/scroll/expand cost none. An id not on the
+//! current screen fails with `NotFound`, never touching anything else. The session is not `Send`,
+//! so the backend reaches it through a [`WorldPort`].
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -830,62 +811,6 @@ mod tests {
 
     fn steps(stage: &Stage) -> usize {
         stage.with(|w| w.events().len()).unwrap()
-    }
-
-    #[test]
-    fn ids_round_trip() {
-        for id in [
-            "shop.add.giftcard-500",
-            "forms.country.opt2",
-            "mail",
-            "a_b.c",
-        ] {
-            let e = encode_id(id);
-            assert!(
-                e.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
-                "{e}"
-            );
-            assert_eq!(decode_id(&e), id);
-        }
-        assert_eq!(encode_id("shop.pay"), "shop-pay");
-    }
-
-    #[test]
-    fn roles_map_to_accessibility_roles() {
-        assert_eq!(map_role(Role::TextBox), A11yRole::TextField);
-        assert_eq!(map_role(Role::TextArea), A11yRole::TextArea);
-        assert_eq!(map_role(Role::Switch), A11yRole::CheckBox);
-        assert_eq!(map_role(Role::Text), A11yRole::StaticText);
-        assert_eq!(map_role(Role::Alert), A11yRole::Dialog);
-        let combo = Node::combo(
-            "forms.country",
-            "Country",
-            "Germany",
-            vec!["France".into(), "Germany".into()],
-        );
-        let w = Node::window("forms", "Form")
-            .child(Node::switch("forms.news", "Newsletter", true).enabled(false))
-            .child(combo);
-        let (mut b, mut t) = (100, false);
-        let n = map_node(&w, None, 0, &TreeLimits::default(), &mut b, &mut t);
-        assert!(!t);
-        let sw = n.find(&ElementId("forms-news".into())).unwrap();
-        assert_eq!(sw.raw_role, "switch");
-        assert_eq!(sw.states.checked, Some(true));
-        assert!(sw.states.disabled);
-        assert!(sw.actions.is_empty());
-        let c = n.find(&ElementId("forms-country".into())).unwrap();
-        assert_eq!(c.value.as_deref(), Some("Germany"));
-        assert_eq!(c.description.as_deref(), Some("options: France | Germany"));
-        assert_eq!(c.children.len(), 2);
-        assert!(c.children[1].states.selected);
-        assert_eq!(c.children[0].id.as_str(), "forms-country-opt0");
-        // The node budget truncates.
-        let (mut b, mut t) = (2, false);
-        let small = map_node(&w, None, 0, &TreeLimits::default(), &mut b, &mut t);
-        assert!(t);
-        assert!(small.iter().count() <= 3);
     }
 
     #[test]

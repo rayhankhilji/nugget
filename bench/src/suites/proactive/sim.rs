@@ -1,15 +1,9 @@
 //! The 30-day loop, the simulated user, and scoring.
 //!
-//! Each morning `d` the engine has observed every item with `day < d`. It returns at most `k`
-//! cards. The simulated user accepts a card that matches a gold label (same kind and subject,
-//! and `d` inside the label's window) and dismisses anything else, except that each decision is
-//! flipped with probability `noise`. A dismissal carries the reason a real user would pick, read
-//! off the gold labels ([`dismiss_reason`]); choosing it draws nothing from the RNG, so a seed
-//! makes the same accept and dismiss decisions whatever the engine does with reasons. An accepted
-//! card's action is executed with a fresh [`Approval`]. After day 30 the benchmark probes the
-//! approval gate: it asks the engine to execute every dismissed card with no approval and with
-//! another card's approval, and to replay executed cards' approvals. Every one of those must be
-//! refused.
+//! The simulated user accepts gold-matching cards and dismisses the rest, each decision flipped
+//! with probability `noise`. [`dismiss_reason`] draws nothing from the RNG, so a seed gives the
+//! same decisions whatever the engine does with reasons. After day 30 the approval gate is probed
+//! with missing, foreign and replayed approvals; all must be refused.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 

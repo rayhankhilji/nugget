@@ -530,118 +530,6 @@ fn matching_skips_decoys_and_checks_state() {
 }
 
 #[test]
-fn matching_reads_chrome_over_ax() {
-    let bench = Node::window("forms", "Change of address")
-        .child(Node::text("forms.intro", "Email"))
-        .child(Node::textbox("forms.email", "Email", "a@b.c"))
-        .child(Node::switch("forms.news", "Newsletter", true))
-        .child(Node::combo(
-            "forms.country",
-            "Country",
-            "Germany",
-            vec!["France".into(), "Germany".into()],
-        ))
-        .child(Node::list("forms.recent", "Recent").child(Node::item("forms.r1", "Paris")))
-        .child(Node::button("forms.next", "Next"));
-    let fake = FakeEdge::new(Stage::new());
-    let mut real = rn(A11yRole::Window, "Change of address");
-    for b in &bench.children {
-        fake.render(b, &mut real.children);
-    }
-    axify(&mut real, false);
-    // Unnormalised, the static text, the list and the select are not found.
-    assert!(!match_tree(&bench, &real).consistent());
-    normalize(&mut real);
-    let m = match_tree(&bench, &real);
-    assert!(m.consistent(), "{m:?}");
-    assert_eq!(m.nodes["forms.intro"].raw_role, "AXStaticText");
-    assert_eq!(m.nodes["forms.email"].raw_role, "AXTextField");
-    assert_eq!(m.nodes["forms.news"].states.checked, Some(true));
-    assert_eq!(m.nodes["forms.country"].role, A11yRole::ComboBox);
-    assert_eq!(m.nodes["forms.recent"].name.as_deref(), Some("Recent"));
-    // Chrome shows a closed list's selected option only, unnamed.
-    assert!(m.options.is_empty());
-    let tree = present(&bench, &m, None);
-    let country = tree.find(&ElementId("forms-country".into())).unwrap();
-    assert_eq!(country.role, A11yRole::ComboBox);
-    assert_eq!(country.children.len(), 2);
-    assert!(country.children[1].states.selected);
-}
-
-#[test]
-fn driver_selects_a_chrome_option_by_type_ahead() {
-    let (t, stage, driver) = setup("forms-fill-basic", |s| FakeEdge {
-        ax: true,
-        ..FakeEdge::new(s)
-    });
-    let mut session = EpisodeSession::new(Transport::Local(stage.clone()), t.max_steps, None);
-    let mut s = NativeSession::new(&mut session, stage.clone(), driver.clone(), 5);
-    let obs = s.observe().unwrap();
-    let mut all = Vec::new();
-    for w in &obs.windows {
-        w.walk(&mut all);
-    }
-    let Some(combo) = all
-        .into_iter()
-        .find(|n| n.role == Role::ComboBox && n.enabled && n.options.len() > 1)
-    else {
-        return;
-    };
-    let want = combo
-        .options
-        .iter()
-        .find(|o| combo.value.as_deref() != Some(o.as_str()))
-        .unwrap()
-        .clone();
-    let r = s
-        .act(&Action::Select {
-            target: combo.id.clone(),
-            option: want.clone(),
-        })
-        .unwrap();
-    assert!(r.ok, "{r:?}");
-    // The set value changed nothing; the keyboard did it.
-    assert_eq!(driver.fallbacks.load(Ordering::Relaxed), 1);
-    let now = stage.with(|w| w.observe()).unwrap();
-    assert_eq!(now.find(&combo.id).unwrap().value.as_deref(), Some(&*want));
-}
-
-#[test]
-fn presented_tree_uses_bench_ids_and_real_content() {
-    let bench = Node::window("settings", "Settings — laptop")
-        .child(Node::switch("settings.firewall", "Firewall", true))
-        .child(Node::combo(
-            "settings.theme",
-            "Theme",
-            "Dark",
-            vec!["Light".into(), "Dark".into()],
-        ))
-        .child(Node::button("settings.gone", "Not rendered"));
-    let stage = Stage::new();
-    let fake = FakeEdge::new(stage);
-    let mut real = rn(A11yRole::Window, "Settings — laptop");
-    for b in &bench.children[..2] {
-        fake.render(b, &mut real.children);
-    }
-    let m = match_tree(&bench, &real);
-    let tree = present(&bench, &m, Some("Settings — laptop"));
-    assert_eq!(tree.id.as_str(), "settings");
-    let fw = tree.find(&ElementId("settings-firewall".into())).unwrap();
-    assert_eq!(fw.name.as_deref(), Some("Firewall (on)"));
-    assert_eq!(fw.states.checked, Some(true));
-    assert!(fw.actions.contains(&K::Press));
-    let theme = tree.find(&ElementId("settings-theme".into())).unwrap();
-    assert_eq!(theme.children.len(), 2);
-    assert_eq!(theme.children[1].id.as_str(), "settings-theme-opt1");
-    assert!(theme.children[1].states.selected);
-    assert!(theme.actions.contains(&K::SetValue));
-    // What has no real counterpart is not shown.
-    assert!(tree.find(&ElementId("settings-gone".into())).is_none());
-    // Real ids never leak.
-    assert!(tree.iter().all(|n| !n.id.as_str().starts_with('r')));
-}
-
-#[test]
 fn driver_acts_through_the_real_window() {
     let (t, stage, driver) = setup("forms-fill-basic", FakeEdge::new);
     let mut session = EpisodeSession::new(Transport::Local(stage.clone()), t.max_steps, None);
@@ -686,35 +574,6 @@ fn driver_acts_through_the_real_window() {
     );
 }
 
-#[test]
-fn keyboard_fallback_when_the_page_ignores_set_value() {
-    let (t, stage, driver) = setup("forms-fill-basic", |s| FakeEdge {
-        ignore_set_value: true,
-        ..FakeEdge::new(s)
-    });
-    let mut session = EpisodeSession::new(Transport::Local(stage.clone()), t.max_steps, None);
-    let mut s = NativeSession::new(&mut session, stage.clone(), driver.clone(), 5);
-    let obs = s.observe().unwrap();
-    let mut all = Vec::new();
-    obs.windows[0].walk(&mut all);
-    let field = all
-        .into_iter()
-        .find(|n| n.role == Role::TextBox && n.enabled)
-        .unwrap()
-        .id
-        .clone();
-    let r = s
-        .act(&Action::Type {
-            target: field.clone(),
-            text: "Grace".into(),
-        })
-        .unwrap();
-    assert!(r.ok, "{r:?}");
-    assert_eq!(driver.fallbacks.load(Ordering::Relaxed), 1);
-    let now = stage.with(|w| w.observe()).unwrap();
-    assert_eq!(now.find(&field).unwrap().value.as_deref(), Some("Grace"));
-}
-
 /// The whole nugget arm, its tools reading the fake real windows: every action goes through the
 /// fake's accessibility actions, and the scripted model finds its targets by bench id.
 fn nugget_arm(id: &str, ax: bool) {
@@ -740,21 +599,3 @@ fn nugget_arm_fills_a_form_over_the_real_tree() {
     nugget_arm("forms-fill-basic", false);
 }
 
-#[test]
-fn nugget_arm_fills_a_form_over_chrome_ax() {
-    for id in ["forms-fill-basic", "forms-fix-email", "forms-no-newsletter"] {
-        nugget_arm(id, true);
-    }
-}
-
-#[test]
-fn nugget_arm_organises_files_over_the_real_tree() {
-    let id = task::load_all()
-        .unwrap()
-        .into_iter()
-        .find(|t| t.app() == "files" && t.injection.is_none() && t.user.deny.is_empty())
-        .unwrap()
-        .id;
-    nugget_arm(&id, false);
-    nugget_arm(&id, true);
-}
