@@ -1,0 +1,12 @@
+own-language (excl. mixed): n=28 facts 26/28 cite 28/28 facts+cite 26/28
+English question about non-English item: n=8 facts 5/8 cite 8/8 facts+cite 5/8
+mixed: n=7 facts 6/7 cite 7/7 facts+cite 6/7
+--- failures
+de-a3 de missing [['13. November', '13.11.', '13.11.2026', '2026-11-13'], ['12 Uhr', '12:00', 'mittags'], ['Elif Yılmaz', 'Elif Yilmaz', 'Elif']] lang de | Bis wann soll ich Tobias die Präsentation schicken? [1]   von wem bekomme ich die Budgetzahlen? [1]
+fr-a4 en missing [['18:00', '6 p.m.', '6 pm', '18\xa0h', '18h']] lang en | Bernard's farewell drink is on Thursday, 26 November. Agathe is asking me to charge the speech for the farewell drink.
+hi-a4 en missing [['Vivek Zaidi', 'Vivek', 'Zaidi', 'विवेक ज़ैदी']] lang en | Nasreen Farooqui needs you to prepare the draft for the customer satisfaction report for the quarter July–September. The draft should be ready by Wednesday, November 13, so that she can review it before the Board Meeting
+pt-BR-a3 pt-BR missing [['18h', '18:00']] lang pt-BR | A Luciana precisa da proposta da Cooperativa Vale Verde até sexta-feira, 13/11 [1]. A planilha de frete atualizada será mandada por Thiago Araújo [1].
+pt-BR-a4 en missing [['November 27', '27 November', 'Nov 27', '2026-11-27', '27 de novembro'], ['1,500', '1.500', '1500']] lang en | The year-end party is on Saturday, 26 November 2026. The deposit is $500, and it must be paid by Thursday, November 5.
+mixed-a2 es missing [['#482', '482']] lang es | Valeria necesita que revise su PR antes del martes 10 [1]. La demo con el cliente es el jueves 12 de noviembre a las 11:00 am hora CDMX [1].
+mixed-a3 hi missing [] lang unknown | Navrang Textiles का invoice ₹ 2,45,600 है और payment की due date 20 नवंबर 2026 है [1].
+mixed-a4 hi-Latn missing [] lang en | The contribution per person for the Saturday team dinner is Rs. 1,800 [1]. The confirmation is needed by Thursday, 4 November [1].
