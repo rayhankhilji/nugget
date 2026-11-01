@@ -208,9 +208,7 @@ pub(crate) async fn triage_batch(
             })
             .collect();
         // Titles are untrusted too: one line, no markup that could close the element.
-        let title: String = d
-            .title
-            .unwrap_or("(none)")
+        let title: String = crate::pipeline::visible_title(d.title.unwrap_or("(none)"))
             .chars()
             .filter(|c| !c.is_control() && *c != '<' && *c != '>')
             .take(200)
