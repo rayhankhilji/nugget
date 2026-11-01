@@ -189,7 +189,7 @@ Sensitive items never go to a cloud model.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Run extraction at all |
-| `interval_minutes` | integer, 0 to 10080 | `10` | Run again this often even without new items (retries LLM extraction); `0` never |
+| `interval_minutes` | integer, 0 to 10080 | `10` | Run again this often even without new items (retries LLM extraction); `0` never. Time the computer spends asleep counts, so an overdue run starts within a minute or so of waking |
 | `debounce_ms` | integer, 0 to 600000 | `1500` | Wait this long after the last indexed change before a run |
 | `max_items_per_run` | integer, at least 1 | `500` | Items processed per run; a run that leaves items is followed by another one |
 | `max_llm_requests_per_run` | integer | `50` | LLM extraction requests per run (none while on low battery) |

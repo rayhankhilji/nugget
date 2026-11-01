@@ -7,12 +7,12 @@ use nugget_core::ipc::{
     AskRequest, AskStarted, AuthBegin, ChatCancel, ChatRequest, ChatStarted, ClaimStatusRequest,
     ContextRequest, ContextResponse, EgressRecentRequest, EntitiesRequest, EntityDetail, EntityRef,
     EntitySummaryView, GraphRequest, GraphViewIpc, IngestStatus, KnowledgeStatus, McpClientCreate,
-    McpClientCreated, McpClientInfo, McpClientRef, MergeRequest, ModelInfo, ModelInstallRequest,
-    PluginApproveParams, PluginApproveResult, PluginEnableParams, PluginIdParams, PluginInfo,
-    PluginInspectResult, PluginInstallParams, PluginInstallResult, PluginListResult,
-    PluginRemoveResult, ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit, SearchRequest,
-    SourceInfo, SourceRef, SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate,
-    SplitRequest, StatusResponse, method, plugin_method,
+    McpClientCreated, McpClientInfo, McpClientRef, MergeRequest, ModelCancelRequest, ModelInfo,
+    ModelInstallRequest, PluginApproveParams, PluginApproveResult, PluginEnableParams,
+    PluginIdParams, PluginInfo, PluginInspectResult, PluginInstallParams, PluginInstallResult,
+    PluginListResult, PluginRemoveResult, ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit,
+    SearchRequest, SourceInfo, SourceRef, SourceRemove, SourceSecret, SourceSpec, SourceSync,
+    SourceUpdate, SplitRequest, StatusResponse, method, plugin_method,
 };
 use nugget_core::ipc::{
     BriefView, CardExecuteRequest, CardExecuteResult, CardFeedbackRequest, CardPreview,
@@ -138,6 +138,14 @@ pub async fn models_install(
 ) -> Result<Value> {
     daemon
         .call(&app, method::MODELS_INSTALL, &ModelInstallRequest { id })
+        .await
+}
+
+/// Stops a running install (`models.cancel`); the install's final progress says `cancelled`.
+#[tauri::command]
+pub async fn models_cancel(app: AppHandle, daemon: State<'_, Daemon>, id: String) -> Result<Value> {
+    daemon
+        .call(&app, method::MODELS_CANCEL, &ModelCancelRequest { id })
         .await
 }
 
@@ -312,6 +320,18 @@ pub async fn models_fit(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Val
 #[tauri::command]
 pub async fn runtime_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Vec<RuntimeInfo>> {
     daemon.call(&app, method::RUNTIME_STATUS, &()).await
+}
+
+/// Start a local model server again after it failed or gave up (`runtime.retry`, KK1).
+#[tauri::command]
+pub async fn runtime_retry(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    role: String,
+) -> Result<Value> {
+    daemon
+        .call(&app, "runtime.retry", &serde_json::json!({ "role": role }))
+        .await
 }
 
 // ---- knowledge graph (M2) ----

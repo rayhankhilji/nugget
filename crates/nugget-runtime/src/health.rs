@@ -9,7 +9,6 @@ use nugget_core::{Error, Result};
 use nugget_infer::Secret;
 
 use crate::listener::{Ownership, owner};
-use crate::logs::{SharedLog, lock};
 use crate::process::ServerProcess;
 
 /// HTTP client for 127.0.0.1 only: never through a proxy, never following redirects.
@@ -96,7 +95,17 @@ pub(crate) enum Health {
 }
 
 pub(crate) async fn probe(target: &Target) -> Health {
-    match target.client.get(target.url("/health")).send().await {
+    probe_request(target.client.get(target.url("/health"))).await
+}
+
+/// [`probe`], giving up (as [`Health::Down`]) after `timeout`: a hung server accepts the
+/// connection and never answers.
+pub(crate) async fn probe_within(target: &Target, timeout: Duration) -> Health {
+    probe_request(target.client.get(target.url("/health")).timeout(timeout)).await
+}
+
+async fn probe_request(req: reqwest::RequestBuilder) -> Health {
+    match req.send().await {
         Ok(r) if r.status().is_success() => match r.text().await {
             // llama-server answers {"status":"ok"} once the model is loaded.
             Ok(body) if body.contains("ok") => Health::Ready,
@@ -134,6 +143,19 @@ fn lock_slot(slot: &ProcSlot) -> std::sync::MutexGuard<'_, Option<ServerProcess>
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Why a start did not become ready.
+#[derive(Debug)]
+pub(crate) enum StartFailure {
+    /// The process exited while loading.
+    Exited(std::process::ExitStatus),
+    /// Not ready within the timeout.
+    TimedOut(Duration),
+    /// Somebody else answered on the server's port.
+    Foreign(String),
+    /// A stop took the process.
+    Cancelled,
+}
+
 /// Poll `/health` until the server in `slot` is ready, its process exits, or `timeout` passes.
 ///
 /// Ready means: the process is alive before and after a `/health` probe that answered ok, and
@@ -146,8 +168,7 @@ pub(crate) async fn wait_ready(
     slot: &ProcSlot,
     timeout: Duration,
     poll: Duration,
-    log: &SharedLog,
-) -> Result<()> {
+) -> std::result::Result<(), StartFailure> {
     let start = Instant::now();
     let mut delay = poll.max(Duration::from_millis(10));
     loop {
@@ -156,12 +177,9 @@ pub(crate) async fn wait_ready(
             Child::Exited(status) => {
                 // Give the log pumps a moment to drain the last lines.
                 tokio::time::sleep(Duration::from_millis(50)).await;
-                let tail = lock(log).tail(5).join(" | ");
-                return Err(Error::Provider(format!(
-                    "llama-server exited during start-up ({status}); last output: {tail}"
-                )));
+                return Err(StartFailure::Exited(status));
             }
-            Child::Gone => return Err(Error::Cancelled),
+            Child::Gone => return Err(StartFailure::Cancelled),
         };
         if probe(target).await == Health::Ready
             && matches!(child(slot), Child::Running(p) if p == pid)
@@ -173,22 +191,13 @@ pub(crate) async fn wait_ready(
                         return Ok(());
                     }
                 }
-                Ownership::Foreign(who) => {
-                    return Err(Error::Provider(format!(
-                        "another process answered on the server's port: {who}; refusing to \
-                         use it"
-                    )));
-                }
+                Ownership::Foreign(who) => return Err(StartFailure::Foreign(who)),
                 // Raced with the listener going away; the next round sees why.
                 Ownership::NotListening => {}
             }
         }
         if start.elapsed() >= timeout {
-            let tail = lock(log).tail(3).join(" | ");
-            return Err(Error::Provider(format!(
-                "llama-server was not ready after {}s; last output: {tail}",
-                timeout.as_secs_f32()
-            )));
+            return Err(StartFailure::TimedOut(timeout));
         }
         tokio::time::sleep(delay).await;
         delay = (delay * 3 / 2).min(Duration::from_millis(500));

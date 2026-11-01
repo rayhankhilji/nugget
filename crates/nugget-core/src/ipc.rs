@@ -25,6 +25,7 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `providers.probe` | [`ProbeRequest`] | [`Capabilities`] |
 /// | `models.list` | `{}` | `Vec<`[`ModelInfo`]`>` |
 /// | `models.install` | [`ModelInstallRequest`] | `null`, then `models.progress` notifications |
+/// | `models.cancel` | [`ModelCancelRequest`] | [`ModelCancelResponse`] (the install's connection gets a final `failed` progress with reason `cancelled`) |
 /// | `egress.recent` | [`EgressRecentRequest`] | [`EgressRecentResponse`] |
 /// | `egress.record` | [`EgressRecordRequest`] | `null` |
 /// | `sources.list` | `{}` | `Vec<`[`SourceInfo`]`>` |
@@ -38,6 +39,7 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `retrieve.context` | [`ContextRequest`] | [`ContextResponse`] |
 /// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications |
 /// | `runtime.status` | `{}` | `Vec<`[`RuntimeInfo`]`>` |
+/// | `runtime.retry` | [`RuntimeRetryRequest`] | `{started: bool}` (served by the `runtime_retry` feature) |
 /// | `knowledge.entities` | [`EntitiesRequest`] | `Vec<`[`EntitySummaryView`]`>` |
 /// | `knowledge.entity` | [`EntityRef`] | [`EntityDetail`] |
 /// | `knowledge.graph` | [`GraphRequest`] | [`GraphViewIpc`] |
@@ -61,6 +63,8 @@ pub mod method {
     pub const PROVIDERS_PROBE: &str = "providers.probe";
     pub const MODELS_LIST: &str = "models.list";
     pub const MODELS_INSTALL: &str = "models.install";
+    /// Stop a running `models.install`; staged bytes are kept and the next install resumes.
+    pub const MODELS_CANCEL: &str = "models.cancel";
     pub const EGRESS_RECENT: &str = "egress.recent";
     /// A request the desktop app made itself (update checks), for the daemon's ledger.
     pub const EGRESS_RECORD: &str = "egress.record";
@@ -122,6 +126,58 @@ pub struct StatusResponse {
     /// Result of verifying the audit hash chain at startup. `None` if not checked.
     #[serde(default)]
     pub audit_chain_ok: Option<bool>,
+    /// Free space on the disk that holds the data directory. `None` from older daemons, or when
+    /// it is not known (an in-memory store).
+    #[serde(default)]
+    pub disk: Option<DiskStatus>,
+}
+
+/// Below this many free bytes the data disk counts as full ([`DiskLevel::Full`]): 200 MiB.
+pub const DISK_FULL_BYTES: u64 = 200 * 1024 * 1024;
+/// Below this many free bytes the data disk counts as low ([`DiskLevel::Low`]): 1 GiB.
+pub const DISK_LOW_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// `status.disk`: free space on the disk that holds Nugget's data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskStatus {
+    /// Bytes available on that disk; `None` when they could not be read.
+    #[serde(default)]
+    pub free_bytes: Option<u64>,
+    pub level: DiskLevel,
+    /// A write failed recently because the disk was full (it may have recovered since).
+    #[serde(default)]
+    pub recent_full_error: bool,
+}
+
+/// How much room is left on the data disk.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskLevel {
+    #[default]
+    Ok,
+    /// Under [`DISK_LOW_BYTES`] free.
+    Low,
+    /// Under [`DISK_FULL_BYTES`] free, or a write just failed for lack of space while under
+    /// [`DISK_LOW_BYTES`]: indexing and other writes are failing or about to.
+    Full,
+}
+
+impl DiskStatus {
+    /// Classify `free_bytes` (unknown counts as `Ok` unless a write failed for lack of space).
+    pub fn classify(free_bytes: Option<u64>, recent_full_error: bool) -> Self {
+        let level = match free_bytes {
+            Some(f) if f < DISK_FULL_BYTES => DiskLevel::Full,
+            Some(f) if f < DISK_LOW_BYTES && recent_full_error => DiskLevel::Full,
+            None if recent_full_error => DiskLevel::Full,
+            Some(f) if f < DISK_LOW_BYTES => DiskLevel::Low,
+            _ => DiskLevel::Ok,
+        };
+        Self {
+            free_bytes,
+            level,
+            recent_full_error,
+        }
+    }
 }
 
 // ---- providers ----
@@ -289,6 +345,22 @@ pub struct ModelInstallRequest {
     pub id: String,
 }
 
+/// Params of `models.cancel`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelCancelRequest {
+    pub id: String,
+}
+
+/// Result of `models.cancel`. Idempotent: `cancelled` is `false` if no install of `id` was
+/// running.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelCancelResponse {
+    pub cancelled: bool,
+}
+
+/// One `models.progress` notification. In `failed`, `downloaded` is the number of bytes staged
+/// (kept, so the next install resumes), `error` a short plain-language message, and `reason` /
+/// `http_status` say why in machine-readable form (clients localise by `reason`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelProgress {
     pub id: String,
@@ -296,6 +368,36 @@ pub struct ModelProgress {
     pub total: u64,
     pub phase: ModelPhase,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ModelFailReason>,
+    /// The HTTP status when `reason` is `http_error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+}
+
+/// Why a model install failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelFailReason {
+    /// No network, or the download server cannot be reached (DNS / connect failure).
+    Offline,
+    /// The server answered with an error status (see `http_status`).
+    HttpError,
+    /// The network served a sign-in web page instead of the file.
+    CaptivePortal,
+    /// No data arrived for several seconds.
+    Stalled,
+    /// The connection kept closing before the file was complete.
+    Interrupted,
+    DiskFull,
+    /// The downloaded bytes did not match the signed manifest; they were discarded.
+    Integrity,
+    /// Stopped by `models.cancel` (or the install's client went away).
+    Cancelled,
+    Other,
+    /// A reason this build does not know (newer daemon).
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -680,8 +782,35 @@ pub struct RuntimeInfo {
     pub state: RuntimeState,
     /// Provider id the router knows this runtime by (e.g. `local-chat`).
     pub provider: ProviderId,
+    /// What went wrong, as one short sentence for the user (`failed`).
     #[serde(default)]
     pub error: Option<String>,
+    /// Milliseconds spent in the current state; while `starting`, how long the model has been
+    /// warming up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_ms: Option<u64>,
+    /// While `starting`: how long loading the model is expected to take, in ms (the last load
+    /// on this machine, or an estimate from its size).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_ms: Option<u64>,
+    /// While `failed`: ms until the next automatic restart (or until a request may start the
+    /// server again). Absent when nothing is scheduled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_in_ms: Option<u64>,
+    /// While `failed`: the supervisor gave up after repeated failures and waits for
+    /// `runtime.retry`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gave_up: bool,
+    /// The last line the model server printed before it failed (technical detail for the log
+    /// view; never needed to understand `error`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// `runtime.retry`: start a role's model server again after it failed or gave up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeRetryRequest {
+    pub role: RuntimeRole,
 }
 
 // ---- knowledge graph ----
@@ -1946,6 +2075,58 @@ pub struct ReminderView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disk_status_is_additive_and_classified() {
+        // An older daemon's status (no disk) still parses.
+        let old: StatusResponse = serde_json::from_value(serde_json::json!({
+            "protocol": 1, "version": "x", "uptime_secs": 1, "items": 0, "chunks": 0,
+            "providers": []
+        }))
+        .unwrap();
+        assert_eq!(old.disk, None);
+        let mib = 1024 * 1024;
+        let level = |free, err| DiskStatus::classify(free, err).level;
+        assert_eq!(level(Some(50 * 1024 * mib), false), DiskLevel::Ok);
+        assert_eq!(level(Some(50 * 1024 * mib), true), DiskLevel::Ok);
+        assert_eq!(level(Some(500 * mib), false), DiskLevel::Low);
+        assert_eq!(level(Some(500 * mib), true), DiskLevel::Full);
+        assert_eq!(level(Some(199 * mib), false), DiskLevel::Full);
+        assert_eq!(level(None, false), DiskLevel::Ok);
+        assert_eq!(level(None, true), DiskLevel::Full);
+        let v = serde_json::to_value(DiskStatus::classify(Some(5), true)).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"free_bytes": 5, "level": "full", "recent_full_error": true})
+        );
+    }
+
+    #[test]
+    fn model_progress_failure_fields_are_additive() {
+        // An older daemon's progress (no reason) still parses.
+        let old: ModelProgress = serde_json::from_value(serde_json::json!({
+            "id": "m", "downloaded": 5, "total": 10, "phase": "failed", "error": "x"
+        }))
+        .unwrap();
+        assert_eq!((old.reason, old.http_status), (None, None));
+        // No new keys on the wire unless set.
+        let v = serde_json::to_value(&old).unwrap();
+        assert!(v.get("reason").is_none() && v.get("http_status").is_none());
+        let p = ModelProgress {
+            reason: Some(ModelFailReason::HttpError),
+            http_status: Some(500),
+            ..old
+        };
+        let v = serde_json::to_value(&p).unwrap();
+        assert_eq!(
+            (v["reason"].as_str(), v["http_status"].as_u64()),
+            (Some("http_error"), Some(500))
+        );
+        // A reason from a newer daemon is not an error.
+        let newer: ModelFailReason =
+            serde_json::from_value(serde_json::json!("solar_flare")).unwrap();
+        assert_eq!(newer, ModelFailReason::Unknown);
+    }
 
     #[test]
     fn auth_begin_user_code_is_optional_on_the_wire() {

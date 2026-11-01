@@ -229,6 +229,47 @@ impl Store {
         self.inner.db.with_read_conn(f)
     }
 
+    /// Free space on the disk holding the database, and whether a write recently failed
+    /// because it was full (read at most every few seconds). `None` for in-memory stores.
+    pub fn disk_status(&self) -> Option<nugget_core::ipc::DiskStatus> {
+        let (path, _) = self.inner.db.file.as_ref()?;
+        let dir = path
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        Some(crate::disk::status(dir))
+    }
+
+    /// Copy every committed transaction from the write-ahead log into the database file and
+    /// truncate the log to zero bytes (`PRAGMA wal_checkpoint(TRUNCATE)`). Call it on a clean
+    /// stop, after the last write: the next open then finds no log left over, instead of a
+    /// multi-megabyte one whose stale frames look like a crash tail. Returns whether the whole
+    /// log was checkpointed; `false` when a reader still holds an old snapshot (nothing is lost,
+    /// the log is simply kept). A no-op for in-memory stores.
+    pub fn checkpoint_wal(&self) -> Result<bool> {
+        if self.inner.db.file.is_none() {
+            return Ok(true);
+        }
+        let (busy, log, done): (i64, i64, i64) = self.with_conn(|c| {
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .db("checkpoint the write-ahead log")
+        })?;
+        let complete = busy == 0 && log == done;
+        if complete {
+            tracing::debug!(frames = done, "write-ahead log checkpointed and truncated");
+        } else {
+            tracing::info!(
+                busy,
+                frames = log,
+                checkpointed = done,
+                "write-ahead log only partly checkpointed (a reader is still active)"
+            );
+        }
+        Ok(complete)
+    }
+
     /// Database path and key of a file-backed store; `None` for an in-memory one.
     pub(crate) fn file(&self) -> Option<(&Path, &StoreKey)> {
         self.inner.db.file.as_ref().map(|(p, k)| (p.as_path(), k))

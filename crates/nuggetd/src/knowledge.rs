@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use nugget_core::clock::Stopwatch;
 use nugget_core::ids::{EntityId, SourceId};
 use nugget_core::ipc::{KnowledgeChanged, VaultStatus, notification};
 use nugget_core::paths::Paths;
@@ -193,10 +194,14 @@ impl KnowledgeService {
             .then(|| Duration::from_secs(self.cfg.interval_minutes * 60));
         // Startup run: pick up whatever was indexed while extraction was not running.
         let mut due: Option<Instant> = self.cfg.enabled.then(Instant::now);
-        let mut periodic = interval.map(|i| Instant::now() + i);
+        // Counts system sleep (GG6-29); checked at least every `RECHECK_EVERY`.
+        let mut periodic = interval.map(|_| Stopwatch::start());
         loop {
+            let periodic_at = periodic
+                .zip(interval)
+                .map(|(sw, i)| Instant::now() + sw.next_check(i));
             let deadline = if self.cfg.enabled {
-                [due, periodic].into_iter().flatten().min()
+                [due, periodic_at].into_iter().flatten().min()
             } else {
                 None
             };
@@ -230,8 +235,8 @@ impl KnowledgeService {
                 seen = latest;
                 due = Some(now + debounce);
             }
-            if periodic.is_some_and(|p| now >= p) {
-                periodic = interval.map(|i| now + i);
+            if periodic.zip(interval).is_some_and(|(sw, i)| sw.is_due(i)) {
+                periodic = interval.map(|_| Stopwatch::start());
                 if self.power.constrained() {
                     tracing::debug!("knowledge: periodic run skipped (power constrained)");
                 } else {

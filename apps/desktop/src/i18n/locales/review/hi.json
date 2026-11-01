@@ -2,6 +2,9 @@
   "wave": "Z2",
   "note": "Machine-translated in waves Z2, BB1, FF1 II1 and II2; a native speaker should review these keys.",
   "keys": [
+    "status.disk.full",
+    "status.disk.fullUnknown",
+    "status.disk.low",
     "addSource.addTitle.gdrive",
     "addSource.blurb.gcal",
     "addSource.blurb.gdrive",
@@ -624,6 +627,27 @@
     "updates.ask.title",
     "updates.ask.body",
     "updates.ask.stable",
-    "updates.ask.chosen"
+    "updates.ask.chosen",
+    "status.runtime.details",
+    "status.runtime.gaveUp",
+    "status.runtime.logHint",
+    "status.runtime.retry",
+    "status.runtime.retryIn",
+    "status.runtime.retrying",
+    "status.runtime.warming",
+    "status.runtime.warmingLabel",
+    "status.runtime.warmingNoEstimate",
+    "models.fail.offline",
+    "models.fail.httpError",
+    "models.fail.captivePortal",
+    "models.fail.stalled",
+    "models.fail.interrupted",
+    "models.fail.diskFull",
+    "models.fail.integrity",
+    "models.fail.cancelled",
+    "models.fail.kept",
+    "models.cancel",
+    "models.cancelLabel",
+    "models.resume"
   ]
 }

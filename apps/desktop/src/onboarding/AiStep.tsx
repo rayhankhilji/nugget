@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { api, errorMessage, events, type FitReport, type ModelInfo, type ModelProgress } from "../api";
+import { api, errorMessage, events, modelsCancel, type FitReport, type ModelInfo, type ModelProgress } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Trans, useT, type MessageKey } from "../i18n";
@@ -9,6 +9,7 @@ import type { ModelFit } from "../api";
 import { ByokForm } from "./ByokForm";
 import { detectAiSetup, isSearchModel, sortModels } from "./detect";
 import { FitNotes, loadFit, MachineLine } from "./ModelFit";
+import { DownloadFailureNote, isCancelled } from "./DownloadFailure";
 import { detectOs, type Os } from "./platform";
 import { CommandSnippet, OfflineNote, StepHeading, type StepProps } from "./steps";
 
@@ -108,12 +109,23 @@ function LocalModels({ onReady }: { onReady: (model: string) => void }) {
 
   const install = async (id: string) => {
     setRequestError(({ [id]: _, ...rest }) => rest);
-    setProgress((cur) => ({ ...cur, [id]: { id, downloaded: 0, total: 0, phase: "downloading", error: null } }));
+    // A retry resumes from the staged bytes: keep showing them until the daemon reports.
+    setProgress((cur) => ({ ...cur, [id]: { id, downloaded: cur[id]?.downloaded ?? 0, total: cur[id]?.total ?? 0, phase: "downloading", error: null } }));
     try {
       await api.modelsInstall(id);
     } catch (e) {
       setProgress(({ [id]: _, ...rest }) => rest);
       setRequestError((cur) => ({ ...cur, [id]: errorMessage(e) }));
+    }
+  };
+
+  // The daemon answers with a final `failed` / `cancelled` progress; staged bytes are kept.
+  const cancel = async (id: string): Promise<boolean> => {
+    try {
+      return (await modelsCancel(id)).cancelled;
+    } catch (e) {
+      setRequestError((cur) => ({ ...cur, [id]: errorMessage(e) }));
+      return false;
     }
   };
 
@@ -142,6 +154,7 @@ function LocalModels({ onReady }: { onReady: (model: string) => void }) {
         error={requestError[m.id]}
         fit={fit.data}
         onInstall={() => void install(m.id)}
+        onCancel={() => cancel(m.id)}
       />
     ));
   const shownChat = visible(chat);
@@ -187,6 +200,7 @@ function ModelRow({
   error,
   fit,
   onInstall,
+  onCancel,
 }: {
   model: ModelInfo;
   /** The one model to suggest: badged, explained, and its Install is the primary button. */
@@ -195,10 +209,22 @@ function ModelRow({
   error?: string;
   fit?: FitReport | null;
   onInstall: () => void;
+  /** Resolves `false` if nothing was cancelled (the request failed or the install had ended). */
+  onCancel: () => Promise<boolean>;
 }) {
   const t = useT();
   const busy = progress?.phase === "downloading" || progress?.phase === "verifying";
   const failed = progress?.phase === "failed";
+  const cancelled = isCancelled(progress);
+  // After Cancel the button goes away: move focus to Resume so keyboard users keep their place.
+  const [cancelling, setCancelling] = useState(false);
+  const actionRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!busy && cancelling) {
+      setCancelling(false);
+      actionRef.current?.focus();
+    }
+  }, [busy, cancelling]);
   const installed = model.installed || progress?.phase === "installed";
   const total = progress?.total || model.size_bytes;
   const pct = progress ? percent(progress.downloaded, total) : 0;
@@ -239,17 +265,27 @@ function ModelRow({
               total: formatBytes(total),
             })}
           </span>
+          <div className="card-actions">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              aria-label={t("models.cancelLabel", { model: model.id })}
+              disabled={cancelling}
+              onClick={() => {
+                setCancelling(true);
+                void onCancel().then((ok) => ok || setCancelling(false));
+              }}
+            >
+              {t("models.cancel")}
+            </button>
+          </div>
         </div>
       )}
-      {(failed || error) && (
-        <p className="note note-error" role="alert">
-          {progress?.error || error || t("onboarding.models.failed")}
-        </p>
-      )}
+      <DownloadFailureNote t={t} progress={progress} error={error} fallback={t("onboarding.models.failed")} />
       {!installed && !busy && (
         <div className="card-actions">
-          <button type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
-            {failed || error ? t("onboarding.models.retry") : t("onboarding.models.install")}
+          <button ref={actionRef} type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
+            {cancelled ? t("models.resume") : failed || error ? t("onboarding.models.retry") : t("onboarding.models.install")}
           </button>
         </div>
       )}

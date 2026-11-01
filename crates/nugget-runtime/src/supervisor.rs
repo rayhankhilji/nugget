@@ -2,10 +2,12 @@
 
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use nugget_core::capability::Tier;
+use nugget_core::clock::Stopwatch;
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{RuntimeInfo, RuntimeRole, RuntimeState};
@@ -20,7 +22,9 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::args::{LaunchPlan, Tuning};
-use crate::health::{ProcSlot, Target, activity, loopback_client, wait_ready};
+use crate::health::{
+    Health, ProcSlot, StartFailure, Target, activity, loopback_client, probe_within, wait_ready,
+};
 use crate::logs::{RollingLog, SharedLog, lock as lock_log};
 use crate::orphan::{self, PidRecord};
 use crate::process::ServerProcess;
@@ -46,6 +50,21 @@ pub fn provider_id(role: RuntimeRole) -> ProviderId {
         RuntimeRole::Rerank => RERANK_PROVIDER_ID,
         RuntimeRole::Draft => DRAFT_PROVIDER_ID,
     })
+}
+
+/// What a role's model is called in messages for the user.
+fn role_what(role: RuntimeRole) -> &'static str {
+    match role {
+        RuntimeRole::Chat => "on-device chat model",
+        RuntimeRole::Embedding => "on-device search model",
+        RuntimeRole::Rerank => "on-device reranker",
+        RuntimeRole::Draft => "on-device Double Tap model",
+    }
+}
+
+/// Seconds, rounded up, for messages.
+fn secs_up(d: Duration) -> u64 {
+    d.as_millis().div_ceil(1000).max(1) as u64
 }
 
 fn role_name(role: RuntimeRole) -> &'static str {
@@ -91,6 +110,15 @@ pub struct RuntimeOptions {
     pub max_restarts: u32,
     /// Uptime after which a crash no longer counts as consecutive.
     pub stable_after: Duration,
+    /// Hang watchdog: how often a ready server's `/health` is probed while requests are in
+    /// flight or were made recently (see [`Runtime::request`]). A server that accepts
+    /// connections but stops answering is restarted after `hang_strikes` probes in a row went
+    /// unanswered for `hang_probe_timeout` each.
+    pub hang_check_interval: Duration,
+    /// The watchdog's probe interval while the server has been idle for a while.
+    pub hang_check_idle_interval: Duration,
+    pub hang_probe_timeout: Duration,
+    pub hang_strikes: u32,
     /// Stop a server after this long without requests. `None` (default) keeps it running.
     pub idle_shutdown: Option<Duration>,
     /// How often request activity is sampled (from `/metrics`) when `idle_shutdown` is set.
@@ -122,6 +150,11 @@ impl Default for RuntimeOptions {
             restart_backoff_max: Duration::from_secs(60),
             max_restarts: 5,
             stable_after: Duration::from_secs(120),
+            // Worst case from a hang to the restart: 3 x (1 s + 2 s) = 9 s.
+            hang_check_interval: Duration::from_secs(1),
+            hang_check_idle_interval: Duration::from_secs(10),
+            hang_probe_timeout: Duration::from_secs(2),
+            hang_strikes: 3,
             idle_shutdown: None,
             idle_check_interval: Duration::from_secs(30),
             shutdown_grace: Duration::from_secs(5),
@@ -174,9 +207,17 @@ pub struct RuntimeDetails {
     pub pid: Option<u32>,
     /// Restarts after crashes since the last successful `ensure`.
     pub restarts: u32,
+    /// Hangs the watchdog detected (a server that stopped answering, then was killed) over the
+    /// runtime's life: callers compare it around a request to tell a hang from a crash.
+    pub hangs: u32,
     pub accel: Option<RuntimeAccel>,
     pub binary: Option<PathBuf>,
     pub log_file: PathBuf,
+}
+
+/// Times measured in a role's status, as reported in [`RuntimeInfo`].
+fn ms(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
 #[derive(Clone)]
@@ -296,8 +337,45 @@ struct Status {
     port: Option<u16>,
     socket: Option<PathBuf>,
     restarts: u32,
+    hangs: u32,
     accel: Option<RuntimeAccel>,
     binary: Option<PathBuf>,
+    /// When `state` last changed (the warm-up clock while `Starting`).
+    since: Option<Instant>,
+    /// How long loading this model is expected to take (the last successful load, else an
+    /// estimate from its size).
+    expected_load: Option<Duration>,
+    /// While `Failed`: when the next start may happen (an automatic restart, or the earliest
+    /// time [`Runtime::ensure`] starts a server again after a failed start). `None` when the
+    /// supervisor gave up: only [`Runtime::retry`] clears that.
+    retry_at: Option<Instant>,
+    /// Gave up after consecutive failures: [`Runtime::ensure`] fails fast until
+    /// [`Runtime::retry`] (no relaunch per request).
+    gave_up: bool,
+    /// Consecutive failed starts begun by [`Runtime::ensure`] (bounded backoff between them).
+    start_failures: u32,
+    /// The last line the server printed before it failed (details for the log view).
+    detail: Option<String>,
+}
+
+/// Holds a role busy while a request is in flight (see [`Runtime::request`]).
+pub struct RequestGuard {
+    rs: Arc<RoleState>,
+}
+
+impl Drop for RequestGuard {
+    fn drop(&mut self) {
+        self.rs.inflight.fetch_sub(1, Ordering::SeqCst);
+        self.rs.touch();
+    }
+}
+
+impl std::fmt::Debug for RequestGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RequestGuard")
+            .field("role", &self.rs.role)
+            .finish()
+    }
 }
 
 struct RoleState {
@@ -310,7 +388,9 @@ struct RoleState {
     status: Mutex<Status>,
     /// Bumped on every state change (waiters re-check `status`).
     changed: watch::Sender<u64>,
-    activity: Mutex<Instant>,
+    /// Last request activity; counts time the computer slept, so a server idle overnight is
+    /// stopped soon after wake (GG6-29).
+    activity: Mutex<Stopwatch>,
     /// The supervisor of a ready server.
     task: Mutex<Option<Task>>,
     /// The latest start (running, or finished).
@@ -318,6 +398,17 @@ struct RoleState {
     log: Mutex<Option<SharedLog>>,
     log_file: PathBuf,
     pid_file: PathBuf,
+    /// The last successful load time per model (`data/runtime/<role>.load.json`).
+    load_file: PathBuf,
+    /// Requests in flight ([`Runtime::request`]): the hang watchdog probes often while busy.
+    inflight: AtomicUsize,
+}
+
+/// The last successful load of a role's model, persisted for the warm-up estimate.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LoadRecord {
+    model_sha: String,
+    ms: u64,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -326,12 +417,56 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl RoleState {
     fn set(&self, f: impl FnOnce(&mut Status)) {
-        f(&mut lock(&self.status));
+        {
+            let mut st = lock(&self.status);
+            let before = st.state;
+            f(&mut st);
+            if st.state != before || st.since.is_none() {
+                st.since = Some(Instant::now());
+            }
+            if st.state != Some(RuntimeState::Failed) {
+                st.retry_at = None;
+                st.gave_up = false;
+            }
+        }
         self.changed.send_modify(|v| *v = v.wrapping_add(1));
     }
 
+    /// The expected load time of the model with `sha` (`size` bytes): the last successful load
+    /// of that model on this machine, else an estimate (about 150 MB/s plus a few seconds).
+    fn expected_load(&self, sha: &str, size: u64) -> Duration {
+        let recorded = std::fs::read(&self.load_file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<LoadRecord>(&b).ok())
+            .filter(|r| r.model_sha == sha)
+            .map(|r| Duration::from_millis(r.ms));
+        recorded.unwrap_or_else(|| Duration::from_secs(3 + size / 150_000_000))
+    }
+
+    /// Remember how long the model with `sha` took to load (best effort).
+    fn record_load(&self, sha: &str, took: Duration) {
+        let rec = LoadRecord {
+            model_sha: sha.to_string(),
+            ms: ms(took),
+        };
+        if let Ok(b) = serde_json::to_vec(&rec) {
+            if let Some(dir) = self.load_file.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&self.load_file, b);
+        }
+        self.set(|st| st.expected_load = Some(took));
+    }
+
+    /// Whether the hang watchdog should probe at the busy rate: requests in flight, or one
+    /// made within the last minute.
+    fn busy(&self) -> bool {
+        self.inflight.load(Ordering::SeqCst) > 0
+            || lock(&self.activity).elapsed() < Duration::from_secs(60)
+    }
+
     fn touch(&self) {
-        *lock(&self.activity) = Instant::now();
+        *lock(&self.activity) = Stopwatch::start();
     }
 
     /// The role's log, now also redacting `key`.
@@ -370,13 +505,37 @@ impl RoleState {
         };
         // Under the process lock, so a restart cannot slip in between check and update.
         if lock(&self.status).state == Some(RuntimeState::Ready) {
+            tracing::warn!(role = role_name(self.role), %status, "llama-server exited unexpectedly");
+            let what = role_what(self.role);
             self.set(|st| {
                 st.state = Some(RuntimeState::Failed);
                 st.config = None;
-                st.error = Some(format!("llama-server exited unexpectedly ({status})"));
+                st.error = Some(format!("The {what} stopped unexpectedly; restarting it."));
             });
         }
         drop(g);
+    }
+
+    /// While a failed start of this model (or a give-up) holds off new starts: the error to
+    /// return at once. `None` once a new start may begin.
+    fn cooling_down(&self, model_sha: &str) -> Option<Error> {
+        let st = lock(&self.status);
+        if st.state != Some(RuntimeState::Failed) || st.model_sha.as_deref() != Some(model_sha) {
+            return None;
+        }
+        let what = role_what(self.role);
+        let error = st
+            .error
+            .clone()
+            .unwrap_or_else(|| format!("The {what} couldn't start."));
+        if st.gave_up {
+            return Some(Error::Provider(error));
+        }
+        let left = st.retry_at?.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        Some(Error::Provider(error))
     }
 
     /// A start for this model that is still running.
@@ -416,6 +575,31 @@ impl RoleState {
             }
             st.config = None;
         });
+    }
+}
+
+/// An error as the one sentence the status shows (without the error kind's prefix).
+fn plain(e: &Error) -> String {
+    match e {
+        Error::Provider(m) => m.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// What a request is told while the supervisor backs off before restarting a crashed or hung
+/// server.
+fn backing_off_message(role: RuntimeRole, st: &Status) -> String {
+    let what = role_what(role);
+    let error = st
+        .error
+        .clone()
+        .unwrap_or_else(|| format!("The {what} stopped unexpectedly; restarting it."));
+    match st.retry_at {
+        Some(t) => format!(
+            "{error} Try again in {} s.",
+            secs_up(t.saturating_duration_since(Instant::now()))
+        ),
+        None => format!("{error} Try again in a moment."),
     }
 }
 
@@ -489,7 +673,7 @@ impl Runtime {
                 proc: Mutex::new(None),
                 status: Mutex::new(Status::default()),
                 changed: watch::Sender::new(0),
-                activity: Mutex::new(Instant::now()),
+                activity: Mutex::new(Stopwatch::start()),
                 task: Mutex::new(None),
                 start: Mutex::new(None),
                 log: Mutex::new(None),
@@ -501,6 +685,11 @@ impl Runtime {
                     .data
                     .join("runtime")
                     .join(format!("{}.pid", role_name(role))),
+                load_file: paths
+                    .data
+                    .join("runtime")
+                    .join(format!("{}.load.json", role_name(role))),
+                inflight: AtomicUsize::new(0),
             })
         };
         Ok(Self {
@@ -655,6 +844,10 @@ impl Runtime {
                     Some(rx)
                 } else if reuse && rs.serving(&model_sha) {
                     None
+                } else if let Some(e) = rs.cooling_down(&model_sha) {
+                    // A start of this model failed (or the supervisor gave up) moments ago:
+                    // say so at once instead of launching a server per request.
+                    return Err(e);
                 } else {
                     self.stop_locked(&rs).await;
                     Some(self.spawn_start(
@@ -692,7 +885,19 @@ impl Runtime {
                     Some(RuntimeState::Ready) if st.config.is_some() => {
                         return Ok(st.config.clone());
                     }
-                    Some(RuntimeState::Starting | RuntimeState::Failed) => {}
+                    // Loading (warming up after a restart): wait for it.
+                    Some(RuntimeState::Starting) => {}
+                    // Crashed or hung and backing off before the next restart: fail fast with
+                    // what happened, instead of holding the request through the backoff.
+                    Some(RuntimeState::Failed) => {
+                        let task_alive = lock(&rs.task)
+                            .as_ref()
+                            .is_some_and(|t| !t.handle.is_finished());
+                        if !task_alive {
+                            return Ok(None);
+                        }
+                        return Err(Error::Provider(backing_off_message(rs.role, &st)));
+                    }
                     _ => return Ok(None),
                 }
             }
@@ -713,10 +918,9 @@ impl Runtime {
                 }
                 _ = wait => {}
                 _ = tokio::time::sleep_until(deadline) => {
-                    let err = lock(&rs.status).error.clone().unwrap_or_default();
                     return Err(Error::Provider(format!(
-                        "local {} runtime is restarting: {err}",
-                        role_name(rs.role)
+                        "The {} is still loading after a restart; try again in a moment.",
+                        role_what(rs.role)
                     )));
                 }
             }
@@ -782,11 +986,20 @@ impl Runtime {
         on_progress: Arc<dyn Fn(Progress) + Send + Sync>,
     ) -> watch::Receiver<Option<StartResult>> {
         // `Starting` right away, so the status never lags behind the start.
-        let (previous, previous_socket) = {
+        let (previous, previous_socket, start_failures) = {
             let st = lock(&rs.status);
-            (st.port, st.socket.clone())
+            let failures = if st.model_sha.as_deref() == Some(model_sha.as_str()) {
+                st.start_failures
+            } else {
+                0
+            };
+            (st.port, st.socket.clone(), failures)
         };
         let model_id = launches.first().map(|(_, l)| l.entry.id.clone());
+        let expected = launches
+            .first()
+            .map(|(_, l)| rs.expected_load(&model_sha, l.entry.size));
+        let hangs = lock(&rs.status).hangs;
         rs.set(|st| {
             *st = Status {
                 port: previous,
@@ -795,6 +1008,9 @@ impl Runtime {
                 model_sha: Some(model_sha.clone()),
                 state: Some(RuntimeState::Starting),
                 accel: launches.first().map(|(_, l)| l.accel),
+                expected_load: expected,
+                start_failures,
+                hangs,
                 ..Status::default()
             };
         });
@@ -889,6 +1105,19 @@ impl Runtime {
                 state,
                 provider: provider_id(role),
                 error: st.error,
+                state_ms: st.since.map(|t| ms(t.elapsed())),
+                expected_ms: match state {
+                    RuntimeState::Starting => st.expected_load.map(ms),
+                    _ => None,
+                },
+                retry_in_ms: match state {
+                    RuntimeState::Failed => st
+                        .retry_at
+                        .map(|t| ms(t.saturating_duration_since(Instant::now()))),
+                    _ => None,
+                },
+                gave_up: state == RuntimeState::Failed && st.gave_up,
+                detail: st.detail,
             },
             config: if state == RuntimeState::Ready {
                 st.config
@@ -899,6 +1128,7 @@ impl Runtime {
             socket: st.socket,
             pid: rs.pid(),
             restarts: st.restarts,
+            hangs: st.hangs,
             accel: st.accel,
             binary: st.binary,
             log_file: rs.log_file.clone(),
@@ -908,6 +1138,54 @@ impl Runtime {
     /// Record activity for the idle timer (e.g. from the code that sends requests).
     pub fn touch(&self, role: RuntimeRole) {
         self.role(role).touch();
+    }
+
+    /// Mark a request to `role`'s server in flight until the guard is dropped: counts as
+    /// activity for the idle timer, and the hang watchdog probes the server at its busy rate
+    /// ([`RuntimeOptions::hang_check_interval`]) meanwhile.
+    pub fn request(&self, role: RuntimeRole) -> RequestGuard {
+        let rs = Arc::clone(self.role(role));
+        rs.inflight.fetch_add(1, Ordering::SeqCst);
+        rs.touch();
+        RequestGuard { rs }
+    }
+
+    /// The user asked to retry: forget failed starts and a give-up, so the next
+    /// [`Runtime::ensure`] starts a server at once. Starts nothing itself.
+    pub fn retry(&self, role: RuntimeRole) {
+        let rs = self.role(role);
+        rs.set(|st| {
+            st.retry_at = None;
+            st.gave_up = false;
+            st.start_failures = 0;
+        });
+    }
+
+    /// Wait up to `timeout` for `role`'s server to be ready (a restart in progress, say) and
+    /// return its config. `None` if it is not ready by then, failed for good, or never started.
+    /// Starts nothing.
+    pub async fn wait_ready(&self, role: RuntimeRole, timeout: Duration) -> Option<ProviderConfig> {
+        let rs = self.role(role);
+        let mut rx = rs.changed.subscribe();
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            rs.refresh();
+            {
+                let st = lock(&rs.status);
+                match st.state {
+                    Some(RuntimeState::Ready) if st.config.is_some() => return st.config.clone(),
+                    Some(RuntimeState::Starting | RuntimeState::Failed) if !st.gave_up => {}
+                    _ => return None,
+                }
+            }
+            let wait =
+                tokio::time::sleep(self.cfg.opts.watch_interval.min(Duration::from_millis(250)));
+            tokio::select! {
+                r = rx.changed() => if r.is_err() { return None },
+                _ = wait => {}
+                _ = tokio::time::sleep_until(deadline) => return None,
+            }
+        }
     }
 
     /// The rolling log file of `role`'s server.
@@ -955,10 +1233,12 @@ async fn start_new(
     let opts = &ctx.cfg.opts;
     // Reuse the previous port when it is free, so configs handed out before a stop (idle,
     // explicit) point at the right place again (they still need the new key's generation).
-    let (previous, previous_socket) = {
+    let (previous, previous_socket, start_failures) = {
         let st = lock(&rs.status);
-        (st.port, st.socket.clone())
+        (st.port, st.socket.clone(), st.start_failures)
     };
+    let expected = rs.expected_load(model_sha, launch.entry.size);
+    let hangs = lock(&rs.status).hangs;
     rs.set(|st| {
         *st = Status {
             port: previous,
@@ -967,9 +1247,13 @@ async fn start_new(
             model_sha: Some(model_sha.to_string()),
             state: Some(RuntimeState::Starting),
             accel: Some(launch.accel),
+            expected_load: Some(expected),
+            start_failures,
+            hangs,
             ..Status::default()
         };
     });
+    let mut load_started = Instant::now();
     let res = async {
         if let Some(entry) = &runtime {
             launch.binary = ctx.install_entry(entry, on_progress).await?;
@@ -989,6 +1273,7 @@ async fn start_new(
         // A fresh key for every server process.
         let (generation, key) = ctx.secrets.rotate(rs.role)?;
         let log = rs.log(opts, &key)?;
+        load_started = Instant::now();
         start_once(&ctx.client, opts, rs, &launch, &key, &log).await?;
         Ok::<_, Error>((generation, key))
     }
@@ -996,13 +1281,19 @@ async fn start_new(
     let (generation, key) = match res {
         Ok(v) => v,
         Err(e) => {
+            // Hold off further starts of this model for a growing (bounded) while, so requests
+            // made meanwhile fail fast instead of each launching a server (see `cooling_down`).
+            let backoff = opts.backoff(start_failures + 1);
             rs.set(|st| {
                 st.state = Some(RuntimeState::Failed);
-                st.error = Some(e.to_string());
+                st.error = Some(plain(&e));
+                st.start_failures = start_failures + 1;
+                st.retry_at = Some(Instant::now() + backoff);
             });
             return Err(e);
         }
     };
+    rs.record_load(model_sha, load_started.elapsed());
     let cfg = provider_config(rs.role, &launch.entry, &launch.plan, generation)?;
     if let Some(pid) = rs.pid() {
         orphan::write(
@@ -1031,6 +1322,8 @@ async fn start_new(
     rs.set(|st| {
         st.state = Some(RuntimeState::Ready);
         st.error = None;
+        st.detail = None;
+        st.start_failures = 0;
         st.port = port;
         st.socket = sock;
         st.config = Some(cfg.clone());
@@ -1185,26 +1478,58 @@ async fn start_once(
     // Dropping a previous (dead) process kills whatever it left in its group.
     let previous = lock(&rs.proc).replace(proc);
     drop(previous);
-    match wait_ready(
-        &target,
-        &rs.proc,
-        opts.health_timeout,
-        opts.health_poll,
-        log,
-    )
-    .await
-    {
+    match wait_ready(&target, &rs.proc, opts.health_timeout, opts.health_poll).await {
         Ok(()) => Ok(()),
-        Err(e) => {
+        Err(failure) => {
             let proc = lock(&rs.proc).take();
             if let Some(mut p) = proc {
                 p.shutdown(Duration::from_millis(200)).await;
             }
-            if !matches!(e, Error::Cancelled) {
-                lock_log(log).note(&format!("start failed: {e}"));
-            }
+            let what = role_what(rs.role);
+            let (note, e) = match failure {
+                StartFailure::Cancelled => return Err(Error::Cancelled),
+                StartFailure::Exited(status) => (
+                    format!("start failed: llama-server exited during start-up ({status})"),
+                    Error::Provider(format!(
+                        "The {what} couldn't start: the model server quit ({status}). Open \
+                         Status to retry or to see its log."
+                    )),
+                ),
+                StartFailure::TimedOut(t) => (
+                    format!("start failed: not ready after {} s", t.as_secs()),
+                    Error::Provider(format!(
+                        "The {what} didn't finish loading within {} s. Open Status to retry \
+                         or to see its log.",
+                        secs_up(t)
+                    )),
+                ),
+                StartFailure::Foreign(who) => (
+                    format!("start failed: another process answered on the port: {who}"),
+                    Error::Provider(
+                        "Another program answered on the model server's port, so Nugget \
+                         refused to use it."
+                            .into(),
+                    ),
+                ),
+            };
+            // The technical account goes to the server's log and the daemon log (once); the
+            // error stays one short sentence.
+            let detail = lock_log(log).last_server_line();
+            tracing::warn!(role = role_name(rs.role), model = %launch.entry.id,
+                reason = %note, last_output = detail.as_deref().unwrap_or(""),
+                "local runtime did not start");
+            lock_log(log).note(&note);
+            rs.set(|st| st.detail = detail.map(|d| truncate_chars(&d, 300)));
             Err(e)
         }
+    }
+}
+
+/// `s` cut to at most `max` characters (with an ellipsis when cut).
+fn truncate_chars(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((i, _)) => format!("{}…", &s[..i]),
+        None => s.to_string(),
     }
 }
 
@@ -1223,7 +1548,16 @@ enum Event {
     Tick,
 }
 
-/// Watch one server: restart it with backoff when it dies, stop it when idle.
+/// Why a ready server has to be restarted.
+enum Fault {
+    /// The process exited, after this much uptime.
+    Exited(std::process::ExitStatus, Duration),
+    /// It stopped answering `/health` (accepts connections, never replies), after this much
+    /// uptime.
+    Hung(Duration),
+}
+
+/// Watch one server: restart it with backoff when it dies or hangs, stop it when idle.
 async fn supervise(
     rs: Arc<RoleState>,
     ctx: Ctx,
@@ -1235,12 +1569,15 @@ async fn supervise(
     let mut failures = 0u32;
     let mut last_idle_check = Instant::now();
     let mut last_counters: Option<f64> = None;
+    let mut last_probe = Instant::now();
+    let mut strikes = 0u32;
     let Ok(log) = rs.log(opts, &key) else {
         return;
     };
     let Ok(mut server) = target(&ctx.client, &launch.plan) else {
         return;
     };
+    let what = role_what(rs.role);
     loop {
         let ev = tokio::select! {
             _ = cancel.cancelled() => Event::Cancelled,
@@ -1256,23 +1593,91 @@ async fn supervise(
             let Some(p) = g.as_mut() else { return };
             p.try_wait().map(|s| (s, p.started.elapsed()))
         };
-        if let Some((status, uptime)) = exited {
-            let msg = format!("llama-server exited unexpectedly ({status})");
-            // Not ready, and no config for the dead server's port, before anything else.
+        let fault = match exited {
+            Some((status, uptime)) => Some(Fault::Exited(status, uptime)),
+            // Hung? Probed often while requests wait on the server, rarely when idle.
+            None => {
+                let every = if rs.busy() {
+                    opts.hang_check_interval
+                } else {
+                    opts.hang_check_idle_interval
+                };
+                if opts.hang_strikes > 0 && last_probe.elapsed() >= every {
+                    let health = tokio::select! {
+                        _ = cancel.cancelled() => return,
+                        h = probe_within(&server, opts.hang_probe_timeout) => h,
+                    };
+                    last_probe = Instant::now();
+                    if health == Health::Ready {
+                        strikes = 0;
+                    } else {
+                        strikes += 1;
+                        tracing::debug!(
+                            role = role_name(rs.role),
+                            strikes,
+                            ?health,
+                            "local runtime missed a health check"
+                        );
+                    }
+                    if strikes >= opts.hang_strikes {
+                        let uptime = lock(&rs.proc)
+                            .as_ref()
+                            .map_or(Duration::ZERO, |p| p.started.elapsed());
+                        Some(Fault::Hung(uptime))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some(fault) = fault {
+            strikes = 0;
+            let (error, note, uptime) = match &fault {
+                Fault::Exited(status, uptime) => (
+                    format!("The {what} stopped unexpectedly; restarting it."),
+                    format!("llama-server exited unexpectedly ({status})"),
+                    *uptime,
+                ),
+                Fault::Hung(uptime) => (
+                    format!("The {what} stopped responding; restarting it."),
+                    format!(
+                        "llama-server stopped responding ({} health checks in a row went \
+                         unanswered); restarting it",
+                        opts.hang_strikes
+                    ),
+                    *uptime,
+                ),
+            };
+            // Not ready, and no config for the server's port, before anything else: requests
+            // fail fast from here on (see `wait_ready_state`).
+            let hung = matches!(fault, Fault::Hung(_));
             rs.set(|st| {
                 st.state = Some(RuntimeState::Failed);
-                st.error = Some(msg.clone());
+                st.error = Some(error);
                 st.config = None;
+                if hung {
+                    st.hangs += 1;
+                }
             });
-            if let Some(mut p) = lock(&rs.proc).take() {
-                p.kill_stragglers();
+            let proc = lock(&rs.proc).take();
+            if let Some(mut p) = proc {
+                match fault {
+                    Fault::Exited(..) => p.kill_stragglers(),
+                    // A hung (or stopped) process may never act on a polite signal: a short
+                    // grace, then it is killed, which also fails its open requests at once.
+                    Fault::Hung(_) => p.shutdown(Duration::from_millis(200)).await,
+                }
             }
             if uptime >= opts.stable_after {
                 failures = 0;
             }
             failures += 1;
-            tracing::warn!(role = role_name(rs.role), %status, failures, "local runtime crashed");
-            lock_log(&log).note(&msg);
+            tracing::warn!(role = role_name(rs.role), reason = %note, failures,
+                "local runtime failed");
+            lock_log(&log).note(&note);
             match restart(&rs, &ctx, &mut launch, &log, &cancel, &mut failures).await {
                 Some(k) => key = k,
                 None => return,
@@ -1282,6 +1687,7 @@ async fn supervise(
                 Err(_) => return,
             }
             last_counters = None;
+            last_probe = Instant::now();
             continue;
         }
 
@@ -1299,6 +1705,9 @@ async fn supervise(
                 }
                 // No metrics: cannot tell, so treat as active.
                 None => rs.touch(),
+            }
+            if rs.inflight.load(Ordering::SeqCst) > 0 {
+                rs.touch();
             }
             if lock(&rs.activity).elapsed() >= idle {
                 tracing::info!(role = role_name(rs.role), "stopping idle local runtime");
@@ -1321,8 +1730,8 @@ async fn supervise(
     }
 }
 
-/// Restart after a crash, with a new API key. Returns the new key, or `None` if cancelled or
-/// given up.
+/// Restart after a crash or hang, with a new API key. Returns the new key, or `None` if
+/// cancelled or given up.
 async fn restart(
     rs: &RoleState,
     ctx: &Ctx,
@@ -1332,24 +1741,36 @@ async fn restart(
     failures: &mut u32,
 ) -> Option<Secret> {
     let opts = &ctx.cfg.opts;
+    let what = role_what(rs.role);
     loop {
         if *failures > opts.max_restarts {
-            let msg = format!(
-                "gave up after {} consecutive failures; call ensure() to retry",
+            lock_log(log).note(&format!(
+                "gave up after {} consecutive failures; waiting for a retry",
                 *failures
+            ));
+            tracing::warn!(
+                role = role_name(rs.role),
+                failures = *failures,
+                "local runtime keeps failing; gave up until a retry"
             );
-            lock_log(log).note(&msg);
             orphan::remove(&rs.pid_file);
             rs.set(|st| {
                 st.state = Some(RuntimeState::Failed);
-                st.error = Some(msg);
+                st.error = Some(format!(
+                    "The {what} keeps stopping, so Nugget stopped restarting it. Open Status to \
+                     retry or to see its log."
+                ));
                 st.config = None;
+                st.retry_at = None;
+                st.gave_up = true;
             });
             return None;
         }
+        let backoff = opts.backoff(*failures);
+        rs.set(|st| st.retry_at = Some(Instant::now() + backoff));
         tokio::select! {
             _ = cancel.cancelled() => return None,
-            _ = tokio::time::sleep(opts.backoff(*failures)) => {}
+            _ = tokio::time::sleep(backoff) => {}
         }
         // Keep the port unless something else took it. Whoever holds it now, the new server
         // must turn out to be the listener before it is trusted (see `wait_ready`). A socket
@@ -1362,6 +1783,7 @@ async fn restart(
             st.state = Some(RuntimeState::Starting);
             st.config = None;
         });
+        let load_started = Instant::now();
         let started = async {
             let (generation, key) = ctx.secrets.rotate(rs.role)?;
             lock_log(log).add_secret(key.expose());
@@ -1374,6 +1796,8 @@ async fn restart(
         };
         match started {
             Ok((generation, key)) => {
+                let model_sha = lock(&rs.status).model_sha.clone().unwrap_or_default();
+                rs.record_load(&model_sha, load_started.elapsed());
                 let cfg = provider_config(rs.role, &launch.entry, &launch.plan, generation).ok();
                 if let Some(pid) = rs.pid() {
                     orphan::write(
@@ -1388,6 +1812,7 @@ async fn restart(
                 rs.set(|st| {
                     st.state = Some(RuntimeState::Ready);
                     st.error = None;
+                    st.detail = None;
                     st.port = port;
                     st.socket = sock;
                     st.config = cfg;
@@ -1401,7 +1826,7 @@ async fn restart(
                 *failures += 1;
                 rs.set(|st| {
                     st.state = Some(RuntimeState::Failed);
-                    st.error = Some(e.to_string());
+                    st.error = Some(plain(&e));
                 });
             }
         }

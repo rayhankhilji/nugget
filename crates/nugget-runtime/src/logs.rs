@@ -13,6 +13,8 @@ const MAX_LINE: usize = 8 * 1024;
 /// Lines kept in memory for error messages.
 const TAIL_LINES: usize = 40;
 const REDACTED: &str = "<redacted>";
+/// The stream tag of the supervisor's own notes.
+const NOTE_STREAM: &str = "nugget";
 
 /// A size-capped log file rotated as `<name>`, `<name>.1`, ... `<name>.<keep>`.
 pub(crate) struct RollingLog {
@@ -23,6 +25,9 @@ pub(crate) struct RollingLog {
     size: u64,
     secrets: Vec<String>,
     tail: VecDeque<String>,
+    /// The last lines of the server's own output (stdout/stderr), without the supervisor's
+    /// notes: what an error may quote without repeating itself.
+    server_tail: VecDeque<String>,
 }
 
 pub(crate) type SharedLog = Arc<Mutex<RollingLog>>;
@@ -47,6 +52,7 @@ impl RollingLog {
             size,
             secrets: Vec::new(),
             tail: VecDeque::new(),
+            server_tail: VecDeque::new(),
         })
     }
 
@@ -84,6 +90,12 @@ impl RollingLog {
         {
             self.size += entry.len() as u64;
         }
+        if stream != NOTE_STREAM {
+            if self.server_tail.len() == TAIL_LINES {
+                self.server_tail.pop_front();
+            }
+            self.server_tail.push_back(text.clone());
+        }
         if self.tail.len() == TAIL_LINES {
             self.tail.pop_front();
         }
@@ -92,10 +104,20 @@ impl RollingLog {
 
     /// A marker line from the supervisor itself.
     pub(crate) fn note(&mut self, text: &str) {
-        self.line("nugget", text);
+        self.line(NOTE_STREAM, text);
+    }
+
+    /// The last non-empty line the server itself printed (already redacted), if any.
+    pub(crate) fn last_server_line(&self) -> Option<String> {
+        self.server_tail
+            .iter()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .cloned()
     }
 
     /// The last lines written (already redacted), oldest first.
+    #[cfg(test)]
     pub(crate) fn tail(&self, n: usize) -> Vec<String> {
         self.tail
             .iter()
@@ -180,6 +202,22 @@ mod tests {
         assert!(std::fs::metadata(&path).unwrap().len() <= 4096);
         assert_eq!(log.tail(2).len(), 2);
         assert!(log.tail(1)[0].starts_with("line 399"));
+    }
+
+    #[test]
+    fn the_server_tail_leaves_out_the_supervisors_notes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = RollingLog::open(dir.path().join("x.log"), 1 << 20, 1).unwrap();
+        assert_eq!(log.last_server_line(), None);
+        log.line("stderr", "error: cannot load model");
+        log.line("stderr", "  ");
+        log.note("start failed: llama-server exited during start-up");
+        log.note("starting chat on /tmp/chat.sock");
+        assert_eq!(
+            log.last_server_line().as_deref(),
+            Some("error: cannot load model")
+        );
+        assert!(log.tail(1)[0].starts_with("starting chat"));
     }
 
     #[tokio::test]

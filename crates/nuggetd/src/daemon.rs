@@ -685,6 +685,10 @@ impl Daemon {
         let store = state.store.clone();
         let _ = blocking(move || {
             store.flush_egress();
+            // Writers are done: leave no write-ahead log for the next start (GG6-24).
+            if let Err(e) = store.checkpoint_wal() {
+                tracing::warn!(error = %e, "cannot checkpoint the write-ahead log at stop");
+            }
             Ok(())
         })
         .await;

@@ -63,6 +63,11 @@ use nugget_runtime::{Runtime, provider_id};
 use crate::config::Config;
 use crate::features::draft::local_draft_model;
 
+/// How long a chat whose server crashed or hung before it streamed anything waits for the
+/// restarted server before it gives up with a plain error (KK1: an answer or an actionable
+/// error within 15 s of a hang; the watchdog needs up to about 9 s to notice one).
+const CHAT_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+
 /// Tiers the local chat server always serves, whatever else its model lists.
 const CHAT_TIERS: [Tier; 3] = [Tier::Triage, Tier::Light, Tier::Synthesis];
 
@@ -383,8 +388,17 @@ impl RuntimeSlot {
     /// The background start [`RuntimeSlot::starting`] announced failed: unless the server was
     /// ready before, the slot is routable for nothing again, so requests go straight to the
     /// next candidate instead of retrying the start each time.
+    ///
+    /// Except when a server was launched and failed (state `failed`, KK1): the runtime then
+    /// fails requests at once with one plain sentence while it backs off or after it gave up,
+    /// so the slot stays routable. The router still falls back to the next candidate on that
+    /// error, and with no other candidate the user sees why (and Status offers Retry) instead
+    /// of "no provider has the required capabilities".
     pub fn start_failed(&self) {
         if starting_capabilities(self.role).is_none() {
+            return;
+        }
+        if self.state() == Some(RuntimeState::Failed) {
             return;
         }
         let active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
@@ -422,6 +436,49 @@ impl RuntimeSlot {
             hook(self.role);
         }
         Ok(provider)
+    }
+
+    /// Start a chat and wait for its first event: an error before anything streamed is
+    /// returned as the error (so the caller can retry), anything else is put back in front.
+    async fn chat_started(&self, req: ChatRequest) -> Result<ChatStream> {
+        use futures::StreamExt;
+        let mut stream = self.ready().await?.chat(req).await?;
+        match stream.next().await {
+            Some(Err(e)) => Err(e),
+            Some(Ok(first)) => Ok(Box::pin(
+                futures::stream::once(async { Ok(first) }).chain(stream),
+            )),
+            None => Ok(Box::pin(futures::stream::empty())),
+        }
+    }
+
+    /// Whether the role's server failed since a request began on the server with
+    /// `pid_before`: it is no longer ready, or another process serves now (restarted).
+    async fn server_failed(&self, pid_before: Option<u32>) -> bool {
+        for attempt in 0..2 {
+            let failed = match self.runtime.details(self.role) {
+                Some(d) => d.info.state != RuntimeState::Ready || d.pid != pid_before,
+                None => false,
+            };
+            if failed {
+                return true;
+            }
+            // The connection can close a moment before the exit can be collected.
+            if attempt == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+        }
+        false
+    }
+
+    /// The plain error for a server that failed and is not back yet (from the runtime's
+    /// status, which says whether it crashed, hung or is loading).
+    fn down_error(&self) -> Error {
+        let d = self.runtime.details(self.role);
+        let msg = d
+            .and_then(|d| d.info.error)
+            .unwrap_or_else(|| "The on-device chat model is restarting.".into());
+        Error::Provider(format!("{msg} Try again in a moment."))
     }
 
     fn context_tokens(&self) -> Option<u32> {
@@ -463,14 +520,40 @@ impl Provider for RuntimeSlot {
         let guard = nugget_ingest::is_interactive(&req.feature)
             .then(|| self.foreground.get().map(|f| f.begin()))
             .flatten();
-        let stream = self.ready().await?.chat(req).await?;
-        Ok(match guard {
-            Some(g) => Box::pin(futures::StreamExt::map(stream, move |ev| {
-                let _held = &g;
-                ev
-            })),
-            None => stream,
-        })
+        // In flight until the stream ends: the hang watchdog checks the server often meanwhile.
+        let busy = self.runtime.request(self.role);
+        let before = self.runtime.details(self.role);
+        let pid_before = before.as_ref().and_then(|d| d.pid);
+        let hangs_before = before.map_or(0, |d| d.hangs);
+        let stream = match self.chat_started(req.clone()).await {
+            Ok(s) => s,
+            // The server hung and the watchdog killed it: say so at once. No automatic resend:
+            // the same request might hang it again, and the answer is due within seconds.
+            Err(e)
+                if self
+                    .runtime
+                    .details(self.role)
+                    .is_some_and(|d| d.hangs != hangs_before) =>
+            {
+                tracing::warn!(provider = %self.id, error = %e, "local server hung during a chat");
+                return Err(self.down_error());
+            }
+            // The server crashed (and is restarting) before anything streamed: retry once if
+            // it is back within a moment, else say plainly what happened (GG6-17).
+            Err(e) if pid_before.is_some() && self.server_failed(pid_before).await => {
+                tracing::warn!(provider = %self.id, error = %e,
+                    "local server failed before answering; retrying once");
+                match self.runtime.wait_ready(self.role, CHAT_RETRY_WAIT).await {
+                    Some(_) => self.chat_started(req).await?,
+                    None => return Err(self.down_error()),
+                }
+            }
+            Err(e) => return Err(e),
+        };
+        Ok(Box::pin(futures::StreamExt::map(stream, move |ev| {
+            let _held = (&guard, &busy);
+            ev
+        })))
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -635,6 +718,11 @@ impl LocalRuntime {
                 },
                 provider: s.id.clone(),
                 error: None,
+                state_ms: None,
+                expected_ms: None,
+                retry_in_ms: None,
+                gave_up: false,
+                detail: None,
             });
         }
         out

@@ -118,11 +118,30 @@ export type ModelPhase = "downloading" | "verifying" | "installed" | "failed";
 
 export interface ModelProgress {
   id: string;
+  /** Bytes downloaded; in `failed`, the bytes staged (kept, so the next install resumes). */
   downloaded: number;
   total: number;
   phase: ModelPhase;
+  /** Plain-language message (English) when `failed`; prefer a localised one by `reason`. */
   error: string | null;
+  /** Why it failed (absent on older daemons). */
+  reason?: ModelFailReason;
+  /** The HTTP status when `reason` is `http_error`. */
+  http_status?: number;
 }
+
+/** `nugget_core::ipc::ModelFailReason`; a newer daemon may send others (shown via `error`). */
+export type ModelFailReason =
+  | "offline"
+  | "http_error"
+  | "captive_portal"
+  | "stalled"
+  | "interrupted"
+  | "disk_full"
+  | "integrity"
+  | "cancelled"
+  | "other"
+  | (string & {});
 
 export interface EgressEvent {
   /** RFC 3339 timestamp. */
@@ -335,7 +354,18 @@ export interface RuntimeInfo {
   state: RuntimeState;
   /** Provider id the router knows this runtime by (e.g. `local-chat`). */
   provider: string;
+  /** One short sentence for the user (`failed`). */
   error?: string | null;
+  /** Milliseconds in the current state: while `starting`, how long the model has been warming up (KK1). */
+  state_ms?: number | null;
+  /** While `starting`: how long loading is expected to take, in ms (KK1). */
+  expected_ms?: number | null;
+  /** While `failed`: ms until the next automatic restart (KK1). */
+  retry_in_ms?: number | null;
+  /** While `failed`: the daemon stopped restarting it and waits for a Retry (KK1). */
+  gave_up?: boolean;
+  /** The model server's last line before it failed, for the details view (KK1). */
+  detail?: string | null;
 }
 
 // ---- knowledge graph (M2) ----
@@ -2759,4 +2789,36 @@ export type ItemPreview = {
 /** The local UTC offset in minutes (east positive), for the daemon's date filters and months. */
 export function utcOffsetMinutes(d: Date = new Date()): number {
   return -d.getTimezoneOffset();
+}
+
+// ---- KK1 (runtime) ----
+
+/** Start a local model server again after it failed (`runtime.retry`). */
+export function runtimeRetry(role: RuntimeRole): Promise<{ started: boolean }> {
+  return call<{ started: boolean }>("runtime_retry", { role });
+}
+
+// ---- KK1 (model downloads) ----
+
+/** Stop a running model download (`models.cancel`); staged bytes are kept for a resume. */
+export function modelsCancel(id: string): Promise<{ cancelled: boolean }> {
+  return call<{ cancelled: boolean }>("models_cancel", { id });
+}
+
+// ---- KK1 (disk) ----
+
+/** How much room is left on the disk that holds Nugget's data (`status.disk`). */
+export type DiskLevel = "ok" | "low" | "full";
+
+export interface DiskStatus {
+  /** Bytes available on that disk; `null` when they could not be read. */
+  free_bytes?: number | null;
+  level: DiskLevel;
+  /** A write failed recently because the disk was full (it may have recovered since). */
+  recent_full_error?: boolean;
+}
+
+/** `status.disk` (merged into the declaration above): absent from older daemons. */
+export interface StatusResponse {
+  disk?: DiskStatus | null;
 }

@@ -181,26 +181,32 @@ fn read_full(r: &mut impl std::io::Read, buf: &mut [u8]) -> std::io::Result<usiz
 ///   that commit;
 /// - a damaged header with frames after it.
 pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
+    scan_wal(wal).map(|(problem, _)| problem)
+}
+
+/// [`wal_problem`], plus what follows the last commit when the log is sound.
+fn scan_wal(wal: &Path) -> Result<(Option<String>, WalTail)> {
     use std::io::BufReader;
     let len = match fs::metadata(wal) {
         Ok(m) => m.len(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((None, WalTail::None)),
         Err(e) => return Err(e.into()),
     };
     if len == 0 {
-        return Ok(None);
+        return Ok((None, WalTail::None));
     }
     let mut r = BufReader::new(fs::File::open(wal)?);
     let invalid = |valid_end: u64, why: &str| {
-        Some(format!(
+        let problem = format!(
             "write-ahead log has {} bytes of invalid frames after the last valid commit ({why})",
             len - valid_end
-        ))
+        );
+        (Some(problem), WalTail::None)
     };
     let mut hdr = [0u8; WAL_HEADER];
     if read_full(&mut r, &mut hdr)? < WAL_HEADER {
         tracing::info!(path = %wal.display(), "write-ahead log ends inside its header (crash tail)");
-        return Ok(None);
+        return Ok((None, WalTail::Torn(len)));
     }
     let magic = be32(&hdr[0..]);
     let page_size = be32(&hdr[8..]) as usize;
@@ -215,7 +221,7 @@ pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
             return Ok(invalid(0, "damaged header with frames after it"));
         }
         tracing::info!(path = %wal.display(), "write-ahead log header is torn (crash tail)");
-        return Ok(None);
+        return Ok((None, WalTail::Torn(len)));
     }
     let salts = &hdr[16..24];
     let mut cks = (be32(&hdr[24..]), be32(&hdr[28..]));
@@ -224,6 +230,10 @@ pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
     let mut prev_stored = cks;
     let mut offset = WAL_HEADER as u64;
     let mut last_commit_end = offset;
+    // End of the last frame of the unbroken chain, and whether the chain ended at a whole frame
+    // from an earlier generation of the log (other salts) with no frame of the current one after.
+    let mut chain_end = offset;
+    let mut stale_break = false;
     let mut frame = vec![0u8; WAL_FRAME_HEADER + page_size];
     let mut broken = false;
     loop {
@@ -244,29 +254,74 @@ pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
         if !broken {
             if current && checksum_from(cks) == stored {
                 cks = stored;
+                chain_end = offset + frame.len() as u64;
                 if commit {
-                    last_commit_end = offset + frame.len() as u64;
+                    last_commit_end = chain_end;
                 }
             } else {
                 broken = true;
+                stale_break = !current;
             }
         } else if current && commit && checksum_from(prev_stored) == stored {
             return Ok(invalid(
                 last_commit_end,
                 "a damaged frame hides a later commit",
             ));
+        } else if current {
+            stale_break = false;
         }
         prev_stored = stored;
         offset += frame.len() as u64;
     }
-    if len > last_commit_end {
-        tracing::info!(
+    let tail = classify_tail(len, offset, chain_end, last_commit_end, stale_break);
+    match tail {
+        WalTail::None => {}
+        WalTail::Stale(bytes) => tracing::debug!(
             path = %wal.display(),
-            bytes = len - last_commit_end,
+            bytes,
+            "write-ahead log ends with frames from before it was last reused (normal)"
+        ),
+        WalTail::Torn(bytes) => tracing::info!(
+            path = %wal.display(),
+            bytes,
             "write-ahead log has an uncommitted or torn tail (a crash); SQLite rolls it back"
-        );
+        ),
     }
-    Ok(None)
+    Ok((None, tail))
+}
+
+/// What follows the last commit of a sound write-ahead log.
+#[derive(Debug, PartialEq, Eq)]
+enum WalTail {
+    /// Nothing: the log ends at a commit.
+    None,
+    /// Only whole frames from an earlier generation of the log (other salts). SQLite reuses the
+    /// log from the start after a checkpoint without truncating it, so the old frames beyond the
+    /// newest commit are normal on any store that is open or was not checkpointed at close; they
+    /// say nothing about a crash.
+    Stale(u64),
+    /// Frames of an uncommitted transaction, or a torn or partial frame: what a crash (or a
+    /// writer caught mid-transaction) leaves.
+    Torn(u64),
+}
+
+/// Classify the bytes after `last_commit_end` of a `len`-byte log whose whole frames end at
+/// `whole_end`, whose chain of valid frames ends at `chain_end`, and whose first invalid frame
+/// (if any) had other salts, as did every frame after it (`stale_break`).
+fn classify_tail(
+    len: u64,
+    whole_end: u64,
+    chain_end: u64,
+    last_commit_end: u64,
+    stale_break: bool,
+) -> WalTail {
+    if len <= last_commit_end {
+        WalTail::None
+    } else if chain_end == last_commit_end && stale_break && whole_end == len {
+        WalTail::Stale(len - last_commit_end)
+    } else {
+        WalTail::Torn(len - last_commit_end)
+    }
 }
 
 /// Errors that say nothing about the file's content.
@@ -891,6 +946,80 @@ mod tests {
         assert_eq!(health_with_wal(&copy, &stale), FileHealth::Healthy);
         // An empty WAL is no WAL.
         assert_eq!(health_with_wal(&copy, b""), FileHealth::Healthy);
+    }
+
+    /// After a checkpoint SQLite reuses the log from its start without truncating it, so frames
+    /// of the previous generation (other salts) follow the newest commit. That is no crash tail.
+    #[test]
+    fn stale_frames_after_a_reused_log_are_not_a_crash_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 30);
+        s.with_conn(|c| {
+            c.query_row("PRAGMA wal_checkpoint(RESTART)", [], |_| Ok(()))
+                .db("restart")
+        })
+        .unwrap();
+        put_item(&s, 1000);
+        let wal = sidecar(&path, "-wal");
+        let (problem, tail) = scan_wal(&wal).unwrap();
+        assert_eq!(problem, None);
+        assert!(matches!(tail, WalTail::Stale(n) if n > 0), "{tail:?}");
+
+        // The same log cut inside a frame: a real crash tail.
+        let bytes = fs::read(&wal).unwrap();
+        let cut = dir.path().join("cut-wal");
+        fs::write(&cut, &bytes[..bytes.len() - 100]).unwrap();
+        let (problem, tail) = scan_wal(&cut).unwrap();
+        assert_eq!(problem, None);
+        assert!(matches!(tail, WalTail::Torn(_)), "{tail:?}");
+        drop(s);
+    }
+
+    #[test]
+    fn wal_tails_are_classified() {
+        // No tail.
+        assert_eq!(classify_tail(100, 100, 100, 100, false), WalTail::None);
+        // Old-generation whole frames only.
+        assert_eq!(classify_tail(300, 300, 100, 100, true), WalTail::Stale(200));
+        // Valid but uncommitted frames before the stale ones.
+        assert_eq!(classify_tail(300, 300, 200, 100, true), WalTail::Torn(200));
+        // A partial frame at the end.
+        assert_eq!(classify_tail(350, 300, 100, 100, true), WalTail::Torn(250));
+        // A current frame that fails its checksum.
+        assert_eq!(classify_tail(300, 300, 100, 100, false), WalTail::Torn(200));
+    }
+
+    /// A clean stop checkpoints and truncates the log, so the next start finds no tail even when
+    /// the process exits without closing its connections.
+    #[test]
+    fn checkpoint_on_clean_stop_leaves_no_log_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 30);
+        let wal = sidecar(&path, "-wal");
+        assert!(fs::metadata(&wal).unwrap().len() > 0);
+        assert!(s.checkpoint_wal().unwrap());
+        assert_eq!(fs::metadata(&wal).unwrap().len(), 0);
+        // What a process exit leaves (connections never closed): copy the files as they are.
+        let stopped = dir.path().join("stopped");
+        fs::create_dir(&stopped).unwrap();
+        let copy = stopped.join("nugget.db");
+        for suffix in ["", "-wal", "-shm"] {
+            fs::copy(sidecar(&path, suffix), sidecar(&copy, suffix)).unwrap();
+        }
+        assert_eq!(
+            scan_wal(&sidecar(&copy, "-wal")).unwrap(),
+            (None, WalTail::None)
+        );
+        assert_eq!(check_both(&copy, &key()), FileHealth::Healthy);
+        let reopened = Store::open(&copy, &key()).unwrap();
+        assert_eq!(reopened.counts().unwrap().items, 30);
+        drop(s);
+        // In-memory stores have no log.
+        assert!(Store::open_in_memory().unwrap().checkpoint_wal().unwrap());
     }
 
     /// Open a fresh copy of `copy`'s database with `wal` as its log (a store that crashed with

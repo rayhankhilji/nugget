@@ -37,6 +37,12 @@ pub enum Action {
     /// Answer 200 with the whole file regardless of `Range`.
     IgnoreRange,
     Redirect(String),
+    /// A captive portal: 200 `text/html` with a sign-in page, whatever was asked.
+    Html,
+    /// Promise the requested range, send `n` body bytes, then go silent (connection held open).
+    StallAfter(usize),
+    /// Accept the connection and close it without answering (a server going down).
+    Close,
 }
 
 pub type Behavior = Arc<dyn Fn(&Req) -> Action + Send + Sync>;
@@ -190,6 +196,19 @@ async fn respond(
             .await?;
         return Ok(());
     }
+    if let Action::Close = action {
+        return Ok(());
+    }
+    if let Action::Html = action {
+        let page = b"<html><body>Please sign in to the Wi-Fi</body></html>";
+        let h = head(
+            "200 OK",
+            "Content-Type: text/html; charset=utf-8\r\n",
+            page.len(),
+        );
+        conn.write_all(h.as_bytes()).await?;
+        return conn.write_all(page).await;
+    }
     if let Action::Redirect(loc) = &action {
         conn.write_all(head("302 Found", &format!("Location: {loc}\r\n"), 0).as_bytes())
             .await?;
@@ -232,6 +251,12 @@ async fn respond(
         Action::DropAfter(n) => {
             conn.write_all(&body[..n.min(body.len())]).await?;
             conn.flush().await
+        }
+        Action::StallAfter(n) => {
+            conn.write_all(&body[..n.min(body.len())]).await?;
+            conn.flush().await?;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Ok(())
         }
         _ => conn.write_all(body).await,
     }
@@ -329,6 +354,8 @@ pub fn fast_opts() -> DownloadOptions {
         parts: 4,
         min_part_size: 1024,
         max_retries: 3,
+        retry_window: Duration::from_secs(2),
+        stall_timeout: Duration::from_secs(2),
         backoff_base: Duration::from_millis(5),
         backoff_max: Duration::from_millis(50),
         commit_every: 512,

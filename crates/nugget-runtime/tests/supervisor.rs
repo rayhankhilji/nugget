@@ -378,12 +378,12 @@ async fn slow_start_is_awaited_and_a_hung_start_times_out() {
     let rt = e.runtime(o);
     let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
     assert!(
-        matches!(&err, Error::Provider(m) if m.contains("not ready")),
+        matches!(&err, Error::Provider(m) if m.contains("didn't finish loading")),
         "{err}"
     );
     let d = rt.details(RuntimeRole::Chat).unwrap();
     assert_eq!(d.info.state, RuntimeState::Failed);
-    assert!(d.info.error.unwrap().contains("not ready"));
+    assert!(d.info.error.unwrap().contains("didn't finish loading"));
     assert_eq!(d.pid, None, "the hung server was killed");
 }
 
@@ -396,9 +396,207 @@ async fn startup_failure_reports_the_server_output() {
     ));
     let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("exited during start-up"), "{msg}");
-    assert!(msg.contains("exiting immediately with 7"), "{msg}");
-    assert_eq!(rt.status()[0].state, RuntimeState::Failed);
+    // GG6-5: one short, plain sentence with what to do; no log dump, no repeated lines.
+    assert!(msg.contains("couldn't start"), "{msg}");
+    assert!(msg.contains("Open Status to retry"), "{msg}");
+    assert!(
+        !msg.contains("starting"),
+        "no supervisor notes in the error: {msg}"
+    );
+    assert!(msg.len() < 200, "{msg}");
+    let info = &rt.status()[0];
+    assert_eq!(info.state, RuntimeState::Failed);
+    assert!(matches!(&err, Error::Provider(m) if Some(m) == info.error.as_ref()));
+    // The server's own last line is kept apart, as a detail for the log view.
+    assert_eq!(
+        info.detail.as_deref(),
+        Some("fake: exiting immediately with 7")
+    );
+    let logs = read_all_logs(&e.paths.data.join("logs"));
+    assert!(logs.contains("exited during start-up"), "{logs}");
+}
+
+#[tokio::test]
+async fn failed_starts_back_off_instead_of_relaunching_per_request() {
+    let e = env().await;
+    let mut o = with_extra(RuntimeRole::Chat, &["--fake-exit-immediately", "1"]);
+    o.restart_backoff_base = Duration::from_secs(30);
+    o.restart_backoff_max = Duration::from_secs(60);
+    let rt = e.runtime(o);
+    let first = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    let launches = || {
+        read_all_logs(&e.paths.data.join("logs"))
+            .matches("] starting chat-model")
+            .count()
+    };
+    assert_eq!(launches(), 1);
+    // GG6-5: requests made while the start backs off fail fast with the same plain error and
+    // launch nothing.
+    for _ in 0..20 {
+        let t = Instant::now();
+        let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+        assert!(
+            t.elapsed() < Duration::from_millis(500),
+            "{:?}",
+            t.elapsed()
+        );
+        assert_eq!(err.to_string(), first.to_string());
+    }
+    assert_eq!(launches(), 1, "no relaunch storm");
+    let info = rt.status()[0].clone();
+    assert!(
+        info.retry_in_ms
+            .is_some_and(|ms| ms > 20_000 && ms <= 30_000),
+        "{info:?}"
+    );
+    // Retry starts again at once.
+    rt.retry(RuntimeRole::Chat);
+    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    assert_eq!(launches(), 2);
+}
+
+#[tokio::test]
+async fn a_hung_server_is_detected_killed_and_restarted() {
+    let e = env().await;
+    let mut o = common::opts();
+    o.hang_check_interval = Duration::from_millis(50);
+    o.hang_check_idle_interval = Duration::from_millis(50);
+    o.hang_probe_timeout = Duration::from_millis(200);
+    o.hang_strikes = 3;
+    o.restart_backoff_base = Duration::from_millis(400);
+    let rt = e.runtime(o);
+    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let pid1 = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
+    let a = addr(&cfg);
+    let k = key(&rt, RuntimeRole::Chat);
+    // Stays ready while healthy (the watchdog's probes are answered).
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        rt.details(RuntimeRole::Chat).unwrap().info.state,
+        RuntimeState::Ready
+    );
+    let r = a
+        .client()
+        .post(a.url("/fake/hang"))
+        .bearer_auth(&k)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 200);
+    // A request in flight on the hung server (no client timeout): it must end once the
+    // watchdog kills the server, not after minutes.
+    let busy = rt.request(RuntimeRole::Chat);
+    let t = Instant::now();
+    let pending = tokio::spawn({
+        let (a, k) = (a.clone(), k.clone());
+        async move {
+            a.client()
+                .get(a.url("/v1/models"))
+                .bearer_auth(&k)
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map(|_| ())
+        }
+    });
+    wait_until("hang noticed", Duration::from_secs(5), || {
+        rt.details(RuntimeRole::Chat)
+            .is_some_and(|d| d.info.state != RuntimeState::Ready)
+    })
+    .await;
+    // GG6-3: the status stops saying Ready, with a plain reason, and requests fail fast while
+    // it backs off.
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert!(
+        d.info
+            .error
+            .as_deref()
+            .is_some_and(|m| m.contains("stopped responding")),
+        "{:?}",
+        d.info
+    );
+    let t2 = Instant::now();
+    let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+    assert!(
+        t2.elapsed() < Duration::from_millis(300),
+        "{:?}",
+        t2.elapsed()
+    );
+    assert!(err.to_string().contains("stopped responding"), "{err}");
+    let res = tokio::time::timeout(Duration::from_secs(5), pending)
+        .await
+        .expect("the request on the hung server ended")
+        .unwrap();
+    assert!(res.is_err(), "the hung server never answered");
+    assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+    assert!(!alive(pid1), "the hung server was killed");
+    drop(busy);
+    // Restarted on the same address, with a new key.
+    let cfg2 = rt
+        .wait_ready(RuntimeRole::Chat, Duration::from_secs(10))
+        .await
+        .expect("restarted");
+    assert_eq!(addr(&cfg2), a);
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert_eq!(d.restarts, 1);
+    assert_ne!(d.pid, Some(pid1));
+    let k2 = key(&rt, RuntimeRole::Chat);
+    assert_eq!(get(&a, "/v1/models", Some(&k2)).await.0, 200);
+    let logs = read_all_logs(&e.paths.data.join("logs"));
+    assert!(logs.contains("stopped responding"), "{logs}");
+    rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn warm_up_reports_elapsed_and_expected_load_time() {
+    let e = env().await;
+    let rt = e.runtime(with_extra(
+        RuntimeRole::Chat,
+        &["--fake-start-delay-ms", "600"],
+    ));
+    let start = {
+        let rt = rt.clone();
+        let chat = e.chat.clone();
+        tokio::spawn(async move { rt.ensure(RuntimeRole::Chat, &chat).await })
+    };
+    wait_until("warming up", Duration::from_secs(5), || {
+        rt.details(RuntimeRole::Chat).is_some_and(|d| {
+            d.info.state == RuntimeState::Starting && d.info.state_ms.is_some_and(|ms| ms >= 200)
+        })
+    })
+    .await;
+    // First load: an estimate from the model's size.
+    let first = rt.details(RuntimeRole::Chat).unwrap().info;
+    assert!(first.expected_ms.is_some_and(|ms| ms >= 3000), "{first:?}");
+    start.await.unwrap().unwrap();
+    let ready = rt.details(RuntimeRole::Chat).unwrap().info;
+    assert_eq!(ready.expected_ms, None);
+    rt.shutdown().await;
+
+    // The next start expects what the last load took.
+    let rt = e.runtime(with_extra(
+        RuntimeRole::Chat,
+        &["--fake-start-delay-ms", "600"],
+    ));
+    let start = {
+        let rt = rt.clone();
+        let chat = e.chat.clone();
+        tokio::spawn(async move { rt.ensure(RuntimeRole::Chat, &chat).await })
+    };
+    wait_until("warming up again", Duration::from_secs(5), || {
+        rt.details(RuntimeRole::Chat)
+            .is_some_and(|d| d.info.state == RuntimeState::Starting)
+    })
+    .await;
+    let again = rt.details(RuntimeRole::Chat).unwrap().info;
+    assert!(
+        again
+            .expected_ms
+            .is_some_and(|ms| (500..3000).contains(&ms)),
+        "{again:?}"
+    );
+    start.await.unwrap().unwrap();
+    rt.shutdown().await;
 }
 
 #[tokio::test]
@@ -434,7 +632,8 @@ async fn crashed_server_is_restarted_on_the_same_port() {
     let k = key(&rt, RuntimeRole::Chat);
     assert_eq!(get(&addr(&cfg), "/v1/models", Some(&k)).await.0, 200);
 
-    // A crash on request (exit 42) is handled the same way, and ensure() waits it out.
+    // A crash on request (exit 42) is handled the same way. While it backs off, ensure() fails
+    // fast with a plain reason; once restarted it hands out the new config.
     let a = addr(&cfg);
     let _ = a
         .client()
@@ -442,7 +641,15 @@ async fn crashed_server_is_restarted_on_the_same_port() {
         .bearer_auth(&k)
         .send()
         .await;
-    let again = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let again = loop {
+        match rt.ensure(RuntimeRole::Chat, &e.chat).await {
+            Ok(c) => break c,
+            Err(err) => {
+                assert!(err.to_string().contains("stopped unexpectedly"), "{err}");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    };
     assert_eq!(addr(&again), a);
     wait_until("second restart", Duration::from_secs(10), || {
         rt.details(RuntimeRole::Chat)
@@ -462,18 +669,29 @@ async fn crash_loop_gives_up_and_ensure_retries() {
     let rt = e.runtime(o);
     rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
     wait_until("give up", Duration::from_secs(10), || {
-        rt.details(RuntimeRole::Chat).is_some_and(|d| {
-            d.info.state == RuntimeState::Failed
-                && d.info
-                    .error
-                    .as_deref()
-                    .is_some_and(|m| m.contains("gave up"))
-        })
+        rt.details(RuntimeRole::Chat)
+            .is_some_and(|d| d.info.state == RuntimeState::Failed && d.info.gave_up)
     })
     .await;
-    assert_eq!(rt.details(RuntimeRole::Chat).unwrap().pid, None);
-    assert!(rt.details(RuntimeRole::Chat).unwrap().config.is_none());
-    // A new ensure starts from scratch (and succeeds until the next crash).
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert_eq!(d.pid, None);
+    assert!(d.config.is_none());
+    assert!(
+        d.info
+            .error
+            .as_deref()
+            .is_some_and(|m| m.contains("keeps stopping")),
+        "{:?}",
+        d.info
+    );
+    // GG6-5: after giving up, requests fail fast and start nothing (no relaunch storm)...
+    for _ in 0..10 {
+        let err = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap_err();
+        assert!(err.to_string().contains("keeps stopping"), "{err}");
+        assert_eq!(rt.details(RuntimeRole::Chat).unwrap().pid, None);
+    }
+    // ...until the user retries: then it starts from scratch (and runs until the next crash).
+    rt.retry(RuntimeRole::Chat);
     rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
     rt.shutdown().await;
 }
@@ -809,7 +1027,7 @@ async fn a_squatter_on_the_servers_port_is_rejected() {
 
     let err = res.expect_err("a foreign listener must not count as ready");
     assert!(
-        matches!(&err, Error::Provider(m) if m.contains("another process")),
+        matches!(&err, Error::Provider(m) if m.contains("Another program answered")),
         "{err}"
     );
     let d = rt.details(RuntimeRole::Chat).unwrap();
@@ -919,7 +1137,7 @@ async fn a_crash_is_reported_at_once() {
         d.info
             .error
             .as_deref()
-            .is_some_and(|m| m.contains("exited unexpectedly")),
+            .is_some_and(|m| m.contains("stopped unexpectedly")),
         "{:?}",
         d.info.error
     );

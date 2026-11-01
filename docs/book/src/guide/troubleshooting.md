@@ -41,8 +41,35 @@ hot reload.
 - `keychain:NAME: no OS keychain`: on headless Linux there is no Secret Service. Use `env:VAR`.
 - A local server refuses connections: check it is running (`ollama serve`) and that `base_url` ends in
   `/v1` for OpenAI-compatible servers.
+- A provider `local` at `http://127.0.0.1:11434/v1` disappeared after an update: earlier versions
+  enabled this Ollama example in every new `config.toml`, although most people never set Ollama up.
+  On start, Nugget now comments that block out if it is exactly the untouched example, with a note
+  above it (the daemon log says so too). Any provider you added or changed is left alone. If you do
+  run Ollama with that model, remove the leading `# ` from those lines and restart `nuggetd`.
 - "not probed": the provider only serves plain chat until it is probed. Probe it on the **Status**
   page.
+
+## The on-device model is warming up, stopped, or won't start
+
+**Status** shows each on-device model's state:
+
+- **Starting**, with "Warming up: 12s of about 40s": the model is being loaded into memory. Nugget
+  starts installed models when it starts, and after an idle stop the next request loads it again.
+  On a CPU this takes from a few seconds to a few minutes; the estimate is how long the last load
+  took on this computer. A question asked meanwhile waits for it.
+- **Failed** with "stopped responding; restarting it": the model server stopped answering (this can
+  happen after waking from sleep or when the computer runs out of memory). Nugget checks it every
+  second while a request waits on it, stops it after about 9 seconds without an answer and starts it
+  again. The request that was waiting ends with that message instead of waiting for minutes; ask
+  again once Status says **Ready**.
+- **Failed** with "stopped unexpectedly": the server crashed. A request that had not received
+  anything yet is sent once more to the restarted server; otherwise Nugget restarts it with a
+  growing pause ("Trying again automatically in 4s"), and requests made during the pause fail at
+  once with that message.
+- **Failed** with "couldn't start" or "keeps stopping": the server could not load the model, or
+  crashed several times in a row. Nugget does not try again on every request; press **Retry** when
+  you have freed memory or fixed the cause. **Details** shows the server's last line, and the full
+  log is `llama-server-chat.log` (or `-embedding`, `-rerank`, `-draft`) in the logs folder.
 
 ## Search is text-only
 
@@ -116,6 +143,12 @@ For [Double Tap](double-tap.md), the [agent](agent.md), [Today](today.md) and
 Model installs refuse to start unless there is room for the model plus 10 % plus 1 GiB, and say so.
 The store grows by roughly 6 to 8 MB per 1 000 small documents with the test embedder; real embedding
 models add more per chunk.
+
+The **Status** page warns when the disk that holds Nugget's data has less than 1 GiB free, and says
+the disk is full below 200 MiB, or as soon as a write fails for lack of space (`nuggetd status` shows
+the same on its `disk:` line, and `status.disk` carries it for scripts). While the disk is full,
+indexing and saving stop; nothing already stored is lost or damaged. Free up some space and indexing
+picks up again by itself.
 
 ## Starting over
 

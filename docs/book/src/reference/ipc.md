@@ -49,9 +49,11 @@ object per line, over a local socket. The protocol types live in `nugget_core::i
 | `providers.probe` | `ProbeRequest`: `{provider}` | `Capabilities`: `streaming`, `vision`, `tools`, `json_schema`, `embeddings`, `context_tokens` | yes |
 | `models.list` | `{}` | list of `ModelInfo`: `id`, `size_bytes`, `installed`, `recommended`, `family`, `tiers`, `license`, `revision`, `update_available` | yes |
 | `models.install` | `ModelInstallRequest`: `{id}` | `null`, then `models.progress` notifications | yes |
+| `models.cancel` | `ModelCancelRequest`: `{id}` | `{cancelled}` (`false` if no install of `id` was running); the install's connection gets a final `failed` progress with reason `cancelled`, and the staged bytes are kept so the next `models.install` resumes | yes |
 | `egress.recent` | `EgressRecentRequest`: `{limit}` (at most 1000) | list of `EgressEvent`: `at`, `host`, `feature`, `bytes_sent`, `bytes_received`, `items` | yes |
 | `egress.record` | `EgressRecordRequest`: `host` (bare `host[:port]`), `feature` (`update_check` or `update_download` only), `bytes_sent`, `bytes_received` (default 0), `at` (RFC 3339, default now; at most 5 minutes ahead and 30 days old; stored in UTC) | `null`. A request the desktop app made itself, written to the ledger with no items. Host: a DNS name, an IPv4 address or a bracketed IPv6 address, optional port. At most 60 rows a minute across all clients (`SERVER_BUSY` beyond) | yes |
-| `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat` or `embedding`), `state`, `provider`, `error`. Empty when `[runtime]` is disabled | yes |
+| `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat`, `embedding`, `rerank` or `draft`), `state`, `provider`, `error` (one plain sentence), and when present `state_ms` (time in this state: the warm-up so far while `starting`), `expected_ms` (expected load time while `starting`), `retry_in_ms` (next automatic restart while `failed`), `gave_up` (`failed` and waiting for `runtime.retry`), `detail` (the server's last line). Empty when `[runtime]` is disabled | yes |
+| `runtime.retry` | `RuntimeRetryRequest`: `{role}` | `{started}`: clears a failed start or a give-up and starts the role's server in the background (`false` when its model is not installed) | yes |
 
 `RuntimeInfo.state` is one of `not_installed`, `stopped`, `starting`, `ready`, `failed`.
 
@@ -223,7 +225,7 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 |---|---|---|
 | `chat.delta` | `ChatDelta`: `{stream_id, text}` | A chat, Ask or draft stream produced text |
 | `chat.done` | `ChatDone`: `{stream_id, error, input_tokens, output_tokens}`; `error` is `null` on success | The stream ended, failed or was cancelled |
-| `models.progress` | `ModelProgress`: `{id, downloaded, total, phase, error}`, `phase` one of `downloading`, `verifying`, `installed`, `failed` | A model install progressed |
+| `models.progress` | `ModelProgress`: `{id, downloaded, total, phase, error, reason?, http_status?}`, `phase` one of `downloading`, `verifying`, `installed`, `failed`. In `failed`, `downloaded` is the bytes staged for a resume, `error` a short plain-language message, and `reason` one of `offline`, `http_error` (with `http_status`), `captive_portal`, `stalled`, `interrupted`, `disk_full`, `integrity`, `cancelled`, `other` | A model install progressed |
 | `ingest.progress` | `IngestProgress`: `{source, phase, done, total, error}`, `phase` one of `scanning`, `indexing`, `idle`, `error` | A source's sync progressed |
 | `sources.changed` | A `SourceInfo`; or `{"id": …, "removed": true}`; or `{"lagged": n}` | A source was added, changed (including after sign-in) or removed. Treat anything but a `SourceInfo` as "refetch `sources.list`" |
 | `knowledge.changed` | `KnowledgeChanged`: `{entities}` | Entities changed (after an extraction run, a merge, a claim status change or a vault edit) |
