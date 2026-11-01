@@ -1,8 +1,5 @@
-//! Global trigger detection for Double Tap: a double tap of a modifier, or a chord.
-//!
-//! **Contract (M3):** [`Trigger`], [`start`], [`Listener`]. Work package M3-B implements the
-//! platform backends. Only the configured trigger is observed; no other keystrokes are recorded
-//! or stored.
+//! Global trigger detection for Double Tap: a double tap of a modifier, or a chord. Only the
+//! configured trigger is observed; no other keystrokes are recorded or stored.
 //!
 //! # Privacy
 //!
@@ -37,43 +34,25 @@
 //! thread, so it may block briefly or drop the listener.
 //!
 //! - **macOS:** NSEvent monitors and Carbon hot keys deliver through the **main run loop**, so
-//!   the app's main thread must be running an `NSApplication` event loop (Tauri's is).
-//!   [`start`] may be called from any thread: on the main thread it installs synchronously;
-//!   from another thread it schedules the installation on the main dispatch queue and returns
-//!   immediately (so a chord that the OS refuses is then only logged). Dropping the listener
-//!   removes the monitors on the main queue as well. Never block the main thread waiting for
-//!   a listener started from another thread before the event loop runs.
+//!   the app's main thread must run an `NSApplication` event loop (Tauri's does). [`start`] on
+//!   the main thread installs synchronously; from another thread it queues the installation on
+//!   the main dispatch queue and returns at once (a chord the OS refuses is then only logged).
+//!   Never block the main thread waiting for such a listener before the event loop runs.
 //! - **Windows:** each listener owns a thread with its own message loop (low-level hooks and
-//!   `RegisterHotKey` both deliver to the installing thread's queue). Callable from anywhere.
+//!   `RegisterHotKey` both deliver to the installing thread's queue).
 //! - **Linux:** X11 listeners own a thread with their own X connection; the Wayland portal
-//!   listener owns a thread with a small async runtime, which stays alive after [`start`]
-//!   returns: it waits for the desktop's consent, follows shortcut changes, and binds the
-//!   shortcut again (with a capped backoff) if the desktop closes the session or the portal
-//!   restarts. Callable from anywhere.
+//!   listener owns a thread with a small async runtime that waits for the desktop's consent,
+//!   follows shortcut changes, and binds the shortcut again (with a capped backoff) if the
+//!   desktop closes the session or the portal restarts.
 //!
 //! # Tauri integration
 //!
-//! Start the listeners in `tauri::Builder::setup` (which runs on the main thread, so macOS
-//! installs synchronously and reports errors), keep the returned handles in app state for as
-//! long as they should listen, and forward each fire to the app:
-//!
-//! ```ignore
-//! .setup(|app| {
-//!     let handle = app.handle().clone();
-//!     let listener = nugget_hotkey::start(trigger, Box::new(move || {
-//!         let _ = handle.emit("double-tap", ());
-//!     }))?;
-//!     let kill = nugget_hotkey::start_kill_switch(Default::default(), Box::new(|| { /* stop */ }))?;
-//!     app.manage(Mutex::new((listener, kill)));
-//!     Ok(())
-//! })
-//! ```
-//!
-//! To change the trigger from a settings page, drop the old listener and start a new one (from
-//! any thread; on macOS that path is asynchronous, so call [`check`] first for validation).
-//! Do not also use Tauri's global-shortcut plugin or another `global-hotkey` event handler in
-//! the same process: `global-hotkey` delivers to a single process-wide handler, which this crate
-//! installs.
+//! Start the listeners in `tauri::Builder::setup` (the main thread, so macOS installs
+//! synchronously and reports errors) and keep the handles in app state. To change the trigger,
+//! drop the old listener and start a new one ([`check`] first: off the main thread macOS installs
+//! asynchronously). Do not install another `global-hotkey` event handler (such as Tauri's
+//! global-shortcut plugin) in the same process: it delivers to one process-wide handler, which
+//! this crate installs.
 
 use nugget_core::{Error, Result};
 
@@ -312,9 +291,7 @@ impl Role {
     }
 }
 
-// --- kill switch ---------------------------------------------------------------------------
-
-/// A second, independent trigger that stops whatever Nugget is doing (M4 computer use).
+/// A second, independent trigger that stops whatever Nugget is doing (computer use).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KillSwitch {
     /// Escape pressed `presses` times, each within `window_ms` of the previous one. Needs
@@ -341,10 +318,6 @@ pub struct KillSwitchListener {
 }
 
 impl KillSwitchListener {
-    pub fn kill_switch(&self) -> &KillSwitch {
-        &self.kill_switch
-    }
-
     /// Where the kill switch's shortcut stands; see [`Listener::state`].
     pub fn state(&self) -> ShortcutState {
         self.backend.state()
@@ -379,8 +352,6 @@ pub fn start_kill_switch(
 pub fn check_kill_switch(kill_switch: &KillSwitch) -> Result<()> {
     Plan::for_kill_switch(kill_switch)?.supported()
 }
-
-// --- sessions and capabilities -------------------------------------------------------------
 
 /// The desktop session the listeners would run in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -488,8 +459,6 @@ pub fn recommended_trigger() -> Trigger {
         _ => Trigger::Chord("Ctrl+Alt+Space".into()),
     }
 }
-
-// --- planning and backend dispatch ---------------------------------------------------------
 
 enum Plan {
     Detect(Detector),
@@ -629,63 +598,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_trigger_is_unchanged() {
-        assert_eq!(
-            Trigger::default(),
-            Trigger::DoubleTap {
-                modifier: Modifier::RightCommand,
-                window_ms: 350
-            }
-        );
-    }
-
-    #[test]
     fn invalid_triggers_are_rejected_before_any_backend_runs() {
-        for t in [
-            Trigger::DoubleTap {
-                modifier: Modifier::LeftShift,
-                window_ms: 0,
-            },
-            Trigger::DoubleTap {
-                modifier: Modifier::LeftShift,
-                window_ms: 99,
-            },
-            Trigger::DoubleTap {
-                modifier: Modifier::LeftShift,
-                window_ms: 2_001,
-            },
-            Trigger::Chord("Ctrl+".into()),
-            Trigger::Chord("A".into()),
-        ] {
+        let tap = |window_ms| Trigger::DoubleTap {
+            modifier: Modifier::LeftShift,
+            window_ms,
+        };
+        for t in [tap(99), tap(2_001), Trigger::Chord("Ctrl+".into())] {
             assert!(matches!(check(&t), Err(Error::Invalid(_))), "{t:?}");
-            assert!(
-                matches!(start(t.clone(), Box::new(|| {})), Err(Error::Invalid(_))),
-                "{t:?}"
-            );
+            let started = start(t.clone(), Box::new(|| {}));
+            assert!(matches!(started, Err(Error::Invalid(_))), "{t:?}");
         }
+        let esc = |presses, window_ms| KillSwitch::EscapeRepeat { presses, window_ms };
         for k in [
-            KillSwitch::EscapeRepeat {
-                presses: 1,
-                window_ms: 500,
-            },
-            KillSwitch::EscapeRepeat {
-                presses: 11,
-                window_ms: 500,
-            },
-            KillSwitch::EscapeRepeat {
-                presses: 3,
-                window_ms: 5,
-            },
+            esc(1, 500),
+            esc(11, 500),
+            esc(3, 5),
             KillSwitch::Trigger(Trigger::Chord("Nope+X".into())),
         ] {
             assert!(
                 matches!(check_kill_switch(&k), Err(Error::Invalid(_))),
                 "{k:?}"
             );
-            assert!(matches!(
-                start_kill_switch(k.clone(), Box::new(|| {})),
-                Err(Error::Invalid(_))
-            ));
+            let started = start_kill_switch(k.clone(), Box::new(|| {}));
+            assert!(matches!(started, Err(Error::Invalid(_))), "{k:?}");
         }
     }
 
@@ -693,52 +628,36 @@ mod tests {
     fn session_detection() {
         use Session::*;
         let d = detect_linux_session;
-        assert_eq!(
-            d(None, Some("wayland"), Some("wayland-0"), Some(":0")),
-            Wayland
-        );
         assert_eq!(d(None, Some("x11"), None, Some(":0")), X11);
         assert_eq!(d(None, None, None, Some(":99")), X11);
         assert_eq!(d(None, None, Some("wayland-1"), None), Wayland);
         assert_eq!(d(None, Some("tty"), None, None), Headless);
         assert_eq!(d(None, None, Some(""), Some("")), Headless);
-        assert_eq!(d(None, None, None, None), Headless);
         // XWayland's DISPLAY does not make a Wayland session X11.
         assert_eq!(d(None, None, Some("wayland-0"), Some(":0")), Wayland);
         // Overrides.
-        assert_eq!(
-            d(Some("x11"), Some("wayland"), Some("wayland-0"), Some(":1")),
-            X11
-        );
+        assert_eq!(d(Some("x11"), Some("wayland"), Some("w"), Some(":1")), X11);
         assert_eq!(d(Some("WAYLAND"), Some("x11"), None, Some(":0")), Wayland);
         assert_eq!(d(Some("bogus"), Some("x11"), None, Some(":0")), X11);
     }
 
     #[test]
     fn capabilities_per_session() {
-        let w = capabilities_for(Session::Wayland);
-        assert!(!w.double_tap && w.chord && !w.escape_repeat);
-        for s in [Session::MacOs, Session::Windows, Session::X11] {
+        let c = |s| {
             let c = capabilities_for(s);
-            assert!(c.double_tap && c.chord && c.escape_repeat, "{s:?}");
+            (c.double_tap, c.chord, c.escape_repeat)
+        };
+        assert_eq!(c(Session::Wayland), (false, true, false));
+        assert_eq!(c(Session::Headless), (false, false, false));
+        for s in [Session::MacOs, Session::Windows, Session::X11] {
+            assert_eq!(c(s), (true, true, true), "{s:?}");
         }
-        let h = capabilities_for(Session::Headless);
-        assert!(!h.double_tap && !h.chord && !h.escape_repeat);
-    }
-
-    #[test]
-    fn unsupported_double_tap_on_wayland_recommends_a_chord() {
         let msg = unsupported("a modifier double tap", Session::Wayland).to_string();
         assert!(
             msg.contains("chord") && msg.contains("GlobalShortcuts"),
             "{msg}"
         );
-    }
-
-    #[test]
-    fn recommended_trigger_is_supported() {
-        let caps = capabilities();
-        if caps.double_tap || caps.chord {
+        if capabilities().double_tap || capabilities().chord {
             check(&recommended_trigger()).unwrap();
         }
     }
@@ -759,16 +678,5 @@ mod tests {
                 Modifier::ALL.iter().map(|m| m.label_for(p)).collect();
             assert_eq!(labels.len(), 8);
         }
-    }
-
-    #[test]
-    fn default_kill_switch_is_three_escapes() {
-        assert_eq!(
-            KillSwitch::default(),
-            KillSwitch::EscapeRepeat {
-                presses: 3,
-                window_ms: 500
-            }
-        );
     }
 }

@@ -1,30 +1,17 @@
 //! The user's writing voice, learned from messages they sent.
 //!
-//! **Contract (M3):** [`VoiceHints`], [`Channel`], [`StyleStats`]. Work package M3-D builds the
-//! profile from the store (sent mail, chat messages marked as the user's, draft feedback) and
-//! selects exemplars per channel and recipient.
-//!
-//! # Overview
-//! - [`MeIdentity`]: who "me" is. Configured addresses and names, plus inference from the most
-//!   frequent `From` address of sent mail (Gmail `SENT` label, an IMAP Sent folder, a `Sent`
-//!   tag from `X-Gmail-Labels`).
-//! - [`VoiceProfile::build`] reads the user's own messages from the store: sent mail bodies
-//!   (the main text only; `nugget-extract` moves quoted replies and signatures into metadata,
-//!   and leftovers are stripped again here), chat messages flagged `from_me`, Markdown notes
-//!   and draft feedback recorded by [`StoreFeedbackSink`]. [`VoiceProfile::refresh`] is
-//!   incremental: only items whose connector version changed are read again.
-//!   [`VoiceProfile::save`] keeps a snapshot inside the encrypted store (never a plain file) and
-//!   [`VoiceProfile::load_or_build`] restores it at startup, so a restart only reads what
-//!   changed. `refresh` does not save: call `save` when [`RefreshReport::changed`] is true.
-//!   The profile does not hold message texts: per message it keeps features, recipients and
-//!   content-term ids, and reads the few exemplar texts a draft gets back from the store.
-//! - [`StyleStats`] per channel and per frequent recipient (see [`stats`] for definitions).
-//! - [`VoiceSource::hints`] returns stats plus 3–6 short exemplars, chosen by recipient, then
-//!   channel, then topic similarity to the current thread (hybrid store search restricted to
-//!   the user's own items, plus a local term cosine), biased to recent messages.
-//!   [`VoiceQuery::exclude_sensitive`] keeps sensitive items out of exemplars sent to cloud
-//!   models.
-//! - [`style_distance`] and [`similarity`] score how close a text is to a style (`bench draft`).
+//! - [`MeIdentity`]: who "me" is: configured addresses and names, plus the most frequent `From`
+//!   address of sent mail.
+//! - [`VoiceProfile`] reads the user's own messages from the store (sent mail without quotes and
+//!   signatures, chat messages flagged `from_me`, Markdown notes, and draft feedback recorded by
+//!   [`StoreFeedbackSink`]). [`VoiceProfile::refresh`] reads only items whose version changed;
+//!   [`VoiceProfile::save`] keeps a snapshot inside the encrypted store (never a plain file),
+//!   restored by [`VoiceProfile::load_or_build`]. The profile holds no message texts, only
+//!   per-message features, recipients and term ids; exemplar texts are read back from the store.
+//! - [`VoiceSource::hints`] returns [`StyleStats`] (see [`stats`]) plus a few short exemplars,
+//!   chosen by recipient, then channel, then topic. [`VoiceQuery::exclude_sensitive`] keeps
+//!   sensitive items out of exemplars sent to cloud models.
+//! - [`style_distance`] scores how close a text is to a style.
 
 mod feedback;
 mod me;
@@ -44,7 +31,7 @@ pub use nugget_core::ipc::VoiceStatus;
 pub use profile::{
     RefreshReport, VOICE_CURSOR_SOURCE, VOICE_SNAPSHOT_SOURCE, VoiceConfig, VoiceProfile,
 };
-pub use stats::{similarity, style_distance};
+pub use stats::style_distance;
 pub use text::{normalize_greeting, normalize_signoff};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -150,11 +137,6 @@ impl VoiceQuery {
 
     pub fn with_thread(mut self, text: impl Into<String>) -> Self {
         self.thread_text = text.into();
-        self
-    }
-
-    pub fn with_embedding(mut self, embedding: Vec<f32>) -> Self {
-        self.thread_embedding = Some(embedding);
         self
     }
 

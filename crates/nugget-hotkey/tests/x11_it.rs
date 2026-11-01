@@ -15,11 +15,13 @@
 
 #![cfg(target_os = "linux")]
 
-use std::sync::mpsc;
+mod support;
+
 use std::thread::sleep;
 use std::time::Duration;
 
 use nugget_hotkey::{KillSwitch, Modifier, Trigger, start, start_kill_switch};
+use support::{channel_callback, fired};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
     ConnectionExt as _, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, Keycode, Window,
@@ -107,25 +109,6 @@ impl Injector {
     }
 }
 
-fn channel_callback() -> (Box<dyn Fn() + Send + Sync>, mpsc::Receiver<()>) {
-    let (tx, rx) = mpsc::channel();
-    let tx = std::sync::Mutex::new(tx);
-    (
-        Box::new(move || {
-            let _ = tx.lock().unwrap().send(());
-        }),
-        rx,
-    )
-}
-
-fn fired(rx: &mpsc::Receiver<()>) -> usize {
-    let mut n = 0;
-    while rx.recv_timeout(Duration::from_millis(300)).is_ok() {
-        n += 1;
-    }
-    n
-}
-
 #[test]
 fn x11_listeners_against_a_real_server() {
     if std::env::var("NUGGET_HOTKEY_IT").as_deref() != Ok("1") {
@@ -146,14 +129,11 @@ fn x11_listeners_against_a_real_server() {
 
     // Double tap of right Ctrl.
     let (cb, rx) = channel_callback();
-    let listener = start(
-        Trigger::DoubleTap {
-            modifier: Modifier::RightControl,
-            window_ms: 350,
-        },
-        cb,
-    )
-    .expect("start the double-tap listener");
+    let trigger = Trigger::DoubleTap {
+        modifier: Modifier::RightControl,
+        window_ms: 350,
+    };
+    let listener = start(trigger, cb).expect("start the double-tap listener");
     sleep(Duration::from_millis(200));
 
     x.tap(CONTROL_R);

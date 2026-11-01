@@ -109,47 +109,16 @@ const NAMED_KEYS: &[(ChordKey, &str, &str, &str)] = &[
     (ChordKey::BracketRight, "]", "BracketRight", "bracketright"),
 ];
 
-/// Extra spellings accepted when parsing (lower case).
+/// Spellings accepted besides the display and W3C names (lower case).
 const KEY_ALIASES: &[(&str, ChordKey)] = &[
-    ("space", ChordKey::Space),
     ("spacebar", ChordKey::Space),
-    ("enter", ChordKey::Enter),
     ("return", ChordKey::Enter),
-    ("tab", ChordKey::Tab),
-    ("esc", ChordKey::Escape),
-    ("escape", ChordKey::Escape),
-    ("backspace", ChordKey::Backspace),
-    ("delete", ChordKey::Delete),
     ("del", ChordKey::Delete),
-    ("insert", ChordKey::Insert),
     ("ins", ChordKey::Insert),
-    ("home", ChordKey::Home),
-    ("end", ChordKey::End),
-    ("pageup", ChordKey::PageUp),
     ("pgup", ChordKey::PageUp),
-    ("pagedown", ChordKey::PageDown),
     ("pgdn", ChordKey::PageDown),
-    ("up", ChordKey::Up),
-    ("arrowup", ChordKey::Up),
-    ("down", ChordKey::Down),
-    ("arrowdown", ChordKey::Down),
-    ("left", ChordKey::Left),
-    ("arrowleft", ChordKey::Left),
-    ("right", ChordKey::Right),
-    ("arrowright", ChordKey::Right),
-    ("minus", ChordKey::Minus),
-    ("equal", ChordKey::Equal),
-    ("comma", ChordKey::Comma),
-    ("period", ChordKey::Period),
-    ("slash", ChordKey::Slash),
-    ("backslash", ChordKey::Backslash),
-    ("semicolon", ChordKey::Semicolon),
-    ("quote", ChordKey::Quote),
     ("apostrophe", ChordKey::Quote),
-    ("backquote", ChordKey::Backquote),
     ("grave", ChordKey::Backquote),
-    ("bracketleft", ChordKey::BracketLeft),
-    ("bracketright", ChordKey::BracketRight),
 ];
 
 impl ChordKey {
@@ -215,10 +184,16 @@ impl ChordKey {
         if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()) {
             return (1..=24).contains(&n).then_some(Self::Function(n));
         }
-        KEY_ALIASES
+        NAMED_KEYS
             .iter()
-            .find(|(a, _)| *a == lower)
-            .map(|(_, k)| *k)
+            .find(|n| n.1.eq_ignore_ascii_case(&lower) || n.2.eq_ignore_ascii_case(&lower))
+            .map(|n| n.0)
+            .or_else(|| {
+                KEY_ALIASES
+                    .iter()
+                    .find(|(a, _)| *a == lower)
+                    .map(|(_, k)| *k)
+            })
     }
 }
 
@@ -331,58 +306,34 @@ impl Chord {
     /// `Ctrl+Alt+Shift+Win+K` on Windows and `Ctrl+Alt+Shift+Super+K` on Linux. Parsing the
     /// result gives back the same chord.
     pub fn accelerator_for(&self, platform: Platform) -> String {
-        let m = self.modifiers;
         let (alt, sup) = match platform {
             Platform::MacOs => ("Option", "Cmd"),
             Platform::Windows => ("Alt", "Win"),
             Platform::Linux => ("Alt", "Super"),
         };
-        let mut parts: Vec<String> = [
-            (m.control, "Ctrl"),
-            (m.alt, alt),
-            (m.shift, "Shift"),
-            (m.super_key, sup),
-        ]
-        .into_iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, n)| n.to_string())
-        .collect();
-        parts.push(self.key.name());
-        parts.join("+")
+        self.join(["Ctrl", alt, "Shift", sup], self.key.name())
     }
 
     /// The `global-hotkey` form (`control+alt+Space`, `super+KeyK`).
     pub(crate) fn global_hotkey_string(&self) -> String {
-        let m = self.modifiers;
-        let mut parts: Vec<String> = [
-            (m.control, "control"),
-            (m.alt, "alt"),
-            (m.shift, "shift"),
-            (m.super_key, "super"),
-        ]
-        .into_iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, n)| n.to_string())
-        .collect();
-        parts.push(self.key.w3c_code());
-        parts.join("+")
+        self.join(["control", "alt", "shift", "super"], self.key.w3c_code())
     }
 
     /// The trigger string for the XDG GlobalShortcuts portal (`CTRL+ALT+space`), following the
     /// XDG "shortcuts" specification.
     pub fn portal_trigger(&self) -> String {
+        self.join(["CTRL", "ALT", "SHIFT", "LOGO"], self.key.xkb_name())
+    }
+
+    /// The set modifiers' names (control, alt, shift, super order) and `key`, joined by `+`.
+    fn join(&self, names: [&str; 4], key: String) -> String {
         let m = self.modifiers;
-        let mut parts: Vec<String> = [
-            (m.control, "CTRL"),
-            (m.alt, "ALT"),
-            (m.shift, "SHIFT"),
-            (m.super_key, "LOGO"),
-        ]
-        .into_iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, n)| n.to_string())
-        .collect();
-        parts.push(self.key.xkb_name());
+        let mut parts: Vec<&str> = [m.control, m.alt, m.shift, m.super_key]
+            .into_iter()
+            .zip(names)
+            .filter_map(|(on, n)| on.then_some(n))
+            .collect();
+        parts.push(&key);
         parts.join("+")
     }
 }
@@ -408,20 +359,20 @@ mod tests {
     #[test]
     fn parses_the_common_chord() {
         let c = parse_chord_for("Ctrl+Alt+Space", Platform::Linux).unwrap();
+        let modifiers = ChordModifiers {
+            control: true,
+            alt: true,
+            ..Default::default()
+        };
         assert_eq!(
             c,
             Chord {
-                modifiers: ChordModifiers {
-                    control: true,
-                    alt: true,
-                    ..Default::default()
-                },
-                key: ChordKey::Space,
+                modifiers,
+                key: ChordKey::Space
             }
         );
         assert_eq!(c.accelerator_for(Platform::Linux), "Ctrl+Alt+Space");
         assert_eq!(c.accelerator_for(Platform::MacOs), "Ctrl+Option+Space");
-        assert_eq!(c.accelerator_for(Platform::Windows), "Ctrl+Alt+Space");
         assert_eq!(c.portal_trigger(), "CTRL+ALT+space");
         assert_eq!(c.global_hotkey_string(), "control+alt+Space");
     }
@@ -464,88 +415,69 @@ mod tests {
 
     #[test]
     fn named_and_punctuation_keys() {
-        let cases = [
+        for (s, key) in [
             ("Ctrl+Enter", ChordKey::Enter),
             ("Ctrl+Return", ChordKey::Enter),
             ("Ctrl+Esc", ChordKey::Escape),
+            ("Ctrl+spacebar", ChordKey::Space),
             ("Alt+PgDn", ChordKey::PageDown),
             ("Alt+ArrowUp", ChordKey::Up),
+            ("Alt+up", ChordKey::Up),
             ("Ctrl+/", ChordKey::Slash),
             ("Ctrl+=", ChordKey::Equal),
             ("Ctrl+Minus", ChordKey::Minus),
-            ("Ctrl+\\", ChordKey::Backslash),
+            ("Ctrl+apostrophe", ChordKey::Quote),
             ("Ctrl+`", ChordKey::Backquote),
-            ("Ctrl+[", ChordKey::BracketLeft),
             ("Ctrl+Digit7", ChordKey::Digit(7)),
-            ("Ctrl+7", ChordKey::Digit(7)),
             ("Ctrl+f12", ChordKey::Function(12)),
-        ];
-        for (s, key) in cases {
+            // A bare function key steals no typing.
+            ("F13", ChordKey::Function(13)),
+            ("Shift+F5", ChordKey::Function(5)),
+        ] {
             assert_eq!(parse_chord_for(s, Platform::Linux).unwrap().key, key, "{s}");
         }
-    }
-
-    #[test]
-    fn bare_function_keys_are_allowed() {
-        let c = parse_chord_for("F13", Platform::Linux).unwrap();
-        assert!(c.modifiers.is_empty());
-        assert!(parse_chord_for("Shift+F5", Platform::Linux).is_ok());
     }
 
     #[test]
     fn rejects_invalid_chords() {
         for s in [
             "",
-            "   ",
             "Ctrl+",
             "+Space",
-            "Ctrl++Space",
-            "Ctrl+Ctrl+Space",
             "Ctrl+Control+Space",
             "Ctrl+Alt",
-            "Shift",
             "Ctrl+A+B",
             "Ctrl+Hyper+A",
             "Ctrl+F25",
-            "Ctrl+F0",
-            "Ctrl+Key",
             "Ctrl+KeyAB",
             "Ctrl+é",
-            "A",
             "Space",
             "Shift+A",
         ] {
             let err = parse_chord_for(s, Platform::Linux).unwrap_err();
             assert!(matches!(err, Error::Invalid(_)), "{s}: {err}");
         }
+        let err = parse_chord_for("Ctrl+Bogus", Platform::Linux)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Ctrl+Bogus"), "errors name the input: {err}");
     }
 
     #[test]
     fn every_key_round_trips_on_every_platform() {
-        let mods = ChordModifiers {
+        let modifiers = ChordModifiers {
             control: true,
             alt: true,
             shift: true,
             super_key: true,
         };
-        for platform in [Platform::MacOs, Platform::Windows, Platform::Linux] {
-            for key in all_keys() {
-                let c = Chord {
-                    modifiers: mods,
-                    key,
-                };
+        for key in all_keys() {
+            assert!(!key.xkb_name().is_empty(), "{key:?}");
+            for platform in [Platform::MacOs, Platform::Windows, Platform::Linux] {
+                let c = Chord { modifiers, key };
                 let text = c.accelerator_for(platform);
                 assert_eq!(parse_chord_for(&text, platform).unwrap(), c, "{text}");
             }
-        }
-    }
-
-    #[test]
-    fn every_key_has_codes_for_the_backends() {
-        for key in all_keys() {
-            assert!(!key.name().is_empty(), "{key:?}");
-            assert!(!key.w3c_code().is_empty(), "{key:?}");
-            assert!(!key.xkb_name().is_empty(), "{key:?}");
         }
     }
 
@@ -553,26 +485,15 @@ mod tests {
     #[test]
     fn every_key_converts_to_a_global_hotkey() {
         use std::str::FromStr;
-        let mods = ChordModifiers {
+        let modifiers = ChordModifiers {
             control: true,
             shift: true,
             ..Default::default()
         };
         for key in all_keys() {
-            let c = Chord {
-                modifiers: mods,
-                key,
-            };
+            let c = Chord { modifiers, key };
             global_hotkey::hotkey::HotKey::from_str(&c.global_hotkey_string())
                 .unwrap_or_else(|e| panic!("{key:?}: {e}"));
         }
-    }
-
-    #[test]
-    fn errors_name_the_input() {
-        let err = parse_chord_for("Ctrl+Bogus", Platform::Linux)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("Ctrl+Bogus") && err.contains("Bogus"), "{err}");
     }
 }

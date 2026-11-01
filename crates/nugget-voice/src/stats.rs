@@ -190,13 +190,6 @@ pub(crate) fn distance_with(
     (parts.iter().map(|(w, d)| w * d).sum::<f32>() / total).clamp(0.0, 1.0)
 }
 
-/// Voice similarity of `text` to the user's overall style, in `[0, 1]` (higher is closer):
-/// `1 − style_distance`. See [`crate::VoiceProfile::similarity_for`] for a channel- and
-/// recipient-specific score.
-pub fn similarity(profile: &crate::VoiceProfile, text: &str) -> f32 {
-    profile.similarity(text)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

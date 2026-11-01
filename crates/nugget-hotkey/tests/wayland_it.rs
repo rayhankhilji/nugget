@@ -42,7 +42,7 @@ use nugget_hotkey::{
     Trigger, capabilities, check, check_kill_switch, detect_linux_session, recommended_trigger,
     session, start, start_kill_switch,
 };
-use support::{Mode, Pipeline};
+use support::{Pipeline, channel_callback, fired};
 
 const CHORD: &str = "Ctrl+Alt+Space";
 
@@ -80,74 +80,55 @@ fn portal_has_global_shortcuts() -> bool {
 
 /// Quoted strings and object paths in a gdbus reply.
 fn tokens(reply: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for part in reply.split(['\'', '"']).skip(1).step_by(2) {
-        out.push(part.to_string());
-    }
-    out
+    reply
+        .split(['\'', '"'])
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect()
 }
 
-/// The kglobalaccel component and action the KDE portal bound for Double Tap: component
-/// `dev.nugget.Nugget` (the app id, object path `/component/dev_nugget_Nugget`), action
-/// [`DOUBLE_TAP_SHORTCUT_ID`].
-fn find_kglobalaccel_shortcut() -> Option<(String, String)> {
-    let comps = gdbus(&[
-        "call",
-        "--session",
-        "--dest",
-        "org.kde.kglobalaccel",
-        "--object-path",
-        "/kglobalaccel",
-        "--method",
-        "org.kde.KGlobalAccel.allComponents",
-    ])
-    .ok()?;
+/// Call `method` on kglobalaccel's object `path`.
+fn kglobalaccel(path: &str, method: &str, args: &[&str]) -> Result<String, String> {
+    let dest = ["call", "--session", "--dest", "org.kde.kglobalaccel"];
+    gdbus(
+        &[
+            &dest[..],
+            &["--object-path", path, "--method", method],
+            args,
+        ]
+        .concat(),
+    )
+}
+
+fn components() -> Result<String, String> {
+    kglobalaccel("/kglobalaccel", "org.kde.KGlobalAccel.allComponents", &[])
+}
+
+fn shortcut_names(component: &str) -> Result<String, String> {
+    kglobalaccel(
+        component,
+        "org.kde.kglobalaccel.Component.shortcutNames",
+        &[],
+    )
+}
+
+/// The kglobalaccel component the KDE portal bound Double Tap under, when it has the action
+/// [`DOUBLE_TAP_SHORTCUT_ID`]: the app id's object path, `/component/dev_nugget_Nugget`.
+fn find_kglobalaccel_shortcut() -> Option<String> {
     let want = format!("/component/{}", APP_ID.replace(['.', '-'], "_"));
-    for comp in tokens(&comps).into_iter().filter(|c| *c == want) {
-        let Ok(names) = gdbus(&[
-            "call",
-            "--session",
-            "--dest",
-            "org.kde.kglobalaccel",
-            "--object-path",
-            &comp,
-            "--method",
-            "org.kde.kglobalaccel.Component.shortcutNames",
-        ]) else {
-            continue;
-        };
-        if tokens(&names).iter().any(|n| n == DOUBLE_TAP_SHORTCUT_ID) {
-            return Some((comp, DOUBLE_TAP_SHORTCUT_ID.to_string()));
-        }
-    }
-    None
+    tokens(&components().ok()?).into_iter().find(|c| {
+        *c == want
+            && shortcut_names(c)
+                .is_ok_and(|n| tokens(&n).iter().any(|n| n == DOUBLE_TAP_SHORTCUT_ID))
+    })
 }
 
 fn dump_kglobalaccel() -> String {
-    let comps = gdbus(&[
-        "call",
-        "--session",
-        "--dest",
-        "org.kde.kglobalaccel",
-        "--object-path",
-        "/kglobalaccel",
-        "--method",
-        "org.kde.KGlobalAccel.allComponents",
-    ])
-    .unwrap_or_else(|e| e);
+    let comps = components().unwrap_or_else(|e| e);
     let mut s = format!("components: {comps}");
     for comp in tokens(&comps).into_iter().filter(|c| c.starts_with('/')) {
-        let names = gdbus(&[
-            "call",
-            "--session",
-            "--dest",
-            "org.kde.kglobalaccel",
-            "--object-path",
-            &comp,
-            "--method",
-            "org.kde.kglobalaccel.Component.shortcutNames",
-        ])
-        .unwrap_or_else(|e| e);
+        let names = shortcut_names(&comp).unwrap_or_else(|e| e);
         s.push_str(&format!("\n  {comp}: {}", names.trim()));
     }
     s
@@ -266,19 +247,10 @@ fn press_until_fired(script: &str, rx: &mpsc::Receiver<Instant>) -> Option<f64> 
 
 /// Activate the bound shortcut through kglobalaccel (not a key press: the fallback when the
 /// session has no virtual keyboard).
-fn invoke(comp: &str, name: &str) {
-    gdbus(&[
-        "call",
-        "--session",
-        "--dest",
-        "org.kde.kglobalaccel",
-        "--object-path",
-        comp,
-        "--method",
-        "org.kde.kglobalaccel.Component.invokeShortcut",
-        name,
-    ])
-    .unwrap_or_else(|e| panic!("invokeShortcut {name}: {e}"));
+fn invoke(component: &str) {
+    let method = "org.kde.kglobalaccel.Component.invokeShortcut";
+    kglobalaccel(component, method, &[DOUBLE_TAP_SHORTCUT_ID])
+        .unwrap_or_else(|e| panic!("invokeShortcut: {e}"));
 }
 
 fn keyboard_kind() -> &'static str {
@@ -289,31 +261,12 @@ fn keyboard_kind() -> &'static str {
     }
 }
 
-fn channel_callback() -> (Box<dyn Fn() + Send + Sync>, mpsc::Receiver<Instant>) {
-    let (tx, rx) = mpsc::channel();
-    let tx = std::sync::Mutex::new(tx);
-    (
-        Box::new(move || {
-            let _ = tx.lock().unwrap().send(Instant::now());
-        }),
-        rx,
-    )
-}
-
 /// The same callback twice: one for a listener, one to call directly.
 type Callback = Box<dyn Fn() + Send + Sync>;
 fn split_callback(cb: Callback) -> (Callback, impl Fn()) {
     let cb = std::sync::Arc::new(cb);
     let direct = cb.clone();
     (Box::new(move || cb()), move || direct())
-}
-
-fn fired(rx: &mpsc::Receiver<Instant>) -> usize {
-    let mut n = 0;
-    while rx.recv_timeout(Duration::from_millis(300)).is_ok() {
-        n += 1;
-    }
-    n
 }
 
 fn summary(line: &str) {
@@ -551,13 +504,13 @@ fn wayland_portal_chord() {
         press(&keys, KEYS);
         assert_eq!(fired(&rx), 1, "a second press fires again");
         (format!("virtual keyboard ({})", keyboard_kind()), ms)
-    } else if let Some((comp, name)) = find_kglobalaccel_shortcut() {
+    } else if let Some(comp) = find_kglobalaccel_shortcut() {
         assert!(
             !expect_fires(),
             "a key press is expected, but this session has no virtual keyboard"
         );
         let pressed = Instant::now();
-        invoke(&comp, &name);
+        invoke(&comp);
         let at = rx
             .recv_timeout(Duration::from_secs(3))
             .expect("the portal's Activated signal did not fire within 3 s");
@@ -676,61 +629,49 @@ fn wayland_doubletap_into_gtk4() {
     );
     let os = format!("linux-wayland-{}", compositor());
 
-    for (mode, chunks) in [
-        (Mode::Shell, support::SHELL_CHUNKS),
-        (Mode::Streamed, support::STREAMED_CHUNKS),
-    ] {
-        let _app = Fixture::start("composer");
-        let focused = support::wait_for_field(a11y.as_ref(), Duration::from_secs(15), is_fixture)
-            .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(focused.field.label.as_deref(), Some("Message composer"));
-        if mode == Mode::Shell {
-            support::read_breakdown(&backend, &os);
-        }
-        let pipeline = Pipeline::new(chunks);
-        let (cb, rx) = channel_callback();
-        // The real trigger when the desktop binds the portal chord (consent accepted in its
-        // dialog, keys pressed on the virtual keyboard); otherwise the listener is still started,
-        // as the shell does, and the same path is driven by a direct call, as the tray/app
-        // button does.
-        let (cb, direct) = split_callback(cb);
-        let t = Instant::now();
-        let listener = has_portal
-            .then(|| start(Trigger::Chord(CHORD.into()), cb))
-            .and_then(|r| {
-                r.map_err(|e| println!("portal chord unavailable: {e}"))
-                    .ok()
-            });
-        let bound = listener.as_ref().is_some_and(|l| {
-            let bind = settle(l.as_ref(), t);
-            println!("portal bind: {:?}; consent: {}", bind.state, bind.consent);
-            matches!(bind.state, ShortcutState::Active { .. })
+    let _app = Fixture::start("composer");
+    let focused = support::wait_for_field(a11y.as_ref(), Duration::from_secs(15), is_fixture)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(focused.field.label.as_deref(), Some("Message composer"));
+    let pipeline = Pipeline::new(support::CHUNKS);
+    // The real trigger when the desktop binds the portal chord (consent accepted in its dialog,
+    // keys pressed on the virtual keyboard); otherwise the listener is still started, as the
+    // shell does, and the same path is driven by a direct call, as the tray/app button does.
+    let (cb, rx) = channel_callback();
+    let (cb, direct) = split_callback(cb);
+    let t = Instant::now();
+    let listener = has_portal
+        .then(|| start(Trigger::Chord(CHORD.into()), cb))
+        .and_then(|r| {
+            r.map_err(|e| println!("portal chord unavailable: {e}"))
+                .ok()
         });
-        let keys = virtual_keyboard().filter(|_| bound);
-        if expect_fires() {
-            assert!(keys.is_some(), "the portal shortcut was not bound");
-        }
-        let trigger = if keys.is_some() {
-            "portal, virtual key press"
-        } else {
-            "direct"
-        };
-        let report = support::trigger_and_draft(&backend, &pipeline, mode, rx, |_| match &keys {
-            Some(k) => press(k, KEYS),
-            None => direct(),
-        })
-        .unwrap_or_else(|e| panic!("{} mode: {e}", mode.as_str()));
-        drop(listener);
-        report.publish(&os);
-        assert!(is_fixture(&report.app), "{:?}", report.app);
-        println!(
-            "DOUBLETAP-WAYLAND compositor={} trigger={} mode={} insert_methods={:?} \
-             first_token_ms={:.1}",
-            compositor(),
-            trigger,
-            mode.as_str(),
-            report.methods,
-            support::ms(report.first_token)
-        );
+    let bound = listener.as_ref().is_some_and(|l| {
+        let bind = settle(l.as_ref(), t);
+        println!("portal bind: {:?}; consent: {}", bind.state, bind.consent);
+        matches!(bind.state, ShortcutState::Active { .. })
+    });
+    let keys = virtual_keyboard().filter(|_| bound);
+    if expect_fires() {
+        assert!(keys.is_some(), "the portal shortcut was not bound");
     }
+    let trigger = if keys.is_some() {
+        "portal, virtual key press"
+    } else {
+        "direct"
+    };
+    let report = support::trigger_and_draft(&backend, &pipeline, rx, |_| match &keys {
+        Some(k) => press(k, KEYS),
+        None => direct(),
+    })
+    .unwrap_or_else(|e| panic!("{e}"));
+    drop(listener);
+    report.publish(&os);
+    assert!(is_fixture(&report.app), "{:?}", report.app);
+    println!(
+        "DOUBLETAP-WAYLAND compositor={} trigger={trigger} insert_method={:?} first_token_ms={:.1}",
+        compositor(),
+        report.method,
+        support::ms(report.first_token)
+    );
 }
