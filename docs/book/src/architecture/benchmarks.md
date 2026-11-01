@@ -20,12 +20,9 @@ on a missed target. Fake-index and scripted-model numbers validate the harness, 
 
 ## Headline results
 
-| Target | Result |
-|---|---|
-| Freshness p95 ≤ 60 s | 0.60 s (local folder; mail and calendar poll every 60 s to 5 min) |
-| Hybrid recall@10 ≥ text-only, labelled eval set | 1.000 vs 0.905 |
-| Synthetic recall gate, real embedder | 0.938 vs 0.938 (standard, tie); 0.892 vs 0.874 (full) |
-| Edits, creates, deletes, renames reflected | 1.0 |
+Freshness p95 0.60 s (target 60 s, local folder); hybrid recall@10 1.000 vs 0.905 text-only on the
+labelled set; synthetic gate with the real embedder 0.938 vs 0.938 (standard) and 0.892 vs 0.874
+(full); edits, creates, deletes and renames all reflected. Other suites: [What works today](../status.md).
 
 MMR lowers known-item recall@10 on the synthetic corpus and is reported, not gated. Not measured yet:
 citation accuracy, battery cost in joules, and Double Tap latency with a cloud model.

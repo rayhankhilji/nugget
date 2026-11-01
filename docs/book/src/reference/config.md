@@ -38,8 +38,7 @@ Every key is optional; an empty file gives the defaults (no providers).
 
 ### `[models.selected]`
 
-The local model chosen for each tier, by manifest id (as listed on the Models page or by
-`models.list`). A model id is 1 to 64 characters of lowercase letters, digits, `.`, `_` and `-`.
+The local model per tier, by manifest id (1–64 of `a-z`, `0-9`, `.`, `_`, `-`; see `models.list`).
 
 <!-- check-refs: config.models.selected -->
 | Key | Type | Default | Description |
@@ -320,9 +319,8 @@ Proactive cards and the morning brief. Unknown keys are an error.
 | `debounce_secs` | integer | `60` | Wait after the last ingest or knowledge event before refreshing |
 | `utc_offset` | `"+HH:MM"` | the machine's | Offset for "today" and the brief time; read once at start |
 
-`[proactive.engine]` tunes generators and ranking (`nugget_proactive::ProactiveConfig`), e.g.
-`min_score` (`0.45`), `max_inbox`, `user_addresses`, `followup_lead_days`, `awaiting_reply_days`,
-`renewal_horizon_days`.
+`[proactive.engine]` tunes ranking (`nugget_proactive::ProactiveConfig`): `min_score` (`0.45`),
+`max_inbox`, `user_addresses`, `followup_lead_days`, `awaiting_reply_days`, `renewal_horizon_days`.
 
 ### `[draft]`
 

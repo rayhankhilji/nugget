@@ -29,11 +29,9 @@ differ. Nugget claims point at code or the book. No Sentient code or prompts are
 - Apple Notes and Apple Mail sources (§2.4); hosted connectors are easier to start with than Nugget's
   bring-your-own Google OAuth client (one-time Cloud setup, weekly re-sign-in in Testing mode).
 - A frontier model writes its notes, which may read better than rendered pages; nobody has measured it.
-- Nugget's own gaps are listed in [PLAN.md](../PLAN.md), including an open Double Tap prompt-injection
+- Nugget's own gaps are in [PLAN.md](../PLAN.md), including an open Double Tap prompt-injection
   Blocker and an unmeasured cloud latency.
 
-## Ideas Nugget took from Sentient
-
-In our own words (§2.1, §2.2, §2.6): prove vision support by reading back a random code from an image;
-refuse to act in an app whose state was not read first; never replay a failed action; keep a
-deterministic regex backstop next to model triage.
+Ideas Nugget took, in our own words (§2.1, §2.2, §2.6): a vision probe that reads back a random code;
+no action in an app whose state was not read first; no replay of failed actions; a regex backstop
+next to model triage.

@@ -12,10 +12,7 @@ Nugget is two parts: **`nuggetd`**, a Rust daemon that owns the encrypted store,
 model call; and **the desktop app** (Tauri 2), which holds the OS permissions and talks to the daemon
 over the [local IPC protocol](reference/ipc.md).
 
-This book has a [user guide](guide/install.md), a [reference](reference/config.md) checked against the
-code in CI ([how](contributing/docs.md)), the [architecture](architecture/overview.md),
-[contributing](contributing/setup.md) notes and a [comparison with Sentient OS](comparison.md).
-
+The [reference](reference/config.md) is checked against the code in CI ([how](contributing/docs.md)).
 Nugget is **pre-release**: no release has been cut. [What works today](status.md) lists what runs and
 what does not. Contributions are accepted under Apache-2.0 with a
 [DCO sign-off](contributing/rules.md#developer-certificate-of-origin).

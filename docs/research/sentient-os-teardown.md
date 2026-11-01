@@ -9,12 +9,9 @@ What was observed in [Sentient-OS-Labs/sentient-os](https://github.com/Sentient-
 
 ## 1. Summary
 
-A macOS-only (Apple Silicon, 15.4+) SwiftUI menu-bar app of about 98k lines (O). Overnight, an
-on-device Gemma model triages local data into short summaries; a frontier cloud model (via a bundled
-OpenAI Codex CLI, the Claude Code CLI, or a custom endpoint) writes an 80–120 note Markdown vault and up
-to 5 prepared actions a day; computer use ("Sidekick") runs on OpenAI's computer-use helper through
-`codex exec`; Double Tap is one vision call (screenshot plus whole vault) via a closed relay, pasted with
-the clipboard. Developed privately and mirrored to GitHub in bulk per release.
+A macOS-only (Apple Silicon, 15.4+) SwiftUI menu-bar app of about 98k lines (O): on-device triage,
+then a frontier cloud model (via a bundled Codex CLI, Claude Code CLI or custom endpoint) writes the
+vault and daily cards; developed privately and mirrored to GitHub in bulk per release.
 
 ## 2. Findings
 
@@ -27,9 +24,8 @@ the clipboard. Developed privately and mirrored to GitHub in bulk per release.
   ChatGPT plan is read from an unverified JWT claim; model ids hard-coded. Custom endpoints must pass a
   vision probe (read back a random code from an image), a good idea. Third-party binaries are re-hosted
   (redistribution rights **U**).
-- **2.3 Scheduling (O).** A **root LaunchDaemon** wakes the Mac at 3 AM and disables sleep; strictly
-  serial, one item at a time; only the critical thermal state is honoured. A helper crash could leave
-  sleep disabled (I).
+- **2.3 Scheduling (O).** A **root LaunchDaemon** wakes the Mac at 3 AM and disables sleep (a helper
+  crash could leave it disabled, I); strictly serial, one item at a time.
 - **2.4 Sources (O).** Files (keyed on date added: **edits never re-read**; no OCR), iMessage and
   WhatsApp (private SQLite, heuristic decoders), Apple Notes (schema-less protobuf; edits missed),
   Apple Mail (Envelope Index), Calendar (EventKit, no attendees). Gmail, Calendar, Slack, Outlook and

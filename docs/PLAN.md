@@ -12,7 +12,6 @@ Architecture: [book/src/architecture/](book/src/architecture/overview.md). User-
 - **M0 Foundations, M1 Memory, M2 Knowledge graph: done.** Workspace, CI on three OSes, encrypted store, providers, signed model manifest, local runtime, connectors, hybrid cited retrieval, knowledge graph, vault and local MCP server run in `nuggetd`.
 - **M3 Double Tap, M4 Agent and computer use, M5 Proactive: wired into the daemon and app**, with a real-app end-to-end test in CI ([e2e.yml](../.github/workflows/e2e.yml)). Message imports (iMessage, WhatsApp, Telegram), search filters and timelines, tray, deep links and quick ask are in too.
 - **M6 Hardening: mostly built, not released.** Packaging, a release dry run (unsigned installers on all three OSes), Windows signing via Azure Trusted Signing, a release rehearsal with throwaway keys, the opt-in signed updater, i18n, onboarding, Microsoft 365 and SaaS connectors, and the WASM plugin host are in.
-- Egress accounting lives in `nugget-core` and `nugget-store`, the PII scan in `nugget-ingest` (there is no `nugget-privacy` crate).
 
 ## Open: blockers, highs and misses
 
@@ -22,7 +21,7 @@ v1 needs every Blocker and High fixed and re-verified by the same QA scenarios o
 - No release has been cut. Release keys (updater, model-manifest release key, Apple and Windows certificates) do not exist; signing paths are untested without real certificates ([release.md](release.md) §8).
 - Real macOS and Windows runs on physical machines (installer, accessibility, Double Tap insertion, native computer use) not done; only CI runners so far. Start-at-login service not exercised on macOS or Windows in CI.
 - MSI, `.deb` and `.rpm` are build-only (no launch smoke). Linux packages are not GPG-signed; no apt or rpm repository.
-- Empty, loading and error states (Y4) not confirmed complete. The E2E relay (optional) is not started.
+- Empty, loading and error states not confirmed complete. The E2E relay (optional) is not started.
 
 **Blockers**
 - **GG1-1, still open:** Double Tap obeys an instruction planted in a vault note (attacker link in 62 drafts). Fix paused until the user says continue.
@@ -34,7 +33,7 @@ v1 needs every Blocker and High fixed and re-verified by the same QA scenarios o
 - Knowledge: claim extraction with a local model produces junk titles; vault edits are overwritten by re-extraction; vault and graph ignore sensitivity; extraction falls behind on CPU and regresses after a restart.
 - Proactive: meeting prep and the brief's calendar break on `.ics` invites (recurrence, dedup, time zones).
 - First week: a hung or crashing local model server and raw download errors; folders with nothing to index; API keys that cannot be changed; quit, uninstall and update leave the daemon behind.
-- Sensitivity: rules miss de/es/fr text, and the 4B triage clears health, money and legal mail. Ingest fixes (searchable before triage, unknown counts as sensitive) are not re-verified by QA.
+- Sensitivity: the 4B triage clears health, money and legal mail. Ingest fixes (searchable before triage, unknown counts as sensitive, deterministic rules in all 9 UI languages) are not re-verified by QA.
 - WhatsApp import: dates in fr/ar and day-first exports.
 - Privacy (captured traffic; local-only use sends nothing): GG8-1 an Ask follow-up forwards earlier answers unscanned to a cloud model; GG8-3 Double Tap sent texts become a hidden source readable by MCP clients and cloud Ask. GG8-5 (unledgered update check): update checks are now ledgered through `egress.record`; not re-verified. v1 needs all High and Medium privacy findings fixed.
 - Ask: the real-model re-run after the date, follow-up and partial-match fixes is pending.
@@ -58,7 +57,7 @@ v1 needs every Blocker and High fixed and re-verified by the same QA scenarios o
 
 ## v1 checklist
 
-Bench numbers: [bench/README.md](../bench/README.md). QA findings above override bench figures where they differ.
+Numbers: [bench/README.md](../bench/README.md); QA findings above override bench figures where they differ.
 
 | Criterion | Evidence | State |
 |---|---|---|

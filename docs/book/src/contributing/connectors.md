@@ -57,10 +57,7 @@ cancellation, bad credentials, egress recording and malformed input.
 
 ## Plugin connectors (WebAssembly)
 
-A component built against the SDK (`crates/nugget-plugin/sdk`) runs as kind `plugin:<plugin id>`. Its
-manifest's `[connector]` section sets `display_name`, `auth` (`none` or `password`),
-`poll_interval_secs` and `settings_schema`. It declares capabilities (HTTP hosts, named secrets,
-key-value size) that the user approves; the host makes all HTTP requests (ledgered as
-`sync:plugin:<plugin id>`) and keeps secrets under `plugin:<plugin id>:<name>`. Example:
-`crates/nugget-plugin/sdk/examples/feed-reader`. Author guide:
+A component built against `crates/nugget-plugin/sdk` runs as kind `plugin:<plugin id>`, with
+approved capabilities only; the host makes its HTTP requests (ledgered as `sync:plugin:<plugin id>`).
+See the `feed-reader` example and
 [`docs/plugins.md`](https://github.com/rayhankhilji/nugget/blob/main/docs/plugins.md).

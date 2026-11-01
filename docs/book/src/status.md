@@ -30,7 +30,7 @@ open issue. Numbers come from [`bench/README.md`](https://github.com/rayhankhilj
   down (mitigated, not fixed); the stdio bridge avoids it.
 - **Knowledge:** vault edits can be overwritten by re-extraction; the vault and graph ignore
   sensitivity.
-- **Wayland:** the Double Tap shortcut works via the portal on KDE Plasma 6 and GNOME 50 only.
+- **Wayland:** the Double Tap shortcut is verified via the portal on KDE Plasma 6 and GNOME 50 only.
 - **Not measured:** battery cost in joules. Drive, Microsoft 365, Slack, Notion, GitHub and Linear
   are tested against mock servers only.
 
@@ -38,5 +38,3 @@ open issue. Numbers come from [`bench/README.md`](https://github.com/rayhankhilj
 
 The end-to-end-encrypted relay; connectors for Apple Notes, Apple Mail, macOS Calendar and Contacts,
 Signal, Thunderbird, Logseq, Maildir and CardDAV; MCP servers as sources; a community plugin registry.
-
-The [benchmark dashboard](benchmarks/dashboard.md) charts nightly results.

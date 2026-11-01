@@ -26,14 +26,11 @@ query ─▶ (follow-up? rewrite locally) ─▶ embed ─▶ hybrid search (BM2
              ─▶ stream answer (chat.delta / chat.done) ─▶ egress row with the cited items
 ```
 
-**Models:** the router tries on-device and LAN providers, then the managed runtime, then cloud
-providers, each in config order; a provider must have proved the capability by probe, and errors fall
-through to the next.
+**Models:** routed by tier in the order given in [`[[providers]]`](../reference/config.md#providers);
+a provider must have proved the capability by probe, and errors fall through to the next.
 
 **Knowledge:** after ingest commits (and periodically), extractors produce entities and claims; an LLM
 claim needs a verbatim quote, and re-extraction retracts old evidence first. Changes re-render the
 vault and emit `knowledge.changed`.
 
-**Startup** order: lock and socket, config, store, models and providers, ingest, knowledge, vault,
-MCP, features, then IPC; the audit chain is verified in the background. **Shutdown** on SIGINT or
-SIGTERM reverses it, ending open streams with `chat.done`.
+**Startup** ends with IPC (the audit chain is verified in the background); **shutdown** reverses it.

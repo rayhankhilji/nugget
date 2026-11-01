@@ -23,6 +23,5 @@ native-messaging host `nugget-browser-host`.
 Connectors emit versioned changes and never touch the store; ingest stores them in one SQLCipher
 database; knowledge extraction and the vault follow; retrieval packs cited context; `nugget-infer`
 routes every model call by tier and ledgers non-local requests ([Data flow](data-flow.md)). Subsystems
-after M2 are modules in `crates/nuggetd/src/features/`, each owning its IPC methods, tasks, config
-section and shutdown. The desktop app depends only on `nugget-core` and `nugget-ipc`, so it never opens
+after M2 are modules in `crates/nuggetd/src/features/` with their own IPC methods and config. The desktop app depends only on `nugget-core` and `nugget-ipc`, so it never opens
 the store or calls a model. See the [crate map](crates.md) and [security model](security.md).

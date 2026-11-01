@@ -53,10 +53,9 @@ allowed.
 
 ## Tokens, limits and audit
 
-- A token is `ngt_` plus 32 random bytes (base64url), returned once by `mcp.clients.create`. Only
-  `HMAC-SHA256(server key, token)` is stored. Revoking deletes the record; the token stops working at
-  once on every transport.
-- Rate limit per client: a burst of 60, refilled at 120 per minute.
+- A token is `ngt_` plus 32 random bytes, returned once by `mcp.clients.create`; only
+  `HMAC-SHA256(server key, token)` is stored, and revoking takes effect at once. Rate limit: a burst of
+  60, refilled at 120 per minute.
 - Every `tools/call` and `resources/read` is audited: client, tool, outcome and item references, never
   content. Free-text arguments are kept only as length and a keyed hash. MCP is local, so it creates no
   egress rows.

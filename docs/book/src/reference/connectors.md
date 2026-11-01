@@ -3,21 +3,22 @@
 The `settings` object of each source kind (`sources.add`, `sources.update`, `SourceInfo`). Unknown
 keys are rejected. Gmail and Outlook poll every 60 s, most other cloud kinds every 5–10 minutes;
 folders and chat exports are watched. Secrets never go in settings: use `sources.secret.set` (OS keychain, service
-`dev.nugget.Nugget`; deleted with the source).
+`dev.nugget.Nugget`; deleted with the source). `.gitignore` and `.nuggetignore` are honoured by
+folder kinds.
 
 <!-- check-refs: connector.kinds -->
 | Kind | Display name | Sign-in | Keychain accounts |
 |---|---|---|---|
 | `files` | Folders | none | none |
 | `obsidian` | Obsidian vault | none | none |
-| `gmail` | Gmail | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
-| `gcal` | Google Calendar | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
-| `gdrive` | Google Drive | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
+| `gmail` | Gmail | OAuth, `gmail.readonly` | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
+| `gcal` | Google Calendar | OAuth, `calendar.readonly` | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
+| `gdrive` | Google Drive | OAuth, `drive.readonly` | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
 | `imap` | IMAP mail | password | `password:<source id>` |
 | `caldav` | CalDAV calendar | password | `password:<source id>` |
-| `outlook` | Outlook mail | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` (optional) |
-| `outlook-calendar` | Outlook calendar | OAuth | as for `outlook` |
-| `onedrive` | OneDrive | OAuth | as for `outlook` |
+| `outlook` | Outlook mail | OAuth, `offline_access User.Read Mail.Read` | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` (optional) |
+| `outlook-calendar` | Outlook calendar | OAuth, `… Calendars.Read` | as for `outlook` |
+| `onedrive` | OneDrive | OAuth, `… Files.Read` | as for `outlook` |
 | `slack` | Slack | password (pasted token) | `password:<source id>` |
 | `notion` | Notion | password (pasted token) | `password:<source id>` |
 | `github` | GitHub | password (pasted token), or the device flow with `client_id` | `password:<source id>`, `oauth:<source id>` (device-flow tokens) |
@@ -42,9 +43,6 @@ up in `token_env`, then `oauth:<source id>`, then `password:<source id>`; none i
 | `debounce_ms` | integer, 20 to 10000 | `300` | Watcher debounce: bursts of events on one path within this window are coalesced |
 | `rescan_interval_secs` | integer | `3600` (`900` on Windows) | While watching, run a full reconcile this often as a safety net; `0` never |
 
-Item keys are `<root index>:<relative path>` (e.g. `0:Projects/plan.md`); `.gitignore` and
-`.nuggetignore` are honoured.
-
 ## `obsidian`
 <!-- check-refs: connector.obsidian -->
 | Key | Type | Default | Description |
@@ -58,11 +56,7 @@ Item keys are `<root index>:<relative path>` (e.g. `0:Projects/plan.md`); `.giti
 | `debounce_ms` | integer, 20 to 10000 | `300` | As for `files` |
 | `rescan_interval_secs` | integer | `3600` (`900` on Windows) | As for `files` |
 
-Item URLs are `obsidian://open?vault=…&file=…` links.
-
 ## `gmail`
-
-Scope `gmail.readonly`. OAuth client setup: [Google sources](../guide/sources-google.md).
 
 <!-- check-refs: connector.gmail -->
 | Key | Type | Default | Description |
@@ -76,8 +70,6 @@ Scope `gmail.readonly`. OAuth client setup: [Google sources](../guide/sources-go
 
 ## `gcal`
 
-Scope `calendar.readonly`.
-
 <!-- check-refs: connector.gcal -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -90,7 +82,7 @@ Scope `calendar.readonly`.
 
 ## `gdrive`
 
-Scope `drive.readonly`. See [Google Drive](../guide/sources-google.md#google-drive).
+Setup: [Google sources](../guide/sources-google.md), [Google Drive](../guide/sources-google.md#google-drive).
 
 <!-- check-refs: connector.gdrive -->
 | Key | Type | Default | Description |
@@ -124,8 +116,7 @@ Scope `drive.readonly`. See [Google Drive](../guide/sources-google.md#google-dri
 
 ## `outlook`
 
-Scopes `offline_access`, `User.Read`, `Mail.Read`. App registration:
-[Microsoft 365](../guide/sources-microsoft.md).
+App registration: [Microsoft 365](../guide/sources-microsoft.md).
 
 <!-- check-refs: connector.outlook -->
 | Key | Type | Default | Description |
@@ -139,8 +130,6 @@ Scopes `offline_access`, `User.Read`, `Mail.Read`. App registration:
 
 ## `outlook-calendar`
 
-Scopes `offline_access`, `User.Read`, `Calendars.Read`.
-
 <!-- check-refs: connector.outlook_calendar -->
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -152,8 +141,6 @@ Scopes `offline_access`, `User.Read`, `Calendars.Read`.
 | `future_days` | integer, 0 to 3650 | `365` | Days of future events. `past_days` and `future_days` cannot both be `0` |
 
 ## `onedrive`
-
-Scopes `offline_access`, `User.Read`, `Files.Read`.
 
 <!-- check-refs: connector.onedrive -->
 | Key | Type | Default | Description |

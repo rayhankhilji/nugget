@@ -4,13 +4,10 @@ The desktop app, the CLI and other local programs talk to `nuggetd` with **JSON-
 object per line (UTF-8, at most 16 MiB, else `-32008`). Types are in `nugget_core::ipc`; the Rust
 client is `nugget_ipc::Client`. Protocol version `1` (reported by `status`).
 
-| Platform | Transport |
-|---|---|
-| macOS, Linux | Unix socket `<data>/ipc/nuggetd.sock` in a `0700` directory (a short private directory under `$XDG_RUNTIME_DIR` or the temp dir if that path is too long) |
-| Windows | Named pipe `\\.\pipe\nugget-<user SID>-<hash>-nuggetd.sock`, ACL for you and SYSTEM only; clients check the server runs as the same user |
-
-There is no TCP listener; being able to open the socket is the credential. `nuggetd status` prints the
-socket path.
+Transport: on macOS and Linux a Unix socket `<data>/ipc/nuggetd.sock` in a `0700` directory (or a short
+private directory under `$XDG_RUNTIME_DIR` if that path is too long); on Windows a named pipe
+`\\.\pipe\nugget-<user SID>-<hash>-nuggetd.sock` admitting only you and SYSTEM. No TCP; opening the
+socket is the credential. `nuggetd status` prints the path.
 
 **Conventions.** Requests carry an `id` and may run concurrently on one connection. Notifications (no
 `id`) carry streams and events: `chat.delta`, `chat.done` and `models.progress` go to the requesting
@@ -21,8 +18,6 @@ parameters take `{}`. Timestamps are RFC 3339; ids are strings; an `ItemRef` is
 
 The **Daemon** column: `yes` = served; `not yet` = in the protocol but the daemon answers `-32601`;
 `in progress` = being wired in on another branch (shape not final).
-
-## Methods
 
 ### Status, providers and models
 <!-- check-refs: ipc.methods -->
@@ -38,10 +33,8 @@ The **Daemon** column: `yes` = served; `not yet` = in the protocol but the daemo
 | `egress.recent` | `EgressRecentRequest`: `{limit}` (at most 1000) | list of `EgressEvent`: `at`, `host`, `feature`, `bytes_sent`, `bytes_received`, `items` | yes |
 | `egress.page` | `EgressPageRequest`: `{limit, cursor}` (`limit` at most 1000; `cursor` optional: the previous page's `next_cursor`) | `{items, next_cursor}`: `items` a list of `EgressEvent`, newest first; `next_cursor` (a string, or `null` after the oldest row) continues after the last of them. Keyset paging on the ledger row: rows recorded while you page never shift later pages, so none is skipped or listed twice. Cursors are opaque; one this daemon did not return is invalid params (`-32602`) | yes |
 | `egress.record` | `EgressRecordRequest`: `host` (bare `host[:port]`), `feature` (`update_check` or `update_download` only), `bytes_sent`, `bytes_received` (default 0), `at` (RFC 3339, default now; at most 5 minutes ahead and 30 days old; stored in UTC) | `null`. A request the desktop app made itself, written to the ledger with no items. Host: a DNS name, an IPv4 address or a bracketed IPv6 address, optional port. At most 60 rows a minute across all clients (`SERVER_BUSY` beyond) | yes |
-| `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat`, `embedding`, `rerank` or `draft`), `state`, `provider`, `error` (one plain sentence), and when present `state_ms` (time in this state: the warm-up so far while `starting`), `expected_ms` (expected load time while `starting`), `retry_in_ms` (next automatic restart while `failed`), `gave_up` (`failed` and waiting for `runtime.retry`), `detail` (the server's last line). Empty when `[runtime]` is disabled | yes |
+| `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat`, `embedding`, `rerank` or `draft`), `state` (`not_installed`, `stopped`, `starting`, `ready`, `failed`), `provider`, `error` (one plain sentence), and when present `state_ms` (time in this state: the warm-up so far while `starting`), `expected_ms` (expected load time while `starting`), `retry_in_ms` (next automatic restart while `failed`), `gave_up` (`failed` and waiting for `runtime.retry`), `detail` (the server's last line). Empty when `[runtime]` is disabled | yes |
 | `runtime.retry` | `RuntimeRetryRequest`: `{role}` | `{started}`: clears a failed start or a give-up and starts the role's server in the background (`false` when its model is not installed) | yes |
-
-`RuntimeInfo.state`: `not_installed`, `stopped`, `starting`, `ready`, `failed`.
 
 ### Search
 <!-- check-refs: ipc.methods -->

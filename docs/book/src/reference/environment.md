@@ -1,6 +1,6 @@
 # Environment variables
 
-## The daemon
+## The daemon and the MCP bridge
 <!-- check-refs: env.daemon -->
 | Variable | Meaning |
 |---|---|
@@ -9,14 +9,10 @@
 | `NUGGET_KEYCHAIN` | `0`, `off`, `false` or `no` turns the OS keychain off. The store key then lives in a `store.key` file readable only by you, and source passwords and tokens are kept **in memory only**: you must set them again after every restart |
 | `NUGGET_OCR_MODELS` | A directory holding the two `ocrs` models, `text-detection.rten` and `text-recognition.rten`. Image OCR runs only when they are present. Nugget never downloads them |
 
+| `NUGGET_MCP_TOKEN` | The client token for `nuggetd mcp --client <id>`, set in the AI app's MCP config by `nuggetd mcp install` or the setup snippet. Kept out of the command line so it does not appear in process listings. The bridge refuses to start without it |
+
 `env:VAR` references in `config.toml` are read from the **daemon's** environment; a login service
 does not read your shell profile.
-
-## MCP clients
-<!-- check-refs: env.mcp -->
-| Variable | Meaning |
-|---|---|
-| `NUGGET_MCP_TOKEN` | The client token for `nuggetd mcp --client <id>`, set in the AI app's MCP config by `nuggetd mcp install` or the setup snippet. Kept out of the command line so it does not appear in process listings. The bridge refuses to start without it |
 
 ## Desktop app
 <!-- check-refs: env.desktop -->

@@ -29,6 +29,5 @@ Layout: `crates/` (libraries and `nuggetd`; [crate map](../architecture/crates.m
 `crates/nugget-plugin/sdk` (plugin SDK, `wasm32-wasip2`), `apps/desktop` (Tauri shell),
 `extensions/browser`, `bench`, `manifests` (signed model manifest), `packaging`, `docs`.
 
-CI (`ci.yml`) runs fmt, clippy, tests, a benchmark smoke run, the desktop build, `cargo deny` and the
-DCO check on all three OSes; `docs.yml` runs `check-refs.py` and builds the book; `release.yml` builds
-installers ([`docs/release.md`](https://github.com/rayhankhilji/nugget/blob/main/docs/release.md)).
+CI runs the commands above on all three OSes plus the DCO check; `docs.yml` builds the book;
+`release.yml` builds installers ([`docs/release.md`](https://github.com/rayhankhilji/nugget/blob/main/docs/release.md)).

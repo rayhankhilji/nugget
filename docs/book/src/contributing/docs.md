@@ -24,6 +24,5 @@ Rust with regular expressions, so update its `SOURCES` table if a struct moves.
 
 ## Style
 
-Plain, direct sentences, second person in the user guide. Say what is not done yet on the page itself.
-Numbers only from `nugget-bench` reports, with their conditions. Facts about Sentient OS only from
-`docs/research/`.
+Plain, direct sentences; say what is not done yet on the page itself. Numbers only from `nugget-bench`
+reports, with conditions. Facts about Sentient OS only from `docs/research/`.

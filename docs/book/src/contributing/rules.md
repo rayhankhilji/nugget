@@ -2,10 +2,9 @@
 
 ## Developer Certificate of Origin
 
-Nugget uses the [DCO 1.1](https://developercertificate.org/), not a CLA. Sign off every commit
-(`git commit -s`); the `Signed-off-by` line must match the author, and CI checks it. To fix a branch:
-`git rebase --signoff origin/main`, then `git push --force-with-lease`. Contributions are accepted under
-Apache-2.0.
+Nugget uses the [DCO 1.1](https://developercertificate.org/), not a CLA: sign off every commit
+(`git commit -s`, matching the author; CI checks it; fix a branch with `git rebase --signoff origin/main`).
+Contributions are accepted under Apache-2.0.
 
 ## The clean-room rule
 
