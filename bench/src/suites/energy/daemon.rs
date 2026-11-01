@@ -127,9 +127,7 @@ pub(super) fn daemon_idle(
     Ok(out)
 }
 
-/// A fresh daemon (empty store, vault off) indexes `p.index_items` files dropped into a watched
-/// folder, metered until all are indexed and searchable. With an energy source, an equal baseline window is metered after
-/// the daemon stopped.
+/// A fresh daemon indexes `p.index_items` dropped files, metered until all are searchable.
 pub(super) fn index_1k(
     ctx: &mut RunContext,
     p: &EnergyParams,
@@ -271,4 +269,3 @@ pub(super) fn index_1k(
     out.extend(energy_metrics(&prefix, "indexing", &r, base.as_ref()));
     Ok(out)
 }
-

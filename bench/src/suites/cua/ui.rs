@@ -434,5 +434,4 @@ mod tests {
         let json = serde_json::to_string(&w).unwrap();
         assert!(!json.contains("emits"));
     }
-
 }

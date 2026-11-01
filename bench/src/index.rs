@@ -85,6 +85,10 @@ impl FakeIndex {
         self.by_item.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.by_item.is_empty()
+    }
+
     pub fn contains(&self, item: &ItemRef) -> bool {
         self.by_item.contains_key(item)
     }
@@ -391,5 +395,4 @@ mod tests {
             "dimension mismatch yields nothing"
         );
     }
-
 }

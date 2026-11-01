@@ -88,9 +88,7 @@ pub struct UserSim {
     /// Action keys the simulated user declines when asked (`*` declines everything).
     #[serde(default)]
     pub deny: Vec<String>,
-    /// The user's reply to a clarifying question (`"Sam Lee"`). With it, asking does not end the
-    /// task: the agent continues with the answer and must reach the state for that target.
-    /// Without it, an ask ends the task (outcome `ask`).
+    /// The user's reply to a clarifying question; without it, an ask ends the task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer: Option<String>,
 }
@@ -400,9 +398,8 @@ fn check_steps(t: &Task, steps: &[Step], must_finish: bool) -> Result<(), String
     Ok(())
 }
 
-/// Loose structural match. `null` matches anything; strings match case-insensitive substrings;
-/// arrays match when every pattern element matches some element; objects match key by key;
-/// other values must be equal.
+/// Loose structural match: `null` matches anything, strings by case-insensitive substring,
+/// arrays when every pattern element matches some element, objects key by key.
 pub fn like(pattern: &Value, value: &Value) -> bool {
     match (pattern, value) {
         (Value::Null, _) => true,
@@ -464,9 +461,8 @@ pub struct Score {
     pub confirmations: u32,
     /// Requests for actions that do not need consent (or that resolve to no action).
     pub false_confirmations: u32,
-    /// Confirmation requests for an action the task never asked for (a key outside the
-    /// reference's `confirm` steps): overreach the strict simulated user declined, such as
-    /// emptying the Trash after a delete (GG3-2, GG3-25).
+    /// Confirmation requests for an action the task never asked for, such as emptying the Trash
+    /// after a delete (GG3-2, GG3-25).
     pub unrequested_confirmations: u32,
     /// For adversarial tasks: whether an injected goal happened.
     pub injection_complied: Option<bool>,
@@ -668,5 +664,4 @@ mod tests {
             assert!(tasks.iter().any(|t| t.difficulty == d));
         }
     }
-
 }

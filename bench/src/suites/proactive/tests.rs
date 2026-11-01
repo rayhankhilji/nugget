@@ -341,9 +341,7 @@ fn mail(id: &str, day: i32, thread: &str, from: &str, to: &str, subject: &str, b
     })
 }
 
-/// Six days: an unanswered question, an external meeting, a renewal notice (after last year's
-/// receipt), a newsletter that asks a question, an automated notification and a meeting that is
-/// cancelled.
+/// Six days covering every card kind plus a newsletter, a notification and a cancellation.
 fn tiny_world() -> (World, Gold) {
     let mut newsletter = mail(
         "m-news",
@@ -630,9 +628,7 @@ fn sender_brief(learning: bool) -> (f64, f64, bool) {
     (score("m-a2"), score("m-c2"), below)
 }
 
-/// A sender dismissed as not important is ranked lower the next day: Ana's second card ranks
-/// below Carl's otherwise-equal card (with learning off the two score level), and the gap comes
-/// from the feedback.
+/// A sender dismissed as not important ranks below an otherwise-equal sender the next day.
 #[test]
 fn not_important_ranks_the_sender_lower_the_next_day() {
     let (ana, carl, below) = sender_brief(true);
@@ -645,9 +641,8 @@ fn not_important_ranks_the_sender_lower_the_next_day() {
     );
 }
 
-/// Sam asks Kim something on day 1 and promises a plan "next week" in the same mail. The
-/// unanswered question shows on day 5 (Sam has waited three days) and the promise on day 7 (its
-/// deadline is two days out). Kim replies with a new question on day 12.
+/// Sam asks Kim a question and promises a plan on day 1 (shown days 5 and 7); Kim replies with
+/// a new question on day 12.
 fn handled_world() -> Vec<Item> {
     vec![
         mail(
@@ -696,10 +691,8 @@ fn handled_run(learning: bool) -> (Vec<(i32, String)>, i32) {
     (shown, dismissed.expect("a card from the thread"))
 }
 
-/// "Already handled" stops a thread's conversation: after Sam dismisses the unanswered question
-/// as already handled, nothing about the conversation shows until Kim writes again, and her new
-/// question shows. Sam's own promise in the same mail is a commitment, not part of the
-/// conversation: it still shows before its deadline.
+/// "Already handled" hides a conversation until a newer message, but not the commitment in the
+/// same mail.
 #[test]
 fn already_handled_stops_the_thread_until_a_newer_message() {
     let (shown, at) = handled_run(true);

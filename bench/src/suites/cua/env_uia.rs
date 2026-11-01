@@ -420,9 +420,8 @@ fn chord(key: Key) -> KeyChord {
     }
 }
 
-/// Typing an option's text into a closed list. On macOS each character goes as its own key
-/// press: a list's type-ahead reads key presses, and the text input path sends a string per
-/// event.
+/// Typing an option's text into a closed list; on macOS one key press per character, because
+/// type-ahead reads key presses, not strings.
 fn type_ahead(option: &str) -> KeyInput {
     if cfg!(target_os = "macos") {
         KeyInput::Keys(option.chars().map(|c| chord(Key::Char(c))).collect())

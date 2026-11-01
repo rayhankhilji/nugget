@@ -372,11 +372,7 @@ impl ComputerUse for FakeEdge {
     }
 }
 
-/// A UIA-style fake tree as Chrome shows it over AX on macOS (after the AX backend has named
-/// labelled controls from their AXTitleUIElement): static text in `AXValue`, `aria-label`s as
-/// descriptions, a `<select>` as an `AXPopUpButton` (a button) that shows only its selected
-/// option (an unnamed menu item with the text as its value) and ignores a set value, switches
-/// as `AXCheckBox`/`AXSwitch`.
+/// A UIA-style fake tree rewritten as Chrome shows it over AX on macOS.
 fn axify(n: &mut UiNode, in_combo: bool) {
     let combo = n.role == A11yRole::ComboBox;
     if combo {
@@ -598,4 +594,3 @@ fn nugget_arm(id: &str, ax: bool) {
 fn nugget_arm_fills_a_form_over_the_real_tree() {
     nugget_arm("forms-fill-basic", false);
 }
-

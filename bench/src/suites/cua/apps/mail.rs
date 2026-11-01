@@ -302,5 +302,4 @@ mod tests {
         assert_eq!(m.sent[0].in_reply_to.as_deref(), Some("m1"));
         assert_eq!(m.screen, Screen::Inbox);
     }
-
 }

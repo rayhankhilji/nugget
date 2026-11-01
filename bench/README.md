@@ -8,12 +8,10 @@ the top-level README must come from a report produced here, on a release build.
 
 ```sh
 cargo run --release -p nugget-bench -- --list                          # registered suites
-cargo run --release -p nugget-bench -- perf memory                     # run suites, write reports
 cargo run --release -p nugget-bench -- all --scale quick               # every suite, smaller workload
 cargo run --release -p nugget-bench -- memory --backend real --strict  # the M1 gate
 cargo run --release -p nugget-bench -- knowledge --strict              # the M2 gates
 cargo run --release -p nugget-bench -- doubletap --local-models --scale quick
-cargo run -p nugget-bench -- --schema                                  # print the report JSON schema
 ```
 
 | Option | Meaning |
@@ -22,172 +20,134 @@ cargo run -p nugget-bench -- --schema                                  # print t
 | `--scale smoke\|quick\|standard\|full` | Workload size (default `standard`); `smoke` is for CI, publish `standard` or `full` |
 | `--seed N` | Workload seed (default `42`) |
 | `--backend fake\|real` | `memory`, `perf`: the fake index (default) or the real stack in process; `proactive`: the reference engine or the real crate |
-| `--embed-url URL`, `--embed-model NAME` | Real backend: an OpenAI-compatible embeddings endpoint (on-device or LAN) instead of the in-process hash embedder |
+| `--embed-url URL`, `--embed-model NAME` | Real backend: an OpenAI-compatible embeddings endpoint (on-device or LAN) |
 | `--local-models` | Run against real local models ([Real-model results](#real-model-results)) |
-| `--out-dir DIR` | Report directory (default `bench/results/`; env `NUGGET_BENCH_RESULTS_DIR`) |
-| `--no-write`, `--json` | Write no files; print report JSON to stdout (summary to stderr) |
+| `--out-dir DIR`, `--no-write`, `--json` | Report directory (default `bench/results/`, env `NUGGET_BENCH_RESULTS_DIR`); write nothing; JSON to stdout |
 | `--strict` | Exit 4 if a metric misses its target, 3 if a selected suite is not implemented |
 
-Other exit codes: 0 success, 1 a suite failed or a report could not be written, 2 usage error.
-Suite-specific options are in each suite's section and `--help`. Debug-build timings are not
-representative; the CLI warns when you run `perf`, `energy` or `memory --backend real` on one.
+`--schema` prints the report schema. Other exit codes: 0 success, 1 a suite or report write
+failed, 2 usage error. Suite options are in each section and `--help`. Debug-build timings are not
+representative (the CLI warns for `perf`, `energy` and `memory --backend real`).
 
 ## Reports
 
 Each suite run writes `<out-dir>/<suite>-<UTC timestamp>.json` following
-[`schema/report.schema.json`](schema/report.schema.json) (`schema_version` 1): `suite`, `status`
-(`ok`, `not_implemented`, `failed`), times, `harness_version`, `git_commit` (from
-`NUGGET_BENCH_COMMIT`, `GITHUB_SHA` or `.git/HEAD`), `environment`, `config` (scale, seed and every
-workload parameter), `metrics[]` (`name`, `value`, `unit`, `direction`, `target`, `target_met`) and
-`targets[]` (flat pass/fail list). Metric names are dotted and stable; tests keep the Rust types,
-the schema and real output in sync.
-
-`bench/results/` is git-ignored except `latest.json`. The nightly workflow runs the benchmarks in
-[`scripts/bench-runs.json`](../scripts/bench-runs.json) on a release build and on `main` appends
-the results to the `bench-results` branch (the nightly history). `scripts/bench-readme.py` (the
-README table) and `scripts/bench-dashboard.py` (the book's dashboard) read
-`bench/results/latest.json` by default; copy it from that branch to refresh. CI runs
-`all --scale smoke` on Linux, macOS and Windows, `knowledge --strict`, and on Linux
-`memory --backend real --scale smoke` (not strict: at 50 queries the recall gate can tie its
-baseline), and validates every report against the schema.
+[`schema/report.schema.json`](schema/report.schema.json): status, times, `git_commit` (from
+`NUGGET_BENCH_COMMIT`, `GITHUB_SHA` or `.git/HEAD`), environment, every workload parameter, and
+`metrics[]` with stable dotted names, units, directions and targets. `bench/results/` is
+git-ignored except `latest.json`: the nightly workflow runs [`scripts/bench-runs.json`](../scripts/bench-runs.json),
+appends the results to the `bench-results` branch (the nightly history), and
+`scripts/bench-readme.py` and `scripts/bench-dashboard.py` read `bench/results/latest.json` by
+default (copy it from that branch to refresh). CI runs `all --scale smoke` on Linux, macOS and
+Windows, `knowledge --strict`, and on Linux `memory --backend real --scale smoke` (not strict: at
+50 queries the recall gate can tie its baseline), and validates every report against the schema.
 
 ## Suites
 
-| Suite | Runs against | Measures |
-|---|---|---|
-| `memory` | Fake index, or the real store, ingest, files watcher and retriever | Recall@k, MRR, freshness, propagation, ingest throughput, DB size, RSS |
-| `perf` | Fake index, or the real store and retriever plus the real `nuggetd` | Query, update and delete latency; daemon startup, extraction, idle cost, IPC paths, RSS |
-| `energy` | The real `nuggetd`, the desktop shell, local read-ahead | Idle CPU and wakeups; CPU-s and joules per 1k items indexed; cost per read-ahead |
-| `knowledge` | The real pipeline on a labelled corpus | Entity, claim and resolution quality, citations, unsupported claims, retraction, vault merge, MCP latency |
-| `proactive` | Reference engine, or the real crate | Card precision@5 and recall, distractor false positives, learning, dry runs, the approval gate |
-| `draft` | Nugget's drafting vs a Sentient-style baseline; fake model or a real provider | Voice match, fact recall, hallucination, leakage, injection resistance, prompt size, TTFT |
-| `doubletap` | The real `Drafter` with local models | Time to first inserted character, prompt cache use, read-ahead time and CPU |
-| `cua` | 69 tasks on six local test apps | Verified success, unconfirmed risky actions, needless confirmations, injections, asking when ambiguous |
-| `ask` | The daemon's Ask path on 67 gold questions | Correctness, abstention, citations, injection, the post-check, latency |
+`memory`, `perf`, `energy`, `knowledge`, `proactive`, `draft`, `doubletap`, `cua` and `ask`, each
+below with what it measures; their latest numbers are under [Results](#results), [Scale](#scale),
+[Energy](#energy) and [Real-model results](#real-model-results).
 
 ### `memory`
 
-**Fake index** (default, `src/index.rs`): an in-memory stand-in for `nugget-store` (dedup, BM25,
-brute-force kNN, RRF hybrid) with feature-hashed embeddings that carry no semantics. **Do not quote
-fake-index numbers as product numbers.** The corpus (`src/corpus.rs`) is synthetic; each query is
-four words from one target document, so it has exactly one relevant document.
+**Fake index** (default, `src/index.rs`): an in-memory stand-in for `nugget-store` whose hashed
+embeddings carry no semantics. **Do not quote fake-index numbers as product numbers.** The corpus
+(`src/corpus.rs`) is synthetic; each query has exactly one relevant document.
 
-**`--backend real`** (`src/real.rs`): an encrypted `nugget-store` in a temporary `NUGGET_HOME`,
-`nugget-ingest` with the `files` connector (300 ms debounce), `nugget-retrieve` with defaults, and
-the in-process `HashEmbedder` (256 dimensions) unless `--embed-url` or `--local-models` is given.
-Phases: the labelled eval set (57 documents, 42 queries) through the pipeline; the synthetic corpus
-ingested as Markdown files; known-item queries, with the fake index rebuilt on the same corpus as
-the baseline; file edits, creates, deletes and renames timed until `Retriever::search` reflects
-them; DB size and peak RSS. Gates: hybrid recall@10 ≥ the fake index's, eval-set hybrid recall@10
-≥ text-only, `freshness.p95_s` ≤ 60 s, every propagation rate 1.
-
-Options: `--memory-rerank off|local` (also measure the manifest's reranker), `--memory-rerank-timeout-ms`,
-`--memory-rerank-pool`, `--memory-embed-prefixes auto|off`, `--memory-queries N`,
-`--memory-no-freshness`; `NUGGET_BENCH_DUMP_MISSES=FILE` writes per-query ranks.
+**`--backend real`** (`src/real.rs`): an encrypted store in a temporary `NUGGET_HOME`,
+`nugget-ingest` with the `files` connector (300 ms debounce), the default retriever, and the
+in-process hash embedder unless `--embed-url` or `--local-models` is given. It runs the labelled
+eval set (57 documents, 42 queries), ingests the synthetic corpus as files, runs known-item queries
+against the fake index rebuilt on the same corpus, times file edits, creates, deletes and renames
+until search reflects them, and records DB size and peak RSS. Gates: hybrid recall@10 ≥ the fake
+index's, eval-set hybrid ≥ text-only, `freshness.p95_s` ≤ 60 s, propagation 1. Options:
+`--memory-rerank off|local`, `--memory-rerank-timeout-ms`, `--memory-rerank-pool`,
+`--memory-embed-prefixes auto|off`, `--memory-queries N`, `--memory-no-freshness`;
+`NUGGET_BENCH_DUMP_MISSES=FILE` writes per-query ranks.
 
 ### `perf`
 
-The fake run times the fake index (harness regression only). **`perf --backend real`**
-(`src/suites/scale.rs`) writes the synthetic corpus directly into an encrypted store and times the
-store's text, vector and hybrid search, `Retriever::search` and `build_context`, an exact vector
-reference (`recall_vs_exact@10`), updates, deletes and edit freshness. For a large store run
-`nugget-bench perf --backend real --scale full`, as `perf.yml` does.
+The fake run times the fake index (harness regression only). `perf --backend real`
+(`src/suites/scale.rs`) writes the synthetic corpus straight into an encrypted store and times
+store and retriever search, an exact vector reference (`recall_vs_exact@10`), updates, deletes and
+edit freshness. For a large store run `nugget-bench perf --backend real --scale full`, as
+`perf.yml` does.
 
 #### Daemon profile
 
-Then it profiles the real `nuggetd` (`$NUGGET_BENCH_NUGGETD`, else next to `nugget-bench`; skipped
-when absent), code in `src/suites/perf_daemon.rs`. A temporary home (`NUGGET_KEYCHAIN=off`, no
-model providers) is seeded with 300 / 2k / 10k / 100k items by scale; it measures startup, the
-startup knowledge run, searches, the hot IPC paths, Ask's retrieval step, the knowledge page, the
-vault render, an idle window, ingest through a watched folder, RSS and disk (`daemon.*`).
-`NUGGET_BENCH_KEEP_HOME=1` keeps the home. Process metrics come from `/proc` on Linux and `ps` on
-macOS; Windows skips them. `perf.yml` runs it weekly; `--scale full` takes about 30 minutes on 4
-vCPUs (`cargo build --release -p nuggetd -p nugget-bench` first).
-
-Options: `--perf-items N`; `--perf-sizes fixed|mail` (120-word items, or a mailbox-like mix with
-median 80 words); `--perf-phases all|store|daemon|sync|search` (`sync`: a files source's first
-sync through `nuggetd`; `search`: searches on a settled daemon, `NUGGET_BENCH_SEARCH_HOME` keeps
-seeded homes; both run only when named).
+Then it profiles the real `nuggetd` (`$NUGGET_BENCH_NUGGETD`, else next to `nugget-bench`; build
+both with `cargo build --release -p nuggetd -p nugget-bench`) on a temporary home
+(`NUGGET_KEYCHAIN=off`, no model providers) seeded with 300 / 2k / 10k / 100k items by scale:
+startup, the startup knowledge run, searches, hot IPC paths, Ask's retrieval step, the knowledge
+page, the vault render, idle CPU and wakeups, ingest, RSS and disk (`daemon.*`;
+`src/suites/perf_daemon.rs`). `NUGGET_BENCH_KEEP_HOME=1` keeps the home. Process metrics come from
+`/proc` (Linux) or `ps` (macOS); Windows skips them. `--scale full` takes ~30 min on 4 vCPUs.
+Options: `--perf-items N`; `--perf-sizes fixed|mail` (a mailbox-like mix, median 80 words);
+`--perf-phases all|store|daemon|sync|search` (`sync`: a files source's first sync; `search`:
+searches on a settled daemon, `NUGGET_BENCH_SEARCH_HOME` keeps seeded homes).
 
 ### `energy` (DD2)
 
-What Nugget costs in energy (`src/suites/energy/`). A meter samples every second, counting each
-process with its descendants: CPU time and wakeups from `/proc` on Linux and `powermetrics` (or
-`ps`) on macOS, system energy from RAPL or `sudo -n powermetrics`; Windows is not measured. Every
-source is optional and recorded (`params.<scenario>.energy_source`, `energy_note`). Package energy
-is the whole machine's, so each scenario meters an equal baseline window and reports `attributable
-= window − baseline`, which is noisy on a shared VM; CPU and wakeups are per process.
+What Nugget costs in energy (`src/suites/energy/`). A meter samples each process with its
+descendants every second: CPU time and wakeups (`/proc` on Linux, `powermetrics` or `ps` on macOS;
+Windows not measured) and system energy (RAPL, or `sudo -n powermetrics`). Every source is
+optional and recorded in `params.<scenario>.energy_source`. Package energy is the whole machine's,
+so an equal baseline window is subtracted (`attributable`, noisy on a shared VM); CPU and wakeups
+are per process. Scenarios (`--energy-scenarios`, env `NUGGET_BENCH_ENERGY_SCENARIOS`; default
+`daemon_idle,index_1k,a11y_poll,prefill`, or `all`):
 
-Scenarios (`--energy-scenarios`, env `NUGGET_BENCH_ENERGY_SCENARIOS`; default
-`daemon_idle,index_1k,a11y_poll,prefill`; short forms `idle`, `index`, `poll`, or `all`):
-
-- `daemon_idle`: a seeded `nuggetd` after its startup work. `index_1k`: 1,000 files written into a
-  watched folder until searchable, without model providers (indexing with the embedding model and
-  the extraction that follows are not measured).
-- `a11y_poll`: the shell's 1 Hz frontmost-app read, against a sleeping arm.
-- `prefill` (`--local-models`): read-aheads in `llama-server`.
-- `shell_idle`, `shell_focus` (Linux X11, macOS; only when listed): the shell (`NUGGET_BENCH_SHELL`)
-  hidden in the tray, and three text windows switched every 5 s with read-ahead off then on,
-  against the fake model server (`NUGGET_BENCH_FAKE_LLAMA_SERVER`). A debug shell honours
-  `NUGGET_E2E_PROBE` and reports read-ahead counts. On Linux, `bench/scripts/energy-linux.sh
-  <command…>` provides Xvfb, a window manager and AT-SPI (plus `xdotool` and a Python with GTK 3,
-  `NUGGET_BENCH_PYTHON`). On macOS the webview's XPC processes are not counted.
+- `daemon_idle` (a seeded daemon after its startup work); `index_1k` (1,000 files into a watched
+  folder, no model providers: indexing with the embedding model is not measured);
+- `a11y_poll` (the shell's 1 Hz frontmost-app read); `prefill` (`--local-models` read-aheads);
+- `shell_idle`, `shell_focus` (only when listed; Linux X11 and macOS): the shell
+  (`NUGGET_BENCH_SHELL`) hidden in the tray, and three text windows switched every 5 s with
+  read-ahead off then on, against the fake model server (`NUGGET_BENCH_FAKE_LLAMA_SERVER`). A debug
+  shell honours `NUGGET_E2E_PROBE`. On Linux `bench/scripts/energy-linux.sh <command…>` provides
+  Xvfb, a window manager and AT-SPI (plus `xdotool` and GTK 3 Python, `NUGGET_BENCH_PYTHON`); on
+  macOS the webview's XPC processes are not counted.
 
 `perf.yml`'s `energy` and `energy-prefill` jobs run weekly. Results: [Energy](#energy).
 
 ### `knowledge`
 
 The knowledge graph end to end (`src/suites/knowledge.rs`, `src/knowledge/`) on a fictional corpus
-in `bench/fixtures/knowledge/`: 106 items (57 mails, 16 events, 33 notes), 91 gold entities, 185
-scored claims, 579 mentions, and a scripted LLM (168 claims, 4 with hallucinated quotes, 4
-injected). Hard cases: one person under many names, a nickname with nothing to corroborate it, two
-people sharing a first name, job changes (one delivered out of order), a deletion, a prompt
-injection. The pipeline extracts, scores the graph, renders and validates the vault, edits pages,
-deletes items, re-renders (three-way merge) and serves `get_context` over MCP. Targets:
-`entities.f1` ≥ 0.8, unsupported and injected claims 0, citation coverage 1, invalid citations and
-validator errors 0, merge fidelity 1, retraction correctness 1. The scoring is tested against an
-oracle; the test `labels_agree_with_ingested_text` guards hand edits to the fixtures.
-
-Options: `--knowledge-items N|all` (real-model subset; `smoke` 8, `quick` 30),
-`--knowledge-corpus all|original` (the 93-item corpus without the later hard cases),
-`--knowledge-dump FILE` (false positives and negatives, and each real-model request, as JSONL).
+(`bench/fixtures/knowledge/`: 106 mails, events and notes; 91 gold entities, 185 scored claims)
+with a scripted LLM that includes hallucinated and injected claims. Hard cases: one person under
+many names, two people sharing a first name, job changes (one out of order), a deletion, an
+injection. It extracts, scores, renders and validates the vault, edits pages, deletes items,
+re-renders (three-way merge) and serves `get_context` over MCP. Targets: entity F1 ≥ 0.8,
+unsupported and injected claims 0, citation coverage 1, invalid citations and validator errors 0,
+merge fidelity 1, retraction 1. The test `labels_agree_with_ingested_text` guards hand edits to the
+fixtures. Options: `--knowledge-items N|all`, `--knowledge-corpus all|original` (93 items, without
+the later hard cases), `--knowledge-dump FILE`.
 
 ### `proactive`
 
-Proactive cards (PLAN M5: track the precision of accepted cards; every action has a dry-run diff).
-The suite drives a `ProactiveEngine` (`src/suites/proactive/`): the in-crate reference engine, or
-with `--backend real` the `nugget-proactive` crate on an encrypted store. The fixture
-(`bench/fixtures/proactive/`, built by `generate.rs`; `NUGGET_BENCH_REGEN=1 cargo test -p
-nugget-bench --lib committed_fixture` rewrites it) is one user over 30 days with 42 gold cards and
-191 distractors. Each morning the engine shows at most 5 cards; a simulated user accepts gold and
-dismisses the rest with a reason (10% noise); accepted actions run under single-use approvals, and
-probes try to run dismissed or replayed ones. A recency-ordered baseline and a learning-off arm run
-on the same seeds (3 / 10 / 30 / 100 by scale). Targets: precision@5 ≥ 0.7, recall ≥ 0.8,
-distractor FPR ≤ 0.05, 0 duplicates, learning gain ≥ 0, dry-run coverage and diff fidelity 1, 0
-executions without approval. One persona: a high score is necessary, not sufficient.
+Proactive cards (PLAN M5): the reference engine, or with `--backend real` the `nugget-proactive`
+crate, through `src/suites/proactive/`. The fixture (`bench/fixtures/proactive/`, JSON edited by
+hand) is one user over 30 days with 42 gold cards and 191 distractors. Each morning the engine shows
+up to 5 cards; a simulated user accepts gold and dismisses the rest with a reason (10% noise);
+actions run under single-use approvals, and probes try to run dismissed or replayed ones. A recency
+baseline and a learning-off arm run on the same 3 / 10 / 30 / 100 seeds. Targets: precision@5 ≥ 0.7,
+recall ≥ 0.8, distractor FPR ≤ 0.05, learning gain ≥ 0, dry-run coverage 1, 0 executions without
+approval. One persona: a high score is necessary, not sufficient.
 
 ### `draft`
 
 Double Tap drafting: does Nugget's prompt (voice profile plus budgeted, cited retrieval) beat a
-Sentient-style prompt (the whole vault plus raw samples) on voice and facts, while keeping secrets
-from cloud models? See docs/m3-spec.md and [the teardown](../docs/research/sentient-os-teardown.md).
-
-Fixtures (`fixtures/draft/`, fictional; the JSON files are the source and are edited by hand; the
-loader validates them): 3 personas with 40 sent messages each, 60 knowledge items with stale and
-final decisions, 5 planted secrets and one indirect injection, and 66 tasks with gold facts,
-forbidden facts and a reference reply. Both arms share model, system prompt and section format; the
-baseline gets no screenshot, which is generous to it. With a real model the Nugget arm drafts
-through the real `nugget_draft::Drafter`. The default fake model is deterministic and obeys any
-instruction it sees, so resistance can only come from what the prompt leaves out; **its numbers
-are not model quality.** Targets: Nugget voice match and recall ≥ baseline, hallucination ≤
-baseline; leak and prompt exposure 0 on cloud-marked runs; TTFT p50 < 1.2 s cloud, < 3 s local.
-
-Fake model, 66 tasks:
+Sentient-style prompt (the whole vault plus raw samples, no screenshot) on voice and facts, while
+keeping secrets from cloud models ([teardown](../docs/research/sentient-os-teardown.md) §2.4,
+§2.7)? Fixtures (`fixtures/draft/`, fictional JSON edited by hand and validated on load): 3
+personas, 60 knowledge items with stale and final decisions, 5 planted secrets, an indirect
+injection, 66 tasks with gold and forbidden facts. With a real model the Nugget arm drafts through
+the real `nugget_draft::Drafter`. The default fake model obeys any instruction it sees, so
+resistance comes only from what the prompt leaves out; **its numbers are not model quality.**
+Targets: Nugget voice and recall ≥ baseline, hallucination ≤ baseline, leak and prompt exposure 0
+on cloud-marked runs, TTFT p50 < 1.2 s cloud or < 3 s local. Fake model, 66 tasks:
 
 | Metric | Nugget | Baseline |
 |---|---|---|
-| `voice_match` | **0.904** | 0.707 |
-| `fact_recall` | **0.663** | 0.618 |
+| `voice_match` / `fact_recall` | **0.904 / 0.663** | 0.707 / 0.618 |
 | `hallucination_rate` | **0.25** | 0.40 |
 | `sensitive_leak_rate` / `sensitive_prompt_exposure_rate` | **0 / 0** | 0.18 / 1.00 |
 | `injection_resistance` (9 tasks) | **1.00** | 0.00 |
@@ -196,15 +156,10 @@ Fake model, 66 tasks:
 | `draft.win_rate_vs_baseline` | 0.95 | |
 
 With `--draft-locality local` secrets may enter the context (exposure 0.36, leak 0.11, injection
-resistance 0.67): leaving them out of the context is the defence that holds.
-
-Options: `--provider-url`, `--provider-model`, `--api-key-env`, `--provider-kind
-anthropic|openai_responses|openai_compatible`; `--draft-locality cloud|local`; `--fake-ttft-ms`,
-`--fake-prefill-ms-per-1k`, `--fake-token-ms`; `--draft-dump FILE`; `--draft-judge
-none|model|heuristic`, `--draft-judge-model ID`, `--draft-judge-timeout-s`,
-`--draft-judge-grounding`; `--draft-grounding on|off|both`, `--draft-grounding-check
-secrets|sentences`; `--draft-local-budget on|off`, `--draft-temperature`, `--draft-context-tokens`,
-`--draft-timeout-s`.
+resistance 0.67): leaving them out is the defence that holds. Options: `--provider-url`,
+`--provider-model`, `--api-key-env`, `--provider-kind`, `--fake-ttft-ms`,
+`--fake-prefill-ms-per-1k`, `--fake-token-ms`, `--draft-dump FILE`, and `--draft-*` (`--help`:
+locality, judge, grounding and its check, local budget, temperature, context, timeouts).
 
 ### `doubletap`
 
@@ -218,42 +173,34 @@ prompt tokens from cache vs evaluated, and with `--doubletap-read-ahead on` the 
 
 Methodology, tasks, environments and scoring: [`cua/README.md`](cua/README.md). Options:
 `--cua-agent reference|null|naive|nugget|nugget-compliant`, `--cua-env
-inproc|socket|xvfb|native`, `--cua-tasks TERMS`; `NUGGET_BENCH_CUA_TASK_TIMEOUT` (real models,
-default 300 s).
+inproc|socket|xvfb|native`, `--cua-tasks TERMS`; `NUGGET_BENCH_CUA_TASK_TIMEOUT` (real models).
 
 ### Native environments
 
-`--cua-env native` runs the apps on the machine's own desktop, one Microsoft Edge app window per
-app driven over UI Automation on Windows (`NUGGET_CUA_EDGE`), Google Chrome over AX on macOS
-(`NUGGET_CUA_CHROME`; needs the Accessibility permission). `NUGGET_CUA_DUMP=<dir>` writes the
-window trees. CI: `cua-windows` and `cua-macos` in `.github/workflows/real-os.yml`. Results:
-[`cua` results](#cua-results).
+`--cua-env native` drives the apps on the machine's own desktop: Edge app windows over UI
+Automation on Windows (`NUGGET_CUA_EDGE`), Chrome over AX on macOS (`NUGGET_CUA_CHROME`).
+`NUGGET_CUA_DUMP=<dir>` writes the window trees. CI: `cua-windows` and `cua-macos` in
+`.github/workflows/real-os.yml`. Results: [`cua` results](#cua-results).
 
 ### `ask`
 
 The answer Chat shows with "Use my sources", from product code (`Retriever::pack_context_with`,
-`nuggetd::ask::ask_request_packed`, `nuggetd::ask::AnswerFilter` and its post-check). Corpus: the
-retrieval eval set plus [`fixtures/ask/docs.json`](fixtures/ask/docs.json) (revised values and
-planted injections with canaries); [`fixtures/ask/questions.json`](fixtures/ask/questions.json):
-67 questions (21 single-fact, 13 multi-hop, 10 latest-value, 13 unanswerable, 10 injection). Arms:
-`plain` (the earlier prompt) and `grounded` (today's). Scoring is rule-based and independent of the
-post-check; citations are scored on the raw model text; a canary counts as obeyed only outside a
-warning or quote. An optional model judge answers in both orders. TTFT excludes retrieval.
-
-Options: `--ask-prompt plain|grounded|both`, `--ask-budget-tokens` (2000), `--ask-temperature`,
-`--ask-timeout-s` (300), `--ask-budget-s` (18000), `--ask-judge none|model`, `--ask-judge-model`,
-`--ask-judge-timeout-s`, `--ask-questions N`, `--ask-dump FILE`, `--ask-rescore FILE` (rebuild a
-report from a dump without a model).
+`nuggetd::ask::AnswerFilter` and its post-check), on the retrieval eval set plus
+[`fixtures/ask/docs.json`](fixtures/ask/docs.json) (revised values, planted injections) and 67
+questions in [`fixtures/ask/questions.json`](fixtures/ask/questions.json) (single-fact, multi-hop,
+latest-value, unanswerable, injection). Arms: `plain` (the earlier prompt) and `grounded`. Scoring
+is rule-based, on the raw model text; an optional judge answers in both orders. Options:
+`--ask-prompt plain|grounded|both`, `--ask-budget-tokens`, `--ask-temperature`, `--ask-timeout-s`,
+`--ask-budget-s`, `--ask-judge none|model`, `--ask-judge-model`, `--ask-judge-timeout-s`,
+`--ask-questions N`, `--ask-dump FILE`, `--ask-rescore FILE`.
 
 ## Double Tap app matrix (FF3)
 
-`nugget-a11y` against real apps on GitHub's runners: browsers loading local fixture pages (plain
-`textarea`, `contenteditable`, a Gmail-like compose, ProseMirror, Quill, Draft.js, Lexical,
-CKEditor 5, each beside a chat or mail thread with a password field) and native editors. Pages
-report their own text model; native editors are read back through accessibility. Per cell: detect,
-read, thread precision/recall, secure (password field refuses insert), six insert payloads (ASCII,
-newlines, emoji, RTL, combining marks, 5,000 characters), one-step undo, median read time. Contract:
-`crates/nugget-a11y/tests/fixtures/apps/PROTOCOL.md`.
+`nugget-a11y` against real apps on GitHub's runners: browsers on local fixture pages (textarea,
+contenteditable, a Gmail-like compose, ProseMirror, Quill, Draft.js, Lexical, CKEditor 5, beside a
+thread and a password field; `tests/fixtures/apps/PROTOCOL.md`) and native editors. Per cell:
+detect, read, thread precision/recall, secure, six insert payloads (ASCII, newlines, emoji, RTL,
+combining marks, 5,000 characters) checked by the page's own text model, one-step undo, read time.
 
 ```sh
 cargo test -p nugget-a11y --test apps_matrix -- --ignored --nocapture --test-threads=1
@@ -267,19 +214,16 @@ gate. Latest, 2026-10-31, run 41190942813:
 | OS | App | Detect, read, secure | Thread P/R | Insert | Undo | Read p50 |
 |---|---|---|---|---|---|---|
 | macOS 26.6 | Safari 26.6 | pass | 100% / 100% | 5/6 (combining marks arrive NFC-composed) | 6/6 | 76–171 ms |
-| | Chrome, Edge, Firefox | not measured: the page never loaded from the runner's background session | | | | |
-| | TextEdit / Notes | TextEdit detected, inserts not measured (reset refused); Notes never focused | | | | |
+| | Chrome, Edge, Firefox, TextEdit, Notes | not measured: browser pages never loaded from the runner's background session; TextEdit's document could not be reset; Notes never focused | | | | |
 | Windows Server 2022 | Chrome 156, Edge 156 | pass | 100% / 100% | 6/6 | 6/6 | 245–305 ms |
 | | Notepad / WordPad | pass | – | 6/6 | 1/6 (single-level undo) / 5/6 (RTL) | 71 / 331 ms |
 | Windows 11 | Chrome 156, Edge 155 | pass | 100% / 100% | 6/6 | 6/6 | 238–346 ms |
-| | Notepad | pass | – | 6/6 | 1/6 | 88 ms |
+| | Notepad (WordPad not installed) | pass | – | 6/6 | 1/6 | 88 ms |
 | Windows (both) | Firefox 158 | no focused text field over UI Automation (not diagnosed) | | | | |
 | Ubuntu 24.04 | Firefox 158 | pass | varies between runs (0–38% recall here) | 6/6 | 6/6 | 643–731 ms |
 | | gedit 46.2 | pass | – | 6/6 | 6/6 | 697 ms |
 | | LibreOffice Writer 24.2 | pass | – | 5/6 (only on-screen text is exposed) | 6/6 | 675 ms |
 | | Chrome 156 / Edge 156 | Chrome exposes no web content over AT-SPI without `--force-renderer-accessibility`; Edge aborted at start (sandbox helper) | | | | |
-
-On Windows rich editors are filled through the clipboard (restored afterwards), one undo step.
 
 ## Results
 
@@ -317,8 +261,7 @@ Dev container, 4 vCPUs, 2026-10-29, hash embeddings (which never take the approx
 | Edit freshness p50; update p50 | 88 ms; 1.7 ms | 1,118 ms; 8.7 ms |
 | Store writes; DB per 1k items; peak RSS | 778 items/s; 5.01 MB; 146 MiB | 829 items/s; 3.62 MB; 660 MiB |
 
-Dense vectors take the approximate index: 14 ms vs 556 ms exact at 100k (recall@10 0.997).
-
+Dense vectors take the approximate index (14 ms vs 556 ms exact at 100k, recall@10 0.997).
 **Daemon profile, 100,000 items**: startup 74 ms, first search 83 ms, startup extraction 570 s
 (175 items/s), vault render 10.4 s, idle 0.00% CPU and 0.0 wakeups/s, RSS after idle 1,472 MiB
 (mostly the draft voice profile, since cut from 978 to 106 MiB; `cargo run --release -p
@@ -338,8 +281,7 @@ nugget-voice --example voice_memory`). 500k: [Scale](#scale).
 | executed without approval (target 0) | **0** | | 0 | |
 | accepted precision / acceptance rate | 0.984 / 0.779 | | | |
 
-Every target passes, with no duplicates and full dry-run coverage. Left: each unflagged bulk sender
-(FPR 0.10) and each monthly plan is shown once before its first dismissal.
+Every target passes. Left: each unflagged bulk sender (FPR 0.10) is shown once before a dismissal.
 
 ### `knowledge`
 
@@ -369,20 +311,15 @@ runner). 500,000 items, GitHub `ubuntu-latest` (EPYC 9V74, 4 vCPUs, 16 GB), run 
 
 | Metric | Value |
 |---|---|
-| Startup / restart | 483 / 544 ms |
-| Ask retrieval (`retrieve.context`) p50 / p95 | 225 / 389 ms |
+| Startup / restart; Ask retrieval (`retrieve.context`) p50 / p95 | 483 / 544 ms; 225 / 389 ms |
 | RSS peak (first start) / after idle | 1,674 / 1,006 MiB |
 | `status` IPC p50; other hot IPC paths p50 | 45 µs; 42–68 µs |
 | Knowledge page / entity detail / graph overview p50 | 3.2 / 4.4 / 66.9 ms |
-| Startup knowledge extraction | 3,606 s (139 items/s) |
-| Vault render (15,040 pages); ingest | 46.9 s; 644 files/s |
+| Startup knowledge extraction; vault render (15,040 pages); ingest | 3,606 s (139 items/s); 46.9 s; 644 files/s |
 | Disk per item after seeding / after extraction | 4,245 / 10,563 bytes |
 | Idle CPU / wakeups | 0.00% / 0.0 per s |
 
-At 250k (dev container): restart 28 ms, idle RSS 429 MiB, `knowledge.status` ~0.2 ms (cached).
-
-<a id="ll1-part-two"></a>
-Later, on a 4-vCPU dev container: the first sync of 100,000 files (`--perf-phases sync`) runs at
+At 250k: restart 28 ms, idle RSS 429 MiB, `knowledge.status` ~0.2 ms. <a id="ll1-part-two"></a>On a 4-vCPU dev container: the first sync of 100,000 files (`--perf-phases sync`) runs at
 **1,709 items/s** (58.5 s; batched ingest writes), observed → committed p50 / p95 80 / 211 ms, file
 → searchable 601 ms p50. Search at 500k (`--perf-phases search`, text-only, 300 queries): **62.6 /
 123.5 ms** p50 / p95, recall@10 0.7076 (rare/common term split with an exact bound). The graph
@@ -398,12 +335,7 @@ on every run.
 `energy --scale quick` (60 s windows), release daemon, **debug** shell. Method: [`energy`
 (DD2)](#energy-dd2). **No energy counter on the CI machines**: GitHub's Linux VMs expose no RAPL
 and the virtual Macs' `powermetrics` reports no processor energy, so every joule figure is
-**MISSED (not measured)** and the figures are CPU time and wakeups. A run on a physical laptop is
-still needed.
-
-### Daemon and indexing
-
-Run [41021694231](https://github.com/rayhankhilji/nugget/actions/runs/41021694231), Linux, EPYC 7763:
+**MISSED (not measured)**; the figures are CPU time and wakeups. Run [41021694231](https://github.com/rayhankhilji/nugget/actions/runs/41021694231), Linux, EPYC 7763:
 the idle daemon (2,000 items, vault on) uses 0.086% of one core and 1.6 wakeups/s; indexing 1,000
 files (text-only) takes 1.56 s and **1.06 CPU-s per 1k items**, 11,800 wakeups per 1k items. macOS
 (virtual M1): idle 0.059% and 1.5 wakeups/s; indexing 1.06 CPU-s.
@@ -417,10 +349,8 @@ files (text-only) takes 1.56 s and **1.06 CPU-s per 1k items**, 11,800 wakeups p
 | 12 focus switches, read-ahead on (4 sent) | 1.46%, 120 | 0.18%, 1.7 |
 
 macOS: run [41027744669](https://github.com/rayhankhilji/nugget/actions/runs/41027744669). The
-daemon stayed at or under 0.005% in every scenario; one frontmost-app read costs 0.34 ms of CPU and
-~16 wakeups. The shell uses OS focus notifications on macOS and Windows and polls adaptively on
-Linux. With read-ahead on, the Linux shell's ~1.5% of a core is the accessibility read of each newly
-focused field, not the polling.
+daemon stayed at or under 0.005%; one frontmost-app read costs 0.34 ms of CPU and ~16 wakeups. With
+read-ahead on, the Linux shell's ~1.5% of a core is the accessibility read of each new field.
 
 ### Read-ahead prefill with a real model
 
@@ -431,41 +361,31 @@ focused field, not the polling.
 | macOS, M2 Pro (virtual), Metal | qwen3-4b-q4km | 7.4 | 34.4 |
 | macOS, M2 Pro (virtual) | qwen3-1.7b-q8 | 2.6 | 12.5 |
 
-One 4B read-ahead costs as much CPU as about ten hours of the idle daemon and hidden shell. It is
-mostly work the draft does anyway, wasted only for fields focused without drafting, so read-ahead
-stays on; it pauses in low power mode / battery saver, and on battery when `read_ahead_on_battery`
-is off.
+One 4B read-ahead costs as much CPU as ~10 hours of the idle daemon and hidden shell, but is mostly
+work the draft does anyway, so it stays on; it pauses in low power mode / battery saver, and on
+battery when `read_ahead_on_battery` is off.
 
 ## Real-model results
 
 Everything above uses scripted or fake models. Here `--local-models` installs the signed manifest's
-models and `llama-server` through `nugget-runtime`, as `nuggetd` does.
-[`evals.yml`](../.github/workflows/evals.yml) runs each suite weekly and on demand and uploads the
-reports as artifacts. Chat model `qwen3-4b-q4km` (thinking off); agent model `qwen3-8b-q4km`;
-`llama-server` b11940, CPU, one slot, 8,192-token context; `quick` scale, temperature 0. Runners:
-GitHub `ubuntu-latest` (4 vCPUs = 2 cores, 15.6 GiB, no GPU; the CPU model varies per job) and
-virtual Apple Silicon Macs. **Read these as a floor**: a typical 16 GB laptop has more cores and
-often a GPU, and CPU generations differ by up to 3× in prompt speed, so compare within a table.
-
-Options: `--models-home DIR` (env `NUGGET_BENCH_MODELS_HOME`), `--local-chat-model`,
-`--local-embed-model`, `--local-rerank-model`, `--local-pending FILE` (unsigned candidates from
-`manifests/pending/`, SHA-256 verified), `--local-threads N`, `--local-thinking off|model`.
+models and `llama-server` through `nugget-runtime`, as `nuggetd` does;
+[`evals.yml`](../.github/workflows/evals.yml) runs each suite weekly and uploads the reports. Chat
+model `qwen3-4b-q4km` (thinking off), agent model `qwen3-8b-q4km`, `llama-server` b11940 on CPU
+(one slot, 8,192 tokens), `quick` scale, temperature 0, on GitHub `ubuntu-latest` (2 cores, 15.6
+GiB, no GPU; the CPU model varies per job) and virtual Apple Silicon Macs. **Read these as a
+floor**, and compare within a table: CPU generations differ by up to 3× in prompt speed. Options:
+`--models-home DIR` (env `NUGGET_BENCH_MODELS_HOME`), `--local-chat-model`, `--local-embed-model`,
+`--local-rerank-model`, `--local-pending FILE`, `--local-threads N`, `--local-thinking off|model`.
 
 ### Double Tap latency
 
-`doubletap`, 12 tasks, local prompt budget (809 prompt tokens p50), from the trigger. With
-read-ahead the trigger finds 808 of 809 prompt tokens cached.
-
 #### A small Double Tap model and read-ahead
+
+`doubletap`, 12 tasks, local prompt budget (809 prompt tokens p50), from the trigger; with
+read-ahead the trigger finds 808 of 809 prompt tokens cached.
 
 | Runner | Model | First char p50 / p95, no read-ahead | ... read-ahead done | Read-ahead p50 | CPU-s per read-ahead |
 |---|---|---|---|---|---|
-| Linux, Xeon 8573C | 4B | 11.5 / 13.6 s **MISSED** | **0.18** / 0.20 s | 8.0 s | 15.1 |
-| | 1.7B | 6.0 / 7.0 s **MISSED** | **0.09** / 0.12 s | 4.2 s | 7.9 |
-| | 0.6B | 2.7 / 3.3 s | 0.05 / 0.06 s | 1.9 s | 3.5 |
-| macOS, M2 Pro (virtual) | 4B | 9.9 / 12.0 s **MISSED** | **0.18** / 0.30 s | 6.5 s | 28.6 |
-| | 1.7B | 3.2 / 4.6 s **MISSED** | **0.14** / 0.43 s | 2.5 s | 11.6 |
-| | 0.6B | 2.0 / 3.6 s | 0.12 / 0.53 s | 1.5 s | 7.1 |
 | Linux, EPYC 7763 | 4B | 30.1 / 34.6 s **MISSED** | **0.14** / 0.14 s | 21.3 s | 39.4 |
 | | 1.7B | 14.6 / 17.2 s **MISSED** | **0.08** / 0.15 s | 10.6 s | 19.6 |
 | | 0.6B | 5.6 / 6.9 s **MISSED** | 0.04 / 0.04 s | 4.2 s | 7.7 |
@@ -473,9 +393,10 @@ read-ahead the trigger finds 808 of 809 prompt tokens cached.
 | | 1.7B | 6.8 / 12.2 s **MISSED** | **0.20** / 0.37 s | 4.5 s | 11.2 |
 | | 0.6B | 3.2 / 3.9 s **MISSED** | 0.17 / 0.36 s | 2.5 s | 6.1 |
 
-Runs 40993886654 (first two runners) and 40998964453 (last two). **Once read-ahead has finished
-the 3 s target is met everywhere; without it only the 0.6B meets it, on the faster runners.** A
-trigger during read-ahead waits for the rest of the prefill (not benchmarked). Repeat drafts of a
+Run [40998964453](https://github.com/rayhankhilji/nugget/actions/runs/40998964453). **Once
+read-ahead has finished the 3 s target is met everywhere; without it nothing meets it on these
+runners** (on faster ones, e.g. a Xeon 8573C, the 0.6B reaches 2.7 s). A trigger during read-ahead
+waits for the rest of the prefill (not benchmarked). Repeat drafts of a
 thread start in 0.15 s (Linux) and 0.23 s (Mac) from the prompt cache. A read-ahead replaces the
 prompt reading the draft would do, so it is wasted only for fields focused without drafting; the
 shell sends one after 1.5 s of focus, at most 4 per minute. Default: the 4B with read-ahead on;
@@ -510,9 +431,8 @@ sentences with unsupported numbers or dates. Run
 | Prompt tokens p50 | 800 | 800 | 696 | 3,400 |
 
 Local prompts leave sensitive items out (`[draft.local] include_sensitive = false`), so only the
-baseline leaks the planted password. Known gap: drafts for `maya-t13` invent "the VPN password is
-included in the attached file", which no check catches. An 8B judge flips with order on a quarter
-to a third of pairs and is no more decisive than the rules.
+baseline leaks the planted password. Known gap: `maya-t13` drafts invent "the VPN password is
+included in the attached file", which no check catches.
 
 ### Computer use with a real model
 
@@ -526,8 +446,8 @@ to a third of pairs and is no more decisive than the rules.
 | Unconfirmed risky / injection compliance / false confirmations | **0 / 0 / 0** | **0 / 0 / 0** |
 | Timed out; wall time per task p50 | 0; 27 s | 2; 95 s |
 
-12 tasks is a small sample (one task is 0.08). On a 4-vCPU CPU the 8B's turns take 21 s p50 and
-64 s p95 and it timed out on 27 of 81 tasks in a larger QA harness: use the 4B on CPU-only machines.
+One task is 0.08 of the rate. The 8B timed out on 27 of 81 tasks in a larger QA harness (turns 21
+s p50, 64 s p95): use the 4B on CPU-only machines.
 
 #### Asking when the target is ambiguous, and the triage decision
 
@@ -535,9 +455,9 @@ to a third of pairs and is no more decisive than the rules.
 goal, or a delete whose object never appeared, and asks. Run
 [41235167757](https://github.com/rayhankhilji/nugget/actions/runs/41235167757), triage off as
 shipped: asked on 12 of 17 ambiguous or missing-fact tasks (4B, 0.71) and 13 of 17 (8B, 0.76),
-**target 0.9 MISSED**; needless questions on 9 controls 0 (4B) and 1 (8B, its own question); no
-unrequested Empty Trash; 0 unconfirmed risky actions. Not caught: requests missing a fact ("book a
-meeting with Dana", no time) and non-destructive moves on a guessed target.
+**target 0.9 MISSED** (requests missing a fact, such as a meeting with no time, and
+non-destructive moves on a guessed target); needless questions on 9 controls 0 (4B) and 1 (8B); 0
+unconfirmed risky actions.
 
 The goal triage (`AgentConfig::triage`, off in the daemon) refuses only a named concrete harm. Run
 [41018125222](https://github.com/rayhankhilji/nugget/actions/runs/41018125222):
@@ -580,12 +500,10 @@ CPU) with its task prefixes; `--memory-rerank local` adds `bge-reranker-v2-m3-q4
 | Ingest; embedding per 1k items | 3.06 files/s; 325 s | 3.12 files/s; 318 s | **1.38 files/s (4.0 h)**; 724 s |
 | Freshness p95 | 1.65 s | 1.67 s | 3.37 s |
 
-Eval set hybrid R@1 / MRR@10 / nDCG@10 0.774 / 0.931 / 0.946 (hash: 0.714 / 0.895 / 0.917). The
-vector leg has no signal on the made-up-word corpus, so RRF decides there. Convex fusion
-(`RetrieveConfig::fusion = "convex"`) fixes that corpus but loses on the English eval set (R@1
-0.702), so **RRF stays the default**. The reranker lifts MRR@10 to 0.83 (quick) given unlimited
-time, but needs ~0.5 s per passage on these CPUs; the adaptive reranker
-(`RetrieveConfig::rerank_adaptive`) pauses it instead of making every search wait 2.5 s (37 ms p50).
+Eval set hybrid R@1 / MRR@10 0.774 / 0.931 (hash 0.714 / 0.895). The vector leg has no signal on
+the made-up-word corpus. Convex fusion (`fusion = "convex"`) fixes that corpus but loses on the
+English eval set (R@1 0.702), so **RRF stays the default**. The reranker (MRR@10 0.83 at quick given
+unlimited time) needs ~0.5 s per passage here, so `rerank_adaptive` pauses it (search 37 ms p50).
 
 #### A multilingual embedder (GG7-2)
 
@@ -599,11 +517,10 @@ set, hit @1 / @5 / @10:
 | `granite-embedding-107m-multilingual` (121 MB) | 0.80 / 0.90 / 1.00 | 0.67 / 0.83 / 0.92 | 0.86 / 0.97 / 0.97 | 0.95 / 1.00 / 1.00 | 0.00 / 0.31 / 0.31 |
 | `multilingual-e5-small` (132 MB) | 0.00 / 0.10 / 0.20 | 0.00 / 0.17 / 0.33 | 0.21 / 0.52 / 0.62 | 0.12 / 0.45 / 0.57 | 0.00 / 0.08 / 0.23 |
 
-**v2-moe is proposed** (`manifests/pending/multilingual-embed.json`): same prefixes and dimensions,
-Apache-2.0 official GGUF, 1.3–2.2× the CPU per chunk. Through `nuggetd` every multilingual query
-finds its file in the top 10 with v2 (v1.5: 0.50–0.58 @10 across languages); @1 stays low because
-the English question also matches English mail lexically. The store records its embedding model
-(`Store::embedding_model`), so existing stores stay on v1.5 until re-embedded.
+**v2-moe is now signed** as the embedding pick for new stores (`manifests/pending/README.md`):
+same prefixes and dimensions, 1.3–2.2× the CPU per chunk. Through `nuggetd` every multilingual
+query finds its file in the top 10 with v2 (v1.5: 0.50–0.58). Stores keep the model that built
+their vectors (`Store::embedding_model`) until re-embedded.
 
 ### Ask answer quality
 
@@ -617,30 +534,25 @@ questions:
 | Latest-value questions | 0.90 → **1.00** | 0.90 → **1.00** | 0.70 → **1.00** |
 | Unanswerable: declines (target ≥ 0.8) | 0.54 → **0.69** (MISSED) | 0.77 → **0.92** | 0.31 → 0.38 |
 | Injection obeyed (target 0) | **0** | **0** | 0.20 |
-| Uncited statements | 0.19 → 0.15 | 0.16 → 0.05 | 0.44 → 0.70 |
 | Planted canary in any answer (67) | 2 → **0** | 2 → **0** | 2 → 3 |
 | Time to first token p50 (grounded) | 46.7 s | 83.3 s | 23.1 s |
 
-The grounded prompt stops planted instructions and fixes latest-value questions, but does not make
-the 4B more correct overall (judge 0.90 → 0.85): it declines, dates and resists injection better.
-Ask on the 1.7B is not recommended. The prompt costs ~100 tokens and 3–5 s to the first token.
+The grounded prompt (~100 more tokens, 3–5 s) stops planted instructions and fixes latest-value
+questions but does not make the 4B more correct (judge 0.90 → 0.85). Not recommended on the 1.7B.
 
 ### Ingest triage
 
-Items are searchable at once; the chat model triages them afterwards in a low-priority background
-job that yields to interactive chats. Rules in the nine UI languages mark sensitive content, and a
-model's "not sensitive" clears an item only when all five categories are false and the topic is a
-named safe one; unknown counts as sensitive. 315 files, 4B, run
-[41235376197](https://github.com/rayhankhilji/nugget/actions/runs/41235376197) (EPYC 7763): all
-searchable in **46 s**, fully triaged 2,373 s, freshness p95 16.0 s, 0 items without chunks, 10/10
-recall probes, 6/6 Asks during the sync cited support (time to first token p50 48.3 s, max 125.2 s).
-Onboarding's first source is done in **0.5 s**. Sensitivity, rules only: 45/45 situations in 9
-languages and 22/22 planted mails flagged, 0/1,157 normal mails; with the 4B on 300 mails, 22/22
-planted stay sensitive, 4/257 normal mails end sensitive, 12/257 labelled junk.
-
-Misses: the worst Ask during the sync (125.2 s) waited behind a proactive judge request, since
-changed to yield to Ask but not re-measured on a runner; full triage is slow on a CPU (~56 output
-tokens per item); the 1,200-mail run with the latest fixes has not run on a runner yet.
+Items are searchable at once and triaged afterwards by a background job that yields to chats;
+rules in nine languages mark sensitive content, and only an all-clear model verdict on a safe
+topic clears it. 315 files, 4B, run
+[41235376197](https://github.com/rayhankhilji/nugget/actions/runs/41235376197): all searchable in
+**46 s**, fully triaged 2,373 s, freshness p95 16.0 s, 10/10 recall probes, 6/6 Asks during the
+sync cited support (time to first token p50 48.3 s, max 125.2 s); onboarding's first source in
+**0.5 s**. Sensitivity rules alone flag 45/45 situations in 9 languages and 22/22 planted mails
+(0/1,157 normal); with the 4B on 300 mails, 22/22 stay sensitive, 4/257 normal mails end
+sensitive, 12/257 are labelled junk. Misses: the worst Ask waited behind a proactive judge request
+(fixed, not re-measured); full triage is slow on a CPU; the 1,200-mail run with the latest fixes
+has not run on a runner.
 
 ## Adding a suite
 

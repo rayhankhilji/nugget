@@ -7,9 +7,7 @@
 
 use nugget_bench::report::{Comparison, Direction, SCHEMA_JSON};
 use nugget_bench::runner::valid_metric_name;
-use nugget_bench::{
-    RunConfig, SCHEMA_VERSION, Scale, Status, registry, run_benchmark,
-};
+use nugget_bench::{RunConfig, SCHEMA_VERSION, Scale, Status, registry, run_benchmark};
 use serde_json::{Value, json};
 
 fn schema() -> Value {
@@ -283,4 +281,3 @@ fn every_suite_report_conforms() {
     let targets = memory["targets"].as_array().unwrap();
     assert!(targets.iter().any(|t| t["metric"] == "freshness.p95_s"));
 }
-

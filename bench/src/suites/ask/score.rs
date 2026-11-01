@@ -17,9 +17,8 @@ use super::gold::Question;
 /// Highest passage number a marker may name.
 pub const MAX_MARKER: u32 = 999;
 
-/// Phrasings of "your items don't say" that count anywhere in a sentence (normalised:
-/// lowercase, straight apostrophes). A superset of the product's `NOT_FOUND_PHRASES`, kept
-/// separately on purpose.
+/// Normalised phrasings of "your items don't say"; a superset of the product's
+/// `NOT_FOUND_PHRASES`, kept separately on purpose.
 pub const ABSTAIN_PHRASES: &[&str] = &[
     "couldn't find",
     "could not find",
@@ -618,9 +617,8 @@ pub fn passages(ctx: &ContextResponse) -> HashMap<u32, String> {
     out
 }
 
-/// The values a sentence states that a passage must contain to support it: numbers (with
-/// `:`/`.` inside kept, `14:20`, `4.6`) and capitalised words other than the first, of three
-/// letters or more. Normalised.
+/// The values a passage must contain to support a sentence: numbers and non-initial capitalised
+/// words of three letters or more, normalised.
 pub fn key_values(sentence: &str) -> Vec<String> {
     let plain = strip_markers(sentence);
     let mut out = BTreeSet::new();
@@ -691,17 +689,9 @@ pub fn support_in_context(q: &Question, ctx: &ContextResponse) -> usize {
         .count()
 }
 
-/// Score a successful answer for `q`: `answer` is the filtered text the user sees (correctness,
-/// abstention, stale values, canary), `raw` the model's own text (every citation figure).
-///
-/// Correct: for an unanswerable question (no support), an abstention; otherwise every `must`
-/// group present and no abstention. `must_not` values never decide correctness (a right
+/// Score a successful answer: `answer` is the filtered text the user sees, `raw` the model's own
+/// text (used for every citation figure). `must_not` values never decide correctness (a right
 /// "latest" answer may mention the stale value as context); they count as [`AnswerScore::stale`].
-///
-/// Citation precision counts, over answerable questions, every (sentence, n) pair of a cited
-/// content sentence of the raw text: supported when passage `n` belongs to a gold support doc,
-/// or when its text holds every [`key_values`] value the sentence states (and it states at
-/// least one); a marker naming no passage is unsupported (and an invalid marker).
 pub fn score(q: &Question, ctx: &ContextResponse, answer: &str, raw: &str) -> AnswerScore {
     let mut s = AnswerScore {
         support_in_context: support_in_context(q, ctx),
@@ -1044,5 +1034,4 @@ mod tests {
         // [1] is gold; [2] lacks "612" (a sentence-initial name is not a key value).
         assert_eq!((s.cited_pairs, s.supported_pairs), (2, 1));
     }
-
 }

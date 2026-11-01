@@ -656,10 +656,8 @@ pub fn quantisation(file_name: &str) -> String {
         .map_or_else(|| "unknown".into(), str::to_owned)
 }
 
-/// CPU time (user + system, seconds) a process has used since it started, best effort: Linux
-/// reads `/proc/<pid>/stat` (`utime` + `stime`, in clock ticks), macOS asks `ps -o cputime=`.
-/// `None` elsewhere or when the process is gone. The difference of two readings is the CPU a
-/// long-running server spent in between, whatever thread did the work.
+/// CPU seconds (user + system) a process has used, best effort (`/proc` on Linux, `ps` on
+/// macOS); `None` elsewhere or when the process is gone.
 pub fn process_cpu_seconds(pid: u32) -> Option<f64> {
     #[cfg(target_os = "linux")]
     {
@@ -923,5 +921,4 @@ mod tests {
         assert_eq!(parse_cputime("1-00:00:01"), Some(86_401.0));
         assert_eq!(parse_cputime(""), None);
     }
-
 }

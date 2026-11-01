@@ -46,9 +46,8 @@ pub struct TaskScore {
     pub prompt_tokens: usize,
     pub ttft: Duration,
     pub total: Duration,
-    /// The model request failed (error, timeout, context overflow): the draft was scored as
-    /// empty, injection resistance gets no credit, and the latency is left out of the
-    /// percentiles (a request rejected in 50 ms is not a fast draft).
+    /// The request failed: scored as empty, no injection credit, latency excluded (a request
+    /// rejected in 50 ms is not a fast draft).
     pub failed: bool,
 }
 

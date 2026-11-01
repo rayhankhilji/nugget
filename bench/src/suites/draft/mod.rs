@@ -41,17 +41,14 @@ pub const DRAFT_MAX_TOKENS: u32 = 400;
 pub const DRAFT_MAX_TOKENS_THINKING: u32 = 2048;
 /// Output cap for a judge verdict.
 pub const JUDGE_MAX_TOKENS: u32 = 160;
-/// Context window assumed for `--local-models` when the runtime config does not state one
-/// (`nugget-runtime`'s chat default on a 16 GB machine).
+/// Context window assumed for `--local-models` when the runtime config states none.
 pub const DEFAULT_LOCAL_CONTEXT_TOKENS: u32 = 8192;
 /// Tokens kept free besides the output: chat template, role markers, special tokens.
 pub const CONTEXT_MARGIN_TOKENS: u32 = 256;
-/// `estimate_tokens` counts four characters a token; real tokenizers count more tokens for
-/// numbers, addresses and punctuation-heavy text, so only this share of the window is filled.
+/// Share of the window filled: real tokenizers count more tokens than `estimate_tokens`' 4 chars.
 pub const ESTIMATE_SAFETY: f64 = 0.85;
 
-/// The baseline's prompt budget in estimated tokens for a context window: window minus the
-/// output cap minus [`CONTEXT_MARGIN_TOKENS`], times [`ESTIMATE_SAFETY`].
+/// The baseline's prompt budget in estimated tokens for a context window.
 pub fn prompt_budget(context_tokens: u32, max_output: u32) -> usize {
     let room = context_tokens.saturating_sub(max_output + CONTEXT_MARGIN_TOKENS);
     (f64::from(room) * ESTIMATE_SAFETY) as usize
@@ -61,8 +58,7 @@ pub fn prompt_budget(context_tokens: u32, max_output: u32) -> usize {
 pub const TTFT_TARGET_CLOUD_S: f64 = 1.2;
 pub const TTFT_TARGET_LOCAL_S: f64 = 3.0;
 
-/// Which path produced the Nugget arm. Switches to the real crates once `nugget-draft` (M3-C)
-/// exposes its prompt builder and `nugget-voice` (M3-D) its profile and `style_distance`.
+/// Which path produced the Nugget arm.
 pub const NUGGET_PATH: &str = "in_suite: nugget_draft::classify (contract rules) + nugget-retrieve \
      (text-only, recency boost, sensitive items excluded for cloud) + voice-stats prompt \
      (nugget_voice::VoiceHints/StyleStats computed in-suite) + instruction neutralising";
@@ -216,8 +212,7 @@ impl GroundingMode {
         }
     }
 
-    /// The default: `both` with a real model, `on` with the fake one (whose in-suite Nugget
-    /// arm has no grounding switch).
+    /// The default: `both` with a real model, `on` with the fake one (no grounding switch).
     pub fn resolve(opt: Option<Self>, real: bool) -> Self {
         opt.unwrap_or(if real { Self::Both } else { Self::On })
     }
@@ -245,9 +240,8 @@ impl std::str::FromStr for Temperature {
 
 /// Default temperature of draft requests to a real model.
 pub const DEFAULT_TEMPERATURE: f32 = 0.0;
-/// Default `--draft-judge-timeout-s` with `--draft-judge-model`: an 8B judge on 2 CPU cores
-/// reads about 14 tokens/s, so a ~700-token judge prompt takes ~50 s before it writes its
-/// verdict at a few tokens/s.
+/// Default `--draft-judge-timeout-s` with `--draft-judge-model`: an 8B judge on 2 cores takes
+/// ~50 s just to read a ~700-token prompt.
 pub const DEFAULT_JUDGE_TIMEOUT_S: u64 = 240;
 
 /// Where the judge's verdicts come from.
@@ -271,9 +265,7 @@ impl JudgePlan {
     }
 }
 
-/// Decide the judge from the options: `--draft-judge` (default `model` with `--local-models`
-/// or a `--draft-judge-model`, `none` otherwise), `--draft-judge-model`, whether the drafts
-/// come from a real model and from a local one, and the drafting model's manifest id.
+/// Decide the judge from the options and the drafting model.
 pub fn plan_judge(
     mode: Option<JudgeMode>,
     judge_model: Option<&str>,
@@ -327,8 +319,7 @@ impl Switch {
     }
 }
 
-/// Default `--draft-timeout-s`: a 4B model on 4 CPU cores prefills a ~6k-token baseline prompt
-/// in a few minutes.
+/// Default `--draft-timeout-s`: a 4B model on 4 cores takes minutes to prefill the baseline.
 pub const DEFAULT_TIMEOUT_S: u64 = 420;
 
 struct RealModel {
@@ -361,8 +352,7 @@ pub struct RequestFailure {
     pub elapsed: Duration,
 }
 
-/// Run a generation (`work` yields the text and the time of its first visible token) within
-/// `timeout`; a timeout or an error becomes a [`RequestFailure`]. Times are from `started`.
+/// Run a generation within `timeout`; a timeout or an error becomes a [`RequestFailure`].
 async fn timed<F>(
     work: F,
     timeout: Duration,
@@ -657,8 +647,7 @@ pub enum NuggetImpl<'a> {
     Engine(&'a Engine),
 }
 
-/// The Nugget arms of a run: the one reported as `draft.nugget.*` and, optionally, the
-/// ungrounded one.
+/// The Nugget arms of a run: `draft.nugget.*` and, optionally, the ungrounded one.
 #[derive(Clone)]
 pub struct ArmSetup<'a> {
     pub nugget: NuggetImpl<'a>,
@@ -696,8 +685,7 @@ impl Slot {
     }
 }
 
-/// Run both arms over `tasks` (indices into the corpus) and score them. `baseline_budget` cuts
-/// the baseline prompt to that many estimated tokens.
+/// Run both arms over `tasks` and score them.
 #[cfg(test)]
 async fn run_arms(
     world: &World,
@@ -720,8 +708,7 @@ async fn run_arms(
     .await
 }
 
-/// Run the arms of `setup` and the baseline over `tasks` (indices into the corpus) and score
-/// them. `baseline_budget` cuts the baseline prompt to that many estimated tokens.
+/// Run the arms of `setup` and the baseline over `tasks` and score them.
 async fn run_arms_with(
     world: &World,
     tasks: &[usize],
@@ -906,8 +893,7 @@ impl Benchmark for DraftBench {
             ));
         }
         let all = corpus.tasks.len();
-        // The fake model is cheap: always every task. A real one is limited by scale, a local
-        // one more (a 4B model on 4 CPU cores takes minutes per task with the judge).
+        // A local model takes minutes per task with the judge, so it runs fewer tasks.
         let limit = if local {
             ctx.scale().pick(3, 8, 16, all).min(all)
         } else if real {
@@ -965,8 +951,7 @@ impl Benchmark for DraftBench {
             ctx.param("sampling.temperature", "n/a (deterministic fake model)");
         }
 
-        // The baseline must fit a real model's window: config, then option, then (local) the
-        // runtime default.
+        // The baseline must fit a real model's window.
         let window = if !real {
             None
         } else if let Some(c) = context_tokens {
@@ -1283,8 +1268,7 @@ async fn judge_all(
     .await
 }
 
-/// Run the model judge over every task, arm `a` (in the judge's "Nugget" seat) against arm
-/// `b`, each given as (drafts, scores) per task.
+/// Run the model judge over every task, arm `a` (the "Nugget" seat) against arm `b`.
 async fn judge_pairs(
     world: &World,
     tasks: &[usize],
@@ -1611,9 +1595,8 @@ fn arm_metrics(arm: &str, s: &ArmSummary, out: &mut Vec<Metric>) {
     }
 }
 
-/// Turn a run into metrics with targets: Nugget at least the baseline on voice and recall, at
-/// most the baseline on hallucinations, no secret in a cloud prompt or draft, and (real
-/// providers only) time to first token under the M3 target for its locality.
+/// Turn a run into metrics with targets relative to the baseline (TTFT targets for real
+/// providers only).
 fn metrics(run: &DraftRun, real: bool, locality: Locality) -> Vec<Metric> {
     let n = score::summarise(&run.nugget);
     let b = score::summarise(&run.baseline);
@@ -2086,5 +2069,4 @@ mod tests {
         // 6 tasks x 3 arms (grounded, ungrounded, baseline).
         assert_eq!(reqs.len(), 18);
     }
-
 }

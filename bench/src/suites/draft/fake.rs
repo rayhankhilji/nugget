@@ -721,5 +721,4 @@ mod tests {
         assert!(d.starts_with("the final"), "{d}");
         assert!(!d.contains("Dear"), "{d}");
     }
-
 }

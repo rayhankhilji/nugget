@@ -64,9 +64,8 @@ fn store_err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// Card persistence that never keeps what was learned: the learning-off ablation. Feedback still
-/// moves cards through the state machine (so dedup and tombstones work), but every save resets
-/// the scoring model to its prior and forgets the per sender, domain, kind and thread entries.
+/// Learning-off ablation: cards still move through the state machine, but every save resets the
+/// scoring model to its prior.
 struct FrozenModel(StoreCardStore);
 
 impl CardStore for FrozenModel {
@@ -602,8 +601,7 @@ impl ProactiveEngine for RealEngine {
             .get(card_id)
             .cloned()
             .ok_or_else(|| format!("card {card_id} has no prepared action"))?;
-        // The user approved the preview of the card the approval names. With no approval the
-        // adapter still asks the crate, with an approval bound to nothing, so the crate's gate
+        // With no approval, still ask the crate with one bound to nothing, so the crate's gate
         // (not the adapter) is what refuses.
         let crate_approval = match approval {
             Some(a) => self

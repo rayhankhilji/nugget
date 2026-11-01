@@ -67,9 +67,7 @@ pub struct CorpusConfig {
     /// the median of a log-normal length distribution.
     pub words_per_doc: usize,
     pub seed: u64,
-    /// Spread of the log-normal body length (σ of `ln(words)`); 0 gives every document exactly
-    /// `words_per_doc` words. [`MAIL_LENGTH_SIGMA`] gives a mailbox-like mix: most items a few
-    /// dozen words, a long tail of long threads and documents.
+    /// σ of `ln(words)` for body length; 0 gives exactly `words_per_doc` words.
     pub length_sigma: f64,
 }
 
@@ -249,7 +247,6 @@ pub fn marker(id: usize, version: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn generation_is_deterministic() {
@@ -264,5 +261,4 @@ mod tests {
         let c = Corpus::generate(CorpusConfig { seed: 43, ..cfg });
         assert_ne!(a.docs, c.docs);
     }
-
 }

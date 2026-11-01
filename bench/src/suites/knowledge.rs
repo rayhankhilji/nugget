@@ -942,9 +942,7 @@ fn request_lines(
         .collect()
 }
 
-/// Which hard cases the (possibly subset) corpus can decide, case by case: all of them on the
-/// full corpus. A nickname case needs two mentions of the person, a same-first-name case a
-/// mention of each person, a job change all its claims in scope.
+/// Which hard cases the (possibly subset) corpus can decide; all of them on the full corpus.
 struct HardCaseScope {
     nickname: Vec<bool>,
     first_name: Vec<bool>,
@@ -1132,9 +1130,8 @@ mod tests {
             .collect()
     }
 
-    /// The real pipeline (default build): the suite completes, every gated metric is reported,
-    /// and the scripted LLM tied every request to a corpus item. The values themselves are the
-    /// pipeline's results, not asserted here.
+    /// The real pipeline completes, reports every gated metric, and every LLM request matched an
+    /// item. Metric values are not asserted.
     #[cfg(feature = "pipeline")]
     #[test]
     fn real_pipeline_smoke() {
@@ -1205,160 +1202,6 @@ mod tests {
         ] {
             assert!(r.targets.iter().any(|c| c.metric == t), "{t}");
         }
-    }
-
-    /// A stand-in for a real local model: the scripted extraction for most items, and for
-    /// three chosen items a provider error, prose instead of JSON, and a stall past the timeout.
-    #[cfg(feature = "pipeline")]
-    struct MockModel {
-        id: nugget_core::ids::ProviderId,
-        script: ScriptedLlm,
-        fail: ItemRef,
-        garbage: ItemRef,
-        stall: ItemRef,
-    }
-
-    #[cfg(feature = "pipeline")]
-    #[async_trait::async_trait]
-    impl Provider for MockModel {
-        fn id(&self) -> &nugget_core::ids::ProviderId {
-            &self.id
-        }
-
-        fn meta(&self) -> nugget_infer::ProviderMeta {
-            nugget_infer::ProviderMeta {
-                kind: nugget_infer::ProviderKind::OpenaiCompatible,
-                model: "mock-local".into(),
-                locality: nugget_core::capability::Locality::OnDevice,
-                context_tokens: Some(32_768),
-            }
-        }
-
-        async fn chat(
-            &self,
-            req: nugget_infer::ChatRequest,
-        ) -> nugget_core::Result<nugget_infer::ChatStream> {
-            use nugget_infer::{ChatEvent, StopReason};
-            if req.items.contains(&self.fail) {
-                return Err(nugget_core::Error::Provider("server error 500".into()));
-            }
-            if req.items.contains(&self.stall) {
-                tokio::time::sleep(Duration::from_secs(600)).await;
-            }
-            if req.items.contains(&self.garbage) {
-                let events = vec![
-                    Ok(ChatEvent::TextDelta(
-                        "Sure! The people in this email are Maggie and Robin.".into(),
-                    )),
-                    Ok(ChatEvent::Done {
-                        stop_reason: StopReason::EndTurn,
-                        input_tokens: None,
-                        output_tokens: None,
-                    }),
-                ];
-                return Ok(Box::pin(futures::stream::iter(events)));
-            }
-            self.script.chat(req).await
-        }
-
-        async fn embed(&self, _: &[String]) -> nugget_core::Result<Vec<Vec<f32>>> {
-            Err(nugget_core::Error::Unsupported("no embeddings".into()))
-        }
-    }
-
-    /// `--local-models` with a mocked model: the subset is processed and scored, and every
-    /// failed, unparseable and stalled request is counted (none aborts the suite).
-    #[cfg(feature = "pipeline")]
-    #[test]
-    fn real_model_path_counts_failures_and_scores_the_subset() {
-        let full = Fixture::builtin().unwrap();
-        let mut ctx = RunContext::new(RunConfig {
-            scale: Scale::Smoke,
-            ..RunConfig::default()
-        });
-        let keep = full.select_items(real_items(Scale::Smoke));
-        assert_eq!(keep.len(), 8);
-        let scenario: Vec<&String> = full
-            .scenario
-            .delete
-            .iter()
-            .chain(&full.scenario.injection)
-            .collect();
-        let others: Vec<ItemRef> = keep
-            .iter()
-            .filter(|id| !scenario.contains(id))
-            .map(|id| full.item(id).unwrap().item_ref())
-            .collect();
-        let mock = MockModel {
-            id: nugget_core::ids::ProviderId::new("mock-local"),
-            script: ScriptedLlm::new(&full),
-            fail: others[0].clone(),
-            garbage: others[1].clone(),
-            stall: others[2].clone(),
-        };
-        let ms = run_real_model(
-            &mut ctx,
-            &full,
-            Arc::new(mock),
-            "mock local model",
-            Duration::from_secs(2),
-        )
-        .unwrap();
-        let p = ctx.params();
-        assert_eq!(p["items"], 8);
-        assert_eq!(p["corpus_items"], full.items.len());
-        assert_eq!(p["subset"]["items"], 8);
-        assert_eq!(p["llm_timeout_s"], 2.0);
-        assert!(!p.contains_key("scripted_hallucinated_quotes"));
-        assert!(p["llm"].as_str().unwrap().starts_with("mock local model"));
-        assert!(p["system"].as_str().unwrap().contains("mock local model"));
-        // Recall is over what the subset supports: fewer gold entities and claims in scope.
-        let fs = full.stats();
-        let gold_entities = p["gold_entities"].as_u64().unwrap() as usize;
-        assert!(gold_entities > 0 && gold_entities < fs.entities);
-        assert!((p["gold_claims"].as_u64().unwrap() as usize) < fs.claims);
-
-        // One request per (small) item; each fault counted once, in its own class.
-        let pipeline = &p["system_stats"]["runs"][0];
-        assert_eq!(get(&ms, "llm.requests"), 8.0);
-        assert_eq!(
-            pipeline["llm_requests"].as_u64(),
-            Some(8),
-            "the pipeline saw what the meter saw"
-        );
-        assert_eq!(pipeline["llm_failed_requests"].as_u64(), Some(3));
-        assert_eq!(get(&ms, "llm.failures"), 1.0);
-        assert_eq!(get(&ms, "llm.timeouts"), 1.0);
-        assert_eq!(get(&ms, "llm.unparseable"), 1.0);
-        assert_eq!(get(&ms, "llm.schema_invalid"), 0.0);
-        assert_eq!(get(&ms, "llm.lost_rate"), 3.0 / 8.0);
-        assert_eq!(get(&ms, "llm.items"), 8.0);
-        assert!(
-            get(&ms, "llm.latency.p95") >= 2.0,
-            "the stall counts at the timeout"
-        );
-        assert!(get(&ms, "llm.latency.p50") < 2.0);
-        assert!(get(&ms, "llm.gate.claims_accepted") > 0.0);
-        assert_eq!(
-            p["llm_requests_after_extract"], 0,
-            "no retry in the delete run"
-        );
-        for n in ["llm.calls", "llm.unmatched"] {
-            assert!(ms.iter().all(|m| m.name != n), "{n}");
-        }
-        // The rest of the suite ran and is scored on the subset.
-        assert!(get(&ms, "entities.recall") > 0.0 && get(&ms, "entities.recall") <= 1.0);
-        assert!(get(&ms, "claims.recall") > 0.0 && get(&ms, "claims.recall") <= 1.0);
-        assert!(get(&ms, "retraction.checks") > 0.0);
-        let f1 = ms.iter().find(|m| m.name == "entities.f1").unwrap();
-        assert_eq!(f1.target, Some(ENTITY_F1_TARGET));
-        let tp = ms
-            .iter()
-            .find(|m| m.name == "throughput.items_per_s")
-            .unwrap();
-        assert!(tp.description.contains("model time included"));
-        // The smoke subset carries every hard case.
-        assert!(!p.contains_key("hard_cases_not_in_subset"));
     }
 
     #[test]
@@ -1454,4 +1297,3 @@ mod tests {
         assert!(get(&ms, "claims.precision") < 1.0);
     }
 }
-

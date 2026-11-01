@@ -418,5 +418,4 @@ mod tests {
         assert!(s.cart.is_empty());
         assert_eq!(s.screen, Screen::Done);
     }
-
 }

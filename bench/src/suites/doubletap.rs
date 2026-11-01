@@ -105,12 +105,8 @@ pub struct FakeLatency {
     pub token_ms: u64,
 }
 
-/// A deterministic chat provider: [`FAKE_REPLY`] word by word after a latency that grows with
-/// the prompt tokens it has to read, with usage in `Stats` and `Done`. It simulates
-/// llama-server's prompt cache (one slot): the tokens of the longest common prefix with the
-/// previous prompt (or with a prefix warmed by [`Provider::prewarm_prefix`]) are served from the
-/// cache, reported as `cached_input_tokens`, and cost no prefill time. Can also fail or stall on
-/// request (tests).
+/// A deterministic chat provider streaming [`FAKE_REPLY`] after a latency that grows with
+/// uncached prompt tokens; it simulates llama-server's one-slot prompt cache.
 pub struct FakeChat {
     id: ProviderId,
     locality: Locality,
@@ -120,8 +116,7 @@ pub struct FakeChat {
     /// Every request opens a stream that never yields.
     stall: bool,
     requests: AtomicUsize,
-    /// The slot's cached prompt text. Held across a prefix prewarm's prefill, so a request
-    /// that arrives meanwhile queues behind it (as on a one-slot server).
+    /// The slot's cached prompt; held across a prewarm so requests queue as on a one-slot server.
     slot: tokio::sync::Mutex<String>,
 }
 
@@ -153,9 +148,8 @@ impl FakeChat {
     }
 }
 
-/// A request's prompt as the fake model reads it: system, then each message's role and text
-/// parts in order, with nothing closing a message, so a request's [`ChatRequest::cache_prefix`]
-/// renders to a prefix of the request's own rendering.
+/// A request's prompt as the fake model reads it. Nothing closes a message, so a
+/// [`ChatRequest::cache_prefix`] renders to a prefix of the request's own rendering.
 fn render_prompt(req: &ChatRequest) -> String {
     let mut out = String::new();
     if let Some(s) = &req.system {
@@ -284,9 +278,7 @@ impl Provider for FakeChat {
 
 // ---- The drafter, as the daemon builds it ----
 
-/// Opens the provider's connection on trigger and warms its prompt cache with the draft's
-/// stable prefix (as `nuggetd`'s `ProviderWarmer`). Counts the warm-ups it started and
-/// finished, so the bench can wait for them (bounded) where a pass needs a finished prewarm.
+/// As `nuggetd`'s `ProviderWarmer`, counting warm-ups so the bench can wait for them.
 #[derive(Default)]
 pub struct ProviderWarmer {
     started: AtomicUsize,
@@ -304,8 +296,7 @@ impl ProviderWarmer {
         self.prefix_calls.load(Ordering::SeqCst)
     }
 
-    /// Wait until at least `at_least` warm-ups have started and every started one finished.
-    /// False on timeout.
+    /// Wait until `at_least` warm-ups started and all finished; false on timeout.
     pub async fn settle(&self, at_least: usize, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
@@ -426,8 +417,7 @@ fn parse_date(d: &str) -> Result<OffsetDateTime, BenchError> {
         .map_err(|_| bad())
 }
 
-/// One store per persona: every knowledge item (sensitive ones flagged) and the persona's sent
-/// messages, one chunk per item, no embeddings.
+/// One text-only store per persona: knowledge items and sent messages, one chunk each.
 pub(crate) fn build_stores(corpus: &Corpus) -> Result<BTreeMap<String, Store>, BenchError> {
     let mut stores = BTreeMap::new();
     for p in &corpus.personas {
@@ -455,8 +445,7 @@ pub(crate) fn build_stores(corpus: &Corpus) -> Result<BTreeMap<String, Store>, B
     Ok(stores)
 }
 
-/// One drafter per persona (all routing to one provider on the Synthesis tier), sharing one
-/// warmer.
+/// One drafter per persona, sharing one provider and warmer.
 pub struct Drafters {
     by_persona: HashMap<String, Drafter>,
     warmer: Arc<ProviderWarmer>,
@@ -467,9 +456,8 @@ impl Drafters {
         self.by_persona.get(persona)
     }
 
-    /// What the daemon does when Double Tap is enabled: [`Drafter::prewarm_idle`] once (every
-    /// drafter shares the provider and the rules prefix), then wait for it, bounded. Returns
-    /// the provider warmed and whether the warm-up finished in time.
+    /// [`Drafter::prewarm_idle`] once, as the daemon does, waited for (bounded). Returns the
+    /// provider warmed and whether the warm-up finished in time.
     pub(crate) async fn prewarm_idle(&self, wait: Duration) -> Option<(ProviderId, bool)> {
         let mut ids: Vec<&String> = self.by_persona.keys().collect();
         ids.sort();
@@ -540,8 +528,7 @@ pub struct Sample {
 }
 
 impl Sample {
-    /// Prompt tokens of the request, cached or not: the engine's timings, else the stream's
-    /// usage.
+    /// Prompt tokens of the request, cached or not.
     pub fn prompt_tokens(&self) -> Option<u64> {
         self.timings
             .prompt_tokens
@@ -708,8 +695,7 @@ impl Probe {
     }
 }
 
-/// Read `task` ahead with the request its trigger will send, bounded by `timeout` (cancelled
-/// when it runs out).
+/// Read `task` ahead with its trigger's request, cancelled after `timeout`.
 pub(crate) async fn read_ahead_task(
     drafters: &Drafters,
     task: &Task,
@@ -1134,9 +1120,8 @@ pub fn pass_metrics(pass: &Pass, target: Option<f64>) -> Vec<Metric> {
     out
 }
 
-/// Metrics of the read-ahead before each draft of the timed pass (`doubletap.read_ahead.`
-/// prefix). `min_interval_ms`: the product's `[draft.read_ahead] min_interval_ms`, which caps
-/// the projected rate. `skip_target`: give `skipped` a target of 0 (real on-device runs).
+/// Read-ahead metrics of the timed pass. `min_interval_ms` caps the projected rate;
+/// `skip_target` gives `skipped` a target of 0.
 pub fn read_ahead_metrics(
     results: &[ReadAheadResult],
     min_interval_ms: u64,
@@ -1292,8 +1277,7 @@ pub fn read_ahead_metrics(
     out
 }
 
-/// `cpu_s` CPU seconds per read-ahead at `per_min` focus changes a minute, as a percentage of
-/// one core; the rate is capped at one read-ahead per `min_interval_ms`.
+/// Percent of one core at `per_min` read-aheads a minute (capped by `min_interval_ms`).
 pub fn projected_core_pct(cpu_s: f64, per_min: u32, min_interval_ms: u64) -> f64 {
     let cap = if min_interval_ms == 0 {
         f64::INFINITY
@@ -1392,8 +1376,7 @@ pub fn thinking_metrics(pass: &Pass) -> Vec<Metric> {
     out
 }
 
-/// The cache-reuse pass: does the second request read only the new tokens, and what does a
-/// finished prefix prewarm save?
+/// The cache-reuse pass: repeated-request reuse and what a finished prefix prewarm saves.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CachePass {
     /// One task drafted twice in a row, `begin` alone both times (the server's cache only).
@@ -1526,8 +1509,7 @@ pub fn cache_metrics(c: &CachePass) -> Vec<Metric> {
     out
 }
 
-/// Fill the provider's prompt cache with an unrelated tiny prompt, so the next request starts
-/// from (nearly) nothing cached. Errors are ignored.
+/// Evict the prompt cache with a tiny unrelated prompt; errors are ignored.
 async fn reset_cache(provider: &Arc<dyn Provider>, timeout: Duration) {
     let req = ChatRequest::new(vec![Message::user_text("Reply with OK.")])
         .with_system("Benchmark cache reset.")
@@ -1545,8 +1527,7 @@ async fn reset_cache(provider: &Arc<dyn Provider>, timeout: Duration) {
     let _ = tokio::time::timeout(timeout, work).await;
 }
 
-/// Run the cache-reuse pass on `repeat` (drafted twice) and `fresh` (reset, no prewarm; reset,
-/// waited prewarm).
+/// Run the cache-reuse pass on `repeat` and `fresh`.
 async fn run_cache_pass(
     drafters: &Drafters,
     provider: &Arc<dyn Provider>,
@@ -1740,8 +1721,7 @@ pub(crate) fn spread(all: usize, n: usize) -> Vec<usize> {
     (0..n).map(|i| i * all / n).collect()
 }
 
-/// Up to `n` task indices not in `used` (from the end, so they differ from the spread), else
-/// the first of `used`.
+/// Up to `n` task indices not in `used`, from the end; else the first of `used`.
 fn unused(all: usize, used: &[usize], n: usize) -> Vec<usize> {
     let mut out: Vec<usize> = (0..all)
         .rev()
@@ -1783,8 +1763,7 @@ fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Met
     let read_ahead = ctx.config.doubletap.doubletap_read_ahead;
     let product_interval_ms = ReadAheadConfig::default().min_interval_ms;
     if read_ahead.is_on() {
-        // Every task stands for a focus change well apart from the last; the product's rate
-        // limit is applied to the CPU projection instead.
+        // Tasks stand for focus changes far apart; the rate limit applies to the projection.
         config.read_ahead.enabled = true;
         config.read_ahead.min_interval_ms = 0;
     }
@@ -2406,5 +2385,4 @@ mod tests {
             cached(&off)
         );
     }
-
 }

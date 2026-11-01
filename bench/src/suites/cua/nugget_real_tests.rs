@@ -296,4 +296,3 @@ fn a_tool_call_written_as_text_is_malformed() {
     assert!(turns > 1.0);
     assert_eq!(metric(&am, "model.malformed_tool_calls"), turns);
 }
-

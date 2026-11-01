@@ -72,7 +72,6 @@ impl StoreParams {
             edit_timeout_s: 30.0,
         }
     }
-
 }
 
 /// Entry point for `perf --backend real`.
@@ -630,7 +629,6 @@ async fn run_async(p: &StoreParams, seed: u64) -> Result<Vec<Metric>, BenchError
 mod tests {
     use super::*;
     use crate::runner::{Backend, RunConfig};
-    
 
     fn tiny() -> StoreParams {
         StoreParams {

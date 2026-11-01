@@ -240,9 +240,7 @@ fn skip(ctx: &mut RunContext, s: Scenario, why: &str) {
     ctx.param(s.as_str(), format!("skipped: {why}"));
 }
 
-/// The desktop shell scenarios (`shell.rs`): `nugget-desktop --minimized` from [`SHELL_ENV`]
-/// against a daemon, the shell metered with its webview children; skipped (recorded) when the
-/// shell, a display or the focus tools are missing.
+/// The desktop shell scenarios (`shell.rs`), skipped (recorded) when prerequisites are missing.
 fn shell_hook(
     ctx: &mut RunContext,
     p: &EnergyParams,
@@ -418,9 +416,7 @@ mod tests {
         );
     }
 
-    /// The daemon and poll scenarios at a tiny size against the `nuggetd` built next to this
-    /// test binary (CI's workspace build has one); the daemon ones are skipped when there is
-    /// none, and `prefill` without `--local-models`.
+    /// The daemon and poll scenarios at a tiny size; daemon ones skip without a `nuggetd`.
     #[test]
     fn energy_smoke() {
         let have_daemon = match find_nuggetd() {

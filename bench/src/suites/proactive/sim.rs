@@ -69,15 +69,8 @@ fn distractor_index(gold: &Gold) -> HashMap<&str, DistractorCategory> {
     idx
 }
 
-/// The reason the simulated user gives for dismissing `card`. `gold_hit` says whether the card
-/// matches a gold label that day (then the dismissal is user noise).
-///
-/// | card | reason |
-/// |---|---|
-/// | a gold card (dismissed by noise) | not relevant |
-/// | answered thread, completed commitment, cancelled meeting | already handled |
-/// | newsletter, notification, bulk mail, spam renewal | not important |
-/// | anything else | not relevant |
+/// The reason the simulated user gives for dismissing `card`; `gold_hit` means the dismissal is
+/// noise.
 pub fn dismiss_reason(
     card: &Card,
     gold_hit: bool,

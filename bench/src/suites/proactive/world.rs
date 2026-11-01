@@ -322,4 +322,3 @@ fn start() -> time::Date {
 fn calendar_date(day: i32) -> time::Date {
     start() + time::Duration::days(i64::from(day) - 1)
 }
-

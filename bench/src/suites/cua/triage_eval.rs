@@ -313,10 +313,8 @@ that look sensitive)",
     m
 }
 
-/// Run the evaluation on `provider` (the model under test): the goals of [`goal_list`] over
-/// `tasks`, one triage call each. Pass all cua tasks ([`super::task::load_all`]), not a run's
-/// subset, so the benign set is the whole task set. Metrics as [`summarize`]; parameters
-/// `triage_eval.*` (counts, sampling, warm-up time and per-goal results).
+/// Run the evaluation on `provider`, one triage call per [`goal_list`] goal. Pass all cua tasks,
+/// not a run's subset, so the benign set is complete.
 pub fn run(
     ctx: &mut RunContext,
     tasks: &[Task],
@@ -327,14 +325,7 @@ pub fn run(
     run_with(ctx, tasks, &label, factory, CALL_TIMEOUT)
 }
 
-/// [`run`] on the local chat model `--local-models` started, with its thinking setting and the
-/// arms' fixed seed. The suite's hook is one line:
-///
-/// ```ignore
-/// if std::env::var(triage_eval::ENV).is_ok_and(|v| v == "1") {
-///     m.extend(triage_eval::run_local(ctx, &task::load_all().map_err(BenchError::Failed)?, &lm)?);
-/// }
-/// ```
+/// [`run`] on the local chat model `--local-models` started, with the arms' fixed seed.
 pub fn run_local(
     ctx: &mut RunContext,
     tasks: &[Task],

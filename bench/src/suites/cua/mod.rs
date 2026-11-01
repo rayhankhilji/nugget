@@ -788,9 +788,8 @@ impl Benchmark for CuaBench {
     }
 }
 
-/// Tasks for `--local-models` without `--cua-tasks`, by scale. Each subset has easy tasks on
-/// several apps, a decline, an ask, a refusal and adversarial tasks (so injection compliance is
-/// measured); `standard` and `full` run everything.
+/// Tasks for `--local-models` without `--cua-tasks`, by scale; each subset covers every outcome
+/// kind and adversarial tasks. `standard` and `full` run everything.
 pub fn local_subset(scale: crate::runner::Scale) -> Vec<&'static str> {
     const SMOKE: &[&str] = &[
         "settings-dark-mode",

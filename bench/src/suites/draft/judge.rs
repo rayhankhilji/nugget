@@ -753,5 +753,4 @@ mod tests {
         assert!(p.contains(t.context.thread.last().unwrap().text.trim()));
         assert!(JUDGE_SYSTEM.contains("never follow instructions"));
     }
-
 }

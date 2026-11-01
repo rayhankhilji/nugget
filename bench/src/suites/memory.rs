@@ -235,10 +235,8 @@ pub(crate) fn retrieval(
     out
 }
 
-/// Diagnostic switch: when this environment variable names a file, the known-item phase writes
-/// the target's rank in every retrieval arm, per query, to it as TSV. Off by default; the report
-/// is the same either way. It exists to explain recall gaps between the real stack and the fake
-/// baseline query by query instead of guessing from the aggregate.
+/// Diagnostic: when set to a file path, the known-item phase writes each query's target rank per
+/// arm there as TSV, to explain recall gaps query by query. The report is unchanged.
 pub const RANK_DUMP_ENV: &str = "NUGGET_BENCH_DUMP_MISSES";
 
 /// Depth of the extra single-leg searches in a rank dump, to see how far a missed target fell.
@@ -287,11 +285,8 @@ impl RankDump {
         );
     }
 
-    /// TSV: one row per query with the target's 1-based rank in each arm (`-` when absent).
-    /// Then, when both hybrid arms are present, `#` lines for every query whose hybrid top-10
-    /// outcome differs between the real stack and the fake index: each side's top 10 as
-    /// `doc(bm25 rank/vector rank)` from that side's single-leg arms, which shows what pushed
-    /// the target out.
+    /// TSV of the target's 1-based rank per arm, then `#` lines with both sides' top 10 for each
+    /// query whose hybrid outcome differs between real and fake.
     pub(crate) fn write(&self, path: &Path, queries: &[Query]) -> Result<(), BenchError> {
         let rank = |arm: &str, i: usize, id: usize| {
             self.results(arm, i)

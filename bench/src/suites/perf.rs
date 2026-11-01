@@ -376,5 +376,4 @@ mod tests {
         assert_eq!(report.config.params["docs"], 300);
         assert_eq!(report.config.params["backend"], "fake_index");
     }
-
 }

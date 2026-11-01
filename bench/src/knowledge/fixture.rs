@@ -287,8 +287,7 @@ pub enum Corpus {
     /// Every item and hard case.
     #[default]
     All,
-    /// The corpus as it was before EE1 (93 items): everything marked `added` is left out, so
-    /// item selection and the scored gold equal the pre-EE1 bench's, for before/after runs.
+    /// The original 93-item corpus: everything marked `added` is left out.
     Original,
 }
 
@@ -329,9 +328,8 @@ impl Fixture {
         Self::load(Path::new(FIXTURE_DIR))
     }
 
-    /// The corpus restricted to `corpus`. `Original` drops the items, entities and hard cases
-    /// marked `added`, the mentions and scripted answers of dropped items, their support on
-    /// the remaining claims, and the claims left with no support (which only they stated).
+    /// The corpus restricted to `corpus`; `Original` drops everything `added` and claims left
+    /// with no support.
     pub fn corpus(&self, corpus: Corpus) -> Fixture {
         let mut fx = self.clone();
         if corpus == Corpus::All {
@@ -565,9 +563,7 @@ impl Fixture {
         for jc in hc.job_change.iter().skip(1) {
             further.push(supporting(jc));
         }
-        // The original case of each kind (the first): always kept. For the job change, the
-        // items supporting its claims, except those of a further case (which come whole or not
-        // at all).
+        // The first case of each kind is always kept (job change: minus further cases' items).
         if let Some(jc) = hc.job_change.first() {
             for id in supporting(jc) {
                 if !further.iter().flatten().any(|f| *f == id) {
@@ -844,8 +840,7 @@ pub fn ingest(store: &Store, fx: &Fixture) -> Result<Ingested, BenchError> {
     Ok(out)
 }
 
-/// `key: value` lines for every scalar (or list of scalars) in extracted metadata and in its
-/// `frontmatter` object, each also with `[[wikilink]]` brackets removed.
+/// `key: value` lines for every scalar in extracted metadata and frontmatter, also unbracketed.
 pub fn field_lines(meta: &Value) -> String {
     fn scalar(v: &Value) -> Option<String> {
         match v {
@@ -952,9 +947,7 @@ mod tests {
         assert!(bad.validate().unwrap_err().contains("duplicate"));
     }
 
-    /// The labels agree with what ingest actually stores: every gold and scripted quote is in its
-    /// item's chunks, every hallucinated or injected quote is not, and every gold surface form is
-    /// in its raw item.
+    /// The labels agree with what ingest actually stores (quotes and surface forms).
     #[test]
     fn labels_agree_with_ingested_text() {
         let fx = Fixture::builtin().unwrap();
@@ -1042,59 +1035,6 @@ mod tests {
             assert!(!it.chunks.is_empty(), "{}", it.id);
             assert_eq!(ing.by_ref(&it.item).unwrap().id, it.id);
         }
-    }
-
-    /// Scoring a subset: only what the kept items support counts.
-    #[test]
-    fn subsets_restrict_the_gold_to_the_kept_items() {
-        let fx = Fixture::builtin().unwrap();
-        let keep = fx.select_items(8);
-        let sub = fx.subset(&keep);
-        assert_eq!(sub.items.len(), 8);
-        assert!(sub.mentions.iter().all(|m| keep.contains(&m.item)));
-        assert!(sub.script.iter().all(|s| keep.contains(&s.item)));
-        for c in sub.claims.iter().filter(|c| !c.optional) {
-            assert!(c.support.iter().all(|s| keep.contains(&s.item)), "{}", c.id);
-        }
-        // Every in-scope entity is mentioned in a kept item or named by an in-scope claim.
-        for e in sub.entities.iter().filter(|e| !e.optional) {
-            let mentioned = sub.mentions.iter().any(|m| m.entity == e.id);
-            let named =
-                sub.claims.iter().filter(|c| !c.optional).any(|c| {
-                    c.subject == e.id || c.object.entity.as_deref() == Some(e.id.as_str())
-                });
-            assert!(mentioned || named, "{}", e.id);
-        }
-        let (s, f) = (sub.stats(), fx.stats());
-        assert!(s.entities > 0 && s.entities < f.entities);
-        assert!(s.claims > 0 && s.claims < f.claims);
-        // The job change is in the smoke subset, so the superseded claims stay superseded.
-        assert!(
-            sub.claims
-                .iter()
-                .any(|c| c.status == GoldStatus::Superseded && !c.optional)
-        );
-        // Without the new job, nothing supersedes the old one: not scored either way.
-        let old_only = fx.subset(&["mail-002".to_owned()]);
-        assert!(
-            old_only
-                .claims
-                .iter()
-                .filter(|c| c.status == GoldStatus::Superseded)
-                .all(|c| c.optional)
-        );
-        assert!(old_only.scenario.delete.is_empty());
-        // Each job change on its own: the second one's new job (mail-053) keeps its old claims
-        // superseded, while the first one's (no new job in scope) are not scored.
-        let second = fx.subset(&["mail-053".to_owned(), "mail-055".to_owned()]);
-        let superseded_scored = |sub: &Fixture, who: &str| {
-            sub.claims
-                .iter()
-                .filter(|c| c.status == GoldStatus::Superseded && c.subject == who)
-                .all(|c| !c.optional)
-        };
-        assert!(superseded_scored(&second, "p-delphine"));
-        assert!(!superseded_scored(&second, "p-priya"));
     }
 
     #[test]

@@ -162,4 +162,3 @@ pub fn sections(user: &str) -> BTreeMap<String, String> {
     }
     out
 }
-

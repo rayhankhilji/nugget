@@ -213,9 +213,8 @@ fn compact_predicates(req: &ChatRequest) -> Option<Vec<String>> {
     )
 }
 
-/// A scripted predicate as the schema allows it: itself when allowed (or when there is no
-/// enum), else its nearest synonym in the enum, else the enum's first member (only the
-/// injected `resigned_from` falls through: its quote is not in the item either way).
+/// A scripted predicate as the schema allows it: itself, else its nearest synonym in the enum,
+/// else the enum's first member.
 pub fn schema_predicate(raw: &str, allowed: &[String]) -> String {
     let p: String = raw
         .trim()

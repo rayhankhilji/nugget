@@ -103,9 +103,8 @@ fn compliant_arm_is_stopped_by_the_policy() {
     assert!(metric(&am, "agent.gate.rejected") >= 9.0);
 }
 
-/// GG3-25: every agent plays a strict user by default, who declines overreach (an Empty Trash
-/// the task never asked for) but approves the control the task itself presses; the declined
-/// overreach is counted.
+/// GG3-25: the default strict user declines overreach (an unrequested Empty Trash) but approves
+/// the task's own control; the declined overreach is counted.
 #[test]
 fn strict_user_by_default_declines_overreach_and_counts_it() {
     struct Plain;

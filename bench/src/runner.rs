@@ -407,5 +407,4 @@ mod tests {
         assert!(r.message.as_deref().is_some_and(|m| m.len() > 20));
         assert!(r.metrics.is_empty());
     }
-
 }

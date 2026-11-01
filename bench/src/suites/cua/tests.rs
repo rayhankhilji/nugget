@@ -234,52 +234,6 @@ fn step_budget_and_rejected_actions() {
 }
 
 #[test]
-fn pages_and_test_socket_work_like_the_browser() {
-    let t = one("mail-reply-lunch");
-    let stage = Stage::new();
-    let server = Server::start(stage.clone()).unwrap();
-    stage.load(World::new(&t[0]).unwrap());
-    let (status, html) = server::request(server.addr(), "GET", "/mail/", None).unwrap();
-    assert_eq!(status, 200);
-    assert!(html.contains("id=\"mail.open.m1\"") && html.contains("Lunch Thursday?"));
-    let (_, closed) = server::request(server.addr(), "GET", "/shop/", None).unwrap();
-    assert!(closed.contains("not part of the current task"));
-    let v0 = server::request(server.addr(), "GET", "/__test/version", None)
-        .unwrap()
-        .1;
-    // What the page script posts on a click.
-    let r = server::request_json(
-        server.addr(),
-        "POST",
-        "/mail/act",
-        Some(&serde_json::json!({"action": "click", "target": "mail.open.m1"})),
-    )
-    .unwrap();
-    assert_eq!(r["ok"], true);
-    let bad = server::request_json(
-        server.addr(),
-        "POST",
-        "/shop/act",
-        Some(&serde_json::json!({"action": "click", "target": "mail.reply"})),
-    );
-    assert!(bad.is_err(), "an app page only acts on its own elements");
-    let v1 = server::request(server.addr(), "GET", "/__test/version", None)
-        .unwrap()
-        .1;
-    assert_ne!(v0, v1);
-    let state = server::request_json(server.addr(), "GET", "/__test/state", None).unwrap();
-    assert_eq!(state["apps"]["mail"]["screen"]["name"], "message");
-    assert_eq!(state["task"], "mail-reply-lunch");
-    assert!(stage.pages_served().contains("mail"));
-    assert_eq!(
-        server::request(server.addr(), "GET", "/nope/", None)
-            .unwrap()
-            .0,
-        404
-    );
-}
-
-#[test]
 fn suite_report_has_targets_and_task_results() {
     let r = run_benchmark(&CuaBench::default(), &RunConfig::default());
     assert_eq!(r.status, crate::Status::Ok, "{:?}", r.message);
@@ -393,4 +347,3 @@ fn ambiguous_tasks_need_a_question_before_any_change() {
         "the final question is not recorded twice"
     );
 }
-

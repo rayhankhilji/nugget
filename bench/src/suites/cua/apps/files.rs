@@ -393,5 +393,4 @@ mod tests {
         f.handle(&click("files.up")).unwrap();
         assert_eq!(f.cwd, "/");
     }
-
 }

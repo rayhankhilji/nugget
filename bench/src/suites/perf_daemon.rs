@@ -54,9 +54,8 @@ pub struct DaemonParams {
     pub dim: usize,
     /// Warm `search` calls after extraction (plus the first one).
     pub searches: usize,
-    /// Quiet time after the vault render before the idle window. Long enough at real scales
-    /// for post-render work and Tokio's idle blocking threads (10 s keep-alive) to wind down;
-    /// at `smoke` the idle numbers still include some of that.
+    /// Quiet time before the idle window, so post-render work and Tokio's idle blocking threads
+    /// (10 s keep-alive) wind down; at `smoke` some of that remains.
     pub settle_s: f64,
     /// Length of the idle window.
     pub idle_s: f64,
@@ -906,10 +905,7 @@ async fn time_calls(
     Ok(answers)
 }
 
-/// The read paths the app hits on every screen, timed on the full store after extraction:
-/// status and counts (`status`, `sources.list`, `ingest.status`, `knowledge.status`), the
-/// privacy ledger (`egress.recent`), Ask's retrieval step (`retrieve.context`), and the
-/// knowledge page (`knowledge.entities` pages, `knowledge.entity` detail, `knowledge.graph`).
+/// The read paths the app hits on every screen, timed on the full store after extraction.
 async fn hot_paths(
     client: &Client,
     queries: &[crate::corpus::Query],

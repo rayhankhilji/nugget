@@ -524,11 +524,8 @@ impl<'a> BaselineArm<'a> {
     }
 }
 
-/// Render `parts`, cutting what Sentient's whole-vault design would cut to fit a model's
-/// window (its 600 KB cap plays the same role): the tail of `CONTEXT` first (at a line break
-/// when one is near), then the oldest writing samples. The thread and the instructions are
-/// kept whole; if they alone exceed the budget the prompt is sent anyway (and may fail, which
-/// the suite counts). Returns whether anything was cut.
+/// Render `parts` cut to `budget`: the tail of `CONTEXT` first, then the oldest samples; thread
+/// and instructions stay whole even if over budget. Returns whether anything was cut.
 pub fn fit_to_budget(persona: &Persona, mut parts: PromptParts, budget: usize) -> (Prompt, bool) {
     let full = prompt::render(persona, &parts);
     if full.tokens() <= budget {
@@ -622,5 +619,4 @@ mod tests {
             );
         }
     }
-
 }

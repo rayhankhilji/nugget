@@ -314,9 +314,8 @@ const PAGE_COMMIT: Duration = Duration::from_millis(400);
 /// Longest wait for a page to reload after the world changed.
 const PAGE_RELOAD: Duration = Duration::from_secs(6);
 
-/// Wait until `app`'s window shows a page served at the current world version (pages reload
-/// whenever the world changes, a confirmation included): an input sent to a page that is about
-/// to reload would be lost with it. Bounded; on timeout the action goes ahead.
+/// Wait (bounded) until `app`'s page is at the current world version: input sent to a page about
+/// to reload would be lost.
 fn wait_current_page(stage: &Stage, app: &str) {
     let t0 = Instant::now();
     while t0.elapsed() < PAGE_RELOAD {

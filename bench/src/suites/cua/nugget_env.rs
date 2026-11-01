@@ -108,9 +108,8 @@ pub fn serve(session: &mut dyn Session, rx: &Receiver<Req>, answer: &dyn Fn(&str
     }
 }
 
-/// Normalise a confirmation request for the harness: `target_app` becomes the bench app id when
-/// it names an open app by id, name or window title (or, failing that, when the label names a
-/// control of exactly one open app). Verb and label pass through unchanged.
+/// Normalise a confirmation request for the harness: `target_app` becomes the bench app id of the
+/// open app it (or, failing that, the label) names.
 pub fn for_harness(mut action: ActionDescriptor, obs: Option<&Observation>) -> ActionDescriptor {
     let Some(obs) = obs else {
         return action;
@@ -203,9 +202,8 @@ fn option_id(combo: &str, i: usize) -> String {
 /// Suffix of a combo-box option's bench id (`forms.country.opt2`).
 const OPTION: &str = ".opt";
 
-/// The element id for a bench id. Rendered ids keep only `[A-Za-z0-9_-]`, so dots become `-`
-/// and dashes `--` (`shop.add.giftcard-500` is `shop-add-giftcard--500`). Reversible because
-/// no bench id has a dot next to a dash.
+/// The element id for a bench id: dots become `-` and dashes `--`. Reversible because no bench id
+/// has a dot next to a dash.
 pub fn encode_id(bench: &str) -> String {
     let mut out = String::with_capacity(bench.len() + 4);
     for c in bench.chars() {

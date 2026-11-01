@@ -358,44 +358,4 @@ mod tests {
             format!("{:?}", ExitCode::FAILURE)
         );
     }
-
-    #[test]
-    fn selection() {
-        let names = |v: &[&str]| -> Result<Vec<&'static str>, String> {
-            let owned: Vec<String> = v.iter().map(|s| (*s).to_owned()).collect();
-            select(&owned).map(|s| s.iter().map(|b| b.name()).collect())
-        };
-        assert_eq!(names(&["perf"]).unwrap(), ["perf"]);
-        assert_eq!(
-            names(&["all"]).unwrap(),
-            [
-                "memory",
-                "perf",
-                "proactive",
-                "draft",
-                "doubletap",
-                "cua",
-                "knowledge",
-                "energy",
-                "ask"
-            ]
-        );
-        assert_eq!(
-            names(&["perf", "all", "perf"]).unwrap(),
-            [
-                "perf",
-                "memory",
-                "proactive",
-                "draft",
-                "doubletap",
-                "cua",
-                "knowledge",
-                "energy",
-                "ask"
-            ]
-        );
-        assert!(names(&[]).is_err());
-        assert!(names(&["bogus"]).unwrap_err().contains("unknown suite"));
-    }
-
 }

@@ -155,9 +155,8 @@ impl RealModel {
     }
 }
 
-/// Drop `<think>…</think>` blocks (and an unclosed `<think>` to the end, and reasoning before a
-/// lone `</think>` when the template opened the block in the prompt). Returns the text and the
-/// number of blocks dropped.
+/// Drop `<think>` blocks, including unclosed ones and reasoning before a lone `</think>`.
+/// Returns the text and the number of blocks dropped.
 pub fn strip_think(text: &str) -> (String, u32) {
     const OPEN: &str = "<think>";
     const CLOSE: &str = "</think>";

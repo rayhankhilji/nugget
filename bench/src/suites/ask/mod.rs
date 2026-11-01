@@ -457,10 +457,8 @@ struct Plan {
     today: time::Date,
 }
 
-/// Start the judge after the answers and check it answers. With a different judge model the
-/// answer server is stopped first (`model`'s servers), so the two never share the machine's
-/// memory. A judge that cannot start or answer is dropped and recorded in `judge.unavailable`;
-/// the answer metrics are reported either way.
+/// Start and probe the judge, stopping a different answer model's servers first so the two never
+/// share memory. A judge that fails is dropped and recorded in `judge.unavailable`.
 fn start_judge(
     ctx: &mut RunContext,
     rt: &tokio::runtime::Runtime,
@@ -527,9 +525,7 @@ fn start_judge(
     (Some(mj), local)
 }
 
-/// Answer the planned questions with `model` (each row dumped as soon as it is scored), then
-/// judge them (each verdict appended to the sidecar as soon as it arrives), both within the
-/// wall-clock budget, then turn the rows into metrics.
+/// Answer, then judge, within the wall-clock budget, dumping each row and verdict as it arrives.
 fn run_answers(
     ctx: &mut RunContext,
     gold: &Gold,

@@ -149,9 +149,7 @@ pub trait ProactiveEngine {
     /// The user's response to a card shown in a brief.
     fn feedback(&mut self, card_id: &str, feedback: Feedback);
 
-    /// Execute a card's action. The engine must refuse (return `Err`) without a valid approval
-    /// for exactly this card. The benchmark also calls this with no approval, and with another
-    /// card's approval, to check that the engine refuses.
+    /// Execute a card's action; must return `Err` without a valid approval for exactly this card.
     fn execute(&mut self, card_id: &str, approval: Option<&Approval>) -> Result<Execution, String>;
 
     /// Every action the engine executed, in order.

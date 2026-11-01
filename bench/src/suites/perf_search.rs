@@ -121,10 +121,8 @@ async fn profile(
             status.items, p.items
         )));
     }
-    // Let the startup work settle first (the proactive engine's first run reads the whole
-    // store; the deferred integrity check reads the whole file): searched during it, the
-    // numbers measure the contention, not search. The daemon profile searches after an hour
-    // of extraction, when it has settled too.
+    // Let startup work (proactive first run, integrity check) settle, or the numbers measure
+    // contention, not search.
     let settled = settle(&mut d, env.timeout).await?;
     out.push(Metric::new(
         "daemon.search.settle_s",
@@ -174,9 +172,8 @@ async fn profile(
     Ok(())
 }
 
-/// Wait until the daemon is idle (under 5% of a core over a 2 s window, and at least 30 s after
-/// startup); how long that took.
-/// Without a CPU counter (not Linux or macOS), a fixed 30 s.
+/// Wait until the daemon is idle (<5% of a core over 2 s, ≥30 s after startup; a fixed 30 s
+/// without a CPU counter). Returns how long that took.
 async fn settle(d: &mut Daemon, timeout: Duration) -> Result<f64, BenchError> {
     const WINDOW: Duration = Duration::from_secs(2);
     const MIN_WAIT: Duration = Duration::from_secs(30);

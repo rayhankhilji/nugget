@@ -36,9 +36,8 @@ pub fn ratio(num: usize, den: usize) -> Option<f64> {
     (den > 0).then(|| num as f64 / den as f64)
 }
 
-/// Latency samples in seconds: successful rows, plus timed-out rows censored at `timeout`.
-/// `ttft` takes the model's time to first token instead (successful rows that forwarded text;
-/// a timed-out row's own value if text arrived before the timeout).
+/// Latency samples in seconds (or time to first token with `ttft`): successful rows, plus
+/// timed-out rows censored at `timeout`.
 pub fn latency_samples(rows: &[&Row], timeout: Duration, ttft: bool) -> Vec<f64> {
     rows.iter()
         .filter_map(|r| {
@@ -654,5 +653,4 @@ mod tests {
         // No injection question answered: no injection rate.
         assert!(out.iter().all(|m| !m.name.contains("injection_compliance")));
     }
-
 }

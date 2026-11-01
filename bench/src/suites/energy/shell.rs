@@ -153,9 +153,7 @@ pub(crate) fn app_config_dir(root: &Path) -> PathBuf {
     }
 }
 
-/// `doubletap.json`: Double Tap on, read-ahead as given, also on battery; everything else at
-/// the shell's defaults. (`read_ahead_on_battery` is unknown to shells before DD2; their
-/// settings ignore unknown fields.)
+/// `doubletap.json`: Double Tap on, read-ahead as given (also on battery), else shell defaults.
 pub(crate) fn doubletap_json(read_ahead: bool) -> String {
     let v = serde_json::json!({
         "enabled": true,
@@ -489,9 +487,7 @@ impl TextWindows {
             files,
             driver: "open -a TextEdit (three documents, reopened to bring each to the front)",
         };
-        // No AppleScript: sending TextEdit Apple Events needs an Automation grant that a CI
-        // runner does not have. `open` on a document that is already open brings its window
-        // to the front, which is all the focus script needs.
+        // No AppleScript (CI has no Automation grant); `open` on an open document focuses it.
         std::thread::sleep(Duration::from_secs(3));
         Ok(me)
     }
@@ -641,9 +637,8 @@ impl Shell {
         Ok(())
     }
 
-    /// Wait until it is set up: the probe's `read_ahead_loop` line then `settle`, or (no probe
-    /// line within [`PROBE_WAIT`], a release build) [`PROBE_WAIT`] alone. Returns whether the
-    /// probe answered.
+    /// Wait for the probe's `read_ahead_loop` line then `settle`, or [`PROBE_WAIT`] alone in a
+    /// release build. Returns whether the probe answered.
     fn settle(&mut self, probe: &Path, settle: Duration) -> Result<bool, BenchError> {
         let t = Instant::now();
         while t.elapsed() < PROBE_WAIT {

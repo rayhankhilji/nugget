@@ -170,9 +170,7 @@ impl Engine {
         }
     }
 
-    /// Draft one task: `begin` with the task's context, then the stream to its end. Times are
-    /// from `started`. Returns the outcome and the text of the prompt that was sent (empty if
-    /// none was).
+    /// Draft one task (times from `started`). Returns the outcome and the prompt text sent.
     pub(crate) async fn draft(
         &self,
         task: &Task,
@@ -233,5 +231,4 @@ mod tests {
         );
         assert_eq!(v.recipient(&m.channel, &[]), "");
     }
-
 }

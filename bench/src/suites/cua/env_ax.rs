@@ -171,5 +171,4 @@ mod tests {
         normalize(&mut t);
         assert_eq!(t.name, None);
     }
-
 }

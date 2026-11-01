@@ -230,5 +230,4 @@ mod tests {
         );
         assert_eq!(answer("", "anything at all here"), PLAIN_REFUSAL);
     }
-
 }

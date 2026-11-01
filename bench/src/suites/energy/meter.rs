@@ -94,15 +94,13 @@ impl Reading {
         Some(self.package_w? - base.package_w?)
     }
 
-    /// Package energy above `base` over this window: [`Self::attributable_w`] times this
-    /// window's length, joules.
+    /// Package energy above `base` over this window, in joules.
     pub(crate) fn attributable_j(&self, base: &Reading) -> Option<f64> {
         self.attributable_w(base).map(|w| w * self.wall_s)
     }
 }
 
-/// Which system energy source a [`Meter`] would use on this machine, and why there is none when
-/// there is none. Cached after the first call (on macOS it runs `powermetrics` once).
+/// The system energy source a [`Meter`] would use here, or why there is none. Cached.
 pub(crate) fn energy_source() -> (EnergySource, Option<String>) {
     #[cfg(target_os = "linux")]
     {
@@ -129,8 +127,7 @@ pub(crate) fn energy_source() -> (EnergySource, Option<String>) {
     }
 }
 
-/// Meter `window` with nothing launched: the reference for [`Reading::attributable_w`].
-/// Blocks the calling thread for `window`.
+/// Meter `window` with nothing launched (blocking): the reference for attribution.
 pub(crate) fn baseline(window: Duration) -> Reading {
     let m = Meter::start(&[]);
     std::thread::sleep(window);
@@ -148,8 +145,7 @@ pub(crate) struct Meter {
 }
 
 impl Meter {
-    /// Start metering `pids` (and their descendants) and system energy. An empty slice meters
-    /// system energy alone.
+    /// Start metering `pids` with descendants, and system energy (alone if `pids` is empty).
     pub(crate) fn start(pids: &[u32]) -> Meter {
         Self::start_groups(&[pids])
     }
@@ -212,8 +208,7 @@ impl Meter {
         self.stop_groups().swap_remove(0)
     }
 
-    /// Stop and read the window of every group, in the order given to
-    /// [`start_groups`](Self::start_groups).
+    /// Stop and read every group, in the order given to [`start_groups`](Self::start_groups).
     pub(crate) fn stop_groups(mut self) -> Vec<Reading> {
         let wall_s = self.started.elapsed().as_secs_f64().max(1e-9);
         self.halt();
@@ -316,8 +311,7 @@ impl State {
     }
 }
 
-/// One reading of one thread (Linux) or process (macOS): cumulative CPU time and context
-/// switches since it started.
+/// Cumulative CPU time and context switches of one thread (Linux) or process (macOS).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Obs {
     /// Thread id on Linux, pid on macOS.
@@ -365,8 +359,7 @@ impl Counters {
     }
 }
 
-/// `roots` and all their descendants in a `(pid, ppid)` table; roots not in the table (exited)
-/// are left out.
+/// `roots` and their descendants in a `(pid, ppid)` table; exited roots are left out.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 fn tree(roots: &[u32], table: &[(u32, u32)]) -> Vec<u32> {
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -496,8 +489,7 @@ fn rapl_delta(prev: u64, cur: u64, max_uj: u64) -> u64 {
     }
 }
 
-/// A top-level zone directory (`intel-rapl:0`, not the subzone `intel-rapl:0:1` or
-/// `intel-rapl-mmio:0`).
+/// A top-level zone (`intel-rapl:0`, not `intel-rapl:0:1` or `intel-rapl-mmio:0`).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn is_top_level_zone(dir_name: &str) -> bool {
     dir_name
@@ -668,8 +660,7 @@ impl Plist {
     }
 }
 
-/// Parse one XML plist document. A minimal reader for what `powermetrics` writes: no comments,
-/// no CDATA; `None` on anything malformed (a sample cut off when the process was stopped).
+/// Minimal XML plist reader for `powermetrics` output; `None` on anything malformed or cut off.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_plist(xml: &str) -> Option<Plist> {
     let at = xml.find("<plist")?;
@@ -856,8 +847,7 @@ fn processor_energy_mj(p: &Plist, elapsed_s: f64) -> Option<f64> {
     p.f64("cpu_power").map(|mw| mw * elapsed_s)
 }
 
-/// The samples of a `powermetrics -f plist` stream (plists separated by NUL bytes); cut-off or
-/// malformed samples are skipped. `default_s`: the sample length when `elapsed_ns` is missing.
+/// The samples of a NUL-separated `powermetrics -f plist` stream, skipping malformed ones.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_powermetrics(bytes: &[u8], default_s: f64) -> Vec<PmSample> {
     bytes
@@ -1015,8 +1005,7 @@ mod pm {
             })
         }
 
-        /// Stop it (SIGTERM to `sudo`, which relays it; then `pkill`; then a kill) and parse what
-        /// it wrote.
+        /// Stop it (SIGTERM via `sudo`, then `pkill`, then kill) and parse what it wrote.
         pub(super) fn finish(mut self) -> Vec<PmSample> {
             let pid = self.child.id().to_string();
             let _ = Command::new("kill").args(["-TERM", &pid]).status();
@@ -1037,8 +1026,7 @@ mod pm {
         }
     }
 
-    /// Fill `r` from `samples`: package energy, and the tasks of `pids` (when `processes`).
-    /// Rates are averaged over the time the samples cover and scaled to the window.
+    /// Fill `r` from `samples`, rates averaged over the samples and scaled to the window.
     pub(super) fn apply(
         r: &mut Reading,
         samples: &[PmSample],
@@ -1183,5 +1171,4 @@ mod tests {
         assert!((r.wakeups.unwrap() - 12.0).abs() < 1e-9);
         assert_eq!(r.process_source, "powermetrics");
     }
-
 }

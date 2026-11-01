@@ -302,12 +302,7 @@ pub const WEIGHTS: [(&str, f32); 7] = [
     ("lowercase_start", 0.10),
 ];
 
-/// Stylometric distance in `[0, 1]` between two profiles (0 = same habits). Greetings and
-/// sign-offs compare the dominant pattern's first word; length compares median words on a log
-/// scale (a 4× difference is the maximum); emoji compares presence; exclamations saturate at 3
-/// per message.
-///
-/// When `nugget_voice::style_distance` lands (M3-D), the suite switches to it.
+/// Stylometric distance in `[0, 1]` between two profiles (0 = same habits).
 pub fn distance(a: &StyleStats, b: &StyleStats) -> f32 {
     let len = ((a.median_words + 1.0) / (b.median_words + 1.0)).ln().abs() / 4f32.ln();
     let greet = f32::from(u8::from(
@@ -370,5 +365,4 @@ mod tests {
         let total: f32 = WEIGHTS.iter().map(|(_, w)| w).sum();
         assert!((total - 1.0).abs() < 1e-6);
     }
-
 }
