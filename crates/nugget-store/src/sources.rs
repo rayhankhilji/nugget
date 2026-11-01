@@ -279,7 +279,7 @@ impl Store {
             let mut stmt = conn
                 .prepare_cached(
                     "SELECT i.source, i.key FROM items i
-                     WHERE (i.source > ?1 OR (i.source = ?1 AND i.key > ?2))
+                     WHERE (i.source, i.key) > (?1, ?2)
                        AND json_valid(i.metadata)
                        AND json_extract(i.metadata, '$.triage.state') = 'pending'
                      ORDER BY i.source, i.key
@@ -316,13 +316,13 @@ impl Store {
             let mut stmt = conn
                 .prepare_cached(
                     "SELECT i.source, i.key,
-                            COALESCE(json_extract(i.metadata, '$.triage.failures'), 1),
-                            COALESCE(json_extract(i.metadata, '$.triage.failed_at'), 0)
+                            COALESCE(CAST(json_extract(i.metadata, '$.triage.failures') AS INTEGER), 1),
+                            COALESCE(CAST(json_extract(i.metadata, '$.triage.failed_at') AS INTEGER), 0)
                      FROM items i
-                     WHERE (i.source > ?1 OR (i.source = ?1 AND i.key > ?2))
+                     WHERE (i.source, i.key) > (?1, ?2)
                        AND json_valid(i.metadata)
                        AND json_extract(i.metadata, '$.triage.state') = 'failed'
-                       AND COALESCE(json_extract(i.metadata, '$.triage.failures'), 1) < ?3
+                       AND COALESCE(CAST(json_extract(i.metadata, '$.triage.failures') AS INTEGER), 1) < ?3
                      ORDER BY i.source, i.key
                      LIMIT ?4",
                 )
@@ -332,7 +332,7 @@ impl Store {
                     let failures: i64 = r.get(2)?;
                     Ok((
                         item_ref(r.get(0)?, r.get(1)?),
-                        u32::try_from(failures.max(1)).unwrap_or(u32::MAX),
+                        u32::try_from(failures.max(0)).unwrap_or(u32::MAX),
                         r.get::<_, i64>(3)?,
                     ))
                 })
