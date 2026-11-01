@@ -1,0 +1,563 @@
+{
+ "t_indexed_s": 11.0,
+ "ingest": {
+  "embedding_provider": null,
+  "freshness_p50_ms": 273,
+  "freshness_p95_ms": 808,
+  "queue_depth": 0,
+  "sources": [
+   {
+    "chunks": 2000,
+    "enabled": true,
+    "health": {
+     "code": "ok",
+     "fix": "",
+     "item_errors": 0,
+     "reason": "Up to date."
+    },
+    "id": "files-1",
+    "items": 2000,
+    "kind": "files",
+    "last_error": null,
+    "last_sync": "2026-11-01T12:51:42.733325747Z",
+    "name": "Mail",
+    "scan": {
+     "finished": true,
+     "found": 2000,
+     "max_file_bytes": 52428800,
+     "roots_denied": 0,
+     "roots_missing": 0,
+     "skipped": [],
+     "to_index": 0,
+     "too_large": 0,
+     "unreadable": 0,
+     "unsupported": 0
+    },
+    "settings": {
+     "roots": [
+      "/root/mm1/jj1-corpus/mail"
+     ]
+    },
+    "state": "watching"
+   }
+  ],
+  "triage": {
+   "done": 0,
+   "failed": 0,
+   "pending": 0,
+   "skipped": 22,
+   "state": "idle"
+  },
+  "triage_provider": null
+ },
+ "rows": [
+  {
+   "path": "mail/Inbox/s0000.eml",
+   "lang": "en",
+   "class": "sensitive",
+   "kind": "health",
+   "probe": "Willow Lane Practice",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0001.eml",
+   "lang": "en",
+   "class": "sensitive",
+   "kind": "health",
+   "probe": "mood journal",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0002.eml",
+   "lang": "en",
+   "class": "sensitive",
+   "kind": "financial",
+   "probe": "Harbour Lettings",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0003.eml",
+   "lang": "en",
+   "class": "sensitive",
+   "kind": "financial",
+   "probe": "net pay 3,130.10",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0004.eml",
+   "lang": "en",
+   "class": "sensitive",
+   "kind": "credentials",
+   "probe": "Kestrel!Moon42",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0005.eml",
+   "lang": "en",
+   "class": "sensitive",
+   "kind": "credentials",
+   "probe": "amber-otter-1182",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0006.eml",
+   "lang": "en",
+   "class": "sensitive",
+   "kind": "legal",
+   "probe": "small claims court",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0007.eml",
+   "lang": "en",
+   "class": "sensitive",
+   "kind": "legal",
+   "probe": "parenting plan for Ella",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0008.eml",
+   "lang": "de",
+   "class": "sensitive",
+   "kind": "health",
+   "probe": "Schilddrüsenwerte",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0009.eml",
+   "lang": "de",
+   "class": "sensitive",
+   "kind": "health",
+   "probe": "AU-Bescheinigung",
+   "found": true,
+   "sensitive": true,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/s0010.eml",
+   "lang": "de",
+   "class": "sensitive",
+   "kind": "financial",
+   "probe": "Hausverwaltung Brenner",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0011.eml",
+   "lang": "de",
+   "class": "sensitive",
+   "kind": "financial",
+   "probe": "Netto 2.951,30",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0012.eml",
+   "lang": "de",
+   "class": "sensitive",
+   "kind": "credentials",
+   "probe": "Lindenblatt#77",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0013.eml",
+   "lang": "de",
+   "class": "sensitive",
+   "kind": "legal",
+   "probe": "Gütetermin",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0014.eml",
+   "lang": "es",
+   "class": "sensitive",
+   "kind": "health",
+   "probe": "Centro de Salud Las Arenas",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0015.eml",
+   "lang": "es",
+   "class": "sensitive",
+   "kind": "financial",
+   "probe": "Recibo de la hipoteca",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0016.eml",
+   "lang": "es",
+   "class": "sensitive",
+   "kind": "credentials",
+   "probe": "Gaviota*2026",
+   "found": true,
+   "sensitive": true,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/s0017.eml",
+   "lang": "es",
+   "class": "sensitive",
+   "kind": "legal",
+   "probe": "Juzgado de lo Social",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0018.eml",
+   "lang": "fr",
+   "class": "sensitive",
+   "kind": "health",
+   "probe": "hernie discale",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0019.eml",
+   "lang": "fr",
+   "class": "sensitive",
+   "kind": "financial",
+   "probe": "Découvert autorisé",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0020.eml",
+   "lang": "fr",
+   "class": "sensitive",
+   "kind": "credentials",
+   "probe": "Mouette+3391",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/s0021.eml",
+   "lang": "fr",
+   "class": "sensitive",
+   "kind": "legal",
+   "probe": "dépôt de garantie",
+   "found": true,
+   "sensitive": true,
+   "nhits": 1
+  },
+  {
+   "path": "mail/Inbox/j0022.eml",
+   "lang": "en",
+   "class": "junk",
+   "kind": null,
+   "probe": "SAVE70",
+   "found": true,
+   "sensitive": false,
+   "nhits": 3
+  },
+  {
+   "path": "mail/Inbox/j0025.eml",
+   "lang": "en",
+   "class": "junk",
+   "kind": null,
+   "probe": "exclusive reward",
+   "found": true,
+   "sensitive": false,
+   "nhits": 3
+  },
+  {
+   "path": "mail/Inbox/j0028.eml",
+   "lang": "en",
+   "class": "junk",
+   "kind": null,
+   "probe": "communities you follow",
+   "found": true,
+   "sensitive": false,
+   "nhits": 3
+  },
+  {
+   "path": "mail/Inbox/j0031.eml",
+   "lang": "de",
+   "class": "junk",
+   "kind": null,
+   "probe": "SNEAK50",
+   "found": true,
+   "sensitive": false,
+   "nhits": 3
+  },
+  {
+   "path": "mail/Inbox/j0034.eml",
+   "lang": "de",
+   "class": "junk",
+   "kind": null,
+   "probe": "Preis sichern",
+   "found": true,
+   "sensitive": false,
+   "nhits": 3
+  },
+  {
+   "path": "mail/Inbox/j0037.eml",
+   "lang": "es",
+   "class": "junk",
+   "kind": null,
+   "probe": "OTONO60",
+   "found": true,
+   "sensitive": false,
+   "nhits": 3
+  },
+  {
+   "path": "mail/Inbox/j0040.eml",
+   "lang": "fr",
+   "class": "junk",
+   "kind": null,
+   "probe": "MAISON40",
+   "found": true,
+   "sensitive": false,
+   "nhits": 3
+  },
+  {
+   "path": "mail/Inbox/n00097.eml",
+   "lang": "fr",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00097",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00194.eml",
+   "lang": "fr",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00194",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00291.eml",
+   "lang": "es",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00291",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00388.eml",
+   "lang": "es",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00388",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00485.eml",
+   "lang": "es",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00485",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00582.eml",
+   "lang": "es",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00582",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00679.eml",
+   "lang": "en",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00679",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00776.eml",
+   "lang": "es",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00776",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00873.eml",
+   "lang": "fr",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00873",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n00970.eml",
+   "lang": "de",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-00970",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01067.eml",
+   "lang": "en",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01067",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01164.eml",
+   "lang": "fr",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01164",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01261.eml",
+   "lang": "en",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01261",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01358.eml",
+   "lang": "en",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01358",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01455.eml",
+   "lang": "de",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01455",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01552.eml",
+   "lang": "fr",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01552",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01649.eml",
+   "lang": "de",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01649",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01746.eml",
+   "lang": "es",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01746",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01843.eml",
+   "lang": "es",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01843",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  },
+  {
+   "path": "mail/Inbox/n01940.eml",
+   "lang": "en",
+   "class": "normal",
+   "kind": null,
+   "probe": "ref-01940",
+   "found": true,
+   "sensitive": false,
+   "nhits": 20
+  }
+ ],
+ "sample_hit": [
+  {
+   "chunk_id": 1919,
+   "date": "2026-10-01T14:17:00Z",
+   "date_source": "extracted",
+   "item": {
+    "key": "0:Inbox/n01940.eml",
+    "source": "files-1"
+   },
+   "kind": "mail",
+   "people": [],
+   "score": 1.0,
+   "sensitive": false,
+   "snippet": "From: Carmen Soto <carmen@soto.example>\nDate: 2026-10-01\n\nThe shop says the wheel will be ready Wednesday afternoon.\n\n(ref-01940)",
+   "title": "Bike repair",
+   "url": "file:///root/mm1/jj1-corpus/mail/Inbox/n01940.eml"
+  }
+ ]
+}

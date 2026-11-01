@@ -1,0 +1,13 @@
+mode: default (unknown = sensitive)
+lang   sens/5 ord-wrong/2  misses
+en     5/5    2/2          FP dinner, FP proj
+de     5/5    2/2          FP dinner, FP proj
+es     5/5    2/2          FP dinner, FP proj
+fr     5/5    2/2          FP dinner, FP proj
+pt-BR  5/5    2/2          FP dinner, FP proj
+hi     5/5    2/2          FP dinner, FP proj
+ja     5/5    2/2          FP dinner, FP proj
+zh-CN  5/5    2/2          FP dinner, FP proj
+ar     5/5    2/2          FP dinner, FP proj
+GG7 corpus marked sensitive: 61/61 ['ar/01-rimal-alkhaleej-ijtima.eml', 'ar/02-khaled-kashta.eml', 'ar/03-afaq-fatura.eml', 'ar/04-ard-majlis-alidara.eml', 'ar/05-kabsa-dajaj.md', 'ar/06-almada-warsha-rad.eml', 'de/01-terminanfrage-kessler-thal.eml', 'de/02-spieleabend-samstag.eml', 'de/03-rechnung-sanitaer-woehrle.eml', 'de/04-praesentation-lenkungsausschuss.eml', 'de/05-rezept-zwetschgendatschi.md', 'de/06-aw-ablesung-heizkostenverteiler.eml', 'en/01-meeting-request-harlow-pike.eml', 'en/02-ridgeline-hike-saturday.eml', 'en/03-invoice-copperline-print.eml', 'en/04-q4-forecast-deadline.eml', 'en/05-thanksgiving-plan.md', 'en/06-re-offsite-venue.eml', 'es/01-solicitud-reunion-alcazar.eml', 'es/02-cumple-lucia-sabado.eml', 'es/03-factura-reformas-penalver.eml', 'es/04-informe-trimestral-viernes-13.eml', 'es/05-receta-paella-valenciana.md', 'es/06-re-cotizacion-embarque.eml', 'fr/01-rdv-ateliers-duval-roche.eml', 'fr/02-weekend-etretat.eml', 'fr/03-reservation-hotel-tilleuls.eml', 'fr/04-rapport-audit-13-novembre.eml', 'fr/05-cr-conseil-syndical.md', 'fr/06-re-pot-de-depart-bernard.eml', 'hi/01-gomti-edtech-baithak.eml', 'hi/02-karan-rishikesh-plan.eml', 'hi/03-kamalvan-chalan.eml', 'hi/04-timahi-report-masauda.eml', 'hi/05-jaisalmer-yatra-yojana.md', 'hi/06-pragati-brochure-re.eml', 'ja/01-kotobuki-uchiawase.eml', 'ja/02-sho-hakone-ryokou.eml', 'ja/03-sakura-insatsu-seikyusho.eml', 'ja/04-nenmatsu-campaign-kikakusho.eml', 'ja/05-kyoto-kouyou-plan.md', 'ja/06-hikari-honyaku-re.eml', 'mixed/01-de-en-workshop-thread.eml', 'mixed/02-es-en-spanglish-demo.eml', 'mixed/03-hinglish-team-dinner.eml', 'mixed/04-hi-en-invoice-gst.eml', 'mixed/05-ar-fr-en-order-confirmation.eml', 'mixed/06-ja-en-release-review.eml', 'mixed/07-zh-supplier-meeting.ics', 'pt-BR/01-solicitacao-reuniao-tavola.eml', 'pt-BR/02-feijoada-sabado.eml', 'pt-BR/03-fatura-marcenaria-sao-joao.eml', 'pt-BR/04-proposta-vale-verde-sexta-13.eml', 'pt-BR/05-roteiro-chapada-diamantina.md', 'pt-BR/06-re-confraternizacao-fim-de-ano.eml', 'zh-CN/01-qinghe-huimian-yaoqing.eml', 'zh-CN/02-xiaoyu-moganshan.eml', 'zh-CN/03-gusu-yayuan-yuding.eml', 'zh-CN/04-erqi-yanshou-cailiao.eml', 'zh-CN/05-hongshaorou-biji.md', 'zh-CN/06-rongchuang-zhanwei-re.eml']
+not found over IPC: []
