@@ -320,9 +320,10 @@ runner). 500,000 items, GitHub `ubuntu-latest` (EPYC 9V74, 4 vCPUs, 16 GB), run 
 | Idle CPU / wakeups | 0.00% / 0.0 per s |
 
 At 250k: restart 28 ms, idle RSS 429 MiB, `knowledge.status` ~0.2 ms. <a id="ll1-part-two"></a>On a 4-vCPU dev container: the first sync of 100,000 files (`--perf-phases sync`) runs at
-**1,709 items/s** (58.5 s; batched ingest writes), observed → committed p50 / p95 80 / 211 ms, file
-→ searchable 601 ms p50. Search at 500k (`--perf-phases search`, text-only, 300 queries): **62.6 /
-123.5 ms** p50 / p95, recall@10 0.7076 (rare/common term split with an exact bound). The graph
+**1,874 items/s** (×3.7; 53.4 s; batched ingest writes, each batch written while the next is
+prepared), observed → committed p50 / p95 90 / 449 ms (an item can wait for its batch), file →
+searchable 596 ms p50. Search at 500k (`--perf-phases search`, text-only, 300 queries): **65 /
+126 ms** p50 / p95, recall@10 0.7076 (rare/common term split with an exact bound). The graph
 overview reads maintained counts: 0.067 ms vs 576 ms for a scan at 2M mentions. The desktop lists
 page by cursor (a 5,000-row ledger scrolls at 17.1 ms p95 frames).
 
