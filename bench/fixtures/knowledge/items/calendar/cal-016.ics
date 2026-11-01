@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:harbourline-po-signoff-20261103@ostrander-freight.test
+DTSTAMP:20261021T000000Z
+DTSTART:20261103T100000Z
+DTEND:20261103T103000Z
+SUMMARY:Harbourline PO sign-off
+LOCATION:Ostrander Depot
+ORGANIZER;CN="Sam Okafor":mailto:sam.okafor@ostrander-freight.test
+ATTENDEE;CN="Sam Okafor";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:sam.okafor@ostrander-freight.test
+ATTENDEE;CN="K. Selkirk";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:katherine.selkirk@ostrander-freight.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+END:VEVENT
+END:VCALENDAR

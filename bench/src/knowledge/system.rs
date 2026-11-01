@@ -37,6 +37,8 @@ pub struct SystemContext {
     pub me_emails: Vec<String>,
     /// Webmail domains of the corpus (`Scenario::webmail_domains`).
     pub webmail_domains: Vec<String>,
+    /// The pipeline's fixed clock (`Scenario::as_of`); `None`: the wall clock.
+    pub as_of: Option<time::OffsetDateTime>,
 }
 
 /// Overrides of `nugget_knowledge::LlmConfig` for a run (the default run sets none).
@@ -80,6 +82,8 @@ pub struct RenderedFact {
     pub footnotes: usize,
     /// The evidence behind those footnotes, checked against the store.
     pub citations: Vec<Evidence>,
+    /// A history line (a superseded claim shown under "Earlier"), not a current fact.
+    pub history: bool,
 }
 
 /// One rendered vault page.
@@ -98,8 +102,20 @@ pub struct RenderedVault {
 }
 
 impl RenderedVault {
+    /// Current facts (history lines excluded).
     pub fn facts(&self) -> impl Iterator<Item = &RenderedFact> {
-        self.pages.iter().flat_map(|p| &p.facts)
+        self.pages
+            .iter()
+            .flat_map(|p| &p.facts)
+            .filter(|f| !f.history)
+    }
+
+    /// History lines: superseded claims the page still shows, with their citations.
+    pub fn history(&self) -> impl Iterator<Item = &RenderedFact> {
+        self.pages
+            .iter()
+            .flat_map(|p| &p.facts)
+            .filter(|f| f.history)
     }
 }
 

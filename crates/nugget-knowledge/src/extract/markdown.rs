@@ -7,6 +7,10 @@
 //!   after the note's title. A project's `owner` leads it and its `members` work on it; a
 //!   person's `org` is where they work and their `club` one they are a member of; an
 //!   organisation-valued key of a project is what the project is part of.
+//! - An untyped note with a `project:` (a meeting note) makes only its `owner` / `lead` and
+//!   `members` / `team` the project's people (`leads`, `works_on`); whoever it lists under
+//!   `people` / `attendees` / `participants` / `with` took part in the meeting and is only
+//!   `related_to` the project.
 //! - Every frontmatter claim quotes the `key: value` line it came from, exactly as stored.
 //! - The note's subjects (its own entity, else its projects, else its topics) are what its
 //!   wikilinks connect: a link becomes a `references` claim from each subject to the linked
@@ -26,17 +30,12 @@ const MAX_LIST: usize = 50;
 
 /// Frontmatter keys naming the people who lead the note's subject.
 const LEAD_KEYS: &[&str] = &["owner", "owners", "lead", "leads"];
-/// Frontmatter keys naming the people involved in the note's subject.
-const MEMBER_KEYS: &[&str] = &[
-    "people",
-    "person",
-    "attendees",
-    "participants",
-    "with",
-    "members",
-    "member",
-    "team",
-];
+/// Frontmatter keys naming the members of the note's subject (a project's team).
+const MEMBER_KEYS: &[&str] = &["members", "member", "team"];
+/// Frontmatter keys naming the people a note involves: of a typed note, its subject's people
+/// (a project's team, an event's attendees); of an untyped note (a meeting note with a
+/// `project:`), only who took part, not the project's members.
+const PEOPLE_KEYS: &[&str] = &["people", "person", "attendees", "participants", "with"];
 /// Frontmatter keys of a person note naming who they report to.
 const MANAGER_KEYS: &[&str] = &["reports_to", "manager"];
 /// Frontmatter keys naming an employer or owning organisation.
@@ -131,6 +130,9 @@ fn host_of(url: &str) -> Option<String> {
 enum PersonRole {
     Lead,
     Member,
+    /// Named under [`PEOPLE_KEYS`]: a member of a typed note's subject, merely involved with
+    /// an untyped note's projects.
+    Involved,
     /// The (person) note's subject reports to them.
     Manager,
 }
@@ -246,12 +248,14 @@ pub(super) fn extract(ctx: &ItemCtx<'_>, ex: &mut Extraction) {
         &[
             (LEAD_KEYS, PersonRole::Lead),
             (MEMBER_KEYS, PersonRole::Member),
+            (PEOPLE_KEYS, PersonRole::Involved),
             (MANAGER_KEYS, PersonRole::Manager),
         ]
     } else {
         &[
             (LEAD_KEYS, PersonRole::Lead),
             (MEMBER_KEYS, PersonRole::Member),
+            (PEOPLE_KEYS, PersonRole::Involved),
         ]
     };
     for (keys, role) in person_groups {
@@ -371,12 +375,17 @@ pub(super) fn extract(ctx: &ItemCtx<'_>, ex: &mut Extraction) {
                         q.clone(),
                     );
                 }
+                // Membership only from explicit keys: the people a meeting note lists (a
+                // vendor, a manager in a 1:1) took part in it; they are not the project's team.
                 for (person, name, role, f) in &people {
-                    let (pred, text) = match role {
-                        PersonRole::Lead => ("leads", format!("{name} leads {pn}.")),
-                        _ => ("works_on", format!("{name} works on {pn}.")),
+                    let (pred, text, c) = match role {
+                        PersonRole::Lead => ("leads", format!("{name} leads {pn}."), 0.6),
+                        PersonRole::Involved => {
+                            ("related_to", format!("{name} is related to {pn}."), 0.5)
+                        }
+                        _ => ("works_on", format!("{name} works on {pn}."), 0.6),
                     };
-                    claim(ex, *person, pred, *p, text, 0.6, ev(f));
+                    claim(ex, *person, pred, *p, text, c, ev(f));
                 }
             }
         }
@@ -489,6 +498,7 @@ mod tests {
             me_emails: &me,
             me_label: "Me",
             cfg: &cfg,
+            now: OffsetDateTime::now_utc(),
         };
         let mut ex = Extraction::default();
         extract(&ctx, &mut ex);
@@ -656,6 +666,7 @@ mod tests {
             "project": "[[Harbourline]]",
             "owner": "[[Robin Ashgrove]]",
             "with": ["Sam Okafor"],
+            "team": ["Ada Wexford"],
         });
         let ex = run("journal/Standup.md", fm.clone());
         let got = triples(&ex);
@@ -666,7 +677,18 @@ mod tests {
                 "Harbourline",
                 "owner: [[Robin Ashgrove]]",
             ),
-            t("Sam Okafor", "works_on", "Harbourline", "with: Sam Okafor"),
+            t(
+                "Sam Okafor",
+                "related_to",
+                "Harbourline",
+                "with: Sam Okafor",
+            ),
+            t(
+                "Ada Wexford",
+                "works_on",
+                "Harbourline",
+                "team: Ada Wexford",
+            ),
             // Body tag: quoted from the chunk.
             t(
                 "Harbourline",

@@ -19,7 +19,7 @@ use crate::config::{KnowledgeConfig, RunBudget};
 use crate::feed::ItemFeed;
 use crate::session::{Plan, Session, plan};
 use crate::splits::Split;
-use crate::state::{SourceLedger, State};
+use crate::state::{SourceLedger, State, TEMPORAL_VERSION};
 
 /// Counters for one [`Knowledge::run_once`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -66,8 +66,9 @@ pub struct RunStats {
     pub llm_quotes_rejected: u64,
     /// Entities not named in the text (or malformed).
     pub llm_entities_dropped: u64,
-    /// Items not sent to any model because only cloud providers exist and the item is
-    /// sensitive or its source is not allow-listed.
+    /// Items not sent to any model: flagged sensitive (`metadata.sensitive == true`: no model
+    /// at all), or only cloud providers exist and the item is sensitive or its source is not
+    /// allow-listed.
     pub llm_skipped_privacy: u64,
     /// Entities whose data changed (also sent to [`Knowledge::subscribe`]rs).
     pub changed_entities: u64,
@@ -114,6 +115,15 @@ impl Inner {
         *cached = Some(s.clone());
         Ok(s)
     }
+
+    /// The time the pipeline judges items against: the fixed clock if one is set
+    /// ([`Knowledge::set_clock`]), else the wall clock.
+    pub fn now(&self) -> time::OffsetDateTime {
+        self.clock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(time::OffsetDateTime::now_utc)
+    }
 }
 
 pub(crate) struct Inner {
@@ -124,6 +134,8 @@ pub(crate) struct Inner {
     pub emb_cache: Mutex<HashMap<String, Vec<f32>>>,
     /// User splits ([`crate::splits`]), loaded on first use.
     splits: Mutex<Option<Arc<Vec<Split>>>>,
+    /// A fixed "now" ([`Knowledge::set_clock`]); `None`: the wall clock.
+    clock: Mutex<Option<time::OffsetDateTime>>,
     run_lock: tokio::sync::Mutex<()>,
     /// What a budget-cut run left of its plan (and whether the LLM was ready when planning),
     /// picked up by the next run instead of planning again: re-planning diffs every item
@@ -190,6 +202,7 @@ impl Knowledge {
                 cfg: config,
                 emb_cache: Mutex::new(HashMap::new()),
                 splits: Mutex::new(None),
+                clock: Mutex::new(None),
                 run_lock: tokio::sync::Mutex::new(()),
                 carry: Mutex::new(None),
                 plan_left: AtomicU64::new(0),
@@ -201,8 +214,21 @@ impl Knowledge {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn inner_for_tests(&self) -> &Inner {
+        &self.inner
+    }
+
     pub fn config(&self) -> &KnowledgeConfig {
         &self.inner.cfg
+    }
+
+    /// Fix the time the pipeline judges items against (`None`: the wall clock, the default):
+    /// whether a calendar event has taken place yet (`attended` or only `invited_to`), and the
+    /// horizon far-future item dates are clamped to. For reproducible runs over a corpus
+    /// written as of a known date (benches, tests); takes effect from the next run.
+    pub fn set_clock(&self, now: Option<time::OffsetDateTime>) {
+        *self.inner.clock.lock().unwrap_or_else(|p| p.into_inner()) = now;
     }
 
     /// Process changed and deleted items within `budget`. Idempotent and resumable: progress
@@ -288,6 +314,11 @@ impl Knowledge {
             budget.max_llm_requests,
         );
         s.stats.planned = total;
+        // A graph from before validity intervals: migrate it once, before any item (resumable:
+        // a run out of time continues it next time).
+        if s.state.temporal < TEMPORAL_VERSION && s.backfill_validity(deadline)? {
+            s.state.temporal = TEMPORAL_VERSION;
+        }
         let (mut deletes_done, mut upserts_done) = (0usize, 0usize);
         let mut spent = 0usize;
         let stop = |s: &Session, spent: usize| {
@@ -314,6 +345,7 @@ impl Knowledge {
         }
         let done = (deletes_done + upserts_done) as u64;
         s.resolve_pending_links()?;
+        s.settle_short_names()?;
         if s.retracted_any {
             // Retractions may leave entities with nothing behind them. Every batch is applied
             // by now, so whatever is orphaned really is.
@@ -515,6 +547,8 @@ impl Knowledge {
             None => crate::splits::load(self.inner.feed.as_ref())?,
         };
         list.retain(|s| !(s.from == split.from && s.to == split.to));
+        // The records of the merges the user undid no longer hold.
+        crate::resolve::forget_split(self.inner.graph.as_ref(), &split)?;
         list.push(split);
         let excess = list.len().saturating_sub(crate::splits::MAX_SPLITS);
         list.drain(..excess);

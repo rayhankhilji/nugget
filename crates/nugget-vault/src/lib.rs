@@ -32,7 +32,10 @@
 //! ## Facts
 //!
 //! ### Works at <!-- p:works_at -->
-//! - Samantha works at [[Organization/Acme (ent_000002)|Acme]]. [^1] <!-- c:1 -->
+//! - Samantha works at [[Organization/Acme (ent_000002)|Acme]]. [^1] <!-- c:7 -->
+//!
+//! *Earlier:*
+//!   - Samantha works at [[Organization/Initech (ent_000003)|Initech]]. (until 2026-09-30) [^2] <!-- h:1 -->
 //! <!-- nugget:end facts -->
 //!
 //! <!-- nugget:begin related -->
@@ -41,12 +44,37 @@
 //! - [[Organization/Acme (ent_000002)|Acme]]: works at
 //! <!-- nugget:end related -->
 //!
+//! <!-- nugget:begin merged -->
+//! ## Merged
+//!
+//! Nugget recognised these as the same person and combined them into this page:
+//!
+//! - Sam L: Same email address as Samantha Lee. (because: shared email) [^1]
+//!
+//! If any of these is a different person, you can split it off again in Nugget; … This section is generated: …
+//! <!-- nugget:end merged -->
+//!
 //! <!-- nugget:begin sources -->
 //! [^1]: [Lunch on Friday](https://mail.example/1): "Sam from Acme"
+//! [^2]: [Intro](https://mail.example/0): "Sam (Initech)"
 //! <!-- nugget:end sources -->
 //!
 //! ## Notes
 //! ```
+//! Within each predicate group the current facts (active and user-asserted claims, `<!-- c:ID -->`)
+//! come first, newest validity start first; superseded claims follow under `*Earlier:*` as
+//! indented history lines (`<!-- h:ID -->`) with their validity interval in UTC dates
+//! (`2026-09-01 – 2026-10-05`, `until …`, `from …`, or none when unknown), newest first, each
+//! with its own citations. History lines are read-only (see [`edits`](crate::edits)). Retracted
+//! and rejected claims are not shown, nor is a superseded claim without evidence (a replaced
+//! user assertion) or one the user corrected by editing its fact line: the manifest records
+//! those, and a superseded claim without an end date in a group with a later user assertion is
+//! treated the same (a corrected fact was never true, so it is not history).
+//! The `merged` block appears only when the entity has a merge log
+//! ([`nugget_graph::merge_log`]): the newest 50 merged names with the reason and a footnote for
+//! the item that corroborated it (while the store still has that item). Like every generated
+//! block it is read-only: an edit to it is kept but reported as a conflict, never applied; the
+//! page says so. Splitting is done in the app.
 //! Links name the target page by its path stem, which ends in the entity's stable short id; they
 //! are regenerated on every render, and links in user text are rewritten when a page moves.
 //!
@@ -119,14 +147,20 @@ use render::Ctx;
 const STATE_FILE: &str = ".nugget/state.json";
 const INDEX_PAGE: &str = "README.md";
 const INDEX_BASE: &str = ".nugget/base/README.md";
-const STATE_VERSION: u32 = 1;
+/// Page layout and manifest version, kept in the manifest. 1: facts, related, sources. 2: adds
+/// history lines (superseded claims) under each predicate group and the `merged` section. A
+/// vault whose manifest has an older version gets one full re-render on the next
+/// [`Vault::render_changed`]; old pages three-way merge into the new layout like any re-render.
+const STATE_VERSION: u32 = 2;
 /// Version of the rules deciding what a page shows. A vault last fully rendered under older
 /// rules is re-rendered in full once, at its next [`Vault::render_changed`] (or
 /// [`Vault::render_all`]), so pages, index entries and footnotes written under the old rules do
 /// not wait for their entity to change. History:
 /// - 1: sensitive items (GG5-3): sensitive-only facts and entities left out, frontmatter
 ///   aliases and identifiers filtered, pages of sensitive-only entities removed or hidden.
-const RENDER_RULES: u32 = 1;
+/// - 2: fact sentences name objects by their current names (GG5-10), addresses and phone
+///   numbers redacted from footnote quotes (GG5-17).
+const RENDER_RULES: u32 = 2;
 /// How often a page is re-rendered when the user keeps changing it under us.
 const WRITE_ATTEMPTS: usize = 3;
 
@@ -229,6 +263,10 @@ struct State {
     last_render: Option<OffsetDateTime>,
     #[serde(default)]
     invalid: Vec<String>,
+    /// Claims superseded because the user edited their fact line: corrections, never shown as
+    /// history.
+    #[serde(default)]
+    corrected: BTreeSet<ClaimId>,
 }
 
 /// Per-pass bookkeeping.
@@ -338,6 +376,15 @@ impl Vault {
         self.fs.root()
     }
 
+    /// Whether the vault holds pages from an older page layout ([`STATE_VERSION`]) that a full
+    /// pass has not re-rendered yet.
+    /// A manifest that was lost or unreadable (so starts at version 0 with no pages) while merge
+    /// bases from an earlier render are on disk counts as old too.
+    fn needs_upgrade(&self, st: &State) -> bool {
+        st.version < STATE_VERSION
+            && (!st.pages.is_empty() || self.fs.entry_exists(".nugget/base/entities"))
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -366,7 +413,9 @@ impl Vault {
             ids.extend(batch);
             cur = high;
         }
-        let mut report = if full {
+        // Pages rendered under older rules, or written by an older layout (also when the
+        // manifest was lost): bring all of them up to date once.
+        let mut report = if full || self.needs_upgrade(&st) {
             self.run(&mut st, None)?
         } else if ids.is_empty() {
             RenderReport::default()
@@ -388,7 +437,7 @@ impl Vault {
     /// with the new answer at its next change (or the next full render).
     pub fn needs_full_render(&self) -> bool {
         let st = self.lock();
-        st.last_render.is_some() && st.rules < RENDER_RULES
+        (st.last_render.is_some() && st.rules < RENDER_RULES) || self.needs_upgrade(&st)
     }
 
     /// Apply the user's edits in the page at `path` (absolute, or relative to the root) to the
@@ -590,8 +639,9 @@ impl Vault {
     fn run(&self, st: &mut State, ids: Option<Vec<EntityId>>) -> Result<RenderReport> {
         let ctx = Ctx::new(self.graph.as_ref(), self.items.as_ref(), &self.config);
         let mut pass = Pass::default();
-        // The first pass of a vault renders every page there is under the current rules.
-        let full = ids.is_none() || st.last_render.is_none();
+        // The first pass of a vault renders every page there is under the current rules; a
+        // partial pass over pages from an older layout does not count as one.
+        let full = ids.is_none() || (st.last_render.is_none() && !self.needs_upgrade(st));
         let ids = match ids {
             Some(v) => v,
             None => {
@@ -627,11 +677,11 @@ impl Vault {
             self.render_index(st, &ctx, &mut pass)
         })();
         st.last_render = Some(OffsetDateTime::now_utc());
-        st.version = STATE_VERSION;
         // A page that kept changing under us keeps the full render pending; one that cannot be
         // read at all (a symlink, too large, not UTF-8) does not, or every sync would render
         // everything again.
         if full && result.is_ok() && !pass.retry {
+            st.version = st.version.max(STATE_VERSION);
             st.rules = RENDER_RULES;
         }
         self.save_state(st)?;
@@ -983,6 +1033,8 @@ impl Vault {
                 }
                 if !plan.is_empty() {
                     self.apply_plan(st, &entity, &plan, pass)?;
+                    st.corrected
+                        .extend(pass.report.edits.superseded.iter().copied());
                     ctx.forget();
                     if let Some(fresh) = ctx.entity(&id)? {
                         entity = fresh;
@@ -990,8 +1042,8 @@ impl Vault {
                 }
             }
 
-            let claims = self.graph.claims_for(&id, false)?;
-            let rendered = ctx.render_entity(&entity, &claims)?;
+            let claims = self.graph.claims_for(&id, true)?;
+            let rendered = ctx.render_entity(&entity, &claims, &st.corrected)?;
             let gen_text = rendered.doc.render();
             let mut rel = page_rel_path(entity.kind, &entity.name, &id, self.config.max_name_chars);
             // (Unless it is this entity's own page, left there by a move interrupted between

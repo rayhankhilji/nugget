@@ -580,6 +580,9 @@ pub fn item_date_of(item: &nugget_store::Item, offset: UtcOffset) -> OffsetDateT
     item_date(
         &nugget_store::ItemDates {
             extracted_date: text(&m["extracted"]["date"]),
+            frontmatter_date: None,
+            frontmatter_created: None,
+            title: None,
             event_start: text(&m["extracted"]["start"])
                 .or_else(|| text(&m["start"]["date_time"]))
                 .or_else(|| text(&m["start"]["date"])),
@@ -632,6 +635,9 @@ mod tests {
         let mtime = at("2026-10-30T09:00:00Z");
         let d = |event: Option<&str>, mail: Option<&str>| nugget_store::ItemDates {
             extracted_date: mail.map(str::to_owned),
+            frontmatter_date: None,
+            frontmatter_created: None,
+            title: None,
             event_start: event.map(str::to_owned),
             source_modified_at: Some(mtime),
             created_at: mtime,

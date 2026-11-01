@@ -358,6 +358,7 @@ mod tests {
             me_emails: &me,
             me_label: "Me",
             cfg: &cfg,
+            now: time::OffsetDateTime::now_utc(),
         };
         let mut ex = Extraction::default();
         extract(&ctx, &mut ex);

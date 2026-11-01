@@ -2,13 +2,22 @@
 //! writes them) and Google Calendar items (`metadata.source` with `event_id` / `attendees`).
 //! An event entity with time attributes, attendees as people with `attended` / `invited_to`,
 //! the organiser with `organized`, and the location as a place.
+//!
+//! An acceptance (or the organiser's own attendance) is `attended` only once the event has
+//! ended by the time the item is processed (`ItemCtx::now`, the pipeline's clock); before that
+//! it is `invited_to` ("accepted the invitation to"). A recurring event's claims say how it
+//! repeats ("weekly from 2026-03-10") rather than naming its first date as if it were the only
+//! one, and it counts as attended once its first occurrence has ended. An attendee's evidence
+//! quotes the `Attendees:` line, an organiser's the `Organizer:` line.
 
 use nugget_graph::EntityKind;
+use nugget_store::Chunk;
 use serde_json::{Value, json};
+use time::OffsetDateTime;
 
 use super::{ItemCtx, parse_when};
 use crate::spec::{ClaimSpec, ERef, EntitySpec, Extraction, OSpec};
-use crate::text::{Address, is_automated, parse_address, truncate_chars};
+use crate::text::{Address, MAX_QUOTE_CHARS, is_automated, parse_address, truncate_chars};
 
 /// Events per item at most.
 const MAX_EVENTS: usize = 200;
@@ -225,11 +234,14 @@ fn one(ctx: &ItemCtx<'_>, ex: &mut Extraction, ev: Event) {
     }
     let event = ex.entity(spec);
     let start = ev.start.as_deref().and_then(parse_when);
-    let when = ev
-        .start
-        .as_deref()
-        .map(|x| format!(" on {x}"))
-        .unwrap_or_default();
+    // A recurring event says how it repeats, not just its first date.
+    let when = match (ev.rrule.as_deref(), ev.start.as_deref()) {
+        (Some(r), Some(st)) => format!(" ({})", recurrence(r, st)),
+        (None, Some(st)) => format!(" on {st}"),
+        (Some(r), None) => format!(" ({})", recurrence(r, "")),
+        (None, None) => String::new(),
+    };
+    let happened = has_ended(&ev, start, ctx.now);
 
     if let Some(loc) = ev.location.as_deref().filter(|l| !is_virtual(l)) {
         let loc = truncate_chars(loc, 200);
@@ -255,13 +267,17 @@ fn one(ctx: &ItemCtx<'_>, ex: &mut Extraction, ev: Event) {
     {
         let who = ex.name_of(r, ctx.me_label);
         let anchor = a.email.clone().unwrap_or_else(|| raw.clone());
+        let evidence = match locate_line(ctx.chunks, "organizer", &anchor) {
+            Some((id, line)) => ctx.evidence(Some(id), &line),
+            None => ctx.evidence_at(&anchor, &format!("Organizer: {raw}")),
+        };
         ex.claim(ClaimSpec {
             subject: r,
             predicate: "organized".into(),
             object: OSpec::Entity(event),
             text: format!("{who} organized {summary}{when}."),
             confidence: 0.95,
-            evidence: ctx.evidence_at(&anchor, &format!("Organizer: {raw}")),
+            evidence,
             valid_from: start,
         });
         seen.push(r);
@@ -272,10 +288,15 @@ fn one(ctx: &ItemCtx<'_>, ex: &mut Extraction, ev: Event) {
         };
         let organizer = seen.first() == Some(&r);
         let status = a.status.as_deref().unwrap_or("");
+        // Accepting is not attending: `attended` only once the event (for a recurring one, its
+        // first occurrence) has ended by the processing time; before, an acceptance is
+        // `invited_to`.
         let (predicate, verb, confidence) = match status {
             "declined" => ("invited_to", "was invited to (declined)", 0.9),
-            "accepted" => ("attended", "attended", 0.85),
-            "" if organizer => ("attended", "attended", 0.85),
+            "accepted" if happened => ("attended", "attended", 0.85),
+            "accepted" => ("invited_to", "accepted the invitation to", 0.9),
+            "" if organizer && happened => ("attended", "attended", 0.85),
+            "" if organizer => ("invited_to", "plans to attend", 0.9),
             _ => ("invited_to", "was invited to", 0.9),
         };
         if seen.contains(&r) && !organizer {
@@ -284,14 +305,122 @@ fn one(ctx: &ItemCtx<'_>, ex: &mut Extraction, ev: Event) {
         seen.push(r);
         let who = ex.name_of(r, ctx.me_label);
         let anchor = a.email.clone().unwrap_or_else(|| raw.clone());
+        // Quote the attendee line, not the first line naming the address (the organizer's).
+        let evidence = match locate_line(ctx.chunks, "attendee", &anchor) {
+            Some((id, line)) => ctx.evidence(Some(id), &line),
+            None => ctx.evidence(None, &format!("Attendee: {raw}")),
+        };
         ex.claim(ClaimSpec {
             subject: r,
             predicate: predicate.into(),
             object: OSpec::Entity(event),
             text: format!("{who} {verb} {summary}{when}."),
             confidence,
-            evidence: ctx.evidence_at(&anchor, &format!("Attendee: {raw}")),
+            evidence,
             valid_from: start,
         });
+    }
+}
+
+/// Whether the event has ended by `now`: its end, else its start (an all-day event without an
+/// end lasts its day). A recurring event has taken place once its first occurrence has. An
+/// event without a start has not provably taken place.
+fn has_ended(ev: &Event, start: Option<OffsetDateTime>, now: OffsetDateTime) -> bool {
+    let end = ev.end.as_deref().and_then(parse_when).or_else(|| {
+        start.map(|s| {
+            if ev.all_day == Some(true) {
+                s + time::Duration::days(1)
+            } else {
+                s
+            }
+        })
+    });
+    end.is_some_and(|e| e <= now)
+}
+
+/// How a recurring event repeats, in words, from its `RRULE` and first start: "weekly from
+/// 2026-03-10", "every 2 weeks from 2026-03-10, 8 times", "monthly from 2026-01-05 until
+/// 2026-06-30". An unknown frequency reads "repeats".
+fn recurrence(rrule: &str, start: &str) -> String {
+    let mut freq = None;
+    let mut interval = 1u32;
+    let mut count = None;
+    let mut until = None;
+    for part in rrule.split(';') {
+        let Some((k, v)) = part.split_once('=') else {
+            continue;
+        };
+        match k.trim().to_ascii_uppercase().as_str() {
+            "FREQ" => freq = Some(v.trim().to_ascii_uppercase()),
+            "INTERVAL" => interval = v.trim().parse().unwrap_or(1).max(1),
+            "COUNT" => count = v.trim().parse::<u32>().ok(),
+            "UNTIL" => until = parse_when(v.trim()),
+            _ => {}
+        }
+    }
+    let unit = match freq.as_deref() {
+        Some("DAILY") => Some(("daily", "days")),
+        Some("WEEKLY") => Some(("weekly", "weeks")),
+        Some("MONTHLY") => Some(("monthly", "months")),
+        Some("YEARLY") => Some(("yearly", "years")),
+        _ => None,
+    };
+    let mut out = match unit {
+        Some((once, _)) if interval == 1 => once.to_owned(),
+        Some((_, many)) => format!("every {interval} {many}"),
+        None => "repeats".to_owned(),
+    };
+    if !start.is_empty() {
+        out.push_str(" from ");
+        out.push_str(start.get(..10).unwrap_or(start));
+    }
+    if let Some(u) = until {
+        out.push_str(&format!(" until {}", u.date()));
+    }
+    if let Some(n) = count {
+        out.push_str(&format!(", {n} times"));
+    }
+    out
+}
+
+/// The first line (in chunk order) that starts with `prefix` and contains `needle`, both
+/// case-insensitive, with its chunk id: the `Attendees:` line naming an address, which
+/// [`crate::text::locate`] misses when the organizer line names it first.
+fn locate_line(chunks: &[Chunk], prefix: &str, needle: &str) -> Option<(i64, String)> {
+    let n = needle.trim().to_lowercase();
+    if n.is_empty() {
+        return None;
+    }
+    chunks.iter().find_map(|c| {
+        c.text.lines().find_map(|l| {
+            let lower = l.trim_start().to_lowercase();
+            (lower.starts_with(prefix) && lower.contains(&n))
+                .then(|| (c.id, truncate_chars(l.trim(), MAX_QUOTE_CHARS)))
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::recurrence;
+
+    #[test]
+    fn recurrences_read_as_words() {
+        assert_eq!(
+            recurrence("FREQ=WEEKLY;BYDAY=TU,WE,TH", "2026-03-10T09:30:00Z"),
+            "weekly from 2026-03-10"
+        );
+        assert_eq!(
+            recurrence("FREQ=WEEKLY;COUNT=8", "2026-06-17T17:00:00Z"),
+            "weekly from 2026-06-17, 8 times"
+        );
+        assert_eq!(
+            recurrence(
+                "FREQ=MONTHLY;INTERVAL=2;UNTIL=20261231T000000Z",
+                "2026-01-05"
+            ),
+            "every 2 months from 2026-01-05 until 2026-12-31"
+        );
+        assert_eq!(recurrence("X-UNKNOWN", ""), "repeats");
     }
 }
