@@ -354,7 +354,16 @@ pub struct DraftRequest {
     pub subject: String,
     pub intent: String,
     /// Evidence quotes from the card.
-    pub context: Vec<String>,
+    pub context: Vec<Quote>,
+}
+
+/// One quote of the thread a draft answers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Quote {
+    pub text: String,
+    /// The user's own words, not the other person's.
+    #[serde(default)]
+    pub from_user: bool,
 }
 
 /// Writes reply text. Implemented by `nugget-draft` (voice profile, retrieval, sensitive gate).
@@ -577,7 +586,7 @@ impl ActionRunner {
         card_id: &str,
         action_index: usize,
         action: &Action,
-        context: &[String],
+        context: &[Quote],
     ) -> Result<PreparedAction> {
         let mut action = action.clone();
         if let Action::DraftReply(d) = &mut action

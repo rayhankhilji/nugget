@@ -103,12 +103,12 @@ pub(crate) fn field_request(req: &DraftRequest) -> FieldDraft {
     let thread = req
         .context
         .iter()
-        .filter(|q| !q.trim().is_empty())
+        .filter(|q| !q.text.trim().is_empty())
         .take(MAX_THREAD)
         .map(|q| ThreadMessage {
             author: None,
-            text: q.clone(),
-            from_me: Some(false),
+            text: q.text.clone(),
+            from_me: Some(q.from_user),
             timestamp: None,
         })
         .collect();
@@ -182,6 +182,7 @@ mod tests {
     use nugget_core::capability::{Locality, Tier};
     use nugget_core::ids::{ItemKey, ItemRef, ProviderId, SourceId};
     use nugget_infer::{ChatRequest, ChatStream, Provider, ProviderKind, ProviderMeta, StopReason};
+    use nugget_proactive::Quote;
     use nugget_store::{NewChunk, NewItem, content_hash};
     use nugget_voice::{MeIdentity, VoiceConfig, VoiceProfile};
 
@@ -260,8 +261,29 @@ mod tests {
             to: vec!["sam@acme.example".into()],
             subject: "Re: Pricing".into(),
             intent: "Send the pricing sheet".into(),
-            context: vec!["Could you send pricing?".into()],
+            context: vec![
+                Quote {
+                    text: "Could you send pricing?".into(),
+                    from_user: false,
+                },
+                Quote {
+                    text: "I'll send the shortlist by Friday.".into(),
+                    from_user: true,
+                },
+            ],
         }
+    }
+
+    /// GG4-16: the user's own words in the thread are marked as theirs.
+    #[test]
+    fn thread_keeps_who_wrote_what() {
+        let from_me: Vec<_> = field_request(&request())
+            .context
+            .thread
+            .iter()
+            .map(|m| m.from_me)
+            .collect();
+        assert_eq!(from_me, [Some(false), Some(true)]);
     }
 
     /// Draft a reply over `store`; returns the system prompt the provider got.

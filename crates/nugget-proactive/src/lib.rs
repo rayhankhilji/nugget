@@ -36,8 +36,8 @@ use time::{OffsetDateTime, UtcOffset};
 pub use actions::{
     APPROVAL_KEY_LEN, Action, ActionPreview, ActionRunner, Approval, ArchiveThread,
     CalendarExecutor, CreateEvent, DiffLine, DiffOp, DraftReply, DraftRequest, Drafter,
-    ExecOutcome, Executors, MailExecutor, NoteExecutor, PreparedAction, Reminder, ReminderExecutor,
-    ResearchNote, new_approval_key,
+    ExecOutcome, Executors, MailExecutor, NoteExecutor, PreparedAction, Quote, Reminder,
+    ReminderExecutor, ResearchNote, new_approval_key,
 };
 pub use brief::{BriefCard, BriefMeeting, MorningBrief};
 pub use candidate::{Candidate, CandidateKind, EvidenceRef, Features};
@@ -457,10 +457,15 @@ impl Proactive {
             .actions
             .get(index)
             .ok_or_else(|| Error::NotFound(format!("action {index} of card {card_id}")))?;
-        let context: Vec<String> = card
+        let context: Vec<Quote> = card
             .evidence
             .iter()
-            .filter_map(|e| e.quote.clone())
+            .filter_map(|e| {
+                Some(Quote {
+                    text: e.quote.clone()?,
+                    from_user: e.from_user,
+                })
+            })
             .collect();
         runner.prepare(card_id, index, action, &context).await
     }

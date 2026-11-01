@@ -48,6 +48,9 @@ pub struct EvidenceRef {
     pub item: ItemRef,
     pub quote: Option<String>,
     pub url: Option<String>,
+    /// The quote is the user's own words (their sent mail).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_user: bool,
 }
 
 /// Model inputs, each in `[0, 1]` (urgency may reach 1.2 when overdue).

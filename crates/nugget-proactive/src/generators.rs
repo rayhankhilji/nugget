@@ -87,6 +87,7 @@ fn evidence(m: &MailMessage, quote: Option<String>) -> EvidenceRef {
         item: m.item.clone(),
         quote,
         url: m.url.clone(),
+        from_user: m.from_user,
     }
 }
 
@@ -111,6 +112,18 @@ fn end_of_day(ctx: &GenContext<'_>, date: time::Date) -> Option<OffsetDateTime> 
     Time::from_hms(17, 0, 0)
         .ok()
         .map(|t| PrimitiveDateTime::new(date, t).assume_offset(ctx.cfg.utc_offset))
+}
+
+/// "In about two hours", on the hour: stable across refreshes, so an open preview of a
+/// reminder still matches the card's action after the next refresh (GG4-14).
+fn soon(ctx: &GenContext<'_>) -> OffsetDateTime {
+    let t = ctx.now + Duration::hours(2);
+    let hour = t.replace_time(Time::from_hms(t.hour(), 0, 0).unwrap_or(Time::MIDNIGHT));
+    if hour == t {
+        t
+    } else {
+        hour + Duration::hours(1)
+    }
 }
 
 fn reply_subject(s: &str) -> String {
@@ -322,18 +335,15 @@ fn claim_evidence(claims: &[&Claim], corpus: &Corpus) -> Vec<EvidenceRef> {
             if out.iter().any(|o| o.item == ev.item) {
                 continue;
             }
-            let url = corpus
-                .mail
-                .iter()
-                .find(|m| m.item == ev.item)
-                .and_then(|m| m.url.clone());
+            let mail = corpus.mail.iter().find(|m| m.item == ev.item);
             out.push(EvidenceRef {
                 item: ev.item.clone(),
                 quote: ev
                     .quote
                     .clone()
                     .or_else(|| Some(truncate(&c.text, QUOTE_CHARS))),
-                url,
+                url: mail.and_then(|m| m.url.clone()),
+                from_user: mail.is_some_and(|m| m.from_user),
             });
         }
     }
@@ -507,7 +517,7 @@ fn commitment_candidate(
     });
     let remind_at = match due {
         Some(d) if d - Duration::days(1) > ctx.now => d - Duration::days(1),
-        _ => ctx.now + Duration::hours(2),
+        _ => soon(ctx),
     };
     let mut actions = vec![Action::Reminder(Reminder {
         text: name.to_owned(),
@@ -598,6 +608,7 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
             item: ev.item.clone(),
             quote: Some(truncate(&ev.title, QUOTE_CHARS)),
             url: ev.url.clone(),
+            from_user: false,
         }];
         evidence.extend(threads.iter().map(|m| evidence_of_thread(m)));
         evidence.extend(notes.iter().cloned());
@@ -776,6 +787,7 @@ fn related_notes(ctx: &GenContext<'_>, ev: &CalEvent) -> Vec<EvidenceRef> {
                     .map_or(h.snippet.clone(), |t| format!("{t}: {}", h.snippet)),
                 QUOTE_CHARS,
             )),
+            from_user: false,
             url: None,
         });
         if out.len() == 3 {
@@ -1220,9 +1232,7 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
         }
         actions.push(Action::Reminder(Reminder {
             text: quote.clone(),
-            at: due
-                .filter(|d| *d > ctx.now)
-                .unwrap_or(ctx.now + Duration::hours(2)),
+            at: due.filter(|d| *d > ctx.now).unwrap_or(soon(ctx)),
             about: Some(m.item.clone()),
         }));
         out.push(Candidate {
@@ -1351,7 +1361,7 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 }),
                 Action::Reminder(Reminder {
                     text: format!("Follow up with {who}: {}", last.subject),
-                    at: ctx.now + Duration::hours(2),
+                    at: soon(ctx),
                     about: Some(last.item.clone()),
                 }),
             ],
@@ -1423,7 +1433,7 @@ fn todo_candidate(
     let remind_at = if due - Duration::days(1) > ctx.now {
         due - Duration::days(1)
     } else {
-        ctx.now + Duration::hours(2)
+        soon(ctx)
     };
     let start = (remind_at + Duration::hours(1))
         .replace_minute(0)
@@ -1456,6 +1466,7 @@ fn todo_candidate(
             item: n.item.clone(),
             quote: Some(truncate(task, QUOTE_CHARS)),
             url: n.url.clone(),
+            from_user: false,
         }],
         people: Vec::new(),
         due: Some(due),

@@ -283,3 +283,19 @@ m-cc2|Priya <priya@x.example>|theo@x.example|Plan|2|||cc|Maya, can you check the
         ["m-cc2"]
     );
 }
+
+/// GG4-14: a refresh minutes later offers the same actions, so an open preview still matches.
+#[test]
+fn actions_are_stable_across_refreshes() {
+    let p = Proactive::new(fixture().store.clone(), cfg());
+    let actions = |t| -> Vec<_> {
+        p.candidates(t)
+            .unwrap()
+            .into_iter()
+            .flat_map(|c| c.actions)
+            .collect()
+    };
+    let first = actions(now() + Duration::minutes(1));
+    assert!(first.iter().any(|a| matches!(a, Action::Reminder(_))));
+    assert_eq!(first, actions(now() + Duration::minutes(3)));
+}

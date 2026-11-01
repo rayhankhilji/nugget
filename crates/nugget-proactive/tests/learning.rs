@@ -219,7 +219,8 @@ async fn kind_reset_restores_the_model_weight() {
     p.dismiss(&renewal.id, DismissReason::NotImportant, now())
         .unwrap();
     let prior = ScoringModel::prior()["kind_renewal"];
-    assert!(p.model().unwrap().weights["kind_renewal"] < prior);
+    // Feedback lives in the learned layer; the shared weights stay at the prior (GG4-5).
+    assert_eq!(p.model().unwrap().weights["kind_renewal"], prior);
     assert!(
         p.learned(now())
             .unwrap()
@@ -342,7 +343,8 @@ async fn a_thread_turning_sensitive_drops_its_earlier_label() {
 
     put_mails(
         &f.store,
-        "m-lab-2|Dana Lee <dana@clinic.test>||Re: Appointment 884213|1||m-lab-1|sensitive|Your biopsy results are in. Could you call me before Friday?",
+        "m-me-1||dana@clinic.test|Re: Appointment 884213|2||m-lab-1||Will check.
+m-lab-2|Dana Lee <dana@clinic.test>||Re: Appointment 884213|1||m-me-1|sensitive|Your biopsy results are in. Could you call me before Friday?",
     );
     let later = now() + Duration::hours(1);
     p.refresh(later).await.unwrap();
