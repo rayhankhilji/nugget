@@ -3214,6 +3214,13 @@ gold) and over `nugget-retrieve`'s English eval set. Hit rates are @1 / @5 / @10
   poor and only community GGUF conversions exist. The e5-small GGUF tested is broken
   (a third-party conversion; mean pooling probably lost); not pursued.
 
+**Memory gate** (`memory --backend real --scale quick --strict --embed-url`, debug build, each
+model served by llama-cpp-python 0.3.16 on 2 CPU threads; the runtime's llama-server could not be
+fetched here): both pass every target with the same recall: eval-set hybrid recall@10 1.00 (MMR
+1.00, convex 1.00, MMR + convex 0.96; target 0.905), synthetic corpus hybrid recall@10 0.97
+(target 0.93), freshness p95 2.3 s (v1.5) and 2.2 s (v2), propagation 1.00. Ingest throughput
+1.85 (v1.5) and 1.79 (v2) chunks/s; this box's embedding server, not the model, sets that pace.
+
 **End to end through `nuggetd`** (GG7 corpus indexed by the files connector, hybrid search over
 IPC, the embedder an on-device `openai_compatible` provider; the runtime's own llama-server could
 not be fetched in this environment). Hit @1 / @5 / @10, same queries:
