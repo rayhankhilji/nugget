@@ -1051,6 +1051,8 @@ mod tests {
         assert!(get("ask.plain.abstention_rate").target.is_none());
         // The fake finds the boiler's fault code and abstains on the sofa.
         assert!(get("ask.grounded.correct_rate").value > 0.0);
+        // Both prompts still let the fake answer the answerable questions.
+        assert!(get("ask.plain.correct_rate").value > 0.0);
         assert_eq!(params["model.fake"], true);
         assert_eq!(params["questions"], 8);
         assert_eq!(params["questions_answered"], 8);
