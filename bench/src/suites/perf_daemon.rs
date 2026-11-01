@@ -1157,18 +1157,18 @@ pub(crate) fn ingest_texts(n: usize, words_per_doc: usize, seed: u64) -> Vec<Str
 
 /// What the OS cheaply reports about a process. `None` where unavailable.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
-struct ProcSample {
+pub(crate) struct ProcSample {
     rss: Option<u64>,
     hwm: Option<u64>,
     /// User + system CPU time of all threads, in seconds.
-    cpu_s: Option<f64>,
+    pub(crate) cpu_s: Option<f64>,
     /// Voluntary + involuntary context switches of all live threads.
     switches: Option<u64>,
     threads: Option<u64>,
 }
 
 #[cfg(target_os = "linux")]
-fn sample(pid: u32) -> ProcSample {
+pub(crate) fn sample(pid: u32) -> ProcSample {
     let base = PathBuf::from(format!("/proc/{pid}"));
     let field = |status: &str, key: &str| -> Option<u64> {
         status
@@ -1212,7 +1212,7 @@ fn sample(pid: u32) -> ProcSample {
 }
 
 #[cfg(target_os = "macos")]
-fn sample(pid: u32) -> ProcSample {
+pub(crate) fn sample(pid: u32) -> ProcSample {
     let Ok(o) = Command::new("ps")
         .args(["-o", "rss=,time=", "-p", &pid.to_string()])
         .output()
@@ -1239,7 +1239,7 @@ fn sample(pid: u32) -> ProcSample {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn sample(_pid: u32) -> ProcSample {
+pub(crate) fn sample(_pid: u32) -> ProcSample {
     ProcSample::default()
 }
 

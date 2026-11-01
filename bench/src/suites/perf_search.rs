@@ -23,7 +23,7 @@ use crate::runner::{BenchError, RunContext};
 use crate::suites::item_ref;
 use crate::suites::perf::{latency_metrics, us};
 use crate::suites::perf_daemon::{
-    DaemonParams, Daemon, Env, call, find_nuggetd, search, seed_home,
+    Daemon, DaemonParams, Env, call, find_nuggetd, sample, search, seed_home,
 };
 
 /// Keep (and reuse) the seeded home in this directory.
@@ -128,6 +128,19 @@ async fn profile(
             status.items, p.items
         )));
     }
+    // Let the startup work settle first (the proactive engine's first run reads the whole
+    // store; the deferred integrity check reads the whole file): searched during it, the
+    // numbers measure the contention, not search. The daemon profile searches after an hour
+    // of extraction, when it has settled too.
+    let settled = settle(&mut d, env.timeout).await?;
+    out.push(Metric::new(
+        "daemon.search.settle_s",
+        settled,
+        "s",
+        Direction::Info,
+        "Wait after startup until the daemon used under 5% of a core over 2 s, and at least \
+         30 s, before the searches",
+    ));
     let t = Instant::now();
     let first = search(&client, &queries[0].text, call_timeout).await?;
     out.push(Metric::new(
@@ -135,9 +148,14 @@ async fn profile(
         t.elapsed().as_secs_f64() * 1e3,
         "ms",
         Direction::LowerIsBetter,
-        "The first `search` IPC call after startup (no knowledge run: disabled in this phase)",
+        "The first `search` IPC call once the daemon settled after startup (no knowledge run: \
+         disabled in this phase)",
     ));
-    let mut found = usize::from(first.iter().any(|h| h.item == item_ref(queries[0].relevant)));
+    let mut found = usize::from(
+        first
+            .iter()
+            .any(|h| h.item == item_ref(queries[0].relevant)),
+    );
     let mut lat = Vec::with_capacity(p.searches);
     for q in &queries[1..] {
         let t = Instant::now();
@@ -161,4 +179,38 @@ async fn profile(
     drop(client);
     d.stop().await?;
     Ok(())
+}
+
+/// Wait until the daemon is idle (under 5% of a core over a 2 s window, and at least 30 s after
+/// startup); how long that took.
+/// Without a CPU counter (not Linux or macOS), a fixed 30 s.
+async fn settle(d: &mut Daemon, timeout: Duration) -> Result<f64, BenchError> {
+    const WINDOW: Duration = Duration::from_secs(2);
+    const MIN_WAIT: Duration = Duration::from_secs(30);
+    let t = Instant::now();
+    loop {
+        d.check_alive()?;
+        let a = sample(d.pid).cpu_s;
+        tokio::time::sleep(WINDOW).await;
+        let b = sample(d.pid).cpu_s;
+        match (a, b) {
+            // Not before the deferred integrity check (20 s after startup) had its turn.
+            (Some(a), Some(b))
+                if (b - a) / WINDOW.as_secs_f64() < 0.05 && t.elapsed() >= MIN_WAIT =>
+            {
+                break;
+            }
+            (Some(_), Some(_)) => {}
+            _ => {
+                tokio::time::sleep(Duration::from_secs(28)).await;
+                break;
+            }
+        }
+        if t.elapsed() >= timeout {
+            return Err(BenchError::Failed(format!(
+                "nuggetd did not settle within {timeout:?} after startup"
+            )));
+        }
+    }
+    Ok(t.elapsed().as_secs_f64())
 }
