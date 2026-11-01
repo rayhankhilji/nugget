@@ -1,0 +1,25 @@
+== phase1
+[active] event:'Counselling session' located_at 'Albers Counselling, 3 Quay Lane, Halden Bay' <- ['Health/2026-06-17-counselling.ics'] quote=['Location: Albers Counselling, 3 Quay Lane, Halden Bay']
+[active] person:'Jonas Albers' organized 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Organizer: Jonas Albers <jonas@albers-counselling.example>']
+[active] person:'Jonas Albers' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.
+[active] person:'Mara Okafor' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.o
+== phase2
+[active] event:'Counselling session' located_at 'Albers Counselling, 3 Quay Lane, Halden Bay' <- ['Health/2026-06-17-counselling.ics'] quote=['Location: Albers Counselling, 3 Quay Lane, Halden Bay']
+[active] person:'Jonas Albers' organized 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Organizer: Jonas Albers <jonas@albers-counselling.example>']
+[active] person:'Jonas Albers' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.
+[active] person:'Mara Okafor' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.o
+== edits
+[active] event:'Counselling session' located_at 'Albers Counselling, 3 Quay Lane, Halden Bay' <- ['Health/2026-06-17-counselling.ics'] quote=['Location: Albers Counselling, 3 Quay Lane, Halden Bay']
+[active] person:'Jonas Albers' organized 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Organizer: Jonas Albers <jonas@albers-counselling.example>']
+[active] person:'Jonas Albers' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.
+[active] person:'Mara Okafor' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.o
+== reextract
+[active] event:'Counselling session' located_at 'Albers Counselling, 3 Quay Lane, Halden Bay' <- ['Health/2026-06-17-counselling.ics'] quote=['Location: Albers Counselling, 3 Quay Lane, Halden Bay']
+[active] person:'Jonas Albers' organized 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Organizer: Jonas Albers <jonas@albers-counselling.example>']
+[active] person:'Jonas Albers' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.
+[active] person:'Mara Okafor' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.o
+== restart
+[active] event:'Counselling session' located_at 'Albers Counselling, 3 Quay Lane, Halden Bay' <- ['Health/2026-06-17-counselling.ics'] quote=['Location: Albers Counselling, 3 Quay Lane, Halden Bay']
+[active] person:'Jonas Albers' organized 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Organizer: Jonas Albers <jonas@albers-counselling.example>']
+[active] person:'Jonas Albers' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.
+[active] person:'Mara Okafor' attended 'Counselling session' <- ['Health/2026-06-17-counselling.ics'] quote=['Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.o

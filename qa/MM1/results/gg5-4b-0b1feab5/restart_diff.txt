@@ -1,0 +1,2 @@
+reextract claims 87 restart 87; missing 0; status changed 0; new 0
+status transitions: Counter()

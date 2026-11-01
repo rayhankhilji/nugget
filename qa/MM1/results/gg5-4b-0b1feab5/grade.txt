@@ -1,0 +1,99 @@
+== phase1: 44 entities, 44 claims, extractor local-chat, vault {'pages': 34, 'conflicts': [], 'invalid': [], 'files': 35}
+   entities resolved 1:1 12/19; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_cnlpzmupvnwlyy4h', 'Mara Okafor', None), ('ent_sdzjyn2v55dtu3gv', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - dana_whitfield: [('ent_yt7dgscaqdw2kwe6', 'Dana', None), ('ent_24qsjy4glqd3k6t5', 'Dana Whitfield', None)] kinds ['person']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_azirfcgk75obqb4s', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_6b7djrvrpu675oxy', 'harbor', None), ('ent_szfuxs4bcowqdeyv', 'Harbor', None), ('ent_tawcfz6ey5kushur', 'Harbor', None)] kinds ['commitment', 'project', 'topic']
+     - halden_bay: [] kinds []
+   gold facts current 5/18; stale shown as current 0; forbidden current 0
+   active claims 44; uncited 0; quote not in source 22
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 10
+== phase2: 71 entities, 72 claims, extractor local-chat, vault {'pages': 60, 'conflicts': [], 'invalid': [], 'files': 63}
+   entities resolved 1:1 10/20; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_cnlpzmupvnwlyy4h', 'Mara Okafor', None), ('ent_sdzjyn2v55dtu3gv', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - dana_whitfield: [('ent_yt7dgscaqdw2kwe6', 'Dana', None), ('ent_tbtdpvf4kfchzywn', 'Dana Whitfield', None)] kinds ['person']
+     - gus_ferreira: [('ent_sfmdjdkrc7irntxt', 'Gus', None), ('ent_yq7dkudhj2za323n', 'Gus Ferreira', None)] kinds ['person']
+     - priyanka_rao: [('ent_syj6by3zu64vepvg', 'Priyanka', None), ('ent_frdz5ccc5krd77u6', 'Priyanka Rao', None)] kinds ['person']
+     - lumenfold: [('ent_srgxgdpgcmi76cix', 'Lumenfold', None), ('ent_5z6lethgv4ervtai', 'Tessellate Systems', None)] kinds ['organization']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_azirfcgk75obqb4s', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_6b7djrvrpu675oxy', 'harbor', None), ('ent_szfuxs4bcowqdeyv', 'Harbor', None), ('ent_tawcfz6ey5kushur', 'Harbor', None)] kinds ['commitment', 'project', 'topic']
+     - halden_bay: [] kinds []
+   gold facts current 8/25; stale shown as current 1; forbidden current 1
+     ! {'id': 'S1', 'claim': 19, 'text': 'Dana Whitfield works at Brightwell (has a brightwell.example address).', 'status': 'active'}
+     ! {'desc': 'Dana still works at Brightwell', 'claim': 19, 'text': 'Dana Whitfield works at Brightwell (has a brightwell.example address).', 'status': 'active'}
+   active claims 72; uncited 0; quote not in source 37
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 11
+== edits: 71 entities, 72 claims, extractor local-chat, vault {'pages': 60, 'conflicts': [], 'invalid': [], 'files': 63}
+   entities resolved 1:1 10/20; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_cnlpzmupvnwlyy4h', 'Mara Okafor', None), ('ent_sdzjyn2v55dtu3gv', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - dana_whitfield: [('ent_yt7dgscaqdw2kwe6', 'Dana', None), ('ent_tbtdpvf4kfchzywn', 'Dana Whitfield', None)] kinds ['person']
+     - gus_ferreira: [('ent_sfmdjdkrc7irntxt', 'Gus', None), ('ent_yq7dkudhj2za323n', 'Gus Ferreira', None)] kinds ['person']
+     - priyanka_rao: [('ent_syj6by3zu64vepvg', 'Priyanka', None), ('ent_frdz5ccc5krd77u6', 'Priyanka Rao', None)] kinds ['person']
+     - lumenfold: [('ent_srgxgdpgcmi76cix', 'Lumenfold', None), ('ent_5z6lethgv4ervtai', 'Tessellate Systems', None)] kinds ['organization']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_azirfcgk75obqb4s', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_6b7djrvrpu675oxy', 'harbor', None), ('ent_szfuxs4bcowqdeyv', 'Harbor', None), ('ent_tawcfz6ey5kushur', 'Harbor', None)] kinds ['commitment', 'project', 'topic']
+     - halden_bay: [] kinds []
+   gold facts current 8/25; stale shown as current 1; forbidden current 1
+     ! {'id': 'S1', 'claim': 19, 'text': 'Dana Whitfield works at Brightwell (has a brightwell.example address).', 'status': 'active'}
+     ! {'desc': 'Dana still works at Brightwell', 'claim': 19, 'text': 'Dana Whitfield works at Brightwell (has a brightwell.example address).', 'status': 'active'}
+   active claims 71; uncited 0; quote not in source 37
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 11
+== reextract: 68 entities, 81 claims, extractor local-chat, vault {'pages': 58, 'conflicts': [], 'invalid': [], 'files': 81}
+   entities resolved 1:1 9/20; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_cnlpzmupvnwlyy4h', 'Mara Okafor', None), ('ent_sdzjyn2v55dtu3gv', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - robert_chen: [('ent_wfljk34d4qxox5gt', 'Rob Chen', None), ('ent_e723vtql6voei2kq', 'Robert Chen', None)] kinds ['person']
+     - dana_whitfield: [('ent_bfjgzimvww5ykh56', 'Dana', None), ('ent_tbtdpvf4kfchzywn', 'Dana Whitfield', None)] kinds ['person']
+     - theo_lindqvist: [('ent_5q4rhwcjzapvqjf2', 'Theo', None), ('ent_ihw3w7d6rzt5noet', 'Theo Lindqvist', None)] kinds ['person']
+     - priyanka_rao: [('ent_p547prrmmqogw3uc', 'Priyanka', None), ('ent_frdz5ccc5krd77u6', 'Priyanka Rao', None)] kinds ['person']
+     - lumenfold: [('ent_srgxgdpgcmi76cix', 'Lumenfold', None), ('ent_5z6lethgv4ervtai', 'Tessellate Systems', None)] kinds ['organization']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_azirfcgk75obqb4s', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_5zujrkgk5nwojkny', 'Harbor', None), ('ent_6b7djrvrpu675oxy', 'harbor', None), ('ent_szfuxs4bcowqdeyv', 'Harbor', None)] kinds ['place', 'project', 'topic']
+     - halden_bay: [] kinds []
+   gold facts current 10/25; stale shown as current 1; forbidden current 1
+     ! {'id': 'S1', 'claim': 19, 'text': 'Dana Whitfield works at Brightwell (has a brightwell.example address).', 'status': 'active'}
+     ! {'desc': 'Dana still works at Brightwell', 'claim': 19, 'text': 'Dana Whitfield works at Brightwell (has a brightwell.example address).', 'status': 'active'}
+   active claims 80; uncited 0; quote not in source 38
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 10
+== restart: 68 entities, 81 claims, extractor local-chat, vault {'pages': 58, 'conflicts': [], 'invalid': [], 'files': 81}
+   entities resolved 1:1 9/20; wrong merges 0; split surfaces 0
+     - mara_okafor: [('ent_cnlpzmupvnwlyy4h', 'Mara Okafor', None), ('ent_sdzjyn2v55dtu3gv', 'Mara Okafor', None)] kinds ['organization', 'person']
+     - robert_chen: [('ent_wfljk34d4qxox5gt', 'Rob Chen', None), ('ent_e723vtql6voei2kq', 'Robert Chen', None)] kinds ['person']
+     - dana_whitfield: [('ent_bfjgzimvww5ykh56', 'Dana', None), ('ent_tbtdpvf4kfchzywn', 'Dana Whitfield', None)] kinds ['person']
+     - theo_lindqvist: [('ent_5q4rhwcjzapvqjf2', 'Theo', None), ('ent_ihw3w7d6rzt5noet', 'Theo Lindqvist', None)] kinds ['person']
+     - priyanka_rao: [('ent_p547prrmmqogw3uc', 'Priyanka', None), ('ent_frdz5ccc5krd77u6', 'Priyanka Rao', None)] kinds ['person']
+     - lumenfold: [('ent_srgxgdpgcmi76cix', 'Lumenfold', None), ('ent_5z6lethgv4ervtai', 'Tessellate Systems', None)] kinds ['organization']
+     - northshore_credit_union: [] kinds []
+     - halden_bay_medical_practice: [] kinds []
+     - halden_bay_bouldering: [('ent_azirfcgk75obqb4s', 'Halden Bay Bouldering', None)] kinds ['place']
+     - harbor: [('ent_5zujrkgk5nwojkny', 'Harbor', None), ('ent_6b7djrvrpu675oxy', 'harbor', None), ('ent_szfuxs4bcowqdeyv', 'Harbor', None)] kinds ['place', 'project', 'topic']
+     - halden_bay: [] kinds []
+   gold facts current 10/25; stale shown as current 1; forbidden current 1
+     ! {'id': 'S1', 'claim': 19, 'text': 'Dana Whitfield works at Brightwell (has a brightwell.example address).', 'status': 'active'}
+     ! {'desc': 'Dana still works at Brightwell', 'claim': 19, 'text': 'Dana Whitfield works at Brightwell (has a brightwell.example address).', 'status': 'active'}
+   active claims 80; uncited 0; quote not in source 38
+   sensitive strings found 14: [('claim', 'Counselling session'), ('claim', 'Jonas Albers'), ('entity_name', 'Counselling session'), ('entity_name', 'Jonas Albers')]
+   entities without a vault page: 10
+== edit E2 delete first fact line (Theo Lindqvist) (Person/Theo Lindqvist (ent_ihw3w7d6rzt5noet).md)
+   edits: {"claim 74": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+   reextract: {"claim 74": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+   restart: {"claim 74": "rejected", "added_lines_still_on_page": [], "removed_lines_back_on_page": []}
+== edit E3 add fact + note (Sam Okonkwo) (Person/Sam Okonkwo (ent_sanfjlkitdlr3fzl).md)
+   edits: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+   reextract: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+   restart: {"added_lines_still_on_page": ["- Sam Okonkwo lives in Halden Bay (added by me)", "Climbs V5, prefers the north wall. My own note, keep it."], "removed_lines_back_on_page": []}
+== edit E4 add alias Bobby (Robert Chen) (Person/Robert Chen (ent_e723vtql6voei2kq).md)
+   edits: {"added_lines_still_on_page": [], "removed_lines_back_on_page": [], "robert_aliases": ["Bob", "Bobby", "R. Chen"]}
+   reextract: {"added_lines_still_on_page": [], "removed_lines_back_on_page": [], "robert_aliases": ["Bob", "Bobby", "R. Chen"]}
+   restart: {"added_lines_still_on_page": [], "removed_lines_back_on_page": [], "robert_aliases": ["Bob", "Bobby", "R. Chen"]}

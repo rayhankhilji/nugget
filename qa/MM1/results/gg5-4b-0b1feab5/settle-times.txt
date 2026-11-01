@@ -1,0 +1,5 @@
+[2026-11-01T19:46:01Z] settled {"label": "phase1", "seconds": 2616
+[2026-11-01T20:09:32Z] settled {"label": "phase2", "seconds": 1405
+[2026-11-01T20:10:06Z] settled {"label": "edits", "seconds": 24
+[2026-11-01T20:56:50Z] settled {"label": "reextract", "seconds": 2799
+[2026-11-01T20:57:25Z] settled {"label": "restart", "seconds": 24
