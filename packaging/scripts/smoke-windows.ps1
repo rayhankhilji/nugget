@@ -12,6 +12,9 @@
 #   SMOKE_ARTIFACTS          copy the logs (and a screenshot) here, pass or fail
 #   SMOKE_CONNECT_TIMEOUT    seconds to wait for "connected to nuggetd" (default 90)
 #   SMOKE_SPAWN_GRACE        seconds to wait for the app to start nuggetd itself (default 30)
+#   SMOKE_QUIT               the "When you quit Nugget" choice to test (platform.json quit_daemon):
+#                            stop (default) - quitting stops the nuggetd the app started, cleanly;
+#                            keep - nuggetd outlives the app and stops cleanly on CTRL_BREAK
 param(
     [Parameter(Mandatory = $true)][string]$Installer
 )
@@ -26,6 +29,8 @@ $Installer = (Resolve-Path -LiteralPath $Installer).Path
 
 $connectTimeout = if ($env:SMOKE_CONNECT_TIMEOUT) { [int]$env:SMOKE_CONNECT_TIMEOUT } else { 90 }
 $spawnGrace = if ($env:SMOKE_SPAWN_GRACE) { [int]$env:SMOKE_SPAWN_GRACE } else { 30 }
+$quitMode = if ($env:SMOKE_QUIT) { $env:SMOKE_QUIT } else { 'stop' }
+if ($quitMode -notin @('stop', 'keep')) { Write-Error 'smoke: SMOKE_QUIT must be stop or keep'; exit 2 }
 $installTimeout = 180
 $windowTimeout = 60
 $quitTimeout = 30
@@ -42,6 +47,14 @@ $env:NUGGET_LOG = 'info'
 $env:NO_COLOR = '1'
 # Keep WebView2's profile in the throwaway directory too (Tauri may set its own folder instead).
 $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $work 'webview2'
+# Answer "When you quit Nugget" up front, so quitting doesn't stop to ask (platform.rs). The app's
+# config dir is %APPDATA%\dev.nugget.desktop; an existing platform.json is kept and put back.
+$appConfig = Join-Path $env:APPDATA 'dev.nugget.desktop'
+$platformJson = Join-Path $appConfig 'platform.json'
+$platformBackup = "$platformJson.smoke-backup"
+New-Item -ItemType Directory -Force -Path $appConfig | Out-Null
+if (Test-Path -LiteralPath $platformJson) { Move-Item -Force -LiteralPath $platformJson -Destination $platformBackup }
+[IO.File]::WriteAllText($platformJson, "{`"quit_daemon`":`"$quitMode`"}`n")
 
 $appLog = Join-Path $work 'app.log'
 $appErr = Join-Path $work 'app.stderr.log'
@@ -216,6 +229,8 @@ if ($r -eq 'ok') { exit 0 } else { exit 1 }
 
 function Cleanup([bool]$failed) {
     if ($failed) { Diagnostics }
+    Remove-Item -LiteralPath $platformJson -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $platformBackup) { Move-Item -Force -LiteralPath $platformBackup -Destination $platformJson }
     try { if ($script:app -and -not $script:app.HasExited) { Stop-Process -Id $script:app.Id -Force -ErrorAction SilentlyContinue } } catch {}
     foreach ($d in (Find-Daemons)) { Stop-Process -Id $d.ProcessId -Force -ErrorAction SilentlyContinue }
     if ($script:installed -and $script:uninstaller -and (Test-Path -LiteralPath $script:uninstaller)) {
@@ -328,28 +343,47 @@ try {
     $tExit = Elapsed $tQuit
     Log "app exited cleanly (status 0) ${tExit}s after the close"
 
-    # The daemon is a background service and outlives the app by design.
-    $daemonProc = Get-Process -Id $script:daemon.ProcessId -ErrorAction SilentlyContinue
-    if (-not $daemonProc) { Fail 'nuggetd exited with the app; it should keep running' }
-    $null = $daemonProc.Handle
-    if ($daemonProc.WaitForExit(2000)) {
-        Fail ('nuggetd exited (status 0x{0:X8}) within 2s of the app; it should keep running' -f $daemonProc.ExitCode)
+    if ($quitMode -eq 'stop') {
+        # Quitting stops the daemon the app started (daemon.shutdown), before the app exits.
+        $daemonProc = Get-Process -Id $script:daemon.ProcessId -ErrorAction SilentlyContinue
+        if ($daemonProc) {
+            $null = $daemonProc.Handle
+            if (-not $daemonProc.WaitForExit($daemonStopTimeout * 1000)) {
+                Fail "nuggetd still running ${daemonStopTimeout}s after the app quit (quit_daemon=stop)"
+            }
+        }
+        $tStop = Elapsed $tQuit
+        if (-not (Daemon-Logged 'stop requested over IPC')) { Fail 'nuggetd was not stopped through daemon.shutdown' }
+        if (-not (Daemon-Logged '"stopped"')) { Fail "nuggetd exited without logging 'stopped' (unclean shutdown)" }
+        $leftovers = @(Get-Process -Name 'llama-server' -ErrorAction SilentlyContinue)
+        if ($leftovers.Count -gt 0) { Fail "a model server is still running after quit (pid $($leftovers[0].Id))" }
+        $stopHow = 'with the app (daemon.shutdown)'
+        Log "nuggetd stopped cleanly ${tStop}s after the close, with the app"
+    } else {
+        # Kept running in the background: it outlives the app, then stops cleanly on CTRL_BREAK.
+        $daemonProc = Get-Process -Id $script:daemon.ProcessId -ErrorAction SilentlyContinue
+        if (-not $daemonProc) { Fail 'nuggetd exited with the app; quit_daemon=keep should keep it' }
+        $null = $daemonProc.Handle
+        if ($daemonProc.WaitForExit(2000)) {
+            Fail ('nuggetd exited (status 0x{0:X8}) within 2s of the app; quit_daemon=keep should keep it' -f $daemonProc.ExitCode)
+        }
+        $tTerm = Now
+        Send-CtrlBreak $script:daemon.ProcessId
+        if (-not $daemonProc.WaitForExit($daemonStopTimeout * 1000)) {
+            Fail "nuggetd did not exit within ${daemonStopTimeout}s of CTRL_BREAK"
+        }
+        $daemonProc.WaitForExit()
+        $tStop = Elapsed $tTerm
+        $daemonStatus = $daemonProc.ExitCode
+        # Buffered log lines are flushed on exit; "stopped" is the last line of a clean shutdown.
+        if (-not (Daemon-Logged '"stopped"')) {
+            $seen = if (Daemon-Logged 'console control signal received') { 'it logged the signal' } else { 'it never logged the signal' }
+            Fail ("nuggetd exited (status 0x{0:X8}) without logging 'stopped' (unclean shutdown; {1})" -f $daemonStatus, $seen)
+        }
+        if ($daemonStatus -ne 0) { Fail "nuggetd exited with status $daemonStatus" }
+        $stopHow = 'after CTRL_BREAK'
+        Log "nuggetd stopped cleanly ${tStop}s after CTRL_BREAK (status 0)"
     }
-    $tTerm = Now
-    Send-CtrlBreak $script:daemon.ProcessId
-    if (-not $daemonProc.WaitForExit($daemonStopTimeout * 1000)) {
-        Fail "nuggetd did not exit within ${daemonStopTimeout}s of CTRL_BREAK"
-    }
-    $daemonProc.WaitForExit()
-    $tStop = Elapsed $tTerm
-    $daemonStatus = $daemonProc.ExitCode
-    # Buffered log lines are flushed on exit; "stopped" is the last line of a clean shutdown.
-    if (-not (Daemon-Logged '"stopped"')) {
-        $seen = if (Daemon-Logged 'console control signal received') { 'it logged the signal' } else { 'it never logged the signal' }
-        Fail ("nuggetd exited (status 0x{0:X8}) without logging 'stopped' (unclean shutdown; {1})" -f $daemonStatus, $seen)
-    }
-    if ($daemonStatus -ne 0) { Fail "nuggetd exited with status $daemonStatus" }
-    Log "nuggetd stopped cleanly ${tStop}s after CTRL_BREAK (status 0)"
 
     # ---- silent uninstall -------------------------------------------------------------------
 
@@ -375,7 +409,7 @@ PASS: Windows NSIS smoke test ($(Split-Path -Leaf $Installer))
   window 'Nugget' shown      ${tWindow}s after launch
   connected to nuggetd       ${tConnect}s after launch (daemon started by: $startedBy)
   app exit after WM_CLOSE    ${tExit}s (status 0)
-  nuggetd stop after BREAK   ${tStop}s
+  nuggetd stopped            ${tStop}s $stopHow (quit_daemon=$quitMode)
   silent uninstall           ${tUninstalled}s
   total                      $(Elapsed 0)s
 "@

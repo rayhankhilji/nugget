@@ -11,6 +11,9 @@
 #   SMOKE_ARTIFACTS          copy the logs (and a screenshot) here, pass or fail
 #   SMOKE_CONNECT_TIMEOUT    seconds to wait for "connected to nuggetd" (default 90)
 #   SMOKE_SPAWN_GRACE        seconds to wait for the app to start nuggetd itself (default 30)
+#   SMOKE_QUIT               the "When you quit Nugget" choice to test (platform.json quit_daemon):
+#                            stop (default) - quitting stops the nuggetd the app started, cleanly;
+#                            keep - nuggetd outlives the app and stops cleanly on SIGTERM
 set -euo pipefail
 
 usage() { echo "usage: $0 path/to/Nugget.AppImage" >&2; exit 2; }
@@ -23,6 +26,8 @@ for tool in Xvfb openbox wmctrl dbus-run-session; do
   command -v "$tool" >/dev/null || { echo "smoke: missing required tool: $tool" >&2; exit 2; }
 done
 
+quit_mode="${SMOKE_QUIT:-stop}"
+case "$quit_mode" in stop | keep) ;; *) echo "smoke: SMOKE_QUIT must be stop or keep" >&2; exit 2 ;; esac
 connect_timeout="${SMOKE_CONNECT_TIMEOUT:-90}"
 spawn_grace="${SMOKE_SPAWN_GRACE:-30}"
 window_timeout=60
@@ -42,6 +47,9 @@ export XDG_RUNTIME_DIR="$work/runtime"
 mkdir -p "$NUGGET_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" \
   "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
+# Answer "When you quit Nugget" up front, so quitting doesn't stop to ask (platform.rs).
+mkdir -p "$XDG_CONFIG_HOME/dev.nugget.desktop"
+printf '{"quit_daemon":"%s"}\n' "$quit_mode" > "$XDG_CONFIG_HOME/dev.nugget.desktop/platform.json"
 unset WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
 
 export NUGGET_TRAY=off # without a tray, closing the main window quits the app
@@ -253,17 +261,28 @@ app_pid=""
 t_exit=$(elapsed "$t_quit")
 log "app exited cleanly (status 0) ${t_exit}s after the close"
 
-# The daemon is a background service and outlives the app by design.
-kill -0 "$daemon_pid" 2>/dev/null || fail "nuggetd exited with the app; it should keep running"
-t_term=$(ms)
-kill -TERM "$daemon_pid"
-wait_until "$daemon_stop_timeout" "nuggetd to stop" daemon_exited ||
-  fail "nuggetd did not exit within ${daemon_stop_timeout}s of SIGTERM"
-t_stop=$(elapsed "$t_term")
-daemon_pid=""
+if [ "$quit_mode" = stop ]; then
+  # Quitting stops the daemon the app started (daemon.shutdown), before the app exits.
+  wait_until "$daemon_stop_timeout" "nuggetd to stop with the app" daemon_exited ||
+    fail "nuggetd still running ${daemon_stop_timeout}s after the app quit (quit_daemon=stop)"
+  t_stop=$(elapsed "$t_quit")
+  daemon_pid=""
+  daemon_logged 'stop requested over IPC' || fail "nuggetd was not stopped through daemon.shutdown"
+  stop_how="with the app (daemon.shutdown)"
+else
+  # Kept running in the background: it outlives the app, then stops cleanly on SIGTERM.
+  kill -0 "$daemon_pid" 2>/dev/null || fail "nuggetd exited with the app; quit_daemon=keep should keep it"
+  t_term=$(ms)
+  kill -TERM "$daemon_pid"
+  wait_until "$daemon_stop_timeout" "nuggetd to stop" daemon_exited ||
+    fail "nuggetd did not exit within ${daemon_stop_timeout}s of SIGTERM"
+  t_stop=$(elapsed "$t_term")
+  daemon_pid=""
+  stop_how="after SIGTERM"
+fi
 # Buffered log lines are flushed on exit; "stopped" is the last line of a clean shutdown.
 daemon_logged '"stopped"' || fail "nuggetd exited without logging 'stopped' (unclean shutdown?)"
-log "nuggetd stopped cleanly ${t_stop}s after SIGTERM"
+log "nuggetd stopped cleanly ${t_stop}s ${stop_how}"
 
 cat <<EOF
 
@@ -271,6 +290,6 @@ PASS: AppImage smoke test ($(basename "$appimage"))
   window 'Nugget' shown      ${t_window}s after launch
   connected to nuggetd       ${t_connect}s after launch (daemon started by: ${started_by})
   app exit after close       ${t_exit}s (status 0)
-  nuggetd stop after TERM    ${t_stop}s
+  nuggetd stopped            ${t_stop}s ${stop_how} (quit_daemon=${quit_mode})
   total                      $(elapsed "$t0")s
 EOF

@@ -398,11 +398,36 @@ jobs:
           SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
         run: ./packaging/scripts/smoke-windows.ps1 (Get-ChildItem "$env:RUNNER_TEMP/out" -Filter '*-setup.exe')[0].FullName
 
+      # Each smoke test runs with the default quit choice (quitting stops the daemon the app
+      # started) and again with "keep running", where the daemon outlives the app and must stop
+      # cleanly on a signal.
+      - name: Smoke tests, daemon kept running after quit
+        if: contains(fromJSON('["x86_64-unknown-linux-gnu","aarch64-apple-darwin","x86_64-pc-windows-msvc"]'), matrix.target)
+        shell: bash
+        env:
+          SMOKE_QUIT: keep
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke-keep
+        run: |
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu) packaging/scripts/smoke-appimage.sh "$RUNNER_TEMP"/out/*.AppImage ;;
+            aarch64-apple-darwin) packaging/scripts/smoke-macos.sh "$RUNNER_TEMP"/out/*.dmg ;;
+            x86_64-pc-windows-msvc)
+              pwsh -NoProfile -File packaging/scripts/smoke-windows.ps1 "$(cygpath -w "$(ls "$RUNNER_TEMP"/out/*-setup.exe | head -1)")" ;;
+          esac
+
+      # What the uninstaller removes with each command-line choice (GG6-9).
+      - name: NSIS uninstall data test
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: ./packaging/scripts/smoke-windows-uninstall.ps1 (Get-ChildItem "$env:RUNNER_TEMP/out" -Filter '*-setup.exe')[0].FullName
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always() && contains(fromJSON('["x86_64-unknown-linux-gnu","aarch64-apple-darwin","x86_64-pc-windows-msvc"]'), matrix.target)
         with:
           name: smoke-${{ matrix.target }}
-          path: ${{ runner.temp }}/smoke/
+          path: |
+            ${{ runner.temp }}/smoke/
+            ${{ runner.temp }}/smoke-keep/
           if-no-files-found: ignore
           retention-days: 14
 
