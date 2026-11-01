@@ -72,6 +72,12 @@ describe("formatDatesInText", () => {
     expect(fmt("at 2026-11-10T13:00:00.250+02:00")).toBe("at Nov 10, 2026, 11:00 AM");
   });
 
+  it("takes a date before a colon, but not one glued to a time (LL2, GG7-11)", () => {
+    expect(fmt("Due 2026-11-03: pay the invoice")).toBe("Due Nov 3, 2026: pay the invoice");
+    expect(fmt("Due 2026-11-03:", "de")).toBe("Due 03.11.2026:");
+    expect(fmt("log 2026-11-03:12 x")).toBe("log 2026-11-03:12 x");
+  });
+
   it("follows the locale", () => {
     expect(fmt("am 2026-11-10", "de-DE")).toBe("am 10.11.2026");
   });

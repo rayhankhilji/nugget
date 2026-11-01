@@ -180,6 +180,18 @@ describe("Today page", () => {
     expect(archive.getAttribute("aria-label")).toBe("Archive thread: Archive the thread");
   });
 
+  it("writes ISO dates inside card and brief text for the reader's locale (LL2, GG7-11)", async () => {
+    const dated = { ...card, title: "Domain renews 2026-11-03", summary: "Due 2026-11-03: pay the invoice", detail: "Since 2026-10-01." };
+    setup({ cards_list: { ...list, cards: [dated] } });
+    const { container } = await render(<TodayPage />);
+    await flush();
+    const text = container.querySelector(".today-card")!.textContent!;
+    expect(text).not.toContain("2026-11-03");
+    expect(text).toContain("Nov 3, 2026");
+    expect(container.querySelector(".today-card-title")!.textContent).toBe("Domain renews Nov 3, 2026");
+    expect(byText(container, "button", "Accept")?.getAttribute("aria-label") ?? "").not.toContain("2026-11-03");
+  });
+
   it("has no accessibility violations", async () => {
     setup();
     await render(<TodayPage />);

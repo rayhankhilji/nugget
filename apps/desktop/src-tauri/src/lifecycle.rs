@@ -115,6 +115,13 @@ pub fn remove_record(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
+/// Remove the record if it names `pid`, which has exited (a record of a later daemon is kept).
+pub fn forget_record_of(path: &Path, pid: u32) {
+    if read_record(path).is_some_and(|r| r.pid == pid) {
+        remove_record(path);
+    }
+}
+
 /// When a running `pid` started, as a value that never changes for one process and differs for
 /// a new process reusing the pid; `None` once it has exited (or is a zombie).
 ///
@@ -1114,6 +1121,21 @@ mod tests {
         assert_eq!(read_record(&path), None);
         remove_record(&path);
         assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// LC-2: a reaped daemon's record goes, so its reused pid never passes for the app's own;
+    /// the record of a daemon started after it stays.
+    #[test]
+    fn an_exited_daemons_record_is_forgotten_and_only_its_own() {
+        let dir = std::env::temp_dir().join(format!("nugget-owned-forget-{}", std::process::id()));
+        let path = record_path(&Paths::rooted(dir.clone()));
+        write_record(&path, &rec(10, 2));
+        forget_record_of(&path, 11);
+        assert_eq!(read_record(&path), Some(rec(10, 2)));
+        forget_record_of(&path, 10);
+        assert_eq!(read_record(&path), None);
+        forget_record_of(&path, 10);
         let _ = std::fs::remove_dir_all(dir);
     }
 

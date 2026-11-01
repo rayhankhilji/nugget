@@ -115,6 +115,11 @@ hot reload.
   you have freed memory or fixed the cause. **Details** shows the server's last line, and the full
   log is `llama-server-chat.log` (or `-embedding`, `-rerank`, `-draft`) in the logs folder.
 
+When a Chat answer fails, the message says why and **Retry** under it asks the same question again
+in its place (with the same conversation before it). If the on-device chat model had given up
+restarting, Retry starts it first. **Status details** next to it opens Status, where the model's
+state and its last log line are.
+
 ## Search is text-only
 
 No embedding provider is available. Install the embedding model on **Models** (and check that

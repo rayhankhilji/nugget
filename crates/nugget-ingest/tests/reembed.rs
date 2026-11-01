@@ -100,7 +100,11 @@ async fn items_indexed_before_an_embedder_is_routable_are_embedded_later() {
     assert_eq!(a.version.as_deref(), Some("1"), "the version is kept");
     // Sensitive items may use local embedders.
     assert!(embedder.embedded().iter().any(|t| t.contains("4111")));
-    assert_eq!(h.ingest.reembed_stats().embedded, 2);
+    // The stats are counted after the vectors are written: wait for them, don't race them.
+    eventually("both items counted as re-embedded", || {
+        h.ingest.reembed_stats().embedded == 2
+    })
+    .await;
     // Still searchable by text, with the same single chunk.
     assert_eq!(h.store.search_text("pelicans", 10).unwrap().len(), 1);
     h.ingest.shutdown().await;
@@ -157,7 +161,10 @@ async fn reembedding_never_sends_sensitive_items_to_cloud_embedders() {
             .get("embedding_provider")
             .is_none()
     );
-    assert!(h.ingest.reembed_stats().skipped >= 1);
+    eventually("the sensitive item counted as skipped", || {
+        h.ingest.reembed_stats().skipped >= 1
+    })
+    .await;
     // GG8-6: the re-embed request names the item it carried.
     let items = cloud.embed_items.lock().unwrap().clone();
     assert!(!items.is_empty());

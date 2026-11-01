@@ -230,6 +230,24 @@ function ModelRow({
     }
   }, [busy, cancelling]);
   const installed = model.installed || progress?.phase === "installed";
+  // LL2: Install turns into Cancel, and Cancel goes away once installed: keep keyboard focus in
+  // the card (on Cancel, then on the model's name or Retry install) instead of dropping it to the page.
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLElement>(null);
+  const focusIn = useRef<"cancel" | "title" | null>(null);
+  useEffect(() => {
+    if (busy) {
+      if (focusIn.current === "cancel") cancelRef.current?.focus();
+      // Remembered while it lasts: Cancel unmounts without a blur event.
+      focusIn.current = document.activeElement === cancelRef.current ? "title" : null;
+    } else if (focusIn.current === "title") {
+      // Installed: the name; failed (the request or the download): its Retry install. Only when
+      // focus went with Cancel, never from wherever the user moved to meanwhile.
+      focusIn.current = null;
+      const at = document.activeElement;
+      if (!at || at === document.body || !at.isConnected) (installed ? titleRef.current : actionRef.current)?.focus();
+    }
+  });
   const total = progress?.total || model.size_bytes;
   const pct = progress ? percent(progress.downloaded, total) : 0;
   const labelId = `ob-model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -240,7 +258,7 @@ function ModelRow({
   return (
     <li className={best ? "card ob-model-best" : "card"} aria-labelledby={labelId}>
       <div className="card-head">
-        <bdi id={labelId} className="card-title">
+        <bdi id={labelId} ref={titleRef} className="card-title" tabIndex={-1}>
           {model.id}
         </bdi>
         <span className="badges">
@@ -281,6 +299,7 @@ function ModelRow({
           </span>
           <div className="card-actions">
             <button
+              ref={cancelRef}
               type="button"
               className="btn btn-ghost"
               aria-label={t("models.cancelLabel", { model: model.id })}
@@ -298,7 +317,15 @@ function ModelRow({
       <DownloadFailureNote t={t} progress={progress} error={error} fallback={t("onboarding.models.failed")} />
       {!installed && !busy && (
         <div className="card-actions">
-          <button ref={actionRef} type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
+          <button
+            ref={actionRef}
+            type="button"
+            className={best ? "btn btn-primary" : "btn"}
+            onClick={(e) => {
+              if (document.activeElement === e.currentTarget) focusIn.current = "cancel";
+              onInstall();
+            }}
+          >
             {cancelled ? t("models.resume") : failed || error ? t("onboarding.models.retry") : t("onboarding.models.install")}
           </button>
         </div>

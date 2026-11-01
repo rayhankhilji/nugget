@@ -132,53 +132,103 @@ fn safe_url(url: &str) -> Option<String> {
     Some(out)
 }
 
+/// Zero code points of the Unicode decimal digit blocks other than ASCII that
+/// [`redact_contacts`] reads as digits (Arabic-Indic, the Indic scripts, Thai, Myanmar, Khmer,
+/// fullwidth and others).
+const DIGIT_ZEROS: &[u32] = &[
+    0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6, 0x0D66,
+    0x0DE6, 0x0E50, 0x0ED0, 0x0F20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80, 0x1A90,
+    0x1B50, 0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900, 0xA9D0, 0xA9F0, 0xAA50, 0xABF0, 0xFF10,
+    0x1D7CE, 0x1D7D8, 0x1D7E2, 0x1D7EC, 0x1D7F6,
+];
+
+/// `c` as [`redact_contacts`] classifies it: fullwidth forms (`＠`, `＋`, `（`) as ASCII, other
+/// scripts' decimal digits as ASCII digits, a no-break or other Unicode space as a space.
+fn contact_char(c: char) -> char {
+    let cp = u32::from(c);
+    if (0xFF01..=0xFF5E).contains(&cp) {
+        return char::from_u32(cp - 0xFEE0).unwrap_or(c);
+    }
+    if let Some(d) = DIGIT_ZEROS
+        .iter()
+        .find(|&&z| (z..z + 10).contains(&cp))
+        .and_then(|&z| char::from_digit(cp - z, 10))
+    {
+        return d;
+    }
+    if c.is_whitespace() { ' ' } else { c }
+}
+
 /// `text` with email addresses replaced by "(address)" and phone numbers (9 or more digits,
 /// with spaces, dots, dashes, parentheses or a leading "+") by "(phone)". Dates, times and
-/// amounts have fewer digits or other separators and are kept.
+/// amounts have fewer digits or other separators and are kept. Fullwidth forms and other
+/// scripts' digits count as their ASCII forms (security review 3, ER-6).
 pub(crate) fn redact_contacts(text: &str) -> String {
-    let mut out: Vec<String> = Vec::new();
-    for w in text.split(' ') {
-        let core = w.trim_matches(|c: char| "<>()[]{},;:'\"".contains(c));
-        let at = core.find('@');
-        if let Some(i) = at
-            && i > 0
-            && core[i + 1..].contains('.')
-        {
-            out.push(w.replace(core, "(address)"));
-        } else {
-            out.push(w.to_owned());
+    // (shown, as classified) pairs.
+    let mut chars: Vec<(char, char)> = Vec::new();
+    let orig: Vec<char> = text.chars().collect();
+    let folded: Vec<char> = orig.iter().copied().map(contact_char).collect();
+    let mut start = 0;
+    while start <= orig.len() {
+        let end = folded[start..]
+            .iter()
+            .position(|&c| c == ' ')
+            .map_or(orig.len(), |p| start + p);
+        let trim = |c: &char| "<>()[]{},;:'\"".contains(*c);
+        let mut a = start;
+        while a < end && trim(&folded[a]) {
+            a += 1;
         }
+        let mut b = end;
+        while b > a && trim(&folded[b - 1]) {
+            b -= 1;
+        }
+        let core = &folded[a..b];
+        let at = core.iter().position(|&c| c == '@');
+        let is_address = at.is_some_and(|i| i > 0 && core[i + 1..].contains(&'.'));
+        for k in start..end {
+            if is_address && (a..b).contains(&k) {
+                if k == a {
+                    chars.extend("(address)".chars().map(|c| (c, c)));
+                }
+            } else {
+                chars.push((orig[k], folded[k]));
+            }
+        }
+        if end < orig.len() {
+            chars.push((orig[end], ' '));
+        }
+        start = end + 1;
     }
-    let joined = out.join(" ");
     // Phone numbers: runs of digits and separators holding 9+ digits.
-    let chars: Vec<char> = joined.chars().collect();
     let mut res = String::new();
     let mut i = 0;
+    let f = |k: usize| chars.get(k).map(|p| p.1);
     while i < chars.len() {
-        let starts = chars[i].is_ascii_digit()
-            || (chars[i] == '+' && chars.get(i + 1).is_some_and(char::is_ascii_digit))
-            || (chars[i] == '(' && chars.get(i + 1).is_some_and(char::is_ascii_digit));
-        if starts && !(i > 0 && chars[i - 1].is_alphanumeric()) {
+        let c = chars[i].1;
+        let starts = c.is_ascii_digit()
+            || (c == '+' && f(i + 1).is_some_and(|d| d.is_ascii_digit()))
+            || (c == '(' && f(i + 1).is_some_and(|d| d.is_ascii_digit()));
+        if starts && !(i > 0 && chars[i - 1].1.is_alphanumeric()) {
             let mut j = i;
             let mut digits = 0;
             let mut last_digit = i;
-            while j < chars.len() && (chars[j].is_ascii_digit() || " .-()+".contains(chars[j])) {
-                if chars[j].is_ascii_digit() {
+            while j < chars.len() && (chars[j].1.is_ascii_digit() || " .-()+".contains(chars[j].1))
+            {
+                if chars[j].1.is_ascii_digit() {
                     digits += 1;
                     last_digit = j;
                 }
                 j += 1;
             }
-            let after_ok = !chars
-                .get(last_digit + 1)
-                .is_some_and(|c| c.is_alphanumeric());
+            let after_ok = !f(last_digit + 1).is_some_and(|c| c.is_alphanumeric());
             if digits >= 9 && after_ok {
                 res.push_str("(phone)");
                 i = last_digit + 1;
                 continue;
             }
         }
-        res.push(chars[i]);
+        res.push(chars[i].0);
         i += 1;
     }
     res
@@ -833,6 +883,13 @@ impl<'a> Ctx<'a> {
                     .replace('[', "(")
                     .replace(']', ")")
             });
+        // A mail subject or event title can hold an address or a number as much as a quote
+        // (security review 3, ER-6).
+        let title = if self.cfg.include_identifiers {
+            title
+        } else {
+            redact_contacts(&title)
+        };
         let title = truncate(&title, 120);
         let url = info
             .url
@@ -995,5 +1052,26 @@ mod tests {
             redact_contacts("Ring 07700 900123 today"),
             "Ring (phone) today"
         );
+    }
+
+    /// Security review 3, ER-6: fullwidth forms and other scripts' digits are redacted too.
+    #[test]
+    fn contacts_in_other_scripts_are_redacted() {
+        use super::redact_contacts;
+        assert_eq!(
+            redact_contacts("電話 ０７７００ ９００１２３ まで ana＠lumenfold.example"),
+            "電話 (phone) まで (address)"
+        );
+        assert_eq!(
+            redact_contacts("اتصل ٠٧٧٠٠ ٩٠٠١٢٣ اليوم"),
+            "اتصل (phone) اليوم"
+        );
+        assert_eq!(redact_contacts("कॉल +९१ ९८७६५ ४३२१० करें"), "कॉल (phone) करें");
+        assert_eq!(
+            redact_contacts("Due ２０２６-10-30, ref 12345."),
+            "Due ２０２６-10-30, ref 12345."
+        );
+        assert_eq!(redact_contacts(""), "");
+        assert_eq!(redact_contacts("a  b "), "a  b ");
     }
 }

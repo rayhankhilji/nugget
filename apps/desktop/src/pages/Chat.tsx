@@ -10,6 +10,7 @@ import {
   isCommandMissing,
   isOpenableUrl,
   onAskRestarted,
+  runtimeRetry,
   type AnswerCheck,
   type AskRestarted,
   type AskDateFilter,
@@ -19,12 +20,13 @@ import {
   type Citation,
   type ProviderInfo,
   type QuickAskHandover,
+  type RuntimeInfo,
   type StoredChatMessage,
   type StoredConversation,
   type Tier,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
-import { usePendingChatHandover, usePendingNewChat } from "../hooks.nav";
+import { requestPage, usePendingChatHandover, usePendingNewChat } from "../hooks.nav";
 import { handoverCitations, handoverExpired } from "../quickask/handover";
 import { localityLabel, tierLabel } from "../format";
 import { GoToPage } from "../components/GoToPage";
@@ -36,6 +38,7 @@ import { citedNumbers, groupSources, stripCitationMarkers, withheldNotice, type 
 import { Trans, useT } from "../i18n";
 import { askCitations } from "../askSearch";
 import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
+import { textDir } from "../bidi";
 import "../styles-chat.css";
 
 interface Turn {
@@ -151,6 +154,29 @@ function newConversationId(): string {
 }
 
 const isActive = (x: Turn) => x.state === "pending" || x.state === "streaming";
+
+/** The conversation so far as the model gets it: questions and settled replies. */
+function historyOf(turns: readonly Turn[]): ChatMessage[] {
+  return (
+    turns
+      .filter((x) => x.role === "user" || x.state === "done" || (x.state === "cancelled" && x.text))
+      // An earlier reply's `[n]` markers pointed at that reply's passages: drop them.
+      .map((x) => ({ role: x.role, text: x.role === "assistant" ? stripCitationMarkers(x.text) : x.text }))
+  );
+}
+
+/**
+ * LL2: whether a failed reply came from an on-device model server (so Status has the details and a
+ * Retry): its provider is a local runtime's, or it failed before any provider answered while the
+ * local chat model is down.
+ */
+export function failedOnDevice(turn: Pick<Turn, "provider">, runtimes: readonly RuntimeInfo[] | null): boolean {
+  if (turn.provider) {
+    return turn.provider.startsWith("local-") || !!runtimes?.some((r) => r.provider === turn.provider);
+  }
+  // `stopped` is an installed model at rest (not started yet, or stopped when idle): not a failure.
+  return !!runtimes?.some((r) => r.role === "chat" && (r.state === "failed" || r.gave_up === true || (r.state === "starting" && !!r.error)));
+}
 
 /** Settled turns as saved; a turn still streaming (e.g. when leaving the page) counts as stopped. */
 function toStored(turns: readonly Turn[]): StoredChatMessage[] {
@@ -385,17 +411,58 @@ export function ChatPage() {
     const text = input.trim();
     if (!text || active) return;
 
-    const history: ChatMessage[] = turns
-      .filter((x) => x.role === "user" || x.state === "done" || (x.state === "cancelled" && x.text))
-      // An earlier reply's `[n]` markers pointed at that reply's passages: drop them.
-      .map((x) => ({ role: x.role, text: x.role === "assistant" ? stripCitationMarkers(x.text) : x.text }));
-
+    const history = historyOf(turns);
     const userTurn: Turn = { id: nextTurnId++, role: "user", text };
     const reply: Turn = { id: nextTurnId++, role: "assistant", text: "", state: "pending" };
     setTurns((ts) => [...ts, userTurn, reply]);
     setInput("");
     announce(t("announce.answering"));
+    await answer(text, history, reply);
+  };
 
+  // LL2: the runtimes, read when the newest reply failed, to tell an on-device failure (Status
+  // has its details and Retry) from any other.
+  const [runtimes, setRuntimes] = useState<RuntimeInfo[] | null>(null);
+  const lastTurn = turns[turns.length - 1];
+  const failedId = lastTurn?.role === "assistant" && lastTurn.state === "error" ? lastTurn.id : null;
+  useEffect(() => {
+    if (failedId === null) return;
+    let alive = true;
+    api
+      .runtimeStatus()
+      .then((rs) => alive && setRuntimes(rs))
+      .catch(() => alive && setRuntimes(null));
+    return () => {
+      alive = false;
+    };
+  }, [failedId]);
+
+  /** LL2: ask the failed newest reply's question again, in its place. */
+  const retry = async (replyId: number) => {
+    if (active) return;
+    const at = turns.findIndex((x) => x.id === replyId);
+    const question = turns[at - 1];
+    if (at !== turns.length - 1 || turns[at]!.state !== "error" || question?.role !== "user") return;
+    const failed = turns[at]!;
+    const history = historyOf(turns.slice(0, at - 1));
+    const reply: Turn = { id: nextTurnId++, role: "assistant", text: "", state: "pending" };
+    setTurns((ts) => ts.map((x) => (x.id === replyId ? reply : x)));
+    announce(t("chat.retryAnnounce"));
+    inputRef.current?.focus();
+    // A local model server that stopped restarting by itself is started again first.
+    try {
+      const rs = await api.runtimeStatus();
+      const down = rs.find(
+        (r) => r.role === "chat" && r.state === "failed" && r.gave_up && (!failed.provider || r.provider === failed.provider),
+      );
+      if (down) await runtimeRetry(down.role);
+    } catch {
+      /* an older daemon, or the restart failed: the answer below says why */
+    }
+    await answer(question.text, history, reply);
+  };
+
+  const answer = async (text: string, history: ChatMessage[], reply: Turn) => {
     awaiting.current++;
     try {
       const route = { provider: provider || null, tier };
@@ -725,7 +792,13 @@ export function ChatPage() {
                 </li>
               )}
               {turns.map((turn) => (
-                <MessageItem key={turn.id} turn={turn} onOpenLink={(url, label) => void opener.open(url, label)} />
+                <MessageItem
+                  key={turn.id}
+                  turn={turn}
+                  onOpenLink={(url, label) => void opener.open(url, label)}
+                  onRetry={turn.id === failedId && !active ? () => void retry(turn.id) : undefined}
+                  onDevice={turn.id === failedId && failedOnDevice(turn, runtimes)}
+                />
               ))}
             </ol>
           </div>
@@ -771,7 +844,19 @@ export function ChatPage() {
 /** Element id of the source `n` belongs to, in the list under reply `turnId`. */
 const citeId = (turnId: number, n: number) => `msg-${turnId}-cite-${n}`;
 
-function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: string, label: string) => void }) {
+function MessageItem({
+  turn,
+  onOpenLink,
+  onRetry,
+  onDevice = false,
+}: {
+  turn: Turn;
+  onOpenLink: (url: string, label: string) => void;
+  /** LL2: the newest reply failed: ask its question again in place. */
+  onRetry?: () => void;
+  /** LL2: it failed on an on-device model server: link to its details on Status. */
+  onDevice?: boolean;
+}) {
   const t = useT();
   const opener = onOpenLink;
   const sourcesRef = useRef<HTMLDivElement>(null);
@@ -881,11 +966,11 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         )}
       </div>
       {turn.role === "user" ? (
-        <div className="msg-body" dir="auto">
+        <div className="msg-body" dir={textDir(turn.text)}>
           {turn.text}
         </div>
       ) : (
-        <div className="msg-body msg-md" dir="auto">
+        <div className="msg-body msg-md" dir={textDir(turn.text)}>
           {turn.text && <Markdown text={turn.text} onOpenLink={onOpenLink} citations={cite} />}
           {streaming && <span className="caret" aria-hidden="true" />}
           {reading ? (
@@ -956,9 +1041,25 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         </div>
       )}
       {turn.state === "error" && (
-        <p className="note note-error" role="alert">
-          {turn.error}
-        </p>
+        <div className="note note-error chat-error">
+          <p role="alert" dir="auto">
+            {turn.error || t("chat.failed")}
+          </p>
+          {(onRetry || onDevice) && (
+            <div className="chat-error-actions">
+              {onRetry && (
+                <button type="button" className="btn btn-small" onClick={onRetry}>
+                  {t("chat.retry")}
+                </button>
+              )}
+              {onDevice && (
+                <button type="button" className="btn btn-small btn-ghost" onClick={() => requestPage("status")}>
+                  {t("chat.statusDetails")}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </li>
   );

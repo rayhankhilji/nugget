@@ -14,6 +14,7 @@ import {
 import { keyOrText } from "../doubletap";
 import { formatRelative, localityLabel } from "../format";
 import { t as translate, useT, type MessageKey } from "../i18n";
+import { textDir, type TextDir } from "../bidi";
 import { detectOs } from "../onboarding/platform";
 import {
   accept,
@@ -254,6 +255,11 @@ export function Overlay() {
   }, [apply, hasHistory]);
 
   const editing = state.mode === "edit";
+  // The editor keeps the direction the draft had when editing began, so typing never flips it.
+  const editDir = useRef<TextDir>("auto");
+  const wasEditing = useRef(false);
+  if (editing && !wasEditing.current) editDir.current = textDir(state.draft);
+  wasEditing.current = editing;
   useLayoutEffect(() => {
     if (!editing || !editor.current) return;
     const el = editor.current;
@@ -298,6 +304,8 @@ export function Overlay() {
 
   return (
     <main ref={mainRef} tabIndex={-1} className={`overlay overlay-${view.phase}`} aria-label={t("doubletap.title")}>
+      {/* LL2: the window's one heading, for screen readers' heading navigation. */}
+      <h1 className="visually-hidden">{t("doubletap.title")}</h1>
       <div className="visually-hidden" aria-live="polite" aria-atomic="true">
         {saying}
       </div>
@@ -325,7 +333,7 @@ export function Overlay() {
         <textarea
           ref={editor}
           className="overlay-editor"
-          dir="auto"
+          dir={editDir.current}
           aria-label={t("doubletap.overlay.editLabel")}
           value={state.draft}
           onChange={(e) => update(setDraft(ref.current, e.target.value))}
@@ -334,7 +342,7 @@ export function Overlay() {
       ) : (
         view.text && (
           // Focusable so the draft can be scrolled and read; Tab from here still starts editing.
-          <div ref={textRef} className="overlay-text" dir="auto" role="region" tabIndex={0} aria-label={t("doubletap.overlay.draftLabel")}>
+          <div ref={textRef} className="overlay-text" dir={textDir(view.text)} role="region" tabIndex={0} aria-label={t("doubletap.overlay.draftLabel")}>
             {view.text}
             {view.phase === "streaming" && <span className="caret" aria-hidden="true" />}
           </div>

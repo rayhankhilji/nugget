@@ -1081,11 +1081,12 @@ async fn requests_are_sized_by_the_measured_prefill_rate_and_long_items_go_in_pa
     })
     .await;
     let chats = local.chats();
-    // Every request after the first fits the measured budget (document text plus markup).
+    // Every request after the first fits the measured budget (document text plus markup: the
+    // request's preamble naming its tag code, and each document's tags).
     for c in &chats[1..] {
         let docs = c.matches("<document n=").count();
         assert!(
-            c.chars().count() <= 1_000 + 120 * docs,
+            c.chars().count() <= 1_000 + 220 + 120 * docs,
             "{} chars: {c}",
             c.len()
         );
