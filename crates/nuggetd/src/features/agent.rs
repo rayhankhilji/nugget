@@ -70,7 +70,7 @@ pub(crate) async fn register(
             return None;
         }
     };
-    start(list, "policy", super::policy::start(cx, &safety));
+    start(list, "policy", &[], super::policy::start(cx, &safety));
     let browser = match super::browser::start(cx, &safety) {
         Ok(b) => {
             list.push(b.feature.clone());
@@ -92,6 +92,7 @@ pub(crate) async fn register(
     start(
         list,
         "agent",
+        &[],
         self::start_agent(cx, &safety, tools, browser_controller).await,
     );
     Some(safety)

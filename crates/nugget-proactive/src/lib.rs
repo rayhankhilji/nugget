@@ -11,6 +11,7 @@
 
 pub mod actions;
 pub mod brief;
+pub mod calendar;
 pub mod candidate;
 pub mod cards;
 pub mod config;
@@ -35,8 +36,8 @@ use time::{OffsetDateTime, UtcOffset};
 pub use actions::{
     APPROVAL_KEY_LEN, Action, ActionPreview, ActionRunner, Approval, ArchiveThread,
     CalendarExecutor, CreateEvent, DiffLine, DiffOp, DraftReply, DraftRequest, Drafter,
-    ExecOutcome, Executors, MailExecutor, NoteExecutor, PreparedAction, Reminder, ReminderExecutor,
-    ResearchNote, new_approval_key,
+    ExecOutcome, Executors, MailExecutor, NoteExecutor, PreparedAction, Quote, Reminder,
+    ReminderExecutor, ResearchNote, new_approval_key,
 };
 pub use brief::{BriefCard, BriefMeeting, MorningBrief};
 pub use candidate::{Candidate, CandidateKind, EvidenceRef, Features};
@@ -87,6 +88,8 @@ pub struct Proactive {
     lock: Mutex<()>,
     /// Cards with an action executing: one at a time per card.
     executing: Mutex<HashSet<String>>,
+    /// The user's current IANA zone; replaces `cfg.timezone` (see [`Proactive::set_timezone`]).
+    timezone: Mutex<Option<String>>,
 }
 
 impl Proactive {
@@ -97,6 +100,7 @@ impl Proactive {
             cards: Arc::new(StoreCardStore::new(store.clone())),
             store,
             utc_offset: AtomicI32::new(cfg.utc_offset.whole_seconds()),
+            timezone: Mutex::new(cfg.timezone.clone()),
             cfg,
             judge: None,
             lock: Mutex::new(()),
@@ -138,10 +142,27 @@ impl Proactive {
             .store(offset.whole_seconds(), Ordering::Relaxed);
     }
 
-    /// The configuration with the current UTC offset.
+    /// Change the user's IANA zone (travel, or the OS zone read again). Takes effect from the
+    /// next call.
+    pub fn set_timezone(&self, tz: Option<String>) {
+        *self.timezone.lock().unwrap_or_else(PoisonError::into_inner) = tz;
+    }
+
+    /// The configuration with the current UTC offset and zone.
     fn cfg_now(&self) -> Cow<'_, ProactiveConfig> {
         let offset = self.utc_offset();
-        if offset == self.cfg.utc_offset {
+        let tz = self
+            .timezone
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if tz != self.cfg.timezone {
+            Cow::Owned(ProactiveConfig {
+                utc_offset: offset,
+                timezone: tz,
+                ..self.cfg.clone()
+            })
+        } else if offset == self.cfg.utc_offset {
             Cow::Borrowed(&self.cfg)
         } else {
             Cow::Owned(ProactiveConfig {
@@ -192,9 +213,10 @@ impl Proactive {
             let mut pending: Vec<(&Candidate, f64)> = cands
                 .iter()
                 .filter(|c| {
-                    snapshot
-                        .by_dedup_key(&c.dedup_key)
-                        .is_none_or(|card| !card.state.is_terminal() && card.enrichment.is_none())
+                    snapshot.by_dedup_key(&c.dedup_key).is_none_or(|card| {
+                        !card.state.is_terminal()
+                            && card.enrichment.as_ref().is_none_or(|e| e.stale(c.due, now))
+                    })
                 })
                 .filter_map(|c| {
                     let (p, _, effects) = score::learned_score(
@@ -215,7 +237,7 @@ impl Proactive {
                     break;
                 }
                 if judge_allowed(locality, self.cfg.judge_allow_cloud, c.sensitive) {
-                    inputs.push(JudgeInput::from_candidate(c));
+                    inputs.push(JudgeInput::from_candidate(c, self.cfg_now().to_local(now)));
                 } else {
                     report.judge_withheld += 1;
                 }
@@ -249,13 +271,23 @@ impl Proactive {
             let enrichment = enrichments
                 .iter()
                 .find(|e| e.dedup_key == cand.dedup_key)
-                .cloned();
+                .map(|e| Enrichment {
+                    at: Some(now),
+                    ..e.clone()
+                });
             match state.cards.get_mut(&id) {
                 Some(card) if card.state.is_terminal() => report.suppressed += 1,
                 Some(card) => {
                     card.refresh_from(cand, now);
                     if enrichment.is_some() {
                         card.enrichment = enrichment;
+                    } else if card
+                        .enrichment
+                        .as_ref()
+                        .is_some_and(|e| e.stale(card.due, now))
+                    {
+                        // Not redone: the deterministic detail beats an out-of-date summary.
+                        card.enrichment = None;
                     }
                     report.updated += 1;
                 }
@@ -374,11 +406,10 @@ impl Proactive {
             card.title.clone()
         };
         let (features, kind) = (card.features.clone(), card.kind);
-        // One accept per card counts; repeated accepts are no-ops.
+        // One accept per card counts; repeated accepts are no-ops. Feedback teaches only the
+        // scoped, decaying, bounded learned layer: the shared model stays at its prior, so
+        // feedback about one sender never moves everyone else's cards (GG4-5).
         if !(fb == Feedback::Accepted && already_accepted) {
-            state
-                .model
-                .update_weighted(&features, fb, model_weight(fb, reason));
             state
                 .learned
                 .record(kind, &features, fb, reason, &title, now);
@@ -446,10 +477,15 @@ impl Proactive {
             .actions
             .get(index)
             .ok_or_else(|| Error::NotFound(format!("action {index} of card {card_id}")))?;
-        let context: Vec<String> = card
+        let context: Vec<Quote> = card
             .evidence
             .iter()
-            .filter_map(|e| e.quote.clone())
+            .filter_map(|e| {
+                Some(Quote {
+                    text: e.quote.clone()?,
+                    from_user: e.from_user,
+                })
+            })
             .collect();
         runner.prepare(card_id, index, action, &context).await
     }
@@ -570,17 +606,6 @@ impl Drop for ExecutingGuard<'_> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&self.card_id);
-    }
-}
-
-/// How much one piece of feedback moves the shared model's weights: dismissals that say
-/// something about this one card (already handled, wrong info) move them less.
-fn model_weight(fb: Feedback, reason: Option<&DismissReason>) -> f64 {
-    match (fb, reason) {
-        (Feedback::Dismissed, Some(DismissReason::AlreadyHandled)) => 0.5,
-        (Feedback::Dismissed, Some(DismissReason::WrongInfo)) => 0.25,
-        (Feedback::Dismissed, Some(DismissReason::Other(_))) => 0.75,
-        _ => 1.0,
     }
 }
 

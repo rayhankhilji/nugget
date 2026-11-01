@@ -229,6 +229,7 @@ pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
     let mut stack: Vec<String> = Vec::new();
     let mut saw_calendar = false;
     let mut cal_name = None;
+    let mut method = None;
     let mut components: Vec<Component> = Vec::new();
     let mut cur: Option<Component> = None;
     let mut dropped = 0usize;
@@ -284,6 +285,8 @@ pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
                     }
                 } else if top == Some("VCALENDAR") && p.name == "X-WR-CALNAME" {
                     cal_name = Some(unescape(&p.value).trim().to_owned());
+                } else if top == Some("VCALENDAR") && p.name == "METHOD" {
+                    method = Some(p.value.trim().to_ascii_uppercase());
                 }
             }
         }
@@ -332,6 +335,9 @@ pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
                 meta.insert(key.into(), v.clone());
             }
         }
+    }
+    if let Some(m) = method.filter(|m| !m.is_empty()) {
+        meta.insert("method".into(), Value::String(m));
     }
     if dropped > 0 {
         meta.insert("events_dropped".into(), Value::from(dropped));
@@ -407,6 +413,33 @@ fn render(c: &Component, tags: &mut Vec<String>, links: &mut Vec<String>) -> (St
     }
     if let Some(r) = c.get("RECURRENCE-ID").and_then(parse_when) {
         m.insert("recurrence_id".into(), Value::String(r.iso));
+    }
+    // Excluded and extra occurrences: `EXDATE;TZID=..:a,b` (zone as the start's unless `Z`).
+    for (prop, key) in [("EXDATE", "exdate"), ("RDATE", "rdate")] {
+        let dates: Vec<String> = c
+            .props
+            .iter()
+            .filter(|p| p.name == prop)
+            .flat_map(|p| {
+                p.value.split(',').filter_map(|v| {
+                    let one = Prop {
+                        value: v.trim().to_owned(),
+                        ..p.clone()
+                    };
+                    parse_when(&one).map(|w| w.iso)
+                })
+            })
+            .take(1_000)
+            .collect();
+        if !dates.is_empty() {
+            m.insert(key.into(), json!(dates));
+        }
+    }
+    if let Some(n) = c.text("SEQUENCE").and_then(|s| s.parse::<i64>().ok()) {
+        m.insert("sequence".into(), Value::from(n));
+    }
+    if let Some(d) = c.get("DTSTAMP").and_then(parse_when) {
+        m.insert("dtstamp".into(), Value::String(d.iso));
     }
     if let Some(l) = c.text("LOCATION") {
         lines.push(format!("Location: {l}"));

@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
 use crate::actions::Action;
-use crate::candidate::{Candidate, CandidateKind, EvidenceRef, Features};
+use crate::candidate::{Candidate, CandidateKind, EvidenceRef, Features, LocalText};
 use crate::feedback::Learned;
 use crate::judge::Enrichment;
 use crate::score::{Factor, Feedback, ScoringModel};
@@ -93,6 +93,12 @@ pub struct Card {
     pub kind: CandidateKind,
     pub title: String,
     pub detail: String,
+    /// See [`Candidate::title_text`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_text: Option<LocalText>,
+    /// See [`Candidate::detail_text`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_text: Option<LocalText>,
     pub evidence: Vec<EvidenceRef>,
     pub people: Vec<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
@@ -146,6 +152,8 @@ impl Card {
             kind: c.kind,
             title: c.title,
             detail: c.detail,
+            title_text: c.title_text,
+            detail_text: c.detail_text,
             evidence: c.evidence,
             people: c.people,
             due: c.due,
@@ -175,6 +183,8 @@ impl Card {
     pub(crate) fn refresh_from(&mut self, c: Candidate, now: OffsetDateTime) {
         self.title = c.title;
         self.detail = c.detail;
+        self.title_text = c.title_text;
+        self.detail_text = c.detail_text;
         self.evidence = c.evidence;
         self.people = c.people;
         self.due = c.due;
@@ -347,6 +357,7 @@ impl ProactiveState {
                 c.actions.clear();
                 c.enrichment = None;
                 c.detail.clear();
+                c.detail_text = None;
             }
         }
         if self.feedback_log.len() > MAX_FEEDBACK_LOG {
@@ -360,6 +371,11 @@ impl ProactiveState {
     pub(crate) fn migrate(&mut self, now: OffsetDateTime) {
         for (sender, w) in self.model.take_legacy_senders() {
             self.learned.import_sender_weight(&sender, w, now);
+        }
+        // Older versions trained the shared weights on every feedback, unscoped and without
+        // decay; that is dropped (the learned layer keeps the scoped part).
+        if self.model.updates > 0 {
+            self.model.reset_learned();
         }
     }
 
@@ -504,7 +520,7 @@ fn state_name(s: CardState) -> &'static str {
 impl Metrics {
     pub fn compute(state: &ProactiveState) -> Self {
         let mut m = Metrics {
-            model_updates: state.model.updates,
+            model_updates: state.feedback_log.len() as u64,
             ..Default::default()
         };
         let mut tta = Vec::new();

@@ -227,3 +227,64 @@ plants\n- [x] Submit the expenses (due 2026-10-29)\n- [ ] Book flights (due 2026
     assert!(c[0].title.starts_with("Due 2026-10-30") && c[0].title.contains("lease extension"));
     assert!(c[0].dedup_key.starts_with("todo:"));
 }
+
+/// GG4-7: an HR letter asks nothing ("please don't share" is no request, `hr@` is a role
+/// mailbox); a confidential ask from a person is a sensitive card.
+#[test]
+fn confidential_mail_is_no_ask_and_sensitive() {
+    let p = with_mails(
+        "\
+m-hr|Larkspur People Team <hr@larkspur.example>||Confidential: your 2027 compensation|2||||Your salary for 2027 will be $118,500 (+6%). Please don't share this letter.
+m-cfo|Rita Cole <rita@larkspur.example>||Board numbers|2||||Confidential. Can you check the 2027 salary bands before Friday?",
+    );
+    let c = by_kind(&p, CandidateKind::UnansweredThread);
+    assert_eq!(keys(&c), ["m-cfo"]);
+    assert!(c[0].sensitive);
+}
+
+/// GG4-12: a nudge keeps the card (same key) that the first ask started.
+#[test]
+fn a_nudge_keeps_the_card() {
+    let ask = "m-ask|Priya <priya@x.example>||Budget|3||||Can you approve the budget?";
+    let key = |p: &Proactive| {
+        by_kind(p, CandidateKind::UnansweredThread)[0]
+            .dedup_key
+            .clone()
+    };
+    let before = key(&with_mails(ask));
+    let nudged = with_mails(&format!(
+        "{ask}\nm-nudge|Priya <priya@x.example>||Re: Budget|0.5||m-ask||Any update?"
+    ));
+    assert_eq!(key(&nudged), before);
+}
+
+/// GG4-13: on Cc only, a question for someone else is no reply card.
+#[test]
+fn cc_only_ask_for_someone_else() {
+    let p = with_mails(
+        "\
+m-cc|Priya <priya@x.example>|theo@x.example|Invoice|2|||cc|Theo, can you approve the invoice by Friday?
+m-sent|Maya Lin <me@nugget.dev>|priya@x.example|Hi|9|SENT|||Hello.
+m-cc2|Priya <priya@x.example>|theo@x.example|Plan|2|||cc|Maya, can you check the plan?",
+    );
+    assert_eq!(
+        keys(&by_kind(&p, CandidateKind::UnansweredThread)),
+        ["m-cc2"]
+    );
+}
+
+/// GG4-14: a refresh minutes later offers the same actions, so an open preview still matches.
+#[test]
+fn actions_are_stable_across_refreshes() {
+    let p = Proactive::new(fixture().store.clone(), cfg());
+    let actions = |t| -> Vec<_> {
+        p.candidates(t)
+            .unwrap()
+            .into_iter()
+            .flat_map(|c| c.actions)
+            .collect()
+    };
+    let first = actions(now() + Duration::minutes(1));
+    assert!(first.iter().any(|a| matches!(a, Action::Reminder(_))));
+    assert_eq!(first, actions(now() + Duration::minutes(3)));
+}

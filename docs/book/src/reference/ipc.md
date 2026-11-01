@@ -160,6 +160,12 @@ A field with `secure: true` (a password field) is refused, and its value is neve
 An approval is bound to the exact preview (a keyed digest, valid once); every action passes the safety
 policy.
 
+Card, brief and action text comes in English (`title`, `detail`, `summary`, `label`) and as a
+`LocalText` beside it (`title_text`, `detail_text`, `summary_text`, `label_text`, and a
+`needs_confirmation` result's `detail_text`): a message key and raw arguments (ISO dates, numbers,
+an amount with its currency) the app formats in the user's language. Unknown keys fall back to the
+English.
+
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|

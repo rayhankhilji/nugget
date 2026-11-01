@@ -14,7 +14,9 @@ use nugget_infer::{ChatRequest, ChatResponse, Message, Provider};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::candidate::Candidate;
+use time::OffsetDateTime;
+
+use crate::candidate::{Candidate, CandidateKind};
 use crate::text::truncate;
 
 /// The judge's additions to one candidate.
@@ -26,6 +28,16 @@ pub struct Enrichment {
     pub suggested_action: Option<String>,
     /// 0–1.
     pub confidence: f64,
+    /// When it was judged (a summary written before the due date is redone after it).
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub at: Option<OffsetDateTime>,
+}
+
+impl Enrichment {
+    /// Written before `due` passed, now that it has.
+    pub(crate) fn stale(&self, due: Option<OffsetDateTime>, now: OffsetDateTime) -> bool {
+        due.is_some_and(|d| d <= now && self.at.is_none_or(|a| a < d))
+    }
 }
 
 /// What the judge sees of a candidate.
@@ -33,8 +45,15 @@ pub struct Enrichment {
 pub struct JudgeInput {
     pub key: String,
     pub kind: String,
+    /// Who owes what to whom, in words.
+    pub direction: String,
+    /// The other person (an address), when there is one.
+    pub person: Option<String>,
+    /// The user's date today.
+    pub today: String,
     pub title: String,
     pub detail: String,
+    /// `YYYY-MM-DD`, with `(overdue)` once past.
     pub due: Option<String>,
     pub evidence: Vec<String>,
     pub actions: Vec<String>,
@@ -44,13 +63,31 @@ pub struct JudgeInput {
 }
 
 impl JudgeInput {
-    pub fn from_candidate(c: &Candidate) -> Self {
+    /// `local_now` is now in the user's offset.
+    pub fn from_candidate(c: &Candidate, local_now: OffsetDateTime) -> Self {
+        let direction = match c.kind {
+            CandidateKind::UnansweredThread => "they wrote to the user, who has not replied yet",
+            CandidateKind::FollowUp => "the user promised this to them",
+            CandidateKind::Commitment => "a commitment in the user's notes and mail",
+            CandidateKind::MeetingPrep => "an upcoming meeting of the user's",
+            CandidateKind::Renewal => "a subscription the user pays for",
+        };
         Self {
             key: c.dedup_key.clone(),
             kind: c.kind.as_str().into(),
+            direction: direction.into(),
+            person: c.people.first().cloned(),
+            today: local_now.date().to_string(),
             title: c.title.clone(),
             detail: c.detail.clone(),
-            due: c.due.map(|d| d.date().to_string()),
+            due: c.due.map(|d| {
+                let day = d.to_offset(local_now.offset()).date();
+                if d <= local_now {
+                    format!("{day} (overdue)")
+                } else {
+                    day.to_string()
+                }
+            }),
             evidence: c
                 .evidence
                 .iter()
@@ -88,7 +125,8 @@ pub struct LlmJudge {
 pub const FEATURE_JUDGE: &str = "proactive_judge";
 
 const SYSTEM: &str = "You review suggestions a personal assistant found in the user's own mail, \
-calendar and notes. For each suggestion, write a one-sentence summary of why it matters now, \
+calendar and notes. For each suggestion, write a one-sentence summary of why it matters today (`today` is the \
+current date; `direction` says who owes whom; a due date marked overdue has passed), \
 pick the most useful action from the ones it lists (or none), and give your confidence from 0 to \
 1 that the user will want to act on it. Use only the evidence given. Do not add suggestions. \
 Reply with JSON only.";
@@ -166,6 +204,7 @@ pub(crate) fn parse_reply(text: &str) -> Result<Vec<Enrichment>> {
             } else {
                 0.0
             },
+            at: None,
         })
         .collect())
 }

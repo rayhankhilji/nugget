@@ -8,8 +8,8 @@
 //! [`build`].
 //!
 //! Order of events: the daemon builds [`State`], then calls [`build`]; a feature that fails to
-//! start is logged and left out (its methods answer "method not found"), so one broken feature
-//! never stops the daemon. Methods are matched after the built-in ones in `handler.rs`. On
+//! start is logged, listed in `status.failed_features`, and its methods (when known) answer with
+//! the reason, so one broken feature never stops the daemon. Methods are matched after the built-in ones in `handler.rs`. On
 //! shutdown, [`Features::shutdown`] runs after the listener closed and before ingest stops.
 
 use std::collections::HashMap;
@@ -51,6 +51,37 @@ pub(crate) trait Feature: Send + Sync {
     /// Stop background work. Tasks spawned on `State::tasks` that watch `State::shutdown` stop
     /// on their own; this is for anything else (flushing, closing handles).
     async fn shutdown(&self) {}
+    /// Why the feature did not start, for a stand-in ([`Failed`]).
+    fn failure(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// Stands in for a feature that did not start (a bad `[section]`): its methods answer with the
+/// reason instead of "method not found" (GG4-18).
+struct Failed {
+    name: &'static str,
+    methods: &'static [&'static str],
+    error: String,
+}
+
+#[async_trait]
+impl Feature for Failed {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+    fn methods(&self) -> &'static [&'static str] {
+        self.methods
+    }
+    async fn call(&self, method: &str, _: Value, _: Notifier) -> Result<Value, RpcError> {
+        Err(RpcError::new(
+            nugget_ipc::code::UNSUPPORTED,
+            format!("{method}: {} did not start: {}", self.name, self.error),
+        ))
+    }
+    fn failure(&self) -> Option<&str> {
+        Some(&self.error)
+    }
 }
 
 /// What a feature's constructor gets.
@@ -113,38 +144,64 @@ impl Features {
 
     /// Names of the running features (status, tests).
     pub(crate) fn names(&self) -> Vec<&'static str> {
-        self.list.iter().map(|f| f.name()).collect()
+        self.list
+            .iter()
+            .filter(|f| f.failure().is_none())
+            .map(|f| f.name())
+            .collect()
+    }
+
+    /// Features that did not start, with why.
+    pub(crate) fn failed(&self) -> std::collections::BTreeMap<String, String> {
+        self.list
+            .iter()
+            .filter_map(|f| Some((f.name().to_owned(), f.failure()?.to_owned())))
+            .collect()
     }
 }
 
 /// Start every feature. One line per feature; keep them in this order.
 pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     let mut list: Vec<Arc<dyn Feature>> = Vec::new();
-    start(&mut list, "draft", draft::start(cx).await);
+    start(&mut list, "draft", &[], draft::start(cx).await);
     // Plugins before the agent, which registers their tools.
-    start(&mut list, "plugins", plugins::start(cx).await);
+    start(&mut list, "plugins", &[], plugins::start(cx).await);
     let safety = agent::register(cx, &mut list).await; // policy, browser, agent
     start(
         &mut list,
         "proactive",
+        proactive::METHODS,
         proactive::start(cx, safety.as_ref()).await,
     );
-    start(&mut list, "ai_keys", ai_keys::start(cx));
-    start(&mut list, "model_fit", model_fit::start(cx));
-    start(&mut list, "backup", backup::start(cx));
-    start(&mut list, "search_ui", search_ui::start(cx)); // faceted search, timelines, previews
-    start(&mut list, "runtime_retry", runtime_retry::start(cx));
-    start(&mut list, "search_upgrade", search_upgrade::start(cx));
+    start(&mut list, "ai_keys", &[], ai_keys::start(cx));
+    start(&mut list, "model_fit", &[], model_fit::start(cx));
+    start(&mut list, "backup", &[], backup::start(cx));
+    start(&mut list, "search_ui", &[], search_ui::start(cx)); // faceted search, timelines, previews
+    start(&mut list, "runtime_retry", &[], runtime_retry::start(cx));
+    start(&mut list, "search_upgrade", &[], search_upgrade::start(cx));
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features
 }
 
-/// Keep a started feature, or log why it could not start and leave it out.
-fn start(list: &mut Vec<Arc<dyn Feature>>, name: &str, started: Result<Arc<dyn Feature>>) {
+/// Keep a started feature, or log why it could not start and keep a [`Failed`] stand-in
+/// serving `methods`.
+fn start(
+    list: &mut Vec<Arc<dyn Feature>>,
+    name: &'static str,
+    methods: &'static [&'static str],
+    started: Result<Arc<dyn Feature>>,
+) {
     match started {
         Ok(f) => list.push(f),
-        Err(e) => tracing::error!(feature = name, error = %e, "feature did not start"),
+        Err(e) => {
+            tracing::error!(feature = name, error = %e, "feature did not start");
+            list.push(Arc::new(Failed {
+                name,
+                methods,
+                error: e.to_string(),
+            }));
+        }
     }
 }
 
@@ -172,5 +229,24 @@ mod tests {
         assert_eq!(f.find("echo.say").map(|f| f.name()), Some("echo"));
         assert!(f.find("echo.other").is_none());
         assert_eq!(f.names(), ["echo"]);
+    }
+
+    /// GG4-18: a feature that did not start is listed, and its methods say why.
+    #[test]
+    fn a_failed_feature_says_why() {
+        let mut list = Vec::new();
+        start(
+            &mut list,
+            "proactive",
+            &["brief.get"],
+            Err(Error::Invalid(
+                "[proactive]: brief_time \"25:00\" is not HH:MM".into(),
+            )),
+        );
+        let f = Features::new(list);
+        assert!(f.names().is_empty());
+        assert_eq!(f.failed().len(), 1);
+        let stand_in = f.find("brief.get").unwrap();
+        assert!(stand_in.failure().unwrap().contains("brief_time"));
     }
 }

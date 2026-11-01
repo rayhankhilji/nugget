@@ -9,6 +9,7 @@ pub mod egress;
 pub mod error;
 pub mod ids;
 pub mod ipc;
+pub mod lang;
 pub mod paths;
 pub mod secrets;
 

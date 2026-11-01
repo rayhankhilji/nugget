@@ -21,6 +21,7 @@ use sha2::Sha256;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use crate::candidate::LocalText;
 use crate::text::truncate;
 
 /// Draft a reply for the user to copy or open in their mail app. Never sends, and nothing is
@@ -207,6 +208,30 @@ impl Action {
         }
     }
 
+    /// [`ActionPreview::summary`] for the app to localise (`at` as RFC 3339, formatted by the
+    /// app).
+    pub fn summary_text(&self) -> LocalText {
+        match self {
+            Self::DraftReply(d) => LocalText::new("action.draft_reply").arg("to", d.to.join(", ")),
+            Self::CreateEvent(e) => {
+                LocalText::new("action.create_event").arg("title", e.title.as_str())
+            }
+            Self::Reminder(r) => LocalText::new("action.reminder").arg("at", fmt_time(r.at)),
+            Self::ArchiveThread(a) => {
+                LocalText::new("action.archive_thread").arg("subject", a.subject.as_str())
+            }
+            Self::ResearchNote(n) => {
+                LocalText::new("action.research_note").arg("title", n.title.as_str())
+            }
+        }
+    }
+
+    /// [`Action::requires_confirmation`] for the app to localise.
+    pub fn confirmation_text(&self) -> Option<LocalText> {
+        self.requires_confirmation()
+            .map(|_| LocalText::new(format!("confirm.{}", self.name())))
+    }
+
     fn target(&self) -> (&'static str, &'static str) {
         match self {
             Self::DraftReply(_) => ("mail", "save_draft"),
@@ -303,10 +328,13 @@ impl Action {
         let (app, verb) = self.target();
         let (label, text) = match self {
             Self::DraftReply(d) => (d.subject.clone(), d.body.clone().unwrap_or_default()),
+            Self::CreateEvent(e) if e.attendees.is_empty() => ("Event".into(), e.title.clone()),
             Self::CreateEvent(e) => (e.title.clone(), e.attendees.join(", ")),
-            Self::Reminder(r) => (r.text.clone(), r.text.clone()),
+            // Local items: their text is the user's note to self, not a control to press, so
+            // its words ("submit", "renew") are not read as a send or a purchase (GG4-15).
+            Self::Reminder(r) => ("Reminder".into(), r.text.clone()),
             Self::ArchiveThread(a) => (a.subject.clone(), String::new()),
-            Self::ResearchNote(n) => (n.title.clone(), n.body.clone()),
+            Self::ResearchNote(n) => ("Note".into(), format!("{}\n{}", n.title, n.body)),
         };
         ActionDescriptor {
             target_app: app.into(),
@@ -329,7 +357,16 @@ pub struct DraftRequest {
     pub subject: String,
     pub intent: String,
     /// Evidence quotes from the card.
-    pub context: Vec<String>,
+    pub context: Vec<Quote>,
+}
+
+/// One quote of the thread a draft answers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Quote {
+    pub text: String,
+    /// The user's own words, not the other person's.
+    #[serde(default)]
+    pub from_user: bool,
 }
 
 /// Writes reply text. Implemented by `nugget-draft` (voice profile, retrieval, sensitive gate).
@@ -552,7 +589,7 @@ impl ActionRunner {
         card_id: &str,
         action_index: usize,
         action: &Action,
-        context: &[String],
+        context: &[Quote],
     ) -> Result<PreparedAction> {
         let mut action = action.clone();
         if let Action::DraftReply(d) = &mut action
@@ -747,6 +784,33 @@ mod tests {
     use nugget_policy::{Effect, PolicyConfig, PolicyEngine, Rule};
 
     use super::*;
+
+    /// GG4-15: a local reminder or note keeps its typed risk whatever words its text holds.
+    #[test]
+    fn local_actions_keep_their_typed_risk() {
+        let at = OffsetDateTime::UNIX_EPOCH;
+        for text in [
+            "Submit the October expense report",
+            "Renew Pixelboard: $12.99",
+        ] {
+            let reminder = Action::Reminder(Reminder {
+                text: text.into(),
+                at,
+                about: None,
+            });
+            let note = Action::ResearchNote(ResearchNote {
+                title: text.into(),
+                body: text.into(),
+                sources: Vec::new(),
+            });
+            for a in [reminder, note] {
+                let ctx = ActionContext::default().with_window_title(a.preview().summary);
+                let c = nugget_policy::RiskClassifier::global()
+                    .classify_with_context(&a.descriptor("t"), &ctx);
+                assert_eq!(c.risk, a.risk(), "{text}: {:?}", c.reasons);
+            }
+        }
+    }
 
     /// Records the context of every check; refuses any check made without one.
     #[derive(Default)]

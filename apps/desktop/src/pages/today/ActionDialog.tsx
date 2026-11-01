@@ -21,7 +21,7 @@ import { Badge, ErrorNote, Spinner } from "../../components/ui";
 import { fileUrl } from "../../knowledge";
 import { formatTime } from "../../format";
 import { useT } from "../../i18n";
-import { diffMarker, riskLabel, riskTone, targetLabel } from "./model";
+import { diffMarker, localText, riskLabel, riskTone, targetLabel } from "./model";
 
 type Phase =
   | { kind: "previewing" }
@@ -77,13 +77,15 @@ export function ActionDialog({ card, action, onClose }: { card: CardView; action
   }, [phase]);
 
   return (
-    <Dialog title={action.label || t("today.action.title")} description={card.title} onClose={() => onClose(executed)} wide>
+    <Dialog
+      title={action.label ? localText(action.label_text, action.label) : t("today.action.title")}
+      description={localText(card.title_text, card.title)} onClose={() => onClose(executed)} wide>
       {phase.kind === "previewing" && !error && <Spinner label={t("today.action.previewing")} />}
       <ErrorNote error={error} onRetry={preview ? undefined : () => void loadPreview()} />
 
       {preview && (
         <section aria-label={t("today.action.previewLabel")} className="today-preview">
-          <p className="today-preview-summary">{preview.summary}</p>
+          <p className="today-preview-summary">{localText(preview.summary_text, preview.summary)}</p>
           <div className="badges">
             <Badge tone={riskTone(preview.risk)}>{t("today.action.risk", { risk: riskLabel(preview.risk) })}</Badge>
             <Badge>{t("today.action.target", { target: targetLabel(preview.target) })}</Badge>
@@ -148,7 +150,9 @@ function Outcome({ result, onConfirm }: { result: CardExecuteResult; onConfirm: 
     case "needs_confirmation":
       return (
         <div className="note note-warn" role="alert">
-          <span>{result.detail ? t("today.action.confirmReason", { reason: result.detail }) : t("today.action.confirmGeneric")}</span>
+          <span>{result.detail
+              ? t("today.action.confirmReason", { reason: localText(result.detail_text, result.detail) })
+              : t("today.action.confirmGeneric")}</span>
           <button type="button" className="btn btn-primary btn-small" onClick={onConfirm} data-autofocus>
             {t("today.action.confirm")}
           </button>

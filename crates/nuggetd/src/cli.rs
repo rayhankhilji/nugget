@@ -86,6 +86,9 @@ pub fn format_status(s: &StatusResponse, socket: &str) -> String {
         };
         let _ = writeln!(out, "disk:      {line}");
     }
+    for (name, why) in &s.failed_features {
+        let _ = writeln!(out, "FAILED:    {name}: {why}");
+    }
     if s.providers.is_empty() {
         let _ = writeln!(out, "providers: none configured");
         return out;
@@ -178,8 +181,13 @@ mod tests {
             )),
             pid: None,
             service: None,
+            failed_features: [("proactive".into(), "[proactive]: bad brief_time".into())].into(),
         };
         let out = format_status(&s, "/tmp/sock");
+        assert!(
+            out.contains("FAILED:    proactive: [proactive]: bad brief_time"),
+            "{out}"
+        );
         assert!(out.contains("disk:      FULL: 150 MB free"), "{out}");
         assert!(out.starts_with("nuggetd 0.0.1 running (protocol 1), up 1h 2m\n"));
         assert!(

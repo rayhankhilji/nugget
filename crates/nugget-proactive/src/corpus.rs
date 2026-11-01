@@ -6,15 +6,17 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use jiff::tz::TimeZone;
 use nugget_core::Result;
 use nugget_core::ids::ItemRef;
 use nugget_store::{Item, Store};
 use serde_json::Value;
+use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use time::{OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 
+use crate::calendar::{Recurrence, resolve, zone_named};
 use crate::config::ProactiveConfig;
-use crate::text::{Address, is_generated_subject, normalize_subject, parse_iso_date, stable_hash};
+use crate::text::{Address, is_generated_subject, normalize_subject, stable_hash};
 
 /// Source ids with this prefix belong to this crate and are never read as content.
 pub const OWN_SOURCE_PREFIX: &str = "proactive";
@@ -156,6 +158,15 @@ fn automated_local(local: &str) -> bool {
         "community",
         "webmaster",
         "security",
+        "hr",
+        "people",
+        "peopleops",
+        "payroll",
+        "benefits",
+        "recruiting",
+        "talent",
+        "legal",
+        "compliance",
     ];
     const PARTS: &[&str] = &[
         "noreply",
@@ -191,8 +202,27 @@ pub struct CalEvent {
     pub organizer: Option<Address>,
     pub attendees: Vec<Attendee>,
     pub cancelled: bool,
+    /// The user declined it.
+    pub declined: bool,
+    /// Attendees who declined (lowercased addresses).
+    pub declined_by: Vec<String>,
     pub sensitive: bool,
     pub url: Option<String>,
+    /// A repeating series (expanded by [`Corpus::events_between`]).
+    pub recurrence: Option<Recurrence>,
+    /// iCalendar version: `(RECURRENCE-ID, SEQUENCE, DTSTAMP)`; `None` for connector events.
+    pub version: Option<(Option<OffsetDateTime>, i64, Option<OffsetDateTime>)>,
+}
+
+impl CalEvent {
+    /// Whether it touches `[from, to)`.
+    fn overlaps(&self, from: OffsetDateTime, to: OffsetDateTime) -> bool {
+        self.start < to
+            && match self.end.filter(|e| *e > self.start) {
+                Some(end) => end > from,
+                None => self.start >= from,
+            }
+    }
 }
 
 /// A text item that is neither mail nor an event: a note, a document.
@@ -233,8 +263,8 @@ impl Parts {
     fn push(&mut self, it: &Item, cfg: &ProactiveConfig) {
         if let Some(m) = parse_mail(it) {
             self.mail.push(m);
-        } else if let Some(e) = parse_event(it, cfg.utc_offset) {
-            self.events.push(e);
+        } else if let Some(e) = parse_events(it, &cfg.zone()) {
+            self.events.extend(e);
         } else if let Some(n) = parse_note(it) {
             self.notes.push(n);
         }
@@ -281,7 +311,7 @@ impl Corpus {
     fn assemble(parts: Parts, cfg: &ProactiveConfig) -> Self {
         let Parts {
             mut mail,
-            mut events,
+            events,
             mut notes,
         } = parts;
         notes.sort_by(|a, b| a.item.key.cmp(&b.item.key));
@@ -306,6 +336,7 @@ impl Corpus {
                 .then_with(|| a.item.key.cmp(&b.item.key))
         });
         let threads = thread(&mut mail, &users);
+        let mut events = current_versions(events, &users);
         events.sort_by_key(|e| e.start);
         let internal_domains = cfg.internal_domains_for(&users);
         Self {
@@ -316,6 +347,35 @@ impl Corpus {
             internal_domains,
             threads,
         }
+    }
+
+    /// Events touching `[from, to)`, with each repeating series expanded into its occurrences,
+    /// by start.
+    pub fn events_between(&self, from: OffsetDateTime, to: OffsetDateTime) -> Vec<CalEvent> {
+        let mut out = Vec::new();
+        for e in &self.events {
+            let Some(r) = &e.recurrence else {
+                if e.overlaps(from, to) {
+                    out.push(e.clone());
+                }
+                continue;
+            };
+            let len = e.end.map(|end| end - e.start);
+            let lead = len.unwrap_or_default().max(time::Duration::ZERO);
+            for start in r.between(from - lead, to) {
+                let occ = CalEvent {
+                    start,
+                    end: len.map(|l| start + l),
+                    recurrence: None,
+                    ..e.clone()
+                };
+                if occ.overlaps(from, to) {
+                    out.push(occ);
+                }
+            }
+        }
+        out.sort_by_key(|e| e.start);
+        out
     }
 
     pub fn is_user(&self, email: &str) -> bool {
@@ -495,6 +555,31 @@ fn header(meta: &Value, name: &str) -> Option<String> {
     None
 }
 
+/// Marked confidential by its sender: kept from cloud models and never quoted on cards.
+fn confidential(subject: &str, body: &str) -> bool {
+    const MARKS: &[&str] = &[
+        "confidential",
+        "do not share",
+        "don't share",
+        "do not forward",
+        "don't forward",
+        "vertraulich",
+        "confidentiel",
+        "confidencial",
+        "riservato",
+        "गोपनीय",
+        "機密",
+        "机密",
+        "保密",
+        "سري للغاية",
+    ];
+    let head: String = body.chars().take(4000).collect();
+    let text = format!("{subject}\n{head}")
+        .to_lowercase()
+        .replace('\u{2019}', "'");
+    MARKS.iter().any(|m| text.contains(m))
+}
+
 fn sensitive(meta: &Value) -> bool {
     // Same rule as retrieval: only an explicit `false` means not sensitive.
     meta.get("sensitive") != Some(&Value::Bool(false))
@@ -558,6 +643,7 @@ fn parse_mail(item: &Item) -> Option<MailMessage> {
         .into_iter()
         .map(|l| l.trim().trim_start_matches('\\').to_uppercase())
         .collect();
+    let confidential = confidential(&subject, &body);
     Some(MailMessage {
         item: item.item.clone(),
         message_id: str_at(meta, &["extracted", "message_id"])
@@ -579,7 +665,7 @@ fn parse_mail(item: &Item) -> Option<MailMessage> {
         precedence: header(meta, "Precedence").map(|p| p.trim().to_lowercase()),
         auto_submitted: header(meta, "Auto-Submitted").map(|p| p.trim().to_lowercase()),
         junk: meta.get("junk") == Some(&Value::Bool(true)),
-        sensitive: sensitive(meta),
+        sensitive: sensitive(meta) || confidential,
         url: url(meta),
         from_user: false,
         thread: String::new(),
@@ -610,95 +696,122 @@ fn parse_note(item: &Item) -> Option<NoteDoc> {
     })
 }
 
-/// A calendar time: RFC 3339, a floating `YYYY-MM-DDTHH:MM:SS` (read in `offset`), or a date.
-fn parse_time(s: &str, offset: UtcOffset) -> Option<(OffsetDateTime, bool)> {
-    let s = s.trim();
-    if let Ok(t) = OffsetDateTime::parse(s, &Rfc3339) {
-        return Some((t, false));
-    }
-    let date = parse_iso_date(s)?;
-    if s.len() == 10 {
-        return Some((
-            PrimitiveDateTime::new(date, Time::MIDNIGHT).assume_offset(offset),
-            true,
-        ));
-    }
-    let t = s.get(11..19).or_else(|| s.get(11..16))?;
-    let mut parts = t.split(':').map(|p| p.parse::<u8>().ok());
-    let (h, m) = (parts.next()??, parts.next()??);
-    let sec = parts.next().flatten().unwrap_or(0);
-    let time = Time::from_hms(h, m, sec).ok()?;
-    let utc = s.ends_with('Z') || s.ends_with('z');
-    let off = if utc { UtcOffset::UTC } else { offset };
-    Some((PrimitiveDateTime::new(date, time).assume_offset(off), false))
-}
-
-fn parse_event(item: &Item, offset: UtcOffset) -> Option<CalEvent> {
+/// The calendar events of an item: one per VEVENT of an iCalendar item (`extracted.events`),
+/// or the connector's own event (Google: `source.start` is `{date, date_time}`). Times without
+/// an offset are read in their TZID, else in the user's zone `tz`.
+fn parse_events(item: &Item, tz: &TimeZone) -> Option<Vec<CalEvent>> {
     let meta = &item.metadata;
-    let mime = mime(item);
-    // Google Calendar: `source.start` is {date, date_time}.
-    let gstart = get(meta, &["source", "start"]).filter(|v| v.is_object());
-    let (start, end, all_day) = if let Some(s) = gstart {
+    if let Some(s) = get(meta, &["source", "start"]).filter(|v| v.is_object()) {
         let pick = |v: &Value| {
             v.get("date_time")
                 .and_then(Value::as_str)
                 .or_else(|| v.get("date").and_then(Value::as_str))
-                .and_then(|x| parse_time(x, offset))
+                .and_then(|x| resolve(x, tz))
         };
-        let (start, all_day) = pick(s)?;
-        let end = get(meta, &["source", "end"]).and_then(pick).map(|(t, _)| t);
-        (start, end, all_day)
-    } else {
-        // iCalendar (CalDAV, .ics files): `extracted.start` is ISO.
-        if !mime.contains("calendar") && get(meta, &["extracted", "start"]).is_none() {
-            return None;
+        let (start, all_day, _) = pick(s)?;
+        let end = get(meta, &["source", "end"])
+            .and_then(pick)
+            .map(|(t, ..)| t);
+        let src = get(meta, &["source"])?;
+        let mut e = event_fields(item, src, tz);
+        e.uid = str_at(meta, &["source", "ical_uid"])
+            .or_else(|| str_at(meta, &["source", "event_id"]))
+            .map(str::to_owned);
+        e.start = start;
+        e.end = end;
+        e.all_day = all_day;
+        e.version = None;
+        e.recurrence = None;
+        return Some(vec![e]);
+    }
+    let mime = mime(item);
+    let evs = get(meta, &["extracted", "events"]).and_then(Value::as_array);
+    if !mime.contains("calendar") && evs.is_none() {
+        return None;
+    }
+    let cancel_all = str_at(meta, &["extracted", "method"]) == Some("CANCEL");
+    let single = evs.map_or(0, Vec::len) == 1;
+    let out: Vec<CalEvent> = evs
+        .into_iter()
+        .flatten()
+        .filter(|ev| ev.get("kind").and_then(Value::as_str) != Some("task"))
+        .filter(|ev| ev.get("start").is_some())
+        .map(|ev| {
+            let mut e = event_fields(item, ev, tz);
+            e.cancelled |= cancel_all;
+            if !single {
+                // A file of many events: each is its own (the item title is the calendar's).
+                e.title = ev
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .unwrap_or("(untitled event)")
+                    .to_owned();
+            }
+            e
+        })
+        .collect();
+    Some(out)
+}
+
+/// The fields of one event object (an `extracted.events[i]` or a connector's `source`).
+fn event_fields(item: &Item, ev: &Value, user_tz: &TimeZone) -> CalEvent {
+    let s = |k: &str| ev.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+    let zone_of = |k: &str| {
+        s(k).filter(|z| *z != "UTC")
+            .and_then(zone_named)
+            .unwrap_or_else(|| user_tz.clone())
+    };
+    let tz = zone_of("timezone");
+    let start = s("start").and_then(|x| resolve(x, &tz));
+    let end = s("end")
+        .and_then(|x| resolve(x, &zone_of("end_timezone")))
+        .map(|(t, ..)| t);
+    let times = |k: &str| -> Vec<OffsetDateTime> {
+        strings(ev.get(k))
+            .iter()
+            .filter_map(|x| resolve(x, &tz).map(|(t, ..)| t))
+            .collect()
+    };
+    let recurrence = match (s("rrule"), &start) {
+        (Some(r), Some((_, _, wall))) => {
+            Recurrence::parse(r, *wall, tz.clone(), times("exdate"), times("rdate"))
         }
-        let (start, all_day) = parse_time(str_at(meta, &["extracted", "start"])?, offset)?;
-        let end = str_at(meta, &["extracted", "end"])
-            .and_then(|x| parse_time(x, offset))
-            .map(|(t, _)| t);
-        (start, end, all_day)
+        _ => None,
     };
     let mut attendees = Vec::new();
-    for a in get(meta, &["source", "attendees"])
-        .or_else(|| get(meta, &["extracted", "attendees"]))
+    let mut declined_by = Vec::new();
+    for a in ev
+        .get("attendees")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
     {
-        match a {
+        let (address, resource, response) = match a {
             Value::String(s) => {
-                if let Some(address) = Address::parse(s) {
-                    attendees.push(Attendee {
-                        address,
-                        resource: false,
-                    });
-                }
+                let response = s.trim_end().ends_with("(declined)").then_some("declined");
+                (Address::parse(s), false, response)
             }
-            Value::Object(o) => {
-                if let Some(email) = o.get("email").and_then(Value::as_str) {
-                    attendees.push(Attendee {
-                        address: Address {
-                            name: o.get("name").and_then(Value::as_str).map(str::to_owned),
-                            email: email.to_lowercase(),
-                        },
-                        resource: o.get("resource").and_then(Value::as_bool).unwrap_or(false),
-                    });
-                }
-            }
-            _ => {}
+            Value::Object(o) => (
+                o.get("email").and_then(Value::as_str).map(|email| Address {
+                    name: o.get("name").and_then(Value::as_str).map(str::to_owned),
+                    email: email.to_lowercase(),
+                }),
+                o.get("resource").and_then(Value::as_bool).unwrap_or(false),
+                o.get("response").and_then(Value::as_str),
+            ),
+            _ => continue,
+        };
+        let Some(address) = address else { continue };
+        if response == Some("declined") {
+            declined_by.push(address.email.clone());
         }
+        // Rooms and equipment, even when the connector did not flag them.
+        let resource = resource
+            || address.domain().starts_with("resource.")
+            || address.domain().ends_with(".resource.calendar.google.com");
+        attendees.push(Attendee { address, resource });
     }
-    // Rooms and equipment, even when the connector did not flag them.
-    for a in &mut attendees {
-        a.resource |= a.address.domain().starts_with("resource.")
-            || a.address
-                .domain()
-                .ends_with(".resource.calendar.google.com");
-    }
-    let organizer = match get(meta, &["source", "organizer"])
-        .or_else(|| get(meta, &["extracted", "organizer"]))
-    {
+    let organizer = match ev.get("organizer") {
         Some(Value::String(s)) => Address::parse(s),
         Some(Value::Object(o)) => o.get("email").and_then(Value::as_str).map(|e| Address {
             name: o.get("name").and_then(Value::as_str).map(str::to_owned),
@@ -706,32 +819,74 @@ fn parse_event(item: &Item, offset: UtcOffset) -> Option<CalEvent> {
         }),
         _ => None,
     };
-    let status = str_at(meta, &["source", "status"])
-        .or_else(|| str_at(meta, &["extracted", "status"]))
-        .unwrap_or("")
-        .to_lowercase();
     let title = item
         .title
         .clone()
-        .or_else(|| str_at(meta, &["extracted", "summary"]).map(str::to_owned))
+        .or_else(|| s("summary").map(str::to_owned))
         .unwrap_or_else(|| "(untitled event)".into());
-    Some(CalEvent {
+    let (start, all_day) = start.map_or((item.created_at, false), |(t, d, _)| (t, d));
+    CalEvent {
         item: item.item.clone(),
-        uid: str_at(meta, &["source", "ical_uid"])
-            .or_else(|| str_at(meta, &["extracted", "uid"]))
-            .or_else(|| str_at(meta, &["source", "event_id"]))
-            .map(str::to_owned),
+        uid: s("uid").map(str::to_owned),
         title,
         start,
         end,
         all_day,
-        location: str_at(meta, &["source", "location"])
-            .or_else(|| str_at(meta, &["extracted", "location"]))
-            .map(str::to_owned),
+        location: s("location").map(str::to_owned),
         organizer,
         attendees,
-        cancelled: status == "cancelled",
-        sensitive: sensitive(meta),
-        url: url(meta),
-    })
+        cancelled: s("status").is_some_and(|v| v.eq_ignore_ascii_case("cancelled")),
+        declined: false,
+        declined_by,
+        sensitive: sensitive(&item.metadata),
+        url: url(&item.metadata),
+        recurrence,
+        version: Some((
+            s("recurrence_id")
+                .and_then(|x| resolve(x, &tz))
+                .map(|(t, ..)| t),
+            ev.get("sequence").and_then(Value::as_i64).unwrap_or(0),
+            s("dtstamp").and_then(|x| resolve(x, &tz)).map(|(t, ..)| t),
+        )),
+    }
+}
+
+/// One event per iCalendar UID and RECURRENCE-ID: the highest SEQUENCE (then DTSTAMP, then a
+/// cancellation) wins. Cancelled and user-declined events are dropped; an instance that was
+/// moved, cancelled or declined is taken out of its series.
+fn current_versions(events: Vec<CalEvent>, users: &[String]) -> Vec<CalEvent> {
+    let mut best: BTreeMap<(String, Option<OffsetDateTime>), CalEvent> = BTreeMap::new();
+    let mut out = Vec::new();
+    for mut e in events {
+        e.declined = e.declined_by.iter().any(|a| users.contains(a));
+        let (Some(uid), Some((rid, ..))) = (e.uid.clone(), e.version) else {
+            if !e.cancelled && !e.declined {
+                out.push(e);
+            }
+            continue;
+        };
+        let rank = |e: &CalEvent| e.version.map(|(_, seq, stamp)| (seq, stamp, e.cancelled));
+        match best.get(&(uid.clone(), rid)) {
+            Some(cur) if rank(cur) >= rank(&e) => {}
+            _ => {
+                best.insert((uid, rid), e);
+            }
+        }
+    }
+    let mut excluded: HashMap<String, Vec<OffsetDateTime>> = HashMap::new();
+    for (uid, rid) in best.keys() {
+        if let Some(rid) = rid {
+            excluded.entry(uid.clone()).or_default().push(*rid);
+        }
+    }
+    for ((uid, _), mut e) in best {
+        if let Some(r) = &mut e.recurrence {
+            r.exdates
+                .extend(excluded.get(&uid).into_iter().flatten().copied());
+        }
+        if !e.cancelled && !e.declined {
+            out.push(e);
+        }
+    }
+    out
 }

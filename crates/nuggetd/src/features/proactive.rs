@@ -65,7 +65,7 @@ const APPROVAL_KEY_KEY: &str = "proactive:approval_key";
 /// The clock wakes at least this often (reminders are checked on each wake).
 const CLOCK_TICK: Duration = Duration::from_secs(60);
 
-const METHODS: &[&str] = &[
+pub(crate) const METHODS: &[&str] = &[
     proactive_method::CARDS_LIST,
     proactive_method::CARDS_FEEDBACK,
     proactive_method::CARDS_PREVIEW,
@@ -84,7 +84,11 @@ pub(crate) async fn start(
 ) -> Result<Arc<dyn Feature>> {
     let state = cx.state.clone();
     let table = cx.config.proactive.clone();
-    let settings = blocking(move || Settings::parse(&table, settings::detect_local_offset)).await?;
+    let mut settings =
+        blocking(move || Settings::parse(&table, settings::detect_local_offset)).await?;
+    if !settings.offset_fixed && !settings.zone_fixed {
+        settings.engine.timezone = settings::machine_zone(settings.offset);
+    }
 
     let identity = exec::Identity::from_config(&settings.engine.user_addresses, &cx.config.draft);
     let exec = exec::Exec::new(&state, &cx.config.draft, identity)?;
@@ -377,6 +381,10 @@ impl Core {
         if let Ok(Some(new)) = blocking(move || Ok(offset.recheck(force))).await {
             tracing::info!(utc_offset = %new, "the local UTC offset changed");
             self.engine.set_utc_offset(new);
+            if !self.settings.zone_fixed {
+                // Travel: the machine's zone may have changed too.
+                self.engine.set_timezone(settings::machine_zone(new));
+            }
         }
         self.offset()
     }
@@ -583,7 +591,8 @@ impl Core {
         match out {
             Ok(ExecOutcome::Executed(id)) => {
                 let artifact = self.exec.artifact(&entry.prepared.action, &id);
-                let mut result = convert::outcome(ExecOutcome::Executed(id));
+                let mut result =
+                    convert::outcome(ExecOutcome::Executed(id), &entry.prepared.action);
                 result.artifact = artifact;
                 let open = self.open_count().await.unwrap_or(0);
                 self.announce(&self.changed("execute", open, 0, 1));
@@ -591,8 +600,9 @@ impl Core {
             }
             Ok(other) => {
                 // Needs confirmation, denied or halted: the same preview may be retried.
+                let result = convert::outcome(other, &entry.prepared.action);
                 self.previews().put_back(entry);
-                Ok(convert::outcome(other))
+                Ok(result)
             }
             Err(e) => {
                 self.previews().put_back(entry);
@@ -1089,6 +1099,8 @@ mod tests {
             kind: CandidateKind::FollowUp,
             title: format!("Card {id}"),
             detail: "detail".into(),
+            title_text: None,
+            detail_text: None,
             evidence: Vec::new(),
             people: vec!["ana@example.com".into()],
             due: None,

@@ -1,5 +1,7 @@
 //! Deterministic text helpers: dates, money amounts, promise phrases, addresses, hashing.
 
+pub use nugget_core::lang::find_dates;
+use nugget_core::lang::{self, contains_word, normalize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::{Date, Duration, Month, Weekday};
@@ -122,7 +124,8 @@ pub fn own_text(body: &str) -> String {
     out.join("\n")
 }
 
-/// Split into sentences (on `.`, `!`, `?` followed by whitespace, and on line breaks).
+/// Split into sentences (on `.`, `!`, `?`, `؟`, `।` followed by whitespace, on `。！？`, and on
+/// line breaks).
 pub fn sentences(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -130,7 +133,10 @@ pub fn sentences(text: &str) -> Vec<String> {
         let chars: Vec<char> = line.chars().collect();
         for (i, &c) in chars.iter().enumerate() {
             cur.push(c);
-            if matches!(c, '.' | '!' | '?') && chars.get(i + 1).is_none_or(|n| n.is_whitespace()) {
+            let end = matches!(c, '。' | '！' | '？')
+                || (matches!(c, '.' | '!' | '?' | '؟' | '।')
+                    && chars.get(i + 1).is_none_or(|n| n.is_whitespace()));
+            if end {
                 let t = cur.trim();
                 if !t.is_empty() {
                     out.push(t.to_owned());
@@ -166,6 +172,84 @@ const ASKS: &[&str] = &[
     "can we",
     "could we",
     "shall we",
+    // de
+    "könnten sie",
+    "können sie",
+    "könntest du",
+    "kannst du",
+    "würden sie",
+    "würdest du",
+    "gib mir bescheid",
+    "geben sie mir bescheid",
+    "lass mich wissen",
+    "lassen sie mich wissen",
+    // fr
+    "pourriez-vous",
+    "pouvez-vous",
+    "pourrais-tu",
+    "peux-tu",
+    "tenez-moi au courant",
+    "tiens-moi au courant",
+    "dites-moi",
+    "dis-moi",
+    // es
+    "podrías",
+    "podría usted",
+    "puedes",
+    "avísame",
+    "confírmame",
+    "le agradecería",
+    "te agradecería",
+    // pt
+    "pode me",
+    "pode nos",
+    "você pode",
+    "poderia",
+    "me avise",
+    "me confirme",
+    "me diga",
+    // hi
+    "बताइए",
+    "बताइये",
+    "बताएं",
+    "बताएँ",
+    "दीजिए",
+    "दीजिये",
+    "भेजिए",
+    // ja
+    "いただけます",
+    "いただけません",
+    "いただければ",
+    "いただけない",
+    // zh
+    "麻烦你",
+    "麻烦您",
+    "能否",
+    "可否",
+    "能不能",
+    // ar
+    "هل يمكنك",
+    "هل يمكنكم",
+];
+
+/// Words that turn what follows into a request ("please", "bitte", "por favor", "请", …).
+const PLEASE: &[&str] = &[
+    "please",
+    "bitte",
+    "por favor",
+    "por gentileza",
+    "s'il vous plaît",
+    "s'il te plaît",
+    "veuillez",
+    "merci de",
+    "कृपया",
+    "कृप्या",
+    "يرجى",
+    "نرجو",
+    "ارجو",
+    "الرجاء",
+    "من فضلك",
+    "请",
 ];
 
 /// "please …" that does not request anything.
@@ -178,38 +262,146 @@ const PLEASE_NOT_ASKING: &[&str] = &[
     "please disregard",
     "please do not reply",
     "please don't reply",
+    "bitte schön",
+    "bitte sehr",
+    "bitte beachten",
+    "bitte finden sie anbei",
+    "veuillez trouver",
+    "merci de votre",
+    "merci de vos",
+    "merci de ton",
+    "merci de ta",
+    "merci de tes",
+    "merci de m'avoir",
+    "merci de nous avoir",
+    "merci de l'",
+    "merci de la ",
+    "कृपया ध्यान",
+    "कृपया संलग्न",
+    "请查收",
+    "请见附件",
+    "请参阅",
+    "请注意",
 ];
+
+/// "Yes" and "thanks" before a "please" that then does not ask ("yes please").
+const YES_THANKS: &[&str] = &[
+    "yes",
+    "thanks",
+    "ja",
+    "danke",
+    "oui",
+    "merci",
+    "sí",
+    "si",
+    "sim",
+    "gracias",
+    "obrigado",
+    "obrigada",
+    "हाँ",
+    "好的",
+    "谢谢",
+    "نعم",
+    "شكرا",
+];
+
+/// Negations that make a "please" a prohibition ("please don't share"): right after it, or
+/// near the end in verb-final word order.
+const NEG_HEAD: &[&str] = &[
+    "don't", "dont", "not", "never", "nicht", "kein", "keine", "ne", "no", "não", "nao", "न", "मत",
+    "عدم", "لا",
+];
+const NEG_TAIL: &[&str] = &["nicht", "न", "मत"];
+
+fn please_asks(l: &str, at: usize, please: &str) -> bool {
+    // "申请", "邀请", "请假": not "please".
+    if please == "请"
+        && (l[..at].ends_with(['申', '邀', '聘', '宴'])
+            || l[at + please.len()..].starts_with(['假', '柬']))
+    {
+        return false;
+    }
+    let before = l[..at].trim_end_matches([' ', ',', '，']);
+    let rest = &l[at..];
+    let after = rest[please.len()..].trim_start_matches([' ', ',', '!', '.', '،', '，', '、']);
+    let words: Vec<&str> = after
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| c.is_ascii_punctuation() && c != '\''))
+        .collect();
+    let prohibition = words
+        .iter()
+        .take(2)
+        .any(|w| NEG_HEAD.contains(w) || w.starts_with("n'"))
+        || words.iter().rev().take(3).any(|w| NEG_TAIL.contains(w))
+        || after.starts_with(['勿', '别'])
+        || after.starts_with("不要");
+    !after.is_empty()
+        && !prohibition
+        && !before
+            .rsplit([' ', ','])
+            .next()
+            .is_some_and(|w| YES_THANKS.contains(&w))
+        && !PLEASE_NOT_ASKING.iter().any(|p| rest.starts_with(p))
+}
+
+/// Polite closings that ask nothing ("よろしくお願いします"), and what may stand around them.
+const JA_CLOSING: &[&str] = &[
+    "ご査収のほど",
+    "ご査収ください",
+    "ご了承のほど",
+    "ご了承ください",
+    "今後とも",
+    "引き続き",
+    "以上",
+    "皆様",
+    "皆さま",
+    "どうぞ",
+    "何卒",
+    "よろしく",
+    "宜しく",
+    "お願い",
+    "申し上げます",
+    "いたします",
+    "致します",
+    "します",
+    "ください",
+];
+
+/// A Japanese request (`…ください`, `…お願いします`) that is more than a polite closing and not
+/// a prohibition (`…しないでください`).
+fn japanese_asks(l: &str) -> bool {
+    if !(l.contains("ください") || l.contains("お願い"))
+        || [
+            "ないでください",
+            "ないようお願い",
+            "ないようにお願い",
+            "ご遠慮",
+        ]
+        .iter()
+        .any(|p| l.contains(p))
+    {
+        return false;
+    }
+    let rest = JA_CLOSING
+        .iter()
+        .fold(l.to_owned(), |r, p| r.replace(p, ""));
+    rest.chars().any(char::is_alphanumeric)
+}
 
 /// Whether one sentence asks the reader something: a question, or a request.
 pub fn sentence_asks(sentence: &str) -> bool {
-    let l = sentence.to_lowercase().replace('’', "'");
+    let l = normalize(sentence);
     let l = l.trim();
     let end = l.trim_end_matches(['"', '\'', ')', ']', '*', '_']);
-    if end.ends_with('?') || end.ends_with('？') || l.starts_with('¿') {
+    if end.ends_with(['?', '？', '؟']) || l.starts_with('¿') {
         return true;
     }
-    if ASKS.iter().any(|p| contains_phrase(l, p)) {
+    if ASKS.iter().any(|p| contains_word(l, &normalize(p))) || japanese_asks(l) {
         return true;
     }
-    // "Please send…" asks; "yes please", "thanks, please find attached" do not.
-    if let Some(i) = l.find("please") {
-        let before = l[..i].trim_end_matches([' ', ',']);
-        let rest = &l[i..];
-        let after = rest["please".len()..].trim_start_matches([' ', ',', '!', '.']);
-        return !after.is_empty()
-            && !before.ends_with("yes")
-            && !before.ends_with("thanks")
-            && !PLEASE_NOT_ASKING.iter().any(|p| rest.starts_with(p));
-    }
-    false
-}
-
-/// `phrase` in `text` at word boundaries.
-fn contains_phrase(text: &str, phrase: &str) -> bool {
-    text.match_indices(phrase).any(|(i, _)| {
-        let before = text[..i].chars().next_back();
-        let after = text[i + phrase.len()..].chars().next();
-        before.is_none_or(|c| !c.is_alphanumeric()) && after.is_none_or(|c| !c.is_alphanumeric())
+    PLEASE.iter().any(|p| {
+        let p = normalize(p);
+        lang::word_hits(l, &p).any(|at| please_asks(l, at, &p))
     })
 }
 
@@ -282,62 +474,144 @@ const PROMISES: &[&str] = &[
     "i'll update you",
     "i'll let you know",
     "i will let you know",
+    // de
+    "ich schicke",
+    "ich schick",
+    "ich sende",
+    "ich werde",
+    "ich melde mich",
+    "ich kümmere mich",
+    "ich gebe dir bescheid",
+    "ich gebe ihnen bescheid",
+    // fr
+    "je t'envoie",
+    "je vous envoie",
+    "je t'enverrai",
+    "je vous enverrai",
+    "je vais t'",
+    "je vais vous",
+    "je vais te",
+    "je reviens vers",
+    "je te tiens au courant",
+    "je vous tiens au courant",
+    "je m'en occupe",
+    // es
+    "te envío",
+    "le envío",
+    "te enviaré",
+    "le enviaré",
+    "te mando",
+    "le mando",
+    "voy a enviar",
+    "voy a mandar",
+    "te aviso",
+    "le aviso",
+    "me encargo",
+    // pt
+    "vou te enviar",
+    "vou enviar",
+    "vou te mandar",
+    "vou mandar",
+    "te envio",
+    "lhe envio",
+    "vou verificar",
+    "vou confirmar",
+    // hi
+    "भेज दूँगा",
+    "भेज दूंगा",
+    "भेज दूँगी",
+    "भेज दूंगी",
+    "भेजूँगा",
+    "भेजूंगा",
+    "भेजूँगी",
+    "भेजूंगी",
+    "बता दूँगा",
+    "बता दूंगा",
+    "बता दूँगी",
+    "बता दूंगी",
+    // ja
+    "送ります",
+    "お送りします",
+    "送付します",
+    "ご連絡します",
+    "共有します",
+    // zh
+    "我会",
+    "我将",
+    "发给你",
+    "发给您",
+    // ar
+    "سأرسل",
+    "سوف أرسل",
+    "سأبلغك",
+    "سأخبرك",
 ];
+
+/// Words of something sent along now ("ich schicke dir anbei"), not promised.
+const ATTACHED: &[&str] = &[
+    "anbei",
+    "im anhang",
+    "ci-joint",
+    "pièce jointe",
+    "adjunto",
+    "em anexo",
+];
+
+pub fn is_promise(text: &str) -> bool {
+    let l = normalize(text);
+    PROMISES.iter().any(|p| l.contains(&normalize(p))) && !ATTACHED.iter().any(|a| l.contains(a))
+}
 
 /// Sentences of the user's own text that promise something.
 pub fn find_promises(text: &str) -> Vec<String> {
     sentences(&own_text(text))
         .into_iter()
-        .filter(|s| {
-            let l = s.to_lowercase().replace('’', "'");
-            PROMISES.iter().any(|p| l.contains(p))
-        })
+        .filter(|s| is_promise(s))
         .collect()
 }
 
-pub fn is_promise(text: &str) -> bool {
-    let l = text.to_lowercase().replace('’', "'");
-    PROMISES.iter().any(|p| l.contains(p))
-}
+const NEXT_WEEK: &[&str] = &[
+    "next week",
+    "nächste woche",
+    "nächsten woche",
+    "semaine prochaine",
+    "próxima semana",
+    "semana que vem",
+    "अगले हफ्ते",
+    "अगले सप्ताह",
+    "下周",
+    "来週",
+    "الاسبوع القادم",
+];
 
 /// A deadline phrase in a promise, relative to the day it was written ("by Friday", "tomorrow",
-/// "next week", "end of day", an explicit date).
+/// "next week", "end of day", an explicit date), in any of the languages.
 pub fn deadline_in(sentence: &str, written: Date) -> Option<Date> {
-    let l = sentence.to_lowercase();
-    if l.contains("today") || l.contains("tonight") || l.contains("eod") || l.contains("end of day")
-    {
-        return Some(written);
+    let l = normalize(sentence);
+    if let Some(d) = lang::relative_day(&l, written) {
+        return Some(d);
     }
-    if l.contains("tomorrow") {
-        return written.next_day();
+    if l.contains("eod") || l.contains("end of day") {
+        return Some(written);
     }
     if l.contains("end of week") || l.contains("end of the week") || l.contains("eow") {
         return Some(next_weekday(written, Weekday::Friday, true));
     }
-    if l.contains("next week") {
+    if let Some(d) = find_dates(&l, written).into_iter().next() {
+        return Some(d);
+    }
+    if let Some(wd) = lang::weekday_in(&l) {
+        return Some(next_weekday(written, wd, false));
+    }
+    if NEXT_WEEK.iter().any(|w| l.contains(w)) {
         return Some(written + Duration::days(7));
     }
     if l.contains("end of month") || l.contains("end of the month") {
         let (y, m) = (written.year(), written.month());
         return Date::from_calendar_date(y, m, m.length(y)).ok();
     }
-    for (name, wd) in WEEKDAYS {
-        if l.contains(name) {
-            return Some(next_weekday(written, *wd, false));
-        }
-    }
-    find_dates(sentence, written).into_iter().next()
+    None
 }
-
-const WEEKDAYS: &[(&str, Weekday)] = &[
-    ("monday", Weekday::Monday),
-    ("tuesday", Weekday::Tuesday),
-    ("wednesday", Weekday::Wednesday),
-    ("thursday", Weekday::Thursday),
-    ("friday", Weekday::Friday),
-    ("saturday", Weekday::Saturday),
-    ("sunday", Weekday::Sunday),
-];
 
 /// The next `wd` after `from` (or `from` itself when `inclusive` and it matches).
 fn next_weekday(from: Date, wd: Weekday, inclusive: bool) -> Date {
@@ -350,53 +624,6 @@ fn next_weekday(from: Date, wd: Weekday, inclusive: bool) -> Date {
         d += Duration::days(1);
     }
     d
-}
-
-const MONTHS: &[(&str, Month)] = &[
-    ("january", Month::January),
-    ("february", Month::February),
-    ("march", Month::March),
-    ("april", Month::April),
-    ("may", Month::May),
-    ("june", Month::June),
-    ("july", Month::July),
-    ("august", Month::August),
-    ("september", Month::September),
-    ("october", Month::October),
-    ("november", Month::November),
-    ("december", Month::December),
-];
-
-fn month_of(tok: &str) -> Option<Month> {
-    let t = tok
-        .trim_matches(|c: char| !c.is_alphabetic())
-        .to_lowercase();
-    if t.len() < 3 {
-        return None;
-    }
-    MONTHS
-        .iter()
-        .find(|(name, _)| *name == t || (t.len() <= 4 && name.starts_with(t.as_str())))
-        .map(|(_, m)| *m)
-}
-
-fn day_of(tok: &str) -> Option<u8> {
-    let t = tok.trim_matches(|c: char| !c.is_alphanumeric());
-    let t = ["st", "nd", "rd", "th"]
-        .iter()
-        .find_map(|s| t.strip_suffix(s))
-        .unwrap_or(t);
-    let d: u8 = t.parse().ok()?;
-    (1..=31).contains(&d).then_some(d)
-}
-
-fn year_of(tok: &str) -> Option<i32> {
-    let t = tok.trim_matches(|c: char| !c.is_ascii_digit());
-    if t.len() != 4 {
-        return None;
-    }
-    let y: i32 = t.parse().ok()?;
-    (1990..=2100).contains(&y).then_some(y)
 }
 
 /// Parse an ISO date (`2026-11-03`, also the date part of RFC 3339).
@@ -413,83 +640,9 @@ pub fn parse_iso_date(s: &str) -> Option<Date> {
     Date::from_calendar_date(y, Month::try_from(m).ok()?, day).ok()
 }
 
-/// Every date written in `text`: ISO dates, `November 3, 2026`, `Nov 3`, `3 Nov 2026`. A date
-/// without a year takes `reference`'s year, or the next year when that would be more than a
-/// month before `reference`.
-pub fn find_dates(text: &str, reference: Date) -> Vec<Date> {
-    let toks: Vec<&str> = text.split_whitespace().collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    let infer_year = |m: Month, d: u8| -> Option<Date> {
-        let this = Date::from_calendar_date(reference.year(), m, d).ok()?;
-        if this < reference - Duration::days(31) {
-            Date::from_calendar_date(reference.year() + 1, m, d).ok()
-        } else {
-            Some(this)
-        }
-    };
-    while i < toks.len() {
-        let t = toks[i];
-        let trimmed = t.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-');
-        if let Some(d) = parse_iso_date(trimmed) {
-            out.push(d);
-            i += 1;
-            continue;
-        }
-        // Month day[,] [year]
-        if let Some(m) = month_of(t)
-            && let Some(d) = toks.get(i + 1).and_then(|x| day_of(x))
-        {
-            let year = toks.get(i + 2).and_then(|x| year_of(x));
-            let date = match year {
-                Some(y) => Date::from_calendar_date(y, m, d).ok(),
-                None => infer_year(m, d),
-            };
-            if let Some(date) = date {
-                out.push(date);
-                i += if year.is_some() { 3 } else { 2 };
-                continue;
-            }
-        }
-        // day Month [year]
-        if let Some(d) = day_of(t)
-            && let Some(m) = toks.get(i + 1).and_then(|x| month_of(x))
-        {
-            let year = toks.get(i + 2).and_then(|x| year_of(x));
-            let date = match year {
-                Some(y) => Date::from_calendar_date(y, m, d).ok(),
-                None => infer_year(m, d),
-            };
-            if let Some(date) = date {
-                out.push(date);
-                i += if year.is_some() { 3 } else { 2 };
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out
-}
-
-/// `in N days` → `reference + N`.
+/// `tomorrow`, `the day after` or `in N days` (any language) → a day after `reference`.
 pub fn relative_days(text: &str, reference: Date) -> Option<Date> {
-    let l = text.to_lowercase();
-    if l.contains("tomorrow") {
-        return reference.next_day();
-    }
-    let toks: Vec<&str> = l.split_whitespace().collect();
-    for w in toks.windows(3) {
-        if w[0] == "in"
-            && w[2]
-                .trim_matches(|c: char| !c.is_alphabetic())
-                .starts_with("day")
-            && let Ok(n) = w[1].parse::<i64>()
-            && (0..=366).contains(&n)
-        {
-            return Some(reference + Duration::days(n));
-        }
-    }
-    None
+    lang::relative_day(text, reference).filter(|d| *d > reference)
 }
 
 /// A money amount in minor units (cents).
@@ -563,8 +716,26 @@ fn parse_number(s: &str) -> Option<i64> {
 pub fn find_amounts(text: &str) -> Vec<Money> {
     let toks: Vec<&str> = text.split_whitespace().collect();
     let mut out = Vec::new();
+    let mut after_number = false;
     for (i, raw) in toks.iter().enumerate() {
         let t = raw.trim_start_matches(['(', '[', '"']);
+        if std::mem::take(&mut after_number) {
+            continue;
+        }
+        // Symbol after a space: 12,99 €
+        if let Some(minor) = parse_number(t)
+            && let Some((_, code)) = toks.get(i + 1).and_then(|n| {
+                let n = n.trim_end_matches(['.', ',', ')']);
+                SYMBOLS.iter().find(|(s, _)| *s != "$" && *s == n)
+            })
+        {
+            out.push(Money {
+                currency: (*code).into(),
+                minor,
+            });
+            after_number = true;
+            continue;
+        }
         // Symbol prefix: $12.99
         if let Some((sym, code)) = SYMBOLS.iter().find(|(s, _)| t.starts_with(s)) {
             let rest = &t[sym.len()..];
@@ -661,6 +832,38 @@ mod tests {
     }
 
     #[test]
+    fn multilingual_deadlines_and_promises() {
+        let mon = date!(2026 - 10 - 26);
+        for (text, due) in [
+            (
+                "Ich schicke dir die überarbeiteten Folien bis Montag, 2. November.",
+                Some(date!(2026 - 11 - 02)),
+            ),
+            ("Je t'envoie le devis demain.", Some(date!(2026 - 10 - 27))),
+            (
+                "Te envío el contrato el 13 de noviembre.",
+                Some(date!(2026 - 11 - 13)),
+            ),
+            (
+                "Vou te enviar os slides até sexta.",
+                Some(date!(2026 - 10 - 30)),
+            ),
+            ("我会在11月5日前发给你。", Some(date!(2026 - 11 - 05))),
+            ("Ich schicke dir anbei die Folien.", None),
+        ] {
+            assert_eq!(is_promise(text), due.is_some(), "{text}");
+            if due.is_some() {
+                assert_eq!(deadline_in(text, mon), due, "{text}");
+            }
+        }
+        assert_eq!(find_amounts("Zahlung erhalten: 12,99 €.")[0].minor, 1299);
+        assert_eq!(
+            find_dates("Ihr Abonnement verlängert sich am 3. November 2026.", mon),
+            vec![date!(2026 - 11 - 03)]
+        );
+    }
+
+    #[test]
     fn amounts() {
         assert_eq!(
             find_amounts("You will be charged $12.99 on"),
@@ -709,6 +912,15 @@ mod tests {
             "Let me know which variant you prefer.",
             "I'd like your view before Friday.",
             "Hi,\n\nThoughts on the draft? \n\nOn Mon, Bob wrote:\n> ok",
+            "Bitte teilen Sie mir mit, ob Ihnen der Termin passt.",
+            "Por favor, confírmame la dirección antes del miércoles.",
+            "Merci de me confirmer d'ici vendredi.",
+            "Pode me confirmar até sexta.",
+            "कृपया बताइए कि आपको कवर वाला विकल्प चाहिए या नहीं।",
+            "ご検討のほどよろしくお願い申し上げます。",
+            "请在周五前确认地址。",
+            "يرجى تأكيد العنوان قبل الأربعاء.",
+            "هل وصلك الملف؟",
         ] {
             assert!(asks_something(yes), "{yes}");
         }
@@ -722,6 +934,15 @@ mod tests {
             "Got them!\n\nOn Sun, Carol wrote:\n> Did you get the photos?",
             "See https://example.com/a?b=c for details.",
             "We scanned it as best we can, you're all set.",
+            "Your salary will be $118,500. Please don't share this letter.",
+            "Please do not forward.",
+            "Bitte nicht weiterleiten.",
+            "Bitte leiten Sie diesen Brief nicht weiter.",
+            "Merci de votre réponse rapide.",
+            "Por favor, no comparta esta carta.",
+            "引き続きよろしくお願いいたします。",
+            "请勿转发。",
+            "我已经提交了申请。",
         ] {
             assert!(!asks_something(no), "{no}");
         }

@@ -13,7 +13,9 @@ use serde_json::Value;
 use time::{Duration, OffsetDateTime, PrimitiveDateTime, Time};
 
 use crate::actions::{Action, ArchiveThread, CreateEvent, DraftReply, Reminder, ResearchNote};
-use crate::candidate::{Candidate, CandidateKind, EvidenceRef, Features, freshness, urgency};
+use crate::candidate::{
+    Candidate, CandidateKind, EvidenceRef, Features, LocalText, freshness, urgency,
+};
 use crate::config::{PUBLIC_MAIL_DOMAINS, ProactiveConfig};
 use crate::corpus::{CalEvent, Corpus, MailMessage, NoteDoc};
 use crate::text::{
@@ -80,6 +82,7 @@ fn evidence(m: &MailMessage, quote: Option<String>) -> EvidenceRef {
         item: m.item.clone(),
         quote,
         url: m.url.clone(),
+        from_user: m.from_user,
     }
 }
 
@@ -95,15 +98,26 @@ fn lead(body: &str) -> Option<String> {
 
 /// Whole days from `now` to `due`, by the user's calendar (0 = due today, negative = overdue).
 fn days_left(ctx: &GenContext<'_>, due: OffsetDateTime) -> i64 {
-    let off = ctx.cfg.utc_offset;
-    (due.to_offset(off).date() - ctx.now.to_offset(off).date()).whole_days()
+    (ctx.cfg.to_local(due).date() - ctx.cfg.to_local(ctx.now).date()).whole_days()
 }
 
 /// 17:00 local on `date`.
 fn end_of_day(ctx: &GenContext<'_>, date: time::Date) -> Option<OffsetDateTime> {
     Time::from_hms(17, 0, 0)
         .ok()
-        .map(|t| PrimitiveDateTime::new(date, t).assume_offset(ctx.cfg.utc_offset))
+        .map(|t| ctx.cfg.local_at(date, t))
+}
+
+/// "In about two hours", on the hour: stable across refreshes, so an open preview of a
+/// reminder still matches the card's action after the next refresh (GG4-14).
+fn soon(ctx: &GenContext<'_>) -> OffsetDateTime {
+    let t = ctx.now + Duration::hours(2);
+    let hour = t.replace_time(Time::from_hms(t.hour(), 0, 0).unwrap_or(Time::MIDNIGHT));
+    if hour == t {
+        t
+    } else {
+        hour + Duration::hours(1)
+    }
 }
 
 fn reply_subject(s: &str) -> String {
@@ -115,6 +129,22 @@ fn reply_subject(s: &str) -> String {
 }
 
 // ---- unanswered threads ----
+
+/// Whether `body` names the user: their first name (from their sent mail) or their address.
+fn names_user(c: &Corpus, body: &str) -> bool {
+    let own = own_text(body).to_lowercase();
+    let words: Vec<&str> = own
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    c.mail
+        .iter()
+        .filter(|m| m.from_user)
+        .filter_map(|m| m.from.as_ref()?.name.as_deref()?.split_whitespace().next())
+        .map(str::to_lowercase)
+        .chain(c.user_addresses.iter().cloned())
+        .any(|n| words.contains(&n.as_str()) || (n.contains('@') && own.contains(&n)))
+}
 
 /// Inbound mail from real people, addressed to the user, that asks something and has no later
 /// reply from the user, 1–14 days old. Newsletters, automated senders, role mailboxes and
@@ -134,8 +164,14 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
             continue;
         }
         let Some(from) = &last.from else { continue };
-        let age = ctx.days_ago(last.date);
-        if age < ctx.cfg.unanswered_min_days as f64 || age > ctx.cfg.unanswered_max_days as f64 {
+        // What arrived since the user last wrote: a nudge ("Any update?") keeps the card that
+        // the first of these started, with its age and id (GG4-12).
+        let waiting_from = human.iter().rposition(|m| m.from_user).map_or(0, |i| i + 1);
+        let first = human[waiting_from];
+        let age = ctx.days_ago(first.date);
+        if age < ctx.cfg.unanswered_min_days as f64
+            || ctx.days_ago(last.date) > ctx.cfg.unanswered_max_days as f64
+        {
             continue;
         }
         let direct = last.to.iter().any(|a| c.is_user(&a.email));
@@ -144,9 +180,16 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
         if !c.user_addresses.is_empty() && !direct && !cc {
             continue;
         }
+        // On Cc only, an ask is for someone else unless it names the user (GG4-13).
+        if !direct && cc && !names_user(c, &last.body) {
+            continue;
+        }
         // Only a message that asks something or requests an action is waiting on the user: FYIs,
         // thanks and closing replies ("Done, you're on from the 1st.") are not.
-        if !asks_something(&last.body) {
+        if !human[waiting_from..]
+            .iter()
+            .any(|m| asks_something(&m.body))
+        {
             continue;
         }
         let question = true;
@@ -156,10 +199,10 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
         if let Some(mine) = human.iter().rev().find(|m| m.from_user) {
             evidence_list.push(evidence(mine, lead(&mine.body)));
         }
-        let msg_key = last
+        let msg_key = first
             .message_id
             .clone()
-            .unwrap_or_else(|| last.item.key.as_str().to_owned());
+            .unwrap_or_else(|| first.item.key.as_str().to_owned());
         let dedup_key = format!("unanswered:{}", stable_hash(&[&last.thread, &msg_key]));
         let mut to = vec![from.email.clone()];
         let cc_list: Vec<String> = last
@@ -199,6 +242,16 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 from.display(),
                 days,
                 if days == 1 { "" } else { "s" }
+            ),
+            title_text: Some(
+                LocalText::new("unanswered.title")
+                    .arg("who", from.display())
+                    .arg("subject", last.subject.as_str()),
+            ),
+            detail_text: Some(
+                LocalText::new("unanswered.detail")
+                    .arg("who", from.display())
+                    .arg("days", days),
             ),
             evidence: evidence_list,
             people: vec![from.email.clone()],
@@ -276,18 +329,15 @@ fn claim_evidence(claims: &[&Claim], corpus: &Corpus) -> Vec<EvidenceRef> {
             if out.iter().any(|o| o.item == ev.item) {
                 continue;
             }
-            let url = corpus
-                .mail
-                .iter()
-                .find(|m| m.item == ev.item)
-                .and_then(|m| m.url.clone());
+            let mail = corpus.mail.iter().find(|m| m.item == ev.item);
             out.push(EvidenceRef {
                 item: ev.item.clone(),
                 quote: ev
                     .quote
                     .clone()
                     .or_else(|| Some(truncate(&c.text, QUOTE_CHARS))),
-                url,
+                url: mail.and_then(|m| m.url.clone()),
+                from_user: mail.is_some_and(|m| m.from_user),
             });
         }
     }
@@ -437,6 +487,20 @@ fn commitment_candidate(
         (_, false, Some(w)) => format!("Due {w}: {name}"),
         (_, _, None) => format!("You committed to: {name}"),
     };
+    let mut title_text = LocalText::new(match (owner, overdue, &when) {
+        (Owner::Them(_), _, Some(_)) => "commitment.waiting_due",
+        (Owner::Them(_), _, None) => "commitment.waiting",
+        (_, true, Some(_)) => "commitment.overdue",
+        (_, false, Some(_)) => "commitment.due",
+        (_, _, None) => "commitment.mine",
+    })
+    .arg("what", name);
+    if let Owner::Them(who) = owner {
+        title_text = title_text.arg("who", who.as_str());
+    }
+    if let Some(w) = &when {
+        title_text = title_text.arg("due", w.as_str());
+    }
     let evidence = claim_evidence(claims, ctx.corpus);
     let sensitive = evidence.iter().any(|ev| {
         ctx.corpus
@@ -447,7 +511,7 @@ fn commitment_candidate(
     });
     let remind_at = match due {
         Some(d) if d - Duration::days(1) > ctx.now => d - Duration::days(1),
-        _ => ctx.now + Duration::hours(2),
+        _ => soon(ctx),
     };
     let mut actions = vec![Action::Reminder(Reminder {
         text: name.to_owned(),
@@ -470,6 +534,9 @@ fn commitment_candidate(
         dedup_key: format!("commitment:{}", stable_hash(&[id])),
         kind: CandidateKind::Commitment,
         title,
+        title_text: Some(title_text),
+        // The claim's own words.
+        detail_text: None,
         detail: claims
             .first()
             .map(|c| truncate(&c.text, QUOTE_CHARS))
@@ -509,7 +576,7 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
     let c = ctx.corpus;
     let horizon = ctx.now + Duration::hours(ctx.cfg.meeting_horizon_hours);
     let mut out = Vec::new();
-    for ev in &c.events {
+    for ev in &c.events_between(ctx.now, horizon) {
         if ev.cancelled || ev.all_day || ev.start <= ctx.now || ev.start > horizon {
             continue;
         }
@@ -535,6 +602,7 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
             item: ev.item.clone(),
             quote: Some(truncate(&ev.title, QUOTE_CHARS)),
             url: ev.url.clone(),
+            from_user: false,
         }];
         evidence.extend(threads.iter().map(|m| evidence_of_thread(m)));
         evidence.extend(notes.iter().cloned());
@@ -585,6 +653,17 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 if threads.len() == 1 { "" } else { "s" },
                 notes.len(),
                 if notes.len() == 1 { "" } else { "s" },
+            ),
+            title_text: Some(
+                LocalText::new("meeting.title")
+                    .arg("event", ev.title.as_str())
+                    .arg("hours", hours),
+            ),
+            detail_text: Some(
+                LocalText::new("meeting.detail")
+                    .arg("people", names.join(", "))
+                    .arg("threads", threads.len())
+                    .arg("notes", notes.len()),
             ),
             evidence,
             people: external.clone(),
@@ -702,6 +781,7 @@ fn related_notes(ctx: &GenContext<'_>, ev: &CalEvent) -> Vec<EvidenceRef> {
                     .map_or(h.snippet.clone(), |t| format!("{t}: {}", h.snippet)),
                 QUOTE_CHARS,
             )),
+            from_user: false,
             url: None,
         });
         if out.len() == 3 {
@@ -726,6 +806,91 @@ const RENEWAL_WORDS: &[&str] = &[
     "trial will end",
     "trial expires",
     "free trial",
+    // de
+    "verlängert",
+    "verlängerung",
+    "abonnement",
+    "wird abgebucht",
+    "wird belastet",
+    "nächste zahlung",
+    "nächste abbuchung",
+    "testphase",
+    "probezeitraum",
+    // fr
+    "renouvel",
+    "sera débité",
+    "prélèvement",
+    "prochain paiement",
+    "période d'essai",
+    "essai gratuit",
+    // es
+    "renueva",
+    "renovación",
+    "renovará",
+    "suscripción",
+    "se cobrará",
+    "próximo pago",
+    "prueba gratuita",
+    "período de prueba",
+    "periodo de prueba",
+    // pt
+    "renovação",
+    "renovad",
+    "assinatura",
+    "será cobrado",
+    "próxima cobrança",
+    "teste grátis",
+    "período de teste",
+    // hi
+    "नवीनीकरण",
+    "रिन्यू",
+    "सदस्यता",
+    "शुल्क लिया जाएगा",
+    "ट्रायल",
+    // ja
+    "自動更新",
+    "契約更新",
+    "更新日",
+    "更新されます",
+    "サブスクリプション",
+    "次回のお支払い",
+    "請求されます",
+    "トライアル",
+    // zh
+    "续订",
+    "续费",
+    "自动续",
+    "订阅",
+    "扣款",
+    "下次付款",
+    "试用",
+    // ar
+    "تجديد",
+    "يتجدد",
+    "سيتجدد",
+    "اشتراك",
+    "سيتم خصم",
+    "الدفعة التالية",
+    "تجربة مجانية",
+    "الفترة التجريبية",
+];
+
+/// Words of a free trial (in a renewal notice).
+const TRIAL_WORDS: &[&str] = &[
+    "trial",
+    "testphase",
+    "probezeitraum",
+    "d'essai",
+    "essai gratuit",
+    "de prueba",
+    "prueba gratuita",
+    "de teste",
+    "teste grátis",
+    "ट्रायल",
+    "トライアル",
+    "试用",
+    "تجربة مجانية",
+    "التجريبية",
 ];
 
 /// Phrases of a receipt or payment confirmation: proof that the user pays a vendor.
@@ -740,6 +905,63 @@ const RECEIPT_WORDS: &[&str] = &[
     "we received your payment",
     "payment successful",
     "invoice paid",
+    // de
+    "quittung",
+    "zahlung erhalten",
+    "zahlung eingegangen",
+    "zahlungsbestätigung",
+    "bestellbestätigung",
+    "danke für ihre bestellung",
+    "danke für deine bestellung",
+    // fr
+    "paiement reçu",
+    "votre reçu",
+    "confirmation de paiement",
+    "confirmation de commande",
+    "merci pour votre commande",
+    "merci pour votre achat",
+    "facture payée",
+    // es
+    "pago recibido",
+    "recibo de",
+    "tu recibo",
+    "su recibo",
+    "confirmación de pago",
+    "confirmación de pedido",
+    "gracias por tu compra",
+    "gracias por su compra",
+    "gracias por tu pedido",
+    "gracias por su pedido",
+    // pt
+    "pagamento recebido",
+    "pagamento confirmado",
+    "seu recibo",
+    "confirmação de pagamento",
+    "confirmação de pedido",
+    "obrigado pela sua compra",
+    "obrigado pelo seu pedido",
+    // hi
+    "रसीद",
+    "भुगतान प्राप्त",
+    "भुगतान सफल",
+    // ja
+    "領収書",
+    "お支払いが完了",
+    "決済完了",
+    "ご購入ありがとう",
+    "ご注文ありがとう",
+    // zh
+    "收据",
+    "付款成功",
+    "支付成功",
+    "已收到您的付款",
+    "感谢您的购买",
+    "感谢您的订单",
+    // ar
+    "إيصال",
+    "ايصال",
+    "تم استلام الدفع",
+    "تم الدفع",
 ];
 
 /// A receipt or payment confirmation (not a renewal or charge *notice*, which spam imitates).
@@ -819,7 +1041,7 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
         if !RENEWAL_WORDS.iter().any(|w| lower.contains(w)) {
             continue;
         }
-        let trial = lower.contains("trial");
+        let trial = TRIAL_WORDS.iter().any(|w| lower.contains(w));
         let proof = paid
             .get(&base)
             .is_some_and(|ds| ds.iter().any(|d| *d <= m.date));
@@ -844,9 +1066,7 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 .or_else(|| relative_days(s, written))
         });
         let Some(date) = date else { continue };
-        let Ok(at) = Time::from_hms(9, 0, 0)
-            .map(|t| PrimitiveDateTime::new(date, t).assume_offset(ctx.cfg.utc_offset))
-        else {
+        let Ok(at) = Time::from_hms(9, 0, 0).map(|t| ctx.cfg.local_at(date, t)) else {
             continue;
         };
         if at < ctx.now - Duration::days(1) || at > horizon {
@@ -876,6 +1096,19 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
         } else {
             format!("{vendor} renews {date}{money}")
         };
+        let mut title_text = LocalText::new(match (trial, amount.is_some()) {
+            (true, true) => "renewal.trial_amount",
+            (true, false) => "renewal.trial",
+            (false, true) => "renewal.renews_amount",
+            (false, false) => "renewal.renews",
+        })
+        .arg("vendor", vendor.as_str())
+        .arg("due", date.to_string());
+        if let Some(a) = &amount {
+            title_text = title_text
+                .arg("amount", a.minor as f64 / 100.0)
+                .arg("currency", a.currency.as_str());
+        }
         let quote = key_sents.first().map(|s| truncate(s, QUOTE_CHARS));
         let remind = (at - Duration::days(1)).max(ctx.now + Duration::hours(1));
         let cand = Candidate {
@@ -887,6 +1120,12 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
             } else {
                 "Keep it, or cancel before the charge.".into()
             },
+            title_text: Some(title_text),
+            detail_text: Some(LocalText::new(if trial {
+                "renewal.trial_detail"
+            } else {
+                "renewal.detail"
+            })),
             evidence: vec![evidence(m, quote)],
             people: vec![from.email.clone()],
             due: Some(at),
@@ -985,9 +1224,7 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
         }
         actions.push(Action::Reminder(Reminder {
             text: quote.clone(),
-            at: due
-                .filter(|d| *d > ctx.now)
-                .unwrap_or(ctx.now + Duration::hours(2)),
+            at: due.filter(|d| *d > ctx.now).unwrap_or(soon(ctx)),
             about: Some(m.item.clone()),
         }));
         out.push(Candidate {
@@ -998,6 +1235,20 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
             kind: CandidateKind::FollowUp,
             title: format!("You told {who}: \"{}\"", truncate(promise, 80)),
             detail: format!("In \"{}\" on {}.", m.subject, m.date.date()),
+            title_text: Some(
+                LocalText::new(if recipients.is_empty() {
+                    "follow_up.title_someone"
+                } else {
+                    "follow_up.title"
+                })
+                .arg("who", who.as_str())
+                .arg("promise", truncate(promise, 80)),
+            ),
+            detail_text: Some(
+                LocalText::new("follow_up.detail")
+                    .arg("subject", m.subject.as_str())
+                    .arg("date", m.date.date().to_string()),
+            ),
             evidence: vec![evidence(m, Some(quote))],
             people: recipients.clone(),
             due,
@@ -1067,6 +1318,12 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
             kind: CandidateKind::FollowUp,
             title: format!("No answer from {who}: {}", last.subject),
             detail: format!("You asked {days} days ago and haven't heard back."),
+            title_text: Some(
+                LocalText::new("awaiting.title")
+                    .arg("who", who.as_str())
+                    .arg("subject", last.subject.as_str()),
+            ),
+            detail_text: Some(LocalText::new("awaiting.detail").arg("days", days)),
             evidence: vec![evidence(last, quote)],
             people: emails.clone(),
             due: None,
@@ -1094,7 +1351,7 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 }),
                 Action::Reminder(Reminder {
                     text: format!("Follow up with {who}: {}", last.subject),
-                    at: ctx.now + Duration::hours(2),
+                    at: soon(ctx),
                     about: Some(last.item.clone()),
                 }),
             ],
@@ -1157,7 +1414,7 @@ fn todo_candidate(
     left: i64,
 ) -> Candidate {
     let what = truncate(task, 120);
-    let when = due.to_offset(ctx.cfg.utc_offset).date();
+    let when = ctx.cfg.to_local(due).date();
     let title = if left < 0 {
         format!("Overdue since {when}: {what}")
     } else {
@@ -1166,7 +1423,7 @@ fn todo_candidate(
     let remind_at = if due - Duration::days(1) > ctx.now {
         due - Duration::days(1)
     } else {
-        ctx.now + Duration::hours(2)
+        soon(ctx)
     };
     let start = (remind_at + Duration::hours(1))
         .replace_minute(0)
@@ -1182,10 +1439,24 @@ fn todo_candidate(
             Some(t) => format!("From your note \"{t}\"."),
             None => "From your notes.".into(),
         },
+        title_text: Some(
+            LocalText::new(if left < 0 {
+                "commitment.overdue"
+            } else {
+                "commitment.due"
+            })
+            .arg("what", what.as_str())
+            .arg("due", when.to_string()),
+        ),
+        detail_text: Some(match &n.title {
+            Some(t) => LocalText::new("todo.note").arg("note", t.as_str()),
+            None => LocalText::new("todo.notes"),
+        }),
         evidence: vec![EvidenceRef {
             item: n.item.clone(),
             quote: Some(truncate(task, QUOTE_CHARS)),
             url: n.url.clone(),
+            from_user: false,
         }],
         people: Vec::new(),
         due: Some(due),

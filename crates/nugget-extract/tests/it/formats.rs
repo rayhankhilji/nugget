@@ -303,6 +303,15 @@ fn mail_plain_with_quotes_signature_attachment() {
     assert_eq!(e.links, ["https://example.com/menu"]);
 }
 
+/// GG4-9: an unquoted comma in a display name keeps the mailbox.
+#[test]
+fn mail_unquoted_comma_in_name() {
+    let raw = "From: Paula Grant, RN <paula@clinic.example>\r\nTo: Grant, Ann <a@x.example>, b@x.example\r\nSubject: Results\r\nMessage-ID: <1@x>\r\n\r\nPlease call.\r\n";
+    let m = run("message/rfc822", raw.as_bytes()).metadata;
+    assert_eq!(m["from"], "Paula Grant, RN <paula@clinic.example>");
+    assert_eq!(m["to"], json!(["Grant, Ann <a@x.example>", "b@x.example"]));
+}
+
 #[test]
 fn mail_html_only() {
     let e = run("message/rfc822", &fixture("html_only.eml"));
