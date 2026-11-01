@@ -286,7 +286,7 @@ function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: Sav
   const t = useT();
   const labelId = `provider-${p.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   return (
-    <li className="card" aria-labelledby={labelId} data-provider-id={p.id}>
+    <li className="card model-card" aria-labelledby={labelId} data-provider-id={p.id}>
       <div className="card-head">
         <bdi dir="ltr" id={labelId} className="card-title">
           {p.id}
@@ -312,7 +312,7 @@ function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: Sav
           {p.error}
         </p>
       )}
-      <div className="card-actions">
+      <div className="card-actions" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
         <button type="button" className="btn" onClick={onReplace} aria-label={t("models.providers.replaceLabel", { name: p.id })}>
           {t("models.providers.replace")}
         </button>

@@ -25,6 +25,7 @@ import { firstRunScenario } from "./first-run.mjs";
 import { i18nScenario } from "./i18n.mjs";
 import { aiSetupScenario } from "./ai-setup.mjs";
 import { byokScenario } from "./byok.mjs";
+import { byokKeysScenario } from "./byok-keys.mjs";
 import { a11yScenario } from "./a11y.mjs";
 import { prefsScenario } from "./prefs.mjs";
 import { keyboardScenario } from "./keyboard.mjs";
@@ -61,7 +62,7 @@ import {
  * bring-your-own-key, the accessibility audit, display preferences, keyboard-only use,
  * screenshots compared with baselines, and backup, export and restore into a wiped home.
  */
-const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard", "visual", "backup", "messaging", "search", "sources-setup"];
+const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "byok-keys", "a11y", "prefs", "keyboard", "visual", "backup", "messaging", "search", "sources-setup"];
 /** Scenarios that use the shared indexed home. */
 const INDEXED = ["pages", "i18n", "a11y", "prefs", "visual", "search"];
 
@@ -408,6 +409,7 @@ async function main() {
         } else if (name === "first-run") summary.first_run = await firstRunScenario({ browser, bin });
         else if (name === "ai-setup") summary.first_run_ai = await aiSetupScenario({ browser });
         else if (name === "byok") summary.byok = await byokScenario({ browser, bin });
+        else if (name === "byok-keys") summary.byok_keys = await byokKeysScenario({ browser, bin });
         else if (name === "a11y") {
           const { daemon } = await indexedHome(bin);
           summary.a11y = await a11yScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });

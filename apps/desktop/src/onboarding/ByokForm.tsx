@@ -151,7 +151,7 @@ function KeyFields({
         placeholder={placeholder}
         onChange={(e) => onChange({ ...entry, key: e.target.value })}
       />
-      <button type="button" className="btn btn-ghost btn-small" disabled={disabled} onClick={() => onChange({ ...entry, mode: "env" })}>
+      <button type="button" className="btn btn-ghost btn-small" style={{ justifySelf: "start", alignSelf: "flex-start" }} disabled={disabled} onClick={() => onChange({ ...entry, mode: "env" })}>
         {t("onboarding.byok.form.useEnv")}
       </button>
     </div>
@@ -173,7 +173,7 @@ function KeyFields({
       <p id={`${id}-env-hint`} className="muted small">
         {t("onboarding.byok.form.envVarHint")}
       </p>
-      <button type="button" className="btn btn-ghost btn-small" disabled={disabled} onClick={() => onChange({ ...entry, mode: "key" })}>
+      <button type="button" className="btn btn-ghost btn-small" style={{ justifySelf: "start", alignSelf: "flex-start" }} disabled={disabled} onClick={() => onChange({ ...entry, mode: "key" })}>
         {t("onboarding.byok.form.useKey")}
       </button>
     </div>
