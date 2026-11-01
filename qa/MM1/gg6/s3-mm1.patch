@@ -1,0 +1,17 @@
+--- s3-model-crash.mjs	2026-11-01 10:31:45.762526114 +0000
++++ s3-mm1.mjs	2026-11-01 13:01:13.717666543 +0000
+@@ -115,7 +115,7 @@
+ R.hung_server_ask = await ask("hung server", undefined, 200_000);
+ R.rt_while_hung = await rt();
+ log("hung", JSON.stringify(R.hung_server_ask), JSON.stringify(R.rt_while_hung));
+-process.kill(pid, "SIGKILL");
++try { process.kill(pid, "SIGKILL"); } catch { R.hung_pid_already_gone = true; }
+ await sleep(5000);
+ 
+ // C: crash loop
+@@ -148,4 +148,4 @@
+ R.logs = grepLogs(d.logDir, /local runtime|llama-server|gave up/i).map((l) => l.slice(0, 400)).slice(-25);
+ await d.stop();
+ await served.close();
+-writeJson("s3-model-crash.json", R);
++writeJson("s3-mm1.json", R);

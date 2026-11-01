@@ -1,0 +1,58 @@
+--- overlay_scenarios.mjs	2026-11-01 10:31:45.764509854 +0000
++++ overlay_mm1.mjs	2026-11-01 13:11:28.090408188 +0000
+@@ -479,6 +479,34 @@
+ };
+ 
+ 
++// MM1: the fix must not over-refuse. Click away to Search, click back into the composer, then the
++// overlay + Enter: the draft should go into the composer (the field it was written for).
++S.s9d = async () => {
++  await freshTarget();
++  const draft = "Back in the composer, insert me.";
++  await fireAndDone({ text: draft, delayMs: 60 });
++  const ent = atspi("ext", "gtk_test_app|python", "Search");
++  await linux.click(ent.x + 30, ent.y + ent.h / 2);
++  await sleep(800);
++  const c = atspi("ext", "gtk_test_app|python", "Message composer");
++  await linux.click(c.x + 30, c.y + Math.min(20, c.h / 2));
++  await sleep(800);
++  const up = await overlayRect();
++  let phase = null;
++  if (up) {
++    await linux.click(up.x + up.w / 2, up.y + 40);
++    await sleep(400);
++    const acc = Date.now();
++    key("Return");
++    phase = await waitFor("inserted/err", () => views(acc).find((v) => ["inserted", "error"].includes(v.phase)), 8000).catch(() => null);
++    await sleep(800);
++  }
++  const comp = await readField();
++  const entryText = atspi("ext", "gtk_test_app|python", "Search")?.text ?? "";
++  record("9d-mm1", "click away, back into the same field, overlay + Enter: inserted into the composer", comp.includes(draft) && !entryText.includes(draft), { overlay_up: Boolean(up), phase: phase?.phase, message: phase?.message ?? null, composer: comp, search_entry: entryText });
++  await settle();
++};
++
+ S.s9 = async () => {
+   // Hostile: while the draft is ready, the user clicks the fixture's Search entry, then comes
+   // back to the overlay and presses Enter. Where does the draft go? Is the overlay left up?
+@@ -501,6 +529,9 @@
+   }
+   entryText = atspi("ext", "gtk_test_app|python", "Search")?.text ?? "";
+   comp = await readField();
++  const clip = spawnSync("xclip", ["-o", "-selection", "clipboard"], { encoding: "utf8", timeout: 3000 });
++  const overlayMsg = phase?.message ?? null;
++  record("9a-mm1", "refused insert into the other field: nothing inserted anywhere, draft on the clipboard", !entryText.includes(draft) && !comp.includes(draft) && phase?.phase === "error" && (clip.stdout ?? "").includes(draft), { phase: phase?.phase, message: overlayMsg, clipboard: (clip.stdout ?? "").slice(0, 80), clip_err: (clip.stderr ?? "").slice(0, 80), composer: comp, search_entry: entryText });
+   record("9a", "click away to another field, back to overlay, Enter", !entryText.includes(draft) && (!stillUp || comp.includes(draft)), {
+     overlay_visible_after_click_away: Boolean(stillUp), foreground_after_click: fgAfterClick, phase: phase?.phase, method: phase?.method, composer: comp, search_entry: entryText,
+   });
+--- /home/user/nugget/qa/JJ1/overlay/run.sh	2026-11-01 10:20:05.148553045 +0000
++++ run.sh	2026-11-01 13:10:14.979503957 +0000
+@@ -15,7 +15,7 @@
+   openbox >/dev/null 2>&1 &
+   wm=$!
+   sleep 1
+-  node "$0/overlay_scenarios.mjs" "$@"
++  node "$0/${QA_SCENARIOS:-overlay_scenarios.mjs}" "$@"
+   status=$?
+   kill "$wm" 2>/dev/null
+   exit "$status"
