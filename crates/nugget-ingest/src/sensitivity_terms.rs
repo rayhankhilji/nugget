@@ -7,10 +7,15 @@
 //! - [`M::Stem`]: a token that contains it (German compounds: `Gehaltsabrechnung`,
 //!   `Girokonto`, `Schilddrüsenwerte`);
 //! - [`M::Sub`]: anywhere in the text, for scripts without spaces between words (Japanese,
-//!   Chinese) or with attached prefixes (Arabic), and Devanagari (whose virama splits tokens).
+//!   Chinese) and Devanagari (whose vowel signs and virama split tokens). Arabic terms are
+//!   matched as words that may carry clitics: a prefix (`ال`, `و`, `ب`, `ل`, `ف`, `ك` and their
+//!   combinations) and a suffix (pronouns, plural endings; `ة` becomes `ت` before one), so
+//!   `القرض` and `عيادتك` match while `طلاق` does not match inside `إطلاق` (see [`arabic_match`]).
 //!
 //! Latin text and terms are compared lowercase and with accents folded (`análisis` =
-//! `analisis`), so a missing accent still matches. Terms favour recall: a false positive only
+//! `analisis`), so a missing accent still matches. Arabic is compared without short vowels and
+//! tatweel, with `أ إ آ ٱ` as `ا`, `ى` as `ي` and `ة` as `ه`; Devanagari with chandrabindu as
+//! anusvara and without nukta (`जाँच` = `जांच`). Terms favour recall: a false positive only
 //! keeps an item from cloud models; it stays searchable locally.
 
 /// Match mode of a term (see the module docs).
@@ -113,14 +118,17 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     ("psicologa", Word, H),
     ("baja medica", Phrase, H),
     ("extracto", Word, F),
-    ("saldo", Word, F),
+    ("saldo anterior", Phrase, F),
+    ("saldo actual", Phrase, F),
+    ("saldo disponible", Phrase, F),
+    ("saldo de su cuenta", Phrase, F),
     ("cuenta bancaria", Phrase, F),
     ("nomina", Word, F),
     ("hipoteca", Word, F),
     ("tarjeta terminada en", Phrase, F),
     ("prestamo", Word, F),
     ("deuda", Word, F),
-    ("transferencia bancaria", Phrase, F),
+    ("ha recibido una transferencia", Phrase, F),
     ("declaracion de la renta", Phrase, F),
     ("contrasena", Word, C),
     ("clave de acceso", Phrase, C),
@@ -139,6 +147,11 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     ("pasaporte", Word, I),
     ("seguridad social", Phrase, I),
     // ---- French ----
+    ("resultats d'analyses", Phrase, H),
+    ("analyses de sang", Phrase, H),
+    ("hypothyroidie", Word, H),
+    ("hyperthyroidie", Word, H),
+    ("diabete", Word, H),
     ("compte rendu de consultation", Phrase, H),
     ("medecin", Word, H),
     ("docteur", Word, H),
@@ -195,7 +208,10 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     ("psicologo", Word, H),
     ("terapia", Word, H),
     ("extrato", Word, F),
-    ("saldo", Word, F),
+    ("saldo anterior", Phrase, F),
+    ("saldo atual", Phrase, F),
+    ("saldo disponivel", Phrase, F),
+    ("saldo em conta", Phrase, F),
     ("conta corrente", Phrase, F),
     ("salario", Word, F),
     ("holerite", Word, F),
@@ -218,6 +234,7 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     // ---- Japanese ----
     ("診察", Sub, H),
     ("診断", Sub, H),
+    ("糖尿病", Sub, H),
     ("病院", Sub, H),
     ("クリニック", Sub, H),
     ("検査結果", Sub, H),
@@ -247,6 +264,8 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     ("保険証", Sub, I),
     // ---- Chinese (Simplified) ----
     ("诊断", Sub, H),
+    ("确诊", Sub, H),
+    ("糖尿病", Sub, H),
     ("医院", Sub, H),
     ("门诊", Sub, H),
     ("体检", Sub, H),
@@ -260,7 +279,9 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     ("薪资", Sub, F),
     ("银行卡", Sub, F),
     ("余额", Sub, F),
-    ("对账单", Sub, F),
+    ("账户对账单", Sub, F),
+    ("银行对账单", Sub, F),
+    ("信用卡对账单", Sub, F),
     ("贷款", Sub, F),
     ("房贷", Sub, F),
     ("个税", Sub, F),
@@ -280,10 +301,15 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     ("डॉक्टर", Sub, H),
     ("अस्पताल", Sub, H),
     ("जांच रिपोर्ट", Sub, H),
-    ("जाँच रिपोर्ट", Sub, H),
     ("दवा", Sub, H),
     ("इलाज", Sub, H),
     ("निदान", Sub, H),
+    ("मधुमेह", Sub, H),
+    ("मनोवैज्ञानिक", Sub, H),
+    ("मनोचिकित्सक", Sub, H),
+    ("परामर्श सत्र", Sub, H),
+    ("काउंसलिंग", Sub, H),
+    ("थेरेपी", Sub, H),
     ("वेतन", Sub, F),
     ("सैलरी", Sub, F),
     ("बैंक खाता", Sub, F),
@@ -293,8 +319,13 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     ("पर्सनल लोन", Sub, F),
     ("लोन की किस्त", Sub, F),
     ("कर्ज", Sub, F),
+    ("ऋण", Sub, F),
+    ("खाता संख्या", Sub, F),
+    ("खाता विवरण", Sub, F),
     ("पासवर्ड", Sub, C),
     ("ओटीपी", Sub, C),
+    ("सत्यापन कोड", Sub, C),
+    ("वन टाइम पासवर्ड", Sub, C),
     ("अदालत", Sub, L),
     ("कोर्ट", Sub, L),
     ("वकील", Sub, L),
@@ -306,25 +337,34 @@ pub(crate) const TERMS: &[(&str, M, &str)] = &[
     ("पासपोर्ट", Sub, I),
     // ---- Arabic ----
     ("طبيب", Sub, H),
-    ("الطبيب", Sub, H),
     ("مستشفى", Sub, H),
     ("عيادة", Sub, H),
     ("تحاليل", Sub, H),
     ("تشخيص", Sub, H),
     ("وصفة طبية", Sub, H),
     ("علاج", Sub, H),
+    ("السكري", Sub, H),
+    ("أخصائي نفسي", Sub, H),
+    ("أخصائية نفسية", Sub, H),
+    ("طبيب نفسي", Sub, H),
+    ("طبيبة نفسية", Sub, H),
+    ("معالج نفسي", Sub, H),
+    ("معالجة نفسية", Sub, H),
+    ("علاج نفسي", Sub, H),
+    ("الصحة النفسية", Sub, H),
+    ("استشارة نفسية", Sub, H),
     ("الراتب", Sub, F),
     ("راتبك", Sub, F),
     ("كشف حساب", Sub, F),
     ("رصيد", Sub, F),
     ("حساب بنكي", Sub, F),
     ("قرض", Sub, F),
+    ("قروض", Sub, F),
     ("تحويل بنكي", Sub, F),
     ("كلمة المرور", Sub, C),
     ("كلمة السر", Sub, C),
     ("رمز التحقق", Sub, C),
     ("محكمة", Sub, L),
-    ("المحكمة", Sub, L),
     ("محامي", Sub, L),
     ("دعوى", Sub, L),
     ("طلاق", Sub, L),
@@ -348,15 +388,87 @@ pub(crate) fn fold(s: &str) -> String {
             'ç' => 'c',
             'ñ' => 'n',
             '\u{2019}' | '\u{2018}' => '\'',
+            // Arabic letter variants.
+            'أ' | 'إ' | 'آ' | 'ٱ' => 'ا',
+            'ى' => 'ي',
+            'ة' => 'ه',
+            // Devanagari: chandrabindu as anusvara.
+            '\u{0901}' => '\u{0902}',
             c => c,
         })
+        // Arabic short vowels, shadda, sukun, superscript alef and tatweel; Devanagari nukta.
+        .filter(|c| {
+            !matches!(
+                c,
+                '\u{064B}'..='\u{0652}' | '\u{0670}' | '\u{0640}' | '\u{093C}'
+            )
+        })
         .collect()
+}
+
+fn is_arabic(c: char) -> bool {
+    matches!(c, '\u{0600}'..='\u{06FF}')
+}
+
+/// Prefix clitics an Arabic word may carry (folded): conjunctions, prepositions, the article.
+const AR_PREFIXES: &[&str] = &[
+    "", "و", "ف", "ب", "ك", "ل", "ال", "وال", "فال", "بال", "كال", "لل", "ولل", "فلل", "وب", "ول",
+    "فب", "فل", "وك",
+];
+/// Suffixes an Arabic word may carry (folded): pronouns and plural/dual endings.
+const AR_SUFFIXES: &[&str] = &[
+    "", "ه", "ها", "هم", "هن", "هما", "ك", "كم", "كن", "كما", "ي", "نا", "ات", "ان", "ين", "ون",
+    "يه", "يها", "يهم",
+];
+
+/// Whether folded `term` occurs in folded `text` as an Arabic word with clitics. The parts of
+/// the word before and after the match must be a known prefix and suffix.
+fn arabic_match(text: &str, term: &str) -> bool {
+    // `ة` (folded to `ه`) is written `ت` before a suffix: `عيادة` + `ك` = `عيادتك`.
+    let stem_t = term.strip_suffix('ه').map(|b| format!("{b}ت"));
+    let forms = std::iter::once((term, false)).chain(stem_t.as_deref().map(|t| (t, true)));
+    for (form, needs_suffix) in forms {
+        for (at, _) in text.match_indices(form) {
+            let start = text[..at]
+                .char_indices()
+                .rev()
+                .find(|(_, c)| !is_arabic(*c))
+                .map_or(0, |(i, c)| i + c.len_utf8());
+            let end = at + form.len();
+            let stop = text[end..]
+                .char_indices()
+                .find(|(_, c)| !is_arabic(*c))
+                .map_or(text.len(), |(i, _)| end + i);
+            let (pre, suf) = (&text[start..at], &text[end..stop]);
+            if AR_PREFIXES.contains(&pre)
+                && AR_SUFFIXES.contains(&suf)
+                && !(needs_suffix && suf.is_empty())
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Han, kana and CJK punctuation. Text in these scripts has no spaces between words, so a
+/// CJK character also ends a Latin word glued to it (`HbA1cは7.2%`, `您的OTP为482913`; QA
+/// GG7-3); CJK terms themselves are matched as substrings ([`M::Sub`]).
+pub(crate) fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3000}'..='\u{30FF}' | '\u{31F0}'..='\u{31FF}' | '\u{3400}'..='\u{4DBF}'
+        | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' | '\u{FF00}'..='\u{FFEF}')
+}
+
+/// Whether `c` belongs to a word token (Latin and other spaced scripts).
+pub(crate) fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() && !is_cjk(c)
 }
 
 /// Folded tokens: letters, digits, `'` and `-` inside a word.
 pub(crate) fn tokens(s: &str) -> Vec<String> {
     fold(s)
-        .split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '-'))
+        .split(|c: char| !(is_word_char(c) || c == '\'' || c == '-'))
         .map(|t| t.trim_matches(['\'', '-']).to_owned())
         .filter(|t| !t.is_empty())
         .collect()
@@ -368,7 +480,14 @@ pub(crate) fn find(texts: &[&str]) -> Option<&'static str> {
     let toks: Vec<Vec<String>> = texts.iter().map(|t| tokens(t)).collect();
     for (term, mode, kind) in TERMS {
         let hit = match mode {
-            Sub => folded.iter().any(|t| t.contains(term)),
+            Sub => {
+                let t = fold(term);
+                if t.chars().next().is_some_and(is_arabic) {
+                    folded.iter().any(|x| arabic_match(x, &t))
+                } else {
+                    folded.iter().any(|x| x.contains(&t))
+                }
+            }
             Word => {
                 let t = fold(term);
                 toks.iter().flatten().any(|w| {
@@ -713,6 +832,36 @@ mod tests {
                 ("नई कॉलोनी", "हमारी कॉलोनी में नया पार्क खुला है।"),
             ],
         );
+    }
+
+    #[test]
+    fn arabic_words_carry_clitics_but_do_not_match_inside_other_words() {
+        // Prefixes, suffixes, and ة written ت before a suffix.
+        assert!(mail("موعد", "سيتصل بك الطبيب غدا.").is_some());
+        assert!(mail("القرض", "تم خصم قسط القرض.").is_some());
+        assert!(mail("موعد", "نذكرك بموعدك في عيادتك يوم الأحد.").is_some());
+        assert!(mail("جلسة", "د. ليلى منصور، أخصائية نفسية").is_some());
+        // Short vowels and hamza forms do not matter.
+        assert!(mail("موعد", "أخصّائيّة نفسيّة").is_some());
+        assert!(mail("موعد", "اخصائية نفسية").is_some());
+        // `طلاق` (divorce) inside `إطلاق` (launch), `قرض` inside `يقرضون`: no.
+        assert_eq!(mail("إطلاق المرحلة الثانية", "نستعد لإطلاق المشروع."), None);
+        assert_eq!(mail("مشروع", "هم يقرضون الأدوات للجيران."), None);
+    }
+
+    #[test]
+    fn latin_terms_glued_to_cjk_text_still_match() {
+        // QA GG7-3: a CJK run used to swallow the Latin word next to it.
+        assert!(
+            mail(
+                "ご本人確認",
+                "ご本人確認のためverification code：482913をご入力ください"
+            )
+            .is_some()
+        );
+        assert!(mail("検査", "HbA1cは7.2%でした").is_some());
+        assert!(mail("登录", "您的OTP为482913").is_some());
+        assert!(mail("检查", "您的HbA1c为6.9%").is_some());
     }
 
     #[test]
