@@ -2142,5 +2142,8 @@
   "searchui.nameTaken": "「{name}」という名前の保存した検索がすでにあります。",
   "searchui.recentCleared": "最近の検索を消去しました",
   "searchui.recentWithFilters": "{query} · {n, plural, other {絞り込み # 件}}",
-  "searchui.resultsFiltered": "「{query}」の検索結果：{n, plural, other {# 件}}（絞り込み {filters, plural, other {# 件}}）"
+  "searchui.resultsFiltered": "「{query}」の検索結果：{n, plural, other {# 件}}（絞り込み {filters, plural, other {# 件}}）",
+  "doubletap.overlay.refineMissed": "今回はその変更ができませんでした。これが最も近い下書きです。",
+  "doubletap.error.field_changed": "カーソルが別の欄に移ったため、何も挿入しませんでした。下書きはクリップボードにあります。",
+  "doubletap.error.field_changed_no_copy": "カーソルが別の欄に移ったため、何も挿入しませんでした。下書きは Double Tap ページの「最近の下書き」にあります。"
 }

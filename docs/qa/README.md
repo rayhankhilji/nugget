@@ -109,7 +109,7 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 
 | Finding | Severity | Owner | State |
 |---|---|---|---|
-| GG6-1 With a local model, indexing runs at LLM speed (24 files: 474–589 s in onboarding) | **Blocker** | HH2 | likely fixed by HH2's background triage (08a0cce, merged after the tested build); HH2 to re-verify with GG6's harness |
+| GG6-1 With a local model, indexing runs at LLM speed (24 files: 474–589 s in onboarding) | **Blocker** | HH2 | fixed by HH2's background triage (08a0cce): GG6's own repro indexes 1,000 items in 6 s with a frozen model, was 8 items in 240 s (container); real-OS confirmation pending |
 | GG6-2 Folders with nothing indexable spin on "getting ready to index…" forever; setup says Done | High | KK2 | routed |
 | GG6-3 A hung local model server blocks Ask for minutes while status says Ready | High | KK1 | routed |
 | GG6-4 Default config enabled an Ollama provider nobody set up | High | KK1 (migration) | fixed for new installs by DD4 (c03b984); configs written by earlier builds need a migration |
@@ -125,3 +125,20 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG6-19 macOS: no recovery once Accessibility is denied | Medium | KK2 | routed |
 | GG6-20, GG6-27, GG6-32 (GNOME without tray, macos-14 jobs cancelled, no shell log) | Medium/Low | EE5 follow-up | routed |
 | GG6-28 Windows daemon killed by CTRL_BREAK in the NSIS smoke | Low | EE5 | fixed in 44b9e11 |
+
+## JJ1: wave II features and HH2's triage as a real user ([report](JJ1.md)), tested at efebc0c, repros rerun at 44b9e11
+
+| Finding | Severity | Owner | State |
+|---|---|---|---|
+| JJ1-1 Sensitivity rules miss de/es/fr items; the 4B triage clears health, money and legal mail for cloud use (9/22 stay sensitive) | High | HH2 | routed |
+| JJ1-2 Overlay stuck after the target regains focus; later double taps ignored | High | II3 | fixed in c1b0893f |
+| JJ1-3 Draft inserted into whichever field has focus | High | II3 | fixed in c1b0893f (field checked before insert; otherwise copied) |
+| JJ1-4 Complete one-line replies become an empty draft | High | EE2 (nugget-draft) | waiting: EE2 is paused until the user says continue |
+| JJ1-5 WhatsApp date lines in fr/ar import nothing while the source says up to date | High | II1 | routed |
+| JJ1-6 Day-first 12-hour WhatsApp exports get future dates; re-exports duplicate | High | II1 | routed |
+| JJ1-7 A German chat is drafted and refined in English | High | EE2 (nugget-draft) | waiting: EE2 is paused |
+| JJ1-8 Refinements unchanged or unreliable with the 4B | Medium | II3 | fixed in c1b0893f (explicit target, one retry); real-model re-measure pending |
+| JJ1-9 Recent drafts keep IBAN, SSN and API keys | Medium | II3 | fixed in c1b0893f (draft.check_sensitive) |
+| JJ1-10 Events with TZID on the wrong day | Medium | JJ2 | fixed in 32a60e12 for Search; Ask's date phrases and the stored event start still read it as UTC (extraction, BB2) |
+| JJ1-11 Date filter wrong across DST | Medium | JJ2 | fixed in 32a60e12 |
+| JJ1-12 to JJ1-15 (Telegram zone, phone-only people, one bad iMessage row, Telegram symlinks) and the connector Lows | Medium/Low | II1 | routed |

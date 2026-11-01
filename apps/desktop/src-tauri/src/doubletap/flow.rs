@@ -38,7 +38,7 @@ use nugget_core::ipc::{
 use tauri::{AppHandle, Emitter, Listener as _, Manager, PhysicalPosition, PhysicalSize};
 
 use super::errors::{self, Failure};
-use super::overlay::{Effect, Event, Refinement, Started};
+use super::overlay::{Effect, Event, RefineRequest, Started};
 use super::placement::{self, Area, Screen};
 use super::practice::{self, PracticeField};
 use super::probe;
@@ -61,13 +61,69 @@ pub struct Target {
     pub practice: bool,
     /// The field's label names a secret: its drafts are never kept in the history.
     pub sensitive: bool,
+    /// The field the draft was written for, checked again before inserting (`None` for the
+    /// practice field).
+    pub field: Option<FieldSig>,
 }
 
-/// The overlay's measured height (logical) and the side of the caret it was put on.
+/// What identifies a field between the trigger and the insertion: the accessibility APIs give
+/// no stable element id across all three platforms, so the role, label and placeholder, plus
+/// the caret position when the field has neither label nor placeholder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldSig {
+    pub role: String,
+    pub label: Option<String>,
+    pub placeholder: Option<String>,
+    pub caret: Option<nugget_a11y::Rect>,
+}
+
+impl FieldSig {
+    pub fn of(f: &nugget_a11y::Focused) -> Self {
+        Self {
+            role: f.field.role.clone(),
+            label: f.field.label.clone(),
+            placeholder: f.field.placeholder.clone(),
+            caret: f.caret,
+        }
+    }
+
+    /// Whether `now` is (as far as can be told) the same field.
+    pub fn matches(&self, now: &FieldSig) -> bool {
+        let norm = |v: &Option<String>| {
+            v.as_deref()
+                .map(|s| {
+                    s.split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .to_lowercase()
+                })
+                .filter(|s| !s.is_empty())
+        };
+        if self.role != now.role
+            || norm(&self.label) != norm(&now.label)
+            || norm(&self.placeholder) != norm(&now.placeholder)
+        {
+            return false;
+        }
+        if norm(&self.label).is_some() || norm(&self.placeholder).is_some() {
+            return true;
+        }
+        // Two unlabelled fields of one kind: tell them apart by where the caret is (a caret
+        // moves within its field as the user types, never hundreds of units away).
+        match (self.caret, now.caret) {
+            (Some(a), Some(b)) => (a.y - b.y).abs() <= 300.0 && (a.x - b.x).abs() <= 1_200.0,
+            _ => true,
+        }
+    }
+}
+
+/// The overlay's measured height (logical), the side of the caret it was put on, and when it
+/// was last shown (a focus loss right after showing is the window system settling, not the user).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layout {
     pub height: f64,
     pub above: Option<bool>,
+    pub shown_at: Option<std::time::Instant>,
 }
 
 impl Default for Layout {
@@ -75,7 +131,21 @@ impl Default for Layout {
         Self {
             height: OVERLAY_SIZE.1,
             above: None,
+            shown_at: None,
         }
+    }
+}
+
+/// How long after showing the overlay a focus loss is ignored.
+pub const FOCUS_GRACE: Duration = Duration::from_millis(400);
+
+/// The overlay window lost the keyboard: close the draft unless the window is still settling.
+pub fn on_overlay_blur(app: &AppHandle) {
+    let settling = lock(&app.state::<DoubleTap>().layout)
+        .shown_at
+        .is_some_and(|t| t.elapsed() < FOCUS_GRACE);
+    if !settling {
+        apply(app, Event::FocusLost);
     }
 }
 
@@ -232,6 +302,12 @@ pub async fn fire(app: AppHandle) {
     let generation = {
         let mut m = lock(&state.machine);
         if m.busy() {
+            // Double Tap always answers: a draft on screen comes back to the front with the
+            // keyboard (the user may have clicked away while the window system kept it shown);
+            // reading and inserting finish on their own.
+            let step = m.apply(Event::Refocus);
+            drop(m);
+            run(&app, step.effects);
             return;
         }
         let step = m.apply(Event::Begin);
@@ -294,6 +370,7 @@ pub async fn fire(app: AppHandle) {
             .label
             .as_deref()
             .is_some_and(nugget_policy::redact::is_secure_label),
+        field: Some(FieldSig::of(&focused)),
     });
     let request = draft_request(focused, &s);
     start(&app, generation, request).await;
@@ -334,6 +411,7 @@ async fn fire_practice(
         rtl: field.rtl,
         practice: true,
         sensitive: false,
+        field: None,
     });
     probe::record("practice", || serde_json::Value::Null);
     start(
@@ -367,7 +445,7 @@ fn started_event(started: DraftStarted, generation: u64) -> Started {
 }
 
 /// Retry or a refinement: the session's request again, or rewriting `base`.
-async fn redraft(app: AppHandle, generation: u64, refine: Option<(Refinement, String)>) {
+async fn redraft(app: AppHandle, generation: u64, refine: Option<RefineRequest>) {
     let Some(request) = lock(&app.state::<DoubleTap>().request).clone() else {
         return fail(
             &app,
@@ -376,7 +454,7 @@ async fn redraft(app: AppHandle, generation: u64, refine: Option<(Refinement, St
         );
     };
     let request = match refine {
-        Some((kind, base)) => refined_request(&request, &base, kind),
+        Some(r) => refined_request(&request, &r),
         None => request,
     };
     // The kept request stays the original: a second refinement rewrites the new draft from the
@@ -387,14 +465,14 @@ async fn redraft(app: AppHandle, generation: u64, refine: Option<(Refinement, St
     }
 }
 
-/// The request for a refinement: the original context with `base` as the selected text of the
-/// field (where it would be inserted), so the daemon writes its replacement, plus the
-/// refinement's instruction. The provider choice is unchanged.
-pub(super) fn refined_request(
-    original: &DraftRequest,
-    base: &str,
-    kind: Refinement,
-) -> DraftRequest {
+/// The request for a refinement: the original context with the draft as the selected text of
+/// the field (where it would be inserted), so the daemon writes its replacement, plus an
+/// explicit rewrite instruction with a target length taken from the draft, and a token cap to
+/// match. The provider choice is unchanged.
+pub(super) fn refined_request(original: &DraftRequest, refine: &RefineRequest) -> DraftRequest {
+    let base = refine.base.as_str();
+    let kind = refine.kind;
+    let units = super::overlay::length_units(base);
     let mut r = original.clone();
     let value = &original.context.field.value;
     let chars: Vec<char> = value.chars().collect();
@@ -412,7 +490,8 @@ pub(super) fn refined_request(
     let end = start.saturating_add(u32::try_from(base.chars().count()).unwrap_or(u32::MAX));
     r.context.field.value = format!("{before}{base}{after}");
     r.context.field.selection = Some((start, end));
-    r.instruction = Some(kind.instruction().into());
+    r.instruction = Some(kind.instruction(units, refine.strict));
+    r.max_tokens = Some(kind.max_tokens(units));
     r
 }
 
@@ -663,18 +742,49 @@ fn remember(app: &AppHandle, text: &str) {
     if skip {
         return;
     }
+    if super::history::looks_sensitive(text) {
+        return;
+    }
     let at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
         .unwrap_or(0);
-    let list = {
-        let mut h = lock(&state.history);
-        if !h.push(text, &app_name, at) {
+    let app = app.clone();
+    let text = text.to_owned();
+    tauri::async_runtime::spawn(async move {
+        // The daemon's PII scan (cards, IBANs, SSNs, API keys and other credentials), the same
+        // one that marks items sensitive. Not kept when it can't be asked.
+        if !matches!(daemon_says_clean(&app, &text).await, Some(true)) {
             return;
         }
-        h.list()
+        let state = app.state::<DoubleTap>();
+        let list = {
+            let mut h = lock(&state.history);
+            if !h.push(&text, &app_name, at) {
+                return;
+            }
+            h.list()
+        };
+        emit_history(&app, &list);
+    });
+}
+
+/// `draft.check_sensitive`: `Some(true)` when the daemon finds nothing sensitive in `text`.
+async fn daemon_says_clean(app: &AppHandle, text: &str) -> Option<bool> {
+    let daemon = app.state::<Daemon>();
+    let check = nugget_core::ipc::SensitiveCheck {
+        text: text.to_owned(),
     };
-    emit_history(app, &list);
+    match daemon
+        .call::<_, nugget_core::ipc::SensitiveVerdict>(app, method::DRAFT_CHECK_SENSITIVE, &check)
+        .await
+    {
+        Ok(v) => Some(!v.sensitive),
+        Err(e) => {
+            tracing::debug!(error = %e, "draft.check_sensitive failed; the draft is not kept");
+            None
+        }
+    }
 }
 
 pub(super) fn emit_history(app: &AppHandle, list: &[super::history::Entry]) {
@@ -690,7 +800,12 @@ fn show_overlay(app: &AppHandle, focus: bool) {
         return;
     };
     // Choose the side of the caret afresh for each new draft.
-    lock(&app.state::<DoubleTap>().layout).above = None;
+    {
+        let state = app.state::<DoubleTap>();
+        let mut layout = lock(&state.layout);
+        layout.above = None;
+        layout.shown_at = Some(std::time::Instant::now());
+    }
     place_overlay(app, &win);
     let _ = win.set_focusable(focus);
     let _ = win.set_always_on_top(true);
@@ -798,6 +913,15 @@ async fn insert(app: AppHandle, text: String) {
         {
             return Err(Failure::Error(errors::ERROR_INSERT_FAILED.into()));
         }
+        // The keyboard must be back in the field the draft was written for: an accessibility
+        // insert writes into whatever has focus. A different field gets nothing; the draft goes
+        // to the clipboard instead and the overlay says so.
+        if let Some(want) = target.as_ref().and_then(|t| t.field.as_ref())
+            && let Ok(Some(now)) = a11y.api().focused()
+            && !want.matches(&FieldSig::of(&now))
+        {
+            return Err(Failure::Error(copy_instead(&text)));
+        }
         a11y.api()
             .insert(&text)
             .map_err(|e| errors::classify_a11y(&e, true))
@@ -818,6 +942,19 @@ async fn insert(app: AppHandle, text: String) {
         Ok(Err(Failure::Refused(k))) => apply(&app, Event::Error(k.into())),
         Ok(Err(Failure::Error(e))) => apply(&app, Event::Error(e)),
         Err(e) => apply(&app, Event::Error(e.to_string())),
+    }
+}
+
+/// The field changed before inserting: put the draft on the clipboard (never for a secure field,
+/// whose drafts are refused before this) and return the message to show.
+fn copy_instead(text: &str) -> String {
+    let copied = nugget_a11y::system_clipboard().and_then(|mut c| c.set_text(text));
+    match copied {
+        Ok(()) => errors::ERROR_FIELD_CHANGED.into(),
+        Err(e) => {
+            tracing::debug!(error = %e, "cannot copy the draft");
+            errors::ERROR_FIELD_CHANGED_NO_COPY.into()
+        }
     }
 }
 
@@ -884,6 +1021,7 @@ fn wait_frontmost(a11y: &A11y, target: &AppInfo) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::overlay::Refinement;
     use super::*;
 
     fn app(id: Option<&str>, name: &str) -> AppInfo {
@@ -950,20 +1088,74 @@ mod tests {
         }
     }
 
+    fn rr(base: &str, kind: Refinement) -> RefineRequest {
+        RefineRequest {
+            kind,
+            base: base.into(),
+            strict: false,
+        }
+    }
+
+    fn sig(role: &str, label: Option<&str>, placeholder: Option<&str>, y: f64) -> FieldSig {
+        FieldSig {
+            role: role.into(),
+            label: label.map(Into::into),
+            placeholder: placeholder.map(Into::into),
+            caret: Some(nugget_a11y::Rect {
+                x: 100.0,
+                y,
+                width: 2.0,
+                height: 16.0,
+            }),
+        }
+    }
+
+    #[test]
+    fn the_insert_target_must_be_the_field_the_draft_was_written_for() {
+        let composer = sig("text_area", Some("Message composer"), None, 400.0);
+        // The same field, caret moved, label spaced differently: same.
+        assert!(composer.matches(&sig("text_area", Some(" message  composer"), None, 460.0)));
+        // QA's case: the fixture's search entry took focus.
+        assert!(!composer.matches(&sig("text_field", None, Some("Search messages"), 40.0)));
+        assert!(!composer.matches(&sig("text_area", Some("Notes"), None, 400.0)));
+        // Unlabelled fields of one kind: the caret tells them apart.
+        let bare = sig("text_area", None, None, 900.0);
+        assert!(bare.matches(&sig("text_area", None, None, 940.0)));
+        assert!(!bare.matches(&sig("text_area", None, None, 80.0)));
+    }
+
+    #[test]
+    fn refinements_ask_for_an_explicit_rewrite_with_a_target_length() {
+        let base =
+            "Thanks for the update, I can make the meeting on Thursday at noon in the lobby.";
+        let r = refined_request(&request("", None), &rr(base, Refinement::Shorter));
+        let i = r.instruction.unwrap();
+        assert!(i.contains("at most 9 words (it has 16)"), "{i}");
+        assert!(i.contains("Never return it unchanged"));
+        assert!(i.chars().count() <= 300, "fits the local instruction cap");
+        let strict = Refinement::Longer.instruction(16, true);
+        assert!(
+            strict.contains("about 28 words") && strict.contains("missed"),
+            "{strict}"
+        );
+        assert!(strict.chars().count() <= 300);
+        assert_eq!(r.max_tokens, Some(9 * 3 + 32));
+    }
+
     #[test]
     fn refinements_select_the_draft_where_it_would_go() {
         // Empty reply box: the draft is the whole field, selected.
         let r = refined_request(
             &request("", None),
-            "Thanks, Thursday works.",
-            Refinement::Shorter,
+            &rr("Thanks, Thursday works.", Refinement::Shorter),
         );
         assert_eq!(r.context.field.value, "Thanks, Thursday works.");
         assert_eq!(r.context.field.selection, Some((0, 23)));
         assert_eq!(
-            r.instruction.as_deref(),
-            Some(Refinement::Shorter.instruction())
+            r.instruction,
+            Some(Refinement::Shorter.instruction(3, false))
         );
+        assert_eq!(r.max_tokens, Some(Refinement::Shorter.max_tokens(3)));
         assert_eq!(
             r.provider,
             Some(ProviderId::new("local")),
@@ -971,15 +1163,21 @@ mod tests {
         );
         assert_eq!(r.context.app.name, "Mail");
         // Text before the caret is kept; the draft goes at the caret.
-        let r = refined_request(&request("Hi Ada,\n", None), "Sure.", Refinement::Casual);
+        let r = refined_request(
+            &request("Hi Ada,\n", None),
+            &rr("Sure.", Refinement::Casual),
+        );
         assert_eq!(r.context.field.value, "Hi Ada,\nSure.");
         assert_eq!(r.context.field.selection, Some((8, 13)));
         // A selection is what the draft replaced: the draft takes its place (char offsets).
-        let r = refined_request(&request("é old x", Some((5, 2))), "née", Refinement::Formal);
+        let r = refined_request(
+            &request("é old x", Some((5, 2))),
+            &rr("née", Refinement::Formal),
+        );
         assert_eq!(r.context.field.value, "é née x");
         assert_eq!(r.context.field.selection, Some((2, 5)));
         // A selection past the end is clamped.
-        let r = refined_request(&request("ab", Some((1, 99))), "Z", Refinement::Longer);
+        let r = refined_request(&request("ab", Some((1, 99))), &rr("Z", Refinement::Longer));
         assert_eq!(r.context.field.value, "aZ");
         assert_eq!(r.context.field.selection, Some((1, 2)));
     }
