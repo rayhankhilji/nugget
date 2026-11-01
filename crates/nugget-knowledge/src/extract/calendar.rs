@@ -243,7 +243,13 @@ fn one(ctx: &ItemCtx<'_>, ex: &mut Extraction, ev: Event) {
     };
     let happened = has_ended(&ev, start, ctx.now);
 
-    if let Some(loc) = ev.location.as_deref().filter(|l| !is_virtual(l)) {
+    // A dial-in number or an address is not a place (security review 3, ER-7): it would name a
+    // vault page and a claim sentence.
+    if let Some(loc) = ev
+        .location
+        .as_deref()
+        .filter(|l| !is_virtual(l) && crate::llm::values::sensitive_value(l).is_none())
+    {
         let loc = truncate_chars(loc, 200);
         let place = ex.entity(EntitySpec::new(EntityKind::Place, loc.clone()).mention(
             &loc,

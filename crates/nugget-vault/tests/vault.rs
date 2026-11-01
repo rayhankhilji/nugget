@@ -892,6 +892,27 @@ fn citations_use_store_titles_and_urls() {
     );
 }
 
+/// Security review 3, ER-6: a source title (a mail subject, an event name) shown in a footnote
+/// loses its addresses and phone numbers like the quote does.
+#[test]
+fn footnote_titles_lose_contacts() {
+    fn lookup(_: &ItemRef) -> Option<SourceInfo> {
+        Some(SourceInfo {
+            title: Some("Call me on +44 20 7946 0958 or ana.ruiz@lumenfold.example".into()),
+            url: None,
+            sensitive: false,
+        })
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let g = Arc::new(MemGraph::new());
+    let (sam, ..) = populate(&g);
+    let v = Vault::new(dir.path(), g, Arc::new(lookup), config()).unwrap();
+    v.render_all().unwrap();
+    let t = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    assert!(t.contains("[Call me on (phone) or (address)]"), "{t}");
+    assert_nowhere(dir.path(), &["7946", "ana.ruiz@"]);
+}
+
 /// With no local model every item waits for triage (`sensitive: true`, triage pending or
 /// unknown): such unsorted items are shown in the vault like any other. Once triage confirms one
 /// sensitive, it leaves the vault at the next full render.
