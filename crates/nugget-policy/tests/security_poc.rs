@@ -1,5 +1,4 @@
-//! The policy proofs of concept from the M3–M6 security review
-//! (`docs/reviews/security-m3-m6-poc/policy_poc.rs`), ported so they keep holding. Each one
+//! The policy proofs of concept from the M3–M6 security review, ported so they keep holding. Each one
 //! asserts the fixed behaviour.
 
 use nugget_policy::rules::target_sets;

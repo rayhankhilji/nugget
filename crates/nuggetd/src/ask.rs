@@ -1601,7 +1601,7 @@ Signature is due by November 14.",
         assert_eq!(memory.by_text.len(), MAX_REMEMBERED_ANSWERS);
     }
 
-    /// The planted instructions of QA's GG2 corpus (`qa/GG2/harness/gen_corpus.py`) as passages
+    /// The planted instructions of QA's GG2 corpus as passages
     /// show them (one line), and the text around them.
     #[test]
     fn instructions_addressed_to_an_assistant_are_neutralised() {

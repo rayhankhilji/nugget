@@ -36,7 +36,7 @@ fn hit(s: &Store, q: &str, key: &str) -> Hit {
         .unwrap_or_else(|| panic!("{q:?} did not find {key}"))
 }
 
-// Sentences after the QA corpus (qa/GG7/corpus).
+// Sentences after the QA GG7 corpus.
 const JA_LED: &str = "来春オープン予定の新店舗へのＬＥＤ照明導入の件につきまして";
 const JA_CAMPAIGN: &str = "本日の定例でお話しした年末キャンペーンの件";
 const AR_CHAIRS: &str = "أحضروا الخيمة والكراسي معكم يوم الجمعة";

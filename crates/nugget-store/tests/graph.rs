@@ -1,4 +1,4 @@
-//! Knowledge-graph storage (docs/m2-spec.md, M2-A): the shared `GraphStore` conformance suite
+//! Knowledge-graph storage: the shared `GraphStore` conformance suite
 //! plus SQLite-specific behaviour (persistence, encryption, delete paths, merge edge cases).
 
 use std::path::PathBuf;

@@ -21,7 +21,7 @@ Sentient is ahead, it says so, and where a Nugget feature is still being wired i
   versions may differ.
 - **Everything about Nugget** points at the code or the book, with paths in this repository. Features
   that exist as tested crates but are not yet running in the daemon are labelled **being wired in
-  (wave W)**; see [`docs/waves/wave-w/README.md`](../waves/wave-w/README.md).
+  (wave W)**; see `docs/waves/wave-w/README.md`.
 - **Clean room.** This page describes behaviour in our own words. It quotes no Sentient code or
   prompts. See [the clean-room rules](../../CONTRIBUTING.md#clean-room).
 - No head-to-head benchmark exists: Sentient publishes none, and Nugget has not run one against it.
@@ -151,7 +151,7 @@ verified (teardown §2.7). Writing style is raw samples, not a model (teardown �
 
 **Nugget (being wired in, wave W).** The crates exist and are tested; the daemon methods
 (`draft.begin`, `draft.cancel`, `draft.feedback`, `voice.status`) and the overlay are being wired in
-now ([`docs/waves/wave-w/W1.md`](../waves/wave-w/W1.md)). Design, from the code:
+now (`docs/waves/wave-w/W1.md`). Design, from the code:
 
 - read the focused field and thread through accessibility (AX, UI Automation, AT-SPI) and insert at the
   caret with read-back verification ([`crates/nugget-a11y/src/lib.rs`](../../crates/nugget-a11y/src/lib.rs));
@@ -176,7 +176,7 @@ refused unless the app's state was read first, failed calls never replayed (tear
 
 **Nugget (being wired in, wave W).** Its own agent loop and policy engine, tested as crates; the daemon
 methods and the Agent and Safety pages are being wired in now
-([`docs/waves/wave-w/W3.md`](../waves/wave-w/W3.md)):
+(`docs/waves/wave-w/W3.md`):
 
 - **Policy engine** ([`crates/nugget-policy/src/lib.rs`](../../crates/nugget-policy/src/lib.rs)): six
   risk classes (Observe, Edit, Send, Destroy, Spend, Security); rules per app and site where deny always
@@ -207,7 +207,7 @@ items into at most 5 prepared actions. Ranking is the model's ordering (teardown
 model that learns from accept, dismiss and snooze, an optional judge that can only nudge the rank, and
 typed actions that run only after approval of a previewed diff and the policy gate
 ([`crates/nugget-proactive/src/lib.rs`](../../crates/nugget-proactive/src/lib.rs),
-[`docs/waves/wave-w/W4.md`](../waves/wave-w/W4.md)).
+`docs/waves/wave-w/W4.md`).
 
 ## Connectors
 
@@ -222,7 +222,7 @@ calendar and OneDrive over Microsoft Graph with your own app registration
 ([`crates/nugget-connector-microsoft/src/lib.rs`](../../crates/nugget-connector-microsoft/src/lib.rs)),
 and Slack, Notion, GitHub and Linear over their official APIs
 ([`crates/nugget-connector-saas/src/lib.rs`](../../crates/nugget-connector-saas/src/lib.rs),
-[`docs/waves/wave-w/W5.md`](../waves/wave-w/W5.md)).
+`docs/waves/wave-w/W5.md`).
 
 **Trade-off.** Nugget's Google setup needs a one-time Google Cloud project and, in Testing mode, a
 weekly re-sign-in ([Google guide](../book/src/guide/sources-google.md)). Sentient's hosted connectors
@@ -239,7 +239,7 @@ into the app itself (teardown §2.4, table).
 filesystem, sockets or environment); fuel, deadline and memory limits; packages signed with ed25519
 and verified against trusted keys ([`crates/nugget-plugin/src/lib.rs`](../../crates/nugget-plugin/src/lib.rs),
 [`crates/nugget-plugin/src/package.rs`](../../crates/nugget-plugin/src/package.rs),
-[`docs/waves/wave-w/W6.md`](../waves/wave-w/W6.md)).
+`docs/waves/wave-w/W6.md`).
 
 ## Licence and project
 

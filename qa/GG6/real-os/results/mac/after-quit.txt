@@ -1,2 +1,0 @@
---- still running after Quit:
-63595 /Applications/Nugget.app/Contents/MacOS/nuggetd

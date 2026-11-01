@@ -129,7 +129,7 @@ unless stated otherwise.
 - **Security review** of Double Tap, the agent, the browser extension, plugins, proactive cards,
   connectors and MCP: 13 findings fixed with regression tests, one mitigated (the MCP port issue above). See
   [Security model](architecture/security.md) and the
-  [review](https://github.com/rayhankhilji/nugget/blob/main/docs/reviews/security-m3-m6.md).
+  review.
 - **Supply chain:** model downloads come from a signed, pinned manifest with rollback protection;
   the release workflow is set up to record SBOMs, checksums and build provenance (untested until the
   first tagged release), and a release rehearsal with throwaway keys is being added

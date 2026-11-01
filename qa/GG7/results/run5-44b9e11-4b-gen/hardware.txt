@@ -1,3 +1,0 @@
-label: 4b-gen (qwen3-4b-q4km)
-runner: GitHub Actions 1000013241 (Linux X64)
-commit: 0ac470b558ce196686ba244a22bb370fd9e20a21

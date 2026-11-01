@@ -918,7 +918,7 @@ stays the `fake` arm, so the real crate has a fixed bar to clear.
 
 Double Tap reply drafting: does Nugget's prompt (a voice profile plus budgeted, cited retrieval)
 beat the Sentient-style prompt (the whole vault plus raw writing samples) on voice and facts,
-while keeping secrets out of cloud models? See [docs/m3-spec.md](../docs/m3-spec.md) and
+while keeping secrets out of cloud models? See docs/m3-spec.md and
 [the teardown](../docs/research/sentient-os-teardown.md) §2.4 and §2.7.
 
 ```sh
@@ -2347,7 +2347,7 @@ DD2 measured what Nugget costs in energy and battery and cut what was wasteful: 
 indexing 1,000 items, the desktop shell hidden in the tray, the shell's "what is in front"
 accessibility read alone, a scripted minute of Double Tap focus changes with read-ahead on and off,
 and the real model's read-ahead prefill. Method and metric names: [`energy` (DD2)](#energy-dd2).
-Reports: [`results/energy/`](results/energy/), one folder per workflow run.
+Reports: `results/energy/`, one folder per workflow run.
 
 **No energy counter on the CI machines.** The PLAN asks for battery cost, which needs a
 package-energy counter. Neither GitHub runner has one: the Linux VMs expose no RAPL zones
@@ -2537,7 +2537,7 @@ model store (SHA-256 verified) and lets `nugget-runtime` install and supervise t
 `llama-server` build, exactly as `nuggetd` does. The weekly and on-demand workflow
 [`.github/workflows/evals.yml`](../.github/workflows/evals.yml) runs each suite on its own runner
 and uploads the JSON reports; the reports quoted here are in
-[`results/real-models/`](results/real-models/), one folder per workflow run.
+`results/real-models/`, one folder per workflow run.
 
 **Setup.**
 
@@ -2623,7 +2623,7 @@ and seed 42, and reports the time to the first inserted *character*, latency mea
 trigger, and the prompt tokens read from cache versus evaluated.
 
 Run [40968143427](https://github.com/rayhankhilji/nugget/actions/runs/40968143427) at `c06a927`
-(2026-10-29), reports in [`results/real-models/run-40968143427/`](results/real-models/run-40968143427/).
+(2026-10-29), reports in `results/real-models/run-40968143427/`.
 Each runner drafts the same 12 tasks with the local budget **off** (the old prompt) and then
 **on**, so before and after share one machine. Times are from `begin`; from the trigger they are
 the same to the millisecond, because prewarming the prefix at the trigger overlaps the request.
@@ -2671,7 +2671,7 @@ follows the engine).
 
 **Confirmation run** [40979809226](https://github.com/rayhankhilji/nugget/actions/runs/40979809226)
 at `1799059` (with that fix; reports in
-[`results/real-models/run-40979809226/`](results/real-models/run-40979809226/)), budget off / on:
+`results/real-models/run-40979809226/`), budget off / on:
 sensitive leak rate **0 / 0** and sensitive passages in the prompt 0.375 / **0**; voice match 0.95 /
 0.91, fact recall 0.70 / 0.70, hallucination rate 0.0 / **0.33**, rule-based win rate 0.625 /
 0.625, judge win rate 0.625 / 0.50 (inconsistent 0.125 / 0.50), time to first token p50 26.6 /
@@ -2697,7 +2697,7 @@ read-ahead with `--doubletap-read-ahead on`: before each trigger it calls `Draft
 with the request the trigger will send and waits for it, then runs the trigger flow as before.
 
 Run [40993886654](https://github.com/rayhankhilji/nugget/actions/runs/40993886654) at `096586a`
-(2026-10-30), reports in [`results/real-models/run-40993886654/`](results/real-models/run-40993886654/).
+(2026-10-30), reports in `results/real-models/run-40993886654/`.
 Each runner ran all six configurations one after the other, so every row of a runner shares one
 machine; same 12 tasks, temperature 0, seed 42, local prompt budget on (809 prompt tokens p50).
 The Linux job landed on a newer and much faster CPU than AA1's (Intel Xeon Platinum 8573C, 4
@@ -2775,7 +2775,7 @@ three on one AMD EPYC 9V74 runner; each model judges its own drafts, so the judg
 
 **Confirmation run** [40998964453](https://github.com/rayhankhilji/nugget/actions/runs/40998964453)
 at `3a48cab` (same code; reports in
-[`results/real-models/run-40998964453/`](results/real-models/run-40998964453/)) landed on the slow
+`results/real-models/run-40998964453/`) landed on the slow
 CPU of the AA1 runs and on a smaller virtual Mac, which shows the other end of the range:
 
 | Runner | Model | First inserted char p50 / p95, read-ahead off | ... on | Read-ahead time p50 | CPU-s per read-ahead |
@@ -2988,9 +2988,9 @@ turn with its tokens and time, each gate decision, result and verification), fix
 baseline commit (`abe2f74`: Y2's agent plus only the traces and sampling) and the change, and
 runs both back to back. The bench is a debug build in these runs (a release build trusts no
 manifest key here; the model runs in `llama-server`, so the bench's own build barely matters).
-Reports: [`results/real-models/run-40856496441/`](results/real-models/run-40856496441/),
-[`run-40969907505/`](results/real-models/run-40969907505/) and
-[`run-40976264169/`](results/real-models/run-40976264169/).
+Reports: `results/real-models/run-40856496441/`,
+`run-40969907505/` and
+`run-40976264169/`.
 
 **Why the baseline failed** (every failed task in the five baseline arms, 4B and 8B, classified
 from the traces; 28 failures):
@@ -3087,7 +3087,7 @@ target ≥ 0.9) and `judgement.needless_question_rate` (controls with any questi
 goal: every cua task plus `cua/triage_goals.json` (13 harmful goals and 20 benign goals that look
 sensitive). Each comparison ran on one runner, one arm after the other, temperature 0, seed 42:
 run [41018125222](https://github.com/rayhankhilji/nugget/actions/runs/41018125222) at `321ec47`
-(2026-10-30), reports in [`results/real-models/run-41018125222/`](results/real-models/run-41018125222/).
+(2026-10-30), reports in `results/real-models/run-41018125222/`.
 "Off" is the AA2 agent: the clarify guard off leaves the system prompt and tools as they were,
 apart from `ask_user` taking optional options.
 
@@ -3166,7 +3166,7 @@ minutes", which named no security word, so it counted as an ordinary edit. Fixed
 security words; tested in `nugget-computer`). Confirmation run
 [41070490169](https://github.com/rayhankhilji/nugget/actions/runs/41070490169) at `a4d7406`
 (4B, EPYC 9V74, triage off, the 7 settings tasks and the refuse tasks; reports in
-[`results/real-models/run-41070490169/`](results/real-models/run-41070490169/)): the screen-lock
+`results/real-models/run-41070490169/`): the screen-lock
 click is now Security and asks first, **0 unconfirmed risky actions** and 0 false confirmations
 in 10 tasks. The model still did not refuse any harmful task without the triage (0 of 4; the
 simulated user approves what the task asks for), which is the triage's job. The triage is cheap in wall time: refused tasks end
@@ -3184,7 +3184,7 @@ small samples: one task moves a rate by 0.06 to 0.11.
 
 #### QA GG3 follow-up: stop guessing, overreaching and claiming false success (DD3)
 
-QA [GG3](../docs/qa/GG3.md) ran the agent through 81 realistic tasks before DD3 was merged and
+QA GG3 ran the agent through 81 realistic tasks before DD3 was merged and
 found it guessing on ambiguous or unseen targets (it trashed a whole folder, GG3-1), emptying the
 Trash unasked (GG3-2), reporting success after a declined send (GG3-4) and judging a control on a
 stale screen (GG3-7). The follow-up changed the loop: a delete whose object never appeared on
@@ -3204,7 +3204,7 @@ or timed-out send (4 of 4) and stop no-progress loops in 4 to 8 steps instead of
 [41235167757](https://github.com/rayhankhilji/nugget/actions/runs/41235167757), GG3's harness
 `qa/GG3/harness`, before = `7add95a` with DD3, after = `81054f9`; triage **off**, as the daemon
 ships; temperature 0, seed 42; reports in
-[`results/real-models/run-41235167757/`](results/real-models/run-41235167757/)). The ask set is
+`results/real-models/run-41235167757/`). The ask set is
 GG3's 8 ask tasks plus DD3's 9 ambiguous ones; the harness does not answer questions, so asking
 is the measured outcome; the 9 unambiguous controls count needless questions.
 
@@ -3416,7 +3416,7 @@ keep matching query and document embeddings (re-indexing picks the prefixes up).
 #### Quick scale
 
 Run [41015993297](https://github.com/rayhankhilji/nugget/actions/runs/41015993297) at `885a865`
-(2026-10-30), reports in [`results/real-models/run-41015993297/`](results/real-models/run-41015993297/).
+(2026-10-30), reports in `results/real-models/run-41015993297/`.
 One runner: **AMD EPYC 9V45**, 4 vCPUs, 15.6 GiB, `llama-server` b11940 with its default threads.
 2,000 files (one chunk each, ~906 characters), 200 known-item queries; the eval set is 57 Markdown
 notes and 42 labelled queries.
@@ -3442,7 +3442,7 @@ notes and 42 labelled queries.
 #### Standard scale: the recall gate
 
 Run [41027473994](https://github.com/rayhankhilji/nugget/actions/runs/41027473994) at `a4aada5`
-(2026-10-30), reports in [`results/real-models/run-41027473994/`](results/real-models/run-41027473994/).
+(2026-10-30), reports in `results/real-models/run-41027473994/`.
 One runner: **AMD EPYC 9V45**, 4 vCPUs. 5,000 files, 500 known-item queries.
 
 | | hash | nomic, prefixes off | **nomic** (app default) | nomic + reranker, no timeout (first 50 queries) |
@@ -3481,7 +3481,7 @@ Plain RRF ranks any chunk that both lists hold above one list's clear best match
 that list's lowest score and the two lists weighted 0.5 / 0.5. Run
 [41029284336](https://github.com/rayhankhilji/nugget/actions/runs/41029284336) at `01b08c9`
 measured it on the same index as RRF (one runner per scale, **AMD EPYC 9V74**; reports in
-[`results/real-models/run-41029284336/`](results/real-models/run-41029284336/)):
+`results/real-models/run-41029284336/`):
 
 | nomic, same index | RRF (default) | convex |
 |---|---|---|
@@ -3523,7 +3523,7 @@ only as far as the time per passage requires.
 #### Full scale
 
 Run [41070097865](https://github.com/rayhankhilji/nugget/actions/runs/41070097865) at `71dc0bb`
-(2026-10-30), reports in [`results/real-models/run-41070097865/`](results/real-models/run-41070097865/).
+(2026-10-30), reports in `results/real-models/run-41070097865/`.
 One runner: **AMD EPYC 7763**, 4 vCPUs (the slowest CPU of these runs). 20,000 files, 1,000
 known-item queries. (The first attempt, run 41027473994, stopped at the bench's then one-hour limit
 on the initial ingest with 7,713 of 20,000 files embedded; the limit is now five hours for local
@@ -3639,8 +3639,8 @@ All three on GitHub `ubuntu-latest`, **AMD EPYC 7763**, 4 vCPUs (2 cores), CPU o
 `4f89727` (200 min), 8B and 1.7B in run
 [41071346019](https://github.com/rayhankhilji/nugget/actions/runs/41071346019) at `6d2cb34`
 (281 and 149 min; the bench and product code are the same in both). Reports, every answer and every
-judge verdict: [`results/real-models/run-41113756737/`](results/real-models/run-41113756737/) and
-[`results/real-models/run-41071346019/`](results/real-models/run-41071346019/). The 1.7B row
+judge verdict: `results/real-models/run-41113756737/` and
+`results/real-models/run-41071346019/`. The 1.7B row
 exists because the manifest's smallest chat model became the 1.7B with CC1, which the job first
 picked up by default; it is now pinned to the 4B.
 
@@ -3700,7 +3700,7 @@ How to read it:
   takes 3 ms.
 
 A first run on the code before review ([41028090092](https://github.com/rayhankhilji/nugget/actions/runs/41028090092),
-8B, EPYC 9V74; [`results/real-models/run-41028090092/`](results/real-models/run-41028090092/))
+8B, EPYC 9V74; `results/real-models/run-41028090092/`)
 showed the same direction with a scorer the review then fixed (it missed prose refusals and
 under-counted the plain arm's declines).
 
@@ -3716,7 +3716,7 @@ anything from search. Deterministic sensitivity rules (GG4-6, GG5-2) mark health
 credential and legal content without a model, and unknown counts as sensitive until triage
 decides.
 
-Measured with [`qa/HH2`](../qa/HH2/README.md) (workflow `hh2-ingest.yml`): both builds in **one
+Measured with `qa/HH2` (workflow `hh2-ingest.yml`): both builds in **one
 job on one runner**, fresh homes, the GG2 corpus (dated 2026-10-30), `qwen3-4b-q4km`, the same 6
 Ask questions during the sync (from 60 s after the source is added) and again once it settled.
 

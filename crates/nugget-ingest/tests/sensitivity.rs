@@ -1,6 +1,6 @@
 //! QA GG4-6 and GG5-2 (GG5 cases at the end). GG4's persona mail (therapy, clinic, bank fraud alert, HR salary letter,
 //! verification code) must be marked sensitive at ingest, with or without a local model, and
-//! ordinary mail must not be. Fixtures: `tests/fixtures/gg4/` (from `qa/GG4/persona/world`).
+//! ordinary mail must not be. Fixtures: `tests/fixtures/gg4/`.
 
 mod common;
 
@@ -245,8 +245,7 @@ async fn gg5_health_and_finance_files_are_flagged_and_unknown_stays_sensitive() 
 
 /// QA GG7-3: per UI language, five sensitive situations (lab result with a diagnosis, therapy
 /// session, salary letter, bank statement with a loan, one-time code) and two ordinary mails,
-/// written natively (`fixtures/gg7/situations/<lang>/`, generated from
-/// `qa/GG7/scenarios/sensitive/items.py`), plus GG7's 61-item multilingual corpus
+/// written natively (`fixtures/gg7/situations/<lang>/`), plus GG7's 61-item multilingual corpus
 /// (`fixtures/gg7/corpus/`, nothing sensitive in it). Rules only, no model: every situation
 /// must be caught by a rule and nothing ordinary may be.
 #[tokio::test]

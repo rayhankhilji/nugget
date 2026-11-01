@@ -71,7 +71,7 @@ pub fn prompt_budget(context_tokens: u32, max_output: u32) -> usize {
     (f64::from(room) * ESTIMATE_SAFETY) as usize
 }
 
-/// Exit-criterion targets for time to first token, p50 (docs/m3-spec.md).
+/// Exit-criterion targets for time to first token, p50.
 pub const TTFT_TARGET_CLOUD_S: f64 = 1.2;
 pub const TTFT_TARGET_LOCAL_S: f64 = 3.0;
 

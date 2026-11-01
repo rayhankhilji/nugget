@@ -655,7 +655,7 @@ export interface McpClientCreated {
   setup: McpSetupSnippet[];
 }
 
-/** Read-only tools the Nugget MCP server offers (docs/m2-spec.md, M2-D). */
+/** Read-only tools the Nugget MCP server offers. */
 export const MCP_TOOLS: readonly { name: McpToolName; label: MessageKey; description: MessageKey }[] = (
   ["search", "get_context", "get_entity", "find_entities", "get_neighbourhood", "get_item", "recent_changes"] as const
 ).map((name) => ({ name, label: `mcp.tool.${name}.label`, description: `mcp.tool.${name}.description` }) as const);

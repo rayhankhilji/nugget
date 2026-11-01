@@ -1,6 +1,6 @@
 ## What and why
 
-<!-- What does this change do, and why? Link the issue or plan section (docs/PLAN.md, docs/m0-spec.md). -->
+<!-- What does this change do, and why? Link the issue or plan section (docs/PLAN.md). -->
 
 Closes #
 

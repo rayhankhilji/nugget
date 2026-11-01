@@ -174,5 +174,5 @@ scope. We still try to limit the damage it can do, for example through keychain-
 
 ## Security reviews
 
-- [M3–M6 adversarial review](docs/reviews/security-m3-m6.md) (wave W, W8): findings, fixes and
+- M3–M6 adversarial review (wave W, W8): findings, fixes and
   open items with proof-of-concept tests.

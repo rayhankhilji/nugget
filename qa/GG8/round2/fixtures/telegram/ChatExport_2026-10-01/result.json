@@ -1,9 +1,0 @@
-{
- "name": "Dana Kim",
- "type": "personal_chat",
- "id": 4242,
- "messages": [
-  {"id": 1, "type": "message", "date": "2026-10-20T10:00:00", "date_unixtime": "1792490400", "from": "Dana Kim", "from_id": "user4242", "text": "Can you send the Acme renewal deck before Monday? GG8CANARY-TG-1"},
-  {"id": 2, "type": "message", "date": "2026-10-20T10:05:00", "date_unixtime": "1792490700", "from": "Robin Hale", "from_id": "user1", "text": "Sure, Sunday evening at the latest. GG8CANARY-TG-2"}
- ]
-}

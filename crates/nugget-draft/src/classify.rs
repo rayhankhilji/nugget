@@ -1814,7 +1814,7 @@ mod tests {
         assert!(matches!(err, nugget_core::Error::Invalid(_)));
     }
 
-    /// Security review PA-5 (`security-m3-m6-poc/draft_poc.rs`, inverted): terminals and the
+    /// Security review PA-5 (inverted): terminals and the
     /// password managers a11y names are refused by the default lists.
     #[test]
     fn pa5_terminals_and_other_password_managers_are_refused() {

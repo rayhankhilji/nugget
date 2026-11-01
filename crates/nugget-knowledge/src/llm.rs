@@ -2672,9 +2672,6 @@ pub(crate) mod values;
 mod tests;
 
 #[cfg(test)]
-mod replay;
-
-#[cfg(test)]
 mod name_shape_tests {
     use super::not_a_name;
     use nugget_graph::EntityKind::{Event, Organization, Person, Place, Project};

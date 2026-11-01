@@ -1,4 +1,4 @@
-//! Behavioural tests for the public `nugget-store` API (see docs/m0-spec.md, WP-A).
+//! Behavioural tests for the public `nugget-store` API.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

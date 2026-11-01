@@ -1,9 +1,0 @@
-noarg	
-search	nugget://search?q=flight%20lands
-ask	nugget://ask?q=When%20does%20Sam%20land%3F
-creds	nugget://alice:hunter2@search?q=x
-unknown-page	nugget://open/settings
-rlo	nugget://search?q=invoice%E2%80%AEfdp.exe
-plugin-file	/tmp/jj1/pl/ok.nuggetplugin
-plugin-symlink	/tmp/jj1/pl/link.nuggetplugin
-item	nugget://item?source=files-1&key=0%3AInbox%2Fa.eml

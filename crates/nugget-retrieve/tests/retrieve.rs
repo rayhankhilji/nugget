@@ -660,7 +660,7 @@ impl Provider for Recording {
     }
 }
 
-/// GG8's canary notes (`qa/GG8/fixtures/corpus`): sensitive, so ingest leaves them without a
+/// QA GG8's canary notes: sensitive, so ingest leaves them without a
 /// vector when only a cloud embedder is allowed.
 const CANARIES: [(&str, &str); 4] = [
     (
