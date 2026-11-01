@@ -295,7 +295,10 @@ async fn check_embeddings(provider: &dyn Provider) -> Result<(), String> {
         "The cat sat on the mat.".to_string(),
         "Quarterly revenue grew by four percent.".to_string(),
     ];
-    let vecs = provider.embed(&texts).await.map_err(|e| e.to_string())?;
+    let vecs = provider
+        .embed_probe(&texts)
+        .await
+        .map_err(|e| e.to_string())?;
     if vecs.len() != texts.len() {
         return Err(format!(
             "expected {} vectors, got {}",

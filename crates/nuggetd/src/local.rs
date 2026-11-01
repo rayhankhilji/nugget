@@ -723,6 +723,13 @@ impl Provider for RuntimeSlot {
         self.ready().await?.embed_items(texts, items).await
     }
 
+    async fn embed_probe(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if self.role != RuntimeRole::Embedding {
+            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
+        }
+        self.ready().await?.embed_probe(texts).await
+    }
+
     /// The served model's task prefixes: from its config once running, else from its id (the
     /// runtime serves a model under its manifest id).
     fn embed_prefixes(&self) -> (String, String) {
@@ -811,6 +818,10 @@ impl Provider for ForegroundAware {
 
     async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
         self.inner.embed_items(texts, items).await
+    }
+
+    async fn embed_probe(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.inner.embed_probe(texts).await
     }
 
     fn embed_prefixes(&self) -> (String, String) {

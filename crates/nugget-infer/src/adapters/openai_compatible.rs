@@ -50,8 +50,8 @@ use crate::provider::{Common, Prepared, Provider, auth_header};
 use crate::schema::is_strict_compatible;
 use crate::sse::SseEvent;
 use crate::types::{
-    ChatEvent, ChatRequest, ChatStream, FEATURE_EMBED, Message, Part, ProviderMeta, Role,
-    StopReason,
+    ChatEvent, ChatRequest, ChatStream, FEATURE_EMBED, FEATURE_PROBE, Message, Part, ProviderMeta,
+    Role, StopReason,
 };
 use nugget_core::capability::Locality;
 
@@ -580,8 +580,25 @@ impl Provider for OpenAiCompatibleProvider {
         self.embed_items(texts, &[]).await
     }
 
+    async fn embed_probe(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.embed_for(texts, &[], FEATURE_PROBE).await
+    }
+
     /// Each batch's ledger row lists the distinct items of its texts.
     async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+        self.embed_for(texts, items, FEATURE_EMBED).await
+    }
+}
+
+impl OpenAiCompatibleProvider {
+    /// Embed `texts` in batches; each batch's ledger row is recorded under `feature` and lists
+    /// the distinct items of its texts.
+    async fn embed_for(
+        &self,
+        texts: &[String],
+        items: &[ItemRef],
+        feature: &str,
+    ) -> Result<Vec<Vec<f32>>> {
         let batch = self
             .common
             .cfg
@@ -604,7 +621,7 @@ impl Provider for OpenAiCompatibleProvider {
             let v = self
                 .common
                 .http
-                .post_for_json("embeddings", &body, FEATURE_EMBED, &refs)
+                .post_for_json("embeddings", &body, feature, &refs)
                 .await?;
             out.extend(parse_embeddings(&self.common.id, &v, chunk.len())?);
         }

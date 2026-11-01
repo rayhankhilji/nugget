@@ -72,6 +72,30 @@ async fn non_local_requests_record_feature_items_and_bytes() {
     assert!(embed.bytes_received > 0);
 }
 
+/// GG8 round 2 (R2-4): the probe's embeddings check sends two fixed sentences and is recorded
+/// as `probe`, not as an embedding of user data.
+#[tokio::test]
+async fn the_probe_embeddings_check_is_recorded_as_probe() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/embeddings"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+            {"index": 0, "embedding": [0.1, 0.2]},
+            {"index": 1, "embedding": [0.3, 0.4]}
+        ]})))
+        .mount(&server)
+        .await;
+    let (p, sink) = provider(
+        &format!("{OAI}\nlocality = \"local_network\""),
+        &format!("{}/v1", server.uri()),
+    );
+    p.embed_probe(&["a".into(), "b".into()]).await.unwrap();
+    let events = sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].feature, "probe");
+    assert!(events[0].items.is_empty());
+}
+
 #[tokio::test]
 async fn on_device_records_nothing_even_on_errors() {
     let server = MockServer::start().await;

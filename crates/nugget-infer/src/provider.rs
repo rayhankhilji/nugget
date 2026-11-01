@@ -41,6 +41,12 @@ pub trait Provider: Send + Sync {
     async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         self.embed(texts).await
     }
+    /// The capability probe's embeddings check: the same request as [`Provider::embed`] with
+    /// fixed, non-user texts, recorded in the egress ledger under `probe` rather than `embed`
+    /// (GG8 round 2, R2-4). Wrappers forward it.
+    async fn embed_probe(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.embed(texts).await
+    }
     /// [`Provider::embed`] with the item each text comes from (`items[i]` for `texts[i]`; empty
     /// when unknown), so the egress ledger lists the items whose content left the device. The
     /// default ignores `items`; adapters that call a server record them. Wrappers forward it.

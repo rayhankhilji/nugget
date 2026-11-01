@@ -44,7 +44,8 @@ Features you will see:
 | `embed` | Embeddings sent to a non-local embedding provider (only if you opted in, or a LAN server) |
 | `triage` | Triage on a local-network provider (cloud is never used for triage) |
 | `knowledge` | LLM fact extraction on a non-local provider (only for sources you allowed) |
-| `probe` | Capability probes of a non-local provider |
+| `probe` | Capability probes of a non-local provider, including its embeddings check (two fixed sentences, no data of yours) |
+| `prewarm` | Opening the connection to a cloud provider ahead of a Double Tap draft (a request listing the provider's models, with your key; no data of yours) |
 | `sync:gmail`, `sync:gcal`, `sync:gdrive`, `sync:imap`, `sync:caldav` | Connector syncs, including OAuth token refreshes |
 | `model_download`, `runtime_download` | Downloading a model or the `llama-server` runtime |
 | `update_check` | The desktop app checking the update channel you chose: the feed, its signature, and the feed again through the updater (see [Install: Updates](install.md#updates)) |
