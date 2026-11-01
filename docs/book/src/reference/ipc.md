@@ -49,8 +49,11 @@ object per line, over a local socket. The protocol types live in `nugget_core::i
 | `providers.probe` | `ProbeRequest`: `{provider}` | `Capabilities`: `streaming`, `vision`, `tools`, `json_schema`, `embeddings`, `context_tokens` | yes |
 | `models.list` | `{}` | list of `ModelInfo`: `id`, `size_bytes`, `installed`, `recommended`, `family`, `tiers`, `license`, `revision`, `update_available` | yes |
 | `models.install` | `ModelInstallRequest`: `{id}` | `null`, then `models.progress` notifications | yes |
+| `models.cancel` | `ModelCancelRequest`: `{id}` | `{cancelled}` (`false` if no install of `id` was running); the install's connection gets a final `failed` progress with reason `cancelled`, and the staged bytes are kept so the next `models.install` resumes | yes |
 | `egress.recent` | `EgressRecentRequest`: `{limit}` (at most 1000) | list of `EgressEvent`: `at`, `host`, `feature`, `bytes_sent`, `bytes_received`, `items` | yes |
-| `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat` or `embedding`), `state`, `provider`, `error`. Empty when `[runtime]` is disabled | yes |
+| `egress.record` | `EgressRecordRequest`: `host` (bare `host[:port]`), `feature` (`update_check` or `update_download` only), `bytes_sent`, `bytes_received` (default 0), `at` (RFC 3339, default now; at most 5 minutes ahead and 30 days old; stored in UTC) | `null`. A request the desktop app made itself, written to the ledger with no items. Host: a DNS name, an IPv4 address or a bracketed IPv6 address, optional port. At most 60 rows a minute across all clients (`SERVER_BUSY` beyond) | yes |
+| `runtime.status` | `{}` | list of `RuntimeInfo`: `model_id`, `role` (`chat`, `embedding`, `rerank` or `draft`), `state`, `provider`, `error` (one plain sentence), and when present `state_ms` (time in this state: the warm-up so far while `starting`), `expected_ms` (expected load time while `starting`), `retry_in_ms` (next automatic restart while `failed`), `gave_up` (`failed` and waiting for `runtime.retry`), `detail` (the server's last line). Empty when `[runtime]` is disabled | yes |
+| `runtime.retry` | `RuntimeRetryRequest`: `{role}` | `{started}`: clears a failed start or a give-up and starts the role's server in the background (`false` when its model is not installed) | yes |
 
 `RuntimeInfo.state` is one of `not_installed`, `stopped`, `starting`, `ready`, `failed`.
 
@@ -71,6 +74,14 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `search` | `SearchRequest`: `{query, limit}` (`limit` at most 200) | list of `SearchHit`: `item`, `chunk_id`, `title`, `snippet`, `score`, `url` | yes |
+| `search.faceted` | `{query, limit, offset, filters, utc_offset_minutes, time_zone}`: `filters` has `sources`, `kinds` (`mail`, `event`, `chat`, `file`), `people`, `from`, `to`; `limit` at most 100 | Hits (each with its item date, kind, `sensitive` and people) and facet counts for `sources`, `kinds`, `people` and `months` | yes |
+| `search.timeline` | `{entity, from, to, limit, utc_offset_minutes, time_zone}` (`limit` at most 1000) | The entity's items and active facts in time order (the newest `limit`), month counts and `truncated` | yes |
+| `search.preview` | `{item, chunk_id, utc_offset_minutes, time_zone}` | The item's text (at most 20,000 characters), the matched passage, its people and its facts with quotes | yes |
+
+`time_zone` is an IANA name (`Europe/Berlin`): with it, `from`/`to` days and `months` buckets use
+each date's own offset, so ranges across a daylight-saving change are right. Without it, or for a
+name the daemon's bundled time zone database lacks, `utc_offset_minutes` (the client's current
+offset) applies to every date, and without that the configured `[retrieve] date_utc_offset_minutes`.
 
 ### Retrieval
 
@@ -78,7 +89,7 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `retrieve.context` | `ContextRequest`: `{query, budget_tokens}` (budget at most 131072) | `ContextResponse`: `text` (passages, each under a `[n]` header), `citations`, `excluded_sensitive` | yes |
-| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten); then `chat.delta` and `chat.done` | yes |
+| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten), `general`, `date` (when the question named a date), `partial` (citation numbers of near misses); then `chat.delta` and `chat.done` | yes |
 
 A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. For `retrieve.ask` the daemon chooses
 the provider first, then packs the context for it: with a `cloud` provider, sensitive items are left out
@@ -86,6 +97,15 @@ and counted in `excluded_sensitive`, and the context is repacked if it falls bac
 With `history`, a follow-up question is first rewritten into a standalone query for retrieval, by a
 local (never `cloud`) chat model or, without one, a heuristic; the earlier user and assistant turns
 then go to the model before the question (`system` entries are ignored, and the turns are bounded).
+
+`AskStarted.date` reports a date phrase in the question ("last week", "in March"):
+`{phrase, start, end, applied, listed}`, with `start` (inclusive) and `end` (exclusive) as RFC 3339
+at the offset the phrase was read with. `applied: false` means nothing dated in the range matched,
+so the question was searched without it; `listed: true` means the question was generic ("summarise
+last week") and the sources are the period's items by date. `AskStarted.partial` lists the `n` of
+citations whose item lacks most of the question's rare key words: at best a near miss. The desktop
+shows both under the answer ("Searched items from 26 Oct to 1 Nov", a "Partial match" label). Both
+fields are absent when empty and from older daemons.
 
 ### Sources and ingest
 
@@ -117,8 +137,8 @@ Entity kinds: `person`, `organization`, `project`, `commitment`, `preference`, `
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `knowledge.entities` | `EntitiesRequest`: `text`, `kind`, `limit`, `offset` | list of `EntitySummaryView`: `id`, `kind`, `name`, `claims`, `mentions`, `updated_at` | yes |
-| `knowledge.entity` | `EntityRef`: `{id}` | `EntityDetail`: `id`, `kind`, `name`, `aliases`, `identifiers`, `attributes`, `claims`, `mentions`, `vault_path` | yes |
-| `knowledge.graph` | `GraphRequest`: `center` (or `null` for an overview), `depth`, `limit`, `kinds`, `source` (optional source filter) | `GraphViewIpc`: `nodes`, `edges`, `truncated` | yes |
+| `knowledge.entity` | `EntityRef`: `{id}` | `EntityDetail`: `id`, `kind`, `name`, `aliases`, `identifiers`, `attributes`, `claims` (each with `sensitive`), `mentions`, `vault_path`, `sensitive` (known only from sensitive items) | yes |
+| `knowledge.graph` | `GraphRequest`: `center` (or `null` for an overview), `depth`, `limit`, `kinds`, `source` (optional source filter), `include_sensitive` (default `false`: entities and facts known only from sensitive items are left out, except the centre) | `GraphViewIpc`: `nodes` (each with `sensitive`), `edges`, `truncated` | yes |
 | `knowledge.merge` | `MergeRequest`: `{into, from}` | `null` | yes |
 | `knowledge.split` | `SplitRequest`: `{entity, claims, name, kind?, aliases?, identifiers?}` (moves the listed facts, aliases and identifiers to a new entity) | `EntityRef` of the new entity | yes |
 | `knowledge.claim.status` | `ClaimStatusRequest`: `{claim, status}`, status `rejected` (sticky reject; `retracted` is an older spelling), `active` (restore), `user_asserted` or `unasserted` (undo the user's assertion) | `null` | yes |
@@ -150,6 +170,7 @@ Status: being wired in (wave W, Double Tap). The contracts below are already in 
 | `draft.prewarm` | A partial `DraftContext` (as much as is known when the trigger fires) | `{provider, locality, retrieval}`, or `null` when drafting is refused or disabled. Starts provider warm-up, retrieval and the voice lookup before `draft.begin` | yes |
 | `draft.read_ahead` | `DraftRequest`, as for `draft.begin` (the context read while the field has focus) | Answers within about 100 ms. `{"started": true}` while the prompt is being prefilled into a non-cloud server's cache in the background, `{"started": true, "done": true}` if it already finished, or `{"started": false, "skipped": reason}` with `disabled`, `refused`, `cloud`, `rate_limited`, `unchanged`, `unavailable` or `cancelled`. No text is generated, nothing is sent when the draft would go to a cloud provider, and nothing is audited or stored | yes |
 | `draft.read_ahead_cancel` | `{}` | `{cancelled}`: whether a read-ahead was in flight. Sent when focus leaves the field | yes |
+| `draft.check_sensitive` | `{text}` | `{sensitive}`: whether the ingest PII scan (cards, IBANs, SSNs, API keys and other credentials) finds anything; text over 64 KiB is sensitive. The desktop asks before keeping a draft in its history; nothing is logged | yes |
 | `voice.status` | `{}` | `VoiceStatus`: `samples`, `channels`, `last_built` | yes |
 
 A field with `secure: true` (a password field) is refused, and its value is never read.
@@ -210,6 +231,7 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 | `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | yes |
 | `plugins.remove` | A plugin | Uninstalls it | yes |
 | `plugins.enable` | A plugin and on or off | Turns it on or off | yes |
+| `plugins.catalog` | `{}` | Signed packages found in the catalog folders, verified but not installed, with their trust, requested access and whether they update an installed plugin | yes |
 
 ## Notifications
 
@@ -218,7 +240,8 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 |---|---|---|
 | `chat.delta` | `ChatDelta`: `{stream_id, text}` | A chat, Ask or draft stream produced text |
 | `chat.done` | `ChatDone`: `{stream_id, error, input_tokens, output_tokens}`; `error` is `null` on success | The stream ended, failed or was cancelled |
-| `models.progress` | `ModelProgress`: `{id, downloaded, total, phase, error}`, `phase` one of `downloading`, `verifying`, `installed`, `failed` | A model install progressed |
+| `ask.restarted` | `AskRestarted`: `{stream_id, provider, locality, citations, excluded_sensitive, general, date, partial}` | An Ask fell back to another provider before its first delta: replace the sources shown so far with these citations; deltas of the new provider follow |
+| `models.progress` | `ModelProgress`: `{id, downloaded, total, phase, error, reason?, http_status?}`, `phase` one of `downloading`, `verifying`, `installed`, `failed`. In `failed`, `downloaded` is the bytes staged for a resume, `error` a short plain-language message, and `reason` one of `offline`, `http_error` (with `http_status`), `captive_portal`, `stalled`, `interrupted`, `disk_full`, `integrity`, `cancelled`, `other` | A model install progressed |
 | `ingest.progress` | `IngestProgress`: `{source, phase, done, total, error}`, `phase` one of `scanning`, `indexing`, `idle`, `error` | A source's sync progressed |
 | `sources.changed` | A `SourceInfo`; or `{"id": …, "removed": true}`; or `{"lagged": n}` | A source was added, changed (including after sign-in) or removed. Treat anything but a `SourceInfo` as "refetch `sources.list`" |
 | `knowledge.changed` | `KnowledgeChanged`: `{entities}` | Entities changed (after an extraction run, a merge, a claim status change or a vault edit) |

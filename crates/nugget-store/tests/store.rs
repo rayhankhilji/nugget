@@ -694,6 +694,178 @@ mod sources {
     }
 
     #[test]
+    fn set_item_metadata_keeps_updated_at_chunks_and_checks_the_hash() {
+        let store = Store::open_in_memory().unwrap();
+        let new = NewItem::new("s", "k", "h1").with_text("alpha text");
+        store.upsert_item(&new).unwrap();
+        store
+            .replace_chunks(&new.item, &[NewChunk::text("alpha text")])
+            .unwrap();
+        let before = store.get_item(&new.item).unwrap().unwrap();
+        let meta = serde_json::json!({"triage": {"state": "done"}, "sensitive": false});
+        assert!(store.set_item_metadata(&new.item, "h1", &meta).unwrap());
+        let after = store.get_item(&new.item).unwrap().unwrap();
+        assert_eq!(after.metadata, meta);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(after.text.as_deref(), Some("alpha text"));
+        assert_eq!(store.search_text("alpha", 10).unwrap().len(), 1);
+        // Another content hash: nothing written.
+        assert!(
+            !store
+                .set_item_metadata(&new.item, "other", &serde_json::json!({}))
+                .unwrap()
+        );
+        assert_eq!(store.get_item(&new.item).unwrap().unwrap().metadata, meta);
+    }
+
+    #[test]
+    fn legacy_triage_items_are_listed_and_chunkless_junk_is_reset() {
+        let store = Store::open_in_memory().unwrap();
+        let r = |s: &str, k: &str| nugget_core::ids::ItemRef {
+            source: SourceId::new(s),
+            key: ItemKey::new(k),
+        };
+        let put = |k: &str, meta: serde_json::Value, chunk: bool| {
+            let new = NewItem::new("s", k, "h")
+                .with_metadata(meta)
+                .with_version("v1");
+            store.upsert_item(&new).unwrap();
+            if chunk {
+                store
+                    .replace_chunks(&new.item, &[NewChunk::text("t")])
+                    .unwrap();
+            }
+        };
+        put(
+            "junk",
+            serde_json::json!({"junk": true, "triage": {"keep": false}}),
+            false,
+        );
+        put(
+            "old",
+            serde_json::json!({"junk": false, "sensitive": false}),
+            true,
+        );
+        put(
+            "new",
+            serde_json::json!({"triage": {"state": "done"}, "junk": true}),
+            false,
+        );
+        assert_eq!(
+            store.items_without_triage_state(None, 10).unwrap(),
+            vec![r("s", "junk"), r("s", "old")]
+        );
+        assert_eq!(
+            store
+                .items_without_triage_state(Some(&r("s", "junk")), 10)
+                .unwrap(),
+            vec![r("s", "old")]
+        );
+        assert_eq!(store.reset_versions_of_legacy_junk().unwrap(), 1);
+        let v = |k: &str| store.get_item(&r("s", k)).unwrap().unwrap().version;
+        assert_eq!(v("junk"), None);
+        assert_eq!(v("old").as_deref(), Some("v1"));
+        assert_eq!(v("new").as_deref(), Some("v1"));
+        assert_eq!(store.reset_versions_of_legacy_junk().unwrap(), 0);
+    }
+
+    #[test]
+    fn items_pending_triage_lists_pending_items_in_pages() {
+        let store = Store::open_in_memory().unwrap();
+        let meta = |state: &str| serde_json::json!({"triage": {"state": state}});
+        for (s, k, m) in [
+            ("b", "two", meta("pending")),
+            ("a", "one", meta("pending")),
+            ("a", "done", meta("done")),
+            ("a", "none", serde_json::json!({})),
+        ] {
+            store
+                .upsert_item(&NewItem::new(s, k, "h").with_metadata(m))
+                .unwrap();
+        }
+        let r = |s: &str, k: &str| nugget_core::ids::ItemRef {
+            source: SourceId::new(s),
+            key: ItemKey::new(k),
+        };
+        assert_eq!(
+            store.items_pending_triage(None, 10).unwrap(),
+            vec![r("a", "one"), r("b", "two")]
+        );
+        assert_eq!(
+            store.items_pending_triage(None, 1).unwrap(),
+            vec![r("a", "one")]
+        );
+        assert_eq!(
+            store
+                .items_pending_triage(Some(&r("a", "one")), 10)
+                .unwrap(),
+            vec![r("b", "two")]
+        );
+        assert!(store.items_pending_triage(None, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn items_failed_triage_lists_retryable_failures_in_pages() {
+        let store = Store::open_in_memory().unwrap();
+        for (s, k, m) in [
+            (
+                "b",
+                "two",
+                serde_json::json!({"triage": {"state": "failed", "failures": 2, "failed_at": 100}}),
+            ),
+            (
+                "a",
+                "one",
+                serde_json::json!({"triage": {"state": "failed"}}),
+            ),
+            (
+                "a",
+                "gone",
+                serde_json::json!({"triage": {"state": "failed", "failures": 3, "failed_at": 5}}),
+            ),
+            (
+                "a",
+                "done",
+                serde_json::json!({"triage": {"state": "done"}}),
+            ),
+            (
+                "a",
+                "pending",
+                serde_json::json!({"triage": {"state": "pending", "failures": 1}}),
+            ),
+        ] {
+            store
+                .upsert_item(&NewItem::new(s, k, "h").with_metadata(m))
+                .unwrap();
+        }
+        let r = |s: &str, k: &str| nugget_core::ids::ItemRef {
+            source: SourceId::new(s),
+            key: ItemKey::new(k),
+        };
+        assert_eq!(
+            store.items_failed_triage(None, 3, 10).unwrap(),
+            vec![(r("a", "one"), 1, 0), (r("b", "two"), 2, 100)]
+        );
+        assert_eq!(
+            store.items_failed_triage(None, 4, 10).unwrap().len(),
+            3,
+            "under a higher cap the third failure is retryable"
+        );
+        assert_eq!(
+            store.items_failed_triage(None, 3, 1).unwrap(),
+            vec![(r("a", "one"), 1, 0)]
+        );
+        assert_eq!(
+            store
+                .items_failed_triage(Some(&r("a", "one")), 3, 10)
+                .unwrap(),
+            vec![(r("b", "two"), 2, 100)]
+        );
+        assert!(store.items_failed_triage(None, 3, 0).unwrap().is_empty());
+        assert!(store.items_failed_triage(None, 1, 10).unwrap().is_empty());
+    }
+
+    #[test]
     fn items_missing_embeddings_lists_text_only_items_in_pages() {
         let store = Store::open_in_memory().unwrap();
         // No vector table yet: every item with chunks is listed; chunkless items never are.

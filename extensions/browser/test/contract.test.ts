@@ -21,7 +21,7 @@ function check(name: string, value: unknown) {
 
 describe("protocol fixtures shared with Rust", () => {
   it("form and checkout snapshots, and a type act result", async () => {
-    const opts = { measure, settleMs: 0, token: "fx", now: () => 1700000000000 };
+    const opts = { measure, settleMs: 0, token: "fx", salt: "fx-salt", now: () => 1700000000000 };
     const form = new PageAgent(dom(fixture("form.html")), opts);
     const snap = form.snapshot();
     check("form-snapshot.json", snap);

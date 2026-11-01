@@ -1,14 +1,18 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { api, events, isMethodNotFound, type EntityKind, type SourceInfo } from "../api";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { api, events, isMethodNotFound, type EntityKind, type EntitySummaryView, type SourceInfo } from "../api";
 import { useAsync, useDebounced, useEvent } from "../hooks";
 import { useT, type MessageKey } from "../i18n";
 import { graphSourceOptions, kindLabel } from "../knowledge";
 import { EntityDetailPanel } from "../components/EntityDetail";
 import { GraphPanel, KindChips } from "../components/GraphView";
 import { GoToPage } from "../components/GoToPage";
-import { Empty, EmptyState, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { Empty, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader } from "../components/ui";
+import { usePagedList } from "../components/usePagedList";
+import { VirtualList } from "../components/VirtualList";
 
+/** Entities fetched per request as the list scrolls. */
 const PAGE_SIZE = 50;
+const entityKey = (e: EntitySummaryView) => e.id;
 type Tab = "browse" | "graph";
 const TABS: { id: Tab; label: MessageKey }[] = [
   { id: "browse", label: "knowledge.tab.browse" },
@@ -40,6 +44,8 @@ export function KnowledgePage() {
   });
 
   const vaultRoot = status.data?.vault.path ?? null;
+  // One page-level error: when the status fails, the list's own error (usually the same) is not repeated.
+  const pageError = status.error != null && !isMethodNotFound(status.error);
   const s = status.data;
 
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -79,7 +85,9 @@ export function KnowledgePage() {
         title={t("knowledge.title")}
         description={t("knowledge.description")}
         actions={
-          s && (
+          // The graph tab has its own count line.
+          s &&
+          tab === "browse" && (
             <p className="muted small knowledge-counts">
               {s.pending_items > 0
                 ? t("knowledge.countsWaiting", { entities: s.entities, claims: s.claims, pending: s.pending_items })
@@ -88,7 +96,15 @@ export function KnowledgePage() {
           )
         }
       />
-      {status.error != null && !isMethodNotFound(status.error) && <ErrorNote error={status.error} onRetry={status.reload} />}
+      {pageError && (
+        <ErrorNote
+          error={status.error}
+          onRetry={() => {
+            status.reload();
+            setListTick((n) => n + 1);
+          }}
+        />
+      )}
 
       <div className="tabs" role="tablist" aria-label={t("knowledge.tabsLabel")} onKeyDown={onTabKey}>
         {TABS.map((x) => (
@@ -112,24 +128,31 @@ export function KnowledgePage() {
       </div>
 
       {tab === "browse" && (
-        <div id="kb-panel-browse" role="tabpanel" aria-labelledby="kb-tab-browse" className="kb-layout">
-          <EntityBrowser
-            selected={selected}
-            onSelect={setSelected}
-            total={s?.entities ?? null}
-            refreshKey={listTick}
-            noSources={sources.data?.length === 0}
-            pending={s?.pending_items ?? 0}
-          />
-          <div className="kb-detail">
-            {detail || (s?.entities !== 0 && <Empty title={t("knowledge.chooseTitle")}>{t("knowledge.chooseBody")}</Empty>)}
+        <div id="kb-panel-browse" role="tabpanel" aria-labelledby="kb-tab-browse" className="kb-panel">
+          <div className={selected ? "kb-layout kb-layout-selected" : "kb-layout"}>
+            <EntityBrowser
+              selected={selected}
+              onSelect={setSelected}
+              total={s?.entities ?? null}
+              refreshKey={listTick}
+              noSources={sources.data?.length === 0}
+              pending={s?.pending_items ?? 0}
+              hideError={pageError}
+            />
+            {(detail || (s && s.entities > 0)) && (
+              <div className="kb-detail">
+                {detail || <Empty title={t("knowledge.chooseTitle")}>{t("knowledge.chooseBody")}</Empty>}
+              </div>
+            )}
           </div>
         </div>
       )}
       {tab === "graph" && (
-        <div id="kb-panel-graph" role="tabpanel" aria-labelledby="kb-tab-graph" className={selected ? "kb-graph kb-graph-with-detail" : "kb-graph"}>
-          <GraphPanel center={center} onCenter={setCenter} selected={selected} onOpen={setSelected} sources={sourceOptions} />
-          {selected && <div className="kb-detail kb-detail-side">{detail}</div>}
+        <div id="kb-panel-graph" role="tabpanel" aria-labelledby="kb-tab-graph" className="kb-panel">
+          <div className={selected ? "kb-graph kb-graph-with-detail" : "kb-graph"}>
+            <GraphPanel center={center} onCenter={setCenter} selected={selected} onOpen={setSelected} sources={sourceOptions} />
+            {selected && <div className="kb-detail kb-detail-side">{detail}</div>}
+          </div>
         </div>
       )}
     </div>
@@ -143,6 +166,7 @@ function EntityBrowser({
   refreshKey,
   noSources,
   pending,
+  hideError,
 }: {
   selected: string | null;
   onSelect: (id: string) => void;
@@ -153,46 +177,45 @@ function EntityBrowser({
   noSources: boolean;
   /** Items still waiting for extraction. */
   pending: number;
+  /** The page already shows an error (the list's would repeat it). */
+  hideError?: boolean;
 }) {
   const t = useT();
   const [text, setText] = useState("");
   const query = useDebounced(text.trim(), 250);
   const [kind, setKind] = useState<EntityKind | null>(null);
-  // The page resets whenever the filter changes (without an extra fetch for the old page).
-  const filterKey = `${query}\u0000${kind ?? ""}`;
-  const [paging, setPaging] = useState({ key: filterKey, page: 0 });
-  const page = paging.key === filterKey ? paging.page : 0;
-  const setPage = (p: number) => setPaging({ key: filterKey, page: p });
-
-  const list = useAsync(
-    () => api.knowledgeEntities({ text: query || null, kind, limit: PAGE_SIZE + 1, offset: page * PAGE_SIZE }),
-    [query, kind, page, refreshKey],
+  // Pages load as the list scrolls (II5); a new filter or a merge starts over from the top.
+  const fetchPage = useCallback(
+    (offset: number, limit: number) => api.knowledgeEntities({ text: query || null, kind, limit, offset }),
+    [query, kind],
   );
+  const list = usePagedList(fetchPage, `${query}\u0000${kind ?? ""}\u0000${refreshKey}`, { pageSize: PAGE_SIZE, itemKey: entityKey });
 
-  // Keep the list fresh while extraction runs, without refetching on every event.
-  const { reload } = list;
+  // Keep the list fresh while extraction runs, without refetching on every event (and without
+  // pulling a long scrolled-through list from under the reader: see `refresh`).
+  const { refresh } = list;
   const last = useRef(0);
   useEvent(events.onKnowledgeChanged, () => {
     if (Date.now() - last.current > 3000) {
       last.current = Date.now();
-      reload();
+      refresh();
     }
   });
 
-  const rows = (list.data ?? []).slice(0, PAGE_SIZE);
-  const hasMore = (list.data?.length ?? 0) > PAGE_SIZE;
+  const rows = list.items ?? [];
+  const hasMore = list.hasMore;
   const filtered = Boolean(query || kind);
-  const from = page * PAGE_SIZE + 1;
-  const to = page * PAGE_SIZE + rows.length;
-
-  const onListKey = (e: KeyboardEvent<HTMLUListElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button.entity-row"));
-    const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    if (i < 0) return;
-    e.preventDefault();
-    buttons[Math.min(buttons.length - 1, Math.max(0, i + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
-  };
+  // Nothing extracted at all: no point offering search and kind filters.
+  // Only when the settled, unfiltered list is empty: never while a query or kind is set, typed but
+  // not yet debounced, or reloading (the stale result of an old query would unmount the field).
+  const nothing = !filtered && !text.trim() && !kind && !list.loading && list.items !== undefined && rows.length === 0;
+  const firstLoad = list.loading && !list.items;
+  // Once the filters have been offered they stay mounted, so focus in them is never dropped.
+  const filtersShown = useRef(false);
+  const showFilters = filtersShown.current || (!nothing && !(firstLoad && !filtered) && !(list.error != null && !list.items));
+  filtersShown.current = showFilters;
+  // "of N" from the status count, but never fewer than the list itself holds.
+  const known = !filtered && total != null && total > 0 ? Math.max(total, rows.length + (hasMore ? 1 : 0)) : null;
 
   if (isMethodNotFound(list.error)) {
     return (
@@ -204,6 +227,8 @@ function EntityBrowser({
 
   return (
     <section className="kb-list" aria-label={t("knowledge.entitiesLabel")}>
+      {showFilters && (
+        <>
       <div className="field">
         <label htmlFor="kb-search" className="visually-hidden">
           {t("knowledge.searchLabel")}
@@ -226,52 +251,57 @@ function EntityBrowser({
         label={t("knowledge.filterByKind")}
         single
       />
+        </>
+      )}
       <p className="muted small kb-count" aria-live="polite">
-        {list.loading && !list.data ? (
-          t("knowledge.loading")
+        {firstLoad ? (
+          ""
         ) : rows.length === 0 ? (
           filtered ? t("knowledge.noMatches") : ""
-        ) : !filtered && total != null ? (
-          t("knowledge.rangeOf", { from, to, total })
+        ) : known != null ? (
+          t("knowledge.rangeOf", { from: 1, to: rows.length, total: known })
         ) : hasMore ? (
-          t("knowledge.rangeMore", { from, to })
+          t("knowledge.rangeMore", { from: 1, to: rows.length })
         ) : (
-          t("knowledge.range", { from, to })
+          t("knowledge.range", { from: 1, to: rows.length })
         )}
       </p>
-      <ErrorNote error={list.error} onRetry={list.reload} />
-      {list.data && rows.length === 0 && !filtered && (
-        <EmptyState title={t("knowledge.emptyTitle")} action={noSources ? <GoToPage page="sources" /> : undefined}>
+      {firstLoad && <Loading label={t("knowledge.loading")} lines={6} />}
+      {!hideError && <ErrorNote error={list.error} onRetry={list.reload} />}
+      {list.items && rows.length === 0 && !filtered && (
+        <EmptyState title={t("knowledge.emptyTitle")} action={noSources ? <GoToPage page="sources" className="btn btn-primary" /> : undefined}>
           {noSources ? t("knowledge.emptyNoSources") : pending > 0 ? t("knowledge.emptyPending", { n: pending }) : t("knowledge.emptyBody")}
         </EmptyState>
       )}
-      <ul className="entity-list" onKeyDown={onListKey} aria-busy={list.loading || undefined}>
-        {rows.map((e) => (
-          <li key={e.id}>
-            <button type="button" className="entity-row" aria-current={e.id === selected ? "true" : undefined} onClick={() => onSelect(e.id)}>
-              <span className="entity-row-name">
-                <span className={`kind-dot kind-${e.kind}`} aria-hidden="true" />
-                <span dir="auto">{e.name}</span>
-              </span>
-              <span className="muted small">
-                {t("knowledge.rowMeta", { kind: kindLabel(e.kind), claims: e.claims, mentions: e.mentions })}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {(page > 0 || hasMore) && (
-        <nav className="pager" aria-label={t("knowledge.pagesLabel")}>
-          <button type="button" className="btn btn-small" onClick={() => setPage(page - 1)} disabled={page === 0 || list.loading}>
-            {t("knowledge.previous")}
+      <VirtualList
+        as="ul"
+        className="entity-list"
+        aria-busy={list.loading || undefined}
+        items={rows}
+        itemKey={entityKey}
+        estimateSize={50}
+        focus="inner"
+        total={known ?? undefined}
+        hasMore={hasMore}
+        loadingMore={list.loadingMore}
+        onEndReached={list.loadMore}
+        renderItem={(e, { tabIndex }) => (
+          <button
+            type="button"
+            className="entity-row"
+            data-vl-focus=""
+            tabIndex={tabIndex}
+            aria-current={e.id === selected ? "true" : undefined}
+            onClick={() => onSelect(e.id)}
+          >
+            <span className="entity-row-name">
+              <span className={`kind-dot kind-${e.kind}`} aria-hidden="true" />
+              <span dir="auto">{e.name}</span>
+            </span>
+            <span className="muted small">{t("knowledge.rowMeta", { kind: kindLabel(e.kind), claims: e.claims, mentions: e.mentions })}</span>
           </button>
-          <span className="muted small">{t("knowledge.page", { n: page + 1 })}</span>
-          <button type="button" className="btn btn-small" onClick={() => setPage(page + 1)} disabled={!hasMore || list.loading}>
-            {t("common.next")}
-          </button>
-          {list.loading && <Spinner />}
-        </nav>
-      )}
+        )}
+      />
     </section>
   );
 }

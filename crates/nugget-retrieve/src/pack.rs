@@ -33,6 +33,9 @@ pub(crate) struct PackItem {
     pub sensitive: bool,
     /// The item's date (`YYYY-MM-DD`), for `Citation::date`.
     pub date: Option<String>,
+    /// The item lacks a key term of the query (see `Retriever::partial_matches`); reported as
+    /// [`PackedPassage::partial`] so a prompt can tell a near miss from an answer.
+    pub partial: bool,
     pub primary: Chunk,
     /// Chunks at `ord - 1` and `ord + 1` that exist.
     pub neighbours: Vec<Chunk>,
@@ -87,25 +90,33 @@ fn render(blocks: &[Block], items: &[PackItem]) -> String {
         }
         out.push_str(&header(b.n, &items[b.idx]));
         out.push('\n');
-        let mut prev: Option<u32> = None;
-        for (ord, piece) in &b.pieces {
-            match prev {
-                None => {}
-                Some(p) if p + 1 == *ord => out.push('\n'),
-                Some(_) => out.push_str(GAP),
-            }
-            // Chunk text is untrusted: only the packer's own header lines start with `[`.
-            for (i, line) in piece.text.split('\n').enumerate() {
-                if i > 0 {
-                    out.push('\n');
-                }
-                if line.starts_with('[') {
-                    out.push(' ');
-                }
-                out.push_str(line);
-            }
-            prev = Some(*ord);
+        out.push_str(&body(b));
+    }
+    out
+}
+
+/// A block's text below its header: its chunks in document order, gaps shown as [`GAP`].
+/// Chunk text is untrusted: only the packer's own header lines start with `[`, so a chunk line
+/// that does is indented by one space and cannot forge a header (DR-2).
+fn body(b: &Block) -> String {
+    let mut out = String::new();
+    let mut prev: Option<u32> = None;
+    for (ord, piece) in &b.pieces {
+        match prev {
+            None => {}
+            Some(p) if p + 1 == *ord => out.push('\n'),
+            Some(_) => out.push_str(GAP),
         }
+        for (i, line) in piece.text.split('\n').enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            if line.starts_with('[') {
+                out.push(' ');
+            }
+            out.push_str(line);
+        }
+        prev = Some(*ord);
     }
     out
 }
@@ -115,7 +126,7 @@ fn fits(blocks: &[Block], items: &[PackItem], budget: usize) -> bool {
 }
 
 /// The first `chars` characters of `text`, cut back to a word boundary when there is one, plus `…`.
-fn cut(text: &str, chars: usize) -> String {
+pub(crate) fn cut(text: &str, chars: usize) -> String {
     let end = text
         .char_indices()
         .nth(chars)
@@ -258,6 +269,8 @@ pub(crate) fn pack(items: &[PackItem], opts: PackOptions) -> (ContextResponse, V
             item: items[b.idx].item.clone(),
             chunk_ids: b.pieces.values().map(|p| p.id).collect(),
             truncated: b.truncated,
+            text: body(b),
+            partial: items[b.idx].partial,
         })
         .collect();
     (
@@ -299,6 +312,7 @@ mod tests {
             url: None,
             sensitive: false,
             date: None,
+            partial: false,
             primary,
             neighbours,
             secondary,
@@ -325,6 +339,7 @@ mod tests {
         let (resp, passages) = pack(&items, opts(1000));
         assert_eq!(resp.text, "[1] A (notes)\nfirst\nmiddle\nthird\n…\nfifth");
         assert_eq!(passages[0].chunk_ids, vec![10, 11, 12, 14]);
+        assert_eq!(passages[0].text, "first\nmiddle\nthird\n…\nfifth");
         assert_eq!(resp.citations.len(), 1);
         assert_eq!(resp.citations[0].chunk_id, 11);
     }

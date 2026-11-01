@@ -17,6 +17,7 @@ use wiremock::MockServer;
 
 use crate::{GoogleEndpoints, RetryPolicy};
 
+mod conformance;
 mod drive;
 mod factory;
 mod gcal;

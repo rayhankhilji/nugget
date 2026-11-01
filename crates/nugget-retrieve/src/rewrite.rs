@@ -4,11 +4,14 @@
 //! follow-up ([`looks_like_followup`]), [`Retriever::rewrite_query`](crate::Retriever::rewrite_query)
 //! asks a **local** chat model (a `Light`, `Triage` or `Synthesis` tier provider whose locality
 //! is not `Cloud`; never a cloud model, since the history is the user's conversation) to restate
-//! it. Without such a model it appends salient words of the last user turn instead
-//! ([`heuristic_rewrite`]). Any model error, timeout or unusable output keeps the original query.
+//! it. Models are tried in order (skipping those in a failure cooldown) within one
+//! [`RetrieveConfig::rewrite_timeout_ms`](crate::RetrieveConfig::rewrite_timeout_ms) budget.
+//! Without such a model, or when every one fails, times out or replies with nothing usable, it
+//! appends salient words of the last user turn instead ([`heuristic_rewrite`]).
 //!
 //! The history is untrusted: it is fenced in the prompt (fence markers inside it are defused),
-//! the model is told it is data, and only the first line of the reply is used, cut to
+//! the model is told it is data, and only the first line of the reply is used (a reasoning
+//! block or markup makes the reply unusable), cut to
 //! [`RetrieveConfig::rewrite_max_chars`](crate::RetrieveConfig::rewrite_max_chars). The worst a
 //! hostile history can do is change the search query.
 
@@ -25,12 +28,16 @@ pub const FEATURE_REWRITE: &str = "query_rewrite";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum RewriteMethod {
-    /// Not a follow-up, no history, rewriting off, or the model failed: the query as given.
+    /// Not a follow-up, no history, rewriting off, or nothing to rewrite with: the query as
+    /// given.
     Unchanged,
     /// Restated by a local chat model.
     Model { provider: ProviderId },
     /// No local model: words of the last user turn appended.
     Heuristic,
+    /// Every local model `tried` failed, timed out or replied with nothing usable: words of the
+    /// last user turn appended, as for [`RewriteMethod::Heuristic`].
+    HeuristicFallback { tried: Vec<ProviderId> },
 }
 
 /// The query actually searched.
@@ -46,6 +53,19 @@ impl QueryRewrite {
         Self {
             query: query.to_owned(),
             method: RewriteMethod::Unchanged,
+        }
+    }
+
+    /// [`heuristic_rewrite`] reported as `method`, or the query unchanged if it adds nothing.
+    pub(crate) fn heuristic(
+        history: &[ChatMessage],
+        query: &str,
+        max_terms: usize,
+        method: RewriteMethod,
+    ) -> Self {
+        match heuristic_rewrite(history, query, max_terms) {
+            Some(q) => Self { query: q, method },
+            None => Self::unchanged(query),
         }
     }
 }
@@ -71,11 +91,39 @@ const OPENERS: &[&[&str]] = &[
     &["any", "more"],
 ];
 
+/// Modal verbs: not content ("what should I bring?").
+const MODALS: &[&str] = &[
+    "should", "could", "would", "can", "may", "might", "must", "shall", "will",
+];
+
+/// Contraction tails dropped from a word ("what's" is `what`, "don't" is `do`).
+const CONTRACTION_TAILS: &[&str] = &["n't", "'s", "'re", "'ll", "'ve", "'d", "'m"];
+
+/// Lowercase words of two or more characters, contraction tails (ASCII or curly apostrophe)
+/// removed.
 fn words(s: &str) -> Vec<String> {
-    s.split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(str::to_lowercase)
-        .collect()
+    let mut out = Vec::new();
+    for raw in s.split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '\u{2019}')) {
+        let mut w = raw.replace('\u{2019}', "'").to_lowercase();
+        if let Some(tail) = CONTRACTION_TAILS.iter().find(|t| w.ends_with(*t)) {
+            w.truncate(w.len() - tail.len());
+            match w.as_str() {
+                "ca" => w.push('n'),
+                "wo" => w = "will".into(),
+                _ => {}
+            }
+        }
+        for part in w.split('\'') {
+            if part.chars().count() >= 2 {
+                out.push(part.to_owned());
+            }
+        }
+    }
+    out
+}
+
+fn is_content(w: &str) -> bool {
+    !STOPWORDS.contains(&w) && !MODALS.contains(&w)
 }
 
 /// Whether `query` likely depends on earlier turns: it opens elliptically ("and ...", "what
@@ -96,10 +144,7 @@ pub fn looks_like_followup(query: &str) -> bool {
     if w.iter().any(|t| ANAPHORA.contains(&t.as_str())) {
         return true;
     }
-    w.iter()
-        .filter(|t| !STOPWORDS.contains(&t.as_str()))
-        .count()
-        <= 1
+    w.iter().filter(|t| is_content(t)).count() <= 1
 }
 
 /// Deterministic fallback: the query plus up to `max_terms` content words of the last user turn
@@ -109,8 +154,7 @@ pub fn heuristic_rewrite(history: &[ChatMessage], query: &str, max_terms: usize)
     let have: Vec<String> = words(query);
     let mut terms: Vec<String> = Vec::new();
     for t in words(&last.text) {
-        if t.chars().count() < 2
-            || STOPWORDS.contains(&t.as_str())
+        if !is_content(&t)
             || ANAPHORA.contains(&t.as_str())
             || have.contains(&t)
             || terms.contains(&t)
@@ -183,9 +227,18 @@ pub(crate) fn user_prompt(history: &[ChatMessage], query: &str, turns: usize) ->
 
 /// The model's reply reduced to a usable query: the first non-empty line, without a `Query:`
 /// label, surrounding quotes or control characters, cut at a word boundary to `max_chars`.
-/// `None` if nothing searchable is left.
+/// A closed leading `<think>…</think>` block is skipped. `None` if nothing searchable is left
+/// or the reply still opens with markup (e.g. an unclosed `<think>`).
 pub(crate) fn clean_reply(reply: &str, max_chars: usize) -> Option<String> {
+    let mut reply = reply.trim_start();
+    if let Some(rest) = strip_prefix_ignore_case(reply, "<think>") {
+        let end = rest.to_ascii_lowercase().find("</think>")?;
+        reply = &rest[end + "</think>".len()..];
+    }
     let line = reply.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if line.starts_with('<') {
+        return None;
+    }
     let mut line = line;
     for label in ["standalone search query:", "search query:", "query:"] {
         if line.len() >= label.len() && line[..label.len()].eq_ignore_ascii_case(label) {
@@ -209,6 +262,12 @@ pub(crate) fn clean_reply(reply: &str, max_chars: usize) -> Option<String> {
     line.chars().any(char::is_alphanumeric).then_some(line)
 }
 
+fn strip_prefix_ignore_case<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = s.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &s[prefix.len()..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +277,21 @@ mod tests {
             role,
             text: text.into(),
         }
+    }
+
+    #[test]
+    fn thinking_is_never_the_query() {
+        assert_eq!(
+            clean_reply(
+                "<think>\nThe user asks about herons.\n</think>\n\nheron river walk",
+                100
+            )
+            .as_deref(),
+            Some("heron river walk")
+        );
+        assert_eq!(clean_reply("<think>\nThe user asks about", 100), None);
+        assert_eq!(clean_reply("<think>", 100), None);
+        assert_eq!(clean_reply("<answer>heron</answer>", 100), None);
     }
 
     #[test]
@@ -296,5 +370,44 @@ mod tests {
         assert_eq!(clean_reply("a\u{7}b", 10).unwrap(), "a b");
         assert_eq!(clean_reply("  \n \"\" \n", 10), None);
         assert_eq!(clean_reply("", 10), None);
+    }
+
+    #[test]
+    fn reasoning_and_markup_replies_are_unusable() {
+        assert_eq!(clean_reply("<think>", 80), None);
+        assert_eq!(clean_reply("  <think>\nThe user asks about", 80), None);
+        assert_eq!(clean_reply("<THINK>still going", 80), None);
+        assert_eq!(clean_reply("<b>boiler</b>", 80), None);
+        assert_eq!(
+            clean_reply("<think>\nresolve it\n</think>\n\nboiler repair date", 80).unwrap(),
+            "boiler repair date"
+        );
+        assert_eq!(clean_reply("<think>x</think>", 80), None);
+    }
+
+    #[test]
+    fn contractions_and_modals_are_not_content() {
+        assert_eq!(words("What's the address?"), ["what", "the", "address"]);
+        assert_eq!(
+            words("They\u{2019}re here, don't we? I can't, it won't"),
+            ["they", "here", "do", "we", "can", "it", "will"]
+        );
+        assert_eq!(words("O'Neill's 5 a b2"), ["neill", "b2"]);
+        let h = [
+            msg(Role::User, "When is my dentist appointment?"),
+            msg(Role::Assistant, "Tuesday at 10:00 with Dr Okafor [1]."),
+        ];
+        for q in [
+            "What's the address?",
+            "What\u{2019}s the address?",
+            "What should I bring?",
+            "Where'll it be?",
+            "Who's it with?",
+        ] {
+            assert!(looks_like_followup(q), "{q:?}");
+            let rw = heuristic_rewrite(&h, q, 4).unwrap();
+            assert!(rw.ends_with("dentist appointment"), "{rw:?}");
+        }
+        assert!(!looks_like_followup("What's the dentist's address?"));
     }
 }

@@ -1,0 +1,71 @@
+{
+"lang":"pt-BR",
+"search":[
+{"id":"pt-BR-s1","query":"Marcenaria São João","expect":["pt-BR/03-fatura-marcenaria-sao-joao.eml"],"kind":"exact"},
+{"id":"pt-BR-s2","query":"Faria Lima","expect":["pt-BR/01-solicitacao-reuniao-tavola.eml"],"kind":"exact"},
+{"id":"pt-BR-s3","query":"pousadas","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"inflected"},
+{"id":"pt-BR-s4","query":"chuva","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"compound_part"},
+{"id":"pt-BR-s5","query":"Lencois","expect":["pt-BR/05-roteiro-chapada-diamantina.md"],"kind":"no_diacritics"},
+{"id":"pt-BR-s6","query":"Fernanda Albuquerque","expect":["pt-BR/01-solicitacao-reuniao-tavola.eml"],"kind":"name"},
+{"id":"pt-BR-s7","query":"almoço com amigos num fim de semana com prato típico de feijão preto","expect":["pt-BR/02-feijoada-sabado.eml"],"kind":"semantic"},
+{"id":"pt-BR-s8","query":"invoice for the custom-made bookshelf","expect":["pt-BR/03-fatura-marcenaria-sao-joao.eml"],"kind":"cross_lingual"}
+],
+"ask":[
+{"id":"pt-BR-a1","question_lang":"pt-BR","question":"Quanto ainda falta pagar para a Marcenaria São João e qual é o vencimento?","facts":[["R$ 4.704,00","4.704,00","4704,00","4.704"],["20/11","20/11/2026","20 de novembro","2026-11-20"]],"cite":["pt-BR/03-fatura-marcenaria-sao-joao.eml"]},
+{"id":"pt-BR-a2","question_lang":"pt-BR","question":"Quando e onde é a reunião com a Távola Engenharia?","facts":[["12 de novembro","12/11","2026-11-12"],["15h","15:00"],["Faria Lima","3.150","Itaim Bibi"]],"cite":["pt-BR/01-solicitacao-reuniao-tavola.eml"]},
+{"id":"pt-BR-a3","question_lang":"pt-BR","question":"Até quando a Luciana precisa da proposta da Cooperativa Vale Verde e quem vai me mandar a planilha de frete?","facts":[["13/11","13 de novembro","sexta-feira, 13","2026-11-13"],["18h","18:00"],["Thiago Araújo","Thiago","Thiago Araujo"]],"cite":["pt-BR/04-proposta-vale-verde-sexta-13.eml"]},
+{"id":"pt-BR-a4","question_lang":"en","question":"When is the year-end party, how much is the deposit, and by when must it be paid?","facts":[["November 27","27 November","Nov 27","2026-11-27","27 de novembro"],["1,500","1.500","1500"],["November 6","6 November","Nov 6","2026-11-06","6/11"]],"cite":["pt-BR/06-re-confraternizacao-fim-de-ano.eml"]}
+],
+"draft":[
+{"id":"pt-BR-d1","file":"pt-BR/01-solicitacao-reuniao-tavola.eml","register":"formal","instruction":"aceitar e informar que vou com uma colega, Débora Lins","accept_lang":["pt-BR","pt"],"formal_markers":["senhora","Sra.","Prezada","Atenciosamente"],"informal_markers":["tô","beleza","valeu","abraço","E aí"]},
+{"id":"pt-BR-d2","file":"pt-BR/02-feijoada-sabado.eml","register":"informal","instruction":"","accept_lang":["pt-BR","pt"],"formal_markers":["Prezado","senhor","Atenciosamente"],"informal_markers":["você","te ","tô","Beleza","valeu","abraço"]},
+{"id":"pt-BR-d3","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","register":"informal","instruction":"dizer que eu aprovo o sinal no sistema hoje","accept_lang":["pt-BR","pt"],"formal_markers":["Prezada","senhora","Atenciosamente"],"informal_markers":["você","te ","tô","Beleza","valeu","abraço","Ju","Oi"]}
+],
+"extract":{
+"people":[
+{"name":"Fernanda Albuquerque Rocha","aliases":["Fernanda","Sra. Fernanda"],"email":"fernanda.rocha@tavolaengenharia.example","file":"pt-BR/01-solicitacao-reuniao-tavola.eml"},
+{"name":"Marcelo Vasconcelos","aliases":["Sr. Marcelo Vasconcelos"],"email":null,"file":"pt-BR/01-solicitacao-reuniao-tavola.eml"},
+{"name":"Rafael Nogueira","aliases":["Rafa"],"email":"rafa.nogueira@example.org","file":"pt-BR/02-feijoada-sabado.eml"},
+{"name":"Luciana Prado","aliases":["Luciana"],"email":"luciana.prado@lumenpfad.example","file":"pt-BR/04-proposta-vale-verde-sexta-13.eml"},
+{"name":"Thiago Araújo","aliases":["Thiago"],"email":"thiago.araujo@lumenpfad.example","file":"pt-BR/04-proposta-vale-verde-sexta-13.eml"},
+{"name":"Juliana Teixeira","aliases":["Ju"],"email":"juliana.teixeira@lumenpfad.example","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml"}
+],
+"orgs":[
+{"name":"Távola Engenharia S.A.","file":"pt-BR/01-solicitacao-reuniao-tavola.eml"},
+{"name":"Marcenaria São João","file":"pt-BR/03-fatura-marcenaria-sao-joao.eml"},
+{"name":"Cooperativa Vale Verde","file":"pt-BR/04-proposta-vale-verde-sexta-13.eml"},
+{"name":"Lumen Pfad Brasil Ltda.","file":"pt-BR/04-proposta-vale-verde-sexta-13.eml"},
+{"name":"Churrascaria Brasa Viva","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml"}
+],
+"dates":[
+{"date":"2026-11-12","time":"15:00","text":"quinta-feira, 12 de novembro de 2026, às 15h","file":"pt-BR/01-solicitacao-reuniao-tavola.eml","what":"Reunião parceria logística, Távola Engenharia"},
+{"date":"2026-11-07","time":"13:00","text":"sábado, 7/11, a partir das 13h","file":"pt-BR/02-feijoada-sabado.eml","what":"Feijoada na casa do Rafa"},
+{"date":"2026-11-04","text":"quarta (4/11)","file":"pt-BR/02-feijoada-sabado.eml","what":"Confirmar presença"},
+{"date":"2026-11-20","text":"sexta-feira, 20/11/2026","file":"pt-BR/03-fatura-marcenaria-sao-joao.eml","what":"Vencimento saldo MSJ-2026-0412"},
+{"date":"2026-11-10","time":"08:00","text":"terça-feira, 10/11, entre 8h e 12h","file":"pt-BR/03-fatura-marcenaria-sao-joao.eml","what":"Instalação da estante"},
+{"date":"2026-11-13","time":"18:00","text":"sexta-feira, 13/11","file":"pt-BR/04-proposta-vale-verde-sexta-13.eml","what":"Proposta comercial Cooperativa Vale Verde"},
+{"date":"2026-11-20","text":"20 de novembro","file":"pt-BR/05-roteiro-chapada-diamantina.md","what":"Início da viagem à Chapada Diamantina"},
+{"date":"2026-11-27","time":"19:30","text":"sexta-feira, 27 de novembro, às 19h30","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","what":"Confraternização na Churrascaria Brasa Viva"},
+{"date":"2026-11-06","text":"sexta-feira, 6/11","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","what":"Pagar sinal R$ 1.500,00"}
+],
+"amounts":[
+{"text":"R$ 7.840,00","value":7840.0,"currency":"BRL","file":"pt-BR/03-fatura-marcenaria-sao-joao.eml"},
+{"text":"R$ 4.704,00","value":4704.0,"currency":"BRL","file":"pt-BR/03-fatura-marcenaria-sao-joao.eml"},
+{"text":"R$ 1.500,00","value":1500.0,"currency":"BRL","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml"},
+{"text":"R$ 145,00","value":145.0,"currency":"BRL","file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml"}
+],
+"ids":[
+{"text":"MSJ-2026-0412","file":"pt-BR/03-fatura-marcenaria-sao-joao.eml"}
+]
+},
+"proactive":[
+{"file":"pt-BR/01-solicitacao-reuniao-tavola.eml","expect":"reply_needed"},
+{"file":"pt-BR/01-solicitacao-reuniao-tavola.eml","expect":"event","date":"2026-11-12","time":"15:00"},
+{"file":"pt-BR/02-feijoada-sabado.eml","expect":"reply_needed","due":"2026-11-04","who":"Rafael Nogueira"},
+{"file":"pt-BR/03-fatura-marcenaria-sao-joao.eml","expect":"payment_due","due":"2026-11-20","amount":"R$ 4.704,00"},
+{"file":"pt-BR/03-fatura-marcenaria-sao-joao.eml","expect":"event","date":"2026-11-10","time":"08:00"},
+{"file":"pt-BR/04-proposta-vale-verde-sexta-13.eml","expect":"commitment","due":"2026-11-13","who":"Luciana Prado"},
+{"file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","expect":"reply_needed","who":"Juliana Teixeira"},
+{"file":"pt-BR/06-re-confraternizacao-fim-de-ano.eml","expect":"commitment","due":"2026-11-06","who":"Juliana Teixeira"}
+]
+}

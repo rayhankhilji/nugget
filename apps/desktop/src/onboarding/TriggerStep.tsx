@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { doubletapApi, errorMessage } from "../api";
 import { useEvent } from "../hooks";
-import { t as translate, useT, type MessageKey } from "../i18n";
+import { t as translate, Trans, useT, type MessageKey } from "../i18n";
 import { detectOs, type Os } from "./platform";
 import { StepHeading, type StepProps } from "./steps";
 import {
@@ -45,6 +45,25 @@ export function triggerLabel(pref: TriggerPref, os: Os): string {
   return pref.kind === "double_tap"
     ? translate("onboarding.trigger.summaryDoubleTap", { key: modifierLabel(pref.modifier, os) })
     : acceleratorLabel(pref.accelerator, os);
+}
+
+/** The trigger as key caps: "Tap [Right Ctrl] twice", or "[Ctrl] [Alt] [Space]". */
+export function TriggerKeys({ pref, os }: { pref: TriggerPref; os: Os }) {
+  if (pref.kind === "double_tap") {
+    return <Trans k="onboarding.trigger.summaryTap" args={{ key: modifierLabel(pref.modifier, os) }} tags={{ kbd: (c) => <kbd>{c}</kbd> }} />;
+  }
+  // One cap per key of the accelerator (no regex lookbehind: older macOS WebKit can't parse it).
+  const keys = pref.accelerator
+    .split("+")
+    .filter(Boolean)
+    .map((k) => acceleratorLabel(k, os));
+  return (
+    <span className="ob-keys" dir="ltr">
+      {keys.map((k, i) => (
+        <kbd key={i}>{k}</kbd>
+      ))}
+    </span>
+  );
 }
 
 export function TriggerStep({ headingRef }: StepProps) {
@@ -116,7 +135,7 @@ export function TriggerStep({ headingRef }: StepProps) {
       <p className="ob-lead">{t("onboarding.trigger.lead")}</p>
       <fieldset className="ob-fieldset">
         <legend className="visually-hidden">{t("onboarding.trigger.legend")}</legend>
-        <div className="kind-picker ob-choices">
+        <div className="kind-picker ob-choices ob-choices-two">
           <label className="kind-option">
             <input type="radio" name={name} checked={pref.kind === "double_tap"} onChange={() => update(tap)} />
             <span>
@@ -141,7 +160,7 @@ export function TriggerStep({ headingRef }: StepProps) {
 
       {pref.kind === "double_tap" ? (
         <div className="ob-fields">
-          <div className="field-inline">
+          <div className="field">
             <label htmlFor={keyId}>{t("onboarding.trigger.key")}</label>
             <select
               id={keyId}
@@ -155,7 +174,7 @@ export function TriggerStep({ headingRef }: StepProps) {
               ))}
             </select>
           </div>
-          <div className="field-inline">
+          <div className="field">
             <label htmlFor={speedId}>{t("onboarding.trigger.speed")}</label>
             <select
               id={speedId}
@@ -172,7 +191,7 @@ export function TriggerStep({ headingRef }: StepProps) {
         </div>
       ) : (
         <div className="ob-fields">
-          <div className="field-inline">
+          <div className="field">
             <label htmlFor={chordId}>{t("onboarding.trigger.combination")}</label>
             <select id={chordId} value={pref.accelerator} onChange={(e) => update({ kind: "chord", accelerator: e.target.value })}>
               {chords.map((c) => (
@@ -185,8 +204,8 @@ export function TriggerStep({ headingRef }: StepProps) {
         </div>
       )}
 
-      <p className="note" role="status">
-        {t("onboarding.trigger.summary", { trigger: triggerLabel(pref, os) })}
+      <p className="ob-trigger-summary" role="status">
+        <span className="muted">{t("onboarding.trigger.summaryLabel")}</span> <TriggerKeys pref={pref} os={os} />
       </p>
       {error ? (
         <p className="field-error" role="alert">

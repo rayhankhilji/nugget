@@ -1,0 +1,190 @@
+name: HH2 JJ1-1 before/after (real 4B triage, sensitive labels)
+
+# Re-measures QA JJ1-1 (docs/qa/JJ1.md on qa/wave-ii): after real 4B triage only 9 of 22 planted
+# sensitive mails stayed sensitive, because the model's single "sensitive: false" cleared every
+# health, money and legal mail. This job runs JJ1's own measurement, qa/JJ1/harness/realmodel.py
+# --part triage (1200 mails from qa/JJ1/triage/gen_corpus.py, seed 7, the 4B as the triage model,
+# default config, labels read through export.run), twice on one ubuntu-latest runner: BEFORE is
+# nuggetd at `before_ref`, AFTER is this commit. The harness is read from QA commit 2cfd682 at run
+# time with `git archive`, not copied into this branch. One run took 74 min on JJ1's runner.
+# Results: the step summary (qa/HH2/jj1_compare.py) and the hh2-jj1-<run id> artifact.
+
+on:
+  # TEMPORARY: the workflow is not on the default branch yet, so it cannot be dispatched;
+  # a push that changes this file runs it with the defaults. Remove before the final push.
+  push:
+    branches: [hh/ingest-triage]
+    paths:
+      - ".github/workflows/hh2-jj1.yml"
+  workflow_dispatch:
+    inputs:
+      before_ref:
+        description: "Commit for the BEFORE nuggetd build"
+        default: adc2ee50
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # -o pipefail, so a failing realmodel.py is not hidden by `| tee`.
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # As qa-JJ1.yml: release builds trust the dev manifest key that signs manifests/default.json
+  # (option_env!, so it matters at build time).
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  NO_COLOR: "1"
+  BEFORE_REF: ${{ inputs.before_ref || 'adc2ee50' }}
+  # JJ1's parameters (qa-JJ1.yml default chat model; realmodel.py defaults for the rest:
+  # nomic-embed-text-v1.5-q8, --triage-n 1200, --triage-timeout 7200, corpus seed 7).
+  CHAT_MODEL: qwen3-4b-q4km
+  # The QA commit holding the JJ1 harness (qa/JJ1/harness, qa/JJ1/triage).
+  JJ1_REF: 2cfd68290a08976aa8fe2faee7c5a812092a8dd4
+  OUT: ${{ github.workspace }}/hh2-jj1-out
+
+jobs:
+  jj1:
+    name: JJ1-1 triage before/after (Linux, real 4B)
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve refs, extract the JJ1 harness from the QA commit
+        run: |
+          git fetch --no-tags origin qa/wave-ii
+          git cat-file -e "$JJ1_REF^{commit}"
+          before=$(git rev-parse --verify "$BEFORE_REF^{commit}")
+          echo "BEFORE_SHA=$before" >> "$GITHUB_ENV"
+          mkdir -p "$OUT" "$RUNNER_TEMP/jj1"
+          # realmodel.py imports only nq.py (same folder) and runs ../triage/gen_corpus.py.
+          git archive "$JJ1_REF" qa/JJ1/harness qa/JJ1/triage | tar -x -C "$RUNNER_TEMP/jj1"
+          echo "JJ1_HARNESS=$RUNNER_TEMP/jj1/qa/JJ1/harness" >> "$GITHUB_ENV"
+          find "$RUNNER_TEMP/jj1" -type f | sort
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: hh2-jj1
+
+      # Models and the llama-server build, keyed as in qa-JJ1.yml. realmodel.py moves them into
+      # each fresh home before the daemon starts and back when it stops.
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/models-cache
+          key: qa-jj1-models-${{ env.CHAT_MODEL }}-${{ hashFiles('manifests/default.json') }}
+
+      # BEFORE in a worktree with its own target dir: cargo decides freshness by mtimes, and a
+      # shared target dir let AFTER reuse BEFORE's binary once (hh2-ingest run 41197266492).
+      - name: Build nuggetd BEFORE (${{ env.BEFORE_REF }})
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/before-src" "$BEFORE_SHA"
+          cargo build --release --locked -p nuggetd \
+            --manifest-path "$RUNNER_TEMP/before-src/Cargo.toml" --target-dir "$RUNNER_TEMP/before-target"
+          mkdir -p "$RUNNER_TEMP/bin"
+          cp "$RUNNER_TEMP/before-target/release/nuggetd" "$RUNNER_TEMP/bin/nuggetd-before"
+          rm -rf "$RUNNER_TEMP/before-target"
+
+      - name: Build nuggetd AFTER (${{ github.sha }})
+        run: |
+          cargo build --release --locked -p nuggetd
+          cp target/release/nuggetd "$RUNNER_TEMP/bin/nuggetd-after"
+          if cmp -s "$RUNNER_TEMP/bin/nuggetd-before" "$RUNNER_TEMP/bin/nuggetd-after"; then
+            echo "::error::BEFORE and AFTER binaries are identical"; exit 1
+          fi
+          sha256sum "$RUNNER_TEMP"/bin/* | tee "$OUT/binaries.txt"
+
+      - name: Record hardware
+        run: |
+          {
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "before: $BEFORE_REF ($BEFORE_SHA)"
+            echo "after: ${{ github.sha }}"
+            echo "jj1 harness: $JJ1_REF"
+            echo "model: $CHAT_MODEL"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu
+            free -g
+            df -h "$HOME" "$RUNNER_TEMP"
+          } | tee "$OUT/hardware.txt"
+
+      # JJ1's exact invocation (qa-JJ1.yml "Run", triage part), with a fresh home per run.
+      - name: Run BEFORE
+        timeout-minutes: 150
+        run: |
+          python3 "$JJ1_HARNESS/realmodel.py" --nuggetd "$RUNNER_TEMP/bin/nuggetd-before" \
+            --home "$RUNNER_TEMP/home-before" --out "$OUT/before" \
+            --part triage --chat-model "$CHAT_MODEL" --models-cache "$RUNNER_TEMP/models-cache" \
+            2>&1 | tee "$OUT/before.console.txt"
+
+      # Nothing from BEFORE may share the CPU with AFTER (a daemon or model server left running).
+      # The models went back to the cache when realmodel.py stopped; the home goes.
+      - name: Clean up after BEFORE
+        if: always()
+        run: |
+          { echo "== still running after BEFORE"; ps -eo pid,rss,etime,comm | grep -Ei 'nuggetd|llama' || true; } | tee "$OUT/before-leftovers.txt"
+          pkill -x nuggetd || true; pkill -x llama-server || true; sleep 3
+          pkill -9 -x nuggetd || true; pkill -9 -x llama-server || true
+          # If the run died before restore_cache, keep the downloaded models for AFTER.
+          if [ -d "$RUNNER_TEMP/home-before/data/models" ]; then
+            mkdir -p "$RUNNER_TEMP/models-cache"
+            for f in "$RUNNER_TEMP/home-before/data/models"/*; do
+              [ -e "$f" ] || continue
+              n=$(basename "$f"); [ -e "$RUNNER_TEMP/models-cache/$n" ] || mv "$f" "$RUNNER_TEMP/models-cache/"
+            done
+          fi
+          rm -rf "$RUNNER_TEMP/home-before"
+          ls -la "$RUNNER_TEMP/models-cache" || true
+          df -h "$RUNNER_TEMP"
+
+      - name: Run AFTER
+        if: ${{ !cancelled() }}
+        timeout-minutes: 150
+        run: |
+          python3 "$JJ1_HARNESS/realmodel.py" --nuggetd "$RUNNER_TEMP/bin/nuggetd-after" \
+            --home "$RUNNER_TEMP/home-after" --out "$OUT/after" \
+            --part triage --chat-model "$CHAT_MODEL" --models-cache "$RUNNER_TEMP/models-cache" \
+            2>&1 | tee "$OUT/after.console.txt"
+
+      - name: Clean up after AFTER
+        if: always()
+        run: |
+          { echo "== still running after AFTER"; ps -eo pid,rss,etime,comm | grep -Ei 'nuggetd|llama' || true; } | tee "$OUT/after-leftovers.txt"
+          pkill -x nuggetd || true; pkill -x llama-server || true; sleep 3
+          pkill -9 -x nuggetd || true; pkill -9 -x llama-server || true
+
+      - name: Compare
+        if: always()
+        run: |
+          python3 qa/HH2/jj1_compare.py "$OUT/before" "$OUT/after" --hardware "$OUT/hardware.txt" \
+            --labels "before ${BEFORE_SHA:0:7}" "after ${GITHUB_SHA:0:7}" \
+            --out "$OUT/compare.md" --labels-dir "$OUT"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hh2-jj1-${{ github.run_id }}
+          # The export (work/export) is summarised in labels-*.jsonl; the corpus is regenerable.
+          path: |
+            ${{ env.OUT }}
+            !${{ env.OUT }}/*/work/export
+            !${{ env.OUT }}/*/work/triage-corpus/mail
+          if-no-files-found: warn
+          retention-days: 30

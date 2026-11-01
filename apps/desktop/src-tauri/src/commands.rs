@@ -2,16 +2,17 @@
 
 use nugget_core::egress::EgressEvent;
 use nugget_core::ids::ProviderId;
+use nugget_core::ipc::PluginCatalogResult;
 use nugget_core::ipc::{
     AskRequest, AskStarted, AuthBegin, ChatCancel, ChatRequest, ChatStarted, ClaimStatusRequest,
     ContextRequest, ContextResponse, EgressRecentRequest, EntitiesRequest, EntityDetail, EntityRef,
     EntitySummaryView, GraphRequest, GraphViewIpc, IngestStatus, KnowledgeStatus, McpClientCreate,
-    McpClientCreated, McpClientInfo, McpClientRef, MergeRequest, ModelInfo, ModelInstallRequest,
-    PluginApproveParams, PluginApproveResult, PluginEnableParams, PluginIdParams, PluginInfo,
-    PluginInspectResult, PluginInstallParams, PluginInstallResult, PluginListResult,
-    PluginRemoveResult, ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit, SearchRequest,
-    SourceInfo, SourceRef, SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate,
-    SplitRequest, StatusResponse, method, plugin_method,
+    McpClientCreated, McpClientInfo, McpClientRef, MergeRequest, ModelCancelRequest, ModelInfo,
+    ModelInstallRequest, PluginApproveParams, PluginApproveResult, PluginEnableParams,
+    PluginIdParams, PluginInfo, PluginInspectResult, PluginInstallParams, PluginInstallResult,
+    PluginListResult, PluginRemoveResult, ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit,
+    SearchRequest, SourceInfo, SourceRef, SourceRemove, SourceSecret, SourceSpec, SourceSync,
+    SourceUpdate, SplitRequest, StatusResponse, method, plugin_method,
 };
 use nugget_core::ipc::{
     BriefView, CardExecuteRequest, CardExecuteResult, CardFeedbackRequest, CardPreview,
@@ -137,6 +138,14 @@ pub async fn models_install(
 ) -> Result<Value> {
     daemon
         .call(&app, method::MODELS_INSTALL, &ModelInstallRequest { id })
+        .await
+}
+
+/// Stops a running install (`models.cancel`); the install's final progress says `cancelled`.
+#[tauri::command]
+pub async fn models_cancel(app: AppHandle, daemon: State<'_, Daemon>, id: String) -> Result<Value> {
+    daemon
+        .call(&app, method::MODELS_CANCEL, &ModelCancelRequest { id })
         .await
 }
 
@@ -302,6 +311,33 @@ pub async fn ai_key_save(
     daemon.call(&app, "ai.key.save", &request).await
 }
 
+/// Check a new key for a saved provider, then replace it (`ai.key.update`). The request carries
+/// the key: it is passed through, never logged.
+#[tauri::command]
+pub async fn ai_key_update(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "ai.key.update", &request).await
+}
+
+/// Delete a saved provider's key and remove the provider (`ai.key.remove`).
+#[tauri::command]
+pub async fn ai_key_remove(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "ai.key.remove", &request).await
+}
+
+/// The providers that use a key (`ai.key.saved`).
+#[tauri::command]
+pub async fn ai_key_saved(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
+    daemon.call(&app, "ai.key.saved", &()).await
+}
+
 /// What each manifest model needs and whether this machine has it (`models.fit`).
 #[tauri::command]
 pub async fn models_fit(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
@@ -311,6 +347,18 @@ pub async fn models_fit(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Val
 #[tauri::command]
 pub async fn runtime_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Vec<RuntimeInfo>> {
     daemon.call(&app, method::RUNTIME_STATUS, &()).await
+}
+
+/// Start a local model server again after it failed or gave up (`runtime.retry`, KK1).
+#[tauri::command]
+pub async fn runtime_retry(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    role: String,
+) -> Result<Value> {
+    daemon
+        .call(&app, "runtime.retry", &serde_json::json!({ "role": role }))
+        .await
 }
 
 // ---- knowledge graph (M2) ----
@@ -658,6 +706,16 @@ pub async fn plugins_enable(
     daemon.call(&app, plugin_method::ENABLE, &request).await
 }
 
+/// Signed packages in the plugin catalog folders, verified but not installed; each entry's path
+/// goes to `plugins_install`.
+#[tauri::command]
+pub async fn plugins_catalog(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+) -> Result<PluginCatalogResult> {
+    daemon.call(&app, plugin_method::CATALOG, &()).await
+}
+
 // ---- shell helpers ----
 
 /// Opens an `https:`, `obsidian:` or local `file:` URL with the OS default handler. Anything else
@@ -887,10 +945,13 @@ pub async fn reminders_list(
 #[tauri::command]
 pub async fn notify(
     app: AppHandle,
+    window: tauri::Window,
     title: String,
     body: String,
     open_today: Option<bool>,
 ) -> Result<()> {
+    // II4: only the main window composes notifications (not the quick-ask box or the overlay).
+    crate::platform::main_only(&window)?;
     crate::notify::show(&app, &title, &body, open_today.unwrap_or(false)).map_err(CmdError::Other)
 }
 
@@ -935,6 +996,128 @@ pub async fn pick_plugin_file(app: AppHandle) -> Result<Option<String>> {
                 .map_err(|_| CmdError::Other("file paths must be valid Unicode".into()))
         })
         .transpose()
+}
+
+// ---- FF1: backup, restore, export ----
+//
+// Pass-through proxies to the daemon's `backup.*` and `export.run` (see `src/api.ts`). Requests
+// are JSON objects whose string fields are paths or a passphrase; the passphrase is passed
+// through, never logged. The daemon validates everything else.
+
+/// Paths beyond this are a UI bug.
+const MAX_BACKUP_PATH_LEN: usize = 4096;
+
+fn check_backup_request(request: &Value) -> Result<()> {
+    let Some(fields) = request.as_object() else {
+        return Err(CmdError::Other("the request must be an object".into()));
+    };
+    for (name, value) in fields {
+        let limit = if name == "passphrase" {
+            MAX_SECRET_LEN
+        } else {
+            MAX_BACKUP_PATH_LEN
+        };
+        if value.as_str().is_some_and(|s| s.len() > limit) {
+            return Err(CmdError::Other(format!("the {name} is too long")));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn backup_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
+    daemon.call(&app, "backup.status", &json!({})).await
+}
+
+#[tauri::command]
+pub async fn backup_configure(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.configure", &request).await
+}
+
+#[tauri::command]
+pub async fn backup_set_passphrase(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.set_passphrase", &request).await
+}
+
+#[tauri::command]
+pub async fn backup_run(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.run", &request).await
+}
+
+#[tauri::command]
+pub async fn backup_list(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.list", &request).await
+}
+
+/// Stages a restore; the daemon exits by itself right after replying and the UI calls
+/// `start_daemon`, which applies it.
+#[tauri::command]
+pub async fn backup_restore(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.restore", &request).await
+}
+
+#[tauri::command]
+pub async fn export_run(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "export.run", &request).await
+}
+
+// ---- II2: faceted search, timelines, previews (pass-through; the daemon validates) ----
+
+#[tauri::command]
+pub async fn search_faceted(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.faceted", &request).await
+}
+
+#[tauri::command]
+pub async fn search_timeline(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.timeline", &request).await
+}
+
+#[tauri::command]
+pub async fn search_preview(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "search.preview", &request).await
 }
 
 #[cfg(test)]
@@ -1091,6 +1274,7 @@ mod tests {
             limit: 1_000_000,
             kinds: vec![],
             source: None,
+            include_sensitive: false,
         })
         .unwrap();
         assert_eq!((g.depth, g.limit), (MAX_GRAPH_DEPTH, MAX_GRAPH_LIMIT));
@@ -1103,6 +1287,7 @@ mod tests {
                 limit: 10,
                 kinds: vec![],
                 source: None,
+                include_sensitive: false,
             })
             .is_err()
         );

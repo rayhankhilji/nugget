@@ -13,12 +13,13 @@ use std::time::UNIX_EPOCH;
 use ignore::{DirEntry, WalkBuilder};
 use nugget_connector::{CancellationToken, Change, Content, Document};
 use nugget_core::ids::ItemKey;
+use nugget_core::ipc::{ScanReport, SkippedFile};
 use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
 
 use crate::config::{Config, Flavor, IGNORE_FILES, is_junk_file, is_secret_file};
-use crate::key::{file_url, item_key, join_rel, obsidian_url, rel_key};
+use crate::key::{file_url, item_key, obsidian_url, rel_key};
 
 /// Item key → last known connector version (`None` = unknown, always re-sent).
 pub(crate) type KnownMap = BTreeMap<String, Option<String>>;
@@ -115,6 +116,51 @@ pub(crate) enum Emit {
     Change(Change),
     /// `scanned` files seen so far; a good moment to checkpoint.
     Progress(u64),
+    /// What a whole pass ([`Scope::All`]) found and skipped; sent once its walk ended.
+    Scan(ScanReport),
+}
+
+/// How many skipped files a [`ScanReport`] names.
+const SKIPPED_EXAMPLES: usize = 5;
+
+fn note_skip(report: &mut ScanReport, rel: &str, reason: &str, bytes: Option<u64>) {
+    match reason {
+        "unsupported" => report.unsupported += 1,
+        "too_large" => report.too_large += 1,
+        _ => report.unreadable += 1,
+    }
+    if report.skipped.len() < SKIPPED_EXAMPLES {
+        report.skipped.push(SkippedFile {
+            path: rel.to_string(),
+            reason: reason.to_string(),
+            bytes,
+        });
+    }
+}
+
+/// Why a root cannot be walked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootProblem {
+    /// Not there (unmounted, moved, or not a folder).
+    Missing,
+    /// There, but permission to read it is denied.
+    Denied,
+    /// There, but listing it failed for another reason (I/O error, ...).
+    Unreadable,
+}
+
+fn root_access(root: &Path) -> std::result::Result<(), RootProblem> {
+    use std::io::ErrorKind::PermissionDenied;
+    match std::fs::metadata(root) {
+        Ok(md) if md.is_dir() => match std::fs::read_dir(root) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == PermissionDenied => Err(RootProblem::Denied),
+            Err(_) => Err(RootProblem::Unreadable),
+        },
+        Ok(_) => Err(RootProblem::Missing),
+        Err(e) if e.kind() == PermissionDenied => Err(RootProblem::Denied),
+        Err(_) => Err(RootProblem::Missing),
+    }
 }
 
 /// The result of a reconcile pass.
@@ -126,6 +172,8 @@ pub(crate) struct Outcome {
     pub deleted: Vec<String>,
     pub scanned: u64,
     pub upserted: u64,
+    /// Found and skipped counts of this pass.
+    pub report: ScanReport,
 }
 
 /// `mtime_ns:size`. Pre-1970 times are negative; a missing mtime counts as 0.
@@ -184,6 +232,7 @@ pub(crate) fn reconcile(
     emit: &mut dyn FnMut(Emit) -> bool,
 ) -> Result<Outcome> {
     let mut out = Outcome::default();
+    out.report.max_file_bytes = cfg.max_file_bytes;
     let mut protected = Protected::default();
     let mut send = |e: Emit| -> Result<()> {
         if emit(e) {
@@ -215,9 +264,15 @@ pub(crate) fn reconcile(
             return Err(Error::Cancelled);
         }
         let root = cfg.roots[idx].path.clone();
-        if !root.is_dir() {
-            // An unmounted drive or a moved folder: keep what we have rather than wiping it.
-            tracing::warn!(root = %root.display(), "root folder is unavailable; keeping its items");
+        if let Err(problem) = root_access(&root) {
+            // An unmounted drive, a moved folder or one we may not open: keep what we have
+            // rather than wiping it.
+            tracing::warn!(root = %root.display(), ?problem, "root folder cannot be walked; keeping its items");
+            match problem {
+                RootProblem::Denied => out.report.roots_denied += 1,
+                RootProblem::Missing => out.report.roots_missing += 1,
+                RootProblem::Unreadable => note_skip(&mut out.report, "", "unreadable", None),
+            }
             protected.0.push(Target::whole_root(idx));
             continue;
         }
@@ -247,10 +302,19 @@ pub(crate) fn reconcile(
             .into_iter()
             .collect(),
     };
-    for key in candidates {
-        if out.found.contains_key(key) || protected.contains(key) {
-            continue;
-        }
+    let deletes: Vec<&String> = candidates
+        .into_iter()
+        .filter(|key| !out.found.contains_key(*key) && !protected.contains(key))
+        .collect();
+
+    out.report.found = out.found.len() as u64;
+    out.report.to_index = out.upserted + deletes.len() as u64;
+    out.report.finished = true;
+    if matches!(scope, Scope::All) {
+        send(Emit::Scan(out.report.clone()))?;
+    }
+
+    for key in deletes {
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
@@ -276,18 +340,18 @@ fn walk_root(
 ) -> Result<()> {
     // Restrict the walk to the targets: descend only into their ancestors and themselves.
     let whole = targets.iter().any(|t| t.rel.is_empty());
-    let mut scope_set: HashSet<PathBuf> = HashSet::new();
-    let mut ancestors: HashSet<PathBuf> = HashSet::new();
+    // Compared as key strings (`rel_key`), not paths: a target comes from a key, and a key of a
+    // non-UTF-8 name does not join back into the same path.
+    let mut scope_set: HashSet<String> = HashSet::new();
+    let mut ancestors: HashSet<String> = HashSet::new();
     if !whole {
         for t in targets {
-            let p = join_rel(root, &t.rel);
-            for a in p.ancestors().skip(1) {
-                if a == root || !a.starts_with(root) {
-                    break;
-                }
-                ancestors.insert(a.to_path_buf());
+            let mut prefix = t.rel.as_str();
+            while let Some((parent, _)) = prefix.rsplit_once('/') {
+                ancestors.insert(parent.to_string());
+                prefix = parent;
             }
-            scope_set.insert(p);
+            scope_set.insert(t.rel.clone());
         }
     }
 
@@ -320,10 +384,9 @@ fn walk_root(
                 if let Some(p) = io_error_path(&err)
                     && let Ok(rel) = p.strip_prefix(root)
                 {
-                    protected.0.push(Target {
-                        root: idx,
-                        rel: rel_key(rel),
-                    });
+                    let rel = rel_key(rel);
+                    note_skip(&mut out.report, &rel, "unreadable", None);
+                    protected.0.push(Target { root: idx, rel });
                 }
                 tracing::warn!(error = %err, "skipping unreadable path");
                 continue;
@@ -339,6 +402,7 @@ fn walk_root(
         let rel = rel_key(rel_path);
         let name = entry.file_name().to_string_lossy();
         if !cfg.include.is_match(&rel, &name, false) {
+            note_skip(&mut out.report, &rel, "unsupported", None);
             continue;
         }
         let key = item_key(idx, rel_path);
@@ -346,12 +410,14 @@ fn walk_root(
             Ok(md) => md,
             Err(err) => {
                 tracing::warn!(path = %path.display(), error = %err, "cannot stat file; skipping");
+                note_skip(&mut out.report, &rel, "unreadable", None);
                 protected.1.insert(key);
                 continue;
             }
         };
         if md.len() > cfg.max_file_bytes {
             tracing::debug!(path = %path.display(), size = md.len(), "over max_file_bytes; skipping");
+            note_skip(&mut out.report, &rel, "too_large", Some(md.len()));
             continue;
         }
         out.scanned += 1;
@@ -377,6 +443,7 @@ fn walk_root(
             }
             Err(err) => {
                 tracing::warn!(path = %path.display(), error = %err, "cannot read file; skipping");
+                note_skip(&mut out.report, &rel, "unreadable", None);
                 // Keep a previously indexed copy (e.g. a file locked by another program).
                 protected.1.insert(key);
             }
@@ -389,22 +456,27 @@ fn keep_entry(
     cfg: &Config,
     root: &Path,
     whole: bool,
-    scope: &HashSet<PathBuf>,
-    ancestors: &HashSet<PathBuf>,
+    scope: &HashSet<String>,
+    ancestors: &HashSet<String>,
     e: &DirEntry,
 ) -> bool {
     if e.depth() == 0 {
         return true;
     }
     let path = e.path();
-    if !whole
-        && !ancestors.contains(path)
-        && !path
-            .ancestors()
-            .take_while(|a| *a != root)
-            .any(|a| scope.contains(a))
-    {
-        return false;
+    if !whole {
+        let Ok(rel) = path.strip_prefix(root) else {
+            return false;
+        };
+        let rel = rel_key(rel);
+        let in_scope = ancestors.contains(&rel)
+            || scope.contains(&rel)
+            || rel
+                .match_indices('/')
+                .any(|(i, _)| scope.contains(&rel[..i]));
+        if !in_scope {
+            return false;
+        }
     }
     let name = e.file_name().to_string_lossy();
     let is_dir = e.file_type().is_some_and(|t| t.is_dir());
@@ -713,5 +785,48 @@ mod tests {
             s,
             Scope::Targets(vec![t(0, "a-b"), t(0, "a/b"), t(0, "a/bc"), t(1, "")])
         );
+    }
+
+    /// A live event for a non-UTF-8 name reconciles that file (its key does not join back into
+    /// the on-disk path, so scope matching must compare keys).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn regression_targeted_reconcile_finds_non_utf8_names() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("r");
+        let sub = root.join(OsStr::from_bytes(b"d\xff"));
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join(OsStr::from_bytes(b"n\xfe.md")), "x").unwrap();
+        std::fs::write(sub.join("plain.md"), "y").unwrap();
+        let cfg = Arc::new(Config::files(&json!({ "roots": [root] })).unwrap());
+        let file_key = item_key(0, Path::new(OsStr::from_bytes(b"d\xff/n\xfe.md")));
+        let (_, file_rel) = crate::key::parse_key(&file_key).unwrap();
+        let dir_rel = rel_key(Path::new(OsStr::from_bytes(b"d\xff")));
+        let mut known = KnownMap::new();
+        known.insert(file_key.clone(), Some("0:0".into()));
+        for target in [file_rel.to_string(), dir_rel] {
+            let mut sent = Vec::new();
+            let out = reconcile(
+                &cfg,
+                &Scope::targets(vec![t(0, &target)]),
+                &known,
+                false,
+                &CancellationToken::new(),
+                0,
+                &mut |e| {
+                    sent.push(format!("{e:?}"));
+                    true
+                },
+            )
+            .unwrap();
+            assert!(out.deleted.is_empty(), "{target}: {sent:?}");
+            assert!(
+                out.found.contains_key(&file_key),
+                "{target}: {:?}",
+                out.found
+            );
+        }
     }
 }

@@ -1,0 +1,928 @@
+{
+ "base.people_orgs": [
+  [
+   "ent_4vhkgaarhxk7rmah",
+   "organization",
+   "Brightwell Analytics"
+  ],
+  [
+   "ent_5bixur43otoo3uhc",
+   "organization",
+   "Corvid Labs"
+  ],
+  [
+   "ent_fhge7mdmic5mjm3m",
+   "person",
+   "Dana Whitfield"
+  ],
+  [
+   "ent_7n5tchcyvveh5xgw",
+   "person",
+   "Dr. Lena Brandt"
+  ],
+  [
+   "ent_nd4pomvfaf24damg",
+   "person",
+   "Gus Ferreira"
+  ],
+  [
+   "ent_vw6clrwfi3lacl6v",
+   "person",
+   "Gus Ferreira"
+  ],
+  [
+   "ent_wrsqnlkbea3per2i",
+   "person",
+   "Ife Okafor"
+  ],
+  [
+   "ent_4fh2qmy4bjfm33on",
+   "person",
+   "Jonas Albers"
+  ],
+  [
+   "ent_yxuqm34vrdmvvlug",
+   "organization",
+   "Lumenfold"
+  ],
+  [
+   "ent_3h2c2dzexuvk7vve",
+   "person",
+   "Mara Okafor"
+  ],
+  [
+   "ent_fdmjhmj5s7lvgbgw",
+   "person",
+   "Priyanka Rao"
+  ],
+  [
+   "ent_exiszhpywdhloygg",
+   "person",
+   "R. Chen"
+  ],
+  [
+   "ent_252ytloyxwwab52s",
+   "person",
+   "Sam"
+  ],
+  [
+   "ent_vv5aomiyakczmky2",
+   "person",
+   "Sam Patel"
+  ],
+  [
+   "ent_hfe4jljdwzczadya",
+   "organization",
+   "Tessellate"
+  ],
+  [
+   "ent_fem66fysiqpw37f3",
+   "person",
+   "Theo Lindqvist"
+  ]
+ ],
+ "ids": {
+  "gus_new": "ent_vw6clrwfi3lacl6v",
+  "gus_old": "ent_nd4pomvfaf24damg",
+  "tessellate": "ent_hfe4jljdwzczadya",
+  "lumenfold": "ent_yxuqm34vrdmvvlug",
+  "sam_okonkwo": "ent_252ytloyxwwab52s",
+  "sam_patel": "ent_vv5aomiyakczmky2",
+  "sam_patel_split": "ent_nfhnnzztsbrofbd3",
+  "robert": "ent_exiszhpywdhloygg"
+ },
+ "merge.gus_old_lookup": {
+  "id": "ent_vw6clrwfi3lacl6v",
+  "name": "Gus Ferreira",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "gus@lumenfold.example"
+   ],
+   [
+    "email",
+    "gus.ferreira@tessellate.example"
+   ]
+  ],
+  "vault_path": "Person/Gus Ferreira (ent_vw6clrwfi3lacl6v).md",
+  "claims": [
+   "Gus Ferreira invited_to Harbor go/no-go review (launch 3 Dec) [active] #22",
+   "Gus Ferreira works_at Lumenfold [active] #37",
+   "Mara Okafor corresponded_with Gus Ferreira [active] #38"
+  ]
+ },
+ "merge.gus_new": {
+  "id": "ent_vw6clrwfi3lacl6v",
+  "name": "Gus Ferreira",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "gus@lumenfold.example"
+   ],
+   [
+    "email",
+    "gus.ferreira@tessellate.example"
+   ]
+  ],
+  "vault_path": "Person/Gus Ferreira (ent_vw6clrwfi3lacl6v).md",
+  "claims": [
+   "Gus Ferreira invited_to Harbor go/no-go review (launch 3 Dec) [active] #22",
+   "Gus Ferreira works_at Lumenfold [active] #37",
+   "Mara Okafor corresponded_with Gus Ferreira [active] #38"
+  ]
+ },
+ "merge.tess_old_lookup": {
+  "id": "ent_yxuqm34vrdmvvlug",
+  "name": "Lumenfold",
+  "aliases": [
+   "Tessellate"
+  ],
+  "identifiers": [
+   [
+    "domain",
+    "tessellate.example"
+   ],
+   [
+    "domain",
+    "lumenfold.example"
+   ]
+  ],
+  "vault_path": "Organization/Lumenfold (ent_yxuqm34vrdmvvlug).md",
+  "claims": [
+   "Gus Ferreira works_at Lumenfold [active] #37"
+  ]
+ },
+ "merge.lumenfold": {
+  "id": "ent_yxuqm34vrdmvvlug",
+  "name": "Lumenfold",
+  "aliases": [
+   "Tessellate"
+  ],
+  "identifiers": [
+   [
+    "domain",
+    "tessellate.example"
+   ],
+   [
+    "domain",
+    "lumenfold.example"
+   ]
+  ],
+  "vault_path": "Organization/Lumenfold (ent_yxuqm34vrdmvvlug).md",
+  "claims": [
+   "Gus Ferreira works_at Lumenfold [active] #37"
+  ]
+ },
+ "merge.entities_named": {
+  "Gus Ferreira": [
+   [
+    "ent_vw6clrwfi3lacl6v",
+    "person"
+   ]
+  ],
+  "Tessellate": [],
+  "Lumenfold": [
+   [
+    "ent_yxuqm34vrdmvvlug",
+    "organization"
+   ]
+  ]
+ },
+ "merge.vault_person_gus": [
+  "Person/Gus Ferreira (ent_nd4pomvfaf24damg).md",
+  "Person/Gus Ferreira (ent_vw6clrwfi3lacl6v).md"
+ ],
+ "merge.vault_org": [
+  "Organization/Brightwell Analytics (ent_4vhkgaarhxk7rmah).md",
+  "Organization/Corvid Labs (ent_5bixur43otoo3uhc).md",
+  "Organization/Lumenfold (ent_yxuqm34vrdmvvlug).md",
+  "Organization/Tessellate (ent_hfe4jljdwzczadya).md"
+ ],
+ "merge.gus_old_page": "---\nnugget_id: \"ent_nd4pomvfaf24damg\"\nkind: \"person\"\nmerged_into: \"ent_vw6clrwfi3lacl6v\"\n---\n<!-- nugget:begin redirect -->\n# Gus Ferreira\n\nThis page moved: the entity was merged into [[Person/Gus Ferreira (ent_vw6clrwfi3lacl6v)|Gus Ferreira]]. Your notes from here were moved there too.\n<!-- nugget:end redirect -->\n",
+ "merge.tess_old_page": "---\nnugget_id: \"ent_hfe4jljdwzczadya\"\nkind: \"organization\"\nmerged_into: \"ent_yxuqm34vrdmvvlug\"\n---\n<!-- nugget:begin redirect -->\n# Tessellate\n\nThis page moved: the entity was merged into [[Organization/Lumenfold (ent_yxuqm34vrdmvvlug)|Lumenfold]]. Your notes from here were moved there too.\n<!-- nugget:end redirect -->\n",
+ "merge.links_to_old_ids": [
+  ".nugget/base/entities/ent_hfe4jljdwzczadya.md",
+  ".nugget/base/entities/ent_nd4pomvfaf24damg.md"
+ ],
+ "wrongmerge.sam_patel_before": {
+  "id": "ent_vv5aomiyakczmky2",
+  "name": "Sam Patel",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "sam.patel@brightwell.example"
+   ]
+  ],
+  "vault_path": "Person/Sam Patel (ent_vv5aomiyakczmky2).md",
+  "claims": [
+   "Sam Patel attended Harbor stand-up [active] #4",
+   "Sam Patel attended Harbor go/no-go review (launch 3 Dec) [active] #21",
+   "Sam Patel works_at Brightwell Analytics [active] #32",
+   "Mara Okafor corresponded_with Sam Patel [active] #35",
+   "Sam Patel works_on Harbor [active] #59"
+  ]
+ },
+ "wrongmerge.sam": {
+  "id": "ent_252ytloyxwwab52s",
+  "name": "Sam",
+  "aliases": [
+   "Sam Okonkwo",
+   "Sam Patel"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "sam.patel@brightwell.example"
+   ],
+   [
+    "email",
+    "sokonkwo@mailbox.example"
+   ]
+  ],
+  "vault_path": "Person/Sam (ent_252ytloyxwwab52s).md",
+  "claims": [
+   "Sam attended Harbor stand-up [active] #4",
+   "Sam attended Climbing with Sam [active] #8",
+   "Sam attended Harbor go/no-go review (launch 3 Dec) [active] #21",
+   "Sam invited_to Ife staying (Gull Point Sunday) [active] #26",
+   "Sam works_at Brightwell Analytics [active] #32",
+   "Mara Okafor corresponded_with Sam [active] #35",
+   "Sam works_on Harbor [active] #59"
+  ]
+ },
+ "split.claims_chosen": [
+  4,
+  21,
+  32,
+  59
+ ],
+ "split.new": {
+  "id": "ent_nfhnnzztsbrofbd3",
+  "name": "Sam Patel",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "sam.patel@brightwell.example"
+   ]
+  ],
+  "vault_path": "Person/Sam Patel (ent_nfhnnzztsbrofbd3).md",
+  "claims": [
+   "Sam Patel attended Harbor stand-up [active] #4",
+   "Sam Patel attended Harbor go/no-go review (launch 3 Dec) [active] #21",
+   "Sam Patel works_at Brightwell Analytics [active] #32",
+   "Sam Patel works_on Harbor [active] #59"
+  ]
+ },
+ "split.sam_after": {
+  "id": "ent_252ytloyxwwab52s",
+  "name": "Sam",
+  "aliases": [
+   "Sam Okonkwo"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "sokonkwo@mailbox.example"
+   ]
+  ],
+  "vault_path": "Person/Sam (ent_252ytloyxwwab52s).md",
+  "claims": [
+   "Sam attended Climbing with Sam [active] #8",
+   "Sam invited_to Ife staying (Gull Point Sunday) [active] #26",
+   "Mara Okafor corresponded_with Sam [active] #35"
+  ]
+ },
+ "split.old_sam_patel_lookup": {
+  "id": "ent_252ytloyxwwab52s",
+  "name": "Sam",
+  "aliases": [
+   "Sam Okonkwo"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "sokonkwo@mailbox.example"
+   ]
+  ],
+  "vault_path": "Person/Sam (ent_252ytloyxwwab52s).md",
+  "claims": [
+   "Sam attended Climbing with Sam [active] #8",
+   "Sam invited_to Ife staying (Gull Point Sunday) [active] #26",
+   "Mara Okafor corresponded_with Sam [active] #35"
+  ]
+ },
+ "split.vault_person_sam": [
+  "Person/Sam (ent_252ytloyxwwab52s).md",
+  "Person/Sam Patel (ent_nfhnnzztsbrofbd3).md",
+  "Person/Sam Patel (ent_vv5aomiyakczmky2).md"
+ ],
+ "split.links_to_old_sp": [
+  ".nugget/base/entities/ent_vv5aomiyakczmky2.md",
+  "Person/Sam Patel (ent_vv5aomiyakczmky2).md"
+ ],
+ "split.old_sp_page": "---\nnugget_id: \"ent_vv5aomiyakczmky2\"\nkind: \"person\"\nmerged_into: \"ent_252ytloyxwwab52s\"\n---\n<!-- nugget:begin redirect -->\n# Sam Patel\n\nThis page moved: the entity was merged into [[Person/Sam (ent_252ytloyxwwab52s)|Sam]]. Your notes from here were moved there too.\n<!-- nugget:end redirect -->\n",
+ "header.rc_found": [
+  {
+   "claims": 6,
+   "id": "ent_exiszhpywdhloygg",
+   "kind": "person",
+   "mentions": 11,
+   "name": "R. Chen",
+   "updated_at": "2026-10-30T19:45:56.471739586Z"
+  }
+ ],
+ "header.robert": {
+  "id": "ent_exiszhpywdhloygg",
+  "name": "R. Chen",
+  "aliases": [
+   "Robert Chen"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "robert.chen@brightwell.example"
+   ]
+  ],
+  "vault_path": "Person/R. Chen (ent_exiszhpywdhloygg).md",
+  "claims": [
+   "R. Chen organized 1:1 Mara / Bob [active] #10",
+   "R. Chen attended 1:1 Mara / Bob [active] #11",
+   "R. Chen attended Harbor go/no-go review (launch 3 Dec) [active] #20",
+   "R. Chen works_at Brightwell Analytics [active] #31",
+   "Mara Okafor corresponded_with R. Chen [active] #34",
+   "R. Chen works_on Harbor [active] #49"
+  ]
+ },
+ "header.vault": [
+  "Person/R. Chen (ent_exiszhpywdhloygg).md"
+ ],
+ "header.conflicts": {
+  "conflicts": [],
+  "invalid": [],
+  "last_render": "2026-10-30T19:46:24.341738969Z",
+  "pages": 43,
+  "path": "/tmp/claude-0/-home-user-nugget/3826b9b2-0317-5073-9bf7-b47d75df8cb7/scratchpad/resolution/A/home/data/vault"
+ },
+ "reextract.touched": [
+  "Calendar/2026-03-10-harbor-standup.ics",
+  "Calendar/2026-04-16-climbing.ics",
+  "Calendar/2026-06-03-1on1-bob.ics",
+  "Calendar/2026-10-14-harbor-go-no-go.ics",
+  "Calendar/2026-10-24-ife-visit.ics",
+  "Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+  "Mail/Inbox/2026-03-12-tessellate-intro.eml",
+  "Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+  "Mail/Inbox/2026-04-02-pipeline-green.eml",
+  "Mail/Inbox/2026-04-09-thursday-climbing.eml",
+  "Mail/Inbox/2026-06-10-tessellate-renewal.eml",
+  "Mail/Inbox/2026-09-01-tessellate-is-now-lumenfold.eml",
+  "Mail/Inbox/2026-09-03-harbor-launch-date.eml",
+  "Mail/Inbox/2026-09-15-fwd-data-weekly.eml",
+  "Mail/Inbox/2026-09-22-lumenfold-region-move.eml",
+  "Mail/Inbox/2026-10-06-harbor-launch-moved.eml",
+  "Mail/Sent/2026-03-05-re-harbor-kickoff.eml",
+  "Mail/Sent/2026-04-19-re-may-visit.eml",
+  "Mail/Sent/2026-08-15-re-new-role.eml",
+  "Mail/Sent/2026-09-04-re-harbor-launch-date.eml",
+  "Mail/Sent/2026-10-20-re-sunday-crag.eml",
+  "Notes/Journal/2026-03-15.md",
+  "Notes/Journal/2026-07-05.md",
+  "Notes/Journal/2026-08-16.md",
+  "Notes/Journal/2026-09-24.md",
+  "Notes/Meetings/2026-06-03-1on1-with-Bob.md",
+  "Notes/People/Dana-Whitfield.md",
+  "Notes/Projects/Harbor-launch-plan.md",
+  "Notes/Projects/Harbor.md",
+  "Work/2026-08-28-mid-year-review-Mara-Okafor.md",
+  "Work/2026-09-18-promotion-case-note.md"
+ ],
+ "reextract.people_orgs": [
+  [
+   "ent_4vhkgaarhxk7rmah",
+   "organization",
+   "Brightwell Analytics"
+  ],
+  [
+   "ent_5bixur43otoo3uhc",
+   "organization",
+   "Corvid Labs"
+  ],
+  [
+   "ent_fhge7mdmic5mjm3m",
+   "person",
+   "Dana Whitfield"
+  ],
+  [
+   "ent_7n5tchcyvveh5xgw",
+   "person",
+   "Dr. Lena Brandt"
+  ],
+  [
+   "ent_vw6clrwfi3lacl6v",
+   "person",
+   "Gus Ferreira"
+  ],
+  [
+   "ent_wrsqnlkbea3per2i",
+   "person",
+   "Ife Okafor"
+  ],
+  [
+   "ent_4fh2qmy4bjfm33on",
+   "person",
+   "Jonas Albers"
+  ],
+  [
+   "ent_yxuqm34vrdmvvlug",
+   "organization",
+   "Lumenfold"
+  ],
+  [
+   "ent_3h2c2dzexuvk7vve",
+   "person",
+   "Mara Okafor"
+  ],
+  [
+   "ent_fdmjhmj5s7lvgbgw",
+   "person",
+   "Priyanka Rao"
+  ],
+  [
+   "ent_exiszhpywdhloygg",
+   "person",
+   "R. Chen"
+  ],
+  [
+   "ent_252ytloyxwwab52s",
+   "person",
+   "Sam"
+  ],
+  [
+   "ent_nfhnnzztsbrofbd3",
+   "person",
+   "Sam Patel"
+  ],
+  [
+   "ent_fem66fysiqpw37f3",
+   "person",
+   "Theo Lindqvist"
+  ]
+ ],
+ "reextract.gus_new": {
+  "id": "ent_vw6clrwfi3lacl6v",
+  "name": "Gus Ferreira",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "gus@lumenfold.example"
+   ],
+   [
+    "email",
+    "gus.ferreira@tessellate.example"
+   ]
+  ],
+  "vault_path": "Person/Gus Ferreira (ent_vw6clrwfi3lacl6v).md",
+  "claims": [
+   "Gus Ferreira invited_to Harbor go/no-go review (launch 3 Dec) [active] #22",
+   "Gus Ferreira works_at Lumenfold [active] #37",
+   "Mara Okafor corresponded_with Gus Ferreira [active] #38"
+  ]
+ },
+ "reextract.gus_old": {
+  "id": "ent_vw6clrwfi3lacl6v",
+  "name": "Gus Ferreira",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "gus@lumenfold.example"
+   ],
+   [
+    "email",
+    "gus.ferreira@tessellate.example"
+   ]
+  ],
+  "vault_path": "Person/Gus Ferreira (ent_vw6clrwfi3lacl6v).md",
+  "claims": [
+   "Gus Ferreira invited_to Harbor go/no-go review (launch 3 Dec) [active] #22",
+   "Gus Ferreira works_at Lumenfold [active] #37",
+   "Mara Okafor corresponded_with Gus Ferreira [active] #38"
+  ]
+ },
+ "reextract.tessellate": {
+  "id": "ent_yxuqm34vrdmvvlug",
+  "name": "Lumenfold",
+  "aliases": [
+   "Tessellate"
+  ],
+  "identifiers": [
+   [
+    "domain",
+    "tessellate.example"
+   ],
+   [
+    "domain",
+    "lumenfold.example"
+   ]
+  ],
+  "vault_path": "Organization/Lumenfold (ent_yxuqm34vrdmvvlug).md",
+  "claims": [
+   "Gus Ferreira works_at Lumenfold [active] #37"
+  ]
+ },
+ "reextract.lumenfold": {
+  "id": "ent_yxuqm34vrdmvvlug",
+  "name": "Lumenfold",
+  "aliases": [
+   "Tessellate"
+  ],
+  "identifiers": [
+   [
+    "domain",
+    "tessellate.example"
+   ],
+   [
+    "domain",
+    "lumenfold.example"
+   ]
+  ],
+  "vault_path": "Organization/Lumenfold (ent_yxuqm34vrdmvvlug).md",
+  "claims": [
+   "Gus Ferreira works_at Lumenfold [active] #37"
+  ]
+ },
+ "reextract.sam_okonkwo": {
+  "id": "ent_252ytloyxwwab52s",
+  "name": "Sam",
+  "aliases": [
+   "Sam Okonkwo"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "sokonkwo@mailbox.example"
+   ]
+  ],
+  "vault_path": "Person/Sam (ent_252ytloyxwwab52s).md",
+  "claims": [
+   "Sam attended Climbing with Sam [active] #8",
+   "Sam invited_to Ife staying (Gull Point Sunday) [active] #26",
+   "Mara Okafor corresponded_with Sam [active] #35"
+  ]
+ },
+ "reextract.sam_patel": {
+  "id": "ent_252ytloyxwwab52s",
+  "name": "Sam",
+  "aliases": [
+   "Sam Okonkwo"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "sokonkwo@mailbox.example"
+   ]
+  ],
+  "vault_path": "Person/Sam (ent_252ytloyxwwab52s).md",
+  "claims": [
+   "Sam attended Climbing with Sam [active] #8",
+   "Sam invited_to Ife staying (Gull Point Sunday) [active] #26",
+   "Mara Okafor corresponded_with Sam [active] #35"
+  ]
+ },
+ "reextract.sam_patel_split": {
+  "id": "ent_nfhnnzztsbrofbd3",
+  "name": "Sam Patel",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "sam.patel@brightwell.example"
+   ]
+  ],
+  "vault_path": "Person/Sam Patel (ent_nfhnnzztsbrofbd3).md",
+  "claims": [
+   "Sam Patel attended Harbor stand-up [active] #4",
+   "Sam Patel attended Harbor go/no-go review (launch 3 Dec) [active] #21",
+   "Sam Patel works_at Brightwell Analytics [active] #32",
+   "Sam Patel works_on Harbor [active] #59",
+   "Mara Okafor corresponded_with Sam Patel [active] #62"
+  ]
+ },
+ "reextract.robert": {
+  "id": "ent_exiszhpywdhloygg",
+  "name": "R. Chen",
+  "aliases": [
+   "Robert Chen"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "robert.chen@brightwell.example"
+   ]
+  ],
+  "vault_path": "Person/R. Chen (ent_exiszhpywdhloygg).md",
+  "claims": [
+   "R. Chen organized 1:1 Mara / Bob [active] #10",
+   "R. Chen attended 1:1 Mara / Bob [active] #11",
+   "R. Chen attended Harbor go/no-go review (launch 3 Dec) [active] #20",
+   "R. Chen works_at Brightwell Analytics [active] #31",
+   "Mara Okafor corresponded_with R. Chen [active] #34",
+   "R. Chen works_on Harbor [active] #49"
+  ]
+ },
+ "reextract.entities_named": {
+  "Gus Ferreira": [
+   [
+    "ent_vw6clrwfi3lacl6v",
+    "person"
+   ]
+  ],
+  "Tessellate": [],
+  "Lumenfold": [
+   [
+    "ent_yxuqm34vrdmvvlug",
+    "organization"
+   ]
+  ],
+  "Sam": [
+   [
+    "ent_252ytloyxwwab52s",
+    "person"
+   ]
+  ],
+  "Sam Patel": [
+   [
+    "ent_nfhnnzztsbrofbd3",
+    "person"
+   ]
+  ],
+  "R. Chen": [
+   [
+    "ent_exiszhpywdhloygg",
+    "person"
+   ]
+  ],
+  "Robert Chen": []
+ },
+ "restart.people_orgs": [
+  [
+   "ent_4vhkgaarhxk7rmah",
+   "organization",
+   "Brightwell Analytics"
+  ],
+  [
+   "ent_5bixur43otoo3uhc",
+   "organization",
+   "Corvid Labs"
+  ],
+  [
+   "ent_fhge7mdmic5mjm3m",
+   "person",
+   "Dana Whitfield"
+  ],
+  [
+   "ent_7n5tchcyvveh5xgw",
+   "person",
+   "Dr. Lena Brandt"
+  ],
+  [
+   "ent_vw6clrwfi3lacl6v",
+   "person",
+   "Gus Ferreira"
+  ],
+  [
+   "ent_wrsqnlkbea3per2i",
+   "person",
+   "Ife Okafor"
+  ],
+  [
+   "ent_4fh2qmy4bjfm33on",
+   "person",
+   "Jonas Albers"
+  ],
+  [
+   "ent_yxuqm34vrdmvvlug",
+   "organization",
+   "Lumenfold"
+  ],
+  [
+   "ent_3h2c2dzexuvk7vve",
+   "person",
+   "Mara Okafor"
+  ],
+  [
+   "ent_fdmjhmj5s7lvgbgw",
+   "person",
+   "Priyanka Rao"
+  ],
+  [
+   "ent_exiszhpywdhloygg",
+   "person",
+   "R. Chen"
+  ],
+  [
+   "ent_252ytloyxwwab52s",
+   "person",
+   "Sam"
+  ],
+  [
+   "ent_nfhnnzztsbrofbd3",
+   "person",
+   "Sam Patel"
+  ],
+  [
+   "ent_fem66fysiqpw37f3",
+   "person",
+   "Theo Lindqvist"
+  ]
+ ],
+ "restart.gus_new": {
+  "id": "ent_vw6clrwfi3lacl6v",
+  "name": "Gus Ferreira",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "gus@lumenfold.example"
+   ],
+   [
+    "email",
+    "gus.ferreira@tessellate.example"
+   ]
+  ],
+  "vault_path": "Person/Gus Ferreira (ent_vw6clrwfi3lacl6v).md",
+  "claims": [
+   "Gus Ferreira invited_to Harbor go/no-go review (launch 3 Dec) [active] #22",
+   "Gus Ferreira works_at Lumenfold [active] #37",
+   "Mara Okafor corresponded_with Gus Ferreira [active] #38"
+  ]
+ },
+ "restart.gus_old": {
+  "id": "ent_vw6clrwfi3lacl6v",
+  "name": "Gus Ferreira",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "gus@lumenfold.example"
+   ],
+   [
+    "email",
+    "gus.ferreira@tessellate.example"
+   ]
+  ],
+  "vault_path": "Person/Gus Ferreira (ent_vw6clrwfi3lacl6v).md",
+  "claims": [
+   "Gus Ferreira invited_to Harbor go/no-go review (launch 3 Dec) [active] #22",
+   "Gus Ferreira works_at Lumenfold [active] #37",
+   "Mara Okafor corresponded_with Gus Ferreira [active] #38"
+  ]
+ },
+ "restart.tessellate": {
+  "id": "ent_yxuqm34vrdmvvlug",
+  "name": "Lumenfold",
+  "aliases": [
+   "Tessellate"
+  ],
+  "identifiers": [
+   [
+    "domain",
+    "tessellate.example"
+   ],
+   [
+    "domain",
+    "lumenfold.example"
+   ]
+  ],
+  "vault_path": "Organization/Lumenfold (ent_yxuqm34vrdmvvlug).md",
+  "claims": [
+   "Gus Ferreira works_at Lumenfold [active] #37"
+  ]
+ },
+ "restart.lumenfold": {
+  "id": "ent_yxuqm34vrdmvvlug",
+  "name": "Lumenfold",
+  "aliases": [
+   "Tessellate"
+  ],
+  "identifiers": [
+   [
+    "domain",
+    "tessellate.example"
+   ],
+   [
+    "domain",
+    "lumenfold.example"
+   ]
+  ],
+  "vault_path": "Organization/Lumenfold (ent_yxuqm34vrdmvvlug).md",
+  "claims": [
+   "Gus Ferreira works_at Lumenfold [active] #37"
+  ]
+ },
+ "restart.sam_okonkwo": {
+  "id": "ent_252ytloyxwwab52s",
+  "name": "Sam",
+  "aliases": [
+   "Sam Okonkwo"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "sokonkwo@mailbox.example"
+   ]
+  ],
+  "vault_path": "Person/Sam (ent_252ytloyxwwab52s).md",
+  "claims": [
+   "Sam attended Climbing with Sam [active] #8",
+   "Sam invited_to Ife staying (Gull Point Sunday) [active] #26",
+   "Mara Okafor corresponded_with Sam [active] #35"
+  ]
+ },
+ "restart.sam_patel": {
+  "id": "ent_252ytloyxwwab52s",
+  "name": "Sam",
+  "aliases": [
+   "Sam Okonkwo"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "sokonkwo@mailbox.example"
+   ]
+  ],
+  "vault_path": "Person/Sam (ent_252ytloyxwwab52s).md",
+  "claims": [
+   "Sam attended Climbing with Sam [active] #8",
+   "Sam invited_to Ife staying (Gull Point Sunday) [active] #26",
+   "Mara Okafor corresponded_with Sam [active] #35"
+  ]
+ },
+ "restart.sam_patel_split": {
+  "id": "ent_nfhnnzztsbrofbd3",
+  "name": "Sam Patel",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "sam.patel@brightwell.example"
+   ]
+  ],
+  "vault_path": "Person/Sam Patel (ent_nfhnnzztsbrofbd3).md",
+  "claims": [
+   "Sam Patel attended Harbor stand-up [active] #4",
+   "Sam Patel attended Harbor go/no-go review (launch 3 Dec) [active] #21",
+   "Sam Patel works_at Brightwell Analytics [active] #32",
+   "Sam Patel works_on Harbor [active] #59",
+   "Mara Okafor corresponded_with Sam Patel [active] #62"
+  ]
+ },
+ "restart.robert": {
+  "id": "ent_exiszhpywdhloygg",
+  "name": "R. Chen",
+  "aliases": [
+   "Robert Chen"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "robert.chen@brightwell.example"
+   ]
+  ],
+  "vault_path": "Person/R. Chen (ent_exiszhpywdhloygg).md",
+  "claims": [
+   "R. Chen organized 1:1 Mara / Bob [active] #10",
+   "R. Chen attended 1:1 Mara / Bob [active] #11",
+   "R. Chen attended Harbor go/no-go review (launch 3 Dec) [active] #20",
+   "R. Chen works_at Brightwell Analytics [active] #31",
+   "Mara Okafor corresponded_with R. Chen [active] #34",
+   "R. Chen works_on Harbor [active] #49"
+  ]
+ },
+ "restart.vault_person": [
+  "Person/Dana Whitfield (ent_fhge7mdmic5mjm3m).md",
+  "Person/Dr. Lena Brandt (ent_7n5tchcyvveh5xgw).md",
+  "Person/Gus Ferreira (ent_nd4pomvfaf24damg).md",
+  "Person/Gus Ferreira (ent_vw6clrwfi3lacl6v).md",
+  "Person/Ife Okafor (ent_wrsqnlkbea3per2i).md",
+  "Person/Jonas Albers (ent_4fh2qmy4bjfm33on).md",
+  "Person/Mara Okafor (ent_3h2c2dzexuvk7vve).md",
+  "Person/Priyanka Rao (ent_fdmjhmj5s7lvgbgw).md",
+  "Person/R. Chen (ent_exiszhpywdhloygg).md",
+  "Person/Sam (ent_252ytloyxwwab52s).md",
+  "Person/Sam Patel (ent_nfhnnzztsbrofbd3).md",
+  "Person/Sam Patel (ent_vv5aomiyakczmky2).md",
+  "Person/Theo Lindqvist (ent_fem66fysiqpw37f3).md"
+ ],
+ "restart.vault_org": [
+  "Organization/Brightwell Analytics (ent_4vhkgaarhxk7rmah).md",
+  "Organization/Corvid Labs (ent_5bixur43otoo3uhc).md",
+  "Organization/Lumenfold (ent_yxuqm34vrdmvvlug).md",
+  "Organization/Tessellate (ent_hfe4jljdwzczadya).md"
+ ]
+}

@@ -1,6 +1,6 @@
 //! `Store`: connection lifecycle, encryption, cursors and counts.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use nugget_core::ids::SourceId;
@@ -47,9 +47,15 @@ pub(crate) struct Db {
     /// `None` for in-memory stores (a second connection would open a different database).
     readers: Option<ReadPool>,
     encrypted: bool,
+    /// Database path and key of a file-backed store (for online backups, which open their own
+    /// connection); `None` for in-memory stores.
+    file: Option<(PathBuf, StoreKey)>,
     /// Held while the approximate vector index is built or dropped (see `vector::build_ann`),
     /// so one runs at a time. Shared with the build thread, which holds `Db` only weakly.
     pub(crate) ann_build: Arc<Mutex<()>>,
+    /// The knowledge graph's counts, with the writer connection's `total_changes()` and the
+    /// time they were computed at (see `graph::counts`).
+    pub(crate) graph_counts: Mutex<Option<(u64, std::time::Instant, [u64; 3])>>,
 }
 
 impl Db {
@@ -188,7 +194,9 @@ impl Store {
             conn: Mutex::new(conn),
             readers,
             encrypted: file.is_some(),
+            file: file.map(|(path, key)| (path.to_path_buf(), key.clone())),
             ann_build: Arc::default(),
+            graph_counts: Mutex::new(None),
         });
         let egress = EgressWriter::spawn(db.clone())?;
         let audit = crate::audit::AuditState::ephemeral()?;
@@ -225,6 +233,52 @@ impl Store {
         self.inner.db.with_read_conn(f)
     }
 
+    /// Free space on the disk holding the database, and whether a write recently failed
+    /// because it was full (read at most every few seconds). `None` for in-memory stores.
+    pub fn disk_status(&self) -> Option<nugget_core::ipc::DiskStatus> {
+        let (path, _) = self.inner.db.file.as_ref()?;
+        let dir = path
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        Some(crate::disk::status(dir))
+    }
+
+    /// Copy every committed transaction from the write-ahead log into the database file and
+    /// truncate the log to zero bytes (`PRAGMA wal_checkpoint(TRUNCATE)`). Call it on a clean
+    /// stop, after the last write: the next open then finds no log left over, instead of a
+    /// multi-megabyte one whose stale frames look like a crash tail. Returns whether the whole
+    /// log was checkpointed; `false` when a reader still holds an old snapshot (nothing is lost,
+    /// the log is simply kept). A no-op for in-memory stores.
+    pub fn checkpoint_wal(&self) -> Result<bool> {
+        if self.inner.db.file.is_none() {
+            return Ok(true);
+        }
+        let (busy, log, done): (i64, i64, i64) = self.with_conn(|c| {
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .db("checkpoint the write-ahead log")
+        })?;
+        let complete = busy == 0 && log == done;
+        if complete {
+            tracing::debug!(frames = done, "write-ahead log checkpointed and truncated");
+        } else {
+            tracing::info!(
+                busy,
+                frames = log,
+                checkpointed = done,
+                "write-ahead log only partly checkpointed (a reader is still active)"
+            );
+        }
+        Ok(complete)
+    }
+
+    /// Database path and key of a file-backed store; `None` for an in-memory one.
+    pub(crate) fn file(&self) -> Option<(&Path, &StoreKey)> {
+        self.inner.db.file.as_ref().map(|(p, k)| (p.as_path(), k))
+    }
+
     /// The shared connections (for work that must outlive a borrowed `Store`, holding them
     /// weakly).
     pub(crate) fn db(&self) -> &Arc<Db> {
@@ -244,7 +298,10 @@ impl Store {
         self.with_read_conn(|c| {
             let (items, chunks): (i64, i64) = c
                 .query_row(
-                    "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM chunks)",
+                    // The trigger-maintained per-source totals (schema v10): a handful of
+                    // rows, where `count(*)` scanned every item and chunk (tens of ms at 500k).
+                    "SELECT coalesce(sum(max(items, 0)), 0), coalesce(sum(max(chunks, 0)), 0)
+                     FROM source_stats",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -384,13 +441,38 @@ fn embedding_prefixes(conn: &Connection) -> Result<Option<(String, String)>> {
 
 /// Open the database at `path` (read-write, plus `extra` flags), check that SQLite has SQLCipher,
 /// and key it, failing with `Error::Integrity` when `key` does not decrypt it.
-fn open_keyed(path: &Path, key: &StoreKey, extra: OpenFlags) -> Result<Connection> {
+pub(crate) fn open_keyed(path: &Path, key: &StoreKey, extra: OpenFlags) -> Result<Connection> {
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX | extra,
     )
     .db("open store")?;
+    apply_key(&conn, key, path)?;
+    Ok(conn)
+}
 
+/// Check that SQLite has SQLCipher and key `conn` (opened on `path`, named in errors), failing
+/// with `Error::Integrity` when `key` does not decrypt it.
+pub(crate) fn apply_key(conn: &Connection, key: &StoreKey, path: &Path) -> Result<()> {
+    set_key(conn, key)?;
+    // The key is only checked on first read of the header.
+    match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
+        r.get::<_, i64>(0)
+    }) {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == ErrorCode::NotADatabase => {
+            Err(Error::Integrity(format!(
+                "cannot decrypt store at {}: wrong key or not a Nugget database",
+                path.display()
+            )))
+        }
+        Err(e) => Err(Error::Storage(format!("read store header: {e}"))),
+    }
+}
+
+/// Check that SQLite has SQLCipher and set `key` on `conn`, without reading the database yet
+/// (so a wrong key is only noticed by the first read).
+pub(crate) fn set_key(conn: &Connection, key: &StoreKey) -> Result<()> {
     // Fail closed if this SQLite has no SQLCipher: `PRAGMA key` would silently do nothing.
     let cipher: Option<String> = conn
         .query_row("PRAGMA cipher_version", [], |r| r.get(0))
@@ -407,26 +489,17 @@ fn open_keyed(path: &Path, key: &StoreKey, extra: OpenFlags) -> Result<Connectio
         .db("configure SQLCipher logging")?;
 
     // Raw 256-bit key (x'..' form): no KDF needed, the key is already uniformly random.
-    let pragma = Zeroizing::new(format!(
-        "PRAGMA key = \"x'{}'\";",
-        hex::encode(key.as_bytes())
-    ));
-    conn.execute_batch(&pragma).db("set store key")?;
-
-    // The key is only checked on first read of the header.
-    match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
-        r.get::<_, i64>(0)
-    }) {
-        Ok(_) => {}
-        Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == ErrorCode::NotADatabase => {
-            return Err(Error::Integrity(format!(
-                "cannot decrypt store at {}: wrong key or not a Nugget database",
-                path.display()
-            )));
-        }
-        Err(e) => return Err(Error::Storage(format!("read store header: {e}"))),
+    // Built in place in a zeroized buffer of its final size, so no copy of the hex key is left
+    // behind in a temporary or a reallocated buffer.
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut pragma = Zeroizing::new(String::with_capacity(24 + 64));
+    pragma.push_str("PRAGMA key = \"x'");
+    for b in key.as_bytes() {
+        pragma.push(char::from(HEX[usize::from(b >> 4)]));
+        pragma.push(char::from(HEX[usize::from(b & 0x0f)]));
     }
-    Ok(conn)
+    pragma.push_str("'\";");
+    conn.execute_batch(&pragma).db("set store key")
 }
 
 /// A read-only (`query_only`) connection to the existing, migrated, WAL-mode database at `path`.
@@ -438,7 +511,7 @@ fn open_reader(path: &Path, key: &StoreKey) -> Result<Connection> {
     Ok(conn)
 }
 
-fn set_common_pragmas(conn: &Connection) -> Result<()> {
+pub(crate) fn set_common_pragmas(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA synchronous = NORMAL;
@@ -451,7 +524,7 @@ fn set_common_pragmas(conn: &Connection) -> Result<()> {
 
 /// Owner-only permissions on the database and its WAL/SHM files (Unix). Best effort: the content
 /// is encrypted regardless.
-fn restrict_file_permissions(path: &Path) {
+pub(crate) fn restrict_file_permissions(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use common::*;
 use nugget_core::capability::{Locality, Tier};
+use nugget_core::ids::ProviderId;
 use nugget_graph::{ClaimObject, EntityKind};
 use nugget_knowledge::{KnowledgeConfig, LlmConfig, RunBudget};
 use nugget_store::{NewItem, content_hash};
@@ -209,6 +210,31 @@ async fn sensitive_items_never_reach_the_cloud() {
     run(&k2).await;
     assert_eq!(cloud2.calls(), 0);
     assert!(!k2.status().llm_local_available);
+}
+
+#[tokio::test]
+async fn status_reports_the_cloud_extractor() {
+    let env = Env::new();
+    env.put(memo("gmail:me", "plain", Some(false)), &[MEMO]);
+    let cloud = FakeProvider::new("cloud", Locality::Cloud, |_| reply());
+    let cfg = KnowledgeConfig {
+        llm: LlmConfig {
+            cloud_sources: vec!["gmail:me".into()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let k = env.knowledge(cfg, Some(router(Tier::Synthesis, vec![cloud.clone()])));
+    let stats = run(&k).await;
+    assert_eq!(cloud.calls(), 1);
+    // GG8-12: the user can see extraction went to the cloud provider.
+    let id = Some(ProviderId::new("cloud"));
+    assert_eq!(stats.llm_provider, id);
+    assert_eq!(k.status().llm_provider, id);
+    // A later run with nothing to send keeps reporting it.
+    let stats = run(&k).await;
+    assert_eq!(stats.llm_provider, None);
+    assert_eq!(k.status().llm_provider, id);
 }
 
 #[tokio::test]

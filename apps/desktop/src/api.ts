@@ -83,6 +83,8 @@ export interface ChatDone {
   error: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  /** Post-check of a sourced `retrieve.ask` answer (absent for plain chat and older daemons). */
+  check?: AnswerCheck;
 }
 
 export interface ItemRef {
@@ -116,11 +118,30 @@ export type ModelPhase = "downloading" | "verifying" | "installed" | "failed";
 
 export interface ModelProgress {
   id: string;
+  /** Bytes downloaded; in `failed`, the bytes staged (kept, so the next install resumes). */
   downloaded: number;
   total: number;
   phase: ModelPhase;
+  /** Plain-language message (English) when `failed`; prefer a localised one by `reason`. */
   error: string | null;
+  /** Why it failed (absent on older daemons). */
+  reason?: ModelFailReason;
+  /** The HTTP status when `reason` is `http_error`. */
+  http_status?: number;
 }
+
+/** `nugget_core::ipc::ModelFailReason`; a newer daemon may send others (shown via `error`). */
+export type ModelFailReason =
+  | "offline"
+  | "http_error"
+  | "captive_portal"
+  | "stalled"
+  | "interrupted"
+  | "disk_full"
+  | "integrity"
+  | "cancelled"
+  | "other"
+  | (string & {});
 
 export interface EgressEvent {
   /** RFC 3339 timestamp. */
@@ -165,6 +186,59 @@ export interface SourceInfo {
   last_sync?: string | null;
   last_error?: string | null;
   settings?: SourceSettings;
+  /** Plain-language sync health (FF2); absent from older daemons. */
+  health?: SourceHealth | null;
+  /** KK2: what the last folder scan found and skipped; absent for other kinds and older daemons. */
+  scan?: ScanReport | null;
+}
+
+/** KK2: a folder scan's counts, so a folder with nothing indexable says so instead of spinning. */
+export interface ScanReport {
+  /** The walk of this pass ended. */
+  finished: boolean;
+  /** Files that will be (or already are) indexed this pass. */
+  found: number;
+  /** New or changed files plus deletions this pass sends (absent from older daemons). */
+  to_index?: number;
+  unsupported: number;
+  too_large: number;
+  unreadable: number;
+  roots_missing: number;
+  roots_denied: number;
+  max_file_bytes: number;
+  /** Up to five examples of skipped files. */
+  skipped?: { path: string; reason: "unsupported" | "too_large" | "unreadable" | string; bytes?: number | null }[];
+}
+
+/** Codes of {@link SourceHealth.code}; unknown codes fall back to the daemon's English text. */
+export type SourceHealthCode =
+  | "ok"
+  | "syncing"
+  | "disabled"
+  | "reconnect"
+  | "not_set_up"
+  | "disk_full"
+  | "rate_limited"
+  | "offline"
+  | "server_error"
+  | "too_large"
+  | "config"
+  | "item_errors"
+  | "error"
+  /** KK2: the folder holds nothing Nugget can index. */
+  | "nothing_indexable"
+  /** KK2: the folder can't be opened (permission denied). */
+  | "unreadable";
+
+export interface SourceHealth {
+  code: SourceHealthCode | string;
+  /** English fallback: what is going on. */
+  reason: string;
+  /** English fallback: what the user can do (empty when nothing is needed). */
+  fix?: string;
+  /** Items skipped in recent passes. */
+  item_errors?: number;
+  last_item_error?: string | null;
 }
 
 export interface SourceRef {
@@ -221,6 +295,17 @@ export interface IngestStatus {
   embedding_provider?: string | null;
   triage_provider?: string | null;
   sources: SourceInfo[];
+  /** HH2: background triage progress (items are searchable before triage). */
+  triage?: TriageProgress | null;
+}
+
+/** HH2: background triage (junk / sensitive labels) progress. */
+export interface TriageProgress {
+  state: "off" | "idle" | "running" | "yielding" | "paused";
+  pending: number;
+  done: number;
+  skipped?: number;
+  failed?: number;
 }
 
 // ---- retrieval ----
@@ -242,6 +327,8 @@ export interface Citation {
   sensitive?: boolean;
   /** The item's date (`YYYY-MM-DD`): source modification time, else last update. */
   date?: string;
+  /** JJ2, set by the client from `AskStarted.partial`: at best a near miss for the question. */
+  partial?: boolean;
 }
 
 export interface ContextResponse {
@@ -263,6 +350,8 @@ export interface AskRequest {
   tier?: Tier;
   /** Earlier turns, oldest first: a follow-up is rewritten for retrieval and they go to the model. */
   history?: ChatMessage[];
+  /** The client's current UTC offset in minutes (east positive): the daemon's "today". */
+  utc_offset_minutes?: number;
 }
 
 /** Answer streaming as `chat.delta` / `chat.done`, plus the context the model was given. */
@@ -278,6 +367,24 @@ export interface AskStarted {
   query_rewrite?: string | null;
   /** Nothing relevant in the sources: the daemon answers as an ordinary chat (Z3). */
   general?: boolean;
+  /** JJ2: the question's date phrase and how it filtered the search. */
+  date?: AskDateFilter | null;
+  /** JJ2: citation numbers of near misses (the item lacks some of the question's rare key words). */
+  partial?: number[];
+}
+
+/** JJ2: a date phrase in an Ask question and what it did (`AskStarted.date`). */
+export interface AskDateFilter {
+  /** As written in the question, e.g. `last week`. */
+  phrase: string;
+  /** RFC 3339, inclusive, at the offset the phrase was read with. */
+  start: string;
+  /** RFC 3339, exclusive (midnight after the last day). */
+  end: string;
+  /** `false`: nothing in the range matched, so all dates were searched. */
+  applied: boolean;
+  /** The question was generic: the period's items by date, not search matches. */
+  listed?: boolean;
 }
 
 // ---- local runtime ----
@@ -291,7 +398,18 @@ export interface RuntimeInfo {
   state: RuntimeState;
   /** Provider id the router knows this runtime by (e.g. `local-chat`). */
   provider: string;
+  /** One short sentence for the user (`failed`). */
   error?: string | null;
+  /** Milliseconds in the current state: while `starting`, how long the model has been warming up (KK1). */
+  state_ms?: number | null;
+  /** While `starting`: how long loading is expected to take, in ms (KK1). */
+  expected_ms?: number | null;
+  /** While `failed`: ms until the next automatic restart (KK1). */
+  retry_in_ms?: number | null;
+  /** While `failed`: the daemon stopped restarting it and waits for a Retry (KK1). */
+  gave_up?: boolean;
+  /** The model server's last line before it failed, for the details view (KK1). */
+  detail?: string | null;
 }
 
 // ---- knowledge graph (M2) ----
@@ -376,6 +494,8 @@ export interface ClaimView {
   evidence: EvidenceView[];
   /** RFC 3339: when the fact last changed, if the daemon sends it. */
   updated_at?: string | null;
+  /** All of the fact's evidence is from sensitive items: it is not in the vault or default MCP. */
+  sensitive?: boolean;
 }
 
 export interface MentionView {
@@ -398,6 +518,8 @@ export interface EntityDetail {
   mentions: MentionView[];
   /** The entity's vault page, relative to the vault root. */
   vault_path?: string | null;
+  /** Known only from sensitive items: no vault page, hidden from the graph unless asked for. */
+  sensitive?: boolean;
 }
 
 export interface GraphRequest {
@@ -408,6 +530,8 @@ export interface GraphRequest {
   kinds?: EntityKind[];
   /** Only nodes and edges supported by items of this source. */
   source?: string | null;
+  /** Also show entities and facts known only from sensitive items (marked `sensitive`). */
+  include_sensitive?: boolean;
 }
 
 export interface GraphNodeView {
@@ -415,6 +539,8 @@ export interface GraphNodeView {
   kind: EntityKind;
   name: string;
   depth: number;
+  /** Known only from sensitive items (only sent with `include_sensitive`, or for the centre). */
+  sensitive?: boolean;
 }
 
 export interface GraphEdgeView {
@@ -573,7 +699,19 @@ export function isSourceInfo(v: unknown): v is SourceInfo {
     isCount(v.chunks) &&
     isOptString(v.last_sync) &&
     isOptString(v.last_error) &&
-    (v.settings === undefined || v.settings === null || isRecord(v.settings))
+    (v.settings === undefined || v.settings === null || isRecord(v.settings)) &&
+    (v.health === undefined || v.health === null || isSourceHealth(v.health))
+  );
+}
+
+export function isSourceHealth(v: unknown): v is SourceHealth {
+  return (
+    isRecord(v) &&
+    typeof v.code === "string" &&
+    typeof v.reason === "string" &&
+    isOptString(v.fix) &&
+    (v.item_errors === undefined || isCount(v.item_errors)) &&
+    isOptString(v.last_item_error)
   );
 }
 
@@ -982,6 +1120,12 @@ export const api = {
   openUrl: (url: string) => call<OpenResult>("open_url", { url }),
   /** Native folder picker; `[]` when cancelled. */
   pickFolders: (multiple: boolean) => call<string[]>("pick_folders", { multiple }),
+
+  // II2 (types and notes in the II2 block at the end of this file).
+  // JJ2: with the time zone, the daemon dates each day and month at its own offset (DST).
+  searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { ...localZone(), ...request } }),
+  searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { ...localZone(), ...request } }),
+  searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request: { ...localZone(), ...request } }),
 };
 
 /** `revealed`: the file could run code, so its folder was shown instead of opening it. */
@@ -1417,8 +1561,9 @@ export type SaasKind = "slack" | "notion" | "github" | "linear";
 export const SAAS_KINDS: readonly SaasKind[] = ["slack", "notion", "github", "linear"];
 
 /** Every kind the Add source wizard offers. */
-export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind;
-export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS];
+export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind | MessagingKind;
+// The messaging kinds are spelled out (MESSAGING_KINDS is declared at the end of the file).
+export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS, "imessage", "whatsapp", "telegram"];
 
 export function isConnectorKind(v: unknown): v is ConnectorKind {
   return typeof v === "string" && (CONNECTOR_KINDS as readonly string[]).includes(v);
@@ -1528,6 +1673,12 @@ export interface OverlayView {
   /** After insertion: whether reading the field back matched. */
   verified: boolean | null;
   method: InsertMethod | null;
+  /** II3: Retry and the refinements can run (a request to repeat exists). Absent from an older shell. */
+  can_retry?: boolean;
+  /** II3: the refinement this draft was asked for, while it is on screen. */
+  refinement?: Refinement | null;
+  /** II3: this session drafts for the practice field on the Double Tap page (nothing real is touched). */
+  practice?: boolean;
 }
 
 export const DOUBLETAP_OVERLAY_EVENT = "doubletap:overlay";
@@ -1541,6 +1692,8 @@ export const doubletapApi = {
   status: () => call<DoubleTapStatus>("doubletap_status"),
   /** macOS: opens the Accessibility / Input Monitoring prompts. Elsewhere just reports status. */
   requestPermissions: () => call<DoubleTapStatus>("doubletap_request_permissions"),
+  /** KK2 (GG6-19), macOS: open System Settings at a Privacy pane; `false` where there is none. */
+  openPrivacySettings: (pane: "accessibility" | "input_monitoring") => call<boolean>("doubletap_open_privacy_settings", { pane }),
   defaultExcluded: () => call<string[]>("doubletap_default_excluded"),
   /** Start a draft as if the trigger fired. */
   fire: () => call<void>("doubletap_fire"),
@@ -1553,6 +1706,69 @@ export const doubletapApi = {
   overlayCancel: () => call<void>("overlay_cancel"),
   onOverlay: (h: (view: OverlayView) => void) => on<OverlayView>(DOUBLETAP_OVERLAY_EVENT, h),
   onSettings: (h: (settings: DoubleTapSettings) => void) => on<DoubleTapSettings>(DOUBLETAP_SETTINGS_EVENT, h),
+};
+
+// ---- II3 Double Tap overlay: retry, refinements, resize, history, practice ----
+// Tauri commands in apps/desktop/src-tauri/src/doubletap/commands.rs.
+
+/** A quick refinement: a new draft of the current text with an instruction. */
+export type Refinement = "shorter" | "longer" | "formal" | "casual";
+export const REFINEMENTS: readonly Refinement[] = ["shorter", "longer", "formal", "casual"];
+
+/** One inserted or dismissed draft. Kept in memory only, never on disk; sensitive drafts are never kept. */
+export interface DraftHistoryEntry {
+  id: number;
+  text: string;
+  /** The app it was written for (its display name). */
+  app: string;
+  /** Unix milliseconds. */
+  at: number;
+}
+
+/** The practice field's state, sent while it has focus (CSS pixels, relative to the page's viewport). */
+export interface PracticeField {
+  value: string;
+  /** Character offsets `[start, end]`, or `null` for a caret at the end. */
+  selection: [number, number] | null;
+  rect: { x: number; y: number; width: number; height: number };
+  rtl: boolean;
+  /** The sample message to reply to, in the UI language. */
+  sample: string;
+}
+
+/** What the shell asks of the practice field: put a draft in, or take focus back after Esc. */
+export type PracticeAction = { kind: "insert"; text: string } | { kind: "focus" };
+
+export const DOUBLETAP_HISTORY_EVENT = "doubletap:history";
+export const DOUBLETAP_PRACTICE_EVENT = "doubletap:practice";
+/** The overlay's height limits in logical pixels (mirrors `doubletap::OVERLAY_MIN_HEIGHT/MAX`). */
+export const OVERLAY_MIN_HEIGHT = 120;
+export const OVERLAY_MAX_HEIGHT = 420;
+
+export const overlayApi = {
+  // Overlay window only.
+  /** A new draft from the same context. */
+  retry: () => call<void>("overlay_retry"),
+  /** A new draft of `base` (the edited text, or `null` for the text shown) with the refinement. */
+  refine: (kind: Refinement, base: string | null) => call<void>("overlay_refine", { kind, base }),
+  /** Ask for this content height (logical px); returns the height applied (clamped, fitted to the screen). */
+  resize: (height: number) => call<number>("overlay_resize", { height }),
+  /** Insert a draft from the history instead of the one shown. */
+  insertPrevious: (id: number) => call<void>("overlay_insert_previous", { id }),
+};
+
+export const draftHistoryApi = {
+  /** Newest first, at most 20. */
+  list: () => call<DraftHistoryEntry[]>("doubletap_history"),
+  clear: () => call<void>("doubletap_history_clear"),
+  remove: (id: number) => call<void>("doubletap_history_remove", { id }),
+  onChange: (h: (entries: DraftHistoryEntry[]) => void) => on<DraftHistoryEntry[]>(DOUBLETAP_HISTORY_EVENT, h),
+};
+
+export const practiceApi = {
+  /** Main window only: the practice field gained focus or changed (`null` when it loses focus). */
+  set: (field: PracticeField | null) => call<void>("doubletap_practice", { field }),
+  onAction: (h: (action: PracticeAction) => void) => on<PracticeAction>(DOUBLETAP_PRACTICE_EVENT, h),
 };
 
 // ---- W6 plugins ----
@@ -1778,7 +1994,7 @@ export type AgentEvent =
   | { event: "action_done"; task_id: string; action_id: string; tool: string; is_error: boolean; summary: string; replayed: boolean }
   | { event: "verification"; task_id: string; action_id: string; tool: string; verification: Verification }
   | { event: "injection_suspected"; task_id: string; action_id: string; tool: string; finding: InjectionFinding }
-  | { event: "suspended"; task_id: string; question: string }
+  | { event: "suspended"; task_id: string; question: string; options?: string[] }
   | { event: "finished"; task_id: string; outcome: AgentOutcome; summary: string | null };
 
 /** One `agent.event` notification. */
@@ -1838,6 +2054,8 @@ export interface AgentTaskDetail {
   explain: string;
   pending: ConfirmationRequest[];
   question?: string | null;
+  /** Candidate answers offered with `question` (untrusted screen text: render as plain text). */
+  options?: string[];
 }
 
 export type PolicyEffect = "allow" | "confirm" | "deny";
@@ -1980,6 +2198,7 @@ export function askInConversation(
     provider: route.provider,
     tier: route.tier,
     history: history.filter((m) => m.role !== "system").slice(-CHAT_ASK_HISTORY),
+    utc_offset_minutes: -new Date().getTimezoneOffset(),
   });
 }
 
@@ -2022,7 +2241,7 @@ export interface AiKeySaveRequest {
 export interface AiKeySaveResult extends AiKeyTestResult {
   saved: boolean;
   provider_id: string | null;
-  /** The daemon reads providers at start: always true. */
+  /** Kept for older clients: always false (the provider is usable right away). */
   restart_required: boolean;
 }
 
@@ -2159,3 +2378,643 @@ export const learningApi = {
   /** Audited; the daemon then emits `cards.changed` with reason `reset_learning`. */
   resetLearning: (request: ResetLearningRequest) => call<ResetLearningResult>("proactive_reset_learning", { request }),
 };
+
+// ---- FF4 plugins ----
+// Mirrors `PluginCatalogEntry` / `PluginCatalogResult` and the `file_roots` capability in the
+// `// ---- Plugins (M6) ----` block of `nugget_core::ipc`.
+
+// Declaration merge: `PluginCapabilities` (W6 block) gains file access.
+export interface PluginCapabilities {
+  /** Source settings fields holding a folder or file the plugin may read (absent from older daemons). */
+  file_roots?: string[];
+}
+
+/** `capabilities.file_roots`, empty when absent. */
+export function pluginFileRoots(c: PluginCapabilities | null | undefined): string[] {
+  return Array.isArray(c?.file_roots) ? c.file_roots.filter((f): f is string => typeof f === "string") : [];
+}
+
+/** File roots in `requested` that `previous` did not have (all of them for a new install). */
+export function newPluginFileRoots(requested: PluginCapabilities, previous: PluginCapabilities | null | undefined): string[] {
+  const old = previous ? pluginFileRoots(previous) : [];
+  return pluginFileRoots(requested).filter((f) => !old.includes(f));
+}
+
+/** A `.nuggetplugin` package found in a catalog folder, verified but not installed. */
+export interface PluginCatalogEntry {
+  /** Absolute path; pass it to `installPlugin`. */
+  path: string;
+  file_name: string;
+  /** Empty when `error` is set. */
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  kinds: string[];
+  requested: PluginCapabilities;
+  connector_display_name?: string | null;
+  signature: PluginSignature;
+  signer: string;
+  installed_version?: string | null;
+  /** Installed at an older version. */
+  update_available: boolean;
+  /** Installing asks for approval (new install, or an update asking for more access). */
+  needs_approval: boolean;
+  /** Why it can't be installed. */
+  error?: string | null;
+}
+
+export interface PluginCatalogResult {
+  entries: PluginCatalogEntry[];
+  dirs?: string[];
+  truncated?: boolean;
+}
+
+function isPluginCapabilities(v: unknown): v is PluginCapabilities {
+  if (typeof v !== "object" || v === null) return false;
+  const c = v as Record<string, unknown>;
+  return Array.isArray(c.hosts) && Array.isArray(c.secrets) && typeof c.kv_max_bytes === "number";
+}
+
+export function isPluginCatalogEntry(v: unknown): v is PluginCatalogEntry {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return (
+    typeof e.path === "string" &&
+    typeof e.file_name === "string" &&
+    typeof e.id === "string" &&
+    typeof e.name === "string" &&
+    typeof e.version === "string" &&
+    Array.isArray(e.kinds) &&
+    isPluginCapabilities(e.requested) &&
+    (PLUGIN_SIGNATURES as readonly unknown[]).includes(e.signature) &&
+    typeof e.update_available === "boolean" &&
+    (e.error === undefined || e.error === null || typeof e.error === "string")
+  );
+}
+
+/** Plugins available to install from the catalog folders (`plugins.catalog`). Older daemons answer "method not found". */
+export const listPluginCatalog = async (): Promise<PluginCatalogResult> => {
+  const r = await call<PluginCatalogResult>("plugins_catalog");
+  return {
+    entries: Array.isArray(r?.entries) ? r.entries.filter(isPluginCatalogEntry) : [],
+    dirs: Array.isArray(r?.dirs) ? r.dirs.filter((d): d is string => typeof d === "string") : [],
+    truncated: r?.truncated === true,
+  };
+};
+
+// ---- EE3: Ask answer check ----
+
+/** Why the daemon's post-check flagged a claim. Newer daemons may send other values (shown like `unsupported`). */
+export type ClaimFlag = "uncited" | "unsupported";
+
+/** One claim of an answer the post-check could not tie to its sources. */
+export interface FlaggedClaim {
+  /** The sentence exactly as it appears in the streamed answer text. */
+  text: string;
+  /** Kept as sent, so a value this version doesn't know survives a re-save. */
+  reason: ClaimFlag | (string & {});
+}
+
+/** The daemon's post-check of a sourced `retrieve.ask` answer, sent on `chat.done`. */
+export interface AnswerCheck {
+  /** The answer says the user's items don't contain what was asked. */
+  not_found: boolean;
+  /** Sentences of the answer that state something. */
+  claims: number;
+  /** Claims to mark, in answer order. */
+  flagged: FlaggedClaim[];
+  /** Citation markers that named a passage the model was not given (removed from the text). */
+  invalid_citations: number;
+}
+
+// Declaration merge: `StoredChatMessage` (chat history) keeps an answer's check.
+export interface StoredChatMessage {
+  /** The answer's post-check, when it came with one (absent from turns saved before EE3). */
+  check?: AnswerCheck | null;
+}
+
+// ---- FF1: backup, restore, export ----
+//
+// `backup.*` and `export.run` (`crates/nuggetd/src/features/backup*`; snake_case like the rest of
+// the IPC). Backups are encrypted with the store key, which is sealed under the user's backup
+// passphrase; exports are plain files and NOT encrypted.
+
+/** One backup on disk (`BackupInfo`). */
+export interface BackupInfo {
+  /** The backup directory (`<folder>/nugget-backup-YYYYMMDDTHHMMSSZ`). */
+  path: string;
+  /** RFC 3339. */
+  created_at: string;
+  items: number;
+  bytes: number;
+  schema_version: number;
+  app_version: string;
+  /** `linux`, `macos` or `windows`: the computer the backup was made on. */
+  os: string;
+}
+
+/** The daemon found its database damaged at start and has not written to it. */
+export interface BackupRecovery {
+  /** Why the database was refused (plain text from the daemon). */
+  reason: string;
+  /** The damaged database file. */
+  db_path: string;
+  /** Where the damaged file was set aside, if it was moved. */
+  moved_to: string | null;
+  latest_backup: BackupInfo | null;
+}
+
+export interface BackupStatus {
+  folder: string | null;
+  /** 0 = manual only. */
+  interval_hours: number;
+  keep: number;
+  passphrase_set: boolean;
+  running: boolean;
+  last_backup: BackupInfo | null;
+  last_error: string | null;
+  /** RFC 3339; `null` when manual only or not configured. */
+  next_due: string | null;
+  restore_pending: boolean;
+  recovery: BackupRecovery | null;
+}
+
+/** `backup.configure`: only the fields given change. */
+export interface BackupConfigure {
+  folder?: string;
+  interval_hours?: number;
+  keep?: number;
+}
+
+export interface BackupList {
+  /** Newest first. */
+  backups: BackupInfo[];
+}
+
+export interface BackupRestoreRequest {
+  path: string;
+  /** Needed when the backup's key is not this computer's store key (another computer, lost key). */
+  passphrase?: string;
+}
+
+export interface BackupRestoreResult {
+  staged: boolean;
+  restart_required: boolean;
+}
+
+export interface ExportResult {
+  /** The export directory (`<folder>/nugget-export-YYYYMMDDTHHMMSSZ`). */
+  path: string;
+  items: number;
+  entities: number;
+  claims: number;
+  audit_entries: number;
+  egress_rows: number;
+  vault_files: number;
+}
+
+export type ExportPhase = "items" | "graph" | "audit" | "egress" | "vault";
+export const EXPORT_PHASES: readonly ExportPhase[] = ["items", "graph", "audit", "egress", "vault"];
+
+/** `export.progress` notification params. */
+export interface ExportProgress {
+  phase: ExportPhase | string;
+  done: number;
+}
+
+/** This feature's daemon notifications (they arrive through `events.onNotification`). */
+export const BACKUP_NOTIFICATION = { changed: "backup.changed", exportProgress: "export.progress" } as const;
+
+/** Schedules the UI offers, as `interval_hours`. */
+export const BACKUP_INTERVALS = { manual: 0, daily: 24, weekly: 168 } as const;
+export type BackupSchedule = keyof typeof BACKUP_INTERVALS;
+
+/** The schedule an `interval_hours` value reads as (other values show as the closest choice). */
+export function scheduleOf(hours: number): BackupSchedule {
+  if (hours <= 0) return "manual";
+  return hours < 96 ? "daily" : "weekly";
+}
+
+/** The daemon's minimum passphrase length (`backup.set_passphrase`). */
+export const MIN_BACKUP_PASSPHRASE = 8;
+
+export function isBackupStatus(v: unknown): v is BackupStatus {
+  return isRecord(v) && typeof v.passphrase_set === "boolean" && typeof v.running === "boolean" && isCount(v.keep) && isCount(v.interval_hours);
+}
+
+export function isExportProgress(v: unknown): v is ExportProgress {
+  return isRecord(v) && typeof v.phase === "string" && isCount(v.done);
+}
+
+export const backupApi = {
+  /** Older daemons answer "method not found". */
+  status: () => call<BackupStatus>("backup_status"),
+  configure: (request: BackupConfigure) => call<BackupStatus>("backup_configure", { request }),
+  /** Write-only: callers drop the passphrase from their state right after this resolves. */
+  setPassphrase: (passphrase: string) => call<{ ok: boolean }>("backup_set_passphrase", { request: { passphrase } }),
+  /** Back up now; `backup.changed` follows. Fails without a folder or a passphrase. */
+  run: () => call<BackupInfo>("backup_run", { request: {} }),
+  /** Backups in `folder` (default: the configured folder), newest first. */
+  list: (folder?: string | null) => call<BackupList>("backup_list", { request: folder ? { folder } : {} }),
+  /** Verifies and stages the backup; the daemon then exits by itself and applies it at its next start. */
+  restore: (request: BackupRestoreRequest) => call<BackupRestoreResult>("backup_restore", { request }),
+  /** Progress arrives as `export.progress` notifications. */
+  exportRun: (folder: string) => call<ExportResult>("export_run", { request: { folder } }),
+};
+
+/** How long to wait for the daemon to exit after staging a restore. */
+export const RESTORE_EXIT_TIMEOUT_MS = 15_000;
+const RESTORE_POLL_MS = 250;
+
+export type RestorePhase = "staging" | "restarting" | "done";
+
+/**
+ * Restore a backup end to end: stage it (`backup.restore`), wait until the daemon has shut
+ * itself down, start it again with the app's `start_daemon` (the daemon applies the staged
+ * restore as it starts) and wait until it answers. `onPhase` reports progress. Throws an
+ * `ApiError` from the step that failed. The current data is set aside by the daemon, never deleted.
+ */
+export async function restoreAndRestart(
+  request: BackupRestoreRequest,
+  onPhase: (phase: RestorePhase) => void = () => {},
+  sleep: (ms: number) => Promise<void> = sleepMs,
+): Promise<ConnectionInfo> {
+  onPhase("staging");
+  await backupApi.restore(request);
+  onPhase("restarting");
+  // `start_daemon` returns at once while the old daemon still answers: wait for it to go first.
+  for (let waited = 0; waited < RESTORE_EXIT_TIMEOUT_MS; waited += RESTORE_POLL_MS) {
+    const c = await api.connection().catch(() => null);
+    if (!c?.connected) break;
+    await sleep(RESTORE_POLL_MS);
+  }
+  const conn = await api.startDaemon();
+  if (!conn.connected) throw new ApiError({ kind: "spawn", message: conn.error ?? t("backup.restore.didNotStart") });
+  onPhase("done");
+  return conn;
+}
+
+// ---- EE3: Ask sources early ----
+
+/** Tauri event `ask.restarted` is re-emitted as (see apps/desktop/src-tauri/src/daemon.rs). */
+export const ASK_RESTARTED_EVENT = "nugget:ask-restarted";
+
+/**
+ * `ask.restarted`: the provider a `retrieve.ask` reply named could not answer and the stream moved
+ * on to `provider`, with the context packed for it. Replaces the reply's citations, provider and
+ * `general` flag; it comes before any `chat.delta` of that provider, possibly before the reply.
+ */
+export interface AskRestarted {
+  stream_id: string;
+  provider: string;
+  locality: Locality;
+  citations: Citation[];
+  excluded_sensitive?: number;
+  general?: boolean;
+  /** As `AskStarted.date`, for this provider's context. */
+  date?: AskDateFilter | null;
+  /** As `AskStarted.partial`, for this provider's context. */
+  partial?: number[];
+}
+
+function isAskRestarted(v: unknown): v is AskRestarted {
+  const r = v as Partial<AskRestarted> | null;
+  return !!r && typeof r.stream_id === "string" && typeof r.provider === "string" && Array.isArray(r.citations);
+}
+
+/** `ask.restarted` notifications; malformed payloads are dropped. */
+export const onAskRestarted = (h: (r: AskRestarted) => void) =>
+  on<unknown>(ASK_RESTARTED_EVENT, (p) => {
+    if (isAskRestarted(p)) h(p);
+  });
+
+// ---- II4: quick ask ----
+
+/** `quickask.json` (see `src-tauri/src/quickask.rs`). */
+export interface QuickAskSettings {
+  enabled: boolean;
+  /** An accelerator such as `Ctrl+Shift+Space`. */
+  shortcut: string;
+}
+
+export type QuickAskState = "listening" | "off" | "error" | "unsupported_wayland";
+
+export interface QuickAskStatus {
+  listening: boolean;
+  error: string | null;
+  /** Wayland: no shortcut is registered; bind a desktop key to {@link QUICK_ASK_COMMAND}. */
+  wayland_fallback: boolean;
+  state?: QuickAskState;
+}
+
+export interface QuickAskView {
+  settings: QuickAskSettings;
+  status: QuickAskStatus;
+}
+
+/** Pages the quick-ask window can open in the main window. */
+export type QuickAskPage = Extract<PageId, "chat" | "search">;
+
+/** The command a desktop key binding runs to toggle quick ask where Nugget can't register one. */
+export const QUICK_ASK_COMMAND = "nugget-desktop --quick-ask";
+/** Text for the question field, sent by the shell; never submitted by itself. */
+export const QUICK_ASK_PREFILL_EVENT = "quickask:prefill";
+/** JJ2: sent to the main window when "Open in Chat" or "Show in Search" carries a question. */
+export const QUICK_ASK_HANDOVER_EVENT = "quickask:handover";
+
+/** JJ2: a quick-ask question (and, for Chat, its finished answer) carried to the main window. */
+export interface QuickAskHandover {
+  /** Set by the shell: the page it opened. */
+  page?: QuickAskPage | "";
+  question: string;
+  answer?: QuickAskHandoverAnswer | null;
+  /** Set by the main window when it took the handover (ms since the epoch). */
+  received?: number;
+}
+
+export interface QuickAskHandoverAnswer {
+  text: string;
+  provider?: string | null;
+  citations?: Citation[];
+  general?: boolean;
+  date?: AskDateFilter | null;
+}
+
+export const quickAskApi = {
+  settingsGet: () => call<QuickAskView>("quickask_settings_get"),
+  settingsSet: (settings: QuickAskSettings) => call<QuickAskView>("quickask_settings_set", { settings }),
+  hide: () => call<null>("quickask_hide"),
+  /** JJ2: with `handover`, the page picks up the question (and Chat the finished answer). */
+  openMain: (page: QuickAskPage, handover?: QuickAskHandover) =>
+    call<null>("quickask_open_main", handover ? { page, handover } : { page }),
+  /** JJ2, main window: the handover waiting for it, once. */
+  takeHandover: () => call<QuickAskHandover | null>("quickask_handover_take"),
+  /** JJ2, main window: a handover is waiting (take it with {@link quickAskApi.takeHandover}). */
+  onHandover: (h: () => void) => on<unknown>(QUICK_ASK_HANDOVER_EVENT, () => h()),
+  /** II4: a prefill sent before this window subscribed, once. */
+  takePrefill: () => call<string | null>("quickask_prefill_take"),
+  onPrefill: (h: (text: string) => void) =>
+    on<unknown>(QUICK_ASK_PREFILL_EVENT, (p) => {
+      if (typeof p === "string") h(p);
+    }),
+};
+
+// ---- II4: platform integration (tray labels, notifications, quit, deep links) ----
+
+/** Quiet hours, in minutes after local midnight; an end before the start spans midnight. */
+export interface QuietHours {
+  start: number;
+  end: number;
+}
+
+/** OS notifications (see `src-tauri/src/notify.rs`). Off until the user opts in. */
+export interface NotifySettings {
+  enabled: boolean;
+  /** The morning brief and due reminders. */
+  brief: boolean;
+  /** An agent waiting for a confirmation or an answer. */
+  agent: boolean;
+  quiet: QuietHours | null;
+}
+
+/** `platform.json` (see `src-tauri/src/platform.rs`). */
+export interface PlatformSettings {
+  notifications: NotifySettings;
+  /** Quitting Nugget also stops a background service the app started. */
+  quit_stops_daemon: boolean;
+  /** Sources the tray's "Pause indexing" turned off (read-only here). */
+  paused_sources: string[];
+}
+
+/** A validated `nugget://` link or opened `.nuggetplugin` file (see `src-tauri/src/deeplink.rs`). */
+export type DeepLink =
+  | { kind: "page"; page: PageId }
+  | { kind: "search"; query: string }
+  | { kind: "item"; source: string; key: string }
+  | { kind: "ask"; question: string }
+  | { kind: "plugin"; path: string };
+
+/** No payload: a link is waiting; take it with {@link platformApi.takeDeepLink}. */
+export const DEEPLINK_EVENT = "nugget:deeplink";
+/** Emitted after the computer wakes from sleep. */
+export const RESUMED_EVENT = "nugget:resumed";
+
+export const platformApi = {
+  settingsGet: () => call<PlatformSettings>("platform_settings_get"),
+  settingsSet: (settings: PlatformSettings) => call<PlatformSettings>("platform_settings_set", { settings }),
+  /** The current locale's strings for the tray and OS notifications (`shell.*` keys). */
+  setShellLabels: (labels: Record<string, string>) => call<number>("shell_labels_set", { labels }),
+  takeDeepLink: () => call<DeepLink | null>("deeplink_take"),
+  onDeepLink: (h: (payload: unknown) => void) => on<unknown>(DEEPLINK_EVENT, h),
+  onResumed: (h: (payload: unknown) => void) => on<unknown>(RESUMED_EVENT, h),
+};
+
+// ---- II1: messaging imports ----
+// Kinds of `crates/nugget-connector-messaging`; settings keys mirror that crate's `lib.rs`.
+
+/** Local message history: the macOS Messages database, WhatsApp chat exports, Telegram Desktop exports. */
+export type MessagingKind = "imessage" | "whatsapp" | "telegram";
+export const MESSAGING_KINDS: readonly MessagingKind[] = ["imessage", "whatsapp", "telegram"];
+
+/** `sources.add` settings of the messaging kinds. Absent keys take the connector's defaults. */
+export interface MessagingSettings {
+  /** Default `true`: documents are marked sensitive (kept away from cloud models and embeddings). */
+  private?: boolean;
+  /** Only messages newer than this many days (≥ 1). Absent: everything. */
+  since_days?: number;
+  /** Default `true`. */
+  include_groups?: boolean;
+  /** iMessage: default `~/Library/Messages/chat.db`. */
+  db_path?: string;
+  /** iMessage: names from the macOS address book (default `true`). */
+  contacts?: boolean;
+  /** WhatsApp: the folder watched for "Export chat" files. */
+  folder?: string;
+  /** WhatsApp: the user's own name as it appears in the exports. */
+  me?: string;
+  /** Telegram: an export folder or its `result.json`. */
+  path?: string;
+}
+
+/** The daemon's error when macOS keeps the Messages database from Nugget (Full Disk Access is off). */
+export const needsFullDiskAccess = (message: string | null | undefined): boolean => /full disk access/i.test(message ?? "");
+
+// ---- II2: faceted search, timelines, previews ----
+// Served by the daemon's `search_ui` feature (`search.faceted`, `search.timeline`,
+// `search.preview`). Older daemons answer "method not found": callers fall back (see
+// `isCommandMissing`). Everything stays on this device.
+
+export type ItemKind = "mail" | "event" | "chat" | "file";
+export const ITEM_KINDS: readonly ItemKind[] = ["mail", "event", "chat", "file"];
+export type EntityRefView = { id: string; name: string; kind: string };
+export type FacetedFilters = { sources?: string[]; kinds?: ItemKind[]; people?: string[]; from?: string | null; to?: string | null };
+export type FacetedRequest = { query: string; limit?: number; offset?: number; filters?: FacetedFilters; utc_offset_minutes?: number; time_zone?: string };
+export type FacetedHit = SearchHit & {
+  date: string | null;
+  date_source: "extracted" | "modified" | "indexed";
+  kind: ItemKind;
+  sensitive: boolean;
+  /** JJ2: sensitive only because triage has not sorted it yet (kept private until sorted). */
+  unsorted?: boolean;
+  people: EntityRefView[];
+};
+export type FacetCount = { value: string; count: number };
+export type PersonFacet = FacetCount & { name: string; kind: string };
+export type FacetedResult = {
+  query: string;
+  hits: FacetedHit[];
+  total: number;
+  pool: number;
+  pool_limited: boolean;
+  facets: { sources: FacetCount[]; kinds: FacetCount[]; people: PersonFacet[]; months: FacetCount[] };
+};
+export type TimelineRequest = { entity: string; from?: string | null; to?: string | null; limit?: number; utc_offset_minutes?: number; time_zone?: string };
+export type TimelineEvent =
+  | { type: "item"; at: string | null; date_source: string; item: ItemRef; title: string | null; snippet: string; kind: ItemKind; url: string | null; sensitive: boolean; unsorted?: boolean }
+  | {
+      type: "fact";
+      at: string | null;
+      date_source: string;
+      claim: {
+        id: number;
+        predicate: string;
+        text: string;
+        status: string;
+        confidence: number;
+        evidence: { item: ItemRef; title: string | null; quote: string | null }[];
+      };
+    };
+export type Timeline = { entity: EntityRefView; events: TimelineEvent[]; months: FacetCount[]; total: number; truncated: boolean };
+export type PreviewRequest = { item: ItemRef; chunk_id?: number | null; utc_offset_minutes?: number; time_zone?: string };
+export type ItemPreview = {
+  item: ItemRef;
+  title: string | null;
+  kind: ItemKind;
+  mime: string | null;
+  url: string | null;
+  date: string | null;
+  date_source: string;
+  sensitive: boolean;
+  /** JJ2: sensitive only because triage has not sorted it yet (kept private until sorted). */
+  unsorted?: boolean;
+  text: string;
+  truncated: boolean;
+  passage: string | null;
+  people: EntityRefView[];
+  facts: { id: number; subject: EntityRefView; predicate: string; text: string; status: string; confidence: number; quote: string | null }[];
+};
+
+/** The local UTC offset in minutes (east positive), for the daemon's date filters and months. */
+export function utcOffsetMinutes(d: Date = new Date()): number {
+  return -d.getTimezoneOffset();
+}
+
+// ---- KK2: AI keys ----
+
+/** Every reason `ai.key.*` can answer with (the Z3 ones plus replace/remove and the env fallback). */
+export type AiKeyOutcome = AiKeyReason | "no_keychain" | "env_missing" | "not_found" | "not_editable" | "reserved";
+
+/** Where the key comes from: typed (goes to the OS keychain), or the daemon's environment variable. */
+export type AiKeySource = { api_key: string; key_ref?: undefined } | { key_ref: `env:${string}`; api_key?: undefined };
+
+export type AiKeyCheckRequest = Omit<AiKeyTestRequest, "api_key"> & AiKeySource;
+export type AiKeyAddRequest = Omit<AiKeySaveRequest, "api_key"> & AiKeySource;
+
+/** `ai.key.update`: a new key (or variable) for a saved provider; `base_url` replaces the address when set. */
+export type AiKeyUpdateRequest = { name: string; base_url?: string | null } & AiKeySource;
+
+export interface AiKeyCheckResult extends Omit<AiKeyTestResult, "reason"> {
+  reason: AiKeyOutcome;
+}
+
+export interface AiKeyAddResult extends Omit<AiKeySaveResult, "reason"> {
+  reason: AiKeyOutcome;
+  /** With `no_keychain`: a variable name to suggest, e.g. `NUGGET_OPENAI_KEY`. */
+  suggested_env?: string;
+}
+
+export interface AiKeyRemoveResult {
+  ok: boolean;
+  reason: AiKeyOutcome;
+  message: string;
+  removed: boolean;
+  provider_id: string;
+}
+
+/** A provider that uses a key (`ai.key.saved`). */
+export interface SavedKeyProvider {
+  id: string;
+  kind: AiKeyKind;
+  base_url: string | null;
+  model: string;
+  /** Where its key is: the OS keychain or an environment variable. */
+  key: "keychain" | "env";
+  env_var: string | null;
+  /** Routed right now. */
+  available: boolean;
+  /** Why it is not (from the daemon, English). */
+  error: string | null;
+}
+
+/** A valid environment variable name for `key_ref`. */
+export const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+
+export const aiKeysApi = {
+  test: (request: AiKeyCheckRequest) => call<AiKeyCheckResult>("ai_key_test", { request }),
+  /** Check, then save; the provider is usable right away (no restart). */
+  save: (request: AiKeyAddRequest) => call<AiKeyAddResult>("ai_key_save", { request }),
+  /** Check a new key for a saved provider, then replace it. */
+  update: (request: AiKeyUpdateRequest) => call<AiKeyAddResult>("ai_key_update", { request }),
+  /** Delete the provider's key and remove it from config.toml. */
+  remove: (name: string) => call<AiKeyRemoveResult>("ai_key_remove", { request: { name } }),
+  saved: async () => (await call<{ providers: SavedKeyProvider[] }>("ai_key_saved")).providers,
+};
+
+/** JJ2: this machine's IANA time zone (`Europe/Berlin`), when the runtime knows it. */
+export function timeZoneName(): string | undefined {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === "string" && tz ? tz : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The zone fields of a search request: the offset (older daemons) and the zone's name. */
+export function localZone(): { utc_offset_minutes: number; time_zone?: string } {
+  const tz = timeZoneName();
+  return tz ? { utc_offset_minutes: utcOffsetMinutes(), time_zone: tz } : { utc_offset_minutes: utcOffsetMinutes() };
+}
+
+// ---- KK1 (runtime) ----
+
+/** Start a local model server again after it failed (`runtime.retry`). */
+export function runtimeRetry(role: RuntimeRole): Promise<{ started: boolean }> {
+  return call<{ started: boolean }>("runtime_retry", { role });
+}
+
+// ---- KK1 (model downloads) ----
+
+/** Stop a running model download (`models.cancel`); staged bytes are kept for a resume. */
+export function modelsCancel(id: string): Promise<{ cancelled: boolean }> {
+  return call<{ cancelled: boolean }>("models_cancel", { id });
+}
+
+// ---- KK1 (disk) ----
+
+/** How much room is left on the disk that holds Nugget's data (`status.disk`). */
+export type DiskLevel = "ok" | "low" | "full";
+
+export interface DiskStatus {
+  /** Bytes available on that disk; `null` when they could not be read. */
+  free_bytes?: number | null;
+  level: DiskLevel;
+  /** A write failed recently because the disk was full (it may have recovered since). */
+  recent_full_error?: boolean;
+}
+
+/** `status.disk` (merged into the declaration above): absent from older daemons. */
+export interface StatusResponse {
+  disk?: DiskStatus | null;
+}

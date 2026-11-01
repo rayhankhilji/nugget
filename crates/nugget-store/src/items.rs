@@ -191,6 +191,16 @@ fn decode_layout(conn: &Connection, item_id: i64, layout: &[u8]) -> Result<Strin
         .map_err(|e| Error::Integrity(format!("item {item_id}: {e}")))
 }
 
+/// Rebuild item `item_id`'s text from its stored `item_text` layout, looking its chunk texts up
+/// by `ord` (for readers outside this module that fetch the chunks themselves, e.g. export).
+pub(crate) fn decode_text_layout<'a>(
+    item_id: i64,
+    layout: &[u8],
+    chunk: impl Fn(u64) -> Option<&'a str>,
+) -> Result<String> {
+    text_layout::decode(layout, chunk).map_err(|e| Error::Integrity(format!("item {item_id}: {e}")))
+}
+
 impl ItemRow {
     /// The public item for this row, with its (already resolved) text.
     fn into_item(self, item: ItemRef, text: Option<String>) -> Result<Item> {
@@ -488,6 +498,37 @@ fn write_chunks(
     Ok(ids)
 }
 
+/// The body of [`Store::upsert_item_with_chunks`], inside the caller's transaction.
+fn upsert_with_chunks_tx(
+    tx: &rusqlite::Transaction<'_>,
+    p: &PreparedItem,
+    chunks: &[NewChunk],
+    dim: Option<usize>,
+) -> Result<UpsertOutcome> {
+    let row = upsert_row(tx, p)?;
+    Ok(match row.outcome {
+        UpsertOutcome::Unchanged => {
+            let has_chunks: bool = tx
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM chunks WHERE item_id = ?1)",
+                    [row.item_id],
+                    |r| r.get(0),
+                )
+                .db("count chunks")?;
+            if has_chunks || chunks.is_empty() {
+                UpsertOutcome::Unchanged
+            } else {
+                rewrite_chunks(tx, row.item_id, chunks, dim, None)?;
+                UpsertOutcome::Updated
+            }
+        }
+        outcome => {
+            rewrite_chunks(tx, row.item_id, chunks, dim, p.layout.as_deref())?;
+            outcome
+        }
+    })
+}
+
 impl Store {
     /// Insert or update an item, keyed by `(source, key)`.
     ///
@@ -531,30 +572,77 @@ impl Store {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .db("begin upsert_item_with_chunks")?;
-            let row = upsert_row(&tx, &p)?;
-            let outcome = match row.outcome {
-                UpsertOutcome::Unchanged => {
-                    let has_chunks: bool = tx
-                        .query_row(
-                            "SELECT EXISTS (SELECT 1 FROM chunks WHERE item_id = ?1)",
-                            [row.item_id],
-                            |r| r.get(0),
-                        )
-                        .db("count chunks")?;
-                    if has_chunks || chunks.is_empty() {
-                        UpsertOutcome::Unchanged
-                    } else {
-                        rewrite_chunks(&tx, row.item_id, chunks, dim, None)?;
-                        UpsertOutcome::Updated
-                    }
-                }
-                outcome => {
-                    rewrite_chunks(&tx, row.item_id, chunks, dim, p.layout.as_deref())?;
-                    outcome
-                }
-            };
+            let outcome = upsert_with_chunks_tx(&tx, &p, chunks, dim)?;
             tx.commit().db("commit upsert_item_with_chunks")?;
             Ok(outcome)
+        })
+    }
+
+    /// [`Store::upsert_item_with_chunks`] for many items in **one transaction**: every item's
+    /// row, chunks, full-text entries and vectors become visible together, or (on any error,
+    /// including an invalid item anywhere in the batch) nothing changes. Returns each item's
+    /// outcome, in order.
+    ///
+    /// For bulk writers (first imports, re-indexing): one commit per batch instead of one per
+    /// item saves a WAL sync and the per-transaction overhead for each item. Keep batches to a
+    /// few hundred items so the writer is never held for long. An item listed twice is written
+    /// twice, in order.
+    pub fn upsert_items_with_chunks(
+        &self,
+        batch: &[(NewItem, Vec<NewChunk>)],
+    ) -> Result<Vec<UpsertOutcome>> {
+        let prepared = batch
+            .iter()
+            .map(|(item, chunks)| {
+                let dim = validate_chunks(chunks)?;
+                Ok((
+                    PreparedItem::with_chunks(item, chunks)?,
+                    chunks.as_slice(),
+                    dim,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // One dimension per database: refuse a batch that mixes them before writing anything.
+        let mut dims = prepared.iter().filter_map(|(_, _, d)| *d);
+        if let Some(first) = dims.next()
+            && dims.any(|d| d != first)
+        {
+            return Err(Error::Invalid("a batch mixes embedding dimensions".into()));
+        }
+        self.with_conn(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .db("begin upsert_items_with_chunks")?;
+            let mut out = Vec::with_capacity(prepared.len());
+            for (p, chunks, dim) in &prepared {
+                out.push(upsert_with_chunks_tx(&tx, p, chunks, *dim)?);
+            }
+            tx.commit().db("commit upsert_items_with_chunks")?;
+            Ok(out)
+        })
+    }
+
+    /// Replace an item's `metadata` only, if its content hash is still `content_hash`. Unlike
+    /// [`Store::upsert_item`] this leaves `updated_at` (and so consumers that fingerprint an
+    /// item by `content_hash:updated_at`, like knowledge extraction) alone: meant for labels
+    /// computed from unchanged content, such as background triage. Returns whether a row
+    /// was updated.
+    pub fn set_item_metadata(
+        &self,
+        item: &ItemRef,
+        content_hash: &str,
+        metadata: &serde_json::Value,
+    ) -> Result<bool> {
+        let json = serde_json::to_string(metadata)?;
+        self.with_conn(|conn| {
+            let n = conn
+                .execute(
+                    "UPDATE items SET metadata = ?3
+                     WHERE source = ?1 AND key = ?2 AND content_hash = ?4",
+                    params![item.source.as_str(), item.key.as_str(), json, content_hash],
+                )
+                .db("set item metadata")?;
+            Ok(n > 0)
         })
     }
 
@@ -596,6 +684,52 @@ impl Store {
             }
         }
         Ok(out)
+    }
+
+    /// Items of `source` in key order, starting after `after` (exclusive; `None` from the
+    /// start), at most `limit`, and the key to pass as `after` for the next page (`None` once
+    /// the source is done): for walking a whole source in pages without holding it in memory.
+    /// Each page costs one key query on the `(source, key)` index and one [`Self::get_items`]
+    /// batch, instead of a query per item. Items written or deleted while walking may or may
+    /// not be seen (keyset paging never repeats or skips the others); a page can hold fewer
+    /// than `limit` items when some were deleted between its two reads, so go by the cursor,
+    /// not the page's length.
+    pub fn items_page(
+        &self,
+        source: &SourceId,
+        after: Option<&ItemKey>,
+        limit: usize,
+    ) -> Result<(Vec<Item>, Option<ItemKey>)> {
+        if limit == 0 {
+            return Ok((Vec::new(), after.cloned()));
+        }
+        let lim = limit.min(i64::MAX as usize) as i64;
+        let keys: Vec<String> = self.with_read_conn(|c| {
+            let mut stmt = c
+                .prepare_cached(
+                    "SELECT key FROM items WHERE source = ?1 AND (?2 IS NULL OR key > ?2)
+                     ORDER BY key LIMIT ?3",
+                )
+                .db("prepare items_page")?;
+            let after = after.map(ItemKey::as_str);
+            let rows = stmt
+                .query_map(params![source.as_str(), after, lim], |r| r.get(0))
+                .db("query items_page")?;
+            rows.collect::<rusqlite::Result<_>>().db("read items_page")
+        })?;
+        let next = (keys.len() >= limit)
+            .then(|| keys.last().map(|k| ItemKey::new(k.clone())))
+            .flatten();
+        let refs: Vec<ItemRef> = keys
+            .into_iter()
+            .map(|k| ItemRef {
+                source: source.clone(),
+                key: ItemKey::new(k),
+            })
+            .collect();
+        // An item deleted between the two reads is left out.
+        let items = self.get_items(&refs)?.into_iter().flatten().collect();
+        Ok((items, next))
     }
 
     /// Delete an item with its chunks, full-text entries and vectors. Returns whether it existed.

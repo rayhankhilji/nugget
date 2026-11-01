@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use nugget_core::Result;
+use nugget_core::ids::ItemRef;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::Store;
@@ -65,7 +66,73 @@ impl Store {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        self.with_read_conn(|c| text_hits(c, &q, limit))
+        let needles = fts::needles(query);
+        self.with_read_conn(|c| text_hits(c, &q, &needles, limit))
+    }
+
+    /// Which of `among` match the full-text `query` (in a chunk's text or the item's title, as
+    /// [`Store::search_text`] matches), provided the query is rare: `None` when more than
+    /// `at_most` chunks and title-only items match it.
+    ///
+    /// For "does this question's key word occur in these few results" checks. Unlike
+    /// `search_text(query, at_most + 1)` it neither ranks the matches nor loads or snippets
+    /// them, so its cost is the index lookup alone (~1% of a 500k-item store matched by a word
+    /// costs ~40 µs per match through `search_text`).
+    pub fn text_matches_among(
+        &self,
+        query: &str,
+        at_most: usize,
+        among: &[ItemRef],
+    ) -> Result<Option<Vec<bool>>> {
+        let Some(q) = fts::match_expr(query) else {
+            return Ok(Some(vec![false; among.len()]));
+        };
+        let lim = at_most.saturating_add(1).min(i64::MAX as usize) as i64;
+        self.with_read_conn(|c| {
+            let mut matched: HashSet<i64> = HashSet::new();
+            let mut n = 0usize;
+            {
+                let mut stmt = c
+                    .prepare_cached(MATCHING_CHUNK_ITEMS_SQL)
+                    .db("prepare matching chunks")?;
+                let mut rows = stmt.query(params![q, lim]).db("matching chunks")?;
+                while let Some(r) = rows.next().db("matching chunks")? {
+                    n += 1;
+                    matched.insert(r.get(0).db("matching chunks")?);
+                }
+            }
+            if n > at_most {
+                return Ok(None);
+            }
+            {
+                let mut stmt = c
+                    .prepare_cached(MATCHING_TITLES_SQL)
+                    .db("prepare matching titles")?;
+                let mut rows = stmt.query(params![q, lim]).db("matching titles")?;
+                while let Some(r) = rows.next().db("matching titles")? {
+                    if matched.insert(r.get(0).db("matching titles")?) {
+                        n += 1;
+                        if n > at_most {
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            let mut id_of = c
+                .prepare_cached("SELECT id FROM items WHERE source = ?1 AND key = ?2")
+                .db("prepare item id")?;
+            among
+                .iter()
+                .map(|r| {
+                    let id: Option<i64> = id_of
+                        .query_row(params![r.source.as_str(), r.key.as_str()], |row| row.get(0))
+                        .optional()
+                        .db("item id")?;
+                    Ok(id.is_some_and(|id| matched.contains(&id)))
+                })
+                .collect::<Result<Vec<bool>>>()
+                .map(Some)
+        })
     }
 
     /// Hybrid search: full-text and (if an embedding is given) vector results fused with
@@ -134,9 +201,19 @@ pub(crate) const TEXT_SEARCH_SQL: &str = "
     JOIN items i ON i.id = ch.item_id
     ORDER BY top.rank, ch.id";
 
-/// Snippet of one matching chunk: `?1` the FTS5 query, `?2` the chunk id.
+/// Items of the chunks matching an FTS5 query `?1`, unranked, at most `?2` rows (one per chunk).
+pub(crate) const MATCHING_CHUNK_ITEMS_SQL: &str = "
+    SELECT ch.item_id
+    FROM (SELECT rowid AS id FROM chunks_fts WHERE chunks_fts MATCH ?1 LIMIT ?2) m
+    JOIN chunks ch ON ch.id = m.id";
+
+/// Items whose title matches an FTS5 query `?1`, unranked, at most `?2`.
+pub(crate) const MATCHING_TITLES_SQL: &str = "
+    SELECT rowid FROM items_fts WHERE items_fts MATCH ?1 LIMIT ?2";
+
+/// Snippet and text of one matching chunk: `?1` the FTS5 query, `?2` the chunk id.
 pub(crate) const SNIPPET_SQL: &str = "
-    SELECT snippet(chunks_fts, 0, '', '', '…', 24)
+    SELECT snippet(chunks_fts, 0, '', '', '…', 24), text
     FROM chunks_fts
     WHERE chunks_fts MATCH ?1 AND rowid = ?2";
 
@@ -155,9 +232,47 @@ pub(crate) const FIRST_CHUNK_SQL: &str = "
     ORDER BY ch.ord
     LIMIT 1";
 
+/// Characters of context kept before the match in [`segmented_snippet`].
+const SNIPPET_LEAD_CHARS: usize = 40;
+
+/// Snippet of a chunk holding CJK or Thai text. Such chunks are indexed segmented (see
+/// `fts::segment`), so FTS5 token positions do not line up with the stored text and
+/// `snippet()` would cut the wrong window: take the text around the first query word instead,
+/// or its opening when none occurs verbatim.
+fn segmented_snippet(text: &str, needles: &[String]) -> String {
+    let fold = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let chars: Vec<char> = text.chars().collect();
+    let hay: Vec<char> = chars.iter().copied().map(fold).collect();
+    let first = needles
+        .iter()
+        .filter_map(|n| {
+            let n: Vec<char> = n.chars().map(fold).collect();
+            if n.is_empty() {
+                return None;
+            }
+            hay.windows(n.len()).position(|w| w == n.as_slice())
+        })
+        .min();
+    let Some(pos) = first else {
+        return excerpt(text);
+    };
+    let start = pos.saturating_sub(SNIPPET_LEAD_CHARS);
+    let end = (start + SNIPPET_CHARS).min(chars.len());
+    let body: String = chars[start..end].iter().collect();
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(body.trim());
+    if end < chars.len() {
+        out.push('…');
+    }
+    out
+}
+
 /// Chunk and title full-text legs, fused (see [`Store::search_text`]). `q` is an FTS5 query
-/// from [`fts::match_expr`].
-fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
+/// from [`fts::match_expr`] and `needles` its words (from [`fts::needles`]).
+fn text_hits(c: &Connection, q: &str, needles: &[String], limit: usize) -> Result<Vec<Hit>> {
     let lim = limit.min(i64::MAX as usize) as i64;
     let mut hits: Vec<(i64, Hit)> = {
         let mut stmt = c
@@ -183,11 +298,15 @@ fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
     if !hits.is_empty() {
         let mut snip = c.prepare_cached(SNIPPET_SQL).db("prepare snippet")?;
         for (_, hit) in &mut hits {
-            hit.snippet = snip
-                .query_row(params![q, hit.chunk_id], |r| r.get(0))
+            let row: Option<(String, String)> = snip
+                .query_row(params![q, hit.chunk_id], |r| Ok((r.get(0)?, r.get(1)?)))
                 .optional()
-                .db("snippet")?
-                .unwrap_or_default();
+                .db("snippet")?;
+            hit.snippet = match row {
+                Some((_, text)) if fts::has_segmented(&text) => segmented_snippet(&text, needles),
+                Some((snippet, _)) => snippet,
+                None => String::new(),
+            };
         }
     }
 

@@ -86,9 +86,16 @@ Tunables for the indexing pipeline (`nugget_ingest::IngestConfig`). Durations ar
 | `chunk_overlap_tokens` | integer | `48` | Overlap between chunks, in estimated tokens |
 | `queue_capacity` | integer | `64` | Changes buffered per source before the connector waits |
 | `keep_text` | bool | `true` | Keep each item's full extracted text (needed for previews and re-chunking) |
-| `triage` | bool | `true` | Run triage when a local triage-tier provider with JSON-schema output exists. Cloud providers are never used |
-| `triage_timeout_ms` | integer | `30000` | Timeout for one triage call |
-| `triage_max_chars` | integer | `6000` | Characters of text sent to triage |
+| `triage` | bool | `true` | Label items as junk or sensitive with a local triage-tier provider with JSON-schema output, in the background after they are indexed; it never delays search or removes an item from it. Cloud providers are never used |
+| `triage_timeout_ms` | integer | `30000` | Timeout for triaging one item (a batch gets this per item) |
+| `triage_max_chars` | integer | `6000` | Characters of each item's text sent to triage |
+| `triage_batch` | integer | `8` | Items labelled per triage request |
+| `triage_batch_chars` | integer | `6000` | Characters of text per triage request; a longer item goes alone |
+| `triage_request_ms` | integer | `3000` | Prompt processing one triage request may take: requests carry as much text as the measured prefill rate gets through in this time (between 300 characters and `triage_batch_chars`), which bounds how long an Ask can wait behind triage |
+| `triage_idle_ms` | integer | `3000` | How long background triage waits after the last interactive model request (Ask, Double Tap, agent) before it uses the local model again. This covers the built-in runtime and the on-device and local-network providers in `providers.toml` (Ollama, a LAN server) |
+| `triage_retry_ms` | integer | `600000` | An item whose triage failed is tried again this long after the failure, once a local triage model is available; the wait grows fourfold with each failure of the item, up to a day |
+| `triage_max_failures` | integer | `5` | Failures after which an item stays failed (still searchable and sensitive) until its content changes; `1` turns retries off. A server that cannot be reached does not count as a failure |
+| `assume_unflagged_safe` | bool | `false` | Count items nobody has judged (triage off or no local triage model, and no sensitivity rule matched) as not sensitive, so cloud models may use them. By default they count as sensitive until local triage clears them |
 | `embeddings` | bool | `true` | Compute embeddings with embedding-tier providers |
 | `allow_cloud_embeddings` | bool | `false` | Allow cloud embedding providers for non-sensitive items |
 | `embed_batch` | integer | `32` | Chunks per embedding request |
@@ -185,7 +192,7 @@ Sensitive items never go to a cloud model.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Run extraction at all |
-| `interval_minutes` | integer, 0 to 10080 | `10` | Run again this often even without new items (retries LLM extraction); `0` never |
+| `interval_minutes` | integer, 0 to 10080 | `10` | Run again this often even without new items (retries LLM extraction); `0` never. Time the computer spends asleep counts, so an overdue run starts within a minute or so of waking |
 | `debounce_ms` | integer, 0 to 600000 | `1500` | Wait this long after the last indexed change before a run |
 | `max_items_per_run` | integer, at least 1 | `500` | Items processed per run; a run that leaves items is followed by another one |
 | `max_llm_requests_per_run` | integer | `50` | LLM extraction requests per run (none while on low battery) |
@@ -336,7 +343,7 @@ is logged) and the rest of the daemon runs normally. The keys are not final; the
 | `policy` | The safety policy for agent actions; rules are edited from the Safety page (`policy.set`) |
 | `browser` | Settings of the browser extension bridge; not settled yet |
 | `proactive` | `enabled`, the time of the morning brief, and where the card judge may run (its locality) |
-| `plugins` | `trusted_keys` (trusted publisher keys) and a developer-mode switch that allows unsigned plugins |
+| `plugins` | `trusted_keys` (trusted publisher keys), `dev_mode` (allows unsigned plugins) and `catalog_dirs` (absolute folders whose `.nuggetplugin` files the Plugins page lists as available; default `<data>/plugin-catalog`, plus the folders in the `NUGGET_PLUGIN_CATALOG` environment variable) |
 
 When a feature lands, its keys get their own table on this page.
 

@@ -25,7 +25,9 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `providers.probe` | [`ProbeRequest`] | [`Capabilities`] |
 /// | `models.list` | `{}` | `Vec<`[`ModelInfo`]`>` |
 /// | `models.install` | [`ModelInstallRequest`] | `null`, then `models.progress` notifications |
+/// | `models.cancel` | [`ModelCancelRequest`] | [`ModelCancelResponse`] (the install's connection gets a final `failed` progress with reason `cancelled`) |
 /// | `egress.recent` | [`EgressRecentRequest`] | [`EgressRecentResponse`] |
+/// | `egress.record` | [`EgressRecordRequest`] | `null` |
 /// | `sources.list` | `{}` | `Vec<`[`SourceInfo`]`>` |
 /// | `sources.add` | [`SourceSpec`] | [`SourceInfo`] |
 /// | `sources.update` | [`SourceUpdate`] | [`SourceInfo`] |
@@ -35,8 +37,9 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `sources.secret.set` | [`SourceSecret`] | `null` |
 /// | `ingest.status` | `{}` | [`IngestStatus`] |
 /// | `retrieve.context` | [`ContextRequest`] | [`ContextResponse`] |
-/// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications |
+/// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications (and `ask.restarted` ([`AskRestarted`]) before them when the stream falls back to another provider) |
 /// | `runtime.status` | `{}` | `Vec<`[`RuntimeInfo`]`>` |
+/// | `runtime.retry` | [`RuntimeRetryRequest`] | `{started: bool}` (served by the `runtime_retry` feature) |
 /// | `knowledge.entities` | [`EntitiesRequest`] | `Vec<`[`EntitySummaryView`]`>` |
 /// | `knowledge.entity` | [`EntityRef`] | [`EntityDetail`] |
 /// | `knowledge.graph` | [`GraphRequest`] | [`GraphViewIpc`] |
@@ -60,7 +63,11 @@ pub mod method {
     pub const PROVIDERS_PROBE: &str = "providers.probe";
     pub const MODELS_LIST: &str = "models.list";
     pub const MODELS_INSTALL: &str = "models.install";
+    /// Stop a running `models.install`; staged bytes are kept and the next install resumes.
+    pub const MODELS_CANCEL: &str = "models.cancel";
     pub const EGRESS_RECENT: &str = "egress.recent";
+    /// A request the desktop app made itself (update checks), for the daemon's ledger.
+    pub const EGRESS_RECORD: &str = "egress.record";
     pub const SOURCES_LIST: &str = "sources.list";
     pub const SOURCES_ADD: &str = "sources.add";
     pub const SOURCES_UPDATE: &str = "sources.update";
@@ -85,6 +92,9 @@ pub mod method {
     pub const DRAFT_BEGIN: &str = "draft.begin";
     pub const DRAFT_CANCEL: &str = "draft.cancel";
     pub const DRAFT_FEEDBACK: &str = "draft.feedback";
+    /// II3: whether a text holds something sensitive (the ingest PII scan: cards, IBANs, SSNs,
+    /// credentials). The desktop asks before keeping a draft in its history.
+    pub const DRAFT_CHECK_SENSITIVE: &str = "draft.check_sensitive";
     /// Sent when the trigger fires, before `draft.begin`: warm the provider, retrieval and voice.
     pub const DRAFT_PREWARM: &str = "draft.prewarm";
     /// Sent while a reply field keeps focus (Double Tap read-ahead, local providers only):
@@ -104,6 +114,8 @@ pub mod notification {
     pub const SOURCES_CHANGED: &str = "sources.changed";
     /// [`KnowledgeChanged`].
     pub const KNOWLEDGE_CHANGED: &str = "knowledge.changed";
+    /// [`AskRestarted`]: a `retrieve.ask` stream moved on to another provider (EE3).
+    pub const ASK_RESTARTED: &str = "ask.restarted";
 }
 
 // ---- status ----
@@ -119,6 +131,61 @@ pub struct StatusResponse {
     /// Result of verifying the audit hash chain at startup. `None` if not checked.
     #[serde(default)]
     pub audit_chain_ok: Option<bool>,
+    /// Free space on the disk that holds the data directory. `None` from older daemons, or when
+    /// it is not known (an in-memory store).
+    #[serde(default)]
+    pub disk: Option<DiskStatus>,
+}
+
+/// Below this many free bytes the data disk counts as full ([`DiskLevel::Full`]): 200 MiB.
+pub const DISK_FULL_BYTES: u64 = 200 * 1024 * 1024;
+/// Below this many free bytes the data disk counts as low ([`DiskLevel::Low`]): 1 GiB.
+pub const DISK_LOW_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// `status.disk`: free space on the disk that holds Nugget's data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskStatus {
+    /// Bytes available on that disk; `None` when they could not be read.
+    #[serde(default)]
+    pub free_bytes: Option<u64>,
+    pub level: DiskLevel,
+    /// A write failed recently because the disk was full (it may have recovered since).
+    #[serde(default)]
+    pub recent_full_error: bool,
+}
+
+/// How much room is left on the data disk.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskLevel {
+    #[default]
+    Ok,
+    /// Under [`DISK_LOW_BYTES`] free.
+    Low,
+    /// Under [`DISK_FULL_BYTES`] free, or a write just failed for lack of space while under
+    /// [`DISK_LOW_BYTES`]: indexing and other writes are failing or about to.
+    Full,
+    /// A level this build does not know (a newer daemon): show nothing.
+    #[serde(other)]
+    Unknown,
+}
+
+impl DiskStatus {
+    /// Classify `free_bytes` (unknown counts as `Ok` unless a write failed for lack of space).
+    pub fn classify(free_bytes: Option<u64>, recent_full_error: bool) -> Self {
+        let level = match free_bytes {
+            Some(f) if f < DISK_FULL_BYTES => DiskLevel::Full,
+            Some(f) if f < DISK_LOW_BYTES && recent_full_error => DiskLevel::Full,
+            None if recent_full_error => DiskLevel::Full,
+            Some(f) if f < DISK_LOW_BYTES => DiskLevel::Low,
+            _ => DiskLevel::Ok,
+        };
+        Self {
+            free_bytes,
+            level,
+            recent_full_error,
+        }
+    }
 }
 
 // ---- providers ----
@@ -191,6 +258,45 @@ pub struct ChatDone {
     pub error: Option<String>,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
+    /// What the daemon's post-check found in a sourced `retrieve.ask` answer; absent on plain
+    /// chats, general answers and failed streams.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<AnswerCheck>,
+}
+
+/// The daemon's post-check of a sourced `retrieve.ask` answer, sent on `chat.done`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerCheck {
+    /// The answer says the user's items don't contain what was asked.
+    #[serde(default)]
+    pub not_found: bool,
+    /// Sentences of the answer that state something (not counting a "not found" reply).
+    #[serde(default)]
+    pub claims: u32,
+    /// Claims the client should mark, in answer order.
+    #[serde(default)]
+    pub flagged: Vec<FlaggedClaim>,
+    /// Citation markers that named a passage the model was not given; removed from the text.
+    #[serde(default)]
+    pub invalid_citations: u32,
+}
+
+/// One claim of an answer the post-check could not tie to its sources.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlaggedClaim {
+    /// The sentence exactly as it appears in the streamed answer text.
+    pub text: String,
+    pub reason: ClaimFlag,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ClaimFlag {
+    /// States something but cites no passage.
+    Uncited,
+    /// Cites passages, but a number, amount or date it states is in none of them.
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,6 +353,22 @@ pub struct ModelInstallRequest {
     pub id: String,
 }
 
+/// Params of `models.cancel`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelCancelRequest {
+    pub id: String,
+}
+
+/// Result of `models.cancel`. Idempotent: `cancelled` is `false` if no install of `id` was
+/// running.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelCancelResponse {
+    pub cancelled: bool,
+}
+
+/// One `models.progress` notification. In `failed`, `downloaded` is the number of bytes staged
+/// (kept, so the next install resumes), `error` a short plain-language message, and `reason` /
+/// `http_status` say why in machine-readable form (clients localise by `reason`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelProgress {
     pub id: String,
@@ -254,6 +376,36 @@ pub struct ModelProgress {
     pub total: u64,
     pub phase: ModelPhase,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ModelFailReason>,
+    /// The HTTP status when `reason` is `http_error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+}
+
+/// Why a model install failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelFailReason {
+    /// No network, or the download server cannot be reached (DNS / connect failure).
+    Offline,
+    /// The server answered with an error status (see `http_status`).
+    HttpError,
+    /// The network served a sign-in web page instead of the file.
+    CaptivePortal,
+    /// No data arrived for several seconds.
+    Stalled,
+    /// The connection kept closing before the file was complete.
+    Interrupted,
+    DiskFull,
+    /// The downloaded bytes did not match the signed manifest; they were discarded.
+    Integrity,
+    /// Stopped by `models.cancel` (or the install's client went away).
+    Cancelled,
+    Other,
+    /// A reason this build does not know (newer daemon).
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,6 +425,33 @@ pub struct EgressRecentRequest {
 }
 
 pub type EgressRecentResponse = Vec<EgressEvent>;
+
+/// Ledger features a client may record with `egress.record`: requests the desktop app makes
+/// itself, outside the daemon's network layer. Anything else is refused.
+pub const CLIENT_EGRESS_FEATURES: &[&str] = &[
+    // The updater's channel feed and its signature.
+    "update_check",
+    // An update package.
+    "update_download",
+];
+
+/// `egress.record`: one request a client made off the device, written to the ledger as is
+/// (no items: these requests carry none of the user's content).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EgressRecordRequest {
+    /// When the request started; the daemon's clock when absent. Rows queued while the daemon
+    /// was not running carry the time they were made.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub at: Option<time::OffsetDateTime>,
+    /// Destination host (`host` or `host:port`).
+    pub host: String,
+    /// One of [`CLIENT_EGRESS_FEATURES`].
+    pub feature: String,
+    #[serde(default)]
+    pub bytes_sent: u64,
+    #[serde(default)]
+    pub bytes_received: u64,
+}
 
 // ---- sources ----
 
@@ -323,6 +502,86 @@ pub struct SourceInfo {
     /// Same shape as [`SourceSpec::settings`]; never contains secrets.
     #[serde(default)]
     pub settings: serde_json::Value,
+    /// Plain-language sync health: what is wrong (if anything) and how to fix it. Filled by the
+    /// daemon from `state`, `last_error` and recent item errors; absent from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<SourceHealth>,
+    /// What the last whole-folder scan found and skipped (files sources); absent until a
+    /// connector reports one, after the settings change or the source is turned on or off, and
+    /// from older daemons. Live (watcher) changes do not refresh it, so `found == 0` is only
+    /// meaningful while `items == 0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<ScanReport>,
+}
+
+/// What a source's scan pass found and what it skipped, so "nothing indexed" can be told apart
+/// from "still working" and explained.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanReport {
+    /// The walk of this pass ended (false while it runs).
+    #[serde(default)]
+    pub finished: bool,
+    /// Files that will be (or already are) indexed this pass.
+    #[serde(default)]
+    pub found: u64,
+    /// Changes (new or changed files, plus deletions) this pass sends for indexing; files
+    /// already indexed and unchanged are not counted. The progress total of the pass.
+    #[serde(default)]
+    pub to_index: u64,
+    /// Files skipped because their type is not indexed.
+    #[serde(default)]
+    pub unsupported: u64,
+    /// Files skipped because they are over `max_file_bytes`.
+    #[serde(default)]
+    pub too_large: u64,
+    /// Files or subfolders that could not be read.
+    #[serde(default)]
+    pub unreadable: u64,
+    /// Roots that are not there (unmounted or moved).
+    #[serde(default)]
+    pub roots_missing: u64,
+    /// Roots that exist but cannot be read (permission denied).
+    #[serde(default)]
+    pub roots_denied: u64,
+    #[serde(default)]
+    pub max_file_bytes: u64,
+    /// Up to 5 examples of skipped files, first found first.
+    #[serde(default)]
+    pub skipped: Vec<SkippedFile>,
+}
+
+/// One skipped file in a [`ScanReport`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedFile {
+    /// Relative to its root, `/`-separated.
+    #[serde(default)]
+    pub path: String,
+    /// `unsupported`, `too_large` or `unreadable`.
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+}
+
+/// A source's sync health, for people rather than logs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceHealth {
+    /// Stable machine code (`ok`, `syncing`, `disabled`, `reconnect`, `not_set_up`,
+    /// `rate_limited`, `offline`, `server_error`, `too_large`, `disk_full`, `config`,
+    /// `item_errors`, `nothing_indexable`, `unreadable`, `error`); clients translate it and
+    /// fall back to `reason`/`fix`.
+    pub code: String,
+    /// One sentence on what is going on, in English.
+    pub reason: String,
+    /// One sentence on what the user can do, in English (empty when nothing is needed).
+    #[serde(default)]
+    pub fix: String,
+    /// Items that failed in recent passes (each one skipped; the rest of the sync went on).
+    #[serde(default)]
+    pub item_errors: u64,
+    /// The most recent item-level failure message, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_item_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -427,6 +686,43 @@ pub struct IngestStatus {
     #[serde(default)]
     pub triage_provider: Option<ProviderId>,
     pub sources: Vec<SourceInfo>,
+    /// Background triage progress. Items are searchable as soon as they are indexed; triage
+    /// (junk / sensitive labels) runs afterwards at low priority. Absent from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage: Option<TriageProgress>,
+}
+
+/// What the background triage job is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageState {
+    /// Triage is turned off or no local triage provider is routable.
+    Off,
+    /// Nothing to triage.
+    Idle,
+    /// Classifying items.
+    Running,
+    /// Waiting for interactive model requests (Ask, Double Tap, agent) to finish.
+    Yielding,
+    /// Waiting for power (battery) to allow heavy work.
+    Paused,
+}
+
+/// Background triage counters since the daemon started (`pending` is the current backlog).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriageProgress {
+    pub state: TriageState,
+    /// Items indexed and searchable whose triage has not run yet.
+    pub pending: u64,
+    /// Items triaged by the model.
+    pub done: u64,
+    /// Items labelled by rule without a model call (e.g. PII already found).
+    #[serde(default)]
+    pub skipped: u64,
+    /// Items whose triage failed and is not being retried right now (they stay searchable and
+    /// count as sensitive; they are retried with backoff, up to `triage_max_failures`).
+    #[serde(default)]
+    pub failed: u64,
 }
 
 // ---- retrieval ----
@@ -483,6 +779,10 @@ pub struct AskRequest {
     /// are forwarded to the answering model. Untrusted text: `System` entries are ignored.
     #[serde(default)]
     pub history: Vec<ChatMessage>,
+    /// The client's current UTC offset, in minutes (clamped to ±18 hours): the daemon dates
+    /// "today" in the answer prompt with it. Without it, the daemon's configured offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc_offset_minutes: Option<i32>,
 }
 
 fn default_ask_tier() -> Tier {
@@ -490,6 +790,11 @@ fn default_ask_tier() -> Tier {
 }
 
 /// Result of `retrieve.ask`: the stream (as for `chat`) plus the context it was given.
+///
+/// Returned as soon as the context for the first provider tried is packed, before that
+/// provider answers (EE3): a provider failure then ends the stream with `chat.done { error }`,
+/// or, routing by tier, moves it on to the next provider with an `ask.restarted`
+/// ([`AskRestarted`]) notification.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AskStarted {
     pub stream_id: String,
@@ -507,6 +812,61 @@ pub struct AskStarted {
     /// (no passages, no citations). Clients should say so on the reply.
     #[serde(default)]
     pub general: bool,
+    /// The date phrase found in the question and how it shaped the search ("Searched items from
+    /// 26 Oct to 1 Nov"). Absent when the question named no date, and from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<AskDateFilter>,
+    /// Citation numbers (`Citation::n`) of passages that are at best a near miss: the item
+    /// lacks one of the question's rare key terms. Clients label them "partial match".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partial: Vec<u32>,
+}
+
+/// How a date phrase in an Ask question filtered the search (`AskStarted::date`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskDateFilter {
+    /// The phrase as written in the question, e.g. `"last week"`.
+    pub phrase: String,
+    /// Start of the range (inclusive), at the offset the phrase was read with.
+    #[serde(with = "time::serde::rfc3339")]
+    pub start: time::OffsetDateTime,
+    /// End of the range (exclusive): a range of whole days ends at the midnight after its last
+    /// day.
+    #[serde(with = "time::serde::rfc3339")]
+    pub end: time::OffsetDateTime,
+    /// `true`: only items dated in the range were searched. `false`: nothing in the range
+    /// matched, so the whole question was searched without the date (the sources are not from
+    /// that period).
+    pub applied: bool,
+    /// The question was generic ("summarise last week"), so the sources are the period's items
+    /// by date rather than search matches.
+    #[serde(default)]
+    pub listed: bool,
+}
+
+/// `ask.restarted` notification: the provider [`AskStarted`] named could not answer and the
+/// `retrieve.ask` stream `stream_id` moved on to `provider` (routing by tier only; an explicit
+/// provider is never substituted). The context is the one packed for that provider's locality,
+/// so `citations`, `excluded_sensitive` and `general` replace the earlier ones: the answer's
+/// `[n]` markers refer to these. Sent before the new provider's request goes out, so before any
+/// `chat.delta` of it, at most once per provider tried; it can arrive before the
+/// `retrieve.ask` reply. The searched query (`AskStarted::query_rewrite`) is unchanged.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AskRestarted {
+    pub stream_id: String,
+    pub provider: ProviderId,
+    pub locality: Locality,
+    pub citations: Vec<Citation>,
+    #[serde(default)]
+    pub excluded_sensitive: u32,
+    #[serde(default)]
+    pub general: bool,
+    /// As [`AskStarted::date`], for this provider's context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<AskDateFilter>,
+    /// As [`AskStarted::partial`], for this provider's context.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partial: Vec<u32>,
 }
 
 // ---- local runtime ----
@@ -547,8 +907,35 @@ pub struct RuntimeInfo {
     pub state: RuntimeState,
     /// Provider id the router knows this runtime by (e.g. `local-chat`).
     pub provider: ProviderId,
+    /// What went wrong, as one short sentence for the user (`failed`).
     #[serde(default)]
     pub error: Option<String>,
+    /// Milliseconds spent in the current state; while `starting`, how long the model has been
+    /// warming up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_ms: Option<u64>,
+    /// While `starting`: how long loading the model is expected to take, in ms (the last load
+    /// on this machine, or an estimate from its size).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_ms: Option<u64>,
+    /// While `failed`: ms until the next automatic restart (or until a request may start the
+    /// server again). Absent when nothing is scheduled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_in_ms: Option<u64>,
+    /// While `failed`: the supervisor gave up after repeated failures and waits for
+    /// `runtime.retry`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gave_up: bool,
+    /// The last line the model server printed before it failed (technical detail for the log
+    /// view; never needed to understand `error`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// `runtime.retry`: start a role's model server again after it failed or gave up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeRetryRequest {
+    pub role: RuntimeRole,
 }
 
 // ---- knowledge graph ----
@@ -629,6 +1016,10 @@ pub struct ClaimView {
     pub evidence: Vec<EvidenceView>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub updated_at: Option<time::OffsetDateTime>,
+    /// Sensitive-only: the claim has evidence and all of it is from sensitive items (missing
+    /// items count as sensitive). Such claims are not in the vault or default-scope MCP.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -657,6 +1048,11 @@ pub struct EntityDetail {
     /// The entity's vault page, relative to the vault root.
     #[serde(default)]
     pub vault_path: Option<String>,
+    /// Sensitive-only: the entity has at least one active claim or mention, and all of them
+    /// come from sensitive items. It has no vault page and is left out of `knowledge.graph`
+    /// unless `include_sensitive` is set.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -672,6 +1068,10 @@ pub struct GraphRequest {
     /// from it, a node with a mention or an active claim backed by it (the centre always stays).
     #[serde(default)]
     pub source: Option<SourceId>,
+    /// Also show sensitive-only entities (see [`EntityDetail::sensitive`]) and claims. Off by
+    /// default: they and their edges are left out (the centre always stays, marked).
+    #[serde(default)]
+    pub include_sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -680,6 +1080,9 @@ pub struct GraphNodeView {
     pub kind: String,
     pub name: String,
     pub depth: u32,
+    /// Sensitive-only entity (see [`EntityDetail::sensitive`]).
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -755,8 +1158,13 @@ pub struct KnowledgeStatus {
     pub entities: u64,
     pub claims: u64,
     pub mentions: u64,
-    /// Items changed but not yet processed by extraction.
+    /// Items changed but not yet processed by extraction: what is left of the current or
+    /// carried-over plan, items changed since that plan was made, and items waiting for the
+    /// model.
     pub pending_items: u64,
+    /// An extraction run is in progress.
+    #[serde(default)]
+    pub running: bool,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_run: Option<time::OffsetDateTime>,
     /// Provider used for LLM extraction, if any (deterministic extractors always run).
@@ -947,6 +1355,18 @@ pub struct DraftFeedback {
     pub insert_verified: Option<bool>,
 }
 
+/// `draft.check_sensitive` params (II3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SensitiveCheck {
+    pub text: String,
+}
+
+/// `draft.check_sensitive` result (II3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SensitiveVerdict {
+    pub sensitive: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VoiceStatus {
     /// Messages written by the user that the profile was built from.
@@ -955,6 +1375,23 @@ pub struct VoiceStatus {
     pub channels: Vec<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_built: Option<time::OffsetDateTime>,
+}
+
+// ---- Local runtime retry (KK1) ----
+
+/// IPC method names of the `runtime_retry` feature (nuggetd `features/runtime_retry.rs`).
+pub mod runtime_retry_method {
+    pub const RETRY: &str = "runtime.retry";
+}
+
+// ---- Search UI (II2) ----
+
+/// IPC method names of the search UI feature (`nuggetd` `features/search_ui`); their request and
+/// response types live in that feature module.
+pub mod search_ui_method {
+    pub const FACETED: &str = "search.faceted";
+    pub const TIMELINE: &str = "search.timeline";
+    pub const PREVIEW: &str = "search.preview";
 }
 
 // ---- Plugins (M6) ----
@@ -967,6 +1404,7 @@ pub mod plugin_method {
     pub const APPROVE: &str = "plugins.approve";
     pub const REMOVE: &str = "plugins.remove";
     pub const ENABLE: &str = "plugins.enable";
+    pub const CATALOG: &str = "plugins.catalog";
 }
 
 /// Capabilities a plugin requests or the user approved.
@@ -981,6 +1419,9 @@ pub struct PluginCapabilities {
     /// Size of the plugin's key-value store in bytes (`0` = none).
     #[serde(default)]
     pub kv_max_bytes: u64,
+    /// Settings fields of a connector source that hold a folder or file the plugin may read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_roots: Vec<String>,
 }
 
 /// Who signed a plugin, as far as this daemon trusts it.
@@ -1094,6 +1535,59 @@ pub struct PluginRemoveResult {
 pub struct PluginEnableParams {
     pub id: String,
     pub enabled: bool,
+}
+
+/// One `.nuggetplugin` file found in a catalog directory (`plugins.catalog`). Verified as
+/// `plugins.install` would, but not installed. When `error` is set the package cannot be
+/// installed and only `path` and `file_name` are reliable.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginCatalogEntry {
+    /// Absolute path to pass to `plugins.install`.
+    pub path: String,
+    pub file_name: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+    /// What the package's manifest requests.
+    #[serde(default)]
+    pub requested: PluginCapabilities,
+    #[serde(default)]
+    pub connector_display_name: Option<String>,
+    #[serde(default)]
+    pub signature: PluginSignature,
+    /// Hex ed25519 public key that signed the package (empty when unknown or unsigned).
+    #[serde(default)]
+    pub signer: String,
+    /// The installed version of this plugin, if any.
+    #[serde(default)]
+    pub installed_version: Option<String>,
+    /// Installed at an older version than this package.
+    #[serde(default)]
+    pub update_available: bool,
+    /// Installing it would ask for approval (a new install, or an update asking for more).
+    #[serde(default)]
+    pub needs_approval: bool,
+    /// Why it cannot be installed (unreadable, unsigned, untrusted signer, ...).
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginCatalogResult {
+    pub entries: Vec<PluginCatalogEntry>,
+    /// The directories that were searched.
+    #[serde(default)]
+    pub dirs: Vec<String>,
+    /// More packages were found than are listed.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 // ---- Agent (M4) ----
@@ -1284,6 +1778,9 @@ pub struct AgentTaskDetail {
     /// The `ask_user` question when the state is `needs_input`.
     #[serde(default)]
     pub question: Option<String>,
+    /// Candidate answers offered with `question` (empty: free text). Untrusted screen text.
+    #[serde(default)]
+    pub options: Vec<String>,
 }
 
 /// Status of the tamper-evident action log.
@@ -1745,6 +2242,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn disk_status_is_additive_and_classified() {
+        // An older daemon's status (no disk) still parses.
+        let old: StatusResponse = serde_json::from_value(serde_json::json!({
+            "protocol": 1, "version": "x", "uptime_secs": 1, "items": 0, "chunks": 0,
+            "providers": []
+        }))
+        .unwrap();
+        assert_eq!(old.disk, None);
+        let mib = 1024 * 1024;
+        let level = |free, err| DiskStatus::classify(free, err).level;
+        assert_eq!(level(Some(50 * 1024 * mib), false), DiskLevel::Ok);
+        assert_eq!(level(Some(50 * 1024 * mib), true), DiskLevel::Ok);
+        assert_eq!(level(Some(500 * mib), false), DiskLevel::Low);
+        assert_eq!(level(Some(500 * mib), true), DiskLevel::Full);
+        assert_eq!(level(Some(199 * mib), false), DiskLevel::Full);
+        assert_eq!(level(None, false), DiskLevel::Ok);
+        assert_eq!(level(None, true), DiskLevel::Full);
+        let v = serde_json::to_value(DiskStatus::classify(Some(5), true)).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"free_bytes": 5, "level": "full", "recent_full_error": true})
+        );
+    }
+
+    #[test]
+    fn model_progress_failure_fields_are_additive() {
+        // An older daemon's progress (no reason) still parses.
+        let old: ModelProgress = serde_json::from_value(serde_json::json!({
+            "id": "m", "downloaded": 5, "total": 10, "phase": "failed", "error": "x"
+        }))
+        .unwrap();
+        assert_eq!((old.reason, old.http_status), (None, None));
+        // No new keys on the wire unless set.
+        let v = serde_json::to_value(&old).unwrap();
+        assert!(v.get("reason").is_none() && v.get("http_status").is_none());
+        let p = ModelProgress {
+            reason: Some(ModelFailReason::HttpError),
+            http_status: Some(500),
+            ..old
+        };
+        let v = serde_json::to_value(&p).unwrap();
+        assert_eq!(
+            (v["reason"].as_str(), v["http_status"].as_u64()),
+            (Some("http_error"), Some(500))
+        );
+        // A reason from a newer daemon is not an error.
+        let newer: ModelFailReason =
+            serde_json::from_value(serde_json::json!("solar_flare")).unwrap();
+        assert_eq!(newer, ModelFailReason::Unknown);
+    }
+
+    #[test]
     fn auth_begin_user_code_is_optional_on_the_wire() {
         let redirect = AuthBegin {
             url: "https://example.com/authorize".into(),
@@ -1767,5 +2316,26 @@ mod tests {
             serde_json::json!({"url": "https://example.com/device", "user_code": "WDJB-MJHT"})
         );
         assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), device);
+    }
+
+    #[test]
+    fn egress_record_time_and_bytes_are_optional() {
+        let r: EgressRecordRequest = serde_json::from_value(
+            serde_json::json!({"host": "github.com", "feature": "update_check"}),
+        )
+        .unwrap();
+        assert_eq!((r.at, r.bytes_sent, r.bytes_received), (None, 0, 0));
+        let at = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
+        let r = EgressRecordRequest {
+            at: Some(at),
+            host: "github.com".into(),
+            feature: "update_download".into(),
+            bytes_sent: 0,
+            bytes_received: 42,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["at"], "2026-09-21T14:13:20Z");
+        assert_eq!(serde_json::from_value::<EgressRecordRequest>(v).unwrap(), r);
+        assert!(CLIENT_EGRESS_FEATURES.contains(&"update_check"));
     }
 }

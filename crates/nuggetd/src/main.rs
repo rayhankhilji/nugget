@@ -5,6 +5,10 @@
 //! - `nuggetd install-service` / `uninstall-service`: run at login as a per-user service.
 //! - `nuggetd mcp --client <id>`: the stdio MCP bridge apps launch (token in `NUGGET_MCP_TOKEN`).
 //! - `nuggetd mcp install --client claude-desktop|claude-code|cursor`: set an app up.
+//! - `nuggetd backup [--to DIR]` / `nuggetd backup set-passphrase`: back up now, or set the
+//!   backup passphrase (through the daemon when it runs, offline otherwise).
+//! - `nuggetd restore --from DIR [--passphrase-file FILE]`: restore a backup (daemon stopped).
+//! - `nuggetd export --to DIR`: export everything in open formats.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -14,7 +18,7 @@ use clap::{Parser, Subcommand};
 use nugget_core::ipc::{StatusResponse, method};
 use nugget_core::paths::Paths;
 use nuggetd::install::{App, InstallOptions};
-use nuggetd::{Daemon, DaemonOptions, Startup, cli, logging, service};
+use nuggetd::{Daemon, DaemonOptions, Startup, backup_cli, cli, logging, service};
 
 /// How long exit waits for blocking work (hashing, SQLite) still running after the daemon stops.
 const RUNTIME_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
@@ -51,6 +55,39 @@ enum Command {
         client: Option<String>,
         #[command(subcommand)]
         action: Option<McpAction>,
+    },
+    /// Back up now (to the configured folder, or DIR), or set the backup passphrase.
+    #[command(args_conflicts_with_subcommands = true)]
+    Backup {
+        /// Write the backup into DIR instead of the configured folder.
+        #[arg(long, value_name = "DIR")]
+        to: Option<PathBuf>,
+        #[command(subcommand)]
+        action: Option<BackupAction>,
+    },
+    /// Restore a backup directory (stop the daemon first). The current data is kept aside.
+    Restore {
+        /// The backup directory (`nugget-backup-<date and time>`).
+        #[arg(long, value_name = "DIR")]
+        from: PathBuf,
+        /// Read the backup passphrase from FILE (else NUGGET_BACKUP_PASSPHRASE, else a prompt).
+        #[arg(long, value_name = "FILE")]
+        passphrase_file: Option<PathBuf>,
+    },
+    /// Export everything in open formats (unencrypted) into a new folder in DIR.
+    Export {
+        #[arg(long, value_name = "DIR")]
+        to: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BackupAction {
+    /// Set the backup passphrase (seals the store key into every later backup).
+    SetPassphrase {
+        /// Read the passphrase from FILE (else NUGGET_BACKUP_PASSPHRASE, else a prompt).
+        #[arg(long, value_name = "FILE")]
+        passphrase_file: Option<PathBuf>,
     },
 }
 
@@ -153,6 +190,36 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some(Command::Backup { to, action }) => {
+            logging::init_cli();
+            let vault = default_vault(&paths, args.home);
+            report(runtime.block_on(async {
+                match action {
+                    Some(BackupAction::SetPassphrase { passphrase_file }) => {
+                        backup_cli::set_passphrase(&paths, passphrase_file.as_deref()).await
+                    }
+                    None => backup_cli::backup(&paths, to, &vault).await,
+                }
+            }))
+        }
+        Some(Command::Restore {
+            from,
+            passphrase_file,
+        }) => {
+            logging::init_cli();
+            let vault = default_vault(&paths, args.home);
+            report(runtime.block_on(backup_cli::restore(
+                &paths,
+                from,
+                passphrase_file.as_deref(),
+                &vault,
+            )))
+        }
+        Some(Command::Export { to }) => {
+            logging::init_cli();
+            let vault = default_vault(&paths, args.home);
+            report(runtime.block_on(backup_cli::export(&paths, to, &vault)))
+        }
         Some(Command::Mcp { .. }) => {
             eprintln!(
                 "nuggetd mcp: use `nuggetd mcp --client <id>` (the stdio bridge) or `nuggetd mcp install --client <app>`"
@@ -187,6 +254,10 @@ async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
             None
         }
     };
+    // Register the stop signals before anything else can take time: a signal that arrives while
+    // no listener exists gets the OS default, which kills the process without a clean shutdown
+    // (exit 0xC000013A on Windows).
+    let shutdown = shutdown_signal();
     let mut opts = DaemonOptions::new(paths);
     match cli::home_override(home_flag) {
         // A normal install keeps its vault in the home directory.
@@ -215,13 +286,23 @@ async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
             daemon.paths().config_file().display()
         );
     }
-    match daemon.run_until(shutdown_signal()).await {
+    match daemon.run_until(shutdown).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!(error = %e, "daemon failed");
             eprintln!("nuggetd: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The vault directory the daemon uses when `[vault] path` is unset (see [`run`]).
+fn default_vault(paths: &Paths, home_flag: Option<PathBuf>) -> PathBuf {
+    match cli::home_override(home_flag) {
+        Ok(None) => std::env::home_dir()
+            .map(|h| h.join("Nugget Vault"))
+            .unwrap_or_else(|| nuggetd::knowledge::default_vault_dir(paths)),
+        _ => nuggetd::knowledge::default_vault_dir(paths),
     }
 }
 
@@ -256,51 +337,81 @@ async fn status(paths: Paths, json: bool) -> ExitCode {
     }
 }
 
-/// Resolves on SIGINT or SIGTERM (Unix), or Ctrl+C / Ctrl+Break / console close (Windows).
-async fn shutdown_signal() {
+/// Registers the stop signals now and returns a future that resolves on the first of them:
+/// SIGINT or SIGTERM (Unix), or Ctrl+C / Ctrl+Break / console close, logoff or shutdown (Windows).
+/// A signal that cannot be registered is logged; the others still work.
+fn shutdown_signal() -> impl std::future::Future<Output = ()> {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
-        match (
-            signal(SignalKind::interrupt()),
-            signal(SignalKind::terminate()),
-        ) {
-            (Ok(mut int), Ok(mut term)) => {
-                tokio::select! {
-                    _ = int.recv() => tracing::info!("SIGINT received"),
-                    _ = term.recv() => tracing::info!("SIGTERM received"),
+        let int = signal(SignalKind::interrupt());
+        let term = signal(SignalKind::terminate());
+        if let Err(e) = &int {
+            tracing::warn!(error = %e, "cannot listen for SIGINT");
+        }
+        if let Err(e) = &term {
+            tracing::warn!(error = %e, "cannot listen for SIGTERM");
+        }
+        tracing::info!("stop signals registered");
+        async move {
+            async fn recv(s: std::io::Result<tokio::signal::unix::Signal>) {
+                match s {
+                    Ok(mut s) => {
+                        s.recv().await;
+                    }
+                    Err(_) => std::future::pending().await,
                 }
             }
-            _ => {
-                tracing::warn!("cannot install signal handlers; stopping on Ctrl+C only");
-                let _ = tokio::signal::ctrl_c().await;
+            tokio::select! {
+                () = recv(int) => tracing::info!("SIGINT received"),
+                () = recv(term) => tracing::info!("SIGTERM received"),
             }
         }
     }
     #[cfg(windows)]
     {
         use tokio::signal::windows;
-        async fn or_pending<T, F, Fut>(sig: std::io::Result<T>, recv: F)
-        where
-            F: FnOnce(T) -> Fut,
-            Fut: std::future::Future<Output = ()>,
-        {
-            match sig {
-                Ok(s) => recv(s).await,
-                Err(_) => std::future::pending().await,
+        // Each listener registers with the console handler when it is created, here, not when
+        // the future is first polled.
+        fn listen<T>(name: &str, r: std::io::Result<T>) -> Option<T> {
+            r.map_err(
+                |e| tracing::warn!(signal = name, error = %e, "cannot listen for a console signal"),
+            )
+            .ok()
+        }
+        let c = listen("ctrl_c", windows::ctrl_c());
+        let brk = listen("ctrl_break", windows::ctrl_break());
+        let close = listen("ctrl_close", windows::ctrl_close());
+        let shutdown = listen("ctrl_shutdown", windows::ctrl_shutdown());
+        let logoff = listen("ctrl_logoff", windows::ctrl_logoff());
+        tracing::info!("console control signals registered");
+        async move {
+            macro_rules! recv {
+                ($s:expr) => {
+                    async {
+                        match $s {
+                            Some(mut s) => {
+                                s.recv().await;
+                            }
+                            None => std::future::pending::<()>().await,
+                        }
+                    }
+                };
             }
+            let which = tokio::select! {
+                () = recv!(c) => "ctrl_c",
+                () = recv!(brk) => "ctrl_break",
+                () = recv!(close) => "ctrl_close",
+                () = recv!(shutdown) => "ctrl_shutdown",
+                () = recv!(logoff) => "ctrl_logoff",
+            };
+            tracing::info!(signal = which, "console control signal received");
         }
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            () = or_pending(windows::ctrl_break(), |mut s| async move { s.recv().await; }) => {}
-            () = or_pending(windows::ctrl_close(), |mut s| async move { s.recv().await; }) => {}
-            () = or_pending(windows::ctrl_shutdown(), |mut s| async move { s.recv().await; }) => {}
-            () = or_pending(windows::ctrl_logoff(), |mut s| async move { s.recv().await; }) => {}
-        }
-        tracing::info!("console control signal received");
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = tokio::signal::ctrl_c().await;
+        async {
+            let _ = tokio::signal::ctrl_c().await;
+        }
     }
 }

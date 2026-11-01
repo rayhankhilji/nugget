@@ -4,6 +4,7 @@
 //! against a stable contract. See `docs/m0-spec.md`.
 
 pub mod capability;
+pub mod clock;
 pub mod egress;
 pub mod error;
 pub mod ids;

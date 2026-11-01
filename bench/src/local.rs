@@ -8,9 +8,11 @@
 //! configs it returns ([`LocalModels::chat`], [`LocalModels::embedder`],
 //! [`LocalModels::reranker`]).
 //!
-//! - **Models.** By default the smallest chat model (any of the triage, light, synthesis or
-//!   agentic tiers) and the smallest embedding model in the manifest; `--local-chat-model` and
-//!   `--local-embed-model` pick others by manifest id.
+//! - **Models.** By default the chat model the app uses on a typical 8–16 GB machine
+//!   ([`DEFAULT_CHAT_MODEL`], or the smallest chat model if a manifest lacks it) and the smallest
+//!   embedding model in the manifest; `--local-chat-model` and `--local-embed-model` pick others
+//!   by manifest id. (The default used to be the smallest chat model, which silently became the
+//!   Double Tap-only 1.7B once that was signed into the manifest.)
 //! - **Pending entries** (`--local-pending FILE`, bench only): proposed manifest entries from
 //!   `manifests/pending/` that are not signed yet. Each entry must pass
 //!   [`ModelEntry::validate`] and must not reuse a signed id; `--local-chat-model` and
@@ -51,6 +53,22 @@ use crate::runner::{BenchError, RunContext};
 /// Chat tiers: a model serving any of them can draft, extract and drive the agent.
 const CHAT_TIERS: [Tier; 4] = [Tier::Triage, Tier::Light, Tier::Synthesis, Tier::Agentic];
 
+/// The chat model measured when `--local-chat-model` is not given: the one `nuggetd` picks for
+/// chat, drafting and extraction on an 8–16 GB machine, so published numbers describe what most
+/// users run.
+pub const DEFAULT_CHAT_MODEL: &str = "qwen3-4b-q4km";
+
+/// `--local-chat-model`, or [`DEFAULT_CHAT_MODEL`] when the signed manifest has it (otherwise
+/// `None`: the smallest chat model).
+fn chat_model_id<'a>(models: &[ModelEntry], requested: Option<&'a str>) -> Option<&'a str> {
+    requested.or_else(|| {
+        models
+            .iter()
+            .any(|m| m.id == DEFAULT_CHAT_MODEL)
+            .then_some(DEFAULT_CHAT_MODEL)
+    })
+}
+
 /// Whether a hybrid reasoning model may think before it answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, clap::ValueEnum)]
 pub enum Thinking {
@@ -82,7 +100,8 @@ pub struct LocalOptions {
     /// `bench/.local-models`).
     #[arg(long, value_name = "DIR", env = "NUGGET_BENCH_MODELS_HOME")]
     pub models_home: Option<PathBuf>,
-    /// Manifest id of the chat model (default: the smallest chat model in the manifest).
+    /// Manifest id of the chat model (default: `qwen3-4b-q4km`, the model the app uses on a
+    /// typical 8–16 GB machine).
     #[arg(long, value_name = "ID", requires = "local_models")]
     pub local_chat_model: Option<String>,
     /// Manifest id of the embedding model (default: the smallest one in the manifest).
@@ -411,7 +430,7 @@ impl LocalModels {
                 RuntimeRole::Chat => pick_with_pending(
                     &manifest.models,
                     &pending,
-                    opts.local_chat_model.as_deref(),
+                    chat_model_id(&manifest.models, opts.local_chat_model.as_deref()),
                     &CHAT_TIERS,
                 )?,
                 RuntimeRole::Embedding => pick_with_pending(
@@ -806,6 +825,30 @@ mod tests {
         let embed = pick(&m.models, None, &[Tier::Embedding]).unwrap();
         assert!(!chat.tiers.contains(&Tier::Embedding));
         assert!(embed.tiers.contains(&Tier::Embedding));
+    }
+
+    #[test]
+    fn the_default_chat_model_is_the_4b_not_the_smallest() {
+        let m = default_manifest().unwrap();
+        // The 1.7B Double Tap model is smaller, but the default must stay what users run.
+        assert_ne!(
+            pick(&m.models, None, &CHAT_TIERS).unwrap().id,
+            DEFAULT_CHAT_MODEL
+        );
+        let id = chat_model_id(&m.models, None);
+        assert_eq!(id, Some(DEFAULT_CHAT_MODEL));
+        assert_eq!(
+            pick(&m.models, id, &CHAT_TIERS).unwrap().id,
+            DEFAULT_CHAT_MODEL
+        );
+        assert_eq!(chat_model_id(&m.models, Some("x")), Some("x"));
+        let without: Vec<_> = m
+            .models
+            .iter()
+            .filter(|e| e.id != DEFAULT_CHAT_MODEL)
+            .cloned()
+            .collect();
+        assert_eq!(chat_model_id(&without, None), None);
     }
 
     #[test]

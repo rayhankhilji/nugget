@@ -45,6 +45,7 @@ use nugget_core::ipc::{
 use nugget_core::{Error, Result};
 use nugget_infer::Router;
 use nugget_ipc::{Notifier, RpcError, parse_params, to_result};
+use nugget_policy::kill::HookGuard;
 use nugget_policy::{ActionContext, PolicyGate, TaskApproval};
 use serde::Deserialize;
 use serde_json::Value;
@@ -87,7 +88,12 @@ pub(crate) async fn register(
     tools.extend(computer_tools(cx));
     // Plugin tools come from the plugins feature, which `features::build` starts first.
     tools.extend(super::plugins::agent_tools(&cx.state.paths).await);
-    start(list, "agent", self::start_agent(cx, &safety, tools).await);
+    let browser_controller = browser.as_ref().and_then(|b| b.controller.clone());
+    start(
+        list,
+        "agent",
+        self::start_agent(cx, &safety, tools, browser_controller).await,
+    );
     Some(safety)
 }
 
@@ -107,6 +113,7 @@ async fn start_agent(
     cx: &FeatureContext<'_>,
     safety: &Arc<Safety>,
     tools: Vec<Arc<dyn nugget_agent::Tool>>,
+    browser: Option<Arc<nugget_browser::BrowserController>>,
 ) -> Result<Arc<dyn Feature>> {
     let settings: AgentSettings = section("agent", &cx.config.agent)?;
     let state = cx.state;
@@ -125,8 +132,16 @@ async fn start_agent(
         hub: state.hub.clone(),
         safety: safety.clone(),
         tasks: Mutex::new(HashMap::new()),
+        browser,
     });
+    let kill_hook = stop_all_hook(
+        &safety.kill,
+        runs.clone(),
+        state.tasks.clone(),
+        state.shutdown.clone(),
+    );
     Ok(Arc::new(AgentFeature {
+        _kill_hook: kill_hook,
         settings,
         router: state.router.clone(),
         safety: safety.clone(),
@@ -154,6 +169,13 @@ struct AgentSettings {
     /// Overrides `[policy] confirm_timeout_secs` for agent runs.
     confirm_timeout_secs: Option<u64>,
     max_concurrent: usize,
+    /// Screen each goal for fraud, impersonation, harassment and other serious harm before the
+    /// first step, on the light tier (a small local model). Off by default: turning it on is
+    /// the user's decision (docs/PLAN.md, "Also open").
+    triage: bool,
+    /// With `triage`, a refusal asks the user ("Do it anyway" / "Cancel") instead of ending the
+    /// task; going ahead is logged as their decision.
+    triage_override: bool,
 }
 
 impl Default for AgentSettings {
@@ -167,6 +189,8 @@ impl Default for AgentSettings {
             max_tokens: None,
             confirm_timeout_secs: None,
             max_concurrent: 4,
+            triage: false,
+            triage_override: true,
         }
     }
 }
@@ -194,6 +218,90 @@ struct AgentFeature {
     runs: Arc<Runs>,
     spawner: TaskTracker,
     shutdown: CancellationToken,
+    /// Ends tasks waiting on `ask_user` when every agent is stopped (see [`stop_all_hook`]).
+    _kill_hook: HookGuard,
+}
+
+/// "Stop all agents" ends everything, not only the loops that are running (GG3-10): a task
+/// waiting on `ask_user` has no loop to see the switch, so it is resumed halted and cancelled,
+/// and ends (and is logged) like a run stopped mid-step. It can never act after a later Resume:
+/// its token is cancelled and its question is gone, so `agent.answer` has nothing to answer.
+fn stop_all_hook(
+    kill: &nugget_policy::KillSwitch,
+    runs: Arc<Runs>,
+    spawner: TaskTracker,
+    shutdown: CancellationToken,
+) -> HookGuard {
+    let rt = tokio::runtime::Handle::try_current().ok();
+    kill.on_change(move |halted| {
+        if halted {
+            stop_suspended(&runs, &spawner, &shutdown, rt.as_ref());
+        }
+    })
+}
+
+fn stop_suspended(
+    runs: &Arc<Runs>,
+    spawner: &TaskTracker,
+    shutdown: &CancellationToken,
+    rt: Option<&tokio::runtime::Handle>,
+) {
+    let stopped: Vec<_> = {
+        let mut tasks = runs.lock();
+        tasks
+            .iter_mut()
+            .filter_map(|(id, t)| {
+                let st = t.suspended.take()?;
+                t.cancel.cancel();
+                t.state = AgentTaskState::Running;
+                t.question = None;
+                t.options.clear();
+                let cfg = t.cfg(shutdown.child_token());
+                cfg.cancel.cancel();
+                Some((id.clone(), t.agent.clone(), st, cfg))
+            })
+            .collect()
+    };
+    for (id, agent, st, cfg) in stopped {
+        let answer = "(all agents were stopped by the user)".to_string();
+        spawn_resume(runs, spawner, rt, &id, agent, st, answer, cfg);
+    }
+}
+
+/// Resume a suspended run on the daemon's task tracker.
+#[allow(clippy::too_many_arguments)]
+fn spawn_resume(
+    runs: &Arc<Runs>,
+    spawner: &TaskTracker,
+    rt: Option<&tokio::runtime::Handle>,
+    task_id: &str,
+    agent: Arc<Agent>,
+    st: RunState,
+    answer: String,
+    cfg: AgentConfig,
+) {
+    let runs = runs.clone();
+    let engine = runs.safety.engine.clone();
+    let id = task_id.to_string();
+    let fut = async move {
+        let run = agent.resume(st, &answer, cfg).await;
+        runs.after_run(&id, run, &engine);
+    };
+    match rt {
+        Some(rt) => drop(spawner.spawn_on(fut, rt)),
+        None => drop(spawner.spawn(fut)),
+    }
+}
+
+/// Refuse a user's answer while every agent is stopped: nothing the user says between Stop and
+/// Resume may set an agent going (GG3-21).
+fn refuse_while_halted(engine: &nugget_policy::PolicyEngine, what: &str) -> Result<()> {
+    if engine.halted() {
+        return Err(Error::Invalid(format!(
+            "all agents are stopped; the {what} was not accepted. Resume first."
+        )));
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -267,12 +375,24 @@ impl AgentFeature {
         let mut task = Task::new(task_id.clone(), goal);
         task.context = req.context.filter(|c| !c.trim().is_empty());
         let gate: Arc<dyn PolicyGate> = self.safety.engine.clone();
-        let agent = Arc::new(
-            Agent::new(model, registry, gate)
-                .with_log(self.log.clone())
-                .with_events(self.runs.clone())
-                .with_ledger(self.ledger.clone()),
-        );
+        let mut agent = Agent::new(model, registry, gate)
+            .with_log(self.log.clone())
+            .with_events(self.runs.clone())
+            .with_ledger(self.ledger.clone());
+        // The triage is one short call: a small model judges it as well as a large one and much
+        // sooner (DD3), so it goes to the light tier when one is configured.
+        if cfg.triage
+            && !self
+                .router
+                .candidates(Tier::Light, &Capabilities::default())
+                .is_empty()
+        {
+            agent = agent.with_triage_model(Model::Router {
+                router: self.router.clone(),
+                tier: Tier::Light,
+            });
+        }
+        let agent = Arc::new(agent);
         {
             let mut tasks = self.runs.lock();
             let active = tasks.values().filter(|t| t.active()).count();
@@ -384,6 +504,8 @@ impl AgentFeature {
             },
             confirm_timeout: Duration::from_secs(timeout),
             cancel: self.shutdown.child_token(),
+            triage: s.triage,
+            triage_override: s.triage_override,
             ..AgentConfig::default()
         }
     }
@@ -400,6 +522,7 @@ impl AgentFeature {
             t.suspended.take().map(|st| {
                 t.state = AgentTaskState::Running;
                 t.question = None;
+                t.options.clear();
                 (st, t.agent.clone(), t.cfg(self.shutdown.child_token()))
             })
         };
@@ -417,6 +540,9 @@ impl AgentFeature {
     }
 
     fn confirm(&self, c: AgentConfirm) -> Result<()> {
+        if c.choice != ConfirmChoice::Deny {
+            refuse_while_halted(&self.safety.engine, "approval")?;
+        }
         let (request, confirmations) = {
             let tasks = self.runs.lock();
             let t = tasks
@@ -459,6 +585,7 @@ impl AgentFeature {
     }
 
     fn answer(&self, task_id: &str, answer: &str) -> Result<()> {
+        refuse_while_halted(&self.safety.engine, "answer")?;
         let (st, agent, cfg) = {
             let mut tasks = self.runs.lock();
             let t = tasks
@@ -471,6 +598,7 @@ impl AgentFeature {
             };
             t.state = AgentTaskState::Running;
             t.question = None;
+            t.options.clear();
             t.cancel = self.shutdown.child_token();
             let cfg = t.cfg(t.cancel.clone());
             (st, t.agent.clone(), cfg)
@@ -487,13 +615,16 @@ impl AgentFeature {
         answer: String,
         cfg: AgentConfig,
     ) {
-        let runs = self.runs.clone();
-        let engine = self.safety.engine.clone();
-        let id = task_id.to_string();
-        self.spawner.spawn(async move {
-            let run = agent.resume(st, &answer, cfg).await;
-            runs.after_run(&id, run, &engine);
-        });
+        spawn_resume(
+            &self.runs,
+            &self.spawner,
+            None,
+            task_id,
+            agent,
+            st,
+            answer,
+            cfg,
+        );
     }
 
     fn list(&self, limit: usize) -> Vec<AgentTaskSummary> {
@@ -523,16 +654,17 @@ impl AgentFeature {
                 t.summary(task_id),
                 t.pending.values().map(to_json).collect::<Vec<_>>(),
                 t.question.clone(),
+                t.options.clone(),
             )
         });
-        let (summary, pending, question) = match live {
+        let (summary, pending, question, options) = match live {
             Some(l) => l,
             None => {
                 let s = summaries_from_log(&entries)
                     .into_iter()
                     .next()
                     .ok_or_else(|| unknown_task(task_id))?;
-                (s, Vec::new(), None)
+                (s, Vec::new(), None, Vec::new())
             }
         };
         Ok(AgentTaskDetail {
@@ -541,6 +673,7 @@ impl AgentFeature {
             explain,
             pending,
             question,
+            options,
         })
     }
 }
@@ -650,6 +783,8 @@ struct TaskEntry {
     /// Open confirmations by request id.
     pending: BTreeMap<String, ConfirmationRequest>,
     question: Option<String>,
+    /// Candidate answers offered with `question`.
+    options: Vec<String>,
     /// Set while the run waits on `ask_user`.
     suspended: Option<RunState>,
     /// The `suspended` event, held back until the run's state is stored (so a client that sees
@@ -676,6 +811,7 @@ impl TaskEntry {
             verification: AgentVerificationCounts::default(),
             pending: BTreeMap::new(),
             question: None,
+            options: Vec::new(),
             suspended: None,
             deferred: None,
             confirmations: agent.confirmations(),
@@ -723,6 +859,9 @@ struct Runs {
     hub: Arc<Hub>,
     safety: Arc<Safety>,
     tasks: Mutex<HashMap<String, TaskEntry>>,
+    /// The browser tools' controller: its "Nugget is acting" overlay is hidden once no task is
+    /// running (GG3-12).
+    browser: Option<Arc<nugget_browser::BrowserController>>,
 }
 
 impl Runs {
@@ -767,8 +906,11 @@ impl Runs {
             AgentEvent::Verification { verification, .. } => {
                 count(&mut t.verification, verification);
             }
-            AgentEvent::Suspended { question, .. } => {
+            AgentEvent::Suspended {
+                question, options, ..
+            } => {
                 t.question = Some(question.clone());
+                t.options.clone_from(options);
                 t.deferred = Some(event.clone());
                 return false;
             }
@@ -796,6 +938,7 @@ impl Runs {
             pending.remove(&id);
         }
         t.question = None;
+        t.options.clear();
         t.suspended = None;
         t.deferred = None;
     }
@@ -811,6 +954,11 @@ impl Runs {
             match run.suspended {
                 Some(st) => {
                     t.question = st.pending.as_ref().map(|p| p.question.clone());
+                    t.options = st
+                        .pending
+                        .as_ref()
+                        .map(|p| p.options.clone())
+                        .unwrap_or_default();
                     t.suspended = Some(st);
                     t.state = AgentTaskState::NeedsInput;
                     t.deferred.take()
@@ -856,12 +1004,25 @@ fn event_task(event: &AgentEvent) -> &str {
 impl EventSink for Runs {
     fn emit(&self, event: AgentEvent) {
         let task_id = event_task(&event).to_string();
-        let send = match self.lock().get_mut(&task_id) {
-            Some(t) => self.track(t, &event),
-            None => true,
+        let (send, idle) = {
+            let mut tasks = self.lock();
+            let send = match tasks.get_mut(&task_id) {
+                Some(t) => self.track(t, &event),
+                None => true,
+            };
+            let idle =
+                matches!(event, AgentEvent::Finished { .. }) && tasks.values().all(|t| !t.active());
+            (send, idle)
         };
         if send {
             self.broadcast(&task_id, &event);
+        }
+        if idle
+            && let Some(c) = &self.browser
+            && let Ok(rt) = tokio::runtime::Handle::try_current()
+        {
+            let c = c.clone();
+            rt.spawn(async move { c.finish().await });
         }
     }
 }
@@ -912,6 +1073,12 @@ mod tests {
         assert_eq!(s.max_steps, Some(7));
         assert_eq!(s.confirm_timeout_secs, Some(3));
         assert_eq!(s.max_concurrent, 4);
+        // The triage stays off unless the user turns it on; a refusal is then a question.
+        assert!(!s.triage);
+        assert!(s.triage_override);
+        let t: toml::Table = toml::from_str("triage = true").unwrap();
+        let s: AgentSettings = section("agent", &t).unwrap();
+        assert!(s.triage);
     }
 
     #[test]
@@ -1011,6 +1178,7 @@ mod tests {
             hub: Arc::new(Hub::default()),
             safety: safety.clone(),
             tasks: Mutex::new(HashMap::new()),
+            browser: None,
         });
         let router = Arc::new(Router::new(Vec::new(), Default::default()));
         let gate: Arc<dyn PolicyGate> = safety.engine.clone();
@@ -1056,9 +1224,11 @@ mod tests {
         runs.emit(AgentEvent::Suspended {
             task_id: "t".into(),
             question: "which one?".into(),
+            options: vec!["Sam Lee".into(), "Sam Ortiz".into()],
         });
         assert!(runs.lock()["t"].deferred.is_some());
         assert_eq!(runs.lock()["t"].question.as_deref(), Some("which one?"));
+        assert_eq!(runs.lock()["t"].options, ["Sam Lee", "Sam Ortiz"]);
 
         // A run stopped while a confirmation was open drops it.
         runs.emit(AgentEvent::ConfirmationNeeded {
@@ -1077,5 +1247,7 @@ mod tests {
         assert!(s.finished_ms.is_some());
         assert!(safety.pending.lock().unwrap().is_empty());
         assert!(runs.lock()["t"].pending.is_empty());
+        assert!(runs.lock()["t"].question.is_none());
+        assert!(runs.lock()["t"].options.is_empty());
     }
 }

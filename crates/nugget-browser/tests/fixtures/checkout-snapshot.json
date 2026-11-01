@@ -152,5 +152,28 @@
   "elements_truncated": false,
   "text": "Pay $20.00",
   "text_truncated": false,
-  "frames": []
+  "frames": [],
+  "forms": [
+    {
+      "id": "n2",
+      "action": "https://shop.example/page",
+      "method": "get",
+      "digest": "1421fb821ef0aafed71b69fcfd843e85dc13a8b82b90634aef71ecc26086519d"
+    }
+  ],
+  "scopes": [
+    {
+      "id": "n2",
+      "members": [
+        "n1",
+        "n3",
+        "n4",
+        "n5",
+        "n6",
+        "n7",
+        "n8"
+      ],
+      "digest": "3baa8eb09de27ed61c72ed6da5454a307ad3b81d39f08c4e17ea9358a961444a"
+    }
+  ]
 }

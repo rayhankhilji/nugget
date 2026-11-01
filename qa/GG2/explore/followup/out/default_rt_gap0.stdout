@@ -1,0 +1,7 @@
+{"conv": "F01", "turn": 1, "q": "When is my dentist appointment?", "query_rewrite": null, "started_ms": 2090, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F01", "turn": 2, "q": "Who is it with?", "query_rewrite": "dentist appointment with whom", "started_ms": 9, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F01", "turn": 3, "q": "And where is it?", "query_rewrite": "dentist appointment location address", "started_ms": 9, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F04", "turn": 1, "q": "Who is Bob Lindqvist?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F04", "turn": 2, "q": "When is he on leave?", "query_rewrite": "Bob Lindqvist leave dates", "started_ms": 7, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F13", "turn": 1, "q": "Where are my farewell drinks?", "query_rewrite": null, "started_ms": 2, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F13", "turn": 2, "q": "What time?", "query_rewrite": "farewell drinks time", "started_ms": 5, "hit": true, "orig_hit": false, "general": false, "error": null}

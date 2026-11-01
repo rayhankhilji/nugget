@@ -1,0 +1,33 @@
+A#1 timeline:
+         4 ms OS key_input START (1900 chars)
+       305 ms KILL SWITCH ENGAGED
+       355 ms run returned: Halted
+      1504 ms OS key_input END (all text typed)
+A#1 log: ["run_started", "model_turn", "decision(type_text):\"allowed\"", "executed(type_text):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+B#1: approvals accepted after kill: 20/20; OS clicks after kill: 0
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    e.g. accepted: accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+A#2 timeline:
+         1 ms OS key_input START (1900 chars)
+       304 ms KILL SWITCH ENGAGED
+       352 ms run returned: Halted
+      1501 ms OS key_input END (all text typed)
+A#2 log: ["run_started", "model_turn", "decision(type_text):\"allowed\"", "executed(type_text):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+B#2: approvals accepted after kill: 20/20; OS clicks after kill: 0
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    e.g. accepted: accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+A#3 timeline:
+         1 ms OS key_input START (1900 chars)
+       303 ms KILL SWITCH ENGAGED
+       353 ms run returned: Halted
+      1501 ms OS key_input END (all text typed)
+A#3 log: ["run_started", "model_turn", "decision(type_text):\"allowed\"", "executed(type_text):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+B#3: approvals accepted after kill: 20/20; OS clicks after kill: 0
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]
+    e.g. accepted: accepted=true outcome=Halted log=["decision(click):\"approved\"", "executed(click):INTERRUPTED[interrupted (halted)]", "finished:\"halted\""]

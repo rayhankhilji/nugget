@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import {
   api,
   errorMessage,
+  runtimeRetry,
   events,
   isMethodNotFound,
   PROTOCOL_VERSION,
   type Capabilities,
+  type DiskStatus,
   type IngestStatus,
   type KnowledgeStatus,
   type ProviderInfo,
@@ -14,12 +16,14 @@ import {
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { fileUrl, vaultLinks } from "../knowledge";
-import { formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
+import { formatBytes, formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
 import { Announce, useAnnouncer, useIngestAnnouncements } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { UpdateSettings } from "../components/UpdateSettings";
+import { BackupSettings } from "../components/BackupSettings";
 import { formatList, formatNumber, Trans, useT, type MessageKey } from "../i18n";
+import { triageLine } from "../triageLine";
 
 export function StatusPage() {
   const t = useT();
@@ -46,6 +50,13 @@ export function StatusPage() {
     }, 10_000);
     return () => window.clearInterval(timer);
   }, [reload, reloadIngest, reloadRuntime, reloadKnowledge, ingestMissing, runtimeMissing, knowledgeMissing]);
+  // KK1: while a model warms up or waits to restart, follow it closely (elapsed time, retry).
+  const runtimeBusy = (runtime.data ?? []).some((r) => r.state === "starting" || r.state === "stopping" || (r.state === "failed" && (r.retry_in_ms ?? 0) > 0));
+  useEffect(() => {
+    if (!runtimeBusy || runtimeMissing) return;
+    const timer = window.setInterval(reloadRuntime, 1_000);
+    return () => window.clearInterval(timer);
+  }, [runtimeBusy, runtimeMissing, reloadRuntime]);
   const refreshAll = () => {
     status.reload();
     ingest.reload();
@@ -54,19 +65,25 @@ export function StatusPage() {
   };
 
   const s = status.data;
+  // The main status call stands for the daemon: while it is failing or loading for the first time,
+  // the page shows one error (or one loading state) instead of one per section.
+  const pageError = status.error && !isMethodNotFound(status.error) ? status.error : null;
+  const firstLoad = status.loading && !s && !status.error;
+  const quiet = pageError !== null || firstLoad;
 
   return (
     <div className="page">
       <PageHeader
         title={t("status.title")}
+        description={t("status.description")}
         actions={
-          <button type="button" className="btn btn-ghost" onClick={refreshAll}>
+          <button type="button" className="btn btn-ghost" onClick={refreshAll} disabled={firstLoad}>
             {t("common.refresh")}
           </button>
         }
       />
-      <ErrorNote error={status.error} onRetry={status.reload} />
-      {status.loading && !s && <Loading label={t("status.loading")} lines={4} />}
+      <ErrorNote error={status.error} onRetry={refreshAll} />
+      {firstLoad && <Loading label={t("status.loading")} lines={4} />}
       {s && (
         <>
           {s.protocol !== PROTOCOL_VERSION && (
@@ -77,7 +94,9 @@ export function StatusPage() {
           <dl className="stats">
             <div>
               <dt>{t("status.daemon")}</dt>
-              <dd>{t("status.version", { version: s.version })}</dd>
+              <dd>
+                <bdi dir="ltr">{t("status.version", { version: s.version })}</bdi>
+              </dd>
             </div>
             <div>
               <dt>{t("status.uptime")}</dt>
@@ -103,11 +122,12 @@ export function StatusPage() {
               {t("status.auditTampered")}
             </p>
           )}
+          <DiskNote disk={s.disk} />
 
           <h2>{t("status.providers")}</h2>
           {s.providers.length === 0 ? (
-            <EmptyState title={t("status.noProvidersTitle")}>
-              <Trans k="status.noProviders" tags={{ code: (c) => <code>{c}</code> }} />
+            <EmptyState title={t("status.noProvidersTitle")} action={<GoToPage page="models" className="btn" />}>
+              {t("status.noProviders")}
             </EmptyState>
           ) : (
             <div className="table-wrap" tabIndex={0} role="region" aria-label={t("status.providers")}>
@@ -133,20 +153,60 @@ export function StatusPage() {
         </>
       )}
 
-      <IndexingCard data={ingest.data} error={ingest.error} loading={ingest.loading} onRetry={ingest.reload} />
-      <RuntimeCard data={runtime.data} error={runtime.error} loading={runtime.loading} onRetry={runtime.reload} />
-      <KnowledgeCard data={knowledge.data} error={knowledge.error} loading={knowledge.loading} onRetry={knowledge.reload} />
+      {/* While the page shows its one error or loading state, sections with nothing to show are left out. */}
+      {(!quiet || ingest.data) && <IndexingCard data={ingest.data} error={quiet ? null : ingest.error} loading={!quiet && ingest.loading} onRetry={ingest.reload} />}
+      {(!quiet || runtime.data) && (
+      <RuntimeCard
+        data={runtime.data}
+        error={quiet ? null : runtime.error}
+        loading={!quiet && runtime.loading}
+        onRetry={runtime.reload}
+        // "No AI providers" above already offers Go to Models: one button per next step.
+        offerModels={!s || s.providers.length > 0}
+      />
+      )}
+      {(!quiet || knowledge.data) && <KnowledgeCard data={knowledge.data} error={quiet ? null : knowledge.error} loading={!quiet && knowledge.loading} onRetry={knowledge.reload} />}
+      {!quiet && <BackupSettings />}
       <UpdateSettings />
 
       <h2>{t("status.connection")}</h2>
-      <p className="muted small">
-        <Trans
-          k="status.connectionLine"
-          args={{ protocol: PROTOCOL_VERSION, socket: conn.data?.socket || "…" }}
-          tags={{ code: (c) => <code>{c}</code> }}
-        />
-      </p>
+      <details className="tech-details small">
+        <summary>{t("status.technicalDetails")}</summary>
+        <p className="muted tech-details-body">
+          <Trans
+            k="status.connectionLine"
+            args={{ protocol: PROTOCOL_VERSION, socket: conn.data?.socket || "…" }}
+            tags={{
+              code: (c) => (
+                <bdi dir="ltr">
+                  <code>{c}</code>
+                </bdi>
+              ),
+            }}
+          />
+        </p>
+      </details>
     </div>
+  );
+}
+
+/** KK1: a full or nearly full data disk (GG6-25), in plain words; nothing when there is room. */
+function DiskNote({ disk }: { disk: DiskStatus | null | undefined }) {
+  const t = useT();
+  // Unknown levels (a newer daemon) show nothing rather than a false alarm.
+  if (!disk || (disk.level !== "low" && disk.level !== "full")) return null;
+  const free = disk.free_bytes != null ? formatBytes(disk.free_bytes) : null;
+  if (disk.level === "low") {
+    return (
+      <p className="note" role="status">
+        {t("status.disk.low", { free: free ?? "–" })}
+      </p>
+    );
+  }
+  return (
+    <p className="note note-error" role="alert">
+      {free != null ? t("status.disk.full", { free }) : t("status.disk.fullUnknown")}
+    </p>
   );
 }
 
@@ -288,7 +348,7 @@ function IndexingCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Loading lines={2} />}
+          {loading && !data && <Loading label={t("status.indexingLoading")} lines={2} />}
           {data && (
             <>
               <dl className="stats">
@@ -321,12 +381,24 @@ function IndexingCard({
                 </div>
                 <div>
                   <dt>{t("status.triage")}</dt>
-                  <dd className="stat-text">{data.triage_provider ?? <span className="muted">{t("status.off")}</span>}</dd>
+                  <dd className="stat-text">
+                    {(() => {
+                      // JJ2: on (provider and what it is doing) or off (and what that means for privacy).
+                      const line = triageLine(data.triage_provider, data.triage);
+                      return (
+                        <>
+                          {line.on ? <span>{data.triage_provider}</span> : <span className="muted">{t("status.off")}</span>}
+                          <span className="muted small triage-line">{t(line.key, line.args)}</span>
+                          {line.failed > 0 && <span className="muted small triage-line">{t("status.triageFailed", { n: line.failed })}</span>}
+                        </>
+                      );
+                    })()}
+                  </dd>
                 </div>
               </dl>
               <p className="muted small">{t("status.freshnessHint")}</p>
               {data.sources.length === 0 && (
-                <EmptyState title={t("status.noSourcesTitle")} action={<GoToPage page="sources" />}>
+                <EmptyState title={t("status.noSourcesTitle")} action={<GoToPage page="sources" className="btn" />}>
                   {t("status.noSourcesBody")}
                 </EmptyState>
               )}
@@ -367,16 +439,77 @@ const RUNTIME_STATE: Record<RuntimeState, { label: MessageKey; tone: "neutral" |
   failed: { label: "status.runtime.failed", tone: "bad" },
 };
 
+/** KK1: what a starting or failed local model is doing, with Retry and the server's last words. */
+function RuntimeStateNote({ r, onChanged }: { r: RuntimeInfo; onChanged: () => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+  if (r.state === "starting") {
+    if (r.state_ms == null) return null;
+    const elapsed = r.state_ms / 1000;
+    const expected = r.expected_ms != null && r.expected_ms > 0 ? r.expected_ms / 1000 : null;
+    const pct = expected ? Math.min(95, Math.round((elapsed / expected) * 100)) : null;
+    const text = expected
+      ? t("status.runtime.warming", { elapsed: formatDuration(elapsed), expected: formatDuration(expected) })
+      : t("status.runtime.warmingNoEstimate", { elapsed: formatDuration(elapsed) });
+    return (
+      <div className="small">
+        <div>{text}</div>
+        {pct != null && <progress max={100} value={pct} aria-label={t("status.runtime.warmingLabel")} aria-valuetext={text} />}
+      </div>
+    );
+  }
+  if (r.state !== "failed") return r.error ? <div className="note note-error small">{r.error}</div> : null;
+  const retry = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await runtimeRetry(r.role);
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
+  const retryIn = r.retry_in_ms != null && r.retry_in_ms > 0 ? Math.ceil(r.retry_in_ms / 1000) : null;
+  return (
+    <>
+      {r.error && <div className="note note-error small">{r.error}</div>}
+      {r.gave_up ? (
+        <div className="small">{t("status.runtime.gaveUp")}</div>
+      ) : (
+        retryIn != null && <div className="small">{t("status.runtime.retryIn", { time: formatDuration(retryIn) })}</div>
+      )}
+      <button type="button" className="btn btn-small" onClick={() => void retry()} disabled={busy} aria-busy={busy}>
+        {busy ? t("status.runtime.retrying") : t("status.runtime.retry")}
+      </button>
+      {r.detail && (
+        <details className="small">
+          <summary>{t("status.runtime.details")}</summary>
+          <bdi dir="ltr">
+            <code>{r.detail}</code>
+          </bdi>
+          <div>{t("status.runtime.logHint", { file: `llama-server-${r.role}.log` })}</div>
+        </details>
+      )}
+      <ErrorNote error={err} />
+    </>
+  );
+}
+
 function RuntimeCard({
   data,
   error,
   loading,
   onRetry,
+  offerModels = true,
 }: {
   data: RuntimeInfo[] | undefined;
   error: unknown;
   loading: boolean;
   onRetry: () => void;
+  offerModels?: boolean;
 }) {
   const t = useT();
   return (
@@ -387,9 +520,9 @@ function RuntimeCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Loading lines={2} />}
+          {loading && !data && <Loading label={t("status.runtimeLoading")} lines={2} />}
           {data && data.length === 0 && (
-            <EmptyState title={t("status.noRuntimesTitle")} action={<GoToPage page="models" />}>
+            <EmptyState title={t("status.noRuntimesTitle")} action={offerModels ? <GoToPage page="models" className="btn" /> : undefined}>
               {t("status.noRuntimes")}
             </EmptyState>
           )}
@@ -412,7 +545,9 @@ function RuntimeCard({
                     return (
                       <tr key={`${r.provider}\u0000${r.model_id}`}>
                         <th scope="row">
-                          <code>{r.model_id}</code>
+                          <bdi dir="ltr">
+                            <code>{r.model_id}</code>
+                          </bdi>
                         </th>
                         <td>
                           {r.role === "embedding"
@@ -425,7 +560,7 @@ function RuntimeCard({
                         </td>
                         <td>
                           <Badge tone={st.tone}>{st.label}</Badge>
-                          {r.error && <div className="note note-error small">{r.error}</div>}
+                          <RuntimeStateNote r={r} onChanged={onRetry} />
                         </td>
                         <td>
                           <code>{r.provider}</code>
@@ -471,7 +606,7 @@ function KnowledgeCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Loading lines={2} />}
+          {loading && !data && <Loading label={t("status.knowledgeLoading")} lines={2} />}
           {data && (
             <>
               <dl className="stats">
@@ -498,7 +633,7 @@ function KnowledgeCard({
                   <dt>{t("status.extraction")}</dt>
                   <dd className="stat-text">
                     {data.extractor_provider ?? <span className="muted">{t("status.rulesOnly")}</span>}
-                    <div className="muted small">{t("status.lastRun", { when: formatRelative(data.last_run, now) })}</div>
+                    <div className="stat-sub">{t("status.lastRun", { when: formatRelative(data.last_run, now) })}</div>
                   </dd>
                 </div>
               </dl>
@@ -509,7 +644,9 @@ function KnowledgeCard({
               <h3 className="ask-sub">{t("status.vault")}</h3>
               {vault?.path ? (
                 <p className="vault-line">
-                  <code>{vault.path}</code>{" "}
+                  <bdi dir="ltr" className="vault-path">
+                    <code>{vault.path}</code>
+                  </bdi>{" "}
                   {vaultUrl && (
                     <button type="button" className="btn btn-small" onClick={() => void opener.open(vaultUrl, t("status.vaultFolder"))}>
                       {t("status.openFolder")}
@@ -517,7 +654,9 @@ function KnowledgeCard({
                   )}
                   <span className="muted small">
                     {" "}
-                    {t("status.vaultPages", { n: vault.pages, when: formatRelative(vault.last_render, now) })}
+                    {vault.last_render
+                      ? t("status.vaultPages", { n: vault.pages, when: formatRelative(vault.last_render, now) })
+                      : t("status.vaultNotYet")}
                   </span>
                 </p>
               ) : (

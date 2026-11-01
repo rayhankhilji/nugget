@@ -1,6 +1,9 @@
 //! `linear`: issues the user is assigned to, created or subscribes to, with their comments,
 //! through Linear's GraphQL API.
 //!
+//! Scopes: a personal API key (read access is all that is used), or OAuth with the `read` scope
+//! only. Tokens come only from the keychain (or `token_env`).
+//!
 //! **Documents.** One Markdown document per issue (`issue/<uuid>`): identifier, title, team,
 //! state, priority, project, people and labels, the description, then comments in order with
 //! replies indented under their parent.
@@ -19,7 +22,7 @@
 //! **Rate limits.** Linear answers HTTP 400 with `RATELIMITED` (or 429); the reset time comes
 //! from `X-RateLimit-Requests-Reset` (Unix ms) or `Retry-After`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,7 +40,9 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::api::{self, Api, Outcome, classify_common, header_u64, retry_after_ms};
+use crate::api::{
+    self, Api, ItemFailures, Outcome, classify_common, header_u64, retry_after_ms, server_now,
+};
 use crate::auth::{self, Credential, Token};
 use crate::settings::{self, MAX_WINDOW_DAYS};
 use crate::text::{
@@ -55,6 +60,10 @@ const MAX_COMMENTS: usize = 300;
 const MAX_BODY_CHARS: usize = 60_000;
 const MAX_DOC_CHARS: usize = 400_000;
 const INCLUDE: &[&str] = &["assigned", "created", "subscribed"];
+/// How far before `since` each incremental listing starts, so an issue whose `updatedAt` lands
+/// just behind the newest one seen (replication lag, clock differences between Linear's
+/// servers) is still read. Re-read issues with an unchanged version cost nothing.
+pub(crate) const WATERMARK_OVERLAP_SECS: i64 = 300;
 
 fn default_window() -> u32 {
     365
@@ -146,6 +155,9 @@ struct Pass {
     after: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     max_seen: Option<String>,
+    /// The earliest `updatedAt` of an issue that failed to load: `since` stays at or before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -161,6 +173,10 @@ struct Cursor {
     reconciled_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pass: Option<Pass>,
+    /// Issues that failed to load: key → passes in a row. `since` is held for them until
+    /// they load or [`api::MAX_ITEM_ATTEMPTS`] is reached.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    failed: BTreeMap<String, u32>,
 }
 
 impl Cursor {
@@ -287,7 +303,10 @@ fn classify(resp: Response) -> Outcome {
     let has = |c: &str| codes.iter().any(|x| x == c);
     if has("RATELIMITED") || status == 429 {
         let reset = header_u64(&resp.headers, "x-ratelimit-requests-reset").map(|ms| {
-            let now_ms = u64::try_from(now_unix()).unwrap_or(0).saturating_mul(1000);
+            // Measured against the response's `Date`, not the local clock (which may be off).
+            let now_ms = u64::try_from(server_now(&resp.headers))
+                .unwrap_or(0)
+                .saturating_mul(1000);
             ms.saturating_sub(now_ms).max(1000)
         });
         return Outcome::Retry(Error::RateLimited {
@@ -400,6 +419,7 @@ impl Connector for LinearConnector {
                 since: rfc3339(from),
                 reconciled_at: 0,
                 pass: None,
+                failed: BTreeMap::new(),
             };
         }
         cur.v = 1;
@@ -420,6 +440,8 @@ impl Connector for LinearConnector {
                 sink.send(Change::Delete(key.clone())).await?;
             }
             cur.reconciled_at = now;
+            cur.failed
+                .retain(|k, _| live.contains(&ItemKey::new(k.as_str())));
         }
         Ok(cur.to_value())
     }
@@ -531,25 +553,36 @@ impl LinearConnector {
     ) -> Result<()> {
         let since = cur
             .since
-            .clone()
-            .or_else(|| rfc3339(cur.window_from))
-            .unwrap_or_default();
-        let filter = self.filter(&since);
+            .as_deref()
+            .and_then(parse_rfc3339)
+            .map(|t| (t.unix_timestamp() - WATERMARK_OVERLAP_SECS).max(cur.window_from))
+            .unwrap_or(cur.window_from);
+        let filter = self.filter(&rfc3339(since).unwrap_or_default());
+        let mut failures = ItemFailures::default();
         let mut pass = cur.pass.clone().unwrap_or_default();
         let mut retried = false;
-        for _ in 0..MAX_PAGES {
+        for requests in 0..MAX_PAGES {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
             let vars = json!({"filter": filter, "first": PAGE_SIZE, "after": pass.after});
+            let resumed = requests == 0 && pass.after.is_some();
             let v = match self.graphql(ISSUES_QUERY, vars, cancel).await {
                 Ok(v) => v,
-                // A stale page cursor from an interrupted pass: start the pass over.
-                Err(Error::Other(m)) if pass.after.is_some() && !retried => {
+                // A stale page cursor saved by an interrupted pass: start the pass over. Linear
+                // reports GraphQL errors as HTTP 400 (`Invalid`) or in a 200 (`Other`).
+                Err(Error::Other(m) | Error::Invalid(m)) if resumed && !retried => {
                     tracing::info!(source = %self.ctx.source, "linear: restarting pass ({m})");
                     retried = true;
-                    pass.after = None;
+                    pass = Pass::default();
                     continue;
+                }
+                // The restarted pass fails as well: the saved position is not the problem, so
+                // forget it rather than restart from it on every poll.
+                Err(e @ (Error::Other(_) | Error::Invalid(_))) if retried => {
+                    cur.pass = None;
+                    sink.checkpoint(cur.to_value()).await?;
+                    return Err(e);
                 }
                 Err(e) => return Err(e),
             };
@@ -577,7 +610,26 @@ impl LinearConnector {
                 if updated.is_some() && known.get(&key).is_some_and(|v| v.as_deref() == updated) {
                     continue;
                 }
-                let doc = self.document(n, key, viewer, cancel).await?;
+                let doc = match self.document(n, key.clone(), viewer, cancel).await {
+                    Ok(d) => {
+                        failures.ok();
+                        cur.failed.remove(key.as_str());
+                        d
+                    }
+                    Err(e) => {
+                        failures.skip(e, SERVICE, key.as_str())?;
+                        if api::note_item_failure(&mut cur.failed, key.as_str(), SERVICE) {
+                            // Without a readable `updatedAt`, hold at the current `since`.
+                            let at = updated.map(str::to_string).or_else(|| cur.since.clone());
+                            if let Some(u) = at
+                                && pass.hold.as_deref().is_none_or(|h| later(h, &u))
+                            {
+                                pass.hold = Some(u);
+                            }
+                        }
+                        continue;
+                    }
+                };
                 sink.send(Change::Upsert(doc)).await?;
             }
             match issues["pageInfo"]["endCursor"].as_str() {
@@ -589,7 +641,12 @@ impl LinearConnector {
                 _ => break,
             }
         }
-        if let Some(m) = pass.max_seen.take()
+        let newest = match (pass.max_seen.take(), pass.hold.take()) {
+            // Just before the failed issue, so `gte` (minus the overlap) reads it again.
+            (Some(m), Some(h)) if later(&m, &h) => Some(h),
+            (m, _) => m,
+        };
+        if let Some(m) = newest
             && cur.since.as_deref().is_none_or(|s| later(&m, s))
         {
             cur.since = Some(m);

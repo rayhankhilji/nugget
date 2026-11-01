@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//GG4 QA//Persona//EN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:standup-gg4@larkspur.example
+DTSTAMP:20261001T120000Z
+SEQUENCE:0
+SUMMARY:Design standup
+DTSTART;TZID=America/New_York:20261005T093000
+DTEND;TZID=America/New_York:20261005T094500
+ORGANIZER;CN=Theo Brandt:mailto:theo@larkspur.example
+ATTENDEE;CN=Maya Okafor:mailto:maya@larkspur.example
+ATTENDEE;CN=Theo Brandt:mailto:theo@larkspur.example
+ATTENDEE;CN=Priya Raman:mailto:priya@larkspur.example
+LOCATION:Zoom
+RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR
+END:VEVENT
+END:VCALENDAR

@@ -461,8 +461,11 @@ impl Kit {
             .clone()
     }
 
+    /// What the agent loop does before running a call: describe it (for the gate), then call.
     pub async fn call(&self, name: &str, args: Value) -> ToolResult {
-        self.tool(name).call(args, &ctx()).await
+        let t = self.tool(name);
+        let _ = t.describe(&args);
+        t.call(args, &ctx()).await
     }
 
     /// Observe the focused window so the cache knows its elements.
@@ -470,9 +473,10 @@ impl Kit {
         self.call("observe", serde_json::json!({})).await
     }
 
-    /// What the agent loop does for a mutating call: observe, call, observe, verify.
+    /// What the agent loop does for a mutating call: describe, observe, call, observe, verify.
     pub async fn act(&self, name: &str, args: Value) -> (ToolResult, Verification) {
         let t = self.tool(name);
+        let _ = t.describe(&args);
         let c = ctx();
         let before: Snapshot = t.observe(&args, &c).await;
         let r = t.call(args.clone(), &c).await;

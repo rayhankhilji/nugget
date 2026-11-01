@@ -57,10 +57,15 @@ impl ImapSettings {
     }
 
     pub fn port(&self) -> u16 {
-        self.port.unwrap_or(match self.tls {
+        self.port.unwrap_or(Self::default_port(self.tls))
+    }
+
+    /// 993 for implicit TLS, 143 for STARTTLS.
+    pub fn default_port(tls: TlsMode) -> u16 {
+        match tls {
             TlsMode::Implicit => 993,
             TlsMode::Starttls => 143,
-        })
+        }
     }
 
     fn check(&self) -> Result<()> {

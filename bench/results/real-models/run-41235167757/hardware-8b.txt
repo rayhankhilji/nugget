@@ -1,0 +1,8 @@
+job: 8b
+after: 81054f90c4feb355b1048dfb0b8c03ac4122bcba before: 7add95a
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V74 80-Core Processor
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           8           0           6          14
+Swap:              2           0           2

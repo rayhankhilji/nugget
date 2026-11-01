@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { api, events, errorMessage, type ConnectionInfo, type PageId } from "./api";
 import { useEvent } from "./hooks";
-import { requestNewChat, requestSearch, usePendingPage } from "./hooks.nav";
+import { requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
 import { useT, type MessageKey } from "./i18n";
 import { Logo } from "./components/Logo";
 import { Offline } from "./components/Offline";
+import { RecoveryBanner } from "./components/BackupSettings";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { ShortcutsHelp, type ShortcutRow } from "./components/ShortcutsHelp";
+import { SavedSearchNav } from "./components/search/SavedSearches";
+import { useSavedSearches, type SavedSearch } from "./savedSearches";
 import { ChatPage } from "./pages/Chat";
 import { SearchPage } from "./pages/Search";
 import { KnowledgePage } from "./pages/Knowledge";
@@ -26,6 +29,9 @@ import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
 import { migrateTriggerOnce } from "./onboarding/trigger";
+import { DeepLinks } from "./platform/DeepLinks";
+import { useShellLabels } from "./platform/shellLabels";
+import { useQuickAskHandover } from "./quickask/handover";
 
 export interface PageDef {
   id: PageId;
@@ -59,6 +65,13 @@ export const PAGES: readonly PageDef[] = [
   { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy" },
   { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: "," },
 ];
+
+/**
+ * The nav shows the pages in two groups: the user's own stuff (Today … Sources) and, from this
+ * page on, setup and settings. Order, ids and shortcuts don't change.
+ */
+const FIRST_SETTINGS_PAGE: PageId = "apps";
+const PAGE_IDS: readonly PageId[] = PAGES.map((p) => p.id);
 
 const PAGE_KEY = "nugget.page";
 const PALETTE: Combo = { mod: true, key: "K" };
@@ -96,6 +109,7 @@ export function App() {
   const mainRef = useRef<HTMLElement>(null);
   // Set when a shortcut or the palette navigates: focus moves to the new page once it renders.
   const focusMain = useRef(false);
+  const saved = useSavedSearches();
 
   const go = useCallback((id: PageId) => {
     setPage(id);
@@ -142,6 +156,8 @@ export function App() {
   }, [conn?.connected, refreshConnection]);
 
   useEffect(() => startProactiveNotifications(), []);
+  useShellLabels();
+  useQuickAskHandover();
 
   // Apply a Double Tap trigger an older onboarding only kept locally (once; never throws).
   useEffect(() => {
@@ -194,6 +210,15 @@ export function App() {
     }
   });
 
+  /** Open Search with a saved search applied (the page takes focus itself). */
+  const runSaved = useCallback(
+    (s: SavedSearch) => {
+      requestSearchState(s.state);
+      go("search");
+    },
+    [go],
+  );
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const pages = PAGES.map((p, i): PaletteItem => {
       const combo = pageCombo(p, i);
@@ -236,8 +261,15 @@ export function App() {
         },
       },
     ];
-    return [...pages, ...actions];
-  }, [t, go, jump]);
+    const searches = saved.map((s): PaletteItem => ({
+      id: `saved:${s.id}`,
+      label: t("searchui.paletteSaved", { name: s.name }),
+      keywords: t("app.keywords.search"),
+      group: t("palette.group.action"),
+      run: () => runSaved(s),
+    }));
+    return [...pages, ...actions, ...searches];
+  }, [t, go, jump, saved, runSaved]);
 
   const searchItem = useCallback(
     (q: string): PaletteItem => ({
@@ -255,12 +287,11 @@ export function App() {
 
   const shortcutRows = useMemo<ShortcutRow[]>(
     () => [
-      { combo: PALETTE, label: t("shortcuts.palette") },
-      { combo: { mod: true, key: `1–${Math.min(9, PAGES.length)}` }, label: t("shortcuts.pages") },
-      ...PAGES.filter((p) => p.shortcut).map((p) => ({ combo: { mod: true, key: p.shortcut! }, label: t("shortcuts.openPage", { page: t(p.label) }) })),
-      { combo: { key: "?" }, label: t("shortcuts.help") },
-      { combo: { mod: true, key: "/" }, label: t("shortcuts.help") },
-      { combo: { key: "Escape" }, label: t("shortcuts.close") },
+      { combos: [PALETTE], label: t("shortcuts.palette") },
+      { combos: [{ mod: true, key: `1–${Math.min(9, PAGES.length)}` }], label: t("shortcuts.pages") },
+      ...PAGES.filter((p) => p.shortcut).map((p) => ({ combos: [{ mod: true, key: p.shortcut! }], label: t("shortcuts.openPage", { page: t(p.label) }) })),
+      { combos: [{ key: "?" }, { mod: true, key: "/" }], label: t("shortcuts.help") },
+      { combos: [{ key: "Escape" }], label: t("shortcuts.close") },
     ],
     [t],
   );
@@ -275,6 +306,26 @@ export function App() {
     const next = buttons[(i + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length];
     next?.focus();
   };
+
+  const navItem = (p: PageDef, i: number) => {
+    const combo = pageCombo(p, i);
+    const label = t(p.label);
+    return (
+      <li key={p.id}>
+        <button
+          type="button"
+          className="nav-item"
+          aria-current={p.id === page ? "page" : undefined}
+          aria-keyshortcuts={combo ? comboAria(combo) : undefined}
+          title={combo ? t("shortcuts.hint", { label, keys: comboLabel(combo) }) : undefined}
+          onClick={() => go(p.id)}
+        >
+          {label}
+        </button>
+      </li>
+    );
+  };
+  const split = Math.max(0, PAGES.findIndex((p) => p.id === FIRST_SETTINGS_PAGE));
 
   const current = PAGES.find((p) => p.id === page) ?? PAGES[0]!;
   const Current = current.Component;
@@ -292,35 +343,25 @@ export function App() {
           <span>{t("app.name")}</span>
         </div>
         <button type="button" className="palette-trigger" onClick={() => setPalette(true)} aria-keyshortcuts={comboAria(PALETTE)} aria-haspopup="dialog">
-          <span>{t("app.openPalette")}</span>
+          <span className="palette-trigger-label">{t("app.openPalette")}</span>
           <kbd aria-hidden="true" dir="ltr">
             {comboLabel(PALETTE)}
           </kbd>
         </button>
         <nav aria-label={t("app.navLabel")} onKeyDown={onNavKey}>
-          <ul>
-            {PAGES.map((p, i) => {
-              const combo = pageCombo(p, i);
-              const label = t(p.label);
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    className="nav-item"
-                    aria-current={p.id === page ? "page" : undefined}
-                    aria-keyshortcuts={combo ? comboAria(combo) : undefined}
-                    title={combo ? t("shortcuts.hint", { label, keys: comboLabel(combo) }) : undefined}
-                    onClick={() => go(p.id)}
-                  >
-                    {label}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <ul>{PAGES.slice(0, split).map((p, i) => navItem(p, i))}</ul>
+          <div>
+            <p className="nav-group-label" id="nav-group-settings">
+              {t("app.navGroup.settings")}
+            </p>
+            <ul aria-labelledby="nav-group-settings">{PAGES.slice(split).map((p, i) => navItem(p, split + i))}</ul>
+          </div>
         </nav>
-        <ConnectionPill conn={conn} />
-        <SidebarSettings onSetup={() => setOnboarding(true)} />
+        <SavedSearchNav onRun={runSaved} />
+        <div className="sidebar-foot">
+          <ConnectionPill conn={conn} />
+          <SidebarSettings onSetup={() => setOnboarding(true)} />
+        </div>
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} aria-label={t(current.label)}>
         {conn === null ? (
@@ -328,9 +369,13 @@ export function App() {
         ) : !conn.connected ? (
           <Offline conn={conn} onConnected={setConn} onRetry={refreshConnection} />
         ) : (
-          <Current />
+          <>
+            <RecoveryBanner />
+            <Current />
+          </>
         )}
       </main>
+      <DeepLinks pages={PAGE_IDS} go={jump} />
       {palette && <CommandPalette items={paletteItems} queryItem={searchItem} onClose={() => setPalette(false)} />}
       {help && <ShortcutsHelp rows={shortcutRows} onClose={() => setHelp(false)} />}
     </div>

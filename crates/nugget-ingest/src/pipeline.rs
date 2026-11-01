@@ -6,7 +6,9 @@
 //! 2. extract on a blocking thread with a timeout (on failure or timeout: title-only item, with
 //!    the error in metadata);
 //! 3. deterministic PII scan (counts only; any finding marks the item sensitive);
-//! 4. optional triage on a local provider (junk → metadata-only item);
+//! 4. triage plan: items that need labels are written `triage.state = "pending"` (and count as
+//!    sensitive until labelled) and handed to the background triage job after step 7; triage
+//!    never delays an item or removes it from search (see `triage.rs`);
 //! 5. chunk; 6. embed in batches (local providers; cloud only if allowed and not sensitive;
 //!    vectors with NaN or infinite values count as a failed embedding: text-only);
 //! 7. persist item, chunks and version in one transaction (`upsert_item_with_chunks`, under
@@ -26,19 +28,21 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use nugget_connector::{CancellationToken, Change, ChangeSink, Content, Document};
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-use nugget_core::ipc::{IngestPhase, IngestProgress};
+use nugget_core::ipc::{IngestPhase, IngestProgress, ScanReport};
 use nugget_core::{Error, Result};
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::ai::{self, Triage};
+use crate::ai;
 use crate::ingest::lock;
 use crate::ingest::{IngestEvent, Inner};
 use crate::known::join_err;
 use crate::metrics::Metrics;
 use crate::pii::{self, PiiFindings};
+use crate::sensitivity;
 use crate::supervisor::Control;
+use crate::triage;
 use crate::util::cap_error;
 
 /// How a change reached the pipeline. Backfill work pauses under power constraints.
@@ -57,6 +61,8 @@ pub(crate) enum OpKind {
     Checkpoint(Value, oneshot::Sender<Result<()>>),
     /// Start of a sync pass: clears the persistence-failure flag and the progress counter.
     BeginPass(oneshot::Sender<()>),
+    /// Something the connector could not read ([`ChangeSink::report_problem`]).
+    Problem(ItemKey, String),
 }
 
 pub(crate) struct Op {
@@ -71,18 +77,27 @@ pub(crate) struct PipelineSink {
     tx: mpsc::Sender<Op>,
     mode: Mode,
     inner: Arc<Inner>,
+    source: SourceId,
 }
 
 impl PipelineSink {
-    pub fn new(tx: mpsc::Sender<Op>, mode: Mode, inner: Arc<Inner>) -> Self {
-        Self { tx, mode, inner }
+    pub fn new(tx: mpsc::Sender<Op>, mode: Mode, inner: Arc<Inner>, source: SourceId) -> Self {
+        Self {
+            tx,
+            mode,
+            inner,
+            source,
+        }
     }
 
     /// Mark the start of a sync pass (ordered with the queue).
     pub async fn begin_pass(&self) -> Result<()> {
         let (ack, rx) = oneshot::channel();
         self.push(OpKind::BeginPass(ack)).await?;
-        rx.await.map_err(|_| Error::Cancelled)
+        rx.await.map_err(|_| Error::Cancelled)?;
+        // The previous pass's report no longer gives this pass's total.
+        self.inner.scan_pass_begins(&self.source);
+        Ok(())
     }
 
     async fn push(&self, kind: OpKind) -> Result<()> {
@@ -141,6 +156,16 @@ impl ChangeSink for PipelineSink {
         self.push(OpKind::Checkpoint(cursor, ack)).await?;
         rx.await.map_err(|_| Error::Cancelled)?
     }
+
+    async fn report_problem(&self, key: ItemKey, message: String) -> Result<()> {
+        self.push(OpKind::Problem(key, message)).await
+    }
+
+    /// Not queued: the report describes the walk, which is done long before its changes are
+    /// applied, and the UI should learn about an empty folder right away.
+    async fn report_scan(&self, report: ScanReport) {
+        self.inner.set_scan(&self.source, report).await;
+    }
 }
 
 enum Outcome {
@@ -167,6 +192,8 @@ pub(crate) struct Worker {
     done: u64,
     last_progress: Instant,
     paused: bool,
+    /// The last change came from the watcher (no scan total applies to it).
+    live: bool,
 }
 
 impl Worker {
@@ -186,6 +213,7 @@ impl Worker {
             done: 0,
             last_progress: Instant::now(),
             paused: false,
+            live: false,
         }
     }
 
@@ -218,6 +246,11 @@ impl Worker {
                 self.done = 0;
                 let _ = ack.send(());
             }
+            OpKind::Problem(key, msg) => {
+                let msg = cap_error(msg);
+                tracing::warn!(source = %self.source, key = %key, "source problem reported");
+                self.inner.record_item_error(&self.source, Some(key), msg);
+            }
             OpKind::Checkpoint(cursor, ack) => {
                 let r = self.checkpoint(cursor).await;
                 if r.is_ok() && self.done > 0 {
@@ -227,6 +260,8 @@ impl Worker {
                 let _ = ack.send(r);
             }
             OpKind::Change(change) => {
+                self.live = op.mode == Mode::Live;
+                let live_upsert = self.live && matches!(change, Change::Upsert(_));
                 if op.mode == Mode::Backfill && !self.wait_for_power(cancel).await {
                     self.inner.metrics.dequeued();
                     return;
@@ -242,6 +277,9 @@ impl Worker {
                 self.inner.metrics.dequeued();
                 match outcome {
                     Outcome::Applied => {
+                        if live_upsert {
+                            self.inner.scan_live_change(&self.source).await;
+                        }
                         self.inner.metrics.record_freshness(op.observed.elapsed());
                         self.done += 1;
                         self.progress(false);
@@ -296,6 +334,17 @@ impl Worker {
         }
     }
 
+    /// What this pass is expected to index, once the connector's scan finished (never below
+    /// `done`: deletes and live changes count too).
+    fn total(&self) -> Option<u64> {
+        if self.live {
+            return None;
+        }
+        self.inner
+            .scan_total(&self.source)
+            .map(|t| t.max(self.done))
+    }
+
     fn progress(&mut self, force: bool) {
         if force
             || self.done == 1
@@ -307,7 +356,7 @@ impl Worker {
                 source: self.source.clone(),
                 phase: IngestPhase::Indexing,
                 done: self.done,
-                total: None,
+                total: self.total(),
                 error: None,
             }));
         }
@@ -319,7 +368,7 @@ impl Worker {
             source: self.source.clone(),
             phase: IngestPhase::Indexing,
             done: self.done,
-            total: None,
+            total: self.total(),
             error: Some(msg),
         }));
     }
@@ -402,6 +451,7 @@ impl Worker {
         };
 
         // 7. Persist (never abandoned half-way).
+        let mark = new.triage;
         let inner = self.inner.clone();
         let res = tokio::task::spawn_blocking(move || {
             let _w = lock(&inner.write_lock);
@@ -412,7 +462,12 @@ impl Worker {
             Ok(Ok(())) => {
                 self.versions
                     .get_or_insert_with(HashMap::new)
-                    .insert(item.key, version);
+                    .insert(item.key.clone(), version);
+                match mark {
+                    TriageMark::Pending => self.inner.triage_enqueue(item),
+                    TriageMark::Skipped => lock(&self.inner.triage).skipped(),
+                    TriageMark::None => {}
+                }
                 Outcome::Applied
             }
             Ok(Err(e @ (Error::Invalid(_) | Error::NotFound(_)))) => {
@@ -428,6 +483,7 @@ impl Worker {
 pub(crate) struct Prepared {
     item: NewItem,
     chunks: Vec<NewChunk>,
+    triage: TriageMark,
 }
 
 /// Output of the blocking extraction step.
@@ -486,52 +542,69 @@ async fn prepare(
         .or_else(|| ex.title.clone())
         .filter(|t| !t.trim().is_empty());
 
-    // 4. Triage (local providers only).
-    let mut triage: Option<Triage> = None;
-    let mut triage_error = None;
-    if inner.cfg.triage
-        && let Some(router) = &inner.router
-        && let Some(text) = ex.text.as_deref().filter(|t| !t.trim().is_empty())
-        && let Some(provider) = ai::triage_provider(router)
-    {
-        match ai::triage(
-            provider.as_ref(),
-            item,
-            title.as_deref(),
-            text,
-            inner.cfg.triage_max_chars,
-            inner.cfg.triage_timeout(),
-        )
-        .await
-        {
-            Ok(t) => {
-                router.report_success(provider.id());
-                triage = Some(t);
-            }
-            Err(e) => {
-                tracing::debug!(provider = %provider.id(), error = %e, "triage failed");
-                router.report_failure(provider.id());
-                triage_error = Some(e.to_string());
-            }
-        }
-    }
-    let junk = triage.as_ref().is_some_and(Triage::is_junk);
-    let sensitive = !ex.pii.is_empty() || triage.as_ref().is_some_and(|t| t.sensitive);
-    let title = title
-        .or_else(|| {
-            triage
-                .as_ref()
-                .map(|t| t.title.clone())
-                .filter(|t| !t.is_empty())
-        })
-        .or_else(|| Some(fallback_title(&key)));
-
-    // 5–6. Chunks and embeddings (junk is metadata-only).
-    let chunk_texts = if junk {
-        Vec::new()
+    // 4. Triage plan. Triage itself runs in the background after the item is written
+    //    (`triage.rs`): it never delays search and never removes content from it.
+    // Deterministic rules first (GG4-6): PII patterns, then health / money / credentials /
+    // legal words and sensitive senders. They hold with or without a model.
+    // II1: a connector may mark a document sensitive itself (`metadata.sensitive = true`, e.g.
+    // private chats the user asked to keep on this device); an explicit `false` never
+    // overrides the rules or triage.
+    let rule = if !ex.pii.is_empty() {
+        Some("pii")
+    } else if source_meta.get("sensitive") == Some(&Value::Bool(true)) {
+        Some("connector")
     } else {
-        std::mem::take(&mut ex.chunks)
+        sensitivity::classify(
+            key.as_str(),
+            &ex.tags,
+            title.as_deref(),
+            ex.text.as_deref().unwrap_or(""),
+            &ex.extracted_meta,
+        )
     };
+    let rule_sensitive = rule.is_some();
+    let has_text = ex.text.as_deref().is_some_and(|t| !t.trim().is_empty());
+    let routable = inner
+        .router
+        .as_ref()
+        .is_some_and(|r| ai::triage_provider(r).is_some());
+    // Unknown counts as sensitive (GG5-2): an item the rules don't flag waits for triage, also
+    // while no local triage model is routable yet (the job picks it up once one is). Only
+    // `assume_unflagged_safe` lets items triage cannot decide now count as not sensitive.
+    let can_triage = inner.cfg.triage && has_text && (routable || !inner.cfg.assume_unflagged_safe);
+    // With a model, rule hits are triaged too (for the junk label) but stay sensitive whatever
+    // it answers (`triage::apply` reads `sensitive_rule`).
+    let plan = if can_triage {
+        match earlier_labels(inner, item, &ex.hash).await {
+            Some(prev) => TriagePlan::Reused(prev),
+            None => TriagePlan::Pending,
+        }
+    } else if let Some(rule) = rule {
+        TriagePlan::Skipped(rule)
+    } else {
+        TriagePlan::Unknown(if !inner.cfg.triage {
+            "off"
+        } else if !has_text {
+            "no_text"
+        } else {
+            "no_model"
+        })
+    };
+    let (junk, sensitive) = match &plan {
+        TriagePlan::Skipped(_) => (false, true),
+        TriagePlan::Unknown(_) => (false, !inner.cfg.assume_unflagged_safe),
+        // Until triage has run the item counts as sensitive: searchable locally, never sent
+        // to cloud models.
+        TriagePlan::Pending => (false, true),
+        TriagePlan::Reused(v) => (
+            v.get("junk").and_then(Value::as_bool).unwrap_or(false),
+            rule_sensitive || v.get("sensitive").and_then(Value::as_bool).unwrap_or(true),
+        ),
+    };
+    let title = title.or_else(|| Some(fallback_title(&key)));
+
+    // 5–6. Chunks and embeddings (every item, junk or not).
+    let chunk_texts = std::mem::take(&mut ex.chunks);
     let mut embeddings: Option<Vec<Vec<f32>>> = None;
     let mut embed_error = None;
     let mut embed_provider = None;
@@ -546,6 +619,7 @@ async fn prepare(
                 &inner.store,
                 router,
                 &providers,
+                item,
                 &chunk_texts,
                 inner.cfg.embed_batch,
                 inner.cfg.embed_timeout(),
@@ -578,6 +652,9 @@ async fn prepare(
         meta.insert("tags".into(), json!(ex.tags));
     }
     meta.insert("sensitive".into(), Value::Bool(sensitive));
+    if let Some(rule) = rule {
+        meta.insert("sensitive_rule".into(), Value::String(rule.into()));
+    }
     if !ex.pii.is_empty() {
         let mut p = Map::new();
         for (k, n) in [
@@ -593,26 +670,31 @@ async fn prepare(
         meta.insert("pii".into(), Value::Object(p));
     }
     meta.insert("junk".into(), Value::Bool(junk));
-    if let Some(t) = &triage {
-        meta.insert(
-            "triage".into(),
-            json!({
-                "keep": t.keep,
-                "junk": t.junk,
-                "sensitive": t.sensitive,
-                "summary": t.summary,
-                "title": t.title,
-            }),
-        );
+    match &plan {
+        TriagePlan::Unknown(reason) => {
+            meta.insert(
+                "triage".into(),
+                json!({"state": triage::UNKNOWN, "reason": reason}),
+            );
+        }
+        TriagePlan::Pending => {
+            meta.insert("triage".into(), json!({"state": triage::PENDING}));
+        }
+        TriagePlan::Skipped(rule) => {
+            meta.insert(
+                "triage".into(),
+                json!({"state": triage::SKIPPED, "reason": rule}),
+            );
+        }
+        TriagePlan::Reused(v) => {
+            meta.insert("triage".into(), v.clone());
+        }
     }
     if ex.truncated {
         meta.insert("truncated".into(), Value::Bool(true));
     }
     if let Some(e) = ex.error.take() {
         meta.insert("extract_error".into(), Value::String(e));
-    }
-    if let Some(e) = triage_error {
-        meta.insert("triage_error".into(), Value::String(e));
     }
     if let Some(e) = embed_error {
         meta.insert("embed_error".into(), Value::String(e));
@@ -627,7 +709,7 @@ async fn prepare(
     new.title = title;
     new.version = version;
     new.source_modified_at = modified_at;
-    if inner.cfg.keep_text && !junk {
+    if inner.cfg.keep_text {
         new.text = ex.text.take();
     }
 
@@ -639,7 +721,57 @@ async fn prepare(
             .collect(),
         None => chunk_texts.into_iter().map(NewChunk::text).collect(),
     };
-    Ok(Prepared { item: new, chunks })
+    Ok(Prepared {
+        item: new,
+        chunks,
+        triage: plan.mark(),
+    })
+}
+
+/// How an item gets its triage labels.
+enum TriagePlan {
+    /// Triage cannot decide (off, no text, or no model with `assume_unflagged_safe`): the
+    /// reason. Sensitive unless `assume_unflagged_safe`.
+    Unknown(&'static str),
+    /// Sensitive by rule (PII or `sensitivity` rules; the rule's name): no model call.
+    Skipped(&'static str),
+    /// To be labelled by the background job.
+    Pending,
+    /// Same content as the stored item, which was already labelled: keep its labels.
+    Reused(Value),
+}
+
+impl TriagePlan {
+    fn mark(&self) -> TriageMark {
+        match self {
+            TriagePlan::Pending => TriageMark::Pending,
+            TriagePlan::Skipped(_) => TriageMark::Skipped,
+            TriagePlan::Unknown(_) | TriagePlan::Reused(_) => TriageMark::None,
+        }
+    }
+}
+
+/// What the worker tells the triage job once the item is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TriageMark {
+    None,
+    Pending,
+    Skipped,
+}
+
+/// The stored item's triage labels (`metadata.triage`, state `done`) if its content is `hash`.
+async fn earlier_labels(inner: &Arc<Inner>, item: &ItemRef, hash: &str) -> Option<Value> {
+    let store = inner.store.clone();
+    let r = item.clone();
+    let stored = tokio::task::spawn_blocking(move || store.get_item(&r))
+        .await
+        .ok()?
+        .ok()??;
+    if stored.content_hash != hash {
+        return None;
+    }
+    let t = stored.metadata.get("triage")?;
+    (t.get("state").and_then(Value::as_str) == Some(triage::DONE)).then(|| t.clone())
 }
 
 /// Extraction, PII scan and chunking on a blocking thread, bounded by the extraction timeout.
@@ -802,6 +934,7 @@ mod tests {
         Prepared {
             item,
             chunks: vec![chunk],
+            triage: TriageMark::None,
         }
     }
 

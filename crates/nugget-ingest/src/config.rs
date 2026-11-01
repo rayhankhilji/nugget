@@ -29,13 +29,42 @@ pub struct IngestConfig {
     pub queue_capacity: usize,
     /// Keep the full extracted text on the item row (needed for previews and re-chunking).
     pub keep_text: bool,
-    /// Run triage (keep / junk / sensitive / summary) when a local `Tier::Triage` provider
-    /// with JSON-schema output exists. Cloud triage providers are never used.
+    /// Label items (junk / sensitive) when a local `Tier::Triage` provider with JSON-schema
+    /// output exists. Cloud triage providers are never used. Triage runs in the background
+    /// after an item is indexed, so it never delays search, and it never removes an item from
+    /// search; until it has run, the item counts as sensitive (kept away from cloud models).
     pub triage: bool,
-    /// Timeout for one triage call.
+    /// Timeout for triaging one item (a batch gets this per item).
     pub triage_timeout_ms: u64,
-    /// Characters of text sent to triage.
+    /// Characters of each item's text sent to triage.
     pub triage_max_chars: usize,
+    /// Count items whose sensitivity nobody decided (triage off, or no local triage model,
+    /// and no sensitivity rule matched) as **not** sensitive, so cloud models may use them.
+    /// Default `false`: unknown counts as sensitive (kept away from cloud models) until local
+    /// triage clears it. Set it only for a setup without a local model that should still use
+    /// cloud models with unflagged items.
+    pub assume_unflagged_safe: bool,
+    /// Items labelled per triage request (small items share one request). Default 8.
+    pub triage_batch: usize,
+    /// Most characters of text per triage request (the measured prefill rate usually allows
+    /// fewer; see `triage_request_ms`). Default 6 000.
+    pub triage_batch_chars: usize,
+    /// Prompt processing one triage request may take, in ms: requests carry as much text as
+    /// the measured prefill rate gets through in this time (between 300 characters and
+    /// `triage_batch_chars`), and a longer item is labelled in parts. A local server cannot stop
+    /// part-way through a prompt step, so this bounds how long an interactive request can wait
+    /// behind triage. Default 3 000.
+    pub triage_request_ms: u64,
+    /// Background triage waits this long after the last interactive model request (Ask,
+    /// Double Tap, agent) before it uses the local model again. Default 3 s.
+    pub triage_idle_ms: u64,
+    /// Items whose triage failed are tried again after this long, once a triage model is
+    /// routable; the wait grows fourfold with each failure of the item (capped at a day).
+    /// Default 10 min.
+    pub triage_retry_ms: u64,
+    /// Failures after which an item stays `failed` for good (until its content changes).
+    /// Default 5; `1` turns retries off.
+    pub triage_max_failures: u32,
     /// Compute embeddings with `Tier::Embedding` providers.
     pub embeddings: bool,
     /// Allow `Cloud` embedding providers for non-sensitive items. Default `false`: on-device and
@@ -87,6 +116,13 @@ impl Default for IngestConfig {
             triage: true,
             triage_timeout_ms: 30_000,
             triage_max_chars: 6_000,
+            assume_unflagged_safe: false,
+            triage_batch: 8,
+            triage_batch_chars: 6_000,
+            triage_request_ms: 3_000,
+            triage_idle_ms: 3_000,
+            triage_retry_ms: 10 * 60 * 1000,
+            triage_max_failures: 5,
             embeddings: true,
             allow_cloud_embeddings: false,
             embed_batch: 32,
@@ -127,6 +163,15 @@ impl IngestConfig {
 
     pub(crate) fn triage_timeout(&self) -> Duration {
         Duration::from_millis(self.triage_timeout_ms.max(1))
+    }
+
+    /// How long after its `failures`-th failure an item is triaged again (see
+    /// [`IngestConfig::triage_retry_ms`]).
+    pub(crate) fn triage_retry_after(&self, failures: u32) -> Duration {
+        const CAP: u64 = 24 * 60 * 60 * 1000;
+        let base = self.triage_retry_ms.max(1);
+        let exp = 2 * failures.saturating_sub(1).min(16);
+        Duration::from_millis(base.saturating_mul(1u64 << exp).min(CAP.max(base)))
     }
 
     pub(crate) fn embed_timeout(&self) -> Duration {
@@ -175,6 +220,23 @@ fn jitter_unit() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn triage_retries_wait_longer_after_each_failure() {
+        let cfg = IngestConfig {
+            triage_retry_ms: 1_000,
+            ..Default::default()
+        };
+        let ms = |n| cfg.triage_retry_after(n).as_millis() as u64;
+        assert_eq!(ms(0), 1_000);
+        assert_eq!(ms(1), 1_000);
+        assert_eq!(ms(2), 4_000);
+        assert_eq!(ms(3), 16_000);
+        assert_eq!(ms(40), 24 * 60 * 60 * 1000);
+        let d = IngestConfig::default();
+        assert_eq!(d.triage_retry_after(1), Duration::from_secs(600));
+        assert_eq!(d.triage_retry_after(4), Duration::from_secs(640 * 60));
+    }
 
     #[test]
     fn backoff_grows_and_is_capped() {

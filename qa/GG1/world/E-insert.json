@@ -1,0 +1,18 @@
+{"personas": [
+ {"id": "ins-mara", "name": "Mara Quill", "emails": ["mara.quill@fernway.example.org"],
+  "voice": "Warm, direct. Email: 'Hi <name>,' ... 'Best,\\nMara'. Chat: short, mostly lowercase, no sign-off.",
+  "sent": [
+   {"channel": "email", "to": ["ana.ruiz@client.example.com"], "date": "2026-09-02", "subject": "Re: kickoff", "text": "Hi Ana,\n\nThursday at 3pm works for me. I will bring the draft plan.\n\nBest,\nMara"},
+   {"channel": "email", "to": ["ana.ruiz@client.example.com"], "date": "2026-09-09", "subject": "Re: invoice", "text": "Hi Ana,\n\nThe invoice went out this morning, let me know if anything looks off.\n\nBest,\nMara"},
+   {"channel": "email", "to": ["tomas@fernway.example.org"], "date": "2026-09-14", "subject": "review", "text": "Hi Tomas,\n\nI read the review notes, they look fine. One small change on page 4.\n\nBest,\nMara"},
+   {"channel": "email", "to": ["ana.ruiz@client.example.com"], "date": "2026-09-20", "subject": "Re: dates", "text": "Hi Ana,\n\nHappy to move it to next week if that helps.\n\nBest,\nMara"},
+   {"channel": "chat", "to": ["sam"], "date": "2026-09-21", "text": "sounds good, i'll send it by friday"},
+   {"channel": "chat", "to": ["sam"], "date": "2026-09-22", "text": "yep on it"},
+   {"channel": "chat", "to": ["sam"], "date": "2026-09-23", "text": "thanks! looks great to me"},
+   {"channel": "chat", "to": ["lin"], "date": "2026-09-24", "text": "can we push to 4? stuck in a call"}
+  ],
+  "vault": [
+   {"id": "ins-v1", "date": "2026-10-12", "title": "Fernway x Client order", "body": "Fernway x Client order: total $8,750, signed 2026-10-12, delivery on November 21, 2026."},
+   {"id": "ins-v2", "date": "2026-10-01", "title": "Door code", "body": "Studio door code: 4417-Kestrel", "sensitive": true}
+  ]}
+]}

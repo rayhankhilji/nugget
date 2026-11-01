@@ -37,6 +37,11 @@ const CONFIG: &str = r#"
 [runtime]
 enabled = false
 
+# No local model here, so triage can never clear items: without this they all count as
+# sensitive (unknown, GG5-2) and these scope tests would see nothing.
+[ingest]
+assume_unflagged_safe = true
+
 [knowledge]
 debounce_ms = 100
 interval_minutes = 0
@@ -590,6 +595,185 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
             .is_some_and(|a| a.iter().any(|v| v == bob.id.as_str()))),
         "the merge was notified: {changed:?}"
     );
+    h.stop().await;
+}
+
+/// Every file under `dir`, as `(path, text)`.
+fn files_under(dir: &Path) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            out.extend(files_under(&p));
+        } else {
+            out.push((p.clone(), std::fs::read_to_string(&p).unwrap_or_default()));
+        }
+    }
+    out
+}
+
+/// GG5-3: an entity known only from an item the PII scan flags (an IBAN in the mail) is marked
+/// in `knowledge.entity`, left out of `knowledge.graph` unless asked for, and gets no vault page.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sensitive_only_entities_are_marked_hidden_from_the_graph_and_kept_out_of_the_vault() {
+    let mut h = Harness::start().await;
+    h.add_files(
+        "mail",
+        &[
+            (
+                "lunch.eml",
+                mail(
+                    "Alice Smith <alice@acme.com>",
+                    "Lunch on Friday",
+                    "m1",
+                    "Shall we meet at noon? Alice",
+                ),
+            ),
+            (
+                "counselling.eml",
+                mail(
+                    "Jonas Albers <jonas@albers-counselling.example>",
+                    "Counselling invoice",
+                    "m9",
+                    "Thanks for Wednesday. Please pay to IBAN GB82 WEST 1234 5698 7654 32.",
+                ),
+            ),
+        ],
+    )
+    .await;
+    let alice = h.wait_entity("person", "Alice Smith").await;
+    let jonas = h.wait_entity("person", "Jonas Albers").await;
+    eventually("extraction and the vault caught up", || async {
+        let st: KnowledgeStatus = h.call(method::KNOWLEDGE_STATUS, json!({})).await;
+        let rendered = match (st.vault.last_render, st.last_run) {
+            (Some(r), Some(l)) => r >= l,
+            _ => false,
+        };
+        st.pending_items == 0 && rendered && h.entity(&alice.id).await.vault_path.is_some()
+    })
+    .await;
+
+    // The entity view marks it (and its facts); it has no vault page.
+    let d = h.entity(&jonas.id).await;
+    assert!(d.sensitive, "{d:#?}");
+    assert_eq!(d.vault_path, None);
+    assert!(!d.claims.is_empty() || !d.mentions.is_empty(), "{d:#?}");
+    assert!(
+        d.claims
+            .iter()
+            .filter(|c| !c.evidence.is_empty())
+            .all(|c| c.sensitive),
+        "{d:#?}"
+    );
+    // No local model here, so triage never ran on the lunch mail: it is not confirmed sensitive
+    // and is shown in the local views like any other item (whether it counts as sensitive for
+    // the cloud depends on `assume_unflagged_safe`; the vault tests cover unsorted items).
+    let lunch_ref = h
+        .entity(&alice.id)
+        .await
+        .claims
+        .iter()
+        .flat_map(|c| c.evidence.iter())
+        .map(|e| e.item.clone())
+        .next()
+        .expect("Alice's facts are cited");
+    let lunch = h.store.get_item(&lunch_ref).unwrap().unwrap();
+    assert!(
+        lunch.metadata["triage"]["state"] != "done"
+            && !nugget_retrieve::is_confirmed_sensitive(&lunch.metadata),
+        "{:?}",
+        lunch.metadata
+    );
+    let a = h.entity(&alice.id).await;
+    assert!(
+        !a.sensitive && a.claims.iter().all(|c| !c.sensitive),
+        "{a:#?}"
+    );
+
+    // The graph leaves it out unless asked for; then it is marked.
+    let names =
+        |g: &GraphViewIpc| -> Vec<String> { g.nodes.iter().map(|n| n.name.clone()).collect() };
+    let g: GraphViewIpc = h
+        .call(method::KNOWLEDGE_GRAPH, json!({"depth": 1, "limit": 200}))
+        .await;
+    assert!(g.nodes.iter().any(|n| n.id == alice.id), "{:?}", names(&g));
+    assert!(
+        g.nodes.iter().all(|n| n.id != jonas.id && !n.sensitive),
+        "{:?}",
+        names(&g)
+    );
+    let all: GraphViewIpc = h
+        .call(
+            method::KNOWLEDGE_GRAPH,
+            json!({"depth": 1, "limit": 200, "include_sensitive": true}),
+        )
+        .await;
+    let j = all.nodes.iter().find(|n| n.id == jonas.id);
+    assert!(j.is_some_and(|n| n.sensitive), "{:?}", names(&all));
+    assert!(all.nodes.iter().any(|n| n.id == alice.id && !n.sensitive));
+    // Neighbourhoods: a sensitive centre stays (marked) but brings nothing else along.
+    let around: GraphViewIpc = h
+        .call(
+            method::KNOWLEDGE_GRAPH,
+            json!({"center": jonas.id, "depth": 2, "limit": 50}),
+        )
+        .await;
+    assert_eq!(
+        names(&around),
+        vec!["Jonas Albers".to_owned()],
+        "{around:?}"
+    );
+    assert!(around.nodes[0].sensitive && around.edges.is_empty());
+    let around: GraphViewIpc = h
+        .call(
+            method::KNOWLEDGE_GRAPH,
+            json!({"center": jonas.id, "depth": 2, "limit": 50, "include_sensitive": true}),
+        )
+        .await;
+    assert!(
+        around.nodes.iter().any(|n| n.id == jonas.id && n.sensitive),
+        "{around:?}"
+    );
+    if let Some(me) = h.find("person", "Tanuj").await {
+        let g: GraphViewIpc = h
+            .call(
+                method::KNOWLEDGE_GRAPH,
+                json!({"center": me.id, "depth": 2, "limit": 50}),
+            )
+            .await;
+        assert!(
+            g.nodes.iter().all(|n| n.id == me.id || !n.sensitive),
+            "{g:?}"
+        );
+        assert!(g.nodes.iter().all(|n| n.id != jonas.id), "{g:?}");
+    }
+
+    // Nothing from the flagged mail anywhere in the vault.
+    for (p, text) in files_under(&h.vault) {
+        for leak in ["Jonas", "albers-counselling", "GB82", "Counselling invoice"] {
+            assert!(!text.contains(leak), "{leak} in {}:\n{text}", p.display());
+        }
+    }
+
+    // A default-scope MCP client cannot reach it through any tool.
+    let created = h.create_client("default", all_scopes()).await;
+    let url = format!("http://{}/mcp", h.mcp_addr.expect("http listener"));
+    let mcp = http_client(&url, &created.token).await.unwrap();
+    for (name, args) in [
+        ("find_entities", json!({"text": "Jonas"})),
+        ("find_entities", json!({})),
+        ("get_entity", json!({"id": jonas.id})),
+        ("get_neighbourhood", json!({"id": alice.id, "depth": 2})),
+        ("search", json!({"query": "Counselling invoice IBAN"})),
+        ("recent_changes", json!({})),
+    ] {
+        let text = tool(&mcp, name, args.clone()).await;
+        assert!(!text.contains("Jonas"), "{name} {args}: {text}");
+        if matches!(name, "get_neighbourhood") || args == json!({}) && name == "find_entities" {
+            assert!(text.contains("Alice Smith"), "{name} {args}: {text}");
+        }
+    }
+    let _ = mcp.cancel().await;
     h.stop().await;
 }
 

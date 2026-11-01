@@ -68,6 +68,46 @@ beforeEach(() => installDomShims());
 afterEach(() => cleanup());
 
 describe("Double Tap settings page", () => {
+  it("GG6-19: on macOS with Accessibility denied, explains how to turn it back on and opens the pane", async () => {
+    const panes: string[] = [];
+    const mac: DoubleTapStatus = { ...status, platform: "macos", session: "macos", trigger_error: null, input_monitoring: "unknown", hint: "doubletap.hint.accessibility" };
+    setup({
+      doubletap_status: mac,
+      doubletap_request_permissions: mac,
+      doubletap_open_privacy_settings: (args: unknown) => (panes.push((args as { pane: string }).pane), true),
+    });
+    await render(<App />);
+    await flush(10);
+    const box = document.querySelector<HTMLElement>(".dt-recover")!;
+    expect(box).not.toBeNull();
+    expect(box.textContent).toContain("Turn Accessibility back on");
+    expect(box.textContent).toContain("System Settings → Privacy & Security → Accessibility");
+    await click(byText(box, "button", "Open Accessibility settings"));
+    await click(byText(box, "button", "Open Input Monitoring settings"));
+    expect(panes).toEqual(["accessibility", "input_monitoring"]);
+    expect(box.querySelector('[role="alert"]')).toBeNull();
+    const results = await axe.run(box);
+    expect(results.violations).toEqual([]);
+  });
+
+  it("GG6-19: says how to get there by hand when System Settings can't be opened", async () => {
+    const mac: DoubleTapStatus = { ...status, platform: "macos", session: "macos", trigger_error: null, input_monitoring: "unknown", hint: null };
+    setup({ doubletap_status: mac, doubletap_open_privacy_settings: false });
+    await render(<App />);
+    await flush(10);
+    const box = document.querySelector<HTMLElement>(".dt-recover")!;
+    await click(byText(box, "button", "Open Accessibility settings"));
+    await flush();
+    expect(box.querySelector('[role="alert"]')?.textContent).toContain("Open it from the Apple menu");
+  });
+
+  it("shows no macOS recovery steps on other systems", async () => {
+    setup();
+    await render(<App />);
+    await flush(10);
+    expect(document.querySelector(".dt-recover")).toBeNull();
+  });
+
   it("renders settings, status and voice, with no axe violations", async () => {
     setup();
     await render(<App />);
@@ -176,7 +216,7 @@ describe("Double Tap settings page", () => {
     const { calls, sent } = setup();
     await render(<App />);
     await flush(10);
-    await change(document.querySelector('input[placeholder^="e.g. com.tinyspeck"]'), "slack");
+    await change(document.querySelector('input[placeholder^="e.g. mail.google"]'), "slack");
     await click(byText(document, "button", "Add"));
     await click(byText(document, "button", "Save"));
     expect((sent[0] as DoubleTapSettings).app_providers).toEqual({ "mail.google.com": "anthropic", slack: "local-chat" });

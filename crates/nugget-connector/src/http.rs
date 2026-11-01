@@ -46,9 +46,9 @@ impl Response {
     }
 }
 
-fn retry_after_ms(h: &HeaderMap) -> Option<u64> {
-    let v = h.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
-    v.trim().parse::<u64>().ok().map(|s| s.saturating_mul(1000))
+/// `Retry-After` in milliseconds: delta-seconds or an HTTP-date (see [`crate::retry`]).
+pub fn retry_after_ms(h: &HeaderMap) -> Option<u64> {
+    crate::retry::retry_after_ms(h)
 }
 
 /// A reqwest client bound to one source's egress ledger.

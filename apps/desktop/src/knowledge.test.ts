@@ -185,12 +185,14 @@ describe("fact decisions", () => {
       undo: "user_asserted",
       next: "retracted",
     });
-    expect(factAction(claim({ status: "user_asserted" })).next).toBe("active");
-    for (const status of ["rejected", "retracted", "superseded"] as const) {
+    expect(factAction(claim({ status: "user_asserted" }))?.next).toBe("active");
+    for (const status of ["rejected", "retracted"] as const) {
       expect(factAction(claim({ status }))).toEqual({ action: "restore", decision: "active", undo: null, next: "active" });
     }
+    // GG5-14: a superseded fact is history; "Restore" would make two values current with no Undo.
+    expect(factAction(claim({ status: "superseded" }))).toBeNull();
     // A rejected fact the user wrote comes back as theirs.
-    expect(factAction(claim({ status: "rejected", evidence: [] })).next).toBe("user_asserted");
+    expect(factAction(claim({ status: "rejected", evidence: [] }))?.next).toBe("user_asserted");
   });
 
   it("predicts the status an undo leads to", () => {

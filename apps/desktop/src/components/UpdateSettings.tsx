@@ -1,8 +1,10 @@
 /**
  * Updates and start-at-login, backed by `src-tauri/src/updater.rs`.
  *
- * Nothing installs without the user: the default is notify-only, the release notes are shown
- * before the Install button, and Install names the exact version shown. Auto-install is opt-in.
+ * Nothing checks until the user picks a channel: until then the card asks (`UpdateChoice`), as
+ * setup does. Nothing installs without the user: the default is notify-only, the release notes
+ * are shown before the Install button, and Install names the exact version shown. Auto-install
+ * is opt-in.
  * The desktop app's own preferences (`AppSettings`) render at the end of the same card.
  */
 import { useCallback, useEffect, useState } from "react";
@@ -11,14 +13,14 @@ import { listen } from "@tauri-apps/api/event";
 import { errorMessage, inTauri } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { AppSettings } from "./AppSettings";
+import { UpdateChoice, type Channel } from "./UpdateChoice";
 import { Badge, Spinner } from "./ui";
 
-type Channel = "stable" | "beta" | "off";
-
-interface UpdateStatus {
+export interface UpdateStatus {
   current_version: string;
   configured: boolean;
-  settings: { channel: Channel; auto_install: boolean; start_at_login: boolean | null };
+  /** `channel` counts only once `channel_chosen`; until then nothing is checked. */
+  settings: { channel: Channel; channel_chosen: boolean; auto_install: boolean; start_at_login: boolean | null };
   available: { version: string; notes: string | null; date: number | null } | null;
   staged: boolean;
   busy: boolean;
@@ -90,7 +92,9 @@ export function UpdateSettings() {
       <p className="muted small">{t("updates.intro", { version: status.current_version })}</p>
 
       {!status.configured ? (
-        <div className="note">{t("updates.unconfigured")}</div>
+        <div className="note small">{t("updates.unconfigured")}</div>
+      ) : !settings.channel_chosen ? (
+        <UpdateChoice disabled={busy} onChoose={(channel) => setSettings(channel, settings.auto_install)} />
       ) : (
         <>
           <div className="row" style={{ justifyContent: "flex-start", alignItems: "center" }}>
@@ -104,14 +108,16 @@ export function UpdateSettings() {
                 ))}
               </select>
             </label>
-            <label className="field-inline">
+            <label className="switch">
               <input
                 type="checkbox"
+                role="switch"
                 checked={settings.auto_install}
                 disabled={busy || settings.channel === "off"}
                 onChange={(e) => setSettings(settings.channel, e.target.checked)}
               />
-              {t("updates.autoInstall")}
+              <span className="switch-track" aria-hidden="true" />
+              <span>{t("updates.autoInstall")}</span>
             </label>
             <button type="button" className="btn btn-ghost btn-small" disabled={busy || settings.channel === "off"} onClick={() => void run("updates_check")}>
               {t("updates.checkNow")}
@@ -155,7 +161,7 @@ export function UpdateSettings() {
 
       <h3 className="ask-sub">{t("updates.login.title")}</h3>
       {settings.start_at_login === null ? (
-        <div className="note" style={{ display: "block" }}>
+        <div className="note small" style={{ display: "block" }}>
           <p>{t("updates.login.ask")}</p>
           <div className="row" style={{ justifyContent: "flex-start" }}>
             <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => void run("login_set", { enabled: true })}>
@@ -167,14 +173,16 @@ export function UpdateSettings() {
           </div>
         </div>
       ) : (
-        <label className="field-inline">
+        <label className="switch">
           <input
             type="checkbox"
+            role="switch"
             checked={settings.start_at_login}
             disabled={busy}
             onChange={(e) => void run("login_set", { enabled: e.target.checked })}
           />
-          {t("updates.login.toggle")}
+          <span className="switch-track" aria-hidden="true" />
+          <span>{t("updates.login.toggle")}</span>
         </label>
       )}
       <AppSettings />

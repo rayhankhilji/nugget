@@ -68,6 +68,16 @@ pub const SECURITY_WORDS: &[&str] = &[
     "authorize",
     "authenticate",
     "trust",
+    // Protections a toggle can switch off (DD3: turning off the screen lock ran unconfirmed).
+    "lock screen",
+    "screen lock",
+    "screen locks",
+    "auto lock",
+    "firewall",
+    "remote access",
+    "remote login",
+    "encryption",
+    "antivirus",
 ];
 /// Buttons that confirm whatever their dialog asks; they take the dialog's risk.
 const AFFIRMATIVE_WORDS: &[&str] = &[
@@ -82,8 +92,8 @@ const SECRET_FIELD_WORDS: &[&str] = &[
     "passkey",
     "pin",
     "otp",
-    "secret",
-    "token",
+    // "token" and "secret" alone are too common ("Token amount", "Secret Santa"): the policy's
+    // table knows the credential phrases.
     "cvv",
     "cvc",
     "security code",
@@ -221,13 +231,14 @@ pub(crate) fn label_text(node: &UiNode) -> String {
         .join(" ")
 }
 
-/// Is `node` a field whose contents are secret (secure, or labelled like a password)?
+/// Is `node` a field whose contents are secret (secure, or labelled like a password)? Labels
+/// are checked against [`SECRET_FIELD_WORDS`] and the policy's multilingual secure-label table
+/// (Passwort, Mot de passe, Пароль, 密码, one-time and sign-in codes, account keys, ...).
 pub fn is_secret_field(node: &UiNode) -> bool {
+    let label = label_text(node);
     node.states.secure
-        || any_phrase(
-            &words(&label_text(node)),
-            SECRET_FIELD_WORDS.iter().copied(),
-        )
+        || any_phrase(&words(&label), SECRET_FIELD_WORDS.iter().copied())
+        || nugget_policy::redact::is_secure_label(&label)
 }
 
 fn is_affirmative(node: &UiNode) -> bool {
@@ -332,7 +343,8 @@ fn is_cart_line_removal(text: &str, kw: &RiskKeywords) -> bool {
 
 /// What a click on `node` risks. `context` is the text around it (its dialog's title and text,
 /// the window title), consulted for confirming buttons such as "OK" in "Delete 3 files?".
-/// `None` (the element is not in the last snapshot) is treated as [`RiskClass::Send`].
+/// `None` (the element is not in the last snapshot) is treated as [`RiskClass::Send`]. The tools
+/// never get here with an unknown id: they rate it Edit and refuse to act on it.
 pub fn click_risk(node: Option<&UiNode>, context: &[String], kw: &RiskKeywords) -> RiskClass {
     click_risk_in(node, &[], context, kw)
 }
@@ -458,7 +470,8 @@ pub(crate) fn action_context(found: Option<&crate::state::Found>) -> nugget_poli
 }
 
 /// What typing into (or setting the value of) `node` risks: a secret field is Security, an
-/// unknown element Send, anything else Edit.
+/// unknown element Send, anything else Edit. (The tools rate an `element` id that is not on
+/// screen Edit before calling this, and refuse to act on it.)
 pub fn input_risk(node: Option<&UiNode>, explicit_id: bool) -> RiskClass {
     match node {
         Some(n) if is_secret_field(n) => RiskClass::Security,
@@ -480,14 +493,89 @@ pub fn keys_risk(
     context: &[String],
     kw: &RiskKeywords,
 ) -> RiskClass {
+    keys_risk_in(chords, target, &[], context, kw)
+}
+
+/// Does this chord, pressed in a text field, move keyboard focus out of it (so a later Space
+/// or Enter in the same call presses some other control)? Outside a text field every chord may
+/// (type-ahead letters pick another menu item or row), see [`keys_risk_in`].
+fn moves_focus_from_text(c: &KeyChord) -> bool {
+    matches!(
+        c.key,
+        Key::Named(
+            NamedKey::Tab
+                | NamedKey::Up
+                | NamedKey::Down
+                | NamedKey::PageUp
+                | NamedKey::PageDown
+                | NamedKey::Escape
+                | NamedKey::F(_)
+        )
+    ) || c.modifiers.alt
+        || ((c.modifiers.ctrl || c.modifiers.meta)
+            && matches!(
+                c.key,
+                Key::Char('f' | 'F' | 'l' | 'L' | 'k' | 'K' | 't' | 'T' | 'w' | 'W' | '`')
+            ))
+}
+
+/// Does `chords` press or submit what it goes to: a Space without Ctrl, Alt or Meta, or an
+/// Enter (Ctrl/Cmd+Enter sends a compose form)?
+pub(crate) fn activates(chords: &[KeyChord]) -> bool {
+    chords.iter().any(|c| match c.key {
+        Key::Named(NamedKey::Space) => !(c.modifiers.ctrl || c.modifiers.meta || c.modifiers.alt),
+        Key::Named(NamedKey::Enter) => !c.modifiers.alt,
+        _ => false,
+    })
+}
+
+/// [`keys_risk`] for an element looked up in the last snapshot, with its containers: Space or
+/// Enter on a pressable control is judged exactly as [`click_risk_found`] judges a click on it.
+pub(crate) fn keys_risk_found(
+    chords: &[KeyChord],
+    found: Option<&crate::state::Found>,
+    kw: &RiskKeywords,
+) -> RiskClass {
+    match found {
+        Some(f) => keys_risk_in(chords, Some(&f.node), &f.ancestors, &f.context, kw),
+        None => keys_risk_in(chords, None, &[], &[], kw),
+    }
+}
+
+fn keys_risk_in(
+    chords: &[KeyChord],
+    target: Option<&UiNode>,
+    ancestors: &[(Role, Option<String>)],
+    context: &[String],
+    kw: &RiskKeywords,
+) -> RiskClass {
     let pressable = target.is_some_and(|n| {
-        n.actions.contains(&UiActionKind::Press) || matches!(n.role, Role::Button | Role::Link)
+        n.actions.contains(&UiActionKind::Press)
+            || matches!(
+                n.role,
+                Role::Button
+                    | Role::Link
+                    | Role::MenuItem
+                    | Role::CheckBox
+                    | Role::Tab
+                    | Role::ListItem
+            )
+            || n.states.checked.is_some()
     });
     let text_input = target.is_some_and(is_text_input);
+    let mut focus_moved = false;
     chords
         .iter()
         .map(|c| {
             let m = c.modifiers;
+            // Once an earlier chord may have moved focus (any chord outside a text field: Tab,
+            // an arrow, a type-ahead letter, Escape, F6, Alt+letter), Space and Enter press
+            // whatever has focus then: unknown, as a click on an unknown element is.
+            let target = if focus_moved { None } else { target };
+            let pressable = pressable && !focus_moved;
+            let text_input = text_input && !focus_moved;
+            focus_moved |= !text_input || moves_focus_from_text(c);
+            let as_click = || click_risk_in(target, ancestors, context, kw);
             match c.key {
                 Key::Named(NamedKey::Enter) => {
                     if m.ctrl || m.meta {
@@ -495,7 +583,7 @@ pub fn keys_risk(
                     } else if target.is_some_and(is_multiline) {
                         RiskClass::Edit
                     } else if pressable {
-                        click_risk(target, context, kw).max(RiskClass::Send)
+                        as_click().max(RiskClass::Send)
                     } else {
                         RiskClass::Send
                     }
@@ -509,7 +597,7 @@ pub fn keys_risk(
                 }
                 Key::Named(NamedKey::Space) if !text_input => match target {
                     None => RiskClass::Send,
-                    Some(_) if pressable => click_risk(target, context, kw),
+                    Some(_) if pressable => as_click(),
                     Some(_) => RiskClass::Edit,
                 },
                 Key::Named(NamedKey::F(4)) if m.alt => RiskClass::Destroy,
@@ -551,6 +639,15 @@ mod tests {
         assert_eq!(classify_text("Unsubscribe", &k), Some(RiskClass::Destroy));
         assert_eq!(classify_text("Subscribe", &k), Some(RiskClass::Spend));
         assert_eq!(classify_text("Permissions", &k), Some(RiskClass::Security));
+        assert_eq!(
+            classify_text("Lock screen after 5 minutes", &k),
+            Some(RiskClass::Security)
+        );
+        assert_eq!(
+            classify_text("Remote access", &k),
+            Some(RiskClass::Security)
+        );
+        assert_eq!(classify_text("Lock", &k), None);
         // The highest class wins.
         assert_eq!(
             classify_text("Delete and send", &k),

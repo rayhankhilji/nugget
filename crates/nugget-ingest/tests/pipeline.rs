@@ -215,6 +215,9 @@ async fn sensitive_items_never_reach_cloud_providers() {
     let h = start(Opts {
         cfg: IngestConfig {
             allow_cloud_embeddings: true,
+            // No local triage model here: only this opt-out lets unflagged items use the cloud
+            // (by default they count as sensitive; see tests/sensitivity.rs).
+            assume_unflagged_safe: true,
             ..cfg()
         },
         router: Some(r),
@@ -263,6 +266,13 @@ async fn sensitive_items_never_reach_cloud_providers() {
     );
     let local_seen = local.embedded().join("\n");
     assert!(local_seen.contains("4111"), "sensitive items embed locally");
+    // GG8-6: the cloud requests name the (only) item they carried, for the egress ledger.
+    let cloud_items = cloud.embed_items.lock().unwrap().clone();
+    assert!(!cloud_items.is_empty());
+    assert!(
+        cloud_items.iter().all(|i| i.key.as_str() == "clean"),
+        "{cloud_items:?}"
+    );
 
     for (key, field) in [
         ("card", "card"),
@@ -281,6 +291,106 @@ async fn sensitive_items_never_reach_cloud_providers() {
     assert_eq!(clean.metadata["sensitive"], json!(false));
     assert!(clean.metadata.get("pii").is_none());
     assert_eq!(clean.metadata["embedding_provider"], json!("cloud"));
+    h.ingest.shutdown().await;
+}
+
+/// II1: a connector can mark a document sensitive itself (private chats), even without PII.
+#[tokio::test]
+async fn connector_marked_sensitive_items_stay_local() {
+    let cloud = FakeProvider::new("cloud", Locality::Cloud);
+    let local = FakeProvider::new("local", Locality::OnDevice);
+    let r = router(&[
+        (cloud.clone(), vec![Tier::Embedding]),
+        (local.clone(), vec![Tier::Embedding]),
+    ]);
+    let h = start(Opts {
+        cfg: IngestConfig {
+            allow_cloud_embeddings: true,
+            // Unflagged items count as not sensitive here, so the connector flag is what keeps
+            // the chat local.
+            assume_unflagged_safe: true,
+            ..cfg()
+        },
+        router: Some(r),
+        ..Default::default()
+    })
+    .await;
+    let with_meta = |key: &str, text: &str, meta: serde_json::Value| {
+        let Change::Upsert(mut d) = text_doc(key, text, Some("1")) else {
+            unreachable!()
+        };
+        d.metadata = meta;
+        Change::Upsert(d)
+    };
+    let private = with_meta(
+        "chat",
+        "see you at the clinic on tuesday",
+        json!({"service": "whatsapp", "sensitive": true}),
+    );
+    let open = with_meta("open", "lunch menu for friday", json!({"sensitive": false}));
+    h.factory.state("fake-1").script(vec![
+        Step::Send(private),
+        Step::Send(open),
+        Step::Return(json!("done")),
+    ]);
+    h.add("fake-1").await;
+    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+
+    let cloud_seen = cloud.embedded().join("\n");
+    assert!(
+        !cloud_seen.contains("clinic"),
+        "a private chat reached the cloud"
+    );
+    assert!(cloud_seen.contains("lunch menu"));
+    assert!(local.embedded().join("\n").contains("clinic"));
+    let item = h.item("fake-1", "chat").unwrap();
+    assert_eq!(item.metadata["sensitive"], json!(true));
+    assert_eq!(item.metadata["sensitive_rule"], json!("connector"));
+    // `sensitive: false` from a connector never overrides the scan.
+    assert_eq!(
+        h.item("fake-1", "open").unwrap().metadata["sensitive"],
+        json!(false)
+    );
+    h.ingest.shutdown().await;
+}
+
+/// A problem a connector reports (an unreadable export) shows in the source's health, and
+/// reporting it again on the next pass counts once.
+#[tokio::test]
+async fn reported_problems_show_in_health_once() {
+    let h = start(Opts::default()).await;
+    let st = h.factory.state("fake-1");
+    for done in ["one", "two"] {
+        st.script(vec![
+            Step::Send(text_doc("a", "hello", Some("1"))),
+            Step::Problem("export:chat.txt".into(), "no readable messages".into()),
+            Step::Checkpoint(json!(done)),
+            Step::Return(json!(done)),
+        ]);
+    }
+    h.add("fake-1").await;
+    eventually("first pass", || h.cursor("fake-1") == Some(json!("one"))).await;
+    h.ingest.sync_now(Some(&SourceId::new("fake-1"))).unwrap();
+    eventually("second pass", || h.cursor("fake-1") == Some(json!("two"))).await;
+    let id = SourceId::new("fake-1");
+    let errors = h.ingest.errors(&id).unwrap();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!(
+        errors[0].key.as_ref().map(|k| k.as_str()),
+        Some("export:chat.txt")
+    );
+    let info = h.ingest.get(&id).await.unwrap();
+    let health = info.health.expect("health");
+    assert_eq!(health.code, "item_errors", "{health:?}");
+    assert_eq!(health.item_errors, 1);
+    assert!(
+        health
+            .last_item_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no readable messages"),
+        "{health:?}"
+    );
     h.ingest.shutdown().await;
 }
 
@@ -311,61 +421,7 @@ async fn cloud_embeddings_are_off_by_default() {
     h.ingest.shutdown().await;
 }
 
-#[tokio::test]
-async fn local_triage_marks_junk_and_sensitive_items() {
-    let local = FakeProvider::new("lan", Locality::LocalNetwork);
-    let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
-        ..Default::default()
-    })
-    .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("spam", "WIN BIG SPAM offer click now", Some("1"))),
-        Step::Send(text_doc("memo", "CONFIDENTIAL merger memo", Some("1"))),
-        Step::Send(text_doc("note", "grocery list: eggs, milk", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-
-    let spam = h
-        .item("fake-1", "spam")
-        .expect("junk is stored metadata-only");
-    assert_eq!(spam.metadata["junk"], json!(true));
-    assert_eq!(spam.metadata["triage"]["junk"], json!(true));
-    assert_eq!(spam.text, None);
-    assert_eq!(
-        h.store.search_text("offer", 10).unwrap().len(),
-        0,
-        "junk is not chunked"
-    );
-    assert!(!local.embedded().iter().any(|t| t.contains("SPAM")));
-
-    let memo = h.item("fake-1", "memo").unwrap();
-    assert_eq!(memo.metadata["sensitive"], json!(true));
-    assert_eq!(memo.metadata["junk"], json!(false));
-
-    let note = h.item("fake-1", "note").unwrap();
-    assert_eq!(
-        note.metadata["triage"]["summary"],
-        json!("A short summary of the document.")
-    );
-    assert_eq!(h.store.search_text("eggs", 10).unwrap().len(), 1);
-    assert_eq!(local.chats().len(), 3);
-    let status = h.ingest.status().await.unwrap();
-    assert_eq!(
-        status.triage_provider.as_ref().map(|p| p.as_str()),
-        Some("lan")
-    );
-    assert_eq!(
-        status.embedding_provider.as_ref().map(|p| p.as_str()),
-        Some("lan")
-    );
-    h.ingest.shutdown().await;
-}
+// Triage (background, batched, low priority): see tests/triage.rs.
 
 #[tokio::test]
 async fn bad_items_are_recorded_and_never_stop_the_source() {

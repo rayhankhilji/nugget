@@ -37,7 +37,15 @@ export function KindPicker({
             {t(g.label)}
           </p>,
           ...g.kinds.map((k) => (
-            <label key={k} className="kind-option">
+            <label
+              key={k}
+              className="kind-option"
+              // A double-click picks the kind and moves on (the buttons can be below the fold).
+              onDoubleClick={() => {
+                onChange(k);
+                onNext();
+              }}
+            >
               <input
                 ref={k === value ? first : undefined}
                 data-autofocus={k === value ? "" : undefined}
@@ -54,6 +62,12 @@ export function KindPicker({
               </span>
             </label>
           )),
+          // Signal has no export to read from; said here so nobody looks for it in vain.
+          g.id === "messages" ? (
+            <p key="signal" className="muted small kind-note">
+              {t("addSource.messages.signal")}
+            </p>
+          ) : null,
         ])}
       </fieldset>
       <div className="dialog-actions">

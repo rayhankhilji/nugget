@@ -20,6 +20,63 @@ use crate::suites::{doc_text, item_ref, secs};
 
 pub struct PerfBench;
 
+/// Size mix of the synthetic items in `perf --backend real`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum PerfSizes {
+    /// Every item the same length (120 words), as W12 and X5 measured.
+    #[default]
+    Fixed,
+    /// A mailbox-like mix: log-normal lengths with a median of 80 words and a long tail
+    /// (see [`crate::corpus::MAIL_LENGTH_SIGMA`]).
+    Mail,
+}
+
+impl PerfSizes {
+    /// `(median or fixed words per item, σ of ln(words))`.
+    pub fn shape(self, fixed_words: usize) -> (usize, f64) {
+        match self {
+            PerfSizes::Fixed => (fixed_words, 0.0),
+            PerfSizes::Mail => (80, crate::corpus::MAIL_LENGTH_SIGMA),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PerfSizes::Fixed => "fixed",
+            PerfSizes::Mail => "mail",
+        }
+    }
+}
+
+/// Which parts of `perf --backend real` run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum PerfPhases {
+    /// The in-process store run and the daemon profile.
+    #[default]
+    All,
+    /// Only the in-process store and retriever run (`crate::suites::scale`).
+    Store,
+    /// Only the `nuggetd` profile (`crate::suites::perf_daemon`).
+    Daemon,
+}
+
+/// `perf --backend real` options (flattened into the CLI). The II5 scale runs use
+/// `--perf-items 250000 --perf-sizes mail --perf-phases daemon`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
+pub struct PerfOptions {
+    /// `perf --backend real`: items in the store run and the daemon profile (default: the
+    /// scale's, 50k / 100k at `full`). The other workload sizes (queries, searches, timeouts)
+    /// stay the scale's, except that waits grow with the item count.
+    #[arg(long, value_name = "N")]
+    pub perf_items: Option<usize>,
+    /// `perf --backend real`: item size mix.
+    #[arg(long, value_enum, default_value_t = PerfSizes::Fixed)]
+    pub perf_sizes: PerfSizes,
+    /// `perf --backend real`: run the store run, the daemon profile, or both.
+    #[arg(long, value_enum, default_value_t = PerfPhases::All)]
+    pub perf_phases: PerfPhases,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PerfParams {
     pub docs: usize,
@@ -56,8 +113,22 @@ impl Benchmark for PerfBench {
         match ctx.backend() {
             Backend::Fake => run_with(ctx, &PerfParams::for_scale(ctx.scale())),
             Backend::Real => {
-                let mut out = crate::suites::scale::run(ctx)?;
-                out.extend(crate::suites::perf_daemon::run(ctx)?);
+                let phases = ctx.config.perf.perf_phases;
+                ctx.param(
+                    "perf_phases",
+                    match phases {
+                        PerfPhases::All => "all",
+                        PerfPhases::Store => "store",
+                        PerfPhases::Daemon => "daemon",
+                    },
+                );
+                let mut out = Vec::new();
+                if phases != PerfPhases::Daemon {
+                    out.extend(crate::suites::scale::run(ctx)?);
+                }
+                if phases != PerfPhases::Store {
+                    out.extend(crate::suites::perf_daemon::run(ctx)?);
+                }
                 Ok(out)
             }
         }

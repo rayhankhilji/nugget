@@ -92,6 +92,33 @@ Links include the entity's short id, so renaming a person does not break links t
 addresses and phone numbers are kept out of the pages by default, because the vault is plain text you
 may sync elsewhere.
 
+### Sensitive items and the vault
+
+For the same reason, nothing from an item confirmed [sensitive](privacy.md#sensitive-items) is
+written to the vault. Confirmed means a card number or similar finding, a sensitivity rule (health,
+money, credentials, a connector that marks its documents sensitive), or local triage that ran and
+said sensitive. Items local triage has not sorted yet (for example while no local model is
+installed) are shown like any other item, as in Search; when triage later confirms one sensitive,
+it leaves the vault at the next render. They still never go to cloud models.
+
+- A fact whose sources are all sensitive is left out: no fact line, no footnote, nothing in
+  `README.md`. Facts you wrote yourself have no sources and are always shown.
+- A footnote never cites or quotes a sensitive item. A fact that also has a non-sensitive source is
+  shown, citing only that source.
+- An entity known only from sensitive items (all of its facts and mentions) gets no page, and other
+  pages name it without a link. If it had a page before (for example, the item was marked sensitive
+  later), your edits on it are applied first, then the page is deleted; if you wrote something on
+  it (notes or your own frontmatter), the file is kept with the heading "Hidden page" and only your
+  own text. When a non-sensitive source supports it again, the page comes back.
+- On other pages, aliases and identifiers learned only from sensitive items are left out of the
+  frontmatter. Aliases you added yourself in the vault are always shown.
+- A vault written by an earlier version is re-rendered once under these rules. Later, when an item
+  becomes sensitive without its facts changing, the pages follow at the entity's next change.
+
+The facts are still in the encrypted store. On the **Knowledge** page such entities and facts carry
+a **Sensitive** badge, and the graph view leaves them out unless you turn on **Show sensitive**. MCP
+clients see them only if you allowed sensitive items for that client.
+
 ## Editing the vault
 
 The vault is yours to edit. The encrypted store stays the source of truth, and your edits are merged
@@ -100,14 +127,22 @@ back into it with a three-way merge (the last render, your file and the new rend
 | You do this | Nugget does this |
 |---|---|
 | Write anything outside the generated regions (for example under `## Notes`) | Keeps it, in your order, on every re-render |
-| **Edit** a fact line | The old fact becomes `superseded`; your text becomes a new fact with status `user_asserted`, which is **yours**: it needs no source and shows a `(you)` tag |
+| **Edit** a fact line | The old fact becomes `superseded`; your text becomes a new fact with status `user_asserted`, which is **yours**: it needs no source and shows a `(you)` tag. Re-saving the source does not bring the old line back while the source still says the same thing; if the source changes what it says, that is a new fact. Delete your own line again and the original comes back the next time its source is read |
 | **Delete** a fact line | The fact becomes `rejected`: re-extraction never brings it back |
 | **Add** a bullet under a fact heading | A new `user_asserted` fact with that heading's relation (`note` outside any heading) |
-| Add an alias in the frontmatter | The alias is added to the entity |
+| Add an alias in the frontmatter | The alias is added to the entity (spelling such as `["A", "B"]` against `["A","B"]` does not matter) |
 | Change a generated region that Nugget also changed | Your version is kept, and Nugget's is written next to it under `.nugget/conflicts/` for you to compare |
 
-Removing a footnote citation is not treated as an edit. Before writing a page, Nugget re-reads your
-file and retries if it changed, so a render never overwrites an edit you just made.
+Removing a footnote citation is not treated as an edit. Retyping a fact line without its invisible
+`<!-- c:N -->` marker keeps your wording. If an editor or formatter strips every HTML comment from a
+page, Nugget puts its markers back from the last render, so your changes still count as edits and the
+page is not duplicated; on such a page only lines you clearly removed reject their facts, and a page
+emptied or rewritten that way changes no facts. Before writing a page, Nugget re-reads your file and retries if it changed, so
+a render never overwrites an edit you just made.
+
+For a fact that holds one value at a time (such as where someone works), your value stays current
+against sources dated before your edit: a value they state is kept as history. A source dated
+**after** your edit with a different value replaces yours, which then becomes `superseded`.
 
 ## Fact statuses
 
@@ -122,12 +157,13 @@ file and retries if it changed, so a render never overwrites an edit you just ma
 Deleting a fact line in the vault, or rejecting a fact on the **Knowledge** page, sets `rejected`.
 
 On the **Knowledge** page, rejecting a fact shows **Undo** for a moment, and a fact you added
-yourself can be withdrawn the same way. Over IPC, `knowledge.claim.status` sets and reports
+yourself can be withdrawn the same way. A superseded fact is history and offers no action; the facts
+count shows current facts only. Over IPC, `knowledge.claim.status` sets and reports
 `rejected`.
 
 ## In the desktop app
 
-The **Knowledge** page lists entities by kind, shows each entity's facts with a **Why?** button that
+The **Knowledge** page lists entities by kind, shows each entity's facts with a **Based on N sources** button that
 opens the evidence, lets you merge duplicates and reject wrong facts, and opens the entity's vault
 page. It also shows how many entities and facts there are and how many items are waiting for
 extraction. `knowledge.status` adds the last run, the model used for LLM extraction, and vault pages
@@ -135,14 +171,14 @@ that failed validation or have merge conflicts. The **graph view** draws the nei
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/knowledge-dark.png">
-  <img src="../images/screenshots/knowledge-light.png" alt="The Knowledge page: the entity list, and Ada Wexford's details with her facts, each with a confidence, a Why? button and a Reject button" loading="lazy">
+  <img src="../images/screenshots/knowledge-light.png" alt="The Knowledge page: the entity list, and Ada Wexford's details with her facts, each with its sources button, and a confidence where it is below 80%" loading="lazy">
 </picture>
 
-**Why?** opens the evidence for a fact: the quoted passage and the item it came from.
+**Based on N sources** opens the evidence for a fact: the quoted passage and the item it came from.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/knowledge-why-dark.png">
-  <img src="../images/screenshots/knowledge-why-light.png" alt="A fact's evidence opened with Why?: a quote from the Wren Mobile usability test calendar event and a link to open it" loading="lazy">
+  <img src="../images/screenshots/knowledge-why-light.png" alt="A fact's evidence opened with Based on 1 source: a quote from the Wren Mobile usability test calendar event and a link to open it" loading="lazy">
 </picture>
 
 <picture>

@@ -263,6 +263,13 @@ impl ToolFailure {
         }
     }
 
+    pub(crate) fn cancelled() -> Self {
+        Self {
+            outcome: Outcome::Cancelled,
+            message: "request cancelled".into(),
+        }
+    }
+
     fn backend(e: nugget_core::Error) -> Self {
         tracing::warn!(error = %e, "mcp backend error");
         Self {

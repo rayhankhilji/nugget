@@ -1,0 +1,135 @@
+name: QA GG2 (Ask and Chat, real models)
+
+# Independent QA of Ask/Chat (docs/waves/wave-gg/GG2.md): a real nuggetd, the signed manifest's
+# models installed through `models.install`, a synthetic corpus ingested through a `files`
+# source, and every question asked over IPC the way the desktop Chat does. See qa/GG2/README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated question ids or categories (empty: all)"
+        default: ""
+        type: string
+      runs:
+        description: "Which runs: full | repro (uses qa/GG2/run.env when empty)"
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  ask:
+    name: ask ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: 4b, model: qwen3-4b-q4km, shard: "0/1", extra: "" }
+          - { label: 8b-s0, model: qwen3-8b-q4km, shard: "0/2", extra: "" }
+          - { label: 8b-s1, model: qwen3-8b-q4km, shard: "1/2", extra: "" }
+          # First hour after setup: the default config (knowledge extraction on) so Ask competes
+          # with extraction for the same local model, as it does for a new user.
+          - { label: 4b-first-hour, model: qwen3-4b-q4km, shard: "0/1", extra: "--knowledge", first_hour: true }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Select runs
+        id: sel
+        run: |
+          [ -f qa/GG2/run.env ] && cat qa/GG2/run.env >> "$GITHUB_ENV"
+          [ -n "${{ inputs.only }}" ] && echo "ONLY=${{ inputs.only }}" >> "$GITHUB_ENV"
+          [ -n "${{ inputs.runs }}" ] && echo "RUNS=${{ inputs.runs }}" >> "$GITHUB_ENV"
+          # A repro run uses one 4B and one 8B runner; the others stop here.
+          runs="${{ inputs.runs }}"; [ -z "$runs" ] && [ -f qa/GG2/run.env ] && runs=$(sed -n 's/^RUNS=//p' qa/GG2/run.env)
+          if [ "$runs" = repro ] && { [ "${{ matrix.shard }}" = "1/2" ] || [ "${{ matrix.first_hour }}" = true ]; }; then
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+          true
+
+      - name: Install Rust toolchain
+        if: env.SKIP != '1'
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        if: env.SKIP != '1'
+        with:
+          shared-key: qa-gg2
+
+      - name: Cache models and runtime
+        if: env.SKIP != '1'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/h/data/models
+          key: qa-gg2-models-${{ matrix.model }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build nuggetd
+        if: env.SKIP != '1'
+        run: cargo build --release --locked -p nuggetd
+
+      - name: Generate corpus (dates anchored to today)
+        if: env.SKIP != '1'
+        run: |
+          python3 qa/GG2/harness/gen_corpus.py --out "$RUNNER_TEMP/corpus" --questions "$RUNNER_TEMP/questions.jsonl"
+          mkdir -p qa-out && cp "$RUNNER_TEMP/questions.jsonl" qa-out/
+
+      - name: Record hardware
+        if: env.SKIP != '1'
+        run: |
+          {
+            echo "label: ${{ matrix.label }}  model: ${{ matrix.model }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)' ; free -g
+          } | tee qa-out/hardware.txt
+
+      - name: Ask
+        if: env.SKIP != '1'
+        run: |
+          if [ "${RUNS:-full}" = repro ] && [ "${{ matrix.shard }}" = "1/2" ]; then echo "repro: one 8b runner is enough"; exit 0; fi
+          only="${ONLY:-}"
+          shard="${{ matrix.shard }}"
+          if [ "${RUNS:-full}" = repro ]; then shard="0/1"; fi
+          if [ "${{ matrix.first_hour }}" = true ]; then
+            [ "${RUNS:-full}" = repro ] && { echo "skip first-hour in repro"; exit 0; }
+            only="L01,L04,L05,L10,L15,L19,P01,X01,T01,T03,A01,A03,F01,F03,I01"
+          fi
+          python3 qa/GG2/harness/ask_qa.py --nuggetd target/release/nuggetd --home "$RUNNER_TEMP/h" \
+            --corpus "$RUNNER_TEMP/corpus" --questions "$RUNNER_TEMP/questions.jsonl" --out qa-out \
+            --chat-model "${{ matrix.model }}" --shard "$shard" --only "$only" ${{ matrix.extra }} \
+            --ingest-timeout 6000 --probe-search qa/GG2/repro/search-probes.txt
+
+      - name: Score
+        if: always()
+        run: |
+          [ -f qa-out/answers.jsonl ] || exit 0
+          python3 qa/GG2/harness/score.py --questions qa-out/questions.jsonl --answers qa-out/answers.jsonl \
+            --out qa-out/score.json --md qa-out/score.md
+          cat qa-out/score.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-gg2-${{ matrix.label }}
+          path: |
+            qa-out
+            ${{ runner.temp }}/h/data/logs
+          retention-days: 30

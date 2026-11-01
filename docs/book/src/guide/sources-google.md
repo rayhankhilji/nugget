@@ -5,13 +5,21 @@ no Nugget-owned Google app sees your data. The trade-off is a one-time setup in 
 console, and a weekly re-sign-in while your app stays in Google's "Testing" mode (explained
 [below](#the-7-day-sign-in-limit-in-testing-mode)).
 
-Nugget asks only for read-only scopes:
+Nugget asks only for read-only scopes (the one exception is opt-in: see **Allow archiving** below):
 
 | Source | Scope | Sync |
 |---|---|---|
 | `gmail` | `https://www.googleapis.com/auth/gmail.readonly` | Backfills the last 365 days (`window_days`), newest first, then polls for changes every 60 s |
 | `gcal` | `https://www.googleapis.com/auth/calendar.readonly` | Events from 365 days back to 365 days ahead (`past_days`, `future_days`), then polls every 5 min |
 | `gdrive` | `https://www.googleapis.com/auth/drive.readonly` | Lists your files once, then follows Drive's change feed, polled every 5 min |
+
+**Scopes.** Each source asks for one scope, for its own product only. `gmail.readonly` and
+`calendar.readonly` are the read-only scopes of those APIs: they cannot send, change or delete mail or
+events. The one exception is Gmail's **Allow archiving** setting (`allow_modify`, off by default): it
+asks for `gmail.modify` instead, so that a suggested action can archive a thread after you confirm it.
+Google grants that scope everything except permanent deletion, including sending and drafting
+mail; Nugget uses it only to remove the `INBOX` label. It takes effect after you reconnect, and turning
+the setting off again (then reconnecting) goes back to `gmail.readonly`.
 
 For Drive, `drive.readonly` is the narrowest scope that can read and export your files' content:
 `drive.file` only sees files Nugget itself created or opened, and `drive.metadata.readonly` cannot read
@@ -100,12 +108,86 @@ skipping changes.
 
 All settings: [Connector settings → `gmail`, `gcal`, `gdrive`](../reference/connectors.md#gmail).
 
+## Checking Gmail with a real account
+
+Gmail and Calendar are tested against mock Google servers; nobody has run this checklist against a
+live account yet. It takes about 10 minutes. Set **Backfill window** to 30 days so the first sync is
+short, and leave **Allow archiving** off. If a step fails, see
+[Reporting a failed check](sources.md#reporting-a-failed-check).
+
+1. **Connect.** Add a Gmail source and choose **Connect**. Expected: after the "unverified app"
+   warning, Google asks for exactly one data permission, read-only mail ("View your email messages and
+   settings", the `gmail.readonly` scope). Nothing about sending, deleting or other Google products.
+   The source switches to `syncing`.
+2. **First sync.** Wait for the source to reach `idle`. Expected: the item count is close to the
+   number of messages (not conversations) Gmail finds for `newer_than:30d -in:drafts`. Spam, Trash
+   and drafts are not counted. Messages stay unread in Gmail.
+3. **Open a result.** Search for a word from a recent message and open the hit. Expected: it opens
+   the message in Gmail. The link uses `mail.google.com/mail/u/0/`, so it opens in the first Google
+   account signed in to your browser; note it if that is not the synced account.
+4. **New mail and changes.** Send yourself a message, then add a label to an older one, and choose
+   **Sync now**. Expected: the new message is searchable within a minute, and the labelled message is
+   re-read (the `labels` in its details include the new label's id, such as `Label_12`). Marking a
+   message read or unread alone causes no re-read.
+5. **Move.** Archive a message, then move another to Spam, and choose **Sync now**. Expected: the
+   archived one stays (it is still in All Mail); the one in Spam disappears.
+6. **Delete.** Move a message to Trash and choose **Sync now**. Expected: it disappears from search.
+   Restore it from Trash: it comes back on the next pass.
+7. **Unicode.** Send yourself a message with the subject `Grüße 🍰 日本語 test`. Expected: the title
+   shows exactly that, and searching for `Grüße` finds it.
+8. **Large attachment.** Send yourself a message with a 20 MB attachment. Expected: the message is
+   indexed and its body is searchable. The attachment is listed by name in the item's details; its
+   content is not indexed (Nugget never extracts mail attachments). Gmail's 25 MB limit keeps mail
+   below Nugget's 64 MiB download cap; a message above it would be skipped with a log warning.
+9. **Revoke.** At <https://myaccount.google.com/permissions>, remove your app's access, then choose
+   **Sync now**. Expected: within a few minutes the source shows **Needs sign-in** (`needs_auth`, health
+   `reconnect`) with the reason "<source name> no longer accepts Nugget's sign-in, so syncing is paused."
+   **Sign in** recovers it, and syncing resumes without downloading everything again.
+10. **Egress.** Expected: the **Privacy** page lists this traffic under `sync:gmail`, to
+    `gmail.googleapis.com` and `oauth2.googleapis.com` only.
+
+## Checking Google Calendar with a real account
+
+Nobody has run this checklist against a live account yet. Set **past_days** and **future_days** to 30
+for a short first sync, and use a test calendar if you have one. If a step fails, see
+[Reporting a failed check](sources.md#reporting-a-failed-check).
+
+1. **Connect.** Add a Google Calendar source and choose **Connect**. Expected: Google asks for one
+   permission, read-only calendars ("See and download any calendar you can access using your Google
+   Calendar", the `calendar.readonly` scope), and nothing that lets Nugget change events.
+2. **First sync.** Wait for `idle`. Expected: the item count matches the events in the window across
+   the calendars ticked in Google Calendar's sidebar. Each occurrence of a repeating event is its own
+   item, so a weekly meeting adds about nine items to a 60-day window.
+3. **Edit.** Change an event's title and description, then choose **Sync now**. Expected: the item
+   shows the new text.
+4. **Move.** Drag an event to another day, and move a second one to another synced calendar. Choose
+   **Sync now**. Expected: the first item's "When:" line shows the new day; the second is gone from the
+   old calendar and appears under the new one.
+5. **Delete.** Delete an event and choose **Sync now**. Expected: it disappears from search.
+6. **Unicode.** Create an event titled `Café ☕ 会議`. Expected: the title shows exactly that and is
+   searchable.
+7. **Large event.** Paste a very long description (over 20,000 characters) and attach a Drive file.
+   Expected: the event is indexed with its description cut at 20,000 characters; the attachment's
+   content is not indexed. At most 200 attendees are listed.
+8. **Recurring event.** Create a weekly event, then change the time of one occurrence and delete
+   another. Expected: every occurrence in the window is an item; only the changed one shows the new
+   time, and the deleted one disappears.
+9. **Another time zone.** Create an event with its own time zone (in the event's details, **Time
+   zone**), different from your calendar's. Expected: the item's "When:" line ends with a zone name and
+   a UTC offset, like `(America/New_York, UTC-04:00)`, and the time and offset give the same moment
+   Google Calendar shows. If the zone name is the event's but the time and offset are your calendar's,
+   report it.
+10. **Revoke.** Remove the app's access at <https://myaccount.google.com/permissions> and choose
+    **Sync now**. Expected: **Needs sign-in**, health `reconnect`, with the reason "<source name> no longer accepts Nugget's sign-in, so syncing is paused." **Sign in** recovers it.
+11. **Egress.** Expected: traffic under `sync:gcal`, to `www.googleapis.com` and
+    `oauth2.googleapis.com` only.
+
 ## Google Drive
 
 > **Not yet tried against a live Google account.** The Drive connector has been tested only against a
 > mock Drive server that imitates Google's API. It may still trip over details of the real service.
-> If you try it, please check the list [below](#checking-drive-with-a-real-account) and report what
-> you find.
+> If you try it, please work through the checklist [below](#checking-drive-with-a-real-account) and
+> report what you find (see [Reporting a failed check](sources.md#reporting-a-failed-check)).
 
 ### What gets indexed
 
@@ -155,24 +237,37 @@ Every request, including token refreshes, exports and downloads, is in the egres
 ### Checking Drive with a real account
 
 What a person should verify the first time with a real Google account (the mock server cannot prove
-these):
+these). Most steps take a minute; the full list takes about 10 minutes on a Drive with a few hundred
+files. Changes arrive through Drive's change feed, so choose **Sync now** after each change rather
+than waiting 5 minutes. If a step fails, see [Reporting a failed check](sources.md#reporting-a-failed-check).
 
-1. Sign-in with `drive.readonly` works with a Desktop-app OAuth client in Testing mode, and the consent
-   screen shows only read-only Drive access.
-2. The first sync finishes for a Drive with a few hundred files, and the item count matches what you
-   expect (owned files only, with both options off).
-3. A Google Doc's Markdown export reads well (headings, lists, tables), and a multi-sheet spreadsheet
-   gives one CSV per sheet; with the Sheets API disabled, the first sheet is still indexed.
-4. A Slides deck is indexed slide by slide with speaker notes; with the Slides API disabled, the plain
-   export still works.
-5. A PDF, a `.docx` and an `.xlsx` are searchable; an image and a file above `max_file_mb` appear with
-   their "Not indexed" note.
-6. Within about 5 minutes: an edit shows up, a rename and a move update the item, trashing removes it,
-   restoring from Trash brings it back, and unsharing a shared file removes it.
-7. Turning on **Include files shared with me** and **Include shared drives** adds those files;
-   turning them off removes them.
-8. Restarting Nugget in the middle of the first sync resumes it rather than starting over.
-9. Each item's link opens the right file in Drive.
-10. Revoking access at <https://myaccount.google.com/permissions> puts the source in **Needs sign-in**,
-    and **Reconnect** recovers it.
-11. The egress ledger shows the traffic under `sync:gdrive`, and nothing else.
+1. **Connect.** Sign in with a Desktop-app OAuth client in Testing mode. Expected: the consent screen
+   asks for one permission, read-only Drive ("See and download all your Google Drive files", the
+   `drive.readonly` scope), and nothing that lets Nugget change, share or delete files.
+2. **First sync.** Expected: it finishes for a Drive with a few hundred files, and the item count
+   matches what you expect: files you own in My Drive (folders and shortcuts are not items), with both
+   sharing options off.
+3. **Docs and Sheets.** Expected: a Google Doc's Markdown export reads well (headings, lists, tables),
+   and a multi-sheet spreadsheet gives one CSV per sheet. With the Sheets API disabled, the first sheet
+   is still indexed.
+4. **Slides.** Expected: a deck is indexed slide by slide with speaker notes. With the Slides API
+   disabled, the plain export still works.
+5. **Other files.** Expected: a PDF, a `.docx` and an `.xlsx` are searchable. An image appears by name
+   with the note "Not indexed: Images are not indexed.", and a file above `max_file_mb` with "Not
+   indexed: Larger than the 25 MB limit." (or your limit). Raising **Largest file (MB)** fetches it.
+6. **Edit, rename, move, delete.** Edit a Doc, rename one file, move another to a different folder,
+   trash a third, then choose **Sync now**. Expected: the edit shows up, the rename and the move update
+   their items, and the trashed file disappears. Restoring it from Trash brings it back; unsharing a
+   file someone shared with you (with that option on) removes it.
+7. **Unicode.** Name a Doc `Notizen über Kuchen 🍰 日本語`. Expected: the title shows exactly that and
+   is searchable.
+8. **Shared content.** Turn on **Include files shared with me** and **Include shared drives**.
+   Expected: those files are added; turning the options off removes them.
+9. **Restart.** Restart Nugget in the middle of the first sync. Expected: it resumes rather than
+   starting over.
+10. **Links.** Expected: each item's link opens the right file in Drive.
+11. **Revoke.** Revoke access at <https://myaccount.google.com/permissions> and choose **Sync now**.
+    Expected: the source shows **Needs sign-in** (health `reconnect`) with the reason "<source name> no longer accepts Nugget's sign-in, so syncing is paused.", and **Sign in** recovers it.
+12. **Egress.** Expected: the **Privacy** page shows the traffic under `sync:gdrive`, to
+    `www.googleapis.com`, `sheets.googleapis.com`, `slides.googleapis.com` and `oauth2.googleapis.com`,
+    and nothing else.

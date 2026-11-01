@@ -1,0 +1,11 @@
+suite: ask-8b
+runner: GitHub Actions 1000010916 (Linux X64)
+commit: 6d2cb3407b33719c0947a6f35a04449f3e4ed6ef
+date: 2026-10-30T14:29:54Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 7763 64-Core Processor
+Thread(s) per core:                      2
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext 
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           5           0           9          14
+Swap:              2           0           2

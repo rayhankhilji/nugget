@@ -1,0 +1,86 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "error": "Error: no act reached the extension; events: [\"run_started:\\\"\\\"\",\"step_started:\\\"\\\"\",\"model_replied:\\\"\\\"\",\"action_proposed:\\\"\\\"\",\"action_done:Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.\",\"step_started:\\\"\\\"\",\"model_replied:\\\"\\\"\",\"action_proposed:\\\"\\\"\",\"action_done:Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.\",\"verification:\\\"\\\"\",\"action_proposed:\\\"\\\"\",\"action_done:Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.\",\"verification:\\\"\\\"\",\"action_proposed:\\\"\\\"\",\"action_done:Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.\",\"verification:\\\"\\\"\",\"step_started:\\\"\\\"\",\"model_replied:\\\"\\\"\",\"action_proposed:\\\"\\\"\",\"action_done:Refused: the kill switch is engaged; Nugget has stopped. The action was not performed. Do not retry it; choose another approach, ask the user, or finish.\",\"verification:\\\"\\\"\",\"step_started:\\\"\\\"\",\"model_replied:\\\"\\\"\",\"action_proposed:\\\"\\\"\",\"action_done:finished\",\"finished:script ended\"]\n    at file:///home/user/nugget/qa/GG3/killswitch/scenarios.mjs:236:13\n    at async Object.s3a_kill_during_tool (file:///home/user/nugget/qa/GG3/killswitch/scenarios.mjs:235:19)\n    at async file:///home/user/nugget/qa/GG3/killswitch/scenarios.mjs:587:15"
+    },
+    {
+      "task": "48601a0c0c494cb3bf901f9566956cb8",
+      "kill_rpc_ms": 1.2,
+      "kill_to_finished_ms": 46.9,
+      "finished": {
+        "outcome": "halted"
+      },
+      "acts_started": [
+        "type:n1@-203ms"
+      ],
+      "acts_started_after_kill": 0,
+      "first_act_completed_after_kill_ms": 1299,
+      "ext_requests_after_kill": [],
+      "halt_sent_to_extension": false,
+      "model_requests": [
+        0,
+        1
+      ],
+      "log_tail": [
+        "model_turn",
+        "decision(browser_type):allowed",
+        "executed(browser_type):INTERRUPTED(interrupted (halted))",
+        "finished:halted"
+      ],
+      "ok": true
+    },
+    {
+      "task": "1aca11d1e3f64709a7c479ee26219f1a",
+      "kill_rpc_ms": 1.1,
+      "kill_to_finished_ms": 47.8,
+      "finished": {
+        "outcome": "halted"
+      },
+      "acts_started": [
+        "type:n1@-203ms"
+      ],
+      "acts_started_after_kill": 0,
+      "first_act_completed_after_kill_ms": 1297,
+      "ext_requests_after_kill": [],
+      "halt_sent_to_extension": false,
+      "model_requests": [
+        0,
+        1
+      ],
+      "log_tail": [
+        "model_turn",
+        "decision(browser_type):allowed",
+        "executed(browser_type):INTERRUPTED(interrupted (halted))",
+        "finished:halted"
+      ],
+      "ok": true
+    },
+    {
+      "task": "e3794f973e79461f9d2eb70f674d6ecc",
+      "kill_rpc_ms": 0.9,
+      "kill_to_finished_ms": 42.4,
+      "finished": {
+        "outcome": "halted"
+      },
+      "acts_started": [
+        "type:n1@-207ms"
+      ],
+      "acts_started_after_kill": 0,
+      "first_act_completed_after_kill_ms": 1293,
+      "ext_requests_after_kill": [],
+      "halt_sent_to_extension": false,
+      "model_requests": [
+        0,
+        1
+      ],
+      "log_tail": [
+        "model_turn",
+        "decision(browser_type):allowed",
+        "executed(browser_type):INTERRUPTED(interrupted (halted))",
+        "finished:halted"
+      ],
+      "ok": true
+    }
+  ]
+}

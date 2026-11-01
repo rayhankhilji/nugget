@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { api } from "../api";
+import { api, type EgressEvent } from "../api";
 import { useAsync } from "../hooks";
 import { formatBytes, formatTime } from "../format";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui";
+import { VirtualList } from "../components/VirtualList";
 import { formatNumber, useT } from "../i18n";
 
 const LIMITS = [50, 200, 1000];
+/** Ledger rows have no id; time and position keep keys stable for a loaded ledger. */
+const egressKey = (r: EgressEvent, i: number) => `${r.at}-${i}`;
 
 export function PrivacyPage() {
   const t = useT();
@@ -24,7 +27,7 @@ export function PrivacyPage() {
         actions={
           <>
             <label className="field-inline">
-              <span>{t("privacy.show")}</span>
+              <span className="visually-hidden">{t("privacy.show")}</span>
               <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
                 {LIMITS.map((l) => (
                   <option key={l} value={l}>
@@ -33,7 +36,7 @@ export function PrivacyPage() {
                 ))}
               </select>
             </label>
-            <button type="button" className="btn btn-ghost" onClick={egress.reload}>
+            <button type="button" className="btn btn-ghost" onClick={egress.reload} disabled={egress.loading && !egress.data}>
               {t("common.refresh")}
             </button>
           </>
@@ -43,7 +46,9 @@ export function PrivacyPage() {
       {egress.loading && !egress.data && <Loading label={t("privacy.loading")} lines={5} />}
 
       {egress.data && rows.length === 0 && (
-        <EmptyState title={t("privacy.emptyTitle")}>{t("privacy.emptyBody")}</EmptyState>
+        <div className="privacy-clear">
+          <EmptyState title={t("privacy.emptyTitle")}>{t("privacy.emptyBody")}</EmptyState>
+        </div>
       )}
 
       {rows.length > 0 && (
@@ -67,10 +72,11 @@ export function PrivacyPage() {
             </div>
           </dl>
           <div className="table-wrap" tabIndex={0} role="region" aria-label={t("privacy.ledgerLabel")}>
-            <table>
+            {/* Only a window of rows is rendered (II5): the row count tells assistive tech the whole size. */}
+            <table aria-rowcount={rows.length + 1}>
               <caption className="visually-hidden">{t("privacy.ledgerCaption")}</caption>
               <thead>
-                <tr>
+                <tr aria-rowindex={1}>
                   <th scope="col">{t("privacy.col.time")}</th>
                   <th scope="col">{t("privacy.col.host")}</th>
                   <th scope="col">{t("privacy.col.feature")}</th>
@@ -85,12 +91,21 @@ export function PrivacyPage() {
                   </th>
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={`${r.at}-${i}`}>
+              <VirtualList
+                as="tbody"
+                items={rows}
+                itemKey={egressKey}
+                estimateSize={37}
+                columns={6}
+                rowIndexBase={2}
+                focus="none"
+                renderItem={(r) => (
+                  <>
                     <td className="nowrap">{formatTime(r.at)}</td>
                     <td>
-                      <code>{r.host}</code>
+                      <bdi dir="ltr">
+                        <code>{r.host}</code>
+                      </bdi>
                     </td>
                     <td>{r.feature}</td>
                     <td className="num">{formatBytes(r.bytes_sent)}</td>
@@ -98,9 +113,9 @@ export function PrivacyPage() {
                     <td className="num" title={r.items.map((it) => `${it.source}: ${it.key}`).join("\n") || undefined}>
                       {formatNumber(r.items.length)}
                     </td>
-                  </tr>
-                ))}
-              </tbody>
+                  </>
+                )}
+              />
             </table>
           </div>
         </div>

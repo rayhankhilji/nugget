@@ -7,6 +7,10 @@ Nugget is built so that you can answer, from the app itself, the question "what 
 - **No Nugget servers.** Nugget runs no first-party service in the data path. Nothing is sent to the
   Nugget project, ever.
 - **No telemetry.** There is none at all today. If it is ever added, it will be opt-in.
+- **No update checks until you choose.** A build that can update itself asks once, in setup or
+  on the Status page's Updates card, whether to check for updates (Stable, Beta or Off). Until you
+  answer, the app contacts no update server. A check is a request to GitHub for a small JSON file
+  (the channel's update feed) and its signature, with no identifiers; each one is in the ledger.
 - **Local models by default.** The default config uses only a model server on `127.0.0.1`. A cloud
   provider is used only if you add one.
 - **Encrypted at rest.** The store (items, chunks, the search indexes, the graph, the ledgers) is one
@@ -36,13 +40,15 @@ Features you will see:
 | Feature | Caused by |
 |---|---|
 | `chat` | A chat in the Chat page to a non-local provider |
-| `ask` | Ask with context to a non-local provider |
+| `ask` | Ask a question with a non-local provider |
 | `embed` | Embeddings sent to a non-local embedding provider (only if you opted in, or a LAN server) |
 | `triage` | Triage on a local-network provider (cloud is never used for triage) |
 | `knowledge` | LLM fact extraction on a non-local provider (only for sources you allowed) |
 | `probe` | Capability probes of a non-local provider |
 | `sync:gmail`, `sync:gcal`, `sync:gdrive`, `sync:imap`, `sync:caldav` | Connector syncs, including OAuth token refreshes |
 | `model_download`, `runtime_download` | Downloading a model or the `llama-server` runtime |
+| `update_check` | The desktop app checking the update channel you chose: the feed, its signature, and the feed again through the updater (see [Install: Updates](install.md#updates)) |
+| `update_download` | The desktop app downloading an update package (when you click Install, or with auto-install on) |
 
 And for the newer features:
 
@@ -62,6 +68,14 @@ machine. Requests to your **local network** are recorded.
 - It records what Nugget's own network layer sends. Code that bypassed it would be a bug. Plugins
   have no network access of their own for this reason: every request goes through the host, which
   records it.
+- Update checks and downloads are made by the desktop app, which hands each row to the daemon
+  (`egress.record`). If the daemon is not running, the rows wait in the app's memory and are
+  written when it connects; rows still waiting when you quit the app are lost. Byte counts for
+  the updater's own requests are estimates (the feed it reads is the one the app fetched and
+  verified), and a download is recorded under the host the feed names, even if that host
+  redirects to a content server. These rows are not marked by source: any program running as
+  you can add `update_check` or `update_download` rows the same way (at most 60 a minute), though
+  never rows for Nugget's own features.
 - It does not record what other programs do with what Nugget gives them. An app connected over
   [MCP](mcp.md) may send the passages it reads to its own cloud model; that is the app's traffic.
   Likewise, pages the [agent](agent.md) opens in your browser are your browser's traffic.
@@ -86,7 +100,14 @@ treated as sensitive. Sensitive items:
 - are never sent to a cloud model for triage, embedding or knowledge extraction, nor for Double Tap
   drafts or the Today judge;
 - are left out of the context when Ask uses a cloud model (the answer says how many were withheld);
-- are hidden from MCP clients unless a client is explicitly allowed to see them.
+- are hidden from MCP clients unless a client is explicitly allowed to see them;
+- never reach the [Markdown vault](knowledge.md#sensitive-items-and-the-vault) once confirmed
+  sensitive (a finding, a rule, or triage): a fact known only from such items is not written
+  there, a citation never quotes one, and an entity known only from them gets no page. The graph
+  view leaves such entities out unless you turn on **Show sensitive**, and the entity view marks
+  them, and their facts, **Sensitive**. Items that are sensitive only because triage has not sorted
+  them yet are shown in these local views (and in Search), but are still kept from cloud models
+  and from MCP clients that are not allowed sensitive items.
 
 ## What leaves for each feature
 
@@ -132,14 +153,15 @@ See [Double Tap: Read-ahead](double-tap.md#read-ahead).
 - Your connector credentials (passwords, OAuth tokens, OAuth client secrets): they go only to the
   service they belong to, for example a Google token only to Google. A plugin's secrets go only to
   the hosts approved for that plugin.
-- Anything, with the default configuration, beyond connector syncs and model downloads.
+- Anything, with the default configuration, beyond connector syncs, model downloads and, once you
+  turn them on, update checks.
 - Sensitive items, to any cloud model.
 
 ## The audit log
 
 Separately from the egress ledger, the daemon keeps an append-only **audit log** of changes: sources
 added, updated and removed, sign-ins started and finished, secrets set (the account name only, never
-the value), model installs, every MCP call (arguments summarised, never content), every draft (without its
+the value), model installs, every MCP call (arguments summarised, a query only as its length and a keyed hash, never content), every draft (without its
 content) and plugin installs and approvals. Each new entry is chained to the previous one with an HMAC-SHA256 keyed from
 your store key, so editing or deleting old entries is detectable; `nuggetd status` reports whether
 the chain verified at startup. The newest entry is also anchored in your OS keychain, so cutting off

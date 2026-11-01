@@ -18,9 +18,8 @@ use serde::{Deserialize, Serialize};
 /// Written to `Paths::config_file()` when no config exists.
 pub const DEFAULT_CONFIG: &str = r#"# Nugget daemon (nuggetd) configuration.
 #
-# Nugget is local-first. Out of the box every tier below is served by a model running on this
-# machine, behind an OpenAI-compatible server (Ollama on its default port), so nothing leaves the
-# device until you add a cloud provider.
+# Nugget is local-first. Out of the box every tier below is served by the on-device runtime
+# (a model running on this machine), so nothing leaves the device until you add a cloud provider.
 #
 # Never put secrets in this file. Providers reference API keys as "env:VAR" (an environment
 # variable) or "keychain:NAME" (an OS keychain entry).
@@ -47,8 +46,9 @@ download_parts = 4
 # --- On-device runtime (llama.cpp llama-server, managed by nuggetd) ------------------------------
 # When a selected model is installed (Models page), nuggetd runs it on 127.0.0.1 and routes to it
 # as `local-chat` (triage, light, synthesis) and `local-embedding` (embedding). Providers you
-# configure below that run on this device or your network are tried first; cloud providers come
-# after the runtime and are never used for triage or (by default) embeddings.
+# configure below that run on your network, or on this device once probed successfully, are tried
+# first; unprobed on-device providers come after the runtime. Cloud providers come last and are
+# never used for triage or (by default) embeddings.
 [runtime]
 enabled = true
 # Manifest model ids. Unset: [models.selected], then the recommendation for this machine.
@@ -95,14 +95,14 @@ port = 7319
 # header_timeout_ms = 10000
 # body_timeout_ms = 30000
 
-# --- On-device: Ollama ---------------------------------------------------------------------------
+# --- On-device: Ollama (uncomment to use) --------------------------------------------------------
 # Install Ollama (https://ollama.com), then pull the model, e.g. `ollama pull qwen3:4b`.
-[[providers]]
-id = "local"
-kind = "openai_compatible"
-base_url = "http://127.0.0.1:11434/v1"
-model = "qwen3:4b"
-tiers = ["triage", "light", "synthesis"]
+# [[providers]]
+# id = "local"
+# kind = "openai_compatible"
+# base_url = "http://127.0.0.1:11434/v1"
+# model = "qwen3:4b"
+# tiers = ["triage", "light", "synthesis"]
 
 # --- Cloud: Anthropic (uncomment to use; requests are recorded in the egress ledger) -------------
 # Set the key in your environment, or store it in the OS keychain and use "keychain:anthropic".
@@ -467,6 +467,17 @@ impl Config {
     /// Read `path`, or write [`DEFAULT_CONFIG`] there first if it does not exist. Returns the
     /// config and whether it was just created. Errors name the file.
     pub fn load_or_create_at(path: &Path) -> Result<(Self, bool)> {
+        Self::load_at(path, true)
+    }
+
+    /// [`Config::load_or_create_at`], but an old default provider to migrate is only dropped in
+    /// memory, never rewritten in the file: for one-shot commands that run beside the daemon
+    /// (backup, restore), which must not race its own config writes.
+    pub fn load_or_create_no_rewrite(paths: &Paths) -> Result<(Self, bool)> {
+        Self::load_at(&paths.config_file(), false)
+    }
+
+    fn load_at(path: &Path, rewrite: bool) -> Result<(Self, bool)> {
         let created = match std::fs::read_to_string(path) {
             Ok(_) => false,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -482,9 +493,22 @@ impl Config {
         };
         let text = std::fs::read_to_string(path)
             .map_err(|e| Error::Invalid(format!("cannot read {}: {e}", path.display())))?;
-        let cfg = Self::parse(&text).map_err(|e| {
+        let (text, skip) = if created {
+            (text, None)
+        } else {
+            migrate_file(path, text, rewrite)
+        };
+        let mut cfg = Self::parse(&text).map_err(|e| {
             Error::Invalid(format!("invalid config {}: {}", path.display(), msg(e)))
         })?;
+        if let Some(i) = skip
+            && cfg
+                .providers
+                .get(i)
+                .is_some_and(|p| p.id.as_str() == "local")
+        {
+            cfg.providers.remove(i);
+        }
         Ok((cfg, created))
     }
 
@@ -492,6 +516,214 @@ impl Config {
     pub fn load_or_create(paths: &Paths) -> Result<(Self, bool)> {
         Self::load_or_create_at(&paths.config_file())
     }
+}
+
+/// The `[[providers]]` block that builds before the on-device runtime wrote, enabled, into every
+/// new config: an Ollama server most users never installed (QA GG6-4). Compared as TOML values.
+const OLD_DEFAULT_OLLAMA: &str = r#"id = "local"
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:11434/v1"
+model = "qwen3:4b"
+tiers = ["triage", "light", "synthesis"]
+"#;
+
+/// In every config written by builds whose default comments the Ollama example out; never in
+/// the files of the builds that enabled it.
+const CURRENT_DEFAULT_MARKER: &str = "# --- On-device: Ollama (uncomment to use)";
+
+/// Written above the commented-out block by [`migrate_old_default_provider`].
+const MIGRATION_NOTE: [&str; 2] = [
+    "# Turned off by Nugget: earlier versions enabled this example Ollama provider by default.",
+    "# Remove the leading \"# \" from the lines below if you do run Ollama with this model.",
+];
+
+/// What [`migrate_old_default_provider`] decided.
+#[derive(Debug, PartialEq, Eq)]
+enum Migration {
+    /// Nothing to migrate (or the text does not parse; [`Config::parse`] reports that).
+    Unchanged,
+    /// The new file contents: the old default block commented out, every other byte kept.
+    Rewritten(String),
+    /// The old default is provider `[i]`, but rewriting the text safely was not possible: leave
+    /// the file alone and drop the provider in memory.
+    SkipInMemory(usize),
+}
+
+/// Find an untouched old default Ollama provider ([`OLD_DEFAULT_OLLAMA`], nothing changed or
+/// added) and comment it out. Any provider the user added or edited is left alone. Idempotent:
+/// a migrated file has no such block left.
+fn migrate_old_default_provider(text: &str) -> Migration {
+    // One shot: a file this migration already touched, or one written by a build whose default
+    // only offers the block commented out, keeps an enabled block on purpose (the user turned
+    // it on, as the note above it says).
+    if text.contains(MIGRATION_NOTE[0]) || text.contains(CURRENT_DEFAULT_MARKER) {
+        return Migration::Unchanged;
+    }
+    let Some(idx) = old_default_index(text) else {
+        return Migration::Unchanged;
+    };
+    let Ok(doc) = toml::from_str::<toml::Table>(text) else {
+        return Migration::Unchanged;
+    };
+    let count = doc
+        .get("providers")
+        .and_then(toml::Value::as_array)
+        .map_or(0, Vec::len);
+    match comment_out_provider(text, count, idx) {
+        Some(new) => {
+            // Accept the rewrite only if it removes exactly that provider and nothing else.
+            let mut expected = doc.clone();
+            if let Some(toml::Value::Array(a)) = expected.get_mut("providers") {
+                a.remove(idx);
+                if a.is_empty() {
+                    expected.remove("providers");
+                }
+            }
+            match toml::from_str::<toml::Table>(&new) {
+                Ok(got) if got == expected => Migration::Rewritten(new),
+                _ => Migration::SkipInMemory(idx),
+            }
+        }
+        None => Migration::SkipInMemory(idx),
+    }
+}
+
+/// `text` with the `idx`-th of `count` `[[providers]]` blocks commented out line by line (header
+/// and settings; comments and blank lines kept), preceded by [`MIGRATION_NOTE`]. `None` when the
+/// block headers cannot be matched to the providers one to one.
+fn comment_out_provider(text: &str, count: usize, idx: usize) -> Option<String> {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let setting = |l: &str| {
+        let t = l.trim();
+        !t.is_empty() && !t.starts_with('#')
+    };
+    let is_providers_header = |l: &str| {
+        let t = l.split('#').next().unwrap_or("");
+        let compact: String = t.chars().filter(|c| !c.is_whitespace()).collect();
+        compact == "[[providers]]"
+    };
+    let headers: Vec<usize> = (0..lines.len())
+        .filter(|&i| is_providers_header(lines[i]))
+        .collect();
+    if headers.len() != count {
+        return None;
+    }
+    let start = *headers.get(idx)?;
+    let end = (start + 1..lines.len())
+        .find(|&i| lines[i].trim_start().starts_with('['))
+        .unwrap_or(lines.len());
+    let eol = if lines[start].ends_with("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut out = String::with_capacity(text.len() + 200);
+    for l in &lines[..start] {
+        out.push_str(l);
+    }
+    for note in MIGRATION_NOTE {
+        out.push_str(note);
+        out.push_str(eol);
+    }
+    for l in &lines[start..end] {
+        if setting(l) {
+            out.push_str("# ");
+        }
+        out.push_str(l);
+    }
+    for l in &lines[end..] {
+        out.push_str(l);
+    }
+    Some(out)
+}
+
+/// Apply [`migrate_old_default_provider`] to the config file at `path` whose contents are `text`.
+/// Returns the text to parse and, when the file could not be rewritten, the index of the
+/// provider to drop in memory.
+fn migrate_file(path: &Path, text: String, rewrite: bool) -> (String, Option<usize>) {
+    // A symlinked config (dotfile managers) would be replaced by a plain file: leave it alone.
+    let symlink = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    let migration = match migrate_old_default_provider(&text) {
+        Migration::Rewritten(_) if symlink || !rewrite => match old_default_index(&text) {
+            Some(i) => Migration::SkipInMemory(i),
+            None => Migration::Unchanged,
+        },
+        m => m,
+    };
+    match migration {
+        Migration::Unchanged => (text, None),
+        Migration::Rewritten(new) => match write_replacing(path, new.as_bytes()) {
+            Ok(()) => {
+                tracing::info!(
+                    path = %path.display(),
+                    "config migrated: commented out provider `local` (Ollama at 127.0.0.1:11434), \
+                     the unchanged example that earlier versions enabled by default; uncomment it \
+                     to use Ollama"
+                );
+                (new, None)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "config migration: cannot rewrite the file; ignoring provider `local` (the \
+                     unchanged Ollama example that earlier versions enabled by default) for now"
+                );
+                let idx = old_default_index(&text);
+                (text, idx)
+            }
+        },
+        Migration::SkipInMemory(i) => {
+            tracing::warn!(
+                path = %path.display(),
+                "config migration: ignoring provider `local` (the unchanged Ollama example that \
+                 earlier versions enabled by default); comment it out in the file to silence this"
+            );
+            (text, Some(i))
+        }
+    }
+}
+
+/// Index of the untouched old default provider in `text`, if any.
+fn old_default_index(text: &str) -> Option<usize> {
+    let doc = toml::from_str::<toml::Table>(text).ok()?;
+    let old: toml::Table = toml::from_str(OLD_DEFAULT_OLLAMA).ok()?;
+    doc.get("providers")?
+        .as_array()?
+        .iter()
+        .position(|p| p.as_table().is_some_and(|t| *t == old))
+}
+
+/// Replace `path` atomically (temp file in the same directory, then rename), keeping its
+/// permissions.
+fn write_replacing(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "config.toml".into());
+    let tmp = dir.join(format!(".{name}.{}.migrate.tmp", std::process::id()));
+    let perms = std::fs::metadata(path)?.permissions();
+    let res = (|| {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        f.set_permissions(perms)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    res
 }
 
 fn is_model_id(id: &str) -> bool {
@@ -551,13 +783,8 @@ mod tests {
         assert_eq!(cfg.models, ModelsConfig::default());
         assert_eq!(cfg.runtime, RuntimeConfig::default());
         assert!(cfg.runtime.enabled);
-        assert_eq!(cfg.providers.len(), 1);
-        let p = &cfg.providers[0];
-        assert_eq!(p.kind, ProviderKind::OpenaiCompatible);
-        assert_eq!(p.base_url.as_deref(), Some("http://127.0.0.1:11434/v1"));
-        assert_eq!(p.effective_locality().unwrap(), Locality::OnDevice);
-        assert_eq!(p.tiers, vec![Tier::Triage, Tier::Light, Tier::Synthesis]);
-        assert!(p.api_key.is_none());
+        // The runtime serves everything; no provider is routed to until the user adds one.
+        assert!(cfg.providers.is_empty());
     }
 
     #[test]
@@ -575,7 +802,7 @@ mod tests {
         assert!(!DEFAULT_CONFIG.contains("sk-"));
     }
 
-    /// The commented-out cloud examples are valid once uncommented.
+    /// The commented-out provider examples are valid once uncommented.
     #[test]
     fn commented_examples_parse_when_uncommented() {
         let start = DEFAULT_CONFIG.find("# [[providers]]").unwrap();
@@ -598,6 +825,12 @@ mod tests {
                 ProviderKind::OpenaiResponses
             ]
         );
+        // The commented on-device example.
+        let p = &cfg.providers[0];
+        assert_eq!(p.base_url.as_deref(), Some("http://127.0.0.1:11434/v1"));
+        assert_eq!(p.effective_locality().unwrap(), Locality::OnDevice);
+        assert_eq!(p.tiers, vec![Tier::Triage, Tier::Light, Tier::Synthesis]);
+        assert!(p.api_key.is_none());
         for p in &cfg.providers[1..] {
             assert_eq!(p.effective_locality().unwrap(), Locality::Cloud);
             assert!(p.api_key.is_some());
@@ -800,5 +1033,176 @@ mod tests {
         let err = Config::load_or_create(&paths).unwrap_err().to_string();
         assert!(err.contains("config.toml"), "{err}");
         assert!(err.starts_with("invalid input: invalid config"), "{err}");
+    }
+
+    /// A config written by an earlier build: the Ollama example enabled.
+    fn old_default_config() -> String {
+        let commented = "# [[providers]]\n# id = \"local\"\n# kind = \"openai_compatible\"\n# base_url = \"http://127.0.0.1:11434/v1\"\n# model = \"qwen3:4b\"\n# tiers = [\"triage\", \"light\", \"synthesis\"]\n";
+        assert!(DEFAULT_CONFIG.contains(commented));
+        let enabled = commented.replace("# ", "");
+        // Earlier builds' header for the block, without "(uncomment to use)".
+        assert!(DEFAULT_CONFIG.contains(CURRENT_DEFAULT_MARKER));
+        DEFAULT_CONFIG.replacen(commented, &enabled, 1).replacen(
+            CURRENT_DEFAULT_MARKER,
+            "# --- On-device: Ollama",
+            1,
+        )
+    }
+
+    #[test]
+    fn migration_comments_out_the_untouched_old_default() {
+        let old = old_default_config();
+        assert_eq!(Config::parse(&old).unwrap().providers.len(), 1);
+        let Migration::Rewritten(new) = migrate_old_default_provider(&old) else {
+            panic!("not migrated");
+        };
+        assert!(Config::parse(&new).unwrap().providers.is_empty());
+        // Every other byte is kept: dropping the note and the added "# " gives the old file.
+        let mut restored = new.clone();
+        for note in MIGRATION_NOTE {
+            restored = restored.replacen(&format!("{note}\n"), "", 1);
+        }
+        let commented = "# [[providers]]\n# id = \"local\"\n# kind = \"openai_compatible\"\n# base_url = \"http://127.0.0.1:11434/v1\"\n# model = \"qwen3:4b\"\n# tiers = [\"triage\", \"light\", \"synthesis\"]\n";
+        assert_eq!(restored.matches(commented).count(), 1, "{new}");
+        let first = restored.find(commented).unwrap();
+        restored.replace_range(first..first + commented.len(), &commented.replace("# ", ""));
+        assert_eq!(restored, old);
+        // Idempotent.
+        assert_eq!(migrate_old_default_provider(&new), Migration::Unchanged);
+        assert_eq!(
+            migrate_old_default_provider(DEFAULT_CONFIG),
+            Migration::Unchanged
+        );
+    }
+
+    /// KK1 review: the migration is one shot. A block the user turned back on (after the note,
+    /// or in a config from a build whose default only offers it commented out) stays on.
+    #[test]
+    fn a_block_the_user_turned_back_on_stays_on() {
+        let Migration::Rewritten(migrated) = migrate_old_default_provider(&old_default_config())
+        else {
+            panic!("not migrated");
+        };
+        let commented = "# [[providers]]\n# id = \"local\"\n# kind = \"openai_compatible\"\n# base_url = \"http://127.0.0.1:11434/v1\"\n# model = \"qwen3:4b\"\n# tiers = [\"triage\", \"light\", \"synthesis\"]\n";
+        let enabled = commented.replace("# ", "");
+        // The user follows the note and turns the migrated block back on.
+        let turned_on = migrated.replacen(commented, &enabled, 1);
+        assert!(turned_on.contains(MIGRATION_NOTE[0]));
+        assert_eq!(Config::parse(&turned_on).unwrap().providers.len(), 1);
+        assert_eq!(
+            migrate_old_default_provider(&turned_on),
+            Migration::Unchanged
+        );
+
+        let current = DEFAULT_CONFIG.replacen(commented, &enabled, 1);
+        assert_ne!(
+            current, DEFAULT_CONFIG,
+            "the current default still has the example"
+        );
+        assert_eq!(Config::parse(&current).unwrap().providers.len(), 1);
+        assert_eq!(migrate_old_default_provider(&current), Migration::Unchanged);
+    }
+
+    /// KK1 review: a symlinked config is never replaced by a plain file; the old default is
+    /// only ignored in memory.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_config_is_not_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.toml");
+        let link = dir.path().join("config.toml");
+        std::fs::write(&real, old_default_config()).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let (cfg, created) = Config::load_or_create_at(&link).unwrap();
+        assert!(!created);
+        assert!(cfg.providers.iter().all(|p| p.id.as_str() != "local"));
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&real).unwrap(),
+            old_default_config()
+        );
+    }
+
+    #[test]
+    fn migration_keeps_crlf_and_other_providers() {
+        let text = "[[providers]]\r\nid = \"anthropic\"\r\nkind = \"anthropic\"\r\nmodel = \"m\"\r\napi_key = \"env:K\"\r\n\r\n[[providers]] # mine\r\nid = \"local\"\r\nkind = \"openai_compatible\"\r\nbase_url = \"http://127.0.0.1:11434/v1\"\r\nmodel = \"qwen3:4b\"\r\ntiers = [\"triage\", \"light\", \"synthesis\"]\r\n\r\n[mcp]\r\nport = 1\r\n";
+        let Migration::Rewritten(new) = migrate_old_default_provider(text) else {
+            panic!("not migrated");
+        };
+        let cfg = Config::parse(&new).unwrap();
+        assert_eq!(cfg.providers.len(), 1);
+        assert_eq!(cfg.providers[0].id.as_str(), "anthropic");
+        assert_eq!(cfg.mcp.port, 1);
+        assert!(
+            new.contains("# [[providers]] # mine\r\n# id = \"local\"\r\n"),
+            "{new}"
+        );
+        assert!(!new.replace("\r\n", "").contains('\n'), "{new:?}");
+    }
+
+    #[test]
+    fn migration_leaves_edited_or_user_added_providers_alone() {
+        let old = old_default_config();
+        let variants = [
+            old.replace("model = \"qwen3:4b\"", "model = \"qwen3:8b\""),
+            old.replace("127.0.0.1:11434/v1", "127.0.0.1:11435/v1"),
+            old.replace("id = \"local\"\nkind", "id = \"ollama\"\nkind"),
+            old.replace(
+                "tiers = [\"triage\", \"light\", \"synthesis\"]\n",
+                "tiers = [\"triage\", \"light\", \"synthesis\"]\ncontext_tokens = 8192\n",
+            ),
+            old.replace(
+                "tiers = [\"triage\", \"light\", \"synthesis\"]\n",
+                "tiers = [\"triage\"]\n",
+            ),
+            old.replace(
+                "tiers = [\"triage\", \"light\", \"synthesis\"]\n",
+                "tiers = [\"triage\", \"light\", \"synthesis\"]\n[providers.headers]\nx-a = \"b\"\n",
+            ),
+            // A user's own Ollama provider with another model.
+            "[[providers]]\nid = \"local\"\nkind = \"openai_compatible\"\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"llama3.2\"\n".to_string(),
+        ];
+        for v in variants {
+            assert_ne!(v, old);
+            assert_eq!(Config::parse(&v).unwrap().providers.len(), 1, "{v}");
+            assert_eq!(
+                migrate_old_default_provider(&v),
+                Migration::Unchanged,
+                "{v}"
+            );
+        }
+    }
+
+    #[test]
+    fn load_migrates_the_file_once_and_skips_in_memory_when_text_is_unusual() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, old_default_config()).unwrap();
+        let (cfg, created) = Config::load_or_create_at(&path).unwrap();
+        assert!(!created);
+        assert!(cfg.providers.is_empty());
+        let migrated = std::fs::read_to_string(&path).unwrap();
+        assert!(migrated.contains(MIGRATION_NOTE[0]));
+        let (cfg, _) = Config::load_or_create_at(&path).unwrap();
+        assert!(cfg.providers.is_empty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), migrated);
+        let leftovers: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().collect();
+        assert_eq!(leftovers.len(), 1);
+
+        // Written as an inline array: the text is left alone, the provider is skipped.
+        let inline = "providers = [{ id = \"local\", kind = \"openai_compatible\", base_url = \"http://127.0.0.1:11434/v1\", model = \"qwen3:4b\", tiers = [\"triage\", \"light\", \"synthesis\"] }]\n";
+        std::fs::write(&path, inline).unwrap();
+        assert_eq!(
+            migrate_old_default_provider(inline),
+            Migration::SkipInMemory(0)
+        );
+        let (cfg, _) = Config::load_or_create_at(&path).unwrap();
+        assert!(cfg.providers.is_empty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), inline);
     }
 }

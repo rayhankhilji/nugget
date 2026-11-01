@@ -7,6 +7,7 @@
     "addSource.vault.defaultName",
     "app.name",
     "app.nav.doubletap",
+    "backup.list.when",
     "chat.providerOption",
     "common.listSeparator",
     "connectApp.namePlaceholder",
@@ -21,10 +22,13 @@
     "format.sourceKind.gdrive",
     "format.sourceKind.github",
     "format.sourceKind.gmail",
+    "format.sourceKind.imessage",
     "format.sourceKind.linear",
     "format.sourceKind.notion",
     "format.sourceKind.onedrive",
     "format.sourceKind.slack",
+    "format.sourceKind.telegram",
+    "format.sourceKind.whatsapp",
     "knowledge.range",
     "models.progressValueText",
     "onboarding.byok.provider.anthropic",
@@ -39,7 +43,12 @@
     "shortcuts.key.ctrl",
     "shortcuts.key.esc",
     "status.version",
-    "today.learned.line"
+    "today.actionFullName",
+    "today.learned.line",
+    "shell.tray.doubleTap"
+  ],
+  "ar": [
+    "shortcuts.key.enter"
   ],
   "de": [
     "addSource.imap.port",
@@ -55,10 +64,15 @@
     "app.nav.status",
     "apps.col.app",
     "apps.col.tools",
+    "backup.passphrase.new",
     "chat.md.code",
     "chat.title",
     "common.details",
     "connectApp.tabsLabel",
+    "entity.attr.handle",
+    "entity.attr.team",
+    "entity.attr.url",
+    "entity.attr.website",
     "format.locality.cloud",
     "format.tier.embedding",
     "format.tier.rerank",
@@ -79,6 +93,8 @@
     "safety.rule.id",
     "search.budget",
     "settings.languageSystem",
+    "sources.details",
+    "sources.detailsId",
     "status.cap.embeddings",
     "status.cap.streaming",
     "status.cap.tools",
@@ -91,7 +107,13 @@
     "status.vault",
     "today.learning.scope.domain",
     "updates.badge.beta",
-    "updates.title"
+    "updates.title",
+    "shell.tray.status",
+    "shell.tray.updates",
+    "searchui.kind.chat",
+    "searchui.saveName",
+    "searchui.text",
+    "status.runtime.details"
   ],
   "es": [
     "addSource.linear.include",
@@ -112,13 +134,15 @@
     "privacy.col.host",
     "privacy.stat.hosts",
     "search.budgetTokens",
+    "sources.detailsId",
     "status.cap.embeddings",
     "status.cap.streaming",
     "status.contextTokens",
     "status.embeddings",
     "status.role.chat",
     "status.role.embedding",
-    "updates.badge.beta"
+    "updates.badge.beta",
+    "searchui.kind.chat"
   ],
   "fr": [
     "addSource.folder.defaultNone",
@@ -127,6 +151,7 @@
     "addSource.imap.tlsImplicit",
     "addSource.imap.tlsStarttls",
     "addSource.linear.include",
+    "addSource.messages.options",
     "addSource.slack.conversations",
     "agent.field.verb",
     "agent.history.col.actions",
@@ -152,10 +177,12 @@
     "graph.source",
     "knowledge.page",
     "merge.mentions",
+    "onboarding.done.summary.sources",
     "palette.group.action",
     "palette.group.page",
     "plugins.title",
     "plugins.version",
+    "quickAsk.sources",
     "safety.log.chainOk",
     "safety.rule.description",
     "safety.rule.verbs",
@@ -171,13 +198,20 @@
     "status.mentions",
     "today.factor.importance",
     "updates.badge.stable",
-    "updates.channel.stable"
+    "updates.channel.stable",
+    "appSettings.notifyHeading",
+    "searchui.facet.date",
+    "searchui.facet.source"
   ],
   "hi": [
     "addSource.linear.include",
+    "shortcuts.key.enter",
+    "sources.detailsId",
     "status.contextTokens"
   ],
   "ja": [
+    "shortcuts.key.enter",
+    "sources.detailsId",
     "status.contextTokens"
   ],
   "pt-BR": [
@@ -186,10 +220,12 @@
     "app.nav.plugins",
     "app.nav.status",
     "apps.col.app",
+    "backup.list.title",
     "chat.title",
     "chat.tokens",
     "connectApp.tabsLabel",
     "connectApp.tokenWhat",
+    "entity.attr.url",
     "format.duration.dh",
     "format.duration.s",
     "offline.socket",
@@ -198,6 +234,8 @@
     "privacy.col.host",
     "privacy.stat.hosts",
     "search.budgetTokens",
+    "shortcuts.key.enter",
+    "sources.detailsId",
     "status.cap.embeddings",
     "status.cap.streaming",
     "status.contextTokens",
@@ -206,7 +244,11 @@
     "status.role.chat",
     "status.role.embedding",
     "status.title",
-    "updates.badge.beta"
+    "updates.badge.beta",
+    "shell.tray.status"
   ],
-  "zh-CN": []
+  "zh-CN": [
+    "shortcuts.key.enter",
+    "sources.detailsId"
+  ]
 }

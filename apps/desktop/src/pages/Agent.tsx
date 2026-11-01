@@ -10,6 +10,7 @@ import {
   type ConfirmChoice,
 } from "../api";
 import {
+  answered,
   canApproveForTask,
   emptyRun,
   isLive,
@@ -33,6 +34,7 @@ import { useAsync, useEvent, useNow } from "../hooks";
 import { formatRelative, formatTime } from "../format";
 import { Dialog } from "../components/Dialog";
 import { GoToPage } from "../components/GoToPage";
+import { isMac } from "../hooks.shortcuts";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatNumber, useT, type MessageKey } from "../i18n";
 
@@ -68,7 +70,7 @@ export function AgentPage() {
       return;
     }
     if (e.event === "confirmation_needed") setAnnounce(t("agent.announce.confirm", { tool: e.request.tool }));
-    else if (e.event === "suspended") setAnnounce(t("agent.announce.question"));
+    else if (e.event === "suspended") setAnnounce(e.options?.length ? t("agent.announce.questionOptions", { n: e.options.length }) : t("agent.announce.question"));
     else if (e.event === "finished") {
       setAnnounce(t("agent.announce.finished", { outcome: outcomeLabel(e.outcome.outcome) }));
       reloadHistory();
@@ -174,24 +176,35 @@ export function AgentPage() {
               )}
             </div>
           </div>
-          {live && !run.question && !run.pending.length && (
+          {live && run.question === null && !run.pending.length && (
             <p className="muted small agent-working">
               <Spinner label={t("agent.run.working")} /> {t("agent.run.working")}
             </p>
           )}
           <Timeline run={run} onReview={(id) => setLater((l) => l.filter((x) => x !== id))} />
-          {run.question && <AnswerForm taskId={run.taskId} question={run.question} onAnswered={() => setRuns((r) => (r[run.taskId] ? { ...r, [run.taskId]: { ...r[run.taskId]!, question: null, outcome: null } } : r))} />}
+          {run.question !== null && (
+            <AnswerForm
+              key={run.question || "(no question)"}
+              taskId={run.taskId}
+              question={run.question}
+              options={run.options}
+              onAnswered={() => {
+                setRuns((r) => (r[run.taskId] ? { ...r, [run.taskId]: answered(r[run.taskId]!) } : r));
+                setAnnounce(t("agent.announce.answered"));
+              }}
+            />
+          )}
           {run.outcome && run.outcome.outcome !== "needs_input" && <OutcomePanel outcome={run.outcome} summary={run.summary} counts={run.verification} injections={run.injections} />}
         </section>
       ) : (
         <>
           {noModel && (
-            <p className="note" role="note">
+            <div className="note note-warn agent-no-model" role="note">
               <span>
                 <strong>{t("agent.noModel.title")}</strong> {t("agent.noModel.body")}
-              </span>{" "}
-              <GoToPage page="models" className="btn btn-ghost btn-small" />
-            </p>
+              </span>
+              <GoToPage page="models" className="btn" />
+            </div>
           )}
           <RunForm halted={halted} onStarted={started} />
         </>
@@ -204,6 +217,7 @@ export function AgentPage() {
           key={shown.request.request_id}
           pending={shown}
           taskId={run.taskId}
+          halted={halted}
           onLater={() => setLater((l) => [...l, shown.request.request_id])}
         />
       )}
@@ -251,7 +265,9 @@ function RunForm({ halted, onStarted }: { halted: boolean; onStarted: (taskId: s
           }}
         />
         <p id={ids.hint} className="field-hint muted small">
-          {t("agent.form.goalHint")}
+          {t("agent.form.goalHint", {
+            keys: isMac() ? `⌘${t("shortcuts.key.enter")}` : `${t("shortcuts.key.ctrl")}+${t("shortcuts.key.enter")}`,
+          })}
         </p>
       </div>
       <details className="help">
@@ -315,6 +331,13 @@ function TimelineEntry({ item, run, onReview }: { item: TimelineItem; run: RunVi
         <div>
           <span className="tl-label">{t("agent.timeline.question")}</span>
           <p className="tl-text">{item.question}</p>
+          {item.options.length > 0 && (
+            <ul className="muted small">
+              {item.options.map((o, i) => (
+                <li key={i}>{o}</li>
+              ))}
+            </ul>
+          )}
         </div>
       );
     case "finished":
@@ -383,19 +406,23 @@ function ActionEntry({ item, pending, onReview }: { item: ActionItem; pending: P
   );
 }
 
-function AnswerForm({ taskId, question, onAnswered }: { taskId: string; question: string; onAnswered: () => void }) {
+/**
+ * The agent's open question. With candidate options (untrusted screen text, shown as plain text)
+ * each is a button that answers with its text; the free-text box stays for anything else.
+ */
+function AnswerForm({ taskId, question, options, onAnswered }: { taskId: string; question: string; options: string[]; onAnswered: () => void }) {
   const t = useT();
   const id = useId();
+  const questionId = `${id}-question`;
+  const hintId = `${id}-hint`;
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!answer.trim()) return;
+  const send = async (text: string) => {
     setBusy(true);
     setError(null);
     try {
-      await agentApi.agentAnswer(taskId, answer.trim());
+      await agentApi.agentAnswer(taskId, text);
       onAnswered();
     } catch (err) {
       setError(err);
@@ -403,11 +430,34 @@ function AnswerForm({ taskId, question, onAnswered }: { taskId: string; question
       setBusy(false);
     }
   };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!answer.trim()) return;
+    void send(answer.trim());
+  };
+  const hasOptions = options.length > 0;
   return (
-    <form className="card agent-answer" onSubmit={(e) => void submit(e)}>
+    <form className="card agent-answer" onSubmit={submit}>
       <div className="field">
-        <label htmlFor={id}>{t("agent.question.label")}</label>
-        <p className="tl-text">{question}</p>
+        {hasOptions ? <span className="tl-label">{t("agent.question.label")}</span> : <label htmlFor={id}>{t("agent.question.label")}</label>}
+        <p className="tl-text" id={questionId}>
+          {question.trim() || t("agent.question.empty")}
+        </p>
+        {hasOptions && (
+          <>
+            <p className="muted small" id={hintId}>
+              {t("agent.question.optionsHint")}
+            </p>
+            <div className="page-actions agent-options" role="group" aria-labelledby={questionId} aria-describedby={hintId}>
+              {options.map((o, i) => (
+                <button key={i} type="button" className="btn" disabled={busy} onClick={() => void send(o)}>
+                  {o}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {hasOptions && <label htmlFor={id}>{t("agent.question.other")}</label>}
         <textarea id={id} rows={2} value={answer} onChange={(e) => setAnswer(e.target.value)} />
       </div>
       <ErrorNote error={error} />
@@ -465,7 +515,7 @@ function VerificationStats({ counts, injections }: { counts: AgentVerificationCo
   );
 }
 
-function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmation; taskId: string; onLater: () => void }) {
+function ConfirmDialog({ pending, taskId, halted, onLater }: { pending: PendingConfirmation; taskId: string; halted: boolean; onLater: () => void }) {
   const t = useT();
   const now = useNow(1000);
   const [busy, setBusy] = useState(false);
@@ -473,6 +523,9 @@ function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmat
   const r = pending.request;
   const a = r.action;
   const left = secondsLeft(pending, now);
+  // After Stop all agents nothing can be approved (the daemon refuses it too); Deny stays.
+  const closed = busy || left === 0;
+  const noApprove = closed || halted;
 
   const choose = async (choice: ConfirmChoice) => {
     setBusy(true);
@@ -491,6 +544,13 @@ function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmat
         <div className="note note-warn" role="note">
           <span>
             <strong>{t("agent.confirm.injectionTitle")}</strong> {t("agent.confirm.injectionBody")}
+          </span>
+        </div>
+      )}
+      {halted && (
+        <div className="note note-warn" role="alert">
+          <span>
+            <strong>{t("agent.halted.title")}</strong> {t("agent.confirm.haltedBody")}
           </span>
         </div>
       )}
@@ -522,6 +582,7 @@ function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmat
             <dt>{t("agent.field.preview")}</dt>
             <dd>
               <pre className="confirm-preview">{a.text_preview}</pre>
+              {(a.declared_risk === "send" || a.declared_risk === "destroy") && <p className="small muted">{t("agent.confirm.exactly")}</p>}
             </dd>
           </div>
         )}
@@ -534,15 +595,15 @@ function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmat
         <button type="button" className="btn btn-ghost" onClick={onLater} disabled={busy}>
           {t("agent.confirm.later")}
         </button>
-        <button type="button" className="btn btn-danger" onClick={() => void choose("deny")} disabled={busy || left === 0} data-autofocus="">
+        <button type="button" className="btn btn-danger" onClick={() => void choose("deny")} disabled={closed} data-autofocus="">
           {t("agent.confirm.deny")}
         </button>
         {canApproveForTask(a.declared_risk) && (
-          <button type="button" className="btn" onClick={() => void choose("task")} disabled={busy || left === 0}>
+          <button type="button" className="btn" onClick={() => void choose("task")} disabled={noApprove}>
             {t("agent.confirm.approveTask")}
           </button>
         )}
-        <button type="button" className="btn btn-primary" onClick={() => void choose("once")} disabled={busy || left === 0}>
+        <button type="button" className="btn btn-primary" onClick={() => void choose("once")} disabled={noApprove}>
           {t("agent.confirm.approveOnce")}
         </button>
       </div>
@@ -651,6 +712,13 @@ function DetailDialog({ taskId, onClose }: { taskId: string; onClose: () => void
             <p>
               <span className="tl-label">{t("agent.timeline.question")}</span> {d.question}
             </p>
+          )}
+          {d.question && (d.options?.length ?? 0) > 0 && (
+            <ul className="muted small">
+              {d.options!.map((o, i) => (
+                <li key={i}>{o}</li>
+              ))}
+            </ul>
           )}
           {d.pending.length > 0 && <p className="note">{t("agent.detail.pending", { n: d.pending.length })}</p>}
           <h3>{t("agent.detail.explain")}</h3>

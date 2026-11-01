@@ -57,7 +57,7 @@ In the knowledge graph (focus the canvas first):
 | `+` `-` | Zoom in and out |
 | 0 or F | Fit the graph to the view |
 | Enter or Space | Open the focused entity |
-| C | Centre on the focused entity |
+| C | Center on the focused entity |
 | Escape | Clear the focus (Tab then leaves the canvas) |
 
 ## How it is tested

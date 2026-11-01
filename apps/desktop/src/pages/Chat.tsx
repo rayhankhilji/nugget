@@ -9,17 +9,23 @@ import {
   errorMessage,
   isCommandMissing,
   isOpenableUrl,
+  onAskRestarted,
+  type AnswerCheck,
+  type AskRestarted,
+  type AskDateFilter,
   type AskStarted,
   type ChatDone,
   type ChatMessage,
   type Citation,
   type ProviderInfo,
+  type QuickAskHandover,
   type StoredChatMessage,
   type StoredConversation,
   type Tier,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
-import { usePendingNewChat } from "../hooks.nav";
+import { usePendingChatHandover, usePendingNewChat } from "../hooks.nav";
+import { handoverCitations, handoverExpired } from "../quickask/handover";
 import { localityLabel, tierLabel } from "../format";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
@@ -28,6 +34,8 @@ import { Announce, useAnnouncer } from "../components/Announce";
 import { Markdown, type CitationLinks } from "../components/Markdown";
 import { citedNumbers, groupSources, stripCitationMarkers, withheldNotice, type SourceEntry } from "../citations";
 import { Trans, useT } from "../i18n";
+import { askCitations } from "../askSearch";
+import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
 import "../styles-chat.css";
 
 interface Turn {
@@ -46,8 +54,12 @@ interface Turn {
   queryRewrite?: string;
   /** Sensitive items withheld from a cloud model (not saved). */
   excludedSensitive?: number;
+  /** JJ2: the question's date range and how it filtered the search (not saved). */
+  dateFilter?: AskDateFilter;
   /** Sources were on but none matched, so this is a plain chat answer. */
   generalAnswer?: boolean;
+  /** The daemon's post-check of a sourced answer (`chat.done`), when it came with one. */
+  check?: AnswerCheck;
 }
 
 const SOURCES_KEY = "nugget.chat.useSources";
@@ -73,15 +85,66 @@ export function writeUseSources(on: boolean): void {
 interface Early {
   text: string;
   done?: ChatDone;
+  /** The latest `ask.restarted`: the stream moved on to another provider before the reply came. */
+  restarted?: AskRestarted;
+}
+
+/** A sourced reply's stream moved on to another provider: its sources and provider are now these. */
+function restartTurn(turn: Turn, r: AskRestarted): Turn {
+  return {
+    ...turn,
+    provider: r.provider,
+    citations: r.general ? undefined : askCitations(r),
+    excludedSensitive: r.excluded_sensitive ?? 0,
+    generalAnswer: r.general ? true : undefined,
+    dateFilter: r.date ?? undefined,
+  };
 }
 
 let nextTurnId = 1;
+
+/**
+ * An answer check as the page uses it, from `chat.done` or a saved turn (which may predate it or
+ * come from another version); `undefined` when there is nothing usable.
+ */
+export function answerCheckOf(v: unknown): AnswerCheck | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const c = v as Partial<Record<keyof AnswerCheck, unknown>>;
+  const count = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+  const flagged = (Array.isArray(c.flagged) ? c.flagged : []).flatMap((f: unknown) => {
+    const x = f as { text?: unknown; reason?: unknown } | null;
+    if (!x || typeof x.text !== "string" || !x.text.trim()) return [];
+    // The reason is kept as sent (a newer one is only labelled like `unsupported`); none at all means `unsupported`.
+    return [{ text: x.text, reason: typeof x.reason === "string" && x.reason ? x.reason : "unsupported" }];
+  });
+  return { not_found: c.not_found === true, claims: count(c.claims), flagged, invalid_citations: count(c.invalid_citations) };
+}
 
 /** Bounds matching `src-tauri/src/history.rs` (chars, so the byte limits always hold). */
 const MAX_SAVED_TEXT = 60_000;
 const MAX_SAVED_ERROR = 1_000;
 const MAX_SAVED_MESSAGES = 200;
 const MAX_TITLE = 80;
+/** Flagged claims saved per answer (`MAX_FLAGGED` in history.rs), and chars kept of each claim and reason. */
+const MAX_SAVED_FLAGGED = 200;
+const MAX_SAVED_CLAIM = 1_000;
+const MAX_SAVED_REASON = 64;
+/** A saved check's JSON size limit (`MAX_MESSAGE_BYTES` in history.rs). */
+const MAX_SAVED_CHECK_BYTES = 256 * 1024;
+
+/**
+ * A check as saved with its (possibly cut) reply text: only claims that are in that text, bounded
+ * so the shell never refuses the conversation; the flagged list goes if it is still too big.
+ */
+export function storedCheck(check: AnswerCheck, text: string): AnswerCheck {
+  const flagged = check.flagged
+    .filter((f) => text.includes(f.text))
+    .slice(0, MAX_SAVED_FLAGGED)
+    .map((f) => ({ text: f.text.slice(0, MAX_SAVED_CLAIM), reason: f.reason.slice(0, MAX_SAVED_REASON) }));
+  const out: AnswerCheck = { ...check, flagged };
+  if (new TextEncoder().encode(JSON.stringify(out)).length > MAX_SAVED_CHECK_BYTES) out.flagged = [];
+  return out;
+}
 
 function newConversationId(): string {
   return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -101,6 +164,7 @@ function toStored(turns: readonly Turn[]): StoredChatMessage[] {
     if (x.tokens?.output != null) m.output_tokens = x.tokens.output;
     if (x.citations?.length) m.citations = x.citations;
     if (x.generalAnswer) m.general_answer = true;
+    if (x.check) m.check = storedCheck(x.check, text);
     return m;
   });
 }
@@ -119,6 +183,7 @@ function fromStored(messages: readonly StoredChatMessage[]): Turn[] {
           tokens: m.output_tokens != null ? { input: null, output: m.output_tokens } : undefined,
           citations: m.citations ?? undefined,
           generalAnswer: m.general_answer === true || undefined,
+          check: answerCheckOf(m.check),
         },
   );
 }
@@ -236,6 +301,7 @@ export function ChatPage() {
     state: done.error ? (/cancel/i.test(done.error) ? "cancelled" : "error") : "done",
     error: done.error ?? undefined,
     tokens: { input: done.input_tokens, output: done.output_tokens },
+    check: done.error ? undefined : answerCheckOf(done.check),
   });
 
   // Stream ids already attached to a turn. Updated synchronously (unlike state), so an event
@@ -272,6 +338,18 @@ export function ChatPage() {
     }
   });
 
+  // EE3: an Ask stream moved on to another provider (before any delta of it): new sources.
+  useEvent(onAskRestarted, (r) => {
+    if (dropped.current.has(r.stream_id)) return;
+    if (attached.current.has(r.stream_id)) {
+      setTurns((ts) => ts.map((x) => (x.streamId === r.stream_id && isActive(x) ? restartTurn(x, r) : x)));
+    } else if (awaiting.current > 0) {
+      const e = early.current.get(r.stream_id) ?? { text: "" };
+      e.restarted = r;
+      early.current.set(r.stream_id, e);
+    }
+  });
+
   // A reply that streamed here is announced once it is complete, never per delta. A failed one
   // announces itself through its alert; a stopped one through `stop`.
   const streamed = useRef(new Set<number>());
@@ -279,9 +357,19 @@ export function ChatPage() {
     for (const x of turns) {
       if (isActive(x)) streamed.current.add(x.id);
       else if (streamed.current.delete(x.id) && x.state === "done") {
+        if (x.check?.not_found) {
+          announce(t("chat.notFoundAnnounce"));
+          continue;
+        }
         const citations = x.citations ?? [];
         const cited = citedNumbers(x.text, new Set(citations.map((c) => c.n)));
-        announce(t("announce.answerReady", { count: groupSources(citations, cited).cited.length }));
+        const sources = groupSources(citations, cited).cited.length;
+        const flagged = x.check?.flagged.length ?? 0;
+        announce(
+          flagged > 0
+            ? t("announce.answerFlagged", { sources, flagged })
+            : t("announce.answerReady", { count: sources }),
+        );
       }
     }
   }, [turns, announce, t]);
@@ -342,13 +430,16 @@ export function ChatPage() {
             state: buffered?.text ? "streaming" : "pending",
           };
           if (asked) {
-            next.citations = asked.citations;
+            next.citations = askCitations(asked);
             next.queryRewrite = asked.query_rewrite ?? undefined;
             next.excludedSensitive = asked.excluded_sensitive ?? 0;
+            next.dateFilter = asked.date ?? undefined;
           } else if (general) {
             next.generalAnswer = true;
             next.excludedSensitive = general.excluded_sensitive ?? 0;
+            next.dateFilter = general.date ?? undefined;
           }
+          if (buffered?.restarted && (asked || general)) next = restartTurn(next, buffered.restarted);
           if (buffered?.done) next = finish(next, buffered.done);
           return next;
         }),
@@ -387,6 +478,53 @@ export function ChatPage() {
     inputRef.current?.focus();
   };
   usePendingNewChat(startNew);
+
+  // JJ2: quick ask's "Open in Chat": a new conversation with its question and finished answer
+  // (saved like any other), or with the question in the composer when there was no answer yet.
+  // While a reply streams it waits for it to end; a draft in the composer is never replaced.
+  const queuedHandover = useRef<QuickAskHandover | null>(null);
+  const applyHandover = (h: QuickAskHandover) => {
+    const question = h.question.trim();
+    if (!question) return;
+    freshChat.current = true;
+    setConvId(newConversationId());
+    setConfirmClear(false);
+    lastSaved.current = "";
+    const a = h.answer;
+    if (a && a.text.trim()) {
+      const citations = handoverCitations(a.citations);
+      setTurns([
+        { id: nextTurnId++, role: "user", text: question },
+        {
+          id: nextTurnId++,
+          role: "assistant",
+          text: a.text,
+          state: "done",
+          provider: a.provider ?? undefined,
+          citations: citations.length ? citations : undefined,
+          generalAnswer: a.general === true || undefined,
+          dateFilter: a.date ?? undefined,
+        },
+      ]);
+    } else {
+      setTurns([]);
+      setInput((draft) => (draft.trim() ? draft : question));
+    }
+    inputRef.current?.focus();
+  };
+  usePendingChatHandover((h) => {
+    if (handoverExpired(h)) return;
+    if (active) queuedHandover.current = h;
+    else applyHandover(h);
+  });
+  useEffect(() => {
+    const h = queuedHandover.current;
+    if (active || !h) return;
+    queuedHandover.current = null;
+    applyHandover(h);
+    // Once the reply that held it back has ended.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   const open = (c: StoredConversation) => {
     if (active || c.id === convId) return;
@@ -638,6 +776,7 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
   const opener = onOpenLink;
   const sourcesRef = useRef<HTMLDivElement>(null);
   const [showMore, setShowMore] = useState(false);
+  const [showFlagged, setShowFlagged] = useState(false);
   /** A source to focus once the list that holds it has been expanded. */
   const [pendingFocus, setPendingFocus] = useState<number | null>(null);
 
@@ -692,6 +831,9 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
   }, [turn.citations, opener, t, sources, showMore, focusSource]);
   const withheld = turn.provider ? withheldNotice(turn.excludedSensitive, turn.provider) : null;
   const moreId = `msg-${turn.id}-more-sources`;
+  const flaggedId = `msg-${turn.id}-flagged`;
+  const check = turn.state === "done" ? turn.check : undefined;
+  const flagged = check && !check.not_found ? check.flagged : [];
 
   const sourceItem = (e: SourceEntry<Citation>) => {
     const first = e.citations[0]!;
@@ -704,6 +846,7 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
           <span className="citation-title" dir="auto">
             {title}
           </span>
+          {e.citations.some((c) => c.partial) && <PartialBadge />}
         </span>
         {url && isOpenableUrl(url) && (
           <button
@@ -720,6 +863,9 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
   };
 
   const streaming = isActive(turn);
+  // EE3: the sources arrive with the reply, long before its first words on a slow model: while
+  // the model reads them, say so and list them all (nothing is cited yet).
+  const reading = turn.role === "assistant" && turn.state === "pending" && !turn.text && !!turn.citations?.length;
   return (
     <li className={`msg msg-${turn.role}`}>
       <div className="msg-meta">
@@ -742,17 +888,54 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         <div className="msg-body msg-md" dir="auto">
           {turn.text && <Markdown text={turn.text} onOpenLink={onOpenLink} citations={cite} />}
           {streaming && <span className="caret" aria-hidden="true" />}
-          {turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>}
+          {reading ? (
+            <p className="muted small chat-reading">{t("chat.reading", { count: turn.citations!.length })}</p>
+          ) : (
+            turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>
+          )}
         </div>
       )}
       {turn.queryRewrite && <p className="muted small chat-rewrite">{t("chat.searchedFor", { query: turn.queryRewrite })}</p>}
+      <AskDateNote date={turn.dateFilter} className="chat-dates" />
       {turn.generalAnswer && <p className="muted small chat-general">{t("chat.generalAnswer")}</p>}
+      {check?.not_found && <p className="muted small chat-not-found">{t("chat.notFound")}</p>}
+      {flagged.length > 0 && (
+        <div className="chat-check">
+          <button
+            type="button"
+            className="btn btn-ghost btn-small chat-check-toggle"
+            aria-expanded={showFlagged}
+            aria-controls={flaggedId}
+            onClick={() => setShowFlagged((v) => !v)}
+          >
+            {t("chat.check.flagged", { count: flagged.length })}
+          </button>
+          {showFlagged && (
+            <ul className="chat-check-list small" id={flaggedId}>
+              {flagged.map((f, i) => (
+                <li key={i} className="chat-check-claim">
+                  <Trans
+                    k={f.reason === "uncited" ? "chat.check.uncited" : "chat.check.unsupported"}
+                    args={{ text: f.text }}
+                    tags={{
+                      reason: (c) => <span className="chat-check-reason muted">{c}</span>,
+                      claim: (c) => <span dir="auto">{c}</span>,
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {withheld && <p className="note small">{withheld}</p>}
       {turn.role === "assistant" && !!turn.citations?.length && (
         <div className="chat-sources" ref={sourcesRef}>
           <h3 className="chat-sources-title small muted">{t("chat.sources")}</h3>
           {sources.cited.length > 0 && <ol className="citations chat-citations">{sources.cited.map(sourceItem)}</ol>}
-          {sources.uncited.length > 0 && (
+          {reading ? (
+            <ol className="citations chat-citations chat-citations-reading">{sources.uncited.map(sourceItem)}</ol>
+          ) : sources.uncited.length > 0 && (
             <>
               <button
                 type="button"

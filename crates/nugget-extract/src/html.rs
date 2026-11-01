@@ -1,5 +1,7 @@
 //! HTML → readable text with a streaming tokenizer (no DOM, so no recursion on deep nesting).
-//! Drops script/style/template/svg; keeps the title, links and h1–h6 sections. For mail, quoted
+//! Drops script/style/template/svg, comments and hidden elements (`hidden`, `aria-hidden="true"`,
+//! inline `display:none` / `visibility:hidden` / `font-size:0`); keeps the title, links and h1–h6
+//! sections. For mail, quoted
 //! replies and signatures can be diverted into separate buffers.
 
 use std::cell::RefCell;
@@ -144,6 +146,100 @@ const SKIP_RAW: &[&str] = &[
 ];
 const SKIP_NESTED: &[&str] = &["template", "svg", "math", "object", "canvas", "select"];
 
+/// Elements without content or end tag: hiding them hides nothing to skip.
+const VOID: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
+];
+
+/// Whether a reader never sees `tag`'s content: the `hidden` attribute (except
+/// `hidden="until-found"`, which find-in-page reveals), `aria-hidden="true"`, or an inline style
+/// with `display:none`, `visibility:hidden|collapse` or a zero `font-size`.
+fn is_hidden(tag: &Tag) -> bool {
+    if attr(tag, "hidden").is_some_and(|v| !v.trim().eq_ignore_ascii_case("until-found")) {
+        return true;
+    }
+    if attr(tag, "aria-hidden").is_some_and(|v| v.trim().eq_ignore_ascii_case("true")) {
+        return true;
+    }
+    attr(tag, "style").is_some_and(style_hides)
+}
+
+fn style_hides(style: &str) -> bool {
+    style.split(';').any(|decl| {
+        let Some((prop, value)) = decl.split_once(':') else {
+            return false;
+        };
+        let value = value.trim().to_ascii_lowercase();
+        let value = value.strip_suffix("!important").unwrap_or(&value).trim();
+        match prop.trim().to_ascii_lowercase().as_str() {
+            "display" => value == "none",
+            "visibility" => value == "hidden" || value == "collapse",
+            "font-size" => is_zero_length(value),
+            _ => false,
+        }
+    })
+}
+
+/// `0`, `0px`, `0.0em`, `0%`...
+fn is_zero_length(v: &str) -> bool {
+    let num_len = v
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(v.len());
+    let (num, unit) = v.split_at(num_len);
+    num.parse::<f64>().is_ok_and(|n| n == 0.0)
+        && matches!(
+            unit.trim(),
+            "" | "px"
+                | "pt"
+                | "pc"
+                | "em"
+                | "rem"
+                | "ex"
+                | "ch"
+                | "%"
+                | "vw"
+                | "vh"
+                | "vmin"
+                | "vmax"
+                | "mm"
+                | "cm"
+                | "in"
+                | "q"
+        )
+}
+
+/// A skipped element whose end tag is optional ends where a browser would close it implicitly:
+/// at a sibling start tag (`<p>`, `<li>`, `<td>`...) or at its parent's end tag. Without this a
+/// hidden `<p>` whose `</p>` is omitted would swallow the visible text after it.
+fn implicitly_closed(skip: &str, tag: &Tag) -> bool {
+    let name: &str = &tag.name;
+    let start = tag.kind == TagKind::StartTag;
+    match skip {
+        "p" if start => {
+            name == "p"
+                || name == "pre"
+                || name == "hr"
+                || heading_level(name).is_some()
+                || (BLOCKS.contains(&name) && name != "body")
+        }
+        "p" => {
+            name != "p" && (BLOCKS.contains(&name) || name == "li" || name == "td" || name == "th")
+        }
+        "li" if start => name == "li",
+        "li" => matches!(name, "ul" | "ol" | "menu"),
+        "dt" | "dd" if start => matches!(name, "dt" | "dd"),
+        "dt" | "dd" => name == "dl",
+        "td" | "th" if start => matches!(name, "td" | "th" | "tr"),
+        "td" | "th" => matches!(name, "tr" | "table" | "tbody" | "thead" | "tfoot"),
+        "tr" if start => name == "tr",
+        "tr" => matches!(name, "table" | "tbody" | "thead" | "tfoot"),
+        "option" if start => matches!(name, "option" | "optgroup"),
+        "option" => matches!(name, "select" | "datalist" | "optgroup"),
+        _ => false,
+    }
+}
+
 fn heading_level(name: &str) -> Option<u32> {
     match name {
         "h1" => Some(1),
@@ -243,10 +339,23 @@ impl State {
 
     fn start_tag(&mut self, tag: &Tag) -> TokenSinkResult<()> {
         let name: &str = &tag.name;
+        if self
+            .skip
+            .as_ref()
+            .is_some_and(|(skip, _)| implicitly_closed(skip, tag))
+        {
+            self.skip = None;
+        }
         if let Some((skip, depth)) = self.skip.as_mut() {
             if skip == name && !tag.self_closing {
                 *depth += 1;
             }
+            return TokenSinkResult::Continue;
+        }
+        // Hidden content is skipped like `<template>` (before quote diversion counts the tag).
+        if !tag.self_closing && !VOID.contains(&name) && !SKIP_RAW.contains(&name) && is_hidden(tag)
+        {
+            self.skip = Some((name.to_owned(), 1));
             return TokenSinkResult::Continue;
         }
         if let Some((div, depth, _)) = self.divert.as_mut()
@@ -361,6 +470,13 @@ impl State {
 
     fn end_tag(&mut self, tag: &Tag) {
         let name: &str = &tag.name;
+        if self
+            .skip
+            .as_ref()
+            .is_some_and(|(skip, _)| implicitly_closed(skip, tag))
+        {
+            self.skip = None;
+        }
         if let Some((skip, depth)) = self.skip.as_mut() {
             if skip == name {
                 *depth -= 1;

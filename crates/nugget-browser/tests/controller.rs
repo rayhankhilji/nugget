@@ -407,3 +407,93 @@ async fn controller_context_matches_what_the_agent_tools_give_the_loop() {
         &("click".to_owned(), loop_context)
     );
 }
+
+/// GG3-12: the daemon's Stop reaches the extension (and Resume lifts it); the overlay shows again
+/// on the next task.
+#[tokio::test]
+async fn kill_switch_changes_are_relayed_to_the_extension() {
+    let (_gate, bridge, c) = setup(FakeGate::new(), None);
+    let s = c.snapshot("t", SnapshotOptions::default()).await.unwrap();
+    c.act(
+        "t",
+        BrowserAction::Scroll {
+            element: None,
+            dx: None,
+            dy: Some(10.0),
+        },
+    )
+    .await
+    .unwrap();
+    c.kill_changed(true).await;
+    c.kill_changed(false).await;
+    let s2 = c.snapshot("t", SnapshotOptions::default()).await.unwrap();
+    assert_eq!(s.url, s2.url);
+    c.act(
+        "t",
+        BrowserAction::Scroll {
+            element: None,
+            dx: None,
+            dy: Some(10.0),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        bridge.kinds(),
+        [
+            "snapshot",
+            "overlay_on",
+            "act",
+            "halt",
+            "resume",
+            "snapshot",
+            "overlay_on",
+            "act"
+        ]
+    );
+}
+
+/// Stop pressed while the overlay request is in flight (after the first halt check): the act is
+/// never sent.
+#[tokio::test]
+async fn stop_during_the_overlay_request_sends_no_act() {
+    struct HaltOnOverlay(Arc<FakeBridge>, Arc<FakeGate>);
+    #[async_trait::async_trait]
+    impl nugget_browser::BrowserBridge for HaltOnOverlay {
+        async fn request(
+            &self,
+            request: nugget_browser::HostRequest,
+        ) -> Result<serde_json::Value, nugget_browser::BridgeError> {
+            if matches!(
+                request,
+                nugget_browser::HostRequest::Overlay { active: true, .. }
+            ) {
+                self.1
+                    .halted
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            self.0.request(request).await
+        }
+    }
+    let gate = Arc::new(FakeGate::new());
+    let bridge = Arc::new(FakeBridge::new(form()));
+    let c = BrowserController::new(
+        Arc::new(HaltOnOverlay(bridge.clone(), gate.clone())),
+        gate.clone(),
+        Arc::new(DeclineAll),
+    );
+    c.snapshot("t", SnapshotOptions::default()).await.unwrap();
+    let err = c
+        .act(
+            "t",
+            BrowserAction::Scroll {
+                element: None,
+                dx: None,
+                dy: Some(10.0),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err, BrowserError::Halted);
+    assert!(!bridge.kinds().contains(&"act"), "{:?}", bridge.kinds());
+}

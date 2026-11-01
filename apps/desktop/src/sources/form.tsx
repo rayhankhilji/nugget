@@ -79,14 +79,30 @@ export function FormError({ error }: { error: unknown }) {
   );
 }
 
-export function Actions({ onBack, busy, submitLabel }: { onBack: () => void; busy: boolean; submitLabel: string }) {
+/**
+ * Back and submit. `blocked` says why submitting can't work here: the submit stays focusable
+ * (aria-disabled, so pressing it explains) and the reason is shown next to it.
+ */
+export function Actions({ onBack, busy, submitLabel, blocked }: { onBack: () => void; busy: boolean; submitLabel: string; blocked?: string | null }) {
   const t = useT();
+  const hintId = useId();
   return (
     <div className="dialog-actions">
+      {blocked && (
+        <p id={hintId} className="muted small dialog-actions-hint">
+          {blocked}
+        </p>
+      )}
       <button type="button" className="btn" onClick={onBack} disabled={busy}>
         {t("common.back")}
       </button>
-      <button type="submit" className="btn btn-primary" disabled={busy}>
+      <button
+        type="submit"
+        className="btn btn-primary"
+        disabled={busy}
+        aria-disabled={blocked ? true : undefined}
+        aria-describedby={blocked ? hintId : undefined}
+      >
         {busy ? (
           <>
             <Spinner label={t("addSource.working")} /> {submitLabel}
@@ -102,9 +118,17 @@ export function Actions({ onBack, busy, submitLabel }: { onBack: () => void; bus
 export function NameField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   const t = useT();
   return (
-    <Field label={t("addSource.name")} optional hint={t("addSource.nameHint")}>
+    <Field label={t("addSource.name")} optional hint={t("addSource.nameHintDefault", { name: placeholder })}>
       {(a) => (
-        <input {...a} type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoComplete="off" />
+        <input
+          {...a}
+          type="text"
+          dir="auto"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={t("addSource.namePlaceholder")}
+          autoComplete="off"
+        />
       )}
     </Field>
   );

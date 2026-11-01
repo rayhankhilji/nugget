@@ -14,13 +14,18 @@ pub use crate::rewrite::QueryRewrite;
 pub struct DateFilter {
     /// The phrase as written, e.g. `"last week"`.
     pub phrase: String,
-    /// Items modified in this range were kept (by source modification time, else store update
-    /// time).
+    /// Items dated in this range were kept (by their own date: event start, mail date, source
+    /// modification time, update time; see `dates::item_date`).
     pub range: DateRange,
     /// `true`: the query without the phrase was searched and only items in `range` kept.
     /// `false`: nothing in range matched, so the original query was searched unfiltered (the
-    /// phrase may have been part of the topic, as in "what to cook this week").
+    /// phrase may have been part of the topic, as in "what to cook this week"); tell the user
+    /// or the model that the results are not from that period.
     pub applied: bool,
+    /// The rest of the query was generic ("summarise last week"), so the results are the
+    /// period's items by date (newest first; soonest first for a future period), not a search.
+    #[serde(default)]
+    pub listed: bool,
 }
 
 /// Which retrieval signals answered a query.
@@ -99,6 +104,10 @@ pub struct ContextOptions {
     /// contexts that go to `Cloud` providers. The packed context is refilled from the next
     /// relevant items; [`ContextResponse::excluded_sensitive`] counts what was left out.
     pub exclude_sensitive: bool,
+    /// Don't read date phrases in the query as date filters. For text that is not a search
+    /// query, such as a thread a draft replies to: "last week" or "our call on Tuesday" there
+    /// describes events, not when the notes that matter were written.
+    pub ignore_dates: bool,
 }
 
 /// Per-call overrides.
@@ -196,6 +205,15 @@ pub struct PackedPassage {
     pub chunk_ids: Vec<ChunkId>,
     /// The primary passage was cut to fit the budget.
     pub truncated: bool,
+    /// The block's text below its `[n] Title (source)` header in
+    /// [`ContextResponse::text`](nugget_core::ipc::ContextResponse::text): what the passage
+    /// really says, without the ambiguity of re-parsing headers out of the rendered text.
+    #[serde(default)]
+    pub text: String,
+    /// The item lacks one of the query's rare key terms (a word few items have, like "therapy"
+    /// or "Tokyo"): at best a near miss (GG2-8). Only set for short, question-like queries.
+    #[serde(default)]
+    pub partial: bool,
 }
 
 /// A packed context with diagnostics.

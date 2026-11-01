@@ -1,0 +1,18 @@
+[package]
+name = "nugget-read-later"
+description = "Nugget plugin: import saved articles from Pocket, Instapaper and bookmark exports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nugget-plugin-sdk.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tempfile = "3"

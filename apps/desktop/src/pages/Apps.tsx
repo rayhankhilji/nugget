@@ -35,7 +35,13 @@ export function AppsPage() {
         description={t("apps.description")}
         actions={
           !unavailable && (
-            <button type="button" className="btn btn-primary" ref={connectRef} onClick={() => setConnecting(true)}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              ref={connectRef}
+              onClick={() => setConnecting(true)}
+              disabled={loaded.loading && !clients}
+            >
               {t("apps.connect")}
             </button>
           )
@@ -50,19 +56,18 @@ export function AppsPage() {
       ) : (
         <>
           <ErrorNote error={loaded.error} onRetry={loaded.reload} />
-          {loaded.loading && !clients && <Loading label={t("apps.loading")} />}
-          {clients && list.length === 0 && (
-            <EmptyState
-              title={t("apps.emptyTitle")}
-              action={
-                <button type="button" className="btn" onClick={() => setConnecting(true)}>
-                  {t("apps.connect")}
-                </button>
-              }
-            >
-              {t("apps.emptyBody")}
-            </EmptyState>
+          {loaded.loading && !clients && (
+            <>
+              <Loading label={t("apps.loading")} lines={0} />
+              <div className="table-wrap pg-skeleton-table" aria-hidden="true">
+                {[0, 1, 2].map((i) => (
+                  <span key={i} className="pg-skeleton" />
+                ))}
+              </div>
+            </>
           )}
+          {/* The header has the Connect button; the empty state explains instead of repeating it. */}
+          {clients && list.length === 0 && <EmptyState title={t("apps.emptyTitle")}>{t("apps.emptyBody")}</EmptyState>}
           {list.length > 0 && (
             <div
               className={loaded.loading ? "table-wrap pg-stale" : "table-wrap"}
@@ -88,13 +93,19 @@ export function AppsPage() {
                 <tbody>
                   {list.map((c) => {
                     const sum = summarizeScopes(c.scopes, sources.data);
+                    // Two connections with the same name: tell them apart by a short id, on screen and to screen readers.
+                    const shortId = list.some((o) => o.id !== c.id && o.name === c.name) ? c.id.slice(0, 8) : null;
                     return (
                       <tr key={c.id}>
-                        <th scope="row">
-                          {c.name}
-                          <div className="muted small">
-                            <code>{c.id}</code>
-                          </div>
+                        <th scope="row" title={c.id}>
+                          <bdi>{c.name}</bdi>
+                          {shortId && (
+                            <div className="muted small">
+                              <bdi dir="ltr">
+                                <code>{shortId}</code>
+                              </bdi>
+                            </div>
+                          )}
                         </th>
                         <td>
                           {sum.sources}
@@ -110,7 +121,7 @@ export function AppsPage() {
                           {c.last_used ? formatRelative(c.last_used, now) : <span className="muted">{t("apps.neverUsed")}</span>}
                         </td>
                         <td>
-                          <button type="button" className="btn btn-small btn-danger-ghost" onClick={() => setRevoking(c)} aria-label={t("apps.revokeLabel", { name: c.name })}>
+                          <button type="button" className="btn btn-small btn-danger-ghost" onClick={() => setRevoking(c)} aria-label={shortId ? t("apps.revokeLabelId", { name: c.name, id: shortId }) : t("apps.revokeLabel", { name: c.name })}>
                             {t("apps.revoke")}
                           </button>
                         </td>
@@ -121,7 +132,8 @@ export function AppsPage() {
               </table>
             </div>
           )}
-          <details className="help apps-help">
+          {/* Open while nothing is connected: the steps are the next thing to read. */}
+          <details className="help apps-help" open={clients !== null && list.length === 0}>
             <summary>{t("apps.help.summary")}</summary>
             <ol>
               <li>{t("apps.help.step1")}</li>

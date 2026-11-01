@@ -1,6 +1,10 @@
 //! User-controlled updates on top of `tauri-plugin-updater`.
 //!
-//! - The user picks a channel (stable, beta or off). Off never contacts the update server.
+//! - The user picks a channel (stable, beta or off). Off never contacts the update server, and
+//!   neither does a channel nobody chose: until the user answers (in setup or on the Updates
+//!   card), no check runs (`Settings::channel_chosen`).
+//! - Every request a check or download makes goes into the daemon's egress ledger
+//!   (`update_check`, `update_download`) through `Daemon::record_egress`.
 //! - The default is notify-only: a check finds a newer version and shows it (tray item plus the
 //!   settings panel, with the release notes). Nothing is downloaded until the user clicks
 //!   Install, and Install names the exact version whose notes were shown.
@@ -18,11 +22,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use nugget_core::ipc::EgressRecordRequest;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
+use time::OffsetDateTime;
 
-use crate::daemon::CmdError;
+use crate::daemon::{CmdError, Daemon};
 use crate::settings::{self, Channel, Settings};
 
 /// minisign public key (the base64 text `tauri signer generate` prints), baked in at build time.
@@ -38,6 +44,10 @@ const FEED: Option<&str> = option_env!("NUGGET_UPDATER_FEED");
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(60);
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Egress-ledger features (`nugget_core::ipc::CLIENT_EGRESS_FEATURES`).
+const FEATURE_CHECK: &str = "update_check";
+const FEATURE_DOWNLOAD: &str = "update_download";
 
 pub mod event {
     /// `UpdateStatus`, whenever anything about the pending update changes.
@@ -94,10 +104,37 @@ pub struct Updates {
     state: Mutex<State>,
     /// Serialises check/download/install.
     op: tokio::sync::Mutex<()>,
+    /// Wakes the background checks when the user turns updates on.
+    wake: tokio::sync::Notify,
 }
 
 pub fn configured() -> bool {
     PUBKEY.is_some_and(|k| !k.trim().is_empty())
+}
+
+/// What a check would fetch, with the build's key: nothing unless this build has a key and the
+/// user chose a channel other than Off.
+fn check_target(
+    settings: &Settings,
+    pubkey: Option<&'static str>,
+) -> Option<(&'static str, String)> {
+    let pubkey = pubkey.filter(|k| !k.trim().is_empty())?;
+    Some((pubkey, feed_url(settings.active_channel()?)?))
+}
+
+/// Put requests the updater made into the daemon's egress ledger.
+async fn ledger(app: &AppHandle, feature: &str, at: OffsetDateTime, requests: Vec<feed::Exchange>) {
+    let daemon = app.state::<Daemon>();
+    for r in requests {
+        let row = EgressRecordRequest {
+            at: Some(at),
+            host: r.host,
+            feature: feature.to_owned(),
+            bytes_sent: r.bytes_sent,
+            bytes_received: r.bytes_received,
+        };
+        daemon.record_egress(app, row).await;
+    }
 }
 
 /// The manifest URL for a channel, or `None` for Off.
@@ -139,6 +176,7 @@ impl Updates {
                 ..State::default()
             }),
             op: tokio::sync::Mutex::new(()),
+            wake: tokio::sync::Notify::new(),
         }
     }
 
@@ -185,8 +223,10 @@ impl Updates {
         if let Some(path) = &self.settings_path {
             settings::save(path, &new).map_err(|e| err(format!("couldn't save settings: {e}")))?;
         }
-        {
+        let turned_on = {
             let mut s = self.lock();
+            let turned_on = new.active_channel().is_some()
+                && new.active_channel() != s.settings.active_channel();
             if s.settings.channel != new.channel {
                 s.pending = None;
                 s.staged = None;
@@ -196,28 +236,35 @@ impl Updates {
                 s.staged = None;
             }
             s.settings = new;
+            turned_on
+        };
+        if turned_on {
+            self.wake.notify_one();
         }
         Ok(self.publish(app))
     }
 
     /// Ask the channel's feed whether a newer version exists. Never downloads in notify-only mode.
+    /// Contacts nothing while updates are off or no channel was chosen.
     pub async fn check(&self, app: &AppHandle) -> Result<UpdateStatus, CmdError> {
         let _op = self.op.lock().await;
-        let channel = self.lock().settings.channel;
-        let (Some(pubkey), Some(url)) = (PUBKEY.filter(|_| configured()), feed_url(channel)) else {
+        let target = check_target(&self.lock().settings, PUBKEY);
+        let Some((pubkey, url)) = target else {
             return Ok(self.publish(app));
         };
         self.set_busy(app, true);
         let result = async {
             // Verify the feed before the plugin reads it; then accept the plugin's answer only
             // if it came from that same feed (`feed::consistent`).
-            let verified = feed::fetch_verified(&url, pubkey, HTTP_TIMEOUT)
-                .await
-                .map_err(err)?;
+            let at = OffsetDateTime::now_utc();
+            let mut requests = Vec::new();
+            let fetched = feed::fetch_verified(&url, pubkey, HTTP_TIMEOUT, &mut requests).await;
+            ledger(app, FEATURE_CHECK, at, requests).await;
+            let verified = fetched.map_err(err)?;
             let seen = Arc::new(Mutex::new(None::<String>));
             let record = Arc::clone(&seen);
             let want = verified.version.clone();
-            let update = app
+            let updater = app
                 .updater_builder()
                 .pubkey(pubkey)
                 .endpoints(vec![url.parse().map_err(err)?])
@@ -230,10 +277,17 @@ impl Updates {
                     same && release.version > current
                 })
                 .build()
-                .map_err(err)?
-                .check()
-                .await
                 .map_err(err)?;
+            // The plugin fetches the feed again, through the same hosts; it read the same bytes
+            // when the check below finds it consistent, and the byte counts are ours otherwise.
+            let at = OffsetDateTime::now_utc();
+            let checked = updater.check().await;
+            let mut repeat = verified.fetched_by.clone();
+            if checked.is_err() {
+                repeat.iter_mut().for_each(|r| r.bytes_received = 0);
+            }
+            ledger(app, FEATURE_CHECK, at, repeat).await;
+            let update = checked.map_err(err)?;
             let seen = seen.lock().unwrap_or_else(|p| p.into_inner()).take();
             feed::consistent(
                 &verified,
@@ -247,6 +301,12 @@ impl Updates {
         let auto = {
             let mut s = self.lock();
             s.busy = false;
+            // The user switched channel (or turned updates off) while this check ran:
+            // `set_settings` already cleared the old answer; don't bring it back.
+            if check_target(&s.settings, PUBKEY).map(|(_, u)| u).as_deref() != Some(url.as_str()) {
+                drop(s);
+                return Ok(self.publish(app));
+            }
             s.last_checked = Some(now_secs());
             match result {
                 Ok(update) => {
@@ -275,8 +335,15 @@ impl Updates {
 
     /// Auto-install: fetch and verify now, install at quit (see `install_staged`).
     async fn download_staged(&self, app: &AppHandle) {
-        let Some(update) = self.lock().pending.clone() else {
-            return;
+        let update = {
+            let s = self.lock();
+            if s.settings.active_channel().is_none() || !s.settings.auto_install {
+                return;
+            }
+            let Some(update) = s.pending.clone() else {
+                return;
+            };
+            update
         };
         self.set_busy(app, true);
         let result = download(app, &update).await;
@@ -287,7 +354,10 @@ impl Updates {
                 tracing::info!(version = %update.version, "update downloaded; installs at quit");
                 s.staged = Some(bytes);
             }
-            Err(e) => s.last_error = Some(e.to_string()),
+            Err(e) => {
+                tracing::warn!(version = %update.version, error = %e, "update download failed");
+                s.last_error = Some(e.to_string());
+            }
         }
     }
 
@@ -351,7 +421,9 @@ impl Updates {
 async fn download(app: &AppHandle, update: &Update) -> Result<Vec<u8>, CmdError> {
     let mut downloaded = 0u64;
     let mut last_emit = 0u64;
-    update
+    let at = OffsetDateTime::now_utc();
+    let url = update.download_url.as_str().to_owned();
+    let result = update
         .download(
             |chunk, total| {
                 downloaded += chunk as u64;
@@ -363,11 +435,20 @@ async fn download(app: &AppHandle, update: &Update) -> Result<Vec<u8>, CmdError>
             },
             || {},
         )
-        .await
-        .map_err(|e| err(format!("download or signature check failed: {e}")))
+        .await;
+    // The host the feed names; the plugin may be redirected to a content host it doesn't report.
+    let request = feed::Exchange {
+        host: reqwest::Url::parse(&url)
+            .map_or_else(|_| "unknown".to_owned(), |u| feed::host_of(&u)),
+        bytes_sent: url.len() as u64 + 160,
+        bytes_received: downloaded,
+    };
+    ledger(app, FEATURE_DOWNLOAD, at, vec![request]).await;
+    result.map_err(|e| err(format!("download or signature check failed: {e}")))
 }
 
-/// Background checks: once shortly after launch, then daily, unless the channel is off.
+/// Background checks: once shortly after launch, then daily, only while the user has chosen a
+/// channel other than Off. Choosing one checks right away.
 pub fn spawn_background_checks(app: &AppHandle) {
     if !configured() {
         tracing::info!("this build has no update key; updates are disabled");
@@ -375,13 +456,17 @@ pub fn spawn_background_checks(app: &AppHandle) {
     }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(FIRST_CHECK_DELAY).await;
+        let mut wait = FIRST_CHECK_DELAY;
         loop {
             let updates = app.state::<Updates>();
-            if updates.settings().channel != Channel::Off {
+            tokio::select! {
+                () = tokio::time::sleep(wait) => {}
+                () = updates.wake.notified() => {}
+            }
+            if updates.settings().active_channel().is_some() {
                 let _ = updates.check(&app).await;
             }
-            tokio::time::sleep(CHECK_INTERVAL).await;
+            wait = CHECK_INTERVAL;
         }
     });
 }
@@ -400,6 +485,35 @@ mod tests {
     }
 
     #[test]
+    fn nothing_is_checked_until_a_channel_is_chosen() {
+        const KEY: Option<&str> = Some("a-key");
+        let unchosen = Settings::default();
+        assert_eq!(check_target(&unchosen, KEY), None);
+        // An old settings file with the former default is unchosen too.
+        let old: Settings = serde_json::from_str(r#"{"channel":"stable"}"#).unwrap();
+        assert_eq!(check_target(&old, KEY), None);
+        let chose = |channel| Settings {
+            channel,
+            channel_chosen: true,
+            ..Settings::default()
+        };
+        let (key, url) = check_target(&chose(Channel::Stable), KEY).unwrap();
+        assert_eq!((key, url.ends_with("/stable.json")), ("a-key", true));
+        assert!(check_target(&chose(Channel::Beta), KEY).is_some());
+        assert_eq!(check_target(&chose(Channel::Off), KEY), None);
+        // A build without a key never checks.
+        assert_eq!(check_target(&chose(Channel::Stable), None), None);
+        assert_eq!(check_target(&chose(Channel::Stable), Some(" ")), None);
+    }
+
+    #[test]
+    fn ledger_features_are_ones_the_daemon_accepts() {
+        for f in [FEATURE_CHECK, FEATURE_DOWNLOAD] {
+            assert!(nugget_core::ipc::CLIENT_EGRESS_FEATURES.contains(&f), "{f}");
+        }
+    }
+
+    #[test]
     fn event_names_are_valid() {
         for name in [event::STATUS, event::PROGRESS] {
             assert!(
@@ -415,7 +529,8 @@ pub fn updates_status(app: AppHandle, updates: tauri::State<'_, Updates>) -> Upd
     updates.status(&app)
 }
 
-/// Channel and auto-install. The start-at-login answer is changed only through `login_set`.
+/// Channel and auto-install; this marks the channel as chosen. The start-at-login answer is
+/// changed only through `login_set`.
 #[tauri::command]
 pub fn updates_set_settings(
     app: AppHandle,
@@ -423,19 +538,25 @@ pub fn updates_set_settings(
     channel: Channel,
     auto_install: bool,
 ) -> Result<UpdateStatus, CmdError> {
+    // Setting the channel, here or in setup, is the user's choice.
     let new = Settings {
         channel,
+        channel_chosen: true,
         auto_install,
         ..updates.settings()
     };
     updates.set_settings(&app, new)
 }
 
+/// "Check now". Needs a chosen channel: the UI asks first.
 #[tauri::command]
 pub async fn updates_check(
     app: AppHandle,
     updates: tauri::State<'_, Updates>,
 ) -> Result<UpdateStatus, CmdError> {
+    if !updates.settings().channel_chosen {
+        return Err(err("choose an update channel first"));
+    }
     updates.check(&app).await
 }
 

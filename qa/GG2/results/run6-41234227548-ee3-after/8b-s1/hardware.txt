@@ -1,0 +1,9 @@
+label: 8b-s1  model: qwen3-8b-q4km
+runner: GitHub Actions 1000012593 (Linux X64)
+commit: 80ad4690f024ea710c8db9be1ba1828aac635e34
+date: 2026-10-31T19:30:57Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V45 96-Core Processor
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          10           0           4          14
+Swap:              2           0           2

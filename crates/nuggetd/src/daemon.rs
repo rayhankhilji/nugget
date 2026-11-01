@@ -5,10 +5,11 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use nugget_connector::{Registry, SecretStore};
+use nugget_core::capability::Locality;
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::ProviderId;
 use nugget_core::paths::Paths;
@@ -36,6 +37,9 @@ use crate::sources;
 
 /// How long shutdown waits for chat streams and installs to stop.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+/// How long shutdown waits for an interrupted knowledge run, before and after stopping the
+/// local models.
+const KNOWLEDGE_GRACE: Duration = Duration::from_secs(3);
 
 /// How to start a daemon.
 #[derive(Clone)]
@@ -126,9 +130,10 @@ pub(crate) struct State {
     /// Broadcast notifications to every connection.
     pub hub: Arc<Hub>,
     /// Every configured provider, in config order (including ones that failed to build).
-    pub configs: Vec<ProviderConfig>,
+    /// Changed while running by [`State::set_provider`] / [`State::remove_provider`].
+    pub configs: RwLock<Vec<ProviderConfig>>,
     /// Providers that could not be built, with the reason. They are not in the router.
-    pub unavailable: HashMap<ProviderId, String>,
+    pub unavailable: RwLock<HashMap<ProviderId, String>>,
     /// Result of verifying the audit hash chain; unset until the startup check finishes.
     pub audit_chain_ok: Arc<OnceLock<bool>>,
     pub probes: Arc<Mutex<ProbeCache>>,
@@ -137,6 +142,8 @@ pub(crate) struct State {
     pub hardware: Hardware,
     /// Cancellation per running chat stream.
     pub streams: Mutex<HashMap<String, CancellationToken>>,
+    /// The sources of recent Ask answers, for follow-ups' history (`crate::ask::AnswerMemory`).
+    pub answers: Mutex<crate::ask::AnswerMemory>,
     /// Model ids being installed.
     pub installs: Arc<InFlight>,
     pub tasks: TaskTracker,
@@ -147,11 +154,92 @@ pub(crate) struct State {
 
 impl State {
     /// Config of a provider that was built (and so is in the router).
-    pub fn config_of(&self, id: &ProviderId) -> Option<&ProviderConfig> {
-        if self.unavailable.contains_key(id) {
+    pub fn config_of(&self, id: &ProviderId) -> Option<ProviderConfig> {
+        if self.unavailable_reason(id).is_some() {
             return None;
         }
-        self.configs.iter().find(|c| &c.id == id)
+        self.provider_configs().into_iter().find(|c| &c.id == id)
+    }
+
+    /// Every configured provider, in config order (a snapshot).
+    pub fn provider_configs(&self) -> Vec<ProviderConfig> {
+        self.configs
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Why a configured provider could not be built, if it could not.
+    pub fn unavailable_reason(&self, id: &ProviderId) -> Option<String> {
+        self.unavailable
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned()
+    }
+
+    /// Route `cfg` from now on without a restart: added after the other providers, or replacing
+    /// the one with its id (for example with a new key). `built` is the provider built from it,
+    /// or why it could not be built (it is then listed as unavailable and not routed).
+    pub fn set_provider(
+        &self,
+        cfg: ProviderConfig,
+        built: std::result::Result<Arc<dyn Provider>, String>,
+    ) {
+        let id = cfg.id.clone();
+        {
+            let mut unavailable = self
+                .unavailable
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            match built {
+                Ok(p) => {
+                    unavailable.remove(&id);
+                    // Placed as at startup (`local::tier_map`): on-device and LAN servers
+                    // before the runtime's slots (an unprobed on-device one right after them),
+                    // cloud providers last.
+                    let rank = |loc: Locality, probed: bool| match loc {
+                        Locality::Cloud => 3,
+                        Locality::OnDevice if !probed => 2,
+                        _ => 0,
+                    };
+                    let mine = rank(p.meta().locality, false);
+                    let before = |other: &ProviderId| {
+                        let theirs = if self.slot(other).is_some() {
+                            1
+                        } else {
+                            self.router.provider(other).map_or(3, |o| {
+                                rank(o.meta().locality, self.router.capabilities(other).is_some())
+                            })
+                        };
+                        theirs > mine
+                    };
+                    self.router.set_provider_before(p, &cfg.tiers, &before);
+                }
+                Err(reason) => {
+                    self.router.remove_provider(&id);
+                    unavailable.insert(id.clone(), reason);
+                }
+            }
+        }
+        let mut configs = self.configs.write().unwrap_or_else(PoisonError::into_inner);
+        match configs.iter_mut().find(|c| c.id == id) {
+            Some(c) => *c = cfg,
+            None => configs.push(cfg),
+        }
+    }
+
+    /// Stop routing to provider `id` and forget its config. Returns whether it was configured.
+    pub fn remove_provider(&self, id: &ProviderId) -> bool {
+        self.router.remove_provider(id);
+        self.unavailable
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+        let mut configs = self.configs.write().unwrap_or_else(PoisonError::into_inner);
+        let before = configs.len();
+        configs.retain(|c| &c.id != id);
+        configs.len() != before
     }
 
     pub fn streams(&self) -> MutexGuard<'_, HashMap<String, CancellationToken>> {
@@ -177,6 +265,9 @@ pub(crate) fn spawn_refresh(state: &Arc<State>, slot: Arc<RuntimeSlot>) {
 
 fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
     let stop = state.shutdown.clone();
+    let knowledge = state.knowledge.clone();
+    // Route chat to the slot while its model loads (the request waits for the server).
+    slot.starting();
     state.tasks.spawn(async move {
         let model = slot.model().id.clone();
         let start = async {
@@ -189,8 +280,15 @@ fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
         tokio::select! {
             () = stop.cancelled() => {}
             r = start => match r {
-                Ok(_) => tracing::info!(provider = %slot.id(), %model, "local runtime ready"),
-                Err(e) => tracing::warn!(provider = %slot.id(), %model, error = %e, "local runtime did not start"),
+                Ok(_) => {
+                    tracing::info!(provider = %slot.id(), %model, "local runtime ready");
+                    // Items waiting for a model are retried now, not at the periodic run.
+                    knowledge.wake();
+                }
+                Err(e) => {
+                    slot.start_failed();
+                    tracing::warn!(provider = %slot.id(), %model, error = %e, "local runtime did not start");
+                }
             },
         }
     });
@@ -262,11 +360,6 @@ impl Daemon {
             }
         };
 
-        let (config, config_created) = Config::load_or_create(&paths)?;
-        if config_created {
-            tracing::info!(path = %paths.config_file().display(), "created default config");
-        }
-
         let store = {
             let paths = paths.clone();
             let key = opts.store_key;
@@ -276,10 +369,16 @@ impl Daemon {
                     None => StoreKey::load_or_create(&paths)?,
                 };
                 tracing::info!(source = ?key.source(), "store key loaded");
-                Store::open(paths.db_file(), &key)
+                // Applies a staged restore; a damaged database is never opened (recovery mode).
+                crate::features::backup::open_store(&paths, key)
             })
             .await?
         };
+        // After the store: applying a staged restore may have put the backup's config in place.
+        let (mut config, config_created) = Config::load_or_create(&paths)?;
+        if config_created {
+            tracing::info!(path = %paths.config_file().display(), "created default config");
+        }
         let egress: Arc<dyn EgressSink> = Arc::new(store.clone());
 
         let (providers, unavailable) = {
@@ -372,6 +471,7 @@ impl Daemon {
         };
 
         let localities = local::localities(&providers);
+        let probes = ProbeCache::load(ProbeCache::path_for(&paths));
         let configured: Vec<_> = built
             .iter()
             .map(|c| {
@@ -379,11 +479,13 @@ impl Daemon {
                     .get(&c.id)
                     .copied()
                     .unwrap_or(nugget_core::capability::Locality::Cloud);
-                (c.id.clone(), c.tiers.clone(), loc)
+                (c.id.clone(), c.tiers.clone(), loc, probes.get(c).is_some())
             })
             .collect();
         let tier_map = local::tier_map(&configured, &local::slot_routes(local.as_deref()));
-        let mut all_providers = providers;
+        // Interactive chats on configured on-device and LAN providers hold the foreground too.
+        let foreground = local::ForegroundCell::default();
+        let mut all_providers = local::guard_configured(providers, &foreground);
         if let Some(l) = &local {
             all_providers.extend(local::as_providers(l));
         }
@@ -391,7 +493,6 @@ impl Daemon {
         if let Some(l) = &local {
             l.attach(&router);
         }
-        let probes = ProbeCache::load(ProbeCache::path_for(&paths));
         for cfg in &built {
             if let Some(caps) = probes.get(cfg) {
                 router.set_capabilities(&cfg.id, caps.clone());
@@ -399,7 +500,12 @@ impl Daemon {
         }
 
         // Ingest: every M1 connector kind, credentials in the keychain.
+        // Recovery mode (damaged database, empty temporary store): no source kinds and no
+        // keychain, so nothing runs and source ids reused in the empty store can never touch the
+        // real credentials (see `features::backup`).
+        let recovery = crate::features::backup::in_recovery(&paths);
         let secrets: Arc<dyn SecretStore> = match opts.source_secrets {
+            _ if recovery => Arc::new(MemorySecrets::new()),
             Some(s) => s,
             None if sources::keychain_disabled() => {
                 tracing::warn!(
@@ -423,6 +529,9 @@ impl Daemon {
         plugin_factories
             .into_iter()
             .for_each(|f| registry.register(f));
+        if recovery {
+            registry = Registry::new();
+        }
         let resolver =
             sources::client_secret_resolver(secrets.clone(), sources::oauth_kinds(&registry));
         let power: Arc<dyn PowerPolicy> = opts.power.unwrap_or_else(|| {
@@ -444,12 +553,18 @@ impl Daemon {
             Error::Invalid(m) => Error::Invalid(format!("sources: {m}")),
             other => other,
         })?;
+        let _ = foreground.set(ingest.foreground());
         // Items indexed text-only while no embedder was routable get vectors once one is.
         if let Some(l) = &local {
             let ingest = ingest.clone();
+            l.set_foreground(ingest.foreground());
             l.on_ready(Arc::new(move |role| {
                 if role == nugget_core::ipc::RuntimeRole::Embedding {
                     ingest.reembed_now();
+                }
+                // A chat model became ready: background triage can start (HH2).
+                if role == nugget_core::ipc::RuntimeRole::Chat {
+                    ingest.triage_now();
                 }
             }));
         }
@@ -473,6 +588,7 @@ impl Daemon {
             .clone()
             .unwrap_or_else(|| crate::knowledge::default_vault_dir(&paths));
         let vault_dir = crate::knowledge::vault_root(&config.vault, &default_vault)?;
+        crate::features::backup::prepare_config(&paths, &mut config, &vault_dir, &default_vault);
         let knowledge = {
             let (store, router, hub, power) =
                 (store.clone(), router.clone(), hub.clone(), power.clone());
@@ -543,14 +659,15 @@ impl Daemon {
             mcp,
             secrets,
             hub,
-            configs,
-            unavailable,
+            configs: RwLock::new(configs),
+            unavailable: RwLock::new(unavailable),
             audit_chain_ok,
             probes: Arc::new(Mutex::new(probes)),
             manifest,
             models,
             hardware,
             streams: Mutex::new(HashMap::new()),
+            answers: Mutex::new(crate::ask::AnswerMemory::default()),
             installs: Arc::new(InFlight::default()),
             tasks,
             shutdown,
@@ -559,9 +676,8 @@ impl Daemon {
 
         // Forward ingest events to every client; start installed local models (not awaited).
         crate::hub::spawn_forwarder(state.hub.clone(), &state.ingest, state.shutdown.clone());
-        state
-            .knowledge
-            .spawn(&state.ingest, &state.tasks, state.shutdown.clone());
+        // Local models first: a starting chat model is routable at once (requests wait for
+        // it), so knowledge's startup run extracts with it instead of without it.
         if let Some(l) = &state.local {
             for slot in &l.slots {
                 if slot.is_installed() {
@@ -569,6 +685,9 @@ impl Daemon {
                 }
             }
         }
+        state
+            .knowledge
+            .spawn(&state.ingest, &state.tasks, state.shutdown.clone());
 
         let features = crate::features::build(&crate::features::FeatureContext {
             state: &state,
@@ -634,8 +753,13 @@ impl Daemon {
         let state = self.state;
         let handler = Arc::new(RpcHandler::new(state.clone()));
         let winding = state.clone();
+        let stop = state.shutdown.clone();
         let shutdown = async move {
-            shutdown.await;
+            // A feature may stop the daemon itself (a staged restore) by cancelling `shutdown`.
+            tokio::select! {
+                () = shutdown => {}
+                () = stop.cancelled() => {}
+            }
             wind_down(&winding).await;
         };
         // Returns once the listener stopped accepting and every connection is closed.
@@ -651,12 +775,20 @@ impl Daemon {
             m.shutdown().await;
         }
         state.ingest.shutdown().await;
+        // Knowledge runs were interrupted at `wind_down`; one may still wait on a model request.
+        // Give it a moment to end before the runtime stops (a request cut off then leaves its
+        // item as it was).
+        let _ = tokio::time::timeout(KNOWLEDGE_GRACE, state.knowledge.knowledge.idle()).await;
         if let Some(l) = &state.local {
             l.runtime.shutdown().await;
         }
+        let _ = tokio::time::timeout(KNOWLEDGE_GRACE, state.knowledge.knowledge.idle()).await;
         let store = state.store.clone();
         let _ = blocking(move || {
-            store.flush_egress();
+            // Flushes the ledger, truncates the WAL and releases the owner lock: the process
+            // exits without dropping the store, which would otherwise read as a crash at the
+            // next start (and cost a full page check, ~5 s per GB; II5).
+            store.close_cleanly();
             Ok(())
         })
         .await;

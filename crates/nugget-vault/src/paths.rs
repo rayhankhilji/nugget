@@ -333,8 +333,45 @@ impl SafeFs {
         }
     }
 
+    /// Remove temp files ([`TMP_SUFFIX`]) that a process killed mid-write left behind (they are
+    /// never pages, but would pile up). Files of this process are kept: its writes may be in
+    /// flight. Symlinks are never followed. Best effort; returns how many were removed.
+    pub fn sweep_temp_files(&self) -> usize {
+        let own = format!(".{}.", std::process::id());
+        let mut removed = 0;
+        let mut stack = vec![self.root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for e in entries.flatten() {
+                let Ok(ft) = e.file_type() else { continue };
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                if ft.is_dir() {
+                    stack.push(e.path());
+                } else if ft.is_file()
+                    && let Some(stem) = name.strip_suffix(TMP_SUFFIX)
+                    && name.starts_with('.')
+                    // `.<name>.<pid>.<n>`: keep this process's own.
+                    && !stem
+                        .rsplit_once('.')
+                        .is_some_and(|(head, _)| format!("{head}.").ends_with(&own))
+                    && fs::remove_file(e.path()).is_ok()
+                {
+                    removed += 1;
+                }
+            }
+        }
+        removed
+    }
+
     /// Atomically replace `rel` with `text`: temp file in the same directory, fsync, rename.
     pub fn write(&self, rel: &str, text: &str) -> Result<()> {
+        #[cfg(test)]
+        if fail::should_fail(rel) {
+            return Err(Error::Storage(format!("injected write failure: {rel}")));
+        }
         let path = self.resolve(rel, true)?.expect("created");
         match fs::symlink_metadata(&path) {
             Ok(m) if m.file_type().is_symlink() => {
@@ -368,6 +405,10 @@ impl SafeFs {
 
     /// Remove a regular file. Missing files are fine; symlinks and directories are refused.
     pub fn remove(&self, rel: &str) -> Result<()> {
+        #[cfg(test)]
+        if fail::should_fail(rel) {
+            return Err(Error::Storage(format!("injected removal failure: {rel}")));
+        }
         let Some(path) = self.resolve(rel, false)? else {
             return Ok(());
         };
@@ -390,9 +431,55 @@ impl SafeFs {
     }
 }
 
+/// Failure injection for tests: the next write or removal of a given path fails (once), standing
+/// in for a crash or a full disk at that point.
+#[cfg(test)]
+pub(crate) mod fail {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static PATTERNS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn next_change_to(rel: &str) {
+        PATTERNS.with(|p| p.borrow_mut().push(rel.to_owned()));
+    }
+
+    pub fn should_fail(rel: &str) -> bool {
+        PATTERNS.with(|p| {
+            let mut p = p.borrow_mut();
+            match p.iter().position(|pat| pat == rel) {
+                Some(i) => {
+                    p.remove(i);
+                    true
+                }
+                None => false,
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sweep_removes_dead_writers_temp_files_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let fs_ = SafeFs::new(dir.path()).unwrap();
+        fs_.write("Person/A (e1).md", "page").unwrap();
+        let person = fs_.root().join("Person");
+        let dead = person.join(format!(".A (e1).md.999999999.3{TMP_SUFFIX}"));
+        let mine = person.join(format!(".A (e1).md.{}.4{TMP_SUFFIX}", std::process::id()));
+        std::fs::write(&dead, "half").unwrap();
+        std::fs::write(&mine, "in flight").unwrap();
+        assert_eq!(fs_.sweep_temp_files(), 1);
+        assert!(!dead.exists() && mine.exists());
+        assert_eq!(
+            fs_.read("Person/A (e1).md").unwrap().as_deref(),
+            Some("page")
+        );
+    }
 
     #[test]
     fn reserved_names_get_prefixed() {

@@ -62,6 +62,10 @@ pub enum Step {
     Hang,
     SetSecret(String, String),
     RecordKnown,
+    /// `ChangeSink::report_problem(key, message)`.
+    Problem(String, String),
+    /// Report a scan (files-connector style).
+    Scan(nugget_core::ipc::ScanReport),
 }
 
 pub struct FakeState {
@@ -156,10 +160,12 @@ impl Connector for FakeConnector {
                     s.sent.fetch_add(1, Ordering::SeqCst);
                 }
                 Step::Checkpoint(v) => sink.checkpoint(v).await?,
+                Step::Problem(k, m) => sink.report_problem(ItemKey::new(k), m).await?,
                 Step::Fail(k) => return Err(k.err()),
                 Step::Return(v) => return Ok(v),
                 Step::Hang => std::future::pending::<()>().await,
                 Step::SetSecret(a, v) => self.ctx.secrets.set(&a, &v)?,
+                Step::Scan(r) => sink.report_scan(r).await,
                 Step::RecordKnown => {
                     let v = self.ctx.known.versions().await?;
                     *s.known.lock().unwrap() = Some(v);
@@ -280,6 +286,8 @@ pub struct FakeProvider {
     pub chat_inputs: Mutex<Vec<String>>,
     /// Every text sent for embedding.
     pub embed_inputs: Mutex<Vec<String>>,
+    /// The item named for each text sent through `embed_items` (the egress ledger's items).
+    pub embed_items: Mutex<Vec<ItemRef>>,
     /// Embedding calls containing this marker wait until `open` is set.
     pub block_marker: Mutex<Option<String>>,
     open: tokio::sync::watch::Sender<bool>,
@@ -288,6 +296,18 @@ pub struct FakeProvider {
     pub nan: AtomicBool,
     /// The task prefixes it reports as `(query, document)` (none by default).
     pub prefixes: Mutex<(String, String)>,
+    /// Chat requests wait while this is `false` (see [`FakeProvider::block_chat`]).
+    chat_open: tokio::sync::watch::Sender<bool>,
+    /// Chat requests that returned a reply (others were dropped while blocked).
+    pub chats_completed: AtomicUsize,
+    /// Reply to triage with unusable output.
+    pub chat_invalid: AtomicBool,
+    /// Simulated prefill: microseconds of delay per character of the request.
+    pub prefill_us_per_char: std::sync::atomic::AtomicU64,
+    /// Reply with unusable output to requests containing this marker.
+    pub invalid_marker: Mutex<Option<String>>,
+    /// Fail every chat as an unreachable server would (`Error::Network`).
+    pub chat_down: AtomicBool,
 }
 
 impl FakeProvider {
@@ -297,12 +317,28 @@ impl FakeProvider {
             locality,
             chat_inputs: Mutex::new(Vec::new()),
             embed_inputs: Mutex::new(Vec::new()),
+            embed_items: Mutex::new(Vec::new()),
             block_marker: Mutex::new(None),
             open: tokio::sync::watch::channel(true).0,
             dim: 4,
             nan: AtomicBool::new(false),
             prefixes: Mutex::new((String::new(), String::new())),
+            chat_open: tokio::sync::watch::channel(true).0,
+            chats_completed: AtomicUsize::new(0),
+            chat_invalid: AtomicBool::new(false),
+            prefill_us_per_char: std::sync::atomic::AtomicU64::new(0),
+            invalid_marker: Mutex::new(None),
+            chat_down: AtomicBool::new(false),
         })
+    }
+
+    /// Hold every chat request until [`FakeProvider::unblock_chat`].
+    pub fn block_chat(&self) {
+        self.chat_open.send_replace(false);
+    }
+
+    pub fn unblock_chat(&self) {
+        self.chat_open.send_replace(true);
     }
 
     /// Block embedding calls whose input contains `marker` (`""` blocks everything).
@@ -351,16 +387,54 @@ impl Provider for FakeProvider {
             .collect::<Vec<_>>()
             .join("\n");
         self.chat_inputs.lock().unwrap().push(text.clone());
-        let junk = text.contains("SPAM");
-        let sensitive = text.contains("CONFIDENTIAL");
-        let reply = json!({
-            "keep": !junk,
-            "junk": junk,
-            "sensitive": sensitive,
-            "summary": "A short summary of the document.",
-            "title": "Triage title"
-        })
-        .to_string();
+        if self.chat_down.load(Ordering::SeqCst) {
+            return Err(Error::Network("connection refused".into()));
+        }
+        let mut rx = self.chat_open.subscribe();
+        while !*rx.borrow_and_update() {
+            if rx.changed().await.is_err() {
+                break;
+            }
+        }
+        let us = self.prefill_us_per_char.load(Ordering::SeqCst);
+        if us > 0 {
+            tokio::time::sleep(Duration::from_micros(us * text.chars().count() as u64)).await;
+        }
+        self.chats_completed.fetch_add(1, Ordering::SeqCst);
+        // One label pair per `<document n="k">` block of a triage batch.
+        let items: Vec<Value> = text
+            .split("<document n=\"")
+            .skip(1)
+            .map(|block| {
+                let n: u64 = block
+                    .split('"')
+                    .next()
+                    .and_then(|k| k.parse().ok())
+                    .unwrap_or(0);
+                let sensitive = block.contains("HUSHHUSH");
+                json!({
+                    "n": n,
+                    "topic": if sensitive { "money" } else { "work" },
+                    "health": false,
+                    "money": sensitive,
+                    "legal": false,
+                    "identity": false,
+                    "credentials": false,
+                    "junk": block.contains("SPAM"),
+                })
+            })
+            .collect();
+        let poisoned = self
+            .invalid_marker
+            .lock()
+            .unwrap()
+            .as_deref()
+            .is_some_and(|m| text.contains(m));
+        let reply = if poisoned || self.chat_invalid.load(Ordering::SeqCst) {
+            "not json".to_owned()
+        } else {
+            json!({ "items": items }).to_string()
+        };
         Ok(Box::pin(futures::stream::iter(vec![
             Ok(ChatEvent::TextDelta(reply)),
             Ok(ChatEvent::Done {
@@ -373,6 +447,11 @@ impl Provider for FakeProvider {
 
     fn embed_prefixes(&self) -> (String, String) {
         self.prefixes.lock().unwrap().clone()
+    }
+
+    async fn embed_items(&self, texts: &[String], items: &[ItemRef]) -> Result<Vec<Vec<f32>>> {
+        self.embed_items.lock().unwrap().extend_from_slice(items);
+        self.embed(texts).await
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -479,6 +558,7 @@ pub struct Opts {
     pub secrets: Option<MemorySecrets>,
     /// Pre-scripted factory (sources in `sources.toml` start syncing during `start`).
     pub factory: Option<Arc<FakeFactory>>,
+    pub foreground: Option<Arc<nugget_ingest::Foreground>>,
 }
 
 impl Default for Opts {
@@ -491,6 +571,7 @@ impl Default for Opts {
             dir: None,
             secrets: None,
             factory: None,
+            foreground: None,
         }
     }
 }
@@ -507,13 +588,14 @@ pub async fn start(opts: Opts) -> Harness {
     let factory = opts.factory.unwrap_or_default();
     let mut registry = Registry::new();
     registry.register(Arc::new(SharedFactory(factory.clone())));
-    let ingest = Ingest::builder(opts.cfg, store.clone(), registry, paths.clone())
+    let mut builder = Ingest::builder(opts.cfg, store.clone(), registry, paths.clone())
         .router(opts.router)
         .secrets(Arc::new(secrets.clone()))
-        .power(opts.power)
-        .start()
-        .await
-        .unwrap();
+        .power(opts.power);
+    if let Some(fg) = opts.foreground {
+        builder = builder.foreground(fg);
+    }
+    let ingest = builder.start().await.unwrap();
     Harness {
         ingest,
         store,

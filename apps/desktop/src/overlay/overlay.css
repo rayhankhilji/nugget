@@ -1,4 +1,6 @@
-/* Double Tap caret overlay: one compact card filling its small, frameless window. */
+/* Double Tap caret overlay: one compact card in its small, frameless window. The card takes its
+   natural height (capped at the window) and the overlay asks the shell to fit the window to it;
+   past the maximum the draft, the editor and the history list scroll inside. */
 
 body.overlay-body {
   font-size: 13px;
@@ -7,12 +9,14 @@ body.overlay-body {
 }
 
 .overlay {
-  height: 100%;
+  height: auto;
+  max-height: 100vh;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  /* The window is frameless and often sits over white: a plain --border nearly vanishes. */
+  border: 1px solid color-mix(in srgb, var(--control-border) 55%, var(--border));
   border-radius: var(--radius);
   background: var(--surface);
 }
@@ -25,9 +29,42 @@ body.overlay-body {
 }
 
 .overlay-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
+}
+
+.overlay-phase .spinner {
+  width: 12px;
+  height: 12px;
+}
+
+/* Error and refused are the states that need attention: full-strength text plus a status glyph. */
+.overlay-error .overlay-phase,
+.overlay-refused .overlay-phase {
+  color: var(--text);
+}
+
+/* The glyph is on an aria-hidden span, so it isn't read out with the status. */
+.overlay-icon::before {
+  content: "!";
+  display: inline-grid;
+  place-items: center;
+  inline-size: 16px;
+  block-size: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--surface);
+  background: var(--warn);
+}
+
+.overlay-error .overlay-icon::before {
+  background: var(--bad);
 }
 
 .overlay-badges {
@@ -37,16 +74,29 @@ body.overlay-body {
   justify-content: flex-end;
 }
 
+/* Focus moves here after Retry or a refinement (the button is gone): no ring around the card. */
+.overlay:focus {
+  outline: none;
+}
+
 .overlay-text {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  /* The draft follows the target field's language, not the UI's: lay out each paragraph by its own text. */
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+.overlay-text:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
 .overlay-editor {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 60px;
   width: 100%;
   resize: none;
@@ -65,6 +115,11 @@ body.overlay-body {
 
 .overlay-msg {
   margin: 0;
+  unicode-bidi: plaintext;
+}
+
+.overlay-hint {
+  margin: 0;
 }
 
 .overlay-msg-error {
@@ -82,15 +137,91 @@ body.overlay-body {
   flex-wrap: wrap;
 }
 
+/* Retry, the refinements and the history toggle: one compact row that wraps. */
+.overlay-tools,
+.overlay-refine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.overlay-tools {
+  flex-shrink: 0;
+}
+
+.overlay-tools .btn-small {
+  padding-inline: 6px;
+}
+
+.overlay-tools kbd,
+.overlay-tools kbd {
+  margin-inline-start: 4px;
+  color: var(--muted);
+}
+
+.overlay-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 0 1 auto;
+  min-height: 48px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.overlay-history li + li {
+  border-block-start: 1px solid var(--border);
+}
+
+.overlay-history-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  inline-size: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.overlay-history-item:hover {
+  background: var(--bg);
+}
+
+.overlay-history-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Truncated on screen only: the whole draft stays in the accessible name. */
+.overlay-history-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+/* Pinned to the bottom in every phase, so the buttons (and Esc) never move around. */
 .overlay-foot {
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  margin-block-start: auto;
+  padding-block-start: 4px;
 }
 
-.overlay-foot kbd {
-  font-family: var(--mono);
-  font-size: 11px;
-  margin-inline-start: 6px;
-  opacity: 0.75;
+/* On the amber button a pale chip with muted text is barely legible: outline it in the label colour. */
+.overlay-foot .btn-primary kbd {
+  background: transparent;
+  border-color: currentColor;
+  color: inherit;
 }

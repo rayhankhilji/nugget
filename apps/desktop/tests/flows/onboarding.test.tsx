@@ -100,6 +100,7 @@ describe("onboarding flow", () => {
     expect(heading()).toBe(t("onboarding.source.heading"));
     await click(button(t("onboarding.skipAll")));
     expect(nav()).not.toBeNull();
+    // "Decide later" is a decision (GG6-21): Continue recorded the AI step as done, not skipped.
     expect(loadState()).toMatchObject({ finished: true, ai: "later", completed: ["welcome", "ai"], skipped: ["source", "permissions", "trigger"] });
   });
 

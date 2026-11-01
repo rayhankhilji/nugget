@@ -1,0 +1,29 @@
+# GG3 explore-layer probes: deterministic scripted "misbehaving models" driving the real agent loop
+# (nugget-agent), the real computer-use tools (nugget-computer), the real policy engine and the
+# bench's in-process apps, then asserting what actually happened. Not a workspace member: its own
+# workspace so that it never changes the product's build. See README.md.
+[package]
+name = "gg3-probes"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[[bin]]
+name = "gg3-probes"
+path = "src/main.rs"
+
+[dependencies]
+nugget-bench = { path = "../../../bench" }
+nugget-agent = { path = "../../../crates/nugget-agent" }
+nugget-computer = { path = "../../../crates/nugget-computer" }
+nugget-policy = { path = "../../../crates/nugget-policy" }
+nugget-infer = { path = "../../../crates/nugget-infer" }
+nugget-core = { path = "../../../crates/nugget-core" }
+nugget-a11y = { path = "../../../crates/nugget-a11y" }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"

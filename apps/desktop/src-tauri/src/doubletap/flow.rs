@@ -16,6 +16,17 @@
 //!   window it was opened over. (Forcing the foreground window would need `unsafe` Win32 calls.)
 //! - **Linux:** X11 window managers and Wayland compositors return focus to the previously
 //!   focused window when the overlay is hidden.
+//!
+//! Esc (and a refusal timing out) hides the overlay and hands the keyboard back the same way
+//! ([`Effect::RestoreFocus`]).
+//!
+//! # Retry, refinements, practice
+//!
+//! The request of the session's last draft is kept ([`DoubleTap::request`]): Retry sends it again,
+//! a refinement sends it with the draft as the field's selected text and the refinement's
+//! instruction ([`refined_request`]), so the daemon rewrites that draft (same provider choice,
+//! same privacy rules). When the practice field on the Double Tap page has focus, the trigger
+//! drafts for it instead of reading another app (see [`super::practice`]).
 
 use std::time::Duration;
 
@@ -24,14 +35,18 @@ use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
     AppInfo, ChatCancel, ChatDelta, ChatDone, DraftContext, DraftRequest, DraftStarted, method,
 };
-use tauri::{AppHandle, Emitter, Listener as _, Manager, PhysicalPosition};
+use tauri::{AppHandle, Emitter, Listener as _, Manager, PhysicalPosition, PhysicalSize};
 
 use super::errors::{self, Failure};
-use super::overlay::{Effect, Event, Started};
+use super::overlay::{Effect, Event, RefineRequest, Started};
 use super::placement::{self, Area, Screen};
+use super::practice::{self, PracticeField};
 use super::probe;
 use super::settings;
-use super::{DRAFT_PREWARM, DoubleTap, OVERLAY_EVENT, OVERLAY_LABEL, OVERLAY_SIZE, lock};
+use super::{
+    DRAFT_PREWARM, DoubleTap, HISTORY_EVENT, MAIN_LABEL, OVERLAY_EVENT, OVERLAY_LABEL,
+    OVERLAY_MAX_HEIGHT, OVERLAY_MIN_HEIGHT, OVERLAY_SIZE, PRACTICE_EVENT, lock,
+};
 use crate::daemon::{self, Daemon};
 
 /// Where the draft was read from: the app to return focus to and the caret to place the
@@ -40,6 +55,98 @@ use crate::daemon::{self, Daemon};
 pub struct Target {
     pub app: AppInfo,
     pub caret: Option<nugget_a11y::Rect>,
+    /// The field's text runs right to left (the overlay lines up with the caret's end).
+    pub rtl: bool,
+    /// The practice field on the Double Tap page (the caret is in physical pixels).
+    pub practice: bool,
+    /// The field's label names a secret: its drafts are never kept in the history.
+    pub sensitive: bool,
+    /// The field the draft was written for, checked again before inserting (`None` for the
+    /// practice field).
+    pub field: Option<FieldSig>,
+}
+
+/// What identifies a field between the trigger and the insertion: the accessibility APIs give
+/// no stable element id across all three platforms, so the role, label and placeholder, plus
+/// the caret position when the field has neither label nor placeholder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldSig {
+    pub role: String,
+    pub label: Option<String>,
+    pub placeholder: Option<String>,
+    pub caret: Option<nugget_a11y::Rect>,
+}
+
+impl FieldSig {
+    pub fn of(f: &nugget_a11y::Focused) -> Self {
+        Self {
+            role: f.field.role.clone(),
+            label: f.field.label.clone(),
+            placeholder: f.field.placeholder.clone(),
+            caret: f.caret,
+        }
+    }
+
+    /// Whether `now` is (as far as can be told) the same field.
+    pub fn matches(&self, now: &FieldSig) -> bool {
+        let norm = |v: &Option<String>| {
+            v.as_deref()
+                .map(|s| {
+                    s.split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .to_lowercase()
+                })
+                .filter(|s| !s.is_empty())
+        };
+        if self.role != now.role
+            || norm(&self.label) != norm(&now.label)
+            || norm(&self.placeholder) != norm(&now.placeholder)
+        {
+            return false;
+        }
+        if norm(&self.label).is_some() || norm(&self.placeholder).is_some() {
+            return true;
+        }
+        // Two unlabelled fields of one kind: tell them apart by where the caret is (a caret
+        // moves within its field as the user types, never hundreds of units away).
+        match (self.caret, now.caret) {
+            (Some(a), Some(b)) => (a.y - b.y).abs() <= 300.0 && (a.x - b.x).abs() <= 1_200.0,
+            _ => true,
+        }
+    }
+}
+
+/// The overlay's measured height (logical), the side of the caret it was put on, and when it
+/// was last shown (a focus loss right after showing is the window system settling, not the user).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Layout {
+    pub height: f64,
+    pub above: Option<bool>,
+    pub shown_at: Option<std::time::Instant>,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            height: OVERLAY_SIZE.1,
+            above: None,
+            shown_at: None,
+        }
+    }
+}
+
+/// How long after showing the overlay a focus loss is ignored.
+pub const FOCUS_GRACE: Duration = Duration::from_millis(400);
+
+/// The overlay window lost the keyboard: close the draft unless the window is still settling.
+pub fn on_overlay_blur(app: &AppHandle) {
+    let settling = lock(&app.state::<DoubleTap>().layout)
+        .shown_at
+        .is_some_and(|t| t.elapsed() < FOCUS_GRACE);
+    if !settling {
+        apply(app, Event::FocusLost);
+    }
 }
 
 // --- the accessibility backend ----------------------------------------------------------------
@@ -167,10 +274,11 @@ fn on_trigger(app: &AppHandle) {
 
 // --- the draft flow ------------------------------------------------------------------------------
 
-fn fail(app: &AppHandle, f: Failure) {
+/// A failure of the request made for `generation` (ignored once a newer one replaced it).
+fn fail(app: &AppHandle, generation: u64, f: Failure) {
     match f {
-        Failure::Refused(k) => apply(app, Event::Refused(k.into())),
-        Failure::Error(e) => apply(app, Event::Error(e)),
+        Failure::Refused(k) => apply_for(app, generation, Event::Refused(k.into())),
+        Failure::Error(e) => apply_for(app, generation, Event::Error(e)),
     };
 }
 
@@ -191,19 +299,33 @@ pub(super) fn local_refusal(
 /// The trigger fired (or `doubletap_fire`): read the field, refuse or start a draft.
 pub async fn fire(app: AppHandle) {
     let state = app.state::<DoubleTap>();
-    {
+    let generation = {
         let mut m = lock(&state.machine);
         if m.busy() {
+            // Double Tap always answers: a draft on screen comes back to the front with the
+            // keyboard (the user may have clicked away while the window system kept it shown);
+            // reading and inserting finish on their own.
+            let step = m.apply(Event::Refocus);
+            drop(m);
+            run(&app, step.effects);
             return;
         }
         let step = m.apply(Event::Begin);
         let _ = app.emit_to(OVERLAY_LABEL, OVERLAY_EVENT, m.view());
         probe::record("view", || serde_json::json!(m.view()));
+        let generation = m.generation();
         drop(m);
         run(&app, step.effects);
-    }
+        generation
+    };
     *lock(&state.target) = None;
+    *lock(&state.request) = None;
+    *lock(&state.layout) = Layout::default();
     let s = lock(&state.settings).clone();
+    if let Some(field) = practice_target(&app) {
+        apply_for(&app, generation, Event::Practice);
+        return fire_practice(&app, generation, field, &s).await;
+    }
     let a11y = state.a11y.clone();
 
     let h = app.clone();
@@ -219,38 +341,173 @@ pub async fn fire(app: AppHandle) {
     })
     .await;
     let focused = match read {
-        Err(e) => return fail(&app, Failure::Error(e.to_string())),
-        Ok(Err(e)) => return fail(&app, errors::classify_a11y(&e, false)),
-        Ok(Ok(None)) => return fail(&app, Failure::Refused(errors::REFUSED_NO_FIELD)),
+        Err(e) => return fail(&app, generation, Failure::Error(e.to_string())),
+        Ok(Err(e)) => return fail(&app, generation, errors::classify_a11y(&e, false)),
+        Ok(Ok(None)) => {
+            return fail(&app, generation, Failure::Refused(errors::REFUSED_NO_FIELD));
+        }
         Ok(Ok(Some(f))) => f,
     };
+    // Nugget's own windows (outside the practice field) are not a target: drafting into the
+    // overlay or a settings field would read and write Nugget itself.
+    if super::readahead::is_own(&app, &focused.app) {
+        return fail(&app, generation, Failure::Refused(errors::REFUSED_NO_FIELD));
+    }
     // A secure field's value is never read (the backend leaves it empty) and never sent.
     if focused.field.secure {
-        return fail(&app, Failure::Refused(errors::REFUSED_SECURE));
+        return fail(&app, generation, Failure::Refused(errors::REFUSED_SECURE));
     }
     if let Some(key) = local_refusal(&focused.app, &s) {
-        return fail(&app, Failure::Refused(key));
+        return fail(&app, generation, Failure::Refused(key));
     }
     *lock(&state.target) = Some(Target {
         app: focused.app.clone(),
         caret: focused.caret,
+        rtl: is_rtl_context(&focused),
+        practice: false,
+        sensitive: focused
+            .field
+            .label
+            .as_deref()
+            .is_some_and(nugget_policy::redact::is_secure_label),
+        field: Some(FieldSig::of(&focused)),
     });
     let request = draft_request(focused, &s);
-    match begin(&app, &request).await {
-        Ok(started) => {
-            apply(
-                &app,
-                Event::Started(Started {
-                    stream_id: started.stream_id,
-                    provider: started.provider.0,
-                    locality: started.locality,
-                    citations: u32::try_from(started.citations.len()).unwrap_or(u32::MAX),
-                    excluded_sensitive: started.excluded_sensitive,
-                }),
-            );
-        }
-        Err(f) => fail(&app, f),
+    start(&app, generation, request).await;
+}
+
+/// The practice field, when it has focus in Nugget's main window (frontmost).
+fn practice_target(app: &AppHandle) -> Option<PracticeField> {
+    let field = lock(&app.state::<DoubleTap>().practice).clone()?;
+    let main = app.get_webview_window(MAIN_LABEL)?;
+    main.is_focused().unwrap_or(false).then_some(field)
+}
+
+/// The trigger fired over the practice field: draft for real from its sandbox context.
+async fn fire_practice(
+    app: &AppHandle,
+    generation: u64,
+    field: PracticeField,
+    s: &settings::DoubleTapSettings,
+) {
+    let state = app.state::<DoubleTap>();
+    // The page's viewport rect, in physical pixels on the desktop.
+    let caret = app.get_webview_window(MAIN_LABEL).and_then(|w| {
+        let origin = w.inner_position().ok()?;
+        let k = w.scale_factor().ok()?;
+        let r = field.rect;
+        Some(nugget_a11y::Rect {
+            x: f64::from(origin.x) + r.x * k,
+            y: f64::from(origin.y) + r.y * k,
+            width: r.width * k,
+            height: r.height * k,
+        })
+    });
+    let app_info = PracticeField::app();
+    let provider = settings::provider_for(&app_info, &s.app_providers);
+    *lock(&state.target) = Some(Target {
+        app: app_info,
+        caret,
+        rtl: field.rtl,
+        practice: true,
+        sensitive: false,
+        field: None,
+    });
+    probe::record("practice", || serde_json::Value::Null);
+    start(
+        app,
+        generation,
+        field.request(provider.map(ProviderId::new)),
+    )
+    .await;
+}
+
+/// Keep the request (for Retry and the refinements) and start the draft.
+async fn start(app: &AppHandle, generation: u64, request: DraftRequest) {
+    *lock(&app.state::<DoubleTap>().request) = Some(request.clone());
+    match begin(app, &request).await {
+        Ok(started) => apply(app, Event::Started(started_event(started, generation))),
+        Err(f) => fail(app, generation, f),
     }
+}
+
+/// `generation` is the request's token: the machine cancels a stream started for an older one.
+fn started_event(started: DraftStarted, generation: u64) -> Started {
+    Started {
+        generation,
+        sensitive: started.citations.iter().any(|c| c.sensitive),
+        stream_id: started.stream_id,
+        provider: started.provider.0,
+        locality: started.locality,
+        citations: u32::try_from(started.citations.len()).unwrap_or(u32::MAX),
+        excluded_sensitive: started.excluded_sensitive,
+    }
+}
+
+/// Retry or a refinement: the session's request again, or rewriting `base`.
+async fn redraft(app: AppHandle, generation: u64, refine: Option<RefineRequest>) {
+    let Some(request) = lock(&app.state::<DoubleTap>().request).clone() else {
+        return fail(
+            &app,
+            generation,
+            Failure::Error(errors::ERROR_DRAFT_FAILED.into()),
+        );
+    };
+    let request = match refine {
+        Some(r) => refined_request(&request, &r),
+        None => request,
+    };
+    // The kept request stays the original: a second refinement rewrites the new draft from the
+    // same context, not a rewrite of a rewrite's prompt.
+    match begin(&app, &request).await {
+        Ok(started) => apply(&app, Event::Started(started_event(started, generation))),
+        Err(f) => fail(&app, generation, f),
+    }
+}
+
+/// The request for a refinement: the original context with the draft as the selected text of
+/// the field (where it would be inserted), so the daemon writes its replacement, plus an
+/// explicit rewrite instruction with a target length taken from the draft, and a token cap to
+/// match. The provider choice is unchanged.
+pub(super) fn refined_request(original: &DraftRequest, refine: &RefineRequest) -> DraftRequest {
+    let base = refine.base.as_str();
+    let kind = refine.kind;
+    let units = super::overlay::length_units(base);
+    let mut r = original.clone();
+    let value = &original.context.field.value;
+    let chars: Vec<char> = value.chars().collect();
+    let n = chars.len();
+    let (a, b) = match original.context.field.selection {
+        Some((a, b)) => {
+            let (a, b) = ((a.min(b) as usize).min(n), (a.max(b) as usize).min(n));
+            (a, b)
+        }
+        None => (n, n),
+    };
+    let before: String = chars[..a].iter().collect();
+    let after: String = chars[b..].iter().collect();
+    let start = u32::try_from(a).unwrap_or(u32::MAX);
+    let end = start.saturating_add(u32::try_from(base.chars().count()).unwrap_or(u32::MAX));
+    r.context.field.value = format!("{before}{base}{after}");
+    r.context.field.selection = Some((start, end));
+    r.instruction = Some(kind.instruction(units, refine.strict));
+    r.max_tokens = Some(kind.max_tokens(units));
+    r
+}
+
+/// Whether the field's text (else the newest message around it) starts right to left.
+fn is_rtl_context(f: &nugget_a11y::Focused) -> bool {
+    first_strong_rtl(&f.field.value)
+        .or_else(|| f.thread.last().and_then(|m| first_strong_rtl(&m.text)))
+        .unwrap_or(false)
+}
+
+/// The direction of the first strong character: `Some(true)` for Hebrew, Arabic, Syriac,
+/// Thaana, NKo and their presentation forms, `Some(false)` for other letters.
+fn first_strong_rtl(text: &str) -> Option<bool> {
+    text.chars().find(|c| c.is_alphabetic()).map(|c| {
+        matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF)
+    })
 }
 
 /// The request `draft.begin` gets for a field read (read-ahead sends the same one, so the
@@ -348,11 +605,23 @@ fn is_disconnect(payload: &str) -> bool {
 
 /// Feed an event to the state machine, emit the view if it changed, run the effects.
 pub fn apply(app: &AppHandle, event: Event) {
+    apply_if(app, None, event);
+}
+
+/// [`apply`] only while the machine's request is still `generation` (checked under its lock).
+fn apply_for(app: &AppHandle, generation: u64, event: Event) {
+    apply_if(app, Some(generation), event);
+}
+
+fn apply_if(app: &AppHandle, generation: Option<u64>, event: Event) {
     let Some(state) = app.try_state::<DoubleTap>() else {
         return;
     };
     let effects = {
         let mut m = lock(&state.machine);
+        if generation.is_some_and(|g| g != m.generation()) {
+            return;
+        }
         let step = m.apply(event);
         if step.changed {
             // Emitted under the lock so views arrive in order.
@@ -405,9 +674,122 @@ fn run(app: &AppHandle, effects: Vec<Effect>) {
                 });
             }
             Effect::Insert(text) => {
-                tauri::async_runtime::spawn(insert(app.clone(), text));
+                if is_practice(app) {
+                    insert_practice(app, text);
+                } else {
+                    tauri::async_runtime::spawn(insert(app.clone(), text));
+                }
             }
+            Effect::Redraft { generation, refine } => {
+                tauri::async_runtime::spawn(redraft(app.clone(), generation, refine));
+            }
+            Effect::RestoreFocus => {
+                if is_practice(app) {
+                    focus_practice(app, practice::Action::Focus);
+                } else {
+                    let h = app.clone();
+                    let target = lock(&app.state::<DoubleTap>().target).clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        restore_focus(&h, target.as_ref().map(|t| &t.app));
+                    });
+                }
+            }
+            Effect::Remember(text) => remember(app, &text),
         }
+    }
+}
+
+/// The session drafts for the practice field (the state machine decides, so feedback, history
+/// and where the text goes always agree).
+fn is_practice(app: &AppHandle) -> bool {
+    lock(&app.state::<DoubleTap>().machine).practice()
+}
+
+/// Bring the main window back and hand the practice field its action.
+fn focus_practice(app: &AppHandle, action: practice::Action) {
+    if let Some(main) = app.get_webview_window(MAIN_LABEL) {
+        let _ = main.set_focus();
+    }
+    if let Err(e) = app.emit_to(MAIN_LABEL, PRACTICE_EVENT, &action) {
+        tracing::debug!(error = %e, "cannot reach the practice field");
+    }
+}
+
+/// Practice: the page puts the text in its field; nothing touches another app.
+fn insert_practice(app: &AppHandle, text: String) {
+    focus_practice(app, practice::Action::Insert { text });
+    probe::record(
+        "insert",
+        || serde_json::json!({ "ok": true, "practice": true }),
+    );
+    apply(
+        app,
+        Event::Inserted {
+            verified: true,
+            method: nugget_a11y::InsertMethod::Accessibility,
+        },
+    );
+}
+
+/// Keep a draft in the history (in memory; never sensitive, see `history.rs`).
+fn remember(app: &AppHandle, text: &str) {
+    let state = app.state::<DoubleTap>();
+    let (app_name, skip) = lock(&state.target)
+        .as_ref()
+        .map(|t| (t.app.name.clone(), t.practice || t.sensitive))
+        .unwrap_or_default();
+    let skip = skip || lock(&state.machine).practice();
+    if skip {
+        return;
+    }
+    if super::history::looks_sensitive(text) {
+        return;
+    }
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
+    let app = app.clone();
+    let text = text.to_owned();
+    tauri::async_runtime::spawn(async move {
+        // The daemon's PII scan (cards, IBANs, SSNs, API keys and other credentials), the same
+        // one that marks items sensitive. Not kept when it can't be asked.
+        if !matches!(daemon_says_clean(&app, &text).await, Some(true)) {
+            return;
+        }
+        let state = app.state::<DoubleTap>();
+        let list = {
+            let mut h = lock(&state.history);
+            if !h.push(&text, &app_name, at) {
+                return;
+            }
+            h.list()
+        };
+        emit_history(&app, &list);
+    });
+}
+
+/// `draft.check_sensitive`: `Some(true)` when the daemon finds nothing sensitive in `text`.
+async fn daemon_says_clean(app: &AppHandle, text: &str) -> Option<bool> {
+    let daemon = app.state::<Daemon>();
+    let check = nugget_core::ipc::SensitiveCheck {
+        text: text.to_owned(),
+    };
+    match daemon
+        .call::<_, nugget_core::ipc::SensitiveVerdict>(app, method::DRAFT_CHECK_SENSITIVE, &check)
+        .await
+    {
+        Ok(v) => Some(!v.sensitive),
+        Err(e) => {
+            tracing::debug!(error = %e, "draft.check_sensitive failed; the draft is not kept");
+            None
+        }
+    }
+}
+
+pub(super) fn emit_history(app: &AppHandle, list: &[super::history::Entry]) {
+    if let Err(e) = app.emit(HISTORY_EVENT, list) {
+        tracing::debug!(error = %e, "cannot announce the draft history");
     }
 }
 
@@ -417,12 +799,32 @@ fn show_overlay(app: &AppHandle, focus: bool) {
     let Some(win) = app.get_webview_window(OVERLAY_LABEL) else {
         return;
     };
-    let caret = app
-        .state::<DoubleTap>()
-        .target
-        .lock()
-        .ok()
-        .and_then(|t| t.as_ref().and_then(|t| t.caret));
+    // Choose the side of the caret afresh for each new draft.
+    {
+        let state = app.state::<DoubleTap>();
+        let mut layout = lock(&state.layout);
+        layout.above = None;
+        layout.shown_at = Some(std::time::Instant::now());
+    }
+    place_overlay(app, &win);
+    let _ = win.set_focusable(focus);
+    let _ = win.set_always_on_top(true);
+    let _ = win.show();
+    if focus {
+        let _ = win.set_focus();
+    }
+    probe::window("show", &win);
+}
+
+/// Size and place the overlay for the measured content height, beside the caret without
+/// covering it. Returns the height applied (logical).
+fn place_overlay(app: &AppHandle, win: &tauri::WebviewWindow) -> f64 {
+    let state = app.state::<DoubleTap>();
+    let (caret, rtl, practice) = lock(&state.target)
+        .as_ref()
+        .map(|t| (t.caret, t.rtl, t.practice))
+        .unwrap_or((None, false, false));
+    let layout = *lock(&state.layout);
     let screens: Vec<Screen> = win
         .available_monitors()
         .unwrap_or_default()
@@ -448,22 +850,45 @@ fn show_overlay(app: &AppHandle, focus: bool) {
         .collect();
     let fallback = app.cursor_position().ok().map(|p| (p.x, p.y));
     let caret = caret.map(|c| Area::new(c.x, c.y, c.width, c.height));
-    if let Some((x, y)) = placement::place(
-        caret,
-        placement::CARET_UNITS,
-        &screens,
-        OVERLAY_SIZE,
-        fallback,
-    ) {
-        let _ = win.set_position(PhysicalPosition::new(x, y));
+    // The practice field's rectangle is computed in physical pixels already.
+    let units = if practice {
+        placement::Units::Physical
+    } else {
+        placement::CARET_UNITS
+    };
+    let want = placement::Want {
+        size: (OVERLAY_SIZE.0, layout.height),
+        min_height: OVERLAY_MIN_HEIGHT,
+        rtl,
+        prefer_above: layout.above,
+    };
+    let Some(fit) = placement::fit(caret, units, &screens, want, fallback) else {
+        return layout.height;
+    };
+    let _ = win.set_size(PhysicalSize::new(fit.width, fit.height));
+    let _ = win.set_position(PhysicalPosition::new(fit.x, fit.y));
+    lock(&state.layout).above = Some(fit.above);
+    f64::from(fit.height) / fit.scale
+}
+
+/// The overlay measured its content: fit the window to `height` (logical), within the limits
+/// and the room beside the caret. Returns the height applied.
+pub fn resize_overlay(app: &AppHandle, height: f64) -> f64 {
+    let height = if height.is_finite() {
+        height.clamp(OVERLAY_MIN_HEIGHT, OVERLAY_MAX_HEIGHT)
+    } else {
+        OVERLAY_SIZE.1
+    };
+    lock(&app.state::<DoubleTap>().layout).height = height;
+    let Some(win) = app.get_webview_window(OVERLAY_LABEL) else {
+        return height;
+    };
+    if !win.is_visible().unwrap_or(false) {
+        return height;
     }
-    let _ = win.set_focusable(focus);
-    let _ = win.set_always_on_top(true);
-    let _ = win.show();
-    if focus {
-        let _ = win.set_focus();
-    }
-    probe::window("show", &win);
+    let applied = place_overlay(app, &win);
+    probe::window("resize", &win);
+    applied
 }
 
 fn hide_overlay(app: &AppHandle) {
@@ -488,6 +913,15 @@ async fn insert(app: AppHandle, text: String) {
         {
             return Err(Failure::Error(errors::ERROR_INSERT_FAILED.into()));
         }
+        // The keyboard must be back in the field the draft was written for: an accessibility
+        // insert writes into whatever has focus. A different field gets nothing; the draft goes
+        // to the clipboard instead and the overlay says so.
+        if let Some(want) = target.as_ref().and_then(|t| t.field.as_ref())
+            && let Ok(Some(now)) = a11y.api().focused()
+            && !want.matches(&FieldSig::of(&now))
+        {
+            return Err(Failure::Error(copy_instead(&text)));
+        }
         a11y.api()
             .insert(&text)
             .map_err(|e| errors::classify_a11y(&e, true))
@@ -508,6 +942,19 @@ async fn insert(app: AppHandle, text: String) {
         Ok(Err(Failure::Refused(k))) => apply(&app, Event::Error(k.into())),
         Ok(Err(Failure::Error(e))) => apply(&app, Event::Error(e)),
         Err(e) => apply(&app, Event::Error(e.to_string())),
+    }
+}
+
+/// The field changed before inserting: put the draft on the clipboard (never for a secure field,
+/// whose drafts are refused before this) and return the message to show.
+fn copy_instead(text: &str) -> String {
+    let copied = nugget_a11y::system_clipboard().and_then(|mut c| c.set_text(text));
+    match copied {
+        Ok(()) => errors::ERROR_FIELD_CHANGED.into(),
+        Err(e) => {
+            tracing::debug!(error = %e, "cannot copy the draft");
+            errors::ERROR_FIELD_CHANGED_NO_COPY.into()
+        }
     }
 }
 
@@ -574,6 +1021,7 @@ fn wait_frontmost(a11y: &A11y, target: &AppInfo) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::overlay::Refinement;
     use super::*;
 
     fn app(id: Option<&str>, name: &str) -> AppInfo {
@@ -620,6 +1068,127 @@ mod tests {
         assert!(!is_bundle_id("-a Calculator"));
         assert!(!is_bundle_id("Slack"));
         assert!(!is_bundle_id("com.example;rm"));
+    }
+
+    fn request(value: &str, selection: Option<(u32, u32)>) -> DraftRequest {
+        DraftRequest {
+            context: DraftContext {
+                app: app(Some("com.apple.mail"), "Mail"),
+                field: nugget_core::ipc::FieldInfo {
+                    role: "text_area".into(),
+                    value: value.into(),
+                    selection,
+                    ..Default::default()
+                },
+                ..DraftContext::default()
+            },
+            instruction: None,
+            provider: Some(ProviderId::new("local")),
+            max_tokens: None,
+        }
+    }
+
+    fn rr(base: &str, kind: Refinement) -> RefineRequest {
+        RefineRequest {
+            kind,
+            base: base.into(),
+            strict: false,
+        }
+    }
+
+    fn sig(role: &str, label: Option<&str>, placeholder: Option<&str>, y: f64) -> FieldSig {
+        FieldSig {
+            role: role.into(),
+            label: label.map(Into::into),
+            placeholder: placeholder.map(Into::into),
+            caret: Some(nugget_a11y::Rect {
+                x: 100.0,
+                y,
+                width: 2.0,
+                height: 16.0,
+            }),
+        }
+    }
+
+    #[test]
+    fn the_insert_target_must_be_the_field_the_draft_was_written_for() {
+        let composer = sig("text_area", Some("Message composer"), None, 400.0);
+        // The same field, caret moved, label spaced differently: same.
+        assert!(composer.matches(&sig("text_area", Some(" message  composer"), None, 460.0)));
+        // QA's case: the fixture's search entry took focus.
+        assert!(!composer.matches(&sig("text_field", None, Some("Search messages"), 40.0)));
+        assert!(!composer.matches(&sig("text_area", Some("Notes"), None, 400.0)));
+        // Unlabelled fields of one kind: the caret tells them apart.
+        let bare = sig("text_area", None, None, 900.0);
+        assert!(bare.matches(&sig("text_area", None, None, 940.0)));
+        assert!(!bare.matches(&sig("text_area", None, None, 80.0)));
+    }
+
+    #[test]
+    fn refinements_ask_for_an_explicit_rewrite_with_a_target_length() {
+        let base =
+            "Thanks for the update, I can make the meeting on Thursday at noon in the lobby.";
+        let r = refined_request(&request("", None), &rr(base, Refinement::Shorter));
+        let i = r.instruction.unwrap();
+        assert!(i.contains("at most 9 words (it has 16)"), "{i}");
+        assert!(i.contains("Never return it unchanged"));
+        assert!(i.chars().count() <= 300, "fits the local instruction cap");
+        let strict = Refinement::Longer.instruction(16, true);
+        assert!(
+            strict.contains("about 28 words") && strict.contains("missed"),
+            "{strict}"
+        );
+        assert!(strict.chars().count() <= 300);
+        assert_eq!(r.max_tokens, Some(9 * 3 + 32));
+    }
+
+    #[test]
+    fn refinements_select_the_draft_where_it_would_go() {
+        // Empty reply box: the draft is the whole field, selected.
+        let r = refined_request(
+            &request("", None),
+            &rr("Thanks, Thursday works.", Refinement::Shorter),
+        );
+        assert_eq!(r.context.field.value, "Thanks, Thursday works.");
+        assert_eq!(r.context.field.selection, Some((0, 23)));
+        assert_eq!(
+            r.instruction,
+            Some(Refinement::Shorter.instruction(3, false))
+        );
+        assert_eq!(r.max_tokens, Some(Refinement::Shorter.max_tokens(3)));
+        assert_eq!(
+            r.provider,
+            Some(ProviderId::new("local")),
+            "same provider choice"
+        );
+        assert_eq!(r.context.app.name, "Mail");
+        // Text before the caret is kept; the draft goes at the caret.
+        let r = refined_request(
+            &request("Hi Ada,\n", None),
+            &rr("Sure.", Refinement::Casual),
+        );
+        assert_eq!(r.context.field.value, "Hi Ada,\nSure.");
+        assert_eq!(r.context.field.selection, Some((8, 13)));
+        // A selection is what the draft replaced: the draft takes its place (char offsets).
+        let r = refined_request(
+            &request("é old x", Some((5, 2))),
+            &rr("née", Refinement::Formal),
+        );
+        assert_eq!(r.context.field.value, "é née x");
+        assert_eq!(r.context.field.selection, Some((2, 5)));
+        // A selection past the end is clamped.
+        let r = refined_request(&request("ab", Some((1, 99))), &rr("Z", Refinement::Longer));
+        assert_eq!(r.context.field.value, "aZ");
+        assert_eq!(r.context.field.selection, Some((1, 2)));
+    }
+
+    #[test]
+    fn rtl_from_the_first_strong_character() {
+        assert_eq!(first_strong_rtl("  123 שלום"), Some(true));
+        assert_eq!(first_strong_rtl("مرحبا Ada"), Some(true));
+        assert_eq!(first_strong_rtl("Hello مرحبا"), Some(false));
+        assert_eq!(first_strong_rtl("こんにちは"), Some(false));
+        assert_eq!(first_strong_rtl("123 !?"), None);
     }
 
     #[test]

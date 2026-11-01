@@ -88,8 +88,10 @@ describe("Apps page states", () => {
     mockDaemon(fresh);
     const { container } = await render(<AppsPage />);
     expect(container.textContent).toContain("No apps connected");
-    const connect = container.querySelectorAll(".pg-empty button");
-    expect(connect[0]?.textContent).toBe("Connect an app");
+    // One Connect button (in the header); the empty state explains instead of repeating it.
+    expect(container.querySelectorAll(".pg-empty button")).toHaveLength(0);
+    const connect = Array.from(container.querySelectorAll("button")).filter((b) => b.textContent === "Connect an app");
+    expect(connect).toHaveLength(1);
     await click(connect[0]);
     expect(document.querySelector("dialog")?.textContent).toContain("No sources added yet.");
     expect(alerts(container)).toEqual([]);

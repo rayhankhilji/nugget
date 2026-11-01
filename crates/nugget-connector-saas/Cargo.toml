@@ -21,6 +21,7 @@ tracing.workspace = true
 url = "2.5"
 
 [dev-dependencies]
+nugget-connector = { workspace = true, features = ["testkit"] }
 wiremock = "0.6"
 
 [lints]

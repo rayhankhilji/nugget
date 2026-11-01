@@ -304,3 +304,26 @@ h6.md-heading {
   font-size: inherit;
   font-weight: 500;
 }
+
+/* Answer check: "not found" note and claims not backed by a cited item. */
+
+.chat-not-found {
+  margin: 4px 0 0;
+}
+
+.chat-check {
+  margin-top: 4px;
+}
+
+.chat-check-list {
+  margin: 4px 0 0;
+  padding-inline-start: 20px;
+}
+
+.chat-check-claim + .chat-check-claim {
+  margin-top: 2px;
+}
+
+.chat-check-reason {
+  font-weight: 500;
+}

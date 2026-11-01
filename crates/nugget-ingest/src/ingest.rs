@@ -11,7 +11,8 @@ use nugget_connector::{
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::{ItemKey, SourceId};
 use nugget_core::ipc::{
-    IngestProgress, IngestStatus, SourceInfo, SourceSpec, SourceState, SourceUpdate,
+    IngestProgress, IngestStatus, ScanReport, SourceHealth, SourceInfo, SourceSpec, SourceState,
+    SourceUpdate,
 };
 use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
@@ -28,10 +29,12 @@ use crate::config::IngestConfig;
 use crate::known::{StoreKnownItems, join_err};
 use crate::metrics::Metrics;
 use crate::power::{PowerPolicy, SystemPowerPolicy};
+use crate::priority::Foreground;
 use crate::reembed::{self, ReembedState, ReembedStats};
 use crate::secrets::{KeyringSecrets, ScopedSecrets, account_belongs_to, default_accounts};
 use crate::sources::{self, SourceEntry};
 use crate::supervisor::{Control, run_source};
+use crate::triage::{self, TriageQueue};
 use crate::util::cap_error;
 
 /// Capacity of the event broadcast; slow subscribers miss old events (`RecvError::Lagged`).
@@ -50,6 +53,9 @@ pub type SettingsResolver =
 
 /// Something that changed, for UIs. `nuggetd` forwards these as notifications:
 /// [`Progress`](Self::Progress) → `ingest.progress`, the others → `sources.changed`.
+// `SourceChanged` is the common event and is cloned to every subscriber anyway; boxing it would
+// change the public shape for little gain.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum IngestEvent {
     Progress(IngestProgress),
@@ -75,6 +81,11 @@ struct SourceStatus {
     last_error: Option<String>,
     errors: VecDeque<ItemError>,
     paused: bool,
+    /// The latest scan report from the connector (files sources), if any.
+    scan: Option<ScanReport>,
+    /// `scan` came from the current (or most recent) sync pass: cleared when a pass begins,
+    /// set when its report arrives.
+    scan_fresh: bool,
 }
 
 impl SourceStatus {
@@ -89,6 +100,8 @@ impl SourceStatus {
             last_error: None,
             errors: VecDeque::new(),
             paused: false,
+            scan: None,
+            scan_fresh: false,
         }
     }
 }
@@ -164,6 +177,10 @@ pub(crate) struct Inner {
     /// Wakes the re-embed job.
     pub reembed: Notify,
     pub reembed_state: Mutex<ReembedState>,
+    /// Background triage: queue and counters, its wake-up, and interactive model use.
+    pub triage: Mutex<TriageQueue>,
+    pub triage_wake: Notify,
+    pub foreground: Arc<Foreground>,
     auth_generation: AtomicU64,
 }
 
@@ -181,6 +198,18 @@ impl Inner {
         let cap = self.cfg.error_ring.max(1);
         let mut slots = lock(&self.slots);
         if let Some(s) = slots.get_mut(id) {
+            // The same item's problem reported again (every pass) refreshes its entry instead
+            // of pushing other errors out of the ring. Pass-level errors (no key) stay one
+            // entry per failed pass: they are the source's failure history.
+            if key.is_some()
+                && let Some(i) = s
+                    .status
+                    .errors
+                    .iter()
+                    .position(|e| e.key == key && e.message == message)
+            {
+                s.status.errors.remove(i);
+            }
             if s.status.errors.len() >= cap {
                 s.status.errors.pop_front();
             }
@@ -212,6 +241,58 @@ impl Inner {
         if changed {
             self.emit_source(id).await;
         }
+    }
+
+    /// Keep the latest scan report of a source and tell listeners when it changed.
+    pub async fn set_scan(&self, id: &SourceId, report: ScanReport) {
+        let changed = {
+            let mut slots = lock(&self.slots);
+            match slots.get_mut(id) {
+                Some(s) => {
+                    let changed = s.status.scan.as_ref() != Some(&report) || !s.status.scan_fresh;
+                    s.status.scan = Some(report);
+                    s.status.scan_fresh = true;
+                    changed
+                }
+                None => false,
+            }
+        };
+        if changed {
+            self.emit_source(id).await;
+        }
+    }
+
+    /// A sync pass begins: the kept report now describes an earlier pass.
+    pub fn scan_pass_begins(&self, id: &SourceId) {
+        if let Some(s) = lock(&self.slots).get_mut(id) {
+            s.status.scan_fresh = false;
+        }
+    }
+
+    /// A live change was indexed: a report claiming the folder had nothing to index is out of
+    /// date (live changes reconcile subtrees only and send no report).
+    pub async fn scan_live_change(&self, id: &SourceId) {
+        let changed = match lock(&self.slots).get_mut(id) {
+            Some(s) if s.status.scan.as_ref().is_some_and(|r| r.found == 0) => {
+                s.status.scan = None;
+                s.status.scan_fresh = false;
+                true
+            }
+            _ => false,
+        };
+        if changed {
+            self.emit_source(id).await;
+        }
+    }
+
+    /// Changes the current pass's finished scan sent (a progress total), once known.
+    pub fn scan_total(&self, id: &SourceId) -> Option<u64> {
+        lock(&self.slots)
+            .get(id)
+            .filter(|s| s.status.scan_fresh)
+            .and_then(|s| s.status.scan.as_ref())
+            .filter(|r| r.finished)
+            .map(|r| r.to_index)
     }
 
     pub async fn sync_succeeded(&self, id: &SourceId) {
@@ -449,6 +530,149 @@ fn info_of(slot: &Slot, counts: Option<&SourceCounts>) -> SourceInfo {
         last_sync: slot.status.last_sync,
         last_error: slot.status.last_error.clone(),
         settings: slot.entry.settings.clone(),
+        health: Some(health_of(slot, counts.map_or(0, |c| c.items))),
+        scan: slot.status.scan.clone(),
+    }
+}
+
+/// Plain-language health from the slot's state, last error and item errors of the last day.
+/// Item errors are counted per item (a bad item re-sent every pass counts once), and the last
+/// message names its item.
+fn health_of(slot: &Slot, items: u64) -> nugget_core::ipc::SourceHealth {
+    let since = OffsetDateTime::now_utc() - time::Duration::days(1);
+    let mut keys = std::collections::HashSet::new();
+    let mut last = None;
+    for e in slot.status.errors.iter().filter(|e| e.at >= since) {
+        if let Some(k) = &e.key {
+            keys.insert(k);
+            last = Some(format!("{k}: {}", e.message));
+        }
+    }
+    let state = if slot.entry.enabled {
+        slot.status.state
+    } else {
+        SourceState::Disabled
+    };
+    let health = nugget_connector::health::diagnose(
+        &slot.entry.kind,
+        state,
+        slot.status.last_error.as_deref(),
+        keys.len() as u64,
+        last.as_deref(),
+    );
+    match &slot.status.scan {
+        // While a new pass runs, an earlier pass's report does not override "syncing".
+        Some(_)
+            if health.code == nugget_connector::health::code::SYNCING
+                && !slot.status.scan_fresh =>
+        {
+            health
+        }
+        Some(scan) => scan_health(health, scan, items),
+        None => health,
+    }
+}
+
+/// Refine an otherwise healthy diagnosis with the latest scan: a folder that cannot be opened,
+/// or a finished scan that found nothing to index while nothing is indexed.
+fn scan_health(health: SourceHealth, scan: &ScanReport, items: u64) -> SourceHealth {
+    use nugget_connector::health::code;
+    if !matches!(
+        health.code.as_str(),
+        code::OK | code::SYNCING | code::ITEM_ERRORS
+    ) {
+        return health;
+    }
+    let mk = |code: &str, reason: String, fix: String| SourceHealth {
+        code: code.into(),
+        reason,
+        fix,
+        ..health.clone()
+    };
+    if scan.roots_denied > 0 && scan.found == 0 && items == 0 {
+        return mk(
+            code::UNREADABLE,
+            "Nugget isn't allowed to open this folder, so it can't index anything in it.".into(),
+            "Check the folder's permissions (or the app's file access in your system settings), \
+             then sync again."
+                .into(),
+        );
+    }
+    if scan.roots_denied > 0 && health.code == code::OK {
+        // Other folders of this source are fine: say so without calling the source broken.
+        let n = scan.roots_denied;
+        return mk(
+            code::OK,
+            format!(
+                "Up to date, but Nugget isn't allowed to open {} of this source's folders.",
+                if n == 1 {
+                    "one".to_string()
+                } else {
+                    n.to_string()
+                }
+            ),
+            "Check that folder's permissions to index it too.".into(),
+        );
+    }
+    if scan.finished && scan.found == 0 && items == 0 {
+        return mk(
+            code::NOTHING_INDEXABLE,
+            "Nothing in this folder can be indexed yet.".into(),
+            nothing_indexable_fix(scan),
+        );
+    }
+    health
+}
+
+fn nothing_indexable_fix(scan: &ScanReport) -> String {
+    let plural = |n: u64, one: &str, many: &str| {
+        if n == 1 {
+            format!("1 {one}")
+        } else {
+            format!("{n} {many}")
+        }
+    };
+    let mut parts = Vec::new();
+    if scan.unsupported > 0 {
+        parts.push(format!(
+            "{} of a type Nugget doesn't read",
+            plural(scan.unsupported, "file is", "files are")
+        ));
+    }
+    if scan.too_large > 0 {
+        parts.push(format!(
+            "{} larger than the {} MB limit",
+            plural(scan.too_large, "file is", "files are"),
+            scan.max_file_bytes.div_ceil(1024 * 1024)
+        ));
+    }
+    if scan.unreadable > 0 {
+        parts.push(format!(
+            "{} couldn't be opened",
+            plural(scan.unreadable, "file or folder", "files or folders")
+        ));
+    }
+    if scan.roots_missing > 0 {
+        return "Nugget can't find this folder: it may have been moved, renamed or be on a drive \
+                that isn't connected. Reconnect it, or remove this source and add the folder again."
+            .into();
+    }
+    if parts.is_empty() {
+        return "The folder is empty. Add documents, notes or PDFs to it, or pick a different \
+                folder."
+            .into();
+    }
+    format!(
+        "{}. Add documents, notes or PDFs to it, or pick a different folder.",
+        capitalize(&parts.join("; "))
+    )
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
     }
 }
 
@@ -462,6 +686,7 @@ pub struct IngestBuilder {
     secrets: Option<Arc<dyn SecretStore>>,
     power: Option<Arc<dyn PowerPolicy>>,
     settings_resolver: Option<SettingsResolver>,
+    foreground: Option<Arc<Foreground>>,
 }
 
 impl std::fmt::Debug for IngestBuilder {
@@ -499,6 +724,13 @@ impl IngestBuilder {
         self
     }
 
+    /// Tracker of interactive model requests that background triage yields to. Default: a new
+    /// one with [`IngestConfig::triage_idle_ms`] of grace; get it with [`Ingest::foreground`].
+    pub fn foreground(mut self, foreground: Arc<Foreground>) -> Self {
+        self.foreground = Some(foreground);
+        self
+    }
+
     /// Load `<config>/sources.toml` and start a supervisor for every enabled source.
     /// Must be called inside a Tokio runtime.
     pub async fn start(self) -> Result<Ingest> {
@@ -515,6 +747,11 @@ impl IngestBuilder {
             .secrets
             .unwrap_or_else(|| Arc::new(KeyringSecrets::new()));
         let cfg = self.cfg;
+        let foreground = self.foreground.unwrap_or_else(|| {
+            Arc::new(Foreground::new(std::time::Duration::from_millis(
+                cfg.triage_idle_ms,
+            )))
+        });
         let inner = Arc::new_cyclic(|weak| Inner {
             metrics: Metrics::new(cfg.freshness_window),
             extract_slots: Arc::new(Semaphore::new(cfg.extraction_slots())),
@@ -537,6 +774,9 @@ impl IngestBuilder {
             write_lock: Mutex::new(()),
             reembed: Notify::new(),
             reembed_state: Mutex::new(ReembedState::default()),
+            triage: Mutex::new(TriageQueue::default()),
+            triage_wake: Notify::new(),
+            foreground,
             auth_generation: AtomicU64::new(0),
         });
         {
@@ -546,8 +786,23 @@ impl IngestBuilder {
             }
         }
         let ids: Vec<SourceId> = lock(&inner.slots).keys().cloned().collect();
+        // Items the old inline triage stored metadata-only as junk (QA GG2-7) are re-indexed
+        // by their source's next full pass; done before any worker caches stored versions.
+        {
+            let store = inner.store.clone();
+            match tokio::task::spawn_blocking(move || store.reset_versions_of_legacy_junk())
+                .await
+                .map_err(join_err)
+                .and_then(|r| r)
+            {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(items = n, "legacy junk items will be re-indexed"),
+                Err(e) => tracing::warn!(error = %e, "resetting legacy junk items failed"),
+            }
+        }
         inner.start_sources(ids).await;
         inner.tracker.spawn(reembed::run(inner.clone()));
+        inner.tracker.spawn(triage::run(inner.clone()));
         Ok(Ingest { inner })
     }
 }
@@ -610,6 +865,7 @@ impl Ingest {
             secrets: None,
             power: None,
             settings_resolver: None,
+            foreground: None,
         }
     }
 
@@ -749,6 +1005,11 @@ impl Ingest {
             s.entry = new.clone();
             if settings_changed {
                 s.connector = None;
+            }
+            if settings_changed || enabled_changed {
+                // The kept report describes the old settings (or a pass long ago).
+                s.status.scan = None;
+                s.status.scan_fresh = false;
             }
             if !new.enabled {
                 s.status.state = SourceState::Disabled;
@@ -922,6 +1183,7 @@ impl Ingest {
             embedding_provider,
             triage_provider,
             sources: self.list().await?,
+            triage: Some(self.inner.triage_progress()),
         })
     }
 
@@ -1133,6 +1395,24 @@ impl Ingest {
     /// embedding provider becomes available.
     pub fn reembed_now(&self) {
         self.inner.reembed.notify_one();
+    }
+
+    /// Interactive model requests in flight, which background triage yields to. The daemon
+    /// marks every on-device chat that is not triage with [`Foreground::begin`].
+    pub fn foreground(&self) -> Arc<Foreground> {
+        self.inner.foreground.clone()
+    }
+
+    /// Wake the background triage job (for example when a local triage model became ready).
+    /// Items whose triage failed and whose retry wait has passed are tried again.
+    pub fn triage_now(&self) {
+        lock(&self.inner.triage).retry_now();
+        self.inner.triage_wake.notify_one();
+    }
+
+    /// Background triage backlog and counters (also in [`Ingest::status`]).
+    pub fn triage_progress(&self) -> nugget_core::ipc::TriageProgress {
+        self.inner.triage_progress()
     }
 
     /// Progress of the re-embed job.
