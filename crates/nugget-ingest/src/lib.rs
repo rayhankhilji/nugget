@@ -81,6 +81,7 @@ mod priority;
 mod reembed;
 mod secrets;
 mod sensitivity;
+mod sensitivity_terms;
 mod sources;
 mod supervisor;
 mod triage;

@@ -396,10 +396,16 @@ impl Provider for FakeProvider {
                     .next()
                     .and_then(|k| k.parse().ok())
                     .unwrap_or(0);
+                let sensitive = block.contains("HUSHHUSH");
                 json!({
                     "n": n,
+                    "topic": if sensitive { "money" } else { "work" },
+                    "health": false,
+                    "money": sensitive,
+                    "legal": false,
+                    "identity": false,
+                    "credentials": false,
                     "junk": block.contains("SPAM"),
-                    "sensitive": block.contains("HUSHHUSH"),
                 })
             })
             .collect();

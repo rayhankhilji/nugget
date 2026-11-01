@@ -270,6 +270,15 @@ pub(crate) fn classify(
     {
         return Some(kind);
     }
+    // The other UI languages (and a few English phrases), with their own matching rules.
+    if let Some(kind) = crate::sensitivity_terms::find(
+        &[title, subject, Some(text)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    ) {
+        return Some(kind);
+    }
     let from = extracted.get("from").and_then(Value::as_str).unwrap_or("");
     if let Some(kind) = sender_kind(from) {
         return Some(kind);
