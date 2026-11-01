@@ -2057,6 +2057,113 @@ waiting for a later request on the same connection); over the cap a request gets
 rows now record the store handle that wrote them, and a second process opening the store marks
 only rows whose owner is gone as `interrupted` (per-handle lock files next to the database).
 
+## Scale
+
+II5 measured Nugget at **250,000 and 500,000 items** (X5 stopped at 100k) and fixed what did not
+scale. Method: the daemon profile above (`perf --backend real --perf-phases daemon`) with
+`--perf-items N --perf-sizes mail`: synthetic items with a mailbox-like size mix (log-normal,
+median 80 words, 1% over 1,000, at most 4,000; chunks of up to 256 words), seeded in 256-item
+transactions, then the real `nuggetd` over IPC: startup, the startup knowledge run over every item,
+searches, the hot status paths, Ask's retrieval step, the knowledge page, the vault render, idle,
+ingest, RSS and the store on disk. `.github/workflows/perf.yml` job `scale` (dispatch with
+`only: scale`, `before_ref: <ref>`) runs the same bench against `nuggetd` built at `before_ref` and at
+the branch head, one after the other on the same runner.
+
+```sh
+cargo build --release -p nuggetd -p nugget-bench
+target/release/nugget-bench perf --backend real --scale full --perf-phases daemon \
+  --perf-items 500000 --perf-sizes mail      # ~65 min on 4 vCPUs, ~5 GB of disk
+```
+
+**500,000 items**, GitHub `ubuntu-latest` (AMD EPYC 9V74, 4 vCPUs, 16 GB), seed 42, release
+builds, workflow run 41267784157: before = integration branch `44b9e11`, after = `ii/scale` at
+`ee8764f` (every fix below but the `knowledge.status` cache, measured separately):
+
+| Metric | Before | After |
+|---|---|---|
+| `daemon.startup_ms` (first start on the seeded store) | 8,302 | **483** |
+| `daemon.restart.startup_ms` (after a graceful stop) | 13,886 | **544** |
+| `daemon.ask.retrieve.latency.p50_us` / `p95_us` (`retrieve.context`) | 1,879,429 / 2,650,182 | **224,671 / 389,169** |
+| `daemon.rss_mib.after_extract` | 2,754 | **1,135** |
+| `daemon.rss_mib.peak_first_start` (startup, extraction, searches) | 4,626 | **1,674** |
+| `daemon.rss_mib.after_idle` (second start, vault rendered) | 2,984 | **1,006** |
+| `daemon.rss_mib.peak` (second start) | 3,143 | **1,171** |
+| `daemon.ipc.status.latency.p50_us` / `p95_us` | 302 / 623 | **45 / 81** |
+| `daemon.ipc.sources_list` / `ingest_status` / `egress_recent` p50 (us) | 44 / 45 / 75 | 42 / 45 / 68 |
+| `daemon.ipc.knowledge_status.latency.p50_us` | 13,934 | 158,532 (see below; now cached) |
+| `daemon.first_search_ms` | 182 | 171 |
+| `daemon.search.latency.p50_us` / `p95_us` | 89,326 / 288,881 | 92,983 / 326,857 |
+| `daemon.knowledge.page_load_ms` (first entity page) | 3.4 | 3.2 |
+| `daemon.knowledge.entity.latency.p50_us` (detail page) | 4,526 | 4,448 |
+| `daemon.knowledge.graph.latency.p50_us` (overview) | 64,033 | 66,926 |
+| `daemon.knowledge.extract_s` (startup run, 500k items) | 3,750 (133 items/s) | 3,606 (139 items/s) |
+| `daemon.vault.render_s` (15,040 pages) | 53.5 | 46.9 |
+| `daemon.ingest.files_per_s` (2k files, watched folder) | 678 | 644 |
+| `daemon.seed.items_per_s` (store writes, batched) | 3,056 | 3,056 |
+| `daemon.disk.bytes_per_item.after_seed` / `after_extract` | 4,245 / 9,001 | 4,245 / 10,563 |
+| `daemon.idle.cpu_percent` / `wakeups_per_s` | 0.00 / 0.0 | 0.00 / 0.0 |
+
+At 250k items the "before" daemon (`44b9e11`) did not finish the bench: one `knowledge.status`
+call blocked for more than the bench's 60 s call timeout (reproduced locally: **81 s**), while
+the proactive engine loaded the whole store item by item. The earlier 250k run against `c03b984`
+(run 41245585147, same runner type) gives the 250k baseline: startup 6.5 s, restart 10.6 s,
+`retrieve.context` p50 1.07 s, idle RSS 1.3 GB; after the fixes, measured on a kept 250k home
+(4-vCPU dev container): restart **28 ms**, idle RSS **429 MiB** with the default config.
+
+What changed, by offender:
+
+- **Startup read the whole database.** Every start ran `PRAGMA quick_check` over the encrypted
+  file before opening it (FF1's damage check): ~5 s per GB. `nugget_store::check_file_on_open` now
+  runs the full check before opening only after an exit without a clean close (a non-empty
+  write-ahead log, which SQLite syncs, or an owner lock file left behind) or a failed background
+  check; otherwise the cheap checks (header, whole pages, the WAL scan, decrypting with the key) and
+  the full check in the background 20 s after startup, at most daily, on its own small-cache
+  connection, cancelled at shutdown. Damage found there is logged and recorded, and the next start
+  refuses the file (recovery mode, as before). The daemon exits without dropping its store, so a
+  graceful stop looked like a crash: new `Store::close_cleanly` (flush the ledger, fold in and
+  truncate the WAL, release the owner lock) runs last at shutdown. Trade-off: damage to a cleanly
+  closed file is now found up to ~20 s after start instead of before it (the backup guide says so).
+- **Proactive held the store twice.** `Corpus::load` read every item (text and metadata tree) with
+  one query each into one `Vec`, then parsed it: ~700 MB at 250k on top of everything else, after
+  every run, and it starved other readers (the 81 s `knowledge.status`). New `Store::items_page`
+  walks a source in key order (one key query plus one batched read per 500 items); the corpus keeps
+  only the parsed form. The proactive engine still rescans the store on every run; making it
+  incremental is the crate's own follow-up.
+- **Ask's near-miss check ranked thousands of rows.** For each rare word of a question,
+  `Retriever::partial_matches` asked `search_text` for up to 1% of all chunks (~6,000 at 500k,
+  ranked, joined and snippeted, up to six words) to learn which of ~20 results contain it. New
+  `Store::text_matches_among` answers from the FTS indexes alone, with the same result.
+- **Counts by full scan.** `status` counted every item and chunk; it now sums the trigger-maintained
+  `source_stats` (schema v10). `knowledge.status` ran `count(*)` over every mention (a million at
+  250k, too big for a reader's 32 MiB page cache, so ~130 ms per call; the 500k "after" column above
+  predates the fix and shows 159 ms); the counts are now cached
+  against the writer connection's `total_changes()` (no write can land under the writer lock) and
+  recomputed at least every 60 s: on a settled 250k daemon, **~130 ms to 0.2 ms** p50 (the first
+  call after a write still pays the count).
+- **Bulk writes.** `Store::upsert_items_with_chunks` writes many items in one transaction (the bench
+  seeds with it: 3,056 items/s at 500k). The ingest pipeline still writes one item per transaction
+  (its crate's call); daemon ingest stays at ~650 files/s.
+
+Not fixed, measured:
+
+- **Knowledge extraction is the long pole:** a first run over 500k items takes an hour (139
+  items/s; X5 measured 175 at 100k). Each item is a few SQLite writes; batching across items is
+  `nugget-knowledge`'s call.
+- **Search** is 93 ms p50 / 327 ms p95 at 500k (text-only: the bench has no embedding provider).
+  Full-text ranking over ~600k chunks dominates; within the brief's budget but the next target.
+- **Disk:** 4.2 KB per item for the store and 10.6 KB after extraction (the knowledge graph:
+  200k claims, 2M mentions at 500k); 5 GB at 500k.
+- **Idle RSS at 500k is ~1 GB**, of which ~290 MB is the draft voice profile and ~160 MB SQLite page
+  caches (writer and 4 readers × 32 MiB); the rest is allocator retention after the startup runs.
+- **The graph overview** (`knowledge.graph`, 67 ms) still scans every entity's counts.
+
+**Desktop lists.** Search results (II2's page, 50 at most) stay a plain list; the knowledge entity
+list and the privacy ledger use the shared windowed `VirtualList` (`apps/desktop/src/components/`),
+the entity list loading 50 more on scroll (`usePagedList`). The e2e `scale` scenario
+(`apps/desktop/e2e/scale.mjs`; the daemon answers a 500,000-entity `knowledge.status` and pages the
+entities) scrolled 2,100 entities at 16.7 ms median / 17.2 ms p95 frames, no long tasks, at most 32
+rows in the DOM; the privacy ledger at 1,000 rows at 17 ms p95, no long tasks, at most 41 rows.
+
 ## Energy
 
 DD2 measured what Nugget costs in energy and battery and cut what was wasteful: the daemon idle,
