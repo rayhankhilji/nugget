@@ -70,3 +70,30 @@ So `recommend` gives the same answer for every tier on every amount of RAM, and 
 named explicitly in `[draft.local] model`. The tiers are the chat tiers the 4B model serves
 (drafting routes by synthesis), so either model can also be named as `runtime.chat_model` for an
 experiment; neither is ever chosen on its own.
+
+## `multilingual-embed.json`
+
+A multilingual embedder for GG7-2 (an English question about non-English mail is not found with
+the English-only `nomic-embed-text-v1.5-q8`). Proposed as the **embedding default for new
+stores**; measurements and the comparison with other candidates are in `bench/README.md`, "A
+multilingual embedder (GG7-2)".
+
+| id | Upstream | Revision | File | Size (bytes) | SHA-256 | Licence |
+|---|---|---|---|---|---|---|
+| `nomic-embed-text-v2-moe-q8` | [nomic-ai/nomic-embed-text-v2-moe-GGUF](https://huggingface.co/nomic-ai/nomic-embed-text-v2-moe-GGUF) | `ffbcf4c99e5d617dda10ec8c0e9f75754b0cbb80` | `nomic-embed-text-v2-moe.Q8_0.gguf` | 512,225,120 | `06e7a7e594a26985523c18383aba4aad39fe6e14f08ffc6ab5b554e1ccdc3cff` | Apache-2.0 |
+
+Size and SHA-256 come from the Hugging Face API for the pinned revision (the file's LFS object),
+and a download was checked against both. The repository is the model authors' own. The model
+uses the same task prefixes as v1.5, so `EMBED_PREFIXES`' `nomic-embed-text` row covers it; it
+needs a llama.cpp build with the `nomic-bert-moe` architecture, which the manifest's `b11940`
+runtime has.
+
+### Why signing it changes the embedding pick, and why that is safe
+
+With `min_ram_gb = 4` and a larger size than v1.5, `recommend` picks it for the embedding tier on
+every machine where v1.5 fits (bench test `pending_entries_do_not_change_recommendations` checks
+that this is the only change; chat picks are unchanged). That pick only applies to stores without
+vectors: `nuggetd` keeps a store that has vectors on the model that built them (recorded by the
+store, or `nomic-embed-text-v1.5-q8` for older stores), because two models' vectors are not
+comparable even at the same dimension. Bench runs keep using the smallest embedding model (v1.5)
+unless `--local-embed-model` names another.

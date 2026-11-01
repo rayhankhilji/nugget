@@ -29,6 +29,12 @@ installed, and the install refuses to start if your disk is too full. The curren
 | `nomic-embed-text-v1.5-q8` | embedding | 146 MB | 4 GB | Apache-2.0 |
 | `bge-reranker-v2-m3-q4km` | rerank | 438 MB | 4 GB | Apache-2.0 |
 
+A store keeps the embedding model its vectors were built with: vectors of two models cannot be
+compared, so once your index has vectors, `nuggetd` keeps running that model even if a newer
+manifest recommends another, unless `[runtime] embedding_model` names one. If you name a
+different model for an existing index, search falls back to full-text and new items are indexed
+without vectors.
+
 When a selected model is installed, `nuggetd` downloads a pinned, verified build of llama.cpp's
 `llama-server` for your OS and hardware (Metal, Vulkan or CPU), and runs one server for chat and one for
 embeddings on `127.0.0.1`. They appear as the providers `local-chat` (triage, light, synthesis) and

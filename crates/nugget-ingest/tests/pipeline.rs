@@ -672,6 +672,39 @@ async fn documents_follow_the_index_prefix_scheme() {
             );
             assert_eq!(store.embedding_prefixes().unwrap(), Some(nomic.clone()));
         }
+        // The index records the model too (a legacy one adopts the model that embeds it now).
+        assert_eq!(
+            store.embedding_model().unwrap().as_deref(),
+            Some("fake-model")
+        );
         h.ingest.shutdown().await;
     }
+}
+
+/// An index built with another embedding model is never given this provider's vectors (not
+/// comparable, even at the same dimension): the item is indexed text-only.
+#[tokio::test]
+async fn an_index_of_another_model_is_not_mixed() {
+    let embedder = FakeProvider::new("local-embed", Locality::OnDevice);
+    let store = nugget_store::Store::open_in_memory().unwrap();
+    store.adopt_embedding_model("another-model").unwrap();
+    let h = start(Opts {
+        router: Some(router(&[(embedder.clone(), vec![Tier::Embedding])])),
+        store: Some(store.clone()),
+        ..Default::default()
+    })
+    .await;
+    h.factory.state("fake-1").script(vec![
+        Step::Send(text_doc("1", "hello world", Some("v"))),
+        Step::Return(json!(1)),
+    ]);
+    h.add("fake-1").await;
+    eventually("item 1 indexed", || h.item("fake-1", "1").is_some()).await;
+    assert!(embedder.embedded().is_empty());
+    assert_eq!(store.embedding_dim().unwrap(), None);
+    assert_eq!(
+        store.embedding_model().unwrap().as_deref(),
+        Some("another-model")
+    );
+    h.ingest.shutdown().await;
 }

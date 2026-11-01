@@ -3470,6 +3470,76 @@ takes 4 hours (1.4–3.1 files/s depending on the CPU), queries take 30–110 ms
 a single change takes 1.5–3.4 s to become searchable instead of 0.6 s, still far inside the 60 s
 target.
 
+#### A multilingual embedder (GG7-2, 2026-11-01)
+
+QA GG7 found that an English question about non-English mail is not found: `nomic-embed-text`
+v1.5, the manifest's embedder, is English-only. Four local candidates (Q8_0 GGUF, CPU, 2
+threads, inputs truncated at 512 tokens) were compared by dense retrieval alone: cosine top-k over
+GG7's 62-file corpus (GG7's search gold by kind, and its Ask questions with the cited file as
+gold) and over `nugget-retrieve`'s English eval set. Hit rates are @1 / @5 / @10:
+
+| Model (licence, download) | ms/doc GG7 / eval | English Q about other-language mail (10) | GG7 `cross_lingual` (12) | Own-language Ask (29) | English eval set (42) | GG7 `name` (13) |
+|---|---|---|---|---|---|---|
+| `nomic-embed-text-v1.5` (Apache-2.0, 146 MB) | 269 / 53 | 0.40 / 0.50 / 0.60 | 0.25 / 0.50 / 0.83 | 0.76 / 0.97 / 1.00 | 0.95 / 1.00 / 1.00 | 0.31 / 0.69 / 0.85 |
+| `nomic-embed-text-v2-moe` (Apache-2.0, 512 MB) | 357 / 117 | **1.00 / 1.00 / 1.00** | 0.58 / 0.92 / 1.00 | **1.00 / 1.00 / 1.00** | 0.98 / 1.00 / 1.00 | 0.54 / 0.69 / 0.77 |
+| `granite-embedding-107m-multilingual` (Apache-2.0, 121 MB) | 60 / 15 | 0.80 / 0.90 / 1.00 | 0.67 / 0.83 / 0.92 | 0.86 / 0.97 / 0.97 | 0.95 / 1.00 / 1.00 | 0.00 / 0.31 / 0.31 |
+| `multilingual-e5-small` (MIT, 132 MB) | 81 / 18 | 0.00 / 0.10 / 0.20 | 0.00 / 0.17 / 0.33 | 0.21 / 0.52 / 0.62 | 0.12 / 0.45 / 0.57 | 0.00 / 0.08 / 0.23 |
+
+- **`nomic-embed-text-v2-moe` is proposed** (`manifests/pending/multilingual-embed.json`): the
+  best cross-language and own-language recall, no loss on the English eval set, the same task
+  prefixes as v1.5 (`search_query: ` / `search_document: `, matched by the existing
+  `nomic-embed-text` row of `EMBED_PREFIXES`), the same 768 dimensions, and an official GGUF from
+  the model's authors under Apache-2.0. Cost: 3.5× the download (512 MB) and 1.3–2.2× the CPU
+  time per chunk. Its trained context is 512 tokens, the chunker's `max_tokens`.
+- Granite 107M is 4–5× faster and nearly as good across languages, but its names recall is
+  poor and only community GGUF conversions exist. The e5-small GGUF tested is broken
+  (a third-party conversion; mean pooling probably lost); not pursued.
+
+**Memory gate** (`memory --backend real --scale quick --strict --embed-url`, debug build, each
+model served by llama-cpp-python 0.3.16 on 2 CPU threads; the runtime's llama-server could not be
+fetched here): both pass every target with the same recall: eval-set hybrid recall@10 1.00 (MMR
+1.00, convex 1.00, MMR + convex 0.96; target 0.905), synthetic corpus hybrid recall@10 0.97
+(target 0.93), freshness p95 2.3 s (v1.5) and 2.2 s (v2), propagation 1.00. Ingest throughput
+1.85 (v1.5) and 1.79 (v2) chunks/s; this box's embedding server, not the model, sets that pace.
+
+**End to end through `nuggetd`** (GG7 corpus indexed by the files connector, hybrid search over
+IPC, the embedder an on-device `openai_compatible` provider; the runtime's own llama-server could
+not be fetched in this environment). Hit @1 / @5 / @10, same queries:
+
+| Queries | v1.5 | v2-moe | v2-moe, `fusion = "convex"` |
+|---|---|---|---|
+| English question about other-language mail (10) | 0.30 / 0.50 / 0.50 | 0.40 / 0.70 / **1.00** | 0.30 / 0.70 / 1.00 |
+| GG7 `cross_lingual` (12) | 0.25 / 0.42 / 0.58 | 0.25 / 0.58 / **1.00** | 0.33 / 0.75 / 1.00 |
+| Own-language Ask (29) | 0.79 / 0.97 / 1.00 | **1.00 / 1.00 / 1.00** | 1.00 / 1.00 / 1.00 |
+| GG7 `semantic` (10) | 0.40 / 0.90 / 1.00 | 0.50 / 1.00 / 1.00 | 0.30 / 1.00 / 1.00 |
+| GG7 `name` (13) | 0.77 / 1.00 / 1.00 | 0.85 / 0.92 / 1.00 | 0.69 / 0.77 / 0.77 |
+| GG7 `exact` (16) | 0.88 / 1.00 / 1.00 | 0.88 / 1.00 / 1.00 | 0.94 / 0.94 / 0.94 |
+
+Every GG7 query now finds its file in the top 10. The remaining cross-language gap is fusion:
+an English question also matches English mail lexically (`en/04-q4-forecast-deadline.eml` on
+"by when", "deadline"), and RRF ranks those beside the right non-English mail, so @1 stays low
+although dense retrieval alone ranks it first. Convex fusion does not fix it and costs names
+and exact matches, so RRF stays the default.
+
+**Query translation** through the local chat model (the GG7 suggestion) was considered and not
+added: with v2 the dense leg already finds the other-language mail, translating would cost a
+chat-model call (seconds on a CPU) on every query whose language differs from some of the
+corpus (a multilingual mailbox always does), and it would only help the lexical leg, whose
+English matches are the problem above.
+
+**Switching embedders safely.** v1.5 and v2 vectors have the same dimension but are not
+comparable, and the index recorded only the dimension and task prefixes, so a new default would
+have mixed two vector spaces silently. The store now records the embedding model too
+(`Store::embedding_model`, adopted with the first vectors like the prefixes); ingest only embeds
+for an index with a provider serving its model (otherwise the item is indexed text-only), and
+search embeds the query only with that model (otherwise `TextOnlyReason::ModelMismatch`).
+`nuggetd` keeps a store that has vectors on the manifest model that built them (vectors from
+before the record count as `nomic-embed-text-v1.5-q8`, the only embedding model shipped until
+now), unless the config names an embedding model; only a store without vectors takes the
+recommendation. So once v2 is signed into the manifest, new installs get it and existing stores
+keep working on v1.5. Moving an existing store to v2 needs its vectors dropped and re-embedded,
+which no command does yet.
+
 ### Ask answer quality (EE3)
 
 `ask --local-models --ask-prompt both --ask-temperature 0 --ask-judge model --ask-judge-model

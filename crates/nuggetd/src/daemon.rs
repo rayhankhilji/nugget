@@ -455,7 +455,14 @@ impl Daemon {
                 if let Some((bin, accel)) = overrides.server_binary.clone() {
                     runtime = runtime.with_server_binary(bin, accel);
                 }
-                let selected = local::selected_models(&config, m, &hardware);
+                let index_model = {
+                    let store = store.clone();
+                    blocking(move || Ok(local::index_embedding_model(&store)))
+                        .await
+                        .unwrap_or_default()
+                };
+                let selected =
+                    local::selected_models_for_index(&config, m, &hardware, index_model.as_deref());
                 Some(Arc::new(LocalRuntime::new(
                     runtime,
                     selected,
