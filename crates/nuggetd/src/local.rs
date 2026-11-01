@@ -67,6 +67,10 @@ use nugget_runtime::{Runtime, provider_id};
 use crate::config::Config;
 use crate::features::draft::local_draft_model;
 
+/// The longest a chat whose server crashed before it streamed anything waits for the restarted
+/// server (its backoff plus reloading the model) before it gives up with a plain error.
+const CHAT_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Tiers the local chat server always serves, whatever else its model lists.
 const CHAT_TIERS: [Tier; 3] = [Tier::Triage, Tier::Light, Tier::Synthesis];
 
@@ -387,8 +391,17 @@ impl RuntimeSlot {
     /// The background start [`RuntimeSlot::starting`] announced failed: unless the server was
     /// ready before, the slot is routable for nothing again, so requests go straight to the
     /// next candidate instead of retrying the start each time.
+    ///
+    /// Except when a server was launched and failed (state `failed`, KK1): the runtime then
+    /// fails requests at once with one plain sentence while it backs off or after it gave up,
+    /// so the slot stays routable. The router still falls back to the next candidate on that
+    /// error, and with no other candidate the user sees why (and Status offers Retry) instead
+    /// of "no provider has the required capabilities".
     pub fn start_failed(&self) {
         if starting_capabilities(self.role).is_none() {
+            return;
+        }
+        if self.state() == Some(RuntimeState::Failed) {
             return;
         }
         let active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
@@ -428,6 +441,74 @@ impl RuntimeSlot {
         Ok(provider)
     }
 
+    /// Start a chat and wait for its first event: an error before anything streamed is
+    /// returned as the error (so the caller can retry), anything else is put back in front.
+    async fn chat_started(&self, req: ChatRequest) -> Result<ChatStream> {
+        use futures::StreamExt;
+        let mut stream = self.ready().await?.chat(req).await?;
+        match stream.next().await {
+            Some(Err(e)) => Err(e),
+            Some(Ok(first)) => Ok(Box::pin(
+                futures::stream::once(async { Ok(first) }).chain(stream),
+            )),
+            None => Ok(Box::pin(futures::stream::empty())),
+        }
+    }
+
+    /// Whether the role's server failed since a request began on the server with
+    /// `pid_before`: it is no longer ready, or another process serves now (restarted).
+    async fn server_failed(&self, pid_before: Option<u32>) -> bool {
+        for attempt in 0..2 {
+            let failed = match self.runtime.details(self.role) {
+                Some(d) => d.info.state != RuntimeState::Ready || d.pid != pid_before,
+                None => false,
+            };
+            if failed {
+                return true;
+            }
+            // The connection can close a moment before the exit can be collected.
+            if attempt == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+        }
+        false
+    }
+
+    /// How long a crashed server is worth waiting for: the supervisor's backoff plus the
+    /// model's expected load time, within [`CHAT_RETRY_BUDGET`] (no point waiting when the
+    /// reload alone takes longer: the user gets the plain error at once instead).
+    fn retry_wait(&self) -> std::time::Duration {
+        use std::time::Duration;
+        let Some(d) = self.runtime.details(self.role) else {
+            return Duration::ZERO;
+        };
+        let backoff = Duration::from_millis(d.info.retry_in_ms.unwrap_or(0));
+        let load = d.expected_load.unwrap_or(CHAT_RETRY_BUDGET);
+        // The supervisor may not have scheduled its restart yet (no `retry_in_ms`): allow for
+        // its first backoff at least.
+        let need = (backoff + load + Duration::from_secs(1)).max(Duration::from_secs(4));
+        if need > CHAT_RETRY_BUDGET {
+            Duration::ZERO
+        } else {
+            need
+        }
+    }
+
+    /// The plain error for a server that failed and is not back yet (from the runtime's
+    /// status, which says whether it crashed, hung or is loading).
+    fn down_error(&self) -> Error {
+        let d = self.runtime.details(self.role);
+        let msg = d
+            .and_then(|d| d.info.error)
+            .unwrap_or_else(|| "The on-device chat model is restarting.".into());
+        // Say what to do once: messages that already name the next step keep theirs.
+        if msg.contains("Open Status") || msg.contains("Try again") {
+            Error::Provider(msg)
+        } else {
+            Error::Provider(format!("{msg} Try again in a moment."))
+        }
+    }
+
     fn context_tokens(&self) -> Option<u32> {
         self.active
             .lock()
@@ -465,8 +546,40 @@ impl Provider for RuntimeSlot {
         // so background triage leaves the model alone; background work (knowledge, proactive
         // judge, probes, triage itself) is not (HH2).
         let guard = interactive_guard(&self.foreground, &req);
-        let stream = self.ready().await?.chat(req).await?;
-        Ok(hold_guard(stream, guard))
+        // In flight until the stream ends: the hang watchdog checks the server often meanwhile.
+        let busy = self.runtime.request(self.role);
+        let before = self.runtime.details(self.role);
+        let pid_before = before.as_ref().and_then(|d| d.pid);
+        let hangs_before = before.map_or(0, |d| d.hangs);
+        let stream = match self.chat_started(req.clone()).await {
+            Ok(s) => s,
+            // The server hung and the watchdog killed it: say so at once. No automatic resend:
+            // the same request might hang it again, and the answer is due within seconds.
+            Err(e)
+                if self
+                    .runtime
+                    .details(self.role)
+                    .is_some_and(|d| d.hangs != hangs_before) =>
+            {
+                tracing::warn!(provider = %self.id, error = %e, "local server hung during a chat");
+                return Err(self.down_error());
+            }
+            // The server crashed (and is restarting) before anything streamed: retry once if
+            // it is back within a moment, else say plainly what happened (GG6-17).
+            Err(e) if pid_before.is_some() && self.server_failed(pid_before).await => {
+                tracing::warn!(provider = %self.id, error = %e,
+                    "local server failed before answering; retrying once");
+                match self.runtime.wait_ready(self.role, self.retry_wait()).await {
+                    Some(_) => self.chat_started(req).await?,
+                    None => return Err(self.down_error()),
+                }
+            }
+            Err(e) => return Err(e),
+        };
+        Ok(Box::pin(futures::StreamExt::map(stream, move |ev| {
+            let _held = (&guard, &busy);
+            ev
+        })))
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -731,6 +844,11 @@ impl LocalRuntime {
                 },
                 provider: s.id.clone(),
                 error: None,
+                state_ms: None,
+                expected_ms: None,
+                retry_in_ms: None,
+                gave_up: false,
+                detail: None,
             });
         }
         out

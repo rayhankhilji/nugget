@@ -33,6 +33,7 @@ mod model_fit;
 pub(crate) mod plugins;
 mod policy;
 mod proactive;
+mod runtime_retry;
 mod search_ui;
 
 /// One wired-in subsystem.
@@ -131,6 +132,7 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     start(&mut list, "model_fit", model_fit::start(cx)); // Z3: explained recommendation
     start(&mut list, "backup", backup::start(cx)); // FF1: backup, restore, export
     start(&mut list, "search_ui", search_ui::start(cx)); // II2: faceted search, timelines, previews
+    start(&mut list, "runtime_retry", runtime_retry::start(cx)); // KK1: Retry a failed local model
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features

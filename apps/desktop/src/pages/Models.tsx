@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { aiKeysApi, api, errorMessage, events, isMethodNotFound, type FitReport, type ModelFit, type ModelInfo, type ModelProgress, type SavedKeyProvider } from "../api";
+import { aiKeysApi, api, errorMessage, events, isMethodNotFound, modelsCancel, type FitReport, type ModelFit, type ModelInfo, type ModelProgress, type SavedKeyProvider } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
@@ -7,6 +7,7 @@ import { Dialog } from "../components/Dialog";
 import { ByokForm, kindLabel, ReplaceKeyForm } from "../onboarding/ByokForm";
 import { t as translate, useT, type MessageKey } from "../i18n";
 import { FitNotes, loadFit, MachineLine } from "../onboarding/ModelFit";
+import { DownloadFailureNote, isCancelled } from "../onboarding/DownloadFailure";
 
 const PHASES = new Set(["downloading", "verifying", "installed", "failed"]);
 
@@ -112,12 +113,23 @@ export function ModelsPage() {
 
   const install = async (id: string) => {
     setRequestError((e) => ({ ...e, [id]: "" }));
-    setProgress((all) => ({ ...all, [id]: { id, downloaded: 0, total: 0, phase: "downloading", error: null } }));
+    // A retry resumes from the staged bytes: keep showing them until the daemon reports.
+    setProgress((all) => ({ ...all, [id]: { id, downloaded: all[id]?.downloaded ?? 0, total: all[id]?.total ?? 0, phase: "downloading", error: null } }));
     try {
       await api.modelsInstall(id);
     } catch (err) {
       setProgress(({ [id]: _, ...rest }) => rest);
       setRequestError((e) => ({ ...e, [id]: errorMessage(err) }));
+    }
+  };
+
+  // The daemon answers with a final `failed` / `cancelled` progress; staged bytes are kept.
+  const cancel = async (id: string): Promise<boolean> => {
+    try {
+      return (await modelsCancel(id)).cancelled;
+    } catch (err) {
+      setRequestError((e) => ({ ...e, [id]: errorMessage(err) }));
+      return false;
     }
   };
 
@@ -145,6 +157,7 @@ export function ModelsPage() {
       error={requestError[m.id]}
       fit={fit.data}
       onInstall={() => void install(m.id)}
+      onCancel={() => cancel(m.id)}
     />
   );
   const groupClass = models.loading ? "cards pg-stale" : "cards";
@@ -393,6 +406,7 @@ function ModelCard({
   error,
   fit,
   onInstall,
+  onCancel,
 }: {
   model: ModelInfo;
   role: ModelRole;
@@ -407,10 +421,22 @@ function ModelCard({
   error?: string;
   fit?: FitReport | null;
   onInstall: () => void;
+  /** Resolves `false` if nothing was cancelled (the request failed or the install had ended). */
+  onCancel: () => Promise<boolean>;
 }) {
   const t = useT();
   const busy = progress && (progress.phase === "downloading" || progress.phase === "verifying");
   const failed = progress?.phase === "failed";
+  const cancelled = isCancelled(progress);
+  // After Cancel the button goes away: move focus to Resume so keyboard users keep their place.
+  const [cancelling, setCancelling] = useState(false);
+  const actionRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!busy && cancelling) {
+      setCancelling(false);
+      actionRef.current?.focus();
+    }
+  }, [busy, cancelling]);
   const installed = model.installed || progress?.phase === "installed";
   const pct = progress ? percent(progress.downloaded, progress.total || model.size_bytes) : 0;
   const labelId = `model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -452,18 +478,28 @@ function ModelCard({
               total: formatBytes(progress.total || model.size_bytes),
             })}
           </span>
+          <div className="card-actions">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              aria-label={t("models.cancelLabel", { model: name })}
+              disabled={cancelling}
+              onClick={() => {
+                setCancelling(true);
+                void onCancel().then((ok) => ok || setCancelling(false));
+              }}
+            >
+              {t("models.cancel")}
+            </button>
+          </div>
         </div>
       )}
-      {(failed || error) && (
-        <p className="note note-error" role="alert">
-          {progress?.error || error || t("models.installFailed")}
-        </p>
-      )}
+      <DownloadFailureNote t={t} progress={progress} error={error} fallback={t("models.installFailed")} />
 
       {!installed && !busy && (
         <div className="card-actions">
-          <button type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
-            {failed || error ? t("models.retryInstall") : t("models.install")}
+          <button ref={actionRef} type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
+            {cancelled ? t("models.resume") : failed || error ? t("models.retryInstall") : t("models.install")}
           </button>
         </div>
       )}

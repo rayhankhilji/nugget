@@ -6,7 +6,7 @@
 //! <root>/slots.json              model id -> { active, previous }
 //! ```
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::download::{
-    CancelOnDrop, DATA_FILE, Download, DownloadOptions, Phase, Progress, ProgressFn, Reporter,
-    sha256_file, staged_bytes,
+    CancelOnDrop, CancelToken, DATA_FILE, Download, DownloadOptions, Phase, Progress, ProgressFn,
+    Reporter, sha256_file, staged_bytes,
 };
 use crate::manifest::{ModelEntry, is_sha256_hex};
 use crate::preflight::{DiskSpace, SystemDiskSpace, check_disk_space};
@@ -77,8 +77,8 @@ pub struct ModelStore {
     app_version: semver::Version,
     /// Serialises slot updates, blob placement and gc.
     pub(crate) lock: tokio::sync::Mutex<()>,
-    /// SHA-256 of installs in flight.
-    pub(crate) installing: Mutex<HashSet<String>>,
+    /// SHA-256 of installs in flight, with the token that cancels each.
+    pub(crate) installing: Mutex<HashMap<String, Arc<CancelToken>>>,
 }
 
 impl std::fmt::Debug for ModelStore {
@@ -90,10 +90,13 @@ impl std::fmt::Debug for ModelStore {
 }
 
 /// Build the default HTTP client: rustls, system proxy settings, conservative timeouts.
+///
+/// The connect timeout is shorter than [`DownloadOptions::stall_timeout`], so an unreachable
+/// network reads as offline (not as a stall) and is reported within seconds.
 pub fn default_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(concat!("nugget/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(8))
         .read_timeout(Duration::from_secs(60))
         .build()
         .map_err(|e| Error::Other(format!("cannot build HTTP client: {e}")))
@@ -118,7 +121,7 @@ impl ModelStore {
             app_version: semver::Version::parse(crate::APP_VERSION)
                 .map_err(|e| Error::Other(format!("bad app version: {e}")))?,
             lock: tokio::sync::Mutex::new(()),
-            installing: Mutex::new(HashSet::new()),
+            installing: Mutex::new(HashMap::new()),
         })
     }
 
@@ -165,8 +168,12 @@ impl ModelStore {
     /// of the same model id is kept as `previous` for [`ModelStore::rollback`].
     ///
     /// `entry` must come from a manifest accepted by [`crate::verify_manifest`]; it is re-validated
-    /// here regardless. Cancel by dropping the future: staged bytes are kept for the next call,
-    /// and a hash in progress stops within 1 MiB.
+    /// here regardless. Cancel with [`ModelStore::cancel_install`] (the install then fails with
+    /// [`Error::Cancelled`] after a final `Failed` progress), or by dropping the future: either
+    /// way staged bytes are kept for the next call, and a hash in progress stops within 1 MiB.
+    ///
+    /// On failure the last progress is `Failed` with the staged byte count, a plain-language
+    /// message and a [`crate::FailReason`].
     pub async fn install(
         &self,
         entry: &ModelEntry,
@@ -176,20 +183,37 @@ impl ModelStore {
         let reporter = Reporter::new(&entry.id, entry.size, f, self.opts.progress_interval);
         // Dropped with this future: stops any blocking hash it started.
         let cancel = CancelOnDrop::new();
-        let res = self.install_inner(entry, &reporter, &cancel.flag()).await;
+        let res = self.install_inner(entry, &reporter, &cancel).await;
         match &res {
             Ok(_) => reporter.emit(Phase::Installed, entry.size),
-            Err(e) => reporter.fail(e),
+            Err(e) => reporter.fail(e, self.staged_bytes(entry)),
         }
         res
+    }
+
+    /// Cancel a running install of `entry` (matched by its SHA-256). Staged bytes are kept.
+    /// Returns `false` if none is running.
+    pub fn cancel_install(&self, entry: &ModelEntry) -> bool {
+        let token = crate::download::lock(&self.installing)
+            .get(&entry.sha256)
+            .cloned();
+        match token {
+            Some(t) => {
+                tracing::info!(id = %entry.id, "install cancel requested");
+                t.cancel();
+                true
+            }
+            None => false,
+        }
     }
 
     async fn install_inner(
         &self,
         entry: &ModelEntry,
         reporter: &Reporter,
-        cancel: &Arc<AtomicBool>,
+        cancel_guard: &CancelOnDrop,
     ) -> Result<InstalledModel> {
+        let cancel = &cancel_guard.flag();
         entry.validate()?;
         if !entry.compatible_with(&self.app_version) {
             return Err(Error::Unsupported(format!(
@@ -197,7 +221,7 @@ impl ModelStore {
                 entry.id, entry.min_app_version, self.app_version
             )));
         }
-        let _guard = InstallGuard::acquire(&self.installing, &entry.sha256)?;
+        let _guard = InstallGuard::acquire(&self.installing, &entry.sha256, cancel_guard.token())?;
 
         // Already have these exact bytes (another id, or a reinstall)? Re-verify and activate.
         let blob = self.blob_path(&entry.sha256);
@@ -235,6 +259,7 @@ impl ModelStore {
             reporter: reporter.clone(),
             egress: Arc::clone(&self.egress),
             feature: crate::download::EGRESS_FEATURE,
+            cancel: cancel_guard.token(),
         }
         .run()
         .await?;
@@ -428,7 +453,7 @@ impl ModelStore {
         if !is_sha256_hex(&entry.sha256) {
             return Err(Error::Invalid("bad sha256".into()));
         }
-        if crate::download::lock(&self.installing).contains(&entry.sha256) {
+        if crate::download::lock(&self.installing).contains_key(&entry.sha256) {
             return Err(Error::Invalid(format!(
                 "model `{}` is being installed",
                 entry.id
@@ -545,16 +570,25 @@ pub(crate) fn sync_dir(dir: &Path) {
 }
 
 pub(crate) struct InstallGuard<'a> {
-    set: &'a Mutex<HashSet<String>>,
+    set: &'a Mutex<HashMap<String, Arc<CancelToken>>>,
     key: String,
 }
 
 impl<'a> InstallGuard<'a> {
-    pub(crate) fn acquire(set: &'a Mutex<HashSet<String>>, key: &str) -> Result<Self> {
-        if !crate::download::lock(set).insert(key.to_string()) {
-            return Err(Error::Invalid(format!(
-                "an install of {key} is already in progress"
-            )));
+    pub(crate) fn acquire(
+        set: &'a Mutex<HashMap<String, Arc<CancelToken>>>,
+        key: &str,
+        cancel: Arc<CancelToken>,
+    ) -> Result<Self> {
+        match crate::download::lock(set).entry(key.to_string()) {
+            std::collections::hash_map::Entry::Occupied(_) => {
+                return Err(Error::Invalid(format!(
+                    "an install of {key} is already in progress"
+                )));
+            }
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert(cancel);
+            }
         }
         Ok(Self {
             set,

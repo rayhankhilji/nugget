@@ -37,6 +37,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use nugget_core::capability::{Capabilities, Locality, Tier};
+use nugget_core::clock::Stopwatch;
 use nugget_core::ids::SourceId;
 use nugget_core::ipc::{
     self, ActionArtifact, BriefView, CardExecuteRequest, CardExecuteResult, CardFeedbackRequest,
@@ -868,9 +869,11 @@ async fn trigger_loop(
     let mut pokes = Some(pokes);
     let mut debounce = Debounce::new(core.settings.debounce);
     debounce.at(Instant::now() + initial);
-    let mut periodic = Instant::now() + core.settings.refresh;
+    // Counts system sleep (GG6-29); checked at least every `RECHECK_EVERY`.
+    let mut periodic = Stopwatch::start();
     loop {
-        let next = debounce.due().map_or(periodic, |d| d.min(periodic));
+        let periodic_at = Instant::now() + periodic.next_check(core.settings.refresh);
+        let next = debounce.due().map_or(periodic_at, |d| d.min(periodic_at));
         let poked = async {
             match pokes.as_mut() {
                 Some(rx) => rx.recv().await,
@@ -884,9 +887,13 @@ async fn trigger_loop(
                 None => pokes = None,
             },
             () = tokio::time::sleep_until(next) => {
+                let debounced = debounce.due().is_some_and(|d| d <= Instant::now());
+                if !debounced && !periodic.is_due(core.settings.refresh) {
+                    continue;
+                }
                 debounce.fired();
                 core.refresh_logged(OffsetDateTime::now_utc()).await;
-                periodic = Instant::now() + core.settings.refresh;
+                periodic = Stopwatch::start();
             }
         }
     }

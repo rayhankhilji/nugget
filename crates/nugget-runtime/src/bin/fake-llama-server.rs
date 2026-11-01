@@ -15,7 +15,8 @@
 //! - `POST /v1/rerank` (also `/rerank`, `/v1/reranking`; needs `--reranking`): each document
 //!   scores the number of distinct query words it contains, Jina/Cohere response shape;
 //! - `GET /metrics` (needs `--metrics`);
-//! - `GET /fake/info`: argv and environment variable *names*; `POST /fake/crash`: exit 42.
+//! - `GET /fake/info`: argv and environment variable *names*; `POST /fake/crash`: exit 42;
+//!   `POST /fake/hang`: from then on accept every request and never answer (a hung server).
 //!
 //! Test controls (extra arguments):
 //! - `--fake-start-delay-ms N`: report "loading" for N ms;
@@ -35,6 +36,9 @@
 //!   every request line (and whether it carried an `authorization` header) to LOGFILE; exits
 //!   after 60 s;
 //! - `--fake-sleeper`: just sleep (used for the spawned child).
+//! - `--fake-hang-on-chat`: hang (as `/fake/hang`) on the first chat completion request;
+//! - `--fake-crash-on-chat-once PATH`: exit 42 on a chat completion request if PATH does not
+//!   exist (creating it), so the restarted server answers;
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -48,6 +52,8 @@ use tokio::net::TcpListener;
 
 /// Set once `/health` has answered 200; `--fake-crash-after-ms` counts from then.
 static SERVED_HEALTHY: AtomicBool = AtomicBool::new(false);
+/// Set by `POST /fake/hang`: from then on every request is read and never answered.
+static HUNG: AtomicBool = AtomicBool::new(false);
 
 /// A connection, over TCP or a Unix socket.
 trait Conn: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -72,6 +78,8 @@ struct Opts {
     ignore_sigterm: bool,
     squat: Option<String>,
     squatter: Option<String>,
+    hang_on_chat: bool,
+    crash_on_chat_once: Option<String>,
 }
 
 const FLAGS_WITH_VALUE: &[&str] = &[
@@ -93,6 +101,7 @@ const FLAGS_WITH_VALUE: &[&str] = &[
     "--fake-spawn-child",
     "--fake-squat",
     "--fake-squatter",
+    "--fake-crash-on-chat-once",
 ];
 const SWITCHES: &[&str] = &[
     "--embedding",
@@ -104,6 +113,7 @@ const SWITCHES: &[&str] = &[
     "--fake-print-key",
     "--fake-sleeper",
     "--fake-ignore-sigterm",
+    "--fake-hang-on-chat",
 ];
 
 fn parse(args: &[String]) -> Result<Opts, String> {
@@ -122,6 +132,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
                 "--fake-print-key" => o.print_key = true,
                 "--fake-sleeper" => o.sleeper = true,
                 "--fake-ignore-sigterm" => o.ignore_sigterm = true,
+                "--fake-hang-on-chat" => o.hang_on_chat = true,
                 _ => {}
             }
             continue;
@@ -149,6 +160,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
             "--fake-spawn-child" => o.spawn_child = Some(v),
             "--fake-squat" => o.squat = Some(v),
             "--fake-squatter" => o.squatter = Some(v),
+            "--fake-crash-on-chat-once" => o.crash_on_chat_once = Some(v),
             "--ctx-size" | "--parallel" | "--threads" | "--batch-size" | "--ubatch-size" => {
                 num(&v)?;
             }
@@ -443,6 +455,10 @@ async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
     let Some(req) = read_request(&mut conn).await? else {
         return Ok(());
     };
+    if HUNG.load(Ordering::SeqCst) {
+        // A hung server: the connection stays open and nothing ever comes back.
+        std::future::pending::<()>().await;
+    }
     let loading = srv.started.elapsed() < srv.opts.start_delay;
     if req.path == "/health" || req.path == "/v1/health" {
         let (code, body) = if loading {
@@ -538,6 +554,25 @@ async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
                 "usage": {"prompt_tokens": docs.len(), "total_tokens": docs.len()}});
             respond(&mut conn, 200, &b).await
         }
+        ("POST", "/v1/chat/completions") if srv.opts.hang_on_chat => {
+            eprintln!("fake: hanging on a chat completion");
+            HUNG.store(true, Ordering::SeqCst);
+            std::future::pending::<()>().await;
+            Ok(())
+        }
+        ("POST", "/v1/chat/completions")
+            if srv
+                .opts
+                .crash_on_chat_once
+                .as_ref()
+                .is_some_and(|m| !std::path::Path::new(m).exists()) =>
+        {
+            if let Some(m) = &srv.opts.crash_on_chat_once {
+                let _ = std::fs::write(m, b"crashed");
+            }
+            eprintln!("fake: crashing on a chat completion");
+            std::process::exit(42);
+        }
         ("POST", "/v1/chat/completions") => {
             if srv.opts.embedding || srv.opts.reranking {
                 let (c, b) = error(
@@ -612,6 +647,11 @@ async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
                 .collect();
             let b = json!({"argv": srv.argv, "env": env, "pid": std::process::id()});
             respond(&mut conn, 200, &b).await
+        }
+        ("POST", "/fake/hang") => {
+            eprintln!("fake: hanging");
+            HUNG.store(true, Ordering::SeqCst);
+            respond(&mut conn, 200, &json!({"hung": true})).await
         }
         ("POST", "/fake/crash") => {
             eprintln!("fake: crash requested");

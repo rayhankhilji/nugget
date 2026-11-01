@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use nugget_core::clock::Stopwatch;
 use nugget_core::ids::{EntityId, SourceId};
 use nugget_core::ipc::{KnowledgeChanged, VaultStatus, notification};
 use nugget_core::paths::Paths;
@@ -191,8 +192,8 @@ impl KnowledgeService {
 
     /// The extraction loop. It sleeps until something happens: an ingest commit (watched via
     /// [`Ingest::subscribe_committed`]), a [`wake`](Self::wake), a batch of vault edits, the
-    /// debounce or periodic deadline, or shutdown. Nothing polls, so an idle daemon does not
-    /// wake up here at all.
+    /// debounce or periodic deadline, or shutdown. While an interval is set it also wakes once
+    /// a minute to notice time spent in system sleep (GG6-29); such a wake does nothing else.
     async fn worker(self: Arc<Self>, ingest: Ingest, stop: CancellationToken) {
         let mut committed = ingest.subscribe_committed();
         let mut seen = *committed.borrow_and_update();
@@ -203,7 +204,8 @@ impl KnowledgeService {
             .then(|| Duration::from_secs(self.cfg.interval_minutes * 60));
         // Startup run: pick up whatever was indexed while extraction was not running.
         let mut due: Option<Instant> = self.cfg.enabled.then(Instant::now);
-        let mut periodic = interval.map(|i| Instant::now() + i);
+        // Counts system sleep (GG6-29); checked at least every `RECHECK_EVERY`.
+        let mut periodic = interval.map(|_| Stopwatch::start());
         // The commit counter when the current chain of runs started. A run that cannot finish
         // its plan carries the rest over to the next run, which does not plan again, so commits
         // that arrive meanwhile are planned only by a run after the chain.
@@ -211,8 +213,11 @@ impl KnowledgeService {
         // Some run of the chain left items for the model after spending its request budget.
         let mut chain_deferred = false;
         loop {
+            let periodic_at = periodic
+                .zip(interval)
+                .map(|(sw, i)| Instant::now() + sw.next_check(i));
             let deadline = if self.cfg.enabled {
-                [due, periodic].into_iter().flatten().min()
+                [due, periodic_at].into_iter().flatten().min()
             } else {
                 None
             };
@@ -246,8 +251,8 @@ impl KnowledgeService {
                 seen = latest;
                 due = Some(now + debounce);
             }
-            if periodic.is_some_and(|p| now >= p) {
-                periodic = interval.map(|i| now + i);
+            if periodic.zip(interval).is_some_and(|(sw, i)| sw.is_due(i)) {
+                periodic = interval.map(|_| Stopwatch::start());
                 if self.power.constrained() {
                     tracing::debug!("knowledge: periodic run skipped (power constrained)");
                 } else {

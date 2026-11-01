@@ -11,9 +11,10 @@ use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
     self, AskRequest, AskRestarted, AskStarted, AuthBegin, ChatCancel, ChatDelta, ChatDone,
     ChatStarted, ContextRequest, ContextResponse, EgressRecentRequest, EgressRecordRequest,
-    ModelInfo, ModelInstallRequest, ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest,
-    ProviderInfo, Role as IpcRole, RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove,
-    SourceSecret, SourceSpec, SourceSync, SourceUpdate, StatusResponse, method, notification,
+    ModelCancelRequest, ModelCancelResponse, ModelFailReason, ModelInfo, ModelInstallRequest,
+    ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo, Role as IpcRole,
+    RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret, SourceSpec,
+    SourceSync, SourceUpdate, StatusResponse, method, notification,
 };
 use nugget_core::{Error, Result};
 use nugget_infer::{
@@ -75,6 +76,7 @@ impl Handler for RpcHandler {
             method::PROVIDERS_PROBE => self.probe(parse_params(params)?).await,
             method::MODELS_LIST => self.models_list().await,
             method::MODELS_INSTALL => self.models_install(parse_params(params)?, notify).await,
+            method::MODELS_CANCEL => self.models_cancel(parse_params(params)?),
             method::EGRESS_RECENT => self.egress_recent(parse_params(params)?).await,
             method::EGRESS_RECORD => self.egress_record(parse_params(params)?).await,
             method::SOURCES_LIST => to_result(self.state.ingest.list().await?),
@@ -134,7 +136,7 @@ impl RpcHandler {
 
     async fn status(&self) -> Result<Value, RpcError> {
         let store = self.state.store.clone();
-        let counts = blocking(move || store.counts()).await?;
+        let (counts, disk) = blocking(move || Ok((store.counts()?, store.disk_status()))).await?;
         to_result(StatusResponse {
             protocol: PROTOCOL_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -143,6 +145,7 @@ impl RpcHandler {
             chunks: counts.chunks,
             providers: self.provider_infos(),
             audit_chain_ok: self.state.audit_chain_ok.get().copied(),
+            disk,
         })
     }
 
@@ -791,6 +794,17 @@ impl RpcHandler {
             .tasks
             .spawn(run_install(state, entry, guard, notify));
         Ok(Value::Null)
+    }
+
+    /// Idempotent: cancelling an install that is not running is not an error. The install's own
+    /// connection gets the final `failed` progress (reason `cancelled`, staged bytes kept).
+    fn models_cancel(&self, req: ModelCancelRequest) -> Result<Value, RpcError> {
+        let cancelled = self
+            .manifest()?
+            .get(&req.id)
+            .is_some_and(|entry| self.state.models.cancel_install(entry));
+        tracing::info!(model = %req.id, cancelled, "model install cancel requested");
+        to_result(ModelCancelResponse { cancelled })
     }
 
     fn manifest(&self) -> Result<&nugget_models::Manifest, RpcError> {
@@ -1473,6 +1487,10 @@ fn is_provider_failure(e: &Error) -> bool {
     )
 }
 
+/// How long a stopped install (client gone, shutdown) gets to checkpoint and wind down.
+// Well under the daemon's shutdown grace, so the install's audit row is still written.
+const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 async fn run_install(
     state: Arc<State>,
     entry: ModelEntry,
@@ -1517,6 +1535,14 @@ async fn run_install(
             }
         }
     }
+    if result.is_none() {
+        // Stop the download through its token so it checkpoints every committed byte and
+        // reports `cancelled`, instead of being dropped mid-write; bounded, then dropped anyway.
+        state.models.cancel_install(&entry);
+        if let Ok(r) = tokio::time::timeout(CANCEL_GRACE, &mut install).await {
+            result = Some(r);
+        }
+    }
 
     // Route to the new model before the client hears it is installed: a chat sent right after
     // the final progress (onboarding's first question) must find the slot starting.
@@ -1541,6 +1567,14 @@ async fn run_install(
     }
 
     let detail = match (&result, stop_reason) {
+        (Some(Err(Error::Cancelled)), Some(reason)) => {
+            tracing::info!(model = %entry.id, reason, "model install stopped; staged data kept for resume");
+            json!({"result": "cancelled", "reason": reason})
+        }
+        (Some(Err(Error::Cancelled)), None) => {
+            tracing::info!(model = %entry.id, "model install cancelled; staged data kept for resume");
+            json!({"result": "cancelled", "reason": "models.cancel"})
+        }
         (Some(Ok(m)), _) => {
             tracing::info!(model = %entry.id, sha256 = %m.sha256, "model install finished");
             json!({"result": "installed", "sha256": m.sha256, "revision": m.revision})
@@ -1560,7 +1594,9 @@ async fn run_install(
                         downloaded: state.models.staged_bytes(&entry),
                         total: entry.size,
                         phase: ModelPhase::Failed,
-                        error: Some(format!("cancelled: {reason}")),
+                        error: Some(nugget_models::FailReason::Cancelled.message()),
+                        reason: Some(ModelFailReason::Cancelled),
+                        http_status: None,
                     },
                 )
                 .await;

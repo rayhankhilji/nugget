@@ -11,7 +11,12 @@ pub(crate) trait DbExt<T> {
 
 impl<T> DbExt<T> for rusqlite::Result<T> {
     fn db(self, context: &str) -> Result<T> {
-        self.map_err(|e| Error::Storage(format!("{context}: {e}")))
+        self.map_err(|e| {
+            if crate::disk::is_disk_full(&e) {
+                crate::disk::note_disk_full();
+            }
+            Error::Storage(format!("{context}: {e}"))
+        })
     }
 }
 

@@ -202,7 +202,9 @@ async fn hash_mismatch_wipes_staging_and_installs_nothing() {
     assert!(st.slot("m").unwrap().is_none());
     let last = log.lock().unwrap().last().cloned().unwrap();
     assert_eq!(last.phase, Phase::Failed);
-    assert!(last.error.unwrap().contains("mismatch"));
+    assert_eq!(last.reason, Some(nugget_models::FailReason::Integrity));
+    assert_eq!(last.done, 0, "staging was discarded");
+    assert!(last.error.unwrap().contains("discarded"));
 }
 
 #[tokio::test]

@@ -646,7 +646,9 @@ fn restore_vault(paths: &Paths, root: &Path, ready: &Ready) -> Result<()> {
     }
     let mark = || fs::write(&done, b"").map_err(|e| io_err(&done, e));
     let config = if paths.config_file().exists() {
-        Config::load_or_create(paths).map(|(c, _)| c).ok()
+        Config::load_or_create_no_rewrite(paths)
+            .map(|(c, _)| c)
+            .ok()
     } else {
         Some(Config::default_local())
     };

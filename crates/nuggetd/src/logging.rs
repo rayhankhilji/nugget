@@ -54,7 +54,7 @@ pub fn init_daemon(paths: &Paths) -> Result<WorkerGuard> {
         .max_log_files(MAX_LOG_FILES)
         .build(&dir)
         .map_err(|e| Error::Other(format!("cannot open log dir {}: {e}", dir.display())))?;
-    let (file_writer, guard) = tracing_appender::non_blocking(appender);
+    let (file_writer, guard) = tracing_appender::non_blocking(LineSafe::new(appender));
     let file_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_ansi(false)
@@ -73,6 +73,45 @@ pub fn init_daemon(paths: &Paths) -> Result<WorkerGuard> {
         .try_init()
         .map_err(|e| Error::Other(format!("cannot install logger: {e}")))?;
     Ok(guard)
+}
+
+/// A log file writer that keeps lines whole across failed writes: a write that fails part way
+/// (the disk is full) leaves a partial line in the file, so the next write starts with a line
+/// break and later lines stay parseable once space is back (QA GG6-25). Each write is one
+/// whole event from the non-blocking worker.
+struct LineSafe<W> {
+    inner: W,
+    /// The last write failed: the file may end inside a line.
+    broken: bool,
+}
+
+impl<W> LineSafe<W> {
+    fn new(inner: W) -> Self {
+        Self {
+            inner,
+            broken: false,
+        }
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for LineSafe<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.broken {
+            self.inner.write_all(b"\n")?;
+            self.broken = false;
+        }
+        match self.inner.write_all(buf) {
+            Ok(()) => Ok(buf.len()),
+            Err(e) => {
+                self.broken = true;
+                Err(e)
+            }
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 /// Warnings-and-up to stderr, for one-shot CLI commands.
@@ -96,6 +135,45 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+
+    /// Accepts `room` bytes, then fails like a full disk (keeping what fit).
+    struct FullDisk {
+        out: Vec<u8>,
+        room: usize,
+    }
+
+    impl Write for FullDisk {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let n = buf.len().min(self.room - self.out.len().min(self.room));
+            if n == 0 {
+                return Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "full"));
+            }
+            self.out.extend_from_slice(&buf[..n]);
+            Ok(n)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_write_does_not_glue_the_next_line_to_a_partial_one() {
+        let mut w = LineSafe::new(FullDisk {
+            out: Vec::new(),
+            room: 15,
+        });
+        w.write_all(b"{\"a\":1}\n").unwrap();
+        assert!(w.write_all(b"{\"b\":22222}\n").is_err());
+        // Still full: nothing more is lost than the line being written.
+        assert!(w.write_all(b"{\"c\":3}\n").is_err());
+        w.inner.room = 1000;
+        w.write_all(b"{\"d\":4}\n").unwrap();
+        let text = String::from_utf8(w.inner.out.clone()).unwrap();
+        assert_eq!(text, "{\"a\":1}\n{\"b\":22\n{\"d\":4}\n");
+        let last = text.lines().last().unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(last).is_ok());
+    }
 
     #[derive(Clone, Default)]
     struct Buf(Arc<Mutex<Vec<u8>>>);

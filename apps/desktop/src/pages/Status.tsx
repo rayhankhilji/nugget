@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import {
   api,
   errorMessage,
+  runtimeRetry,
   events,
   isMethodNotFound,
   PROTOCOL_VERSION,
   type Capabilities,
+  type DiskStatus,
   type IngestStatus,
   type KnowledgeStatus,
   type ProviderInfo,
@@ -14,7 +16,7 @@ import {
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { fileUrl, vaultLinks } from "../knowledge";
-import { formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
+import { formatBytes, formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
 import { Announce, useAnnouncer, useIngestAnnouncements } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
@@ -48,6 +50,13 @@ export function StatusPage() {
     }, 10_000);
     return () => window.clearInterval(timer);
   }, [reload, reloadIngest, reloadRuntime, reloadKnowledge, ingestMissing, runtimeMissing, knowledgeMissing]);
+  // KK1: while a model warms up or waits to restart, follow it closely (elapsed time, retry).
+  const runtimeBusy = (runtime.data ?? []).some((r) => r.state === "starting" || r.state === "stopping" || (r.state === "failed" && (r.retry_in_ms ?? 0) > 0));
+  useEffect(() => {
+    if (!runtimeBusy || runtimeMissing) return;
+    const timer = window.setInterval(reloadRuntime, 1_000);
+    return () => window.clearInterval(timer);
+  }, [runtimeBusy, runtimeMissing, reloadRuntime]);
   const refreshAll = () => {
     status.reload();
     ingest.reload();
@@ -113,6 +122,7 @@ export function StatusPage() {
               {t("status.auditTampered")}
             </p>
           )}
+          <DiskNote disk={s.disk} />
 
           <h2>{t("status.providers")}</h2>
           {s.providers.length === 0 ? (
@@ -177,6 +187,26 @@ export function StatusPage() {
         </p>
       </details>
     </div>
+  );
+}
+
+/** KK1: a full or nearly full data disk (GG6-25), in plain words; nothing when there is room. */
+function DiskNote({ disk }: { disk: DiskStatus | null | undefined }) {
+  const t = useT();
+  // Unknown levels (a newer daemon) show nothing rather than a false alarm.
+  if (!disk || (disk.level !== "low" && disk.level !== "full")) return null;
+  const free = disk.free_bytes != null ? formatBytes(disk.free_bytes) : null;
+  if (disk.level === "low") {
+    return (
+      <p className="note" role="status">
+        {t("status.disk.low", { free: free ?? "–" })}
+      </p>
+    );
+  }
+  return (
+    <p className="note note-error" role="alert">
+      {free != null ? t("status.disk.full", { free }) : t("status.disk.fullUnknown")}
+    </p>
   );
 }
 
@@ -409,6 +439,65 @@ const RUNTIME_STATE: Record<RuntimeState, { label: MessageKey; tone: "neutral" |
   failed: { label: "status.runtime.failed", tone: "bad" },
 };
 
+/** KK1: what a starting or failed local model is doing, with Retry and the server's last words. */
+function RuntimeStateNote({ r, onChanged }: { r: RuntimeInfo; onChanged: () => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+  if (r.state === "starting") {
+    if (r.state_ms == null) return null;
+    const elapsed = r.state_ms / 1000;
+    const expected = r.expected_ms != null && r.expected_ms > 0 ? r.expected_ms / 1000 : null;
+    const pct = expected ? Math.min(95, Math.round((elapsed / expected) * 100)) : null;
+    const text = expected
+      ? t("status.runtime.warming", { elapsed: formatDuration(elapsed), expected: formatDuration(expected) })
+      : t("status.runtime.warmingNoEstimate", { elapsed: formatDuration(elapsed) });
+    return (
+      <div className="small">
+        <div>{text}</div>
+        {pct != null && <progress max={100} value={pct} aria-label={t("status.runtime.warmingLabel")} aria-valuetext={text} />}
+      </div>
+    );
+  }
+  if (r.state !== "failed") return r.error ? <div className="note note-error small">{r.error}</div> : null;
+  const retry = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await runtimeRetry(r.role);
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
+  const retryIn = r.retry_in_ms != null && r.retry_in_ms > 0 ? Math.ceil(r.retry_in_ms / 1000) : null;
+  return (
+    <>
+      {r.error && <div className="note note-error small">{r.error}</div>}
+      {r.gave_up ? (
+        <div className="small">{t("status.runtime.gaveUp")}</div>
+      ) : (
+        retryIn != null && <div className="small">{t("status.runtime.retryIn", { time: formatDuration(retryIn) })}</div>
+      )}
+      <button type="button" className="btn btn-small" onClick={() => void retry()} disabled={busy} aria-busy={busy}>
+        {busy ? t("status.runtime.retrying") : t("status.runtime.retry")}
+      </button>
+      {r.detail && (
+        <details className="small">
+          <summary>{t("status.runtime.details")}</summary>
+          <bdi dir="ltr">
+            <code>{r.detail}</code>
+          </bdi>
+          <div>{t("status.runtime.logHint", { file: `llama-server-${r.role}.log` })}</div>
+        </details>
+      )}
+      <ErrorNote error={err} />
+    </>
+  );
+}
+
 function RuntimeCard({
   data,
   error,
@@ -471,7 +560,7 @@ function RuntimeCard({
                         </td>
                         <td>
                           <Badge tone={st.tone}>{st.label}</Badge>
-                          {r.error && <div className="note note-error small">{r.error}</div>}
+                          <RuntimeStateNote r={r} onChanged={onRetry} />
                         </td>
                         <td>
                           <code>{r.provider}</code>

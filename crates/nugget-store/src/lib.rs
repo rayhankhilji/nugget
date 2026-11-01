@@ -21,6 +21,7 @@ mod acl;
 mod audit;
 mod backup;
 mod changes;
+mod disk;
 mod egress;
 mod envelope;
 mod error;
