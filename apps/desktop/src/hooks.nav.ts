@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { PageId } from "./api";
+import type { PageId, QuickAskHandover } from "./api";
 
 /**
  * In-app requests from the shell (command palette, shortcuts) to a page, e.g. "search for this".
@@ -100,4 +100,18 @@ export function requestSearchState(encoded: string): void {
 /** Run `onState` for a search state requested before mount and for every later request. */
 export function usePendingSearchState(onState: (encoded: string) => void): void {
   searchState.usePending(onState);
+}
+
+// ---- JJ2: a quick-ask question (and answer) opened in Chat ----
+
+const chatHandover = channel<QuickAskHandover>();
+
+/** Ask the Chat page to continue a quick-ask question. The caller navigates to the page itself. */
+export function requestChatHandover(h: QuickAskHandover): void {
+  chatHandover.request(h);
+}
+
+/** Run `onHandover` for a handover requested before mount and for every later request. */
+export function usePendingChatHandover(onHandover: (h: QuickAskHandover) => void): void {
+  chatHandover.usePending(onHandover);
 }

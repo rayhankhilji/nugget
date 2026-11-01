@@ -284,6 +284,8 @@ export interface Citation {
   sensitive?: boolean;
   /** The item's date (`YYYY-MM-DD`): source modification time, else last update. */
   date?: string;
+  /** JJ2, set by the client from `AskStarted.partial`: at best a near miss for the question. */
+  partial?: boolean;
 }
 
 export interface ContextResponse {
@@ -322,6 +324,24 @@ export interface AskStarted {
   query_rewrite?: string | null;
   /** Nothing relevant in the sources: the daemon answers as an ordinary chat (Z3). */
   general?: boolean;
+  /** JJ2: the question's date phrase and how it filtered the search. */
+  date?: AskDateFilter | null;
+  /** JJ2: citation numbers of near misses (the item lacks some of the question's rare key words). */
+  partial?: number[];
+}
+
+/** JJ2: a date phrase in an Ask question and what it did (`AskStarted.date`). */
+export interface AskDateFilter {
+  /** As written in the question, e.g. `last week`. */
+  phrase: string;
+  /** RFC 3339, inclusive, at the offset the phrase was read with. */
+  start: string;
+  /** RFC 3339, exclusive (midnight after the last day). */
+  end: string;
+  /** `false`: nothing in the range matched, so all dates were searched. */
+  applied: boolean;
+  /** The question was generic: the period's items by date, not search matches. */
+  listed?: boolean;
 }
 
 // ---- local runtime ----
@@ -1048,9 +1068,10 @@ export const api = {
   pickFolders: (multiple: boolean) => call<string[]>("pick_folders", { multiple }),
 
   // II2 (types and notes in the II2 block at the end of this file).
-  searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { utc_offset_minutes: utcOffsetMinutes(), ...request } }),
-  searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { utc_offset_minutes: utcOffsetMinutes(), ...request } }),
-  searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request }),
+  // JJ2: with the time zone, the daemon dates each day and month at its own offset (DST).
+  searchFaceted: (request: FacetedRequest) => call<FacetedResult>("search_faceted", { request: { ...localZone(), ...request } }),
+  searchTimeline: (request: TimelineRequest) => call<Timeline>("search_timeline", { request: { ...localZone(), ...request } }),
+  searchPreview: (request: PreviewRequest) => call<ItemPreview>("search_preview", { request: { ...localZone(), ...request } }),
 };
 
 /** `revealed`: the file could run code, so its folder was shown instead of opening it. */
@@ -2609,12 +2630,38 @@ export type QuickAskPage = Extract<PageId, "chat" | "search">;
 export const QUICK_ASK_COMMAND = "nugget-desktop --quick-ask";
 /** Text for the question field, sent by the shell; never submitted by itself. */
 export const QUICK_ASK_PREFILL_EVENT = "quickask:prefill";
+/** JJ2: sent to the main window when "Open in Chat" or "Show in Search" carries a question. */
+export const QUICK_ASK_HANDOVER_EVENT = "quickask:handover";
+
+/** JJ2: a quick-ask question (and, for Chat, its finished answer) carried to the main window. */
+export interface QuickAskHandover {
+  /** Set by the shell: the page it opened. */
+  page?: QuickAskPage | "";
+  question: string;
+  answer?: QuickAskHandoverAnswer | null;
+  /** Set by the main window when it took the handover (ms since the epoch). */
+  received?: number;
+}
+
+export interface QuickAskHandoverAnswer {
+  text: string;
+  provider?: string | null;
+  citations?: Citation[];
+  general?: boolean;
+  date?: AskDateFilter | null;
+}
 
 export const quickAskApi = {
   settingsGet: () => call<QuickAskView>("quickask_settings_get"),
   settingsSet: (settings: QuickAskSettings) => call<QuickAskView>("quickask_settings_set", { settings }),
   hide: () => call<null>("quickask_hide"),
-  openMain: (page: QuickAskPage) => call<null>("quickask_open_main", { page }),
+  /** JJ2: with `handover`, the page picks up the question (and Chat the finished answer). */
+  openMain: (page: QuickAskPage, handover?: QuickAskHandover) =>
+    call<null>("quickask_open_main", handover ? { page, handover } : { page }),
+  /** JJ2, main window: the handover waiting for it, once. */
+  takeHandover: () => call<QuickAskHandover | null>("quickask_handover_take"),
+  /** JJ2, main window: a handover is waiting (take it with {@link quickAskApi.takeHandover}). */
+  onHandover: (h: () => void) => on<unknown>(QUICK_ASK_HANDOVER_EVENT, () => h()),
   /** II4: a prefill sent before this window subscribed, once. */
   takePrefill: () => call<string | null>("quickask_prefill_take"),
   onPrefill: (h: (text: string) => void) =>
@@ -2712,12 +2759,14 @@ export type ItemKind = "mail" | "event" | "chat" | "file";
 export const ITEM_KINDS: readonly ItemKind[] = ["mail", "event", "chat", "file"];
 export type EntityRefView = { id: string; name: string; kind: string };
 export type FacetedFilters = { sources?: string[]; kinds?: ItemKind[]; people?: string[]; from?: string | null; to?: string | null };
-export type FacetedRequest = { query: string; limit?: number; offset?: number; filters?: FacetedFilters; utc_offset_minutes?: number };
+export type FacetedRequest = { query: string; limit?: number; offset?: number; filters?: FacetedFilters; utc_offset_minutes?: number; time_zone?: string };
 export type FacetedHit = SearchHit & {
   date: string | null;
   date_source: "extracted" | "modified" | "indexed";
   kind: ItemKind;
   sensitive: boolean;
+  /** JJ2: sensitive only because triage has not sorted it yet (kept private until sorted). */
+  unsorted?: boolean;
   people: EntityRefView[];
 };
 export type FacetCount = { value: string; count: number };
@@ -2730,9 +2779,9 @@ export type FacetedResult = {
   pool_limited: boolean;
   facets: { sources: FacetCount[]; kinds: FacetCount[]; people: PersonFacet[]; months: FacetCount[] };
 };
-export type TimelineRequest = { entity: string; from?: string | null; to?: string | null; limit?: number; utc_offset_minutes?: number };
+export type TimelineRequest = { entity: string; from?: string | null; to?: string | null; limit?: number; utc_offset_minutes?: number; time_zone?: string };
 export type TimelineEvent =
-  | { type: "item"; at: string | null; date_source: string; item: ItemRef; title: string | null; snippet: string; kind: ItemKind; url: string | null; sensitive: boolean }
+  | { type: "item"; at: string | null; date_source: string; item: ItemRef; title: string | null; snippet: string; kind: ItemKind; url: string | null; sensitive: boolean; unsorted?: boolean }
   | {
       type: "fact";
       at: string | null;
@@ -2747,7 +2796,7 @@ export type TimelineEvent =
       };
     };
 export type Timeline = { entity: EntityRefView; events: TimelineEvent[]; months: FacetCount[]; total: number; truncated: boolean };
-export type PreviewRequest = { item: ItemRef; chunk_id?: number | null };
+export type PreviewRequest = { item: ItemRef; chunk_id?: number | null; utc_offset_minutes?: number; time_zone?: string };
 export type ItemPreview = {
   item: ItemRef;
   title: string | null;
@@ -2757,6 +2806,8 @@ export type ItemPreview = {
   date: string | null;
   date_source: string;
   sensitive: boolean;
+  /** JJ2: sensitive only because triage has not sorted it yet (kept private until sorted). */
+  unsorted?: boolean;
   text: string;
   truncated: boolean;
   passage: string | null;
@@ -2767,4 +2818,20 @@ export type ItemPreview = {
 /** The local UTC offset in minutes (east positive), for the daemon's date filters and months. */
 export function utcOffsetMinutes(d: Date = new Date()): number {
   return -d.getTimezoneOffset();
+}
+
+/** JJ2: this machine's IANA time zone (`Europe/Berlin`), when the runtime knows it. */
+export function timeZoneName(): string | undefined {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === "string" && tz ? tz : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The zone fields of a search request: the offset (older daemons) and the zone's name. */
+export function localZone(): { utc_offset_minutes: number; time_zone?: string } {
+  const tz = timeZoneName();
+  return tz ? { utc_offset_minutes: utcOffsetMinutes(), time_zone: tz } : { utc_offset_minutes: utcOffsetMinutes() };
 }

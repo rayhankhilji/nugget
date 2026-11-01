@@ -31,6 +31,7 @@ import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
 import { migrateTriggerOnce } from "./onboarding/trigger";
 import { DeepLinks } from "./platform/DeepLinks";
 import { useShellLabels } from "./platform/shellLabels";
+import { useQuickAskHandover } from "./quickask/handover";
 
 export interface PageDef {
   id: PageId;
@@ -156,6 +157,7 @@ export function App() {
 
   useEffect(() => startProactiveNotifications(), []);
   useShellLabels();
+  useQuickAskHandover();
 
   // Apply a Double Tap trigger an older onboarding only kept locally (once; never throws).
   useEffect(() => {

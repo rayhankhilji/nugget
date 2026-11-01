@@ -400,7 +400,9 @@ impl Daemon {
             })
             .collect();
         let tier_map = local::tier_map(&configured, &local::slot_routes(local.as_deref()));
-        let mut all_providers = providers;
+        // Interactive chats on configured on-device and LAN providers hold the foreground too.
+        let foreground = local::ForegroundCell::default();
+        let mut all_providers = local::guard_configured(providers, &foreground);
         if let Some(l) = &local {
             all_providers.extend(local::as_providers(l));
         }
@@ -468,6 +470,7 @@ impl Daemon {
             Error::Invalid(m) => Error::Invalid(format!("sources: {m}")),
             other => other,
         })?;
+        let _ = foreground.set(ingest.foreground());
         // Items indexed text-only while no embedder was routable get vectors once one is.
         if let Some(l) = &local {
             let ingest = ingest.clone();

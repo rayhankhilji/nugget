@@ -33,7 +33,7 @@ mod logic;
 
 use logic::{
     Candidate, DateSource, Dated, DayRange, FacetCount, FacetFilters, FactDateSource, ItemKind,
-    PersonFacet, SelectedPerson,
+    PersonFacet, SelectedPerson, Zone,
 };
 
 use nugget_core::ipc::search_ui_method::{FACETED, PREVIEW, TIMELINE};
@@ -196,6 +196,9 @@ struct FacetedParams {
     offset: Option<u32>,
     filters: Filters,
     utc_offset_minutes: Option<i32>,
+    /// JJ2: the client's IANA time zone (`Europe/Berlin`): each date at its own offset. Without
+    /// it (or for a name the bundled database lacks), `utc_offset_minutes` for every date.
+    time_zone: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -216,6 +219,9 @@ struct FacetedHit {
     date_source: DateSource,
     kind: ItemKind,
     sensitive: bool,
+    /// JJ2: `sensitive` only because triage has not sorted it yet (see `logic::unsorted_private`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unsorted: bool,
     people: Vec<EntityRefView>,
 }
 
@@ -244,6 +250,7 @@ struct PoolItem {
     date_source: DateSource,
     kind: ItemKind,
     sensitive: bool,
+    unsorted: bool,
     people: Vec<EntityLinkRow>,
 }
 
@@ -252,6 +259,22 @@ impl SearchUi {
         logic::offset_from_minutes(
             minutes.unwrap_or(self.state.retriever.config().date_utc_offset_minutes),
         )
+    }
+
+    /// The client's time zone when it named one the bundled database knows, else its (or the
+    /// configured) fixed offset.
+    fn zone(&self, minutes: Option<i32>, name: Option<&str>) -> Result<Zone> {
+        let fixed = self.offset(minutes)?;
+        Ok(match name.map(str::trim).filter(|n| !n.is_empty()) {
+            None => Zone::Fixed(fixed),
+            Some(n) => Zone::named(n).unwrap_or_else(|| {
+                tracing::debug!(
+                    zone = %n.chars().take(64).collect::<String>(),
+                    "search_ui: unknown time zone; using the UTC offset"
+                );
+                Zone::Fixed(fixed)
+            }),
+        })
     }
 
     /// Source id → connector kind, for kind classification. Best effort: a failing list
@@ -290,8 +313,8 @@ impl SearchUi {
                 })
             })
             .collect::<Result<_>>()?;
-        let offset = self.offset(p.utc_offset_minutes)?;
-        let range = logic::day_range("filters.", f.from.as_deref(), f.to.as_deref(), offset)?;
+        let zone = self.zone(p.utc_offset_minutes, p.time_zone.as_deref())?;
+        let range = logic::day_range("filters.", f.from.as_deref(), f.to.as_deref(), &zone)?;
         let limit = clamp_limit(p.limit, DEFAULT_LIMIT, MAX_LIMIT);
         let skip = p.offset.unwrap_or(0) as usize;
 
@@ -317,10 +340,11 @@ impl SearchUi {
         let store = self.state.store.clone();
         let graph = self.state.knowledge.graph.clone();
         let wanted_people = f.people.clone();
+        let pool_zone = zone.clone();
         let (items, selected, selected_names) = blocking(move || {
             let (selected, names) = resolve_people(graph.as_ref(), &wanted_people)?;
             let live: HashSet<String> = selected.iter().filter_map(|s| s.live.clone()).collect();
-            let items = load_pool(&store, hits, &source_kinds, offset, &live)?;
+            let items = load_pool(&store, hits, &source_kinds, &pool_zone, &live)?;
             Ok((items, selected, names))
         })
         .await?;
@@ -345,7 +369,7 @@ impl SearchUi {
                 at: i.at,
             })
             .collect();
-        let (matching, tally) = logic::facet(&cands, &filters, offset);
+        let (matching, tally) = logic::facet(&cands, &filters, &zone);
 
         let mut names: HashMap<String, (String, String)> = selected_names;
         for i in &items {
@@ -375,6 +399,7 @@ impl SearchUi {
                 date_source: i.date_source,
                 kind: i.kind,
                 sensitive: i.sensitive,
+                unsorted: i.unsorted,
                 people: i
                     .people
                     .iter()
@@ -412,7 +437,7 @@ fn load_pool(
     store: &Store,
     hits: Vec<SearchHit>,
     source_kinds: &HashMap<String, String>,
-    offset: UtcOffset,
+    zone: &Zone,
     selected: &HashSet<String>,
 ) -> Result<Vec<PoolItem>> {
     let refs: Vec<ItemRef> = hits.iter().map(|h| h.item.clone()).collect();
@@ -424,7 +449,7 @@ fn load_pool(
         let (Some(item), Some(d)) = (metas.remove(&hit.item), dates.get(&hit.item)) else {
             continue;
         };
-        let (at, date_source) = logic::own_date(d, offset);
+        let (at, date_source) = logic::own_date(&logic::zoned_dates(d, &item.metadata), zone);
         let kind = logic::classify_kind(
             &item.metadata,
             item.mime.as_deref(),
@@ -440,6 +465,7 @@ fn load_pool(
                 .filter(|p| is_people_kind(p.kind) || selected.contains(p.id.as_str()))
                 .collect(),
             sensitive: nugget_retrieve::is_sensitive(&item.metadata),
+            unsorted: logic::unsorted_private(&item.metadata),
             hit,
             at,
             date_source,
@@ -483,6 +509,8 @@ struct TimelineParams {
     to: Option<String>,
     limit: Option<u32>,
     utc_offset_minutes: Option<i32>,
+    /// JJ2: as for `search.faceted`.
+    time_zone: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -497,6 +525,9 @@ enum TimelineEvent {
         kind: ItemKind,
         url: Option<String>,
         sensitive: bool,
+        /// JJ2: as `FacetedHit::unsorted`.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        unsorted: bool,
     },
     Fact {
         at: String,
@@ -553,8 +584,8 @@ impl SearchUi {
             return Err(Error::Invalid("entity: required".into()));
         }
         check_len("entity", &id)?;
-        let offset = self.offset(p.utc_offset_minutes)?;
-        let range = logic::day_range("", p.from.as_deref(), p.to.as_deref(), offset)?;
+        let zone = self.zone(p.utc_offset_minutes, p.time_zone.as_deref())?;
+        let range = logic::day_range("", p.from.as_deref(), p.to.as_deref(), &zone)?;
         let limit = clamp_limit(p.limit, DEFAULT_TIMELINE_LIMIT, MAX_TIMELINE_LIMIT);
         let source_kinds = self.source_kinds().await;
         let store = self.state.store.clone();
@@ -567,7 +598,7 @@ impl SearchUi {
                 &Window {
                     range,
                     limit,
-                    offset,
+                    zone,
                     max_items: TIMELINE_ITEMS,
                 },
                 &source_kinds,
@@ -581,7 +612,7 @@ impl SearchUi {
 struct Window {
     range: DayRange,
     limit: usize,
-    offset: UtcOffset,
+    zone: Zone,
     /// Distinct mentioning items read at most.
     max_items: usize,
 }
@@ -593,7 +624,7 @@ fn build_timeline(
     w: &Window,
     source_kinds: &HashMap<String, String>,
 ) -> Result<TimelineResult> {
-    let (range, limit, offset, max_items) = (&w.range, w.limit, w.offset, w.max_items);
+    let (range, limit, zone, max_items) = (&w.range, w.limit, &w.zone, w.max_items);
     let entity = graph
         .get_entity(&EntityId::new(id))?
         .ok_or_else(|| Error::NotFound(format!("entity {id}")))?;
@@ -622,7 +653,14 @@ fn build_timeline(
         }
     }
     let dates = store.item_dates(&order)?;
-    let own = |item: &ItemRef| dates.get(item).map(|d| logic::own_date(d, offset));
+    // JJ1-10: an event start in a named zone is dated at its instant (needs the metadata).
+    let metas = store.item_meta(&order)?;
+    let own = |item: &ItemRef| {
+        dates.get(item).map(|d| match metas.get(item) {
+            Some(m) => logic::own_date(&logic::zoned_dates(d, &m.metadata), zone),
+            None => logic::own_date(d, zone),
+        })
+    };
 
     let mut events: Vec<Dated<Pending>> = Vec::new();
     for item in &order {
@@ -658,7 +696,7 @@ fn build_timeline(
             },
         });
     }
-    let cut = logic::assemble(events, range, limit, offset);
+    let cut = logic::assemble(events, range, limit, zone);
 
     // Load the kept items and the evidence items of the kept facts.
     let mut wanted: Vec<ItemRef> = Vec::new();
@@ -732,6 +770,7 @@ fn build_timeline(
                         }),
                         url: it.and_then(|i| item_url(&i.metadata)),
                         sensitive: it.is_none_or(|i| nugget_retrieve::is_sensitive(&i.metadata)),
+                        unsorted: it.is_some_and(|i| logic::unsorted_private(&i.metadata)),
                         item,
                     }
                 }
@@ -776,6 +815,11 @@ struct PreviewParams {
     item: ItemRef,
     #[serde(default)]
     chunk_id: Option<i64>,
+    /// JJ2: the client's offset and time zone, as for `search.faceted`.
+    #[serde(default)]
+    utc_offset_minutes: Option<i32>,
+    #[serde(default)]
+    time_zone: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -799,6 +843,9 @@ struct PreviewResult {
     date: Option<String>,
     date_source: DateSource,
     sensitive: bool,
+    /// JJ2: as `FacetedHit::unsorted`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unsorted: bool,
     text: String,
     truncated: bool,
     passage: Option<String>,
@@ -810,10 +857,10 @@ impl SearchUi {
     async fn preview(&self, p: PreviewParams) -> Result<PreviewResult> {
         check_item("item", &p.item)?;
         let source_kind = self.source_kinds().await.remove(p.item.source.as_str());
-        let offset = self.offset(None)?;
+        let zone = self.zone(p.utc_offset_minutes, p.time_zone.as_deref())?;
         let store = self.state.store.clone();
         let graph = self.state.knowledge.graph.clone();
-        blocking(move || build_preview(&store, graph.as_ref(), p, source_kind.as_deref(), offset))
+        blocking(move || build_preview(&store, graph.as_ref(), p, source_kind.as_deref(), &zone))
             .await
     }
 }
@@ -823,12 +870,12 @@ fn build_preview(
     graph: &dyn GraphStore,
     p: PreviewParams,
     source_kind: Option<&str>,
-    offset: UtcOffset,
+    zone: &Zone,
 ) -> Result<PreviewResult> {
     let item = store
         .get_item(&p.item)?
         .ok_or_else(|| Error::NotFound(format!("item {}:{}", p.item.source, p.item.key)))?;
-    let (at, date_source) = logic::own_date(&logic::dates_of(&item), offset);
+    let (at, date_source) = logic::own_date(&logic::item_dates_of(&item), zone);
     let full = item.text.as_deref().unwrap_or("");
     let (text, truncated) = logic::cut_chars(full, PREVIEW_CHARS);
     let passage = match p.chunk_id {
@@ -890,6 +937,7 @@ fn build_preview(
         kind: logic::classify_kind(&item.metadata, item.mime.as_deref(), source_kind),
         url: item_url(&item.metadata),
         sensitive: nugget_retrieve::is_sensitive(&item.metadata),
+        unsorted: logic::unsorted_private(&item.metadata),
         date: Some(logic::rfc3339(at)),
         date_source,
         text: text.to_owned(),
@@ -977,7 +1025,7 @@ mod tests {
                 &Window {
                     range: DayRange::default(),
                     limit,
-                    offset: UtcOffset::UTC,
+                    zone: Zone::Fixed(UtcOffset::UTC),
                     max_items: cap,
                 },
                 &kinds,

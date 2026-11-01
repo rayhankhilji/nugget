@@ -907,3 +907,79 @@ async fn ask_sends_no_local_paths_to_a_cloud_model() {
     );
     h.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_reports_its_date_filter_and_partial_matches() {
+    let mut h = start(LOCAL).await;
+    let mut notes = h.client.notifications();
+
+    // No date phrase: no `date` on the wire.
+    let raw: Value = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "heron fishing river", "budget_tokens": 2000}),
+        )
+        .await;
+    assert!(raw.get("date").is_none(), "{raw}");
+    assert!(raw.get("partial").is_none(), "{raw}");
+    let started: AskStarted = serde_json::from_value(raw).unwrap();
+    collect(&mut notes, &started.stream_id).await;
+
+    // The items were just written, so "this week" finds them: the filter was applied.
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "heron fishing river this week", "budget_tokens": 2000}),
+        )
+        .await;
+    let date = started.date.clone().expect("a date filter");
+    assert_eq!(date.phrase, "this week");
+    assert!(date.applied, "{date:?}");
+    assert!(!date.listed);
+    assert!(date.start < date.end);
+    assert!(!started.citations.is_empty());
+    collect(&mut notes, &started.stream_id).await;
+
+    // Nothing is from 2019: the question was searched without the date, and says so.
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "heron fishing river in 2019", "budget_tokens": 2000}),
+        )
+        .await;
+    let date = started.date.clone().expect("a date filter");
+    assert!(!date.applied, "{date:?}");
+    assert_eq!(date.start.year(), 2019);
+    collect(&mut notes, &started.stream_id).await;
+
+    // Enough items to tell rare words: a passage lacking most of the question's rare key
+    // terms is reported as a partial match, by its citation number.
+    for i in 0..120 {
+        let text = format!("Garden note {i}: the tomatoes need water and the beans need sun.");
+        let item = NewItem::new("files-1", format!("garden-{i}.md"), content_hash(&text))
+            .with_title(format!("garden-{i}.md"));
+        h.store
+            .upsert_item_with_chunks(&item, &[NewChunk::text(text)])
+            .unwrap();
+    }
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "heron Tokyo Kyoto", "budget_tokens": 2000}),
+        )
+        .await;
+    let walk = started
+        .citations
+        .iter()
+        .find(|c| c.item.key.as_str() == "walk.md")
+        .unwrap_or_else(|| panic!("walk.md retrieved: {started:?}"));
+    assert!(started.partial.contains(&walk.n), "{started:?}");
+    for n in &started.partial {
+        assert!(
+            started.citations.iter().any(|c| c.n == *n),
+            "{n} is a citation"
+        );
+    }
+    collect(&mut notes, &started.stream_id).await;
+    h.stop().await;
+}
