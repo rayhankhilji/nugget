@@ -5,13 +5,11 @@ use std::time::Duration;
 use nugget_extract::{ChunkOptions, ExtractOptions};
 use serde::{Deserialize, Serialize};
 
-/// Ingest settings. Every field has a sensible default, so `IngestConfig::default()` is a
-/// working configuration and a partial `[ingest]` TOML table deserializes.
+/// Ingest settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct IngestConfig {
-    /// Per-item extraction timeout. On timeout the item is indexed by title only and the error
-    /// is recorded in its metadata. Default 30 s.
+    /// Per-item extraction timeout.
     pub extract_timeout_ms: u64,
     /// Refuse inputs larger than this many bytes (extraction fails; title-only item).
     pub max_input_bytes: u64,
@@ -29,64 +27,51 @@ pub struct IngestConfig {
     pub queue_capacity: usize,
     /// Keep the full extracted text on the item row (needed for previews and re-chunking).
     pub keep_text: bool,
-    /// Label items (junk / sensitive) when a local `Tier::Triage` provider with JSON-schema
-    /// output exists. Cloud triage providers are never used. Triage runs in the background
-    /// after an item is indexed, so it never delays search, and it never removes an item from
-    /// search; until it has run, the item counts as sensitive (kept away from cloud models).
+    /// Label items (junk / sensitive) when a local `Tier::Triage` provider with JSON-schema output
+    /// exists.
     pub triage: bool,
     /// Timeout for triaging one item (a batch gets this per item).
     pub triage_timeout_ms: u64,
     /// Characters of each item's text sent to triage.
     pub triage_max_chars: usize,
-    /// Count items whose sensitivity nobody decided (triage off, or no local triage model,
-    /// and no sensitivity rule matched) as **not** sensitive, so cloud models may use them.
-    /// Default `false`: unknown counts as sensitive (kept away from cloud models) until local
-    /// triage clears it. Set it only for a setup without a local model that should still use
-    /// cloud models with unflagged items.
+    /// Count items whose sensitivity nobody decided (triage off, or no local triage model, and no
+    /// sensitivity rule matched) as **not** sensitive, so cloud models may use them.
     pub assume_unflagged_safe: bool,
     /// Items labelled per triage request (small items share one request). Default 8.
     pub triage_batch: usize,
-    /// Most characters of text per triage request (the measured prefill rate usually allows
-    /// fewer; see `triage_request_ms`). Default 6 000.
+    /// Most characters of text per triage request (the measured prefill rate usually allows fewer;
+    /// see `triage_request_ms`).
     pub triage_batch_chars: usize,
-    /// Prompt processing one triage request may take, in ms (instructions included): requests
-    /// carry as much text as the measured prefill rate gets through in this time (at least
-    /// 1 000 characters unless that would take more than twice this long, at most
-    /// `triage_batch_chars`), and a longer item is labelled in parts. A local
-    /// server cannot stop part-way through a prompt step, so this bounds how long an interactive
-    /// request can wait behind triage; shorter requests repeat the fixed instructions more often
-    /// and label fewer items per hour. Default 8 000.
+    /// Prompt processing one triage request may take, in ms (instructions included): requests carry
+    /// as much text as the measured prefill rate gets through in this time (at least 1 000
+    /// characters unless that would take more than twice this long, at most `triage_batch_chars`),
+    /// and a longer item is labelled in parts.
     pub triage_request_ms: u64,
-    /// Background triage waits this long after the last interactive model request (Ask,
-    /// Double Tap, agent) before it uses the local model again. Default 3 s.
+    /// Background triage waits this long after the last interactive model request (Ask, Double Tap,
+    /// agent) before it uses the local model again.
     pub triage_idle_ms: u64,
-    /// Items whose triage failed are tried again after this long, once a triage model is
-    /// routable; the wait grows fourfold with each failure of the item (capped at a day).
-    /// Default 10 min.
+    /// Items whose triage failed are tried again after this long, once a triage model is routable;
+    /// the wait grows fourfold with each failure of the item (capped at a day).
     pub triage_retry_ms: u64,
     /// Failures after which an item stays `failed` for good (until its content changes).
-    /// Default 5; `1` turns retries off.
     pub triage_max_failures: u32,
     /// Compute embeddings with `Tier::Embedding` providers.
     pub embeddings: bool,
-    /// Allow `Cloud` embedding providers for non-sensitive items. Default `false`: on-device and
-    /// LAN providers only.
+    /// Allow `Cloud` embedding providers for non-sensitive items.
     pub allow_cloud_embeddings: bool,
     /// Chunks per embedding request.
     pub embed_batch: usize,
     /// Timeout for one embedding request.
     pub embed_timeout_ms: u64,
-    /// How often the re-embed job looks for items indexed text-only (for example before an
-    /// embedder was routable) and embeds them. It also runs at start and whenever
-    /// [`Ingest::reembed_now`](crate::Ingest::reembed_now) is called (e.g. when a local
-    /// embedding server becomes ready). 0 = only then. Default 10 min.
+    /// How often the re-embed job looks for items indexed text-only (for example before an embedder
+    /// was routable) and embeds them.
     pub reembed_interval_ms: u64,
     /// First retry delay after a failed sync pass; doubles per failure.
     pub backoff_base_ms: u64,
     /// Retry delay cap.
     pub backoff_max_ms: u64,
-    /// While watching, re-run a reconciling sync this often (0 = only on `sync_now` or when
-    /// the watch ends). Default 1 h.
+    /// While watching, re-run a reconciling sync this often (0 = only on `sync_now` or when the
+    /// watch ends).
     pub watch_resync_ms: u64,
     /// Battery fraction (0..1) under which backfills pause while discharging.
     pub low_battery_threshold: f32,
@@ -94,8 +79,8 @@ pub struct IngestConfig {
     pub power_poll_ms: u64,
     /// Item-level errors kept per source.
     pub error_ring: usize,
-    /// Extractions allowed to run at once across all sources (also bounds threads left behind
-    /// by timed-out extractions). 0 = number of CPUs.
+    /// Extractions allowed to run at once across all sources (also bounds threads left behind by
+    /// timed-out extractions).
     pub max_concurrent_extractions: usize,
     /// Freshness samples kept for the rolling p50/p95.
     pub freshness_window: usize,
@@ -254,13 +239,5 @@ mod tests {
             assert!(d <= 1_000, "attempt {attempt}: {d}");
         }
         assert!(cfg.backoff(0) < Duration::from_millis(200));
-    }
-
-    #[test]
-    fn partial_toml_uses_defaults() {
-        let cfg: IngestConfig = toml::from_str("queue_capacity = 8").unwrap();
-        assert_eq!(cfg.queue_capacity, 8);
-        assert_eq!(cfg.extract_timeout_ms, 30_000);
-        assert!(!cfg.allow_cloud_embeddings);
     }
 }

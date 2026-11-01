@@ -15,16 +15,7 @@ use crate::key::{StoreKey, create_private_dir};
 use crate::types::Counts;
 use crate::{schema, vec_ext};
 
-/// Handle to the encrypted store. Cheap to clone; all clones share its connections.
-///
-/// Writes (and reads inside write transactions) are serialized on one writer connection behind
-/// a mutex. A file-backed store also keeps a small pool of read-only connections, so plain reads
-/// run concurrently with each other and with the writer (WAL); an in-memory store reads through
-/// its writer connection.
-///
-/// Egress events recorded through [`EgressSink`](nugget_core::egress::EgressSink) are written by
-/// a dedicated thread so async callers never wait on SQLite. Dropping the last clone writes every
-/// queued event before it returns.
+/// Handle to the encrypted store.
 #[derive(Clone)]
 pub struct Store {
     inner: Arc<Inner>,
@@ -67,9 +58,7 @@ impl Db {
     }
 
     /// Run a read on a pooled read-only connection (waiting for a free one), or on the writer
-    /// connection for in-memory stores. Each statement sees every write committed before it
-    /// started. Never call this from inside [`Db::with_conn`]: a read that must see the
-    /// writer's uncommitted changes belongs on the writer connection.
+    /// connection for in-memory stores.
     pub(crate) fn with_read_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         match &self.readers {
             Some(pool) => f(&pool.take()),
@@ -153,10 +142,6 @@ impl std::fmt::Debug for Store {
 
 impl Store {
     /// Open (or create) the SQLCipher database at `path`, keyed with `key`, and migrate it.
-    ///
-    /// Returns `Error::Integrity` if the file cannot be decrypted with `key` (wrong key, or not a
-    /// Nugget database), and `Error::Unsupported` if the linked SQLite lacks SQLCipher or the
-    /// schema is newer than this build.
     pub fn open(path: impl AsRef<Path>, key: &StoreKey) -> Result<Self> {
         let path = path.as_ref();
         vec_ext::ensure_registered()?;
@@ -182,8 +167,7 @@ impl Store {
         Self::finish(conn, None)
     }
 
-    /// Migrate, then build the shared state. `file` is the database path and key of a
-    /// file-backed (encrypted) store, which gets a read pool; `None` for an in-memory one.
+    /// Migrate, then build the shared state.
     fn finish(mut conn: Connection, file: Option<(&Path, &StoreKey)>) -> Result<Self> {
         schema::migrate(&mut conn)?;
         // Opened after migrating, so readers start on the current schema.
@@ -244,43 +228,12 @@ impl Store {
         Some(crate::disk::status(dir))
     }
 
-    /// Copy every committed transaction from the write-ahead log into the database file and
-    /// truncate the log to zero bytes (`PRAGMA wal_checkpoint(TRUNCATE)`). Call it on a clean
-    /// stop, after the last write: the next open then finds no log left over, instead of a
-    /// multi-megabyte one whose stale frames look like a crash tail. Returns whether the whole
-    /// log was checkpointed; `false` when a reader still holds an old snapshot (nothing is lost,
-    /// the log is simply kept). A no-op for in-memory stores.
-    pub fn checkpoint_wal(&self) -> Result<bool> {
-        if self.inner.db.file.is_none() {
-            return Ok(true);
-        }
-        let (busy, log, done): (i64, i64, i64) = self.with_conn(|c| {
-            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
-            .db("checkpoint the write-ahead log")
-        })?;
-        let complete = busy == 0 && log == done;
-        if complete {
-            tracing::debug!(frames = done, "write-ahead log checkpointed and truncated");
-        } else {
-            tracing::info!(
-                busy,
-                frames = log,
-                checkpointed = done,
-                "write-ahead log only partly checkpointed (a reader is still active)"
-            );
-        }
-        Ok(complete)
-    }
-
     /// Database path and key of a file-backed store; `None` for an in-memory one.
     pub(crate) fn file(&self) -> Option<(&Path, &StoreKey)> {
         self.inner.db.file.as_ref().map(|(p, k)| (p.as_path(), k))
     }
 
-    /// The shared connections (for work that must outlive a borrowed `Store`, holding them
-    /// weakly).
+    /// The shared connections (for work that must outlive a borrowed `Store`, holding them weakly).
     pub(crate) fn db(&self) -> &Arc<Db> {
         &self.inner.db
     }
@@ -339,9 +292,8 @@ impl Store {
         self.set_cursor_from(source, &value)
     }
 
-    /// Store (replace) the sync cursor for `source`, serialized from `value` directly (no
-    /// [`Value`] tree in between). Read it back with [`Store::get_cursor`] or
-    /// [`Store::get_cursor_json`].
+    /// Store (replace) the sync cursor for `source`, serialized from `value` directly (no [`Value`]
+    /// tree in between).
     pub fn set_cursor_from<T: serde::Serialize + ?Sized>(
         &self,
         source: &SourceId,
@@ -361,9 +313,8 @@ impl Store {
         })
     }
 
-    /// Forget the sync cursor of `source`, so its next pass starts from scratch (a full
-    /// backfill, reconciled against stored item versions). Items are kept. Returns whether a
-    /// cursor existed.
+    /// Forget the sync cursor of `source`, so its next pass starts from scratch (a full backfill,
+    /// reconciled against stored item versions).
     pub fn clear_cursor(&self, source: &SourceId) -> Result<bool> {
         self.with_conn(|c| {
             let n = c
@@ -419,17 +370,13 @@ impl Store {
 
     /// The embedding model this database's vectors were built with (the provider's model name,
     /// [`Store::adopt_embedding_model`]); `None` while no model is recorded (no vectors yet, or
-    /// vectors from before models were recorded). Vectors of two models are not comparable even
-    /// when their dimensions agree, so a query must be embedded by this model.
+    /// vectors from before models were recorded).
     pub fn embedding_model(&self) -> Result<Option<String>> {
         self.with_read_conn(embedding_model)
     }
 
     /// The model to embed with: the one already recorded ([`Store::embedding_model`]), or, when
-    /// none is, `model`, recorded so every later vector and query must come from it. A legacy
-    /// database (vectors, no record) adopts `model` too: its vectors came from whatever embedded
-    /// it before, which callers keep running (nuggetd keeps such a store on the model it shipped
-    /// with). A database's model never changes once recorded.
+    /// none is, `model`, recorded so every later vector and query must come from it.
     pub fn adopt_embedding_model(&self, model: &str) -> Result<String> {
         if let Some(m) = self.embedding_model()? {
             return Ok(m);
@@ -536,8 +483,6 @@ pub(crate) fn set_key(conn: &Connection, key: &StoreKey) -> Result<()> {
         .db("configure SQLCipher logging")?;
 
     // Raw 256-bit key (x'..' form): no KDF needed, the key is already uniformly random.
-    // Built in place in a zeroized buffer of its final size, so no copy of the hex key is left
-    // behind in a temporary or a reallocated buffer.
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut pragma = Zeroizing::new(String::with_capacity(24 + 64));
     pragma.push_str("PRAGMA key = \"x'");
@@ -569,8 +514,7 @@ pub(crate) fn set_common_pragmas(conn: &Connection) -> Result<()> {
     .db("configure connection")
 }
 
-/// Owner-only permissions on the database and its WAL/SHM files (Unix). Best effort: the content
-/// is encrypted regardless.
+/// Owner-only permissions on the database and its WAL/SHM files (Unix).
 pub(crate) fn restrict_file_permissions(path: &Path) {
     #[cfg(unix)]
     {
@@ -641,7 +585,6 @@ mod tests {
                     std::thread::spawn(move || {
                         s.with_read_conn(|c| {
                             entered_tx.send(()).unwrap();
-                            // Stay inside the read until released (or the test gave up).
                             let _ = wait.recv_timeout(Duration::from_secs(10));
                             cursor(c, "files:test")
                         })
@@ -691,7 +634,6 @@ mod tests {
         let nomic = ("search_query: ".to_owned(), "search_document: ".to_owned());
         let item = |key: &str| NewItem::new("src", key, content_hash(key)).with_text(key);
 
-        // A fresh database adopts the scheme it is offered, and keeps it.
         let s = Store::open_in_memory().unwrap();
         assert_eq!(s.embedding_prefixes().unwrap(), None);
         assert_eq!(
@@ -701,7 +643,6 @@ mod tests {
         assert_eq!(s.adopt_embedding_prefixes("", "").unwrap(), nomic);
         assert_eq!(s.embedding_prefixes().unwrap(), Some(nomic.clone()));
 
-        // Vectors stored before any record: the index was built without prefixes, and stays so.
         let legacy = Store::open_in_memory().unwrap();
         legacy
             .upsert_item_with_chunks(&item("a"), &[NewChunk::embedded("a", vec![1.0, 0.0])])

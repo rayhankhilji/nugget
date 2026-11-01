@@ -1,52 +1,15 @@
 //! Knowledge graph: typed entities, claims backed by evidence, and mentions.
 //!
-//! **Contract (stable for M2):** the types in [`types`] and the [`GraphStore`] trait. Work package
-//! M2-A provides the SQLite implementation in `nugget-store`; [`MemGraph`] is the reference
-//! implementation and test double. Both must pass the same behaviour tests ([`conformance`]).
-//!
-//! Invariants every implementation keeps:
-//! - Entity ids are never reused. A merged entity keeps its id as a tombstone (`merged_into`), and
-//!   every lookup by id follows it to the surviving entity. An entity removed by
-//!   [`GraphStore::prune_orphans`] is a tombstone too: lookups return `None`.
-//! - A claim always has at least one [`Evidence`] unless its status is a user decision
-//!   (`UserAsserted` or `Rejected`). Removing the last evidence of a claim retracts it, except a
-//!   `Rejected` (or `UserAsserted`) one, which keeps its status.
-//! - **No duplicate live triples.** At most one claim per `(subject, predicate, object)` is live
-//!   ([`ClaimStatus::is_live`]: `Active`, `UserAsserted` or `Rejected`). Adding a claim that
-//!   matches a live claim adds the evidence to it instead of creating a duplicate, keeping the
-//!   **higher confidence** and the live claim's status (a new `UserAsserted` or `Rejected` claim
-//!   sets that status: it is a user decision). In particular a rejected fact stays rejected when
-//!   its source is re-extracted. Anything that makes a claim live again (`add_evidence` on a
-//!   retracted claim, `set_claim_status`, a merge) **folds** it into an existing live twin.
-//! - **Fold survivor:** when claims fold, the **user's own claim** (`UserAsserted`, the oldest
-//!   of them) survives, else the one with the **oldest (smallest) claim id**; it gets the union
-//!   of the evidence, the maximum confidence and the strongest status
-//!   ([`ClaimStatus::strongest`]: `UserAsserted` > `Rejected` > `Active`), except that an
-//!   explicit `set_claim_status` to `UserAsserted` or `Rejected` keeps the requested status.
-//!   Folded-away claim ids are gone (`get_claim` returns `None`) and never reused. `add_claim`
-//!   of a `UserAsserted` claim onto a live twin sets the twin's text: the user's wording is never
-//!   replaced by generated text.
-//! - **Replaced by the user:** [`GraphStore::supersede_by_user`] makes a claim `Superseded` and
-//!   remembers the items it had evidence from. Evidence is *remembered* when it comes from such
-//!   an item and has the quote it had then, or the item is unchanged since (same content; a
-//!   store that keeps no items, like `MemGraph`, never sees one change). While all of a claim's
-//!   evidence is remembered, it stays `Superseded`: [`GraphStore::add_evidence`] leaves a
-//!   `Retracted` or `Superseded` claim `Superseded` (unless its retraction left a live twin,
-//!   such as the user's own claim, which it then folds into as usual), and
-//!   [`GraphStore::add_claim`] of an extracted claim whose evidence is all remembered lands in
-//!   it when no live twin exists. Once it has evidence that is not remembered (the source now
-//!   says it differently), it becomes `Active` and the record is forgotten; the outcome does not
-//!   depend on the order evidence arrives in. Making it live with `set_claim_status`, or the
-//!   user's replacing claim stopping being current (any `set_claim_status` to a status that is
-//!   not current), forgets the record too.
-//! - Quotes are cut to [`MAX_QUOTE_CHARS`] characters on every write.
-//! - **`limit` 0 means unlimited** everywhere a method takes a `limit` (`list_entities`,
-//!   `mentions_for`, `neighbourhood`, `changes_since`); implementations may still apply a
-//!   documented hard cap (e.g. `SqliteGraph`'s neighbourhood bound).
-//! - Every mutation advances the change feed ([`GraphStore::changes_since`]).
-//! - [`GraphStore::apply_batch`] applies its ops in one transaction where the implementation
-//!   supports it (both `MemGraph` and `SqliteGraph` do): all or nothing, and readers never see a
-//!   half-applied batch.
+//! Invariants every [`GraphStore`] keeps (checked by [`conformance`]):
+//! - Entity ids are never reused; merged and pruned ids are tombstones that lookups follow.
+//! - A claim has evidence unless it is a user decision (`UserAsserted`, `Rejected`); losing its
+//!   last evidence retracts it, except a user decision, which keeps its status.
+//! - At most one live claim per triple: duplicates fold into the user's claim, else the oldest,
+//!   with the union of evidence, max confidence and the strongest status.
+//! - A claim the user replaced (`supersede_by_user`) stays `Superseded` while its evidence is
+//!   what it had then; new evidence makes it `Active`.
+//! - Quotes are cut to [`MAX_QUOTE_CHARS`]; `limit` 0 means unlimited; every mutation advances
+//!   the change feed; `apply_batch` is all or nothing.
 
 pub mod conformance;
 pub mod mem;
@@ -79,52 +42,30 @@ pub trait GraphStore: Send + Sync {
 
     // ---- claims ----
     /// Insert, or add the evidence to the live claim with the same triple (see the crate
-    /// invariants: the higher confidence is kept, and a rejected claim stays rejected). Returns
-    /// the id of the claim the triple landed in.
+    /// invariants: the higher confidence is kept, and a rejected claim stays rejected).
     fn add_claim(&self, new: &NewClaim) -> Result<ClaimId>;
     fn get_claim(&self, id: ClaimId) -> Result<Option<Claim>>;
-    /// Add evidence to a claim. A `Retracted` claim becomes `Active` again (folding into a live
-    /// twin, if any); other statuses are kept.
+    /// Add evidence to a claim.
     fn add_evidence(&self, claim: ClaimId, ev: &Evidence) -> Result<()>;
-    /// Set a claim's status. `Active` needs evidence (`Invalid` otherwise). Making a claim live
-    /// folds it into a live twin, if any (see the crate invariants for the survivor).
+    /// Set a claim's status.
     fn set_claim_status(&self, claim: ClaimId, status: ClaimStatus) -> Result<()>;
-    /// The user replaced `claim` with their own wording (a vault edit): it becomes
-    /// `Superseded`, then `by` (the user's claim) is added as with [`GraphStore::add_claim`],
-    /// in one write. The items `claim` had evidence from are remembered, so that extracting
-    /// them again does not make it current (see the crate invariants), until `by` stops being
-    /// current. Returns the id `by` landed in. `NotFound` for an unknown claim. The default
-    /// sets the status and adds `by`, remembering nothing.
-    fn supersede_by_user(&self, claim: ClaimId, by: &NewClaim) -> Result<ClaimId> {
-        self.set_claim_status(claim, ClaimStatus::Superseded)?;
-        self.add_claim(by)
-    }
+    /// The user replaced `claim` with their own wording (a vault edit): it becomes `Superseded`,
+    /// then `by` (the user's claim) is added as with [`GraphStore::add_claim`], in one write.
+    fn supersede_by_user(&self, claim: ClaimId, by: &NewClaim) -> Result<ClaimId>;
 
-    /// Whether `claim` was replaced by the user ([`GraphStore::supersede_by_user`]) and every
-    /// piece of `evidence` (non-empty) is remembered: from an item it had evidence from then,
-    /// with the same quote or with the item unchanged since. Adding such evidence does not make
-    /// the claim current. The default remembers nothing (`false`).
-    fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> Result<bool> {
-        let _ = (claim, evidence);
-        Ok(false)
-    }
+    /// Whether `claim` was replaced by the user ([`GraphStore::supersede_by_user`]) and every piece
+    /// of `evidence` (non-empty) is remembered: from an item it had evidence from then, with the
+    /// same quote or with the item unchanged since.
+    fn replaced_by_user(&self, claim: ClaimId, evidence: &[Evidence]) -> Result<bool>;
 
     /// Whether the user replaced `claim` ([`GraphStore::supersede_by_user`]) and the record
     /// is still kept: while it is, evidence that is not remembered makes the claim current
-    /// again (see the crate invariants), whatever evidence the claim has now. The default
-    /// keeps no records (`false`).
-    fn has_user_replacement(&self, claim: ClaimId) -> Result<bool> {
-        let _ = claim;
-        Ok(false)
-    }
+    /// again (see the crate invariants), whatever evidence the claim has now.
+    fn has_user_replacement(&self, claim: ClaimId) -> Result<bool>;
 
-    /// When the claim was last made `UserAsserted` (added as such, a user claim folded into it,
-    /// or its status set to it); kept through folds (the latest wins) and later evidence.
-    /// `None` if never, or the store does not keep it (the default).
-    fn asserted_at(&self, claim: ClaimId) -> Result<Option<time::OffsetDateTime>> {
-        let _ = claim;
-        Ok(None)
-    }
+    /// When the claim was last made `UserAsserted` (added as such, a user claim folded into it, or
+    /// its status set to it); kept through folds (the latest wins) and later evidence.
+    fn asserted_at(&self, claim: ClaimId) -> Result<Option<time::OffsetDateTime>>;
 
     /// Claims where the entity is subject or object.
     fn claims_for(&self, entity: &EntityId, include_inactive: bool) -> Result<Vec<Claim>>;
@@ -135,9 +76,7 @@ pub trait GraphStore: Send + Sync {
     fn mentions_for(&self, entity: &EntityId, limit: usize) -> Result<Vec<Mention>>;
 
     // ---- provenance ----
-    /// Drop all evidence, mentions and detail provenance from `item` (it changed or was
-    /// deleted). Claims left with no evidence are retracted (user-asserted and rejected ones keep
-    /// their status). Returns the affected claim ids, ascending.
+    /// Drop all evidence, mentions and detail provenance from `item` (it changed or was deleted).
     fn retract_item(&self, item: &ItemRef) -> Result<Vec<ClaimId>>;
 
     // ---- graph views ----
@@ -151,82 +90,35 @@ pub trait GraphStore: Send + Sync {
     fn changes_since(&self, seq: u64, limit: usize) -> Result<(Vec<EntityId>, u64)>;
     fn counts(&self) -> Result<GraphCounts>;
 
-    // ---- M2 wave 2 additions (all have defaults, so older implementations keep compiling) ----
+    /// Change a claim's confidence, validity bounds or text (not its triple or status).
+    fn update_claim(&self, claim: ClaimId, patch: &ClaimPatch) -> Result<Claim>;
 
-    /// Change a claim's confidence, validity bounds or text (not its triple or status). Returns
-    /// the updated claim. `NotFound` for an unknown claim, `Invalid` for a confidence outside
-    /// `0..=1` or a blank text.
-    fn update_claim(&self, claim: ClaimId, patch: &ClaimPatch) -> Result<Claim> {
-        let _ = (claim, patch);
-        Err(nugget_core::Error::Unsupported(
-            "this graph store cannot update claims".into(),
-        ))
-    }
-
-    /// Record that `item` supplied `detail` (an alias or identifier) of `entity`. Recorded even
-    /// if the entity does not hold the detail (yet); [`GraphStore::entity_provenance`] only
-    /// reports details the entity holds. Dropped by [`GraphStore::retract_item`] for that item;
-    /// moves with the detail on merge and split. The default keeps no provenance.
+    /// Record that `item` supplied `detail` (an alias or identifier) of `entity`.
     fn add_detail_source(
         &self,
         entity: &EntityId,
         detail: &EntityDetail,
         item: &ItemRef,
-    ) -> Result<()> {
-        let _ = (entity, detail, item);
-        Ok(())
-    }
+    ) -> Result<()>;
 
-    /// Which items supplied each alias and identifier (following merges). `None` if the id never
-    /// existed. The default reports every detail with no items.
-    fn entity_provenance(&self, entity: &EntityId) -> Result<Option<EntityProvenance>> {
-        Ok(self.get_entity(entity)?.map(|e| EntityProvenance {
-            aliases: e.aliases.into_iter().map(|a| (a, Vec::new())).collect(),
-            identifiers: e.identifiers.into_iter().map(|i| (i, Vec::new())).collect(),
-        }))
-    }
+    /// Which items supplied each alias and identifier (following merges).
+    fn entity_provenance(&self, entity: &EntityId) -> Result<Option<EntityProvenance>>;
 
-    /// Split `claims` off `entity` into a new entity created from `new`: the claims are
-    /// re-pointed (subject and/or object) from `entity` to the new one. Identifiers of `entity`
-    /// listed in `new.identifiers` move (with their provenance); aliases of `entity` listed in
-    /// `new.aliases` move too (its name stays). Mentions of `entity` move when their item
-    /// supports a moved claim and no claim left on `entity`. Every claim must have `entity` as
-    /// subject or object (`Invalid` otherwise); an identifier held by a third entity is
-    /// `Invalid`. Ids merged into `entity` earlier whose name (as it was when merged) is the new
-    /// entity's name or one of its aliases, and not `entity`'s own name, resolve to the new
-    /// entity afterwards (undoing a mistaken merge redirects the old id to the split-off
-    /// entity); they count as changed. Returns the new entity's id.
-    fn split(&self, entity: &EntityId, claims: &[ClaimId], new: &NewEntity) -> Result<EntityId> {
-        let _ = (entity, claims, new);
-        Err(nugget_core::Error::Unsupported(
-            "this graph store cannot split entities".into(),
-        ))
-    }
+    /// Split `claims` off `entity` into a new entity created from `new`: the claims are re-pointed
+    /// (subject and/or object) from `entity` to the new one.
+    fn split(&self, entity: &EntityId, claims: &[ClaimId], new: &NewEntity) -> Result<EntityId>;
 
-    /// Tombstone orphaned entities among `among` (every live entity when `None`) and return
-    /// them. An entity is an orphan when it has no mentions and every claim that references it
-    /// is `Retracted` (those claims are deleted with it). Never pruned: entities with an
-    /// attribute `is_me` or `user_asserted` set to `true`, and entities with any active,
-    /// superseded, user-asserted or rejected claim. A pruned id resolves to nothing afterwards
-    /// (and is never reused); its identifiers are released. The default prunes nothing.
-    fn prune_orphans(&self, among: Option<&[EntityId]>) -> Result<Vec<EntityId>> {
-        let _ = among;
-        Ok(Vec::new())
-    }
+    /// Tombstone orphaned entities among `among` (every live entity when `None`) and return them.
+    fn prune_orphans(&self, among: Option<&[EntityId]>) -> Result<Vec<EntityId>>;
 
     /// Live entities that items of `source` support, ascending by id: entities with a mention
     /// from an item of `source`, or that are subject or object of an active claim
-    /// ([`ClaimStatus::is_active`]) with evidence from an item of `source`. One query in
-    /// `SqliteGraph`; the default scans every entity ([`entities_supported_by_scan`]).
-    fn entities_supported_by(&self, source: &SourceId) -> Result<Vec<EntityId>> {
-        entities_supported_by_scan(self, source)
-    }
+    /// ([`ClaimStatus::is_active`]) with evidence from an item of `source`.
+    fn entities_supported_by(&self, source: &SourceId) -> Result<Vec<EntityId>>;
 
-    /// Live entities of `kinds` (empty = every kind), most connected first: by `claims`
-    /// descending, then `mentions` descending, then `name` ascending (byte order), then id;
-    /// counts as in [`GraphStore::list_entities`]. Skips `offset` entities, then returns at
-    /// most `limit` (0 = unlimited). `SqliteGraph` reads maintained counts through an index;
-    /// the default scans and sorts every entity ([`top_entities_scan`]).
+    /// Live entities of `kinds` (empty = every kind), most connected first: by `claims` descending,
+    /// then `mentions` descending, then `name` ascending (byte order), then id; counts as in
+    /// [`GraphStore::list_entities`].
     fn top_entities(
         &self,
         kinds: &[EntityKind],
@@ -236,40 +128,9 @@ pub trait GraphStore: Send + Sync {
         top_entities_scan(self, kinds, limit, offset)
     }
 
-    /// Apply `batch` in order and return one result per op. `MemGraph` and `SqliteGraph` apply it
-    /// atomically (one transaction: all or nothing, one change-feed step per touched entity);
-    /// the default applies the ops one by one through the methods above and stops at the first
-    /// error.
-    fn apply_batch(&self, batch: &GraphBatch) -> Result<Vec<BatchResult>> {
-        let mut out = Vec::with_capacity(batch.ops.len());
-        for op in &batch.ops {
-            out.push(apply_op(self, op)?);
-        }
-        Ok(out)
-    }
-}
-
-/// [`GraphStore::entities_supported_by`] through `list_entities`, `claims_for` and
-/// `mentions_for` (the default; one round of lookups per entity).
-pub fn entities_supported_by_scan<G: GraphStore + ?Sized>(
-    g: &G,
-    source: &SourceId,
-) -> Result<Vec<EntityId>> {
-    let mut out = Vec::new();
-    for e in g.list_entities(&EntityQuery::default())? {
-        let supported = g
-            .claims_for(&e.id, false)?
-            .iter()
-            .any(|c| c.evidence.iter().any(|ev| &ev.item.source == source))
-            || g.mentions_for(&e.id, 0)?
-                .iter()
-                .any(|m| &m.item.source == source);
-        if supported {
-            out.push(e.id);
-        }
-    }
-    out.sort();
-    Ok(out)
+    /// Apply `batch` in order, atomically (all or nothing, one change-feed step per touched
+    /// entity), and return one result per op.
+    fn apply_batch(&self, batch: &GraphBatch) -> Result<Vec<BatchResult>>;
 }
 
 /// [`GraphStore::top_entities`] through `list_entities` (the default): every live entity of
@@ -298,49 +159,4 @@ pub fn top_entities_scan<G: GraphStore + ?Sized>(
     });
     let limit = if limit == 0 { usize::MAX } else { limit };
     Ok(all.into_iter().skip(offset).take(limit).collect())
-}
-
-/// Apply one op through the single-write methods of `g` (the default `apply_batch`).
-pub fn apply_op<G: GraphStore + ?Sized>(g: &G, op: &GraphOp) -> Result<BatchResult> {
-    Ok(match op {
-        GraphOp::CreateEntity { entity } => BatchResult::Entity(g.create_entity(entity)?),
-        GraphOp::UpdateEntity { entity, patch } => {
-            g.update_entity(entity, patch)?;
-            BatchResult::Done
-        }
-        GraphOp::AddAlias { entity, alias } => {
-            g.add_alias(entity, alias)?;
-            BatchResult::Done
-        }
-        GraphOp::AddIdentifier { entity, identifier } => {
-            g.add_identifier(entity, identifier)?;
-            BatchResult::Done
-        }
-        GraphOp::AddDetailSource {
-            entity,
-            detail,
-            item,
-        } => {
-            g.add_detail_source(entity, detail, item)?;
-            BatchResult::Done
-        }
-        GraphOp::AddClaim { claim } => BatchResult::Claim(g.add_claim(claim)?),
-        GraphOp::AddEvidence { claim, evidence } => {
-            g.add_evidence(*claim, evidence)?;
-            BatchResult::Done
-        }
-        GraphOp::SetClaimStatus { claim, status } => {
-            g.set_claim_status(*claim, *status)?;
-            BatchResult::Done
-        }
-        GraphOp::UpdateClaim { claim, patch } => {
-            g.update_claim(*claim, patch)?;
-            BatchResult::Done
-        }
-        GraphOp::AddMention { mention } => {
-            g.add_mention(mention)?;
-            BatchResult::Done
-        }
-        GraphOp::RetractItem { item } => BatchResult::Claims(g.retract_item(item)?),
-    })
 }

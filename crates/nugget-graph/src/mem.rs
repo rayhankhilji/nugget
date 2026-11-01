@@ -1,9 +1,4 @@
 //! In-memory [`GraphStore`]: the reference implementation and test double.
-//!
-//! Every write is a method on the inner `State`, so [`GraphStore::apply_batch`] can run a whole
-//! batch on a copy of the state and swap it in only when every op succeeded (all or nothing).
-//! That copy makes a batch O(graph size): fine for tests and fixtures, which is what `MemGraph`
-//! is for.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
@@ -43,8 +38,6 @@ struct State {
 }
 
 /// A claim the user replaced: the items its evidence came from then, and the user's claim.
-/// `MemGraph` keeps no items, so an item never counts as changed since: any evidence from a
-/// recorded item is remembered, whatever its quote.
 #[derive(Clone, Default)]
 struct Replaced {
     items: Vec<ItemRef>,
@@ -127,8 +120,7 @@ impl State {
             .map(|c| c.id)
     }
 
-    /// Fold `id` (just made live) with every live twin into the oldest of them. Returns the
-    /// survivor.
+    /// Fold `id` (just made live) with every live twin into the oldest of them.
     fn fold(&mut self, id: ClaimId, explicit: Option<ClaimStatus>) -> ClaimId {
         let Some(c) = self.claims.get(&id) else {
             return id;

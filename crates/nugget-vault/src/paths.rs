@@ -1,12 +1,4 @@
 //! Page paths and filesystem safety.
-//!
-//! Every page lives at `<Kind>/<Name> (<short id>).md`. The name part is sanitised so the path is
-//! valid on Windows, macOS and Linux; the short id keeps it unique and lets links survive renames.
-//!
-//! All writes go through [`SafeFs`]: paths are relative to the canonical vault root, may only use
-//! normal components, never pass through a symlink (directories are checked one by one, and a
-//! symlinked page is refused), and are written to a temp file in the same directory that is then
-//! renamed over the target.
 
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
@@ -41,10 +33,6 @@ pub fn kind_dir(kind: EntityKind) -> &'static str {
 }
 
 /// A short, file-name-safe, unique form of an entity id.
-///
-/// Ids made only of `[a-z0-9_-]` and at most 24 characters long are used as they are (so
-/// `ent_000042` stays readable). Anything else becomes `~` plus 12 hex digits of its SHA-256; the
-/// `~` cannot occur in a verbatim id, so the two forms never collide.
 pub fn short_id(id: &EntityId) -> String {
     let s = id.as_str();
     let plain = !s.is_empty()
@@ -84,12 +72,6 @@ fn is_invisible(c: char) -> bool {
 }
 
 /// Make `name` safe as the name part of a file name on every OS and as an Obsidian link target.
-///
-/// NFC-normalised; control and invisible characters dropped; path separators, characters Windows
-/// forbids (`<>:"/\|?*`) and characters that break Obsidian links (`#^[]`) replaced by `-`;
-/// whitespace collapsed; leading and trailing dots and spaces trimmed (no hidden files, nothing
-/// Windows silently strips, no `..`); at most `max_chars` characters and 160 bytes; Windows device
-/// names prefixed with `_`. Never empty.
 pub fn sanitize_name(name: &str, max_chars: usize) -> String {
     let max_chars = max_chars.clamp(8, 200);
     let mut out = String::with_capacity(name.len());
@@ -132,8 +114,7 @@ pub fn sanitize_name(name: &str, max_chars: usize) -> String {
     out
 }
 
-/// The page's path stem relative to the vault root, e.g. `Person/Sam Lee (ent_000001)`. This is
-/// also the link target.
+/// The page's path stem relative to the vault root, e.g.
 pub fn page_stem(kind: EntityKind, name: &str, id: &EntityId, max_chars: usize) -> String {
     format!(
         "{}/{} ({})",
@@ -197,8 +178,7 @@ impl SafeFs {
     }
 
     /// Resolve `rel` to an absolute path, checking every existing component is a real directory
-    /// (not a symlink). With `create`, missing directories are created. Returns `None` when a
-    /// parent directory is missing and `create` is false.
+    /// (not a symlink).
     fn resolve(&self, rel: &str, create: bool) -> Result<Option<PathBuf>> {
         let parts = components(rel)?;
         let (file, dirs) = parts.split_last().expect("non-empty");
@@ -284,8 +264,7 @@ impl SafeFs {
         Some(rel)
     }
 
-    /// Read a page. `Ok(None)` if it does not exist. Symlinks, non-files, oversized files and
-    /// invalid UTF-8 are errors (the caller must then leave the page alone).
+    /// Read a page.
     pub fn read(&self, rel: &str) -> Result<Option<String>> {
         let Some(path) = self.resolve(rel, false)? else {
             return Ok(None);
@@ -315,8 +294,7 @@ impl SafeFs {
             .map_err(|_| Error::Invalid(format!("{rel} is not valid UTF-8")))
     }
 
-    /// Whether anything (file, directory or symlink) exists at `rel`. Errors (such as a symlinked
-    /// parent directory) count as existing, so callers go on to fail safely.
+    /// Whether anything (file, directory or symlink) exists at `rel`.
     pub fn entry_exists(&self, rel: &str) -> bool {
         match self.resolve(rel, false) {
             Ok(Some(p)) => fs::symlink_metadata(p).is_ok(),
@@ -334,8 +312,7 @@ impl SafeFs {
     }
 
     /// Remove temp files ([`TMP_SUFFIX`]) that a process killed mid-write left behind (they are
-    /// never pages, but would pile up). Files of this process are kept: its writes may be in
-    /// flight. Symlinks are never followed. Best effort; returns how many were removed.
+    /// never pages, but would pile up).
     pub fn sweep_temp_files(&self) -> usize {
         let own = format!(".{}.", std::process::id());
         let mut removed = 0;

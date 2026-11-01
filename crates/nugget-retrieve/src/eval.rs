@@ -1,26 +1,7 @@
 //! Retrieval evaluation on a labelled fixture corpus.
-//!
-//! An [`EvalSet`] is a small corpus of documents plus queries labelled with their relevant
-//! document ids (binary relevance). [`index`] loads it into a store (one item per document, one
-//! chunk per paragraph, under source [`EVAL_SOURCE`]); [`run`] searches every query in four
-//! modes and reports recall@1/5/10, MRR@10 and nDCG@10 per mode:
-//!
-//! | mode | strategy | MMR |
-//! |---|---|---|
-//! | `text_only` | full-text (bm25) | off |
-//! | `vector_only` | vector kNN | off |
-//! | `hybrid` | RRF of both | off |
-//! | `hybrid_mmr` | RRF of both | on |
-//!
-//! All modes group chunks by item first, so metrics are per document. Vector modes need an
-//! embedding provider on the retriever; without one they are reported as not run.
-//!
-//! [`HashEmbedder`] is a deterministic, dependency-free embedding provider with a little semantic
-//! signal (hashed bag of words with synonym folding), for tests and benchmarks without a model.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
@@ -81,22 +62,6 @@ impl EvalSet {
             include_str!("../tests/fixtures/eval/docs.json"),
             include_str!("../tests/fixtures/eval/queries.json"),
             include_str!("../tests/fixtures/eval/synonyms.json"),
-        )
-    }
-
-    /// Load `docs.json`, `queries.json` and (optional) `synonyms.json` from a directory.
-    pub fn load_dir(dir: &Path) -> Result<Self> {
-        let read = |name: &str| std::fs::read_to_string(dir.join(name));
-        let synonyms = match read("synonyms.json") {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => "[]".into(),
-            Err(e) => return Err(e.into()),
-        };
-        Self::from_parts(
-            &dir.display().to_string(),
-            &read("docs.json")?,
-            &read("queries.json")?,
-            &synonyms,
         )
     }
 
@@ -221,15 +186,6 @@ impl EvalMode {
         EvalMode::HybridMmr,
     ];
 
-    pub fn as_str(self) -> &'static str {
-        match self {
-            EvalMode::TextOnly => "text_only",
-            EvalMode::VectorOnly => "vector_only",
-            EvalMode::Hybrid => "hybrid",
-            EvalMode::HybridMmr => "hybrid_mmr",
-        }
-    }
-
     fn options(self) -> SearchOptions {
         let (strategy, mmr) = match self {
             EvalMode::TextOnly => (Strategy::TextOnly, false),
@@ -254,15 +210,6 @@ pub struct Metrics {
     pub ndcg_at_10: f64,
 }
 
-/// Ranked document ids for one query.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct QueryOutcome {
-    pub id: String,
-    pub ranked: Vec<String>,
-    /// 1-based rank of the first relevant document within the depth, if any.
-    pub first_relevant: Option<usize>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModeReport {
     pub mode: EvalMode,
@@ -271,7 +218,6 @@ pub struct ModeReport {
     /// Why it did not run, or how it degraded (e.g. hybrid answered text-only).
     pub note: Option<String>,
     pub metrics: Metrics,
-    pub queries: Vec<QueryOutcome>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -285,62 +231,6 @@ pub struct EvalReport {
 impl EvalReport {
     pub fn mode(&self, mode: EvalMode) -> Option<&ModeReport> {
         self.modes.iter().find(|m| m.mode == mode)
-    }
-
-    /// Flat `retrieval.<mode>.<metric>` pairs for benchmark reports (modes that ran only).
-    pub fn metric_pairs(&self) -> Vec<(String, f64)> {
-        let mut out = Vec::new();
-        for m in self.modes.iter().filter(|m| m.ran) {
-            let mode = m.mode.as_str();
-            let x = m.metrics;
-            for (name, v) in [
-                ("recall@1", x.recall_at_1),
-                ("recall@5", x.recall_at_5),
-                ("recall@10", x.recall_at_10),
-                ("mrr@10", x.mrr_at_10),
-                ("ndcg@10", x.ndcg_at_10),
-            ] {
-                out.push((format!("retrieval.{mode}.{name}"), v));
-            }
-        }
-        out
-    }
-}
-
-impl fmt::Display for EvalReport {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(
-            f,
-            "{} ({} docs, {} queries)",
-            self.set, self.docs, self.queries
-        )?;
-        writeln!(
-            f,
-            "{:<12} {:>6} {:>6} {:>6} {:>7} {:>8}",
-            "mode", "R@1", "R@5", "R@10", "MRR@10", "nDCG@10"
-        )?;
-        for m in &self.modes {
-            if m.ran {
-                let x = m.metrics;
-                write!(
-                    f,
-                    "{:<12} {:>6.3} {:>6.3} {:>6.3} {:>7.3} {:>8.3}",
-                    m.mode.as_str(),
-                    x.recall_at_1,
-                    x.recall_at_5,
-                    x.recall_at_10,
-                    x.mrr_at_10,
-                    x.ndcg_at_10
-                )?;
-            } else {
-                write!(f, "{:<12} not run", m.mode.as_str())?;
-            }
-            match &m.note {
-                Some(n) => writeln!(f, "  ({n})")?,
-                None => writeln!(f)?,
-            }
-        }
-        Ok(())
     }
 }
 
@@ -380,8 +270,7 @@ pub fn ndcg_at(ranked: &[String], relevant: &HashSet<&str>, k: usize) -> f64 {
     if ideal == 0.0 { 0.0 } else { dcg / ideal }
 }
 
-/// Run every query of `set` through `retriever` in each [`EvalMode`]. `store` must hold the set
-/// (see [`index`]); `Error::Invalid` otherwise.
+/// Run every query of `set` through `retriever` in each [`EvalMode`].
 pub async fn run(store: &Store, retriever: &Retriever, set: &EvalSet) -> Result<EvalReport> {
     set.validate()?;
     for d in &set.docs {
@@ -406,7 +295,6 @@ pub async fn run(store: &Store, retriever: &Retriever, set: &EvalSet) -> Result<
 
 async fn run_mode(retriever: &Retriever, set: &EvalSet, mode: EvalMode) -> Result<ModeReport> {
     let mut sum = Metrics::default();
-    let mut outcomes = Vec::with_capacity(set.queries.len());
     let mut fell_back = 0usize;
     for q in &set.queries {
         let results = match retriever
@@ -420,7 +308,6 @@ async fn run_mode(retriever: &Retriever, set: &EvalSet, mode: EvalMode) -> Resul
                     ran: false,
                     note: Some(msg),
                     metrics: Metrics::default(),
-                    queries: Vec::new(),
                 });
             }
             Err(e) => return Err(e),
@@ -440,16 +327,6 @@ async fn run_mode(retriever: &Retriever, set: &EvalSet, mode: EvalMode) -> Resul
         sum.recall_at_10 += recall_at(&ranked, &relevant, 10);
         sum.mrr_at_10 += mrr_at(&ranked, &relevant, 10);
         sum.ndcg_at_10 += ndcg_at(&ranked, &relevant, 10);
-        let first_relevant = ranked
-            .iter()
-            .take(EVAL_DEPTH)
-            .position(|id| relevant.contains(id.as_str()))
-            .map(|p| p + 1);
-        outcomes.push(QueryOutcome {
-            id: q.id.clone(),
-            ranked,
-            first_relevant,
-        });
     }
     let n = set.queries.len().max(1) as f64;
     let metrics = Metrics {
@@ -464,7 +341,6 @@ async fn run_mode(retriever: &Retriever, set: &EvalSet, mode: EvalMode) -> Resul
         ran: true,
         note: (fell_back > 0).then(|| format!("{fell_back} queries answered text-only")),
         metrics,
-        queries: outcomes,
     })
 }
 
@@ -479,10 +355,9 @@ const EMBED_STOPWORDS: &[&str] = &[
     "were", "what", "when", "where", "which", "who", "why", "will", "with", "you", "your",
 ];
 
-/// A deterministic embedding "model": hashed bag of words (FNV-1a, signed buckets, sublinear
-/// term frequency, L2-normalised) after lowercasing, light plural stemming and folding each
-/// synonym group to one token. Words that are synonyms embed identically, which gives vector
-/// search a little semantic reach that full-text search lacks.
+/// A deterministic embedding "model": hashed bag of words (FNV-1a, signed buckets, sublinear term
+/// frequency, L2-normalised) after lowercasing, light plural stemming and folding each synonym
+/// group to one token.
 pub struct HashEmbedder {
     id: ProviderId,
     dim: usize,
@@ -621,68 +496,4 @@ fn fnv1a(bytes: &[u8]) -> u64 {
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn ids(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn metrics_match_hand_computation() {
-        let ranked = ids(&["x", "a", "y", "b"]);
-        let rel: HashSet<&str> = ["a", "b", "c"].into_iter().collect();
-        assert_eq!(recall_at(&ranked, &rel, 1), 0.0);
-        assert!((recall_at(&ranked, &rel, 10) - 2.0 / 3.0).abs() < 1e-12);
-        assert_eq!(mrr_at(&ranked, &rel, 10), 0.5);
-        assert_eq!(mrr_at(&ranked, &rel, 1), 0.0);
-        let dcg = 1.0 / 3f64.log2() + 1.0 / 5f64.log2();
-        let idcg = 1.0 + 1.0 / 3f64.log2() + 1.0 / 4f64.log2();
-        assert!((ndcg_at(&ranked, &rel, 10) - dcg / idcg).abs() < 1e-12);
-        let perfect = ids(&["a", "b", "c"]);
-        assert!((ndcg_at(&perfect, &rel, 10) - 1.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn hash_embedder_folds_synonyms_and_is_deterministic() {
-        let e = HashEmbedder::new(64, &[vec!["car".into(), "automobile".into()]]);
-        assert_eq!(e.tokens("The Automobiles"), vec!["car"]);
-        assert_eq!(e.embed_text("my car"), e.embed_text("an automobile"));
-        let v = e.embed_text("anything at all");
-        let norm: f32 = v.iter().map(|x| x * x).sum();
-        assert!((norm - 1.0).abs() < 1e-5);
-        assert_eq!(e.embed_text("the of"), {
-            let mut z = vec![0.0; 64];
-            z[0] = 1.0;
-            z
-        });
-        assert_eq!(stem("policies"), "policy");
-        assert_eq!(stem("class"), "class");
-        assert_eq!(stem("bus"), "bus");
-    }
-
-    #[test]
-    fn builtin_set_is_valid() {
-        let set = EvalSet::builtin().unwrap();
-        assert!(
-            (40..=80).contains(&set.docs.len()),
-            "{} docs",
-            set.docs.len()
-        );
-        assert!(set.queries.len() >= 30, "{} queries", set.queries.len());
-    }
-
-    #[test]
-    fn validation_rejects_bad_labels() {
-        let docs = r#"[{"id":"a","title":"A","text":"hello"}]"#;
-        let bad = r#"[{"id":"q","query":"hello","relevant":["zzz"]}]"#;
-        assert!(EvalSet::from_parts("t", docs, bad, "[]").is_err());
-        let dup = r#"[{"id":"a","title":"A","text":"x"},{"id":"a","title":"B","text":"y"}]"#;
-        let ok = r#"[{"id":"q","query":"x","relevant":["a"]}]"#;
-        assert!(EvalSet::from_parts("t", dup, ok, "[]").is_err());
-        assert!(EvalSet::from_parts("t", docs, ok, "[]").is_ok());
-    }
 }

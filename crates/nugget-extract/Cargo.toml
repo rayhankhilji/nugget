@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = ["ocr"]
 # Image OCR through the pure-Rust `ocrs` engine. Models are never bundled or downloaded: they are
-# looked up at run time (see `set_ocr_model_dir` / `NUGGET_OCR_MODELS`).
+# looked up at run time (see `NUGGET_OCR_MODELS`).
 ocr = ["dep:ocrs", "dep:rten", "dep:image"]
 
 [dependencies]

@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::dates::DateRange;
 pub use crate::rank::ChunkMatch;
-pub use crate::rewrite::QueryRewrite;
 
 /// A date phrase found in the query and what it did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,9 +17,6 @@ pub struct DateFilter {
     /// modification time, update time; see `dates::item_date`).
     pub range: DateRange,
     /// `true`: the query without the phrase was searched and only items in `range` kept.
-    /// `false`: nothing in range matched, so the original query was searched unfiltered (the
-    /// phrase may have been part of the topic, as in "what to cook this week"); tell the user
-    /// or the model that the results are not from that period.
     pub applied: bool,
     /// The rest of the query was generic ("summarise last week"), so the results are the
     /// period's items by date (newest first; soonest first for a future period), not a search.
@@ -104,12 +100,9 @@ pub enum Strategy {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextOptions {
     /// Leave out items whose metadata marks them `sensitive` (or that carry no such flag), for
-    /// contexts that go to `Cloud` providers. The packed context is refilled from the next
-    /// relevant items; [`ContextResponse::excluded_sensitive`] counts what was left out.
+    /// contexts that go to `Cloud` providers.
     pub exclude_sensitive: bool,
-    /// Don't read date phrases in the query as date filters. For text that is not a search
-    /// query, such as a thread a draft replies to: "last week" or "our call on Tuesday" there
-    /// describes events, not when the notes that matter were written.
+    /// Don't read date phrases in the query as date filters.
     pub ignore_dates: bool,
 }
 
@@ -185,10 +178,6 @@ pub struct SearchResults {
     /// The date phrase parsed from the query, if any.
     #[serde(default)]
     pub date: Option<DateFilter>,
-    /// The query actually searched, when
-    /// [`Retriever::search_in_conversation`](crate::Retriever::search_in_conversation) rewrote it.
-    #[serde(default)]
-    pub rewrite: Option<QueryRewrite>,
 }
 
 impl SearchResults {

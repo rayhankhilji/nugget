@@ -1,6 +1,6 @@
-//! `IngestBuilder::settings_resolver` and `Ingest::reload`: values injected at build time reach
-//! the connector but never `sources.toml`, `sources.list` or events; a reload rebuilds with the
-//! current values; accounts written through `set_secret` are deleted on removal.
+//! `IngestBuilder::settings_resolver` and `Ingest::reload`: values injected at build time reach the
+//! connector but never `sources.toml`, `sources.list` or events; a reload rebuilds with the current
+//! values; accounts written through `set_secret` are deleted on removal.
 
 use std::sync::{Arc, Mutex};
 

@@ -3,7 +3,6 @@
 #![allow(dead_code)]
 
 use std::collections::{HashMap, VecDeque};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -62,8 +61,6 @@ pub enum Step {
     Hang,
     SetSecret(String, String),
     RecordKnown,
-    /// `ChangeSink::report_problem(key, message)`.
-    Problem(String, String),
     /// Report a scan (files-connector style).
     Scan(nugget_core::ipc::ScanReport),
 }
@@ -160,7 +157,6 @@ impl Connector for FakeConnector {
                     s.sent.fetch_add(1, Ordering::SeqCst);
                 }
                 Step::Checkpoint(v) => sink.checkpoint(v).await?,
-                Step::Problem(k, m) => sink.report_problem(ItemKey::new(k), m).await?,
                 Step::Fail(k) => return Err(k.err()),
                 Step::Return(v) => return Ok(v),
                 Step::Hang => std::future::pending::<()>().await,
@@ -520,6 +516,11 @@ pub fn router(providers: &[(Arc<FakeProvider>, Vec<Tier>)]) -> Arc<Router> {
     Arc::new(r)
 }
 
+/// A router with `p` as the triage and embedding model.
+pub fn local_router(p: &Arc<FakeProvider>) -> Option<Arc<Router>> {
+    Some(router(&[(p.clone(), vec![Tier::Triage, Tier::Embedding])]))
+}
+
 // ---------------------------------------------------------------- power
 
 #[derive(Default)]
@@ -623,6 +624,14 @@ impl Harness {
             .unwrap()
     }
 
+    /// Script one pass for `source`, add it and wait until the pass returns `cursor`.
+    pub async fn run(&self, source: &str, mut steps: Vec<Step>, cursor: Value) {
+        steps.push(Step::Return(cursor.clone()));
+        self.factory.state(source).script(steps);
+        self.add(source).await;
+        eventually("pass", || self.cursor(source) == Some(cursor.clone())).await;
+    }
+
     pub fn item(&self, source: &str, key: &str) -> Option<nugget_store::Item> {
         self.store
             .get_item(&ItemRef {
@@ -683,8 +692,4 @@ where
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-}
-
-pub fn dir_of(h: &Harness) -> &Path {
-    h.dir.path()
 }

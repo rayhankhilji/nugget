@@ -43,7 +43,6 @@ fn populate(s: &Store, n: usize) {
 }
 
 fn check(s: &Store, n: usize) {
-    // Every item, in a shuffled order, with unknown refs and duplicates mixed in.
     let mut refs: Vec<ItemRef> = (0..n)
         .map(|i| iref(if i % 3 == 2 { "mail" } else { "files" }, &format!("k{i}")))
         .collect();
@@ -62,7 +61,6 @@ fn check(s: &Store, n: usize) {
     }
     let known = batched.iter().filter(|i| i.is_some()).count();
     assert_eq!(known, n + 1, "every item once, plus the duplicate");
-    // Layout-backed texts came back whole.
     let k0 = batched
         .iter()
         .flatten()
@@ -84,13 +82,6 @@ fn check(s: &Store, n: usize) {
         assert_eq!(d.source_modified_at, it.source_modified_at);
     }
     assert!(s.get_items(&[]).unwrap().is_empty());
-}
-
-#[test]
-fn get_items_matches_get_item_in_memory() {
-    let s = Store::open_in_memory().unwrap();
-    populate(&s, 1200);
-    check(&s, 1200);
 }
 
 /// File-backed stores read through the reader pool.

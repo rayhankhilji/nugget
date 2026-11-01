@@ -1,6 +1,5 @@
 //! One supervisor task per enabled source: sync from the stored cursor, then watch (or sleep for
 //! the poll interval), retrying failures with capped exponential backoff and jitter.
-//! `Error::Unauthorized` parks the source in `NeedsAuth` until the user acts.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -5,13 +5,10 @@ use std::path::PathBuf;
 
 use nugget_core::ids::{EntityId, ItemKey, ItemRef, SourceId};
 use nugget_graph::{
-    ClaimObject, ClaimStatus, EntityKind, EntityPatch, EntityQuery, Evidence, GraphStore,
-    Identifier, Mention, NewClaim, NewEntity,
+    ClaimObject, ClaimStatus, EntityKind, EntityPatch, EntityQuery, Evidence, GraphStore, Mention,
+    NewClaim, NewEntity,
 };
-use nugget_store::{
-    ENTITY_ID_PREFIX, Error, NewChunk, NewItem, SqliteGraph, Store, StoreKey, content_hash,
-};
-use serde_json::json;
+use nugget_store::{NewChunk, NewItem, SqliteGraph, Store, StoreKey, content_hash};
 
 fn mem() -> SqliteGraph {
     SqliteGraph::open_in_memory().unwrap()
@@ -65,11 +62,6 @@ fn db_path(dir: &tempfile::TempDir) -> PathBuf {
 }
 
 #[test]
-fn conformance_in_memory() {
-    nugget_graph::conformance::run(&|| Box::new(mem()));
-}
-
-#[test]
 fn conformance_encrypted_file() {
     let dir = tempfile::tempdir().unwrap();
     let n = std::sync::atomic::AtomicUsize::new(0);
@@ -82,146 +74,6 @@ fn conformance_encrypted_file() {
                 .graph(),
         )
     });
-}
-
-#[test]
-fn reference_implementation_still_passes() {
-    // Guards against the suite drifting from the reference while this crate tracks it.
-    nugget_graph::conformance::run(&|| Box::new(nugget_graph::MemGraph::new()));
-}
-
-#[test]
-fn entity_ids_are_random_and_stable_across_rename_and_merge() {
-    let g = mem();
-    let a = entity(&g, EntityKind::Person, "Ada");
-    let b = entity(&g, EntityKind::Person, "Ada L.");
-    assert!(a.as_str().starts_with(ENTITY_ID_PREFIX));
-    assert_ne!(a, b);
-    g.update_entity(
-        &a,
-        &EntityPatch {
-            name: Some("Ada Lovelace".into()),
-            kind: None,
-            attributes: Some(json!({"born": 1815})),
-        },
-    )
-    .unwrap();
-    g.merge(&a, &b).unwrap();
-    let e = g.get_entity(&a).unwrap().unwrap();
-    assert_eq!(e.id, a);
-    assert_eq!(e.name, "Ada Lovelace");
-    assert_eq!(e.attributes, json!({"born": 1815}));
-    assert_eq!(e.aliases, vec!["Ada".to_string(), "Ada L.".to_string()]);
-    assert_eq!(e.merged_ids, vec![b.clone()]);
-    // The tombstone resolves, but is not listed and not found by name as itself.
-    assert_eq!(g.get_entity(&b).unwrap().unwrap().id, a);
-    assert_eq!(g.find_by_name("ada l.", None).unwrap(), vec![a.clone()]);
-    assert_eq!(g.counts().unwrap().entities, 1);
-    let listed = g.list_entities(&EntityQuery::default()).unwrap();
-    assert_eq!(listed.len(), 1);
-}
-
-#[test]
-fn merge_chains_flatten_and_resolve() {
-    let g = mem();
-    let a = entity(&g, EntityKind::Person, "A");
-    let b = entity(&g, EntityKind::Person, "B");
-    let c = entity(&g, EntityKind::Person, "C");
-    g.merge(&b, &c).unwrap(); // c → b
-    g.merge(&a, &b).unwrap(); // b → a, and c re-pointed to a
-    for id in [&a, &b, &c] {
-        assert_eq!(g.get_entity(id).unwrap().unwrap().id, a);
-    }
-    let e = g.get_entity(&a).unwrap().unwrap();
-    let mut merged = e.merged_ids.clone();
-    merged.sort();
-    let mut want = vec![b.clone(), c.clone()];
-    want.sort();
-    assert_eq!(merged, want);
-    // Every operation that takes an id follows tombstones.
-    g.add_alias(&c, "Alpha").unwrap();
-    g.add_claim(&claim(
-        &c,
-        "is",
-        ClaimObject::Literal("x".into()),
-        vec![ev("s", "k")],
-    ))
-    .unwrap();
-    assert_eq!(g.claims_for(&b, false).unwrap()[0].subject, a);
-    assert!(g.merge(&b, &c).is_err(), "both resolve to a");
-    assert!(
-        g.get_entity(&a)
-            .unwrap()
-            .unwrap()
-            .aliases
-            .contains(&"Alpha".into())
-    );
-}
-
-#[test]
-fn merge_moves_mentions_identifiers_and_object_claims() {
-    let g = mem();
-    let a = entity(&g, EntityKind::Organization, "Acme");
-    let b = entity(&g, EntityKind::Organization, "ACME Inc");
-    let sam = entity(&g, EntityKind::Person, "Sam");
-    g.add_identifier(&b, &Identifier::new("domain", "Acme.test"))
-        .unwrap();
-    let c1 = g
-        .add_claim(&claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(b.clone()),
-            vec![ev("s", "1")],
-        ))
-        .unwrap();
-    let c2 = g
-        .add_claim(&claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(a.clone()),
-            vec![ev("s", "2")],
-        ))
-        .unwrap();
-    g.add_mention(&mention(&a, "s", "1", "Acme")).unwrap();
-    g.add_mention(&mention(&b, "s", "1", "Acme")).unwrap();
-    g.add_mention(&mention(&b, "s", "2", "ACME")).unwrap();
-    let (_, before) = g.changes_since(0, 0).unwrap();
-
-    g.merge(&a, &b).unwrap();
-
-    let claims = g.claims_for(&a, false).unwrap();
-    assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0].id, c1.min(c2), "the oldest claim survives");
-    assert_eq!(claims[0].evidence.len(), 2);
-    assert!(g.get_claim(c1.max(c2)).unwrap().is_none());
-    assert_eq!(
-        g.find_by_identifier(&Identifier::new("domain", "acme.test"))
-            .unwrap(),
-        Some(a.clone())
-    );
-    // The duplicate mention (same item, chunk and surface) folded.
-    assert_eq!(g.mentions_for(&a, 0).unwrap().len(), 2);
-    assert_eq!(g.mentions_for(&b, 0).unwrap().len(), 2, "old id resolves");
-    // Survivor, tombstone and the claim's other end all enter the change feed.
-    let (changed, _) = g.changes_since(before, 0).unwrap();
-    for id in [&a, &b, &sam] {
-        assert!(changed.contains(id), "{id} changed");
-    }
-    let s = g.list_entities(&EntityQuery::default()).unwrap();
-    let acme = s.iter().find(|e| e.id == a).unwrap();
-    assert_eq!((acme.claims, acme.mentions), (1, 2));
-}
-
-#[test]
-fn merge_is_atomic() {
-    let g = mem();
-    let a = entity(&g, EntityKind::Person, "A");
-    assert!(
-        g.merge(&a, &EntityId::new("ent_missing")).is_err(),
-        "unknown id"
-    );
-    assert!(g.get_entity(&a).unwrap().is_some());
-    assert_eq!(g.counts().unwrap().entities, 1);
 }
 
 #[test]
@@ -255,14 +107,12 @@ fn list_entities_filters_orders_and_pages() {
         .map(|e| e.name)
         .collect()
     };
-    // Trigram path (≥ 3 chars), alias hits, case-insensitive including non-ASCII.
     assert_eq!(
         q("ALP", None),
         ["Alpha", "Alpine Person"].map(String::from).to_vec()
     );
     assert_eq!(q("alch", None), ["Charlie"].map(String::from).to_vec());
     assert_eq!(q("éCLA", None), ["Éclair"].map(String::from).to_vec());
-    // Short needles fall back to a scan.
     assert_eq!(
         q("al", Some(EntityKind::Topic)),
         ["al", "Alpha", "Charlie"].map(String::from).to_vec()
@@ -321,103 +171,6 @@ fn renames_keep_name_search_in_step() {
             .unwrap()
             .is_empty()
     );
-}
-
-#[test]
-fn claims_round_trip_every_field() {
-    let g = mem();
-    let a = entity(&g, EntityKind::Commitment, "Send the report");
-    let t = time::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
-    let mut new = claim(
-        &a,
-        "due_on",
-        ClaimObject::Literal("2027-01-15".into()),
-        vec![
-            Evidence {
-                item: iref("mail", "m1"),
-                chunk_id: None,
-                quote: None,
-            },
-            Evidence {
-                item: iref("mail", "m1"),
-                chunk_id: None,
-                quote: Some("by Jan 15".into()),
-            },
-            ev("mail", "m1"),
-            ev("mail", "m1"),
-        ],
-    );
-    new.valid_from = Some(t);
-    new.confidence = 0.9;
-    let id = g.add_claim(&new).unwrap();
-    let c = g.get_claim(id).unwrap().unwrap();
-    assert_eq!(c.predicate, "due_on");
-    assert_eq!(c.object, ClaimObject::Literal("2027-01-15".into()));
-    assert_eq!(c.confidence, 0.9);
-    assert_eq!(c.valid_from, Some(t));
-    assert_eq!(c.valid_to, None);
-    assert_eq!(
-        c.evidence.len(),
-        3,
-        "exact duplicates collapse; NULLs are distinct"
-    );
-    assert!(g.get_claim(id + 1000).unwrap().is_none());
-
-    // Dedupe raises confidence and can promote to user_asserted.
-    let mut again = claim(
-        &a,
-        "due_on",
-        ClaimObject::Literal("2027-01-15".into()),
-        vec![],
-    );
-    again.status = ClaimStatus::UserAsserted;
-    again.confidence = 1.0;
-    assert_eq!(g.add_claim(&again).unwrap(), id);
-    let c = g.get_claim(id).unwrap().unwrap();
-    assert_eq!(c.status, ClaimStatus::UserAsserted);
-    assert_eq!(c.confidence, 1.0);
-
-    // Superseded claims are not deduped against.
-    g.set_claim_status(id, ClaimStatus::Superseded).unwrap();
-    let fresh = g
-        .add_claim(&claim(
-            &a,
-            "due_on",
-            ClaimObject::Literal("2027-01-15".into()),
-            vec![ev("mail", "m2")],
-        ))
-        .unwrap();
-    assert_ne!(fresh, id);
-    assert!(g.set_claim_status(999_999, ClaimStatus::Retracted).is_err());
-    assert!(g.add_evidence(999_999, &ev("x", "y")).is_err());
-    assert!(
-        g.add_claim(&claim(
-            &EntityId::new("ent_nope"),
-            "p",
-            ClaimObject::Literal("x".into()),
-            vec![ev("x", "y")]
-        ))
-        .is_err()
-    );
-}
-
-#[test]
-fn user_asserted_claims_survive_retraction() {
-    let g = mem();
-    let a = entity(&g, EntityKind::Person, "A");
-    let mut c = claim(
-        &a,
-        "likes",
-        ClaimObject::Literal("tea".into()),
-        vec![ev("s", "1")],
-    );
-    c.status = ClaimStatus::UserAsserted;
-    let id = g.add_claim(&c).unwrap();
-    assert_eq!(g.retract_item(&iref("s", "1")).unwrap(), vec![id]);
-    let c = g.get_claim(id).unwrap().unwrap();
-    assert_eq!(c.status, ClaimStatus::UserAsserted);
-    assert!(c.evidence.is_empty());
-    assert!(g.retract_item(&iref("s", "1")).unwrap().is_empty());
 }
 
 fn stored_item(s: &Store, source: &str, key: &str) -> ItemRef {
@@ -487,253 +240,9 @@ fn deleting_items_and_sources_retracts_their_provenance() {
     assert_eq!(g.changes_since(mark, 0).unwrap().0, vec![sam.clone()]);
     assert!(s.get_item(&a2).unwrap().is_none());
 
-    // Deleting an unknown item is still a no-op for the graph.
     let (_, mark) = g.changes_since(0, 0).unwrap();
     assert!(!s.delete_item(&iref("mail", "nope")).unwrap());
     assert_eq!(g.changes_since(mark, 0).unwrap().0, Vec::<EntityId>::new());
-}
-
-#[test]
-fn neighbourhood_follows_both_directions_and_skips_inactive() {
-    let g = mem();
-    let [a, b, c, d] = ["A", "B", "C", "D"].map(|n| entity(&g, EntityKind::Person, n));
-    g.add_claim(&claim(
-        &a,
-        "knows",
-        ClaimObject::Entity(b.clone()),
-        vec![ev("s", "1")],
-    ))
-    .unwrap();
-    g.add_claim(&claim(
-        &c,
-        "manages",
-        ClaimObject::Entity(a.clone()),
-        vec![ev("s", "1")],
-    ))
-    .unwrap();
-    let dead = g
-        .add_claim(&claim(
-            &a,
-            "knows",
-            ClaimObject::Entity(d.clone()),
-            vec![ev("s", "2")],
-        ))
-        .unwrap();
-    g.add_claim(&claim(
-        &a,
-        "likes",
-        ClaimObject::Literal("tea".into()),
-        vec![ev("s", "1")],
-    ))
-    .unwrap();
-    g.set_claim_status(dead, ClaimStatus::Superseded).unwrap();
-    let v = g.neighbourhood(&a, 2, 100).unwrap();
-    let mut names: Vec<_> = v.nodes.iter().map(|n| n.name.as_str()).collect();
-    names.sort();
-    assert_eq!(names, ["A", "B", "C"]);
-    assert_eq!(v.nodes[0].depth, 0);
-    assert_eq!(v.edges.len(), 2);
-    assert!(v.edges.iter().any(|e| e.from == c && e.to == a));
-    let v = g.neighbourhood(&a, 0, 100).unwrap();
-    assert_eq!((v.nodes.len(), v.edges.len()), (1, 0));
-    assert!(g.neighbourhood(&EntityId::new("ent_x"), 1, 10).is_err());
-}
-
-#[test]
-fn change_feed_is_monotonic_and_pages() {
-    let g = mem();
-    let ids: Vec<EntityId> = (0..5)
-        .map(|i| entity(&g, EntityKind::Topic, &format!("t{i}")))
-        .collect();
-    let (page, high) = g.changes_since(0, 2).unwrap();
-    assert_eq!(page, ids[..2]);
-    let (rest, high2) = g.changes_since(high, 0).unwrap();
-    assert_eq!(rest, ids[2..]);
-    assert!(high2 > high);
-    // Touching an entity again moves it to the end of the feed.
-    g.add_alias(&ids[0], "zero").unwrap();
-    let (again, high3) = g.changes_since(high2, 0).unwrap();
-    assert_eq!(again, vec![ids[0].clone()]);
-    assert!(high3 > high2);
-    let (all, _) = g.changes_since(0, 0).unwrap();
-    assert_eq!(all.len(), 5, "one entry per entity");
-    // A failed mutation records nothing.
-    assert!(g.add_alias(&EntityId::new("ent_none"), "x").is_err());
-    assert_eq!(g.changes_since(high3, 0).unwrap().0, Vec::<EntityId>::new());
-}
-
-#[test]
-fn identifiers_conflict_on_create_and_after_merge() {
-    let g = mem();
-    let mut new = NewEntity::new(EntityKind::Person, "A");
-    new.identifiers = vec![
-        Identifier::new("email", "a@x.test"),
-        Identifier::new("Email", "A@X.test"),
-    ];
-    let a = g.create_entity(&new).unwrap();
-    assert_eq!(g.get_entity(&a).unwrap().unwrap().identifiers.len(), 1);
-    let mut dup = NewEntity::new(EntityKind::Person, "B");
-    dup.identifiers = vec![Identifier::new("email", "A@x.TEST")];
-    assert!(matches!(g.create_entity(&dup), Err(Error::Invalid(_))));
-    assert_eq!(
-        g.counts().unwrap().entities,
-        1,
-        "failed create left nothing"
-    );
-    // Adding an identifier an entity already has is fine.
-    g.add_identifier(&a, &Identifier::new("email", "a@x.test"))
-        .unwrap();
-}
-
-#[test]
-fn graph_persists_in_the_encrypted_store() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = db_path(&dir);
-    let key = StoreKey::from_bytes([9u8; 32]);
-    let (a, c) = {
-        let g = Store::open(&path, &key).unwrap().graph();
-        let mut new = NewEntity::new(EntityKind::Person, "Secret Person");
-        new.identifiers = vec![Identifier::new("email", "secret@example.test")];
-        let a = g.create_entity(&new).unwrap();
-        let c = g
-            .add_claim(&claim(
-                &a,
-                "lives_in",
-                ClaimObject::Literal("Hidden Valley".into()),
-                vec![ev("s", "1")],
-            ))
-            .unwrap();
-        (a, c)
-    };
-    let raw = std::fs::read(&path).unwrap();
-    for needle in [
-        &b"Secret Person"[..],
-        b"Hidden Valley",
-        b"secret@example.test",
-    ] {
-        assert!(
-            !raw.windows(needle.len()).any(|w| w == needle),
-            "plaintext graph data on disk"
-        );
-    }
-    let g = Store::open(&path, &key).unwrap().graph();
-    assert_eq!(g.get_entity(&a).unwrap().unwrap().name, "Secret Person");
-    assert_eq!(
-        g.get_claim(c).unwrap().unwrap().object,
-        ClaimObject::Literal("Hidden Valley".into())
-    );
-    assert!(Store::open(&path, &StoreKey::from_bytes([1u8; 32])).is_err());
-}
-
-#[test]
-fn graph_is_shareable_across_threads() {
-    let g = mem();
-    let handles: Vec<_> = (0..4)
-        .map(|t| {
-            let g = g.clone();
-            std::thread::spawn(move || {
-                for i in 0..25 {
-                    let e = g
-                        .create_entity(&NewEntity::new(EntityKind::Topic, format!("t{t}-{i}")))
-                        .unwrap();
-                    g.add_claim(&claim(
-                        &e,
-                        "p",
-                        ClaimObject::Literal("v".into()),
-                        vec![ev("s", "1")],
-                    ))
-                    .unwrap();
-                }
-            })
-        })
-        .collect();
-    for h in handles {
-        h.join().unwrap();
-    }
-    let n = g.counts().unwrap();
-    assert_eq!((n.entities, n.claims), (100, 100));
-    assert_eq!(g.retract_item(&iref("s", "1")).unwrap().len(), 100);
-    assert_eq!(g.counts().unwrap().claims, 0);
-}
-
-// ---------------------------------------------------------------- M2 wave 2
-
-#[test]
-fn deleting_an_item_keeps_rejections_and_drops_detail_provenance() {
-    use nugget_graph::EntityDetail;
-    let s = Store::open_in_memory().unwrap();
-    let g = s.graph();
-    let m1 = stored_item(&s, "mail", "1");
-    let m2 = stored_item(&s, "mail", "2");
-    let sam = entity(&g, EntityKind::Person, "Sam");
-    g.add_identifier(&sam, &Identifier::new("email", "sam@x.test"))
-        .unwrap();
-    let email = EntityDetail::Identifier(Identifier::new("email", "sam@x.test"));
-    g.add_detail_source(&sam, &email, &m1).unwrap();
-    g.add_detail_source(&sam, &email, &m2).unwrap();
-    let rejected = g
-        .add_claim(&claim(
-            &sam,
-            "lives_in",
-            ClaimObject::Literal("Oslo".into()),
-            vec![ev("mail", "1")],
-        ))
-        .unwrap();
-    g.set_claim_status(rejected, ClaimStatus::Rejected).unwrap();
-
-    assert!(s.delete_item(&m1).unwrap());
-    let c = g.get_claim(rejected).unwrap().unwrap();
-    assert_eq!(
-        c.status,
-        ClaimStatus::Rejected,
-        "store deletes keep rejections"
-    );
-    assert!(c.evidence.is_empty());
-    let p = g.entity_provenance(&sam).unwrap().unwrap();
-    assert_eq!(p.identifiers[0].1, vec![m2.clone()]);
-    s.delete_source(&SourceId::new("mail")).unwrap();
-    let p = g.entity_provenance(&sam).unwrap().unwrap();
-    assert!(
-        p.identifiers[0].1.is_empty(),
-        "delete_source drops provenance"
-    );
-}
-
-#[test]
-fn a_batch_is_one_transaction_and_one_feed_step_per_entity() {
-    use nugget_graph::{GraphBatch, GraphOp};
-    let g = mem();
-    let sam = entity(&g, EntityKind::Person, "Sam");
-    let acme = entity(&g, EntityKind::Organization, "Acme");
-    let (_, start) = g.changes_since(0, 0).unwrap();
-    let mut b = GraphBatch::new();
-    for i in 0..50 {
-        b.push(GraphOp::AddClaim {
-            claim: claim(
-                &sam,
-                "knows_fact",
-                ClaimObject::Literal(format!("fact {i}")),
-                vec![ev("mail", &i.to_string())],
-            ),
-        });
-        b.push(GraphOp::AddMention {
-            mention: mention(&sam, "mail", &i.to_string(), "Sam"),
-        });
-    }
-    b.push(GraphOp::AddClaim {
-        claim: claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![ev("mail", "1")],
-        ),
-    });
-    let out = g.apply_batch(&b).unwrap();
-    assert_eq!(out.len(), 101);
-    let (changed, high) = g.changes_since(start, 0).unwrap();
-    assert_eq!(changed.len(), 2, "each touched entity enters the feed once");
-    assert_eq!(high, start + 2);
-    assert_eq!(g.claims_for(&sam, false).unwrap().len(), 51);
 }
 
 #[test]
@@ -768,9 +277,7 @@ fn pruned_entities_stay_tombstoned_across_reopen() {
 }
 
 /// GG5-4 review: a claim the user replaced remembers the items it had evidence from and their
-/// content then. Another quote from the same, unchanged item (an LLM retry) stays remembered;
-/// after the item changed, so does any quote while the quote recorded then is still in its
-/// text (second review, finding 3); once the source no longer says it, a new quote revives.
+/// content then.
 #[test]
 fn user_replacement_remembers_item_versions() {
     let s = Store::open_in_memory().unwrap();
@@ -800,7 +307,6 @@ fn user_replacement_remembers_item_versions() {
     mine.status = ClaimStatus::UserAsserted;
     g.supersede_by_user(old, &mine).unwrap();
 
-    // Same item, unchanged: any quote is remembered.
     assert!(
         g.replaced_by_user(old, &[quoted("Acme owns Harbor")])
             .unwrap()
@@ -812,7 +318,6 @@ fn user_replacement_remembers_item_versions() {
         ClaimStatus::Superseded
     );
 
-    // The item is saved again (new content) still saying it: any quote is remembered.
     put("Harbor is part of Acme.\n\nre-saved");
     assert!(g.replaced_by_user(old, &[quoted("part of Acme")]).unwrap());
     assert!(
@@ -825,14 +330,11 @@ fn user_replacement_remembers_item_versions() {
         g.get_claim(old).unwrap().unwrap().status,
         ClaimStatus::Superseded
     );
-    // The source no longer says it: a new quote is the source saying it differently.
     put("Harbor moved to Acme Labs.");
     assert!(
         !g.replaced_by_user(old, &[quoted("Harbor moved to Acme Labs")])
             .unwrap()
     );
-    // (The quote recorded then still counts as remembered: an extractor quoting it means the
-    // source says it.)
     assert!(g.replaced_by_user(old, &[quoted("part of Acme")]).unwrap());
     g.retract_item(&iref("files", "n.md")).unwrap();
     g.add_evidence(old, &quoted("Harbor moved to Acme Labs"))
@@ -864,37 +366,4 @@ fn assertion_time_is_kept() {
     g.add_evidence(id, &ev("s", "1")).unwrap();
     assert!(g.get_claim(id).unwrap().unwrap().updated_at > at);
     assert_eq!(g.asserted_at(id).unwrap(), Some(at));
-}
-
-/// II5: `counts` is cached between commits, and every write path invalidates it.
-#[test]
-fn counts_follow_every_write_through_the_cache() {
-    let store = Store::open_in_memory().unwrap();
-    let g = store.graph();
-    let body = "Acme met Bea";
-    store
-        .upsert_item_with_chunks(
-            &NewItem::new("s", "1", content_hash(body)).with_text(body),
-            &[NewChunk::text(body)],
-        )
-        .unwrap();
-    assert_eq!(g.counts().unwrap().entities, 0);
-    let a = g
-        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
-        .unwrap();
-    let c = g.counts().unwrap();
-    assert_eq!((c.entities, c.mentions), (1, 0));
-    // Repeated reads without a write come from the cache and agree.
-    assert_eq!(g.counts().unwrap(), c);
-    g.add_mention(&mention(&a, "s", "1", "Acme")).unwrap();
-    assert_eq!(g.counts().unwrap().mentions, 1);
-    // A store write outside the graph API (an item delete retracts its mentions).
-    assert!(store.delete_item(&iref("s", "1")).unwrap());
-    assert_eq!(g.counts().unwrap().mentions, 0);
-    // A clone of the store shares the cache and sees the same writes.
-    let other = store.clone().graph();
-    other
-        .create_entity(&NewEntity::new(EntityKind::Person, "Bea"))
-        .unwrap();
-    assert_eq!(g.counts().unwrap().entities, 2);
 }

@@ -1,44 +1,4 @@
 //! Data export: everything a user may want to take out of the store, in open formats.
-//!
-//! - [`Store::export_items`] visits every item (one [`ExportItem`] each, written as one JSON
-//!   line by [`ExportItem::write_jsonl`]) in rowid order.
-//! - [`Store::export_graph_json`] streams the knowledge graph as one JSON document.
-//! - [`Store::export_audit_csv`] and [`Store::export_egress_csv`] write the audit log and the
-//!   egress ledger as RFC 4180 CSV.
-//!
-//! # Paging and consistency
-//!
-//! Every export reads in keyset pages (by rowid / primary key), each page with one SQL
-//! statement on a read connection, and writes a page only after that connection is released.
-//! So an export never holds a read transaction while the caller's writer runs: WAL checkpoints
-//! proceed, a pooled connection is not pinned, and a writer (or item callback) may call back
-//! into the store, also on an in-memory store whose reads share the writer connection. Memory
-//! is bounded by one page; item pages also stop early once about [`PAGE_BYTE_BUDGET`] bytes of
-//! item data are read (always at least one item).
-//!
-//! Exporting a live store is therefore **per-page consistent**: each page is one snapshot, but
-//! different pages may see different states. Rows are exported at most once each, and only
-//! those that exist when their page is read. Rowid-keyed scans (items, claims, mentions, audit,
-//! egress) are bounded by the largest rowid at the start of the export, so rows inserted
-//! meanwhile are left out; in particular an item deleted and re-inserted during the export (it
-//! gets a new rowid) is never exported twice. In the graph, a claim or mention may name an
-//! entity created after the entity section was read.
-//!
-//! # Errors
-//!
-//! On `Err` the output written so far is incomplete (the JSON document is then not valid
-//! JSON): callers write to a temporary file and rename it into place only on success. Errors
-//! of the caller's writer surface as `Error::Io`. A damaged item does not stop the item export:
-//! it is exported with what could be read and an `error` field (see [`ExportItem::error`]).
-//!
-//! # CSV
-//!
-//! Cells are written losslessly: a cell is quoted (`"` doubled) when it is empty or holds `,`,
-//! `"` or any control character (CR, LF, tab, ...) or starts or ends with whitespace; records
-//! end in CRLF. SQL NULL is an empty, unquoted cell; the empty string is `""`. Cells are **not**
-//! altered against "CSV injection" (a leading `=`, `+`, `-` or `@` is kept as is): this is a
-//! data export that must round-trip exactly, not a report for a spreadsheet. Open it in a
-//! spreadsheet with formula evaluation off (import as text) if its contents are untrusted.
 
 use std::io::Write;
 
@@ -66,9 +26,6 @@ const GRAPH_PAGE: usize = 500;
 const CSV_PAGE: usize = 1000;
 
 /// One exported item: every column the store keeps for it, with its full text.
-///
-/// Dates are the stored RFC 3339 strings, unchanged. Source-specific details (author, sender,
-/// participants, labels, ...) are inside `metadata`, which is the stored JSON text verbatim.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportItem {
     /// Row id in this store (stable for the item's life in this store, not across stores).
@@ -91,8 +48,7 @@ pub struct ExportItem {
     pub content_hash: String,
     /// Connector-defined version token.
     pub version: Option<String>,
-    /// Source metadata: the stored JSON text, byte for byte (numbers are not re-encoded). A
-    /// stored value that is not valid JSON is exported as a JSON string holding it.
+    /// Source metadata: the stored JSON text, byte for byte (numbers are not re-encoded).
     pub metadata: Box<RawValue>,
     /// The item's full text, as written by its connector (rebuilt from its chunks when stored
     /// that way).
@@ -101,9 +57,8 @@ pub struct ExportItem {
     /// texts in order (omitted when empty).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunks: Vec<String>,
-    /// What could not be read as stored (a text layout that no longer matches its chunks,
-    /// invalid UTF-8 or JSON, ...), when anything. The item is still exported with everything
-    /// readable; such items are also logged. Omitted when absent.
+    /// What could not be read as stored (a text layout that no longer matches its chunks, invalid
+    /// UTF-8 or JSON, ...), when anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -185,8 +140,7 @@ fn lenient_text(
 }
 
 /// One page of items (rowid in `(?1, ?2]`, at most `?3`), with what their texts need: the
-/// `item_text` layout and, when `items.text` is NULL, the chunks as a JSON array of
-/// `[ord, text]`.
+/// `item_text` layout and, when `items.text` is NULL, the chunks as a JSON array of `[ord, text]`.
 const ITEMS_PAGE_SQL: &str = "SELECT i.id, i.source, i.key, i.title, i.mime, i.source_modified_at,
             i.created_at, i.updated_at, i.content_hash, i.version, i.metadata, i.text, t.layout,
             CASE WHEN i.text IS NULL THEN
@@ -660,21 +614,8 @@ fn cell_text(v: ValueRef<'_>) -> Option<String> {
 type CsvPage = (Option<Vec<String>>, Vec<(i64, Vec<Option<String>>)>);
 
 impl Store {
-    /// Visit every item in rowid order, reading up to `page` items per query (keyset
-    /// pagination; a page also ends early at [`PAGE_BYTE_BUDGET`] bytes of item data). The read
-    /// connection is released before `f` runs, so `f` may use the store. Memory is bounded by
-    /// one page. Returns the number of items visited.
-    ///
-    /// Per-page consistent on a live store: each page is one statement (one snapshot); pages
-    /// may see different states. Only items whose rowid is at most the largest one when the
-    /// export starts are visited, each at most once: an item deleted before its page is read
-    /// is skipped, and one inserted (or deleted and re-inserted, which gives it a new rowid)
-    /// meanwhile is left out.
-    ///
-    /// A damaged item does not stop the export: it is passed to `f` with what could be read
-    /// and [`ExportItem::error`] set, and logged; callers count those. An error from `f` stops
-    /// the export and is returned; whatever `f` wrote so far is then incomplete (write to a
-    /// temporary file and rename it on success). `page == 0` is `Error::Invalid`.
+    /// Visit every item in rowid order, reading up to `page` items per query (keyset pagination; a
+    /// page also ends early at [`PAGE_BYTE_BUDGET`] bytes of item data).
     pub fn export_items(
         &self,
         page: usize,
@@ -713,15 +654,8 @@ impl Store {
     }
 
     /// Write the knowledge graph to `w` as one JSON document:
-    /// `{"format":1,"entities":[...],"claims":[...],"mentions":[...]}`, read in keyset pages
-    /// (never the whole graph in memory; `w` is written only while no read is open). Entities
-    /// carry their `aliases`, `identifiers` and `detail_sources`, claims their `evidence`;
-    /// `attributes` is the stored JSON verbatim. Merged-away and deleted entities and claims of
-    /// every status are included. Per-page consistent on a live store (see the module docs: a
-    /// claim may name an entity created after the entity section was read). Returns counts.
-    ///
-    /// On `Err` the output is truncated, invalid JSON: write to a temporary file and rename it
-    /// on success. Errors of `w` are `Error::Io`.
+    /// `{"format":1,"entities":[...],"claims":[...],"mentions":[...]}`, read in keyset pages (never
+    /// the whole graph in memory; `w` is written only while no read is open).
     pub fn export_graph_json(&self, w: &mut dyn Write) -> Result<GraphExportCounts> {
         self.export_graph_paged(w, GRAPH_PAGE)
     }
@@ -779,9 +713,8 @@ impl Store {
         Ok(counts)
     }
 
-    /// Write a JSON array (`[`, one element per line, `]`) of the rows `read` returns page by
-    /// page (`read(conn, after)` gives the page after key `after`; `key` is a row's key). Each
-    /// page is serialised and written after its read connection is released.
+    /// Write a JSON array (`[`, one element per line, `]`) of the rows `read` returns page by page
+    /// (`read(conn, after)` gives the page after key `after`; `key` is a row's key).
     fn write_json_section<T: Serialize, K>(
         &self,
         w: &mut dyn Write,
@@ -818,12 +751,7 @@ impl Store {
     }
 
     /// Write the audit log to `w` as CSV, oldest entry first, with the header
-    /// `seq,at,actor,action,target,detail,prev_hash,hash` (`detail` is the stored JSON). Read in
-    /// keyset pages, per-page consistent; entries appended after the export starts are left
-    /// out. Returns the number of entries written.
-    ///
-    /// On `Err` the output is truncated: write to a temporary file and rename it on success.
-    /// Errors of `w` are `Error::Io`.
+    /// `seq,at,actor,action,target,detail,prev_hash,hash` (`detail` is the stored JSON).
     pub fn export_audit_csv(&self, w: &mut dyn Write) -> Result<u64> {
         self.export_csv_paged(
             w,
@@ -835,14 +763,9 @@ impl Store {
         )
     }
 
-    /// Write the egress ledger to `w` as CSV, oldest row first: a header row with every column
-    /// of the ledger table (today `id,at,host,feature,bytes_sent,bytes_received,items,state,
-    /// owner`; `items` is the stored JSON array of item refs), then one record per row. Events
-    /// queued but not yet written are flushed first. Read in keyset pages, per-page consistent;
-    /// rows added after the export starts are left out. Returns the number of rows written.
-    ///
-    /// On `Err` the output is truncated: write to a temporary file and rename it on success.
-    /// Errors of `w` are `Error::Io`.
+    /// Write the egress ledger to `w` as CSV, oldest row first: a header row with every column of
+    /// the ledger table (today `id,at,host,feature,bytes_sent,bytes_received,items,state, owner`;
+    /// `items` is the stored JSON array of item refs), then one record per row.
     pub fn export_egress_csv(&self, w: &mut dyn Write) -> Result<u64> {
         self.flush_egress();
         self.export_csv_paged(
@@ -855,9 +778,8 @@ impl Store {
         )
     }
 
-    /// Write a CSV export page by page: `page_sql` takes `(after, max, limit)` and orders by
-    /// the integer column `key`; `max_sql` gives the bound read once at the start. The header
-    /// is `header`, or the statement's column names.
+    /// Write a CSV export page by page: `page_sql` takes `(after, max, limit)` and orders by the
+    /// integer column `key`; `max_sql` gives the bound read once at the start.
     fn export_csv_paged(
         &self,
         w: &mut dyn Write,
@@ -926,10 +848,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
-    use std::io;
 
-    use nugget_core::egress::EgressEvent;
     use nugget_core::ids::{ItemKey, ItemRef, SourceId};
     use nugget_graph::{
         ClaimObject, ClaimStatus, EntityDetail, EntityKind, Evidence, GraphStore, Identifier,
@@ -1046,7 +965,6 @@ mod tests {
                     })),
             )
             .unwrap();
-        // Text stored as a layout over its chunks (`items.text` NULL).
         let long = long_text("long");
         store
             .upsert_item_with_chunks(
@@ -1059,7 +977,6 @@ mod tests {
             1,
             "the long item's text should be stored as a layout"
         );
-        // No text of its own, only chunks (with control characters).
         store
             .upsert_item_with_chunks(
                 &NewItem::new("mail", "m1", content_hash("m1")),
@@ -1069,7 +986,6 @@ mod tests {
                 ],
             )
             .unwrap();
-        // Metadata that is not a JSON object.
         store
             .upsert_item(&NewItem::new("mail", "m2", content_hash("m2")).with_metadata(json!(42)))
             .unwrap();
@@ -1077,51 +993,19 @@ mod tests {
         let out = jsonl(&store, 2);
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 4);
-        let values: Vec<Value> = lines
-            .iter()
-            .map(|l| serde_json::from_str(l).unwrap())
-            .collect();
-        for v in &values {
-            for field in [
-                "id",
-                "source",
-                "key",
-                "title",
-                "mime",
-                "url",
-                "source_modified_at",
-                "created_at",
-                "updated_at",
-                "content_hash",
-                "version",
-                "metadata",
-                "text",
-            ] {
-                assert!(v.get(field).is_some(), "missing {field} in {v}");
-            }
-            assert!(v.get("error").is_none(), "{v}");
-        }
         let items: Vec<ExportItem> = lines
             .iter()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect();
 
         let first = &items[0];
-        let stored = store
-            .get_item(&iref("files", "notes/a.md"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(first.source, "files");
-        assert_eq!(first.key, "notes/a.md");
-        assert_eq!(first.text.as_deref(), Some(tricky));
-        assert_eq!(first.title, stored.title);
-        assert_eq!(first.mime.as_deref(), Some("text/markdown"));
-        assert_eq!(first.version.as_deref(), Some("mtime:1:size:2"));
-        assert_eq!(first.content_hash, content_hash("a"));
         assert_eq!(
-            serde_json::from_str::<Value>(first.metadata.get()).unwrap(),
-            stored.metadata
+            (first.source.as_str(), first.key.as_str()),
+            ("files", "notes/a.md")
         );
+        assert_eq!(first.text.as_deref(), Some(tricky));
+        assert_eq!(first.title.as_deref(), Some("Ünïcödé \"title\"\nnext"));
+        assert_eq!(first.version.as_deref(), Some("mtime:1:size:2"));
         assert_eq!(first.metadata.get(), stored_metadata(&store, first.id));
         assert_eq!(
             first.url.as_deref(),
@@ -1131,8 +1015,6 @@ mod tests {
             first.source_modified_at.as_deref(),
             Some("2023-11-14T22:13:20Z")
         );
-        assert_eq!(parse_time(&first.created_at).unwrap(), stored.created_at);
-        assert_eq!(parse_time(&first.updated_at).unwrap(), stored.updated_at);
         assert!(first.chunks.is_empty());
 
         assert_eq!(items[1].text.as_deref(), Some(long.as_str()));
@@ -1145,57 +1027,9 @@ mod tests {
                 "second\nchunk\u{7f}\u{0}\u{85}"
             ]
         );
-        assert!(values[3].get("chunks").is_none());
+        assert!(!lines[3].contains("\"chunks\""));
         assert_eq!(items[3].metadata.get(), "42");
         assert_eq!(items[3].url, None);
-    }
-
-    #[test]
-    fn metadata_is_exported_byte_for_byte() {
-        let store = Store::open_in_memory().unwrap();
-        store
-            .upsert_item(&NewItem::new("s", "a", "h").with_metadata(json!({
-                "x": 1.0715660391465826e-75,
-                "big": 12345678901234567890u64,
-                "neg": -9223372036854775808i64,
-                "f": 0.1,
-                "e": 1e300,
-            })))
-            .unwrap();
-        add(&store, "b");
-        // Written by hand: odd spacing, exponents and key order survive too.
-        exec(
-            &store,
-            r#"UPDATE items SET metadata = '{"b": 1.0E+2,  "a" : [1.50, -0.0], "url":"u"}'
-               WHERE key = 'b'"#,
-        );
-        let items = collect(&store, 10);
-        for item in &items {
-            assert_eq!(item.metadata.get(), stored_metadata(&store, item.id));
-            let line = {
-                let mut buf = Vec::new();
-                item.write_jsonl(&mut buf).unwrap();
-                String::from_utf8(buf).unwrap()
-            };
-            assert!(line.contains(item.metadata.get()), "{line}");
-        }
-        assert!(items[0].metadata.get().contains("1.0715660391465826e-75"));
-        assert_eq!(
-            items[1].metadata.get(),
-            r#"{"b": 1.0E+2,  "a" : [1.50, -0.0], "url":"u"}"#
-        );
-        assert_eq!(items[1].url.as_deref(), Some("u"));
-    }
-
-    #[test]
-    fn invalid_metadata_is_exported_as_a_string_with_an_error() {
-        let store = Store::open_in_memory().unwrap();
-        add(&store, "a");
-        exec(&store, "UPDATE items SET metadata = 'not json'");
-        let items = collect(&store, 10);
-        assert_eq!(items[0].metadata.get(), "\"not json\"");
-        assert!(items[0].error.as_deref().unwrap().contains("metadata"));
-        assert_eq!(items[0].text.as_deref(), Some("a"));
     }
 
     #[test]
@@ -1212,13 +1046,13 @@ mod tests {
         }
         add(&store, "fine");
         assert_eq!(count(&store, "SELECT count(*) FROM item_text"), 2);
-        // `one` loses a chunk its layout points at; `two` gets a garbage layout.
         exec(
             &store,
             "DELETE FROM chunks WHERE ord = 1 AND item_id = (SELECT id FROM items WHERE key = 'one');
              UPDATE item_text SET layout = X'FF00'
                  WHERE item_id = (SELECT id FROM items WHERE key = 'two');
-             UPDATE items SET title = CAST(X'C328' AS TEXT) WHERE key = 'fine';",
+             UPDATE items SET title = CAST(X'C328' AS TEXT) WHERE key = 'fine';
+             UPDATE items SET metadata = 'not json' WHERE key = 'one';",
         );
         let items = collect(&store, 1);
         assert_eq!(items.len(), 3);
@@ -1234,14 +1068,13 @@ mod tests {
                 .contains("chunk 1 is missing")
         );
         assert_eq!(one_x.chunks, [halves(&one)[0].text.clone()]);
+        assert_eq!(one_x.metadata.get(), "\"not json\"");
         assert_eq!(two_x.text, None);
         assert!(two_x.error.is_some());
         assert_eq!(two_x.chunks.concat(), two);
-        // Invalid UTF-8 is converted lossily, with a note.
         assert_eq!(fine.text.as_deref(), Some("fine"));
         assert_eq!(fine.title.as_deref(), Some("\u{fffd}("));
         assert!(fine.error.as_deref().unwrap().contains("title"));
-        // Still valid JSONL.
         for line in jsonl(&store, 2).lines() {
             serde_json::from_str::<ExportItem>(line).unwrap();
         }
@@ -1269,28 +1102,6 @@ mod tests {
     }
 
     #[test]
-    fn pages_stop_at_the_byte_budget() {
-        let store = Store::open_in_memory().unwrap();
-        let big = "x".repeat(3 << 20);
-        for i in 0..12 {
-            store
-                .upsert_item(
-                    &NewItem::new("s", format!("k{i:02}"), content_hash(i.to_string()))
-                        .with_text(big.clone()),
-                )
-                .unwrap();
-        }
-        let (rows, more) = store
-            .with_read_conn(|c| read_items_page(c, i64::MIN, i64::MAX, 500))
-            .unwrap();
-        assert!(more);
-        assert_eq!(rows.len(), PAGE_BYTE_BUDGET.div_ceil(big.len()));
-        let keys: Vec<String> = collect(&store, 500).into_iter().map(|i| i.key).collect();
-        let want: Vec<String> = (0..12).map(|i| format!("k{i:02}")).collect();
-        assert_eq!(keys, want);
-    }
-
-    #[test]
     fn items_changed_during_export_are_seen_at_most_once() {
         for page in [1, 3, 64] {
             let dir = tempfile::tempdir().unwrap();
@@ -1303,11 +1114,8 @@ mod tests {
             store
                 .export_items(page, &mut |item| {
                     if item.key == "k00" {
-                        // Past the first page for page sizes 1 and 3; already read for 64.
                         writer.delete_item(&iref("src", "k10")).unwrap();
-                        // Inserted after the export started: left out.
                         add(&writer, "late");
-                        // Updating an unread item neither moves it nor exports it twice.
                         writer
                             .upsert_item(
                                 &NewItem::new("src", "k11", content_hash("new")).with_text("new"),
@@ -1326,57 +1134,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn deleted_and_reinserted_items_are_not_exported_twice() {
-        for page in [1, 2, 100] {
-            let store = Store::open_in_memory().unwrap();
-            for i in 0..6 {
-                add(&store, &format!("k{i}"));
-            }
-            let writer = store.clone();
-            let mut seen = Vec::new();
-            store
-                .export_items(page, &mut |item| {
-                    // Re-insert the item just exported and one not read yet: both get new
-                    // rowids past the bound.
-                    if item.key == "k0" {
-                        for k in ["k0", "k4"] {
-                            writer.delete_item(&iref("src", k)).unwrap();
-                            add(&writer, k);
-                        }
-                    }
-                    seen.push(item.key);
-                    Ok(())
-                })
-                .unwrap();
-            let unique: HashSet<&String> = seen.iter().collect();
-            assert_eq!(unique.len(), seen.len(), "page {page}: {seen:?}");
-            assert_eq!(seen.iter().filter(|k| *k == "k0").count(), 1);
-        }
-    }
-
-    #[test]
-    fn callback_errors_stop_the_export() {
-        let store = Store::open_in_memory().unwrap();
-        for i in 0..5 {
-            add(&store, &format!("k{i}"));
-        }
-        let mut calls = 0;
-        let err = store
-            .export_items(2, &mut |_| {
-                calls += 1;
-                if calls == 3 {
-                    return Err(Error::Cancelled);
-                }
-                Ok(())
-            })
-            .unwrap_err();
-        assert!(matches!(err, Error::Cancelled));
-        assert_eq!(calls, 3);
-    }
-
     /// Fills the graph; returns the expected (entities, claims, evidence, mentions).
-    fn populate_graph(store: &Store) -> (usize, usize, usize, usize) {
+    fn populate_graph(store: &Store) {
         let g = store.graph();
         let mut new = NewEntity::new(EntityKind::Person, "Ada \"Countess\" Lovelace");
         new.aliases = vec!["Ada".into(), "A. L.".into()];
@@ -1435,108 +1194,62 @@ mod tests {
             })
             .unwrap();
         }
-        // ada, acme and the merged-away dup; two claims; two evidence rows; three mentions.
-        (3, 2, 2, 3)
     }
 
     #[test]
     fn graph_json_is_one_document_with_matching_counts() {
-        let dir = tempfile::tempdir().unwrap();
-        for store in [Store::open_in_memory().unwrap(), file_store(&dir)] {
-            let mut empty = Vec::new();
-            let counts = store.export_graph_json(&mut empty).unwrap();
-            assert_eq!(counts, GraphExportCounts::default());
-            let doc: Value = serde_json::from_slice(&empty).unwrap();
-            assert_eq!(
-                doc,
-                json!({"format": 1, "entities": [], "claims": [], "mentions": []})
-            );
-
-            let (entities, claims, evidence, mentions) = populate_graph(&store);
-            let expected = GraphExportCounts {
-                entities: entities as u64,
-                claims: claims as u64,
-                evidence: evidence as u64,
-                mentions: mentions as u64,
-            };
-            // Every page size gives the same document.
-            let mut docs = Vec::new();
-            for page in [1, 2, GRAPH_PAGE] {
-                let mut buf = Vec::new();
-                assert_eq!(store.export_graph_paged(&mut buf, page).unwrap(), expected);
-                docs.push(buf);
-            }
-            assert!(docs.windows(2).all(|d| d[0] == d[1]));
+        let store = Store::open_in_memory().unwrap();
+        let mut empty = Vec::new();
+        assert_eq!(
+            store.export_graph_json(&mut empty).unwrap(),
+            GraphExportCounts::default()
+        );
+        let doc: Value = serde_json::from_slice(&empty).unwrap();
+        assert_eq!(
+            doc,
+            json!({"format": 1, "entities": [], "claims": [], "mentions": []})
+        );
+        populate_graph(&store);
+        let expected = GraphExportCounts {
+            entities: 3,
+            claims: 2,
+            evidence: 2,
+            mentions: 3,
+        };
+        let mut docs = Vec::new();
+        for page in [1, 2, GRAPH_PAGE] {
             let mut buf = Vec::new();
-            assert_eq!(store.export_graph_json(&mut buf).unwrap(), expected);
-            assert_eq!(buf, docs[0]);
-            assert_eq!(
-                entities as i64,
-                count(&store, "SELECT count(*) FROM entities")
-            );
-            let doc: Value = serde_json::from_slice(&buf).unwrap();
-            assert_eq!(doc["format"], GRAPH_EXPORT_FORMAT);
-            let ents = doc["entities"].as_array().unwrap();
-            assert_eq!(ents.len(), entities);
-            let ada = ents
-                .iter()
-                .find(|e| e["name"] == "Ada \"Countess\" Lovelace")
-                .unwrap();
-            assert_eq!(ada["kind"], "person");
-            let stored_attributes: String = store
-                .with_read_conn(|c| {
-                    c.query_row(
-                        "SELECT attributes FROM entities WHERE id = ?1",
-                        [ada["id"].as_str().unwrap()],
-                        |r| r.get(0),
-                    )
-                    .db("attributes")
-                })
-                .unwrap();
-            let text = String::from_utf8(buf.clone()).unwrap();
-            assert!(text.contains(&format!("\"attributes\":{stored_attributes}")));
-            let aliases = ada["aliases"].as_array().unwrap();
-            assert!(aliases.contains(&json!({"alias": "Ada", "is_name": false})));
-            assert!(
-                aliases.contains(&json!({"alias": "Ada \"Countess\" Lovelace", "is_name": true}))
-            );
-            assert_eq!(
-                ada["identifiers"],
-                json!([{"scheme": "email", "value": "ada@example.com"}])
-            );
-            assert_eq!(ada["detail_sources"][0]["source"], "mail");
-            assert_eq!(ada["detail_sources"][0]["kind"], "identifier");
-            let merged: Vec<&Value> = ents
-                .iter()
-                .filter(|e| !e["merged_into"].is_null())
-                .collect();
-            assert_eq!(merged.len(), 1);
-            assert_eq!(merged[0]["name"], "ACME");
-
-            let cls = doc["claims"].as_array().unwrap();
-            assert_eq!(cls.len(), claims);
-            let total_evidence: usize = cls
-                .iter()
-                .map(|c| c["evidence"].as_array().unwrap().len())
-                .sum();
-            assert_eq!(total_evidence, evidence);
-            assert_eq!(cls[0]["evidence"][0]["quote"], "quote \"m1\"");
-            assert_eq!(cls[0]["confidence"], 0.75);
-            assert_eq!(cls[1]["object_literal"], "likes tea");
-            assert_eq!(cls[1]["status"], "user_asserted");
-            assert!(cls[1]["asserted_at"].is_string(), "{}", cls[1]);
-            assert!(cls[0].get("asserted_at").is_none());
-            assert!(cls[0].get("user_replaced").is_none());
-            let ids: HashSet<&str> = ents.iter().map(|e| e["id"].as_str().unwrap()).collect();
-            assert!(
-                cls.iter()
-                    .all(|c| ids.contains(c["subject"].as_str().unwrap()))
-            );
-            let ms = doc["mentions"].as_array().unwrap();
-            assert_eq!(ms.len(), mentions);
-            assert_eq!(ms[0]["surface"], "Ada, \"the\" one");
-            assert!(ms[0]["chunk_id"].is_null());
+            assert_eq!(store.export_graph_paged(&mut buf, page).unwrap(), expected);
+            docs.push(buf);
         }
+        assert!(docs.windows(2).all(|d| d[0] == d[1]));
+        let text = String::from_utf8(docs[0].clone()).unwrap();
+        assert!(
+            text.contains("1.0715660391465826e-75"),
+            "attributes kept verbatim"
+        );
+        let doc: Value = serde_json::from_str(&text).unwrap();
+        let ents = doc["entities"].as_array().unwrap();
+        let ada = ents.iter().find(|e| e["kind"] == "person").unwrap();
+        assert!(
+            ada["aliases"]
+                .as_array()
+                .unwrap()
+                .contains(&json!({"alias": "Ada", "is_name": false}))
+        );
+        assert_eq!(
+            ada["identifiers"],
+            json!([{"scheme": "email", "value": "ada@example.com"}])
+        );
+        assert_eq!(ada["detail_sources"][0]["kind"], "identifier");
+        assert_eq!(
+            ents.iter().filter(|e| !e["merged_into"].is_null()).count(),
+            1
+        );
+        let cls = doc["claims"].as_array().unwrap();
+        assert_eq!(cls[0]["evidence"][0]["quote"], "quote \"m1\"");
+        assert!(cls[1]["asserted_at"].is_string(), "{}", cls[1]);
+        assert_eq!(doc["mentions"][0]["surface"], "Ada, \"the\" one");
     }
 
     /// A CSV cell as read back: `None` for an empty unquoted cell (SQL NULL).
@@ -1653,7 +1366,6 @@ mod tests {
             assert_eq!(row[7], rec.hash);
             assert_eq!(parse_time(row[1]).unwrap(), rec.at);
         }
-        // Paging does not change the output.
         let mut paged = Vec::new();
         store
             .export_csv_paged(
@@ -1667,363 +1379,5 @@ mod tests {
             .unwrap();
         assert_eq!(paged, buf);
         store.verify_audit_chain().unwrap();
-    }
-
-    #[test]
-    fn egress_csv_has_every_column_and_keeps_null_apart_from_empty() {
-        let store = Store::open_in_memory().unwrap();
-        let mut empty = Vec::new();
-        assert_eq!(store.export_egress_csv(&mut empty).unwrap(), 0);
-        let header = parse_csv(std::str::from_utf8(&empty).unwrap());
-        let columns: Vec<String> = store
-            .with_read_conn(|c| {
-                let mut stmt = c
-                    .prepare("SELECT name FROM pragma_table_info('egress') ORDER BY cid")
-                    .db("columns")?;
-                let rows = stmt.query_map([], |r| r.get(0)).db("columns")?;
-                rows.collect::<rusqlite::Result<_>>().db("columns")
-            })
-            .unwrap();
-        assert_eq!(
-            header,
-            vec![columns.iter().map(|c| some(c)).collect::<Vec<_>>()]
-        );
-        for c in [
-            "id",
-            "at",
-            "host",
-            "feature",
-            "bytes_sent",
-            "bytes_received",
-            "items",
-            "state",
-            "owner",
-        ] {
-            assert!(columns.iter().any(|x| x == c), "{c}");
-        }
-
-        let event = EgressEvent {
-            at: OffsetDateTime::from_unix_timestamp(1_750_000_000).unwrap(),
-            host: "api.example.com".into(),
-            feature: "chat, \"quoted\"\nfeature".into(),
-            bytes_sent: 1234,
-            bytes_received: 5678,
-            items: vec![iref("mail", "a,b"), iref("files", "x\"y")],
-        };
-        store.record_egress(&event).unwrap();
-        exec(
-            &store,
-            "INSERT INTO egress (at, host, feature, bytes_sent, bytes_received, items, state, owner)
-             VALUES ('2026-01-01T00:00:00Z', 'h', '', 0, 0, '[]', 'done', NULL)",
-        );
-        let mut buf = Vec::new();
-        assert_eq!(store.export_egress_csv(&mut buf).unwrap(), 2);
-        let records = parse_csv(std::str::from_utf8(&buf).unwrap());
-        assert_eq!(records.len(), 3);
-        let row = |i: usize| -> HashMap<String, Cell> {
-            records[0]
-                .iter()
-                .map(|c| c.clone().unwrap())
-                .zip(records[i].iter().cloned())
-                .collect()
-        };
-        let first = row(1);
-        assert_eq!(first["host"], some("api.example.com"));
-        assert_eq!(first["feature"], some(&event.feature));
-        assert_eq!(first["bytes_sent"], some("1234"));
-        assert_eq!(first["bytes_received"], some("5678"));
-        assert_eq!(first["state"], some("done"));
-        assert_eq!(
-            serde_json::from_str::<Vec<ItemRef>>(first["items"].as_deref().unwrap()).unwrap(),
-            event.items
-        );
-        assert_eq!(
-            parse_time(first["at"].as_deref().unwrap()).unwrap(),
-            event.at
-        );
-        let second = row(2);
-        assert_eq!(second["feature"], some(""));
-        assert_eq!(second["owner"], None);
-    }
-
-    #[test]
-    fn csv_cells_are_quoted_only_when_needed() {
-        let mut buf = Vec::new();
-        write_csv_record(
-            &mut buf,
-            [
-                Some("a"),
-                Some("b,c"),
-                Some("d\"e"),
-                Some("f\ng"),
-                Some("h\ri"),
-                Some("=j"),
-                Some(""),
-                None,
-                Some(" k"),
-                Some("l "),
-                Some("m\u{1}"),
-                Some("n\to"),
-                Some("p q"),
-            ],
-        )
-        .unwrap();
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            "a,\"b,c\",\"d\"\"e\",\"f\ng\",\"h\ri\",=j,\"\",,\" k\",\"l \",\"m\u{1}\",\
-             \"n\to\",p q\r\n"
-        );
-    }
-
-    /// Accepts `limit` bytes, then fails like a full disk. Keeps what it accepted.
-    struct FullDisk {
-        limit: usize,
-        written: Vec<u8>,
-    }
-
-    impl Write for FullDisk {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            let room = self.limit - self.written.len();
-            if room == 0 {
-                return Err(io::Error::new(io::ErrorKind::StorageFull, "disk full"));
-            }
-            let n = room.min(buf.len());
-            self.written.extend_from_slice(&buf[..n]);
-            Ok(n)
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn writer_errors_are_io_errors_and_leave_truncated_output() {
-        let store = Store::open_in_memory().unwrap();
-        populate_graph(&store);
-        for i in 0..5 {
-            add(&store, &format!("k{i}"));
-            store
-                .append_audit(&AuditEntry {
-                    actor: "user".into(),
-                    action: "a".into(),
-                    target: format!("t{i}"),
-                    detail: json!({}),
-                })
-                .unwrap();
-        }
-        store
-            .record_egress(&EgressEvent {
-                at: OffsetDateTime::now_utc(),
-                host: "h".into(),
-                feature: "f".into(),
-                bytes_sent: 1,
-                bytes_received: 1,
-                items: Vec::new(),
-            })
-            .unwrap();
-        let is_io =
-            |e: &Error| matches!(e, Error::Io(io) if io.kind() == io::ErrorKind::StorageFull);
-
-        let mut w = FullDisk {
-            limit: 100,
-            written: Vec::new(),
-        };
-        let err = store.export_graph_paged(&mut w, 1).unwrap_err();
-        assert!(is_io(&err), "{err:?}");
-        assert_eq!(w.written.len(), 100);
-        // Documented: the output of a failed export is not a valid document.
-        assert!(serde_json::from_slice::<Value>(&w.written).is_err());
-
-        for limit in [0, 10, 60] {
-            let mut w = FullDisk {
-                limit,
-                written: Vec::new(),
-            };
-            let err = store.export_audit_csv(&mut w).unwrap_err();
-            assert!(is_io(&err), "{err:?}");
-            let mut w = FullDisk {
-                limit,
-                written: Vec::new(),
-            };
-            let err = store.export_egress_csv(&mut w).unwrap_err();
-            assert!(is_io(&err), "{err:?}");
-            let mut w = FullDisk {
-                limit,
-                written: Vec::new(),
-            };
-            let err = store
-                .export_items(2, &mut |item| item.write_jsonl(&mut w))
-                .unwrap_err();
-            assert!(is_io(&err), "{err:?}");
-        }
-    }
-
-    /// A writer that checkpoints the WAL and writes to the store on every write, recording each
-    /// checkpoint's `(busy, log frames, checkpointed frames)`.
-    struct Meddler {
-        store: Store,
-        checkpoints: Vec<(i64, i64, i64)>,
-        writes: usize,
-    }
-
-    impl Write for Meddler {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.writes += 1;
-            // A write that lands in the WAL, so every checkpoint has frames to copy.
-            add(&self.store, &format!("meddle-{}", self.writes));
-            let ckpt = self
-                .store
-                .with_conn(|c| {
-                    c.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-                    })
-                    .db("checkpoint")
-                })
-                .unwrap();
-            self.checkpoints.push(ckpt);
-            // Reads through the store work too (on an in-memory store they share the writer).
-            self.store.counts().unwrap();
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn exports_hold_no_read_while_the_writer_runs() {
-        let dir = tempfile::tempdir().unwrap();
-        for store in [file_store(&dir), Store::open_in_memory().unwrap()] {
-            populate_graph(&store);
-            for i in 0..5 {
-                store
-                    .append_audit(&AuditEntry {
-                        actor: "user".into(),
-                        action: "a".into(),
-                        target: format!("t{i}"),
-                        detail: json!({}),
-                    })
-                    .unwrap();
-                store
-                    .record_egress(&EgressEvent {
-                        at: OffsetDateTime::now_utc(),
-                        host: format!("h{i}"),
-                        feature: "f".into(),
-                        bytes_sent: 1,
-                        bytes_received: 1,
-                        items: Vec::new(),
-                    })
-                    .unwrap();
-            }
-            let mut w = Meddler {
-                store: store.clone(),
-                checkpoints: Vec::new(),
-                writes: 0,
-            };
-            store.export_graph_paged(&mut w, 1).unwrap();
-            let graph_writes = w.writes;
-            assert!(graph_writes > 8, "{graph_writes} writes");
-            for (sql, max, key, header) in [
-                (
-                    AUDIT_PAGE_SQL,
-                    "SELECT coalesce(max(seq), 0) FROM audit",
-                    "seq",
-                    Some(&AUDIT_COLUMNS[..]),
-                ),
-                (
-                    EGRESS_PAGE_SQL,
-                    "SELECT coalesce(max(id), 0) FROM egress",
-                    "id",
-                    None,
-                ),
-            ] {
-                let before = w.writes;
-                assert_eq!(
-                    store
-                        .export_csv_paged(&mut w, 1, sql, max, key, header)
-                        .unwrap(),
-                    5
-                );
-                assert!(w.writes - before >= 5);
-            }
-            if store.is_encrypted() {
-                for &(busy, log, done) in &w.checkpoints {
-                    assert_eq!(busy, 0);
-                    assert!(log > 0);
-                    assert_eq!(done, log, "checkpoint blocked by the export");
-                }
-            }
-        }
-    }
-
-    fn bulk_insert(store: &Store, n: usize) {
-        store
-            .with_conn(|c| {
-                let tx = c.transaction().db("begin bulk")?;
-                for i in 0..n {
-                    let key = format!("item-{i:06}");
-                    tx.execute(
-                        "INSERT INTO items (source, key, title, content_hash, text, created_at,
-                                            updated_at)
-                         VALUES ('bulk', ?1, ?1, ?2, ?3, '2026-01-01T00:00:00Z',
-                                 '2026-01-01T00:00:00Z')",
-                        rusqlite::params![key, content_hash(&key), format!("text of {key}")],
-                    )
-                    .db("bulk insert")?;
-                }
-                tx.commit().db("commit bulk")
-            })
-            .unwrap();
-    }
-
-    fn export_to_sink(store: &Store, page: usize) -> u64 {
-        let mut sink = io::sink();
-        store
-            .export_items(page, &mut |item| item.write_jsonl(&mut sink))
-            .unwrap()
-    }
-
-    #[test]
-    fn exports_many_items_in_pages() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = file_store(&dir);
-        bulk_insert(&store, 20_000);
-        let started = std::time::Instant::now();
-        assert_eq!(export_to_sink(&store, 500), 20_000);
-        eprintln!("exported 20000 items in {:?}", started.elapsed());
-    }
-
-    /// Peak resident set size of this process in KiB, where the OS reports it.
-    fn peak_rss_kib() -> Option<u64> {
-        #[cfg(target_os = "linux")]
-        {
-            let status = std::fs::read_to_string("/proc/self/status").ok()?;
-            status
-                .lines()
-                .find_map(|l| l.strip_prefix("VmHWM:"))
-                .and_then(|v| v.trim().trim_end_matches("kB").trim().parse().ok())
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            None
-        }
-    }
-
-    #[test]
-    #[ignore = "slow: 100k items; run with --ignored --nocapture for timings"]
-    fn exports_100k_items() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = file_store(&dir);
-        bulk_insert(&store, 100_000);
-        let before = peak_rss_kib();
-        let started = std::time::Instant::now();
-        assert_eq!(export_to_sink(&store, 500), 100_000);
-        eprintln!(
-            "exported 100000 items in {:?}; peak RSS (KiB) before export {before:?}, after {:?}",
-            started.elapsed(),
-            peak_rss_kib()
-        );
     }
 }

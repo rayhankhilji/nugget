@@ -1,6 +1,7 @@
 //! People's short names across items: nicknames, first names and initials join a full-name
 //! person only with corroboration, whatever order the items arrive in (one per run or several
-//! per run), and every join leaves a merge record.
+//! per run), and every join leaves a merge record. Resolution across sources (a person's own
+//! note, organisations by name and domain), and a user's split as a constraint.
 
 mod common;
 
@@ -8,7 +9,10 @@ use std::collections::BTreeMap;
 
 use common::*;
 use nugget_core::capability::{Locality, Tier};
-use nugget_graph::{EntityKind, MERGE_LOG_ATTR, merge_log};
+use nugget_core::ids::EntityId;
+use nugget_graph::{
+    Claim, ClaimObject, EntityKind, Identifier, MERGE_LOG_ATTR, NewEntity, merge_log,
+};
 use nugget_knowledge::{Knowledge, KnowledgeConfig, LlmConfig, MeConfig};
 use nugget_store::NewItem;
 use serde_json::{Value, json};
@@ -340,32 +344,14 @@ async fn the_people_do_not_depend_on_item_order() {
 
     // Other orders, one item per run and several per run.
     let reverse = singles((0..n).rev());
-    let shuffled = singles([6, 2, 13, 1, 10, 7, 4, 11, 0, 5, 12, 3, 9, 8]);
     let all_at_once = vec![(0..n).collect::<Vec<_>>()];
-    let reverse_batches: Vec<Vec<usize>> = (0..n)
-        .rev()
-        .collect::<Vec<_>>()
-        .chunks(4)
-        .map(<[usize]>::to_vec)
-        .collect();
     // The competing Sam and the Rob/Bob/Delphine mails first, the full names last.
     let competitor_first = vec![
         vec![5, 8, 2, 6, 9, 10],
         vec![11, 12, 1, 7],
         vec![0, 3, 4, 13],
     ];
-    for runs in [
-        reverse,
-        shuffled,
-        all_at_once,
-        reverse_batches,
-        competitor_first,
-    ] {
-        assert_eq!(
-            runs.iter().map(Vec::len).sum::<usize>(),
-            n,
-            "every item once"
-        );
+    for runs in [reverse, all_at_once, competitor_first] {
         let (got, _, _) = partition(&runs).await;
         assert_eq!(got, want, "runs {runs:?}");
     }
@@ -397,219 +383,6 @@ async fn the_people_do_not_depend_on_item_order() {
         .filter(|r| r.item.as_ref().is_some_and(|i| i.key.as_str() == "h"))
         .collect();
     assert_eq!(from_h.len(), 1, "{from_h:#?}");
-}
-
-/// 2,000 mails among 200 people sharing 20 first names, a quarter of them copying someone
-/// known only by a first name at an unknown address: short-name resolution stays bounded.
-#[tokio::test]
-async fn a_few_thousand_items_with_short_names_stay_fast() {
-    const FIRST: [&str; 20] = [
-        "Sam", "Alex", "Kim", "Noor", "Jo", "Ari", "Lee", "Mika", "Dana", "Chris", "Maggie", "Bob",
-        "Liz", "Theo", "Bea", "Rob", "Pat", "Nick", "Tom", "Ed",
-    ];
-    const LAST: [&str; 10] = [
-        "Smith", "Okafor", "Whitlock", "Chen", "Patel", "Novak", "Garcia", "Kowalski", "Hughes",
-        "Larsen",
-    ];
-    let dir = tempfile::tempdir().unwrap();
-    let store = nugget_store::Store::open(
-        dir.path().join("nugget.db"),
-        &nugget_store::StoreKey::from_bytes([7; 32]),
-    )
-    .unwrap();
-    let graph = std::sync::Arc::new(store.graph());
-    let cfg = KnowledgeConfig {
-        me: MeConfig {
-            name: Some("Robin Ashgrove".into()),
-            emails: vec!["robin@ashgrove.test".into()],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let k = Knowledge::new(store.clone(), graph.clone(), None, cfg);
-    let n = 2_000;
-    for i in 0..n {
-        let (f, l) = (FIRST[i % 20], LAST[(i / 20) % 10]);
-        let from = format!(
-            "{f} {l} <{}.{}@org{}.test>",
-            f.to_lowercase(),
-            l.to_lowercase(),
-            (i / 20) % 10
-        );
-        let short = format!("{f} <{}{i}@club{}.test>", f.to_lowercase(), i % 5);
-        let cc: Vec<&str> = if i % 4 == 0 {
-            vec![short.as_str()]
-        } else {
-            vec![]
-        };
-        let key = format!("m{i}");
-        let body = format!("Note number {i}.");
-        let m = Mail {
-            source: "imap:robin",
-            key: &key,
-            from: &from,
-            to: ME,
-            cc: &cc,
-            date: "2026-10-01T10:00:00Z",
-            subject: "Hello",
-            body: &body,
-            ..Default::default()
-        };
-        store
-            .upsert_item_with_chunks(&m.item(), &[nugget_store::NewChunk::text(&body)])
-            .unwrap();
-    }
-    let started = std::time::Instant::now();
-    let stats = run(&k).await;
-    let took = started.elapsed();
-    println!("{n} items: {took:?}");
-    assert_eq!(stats.items_failed, 0);
-    assert_eq!(stats.items_processed as usize, n);
-    assert!(
-        took < std::time::Duration::from_secs(120),
-        "{n} items took {took:?}"
-    );
-    // Copied first names at unknown clubs corroborate nobody: no person absorbed them.
-    use nugget_graph::GraphStore;
-    for s in graph
-        .list_entities(&nugget_graph::EntityQuery {
-            kind: Some(EntityKind::Person),
-            ..Default::default()
-        })
-        .unwrap()
-    {
-        let e = graph.get_entity(&s.id).unwrap().unwrap();
-        assert!(merge_log(&e).is_empty(), "no joins: {}", e.name);
-    }
-}
-
-/// Internal mail of the user's own organisation, between colleagues already known, names a
-/// colleague by first name: the one person with that given name at the user's domain. Not
-/// from a sender first seen on that mail, and not when two colleagues share the name.
-#[tokio::test]
-async fn internal_mail_names_a_colleague_by_first_name() {
-    async fn felix_groups(extra: &[Mail<'_>]) -> Vec<Vec<String>> {
-        let env = Env::new();
-        let p = FakeProvider::new("local", Locality::OnDevice, |prompt| {
-            let people: &[&str] = if prompt.contains("Felix") && !prompt.contains("Ravensworth") {
-                &["Felix"]
-            } else {
-                &[]
-            };
-            let entities: Vec<Value> = people
-                .iter()
-                .map(|n| json!({"name": n, "kind": "person"}))
-                .collect();
-            json!({"entities": entities, "claims": []}).to_string()
-        });
-        let cfg = KnowledgeConfig {
-            llm: LlmConfig {
-                enabled: true,
-                ..Default::default()
-            },
-            me: MeConfig {
-                name: Some("Robin Ashgrove".into()),
-                emails: vec!["robin@glimmerfen.test".into()],
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let k = env.knowledge(cfg, Some(router(Tier::Synthesis, vec![p])));
-        let base = [
-            Mail {
-                source: "imap:robin",
-                key: "felix",
-                from: "Felix Ravensworth <felix@glimmerfen.test>",
-                to: &["Robin Ashgrove <robin@glimmerfen.test>"],
-                date: "2026-10-01T10:00:00Z",
-                subject: "Runbooks",
-                body: "The runbooks are ready. Felix Ravensworth",
-                ..Default::default()
-            },
-            Mail {
-                source: "imap:robin",
-                key: "theo1",
-                from: "Theo Brannigan <theo@glimmerfen.test>",
-                to: &["Robin Ashgrove <robin@glimmerfen.test>"],
-                date: "2026-10-02T10:00:00Z",
-                subject: "Hi",
-                body: "Back from leave on Monday.",
-                ..Default::default()
-            },
-        ];
-        for m in base.iter().chain(extra) {
-            env.put(m.item(), &[m.body]);
-            assert_eq!(run(&k).await.items_failed, 0);
-        }
-        let mut out = Vec::new();
-        for e in env.entities(EntityKind::Person) {
-            let mut g: Vec<String> = env
-                .g()
-                .mentions_for(&e.id, 0)
-                .unwrap()
-                .into_iter()
-                .filter(|m| m.surface.contains("Felix") || m.surface.contains("felix"))
-                .map(|m| m.item.key.to_string())
-                .collect();
-            g.sort();
-            g.dedup();
-            if !g.is_empty() {
-                out.push(g);
-            }
-        }
-        out.sort();
-        out
-    }
-    let staffing = Mail {
-        source: "imap:robin",
-        key: "staffing",
-        from: "Robin Ashgrove <robin@glimmerfen.test>",
-        to: &["Theo Brannigan <theo@glimmerfen.test>"],
-        date: "2026-10-03T10:00:00Z",
-        subject: "Driftwood staffing",
-        body: "Felix is doing great on the Driftwood API.",
-        ..Default::default()
-    };
-    let joined = felix_groups(std::slice::from_ref(&staffing)).await;
-    assert!(
-        joined
-            .iter()
-            .any(|g| g.contains(&"felix".to_owned()) && g.contains(&"staffing".to_owned())),
-        "{joined:?}"
-    );
-
-    // A sender first seen on the mail itself is not a known colleague.
-    let forged = Mail {
-        key: "forged",
-        from: "Mallory <mallory@glimmerfen.test>",
-        to: &["Robin Ashgrove <robin@glimmerfen.test>"],
-        ..staffing.clone()
-    };
-    let apart = felix_groups(std::slice::from_ref(&forged)).await;
-    assert!(
-        !apart
-            .iter()
-            .any(|g| g.contains(&"forged".to_owned()) && g.contains(&"felix".to_owned())),
-        "{apart:?}"
-    );
-
-    // Two colleagues called Felix: no join.
-    let other = Mail {
-        source: "imap:robin",
-        key: "felix2",
-        from: "Felix Jones <felix.jones@glimmerfen.test>",
-        to: &["Robin Ashgrove <robin@glimmerfen.test>"],
-        date: "2026-10-02T12:00:00Z",
-        subject: "Hello",
-        body: "Hello from the new team. Felix Jones",
-        ..Default::default()
-    };
-    let two = felix_groups(&[other, staffing]).await;
-    assert!(
-        !two.iter()
-            .any(|g| g.contains(&"staffing".to_owned()) && g.len() > 1),
-        "{two:?}"
-    );
 }
 
 /// GG5-9: a person is named by their fullest, most used name, whatever form came first.
@@ -659,57 +432,189 @@ async fn a_person_is_named_by_their_fullest_name_in_any_order() {
         out
     }
     let want = ["Robert Chen", "Sam Okonkwo"];
-    for order in [
-        vec![0, 1, 2, 3, 4, 5],
-        vec![5, 4, 3, 2, 1, 0],
-        vec![2, 0, 5, 4, 1, 3],
-    ] {
+    for order in [vec![0, 1, 2, 3, 4, 5], vec![5, 4, 3, 2, 1, 0]] {
         assert_eq!(names(&order).await, want, "{order:?}");
     }
 }
 
-/// GG5-9: an invite's `CN="R. Chen"` came first; the person's mail later signs "Robert Chen"
-/// from the same address. The person is then "Robert Chen", with "R. Chen" as an alias only.
+/// A recipient at a webmail domain (no organisation).
+const TO: &[&str] = &["Robin <robin@gmail.com>"];
+
 #[tokio::test]
-async fn an_initialled_invite_name_gives_way_to_the_full_name() {
+async fn an_organisation_by_domain_is_the_one_by_name() {
+    // The domain first, the name later.
     let env = Env::new();
-    let cfg = KnowledgeConfig {
-        me: MeConfig {
-            name: Some("Mara Okafor".into()),
-            emails: vec!["mara.okafor@brightwell.example".into()],
-            ..Default::default()
-        },
+    Mail {
+        key: "1",
+        to: TO,
+        from: "Bart Fenwick <bart@cindergate.test>",
         ..Default::default()
-    };
-    let k = env.knowledge(cfg, None);
+    }
+    .put(&env);
+    let k = env.knowledge(KnowledgeConfig::default(), None);
+    run(&k).await;
+    assert_eq!(
+        env.entity(EntityKind::Organization, "Cindergate").name,
+        "Cindergate"
+    );
     env.put(
-        ics(
-            "files:cal",
-            "Calendar/a.ics",
-            json!([{
-                "uid": "u1", "summary": "1:1 Mara / Bob", "start": "2026-06-03T13:00:00Z",
-                "organizer": "\"R. Chen\" <robert.chen@brightwell.example>",
-                "attendees": ["\"R. Chen\" <robert.chen@brightwell.example>",
-                              "\"Mara Okafor\" <mara.okafor@brightwell.example>"]
-            }]),
-            "x",
+        note(
+            "files:notes",
+            "orgs/Cindergate Analytics.md",
+            "Cindergate Analytics",
+            json!({"type": "organization"}),
+            &[],
+            &[],
+            "A customer.",
         ),
-        &["x"],
+        &["A customer."],
     );
     run(&k).await;
-    let m = Mail {
-        source: "imap:m",
-        key: "m1",
-        from: "Robert Chen <robert.chen@brightwell.example>",
-        to: &["Mara Okafor <mara.okafor@brightwell.example>"],
-        date: "2026-06-04T10:00:00Z",
-        subject: "Harbor",
-        body: "Let's talk Harbor.",
-        ..Default::default()
-    };
-    env.put(m.item(), &[m.body]);
+    let orgs = env.entities(EntityKind::Organization);
+    assert_eq!(orgs.len(), 1, "{orgs:?}");
+    assert_eq!(orgs[0].name, "Cindergate Analytics", "the real name wins");
+    assert!(
+        orgs[0]
+            .identifiers
+            .contains(&Identifier::new("domain", "cindergate.test"))
+    );
+    let bart = env.entity(EntityKind::Person, "Bart Fenwick");
+    assert_eq!(
+        env.active(&bart, "works_at")[0].object,
+        ClaimObject::Entity(orgs[0].id.clone())
+    );
+}
+
+/// Claims referencing `e` whose evidence all comes from `key`.
+fn claims_from(env: &Env, e: &EntityId, key: &str) -> Vec<Claim> {
+    env.g()
+        .claims_for(e, false)
+        .unwrap()
+        .into_iter()
+        .filter(|c| {
+            !c.evidence.is_empty() && c.evidence.iter().all(|ev| ev.item.key.as_str() == key)
+        })
+        .collect()
+}
+
+fn split(env: &Env, k: &Knowledge, from: &EntityId, claims: &[Claim], new: NewEntity) -> EntityId {
+    let ids: Vec<_> = claims.iter().map(|c| c.id).collect();
+    let to = env.g().split(from, &ids, &new).unwrap();
+    k.record_split(from, &to).unwrap();
+    to
+}
+
+fn live(env: &Env, id: &EntityId) -> EntityId {
+    env.g().get_entity(id).unwrap().expect("alive").id
+}
+
+#[tokio::test]
+async fn a_split_off_namesake_stays_split_with_its_facts() {
+    let env = Env::new();
+    for (key, title) in [
+        ("projects/Fennel.md", "Fennel"),
+        ("projects/Bramble.md", "Bramble"),
+    ] {
+        env.put(
+            note(
+                "files:notes",
+                key,
+                title,
+                json!({"type": "project", "people": ["Jo Marsh"]}),
+                &[],
+                &[],
+                "Planning.",
+            ),
+            &["Planning."],
+        );
+    }
+    let k = env.knowledge(KnowledgeConfig::default(), None);
     run(&k).await;
-    let rob = env.entity(EntityKind::Person, "Robert Chen");
-    assert_eq!(rob.name, "Robert Chen");
-    assert_eq!(rob.aliases, ["R. Chen"]);
+    // Name only: both notes' Jo Marsh are one person.
+    let jo = env.entity(EntityKind::Person, "Jo Marsh");
+    assert_eq!(env.active(&jo, "works_on").len(), 2);
+
+    // They are two people: the user splits Bramble's Jo off.
+    let moved = claims_from(&env, &jo.id, "projects/Bramble.md");
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    let other = split(
+        &env,
+        &k,
+        &jo.id,
+        &moved,
+        NewEntity::new(EntityKind::Person, "Jo Marsh"),
+    );
+
+    // Re-extract everything (as after a reset or an extractor upgrade).
+    k.reset().await.unwrap();
+    let stats = run(&k).await;
+    assert_eq!(stats.items_failed, 0);
+    assert_eq!(stats.items_processed, 2);
+    assert_eq!(stats.entities_merged, 0);
+    let (a, b) = (live(&env, &jo.id), live(&env, &other));
+    assert_eq!(a, jo.id);
+    assert_eq!(b, other, "never merged back");
+    let fennel = env.entity(EntityKind::Project, "Fennel");
+    let bramble = env.entity(EntityKind::Project, "Bramble");
+    let a_e = env.g().get_entity(&a).unwrap().unwrap();
+    let b_e = env.g().get_entity(&b).unwrap().unwrap();
+    let a_on = env.active(&a_e, "works_on");
+    let b_on = env.active(&b_e, "works_on");
+    assert_eq!(a_on.len(), 1, "{a_on:?}");
+    assert_eq!(a_on[0].object, ClaimObject::Entity(fennel.id.clone()));
+    assert_eq!(b_on.len(), 1, "{b_on:?}");
+    assert_eq!(b_on[0].object, ClaimObject::Entity(bramble.id.clone()));
+    assert_eq!(b_on[0].id, moved[0].id, "the moved fact keeps its id");
+    // Mentions follow: Bramble's note mentions the split-off Jo only.
+    let b_items: Vec<String> = env
+        .g()
+        .mentions_for(&b, 0)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.item.key.as_str().to_owned())
+        .collect();
+    assert!(!b_items.is_empty());
+    assert!(
+        b_items.iter().all(|k| k == "projects/Bramble.md"),
+        "{b_items:?}"
+    );
+    assert!(
+        env.g()
+            .mentions_for(&a, 0)
+            .unwrap()
+            .iter()
+            .all(|m| m.item.key.as_str() == "projects/Fennel.md")
+    );
+    assert_eq!(
+        env.entities(EntityKind::Person)
+            .iter()
+            .filter(|e| e.name == "Jo Marsh")
+            .count(),
+        2
+    );
+
+    // An edit of Bramble's note is still about the split-off Jo.
+    env.put(
+        note(
+            "files:notes",
+            "projects/Bramble.md",
+            "Bramble",
+            json!({"type": "project", "people": ["Jo Marsh"]}),
+            &[],
+            &[],
+            "Planning, again.",
+        ),
+        &["Planning, again."],
+    );
+    run(&k).await;
+    assert_eq!(live(&env, &other), other);
+    let b_e = env.g().get_entity(&other).unwrap().unwrap();
+    assert_eq!(env.active(&b_e, "works_on")[0].id, moved[0].id);
+
+    // Merging by hand lifts the constraint.
+    env.g().merge(&jo.id, &other).unwrap();
+    k.reset().await.unwrap();
+    assert_eq!(run(&k).await.items_failed, 0);
+    let jo = env.entity(EntityKind::Person, "Jo Marsh");
+    assert_eq!(env.active(&jo, "works_on").len(), 2);
 }

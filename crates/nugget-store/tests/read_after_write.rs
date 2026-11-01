@@ -19,7 +19,6 @@ fn search_sees_writes_immediately() {
         let hits = s.search_text(&format!("zq{i}x"), 5).unwrap();
         assert_eq!(hits.len(), 1, "write {i} not visible to the next search");
         if i >= 7 {
-            // The item's previous version is gone at once too.
             let old = s.search_text(&format!("zq{}x", i - 7), 5).unwrap();
             assert!(old.is_empty(), "write {i} left the old text searchable");
         }

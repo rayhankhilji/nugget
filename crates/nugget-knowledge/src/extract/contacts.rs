@@ -1,7 +1,6 @@
 //! Contacts: vCards (`text/vcard` items, or `.vcf` keys) and contact records in metadata
 //! (`metadata.{source,extracted}.contact` or `.contacts`: `{name, emails, phones, organization,
-//! title, birthday}`). A contact card asserts its identifiers together, so entities holding
-//! them may be merged (see [`EntitySpec::trusted_identifiers`]).
+//! title, birthday}`).
 
 use nugget_graph::EntityKind;
 use serde_json::{Value, json};
@@ -178,18 +177,14 @@ fn from_json(v: &Value) -> Option<Contact> {
     (c.name.is_some() || !c.emails.is_empty() || !c.phones.is_empty()).then_some(c)
 }
 
-/// Digits a phone number needs before it names a person on its own: SMS short codes
-/// (`72975`, `262966`) and service numbers (`112`) are senders, not people.
+/// Digits a phone number needs before it names a person on its own.
 const MIN_PERSON_PHONE_DIGITS: usize = 7;
 
 fn phone_digits(p: &str) -> usize {
     p.chars().filter(char::is_ascii_digit).count()
 }
 
-/// The name for a contact known only by phone: the number as the source displays it (a name
-/// that is a number, e.g. a chat sender `+49 151 23456789`), else its first phone number.
-/// `None` without a full phone number: a name that is merely a number (`2024`, `007`) with no
-/// phone to identify it would make a new, unmergeable person on every item.
+/// The name for a contact known only by phone.
 fn phone_name(c: &Contact) -> Option<String> {
     let phone = c
         .phones

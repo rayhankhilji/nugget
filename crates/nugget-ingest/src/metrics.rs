@@ -11,8 +11,7 @@ pub(crate) struct Metrics {
     window: usize,
     samples: Mutex<VecDeque<u64>>,
     queue_depth: AtomicU64,
-    /// Changes committed since start. A `watch` channel, so consumers (knowledge extraction)
-    /// wake on commits instead of polling the counter.
+    /// Changes committed since start.
     committed: tokio::sync::watch::Sender<u64>,
 }
 
@@ -58,8 +57,7 @@ impl Metrics {
     }
 
     pub fn dequeued(&self) {
-        // Saturating: never wrap below zero. (`fetch_update` is `try_update` from Rust 1.99,
-        // newer than the MSRV.)
+        // Saturating: never wrap below zero.
         #[allow(deprecated)]
         let _ = self
             .queue_depth

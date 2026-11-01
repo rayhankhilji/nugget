@@ -1,0 +1,63 @@
+ar/00-med|مختبرات الشفاء <results@alshifa-lab.example>|نتائج تحاليلك جاهزة|مرحباً سام، صدرت نتائج تحليل الدم بتاريخ ٢٢ أكتوبر. نسبة السكر التراكمي ٦٫٩٪، ما يؤكد تشخيص السكري من النوع الثاني. يرجى حجز موعد مع د. حسن لمناقشة العلاج.
+ar/01-ther|"د. ليلى منصور" <mawaeed@laila-mansour.example>|تأكيد موعد الجلسة|أهلاً سام، نؤكد جلستك القادمة يوم الخميس ٥ نوفمبر الساعة ٥ مساءً. للإلغاء يرجى الإبلاغ قبل ٢٤ ساعة. د. ليلى منصور، أخصائية نفسية
+ar/02-sal|الموارد البشرية <hr@lumenpfad.example>|تعديل الراتب لعام ٢٠٢٧|عزيزتي سام، اعتباراً من ١ يناير ٢٠٢٧ سيرتفع راتبك الأساسي الشهري من ١٨٬٠٠٠ ر.س إلى ١٩٬٥٠٠ ر.س، وسيظهر ذلك في كشف راتب يناير.
+ar/03-bank|مصرف الواحة <kashf@alwaha-masraf.example>|كشف حسابك لشهر أكتوبر|رقم الحساب ****٤٨٢١. الرصيد السابق ٣٬٤١٢٫٠٨ ر.س، الرصيد الحالي ٢٬٩٧٧٫٤٠ ر.س. تم خصم قسط القرض الشخصي رقم ٥٥٨٢٠١ بقيمة ٦١٢ ر.س في ١٥ أكتوبر.
+ar/04-otp|Lumen ID <noreply@lumen-id.example>|رمز التحقق الخاص بك|رمز التحقق الخاص بك هو 482913، صالح لمدة ١٠ دقائق.
+ar/05-dinner|نورة <noura.s@example.com>|عشاء يوم الجمعة؟|إيش رأيك نجرب المطعم اللبناني الجديد يوم الجمعة الساعة ٨ ونص؟ بحجز لأربعة.
+ar/06-proj|Dana Reyes <dana@northwind.example>|تحديث مشروع Harbor|إعادة تصميم صفحة الدفع أُنجزت بنسبة ٨٠٪، وتُطلق شاشة الدفع يوم الثلاثاء. تم إصلاح تعطل تسجيل الدخول.
+de/00-med|"Labor Dr. Krüger" <befunde@labor-krueger.example>|Ihr Laborbefund vom 22.10.|Guten Tag Herr Okafor, Ihr Befund liegt vor: Der TSH-Wert ist mit 8,4 mU/l deutlich erhöht, es besteht eine Schilddrüsenunterfunktion. Frau Dr. Lang möchte die Behandlung mit Ihnen besprechen.
+de/01-ther|Jana Brandt <termine@praxis-brandt.example>|Terminbestätigung|Hallo Sam, hiermit bestätige ich Ihre nächste Sitzung am Donnerstag, 5. November, um 17 Uhr. Bitte sagen Sie spätestens 24 Stunden vorher ab. Jana Brandt, Psychologische Psychotherapeutin
+de/02-sal|Personalabteilung <personal@lumenpfad.example>|Ihre Gehaltsanpassung 2027|Sehr geehrte Frau Okafor, ab dem 1. Januar 2027 erhöht sich Ihr monatliches Bruttogehalt von 5.400 € auf 5.750 €. Die Änderung sehen Sie auf Ihrer Gehaltsabrechnung für Januar.
+de/03-bank|Sparkasse Rheintal <kontoauszug@sparkasse-rheintal.example>|Ihr Kontoauszug Oktober 2026|Kontonummer ****4821. Alter Kontostand 3.412,08 €, neuer Kontostand 2.977,40 €. Abbuchung Darlehensrate 612,00 € (Darlehen Nr. 558201) am 15.10.
+de/04-otp|Lumen ID <noreply@lumen-id.example>|Ihr Anmeldecode|Ihr Bestätigungscode lautet 482913. Er ist 10 Minuten gültig.
+de/05-dinner|Jonas Weber <jonas.weber@example.com>|Essen am Freitag?|Hast du Freitag Lust auf den neuen Vietnamesen in der Südstadt? So gegen halb acht, ich würde für vier reservieren.
+de/06-proj|Dana Reyes <dana@northwind.example>|Projektstand Harbor-App KW 44|Der Checkout ist zu 80 % fertig, die Zahlungsseite geht am Dienstag live. Der Absturz beim Login ist behoben.
+en/00-med|Northfield Patient Portal <noreply@northfield-care.example>|Your results from 22 October are ready|Hi Sam, Dr. Ellis has reviewed your blood work. Your HbA1c is 6.9%, which confirms type 2 diabetes. Please book a follow-up to talk about starting metformin.
+en/01-ther|Rebecca Moss <rebecca@mosscounsel.example>|Next Thursday|Hi Sam, just confirming our session next Thursday at 5pm. We'll pick up where we left off on the sleep and anxiety stuff.
+en/02-sal|Larkspur People Team <people@larkspur.example>|Your 2027 pay review|Dear Sam, following this year's review your annual salary will rise from $92,000 to $98,500 from 1 January 2027. Your bonus target stays at 10%.
+en/03-bank|Harbor Federal <statements@harborfederal.example>|Your October statement|Account ending 4821. Opening balance $3,412.08, closing balance $2,977.40. A payment of $612.00 to personal loan PL-558201 was taken on Oct 15.
+en/04-otp|Acme ID <no-reply@acme-id.example>|Your sign-in code|Your verification code is 482913. It expires in 10 minutes.
+en/05-dinner|Priya Nair <priya.n@example.com>|Dinner Friday?|Want to try that new Thai place on Elm St on Friday around 7:30? I can book for four.
+en/06-proj|Dana Reyes <dana@northwind.example>|Harbor app: weekly update|Checkout redesign is 80% done; the payment screen ships Tuesday. The crash on login is fixed.
+es/00-med|Laboratorio Velázquez <resultados@labvelazquez.example>|Sus resultados de análisis|Estimado Sr. Okafor: ya están disponibles sus análisis de sangre. La glucosa en ayunas es de 132 mg/dl, compatible con diabetes tipo 2. La Dra. Ruiz le recomienda pedir cita para valorar el tratamiento.
+es/01-ther|Marta Gil <citas@martagil-psicologia.example>|Confirmación de cita|Hola Sam: te confirmo la sesión del jueves 5 de noviembre a las 17:00. Si no puedes venir, avísame con 24 horas. Un abrazo, Marta Gil, psicóloga sanitaria
+es/02-sal|Recursos Humanos <rrhh@lumenpfad.example>|Revisión salarial 2027|Estimada Sam: a partir del 1 de enero de 2027 su salario bruto anual pasará de 38.000 € a 40.500 €. La nómina de enero reflejará el cambio.
+es/03-bank|Banco Meridiano <avisos@bancomeridiano.example>|Extracto de su cuenta|Cuenta terminada en 4821. Saldo anterior: 3.412,08 €. Saldo actual: 2.977,40 €. Cargo de la cuota de su préstamo personal n.º 558201: 612,00 € el 15/10.
+es/04-otp|Lumen ID <noreply@lumen-id.example>|Tu código de verificación|Tu código de verificación es 482913. Caduca en 10 minutos.
+es/05-dinner|Lucía Romero <lucia.romero@example.com>|¿Cenamos el viernes?|¿Te apetece probar el mexicano nuevo de Lavapiés el viernes sobre las nueve? Reservo para cuatro.
+es/06-proj|Dana Reyes <dana@northwind.example>|Estado del proyecto Harbor|El rediseño del pago va al 80 %; la pantalla de pago sale el martes. El fallo al iniciar sesión ya está resuelto.
+fr/00-med|Laboratoire Saint-Roch <resultats@labo-saintroch.example>|Vos résultats d'analyses|Madame, Monsieur, vos résultats du 22/10 sont disponibles. Le taux de TSH (8,4 mUI/L) confirme une hypothyroïdie. Le Dr Moreau vous propose un rendez-vous pour adapter le traitement.
+fr/01-ther|Claire Fabre <contact@claire-fabre.example>|Rappel : séance de jeudi|Bonjour Sam, je vous rappelle notre séance jeudi 5 novembre à 17 h. En cas d'empêchement, merci de prévenir 48 h à l'avance. Claire Fabre, psychologue clinicienne
+fr/02-sal|Service RH <rh@lumenpfad.example>|Votre augmentation de salaire|Madame, à compter du 1er janvier 2027, votre salaire brut annuel passera de 41 000 € à 43 500 €. Ce changement figurera sur votre bulletin de paie de janvier.
+fr/03-bank|Banque Lazare <releves@banquelazare.example>|Votre relevé de compte d'octobre|Compte n° ****4821. Ancien solde : 3 412,08 €. Nouveau solde : 2 977,40 €. Échéance de votre prêt immobilier n° 558201 : 612,00 € prélevée le 15/10.
+fr/04-otp|Lumen ID <noreply@lumen-id.example>|Votre code de connexion|Votre code de vérification est 482913. Il expire dans 10 minutes.
+fr/05-dinner|Léa Martin <lea.martin@example.com>|Dîner vendredi ?|Ça te dit d'essayer le petit libanais rue Oberkampf vendredi vers 20 h ? Je réserve pour quatre.
+fr/06-proj|Dana Reyes <dana@northwind.example>|Point d'avancement Harbor|La refonte du paiement est terminée à 80 % ; l'écran de paiement sort mardi. Le plantage à la connexion est corrigé.
+hi/00-med|सिटी पैथ लैब <reports@citypath.example>|आपकी जाँच रिपोर्ट तैयार है|नमस्ते सैम जी, 22 अक्टूबर की आपकी खून की जाँच की रिपोर्ट आ गई है। शुगर का स्तर बढ़ा हुआ है, जिससे टाइप 2 मधुमेह की पुष्टि होती है। डॉ. मेहता ने इलाज शुरू करने के लिए मिलने को कहा है।
+hi/01-ther|"डॉ. नीलिमा सक्सेना" <appointments@neelima-saxena.example>|सत्र की पुष्टि|नमस्ते सैम, गुरुवार 5 नवंबर को शाम 5 बजे हमारा अगला परामर्श सत्र तय है। न आ पाएँ तो 24 घंटे पहले बता दीजिए। — डॉ. नीलिमा सक्सेना, मनोवैज्ञानिक
+hi/02-sal|मानव संसाधन विभाग <hr@lumenpfad.example>|वेतन संशोधन 2027|प्रिय सैम, 1 जनवरी 2027 से आपका वार्षिक वेतन ₹14,40,000 से बढ़कर ₹15,60,000 हो जाएगा। नया वेतन जनवरी की वेतन पर्ची में दिखेगा।
+hi/03-bank|जनहित सहकारी <alerts@janhit-sahkari.example>|अक्टूबर का खाता विवरण|खाता संख्या XXXX4821। पिछला शेष ₹34,120.08, वर्तमान शेष ₹29,774.40। 15/10 को गृह ऋण (क्रमांक 558201) की किस्त ₹6,120 कटी।
+hi/04-otp|लुमेन आईडी <noreply@lumen-id.example>|आपका सत्यापन कोड|आपका सत्यापन कोड 482913 है। यह 10 मिनट के लिए मान्य है।
+hi/05-dinner|करण <karan.v@example.com>|शुक्रवार को खाना?|शुक्रवार शाम साढ़े सात बजे कनॉट प्लेस वाले नए दक्षिण भारतीय रेस्टोरेंट चलें? मैं चार लोगों की टेबल बुक कर दूँगा।
+hi/06-proj|Dana Reyes <dana@northwind.example>|हार्बर ऐप: साप्ताहिक अपडेट|चेकआउट का नया डिज़ाइन 80% पूरा है; पेमेंट स्क्रीन मंगलवार को लाइव होगी। लॉगिन पर क्रैश ठीक हो गया है।
+ja/00-med|さくら内科 <info@sakura-naika.example>|検査結果のお知らせ|オカフォー様 10月22日の血液検査の結果が出ました。空腹時血糖値が高く、2型糖尿病と診断されました。今後の治療について、次回受診時に山田医師よりご説明します。
+ja/01-ther|こころの相談室 <yoyaku@kokoro-soudan.example>|カウンセリングご予約の確認|オカフォー様 11月5日（木）17時からのカウンセリングのご予約を承りました。キャンセルは前日までにご連絡ください。臨床心理士 森
+ja/02-sal|人事部 <jinji@lumenpfad.example>|2027年度 給与改定のお知らせ|オカフォー様 2027年1月より、月額基本給を42万円から45万円に改定いたします。詳細は1月の給与明細をご確認ください。
+ja/03-bank|みなと銀行 <info@minato-gin.example>|10月の入出金明細|口座番号 普通 ****821 前回残高 341,208円 今回残高 297,740円 10月15日 住宅ローン返済 61,200円（契約番号558201）
+ja/04-otp|ルーメンID <noreply@lumen-id.example>|ワンタイムパスワードのお知らせ|ワンタイムパスワード：482913 有効期限は10分です。このパスワードは誰にも教えないでください。
+ja/05-dinner|翔 <sho.k@example.com>|金曜ごはん行かない？|金曜の19時半ごろ、駅前に新しくできたタイ料理屋に行かない？4人で予約しとくよ。
+ja/06-proj|Dana Reyes <dana@northwind.example>|Harborアプリ 週次報告|チェックアウト画面の刷新は8割完了、決済画面は火曜にリリース予定です。ログイン時のクラッシュは修正済み。
+pt-BR/00-med|Laboratório Vida Plena <resultados@vidaplena-lab.example>|Seus exames estão prontos|Olá, Sam! Seus exames de sangue de 22/10 já estão disponíveis. O colesterol LDL (190 mg/dL) indicam hipercolesterolemia. A Dra. Souza pede que você agende um retorno.
+pt-BR/01-ther|Ana Ribeiro <agenda@anaribeiro-psi.example>|Confirmação da sessão|Oi, Sam! Confirmando nossa sessão na quinta, 5/11, às 17h. Se precisar desmarcar, me avise com 24h de antecedência. Abraço, Ana Ribeiro, psicóloga
+pt-BR/02-sal|RH Lumen <rh@lumenpfad.example>|Reajuste salarial 2027|Prezada Sam, a partir de 1º de janeiro de 2027 seu salário bruto mensal passa de R$ 12.400,00 para R$ 13.300,00. O novo valor aparecerá no holerite de janeiro.
+pt-BR/03-bank|Banco Aurora <extrato@bancoaurora.example>|Extrato de outubro|Agência 0412, conta 48210-3. Saldo anterior: R$ 3.412,08. Saldo atual: R$ 2.977,40. Parcela do empréstimo nº 558201: R$ 612,00 debitada em 15/10.
+pt-BR/04-otp|Lumen ID <noreply@lumen-id.example>|Seu código de acesso|Seu código de verificação é 482913. Ele expira em 10 minutos.
+pt-BR/05-dinner|Bruno Lima <bruno.lima@example.com>|Jantar sexta?|Bora provar aquele japonês novo na Vila Madalena na sexta, lá pelas 20h? Reservo pra quatro.
+pt-BR/06-proj|Dana Reyes <dana@northwind.example>|Status do projeto Harbor|O redesenho do checkout está 80% pronto; a tela de pagamento sai na terça. O travamento no login foi corrigido.
+zh-CN/00-med|仁和医院检验科 <report@renhe-yy.example>|您的检验报告已出|Sam您好：您10月22日的血液检查结果已出，糖化血红蛋白6.9%，确诊为2型糖尿病。请预约王医生复诊，商量后续治疗方案。
+zh-CN/01-ther|心语心理咨询室 <yuyue@xinyu-xl.example>|咨询预约确认|Sam你好，已为你预约11月5日（周四）下午5点的心理咨询。如需改期请提前24小时告知。——咨询师 林
+zh-CN/02-sal|人力资源部 <hr@lumenpfad.example>|2027年薪资调整通知|Sam您好：自2027年1月1日起，您的月薪由32,000元调整为34,500元，新薪资将体现在1月工资条中。
+zh-CN/03-bank|招远银行 <service@zhaoyuan-yh.example>|10月账户对账单|您尾号4821的账户：上期余额3,412.08元，本期余额2,977.40元。10月15日扣还个人贷款（合同号558201）612.00元。
+zh-CN/04-otp|Lumen <noreply@lumen-id.example>|【Lumen】验证码|您的验证码为482913，10分钟内有效。请勿将验证码告诉他人。
+zh-CN/05-dinner|小美 <xiaomei@example.com>|周五一起吃饭？|周五晚上七点半去吃新开的那家云南菜怎么样？我订四个人的位子。
+zh-CN/06-proj|Dana Reyes <dana@northwind.example>|Harbor项目周报|结账页改版已完成80%，支付页面周二上线。登录崩溃问题已修复。

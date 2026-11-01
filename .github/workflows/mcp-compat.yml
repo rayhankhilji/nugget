@@ -14,7 +14,6 @@ name: MCP compatibility
 #     the same shape as the VS Code, Zed, Claude Code and "Other apps" stdio entries;
 #   - HTTP legs use the URL and `Authorization` header of the daemon's `generic-http` snippet: the
 #     "Other apps" HTTP entry and the Cursor, VS Code and Claude Code HTTP entries.
-# `cargo test -p nugget-mcp --test docs` checks that the guide shows exactly those snippets.
 #
 # Loopback only: nothing but npm and PyPI (dependency install) is reached over the network.
 

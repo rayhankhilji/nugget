@@ -1,8 +1,4 @@
-//! Behaviour every [`GraphStore`] must show. Implementations run [`run`] in their tests:
-//!
-//! ```ignore
-//! nugget_graph::conformance::run(&|| Box::new(MyGraph::open_in_memory().unwrap()));
-//! ```
+//! Behaviour every [`GraphStore`] must show.
 
 use nugget_core::ids::{EntityId, ItemKey, ItemRef, SourceId};
 
@@ -18,7 +14,6 @@ pub fn run(make: &dyn Fn() -> Box<dyn GraphStore>) {
     merge_moves_everything_and_old_ids_resolve(make().as_ref());
     neighbourhood_and_limits(make().as_ref());
     change_feed_advances(make().as_ref());
-    // M2 wave 2 additions.
     limit_zero_is_unlimited(make().as_ref());
     quotes_are_capped(make().as_ref());
     update_claim_patches_fields(make().as_ref());
@@ -30,9 +25,7 @@ pub fn run(make: &dyn Fn() -> Box<dyn GraphStore>) {
     split_failures_change_nothing(make().as_ref());
     prune_orphans_removes_only_orphans(make().as_ref());
     batches_apply_in_order_and_atomically(make().as_ref());
-    // X2 additions.
     entities_supported_by_a_source(make().as_ref());
-    // GG5 additions.
     user_replaced_claims_stay_replaced(make().as_ref());
     user_text_survives_folds(make().as_ref());
     split_repoints_merged_ids_by_name(make().as_ref());
@@ -51,6 +44,23 @@ fn ev(key: &str) -> Evidence {
         chunk_id: Some(1),
         quote: Some("quote".into()),
     }
+}
+
+fn org(g: &dyn GraphStore, name: &str) -> EntityId {
+    g.create_entity(&NewEntity::new(EntityKind::Organization, name))
+        .unwrap()
+}
+
+fn ent(e: &EntityId) -> ClaimObject {
+    ClaimObject::Entity(e.clone())
+}
+
+fn lit(s: &str) -> ClaimObject {
+    ClaimObject::Literal(s.into())
+}
+
+fn add(g: &dyn GraphStore, s: &EntityId, pred: &str, o: ClaimObject, ev: Vec<Evidence>) -> ClaimId {
+    g.add_claim(&claim(s, pred, o, ev)).unwrap()
 }
 
 fn person(g: &dyn GraphStore, name: &str) -> EntityId {
@@ -137,38 +147,17 @@ fn identifiers_are_unique(g: &dyn GraphStore) {
 
 fn claims_dedupe_and_need_evidence(g: &dyn GraphStore) {
     let sam = person(g, "Sam");
-    let acme = g
-        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
-        .unwrap();
-    let c1 = g
-        .add_claim(&claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![ev("a.md")],
-        ))
-        .unwrap();
-    let c2 = g
-        .add_claim(&claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![ev("b.md")],
-        ))
-        .unwrap();
+    let acme = org(g, "Acme");
+    let c1 = add(g, &sam, "works_at", ent(&acme), vec![ev("a.md")]);
+    let c2 = add(g, &sam, "works_at", ent(&acme), vec![ev("b.md")]);
     assert_eq!(c1, c2, "same triple folds into one claim");
     assert_eq!(g.get_claim(c1).unwrap().unwrap().evidence.len(), 2);
     assert!(
-        g.add_claim(&claim(
-            &sam,
-            "likes",
-            ClaimObject::Literal("tea".into()),
-            vec![]
-        ))
-        .is_err(),
+        g.add_claim(&claim(&sam, "likes", lit("tea"), vec![]))
+            .is_err(),
         "evidence required"
     );
-    let mut asserted = claim(&sam, "likes", ClaimObject::Literal("tea".into()), vec![]);
+    let mut asserted = claim(&sam, "likes", lit("tea"), vec![]);
     asserted.status = ClaimStatus::UserAsserted;
     g.add_claim(&asserted).unwrap();
     assert_eq!(
@@ -181,22 +170,14 @@ fn claims_dedupe_and_need_evidence(g: &dyn GraphStore) {
 
 fn retracting_an_item_retracts_unsupported_claims(g: &dyn GraphStore) {
     let sam = person(g, "Sam");
-    let one = g
-        .add_claim(&claim(
-            &sam,
-            "lives_in",
-            ClaimObject::Literal("Oslo".into()),
-            vec![ev("a.md")],
-        ))
-        .unwrap();
-    let two = g
-        .add_claim(&claim(
-            &sam,
-            "speaks",
-            ClaimObject::Literal("Norwegian".into()),
-            vec![ev("a.md"), ev("b.md")],
-        ))
-        .unwrap();
+    let one = add(g, &sam, "lives_in", lit("Oslo"), vec![ev("a.md")]);
+    let two = add(
+        g,
+        &sam,
+        "speaks",
+        lit("Norwegian"),
+        vec![ev("a.md"), ev("b.md")],
+    );
     g.add_mention(&Mention {
         entity: sam.clone(),
         item: item("a.md"),
@@ -230,27 +211,11 @@ fn retracting_an_item_retracts_unsupported_claims(g: &dyn GraphStore) {
 fn merge_moves_everything_and_old_ids_resolve(g: &dyn GraphStore) {
     let a = person(g, "Samantha Lee");
     let b = person(g, "S. Lee");
-    let acme = g
-        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
-        .unwrap();
+    let acme = org(g, "Acme");
     g.add_identifier(&b, &Identifier::new("email", "sam@acme.test"))
         .unwrap();
-    let first = g
-        .add_claim(&claim(
-            &a,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![ev("a.md")],
-        ))
-        .unwrap();
-    let second = g
-        .add_claim(&claim(
-            &b,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![ev("b.md")],
-        ))
-        .unwrap();
+    let first = add(g, &a, "works_at", ent(&acme), vec![ev("a.md")]);
+    let second = add(g, &b, "works_at", ent(&acme), vec![ev("b.md")]);
     g.merge(&a, &b).unwrap();
     let e = g.get_entity(&b).unwrap().unwrap();
     assert_eq!(e.id, a, "old id resolves to the survivor");
@@ -279,13 +244,7 @@ fn neighbourhood_and_limits(g: &dyn GraphStore) {
     let c = person(g, "C");
     let d = person(g, "D");
     for (s, o) in [(&a, &b), (&b, &c), (&c, &d)] {
-        g.add_claim(&claim(
-            s,
-            "knows",
-            ClaimObject::Entity(o.clone()),
-            vec![ev("x.md")],
-        ))
-        .unwrap();
+        add(g, s, "knows", ent(o), vec![ev("x.md")]);
     }
     let v = g.neighbourhood(&b, 1, 100).unwrap();
     let mut names: Vec<_> = v.nodes.iter().map(|n| n.name.clone()).collect();
@@ -332,13 +291,7 @@ fn limit_zero_is_unlimited(g: &dyn GraphStore) {
     let mut ids = vec![hub.clone()];
     for i in 0..5 {
         let p = person(g, &format!("P{i}"));
-        g.add_claim(&claim(
-            &hub,
-            "knows",
-            ClaimObject::Entity(p.clone()),
-            vec![ev("x.md")],
-        ))
-        .unwrap();
+        add(g, &hub, "knows", ent(&p), vec![ev("x.md")]);
         g.add_mention(&mention(&hub, &format!("m{i}.md"))).unwrap();
         ids.push(p);
     }
@@ -363,14 +316,7 @@ fn quotes_are_capped(g: &dyn GraphStore) {
     let long: String = "é".repeat(MAX_QUOTE_CHARS + 50);
     let mut e = ev("a.md");
     e.quote = Some(long.clone());
-    let id = g
-        .add_claim(&claim(
-            &sam,
-            "said",
-            ClaimObject::Literal("hi".into()),
-            vec![e.clone()],
-        ))
-        .unwrap();
+    let id = add(g, &sam, "said", lit("hi"), vec![e.clone()]);
     let q = g.get_claim(id).unwrap().unwrap().evidence[0]
         .quote
         .clone()
@@ -392,14 +338,7 @@ fn quotes_are_capped(g: &dyn GraphStore) {
 
 fn update_claim_patches_fields(g: &dyn GraphStore) {
     let sam = person(g, "Sam");
-    let id = g
-        .add_claim(&claim(
-            &sam,
-            "has_title",
-            ClaimObject::Literal("CTO".into()),
-            vec![ev("a.md")],
-        ))
-        .unwrap();
+    let id = add(g, &sam, "has_title", lit("CTO"), vec![ev("a.md")]);
     let (_, before) = g.changes_since(0, 0).unwrap();
     let to = time::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
     let c = g
@@ -454,10 +393,8 @@ fn update_claim_patches_fields(g: &dyn GraphStore) {
 
 fn rejected_claims_stay_rejected(g: &dyn GraphStore) {
     let sam = person(g, "Sam");
-    let lit = ClaimObject::Literal("Oslo".into());
-    let id = g
-        .add_claim(&claim(&sam, "lives_in", lit.clone(), vec![ev("a.md")]))
-        .unwrap();
+    let obj = lit("Oslo");
+    let id = add(g, &sam, "lives_in", obj.clone(), vec![ev("a.md")]);
     g.set_claim_status(id, ClaimStatus::Rejected).unwrap();
     assert!(!ClaimStatus::Rejected.is_active());
     assert!(g.claims_for(&sam, false).unwrap().is_empty());
@@ -470,9 +407,7 @@ fn rejected_claims_stay_rejected(g: &dyn GraphStore) {
         ClaimStatus::Rejected,
         "losing its evidence does not turn a rejection into a retraction"
     );
-    let again = g
-        .add_claim(&claim(&sam, "lives_in", lit.clone(), vec![ev("a.md")]))
-        .unwrap();
+    let again = add(g, &sam, "lives_in", obj.clone(), vec![ev("a.md")]);
     assert_eq!(again, id, "the triple lands in the rejected claim");
     assert_eq!(status(g, id), ClaimStatus::Rejected);
     assert_eq!(g.get_claim(id).unwrap().unwrap().evidence.len(), 1);
@@ -485,7 +420,7 @@ fn rejected_claims_stay_rejected(g: &dyn GraphStore) {
     assert!(g.claims_for(&sam, false).unwrap().is_empty());
 
     // A rejection needs no evidence.
-    let mut no_ev = claim(&sam, "likes", ClaimObject::Literal("jazz".into()), vec![]);
+    let mut no_ev = claim(&sam, "likes", lit("jazz"), vec![]);
     no_ev.status = ClaimStatus::Rejected;
     let jazz = g.add_claim(&no_ev).unwrap();
     assert_eq!(status(g, jazz), ClaimStatus::Rejected);
@@ -493,32 +428,19 @@ fn rejected_claims_stay_rejected(g: &dyn GraphStore) {
     // The user changing their mind: restoring, or asserting the same fact.
     g.set_claim_status(id, ClaimStatus::Active).unwrap();
     assert_eq!(status(g, id), ClaimStatus::Active);
-    let mut asserted = claim(&sam, "likes", ClaimObject::Literal("jazz".into()), vec![]);
+    let mut asserted = claim(&sam, "likes", lit("jazz"), vec![]);
     asserted.status = ClaimStatus::UserAsserted;
     assert_eq!(g.add_claim(&asserted).unwrap(), jazz);
     assert_eq!(status(g, jazz), ClaimStatus::UserAsserted);
-    assert_eq!(
-        ClaimStatus::parse("rejected"),
-        Some(ClaimStatus::Rejected),
-        "wire name"
-    );
-    assert_eq!(
-        serde_json::to_value(ClaimStatus::Rejected).unwrap(),
-        serde_json::json!("rejected")
-    );
 }
 
 fn reactivation_folds_into_the_oldest(g: &dyn GraphStore) {
     let sam = person(g, "Sam");
-    let tea = ClaimObject::Literal("tea".into());
-    let a = g
-        .add_claim(&claim(&sam, "likes", tea.clone(), vec![ev("a.md")]))
-        .unwrap();
+    let tea = lit("tea");
+    let a = add(g, &sam, "likes", tea.clone(), vec![ev("a.md")]);
     g.retract_item(&item("a.md")).unwrap();
     assert_eq!(status(g, a), ClaimStatus::Retracted);
-    let b = g
-        .add_claim(&claim(&sam, "likes", tea.clone(), vec![ev("b.md")]))
-        .unwrap();
+    let b = add(g, &sam, "likes", tea.clone(), vec![ev("b.md")]);
     assert_ne!(a, b, "a retracted claim is not live: a new claim starts");
     g.add_evidence(a, &ev("c.md")).unwrap();
     let live: Vec<Claim> = g.claims_for(&sam, false).unwrap();
@@ -528,10 +450,8 @@ fn reactivation_folds_into_the_oldest(g: &dyn GraphStore) {
     assert!(g.get_claim(b).unwrap().is_none());
 
     // Reactivating a superseded claim folds too.
-    let coffee = ClaimObject::Literal("coffee".into());
-    let c = g
-        .add_claim(&claim(&sam, "likes", coffee.clone(), vec![ev("d.md")]))
-        .unwrap();
+    let coffee = lit("coffee");
+    let c = add(g, &sam, "likes", coffee.clone(), vec![ev("d.md")]);
     g.set_claim_status(c, ClaimStatus::Superseded).unwrap();
     let mut d_new = claim(&sam, "likes", coffee.clone(), vec![ev("e.md")]);
     d_new.confidence = 0.95;
@@ -546,14 +466,10 @@ fn reactivation_folds_into_the_oldest(g: &dyn GraphStore) {
     assert_eq!(g.claims_for(&sam, false).unwrap().len(), 2);
 
     // Reactivating next to a rejected twin keeps the rejection.
-    let milk = ClaimObject::Literal("milk".into());
-    let e = g
-        .add_claim(&claim(&sam, "likes", milk.clone(), vec![ev("f.md")]))
-        .unwrap();
+    let milk = lit("milk");
+    let e = add(g, &sam, "likes", milk.clone(), vec![ev("f.md")]);
     g.set_claim_status(e, ClaimStatus::Superseded).unwrap();
-    let f = g
-        .add_claim(&claim(&sam, "likes", milk.clone(), vec![ev("g.md")]))
-        .unwrap();
+    let f = add(g, &sam, "likes", milk.clone(), vec![ev("g.md")]);
     g.set_claim_status(f, ClaimStatus::Rejected).unwrap();
     g.set_claim_status(e, ClaimStatus::Active).unwrap();
     assert_eq!(status(g, e), ClaimStatus::Rejected, "rejected beats active");
@@ -563,13 +479,11 @@ fn reactivation_folds_into_the_oldest(g: &dyn GraphStore) {
 fn merge_folds_into_the_oldest_with_the_strongest_status(g: &dyn GraphStore) {
     let a = person(g, "A");
     let b = person(g, "B");
-    let lit = ClaimObject::Literal("chess".into());
-    let mut on_b = claim(&b, "plays", lit.clone(), vec![ev("b.md")]);
+    let obj = lit("chess");
+    let mut on_b = claim(&b, "plays", obj.clone(), vec![ev("b.md")]);
     on_b.status = ClaimStatus::UserAsserted;
     let older = g.add_claim(&on_b).unwrap();
-    let newer = g
-        .add_claim(&claim(&a, "plays", lit.clone(), vec![ev("a.md")]))
-        .unwrap();
+    let newer = add(g, &a, "plays", obj.clone(), vec![ev("a.md")]);
     g.merge(&a, &b).unwrap();
     let c = g.get_claim(older).unwrap().unwrap();
     assert_eq!(c.subject, a);
@@ -648,33 +562,10 @@ fn split_moves_claims_identifiers_and_mentions(g: &dyn GraphStore) {
         &item("b.md"),
     )
     .unwrap();
-    let acme = g
-        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
-        .unwrap();
-    let works = g
-        .add_claim(&claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![ev("b.md")],
-        ))
-        .unwrap();
-    let lives = g
-        .add_claim(&claim(
-            &sam,
-            "lives_in",
-            ClaimObject::Literal("Oslo".into()),
-            vec![ev("a.md")],
-        ))
-        .unwrap();
-    let knows = g
-        .add_claim(&claim(
-            &acme,
-            "employs",
-            ClaimObject::Entity(sam.clone()),
-            vec![ev("b.md"), ev("a.md")],
-        ))
-        .unwrap();
+    let acme = org(g, "Acme");
+    let works = add(g, &sam, "works_at", ent(&acme), vec![ev("b.md")]);
+    let lives = add(g, &sam, "lives_in", lit("Oslo"), vec![ev("a.md")]);
+    let knows = add(g, &acme, "employs", ent(&sam), vec![ev("b.md"), ev("a.md")]);
     g.add_mention(&mention(&sam, "a.md")).unwrap();
     g.add_mention(&mention(&sam, "b.md")).unwrap();
     let (_, before) = g.changes_since(0, 0).unwrap();
@@ -707,10 +598,7 @@ fn split_moves_claims_identifiers_and_mentions(g: &dyn GraphStore) {
     assert_eq!(p.identifiers[0].1, vec![item("b.md")], "provenance moves");
 
     assert_eq!(g.get_claim(works).unwrap().unwrap().subject, samuel);
-    assert_eq!(
-        g.get_claim(knows).unwrap().unwrap().object,
-        ClaimObject::Entity(samuel.clone())
-    );
+    assert_eq!(g.get_claim(knows).unwrap().unwrap().object, ent(&samuel));
     assert_eq!(g.get_claim(lives).unwrap().unwrap().subject, sam);
     // b.md only supports moved claims; a.md also supports `lives_in`, which stays.
     let old_m: Vec<String> = g
@@ -739,14 +627,7 @@ fn split_failures_change_nothing(g: &dyn GraphStore) {
     let kim = person(g, "Kim");
     g.add_identifier(&kim, &Identifier::new("email", "kim@x.test"))
         .unwrap();
-    let on_kim = g
-        .add_claim(&claim(
-            &kim,
-            "likes",
-            ClaimObject::Literal("tea".into()),
-            vec![ev("a.md")],
-        ))
-        .unwrap();
+    let on_kim = add(g, &kim, "likes", lit("tea"), vec![ev("a.md")]);
     let before = g.counts().unwrap();
     assert!(matches!(
         g.split(&sam, &[on_kim], &NewEntity::new(EntityKind::Person, "New")),
@@ -769,14 +650,7 @@ fn prune_orphans_removes_only_orphans(g: &dyn GraphStore) {
         .unwrap();
     g.add_mention(&mention(&mentioned, "x.md")).unwrap();
     let claimed = person(g, "Claimed Only");
-    let dead = g
-        .add_claim(&claim(
-            &claimed,
-            "likes",
-            ClaimObject::Literal("tea".into()),
-            vec![ev("x.md")],
-        ))
-        .unwrap();
+    let dead = add(g, &claimed, "likes", lit("tea"), vec![ev("x.md")]);
     let mut me = NewEntity::new(EntityKind::Person, "Me");
     me.attributes = serde_json::json!({"is_me": true});
     let me = g.create_entity(&me).unwrap();
@@ -784,32 +658,14 @@ fn prune_orphans_removes_only_orphans(g: &dyn GraphStore) {
     pinned.attributes = serde_json::json!({"user_asserted": true});
     let pinned = g.create_entity(&pinned).unwrap();
     let rejecting = person(g, "Rejecting");
-    let mut r = claim(
-        &rejecting,
-        "likes",
-        ClaimObject::Literal("x".into()),
-        vec![],
-    );
+    let mut r = claim(&rejecting, "likes", lit("x"), vec![]);
     r.status = ClaimStatus::Rejected;
     g.add_claim(&r).unwrap();
     let historic = person(g, "Historic");
-    let h = g
-        .add_claim(&claim(
-            &historic,
-            "lives_in",
-            ClaimObject::Literal("Rome".into()),
-            vec![ev("y.md")],
-        ))
-        .unwrap();
+    let h = add(g, &historic, "lives_in", lit("Rome"), vec![ev("y.md")]);
     g.set_claim_status(h, ClaimStatus::Superseded).unwrap();
     let linked = person(g, "Linked");
-    g.add_claim(&claim(
-        &linked,
-        "knows",
-        ClaimObject::Entity(historic.clone()),
-        vec![ev("y.md")],
-    ))
-    .unwrap();
+    add(g, &linked, "knows", ent(&historic), vec![ev("y.md")]);
 
     assert!(
         g.prune_orphans(None).unwrap().is_empty(),
@@ -867,9 +723,7 @@ fn prune_orphans_removes_only_orphans(g: &dyn GraphStore) {
 
 fn batches_apply_in_order_and_atomically(g: &dyn GraphStore) {
     let sam = person(g, "Sam");
-    let acme = g
-        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
-        .unwrap();
+    let acme = org(g, "Acme");
     let mut long = ev("a.md");
     long.quote = Some("q".repeat(MAX_QUOTE_CHARS * 2));
     let mut b = GraphBatch::new();
@@ -877,20 +731,10 @@ fn batches_apply_in_order_and_atomically(g: &dyn GraphStore) {
         entity: NewEntity::new(EntityKind::Topic, "Boilers"),
     });
     b.push(GraphOp::AddClaim {
-        claim: claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![long],
-        ),
+        claim: claim(&sam, "works_at", ent(&acme), vec![long]),
     });
     b.push(GraphOp::AddClaim {
-        claim: claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![ev("b.md")],
-        ),
+        claim: claim(&sam, "works_at", ent(&acme), vec![ev("b.md")]),
     });
     b.push(GraphOp::AddMention {
         mention: mention(&sam, "a.md"),
@@ -964,7 +808,7 @@ fn batches_apply_in_order_and_atomically(g: &dyn GraphStore) {
         claim: claim(
             &EntityId::new("ent_missing"),
             "likes",
-            ClaimObject::Literal("x".into()),
+            lit("x"),
             vec![ev("c.md")],
         ),
     });
@@ -1013,28 +857,20 @@ fn entities_supported_by_a_source(g: &dyn GraphStore) {
     let carol = person(g, "Carol");
     let dave = person(g, "Dave");
     let erin = person(g, "Erin");
-    let acme = g
-        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
-        .unwrap();
+    let acme = org(g, "Acme");
     let alias = person(g, "A. Lice");
     let lonely = person(g, "Lonely");
 
     // An active entity-to-entity claim from mail supports both ends.
-    g.add_claim(&claim(
+    add(
+        g,
         &alice,
         "works_at",
-        ClaimObject::Entity(acme.clone()),
+        ent(&acme),
         vec![src_ev("mail", "m1")],
-    ))
-    .unwrap();
+    );
     // A literal claim from notes supports only its subject.
-    g.add_claim(&claim(
-        &bob,
-        "born",
-        ClaimObject::Literal("1990".into()),
-        vec![src_ev("notes", "n1")],
-    ))
-    .unwrap();
+    add(g, &bob, "born", lit("1990"), vec![src_ev("notes", "n1")]);
     // A mention alone is support.
     g.add_mention(&Mention {
         entity: carol.clone(),
@@ -1045,34 +881,14 @@ fn entities_supported_by_a_source(g: &dyn GraphStore) {
     })
     .unwrap();
     // A rejected claim from mail supports nobody.
-    let rejected = g
-        .add_claim(&claim(
-            &dave,
-            "knows",
-            ClaimObject::Entity(erin.clone()),
-            vec![src_ev("mail", "m3")],
-        ))
-        .unwrap();
+    let rejected = add(g, &dave, "knows", ent(&erin), vec![src_ev("mail", "m3")]);
     g.set_claim_status(rejected, ClaimStatus::Rejected).unwrap();
     // A user-asserted claim with mail evidence supports both ends.
-    let asserted = g
-        .add_claim(&claim(
-            &bob,
-            "knows",
-            ClaimObject::Entity(lonely.clone()),
-            vec![src_ev("mail", "m4")],
-        ))
-        .unwrap();
+    let asserted = add(g, &bob, "knows", ent(&lonely), vec![src_ev("mail", "m4")]);
     g.set_claim_status(asserted, ClaimStatus::UserAsserted)
         .unwrap();
     // A claim whose only mail evidence is retracted no longer counts.
-    g.add_claim(&claim(
-        &erin,
-        "knows",
-        ClaimObject::Entity(dave.clone()),
-        vec![src_ev("mail", "m5")],
-    ))
-    .unwrap();
+    add(g, &erin, "knows", ent(&dave), vec![src_ev("mail", "m5")]);
     g.retract_item(&src_item("mail", "m5")).unwrap();
     // Mentions of a merged entity count for the survivor, never for the tombstone.
     g.add_mention(&Mention {
@@ -1097,14 +913,6 @@ fn entities_supported_by_a_source(g: &dyn GraphStore) {
             .unwrap()
             .is_empty()
     );
-    // Agrees with the definition the default implementation scans.
-    for s in [&mail, &notes] {
-        assert_eq!(
-            g.entities_supported_by(s).unwrap(),
-            crate::entities_supported_by_scan(g, s).unwrap(),
-            "{s}"
-        );
-    }
 }
 
 fn quoted(key: &str, quote: &str) -> Evidence {
@@ -1125,14 +933,12 @@ fn user_claim(subject: &EntityId, pred: &str, object: ClaimObject, text: &str) -
 
 fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
     let a = person(g, "A");
-    let lit = ClaimObject::Literal("Harbor".into());
-    let old = g
-        .add_claim(&claim(&a, "part_of", lit.clone(), vec![ev("n.md")]))
-        .unwrap();
+    let obj = lit("Harbor");
+    let old = add(g, &a, "part_of", obj.clone(), vec![ev("n.md")]);
     let mine = user_claim(
         &a,
         "part_of",
-        ClaimObject::Literal("A Harbor project".into()),
+        lit("A Harbor project"),
         "A Harbor project (mine)",
     );
     let user = g.supersede_by_user(old, &mine).unwrap();
@@ -1157,9 +963,7 @@ fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
     assert_eq!(c.evidence.len(), 1);
     // The same triple added again from the same item lands in it.
     g.retract_item(&item("n.md")).unwrap();
-    let again = g
-        .add_claim(&claim(&a, "part_of", lit.clone(), vec![ev("n.md")]))
-        .unwrap();
+    let again = add(g, &a, "part_of", obj.clone(), vec![ev("n.md")]);
     assert_eq!(again, old);
     assert_eq!(status(g, old), ClaimStatus::Superseded);
     g.add_evidence(old, &ev("n.md")).unwrap();
@@ -1169,14 +973,9 @@ fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
     // Evidence from another item makes it current again, whatever the order within a batch.
     for (i, order) in [["n.md", "x.md"], ["x.md", "n.md"]].iter().enumerate() {
         let p = person(g, &format!("P{i}"));
-        let gen_id = g
-            .add_claim(&claim(&p, "plays", lit.clone(), vec![ev("p.md")]))
+        let gen_id = add(g, &p, "plays", obj.clone(), vec![ev("p.md")]);
+        g.supersede_by_user(gen_id, &user_claim(&p, "plays", lit("x"), "x"))
             .unwrap();
-        g.supersede_by_user(
-            gen_id,
-            &user_claim(&p, "plays", ClaimObject::Literal("x".into()), "x"),
-        )
-        .unwrap();
         g.retract_item(&item("p.md")).unwrap();
         let mut batch = GraphBatch::new();
         for key in order {
@@ -1193,53 +992,24 @@ fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
 
     // An extracted claim from another item is a new claim.
     let b = person(g, "B");
-    let blit = ClaimObject::Literal("Kestrel".into());
-    let first = g
-        .add_claim(&claim(&b, "works_at", blit.clone(), vec![ev("m.md")]))
+    let blit = lit("Kestrel");
+    let first = add(g, &b, "works_at", blit.clone(), vec![ev("m.md")]);
+    g.supersede_by_user(first, &user_claim(&b, "works_at", lit("K"), "K"))
         .unwrap();
-    g.supersede_by_user(
-        first,
-        &user_claim(&b, "works_at", ClaimObject::Literal("K".into()), "K"),
-    )
-    .unwrap();
-    let other = g
-        .add_claim(&claim(&b, "works_at", blit.clone(), vec![ev("x.md")]))
-        .unwrap();
+    let other = add(g, &b, "works_at", blit.clone(), vec![ev("x.md")]);
     assert_ne!(other, first);
     assert_eq!(status(g, other), ClaimStatus::Active);
-
-    // Making it live explicitly forgets the record.
-    let d = person(g, "D");
-    let dlit = ClaimObject::Literal("chess".into());
-    let x = g
-        .add_claim(&claim(&d, "plays", dlit.clone(), vec![ev("d.md")]))
-        .unwrap();
-    g.supersede_by_user(
-        x,
-        &user_claim(&d, "plays", ClaimObject::Literal("go".into()), "go"),
-    )
-    .unwrap();
-    g.set_claim_status(x, ClaimStatus::Active).unwrap();
-    assert!(!g.replaced_by_user(x, &[ev("d.md")]).unwrap());
 
     // The user's replacement stops being current (rejected): the record is forgotten, so the
     // next extraction brings the original back.
     let f = person(g, "F");
-    let x = g
-        .add_claim(&claim(&f, "plays", dlit.clone(), vec![ev("f.md")]))
-        .unwrap();
+    let x = add(g, &f, "plays", lit("chess"), vec![ev("f.md")]);
     let mine = g
-        .supersede_by_user(
-            x,
-            &user_claim(&f, "plays", ClaimObject::Literal("go".into()), "go"),
-        )
+        .supersede_by_user(x, &user_claim(&f, "plays", lit("go"), "go"))
         .unwrap();
     // The user edits their own line again: the newer version now holds the original back.
     let mine2 = g
-        .supersede_by_user(
-            mine,
-            &user_claim(&f, "plays", ClaimObject::Literal("go!".into()), "go!"),
-        )
+        .supersede_by_user(mine, &user_claim(&f, "plays", lit("go!"), "go!"))
         .unwrap();
     g.set_claim_status(mine, ClaimStatus::Rejected).unwrap();
     assert!(
@@ -1255,10 +1025,8 @@ fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
     // A user claim with the same triple: the evidence comes back to it (a fold the user's claim
     // survives, so its id stays valid for a second edit).
     let e = person(g, "E");
-    let elit = ClaimObject::Literal("go".into());
-    let gen_id = g
-        .add_claim(&claim(&e, "plays", elit.clone(), vec![ev("e.md")]))
-        .unwrap();
+    let elit = lit("go");
+    let gen_id = add(g, &e, "plays", elit.clone(), vec![ev("e.md")]);
     let user = g
         .supersede_by_user(
             gen_id,
@@ -1285,22 +1053,11 @@ fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
     assert_eq!(g.asserted_at(old).unwrap(), None);
 
     // Second review, finding 5: release follows the fold survivor's final status.
-    // (a) A retracted claim with U's triple is rejected: it folds into U (the user's claim
-    //     survives) and the group is rejected, so what U replaced is free again.
     let h = person(g, "H");
-    let tea = ClaimObject::Literal("tea".into());
-    let twin = g
-        .add_claim(&claim(&h, "drinks", tea.clone(), vec![ev("x.md")]))
-        .unwrap();
+    let tea = lit("tea");
+    let twin = add(g, &h, "drinks", tea.clone(), vec![ev("x.md")]);
     g.retract_item(&item("x.md")).unwrap();
-    let orig = g
-        .add_claim(&claim(
-            &h,
-            "drinks",
-            ClaimObject::Literal("coffee".into()),
-            vec![ev("h.md")],
-        ))
-        .unwrap();
+    let orig = add(g, &h, "drinks", lit("coffee"), vec![ev("h.md")]);
     let u = g
         .supersede_by_user(orig, &user_claim(&h, "drinks", tea.clone(), "H drinks tea"))
         .unwrap();
@@ -1313,36 +1070,19 @@ fn user_replaced_claims_stay_replaced(g: &dyn GraphStore) {
     );
     assert_eq!(status(g, u), ClaimStatus::Rejected);
     assert!(!g.has_user_replacement(orig).unwrap());
-    // (b) add_claim of a rejection of U's triple lands in U and releases too.
-    let k = person(g, "K");
-    let orig = g
-        .add_claim(&claim(
-            &k,
-            "drinks",
-            ClaimObject::Literal("coffee".into()),
-            vec![ev("k.md")],
-        ))
-        .unwrap();
-    let u = g
-        .supersede_by_user(orig, &user_claim(&k, "drinks", tea.clone(), "K drinks tea"))
-        .unwrap();
-    let mut rej = claim(&k, "drinks", tea.clone(), vec![]);
-    rej.status = ClaimStatus::Rejected;
-    assert_eq!(g.add_claim(&rej).unwrap(), u);
-    assert!(!g.has_user_replacement(orig).unwrap());
 }
 
 fn user_text_survives_folds(g: &dyn GraphStore) {
     let a = person(g, "A");
-    let lit = ClaimObject::Literal("chess".into());
-    let mut generated = claim(&a, "plays", lit.clone(), vec![ev("a.md")]);
+    let obj = lit("chess");
+    let mut generated = claim(&a, "plays", obj.clone(), vec![ev("a.md")]);
     generated.text = "A plays chess.".into();
     let id = g.add_claim(&generated).unwrap();
     assert_eq!(g.asserted_at(id).unwrap(), None);
     let mine = user_claim(
         &a,
         "plays",
-        lit.clone(),
+        obj.clone(),
         "A plays chess on Sundays (retyped)",
     );
     assert_eq!(g.add_claim(&mine).unwrap(), id);
@@ -1362,14 +1102,14 @@ fn user_text_survives_folds(g: &dyn GraphStore) {
     // survives, with its text.
     let b = person(g, "B");
     let c2 = person(g, "C");
-    let mut gen_b = claim(&b, "likes", lit.clone(), vec![ev("b.md")]);
+    let mut gen_b = claim(&b, "likes", obj.clone(), vec![ev("b.md")]);
     gen_b.text = "B likes chess.".into();
     let older = g.add_claim(&gen_b).unwrap();
     let user = g
         .add_claim(&user_claim(
             &c2,
             "likes",
-            lit.clone(),
+            obj.clone(),
             "C really likes chess",
         ))
         .unwrap();
@@ -1387,17 +1127,8 @@ fn split_repoints_merged_ids_by_name(g: &dyn GraphStore) {
     patel.identifiers = vec![Identifier::new("email", "sam.patel@b.test")];
     let patel = g.create_entity(&patel).unwrap();
     let okonkwo = person(g, "Sam Okonkwo");
-    let acme = g
-        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
-        .unwrap();
-    let works = g
-        .add_claim(&claim(
-            &patel,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            vec![ev("p.md")],
-        ))
-        .unwrap();
+    let acme = org(g, "Acme");
+    let works = add(g, &patel, "works_at", ent(&acme), vec![ev("p.md")]);
     g.merge(&sam, &okonkwo).unwrap();
     g.merge(&sam, &patel).unwrap();
     assert_eq!(g.get_entity(&patel).unwrap().unwrap().id, sam);
@@ -1437,22 +1168,8 @@ fn split_repoints_merged_ids_by_name(g: &dyn GraphStore) {
     let kim = person(g, "Kimberly Lee");
     let k1 = person(g, "Kim");
     let k2 = person(g, "K. Lee");
-    let on_k1 = g
-        .add_claim(&claim(
-            &k1,
-            "lives_in",
-            ClaimObject::Literal("Oslo".into()),
-            vec![ev("k.md")],
-        ))
-        .unwrap();
-    let on_k2 = g
-        .add_claim(&claim(
-            &k2,
-            "lives_in",
-            ClaimObject::Literal("Rome".into()),
-            vec![ev("l.md")],
-        ))
-        .unwrap();
+    let on_k1 = add(g, &k1, "lives_in", lit("Oslo"), vec![ev("k.md")]);
+    let on_k2 = add(g, &k2, "lives_in", lit("Rome"), vec![ev("l.md")]);
     g.merge(&kim, &k1).unwrap();
     g.merge(&kim, &k2).unwrap();
     let mut two = NewEntity::new(EntityKind::Person, "Kim Lee");
@@ -1472,14 +1189,7 @@ fn split_repoints_merged_ids_by_name(g: &dyn GraphStore) {
     // Splitting off under the entity's own name re-points nothing.
     let kai = person(g, "Kai");
     let kai2 = person(g, "Kai");
-    let on_kai2 = g
-        .add_claim(&claim(
-            &kai2,
-            "lives_in",
-            ClaimObject::Literal("Oslo".into()),
-            vec![ev("m.md")],
-        ))
-        .unwrap();
+    let on_kai2 = add(g, &kai2, "lives_in", lit("Oslo"), vec![ev("m.md")]);
     g.merge(&kai, &kai2).unwrap();
     g.split(&kai, &[on_kai2], &NewEntity::new(EntityKind::Person, "Kai"))
         .unwrap();

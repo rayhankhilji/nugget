@@ -29,3 +29,34 @@ pub(crate) fn parse_time(s: &str) -> Result<OffsetDateTime> {
     OffsetDateTime::parse(s, &Rfc3339)
         .map_err(|e| Error::Storage(format!("bad timestamp {s:?} in store: {e}")))
 }
+
+pub(crate) trait ConnExt {
+    /// Run a cached statement, returning the rows changed.
+    fn exec(&self, sql: &str, params: impl rusqlite::Params, what: &str) -> Result<usize>;
+    /// Run a cached query, collecting every row mapped by `f`.
+    fn rows<T, B: FromIterator<T>>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+        what: &str,
+    ) -> Result<B>;
+}
+
+impl ConnExt for rusqlite::Connection {
+    fn exec(&self, sql: &str, params: impl rusqlite::Params, what: &str) -> Result<usize> {
+        self.prepare_cached(sql).db(what)?.execute(params).db(what)
+    }
+
+    fn rows<T, B: FromIterator<T>>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+        what: &str,
+    ) -> Result<B> {
+        let mut stmt = self.prepare_cached(sql).db(what)?;
+        let rows = stmt.query_map(params, f).db(what)?;
+        rows.collect::<rusqlite::Result<B>>().db(what)
+    }
+}

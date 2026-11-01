@@ -3,9 +3,9 @@
 /// Longest error message kept in `last_error`, item errors, progress events and logs, in chars.
 pub const MAX_ERROR_CHARS: usize = 300;
 
-/// An error message fit for status fields and logs: control characters (a parser error can
-/// quote raw input, e.g. bytes of a mail message) become spaces, and anything beyond
-/// [`MAX_ERROR_CHARS`] characters is cut with an ellipsis.
+/// An error message fit for status fields and logs: control characters (a parser error can quote
+/// raw input, e.g. bytes of a mail message) become spaces, and anything beyond [`MAX_ERROR_CHARS`]
+/// characters is cut with an ellipsis.
 pub fn cap_error(message: impl AsRef<str>) -> String {
     let message = message.as_ref();
     let mut out = String::with_capacity(message.len().min(MAX_ERROR_CHARS * 4));

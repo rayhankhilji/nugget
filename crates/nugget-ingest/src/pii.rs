@@ -1,12 +1,4 @@
 //! Deterministic PII and secret scan.
-//!
-//! Finds payment card numbers (13–19 digits, optional single space/dash separators, Luhn-valid,
-//! plausible issuer prefix), US Social Security numbers (`AAA-GG-SSSS` with the SSA's invalid
-//! ranges excluded), IBANs (ISO 13616 mod-97 check) and API-key-like secrets (well-known token
-//! prefixes, PEM private keys, and `key = <long random value>` assignments).
-//!
-//! Only counts are reported; matched values are never returned, logged or stored. Any finding
-//! marks the item sensitive, which keeps it away from cloud triage and cloud embeddings.
 
 use serde::{Deserialize, Serialize};
 

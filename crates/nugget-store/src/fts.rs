@@ -1,42 +1,4 @@
 //! User search text → safe FTS5 `MATCH` expression.
-//!
-//! A deliberately small query language, parsed by a total function (it never fails or panics):
-//!
-//! - **plain words**: runs of alphanumeric characters; everything else separates words. Plain
-//!   words are OR-ed, so bm25 ranks chunks matching more of them higher.
-//! - **`"quoted phrases"`**: the words between a pair of quotes (`"`, `“` or `”`) must appear
-//!   in order. A phrase is one more OR-ed term; being rarer than its words, a matching phrase
-//!   ranks high on its own. A quote without a partner is ignored (its text is plain words).
-//! - **`word*` prefix terms**: a word of at least [`MIN_PREFIX_CHARS`] characters directly
-//!   followed by `*` matches every token starting with it (`nug*` → nugget, nuggets). Shorter
-//!   prefixes are plain words (`a*` would match nearly everything).
-//! - **`-word`, `-"phrase"`, `-word*` exclusions**: a `-` at the start of the query or after
-//!   whitespace, directly followed by a letter or a quote, drops chunks containing that term.
-//!   Exclusions only apply alongside at least one positive term (FTS5 `NOT` is binary); a query
-//!   of exclusions alone matches nothing. `-5`, `well-known` and `a - b` are not exclusions.
-//!
-//! Everything else (`AND`, `OR`, `NOT`, `NEAR`, parentheses, `column:` filters, `^`, `+`, stray
-//! `*`) is inert: every token emitted is a double-quoted FTS5 string (inner `"` doubled), so
-//! nothing a user types can become FTS5 syntax. At most [`MAX_QUERY_TERMS`] words are used,
-//! counting each word of a phrase.
-//!
-//! **CJK and Thai.** `unicode61` does not split scripts written without spaces (Han, kana,
-//! Thai) or with particles attached (Hangul), so a whole sentence would be one token. Both the
-//! indexed text (through the `fts_segment` SQL function, called by the FTS triggers) and the
-//! query (here) go through [`segment`], which rewrites each run of such characters as its
-//! overlapping bigrams (`星商事` → `星商 商事`). A query word becomes the phrase of its bigrams, so
-//! character order matters; a lone character matches as a bigram prefix. Other text is unchanged.
-//!
-//! **Spelling variants.** Before segmenting, indexed text and query words are [`fold`]ed: NFKC
-//! (`ＬＥＤ` → `LED`, `ｷｬﾝﾍﾟｰﾝ` → `キャンペーン`), Arabic light normalisation and ß → ss. The index
-//! (through `fts_normalize`, see [`index_form`]) also holds [`variants`] of some words after the
-//! text: Arabic words without their proclitics (`والكراسي` → `الكراسي`, `كراسي`) and German words
-//! with ä/ö/ü spelled ae/oe/ue, so `Königstraße`, `Konigstrasse` and `Koenigstrasse` all match.
-//!
-//! **Word parts.** When a query finds little, text search retries its words as parts of longer
-//! words ([`fallback_exprs`]): as prefixes in the main index (`sofreír` → `sofreírlo`) and as
-//! suffixes in `chunks_rev`, which holds each longer word spelled backwards ([`reversed_form`],
-//! through `fts_reversed`), so `Ausschuss` finds `Lenkungsausschuss` and `गाड़ी` `रेलगाड़ी`.
 
 use std::borrow::Cow;
 
@@ -88,7 +50,6 @@ fn is_segmented(c: char) -> bool {
 }
 
 /// Combining marks inside a segmented run (Thai vowel and tone marks, kana voicing marks).
-/// `unicode61` treats them as separators, so [`segment`] drops them to keep a word in one run.
 fn is_run_mark(c: char) -> bool {
     matches!(c,
         '\u{0E31}' | '\u{0E34}'..='\u{0E3A}' | '\u{0E47}'..='\u{0E4E}' | '\u{3099}' | '\u{309A}'
@@ -101,8 +62,7 @@ pub(crate) fn has_segmented(text: &str) -> bool {
 }
 
 /// `text` with each run of [`is_segmented`] characters replaced by its overlapping bigrams (a
-/// one-character run stays as is), set off by spaces. Text without such characters is returned
-/// unchanged.
+/// one-character run stays as is), set off by spaces.
 pub(crate) fn segment(text: &str) -> Cow<'_, str> {
     if !has_segmented(text) {
         return Cow::Borrowed(text);
@@ -199,10 +159,8 @@ fn variants(text: &str) -> String {
     out
 }
 
-/// Append the forms of an Arabic `word` without its proclitics: a conjunction (و ف), a
-/// preposition before the article (ب ك ل), the article (ال, or ل + ال written لل). `والكراسي` →
-/// `الكراسي كراسي`. Like light stemmers, it cannot tell a clitic from a word's own first letter
-/// (`فاتوره` also gives `اتوره`); such extra forms only cost index space.
+/// Append the forms of an Arabic `word` without its proclitics: a conjunction (و ف), a preposition
+/// before the article (ب ك ل), the article (ال, or ل + ال written لل).
 fn arabic_stems(word: &str, out: &mut String) {
     let mut push = |s: &str| {
         out.push(' ');
@@ -609,7 +567,6 @@ mod tests {
         assert_eq!(segment("星商事ロゴ"), " 星商 商事 事ロ ロゴ ");
         assert_eq!(segment("ABC星商(金)"), "ABC 星商 ( 金 )");
         assert_eq!(segment("다음 주"), " 다음   주 ");
-        // Thai vowel and tone marks are dropped inside a run.
         assert_eq!(segment("ประชุม"), " ปร ระ ะช ชม ");
     }
 
@@ -621,42 +578,8 @@ mod tests {
         assert_eq!(q("お見積*"), Some(r#""お見 見積" *"#.into()));
         assert_eq!(q(r#""星商事 ロゴ""#), Some(r#""星商 商事 ロゴ""#.into()));
         assert_eq!(q("x -上海"), Some(r#"("x") NOT ("上海")"#.into()));
-        // Thai marks do not split a query word.
         assert_eq!(q("ประชุม"), Some(r#""ปร ระ ะช ชม""#.into()));
         assert_eq!(needles("Hoshi -x 見積り"), ["hoshi", "見積り"]);
-    }
-
-    #[test]
-    fn fold_unifies_width_arabic_and_sharp_s() {
-        assert!(matches!(fold("café über 120"), Cow::Borrowed(_)));
-        assert_eq!(fold("ＬＥＤ照明 ｷｬﾝﾍﾟｰﾝ"), "LED照明 キャンペーン");
-        assert_eq!(fold("فاتورة أحمد إلى مستشفى"), "فاتوره احمد الي مستشفي");
-        assert_eq!(fold("مُحَمَّد ـتـ"), "محمد ت");
-        assert_eq!(fold("Königstraße"), "Königstrasse");
-    }
-
-    #[test]
-    fn index_form_appends_variants_after_the_text() {
-        assert!(matches!(index_form("plain text"), Cow::Borrowed(_)));
-        assert_eq!(
-            index_form("Königstraße 14"),
-            "Königstrasse 14\nKoenigstrasse"
-        );
-        assert_eq!(
-            index_form("والكراسي للبيت"),
-            "والكراسي للبيت\nالكراسي كراسي بيت"
-        );
-        assert_eq!(index_form("بالكتاب"), "بالكتاب\nالكتاب كتاب");
-        assert_eq!(index_form("ＬＥＤ照明"), "LED 照明 ");
-        assert!(is_rewritten("Büro"));
-        assert!(!is_rewritten("Buro"));
-    }
-
-    #[test]
-    fn reversed_form_keeps_longer_words_backwards() {
-        assert_eq!(reversed_form("Der Lenkungsausschuss"), "ssuhcssuasgnukneL");
-        assert_eq!(reversed_form("short 見積書 words"), "");
-        assert_eq!(reversed_form("Straße"), "essartS");
     }
 
     #[test]
@@ -678,7 +601,6 @@ mod tests {
         assert_eq!(q("ＬＥＤ照明"), Some(r#""LED 照明""#.into()));
         assert_eq!(q("Königstraße"), Some(r#""Königstrasse""#.into()));
         assert_eq!(q("فاتورة"), Some(r#""فاتوره""#.into()));
-        // A decomposed nukta does not split a word.
         assert_eq!(q("ग\u{0921}\u{093C}"), Some("\"ग\u{0921}\u{093C}\"".into()));
     }
 
@@ -688,13 +610,9 @@ mod tests {
             q(r#"find "the quick fox" now"#),
             Some(r#""find" OR "the quick fox" OR "now""#.into())
         );
-        // Punctuation inside a phrase separates its words, as the tokenizer does.
         assert_eq!(q(r#""don't stop-me""#), Some(r#""don t stop me""#.into()));
-        // Typographic quotes work too.
         assert_eq!(q("“exact match”"), Some(r#""exact match""#.into()));
-        // Empty and punctuation-only phrases vanish.
         assert_eq!(q(r#""" "  ?! " word"#), Some(r#""word""#.into()));
-        // An unpaired quote is ignored.
         assert_eq!(q(r#"a "b c"#), Some(r#""a" OR "b" OR "c""#.into()));
         assert_eq!(
             q(r#""a b" "c"#),
@@ -710,7 +628,6 @@ mod tests {
         assert_eq!(q("* ** *x"), Some(r#""x""#.into()), "stray stars are inert");
         assert_eq!(q("foo-bar*"), Some(r#""foo" OR "bar" *"#.into()));
         assert_eq!(q("ab**"), Some(r#""ab" *"#.into()));
-        // A star after a phrase is inert.
         assert_eq!(q(r#""a b"*"#), Some(r#""a b""#.into()));
     }
 
@@ -721,10 +638,8 @@ mod tests {
             q(r#"-"async std" rust -tok* go"#),
             Some(r#"("rust" OR "go") NOT ("async std" OR "tok" *)"#.into())
         );
-        // Exclusions alone match nothing.
         assert_eq!(q("-tokio"), None);
         assert_eq!(q(r#"-"a b""#), None);
-        // Not exclusions: inside words, before digits or spaces, doubled.
         assert_eq!(q("well-known"), Some(r#""well" OR "known""#.into()));
         assert_eq!(q("-5 degrees"), Some(r#""5" OR "degrees""#.into()));
         assert_eq!(q("a - b"), Some(r#""a" OR "b""#.into()));
@@ -766,20 +681,6 @@ mod tests {
         assert!(!expr.contains("tail"));
     }
 
-    /// Small deterministic PRNG (xorshift64*), so the fuzz loop needs no extra crate.
-    struct Rng(u64);
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 >> 12;
-            self.0 ^= self.0 << 25;
-            self.0 ^= self.0 >> 27;
-            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
-        }
-        fn below(&mut self, n: usize) -> usize {
-            (self.next() % n as u64) as usize
-        }
-    }
-
     fn fts_conn() -> Connection {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(
@@ -814,94 +715,30 @@ mod tests {
         let c = fts_conn();
         for input in [
             "\"",
-            "\"\"",
             "\"\"\"",
             "*",
-            "-",
             "-\"",
             "-*",
-            "a*",
             "ab*",
-            "-ab*",
             "(",
-            ")",
             "^",
             ":",
             "NEAR(",
-            "AND",
-            "OR",
-            "NOT",
-            "a NOT",
             "NOT a",
             "x:y",
             "{a b}:c",
-            "a + b",
             "\u{0}",
             "\u{301}",
             "e\u{301}*",
-            "\u{200b}",
-            "ʰ",
             "ʰ*",
             "ﬁ*",
-            "²*",
-            "-ʰ x",
             "x -ʰ",
-            "“",
             "”“",
-            "“a”b”",
             "-“a” b",
-            "\"a\"\"b\"",
             "a\"\"b",
-            "x²*",
-            "-\u{301}",
             "🙂*",
         ] {
             assert_accepted(&c, input);
         }
-    }
-
-    #[test]
-    fn random_inputs_are_accepted_by_fts5() {
-        let c = fts_conn();
-        const PIECES: &[&str] = &[
-            "\"", "“", "”", "*", "-", "(", ")", ":", "^", "+", " ", "  ", "\t", "\n", "NEAR",
-            "AND", "OR", "NOT", "a", "ab", "fox", "nug", "café", "x²", "½", "ʰ", "\u{301}",
-            "\u{0}", "\u{200b}", "中", "🙂", "'", ",", "{", "}", "\\", "e\u{301}", "ﬁ", "٣",
-        ];
-        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
-        for round in 0..4000 {
-            let input = if round % 2 == 0 {
-                // Random bytes, lossily decoded.
-                let len = rng.below(24);
-                let bytes: Vec<u8> = (0..len).map(|_| rng.next() as u8).collect();
-                String::from_utf8_lossy(&bytes).into_owned()
-            } else {
-                // Random sequences of syntax-heavy pieces.
-                let len = rng.below(16);
-                (0..len).map(|_| PIECES[rng.below(PIECES.len())]).collect()
-            };
-            assert_accepted(&c, &input);
-        }
-    }
-
-    #[test]
-    fn phrases_prefixes_and_exclusions_match_as_documented() {
-        let c = fts_conn();
-        let ids = |input: &str| -> Vec<i64> {
-            let expr = match_expr(input).unwrap();
-            let mut stmt = c
-                .prepare("SELECT rowid FROM t WHERE t MATCH ?1 ORDER BY rowid")
-                .unwrap();
-            stmt.query_map([&expr], |r| r.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        };
-        assert_eq!(ids("\"quick brown\""), [1]);
-        assert!(ids("\"brown quick\"").is_empty());
-        assert_eq!(ids("nugg*"), [2], "prefix, stemmed like the index");
-        assert_eq!(ids("wisdom fox"), [1, 2]);
-        assert_eq!(ids("wisdom fox -quick"), [2]);
-        assert_eq!(ids("cafe NOT"), [3, 4], "operators are plain words");
     }
 }

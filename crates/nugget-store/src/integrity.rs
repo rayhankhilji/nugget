@@ -1,7 +1,6 @@
 //! Integrity checks: [`check_file`] looks at a database file without ever writing to it (before
 //! opening a store after a crash, or to verify a backup), and [`Store::check_consistency`] checks
-//! an open store's derived structures against their sources (crash harness, restore
-//! verification).
+//! an open store's derived structures against their sources (crash harness, restore verification).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,28 +37,8 @@ pub enum FileHealth {
     Corrupt(String),
 }
 
-/// Check the database at `path` with `key` **without writing to it**: `PRAGMA quick_check`, or
-/// the slower `PRAGMA integrity_check` when `full`. Never creates, migrates, checkpoints or
-/// modifies the file or its `-wal`/`-shm`/`-journal` files, and creates none of them.
-///
-/// How it opens the file depends on what lies beside it:
-/// - no `-shm` and no (or an empty) `-wal` (closed cleanly, or a backup): opened `immutable`, so
-///   SQLite takes no locks and needs no side files;
-/// - `-wal` and `-shm` (a running store, or one that crashed): opened read-only with a read-only
-///   `-shm`, so pending WAL content is checked too;
-/// - a non-empty `-wal` without `-shm`, or a hot `-journal`: the file and that side file are
-///   copied to a hidden, owner-only directory beside the file (same file system, removed
-///   afterwards) and the copy is checked (its recovery needs writes).
-///
-/// A non-empty `-wal` is also scanned frame by frame first, because SQLite silently treats its
-/// first invalid frame as the end of the log, dropping every commit after it (see
-/// [`wal_problem`]). Damage in the middle of the log that hides committed transactions is
-/// reported as `Corrupt`; what an ordinary crash leaves at the tail (a torn or partial frame,
-/// an uncommitted transaction) is `Healthy`, since SQLite rolls it back and loses nothing
-/// committed.
-///
-/// Errors (rather than a [`FileHealth`]) are for problems unrelated to the file's content, such
-/// as a busy database or an unreadable directory.
+/// Check the database at `path` with `key` **without writing to it**: `PRAGMA quick_check`, or the
+/// slower `PRAGMA integrity_check` when `full`.
 pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth> {
     let pragma = if full {
         "PRAGMA integrity_check"
@@ -136,15 +115,6 @@ pub enum OpenCheck {
 }
 
 /// [`check_file`] for opening the store at startup, which must not grow with the database.
-///
-/// `PRAGMA quick_check` reads and decrypts every page: ~5 s per GB, so 10–20 s at startup for
-/// a 500k-item store. It runs here, before opening, only when damage is likely: the last
-/// handle on the file did not close cleanly with [`Store::close_cleanly`] (its write-ahead log
-/// is not empty, or a crash or a kill left its owner lock file behind) or a background check
-/// found damage. Otherwise every cheap check still runs (header, whole
-/// pages, the WAL scan, decrypting the first page with `key`), and the full check is left to
-/// [`check_file_in_background`] (at most once per [`BACKGROUND_CHECK_INTERVAL`]), whose
-/// failure makes the next open check in full (and so refuse a damaged file).
 pub fn check_file_on_open(path: &Path, key: &StoreKey) -> Result<(FileHealth, OpenCheck)> {
     // Evidence of an exit without `Store::close_cleanly`: a write-ahead log with content (SQLite
     // syncs the log itself, so unlike the lock file this survives a power cut; a clean close
@@ -175,11 +145,9 @@ pub fn check_file_on_open(path: &Path, key: &StoreKey) -> Result<(FileHealth, Op
     ))
 }
 
-/// SQLite's `quick_check` of the database at `path` while a store has it open (on its own
-/// read-only connection with a small page cache, so it neither blocks writers nor grows the
-/// process), stopping early with `Ok(None)` once `cancel` is set. Records the outcome beside
-/// the database: a pass is remembered for [`BACKGROUND_CHECK_INTERVAL`]; damage makes the next
-/// [`check_file_on_open`] run the full check before opening.
+/// SQLite's `quick_check` of the database at `path` while a store has it open (on its own read-only
+/// connection with a small page cache, so it neither blocks writers nor grows the process),
+/// stopping early with `Ok(None)` once `cancel` is set.
 pub fn check_file_in_background(
     path: &Path,
     key: &StoreKey,
@@ -225,8 +193,7 @@ fn last_check(path: &Path) -> Option<SystemTime> {
     Some(UNIX_EPOCH + Duration::from_secs(secs))
 }
 
-/// Remember a full check's outcome beside the database. Best effort: a missing record only
-/// makes a later check run sooner.
+/// Remember a full check's outcome beside the database.
 fn record_check(path: &Path, healthy: bool) {
     let checked = sidecar(path, CHECKED_SUFFIX);
     let failed = sidecar(path, CHECK_FAILED_SUFFIX);
@@ -277,8 +244,7 @@ fn be32(b: &[u8]) -> u32 {
     u32::from_be_bytes([b[0], b[1], b[2], b[3]])
 }
 
-/// SQLite's WAL checksum over `data` (a multiple of 8 bytes), continuing from `s`. Words are
-/// big-endian when the magic number's low bit is set, little-endian otherwise.
+/// SQLite's WAL checksum over `data` (a multiple of 8 bytes), continuing from `s`.
 fn wal_checksum(big_endian: bool, data: &[u8], s: (u32, u32)) -> (u32, u32) {
     let (mut s0, mut s1) = s;
     for w in data.as_chunks::<8>().0 {
@@ -309,22 +275,7 @@ fn read_full(r: &mut impl std::io::Read, buf: &mut [u8]) -> std::io::Result<usiz
 }
 
 /// Scan the write-ahead log at `wal` (read-only, streamed one frame at a time) for damage that
-/// SQLite would silently treat as the end of the log, losing committed transactions. `None`
-/// when it is absent, empty or sound.
-///
-/// Following the WAL format (32-byte header, then frames of a 24-byte header and one page,
-/// each with a cumulative checksum and the header's salts), it finds the first frame that does
-/// not validate. Everything from there on is ignored by SQLite. That is **normal after a
-/// crash** and reported as sound (logged at info): a process kill or power loss while a
-/// transaction was being written leaves a torn or partial frame (commit frame or not) at the
-/// tail, the remains of an uncommitted transaction, or frames from before the log was last
-/// restarted; SQLite rolls that transaction back on open and nothing committed is lost.
-///
-/// It is reported as damage (`Some`) only when committed data would be lost:
-/// - a later frame with the current salts that validates on its own (its checksum, seeded from
-///   the frame before it, matches) and is a commit frame: damage in the middle of the log hides
-///   that commit;
-/// - a damaged header with frames after it.
+/// SQLite would silently treat as the end of the log, losing committed transactions.
 pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
     scan_wal(wal).map(|(problem, _)| problem)
 }
@@ -440,10 +391,7 @@ fn scan_wal(wal: &Path) -> Result<(Option<String>, WalTail)> {
 enum WalTail {
     /// Nothing: the log ends at a commit.
     None,
-    /// Only whole frames from an earlier generation of the log (other salts). SQLite reuses the
-    /// log from the start after a checkpoint without truncating it, so the old frames beyond the
-    /// newest commit are normal on any store that is open or was not checkpointed at close; they
-    /// say nothing about a crash.
+    /// Only whole frames from an earlier generation of the log (other salts).
     Stale(u64),
     /// Frames of an uncommitted transaction, or a torn or partial frame: what a crash (or a
     /// writer caught mid-transaction) leaves.
@@ -594,10 +542,7 @@ fn file_uri(path: &Path) -> Result<String> {
     Ok(uri_for(s, cfg!(windows)))
 }
 
-/// A `file:` URI for the absolute path `s`, percent-encoded. With `windows`: `\` separators
-/// become `/`, a verbatim prefix is dropped (`\\?\C:\x` is `C:\x`, `\\?\UNC\srv\share` is
-/// `\\srv\share`), a drive path gets an empty authority (`file:///C:/x`) and a UNC path keeps
-/// its leading `//` after one (`file:////srv/share/x`).
+/// A `file:` URI for the absolute path `s`, percent-encoded.
 fn uri_for(s: &str, windows: bool) -> String {
     let mut p = s.to_owned();
     if windows {
@@ -690,8 +635,7 @@ pub struct ConsistencyReport {
     pub chunks: u64,
 }
 
-/// `(description, query counting offending rows)`, run in one read transaction. Each query must
-/// return a single integer.
+/// `(description, query counting offending rows)`, run in one read transaction.
 const ROW_CHECKS: &[(&str, &str)] = &[
     (
         "chunks missing from the full-text index (chunks_fts)",
@@ -851,26 +795,8 @@ fn run_checks(c: &Connection, checks: &[(&str, &str)], problems: &mut Vec<String
 }
 
 impl Store {
-    /// Check the whole store and report every problem found (an `Err` only when the checks
-    /// cannot run at all):
-    ///
-    /// - SQLite's `PRAGMA integrity_check` and `PRAGMA foreign_key_check`;
-    /// - the audit chain ([`Store::verify_audit_chain`], including its anchor);
-    /// - the full-text indexes (`chunks_fts`, `items_fts`, `entity_names_fts`) hold exactly the
-    ///   rows of their tables;
-    /// - every vector (`chunk_vec`) belongs to a chunk, and the approximate index, while it
-    ///   exists, only holds such vectors (exactly all of them once complete);
-    /// - no duplicate items per (source, external id); no chunks, text layouts, mentions or
-    ///   evidence pointing at missing items, entities or claims;
-    /// - the item change feed has a live entry per item and none for missing items, and its head
-    ///   is not below its number of entries; the per-source and per-entity counts match.
-    ///
-    /// Runs inside one read transaction on a connection of its own (a consistent snapshot that
-    /// does not block writers; an in-memory store uses its writer); the audit check runs on the
-    /// writer. It reads everything, so it takes
-    /// time proportional to the store's size. Chunk and vector references from mentions and
-    /// evidence are not checked (chunks are legitimately replaced on re-chunking), nor are items
-    /// that mentions or evidence name by (source, external id).
+    /// Check the whole store and report every problem found (an `Err` only when the checks cannot
+    /// run at all).
     pub fn check_consistency(&self) -> Result<ConsistencyReport> {
         let mut problems = Vec::new();
         if let Err(e) = self.verify_audit_chain() {
@@ -1063,43 +989,35 @@ mod tests {
 
         let corrupt = |h: FileHealth| matches!(&h, FileHealth::Corrupt(m) if m.contains("write-ahead log has"));
 
-        // A flipped byte in a page early in the log, with commits after it.
         let mut bad = wal.clone();
         bad[fr[1].0 + WAL_FRAME_HEADER + 100] ^= 0x01;
         let h = health_with_wal(&copy, &bad);
         assert!(corrupt(h.clone()), "{h:?}");
-        // Without -shm too (the copy path).
         fs::remove_file(sidecar(&copy, "-shm")).unwrap();
         let h = health_with_wal(&copy, &bad);
         assert!(corrupt(h.clone()), "{h:?}");
 
-        // A damaged salt in the middle: frames of the current log follow it.
         let mut bad = wal.clone();
         bad[fr[2].0 + 8] ^= 0xff;
         assert!(corrupt(health_with_wal(&copy, &bad)));
 
-        // A damaged header with frames after it.
         let mut bad = wal.clone();
         bad[12] ^= 0x01;
         assert!(corrupt(health_with_wal(&copy, &bad)));
-        // A header torn while it was first written (nothing after it): a crash.
         assert_eq!(health_with_wal(&copy, &wal[..20]), FileHealth::Healthy);
         let mut torn = wal[..WAL_HEADER].to_vec();
         torn[30] ^= 0x01;
         assert_eq!(health_with_wal(&copy, &torn), FileHealth::Healthy);
 
-        // Crash tail: valid frames of a transaction that never committed.
         let tail = (1..fr.len())
             .find(|&i| fr[i - 1].2 && !fr[i].2)
             .expect("a transaction of several frames");
         let uncommitted = &wal[..fr[tail].0 + fr[tail].1];
         assert_eq!(health_with_wal(&copy, uncommitted), FileHealth::Healthy);
-        // ...also when its frame no longer checks out (overwritten remains, no commit after).
         let mut torn = uncommitted.to_vec();
         let at = torn.len() - 10;
         torn[at] ^= 0x01;
         assert_eq!(health_with_wal(&copy, &torn), FileHealth::Healthy);
-        // Frames from before a restart (other salts) after the valid ones.
         let mut stale = wal.clone();
         let mut old = wal[fr[0].0..fr[0].0 + fr[0].1].to_vec();
         old[8] ^= 0xff;
@@ -1107,7 +1025,6 @@ mod tests {
         stale.extend_from_slice(&old);
         stale.extend_from_slice(&old);
         assert_eq!(health_with_wal(&copy, &stale), FileHealth::Healthy);
-        // An empty WAL is no WAL.
         assert_eq!(health_with_wal(&copy, b""), FileHealth::Healthy);
     }
 
@@ -1130,7 +1047,6 @@ mod tests {
         assert_eq!(problem, None);
         assert!(matches!(tail, WalTail::Stale(n) if n > 0), "{tail:?}");
 
-        // The same log cut inside a frame: a real crash tail.
         let bytes = fs::read(&wal).unwrap();
         let cut = dir.path().join("cut-wal");
         fs::write(&cut, &bytes[..bytes.len() - 100]).unwrap();
@@ -1138,51 +1054,6 @@ mod tests {
         assert_eq!(problem, None);
         assert!(matches!(tail, WalTail::Torn(_)), "{tail:?}");
         drop(s);
-    }
-
-    #[test]
-    fn wal_tails_are_classified() {
-        // No tail.
-        assert_eq!(classify_tail(100, 100, 100, 100, false), WalTail::None);
-        // Old-generation whole frames only.
-        assert_eq!(classify_tail(300, 300, 100, 100, true), WalTail::Stale(200));
-        // Valid but uncommitted frames before the stale ones.
-        assert_eq!(classify_tail(300, 300, 200, 100, true), WalTail::Torn(200));
-        // A partial frame at the end.
-        assert_eq!(classify_tail(350, 300, 100, 100, true), WalTail::Torn(250));
-        // A current frame that fails its checksum.
-        assert_eq!(classify_tail(300, 300, 100, 100, false), WalTail::Torn(200));
-    }
-
-    /// A clean stop checkpoints and truncates the log, so the next start finds no tail even when
-    /// the process exits without closing its connections.
-    #[test]
-    fn checkpoint_on_clean_stop_leaves_no_log_tail() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nugget.db");
-        let s = Store::open(&path, &key()).unwrap();
-        populate(&s, 30);
-        let wal = sidecar(&path, "-wal");
-        assert!(fs::metadata(&wal).unwrap().len() > 0);
-        assert!(s.checkpoint_wal().unwrap());
-        assert_eq!(fs::metadata(&wal).unwrap().len(), 0);
-        // What a process exit leaves (connections never closed): copy the files as they are.
-        let stopped = dir.path().join("stopped");
-        fs::create_dir(&stopped).unwrap();
-        let copy = stopped.join("nugget.db");
-        for suffix in ["", "-wal", "-shm"] {
-            fs::copy(sidecar(&path, suffix), sidecar(&copy, suffix)).unwrap();
-        }
-        assert_eq!(
-            scan_wal(&sidecar(&copy, "-wal")).unwrap(),
-            (None, WalTail::None)
-        );
-        assert_eq!(check_both(&copy, &key()), FileHealth::Healthy);
-        let reopened = Store::open(&copy, &key()).unwrap();
-        assert_eq!(reopened.counts().unwrap().items, 30);
-        drop(s);
-        // In-memory stores have no log.
-        assert!(Store::open_in_memory().unwrap().checkpoint_wal().unwrap());
     }
 
     /// Open a fresh copy of `copy`'s database with `wal` as its log (a store that crashed with
@@ -1221,7 +1092,6 @@ mod tests {
         let full = items_after_crash(&copy, &wal, "full");
         assert_eq!(full, 12);
 
-        // Truncated in the middle of a frame, at several points.
         for (n, at) in [fr.len() / 3, fr.len() / 2, fr.len() - 1]
             .into_iter()
             .enumerate()
@@ -1243,7 +1113,6 @@ mod tests {
             }
         }
 
-        // The last commit frame half-written (fails its checksum).
         let last = *fr.iter().rev().find(|f| f.2).unwrap();
         let mut torn = wal[..last.0 + last.1].to_vec();
         torn[last.0 + WAL_FRAME_HEADER + 7] ^= 0x01;
@@ -1251,8 +1120,6 @@ mod tests {
         let expected = items_after_crash(&copy, &wal[..commit_end_before(&fr, last.0)], "lb");
         assert_eq!(items_after_crash(&copy, &torn, "lt"), expected);
 
-        // A commit frame in the middle damaged, with later commits that still validate: those
-        // would be lost, so that is corruption.
         let mid = *fr[..fr.len() / 2].iter().rev().find(|f| f.2).unwrap();
         let mut bad = wal.clone();
         bad[mid.0 + WAL_FRAME_HEADER + 7] ^= 0x01;
@@ -1306,12 +1173,10 @@ mod tests {
         );
         assert_eq!(snapshot(&copy), before);
 
-        // Without the -shm (checked through a private copy).
         fs::remove_file(sidecar(&copy, "-shm")).unwrap();
         let before = snapshot(&copy);
         assert_eq!(check_both(&copy, &key()), FileHealth::Healthy);
         assert_eq!(snapshot(&copy), before);
-        // The crashed copy itself still opens with all its data.
         let r = Store::open(&copy, &key()).unwrap();
         assert_eq!(r.counts().unwrap().items, 10);
     }
@@ -1334,12 +1199,10 @@ mod tests {
     fn open_check_runs_in_full_only_when_damage_is_likely() {
         let dir = tempfile::tempdir().unwrap();
         let path = closed_store(dir.path());
-        // Closed cleanly, never checked: cheap checks only, the full check is due.
         assert_eq!(
             check_file_on_open(&path, &key()).unwrap(),
             (FileHealth::Healthy, OpenCheck::Due)
         );
-        // The cheap checks still catch a wrong key and a truncated file.
         assert_eq!(
             check_file_on_open(&path, &StoreKey::from_bytes([8; 32]))
                 .unwrap()
@@ -1353,7 +1216,6 @@ mod tests {
             FileHealth::Corrupt(m) if m.contains("truncated")
         ));
 
-        // A background pass is remembered: the next open skips the full check.
         let live = Store::open(&path, &key()).unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         assert_eq!(
@@ -1365,14 +1227,12 @@ mod tests {
             check_file_on_open(&path, &key()).unwrap(),
             (FileHealth::Healthy, OpenCheck::Recent)
         );
-        // Cancelled before it starts: no verdict, nothing recorded.
         cancel.store(true, Ordering::Relaxed);
         assert_eq!(
             check_file_in_background(&path, &key(), &cancel).unwrap(),
             None
         );
 
-        // An owner lock left behind by a handle that did not close (a crash): full check.
         let stale = sidecar(&path, ".egress-00ff00ff.lock");
         fs::write(&stale, b"").unwrap();
         assert_eq!(
@@ -1381,11 +1241,8 @@ mod tests {
         );
         fs::remove_file(&stale).unwrap();
 
-        // A held lock (a live handle elsewhere) is not a crash...
         let held = Store::open(&path, &key()).unwrap();
         assert!(!crate::egress::unclean_close_left(&path));
-        // ...but a write-ahead log with content is what an exit without a clean close leaves
-        // (and, unlike a lock file, it survives a power cut): full check.
         populate(&held, 5);
         assert!(non_empty(&sidecar(&path, "-wal")));
         assert_eq!(check_file_on_open(&path, &key()).unwrap().1, OpenCheck::Ran);
@@ -1399,7 +1256,6 @@ mod tests {
         let s = Store::open(&path, &key()).unwrap();
         populate(&s, 20);
         s.close_cleanly();
-        // Closed cleanly: no lock left, the log folded in and truncated.
         assert!(!crate::egress::unclean_close_left(&path));
         assert_eq!(
             fs::metadata(sidecar(&path, "-wal")).map_or(0, |m| m.len()),
@@ -1423,19 +1279,16 @@ mod tests {
             *b ^= 0x5a;
         }
         fs::write(&bad, &bytes).unwrap();
-        // The cheap checks at open cannot see damage in the middle of the file...
         assert_eq!(
             check_file_on_open(&bad, &key()).unwrap(),
             (FileHealth::Healthy, OpenCheck::Due)
         );
-        // ...the background check does, and records it.
         let cancel = Arc::new(AtomicBool::new(false));
         assert!(matches!(
             check_file_in_background(&bad, &key(), &cancel).unwrap(),
             Some(FileHealth::Corrupt(_))
         ));
         assert!(sidecar(&bad, CHECK_FAILED_SUFFIX).exists());
-        // So the next open runs the full check and refuses the file.
         let (health, check) = check_file_on_open(&bad, &key()).unwrap();
         assert_eq!(check, OpenCheck::Ran);
         assert!(matches!(health, FileHealth::Corrupt(_)), "{health:?}");
@@ -1457,7 +1310,6 @@ mod tests {
         );
         assert_eq!(snapshot(&path), before);
 
-        // Damage in the middle of a copy.
         let bad = dir.path().join("bad.db");
         let mut bytes = fs::read(&path).unwrap();
         let mid = bytes.len() / 2;

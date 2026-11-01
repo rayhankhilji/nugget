@@ -1,49 +1,7 @@
 //! The background triage job: labels indexed items (junk / sensitive) with a local model.
-//!
-//! Triage used to run inline in the pipeline, one model call per item before the item was
-//! written, so a new folder only became searchable after every file had been through the chat
-//! model (QA GG2-6), and a small model's "junk" verdict stored an item without chunks, so it
-//! could never be found (GG2-7). Now:
-//!
-//! - **Search first.** The pipeline writes every item with its chunks and embeddings right
-//!   away. An item that still needs triage carries `triage: {state: "pending"}` and, until
-//!   triage has run, `sensitive: true`: it is searchable locally at once and kept away from
-//!   cloud models (fail closed). Items whose labels are already known skip the model: PII found
-//!   by the deterministic scan (`state: "skipped"`), or unchanged content that was triaged
-//!   before (the earlier labels are kept).
-//! - **Labels never hide.** Triage only rewrites metadata (`junk`, `sensitive`, `triage`); the
-//!   item's chunks, vectors and text are never touched, whatever the verdict.
-//! - **Batched.** Small items share one request (up to [`IngestConfig::triage_batch`] items and
-//!   [`IngestConfig::triage_batch_chars`] characters); the reply is two booleans per item. A
-//!   batch whose reply is unusable is retried one item per request; an item that fails
-//!   [`MAX_ATTEMPTS`] times is marked `state: "failed"` and stays sensitive.
-//! - **Failures are retried.** A failed item records how often the model failed on it
-//!   (`triage.failures`: unusable replies, server errors, timeouts; not an unreachable or
-//!   unavailable provider, so an outage never uses up an item's tries) and when
-//!   (`triage.failed_at`, Unix seconds). While the queue is empty and a triage model is
-//!   routable (and power allows), the job requeues failed items whose wait
-//!   ([`IngestConfig::triage_retry_ms`], fourfold per failure, capped at a day) has passed: at
-//!   start, when the model labels items again after an outage, on
-//!   [`Ingest::triage_now`](crate::Ingest::triage_now) (a model became ready), and when the
-//!   earliest waiting item is due. Until the model has labelled something since its last
-//!   outage, a scan requeues one item only (a probe); otherwise at most [`PAGE`]. Requeued
-//!   items go one per request, and their failures do not slow down other items. After
-//!   [`IngestConfig::triage_max_failures`] failures an item stays failed until its content
-//!   changes. A requeued item is `pending` again (and still sensitive, also if triage is turned
-//!   off meanwhile), so a restart picks it up; it leaves `TriageProgress::failed` while it is
-//!   retried.
-//! - **Low priority.** The job uses the model only while no interactive request (Ask, Double
-//!   Tap, agent) is in flight or ended within the grace period ([`Foreground`]), and abandons
-//!   its request the moment one starts; the batch is retried later. It also pauses under the
-//!   power policy, like backfills.
-//! - **Visible.** `ingest.status.triage` reports the backlog, counters and what the job waits
-//!   for ([`TriageProgress`]).
-//! - **Restart-safe.** At start the job lists `pending` items from the store.
-//!
-//! [`IngestConfig::triage_batch`]: crate::IngestConfig::triage_batch
-//! [`IngestConfig::triage_batch_chars`]: crate::IngestConfig::triage_batch_chars
-//! [`IngestConfig::triage_retry_ms`]: crate::IngestConfig::triage_retry_ms
-//! [`IngestConfig::triage_max_failures`]: crate::IngestConfig::triage_max_failures
+//! Items are searchable before triage (GG2-6) and labels only rewrite metadata (GG2-7). Pending,
+//! failed and retried items stay sensitive (fail closed); model failures are retried with
+//! backoff, outages never use up an item's tries, and the job yields to interactive model use.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -68,18 +26,12 @@ const PAGE: usize = 256;
 /// Characters of document text per request before any prefill has been measured.
 const FIRST_REQUEST_CHARS: usize = 2_000;
 /// Fewest characters of document text per request unless the hardware is very slow (see
-/// [`request_budget`]). Every request
-/// pays the fixed part of the prompt (instructions, schema, chat template) again, so requests of
-/// one or two short items spend most of their time on it (HH2 JJ1-1 run 41269745457: about
-/// 6.5 s per item with the 4B, against about 1 s per item in batches of 8).
+/// [`request_budget`]): every request pays the fixed part of the prompt again.
 const MIN_REQUEST_CHARS: usize = 1_000;
 /// Fewest characters per request on hardware so slow that even [`MIN_REQUEST_CHARS`] would take
 /// more than twice `triage_request_ms` (a request must carry some text).
 const SLOWEST_REQUEST_CHARS: usize = 300;
-/// The fixed part of every request, in characters: the instructions, the preamble naming the
-/// request's tag code (EE4 TB-1) and the chat template.
-/// Counted in the measured prefill rate, so the time to the first token is not charged to the
-/// document text alone (that made a short batch look slow and shrank every later one).
+/// The fixed part of every request, in characters (instructions, preamble, chat template).
 fn fixed_prompt_chars() -> usize {
     ai::TRIAGE_SYSTEM.chars().count() + ai::TRIAGE_PREAMBLE.chars().count() + 200
 }
@@ -109,22 +61,21 @@ pub(crate) struct TriageQueue {
     done: u64,
     skipped: u64,
     failed: u64,
-    /// Items counted in `failed` (so a retried item leaves the count, and is never counted
-    /// twice).
+    /// Items counted in `failed` (so a retried item leaves the count, and is never counted twice).
     counted_failed: HashSet<ItemRef>,
     /// Scan for failed items to retry at the next chance (at start, after an outage, on
     /// `triage_now`).
     retry_due: bool,
     /// When the earliest failed item waiting for its retry is due.
     next_retry_at: Option<tokio::time::Instant>,
-    /// The model labelled items since the provider last failed to answer (so failed items may
-    /// be retried in bulk, not only one probe at a time).
+    /// The model labelled items since the provider last failed to answer (so failed items may be
+    /// retried in bulk, not only one probe at a time).
     healthy: bool,
     /// Requeued failed items: their failures do not back off the whole job.
     retrying: HashSet<ItemRef>,
     state: TriageState,
-    /// Measured prefill cost of triage prompts, ms per character of document text
-    /// (exponential moving average of time to first token over prompt size).
+    /// Measured prefill cost of triage prompts, ms per character of document text (exponential
+    /// moving average of time to first token over prompt size).
     ms_per_char: Option<f64>,
 }
 
@@ -293,8 +244,8 @@ pub(crate) async fn run(inner: Arc<Inner>) {
             }
             BatchOutcome::Nothing => consecutive_failures = 0,
             BatchOutcome::Yielded => {}
-            // A retried item failing again says nothing about the provider: no backoff, so
-            // one poison item never holds up fresh ones.
+            // A retried item failing again says nothing about the provider: no backoff, so one
+            // poison item never holds up fresh ones.
             BatchOutcome::Failed { global: false } => {}
             BatchOutcome::Failed { global: true } => {
                 consecutive_failures += 1;
@@ -357,10 +308,8 @@ async fn recover(inner: &Arc<Inner>) {
     }
 }
 
-/// Give items written before background triage existed (no `triage.state`) the labels the
-/// pipeline gives new items: the sensitivity rules, then pending triage (or unknown). Their
-/// old `sensitive: false` came from patterns or a model verdict only (QA GG4-6, GG5-2).
-/// Metadata only (`Store::set_item_metadata`); pending items are queued by the scan after.
+/// Give items written before background triage existed (no `triage.state`) the labels the pipeline
+/// gives new items: the sensitivity rules, then pending triage (or unknown).
 async fn migrate_legacy(inner: &Arc<Inner>) {
     let mut after: Option<ItemRef> = None;
     let mut migrated = 0u64;
@@ -475,8 +424,8 @@ enum BatchOutcome {
     Labelled,
     Nothing,
     Yielded,
-    /// `global`: the failure should back off the whole job (the provider or store failed, or
-    /// items other than retried ones failed).
+    /// `global`: the failure should back off the whole job (the provider or store failed, or items
+    /// other than retried ones failed).
     Failed {
         global: bool,
     },
@@ -733,17 +682,17 @@ pub(crate) fn request_budget(inner: &Inner) -> usize {
     )
 }
 
-/// [`request_budget`] for a measured prefill rate (ms per prompt character), a target in ms and
-/// a cap in characters.
+/// [`request_budget`] for a measured prefill rate (ms per prompt character), a target in ms and a
+/// cap in characters.
 fn budget_chars(ms_per_char: Option<f64>, target_ms: u64, cap: usize) -> usize {
     let cap = cap.max(MIN_REQUEST_CHARS);
     let Some(rate) = ms_per_char.filter(|r| *r > 0.0) else {
         return FIRST_REQUEST_CHARS.min(cap);
     };
     let fits = |ms: f64| ((ms / rate) as usize).saturating_sub(fixed_prompt_chars());
-    // The floor keeps batches large enough to label well, but on very slow hardware it may
-    // stretch a request to at most twice the target; beyond that requests get smaller, down
-    // to `SLOWEST_REQUEST_CHARS` (EE4 security review TB-2).
+    // The floor keeps batches large enough to label well, but on very slow hardware it may stretch
+    // a request to at most twice the target; beyond that requests get smaller, down to
+    // `SLOWEST_REQUEST_CHARS` (EE4 security review TB-2).
     let floor = fits(2.0 * target_ms as f64).clamp(SLOWEST_REQUEST_CHARS, MIN_REQUEST_CHARS);
     fits(target_ms as f64).clamp(floor, cap)
 }
@@ -762,11 +711,9 @@ fn record_prefill(inner: &Inner, chars: usize, first_token: Option<Duration>) {
     });
 }
 
-/// Label `batch` with requests of at most `budget` characters of document text: one request for
-/// a packed batch, or, for a single item longer than the budget, one request per part (the
-/// item is sensitive if any part is; junk is the first part's verdict). Between requests and
-/// during each one, an interactive request makes it give up (`Err(None)`): the request in
-/// flight is dropped, which closes its connection.
+/// Label `batch` with requests of at most `budget` characters of document text: one request for a
+/// packed batch, or, for a single item longer than the budget, one request per part (the item is
+/// sensitive if any part is; junk is the first part's verdict).
 async fn label(
     inner: &Arc<Inner>,
     provider: &dyn Provider,
@@ -842,8 +789,8 @@ async fn label(
         )))
 }
 
-/// Errors that say the provider could not be reached or would not serve (down, unavailable,
-/// refused us), not that the model failed on these items: they never count toward an item's
+/// Errors that say the provider could not be reached or would not serve (down, unavailable, refused
+/// us), not that the model failed on these items: they never count toward an item's
 /// `triage.failures`, so an outage does not use up its tries.
 fn is_outage(e: &Error) -> bool {
     matches!(
@@ -881,8 +828,7 @@ async fn resolve_without_model(inner: &Arc<Inner>) {
     lock(&inner.triage).skipped += n;
 }
 
-/// The item if it is still pending, with the text triage reads (the stored text, else its
-/// chunks).
+/// The item if it is still pending, with the text triage reads (the stored text, else its chunks).
 fn load(store: &nugget_store::Store, r: &ItemRef, keep_text: bool) -> Result<Option<Loaded>> {
     let Some(item) = store.get_item(r)? else {
         return Ok(None);
@@ -913,8 +859,6 @@ enum Verdict<'a> {
 }
 
 /// Write a verdict into the metadata of `read` (as read for triage), under the write lock.
-/// Nothing is written if the item changed or is no longer pending meanwhile (a concurrent
-/// pipeline write wins). Returns the item's new `sensitive` flag if written.
 fn apply(inner: &Inner, read: &Item, verdict: Verdict<'_>) -> Result<Option<bool>> {
     let store = &inner.store;
     let _w = lock(&inner.write_lock);
@@ -922,7 +866,6 @@ fn apply(inner: &Inner, read: &Item, verdict: Verdict<'_>) -> Result<Option<bool
         return Ok(None);
     };
     // A changed content hash means the pipeline rewrote the item (and queued it again).
-    // `updated_at` may move for other reasons (the re-embed job), which do not affect labels.
     if now.content_hash != read.content_hash || !is_pending(&now.metadata) {
         return Ok(None);
     }
@@ -970,8 +913,8 @@ fn apply(inner: &Inner, read: &Item, verdict: Verdict<'_>) -> Result<Option<bool
             true
         }
         Verdict::Off => {
-            // An item whose triage failed before stays sensitive until a model labels it,
-            // whatever `assume_unflagged_safe` says.
+            // An item whose triage failed before stays sensitive until a model labels it, whatever
+            // `assume_unflagged_safe` says.
             let failed_before = m.get("triage").is_some_and(|t| t.get("failures").is_some());
             m.insert("triage".into(), json!({"state": UNKNOWN, "reason": "off"}));
             // Unknown counts as sensitive unless the user opted out (GG5-2).
@@ -991,8 +934,7 @@ fn unix_now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
-/// Requeue failed items whose retry wait has passed (see the module docs). Returns how many
-/// were requeued and when to look again (`None`: only when woken).
+/// Requeue failed items whose retry wait has passed (see the module docs).
 async fn retry_failed(inner: &Arc<Inner>) -> (usize, Option<Duration>) {
     let max = inner.cfg.triage_max_failures;
     if !inner.cfg.triage || max <= 1 {
@@ -1098,8 +1040,7 @@ async fn retry_failed(inner: &Arc<Inner>) -> (usize, Option<Duration>) {
     (n, next)
 }
 
-/// Mark a failed item `pending` again, keeping its failure count and time. Under the write
-/// lock; nothing is written if it is no longer failed. Returns whether it was written.
+/// Mark a failed item `pending` again, keeping its failure count and time.
 fn reopen(inner: &Inner, r: &ItemRef) -> Result<bool> {
     let store = &inner.store;
     let _w = lock(&inner.write_lock);
@@ -1115,8 +1056,7 @@ fn reopen(inner: &Inner, r: &ItemRef) -> Result<bool> {
     }
     t.insert("state".into(), Value::String(PENDING.into()));
     t.remove("error");
-    // Items that failed before failures were counted had one failure. Keeping the count also
-    // marks the item as failed before (see `Verdict::Off`).
+    // Items that failed before failures were counted had one failure.
     if !t.get("failures").is_some_and(Value::is_u64) {
         t.insert("failures".into(), json!(1));
     }

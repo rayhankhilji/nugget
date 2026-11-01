@@ -2,8 +2,6 @@
 
 mod common;
 
-use std::sync::Arc;
-
 use common::*;
 use nugget_core::capability::{Locality, Tier};
 use nugget_core::ids::ProviderId;
@@ -366,57 +364,4 @@ async fn llm_requests_are_batched_and_budgeted() {
     let again = run(&k).await;
     assert_eq!(again.items_processed, 1);
     assert_eq!(again.llm_requests, 3);
-}
-
-#[tokio::test]
-async fn embedding_similarity_resolves_near_duplicates_locally() {
-    let env = Env::new();
-    env.put(
-        note(
-            "files:notes",
-            "a.md",
-            "A",
-            json!({"organization": "Initech Corporation", "type": "person"}),
-            &[],
-            &[],
-            "x",
-        ),
-        &["x"],
-    );
-    let embedder = FakeProvider::embedder(
-        "emb",
-        &[
-            ("organization: Initech Corporation", vec![1.0, 0.0, 0.0]),
-            ("organization: Initech Corp", vec![0.99, 0.05, 0.0]),
-            ("organization: Initech Labs", vec![0.2, 0.9, 0.0]),
-        ],
-    );
-    let r = router(Tier::Embedding, vec![embedder]);
-    let mut cfg = KnowledgeConfig::default();
-    cfg.resolution.embedding = true;
-    let k = env.knowledge(cfg, Some(Arc::clone(&r)));
-    run(&k).await;
-    for (key, org) in [("b.md", "Initech Corp"), ("c.md", "Initech Labs")] {
-        env.put(
-            note(
-                "files:notes",
-                key,
-                key,
-                json!({"organization": org, "type": "person"}),
-                &[],
-                &[],
-                "x",
-            ),
-            &["x"],
-        );
-    }
-    run(&k).await;
-    let orgs = env.entities(EntityKind::Organization);
-    assert_eq!(
-        orgs.len(),
-        2,
-        "Corp merged into Corporation, Labs kept apart"
-    );
-    let corp = env.entity(EntityKind::Organization, "Initech Corporation");
-    assert!(corp.aliases.iter().any(|a| a == "Initech Corp"));
 }

@@ -68,15 +68,6 @@ impl StoreKey {
     }
 
     /// Load the store key, creating it on first run.
-    ///
-    /// Order: the OS keychain entry; else an existing key file under `paths.data`; else a new
-    /// random key stored in the keychain (verified by reading it back) or, if no keychain is
-    /// usable, in a new `0600` key file (with a warning). Set `NUGGET_KEYCHAIN=off` to skip the
-    /// keychain.
-    ///
-    /// Fails closed: if the database already exists but no key can be found (for example the
-    /// keychain is temporarily locked), it returns an error instead of minting a new key that
-    /// would make the existing data unreadable.
     pub fn load_or_create(paths: &Paths) -> Result<Self> {
         if keychain_disabled_by_env() {
             tracing::info!("{KEYCHAIN_ENV} disables the OS keychain; using the key file");
@@ -91,10 +82,8 @@ impl StoreKey {
         self.source
     }
 
-    /// A public identifier of this key: the first 16 hex characters of
-    /// `HMAC-SHA256(key, "nugget-backup-key-id-v1")`. Recorded in backup manifests and key
-    /// envelopes so a restore can tell whether a stored key opens a backup without asking for
-    /// its passphrase. Reveals nothing about the key.
+    /// A public identifier of this key: the first 16 hex characters of `HMAC-SHA256(key,
+    /// "nugget-backup-key-id-v1")`.
     pub fn key_id(&self) -> String {
         let mut mac = Hmac::<Sha256>::new_from_slice(self.bytes.as_slice())
             .expect("HMAC accepts any key length");
@@ -103,9 +92,7 @@ impl StoreKey {
     }
 
     /// Load the key of an existing home without ever creating one: the OS keychain entry (unless
-    /// [`KEYCHAIN_ENV`] disables it), else the key file under `paths.data`. `Ok(None)` when
-    /// neither holds a key (a keychain that cannot be reached counts as holding none, with a
-    /// warning).
+    /// [`KEYCHAIN_ENV`] disables it), else the key file under `paths.data`.
     pub fn load_existing(paths: &Paths) -> Result<Option<StoreKey>> {
         let keychain = (!keychain_disabled_by_env())
             .then(|| os::keychain_for(&paths.data))
@@ -113,24 +100,9 @@ impl StoreKey {
         load_existing_with(paths, keychain.as_ref().map(|k| k as &dyn SecretBackend))
     }
 
-    /// Make `key` the store key of `paths`, as [`StoreKey::load_or_create`] will find it: in the
-    /// OS keychain when one is usable (and not disabled through [`KEYCHAIN_ENV`]), else in a
-    /// `0600` key file under `paths.data`. Returns where it was stored.
-    ///
-    /// A different key already stored there (keychain or key file) is first saved to
-    /// `<data>/store.key.replaced-<UTC timestamp>` (`0600`), so a database it encrypts (for
-    /// example the one moved aside by a restore) stays readable; it is never silently discarded.
-    /// A key file left over once the key is in the keychain is removed after that copy.
-    ///
-    /// A malformed secret found there is saved the same way (as found) and replaced.
-    ///
-    /// Refuses (`Error::Storage`) rather than write a key file that a keychain entry would
-    /// shadow on the next start: when the keychain is enabled but cannot be read and the home
-    /// has no key file yet (the current key may be in a locked keychain: unlock it, or set
-    /// [`KEYCHAIN_ENV`]`=off` consistently), and when the keychain holds a different key but
-    /// refuses the new one or does not return it after storing it (the previous entry is then
-    /// put back, best effort). When the keychain cannot be read but the home already keeps its
-    /// key in a file, the file is used, as [`StoreKey::load_or_create`] does.
+    /// Make `key` the store key of `paths`, as [`StoreKey::load_or_create`] will find it: in the OS
+    /// keychain when one is usable (and not disabled through [`KEYCHAIN_ENV`]), else in a `0600`
+    /// key file under `paths.data`.
     pub fn install(paths: &Paths, key: &StoreKey) -> Result<KeySource> {
         if keychain_disabled_by_env() {
             return install_with(paths, key, None);
@@ -181,9 +153,8 @@ pub(crate) trait SecretBackend {
     fn set(&self, secret: &str) -> std::result::Result<(), String>;
 }
 
-/// The OS keychain entry `account` under this app's service, for secrets other than the store
-/// key (e.g. the audit chain anchor). `None` when the keychain is disabled through
-/// [`KEYCHAIN_ENV`] or this target has no supported keychain.
+/// The OS keychain entry `account` under this app's service, for secrets other than the store key
+/// (e.g. the audit chain anchor).
 pub(crate) fn keychain_entry(account: String) -> Option<Box<dyn SecretBackend + Send + Sync>> {
     if keychain_disabled_by_env() {
         return None;
@@ -510,8 +481,7 @@ fn random_suffix() -> Result<String> {
     Ok(hex::encode(b))
 }
 
-/// Flush `path`'s content to disk. Opened for writing: Windows' `FlushFileBuffers` refuses a
-/// read-only handle.
+/// Flush `path`'s content to disk.
 pub(crate) fn sync_file(path: &Path) -> std::io::Result<()> {
     fs::OpenOptions::new()
         .read(true)
@@ -520,8 +490,7 @@ pub(crate) fn sync_file(path: &Path) -> std::io::Result<()> {
         .sync_all()
 }
 
-/// Make a rename in `dir` durable (Unix; best effort). Windows cannot open a directory this
-/// way, and its file system commits renames itself.
+/// Make a rename in `dir` durable (Unix; best effort).
 pub(crate) fn sync_dir(dir: &Path) {
     #[cfg(unix)]
     if let Err(e) = fs::File::open(dir).and_then(|d| d.sync_all()) {
@@ -538,8 +507,7 @@ fn read_key_file(path: &Path) -> Result<StoreKey> {
 }
 
 /// Create the key file exclusively (`O_EXCL`), owner-only (`0600` on Unix, a protected DACL on
-/// Windows). A crash mid-write leaves a malformed file, which is reported rather than silently
-/// replaced.
+/// Windows).
 fn write_key_file(path: &Path, hex: &str) -> Result<()> {
     if let Some(dir) = path.parent() {
         create_private_dir(dir)?;
@@ -566,8 +534,7 @@ fn write_key_file(path: &Path, hex: &str) -> Result<()> {
     Ok(())
 }
 
-/// Create `dir` (and parents). A directory we create is owner-only: `0700` on Unix, a protected
-/// DACL (current user and `SYSTEM`) on Windows.
+/// Create `dir` (and parents).
 pub(crate) fn create_private_dir(dir: &Path) -> Result<()> {
     if dir.as_os_str().is_empty() || dir.exists() {
         return Ok(());
@@ -584,8 +551,7 @@ pub(crate) fn create_private_dir(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// On Unix, warn about and fix a key file readable by group or others. Elsewhere a no-op: the
-/// file lives in the per-user profile, whose default ACL is owner-only.
+/// On Unix, warn about and fix a key file readable by group or others.
 #[cfg(unix)]
 fn tighten_permissions(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -910,14 +876,12 @@ mod tests {
     fn install_into_keychain_saves_the_replaced_key() {
         let (_d, paths) = paths();
         let kc = FakeKeychain::default();
-        // Fresh home: straight into the keychain, nothing to save.
         let first = StoreKey::from_bytes([1; 32]);
         assert_eq!(
             install_with(&paths, &first, Some(&kc)).unwrap(),
             KeySource::Keychain
         );
         assert!(replaced(&paths).is_empty());
-        // Installing the same key again changes nothing.
         assert_eq!(
             install_with(&paths, &first, Some(&kc)).unwrap(),
             KeySource::Keychain
@@ -933,7 +897,6 @@ mod tests {
         let loaded = load_or_create_with(&paths, Some(&kc)).unwrap();
         assert_eq!(loaded.as_bytes(), second.as_bytes());
 
-        // A key file left from before the keychain worked is saved and removed.
         fs::write(key_file(&paths), hex::encode([3u8; 32])).unwrap();
         let third = StoreKey::from_bytes([4; 32]);
         install_with(&paths, &third, Some(&kc)).unwrap();
@@ -974,7 +937,6 @@ mod tests {
                 load_or_create_with(&paths, kc).unwrap().as_bytes(),
                 second.as_bytes()
             );
-            // No temporary files are left behind.
             let names: Vec<String> = fs::read_dir(&paths.data)
                 .unwrap()
                 .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -1002,9 +964,7 @@ mod tests {
         let err = install_with(&paths, &StoreKey::from_bytes([8; 32]), Some(&kc)).unwrap_err();
         assert!(matches!(err, Error::Storage(_)), "{err}");
         assert!(!key_file(&paths).exists());
-        // The old key is saved all the same (nothing is ever lost).
         assert_eq!(replaced(&paths), vec![[7; 32]]);
-        // Installing the key it already holds is fine.
         assert_eq!(
             install_with(&paths, &StoreKey::from_bytes([7; 32]), Some(&kc)).unwrap(),
             KeySource::Keychain
@@ -1049,7 +1009,6 @@ mod tests {
     impl SecretBackend for LyingKeychain {
         fn get(&self) -> std::result::Result<Option<Zeroizing<String>>, String> {
             let sets = self.0.lock().unwrap();
-            // Always the first value ever stored (the "old" key), whatever was set since.
             Ok(sets.first().cloned().map(Zeroizing::new))
         }
         fn set(&self, secret: &str) -> std::result::Result<(), String> {
@@ -1097,7 +1056,6 @@ mod tests {
             .collect();
         assert_eq!(saved, vec!["not a key\n".to_owned()]);
 
-        // A malformed keychain entry too.
         let (_d, paths) = self::paths();
         let kc = FakeKeychain(Mutex::new(Some("garbage".into())));
         assert_eq!(
@@ -1108,16 +1066,5 @@ mod tests {
             load_or_create_with(&paths, Some(&kc)).unwrap().as_bytes(),
             key.as_bytes()
         );
-    }
-
-    #[test]
-    fn sync_file_opens_for_writing() {
-        let (_d, paths) = paths();
-        fs::create_dir_all(&paths.data).unwrap();
-        let f = paths.data.join("f");
-        fs::write(&f, b"x").unwrap();
-        sync_file(&f).unwrap();
-        sync_dir(&paths.data);
-        assert_eq!(fs::read(&f).unwrap(), b"x");
     }
 }

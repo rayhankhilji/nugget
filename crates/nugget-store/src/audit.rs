@@ -1,27 +1,4 @@
 //! Tamper-evident audit log: an append-only table whose rows form a keyed hash chain.
-//!
-//! Every field is length-prefixed (u64 LE) so field boundaries are unambiguous, and
-//! `prev_hash(1)` = 64 zeros:
-//!
-//! - **v2** (current): `hash(n) = HMAC-SHA256(mac_key, "nugget-audit-v2\0" ‖ len‖seq ‖ len‖at ‖
-//!   len‖actor ‖ len‖action ‖ len‖target ‖ len‖detail ‖ len‖prev_hash)`, where
-//!   `mac_key = HMAC-SHA256(store_key, "nugget-audit-mac-v1")`. Rewriting an entry needs the
-//!   store key itself, not just write access to the database.
-//! - **v1** (databases written before the keyed chain): the same with plain SHA-256 and the
-//!   `"nugget-audit-v1\0"` domain. Entries before the `audit_v2_from` marker (set by the
-//!   migration that introduced v2) are still verified this way; later ones must be v2.
-//!
-//! The latest `(seq, hash)` is kept in `meta` so truncating the tail of the log is detected,
-//! and `meta.audit_seal` holds a MAC over that head and the v2 marker, so neither can be moved
-//! (for example to pass v2 entries off as v1) without the key. Triggers reject `UPDATE` and
-//! `DELETE` on the table; the chain catches edits that bypass them.
-//!
-//! **Anchor.** Whoever holds the store key can still rewrite the whole log, or restore an older
-//! copy of the database. To catch that, each append also records the head (`seq`, `hash`, and a
-//! MAC over both) outside the database through an [`AuditAnchor`]: by default the OS keychain,
-//! when the store key itself lives there. Verification then fails if the log ends before the
-//! anchored entry, or if that entry's hash differs. Anchoring is best effort: a keychain that
-//! fails is logged once and skipped, never failing the append.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
@@ -35,7 +12,7 @@ use zeroize::Zeroizing;
 
 use crate::Store;
 use crate::egress::limit_i64;
-use crate::error::{DbExt, format_time, parse_time};
+use crate::error::{ConnExt, DbExt, format_time, parse_time};
 use crate::key::{KeySource, SecretBackend, StoreKey};
 use crate::types::{AuditEntry, AuditRecord};
 
@@ -55,12 +32,8 @@ const META_HEAD: &str = "audit_head";
 const META_V2_FROM: &str = "audit_v2_from";
 const META_SEAL: &str = "audit_seal";
 
-/// Somewhere outside the database to keep the audit chain's head, so a rolled-back or
-/// truncated log is detected even by someone holding the store key.
-///
-/// Values are opaque, short ASCII strings written by the store; an implementation only has to
-/// persist the last one. [`Store::open`] anchors in the OS keychain when the store key came from
-/// it; use [`Store::set_audit_anchor`] to supply another location (or a fake in tests).
+/// Somewhere outside the database to keep the audit chain's head, so a rolled-back or truncated log
+/// is detected even by someone holding the store key.
 pub trait AuditAnchor: Send + Sync {
     /// The last stored value: `Ok(None)` when nothing was stored yet, `Err` when the backend is
     /// unusable (the anchor is then skipped).
@@ -385,8 +358,7 @@ fn verify_chain(conn: &Connection, key: &[u8; 32], v2_from: i64) -> Result<()> {
     Ok(())
 }
 
-/// Account name of a store's anchor in the OS keychain. Derived from the store key, so it
-/// follows the database when it moves and separate stores never share an anchor.
+/// Account name of a store's anchor in the OS keychain.
 fn anchor_account(key: &StoreKey) -> String {
     let id = Zeroizing::new(kdf(key.as_bytes(), ANCHOR_ID_LABEL));
     format!("audit-head-{}", hex::encode(&id[..8]))
@@ -441,9 +413,8 @@ pub(crate) fn attach_store_key(store: &Store, key: &StoreKey) -> Result<()> {
 }
 
 impl Store {
-    /// Keep the audit chain's head in `anchor` from now on (`None`: stop anchoring), replacing
-    /// the default chosen by [`Store::open`]. Existing anchor contents are checked before they
-    /// are first overwritten and kept if they do not match this log.
+    /// Keep the audit chain's head in `anchor` from now on (`None`: stop anchoring), replacing the
+    /// default chosen by [`Store::open`].
     pub fn set_audit_anchor(&self, anchor: Option<Arc<dyn AuditAnchor>>) {
         let state = self.audit_state();
         *state.anchor.lock().unwrap_or_else(PoisonError::into_inner) = AnchorSlot {
@@ -453,8 +424,7 @@ impl Store {
         state.anchor_warned.store(false, Ordering::Relaxed);
     }
 
-    /// Write-through of the new head to the anchor, after the append committed. Failures are
-    /// logged, never returned: the entry is already durable.
+    /// Write-through of the new head to the anchor, after the append committed.
     fn anchor_head(&self, seq: i64, hash: &str) {
         let state = self.audit_state();
         let mut slot = state.anchor.lock().unwrap_or_else(PoisonError::into_inner);
@@ -568,23 +538,19 @@ impl Store {
     /// The most recent audit records, newest first.
     pub fn recent_audit(&self, limit: usize) -> Result<Vec<AuditRecord>> {
         let raws: Vec<RawRecord> = self.with_read_conn(|c| {
-            let mut stmt = c
-                .prepare_cached(&format!(
-                    "SELECT {COLUMNS} FROM audit ORDER BY seq DESC LIMIT ?1"
-                ))
-                .db("prepare audit query")?;
-            let rows = stmt
-                .query_map([limit_i64(limit)], read_raw)
-                .db("read audit")?;
-            rows.collect::<rusqlite::Result<_>>().db("read audit")
+            c.rows(
+                &format!("SELECT {COLUMNS} FROM audit ORDER BY seq DESC LIMIT ?1"),
+                [limit_i64(limit)],
+                read_raw,
+                "read audit",
+            )
         })?;
         raws.into_iter().map(RawRecord::into_record).collect()
     }
 
-    /// Walk the whole audit log and check sequence continuity, every `prev_hash` link, every
-    /// record hash (SHA-256 before the keyed chain started, HMAC after), the stored chain head
-    /// and its seal, and, when an anchor holds a head, that the log still contains that entry
-    /// unchanged. Returns `Error::Integrity` naming the first problem.
+    /// Walk the whole audit log and check sequence continuity, every `prev_hash` link, every record
+    /// hash (SHA-256 before the keyed chain started, HMAC after), the stored chain head and its
+    /// seal, and, when an anchor holds a head, that the log still contains that entry unchanged.
     pub fn verify_audit_chain(&self) -> Result<()> {
         let state = self.audit_state();
         let key = state.mac_key();
@@ -622,10 +588,8 @@ fn verify_log(c: &Connection, key: &[u8; 32]) -> Result<()> {
     }
 }
 
-/// Point the anchor at this log's current head after a restore (see
-/// [`Store::reset_audit_anchor`] for when it refuses and what `force` overrides). Verifies the
-/// log first, ignoring the anchor, and leaves the anchor untouched on any refusal. The new value
-/// is stored before this returns; for an empty log it is the seq-0 "no entries yet" value.
+/// Point the anchor at this log's current head after a restore (see [`Store::reset_audit_anchor`]
+/// for when it refuses and what `force` overrides).
 pub(crate) fn reset_anchor(store: &Store, force: bool) -> Result<()> {
     let state = store.audit_state();
     let key = state.mac_key();

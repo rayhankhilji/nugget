@@ -5,15 +5,13 @@ use std::time::Duration;
 use nugget_graph::EntityKind;
 use serde::{Deserialize, Serialize};
 
-/// Everything [`Knowledge`](crate::Knowledge) can be configured with. `Default` is the
-/// conservative, local-only setup.
+/// Everything [`Knowledge`](crate::Knowledge) can be configured with.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KnowledgeConfig {
     /// Who the user ("me") is.
     pub me: MeConfig,
-    /// Extra webmail / consumer mail domains (added to the built-in list). Addresses at these
-    /// domains never produce organisations or `works_at` claims.
+    /// Extra webmail / consumer mail domains (added to the built-in list).
     pub extra_freemail_domains: Vec<String>,
     /// Confidence of a `works_at` claim inferred from a corporate mail domain (a penalty: the
     /// address may be a contractor's, an alias or a shared mailbox).
@@ -21,10 +19,7 @@ pub struct KnowledgeConfig {
     /// Messages with more participants than this produce no `corresponded_with` claims for the
     /// recipients (mailing lists, announcements); the sender is still linked.
     pub max_correspondents: usize,
-    /// Predicates that hold one value at a time: the value seen most recently (and not said to
-    /// have ended) is current, the others are superseded history (see the crate docs, "Claim
-    /// lifecycle"). Replaces the built-in list ([`crate::SINGLE_VALUED_PREDICATES`]) when
-    /// non-empty.
+    /// Predicates that hold one value at a time.
     pub single_valued_predicates: Vec<String>,
     /// The optional LLM extractor.
     pub llm: LlmConfig,
@@ -52,8 +47,7 @@ impl Default for KnowledgeConfig {
     }
 }
 
-/// The user. Their addresses identify the special "me" person, which `corresponded_with`,
-/// `attended` and similar claims hang off.
+/// The user.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MeConfig {
@@ -77,11 +71,6 @@ impl Default for MeConfig {
 }
 
 /// The LLM extractor (`Tier::Synthesis`).
-///
-/// **Privacy:** only `OnDevice` / `LocalNetwork` providers are used, except that a `Cloud`
-/// provider may be used for an item whose source is listed in [`cloud_sources`](Self::cloud_sources)
-/// **and** which is not sensitive. Sensitive items (or items whose sensitivity is unknown) never
-/// reach a cloud provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
@@ -94,8 +83,7 @@ pub struct LlmConfig {
     pub max_requests_per_item: usize,
     /// Output token cap per request.
     pub max_output_tokens: u32,
-    /// Per-request timeout in milliseconds. For a local provider this is the floor: the
-    /// timeout is derived from the request size (see [`LlmConfig::request_timeout`]).
+    /// Per-request timeout in milliseconds.
     pub timeout_ms: u64,
     /// Upper bound on the confidence of an LLM-extracted claim.
     pub max_confidence: f32,
@@ -110,10 +98,7 @@ pub struct LlmConfig {
     pub local: LocalLlmLimits,
 }
 
-/// Per-request limits for a local provider. A small model on a CPU generates a few tokens per
-/// second and reads a few tens, so requests are kept short: a chunk or two in, a capped number
-/// of entities and claims out. Each request then finishes well inside the timeout, and the
-/// per-item total stays bounded by `max_requests_per_item * max_input_chars`.
+/// Per-request limits for a local provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocalLlmLimits {
@@ -181,12 +166,7 @@ impl LlmConfig {
         Duration::from_millis(self.timeout_ms.max(1))
     }
 
-    /// The timeout of one extraction request (QA GG5-18). A cloud provider gets
-    /// [`timeout_ms`](Self::timeout_ms). A local one gets the time a slow CPU needs to read
-    /// the prompt (`prompt_chars` / 4 tokens at `local.prompt_tokens_per_second`) and to write
-    /// the whole output cap (`max_output_tokens` at `local.output_tokens_per_second`), plus a
-    /// fixed allowance; at least `timeout_ms`, at most `local.max_timeout_ms` (or `timeout_ms`
-    /// when that is larger). With the defaults: about 230 s for a full local request.
+    /// The timeout of one extraction request (QA GG5-18).
     pub fn request_timeout(
         &self,
         local: bool,
@@ -205,8 +185,7 @@ impl LlmConfig {
     }
 }
 
-/// Resolution beyond identifiers and exact names. Both steps are off by default and only ever
-/// use local providers.
+/// Resolution beyond identifiers and exact names.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ResolutionConfig {

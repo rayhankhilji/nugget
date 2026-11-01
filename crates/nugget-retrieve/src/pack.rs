@@ -1,18 +1,4 @@
 //! Token-budgeted context packing with `[n]` citations.
-//!
-//! Packing is greedy and verified: every addition is rendered and measured with
-//! [`nugget_extract::estimate_tokens`] over the *whole* text, and kept only if the total stays
-//! within the budget. So the budget holds whatever that estimator does (it need not be additive),
-//! and nothing is ever cut silently: a passage that is cut to fit ends with `…` and is reported as
-//! truncated.
-//!
-//! Phases (each in rank order, so earlier sources get room first):
-//! 1. the best passage of each ranked item, one citation per item;
-//! 2. the chunk before and after each passage (`ord ± 1`);
-//! 3. the item's other matching chunks.
-//!
-//! An item's chunks are rendered in document order under one `[n] Title (source)` header;
-//! adjacent chunks merge into one passage and gaps show as `…`.
 
 use std::collections::BTreeMap;
 
@@ -96,8 +82,6 @@ fn render(blocks: &[Block], items: &[PackItem]) -> String {
 }
 
 /// A block's text below its header: its chunks in document order, gaps shown as [`GAP`].
-/// Chunk text is untrusted: only the packer's own header lines start with `[`, so a chunk line
-/// that does is indented by one space and cannot forge a header (DR-2).
 fn body(b: &Block) -> String {
     let mut out = String::new();
     let mut prev: Option<u32> = None;

@@ -172,15 +172,12 @@ fn rewriting_the_chain_without_the_audit_key_is_detected() {
     s.verify_audit_chain().unwrap();
     let raw = raw_conn(&path);
 
-    // Edit entry 2 and re-link it and everything after it, head included, with plain SHA-256.
     raw.execute("UPDATE audit SET detail = '{\"i\":99}' WHERE seq = 2", [])
         .unwrap();
     relink_v1(&raw, 2);
     let m = integrity_error(&s);
     assert!(m.contains("entry 2 was modified"), "{m}");
 
-    // Passing the whole log off as pre-upgrade v1 entries needs moving the version marker,
-    // which the seal catches.
     raw.execute(
         "UPDATE meta SET value = '5' WHERE key = 'audit_v2_from'",
         [],
@@ -190,14 +187,12 @@ fn rewriting_the_chain_without_the_audit_key_is_detected() {
     let m = integrity_error(&s);
     assert!(m.contains("seal"), "{m}");
 
-    // Dropping the seal altogether does not help either.
     raw.execute("DELETE FROM meta WHERE key = 'audit_seal'", [])
         .unwrap();
     let m = integrity_error(&s);
     assert!(m.contains("seal"), "{m}");
     drop(s);
 
-    // Nor does reopening: an unsealed log that fails verification is not sealed on open.
     raw.execute(
         "UPDATE meta SET value = '1' WHERE key = 'audit_v2_from'",
         [],
@@ -210,7 +205,6 @@ fn rewriting_the_chain_without_the_audit_key_is_detected() {
 
 #[test]
 fn a_different_store_key_cannot_verify_or_extend_the_chain() {
-    // Same database contents, but a MAC key from another store key: the chain does not verify.
     let dir = tempfile::tempdir().unwrap();
     let path = db_path(&dir);
     let s = Store::open(&path, &key()).unwrap();
@@ -233,8 +227,6 @@ fn legacy_v1_entries_verify_and_new_ones_are_keyed() {
     let path = db_path(&dir);
     drop(Store::open(&path, &key()).unwrap());
 
-    // The state the keyed-chain migration leaves behind on an older database: v1 entries, the
-    // v1 head, the v2 marker just past them, and no seal yet.
     {
         let raw = raw_conn(&path);
         let mut prev = GENESIS.to_owned();
@@ -267,7 +259,6 @@ fn legacy_v1_entries_verify_and_new_ones_are_keyed() {
         .unwrap();
     }
 
-    // Opening with the store key verifies the legacy chain and seals it.
     let s = Store::open(&path, &key()).unwrap();
     s.verify_audit_chain().unwrap();
     let old = s.recent_audit(10).unwrap();
@@ -290,7 +281,6 @@ fn legacy_v1_entries_verify_and_new_ones_are_keyed() {
     let s = Store::open(&path, &key()).unwrap();
     s.verify_audit_chain().unwrap();
 
-    // Old entries are still protected by their v1 links.
     raw_conn(&path)
         .execute(
             "UPDATE audit SET target = 'files:x/other' WHERE seq = 1",
@@ -327,7 +317,6 @@ fn rollback_to_an_older_copy_is_detected_by_the_anchor() {
     let anchored = anchor.value().unwrap();
     assert!(anchored.starts_with("v1:5:"), "{anchored}");
 
-    // Restore the older copy: a valid, sealed chain, but shorter than the anchored head.
     std::fs::copy(&backup, &path).unwrap();
     for suffix in ["-wal", "-shm"] {
         let mut p = path.clone().into_os_string();
@@ -340,8 +329,6 @@ fn rollback_to_an_older_copy_is_detected_by_the_anchor() {
     let m = integrity_error(&s);
     assert!(m.contains("rolled back"), "{m}");
 
-    // Appending to the rolled-back log reuses entry 5's seq with a different hash; the anchor
-    // keeps the evidence instead of being overwritten.
     for i in 4..=6 {
         s.append_audit(&audit(i + 10)).unwrap();
     }
@@ -357,7 +344,6 @@ fn forged_anchor_is_rejected() {
     s.set_audit_anchor(Some(anchor.clone()));
     let r = s.append_audit(&audit(1)).unwrap();
     s.verify_audit_chain().unwrap();
-    // A head someone wrote without the audit key.
     *anchor.0.lock().unwrap() = Some(format!("v1:1:{}:{}", r.hash, "0".repeat(64)));
     let m = integrity_error(&s);
     assert!(m.contains("anchored chain head"), "{m}");
@@ -372,7 +358,6 @@ fn unusable_anchor_is_skipped() {
     }
     s.verify_audit_chain().unwrap();
 
-    // Switching anchoring off works too.
     s.set_audit_anchor(None);
     s.append_audit(&audit(4)).unwrap();
     s.verify_audit_chain().unwrap();

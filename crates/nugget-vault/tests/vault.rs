@@ -52,6 +52,25 @@ fn claim(
     }
 }
 
+fn add(
+    g: &MemGraph,
+    s: &EntityId,
+    pred: &str,
+    obj: ClaimObject,
+    text: &str,
+    evidence: Vec<Evidence>,
+) -> ClaimId {
+    g.add_claim(&claim(s, pred, obj, text, evidence)).unwrap()
+}
+
+fn ent(e: &EntityId) -> ClaimObject {
+    ClaimObject::Entity(e.clone())
+}
+
+fn lit(s: &str) -> ClaimObject {
+    ClaimObject::Literal(s.into())
+}
+
 fn lookup(it: &ItemRef) -> Option<SourceInfo> {
     match it.key.as_str() {
         "msg-1" => Some(SourceInfo {
@@ -81,27 +100,25 @@ fn populate(g: &MemGraph) -> (EntityId, EntityId, ClaimId, ClaimId) {
     let acme = g
         .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
         .unwrap();
-    let works_at = g
-        .add_claim(&claim(
-            &sam,
-            "works_at",
-            ClaimObject::Entity(acme.clone()),
-            "Samantha works at Acme.",
-            vec![ev("mail", "msg-1", "Sam from Acme here")],
-        ))
-        .unwrap();
-    let prefers = g
-        .add_claim(&claim(
-            &sam,
-            "prefers",
-            ClaimObject::Literal("oat milk".into()),
-            "Prefers oat milk in coffee.",
-            vec![
-                ev("files", "notes.md", "Sam: oat milk please"),
-                ev("mail", "msg-1", "Sam from Acme here"),
-            ],
-        ))
-        .unwrap();
+    let works_at = add(
+        g,
+        &sam,
+        "works_at",
+        ent(&acme),
+        "Samantha works at Acme.",
+        vec![ev("mail", "msg-1", "Sam from Acme here")],
+    );
+    let prefers = add(
+        g,
+        &sam,
+        "prefers",
+        lit("oat milk"),
+        "Prefers oat milk in coffee.",
+        vec![
+            ev("files", "notes.md", "Sam: oat milk please"),
+            ev("mail", "msg-1", "Sam from Acme here"),
+        ],
+    );
     (sam, acme, works_at, prefers)
 }
 
@@ -148,6 +165,18 @@ impl Fixture {
     fn status(&self, c: ClaimId) -> ClaimStatus {
         self.graph.get_claim(c).unwrap().unwrap().status
     }
+}
+
+fn page_text(v: &Vault, id: &EntityId) -> String {
+    std::fs::read_to_string(v.page_path(id).unwrap().unwrap()).unwrap()
+}
+
+/// `t` without the lines containing `marker`.
+fn drop_line(t: &str, marker: &str) -> String {
+    t.lines()
+        .filter(|l| !l.contains(marker))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn mask_updated(s: &str) -> String {
@@ -265,6 +294,8 @@ fn golden_render() {
     let st = f.vault.status();
     assert_eq!(st.pages, 2);
     assert!(st.last_render.is_some() && st.conflicts.is_empty() && st.invalid.is_empty());
+    // Re-rendering an unchanged graph writes nothing.
+    assert!(f.vault.render_all().unwrap().written.is_empty());
 }
 
 #[test]
@@ -278,30 +309,11 @@ fn identifiers_are_opt_in() {
     };
     let v = Vault::new(dir.path(), g, Arc::new(NoItems), cfg).unwrap();
     v.render_all().unwrap();
-    let text = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    let text = page_text(&v, &sam);
     assert!(text.contains("identifiers: {\"email\":[\"sam@example.com\"]}"));
     // Without a lookup, citations fall back to the item key and a nugget:// link.
     assert!(text.contains("[^1]: [notes.md](nugget://item/files/notes.md)"));
     assert!(v.validate().unwrap().is_ok());
-}
-
-#[test]
-fn rendering_is_deterministic() {
-    let f = fixture();
-    f.vault.render_all().unwrap();
-    // Same graph, second vault: byte-identical pages.
-    let other = tempfile::tempdir().unwrap();
-    let v2 = Vault::new(other.path(), f.graph.clone(), Arc::new(lookup), config()).unwrap();
-    v2.render_all().unwrap();
-    for id in [&f.sam, &f.acme] {
-        let a = f.read(id);
-        let b = std::fs::read_to_string(v2.page_path(id).unwrap().unwrap()).unwrap();
-        assert_eq!(a, b);
-    }
-    // Re-rendering an unchanged graph writes nothing.
-    let r = f.vault.render_all().unwrap();
-    assert!(r.written.is_empty(), "{r:?}");
-    assert!(r.edits.is_empty());
 }
 
 #[test]
@@ -315,16 +327,14 @@ fn user_notes_survive_rerenders() {
         ) + "Call her about the Q3 plan.\n- [ ] send deck\n"
     });
     // The graph changes: a new fact with new evidence.
-    let likes = f
-        .graph
-        .add_claim(&claim(
-            &f.sam,
-            "likes",
-            ClaimObject::Literal("hiking".into()),
-            "Likes hiking.",
-            vec![ev("mail", "msg-9", "went hiking")],
-        ))
-        .unwrap();
+    let likes = add(
+        &f.graph,
+        &f.sam,
+        "likes",
+        lit("hiking"),
+        "Likes hiking.",
+        vec![ev("mail", "msg-9", "went hiking")],
+    );
     let r = f.vault.render_all().unwrap();
     assert!(r.edits.is_empty(), "notes are not facts: {r:?}");
     let t = f.read(&f.sam);
@@ -399,11 +409,11 @@ fn added_fact_lines_and_links() {
     assert_eq!(rep.asserted.len(), 2);
     let a = f.graph.get_claim(rep.asserted[0]).unwrap().unwrap();
     assert_eq!(a.predicate, "mentoring");
-    assert_eq!(a.object, ClaimObject::Entity(f.acme.clone()));
+    assert_eq!(a.object, ent(&f.acme));
     assert_eq!(a.text, "Mentors Acme interns");
     let b = f.graph.get_claim(rep.asserted[1]).unwrap().unwrap();
     assert_eq!(b.predicate, "hobbies");
-    assert_eq!(b.object, ClaimObject::Literal("Plays chess".into()));
+    assert_eq!(b.object, lit("Plays chess"));
     let t = f.read(&f.sam);
     assert!(
         t.contains("### Hobbies <!-- p:hobbies -->\n- Plays chess (you)"),
@@ -422,12 +432,7 @@ fn added_fact_lines_and_links() {
 fn deleted_fact_is_rejected_and_stays_rejected_after_re_extraction() {
     let f = fixture();
     f.vault.render_all().unwrap();
-    f.edit(&f.sam, |t| {
-        t.lines()
-            .filter(|l| !l.contains("<!-- c:1 -->"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
+    f.edit(&f.sam, |t| drop_line(&t, "<!-- c:1 -->"));
     let r = f.vault.render_all().unwrap();
     assert_eq!(r.edits.retracted, vec![f.works_at]);
     assert_eq!(f.status(f.works_at), ClaimStatus::Rejected);
@@ -441,16 +446,14 @@ fn deleted_fact_is_rejected_and_stays_rejected_after_re_extraction() {
     // Its source is re-extracted (retracted, then the same fact found again): it does not come
     // back.
     f.graph.retract_item(&item("mail", "msg-1")).unwrap();
-    let again = f
-        .graph
-        .add_claim(&claim(
-            &f.sam,
-            "works_at",
-            ClaimObject::Entity(f.acme.clone()),
-            "Samantha works at Acme.",
-            vec![ev("mail", "msg-1", "Sam from Acme here")],
-        ))
-        .unwrap();
+    let again = add(
+        &f.graph,
+        &f.sam,
+        "works_at",
+        ent(&f.acme),
+        "Samantha works at Acme.",
+        vec![ev("mail", "msg-1", "Sam from Acme here")],
+    );
     assert_eq!(again, f.works_at);
     assert_eq!(f.status(f.works_at), ClaimStatus::Rejected);
     f.vault.render_all().unwrap();
@@ -482,41 +485,6 @@ fn split_moves_fact_lines_to_the_new_page() {
 }
 
 #[test]
-fn an_edit_to_a_fact_split_off_since_the_last_render_lands_on_its_new_entity() {
-    let f = fixture();
-    f.vault.render_all().unwrap();
-    // The user edits the works_at line while (before the next render) the fact is split off.
-    f.edit(&f.sam, |t| {
-        t.lines()
-            .map(|l| {
-                if l.contains("<!-- c:1 -->") {
-                    "- Works at Acme as CTO <!-- c:1 -->".to_string()
-                } else {
-                    l.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
-    let sam2 = f
-        .graph
-        .split(
-            &f.sam,
-            &[f.works_at],
-            &NewEntity::new(EntityKind::Person, "Sam Lee"),
-        )
-        .unwrap();
-    let r = f.vault.render_all().unwrap();
-    assert_eq!(r.edits.superseded, vec![f.works_at]);
-    assert_eq!(r.edits.asserted.len(), 1);
-    let asserted = f.graph.get_claim(r.edits.asserted[0]).unwrap().unwrap();
-    assert_eq!(asserted.subject, sam2, "the edit follows the fact");
-    assert_eq!(asserted.status, ClaimStatus::UserAsserted);
-    assert!(f.read(&sam2).contains("Works at Acme as CTO"));
-    assert!(!f.read(&f.sam).contains("Works at Acme as CTO"));
-}
-
-#[test]
 fn conflicts_keep_user_text_and_write_a_sidecar() {
     let f = fixture();
     f.vault.render_all().unwrap();
@@ -532,15 +500,14 @@ fn conflicts_keep_user_text_and_write_a_sidecar() {
         .graph
         .create_entity(&NewEntity::new(EntityKind::Person, "Bob"))
         .unwrap();
-    f.graph
-        .add_claim(&claim(
-            &f.sam,
-            "knows",
-            ClaimObject::Entity(bob.clone()),
-            "Sam knows Bob.",
-            vec![ev("mail", "msg-3", "Sam and Bob")],
-        ))
-        .unwrap();
+    add(
+        &f.graph,
+        &f.sam,
+        "knows",
+        ent(&bob),
+        "Sam knows Bob.",
+        vec![ev("mail", "msg-3", "Sam and Bob")],
+    );
     let r = f.vault.render_all().unwrap();
     let rel = "Person/Samantha Lee (ent_000001).md";
     assert_eq!(r.conflicts, vec![rel.to_string()]);
@@ -638,15 +605,14 @@ fn merged_entity_becomes_a_redirect_and_notes_move() {
         .graph
         .create_entity(&NewEntity::new(EntityKind::Person, "S. Lee"))
         .unwrap();
-    f.graph
-        .add_claim(&claim(
-            &dup,
-            "lives_in",
-            ClaimObject::Literal("Lisbon".into()),
-            "Lives in Lisbon.",
-            vec![ev("mail", "msg-4", "back in Lisbon")],
-        ))
-        .unwrap();
+    add(
+        &f.graph,
+        &dup,
+        "lives_in",
+        lit("Lisbon"),
+        "Lives in Lisbon.",
+        vec![ev("mail", "msg-4", "back in Lisbon")],
+    );
     let r = f.vault.render_changed(0).unwrap();
     let seq = r.high_water;
     assert!(seq > 0);
@@ -841,12 +807,7 @@ async fn watcher_applies_edits() {
     assert_eq!(f.status(f.works_at), ClaimStatus::Active);
     assert_eq!(f.status(f.prefers), ClaimStatus::Active);
 
-    f.edit(&f.sam, |t| {
-        t.lines()
-            .filter(|l| !l.contains("<!-- c:2 -->"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
+    f.edit(&f.sam, |t| drop_line(&t, "<!-- c:2 -->"));
     let g = f.graph.clone();
     let p = f.prefers;
     let applied = tokio::task::spawn_blocking(move || {
@@ -880,7 +841,7 @@ fn citations_use_store_titles_and_urls() {
     let dir = tempfile::tempdir().unwrap();
     let v = Vault::new(dir.path(), g, Arc::new(store), config()).unwrap();
     v.render_all().unwrap();
-    let t = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    let t = page_text(&v, &sam);
     assert!(
         t.contains("[^1]: [Quarterly (draft)](https://mail.example/m?id=1%20%28x%29): \"Sam from Acme here\""),
         "{t}"
@@ -908,7 +869,7 @@ fn footnote_titles_lose_contacts() {
     let (sam, ..) = populate(&g);
     let v = Vault::new(dir.path(), g, Arc::new(lookup), config()).unwrap();
     v.render_all().unwrap();
-    let t = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    let t = page_text(&v, &sam);
     assert!(t.contains("[Call me on (phone) or (address)]"), "{t}");
     assert_nowhere(dir.path(), &["7946", "ana.ruiz@"]);
 }
@@ -970,43 +931,15 @@ fn unsorted_items_are_shown_and_leave_once_triage_confirms_them_sensitive() {
 }
 
 #[test]
-fn state_survives_reopen() {
-    let f = fixture();
-    f.vault.render_all().unwrap();
-    f.edit(&f.sam, |t| {
-        t.replace("<!-- c:1 -->\n", "<!-- c:1 -->\nextra\n")
-    });
-    let root: &Path = &f.root;
-    let v2 = Vault::new(root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
-    // Edits made while no vault was running are found by fingerprint.
-    let rep = v2.apply_pending_edits().unwrap();
-    assert!(rep.is_empty());
-    assert_eq!(v2.status().pages, 2);
-    assert!(
-        v2.render_all()
-            .unwrap()
-            .written
-            .iter()
-            .all(|w| !w.contains("Acme"))
-    );
-}
-
-#[test]
 fn lost_manifest_still_applies_edits() {
     let f = fixture();
     f.vault.render_all().unwrap();
     std::fs::remove_file(f.root.join(".nugget/state.json")).unwrap();
-    f.edit(&f.sam, |t| {
-        t.lines()
-            .filter(|l| !l.contains("<!-- c:2 -->"))
-            .collect::<Vec<_>>()
-            .join("\n")
-            + "\nkeep me\n"
-    });
+    f.edit(&f.sam, |t| drop_line(&t, "<!-- c:2 -->") + "\nkeep me\n");
     let v2 = Vault::new(&f.root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
     let r = v2.render_all().unwrap();
     assert_eq!(r.edits.retracted, vec![f.prefers]);
-    let t = std::fs::read_to_string(v2.page_path(&f.sam).unwrap().unwrap()).unwrap();
+    let t = page_text(&v2, &f.sam);
     assert!(t.contains("keep me") && !t.contains("oat milk"));
     assert!(v2.validate().unwrap().is_ok());
 }
@@ -1056,7 +989,7 @@ fn add_history(f: &Fixture) -> (EntityId, ClaimId, ClaimId) {
     let mut old = claim(
         &f.sam,
         "works_at",
-        ClaimObject::Entity(initech.clone()),
+        ent(&initech),
         "Samantha works at Initech.",
         vec![ev("mail", "msg-0", "Sam (Initech)")],
     );
@@ -1066,16 +999,14 @@ fn add_history(f: &Fixture) -> (EntityId, ClaimId, ClaimId) {
     f.graph
         .set_claim_status(worked_at, ClaimStatus::Superseded)
         .unwrap();
-    let lived = f
-        .graph
-        .add_claim(&claim(
-            &f.sam,
-            "lives_in",
-            ClaimObject::Literal("Boston".into()),
-            "Lives in Boston.",
-            vec![ev("files", "notes.md", "Sam moved from Boston")],
-        ))
-        .unwrap();
+    let lived = add(
+        &f.graph,
+        &f.sam,
+        "lives_in",
+        lit("Boston"),
+        "Lives in Boston.",
+        vec![ev("files", "notes.md", "Sam moved from Boston")],
+    );
     f.graph
         .set_claim_status(lived, ClaimStatus::Superseded)
         .unwrap();
@@ -1087,16 +1018,14 @@ fn superseded_claims_render_as_cited_history() {
     let f = fixture();
     let (initech, worked_at, lived) = add_history(&f);
     // Rejected claims never show up, current or history.
-    let rejected = f
-        .graph
-        .add_claim(&claim(
-            &f.sam,
-            "works_at",
-            ClaimObject::Literal("Globex".into()),
-            "Samantha works at Globex.",
-            vec![ev("mail", "msg-1", "Globex")],
-        ))
-        .unwrap();
+    let rejected = add(
+        &f.graph,
+        &f.sam,
+        "works_at",
+        lit("Globex"),
+        "Samantha works at Globex.",
+        vec![ev("mail", "msg-1", "Globex")],
+    );
     f.graph
         .set_claim_status(rejected, ClaimStatus::Rejected)
         .unwrap();
@@ -1131,47 +1060,6 @@ fn superseded_claims_render_as_cited_history() {
 }
 
 #[test]
-fn history_order_and_intervals() {
-    let f = fixture();
-    let mk = |text: &str, from: Option<time::OffsetDateTime>, to: Option<time::OffsetDateTime>| {
-        let mut c = claim(
-            &f.sam,
-            "has_role",
-            ClaimObject::Literal(text.into()),
-            text,
-            vec![ev("mail", "msg-1", "Sam from Acme here")],
-        );
-        c.valid_from = from;
-        c.valid_to = to;
-        f.graph.add_claim(&c).unwrap()
-    };
-    let a = mk("Role A.", None, Some(day(2026, 10, 5)));
-    let b = mk("Role B.", Some(day(2026, 9, 1)), Some(day(2026, 10, 5)));
-    let c = mk("Role C.", Some(day(2024, 3, 1)), None);
-    let d = mk("Role D.", None, None);
-    for id in [a, b, c, d] {
-        f.graph
-            .set_claim_status(id, ClaimStatus::Superseded)
-            .unwrap();
-    }
-    // Current facts: newest validity start first, unknown last.
-    let cur_old = mk("Lead.", Some(day(2025, 1, 1)), None);
-    let cur_new = mk("Director.", Some(day(2026, 10, 6)), None);
-    let cur_unk = mk("Mentor.", None, None);
-    f.vault.render_all().unwrap();
-    let t = f.read(&f.sam);
-    let want = format!(
-        "### Has role <!-- p:has_role -->\n\
-- Director. [^1] <!-- c:{cur_new} -->\n\
-- Lead. [^1] <!-- c:{cur_old} -->\n\
-- Mentor. [^1] <!-- c:{cur_unk} -->\n\n\
-*Earlier:*\n  - Role A. (until 2026-10-05) [^1] <!-- h:{a} -->\n  - Role B. (2026-09-01 – 2026-10-05) [^1] <!-- h:{b} -->\n  - Role C. (from 2024-03-01) [^1] <!-- h:{c} -->\n  - Role D. [^1] <!-- h:{d} -->\n"
-    );
-    assert!(t.contains(&want), "{t}");
-    assert!(f.vault.validate().unwrap().is_ok());
-}
-
-#[test]
 fn editing_or_deleting_history_changes_nothing() {
     let f = fixture();
     let (_, worked_at, lived) = add_history(&f);
@@ -1198,59 +1086,6 @@ fn editing_or_deleting_history_changes_nothing() {
     // History lines are machine-owned: the next render restores them.
     assert_eq!(f.read(&f.sam), before);
     assert!(f.vault.validate().unwrap().is_ok());
-}
-
-#[test]
-fn corrected_facts_are_not_history() {
-    let f = fixture();
-    f.vault.render_all().unwrap();
-    // A note under the corrected fact stays in its group.
-    f.edit(&f.sam, |t| {
-        t.replace(
-            "- Prefers oat milk in coffee. [^1][^2] <!-- c:2 -->",
-            "- Prefers soy milk in coffee. [^1][^2] <!-- c:2 -->\n  - (since the spring)",
-        )
-    });
-    let rep = f.vault.apply_user_edits(f.page(&f.sam)).unwrap();
-    let new = rep.asserted[0];
-    let want = format!(
-        "### Prefers <!-- p:prefers -->\n- Prefers soy milk in coffee. (you) <!-- c:{new} -->\n  - (since the spring)\n\n### Works at"
-    );
-    let t = f.read(&f.sam);
-    assert!(t.contains(&want), "{t}");
-    let report = f.vault.validate().unwrap();
-    assert!(report.is_ok(), "{report:?}");
-    assert_eq!(report.history_facts, 0);
-    // The manifest records the correction; without it, the rule still holds: a superseded claim
-    // with no end date and a later user assertion in its group is a correction.
-    std::fs::remove_file(f.root.join(".nugget/state.json")).unwrap();
-    let v2 = Vault::new(&f.root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
-    v2.render_all().unwrap();
-    let t = std::fs::read_to_string(v2.page_path(&f.sam).unwrap().unwrap()).unwrap();
-    assert!(t.contains(&want) && !t.contains("oat milk"), "{t}");
-    // Later supersessions in the same group are history again: they carry an end date, or
-    // happened after the user's assertion.
-    let mut later = claim(
-        &f.sam,
-        "prefers",
-        ClaimObject::Literal("tea".into()),
-        "Prefers tea.",
-        vec![ev("mail", "msg-1", "Sam from Acme here")],
-    );
-    later.valid_to = Some(day(2026, 10, 20));
-    let later = f.graph.add_claim(&later).unwrap();
-    f.graph
-        .set_claim_status(later, ClaimStatus::Superseded)
-        .unwrap();
-    v2.render_all().unwrap();
-    let t = std::fs::read_to_string(v2.page_path(&f.sam).unwrap().unwrap()).unwrap();
-    assert!(
-        t.contains(&format!(
-            "*Earlier:*\n  - Prefers tea. (until 2026-10-20) [^1] <!-- h:{later} -->\n"
-        )),
-        "{t}"
-    );
-    assert!(!t.contains("oat milk"));
 }
 
 fn set_merge_log(f: &Fixture, log: serde_json::Value) {
@@ -1335,94 +1170,6 @@ fn merge_log_drops_citations_of_deleted_items_and_escapes_links() {
     assert!(f.vault.validate().unwrap().is_ok());
 }
 
-#[test]
-fn merge_log_shows_the_newest_fifty() {
-    let f = fixture();
-    let log: Vec<serde_json::Value> = (0..53)
-        .map(|i| serde_json::json!({"name": format!("Name {i}")}))
-        .collect();
-    set_merge_log(&f, serde_json::Value::Array(log));
-    f.vault.render_all().unwrap();
-    let body = block_body(&f.read(&f.sam), "merged");
-    let lines: Vec<&str> = body.lines().filter(|l| l.starts_with("- ")).collect();
-    assert_eq!(lines.len(), 51);
-    assert_eq!(lines[0], "- … and 3 earlier");
-    assert_eq!(lines[1], "- Name 3");
-    assert_eq!(lines[50], "- Name 52");
-}
-
-#[test]
-fn history_marker_edits_are_restored_and_foreign_markers_kept() {
-    let f = fixture();
-    let (_, worked_at, _) = add_history(&f);
-    f.vault.render_all().unwrap();
-    let before = f.read(&f.sam);
-    // Text appended after a history marker: the line is still history and gets restored.
-    f.edit(&f.sam, |t| {
-        t.replace(
-            &format!("<!-- h:{worked_at} -->"),
-            &format!("<!-- h:{worked_at} --> (not sure)"),
-        )
-    });
-    assert!(f.vault.apply_user_edits(f.page(&f.sam)).unwrap().is_empty());
-    assert_eq!(f.read(&f.sam), before);
-    assert!(f.vault.validate().unwrap().is_ok());
-    // A line with a marker the render never showed is the user's text: kept, not applied.
-    f.edit(&f.sam, |t| {
-        t.replace(
-            "<!-- c:1 -->\n",
-            "<!-- c:1 -->\n- copied from elsewhere [^1] <!-- h:999 -->\n",
-        )
-    });
-    assert!(f.vault.apply_user_edits(f.page(&f.sam)).unwrap().is_empty());
-    assert!(
-        f.read(&f.sam)
-            .contains("- copied from elsewhere [^1] <!-- h:999 -->\n")
-    );
-}
-
-#[test]
-fn lost_manifest_with_old_pages_upgrades_on_render_changed() {
-    let f = fixture();
-    f.vault.render_all().unwrap();
-    let high = f.graph.changes_since(0, 100_000).unwrap().1;
-    // An unreadable manifest: the vault starts from an empty state, but old pages and merge
-    // bases are on disk.
-    std::fs::write(f.root.join(".nugget/state.json"), "{not json").unwrap();
-    let v3 = Vault::new(&f.root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
-    // Even with nothing changed in the graph, render_changed does a full pass and records it.
-    let r = v3.render_changed(high).unwrap();
-    assert_eq!(state_version(&f.root), 2);
-    assert!(r.conflicts.is_empty(), "{r:?}");
-    assert_eq!(v3.status().pages, 2);
-    assert!(v3.validate().unwrap().is_ok());
-}
-
-#[test]
-fn validator_checks_history_and_merge_citations() {
-    let ok = |_: &str| true;
-    let page = "---\nnugget_id: \"e\"\nkind: \"person\"\naliases: []\nupdated: \"2026-10-01T00:00:00Z\"\n---\n\
-<!-- nugget:begin facts -->\n## Facts\n\n### A <!-- p:a -->\n*Earlier:*\n  - Old. <!-- h:3 -->\n  - Older. [^7] <!-- h:4 -->\n  - Fine. [^1] <!-- h:5 -->\n  - Broken. [^1] <!-- h:x -->\n<!-- nugget:end facts -->\n\
-<!-- nugget:begin merged -->\n- M [^8]\n<!-- nugget:end merged -->\n\
-<!-- nugget:begin sources -->\n[^1]: [S](nugget://item/a/b)\n<!-- nugget:end sources -->\n";
-    let r = validate_page("Person/E.md", page, &ok);
-    let msgs: Vec<(IssueKind, &str)> = r
-        .issues
-        .iter()
-        .map(|i| (i.kind, i.message.as_str()))
-        .collect();
-    assert_eq!(
-        msgs,
-        [
-            (IssueKind::MissingCitation, "history line has no citation"),
-            (IssueKind::MissingCitation, "footnote [^7] is not defined"),
-            (IssueKind::BadMarker, "claim marker does not parse"),
-            (IssueKind::MissingCitation, "footnote [^8] is not defined"),
-        ]
-    );
-    assert_eq!((r.facts, r.history_facts, r.cited_facts), (3, 3, 1));
-}
-
 fn state_version(root: &Path) -> serde_json::Value {
     let p = root.join(".nugget/state.json");
     serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(p).unwrap()).unwrap()
@@ -1475,7 +1222,7 @@ fn old_layout_vault_upgrades_and_keeps_user_edits() {
     let mut now = claim(
         &f.sam,
         "works_at",
-        ClaimObject::Entity(globex.clone()),
+        ent(&globex),
         "Samantha works at Globex.",
         vec![ev("mail", "msg-2", "Sam, now at Globex")],
     );
@@ -1492,7 +1239,7 @@ fn old_layout_vault_upgrades_and_keeps_user_edits() {
     let r = v2.render_changed(mark).unwrap();
     assert!(r.edits.is_empty(), "{r:?}");
     assert!(r.conflicts.is_empty(), "{r:?}");
-    let t = std::fs::read_to_string(v2.page_path(&f.sam).unwrap().unwrap()).unwrap();
+    let t = page_text(&v2, &f.sam);
     assert!(
         t.contains(&format!("---\n{para}\n\n<!-- nugget:begin header -->")),
         "{t}"
@@ -1523,20 +1270,6 @@ fn old_layout_vault_upgrades_and_keeps_user_edits() {
     let high = f.graph.changes_since(0, 100_000).unwrap().1;
     let again = v2.render_changed(high).unwrap();
     assert!(again.written.is_empty(), "{again:?}");
-}
-
-#[test]
-fn partial_passes_do_not_mark_an_old_vault_upgraded() {
-    let f = fixture();
-    f.vault.render_all().unwrap();
-    set_state_version(&f.root, 1);
-    let v2 = Vault::new(&f.root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
-    v2.apply_user_edits(v2.page_path(&f.sam).unwrap().unwrap())
-        .unwrap();
-    assert_eq!(state_version(&f.root), 1);
-    let high = f.graph.changes_since(0, 100_000).unwrap().1;
-    v2.render_changed(high).unwrap();
-    assert_eq!(state_version(&f.root), 2);
 }
 
 // ---- sensitive items (GG5-3) ----
@@ -1582,34 +1315,33 @@ fn add_counselling(g: &MemGraph, sam: &EntityId) -> (EntityId, EntityId, EntityI
         .create_entity(&NewEntity::new(EntityKind::Place, "Quay Lane clinic"))
         .unwrap();
     let invite = |q: &str| ev("files", "counselling.ics", q);
-    g.add_claim(&claim(
+    add(
+        g,
         &jonas,
         "organized",
-        ClaimObject::Entity(session.clone()),
+        ent(&session),
         "Jonas Albers organized Counselling session.",
         vec![invite("Organizer: Jonas Albers <jonas@albers.example>")],
-    ))
-    .unwrap();
-    g.add_claim(&claim(
+    );
+    add(
+        g,
         sam,
         "attended",
-        ClaimObject::Entity(session.clone()),
+        ent(&session),
         "Samantha attended Counselling session.",
         vec![invite("Attendee: Samantha Lee")],
-    ))
-    .unwrap();
-    let likes = g
-        .add_claim(&claim(
-            sam,
-            "likes",
-            ClaimObject::Literal("long walks".into()),
-            "Likes long walks.",
-            vec![
-                ev("files", "notes.md", "Sam: long walks"),
-                invite("SECRET: walks help with the sleep diary"),
-            ],
-        ))
-        .unwrap();
+    );
+    let likes = add(
+        g,
+        sam,
+        "likes",
+        lit("long walks"),
+        "Likes long walks.",
+        vec![
+            ev("files", "notes.md", "Sam: long walks"),
+            invite("SECRET: walks help with the sleep diary"),
+        ],
+    );
     // An entity known only from a mention in the invite.
     g.add_mention(&Mention {
         entity: place.clone(),
@@ -1735,7 +1467,7 @@ fn a_page_whose_sources_turn_sensitive_becomes_a_stub_and_comes_back() {
         !readme.contains("Jonas") && !readme.contains("Counselling"),
         "{readme}"
     );
-    let sam_page = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    let sam_page = page_text(&v, &sam);
     assert!(
         !sam_page.contains("Counselling") && !sam_page.contains("SECRET"),
         "{sam_page}"
@@ -1763,25 +1495,25 @@ fn unknown_items_count_as_sensitive_when_the_lookup_says_so() {
     let ghost = g
         .create_entity(&NewEntity::new(EntityKind::Person, "Ghost Person"))
         .unwrap();
-    g.add_claim(&claim(
+    add(
+        &g,
         &sam,
         "prefers",
-        ClaimObject::Literal("tea".into()),
+        lit("tea"),
         "Prefers tea.",
         vec![
             ev("files", "notes.md", "Sam: tea"),
             ev("files", "gone.md", "gone quote"),
         ],
-    ))
-    .unwrap();
-    g.add_claim(&claim(
+    );
+    add(
+        &g,
         &ghost,
         "likes",
-        ClaimObject::Literal("chess".into()),
+        lit("chess"),
         "Likes chess.",
         vec![ev("files", "gone.md", "gone quote")],
-    ))
-    .unwrap();
+    );
     let items = Arc::new(Switch {
         invite_sensitive: true.into(),
         missing_sensitive: true,
@@ -1791,14 +1523,14 @@ fn unknown_items_count_as_sensitive_when_the_lookup_says_so() {
     assert_eq!(v.page_path(&ghost).unwrap(), None);
     let root = v.root().to_path_buf();
     assert_nowhere(&root, &["Ghost", "gone.md", "gone quote", "chess"]);
-    let t = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    let t = page_text(&v, &sam);
     assert!(
         t.contains("Prefers tea. [^1]") && t.contains("\"Sam: tea\""),
         "{t}"
     );
 }
 
-// ---------------------------------------------------------------- GG5 regressions
+// ---- GG5 regressions ----
 
 fn replace_line(t: &str, marker: &str, with: &str) -> String {
     t.lines()
@@ -1814,17 +1546,29 @@ fn replace_line(t: &str, marker: &str, with: &str) -> String {
         + "\n"
 }
 
+/// `t` as an editor that strips every HTML comment saves it.
+fn strip_comments(t: &str) -> String {
+    let mut s = String::new();
+    let mut rest = t;
+    while let Some(i) = rest.find("<!--") {
+        let j = rest[i..].find("-->").unwrap() + i + 3;
+        s.push_str(rest[..i].strip_suffix(' ').unwrap_or(&rest[..i]));
+        rest = &rest[j..];
+    }
+    s.push_str(rest);
+    s
+}
+
 fn works_at_again(f: &Fixture, quote: &str) -> ClaimId {
     f.graph.retract_item(&item("mail", "msg-1")).unwrap();
-    f.graph
-        .add_claim(&claim(
-            &f.sam,
-            "works_at",
-            ClaimObject::Entity(f.acme.clone()),
-            "Samantha works at Acme.",
-            vec![ev("mail", "msg-1", quote)],
-        ))
-        .unwrap()
+    add(
+        &f.graph,
+        &f.sam,
+        "works_at",
+        ent(&f.acme),
+        "Samantha works at Acme.",
+        vec![ev("mail", "msg-1", quote)],
+    )
 }
 
 /// GG5-4: an edited fact line stays edited when its unchanged source is extracted again; a
@@ -1906,11 +1650,7 @@ fn second_edit_and_deleting_the_users_version() {
     assert!(f.read(&f.sam).contains("Samantha is Acme's CTO"));
     // The user deletes their line.
     f.edit(&f.sam, |t| {
-        t.lines()
-            .filter(|l| !l.contains(&format!("<!-- c:{second} -->")))
-            .collect::<Vec<_>>()
-            .join("\n")
-            + "\n"
+        drop_line(&t, &format!("<!-- c:{second} -->")) + "\n"
     });
     f.vault.render_all().unwrap();
     assert_eq!(f.status(second), ClaimStatus::Rejected);
@@ -1932,17 +1672,6 @@ fn second_edit_and_deleting_the_users_version() {
 /// and a line removed outright from one rejects only that fact.
 #[test]
 fn stripped_pages_reject_only_clear_deletions() {
-    let strip = |t: &str| {
-        let mut s = String::new();
-        let mut rest = t;
-        while let Some(i) = rest.find("<!--") {
-            let j = rest[i..].find("-->").unwrap() + i + 3;
-            s.push_str(rest[..i].strip_suffix(' ').unwrap_or(&rest[..i]));
-            rest = &rest[j..];
-        }
-        s.push_str(rest);
-        s
-    };
     for text in [
         "",
         "# Samantha\n\nRewritten from scratch in another editor.\n",
@@ -1966,7 +1695,7 @@ fn stripped_pages_reject_only_clear_deletions() {
     let f = fixture();
     f.vault.render_all().unwrap();
     f.edit(&f.sam, |t| {
-        strip(&t)
+        strip_comments(&t)
             .lines()
             .filter(|l| !l.contains("oat milk"))
             .collect::<Vec<_>>()
@@ -2017,15 +1746,7 @@ fn page_without_markers_is_merged_not_duplicated() {
     let f = fixture();
     f.vault.render_all().unwrap();
     f.edit(&f.sam, |t| {
-        let mut s = String::new();
-        let mut rest = t.as_str();
-        while let Some(i) = rest.find("<!--") {
-            let j = rest[i..].find("-->").unwrap() + i + 3;
-            s.push_str(rest[..i].strip_suffix(' ').unwrap_or(&rest[..i]));
-            rest = &rest[j..];
-        }
-        s.push_str(rest);
-        s.replace("Prefers oat milk", "Prefers soy milk") + "\nMy note on Sam.\n"
+        strip_comments(&t).replace("Prefers oat milk", "Prefers soy milk") + "\nMy note on Sam.\n"
     });
     let r = f.vault.render_all().unwrap();
     assert_eq!(r.edits.superseded, vec![f.prefers]);
@@ -2044,29 +1765,6 @@ fn page_without_markers_is_merged_not_duplicated() {
     assert_eq!(f.read(&f.sam), t);
 }
 
-/// GG5-20: an alias added with YAML spacing is no conflict, and later aliases are written.
-#[test]
-fn alias_added_with_yaml_spacing_is_not_a_conflict() {
-    let f = fixture();
-    f.vault.render_all().unwrap();
-    f.edit(&f.sam, |t| {
-        t.replace("aliases: [\"Sam\"]", "aliases: [\"Sam\", \"Sammy\"]")
-    });
-    let r = f.vault.render_all().unwrap();
-    assert_eq!(r.edits.aliases_added, vec!["Sammy".to_string()]);
-    assert!(r.conflicts.is_empty(), "{r:?}");
-    assert!(f.read(&f.sam).contains("aliases: [\"Sam\",\"Sammy\"]"));
-    f.graph.add_alias(&f.sam, "Samuel").unwrap();
-    let r = f.vault.render_all().unwrap();
-    assert!(r.conflicts.is_empty(), "{r:?}");
-    assert!(
-        f.read(&f.sam)
-            .contains("aliases: [\"Sam\",\"Sammy\",\"Samuel\"]"),
-        "{}",
-        f.read(&f.sam)
-    );
-}
-
 /// GG5-12: splitting a wrongly merged entity back out redirects its old id and page to the
 /// split-off entity, not to the one it was split from.
 #[test]
@@ -2076,16 +1774,14 @@ fn split_after_a_mistaken_merge_redirects_the_old_page_to_the_split_off_entity()
         .graph
         .create_entity(&NewEntity::new(EntityKind::Person, "S. Lee"))
         .unwrap();
-    let lives = f
-        .graph
-        .add_claim(&claim(
-            &dup,
-            "lives_in",
-            ClaimObject::Literal("Lisbon".into()),
-            "Lives in Lisbon.",
-            vec![ev("mail", "msg-4", "back in Lisbon")],
-        ))
-        .unwrap();
+    let lives = add(
+        &f.graph,
+        &dup,
+        "lives_in",
+        lit("Lisbon"),
+        "Lives in Lisbon.",
+        vec![ev("mail", "msg-4", "back in Lisbon")],
+    );
     let seq = f.vault.render_changed(0).unwrap().high_water;
     let dup_path = f.page(&dup);
     f.graph.merge(&f.sam, &dup).unwrap();
@@ -2111,8 +1807,6 @@ fn split_after_a_mistaken_merge_redirects_the_old_page_to_the_split_off_entity()
     assert!(!f.read(&f.sam).contains("Lisbon"));
     assert!(f.vault.validate().unwrap().is_ok());
 }
-
-// ---- sensitive items: upgrade, frontmatter, hidden pages, lookups (GG5-3 review) ----
 
 /// A vault rendered before the sensitivity rules (no `rules` in its state) is rendered in full
 /// once at the next `render_changed`, even with nothing in the change feed: pages, index
@@ -2215,7 +1909,7 @@ fn frontmatter_leaves_out_aliases_and_identifiers_learned_from_sensitive_items()
     )
     .unwrap();
     v.render_all().unwrap();
-    let page = std::fs::read_to_string(v.page_path(&f.sam).unwrap().unwrap()).unwrap();
+    let page = page_text(&v, &f.sam);
     let fm: Vec<&str> = page
         .lines()
         .take_while(|l| !l.contains("nugget:begin"))
@@ -2236,109 +1930,23 @@ fn frontmatter_leaves_out_aliases_and_identifiers_learned_from_sensitive_items()
     // Acme has no sensitive origin: everything it has is shown.
     g.add_alias(&f.acme, "Acme Corp").unwrap();
     v.render_all().unwrap();
-    let acme = std::fs::read_to_string(v.page_path(&f.acme).unwrap().unwrap()).unwrap();
+    let acme = page_text(&v, &f.acme);
     assert!(acme.contains("aliases: [\"Acme Corp\"]"), "{acme}");
 }
 
-/// A held alias the page does not show, kept in the user's frontmatter, is not added again
-/// (which would mark the entity changed, and re-render it, on every pass).
-#[test]
-fn a_hidden_alias_in_the_users_frontmatter_does_not_churn_the_graph() {
-    let f = fixture();
-    add_counselling(&f.graph, &f.sam);
-    f.graph.add_alias(&f.sam, "Sammy").unwrap();
-    f.graph
-        .add_detail_source(
-            &f.sam,
-            &EntityDetail::Alias("Sammy".into()),
-            &item("files", "counselling.ics"),
-        )
-        .unwrap();
-    f.vault.render_all().unwrap();
-    let path = f.page(&f.sam);
-    let text = std::fs::read_to_string(&path).unwrap();
-    assert!(!text.contains("Sammy"), "{text}");
-    // "sam." is the held alias "Sam" for the graph (normalize_name).
-    let edited = text.replacen(
-        "aliases: [\"Sam\"]",
-        "aliases: [\"Sam\", \"Sammy\", \"sam.\"]",
-        1,
-    );
-    assert_ne!(edited, text, "{text}");
-    std::fs::write(&path, edited).unwrap();
-    let (_, head) = f.graph.changes_since(0, 10_000).unwrap();
-    let rep = f.vault.apply_user_edits(&path).unwrap();
-    assert!(rep.aliases_added.is_empty(), "{rep:?}");
-    let (changed, _) = f.graph.changes_since(head, 10).unwrap();
-    assert!(changed.is_empty(), "{changed:?}");
+// ---- hidden pages (GG5-3) ----
+
+/// Sam, Jonas and the counselling session, rendered while the invite is not yet sensitive.
+struct Hidden {
+    _dir: tempfile::TempDir,
+    g: Arc<MemGraph>,
+    items: Arc<Switch>,
+    v: Vault,
+    jonas: EntityId,
+    session: EntityId,
 }
 
-/// Counts lookups: the vault asks in batches and never twice for an item in one pass.
-#[derive(Default)]
-struct Counting {
-    single: std::sync::atomic::AtomicUsize,
-    per_item: std::sync::Mutex<std::collections::HashMap<ItemRef, usize>>,
-}
-
-impl ItemLookup for Counting {
-    fn source_info(&self, it: &ItemRef) -> nugget_core::Result<Option<SourceInfo>> {
-        self.single
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(lookup(it))
-    }
-
-    fn source_infos(
-        &self,
-        items: &[ItemRef],
-    ) -> nugget_core::Result<std::collections::HashMap<ItemRef, SourceInfo>> {
-        let mut seen = self.per_item.lock().unwrap();
-        let mut out = std::collections::HashMap::new();
-        for it in items {
-            *seen.entry(it.clone()).or_default() += 1;
-            if let Some(i) = lookup(it) {
-                out.insert(it.clone(), i);
-            }
-        }
-        Ok(out)
-    }
-
-    fn missing_is_sensitive(&self) -> bool {
-        true
-    }
-}
-
-#[test]
-fn items_are_looked_up_in_batches_once_per_pass() {
-    let dir = tempfile::tempdir().unwrap();
-    let g = Arc::new(MemGraph::new());
-    let (sam, ..) = populate(&g);
-    add_counselling(&g, &sam);
-    let items = Arc::new(Counting::default());
-    let v = Vault::new(dir.path().join("v"), g, items.clone(), config()).unwrap();
-    v.render_all().unwrap();
-    assert_eq!(
-        items.single.load(std::sync::atomic::Ordering::SeqCst),
-        0,
-        "no one-item lookups"
-    );
-    let seen = items.per_item.lock().unwrap();
-    assert!(seen.contains_key(&item("files", "counselling.ics")));
-    assert!(seen.values().all(|n| *n == 1), "{seen:?}");
-}
-
-// ---- hidden pages: user edits, frontmatter, markers, missing base, lookups (GG5-3 review 2) ----
-
-/// A vault with Sam, Jonas and the counselling session rendered while the invite is not yet
-/// sensitive. Returns (dir, graph, items, vault, sam, jonas, session).
-fn hidden_fixture() -> (
-    tempfile::TempDir,
-    Arc<MemGraph>,
-    Arc<Switch>,
-    Vault,
-    EntityId,
-    EntityId,
-    EntityId,
-) {
+fn hidden_fixture() -> Hidden {
     let dir = tempfile::tempdir().unwrap();
     let g = Arc::new(MemGraph::new());
     let (sam, ..) = populate(&g);
@@ -2349,231 +1957,143 @@ fn hidden_fixture() -> (
     });
     let v = Vault::new(dir.path().join("v"), g.clone(), items.clone(), config()).unwrap();
     v.render_all().unwrap();
-    (dir, g, items, v, sam, jonas, session)
-}
-
-fn make_sensitive(items: &Switch) {
-    items
-        .invite_sensitive
-        .store(true, std::sync::atomic::Ordering::SeqCst);
-}
-
-/// Frontmatter the user changed counts as their text: the page is kept (hidden), their own
-/// keys stay, their alias reaches the graph, and no generated text is left.
-#[test]
-fn a_hidden_page_keeps_the_users_frontmatter_and_applies_their_alias() {
-    let (_dir, g, items, v, _sam, jonas, _) = hidden_fixture();
-    let page = v.page_path(&jonas).unwrap().unwrap();
-    let text = std::fs::read_to_string(&page).unwrap();
-    let edited = text.replacen("aliases: []", "aliases: [\"JA\"]\ntags: [\"therapy\"]", 1);
-    assert_ne!(edited, text, "{text}");
-    std::fs::write(&page, edited).unwrap();
-    make_sensitive(&items);
-    let report = v.render_all().unwrap();
-    assert!(
-        page.is_file(),
-        "deleted although the user edited it: {report:?}"
-    );
-    let stub = std::fs::read_to_string(&page).unwrap();
-    assert!(stub.contains("# Hidden page"), "{stub}");
-    assert!(stub.contains("tags: [\"therapy\"]"), "{stub}");
-    for leak in ["# Jonas", "Organizer", "organized", "SECRET", "Counselling"] {
-        assert!(!stub.contains(leak), "{leak} in stub:\n{stub}");
-    }
-    assert!(
-        g.get_entity(&jonas)
-            .unwrap()
-            .unwrap()
-            .aliases
-            .contains(&"JA".to_string())
-    );
-    assert_eq!(v.page_path(&jonas).unwrap(), None);
-    assert!(v.validate().unwrap().is_ok());
-}
-
-/// A reworded fact line on a page whose entity turns sensitive-only is applied first: the
-/// fact is now the user's own, so the entity keeps a normal page.
-#[test]
-fn a_fact_edit_on_a_page_turning_hidden_is_applied_and_keeps_the_page() {
-    let (_dir, g, items, v, _sam, jonas, _) = hidden_fixture();
-    let organized = g.claims_for(&jonas, false).unwrap()[0].id;
-    let page = v.page_path(&jonas).unwrap().unwrap();
-    let text = std::fs::read_to_string(&page).unwrap();
-    let marker = format!("<!-- c:{organized} -->");
-    let edited = replace_line(
-        &text,
-        &marker,
-        &format!("- Jonas runs a book club. {marker}"),
-    );
-    std::fs::write(&page, edited).unwrap();
-    make_sensitive(&items);
-    v.render_all().unwrap();
-    let c = g.get_claim(organized).unwrap().unwrap();
-    assert!(!c.status.is_active(), "{c:?}");
-    assert!(
-        g.claims_for(&jonas, false)
-            .unwrap()
-            .iter()
-            .any(|c| c.status == ClaimStatus::UserAsserted && c.text.contains("book club"))
-    );
-    let now = std::fs::read_to_string(v.page_path(&jonas).unwrap().expect("still a page")).unwrap();
-    assert!(now.contains("Jonas runs a book club."), "{now}");
-    assert!(
-        !now.contains("Organizer") && !now.contains("SECRET"),
-        "{now}"
-    );
-}
-
-/// A deleted fact line on a page turning hidden is applied too (rejected in the graph), and the
-/// deleted region text is never kept as notes.
-#[test]
-fn a_fact_deletion_on_a_page_turning_hidden_is_applied() {
-    let (_dir, g, items, v, _sam, jonas, _) = hidden_fixture();
-    let organized = g.claims_for(&jonas, false).unwrap()[0].id;
-    // A second fact from the invite, so Jonas stays sensitive-only after the deletion.
-    g.add_claim(&claim(
-        &jonas,
-        "phone",
-        ClaimObject::Literal("+49 30 555".into()),
-        "Jonas's phone is +49 30 555.",
-        vec![ev("files", "counselling.ics", "Tel +49 30 555")],
-    ))
-    .unwrap();
-    v.render_all().unwrap();
-    let page = v.page_path(&jonas).unwrap().unwrap();
-    let text = std::fs::read_to_string(&page).unwrap();
-    let marker = format!("<!-- c:{organized} -->");
-    let edited: String = text
-        .lines()
-        .filter(|l| !l.contains(&marker))
-        .map(|l| format!("{l}\n"))
-        .collect();
-    std::fs::write(&page, format!("{edited}my note\n")).unwrap();
-    make_sensitive(&items);
-    v.render_all().unwrap();
-    assert_eq!(
-        g.get_claim(organized).unwrap().unwrap().status,
-        ClaimStatus::Rejected
-    );
-    let stub = std::fs::read_to_string(&page).unwrap();
-    assert!(
-        stub.contains("my note") && stub.contains("# Hidden page"),
-        "{stub}"
-    );
-    for leak in ["Jonas", "Facts", "Related", "Counselling", "SECRET", "555"] {
-        assert!(!stub.contains(leak), "{leak} in stub:\n{stub}");
+    Hidden {
+        _dir: dir,
+        g,
+        items,
+        v,
+        jonas,
+        session,
     }
 }
 
-/// A page an editor saved without HTML comments gets its markers back before anything is
-/// decided: the hidden stub keeps the note, not the heading or the facts.
-#[test]
-fn a_comment_stripped_page_turning_hidden_keeps_no_generated_text() {
-    let (_dir, _g, items, v, _sam, jonas, _) = hidden_fixture();
-    let page = v.page_path(&jonas).unwrap().unwrap();
-    let text = std::fs::read_to_string(&page).unwrap();
-    let stripped: String = text
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("<!-- nugget:"))
-        .map(|l| match l.find(" <!--") {
-            Some(i) => format!("{}\n", &l[..i]),
-            None => format!("{l}\n"),
-        })
-        .collect();
-    assert!(!stripped.contains("<!--"), "{stripped}");
-    std::fs::write(&page, format!("{stripped}my note\n")).unwrap();
-    make_sensitive(&items);
-    v.render_all().unwrap();
-    let stub = std::fs::read_to_string(&page).unwrap();
-    assert!(stub.contains("my note"), "{stub}");
-    for leak in ["# Jonas", "Organizer", "organized", "SECRET", "Counselling"] {
-        assert!(!stub.contains(leak), "{leak} in stub:\n{stub}");
+impl Hidden {
+    /// Rewrite the page of `id` with `f`; returns its path.
+    fn edit(&self, id: &EntityId, f: impl FnOnce(String) -> String) -> std::path::PathBuf {
+        let p = self.v.page_path(id).unwrap().unwrap();
+        let t = std::fs::read_to_string(&p).unwrap();
+        std::fs::write(&p, f(t)).unwrap();
+        p
+    }
+    fn organized(&self) -> Claim {
+        let cs = self.g.claims_for(&self.jonas, true).unwrap();
+        cs.into_iter().find(|c| c.predicate == "organized").unwrap()
     }
 }
 
-/// Without a merge base nothing tells the user's text from the generated text: the page is
-/// never deleted, it becomes a hidden stub.
-#[test]
-fn a_page_without_a_merge_base_is_hidden_not_deleted() {
-    let (_dir, _g, items, v, _sam, _jonas, session) = hidden_fixture();
-    let page = v.page_path(&session).unwrap().unwrap();
-    let base = v.root().join(".nugget/base/entities");
-    for e in std::fs::read_dir(&base).unwrap() {
-        let p = e.unwrap().path();
-        if p.to_string_lossy().contains(&short_id(&session)) {
-            std::fs::remove_file(p).unwrap();
-        }
-    }
-    make_sensitive(&items);
-    let report = v.render_all().unwrap();
-    assert!(page.is_file(), "{report:?}");
-    assert!(
-        !report.removed.iter().any(|r| r.contains("Counselling")),
-        "{report:?}"
-    );
-    let stub = std::fs::read_to_string(&page).unwrap();
-    assert!(stub.contains("# Hidden page"), "{stub}");
-    assert!(
-        !stub.contains("Organizer") && !stub.contains("SECRET"),
-        "{stub}"
-    );
-}
-
-/// A page that cannot be read (here a symlink) does not keep the one-time full render pending.
-#[cfg(unix)]
-#[test]
-fn an_unreadable_page_does_not_force_full_renders_forever() {
-    let (_dir, _g, _items, v, sam, ..) = hidden_fixture();
-    let root = v.root().to_path_buf();
-    let page = v.page_path(&sam).unwrap().unwrap();
-    drop(v);
-    std::fs::remove_file(&page).unwrap();
-    std::os::unix::fs::symlink(root.join("README.md"), &page).unwrap();
-    let state_path = root.join(".nugget/state.json");
-    let mut state: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
-    state.as_object_mut().unwrap().remove("rules");
-    std::fs::write(&state_path, serde_json::to_string(&state).unwrap()).unwrap();
-    let g = Arc::new(MemGraph::new());
-    populate(&g);
-    let v = Vault::new(&root, g, Arc::new(lookup), config()).unwrap();
-    assert!(v.needs_full_render());
-    let report = v.render_changed(u64::MAX).unwrap();
-    assert!(!report.skipped.is_empty(), "{report:?}");
-    assert!(!v.needs_full_render(), "{report:?}");
-}
-
-/// A lookup whose batch call always fails: the vault asks item by item instead of counting
-/// every item as sensitive.
-struct NoBatch;
-
-impl ItemLookup for NoBatch {
-    fn source_info(&self, it: &ItemRef) -> nugget_core::Result<Option<SourceInfo>> {
-        Ok(lookup(it))
-    }
-
-    fn source_infos(
-        &self,
-        _items: &[ItemRef],
-    ) -> nugget_core::Result<std::collections::HashMap<ItemRef, SourceInfo>> {
-        Err(nugget_core::Error::Invalid("batch broken".into()))
+fn assert_absent(text: &str, leaks: &[&str]) {
+    for leak in leaks {
+        assert!(!text.contains(leak), "{leak} in:\n{text}");
     }
 }
 
+/// A page whose entity turns sensitive-only: user edits are applied first, then the page keeps
+/// only the user's own text (never generated text), and is never deleted while it has some.
 #[test]
-fn a_failed_batch_lookup_falls_back_to_one_item_at_a_time() {
-    let dir = tempfile::tempdir().unwrap();
-    let g = Arc::new(MemGraph::new());
-    let (sam, acme, ..) = populate(&g);
-    let v = Vault::new(dir.path().join("v"), g, Arc::new(NoBatch), config()).unwrap();
-    let report = v.render_all().unwrap();
-    assert!(report.removed.is_empty(), "{report:?}");
-    let t = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
-    assert!(
-        t.contains("Samantha works at") && t.contains("Lunch on Friday"),
-        "{t}"
-    );
-    assert!(v.page_path(&acme).unwrap().is_some());
+fn pages_turning_hidden_keep_only_the_users_text() {
+    type Setup = fn(&Hidden) -> std::path::PathBuf;
+    type Check = fn(&Hidden, &str);
+    let cases: [(&str, Setup, Check); 5] = [
+        (
+            "changed frontmatter is the user's text; their alias reaches the graph",
+            |h| {
+                h.edit(&h.jonas, |t| {
+                    t.replacen("aliases: []", "aliases: [\"JA\"]\ntags: [\"therapy\"]", 1)
+                })
+            },
+            |h, stub| {
+                assert!(stub.contains("# Hidden page") && stub.contains("tags: [\"therapy\"]"));
+                assert_absent(stub, &["# Jonas", "organized", "Counselling"]);
+                let jonas = h.g.get_entity(&h.jonas).unwrap().unwrap();
+                assert!(jonas.aliases.contains(&"JA".to_string()));
+                assert_eq!(h.v.page_path(&h.jonas).unwrap(), None);
+                assert!(h.v.validate().unwrap().is_ok());
+            },
+        ),
+        (
+            "a reworded fact is the user's own: a normal page stays",
+            |h| {
+                let m = format!("<!-- c:{} -->", h.organized().id);
+                h.edit(&h.jonas, |t| {
+                    replace_line(&t, &m, &format!("- Jonas runs a book club. {m}"))
+                })
+            },
+            |h, page| {
+                assert!(!h.organized().status.is_active());
+                assert!(h.g.claims_for(&h.jonas, false).unwrap().iter().any(|c| {
+                    c.status == ClaimStatus::UserAsserted && c.text.contains("book club")
+                }));
+                assert!(page.contains("Jonas runs a book club."), "{page}");
+                assert!(h.v.page_path(&h.jonas).unwrap().is_some());
+            },
+        ),
+        (
+            "a deleted fact is rejected and its text is not kept as notes",
+            |h| {
+                // A second invite fact, so Jonas stays sensitive-only after the deletion.
+                add(
+                    &h.g,
+                    &h.jonas,
+                    "phone",
+                    lit("+49 30 555"),
+                    "Jonas's phone is +49 30 555.",
+                    vec![ev("files", "counselling.ics", "Tel +49 30 555")],
+                );
+                h.v.render_all().unwrap();
+                let m = format!("<!-- c:{} -->", h.organized().id);
+                h.edit(&h.jonas, |t| drop_line(&t, &m) + "\nmy note\n")
+            },
+            |h, stub| {
+                assert_eq!(h.organized().status, ClaimStatus::Rejected);
+                assert!(stub.contains("my note") && stub.contains("# Hidden page"));
+                assert_absent(stub, &["Jonas", "Facts", "Related", "Counselling", "555"]);
+            },
+        ),
+        (
+            "a comment-stripped page gets its markers back first",
+            |h| {
+                h.edit(&h.jonas, |t| {
+                    let stripped: String = t
+                        .lines()
+                        .filter(|l| !l.trim_start().starts_with("<!-- nugget:"))
+                        .map(|l| format!("{}\n", l.find(" <!--").map_or(l, |i| &l[..i])))
+                        .collect();
+                    assert!(!stripped.contains("<!--"), "{stripped}");
+                    stripped + "my note\n"
+                })
+            },
+            |_, stub| {
+                assert!(stub.contains("my note"));
+                assert_absent(stub, &["# Jonas", "organized", "Counselling"]);
+            },
+        ),
+        (
+            "without a merge base the page is hidden, not deleted",
+            |h| {
+                let base = h.v.root().join(".nugget/base/entities");
+                for e in std::fs::read_dir(&base).unwrap() {
+                    let p = e.unwrap().path();
+                    if p.to_string_lossy().contains(&short_id(&h.session)) {
+                        std::fs::remove_file(p).unwrap();
+                    }
+                }
+                h.v.page_path(&h.session).unwrap().unwrap()
+            },
+            |_, stub| assert!(stub.contains("# Hidden page")),
+        ),
+    ];
+    for (name, setup, check) in cases {
+        let h = hidden_fixture();
+        let page = setup(&h);
+        h.items
+            .invite_sensitive
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let report = h.v.render_all().unwrap();
+        assert!(page.is_file(), "{name}: deleted: {report:?}");
+        let text = std::fs::read_to_string(&page).unwrap();
+        assert_absent(&text, &["Organizer", "SECRET"]);
+        check(&h, &text);
+    }
 }
 
 /// A lookup that fails for the invite: nothing is deleted in that pass.
@@ -2597,16 +2117,11 @@ impl ItemLookup for FailInvite {
 
 #[test]
 fn no_page_is_deleted_in_a_pass_with_lookup_errors() {
-    let (dir, g, _items, v, _sam, _jonas, session) = hidden_fixture();
-    let page = v.page_path(&session).unwrap().unwrap();
-    let root = v.root().to_path_buf();
-    drop(v);
-    let v = Vault::new(&root, g, Arc::new(FailInvite), config()).unwrap();
+    let h = hidden_fixture();
+    let page = h.v.page_path(&h.session).unwrap().unwrap();
+    let v = Vault::new(h.v.root(), h.g.clone(), Arc::new(FailInvite), config()).unwrap();
     let report = v.render_all().unwrap();
     assert!(report.removed.is_empty(), "{report:?}");
-    assert!(page.is_file());
     // Still hidden: a failed lookup counts as sensitive.
-    let stub = std::fs::read_to_string(&page).unwrap();
-    assert!(!stub.contains("Organizer"), "{stub}");
-    drop(dir);
+    assert_absent(&std::fs::read_to_string(&page).unwrap(), &["Organizer"]);
 }

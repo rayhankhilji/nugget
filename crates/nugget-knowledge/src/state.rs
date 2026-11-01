@@ -1,22 +1,4 @@
 //! Persistent pipeline state, kept in the store's cursor table through [`ItemFeed`]:
-//!
-//! - `knowledge`: [`State`] (extractor and time-model versions, the user's entity and learned
-//!   addresses, the sources seen, the item change-log cursor and retry hints, unresolved
-//!   wikilinks);
-//! - `knowledge/lb/<bucket>/<source>`: the **ledger**, one entry per processed item (connector
-//!   version, content fingerprint, LLM status), sharded into [`BUCKETS`] buckets per source so a
-//!   flush rewrites only what changed (a flush of `flush_every` items dirties about that many
-//!   buckets, so the buckets must be many and small for a flush to cost much less than the
-//!   whole ledger);
-//! - `knowledge/nb/<bucket>`: the notes index used to resolve wikilinks, sharded the same way.
-//!
-//! Earlier versions kept the ledger in [`LEGACY_BUCKETS`] buckets (`knowledge/l/<bucket>/...`)
-//! and the notes under one key (`knowledge/notes`); both are read, merged and moved to the
-//! current layout by the next flush.
-//!
-//! The ledger is written only after an item's extraction is fully applied, so a crash or a
-//! budget cut resumes where it stopped; re-processing an item is idempotent (its evidence is
-//! retracted first).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -27,27 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::feed::ItemFeed;
 
-/// Bump to re-extract everything after extractor changes. A run that finds an older version
-/// re-extracts every item (each item's old evidence is retracted first), so the new resolver
-/// folds duplicates the old one left and entities nothing supports any more are pruned.
-///
-/// - 1: M2.
-/// - 2: W7 resolution and Markdown fixes (trusted note identifiers, name-only twins folded,
-///   organisations linked across name and mail domain, verbatim frontmatter quotes).
-///
-/// Deliberately not bumped for AA3's LLM extraction (compact schema, local limits, kind
-/// adoption): new and changed items use the new path, but re-extracting a whole vault costs one
-/// local-model request per item (26–33 s each on a 2-core CPU), too much to start silently.
+/// Bump to re-extract everything after extractor changes.
 pub const EXTRACTOR_VERSION: u32 = 2;
-/// Version of the claims' time model. A run that finds an older one in [`State::temporal`]
-/// first migrates the graph, without the LLM and without re-extracting anything
-/// (`Session::backfill_validity`): claims get `valid_from` from their evidence dates, and
-/// single-valued predicates are settled again (one current value, dated history). Kept apart
-/// from [`EXTRACTOR_VERSION`], whose bump would re-extract every item with the LLM.
-///
-/// - 1: EE1 validity intervals, past-tense and start cues, order-independent supersession.
-/// - 2: items dated by their own date (frontmatter, event start, file-name date) rather than
-///   the file's mtime (GG5-6): single-valued facts are settled again with those dates.
+/// Version of the claims' time model.
 pub(crate) const TEMPORAL_VERSION: u32 = 2;
 pub(crate) const STATE_KEY: &str = "knowledge";
 /// The pre-sharding notes index (read for migration, cleared once moved).
@@ -74,9 +38,7 @@ pub(crate) struct State {
     #[serde(skip)]
     pub links_dirty: bool,
     pub processed_total: u64,
-    /// Position in the feed's item change log up to which every change was processed. `None`:
-    /// the next run diffs every source against the ledger (first run, after a reset, after an
-    /// extractor upgrade, or with a feed that keeps no change log).
+    /// Position in the feed's item change log up to which every change was processed.
     pub item_cursor: Option<u64>,
     /// Some ledger entry may be due for a retry after a processing failure.
     pub retry_failed: bool,
@@ -87,10 +49,9 @@ pub(crate) struct State {
     pub temporal: u32,
     /// The migration's progress: the last entity (in id order) it finished, while unfinished.
     pub temporal_cursor: Option<EntityId>,
-    /// Changed items whose graph facts came from the model and that were left as they are
-    /// because the model could not run for them (no request budget, power constrained, the
-    /// daemon stopping): re-extracting them without it would replace the model's facts with
-    /// the deterministic extractors' alone. Every plan picks them up again.
+    /// Changed items whose graph facts came from the model and that were left as they are because
+    /// the model could not run for them (no request budget, power constrained, the daemon
+    /// stopping).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub deferred: Vec<Deferred>,
 }
@@ -100,8 +61,7 @@ pub(crate) struct State {
 pub(crate) struct Deferred {
     pub item: ItemRef,
     /// Times the model step ran for it without finishing (no provider, failed requests, request
-    /// budget spent in the middle of the item). At the extractor's `max_attempts` the item is
-    /// extracted without the model after all.
+    /// budget spent in the middle of the item).
     #[serde(default)]
     pub attempts: u32,
 }

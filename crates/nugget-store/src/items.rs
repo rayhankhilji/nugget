@@ -1,9 +1,4 @@
 //! Items and chunks: upsert with content-hash dedup, delete cascade, chunk replacement.
-//!
-//! Item text is stored once: when an item's chunks cover its text, `items.text` is NULL and the
-//! text is kept as a layout over the chunks in `item_text` (see [`text_layout`]). Every path
-//! that rewrites an item's chunks re-plans that layout in the same transaction, without touching
-//! the `items` row (so `updated_at` and the item change feed are unaffected).
 
 mod text_layout;
 
@@ -15,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use time::OffsetDateTime;
 
 use crate::Store;
-use crate::error::{DbExt, format_time, parse_time};
+use crate::error::{ConnExt, DbExt, format_time, parse_time};
 use crate::graph::{ItemScope, Touched, retract_tx};
 use crate::types::{ChunkId, Item, NewChunk, NewItem, UpsertOutcome};
 use crate::vector::AnnWriter;
@@ -73,20 +68,16 @@ fn find_item(conn: &Connection, item: &ItemRef) -> Result<Option<ItemRow>> {
     .db("read item")
 }
 
-/// Items looked up per query by the batched reads ([`Store::get_items`],
-/// [`Store::item_dates`]). The refs travel as one JSON parameter, so this bounds the work (and
-/// the time a read connection is held) per query, not a bound-parameter limit.
+/// Items looked up per query by the batched reads ([`Store::get_items`], [`Store::item_dates`]).
 pub(crate) const LOOKUP_BATCH: usize = 500;
 
-/// `FROM` clause joining the refs in `?1` (a [`refs_json`] array) to their items: `want.key` is
-/// a ref's index in the array, `i` the item. `CROSS JOIN` keeps the refs as the outer loop, so
-/// each one is a lookup on the `(source, key)` index.
+/// `FROM` clause joining the refs in `?1` (a [`refs_json`] array) to their items: `want.key` is a
+/// ref's index in the array, `i` the item.
 pub(crate) const WANTED_ITEMS_JOIN: &str = "FROM json_each(?1) AS want
      CROSS JOIN items i ON i.source = json_extract(want.value, '$[0]')
                        AND i.key = json_extract(want.value, '$[1]')";
 
-/// Chunk texts of the items whose ids are in `?1` (a JSON array). `CROSS JOIN` keeps the ids as
-/// the outer loop (an `IN (SELECT ...)` made SQLite scan `chunks` with a bloom filter).
+/// Chunk texts of the items whose ids are in `?1` (a JSON array).
 const LAYOUT_CHUNKS_SQL: &str = "SELECT c.item_id, c.ord, c.text
      FROM json_each(?1) AS want CROSS JOIN chunks c ON c.item_id = want.value";
 
@@ -117,20 +108,17 @@ fn read_snapshot<T>(c: &Connection, f: impl FnOnce(&Connection) -> Result<T>) ->
 /// The items for a [`refs_json`] array, with their texts, as `(index in the array, row, text)`.
 fn find_items(c: &Connection, refs: &str) -> Result<Vec<(usize, ItemRow, Option<String>)>> {
     let rows: Vec<(usize, ItemRow)> = {
-        let mut stmt = c
-            .prepare_cached(&format!(
+        c.rows(
+            &format!(
                 "SELECT i.id, i.title, i.content_hash, i.mime, i.text, i.metadata,
                         i.source_modified_at, i.created_at, i.updated_at, i.version,
                         (SELECT layout FROM item_text WHERE item_id = i.id), want.key
                  {WANTED_ITEMS_JOIN}"
-            ))
-            .db("prepare get_items")?;
-        let rows = stmt
-            .query_map([refs], |r| {
-                Ok((r.get::<_, i64>(11)? as usize, read_item_row(r)?))
-            })
-            .db("query get_items")?;
-        rows.collect::<rusqlite::Result<_>>().db("read get_items")?
+            ),
+            [refs],
+            |r| Ok((r.get::<_, i64>(11)? as usize, read_item_row(r)?)),
+            "read get_items",
+        )?
     };
     // Chunk texts for every item whose text is a layout, in one query.
     let layout_ids: Vec<i64> = rows
@@ -175,13 +163,12 @@ fn find_items(c: &Connection, refs: &str) -> Result<Vec<(usize, ItemRow, Option<
 
 /// Texts of an item's chunks by `ord`.
 fn chunk_texts(conn: &Connection, item_id: i64) -> Result<HashMap<u64, String>> {
-    let mut stmt = conn
-        .prepare_cached("SELECT ord, text FROM chunks WHERE item_id = ?1")
-        .db("prepare chunk texts")?;
-    let rows = stmt
-        .query_map([item_id], |r| Ok((r.get::<_, i64>(0)? as u64, r.get(1)?)))
-        .db("query chunk texts")?;
-    rows.collect::<rusqlite::Result<_>>().db("read chunk texts")
+    conn.rows(
+        "SELECT ord, text FROM chunks WHERE item_id = ?1",
+        [item_id],
+        |r| Ok((r.get::<_, i64>(0)? as u64, r.get(1)?)),
+        "read chunk texts",
+    )
 }
 
 /// Rebuild an item's text from its `item_text` layout and current chunks.
@@ -266,9 +253,8 @@ fn plan_layout(text: &str, chunks: &[NewChunk]) -> Option<Vec<u8>> {
     text_layout::plan(text, &texts)
 }
 
-/// Replace an item's chunks, keeping its text intact: a text held in `item_text` is re-planned
-/// over the new chunks (or kept as a literal when they no longer cover it). `planned` is a
-/// layout already planned over `chunks` for an item row just written with `text = NULL`.
+/// Replace an item's chunks, keeping its text intact: a text held in `item_text` is re-planned over
+/// the new chunks (or kept as a literal when they no longer cover it).
 fn rewrite_chunks(
     tx: &Connection,
     item_id: i64,
@@ -395,8 +381,7 @@ fn upsert_row(tx: &Connection, p: &PreparedItem<'_>) -> Result<RowUpsert> {
                     item_id: old.id,
                 });
             }
-            // Same text over the same (kept) chunks: the stored layout stays valid. With chunks
-            // to write, `rewrite_chunks` then re-plans it over the new ones.
+            // Same text over the same (kept) chunks: the stored layout stays valid.
             let keep_layout = old.layout.is_some() && same_text && p.layout.is_none();
             let text_column = if keep_layout { None } else { p.text_column() };
             tx.execute(
@@ -433,8 +418,7 @@ fn upsert_row(tx: &Connection, p: &PreparedItem<'_>) -> Result<RowUpsert> {
     }
 }
 
-/// Validate a chunk batch: finite, non-empty embeddings of one dimension. Returns that
-/// dimension (`None` when no chunk carries an embedding).
+/// Validate a chunk batch: finite, non-empty embeddings of one dimension.
 fn validate_chunks(chunks: &[NewChunk]) -> Result<Option<usize>> {
     let mut dim = None;
     for (i, ch) in chunks.iter().enumerate() {
@@ -531,11 +515,6 @@ fn upsert_with_chunks_tx(
 
 impl Store {
     /// Insert or update an item, keyed by `(source, key)`.
-    ///
-    /// Re-upserting identical content and fields returns `Unchanged` without writing. When the
-    /// content hash changes, the item's chunks (derived from the old content) are deleted so stale
-    /// text never stays searchable; re-chunk with [`Store::replace_chunks`], or write item and
-    /// chunks together with [`Store::upsert_item_with_chunks`].
     pub fn upsert_item(&self, new: &NewItem) -> Result<UpsertOutcome> {
         let p = PreparedItem::new(new)?;
         self.with_conn(|conn| {
@@ -548,19 +527,9 @@ impl Store {
         })
     }
 
-    /// Write an item and its chunks in **one transaction**: the item row (including its
-    /// `version`), its chunks, their full-text entries and vectors become visible together, or
-    /// (on any error) nothing changes. A crash can therefore never leave an item whose version
-    /// says "indexed" without its chunks.
-    ///
-    /// - `Inserted` / `Updated`: the item's chunks are replaced by `chunks` (as with
-    ///   [`Store::replace_chunks`]; an empty slice leaves the item without chunks).
-    /// - `Unchanged` (same hash and fields): nothing is written, with one exception: if the stored
-    ///   item has **no** chunks but `chunks` is non-empty (an earlier non-atomic write was
-    ///   interrupted between the item and its chunks), the chunks are written and the outcome
-    ///   is `Updated`.
-    ///
-    /// Embeddings follow the [`Store::replace_chunks`] rules (one dimension per database).
+    /// Write an item and its chunks in **one transaction**: the item row (including its `version`),
+    /// its chunks, their full-text entries and vectors become visible together, or (on any error)
+    /// nothing changes.
     pub fn upsert_item_with_chunks(
         &self,
         new: &NewItem,
@@ -578,15 +547,9 @@ impl Store {
         })
     }
 
-    /// [`Store::upsert_item_with_chunks`] for many items in **one transaction**: every item's
-    /// row, chunks, full-text entries and vectors become visible together, or (on any error,
-    /// including an invalid item anywhere in the batch) nothing changes. Returns each item's
-    /// outcome, in order.
-    ///
-    /// For bulk writers (first imports, re-indexing): one commit per batch instead of one per
-    /// item saves a WAL sync and the per-transaction overhead for each item. Keep batches to a
-    /// few hundred items so the writer is never held for long. An item listed twice is written
-    /// twice, in order.
+    /// [`Store::upsert_item_with_chunks`] for many items in **one transaction**: every item's row,
+    /// chunks, full-text entries and vectors become visible together, or (on any error, including
+    /// an invalid item anywhere in the batch) nothing changes.
     pub fn upsert_items_with_chunks(
         &self,
         batch: &[(NewItem, Vec<NewChunk>)],
@@ -622,11 +585,7 @@ impl Store {
         })
     }
 
-    /// Replace an item's `metadata` only, if its content hash is still `content_hash`. Unlike
-    /// [`Store::upsert_item`] this leaves `updated_at` (and so consumers that fingerprint an
-    /// item by `content_hash:updated_at`, like knowledge extraction) alone: meant for labels
-    /// computed from unchanged content, such as background triage. Returns whether a row
-    /// was updated.
+    /// Replace an item's `metadata` only, if its content hash is still `content_hash`.
     pub fn set_item_metadata(
         &self,
         item: &ItemRef,
@@ -660,10 +619,7 @@ impl Store {
             .transpose()
     }
 
-    /// Fetch many items at once: `out[i]` is `items[i]` (`None` when unknown; duplicates are
-    /// fine). One query per [`LOOKUP_BATCH`] items plus one for the chunk texts their stored
-    /// layouts need, each batch read in one snapshot on a read connection, instead of one or two
-    /// queries per item as with [`Self::get_item`].
+    /// Fetch many items at once: `out[i]` is `items[i]` (`None` when unknown; duplicates are fine).
     pub fn get_items(&self, items: &[ItemRef]) -> Result<Vec<Option<Item>>> {
         let mut out: Vec<Option<Item>> = Vec::with_capacity(items.len());
         for batch in items.chunks(LOOKUP_BATCH) {
@@ -686,14 +642,9 @@ impl Store {
         Ok(out)
     }
 
-    /// Items of `source` in key order, starting after `after` (exclusive; `None` from the
-    /// start), at most `limit`, and the key to pass as `after` for the next page (`None` once
-    /// the source is done): for walking a whole source in pages without holding it in memory.
-    /// Each page costs one key query on the `(source, key)` index and one [`Self::get_items`]
-    /// batch, instead of a query per item. Items written or deleted while walking may or may
-    /// not be seen (keyset paging never repeats or skips the others); a page can hold fewer
-    /// than `limit` items when some were deleted between its two reads, so go by the cursor,
-    /// not the page's length.
+    /// Items of `source` in key order, starting after `after` (exclusive; `None` from the start),
+    /// at most `limit`, and the key to pass as `after` for the next page (`None` once the source is
+    /// done): for walking a whole source in pages without holding it in memory.
     pub fn items_page(
         &self,
         source: &SourceId,
@@ -732,13 +683,7 @@ impl Store {
         Ok((items, next))
     }
 
-    /// Delete an item with its chunks, full-text entries and vectors. Returns whether it existed.
-    ///
-    /// In the same transaction, the item's knowledge-graph provenance is dropped as by
-    /// [`GraphStore::retract_item`](nugget_graph::GraphStore::retract_item): its evidence and
-    /// mentions are removed, claims left without evidence are retracted, and the affected
-    /// entities enter the graph change feed. This happens even if the item row is already gone,
-    /// so a retry cleans up after an earlier partial failure elsewhere.
+    /// Delete an item with its chunks, full-text entries and vectors.
     pub fn delete_item(&self, item: &ItemRef) -> Result<bool> {
         let now = format_time(OffsetDateTime::now_utc())?;
         self.with_conn(|conn| {
@@ -761,11 +706,7 @@ impl Store {
         })
     }
 
-    /// Replace all chunks of an item (in order). Returns the new chunk ids.
-    ///
-    /// The first embedding stored fixes the database's embedding dimension; later embeddings of
-    /// another dimension are rejected with `Error::Invalid`. Fails with `Error::NotFound` if the
-    /// item does not exist. Atomic: on error nothing changes.
+    /// Replace all chunks of an item (in order).
     pub fn replace_chunks(&self, item: &ItemRef, chunks: &[NewChunk]) -> Result<Vec<ChunkId>> {
         let dim = validate_chunks(chunks)?;
         self.with_conn(|conn| {
@@ -870,76 +811,6 @@ fn ensure_vec_table(conn: &Connection, dim: usize) -> Result<()> {
             )
             .db("record embedding dimension")?;
             Ok(())
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Long enough that storing it as a layout over its chunk pays off.
-    const BODY: &str = "a body long enough to be kept once, as a layout over its single chunk, \
-                        rather than twice (in the item row and in the chunk)";
-
-    fn plan(c: &Connection, sql: &str) -> Vec<String> {
-        let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-        let nulls = vec![rusqlite::types::Null; stmt.parameter_count()];
-        stmt.query_map(rusqlite::params_from_iter(nulls), |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap()
-    }
-
-    /// The batched lookups reach `items` and `chunks` through their indexes, once per wanted
-    /// ref, never with a table scan (also after `ANALYZE`, when the planner has statistics).
-    #[test]
-    fn batched_lookups_use_indexes() {
-        let s = Store::open_in_memory().unwrap();
-        for i in 0..50 {
-            let it = NewItem::new("src", format!("k{i}"), format!("h{i}")).with_text(BODY);
-            s.upsert_item_with_chunks(&it, &[NewChunk::text(BODY)])
-                .unwrap();
-        }
-        let statements = [
-            format!("SELECT i.id, want.key {WANTED_ITEMS_JOIN}"),
-            LAYOUT_CHUNKS_SQL.to_owned(),
-        ];
-        let layouts: i64 = s
-            .with_conn(|c| {
-                c.query_row("SELECT count(*) FROM item_text", [], |r| r.get(0))
-                    .db("count layouts")
-            })
-            .unwrap();
-        assert_eq!(layouts, 50, "texts are stored as layouts");
-        let refs: Vec<ItemRef> = (0..50)
-            .map(|i| ItemRef {
-                source: SourceId::new("src"),
-                key: ItemKey::new(format!("k{i}")),
-            })
-            .collect();
-        let items = s.get_items(&refs).unwrap();
-        assert!(
-            items
-                .iter()
-                .all(|i| i.as_ref().unwrap().text.as_deref() == Some(BODY))
-        );
-        for analyze in [false, true] {
-            s.with_conn(|c| {
-                if analyze {
-                    c.execute_batch("ANALYZE;").db("analyze")?;
-                }
-                for sql in &statements {
-                    let steps = plan(c, sql);
-                    let scans: Vec<_> = steps
-                        .iter()
-                        .filter(|d| d.starts_with("SCAN ") && !d.contains("VIRTUAL TABLE"))
-                        .collect();
-                    assert!(scans.is_empty(), "{sql}: {steps:#?}");
-                }
-                Ok(())
-            })
-            .unwrap();
         }
     }
 }

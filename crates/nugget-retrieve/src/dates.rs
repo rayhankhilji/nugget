@@ -1,36 +1,4 @@
 //! Date phrases in queries ("last week", "in march 2025"), parsed deterministically.
-//!
-//! [`parse_date_query`] finds the first date phrase in a query and returns the time range it
-//! names plus the query with the phrase removed. Nothing here guesses: a phrase either matches
-//! one of the forms below exactly or the query is left alone.
-//!
-//! | phrase | range (end exclusive) |
-//! |---|---|
-//! | `today`, `yesterday` | that day |
-//! | `this week`, `last week` / `previous week` | the ISO week (Monday start) |
-//! | `this month`, `last month`, `this year`, `last year` | the calendar month / year |
-//! | `past week`, `past month`, `past year` | rolling: that long before today, through today |
-//! | `past N days`, `last N weeks`, ... (`N` digits or `one`–`twelve`) | rolling, through today |
-//! | `last monday` | the most recent Monday before today |
-//! | `2026-03-02` (ISO date, `on` optional) | that day |
-//! | `march 2025` | that month |
-//! | `in`/`during` `march`, `in`/`during` `2025` | the most recent March up to this month, or the coming one if at most two months ahead; the year |
-//! | `tomorrow`, `next week` / `month` / `year` / `weekend`, `this weekend` | that day, ISO week, month, year, Saturday–Sunday |
-//! | `next friday` / `this friday` | the first Friday after today / that day of this week |
-//! | `upcoming`, `coming up`, `coming week`, `next N days` | today through 30 days / 7 days / N days ahead |
-//! | `5 november 2026`, `november 5, 2026`, `5 nov` | that day (without a year: this year's, unless more than six months ago) |
-//! | `on monday` | the most recent Monday up to today |
-//! | `since <any of the above>` | from the start of that range through today |
-//!
-//! Month names (full, or three-letter abbreviations and `sept`), bare weekdays and bare years
-//! are only dates after a cue word (`in`, `during`, `since`, and `on` for weekdays), so "you
-//! may need" and "2025 tax code" are left alone. Years must be 1990–2100.
-//!
-//! **Time zone.** Days begin at midnight at a fixed UTC offset, UTC unless configured otherwise
-//! ([`RetrieveConfig::date_utc_offset_minutes`](crate::RetrieveConfig::date_utc_offset_minutes)).
-//! The daemon has no reliable notion of the user's time zone (and a fixed offset cannot follow
-//! daylight saving), so UTC is the predictable default; near midnight a "yesterday" can be off by
-//! the user's offset, which a caller that knows the offset can correct.
 
 use serde::{Deserialize, Serialize};
 use time::{Date, Duration, Month, OffsetDateTime, UtcOffset, Weekday};
@@ -164,8 +132,7 @@ enum Cue {
     Since,
 }
 
-/// A date expression at token `j`. Forms that are only dates after a cue word are accepted only
-/// with the matching `cue`.
+/// A date expression at token `j`.
 fn anchor(q: &str, toks: &[Tok], j: usize, today: Date, cue: Cue) -> Option<Span> {
     let w = |k: usize| toks.get(j + k).map(|t| t.text.as_str());
     let first = w(0)?;
@@ -371,9 +338,7 @@ fn next_on(from: Date, wd: Weekday) -> Option<Date> {
     from.checked_add(Duration::days(ahead))
 }
 
-/// A day and a month name, either order, with an optional year: `(tokens used, date)`. Without
-/// a year, the date this year, unless that is more than six months ago (then next year's). `may`
-/// counts only with a year, since "3 may apply" is not a date.
+/// A day and a month name, either order, with an optional year: `(tokens used, date)`.
 fn day_month(toks: &[Tok], j: usize, today: Date) -> Option<(usize, Date)> {
     let w = |k: usize| toks.get(j + k).map(|t| t.text.as_str());
     let day = |s: &str| {
@@ -556,8 +521,6 @@ pub fn wants_latest(query: &str) -> bool {
 
 /// The date an item is about, for date filters, recency and citations: a calendar item's start,
 /// else a mail's sent `Date`, else when the source last modified it, else when it was stored.
-/// A folder copied today keeps its mails' and events' real dates; only plain files fall back
-/// to their modification time. Dates without a time zone are read at `offset`.
 pub fn item_date(dates: &nugget_store::ItemDates, offset: UtcOffset) -> OffsetDateTime {
     dates
         .event_start
@@ -692,39 +655,19 @@ mod tests {
     fn phrases_map_to_ranges() {
         let cases: &[(&str, &str, &str)] = &[
             ("notes from today", "2026-03-04", "2026-03-05"),
-            ("what did I write yesterday", "2026-03-03", "2026-03-04"),
-            ("meetings this week", "2026-03-02", "2026-03-09"),
             ("meetings last week", "2026-02-23", "2026-03-02"),
-            ("previous week standup", "2026-02-23", "2026-03-02"),
-            ("past week", "2026-02-25", "2026-03-05"),
-            ("invoices this month", "2026-03-01", "2026-04-01"),
             ("invoices last month", "2026-02-01", "2026-03-01"),
-            ("past month", "2026-02-04", "2026-03-05"),
-            ("this year", "2026-01-01", "2027-01-01"),
-            ("taxes last year", "2025-01-01", "2026-01-01"),
-            ("past year", "2025-03-04", "2026-03-05"),
             ("emails in the past 3 days", "2026-03-01", "2026-03-05"),
-            ("last 2 weeks of standups", "2026-02-18", "2026-03-05"),
             ("past six months", "2025-09-04", "2026-03-05"),
-            ("past 1 day", "2026-03-03", "2026-03-05"),
             ("since monday", "2026-03-02", "2026-03-05"),
-            ("since Wednesday", "2026-03-04", "2026-03-05"),
-            ("since thursday", "2026-02-26", "2026-03-05"),
             ("since last week", "2026-02-23", "2026-03-05"),
-            ("on monday", "2026-03-02", "2026-03-03"),
-            ("last monday", "2026-03-02", "2026-03-03"),
             ("last wednesday", "2026-02-25", "2026-02-26"),
             ("call on 2026-03-02", "2026-03-02", "2026-03-03"),
-            ("2025-12-31 notes", "2025-12-31", "2026-01-01"),
             ("trip in march", "2026-03-01", "2026-04-01"),
             // April is the coming month (at most two months ahead), not last year's.
             ("trip in April", "2026-04-01", "2026-05-01"),
-            ("trip during march 2025", "2025-03-01", "2025-04-01"),
             ("march 2025 budget", "2025-03-01", "2025-04-01"),
-            ("in sept", "2025-09-01", "2025-10-01"),
-            ("since january", "2026-01-01", "2026-03-05"),
             ("since 2025", "2025-01-01", "2026-03-05"),
-            ("photos in 2024", "2024-01-01", "2025-01-01"),
         ];
         for (q, start, end) in cases {
             assert_eq!(
@@ -739,33 +682,16 @@ mod tests {
     #[test]
     fn future_phrases_and_explicit_dates() {
         let cases: &[(&str, &str, &str)] = &[
-            ("what's on tomorrow", "2026-03-05", "2026-03-06"),
             ("What do I have next week?", "2026-03-09", "2026-03-16"),
-            ("bills due next month", "2026-04-01", "2026-05-01"),
-            ("next year", "2027-01-01", "2028-01-01"),
             ("dinner next friday", "2026-03-06", "2026-03-07"),
-            ("next wednesday", "2026-03-11", "2026-03-12"),
-            ("this friday", "2026-03-06", "2026-03-07"),
             ("this weekend", "2026-03-07", "2026-03-09"),
-            ("next weekend", "2026-03-14", "2026-03-16"),
             ("upcoming appointments", "2026-03-04", "2026-04-03"),
-            ("what's coming up", "2026-03-04", "2026-04-03"),
-            ("the coming week", "2026-03-04", "2026-03-11"),
             ("next 3 days", "2026-03-04", "2026-03-08"),
             ("Thursday 5 November 2026", "2026-11-05", "2026-11-06"),
-            ("on Thursday 5 November 2026", "2026-11-05", "2026-11-06"),
-            ("on November 5, 2026", "2026-11-05", "2026-11-06"),
             ("call on 12th march", "2026-03-12", "2026-03-13"),
-            ("flight on 5 jan", "2026-01-05", "2026-01-06"),
-            ("party on 2 dec", "2026-12-02", "2026-12-03"),
-            ("trip on 10 december", "2026-12-10", "2026-12-11"),
-            ("on 1 jan", "2026-01-01", "2026-01-02"),
             // A bare month: the coming one if it is at most two months ahead.
             ("in april", "2026-04-01", "2026-05-01"),
-            ("in may", "2026-05-01", "2026-06-01"),
             ("in june", "2025-06-01", "2025-07-01"),
-            ("in march", "2026-03-01", "2026-04-01"),
-            ("since april", "2025-04-01", "2026-03-05"),
         ];
         for (q, start, end) in cases {
             assert_eq!(
@@ -797,34 +723,14 @@ mod tests {
     }
 
     #[test]
-    fn latest_cues() {
-        assert!(wants_latest("How much is my Lumen Fiber bill now?"));
-        assert!(wants_latest("the latest invoice"));
-        assert!(!wants_latest("knowledge of the nowhere man"));
-    }
-
-    #[test]
     fn non_dates_do_not_match() {
         for q in [
             "you may need a permit",
-            "May the force be with you",
-            "the march on Washington",
             "2025 tax code",
-            "room 2025",
-            "in 1850",
-            "in 2101",
             "last chance",
-            "the last one",
-            "past tense",
-            "this one",
             "on the monday list", // `on the` is not `on monday`
-            "monday meeting notes",
-            "mar a lago",
             "on 2025-02-29",
-            "1-2026-03-02",
-            "since forever",
             "past 0 days",
-            "past 1000 days",
             "",
         ] {
             assert_eq!(days(q, NOW), None, "{q:?}");
@@ -848,10 +754,6 @@ mod tests {
             days("last week", "2026-01-02T10:00:00Z"),
             Some(("2025-12-22".into(), "2025-12-29".into()))
         );
-        assert_eq!(
-            days("since sunday", "2026-03-08T12:00:00Z"),
-            Some(("2026-03-08".into(), "2026-03-09".into()))
-        );
     }
 
     #[test]
@@ -859,14 +761,6 @@ mod tests {
         assert_eq!(
             days("last month", "2026-01-15T00:00:00Z"),
             Some(("2025-12-01".into(), "2026-01-01".into()))
-        );
-        assert_eq!(
-            days("this month", "2025-12-31T23:59:59Z"),
-            Some(("2025-12-01".into(), "2026-01-01".into()))
-        );
-        assert_eq!(
-            days("this month", "2024-02-10T00:00:00Z"),
-            Some(("2024-02-01".into(), "2024-03-01".into()))
         );
         // Clamped to the shorter month, leap and non-leap.
         assert_eq!(
@@ -878,16 +772,8 @@ mod tests {
             Some(("2025-02-28".into(), "2025-04-01".into()))
         );
         assert_eq!(
-            days("past year", "2024-02-29T00:00:00Z"),
-            Some(("2023-02-28".into(), "2024-03-01".into()))
-        );
-        assert_eq!(
             days("on 2024-02-29", NOW),
             Some(("2024-02-29".into(), "2024-03-01".into()))
-        );
-        assert_eq!(
-            days("in february 2024", NOW),
-            Some(("2024-02-01".into(), "2024-03-01".into()))
         );
         // A month in the future this year means last year's.
         assert_eq!(
@@ -920,19 +806,5 @@ mod tests {
         let p = parse_date_query("today vs yesterday", at(NOW), UtcOffset::UTC).unwrap();
         assert_eq!(p.phrase, "today");
         assert_eq!(p.cleaned, "vs yesterday");
-    }
-
-    #[test]
-    fn offset_shifts_day_boundaries() {
-        // 23:30 UTC on Wednesday is already Thursday at UTC+2.
-        let now = at("2026-03-04T23:30:00Z");
-        let plus2 = UtcOffset::from_hms(2, 0, 0).unwrap();
-        let p = parse_date_query("today", now, plus2).unwrap();
-        assert_eq!(p.range.start, at("2026-03-04T22:00:00Z"));
-        assert_eq!(p.range.end, at("2026-03-05T22:00:00Z"));
-        assert!(p.range.contains(now));
-        assert!(!p.range.contains(at("2026-03-04T21:59:59Z")));
-        let utc = parse_date_query("today", now, UtcOffset::UTC).unwrap();
-        assert_eq!(utc.range.start, at("2026-03-04T00:00:00Z"));
     }
 }

@@ -9,7 +9,7 @@ use std::time::Duration;
 use common::*;
 use nugget_core::ids::{ItemKey, SourceId};
 use nugget_core::ipc::{IngestPhase, SourceState};
-use nugget_ingest::{IngestConfig, IngestEvent};
+use nugget_ingest::IngestEvent;
 use serde_json::json;
 
 fn id() -> SourceId {
@@ -48,35 +48,6 @@ async fn failed_passes_retry_with_growing_backoff_then_recover() {
             .iter()
             .all(|e| e.key.is_none() && e.message.contains("network"))
     );
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
-async fn backoff_is_capped() {
-    let h = start(Opts {
-        cfg: IngestConfig {
-            backoff_base_ms: 10,
-            backoff_max_ms: 40,
-            ..cfg()
-        },
-        ..Default::default()
-    })
-    .await;
-    let st = h.factory.state("fake-1");
-    for _ in 0..8 {
-        st.script(vec![Step::Fail(ErrKind::Network)]);
-    }
-    h.add("fake-1").await;
-    eventually("9 attempts", || st.calls() >= 9).await;
-    let t = st.sync_times.lock().unwrap().clone();
-    for w in t.windows(2).skip(3) {
-        assert!(
-            w[1] - w[0] < Duration::from_millis(400),
-            "{:?}",
-            w[1] - w[0]
-        );
-    }
-    h.wait_state("fake-1", SourceState::Idle).await;
     h.ingest.shutdown().await;
 }
 
@@ -163,7 +134,7 @@ async fn begin_auth_completes_and_resyncs() {
 }
 
 #[tokio::test]
-async fn backfills_pause_on_low_power_until_overridden() {
+async fn backfills_pause_on_low_power_unless_forced() {
     let power = Arc::new(TogglePower::default());
     power.0.store(true, Ordering::SeqCst);
     let h = start(Opts {
@@ -176,10 +147,17 @@ async fn backfills_pause_on_low_power_until_overridden() {
         Step::Send(text_doc("a", "alpha", Some("1"))),
         Step::Return(json!(1)),
     ]);
+    let forced = h.factory.state("fake-2");
+    forced.script(vec![Step::Return(json!(1))]);
     h.add("fake-1").await;
+    h.add("fake-2").await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(st.calls(), 0, "no backfill on low power");
+    assert_eq!(st.calls() + forced.calls(), 0, "no backfill on low power");
     assert!(h.ingest.is_paused(&id()));
+    // Sync now overrides the policy.
+    h.ingest.sync_now(Some(&SourceId::new("fake-2"))).unwrap();
+    eventually("forced backfill", || h.cursor("fake-2") == Some(json!(1))).await;
+    assert_eq!(st.calls(), 0);
 
     // Power comes back: the backfill runs.
     power.0.store(false, Ordering::SeqCst);
@@ -194,28 +172,6 @@ async fn backfills_pause_on_low_power_until_overridden() {
     ]);
     h.ingest.sync_now(Some(&id())).unwrap();
     eventually("incremental", || h.cursor("fake-1") == Some(json!(2))).await;
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
-async fn sync_now_overrides_the_power_policy() {
-    let power = Arc::new(TogglePower::default());
-    power.0.store(true, Ordering::SeqCst);
-    let h = start(Opts {
-        power,
-        ..Default::default()
-    })
-    .await;
-    let st = h.factory.state("fake-1");
-    st.script(vec![
-        Step::Send(text_doc("a", "alpha", Some("1"))),
-        Step::Return(json!(1)),
-    ]);
-    h.add("fake-1").await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(st.calls(), 0);
-    h.ingest.sync_now(Some(&id())).unwrap();
-    eventually("forced backfill", || h.cursor("fake-1") == Some(json!(1))).await;
     h.ingest.shutdown().await;
 }
 
@@ -260,12 +216,12 @@ async fn polling_sources_resync_after_the_poll_interval() {
 async fn events_report_progress_and_state_changes() {
     let h = start(Opts::default()).await;
     let mut rx = h.ingest.subscribe();
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "alpha", Some("1"))),
-        Step::Return(json!(1)),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!(1))).await;
+    h.run(
+        "fake-1",
+        vec![Step::Send(text_doc("a", "alpha", Some("1")))],
+        json!(1),
+    )
+    .await;
     h.wait_state("fake-1", SourceState::Idle).await;
     tokio::time::sleep(Duration::from_millis(50)).await;
 

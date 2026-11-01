@@ -1,6 +1,4 @@
-//! QA GG4-6 and GG5-2 (GG5 cases at the end). GG4's persona mail (therapy, clinic, bank fraud alert, HR salary letter,
-//! verification code) must be marked sensitive at ingest, with or without a local model, and
-//! ordinary mail must not be. Fixtures: `tests/fixtures/gg4/`.
+//! QA GG4-6 and GG5-2 (GG5 cases at the end).
 
 mod common;
 
@@ -91,10 +89,7 @@ async fn gg4_sensitive_mail_is_flagged_even_when_the_model_under_flags() {
     // The fake model labels these mails not sensitive (no marker word): the rules still hold.
     let local = FakeProvider::new("local-chat", Locality::OnDevice);
     let h = start(Opts {
-        router: Some(router(&[(
-            local.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&local),
         ..Default::default()
     })
     .await;
@@ -171,9 +166,9 @@ const GG5_ORDINARY: &[(&str, &str, &[u8])] = &[
     ),
 ];
 
-/// GG5-2: health and finance files are flagged by rules (content, folders, tags), the rest
-/// count as sensitive until triage decides, and nothing reaches an allowed cloud embedder
-/// while no local triage model exists.
+/// GG5-2: health and finance files are flagged by rules (content, folders, tags), the rest count as
+/// sensitive until triage decides, and nothing reaches an allowed cloud embedder while no local
+/// triage model exists.
 #[tokio::test]
 async fn gg5_health_and_finance_files_are_flagged_and_unknown_stays_sensitive() {
     let cloud = FakeProvider::new("cloud", Locality::Cloud);
@@ -243,54 +238,60 @@ async fn gg5_health_and_finance_files_are_flagged_and_unknown_stays_sensitive() 
     h.ingest.shutdown().await;
 }
 
-/// QA GG7-3: per UI language, five sensitive situations (lab result with a diagnosis, therapy
-/// session, salary letter, bank statement with a loan, one-time code) and two ordinary mails,
-/// written natively (`fixtures/gg7/situations/<lang>/`), plus GG7's 61-item multilingual corpus
-/// (`fixtures/gg7/corpus/`, nothing sensitive in it). Rules only, no model: every situation
-/// must be caught by a rule and nothing ordinary may be.
+/// QA GG7-3: per UI language, five sensitive situations (lab result, therapy, salary, bank
+/// statement, one-time code) and two ordinary mails (`fixtures/gg7/situations.txt`: `key|from|
+/// subject|body`), plus ordinary invoices from GG7's corpus. Rules only, no model.
 #[tokio::test]
 async fn gg7_sensitivity_rules_work_in_every_ui_language() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gg7");
-    let mut files = Vec::new();
-    let mut stack = vec![root.clone()];
-    while let Some(dir) = stack.pop() {
-        for e in std::fs::read_dir(&dir).unwrap() {
-            let p = e.unwrap().path();
-            if p.is_dir() {
-                stack.push(p);
-            } else {
-                files.push(p);
-            }
-        }
+    let mut docs: Vec<(String, &str, Vec<u8>)> = Vec::new();
+    for line in include_str!("fixtures/gg7/situations.txt").lines() {
+        let [key, from, subject, body] = line.splitn(4, '|').collect::<Vec<_>>()[..] else {
+            panic!("bad line {line}");
+        };
+        let raw = format!(
+            "From: {from}\r\nTo: Sam Okafor <sam.okafor@example.net>\r\nSubject: {subject}\r\n\
+             Date: Tue, 27 Oct 2026 09:14:00 +0000\r\nContent-Type: text/plain; charset=\"utf-8\"\r\n\
+             Content-Transfer-Encoding: 8bit\r\nMIME-Version: 1.0\r\n\r\n{}\r\n",
+            body.replace("\\n", "\r\n")
+        );
+        docs.push((
+            format!("situations/{key}.eml"),
+            "message/rfc822",
+            raw.into_bytes(),
+        ));
     }
-    files.sort();
-    let mime = |p: &std::path::Path| match p.extension().and_then(|e| e.to_str()) {
-        Some("eml") => "message/rfc822",
-        Some("ics") => "text/calendar",
-        _ => "text/markdown",
-    };
-    let keys: Vec<(String, bool)> = files
-        .iter()
-        .map(|p| {
-            let rel = p
+    for lang in std::fs::read_dir(root.join("corpus")).unwrap() {
+        for f in std::fs::read_dir(lang.unwrap().path()).unwrap() {
+            let p = f.unwrap().path();
+            let mime = if p.extension().is_some_and(|e| e == "ics") {
+                "text/calendar"
+            } else {
+                "message/rfc822"
+            };
+            let key = p
                 .strip_prefix(&root)
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
-            let sensitive = rel.starts_with("situations/")
-                && ["-med.", "-ther.", "-sal.", "-bank.", "-otp."]
-                    .iter()
-                    .any(|s| rel.contains(s));
-            (rel, sensitive)
+            docs.push((key, mime, std::fs::read(&p).unwrap()));
+        }
+    }
+    let keys: Vec<(String, bool)> = docs
+        .iter()
+        .map(|(k, _, _)| {
+            let sensitive = ["-med.", "-ther.", "-sal.", "-bank.", "-otp."]
+                .iter()
+                .any(|s| k.starts_with("situations/") && k.contains(s));
+            (k.clone(), sensitive)
         })
         .collect();
     assert_eq!(keys.iter().filter(|(_, s)| *s).count(), 45);
     let h = start(Opts::default()).await;
-    let mut script: Vec<Step> = files
-        .iter()
-        .zip(&keys)
-        .map(|(p, (k, _))| {
-            let mut d = Document::new(k, mime(p), Content::Bytes(std::fs::read(p).unwrap()));
+    let mut script: Vec<Step> = docs
+        .into_iter()
+        .map(|(k, mime, raw)| {
+            let mut d = Document::new(&k, mime, Content::Bytes(raw));
             d.version = Some("1".into());
             Step::Send(Change::Upsert(d))
         })

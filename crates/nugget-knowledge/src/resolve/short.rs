@@ -1,58 +1,4 @@
-//! Short names of people: "Maggie", "M. Thistlewood", "Maggie T", or an address like
-//! `mthistlewood@` with no display name, joined to the one full-name person they are short for.
-//! A name match ([`crate::names`]) is only ever a precondition: the join also needs
-//! corroboration, and exactly one corroborated candidate.
-//!
-//! **Short side.** Only short forms are placed this way: every name one word or initialled
-//! ([`crate::names::is_short_form`]), or no name but an address. A written-out given name and
-//! surname ("Maggie Smith", "Nathan Lee") is a person of its own, never short for another full
-//! name ("Margaret Smith", "Jonathan Lee"): only a shared strong identifier or a trusted record
-//! joins two full names.
-//!
-//! **Candidates** are people with a written-out given name and a surname that the short side
-//! may be short for ([`crate::names::compatible`], or an address whose local part spells the
-//! full name). The search pages through every name match; past [`CAND_MAX`] rows the answer is
-//! "ambiguous". The user is a candidate too, and a blocking one: a short name that fits the user
-//! joins nobody. A candidate with a conflicting strong identifier, or split from the short side
-//! by the user, cannot be picked (it still counts for uniqueness below).
-//!
-//! **Corroboration** (at least one):
-//! - `shared_email` / `shared_identifier`: an identifier both hold;
-//! - `same_item`: the full-name person appears on an item the short side appears on (headers,
-//!   attendees, frontmatter, other occurrences of the item). Two *full* names on one item are
-//!   two people; this only ever corroborates a short form;
-//! - `same_thread`: an item of each is in one mail thread (shared Message-ID, In-Reply-To or
-//!   References); items without those headers give no thread signal (subjects are not used);
-//! - `same_org`: the short side's own address, or a header participant (From/To/Cc/Bcc) of one
-//!   of its items, is at one of the person's mail domains, and no other name-compatible person
-//!   is known at that domain. Webmail domains and the user's own domains (their addresses and
-//!   employers) never count. In a body, an organisation counts only when the text attributes
-//!   the short name to it ("Tamsin from Quillfeather", "at", "of"); merely named, it never does.
-//!   The one exception for the user's own domain is `internal_mail`: mail whose every
-//!   participant is at that domain, each one other than the user already a known person, names
-//!   a colleague ("Felix is doing great") when exactly one name-compatible person has an address
-//!   at that domain.
-//!
-//! **Order.** Both directions apply the same decision ([`Resolver::full_for`]): a short-form
-//! occurrence joins when it is resolved (forward), and a full-name person absorbs existing short
-//! forms for which it is the one corroborated candidate (reverse). During an item, a join is
-//! made only when exactly one name-compatible candidate exists at all; otherwise the short form
-//! gets an entity of its own and is decided at the end of the run ([`Resolver::settle_pending`]),
-//! when every item of the run is applied. That pass also catches corroboration a later item
-//! supplies. Joins are never undone: a competing candidate that only appears in a later run,
-//! with corroboration of its own, does not split an earlier join (a known limit).
-//!
-//! **Job changes** ([`Resolver::settle_job_changes`]): the same full name under two conflicting
-//! addresses is never merged on the name alone. It is merged (`same_name` + `job_change`) only
-//! when an item *sent from* one address names the other address's organisation or domain (its
-//! mail domain label, or the name of the organisation holding that domain), as Delphine
-//! Corrigan's "my Vellum & Thistle address no longer works" from her new address does.
-//!
-//! **Merge records** ([`MergeRecord`]) cite the item that corroborated the join (same item,
-//! else thread, else the item whose headers showed the organisation) and are indexed by it, one
-//! state key per item; when the item is retracted the records citing it are dropped
-//! ([`forget_item`]) and the merge stays. A user split drops the records of the merge it undid
-//! ([`forget_split`]). `detail` names nobody and quotes nothing from the source ([`describe`]).
+//! Short names of people.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Mutex;
@@ -139,8 +85,7 @@ pub(crate) struct ItemContext<'a> {
     pub item: ItemRef,
     feed: Option<&'a dyn ItemFeed>,
     meta: ItemMeta,
-    /// People on the item: normalised names (with a written-out given name and a surname) and
-    /// identifiers.
+    /// People on the item.
     people: Vec<(Vec<String>, Vec<Identifier>)>,
     /// Entities resolved from this item so far (their mentions are not written yet).
     resolved: Mutex<Vec<EntityId>>,
@@ -181,22 +126,18 @@ impl<'a> ItemContext<'a> {
     }
 
     pub(super) fn note_resolved(&self, id: &EntityId) {
-        let mut r = self.resolved.lock().unwrap_or_else(|p| p.into_inner());
+        let mut r = crate::lock(&self.resolved);
         if !r.contains(id) {
             r.push(id.clone());
         }
     }
 
     fn resolved(&self) -> Vec<EntityId> {
-        self.resolved
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+        crate::lock(&self.resolved).clone()
     }
 }
 
-/// The mail thread keys of an item: its Message-ID, In-Reply-To and References, normalised
-/// (angle brackets dropped, lower case). Empty for items that are not mail.
+/// The mail thread keys of an item.
 pub(crate) fn thread_keys(item: &Item) -> Vec<String> {
     let Some(ex) = item.metadata.get("extracted") else {
         return Vec::new();
@@ -277,8 +218,7 @@ impl<'s> Short<'s> {
         }
     }
 
-    /// Whether this side is a short form: every name is one ([`is_short_form`]), or it has no
-    /// name but an address with a local part. A single written-out full name rules it out.
+    /// Whether this side is a short form.
     pub fn all_short(&self) -> bool {
         if self.names.is_empty() {
             return !self.locals.is_empty();
@@ -356,8 +296,7 @@ fn squash(s: &str) -> String {
         .collect()
 }
 
-/// One short sentence explaining a join from its reason codes. It names nobody and quotes
-/// nothing from the source (the vault shows it next to the record's `name`).
+/// One short sentence explaining a join from its reason codes.
 pub(crate) fn describe(reasons: &[String]) -> String {
     let how: Vec<&str> = reasons
         .iter()
@@ -431,12 +370,7 @@ impl Resolver<'_> {
             if *item == ctx.item {
                 return Ok(ctx.meta.clone());
             }
-            if let Some(m) = ctx
-                .metas
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .get(item)
-            {
+            if let Some(m) = crate::lock(&ctx.metas).get(item) {
                 return Ok(m.clone());
             }
         }
@@ -448,7 +382,7 @@ impl Resolver<'_> {
             None => ItemMeta::default(),
         };
         if let Some(ctx) = self.ctx {
-            let mut cache = ctx.metas.lock().unwrap_or_else(|p| p.into_inner());
+            let mut cache = crate::lock(&ctx.metas);
             if cache.len() > 10_000 {
                 cache.clear();
             }
@@ -457,25 +391,14 @@ impl Resolver<'_> {
         Ok(m)
     }
 
-    /// The user's own registrable domains: of their addresses and of their employers'
-    /// domains. Never evidence of a shared organisation (the user is on every item).
+    /// The user's own registrable domains: of their addresses and of their employers' domains.
     fn user_domains(&self) -> Result<BTreeSet<String>> {
-        if let Some(d) = self
-            .user_domains
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-        {
+        if let Some(d) = crate::lock(&self.user_domains).as_ref() {
             return Ok(d.clone());
         }
-        let cached = self.ctx.and_then(|c| {
-            c.user_domains
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .clone()
-        });
+        let cached = self.ctx.and_then(|c| crate::lock(&c.user_domains).clone());
         if let Some(d) = cached {
-            *self.user_domains.lock().unwrap_or_else(|p| p.into_inner()) = Some(d.clone());
+            *crate::lock(&self.user_domains) = Some(d.clone());
             return Ok(d);
         }
         let mut out = BTreeSet::new();
@@ -504,15 +427,14 @@ impl Resolver<'_> {
                 }
             }
         }
-        *self.user_domains.lock().unwrap_or_else(|p| p.into_inner()) = Some(out.clone());
+        *crate::lock(&self.user_domains) = Some(out.clone());
         if let Some(c) = self.ctx {
-            *c.user_domains.lock().unwrap_or_else(|p| p.into_inner()) = Some(out.clone());
+            *crate::lock(&c.user_domains) = Some(out.clone());
         }
         Ok(out)
     }
 
-    /// Registrable domains of addresses that can show an organisation: not webmail, not the
-    /// user's.
+    /// Registrable domains of addresses that can show an organisation: not webmail, not the user's.
     fn org_domains<'x>(
         &self,
         addrs: impl IntoIterator<Item = &'x str>,
@@ -527,10 +449,8 @@ impl Resolver<'_> {
             .collect())
     }
 
-    /// An item of the short side that is internal mail of one of the user's own domains which
-    /// `f` has an address at: at least two participants, all at that domain, and every one that
-    /// is not the user already a known person (a forged new address does not count). Returns
-    /// the domain and the item.
+    /// An item of the short side that is internal mail of one of the user's own domains which `f`
+    /// has an address at.
     fn internal_mail(&self, s_items: &[ItemRef], f: &Entity) -> Result<Option<(String, ItemRef)>> {
         let user = self.user_domains()?;
         let f_user: BTreeSet<String> = emails(&f.identifiers)
@@ -681,17 +601,14 @@ impl Resolver<'_> {
                 }
             }
         }
-        // Same organisation, inside the user's own: mail whose every participant is at the
-        // user's domains, from known colleagues, names a colleague of the user's (`f` has an
-        // address there). Uniqueness of the name at that domain is checked by the caller.
+        // Same organisation, inside the user's own.
         if c.org.is_empty()
             && let Some((d, i)) = self.internal_mail(s_items, f)?
         {
             c.org.push((d, Some(i)));
             push_reason(&mut c.why, "internal_mail");
         }
-        // Same organisation, from the text: an item of the short side attributes the name to
-        // one of `f`'s organisations ("Tamsin from Quillfeather").
+        // Same organisation, from the text.
         if c.org.is_empty() && !short.names.is_empty() {
             'attr: for d in &f_domains {
                 for i in s_items.iter().rev().take(ATTR_SCAN) {
@@ -705,8 +622,7 @@ impl Resolver<'_> {
         Ok(c)
     }
 
-    /// Why the short side's names fit `f` (empty: they do not). A written-out full name on the
-    /// short side fits nothing else.
+    /// Why the short side's names fit `f` (empty: they do not).
     fn name_fit(short: &Short<'_>, f: &Entity) -> Vec<String> {
         if short
             .names
@@ -781,10 +697,7 @@ impl Resolver<'_> {
         out
     }
 
-    /// The decision both directions share: the one full-name person the short side may be
-    /// short for **and** that something corroborates. No pick when there is none or more than
-    /// one, when the user fits the name, or when the lookup runs past [`CAND_MAX`] rows.
-    /// `f_current`: an entity known to be on the current item (being resolved from it).
+    /// The decision both directions share.
     pub(super) fn full_for(
         &self,
         short: &Short<'_>,
@@ -916,9 +829,7 @@ impl Resolver<'_> {
         })
     }
 
-    /// Short-form people already in the graph that `f` may be the full name of: lookups of
-    /// the short forms its names can take (first name or nickname, with or without the
-    /// surname's initial; given initial and surname).
+    /// Short-form people already in the graph that `f` may be the full name of.
     fn short_forms_of(&self, f: &Entity) -> Result<Vec<Entity>> {
         let mut forms: BTreeSet<String> = BTreeSet::new();
         for n in full_names(f) {
@@ -1001,12 +912,7 @@ impl Resolver<'_> {
         out
     }
 
-    /// The end-of-run pass. Short-form people left on their own are remembered (under
-    /// [`PENDING_KEY`]); once a run's writes are all applied, each one that the run may have
-    /// changed the evidence for (it was touched, a touched entity shares one of its items, or
-    /// a touched person has a name it may be short for) is decided again: it joins its one
-    /// corroborated candidate, however many name-compatible ones there are. Returns the merges
-    /// done, as `(into, from)`.
+    /// The end-of-run pass.
     pub(crate) fn settle_pending(
         &self,
         feed: &dyn ItemFeed,
@@ -1072,9 +978,8 @@ impl Resolver<'_> {
         Ok(merges)
     }
 
-    /// The same full name under two conflicting addresses, joined only on a job-change
-    /// statement (see the module docs). Checked for the people a run touched, once all its
-    /// writes are applied. Returns the merges done, as `(into, from)`.
+    /// The same full name under two conflicting addresses, joined only on a job-change statement
+    /// (see the module docs).
     pub(crate) fn settle_job_changes(
         &self,
         touched: &BTreeSet<EntityId>,
@@ -1135,9 +1040,7 @@ impl Resolver<'_> {
         Ok(merges)
     }
 
-    /// How text may name the organisation of a mail domain, squashed ([`squash`]): the
-    /// domain's label, and the names of the organisation holding the domain (legal suffix
-    /// dropped too). Too-short forms are left out.
+    /// How text may name the organisation of a mail domain, squashed ([`squash`]).
     fn org_needles(&self, domain: &str) -> Result<BTreeSet<String>> {
         let mut needles: BTreeSet<String> = BTreeSet::new();
         needles.insert(squash(&super::domain_label(domain)));
@@ -1164,9 +1067,8 @@ impl Resolver<'_> {
         Ok(needles)
     }
 
-    /// Whether an item's text attributes the short name to the organisation of `domain`
-    /// with "NAME from ORG", "NAME at ORG" or "NAME of ORG" ("Tamsin from Quillfeather"). A
-    /// statement about the person, not an organisation merely named somewhere in the body.
+    /// Whether an item's text attributes the short name to the organisation of `domain` with "NAME
+    /// from ORG", "NAME at ORG" or "NAME of ORG" ("Tamsin from Quillfeather").
     fn attributes_to_org(&self, item: &ItemRef, names: &[String], domain: &str) -> Result<bool> {
         let Some(feed) = self.feed else {
             return Ok(false);
@@ -1247,9 +1149,7 @@ impl Resolver<'_> {
         Ok(None)
     }
 
-    /// Forward direction for an existing entity found by an exact name or identifier: when it
-    /// is a short form and the only name-compatible candidate is corroborated, merge it in.
-    /// Returns that person's id when merged.
+    /// Forward direction for an existing entity found by an exact name or identifier.
     pub(super) fn settle_short(&self, e_id: &EntityId) -> Result<Option<EntityId>> {
         let Some(e) = self.canonical(e_id)? else {
             return Ok(None);
@@ -1351,8 +1251,7 @@ pub(crate) fn write_log(
     Ok(())
 }
 
-/// Append one record to an entity's merge log unless the same one is there. Returns whether
-/// it was added.
+/// Append one record to an entity's merge log unless the same one is there.
 pub(crate) fn append_record(
     graph: &dyn nugget_graph::GraphStore,
     id: &EntityId,
@@ -1425,11 +1324,7 @@ pub(crate) fn index_record(feed: &dyn ItemFeed, item: &ItemRef, id: &EntityId) -
     feed.set_state(&key, serde_json::to_value(&ids)?)
 }
 
-/// An item was retracted (deleted, or changed and about to be extracted again): drop every
-/// merge record citing it, so no record outlives its source. The merges themselves stay (a
-/// retraction does not split entities); when the item comes back changed, resolving it again
-/// writes the record again if it still corroborates the join. Returns the entities whose log
-/// changed.
+/// An item was retracted (deleted, or changed and about to be extracted again).
 pub(crate) fn forget_item(
     graph: &dyn nugget_graph::GraphStore,
     feed: &dyn ItemFeed,
@@ -1463,9 +1358,7 @@ pub(crate) fn forget_item(
     Ok(changed)
 }
 
-/// The user split `split.to` off `split.from`: the records of the merges that joined them no
-/// longer hold. Drops from `from`'s log every record of an entity now resolving to `to`, or
-/// named by one of `to`'s names. Returns whether the log changed.
+/// The user split `split.to` off `split.from`.
 pub(crate) fn forget_split(
     graph: &dyn nugget_graph::GraphStore,
     split: &crate::splits::Split,

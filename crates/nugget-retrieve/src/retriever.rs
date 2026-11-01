@@ -1,5 +1,4 @@
-//! The [`Retriever`]: query embedding, over-fetched search, grouping, reranking, MMR and
-//! packing.
+//! The [`Retriever`]: query embedding, over-fetched search, grouping, reranking, MMR and packing.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -38,10 +37,6 @@ const MAX_URL_LEN: usize = 4096;
 const GET_CHUNKS_BATCH: usize = nugget_store::MAX_CHUNK_IDS;
 
 /// Retrieval over a [`Store`], optionally with query embeddings from a [`Router`].
-///
-/// Store calls are synchronous SQLite queries made from the async methods; async callers that
-/// care about blocking a runtime thread should run searches on a blocking-friendly runtime or
-/// thread (they are typically a few milliseconds).
 #[derive(Clone)]
 pub struct Retriever {
     store: Store,
@@ -229,8 +224,7 @@ impl Retriever {
         self
     }
 
-    /// Fix "now" for the recency boost and date phrases (tests, evaluation). Defaults to the
-    /// system clock.
+    /// Fix "now" for the recency boost and date phrases (tests, evaluation).
     pub fn with_reference_time(mut self, now: OffsetDateTime) -> Self {
         self.now = Some(now);
         self
@@ -278,28 +272,10 @@ impl Retriever {
             items,
             reranked: ranking.reranked,
             date: ranking.date,
-            rewrite: None,
         })
     }
 
-    /// [`search`](Self::search) for the latest message of a conversation: a follow-up such as
-    /// "what about the second one?" is first rewritten into a standalone query with
-    /// [`rewrite_query`](Self::rewrite_query). [`SearchResults::rewrite`] says what was searched.
-    pub async fn search_in_conversation(
-        &self,
-        history: &[ChatMessage],
-        query: &str,
-        limit: usize,
-    ) -> Result<SearchResults> {
-        let rewrite = self.rewrite_query(history, query).await;
-        let mut res = self.search(&rewrite.query, limit).await?;
-        res.rewrite = Some(rewrite);
-        Ok(res)
-    }
-
     /// The standalone form of `query` given the conversation so far (see [`crate::rewrite`]).
-    /// Never fails: if no local model gives a usable rewrite in time, the heuristic rewrite (or
-    /// else the original query) is used.
     pub async fn rewrite_query(&self, history: &[ChatMessage], query: &str) -> QueryRewrite {
         if !self.config.rewrite_followups
             || !history
@@ -458,9 +434,8 @@ impl Retriever {
             ranking.items = kept;
         }
         // GG2-8: items lacking most of the query's rare key terms are near misses: marked
-        // (`PackedPassage::partial`), so the answer prompt can tell them from an answer and "not
-        // in your items" can win. Not dropped: wording alone cannot rule a passage out (the
-        // phone bill that never says "phone plan" is still the answer).
+        // (`PackedPassage::partial`), so the answer prompt can tell them from an answer and "not in
+        // your items" can win.
         let partial = if opts.ignore_dates {
             // Thread text, not a question: it is full of words no item has.
             Default::default()
@@ -494,11 +469,9 @@ impl Retriever {
         })
     }
 
-    /// The items of `ranked` that lack more than half of the query's rare terms: content words
-    /// (not function or question words) found in at most [`RARE_TERM_SHARE`] of the chunks (at
-    /// least [`RARE_TERM_MIN`]), or in none. Such a term names what the question is about ("therapy",
-    /// "Tokyo"), so an item without it is at best a near miss ("physio", "Kyoto"). Matching is
-    /// the full-text index's (stemmed, so "booked" has "book").
+    /// The items of `ranked` that lack more than half of the query's rare terms: content words (not
+    /// function or question words) found in at most [`RARE_TERM_SHARE`] of the chunks (at least
+    /// [`RARE_TERM_MIN`]), or in none.
     fn partial_matches(
         &self,
         query: &str,
@@ -574,11 +547,9 @@ impl Retriever {
         UtcOffset::from_whole_seconds(minutes * 60).unwrap_or(UtcOffset::UTC)
     }
 
-    /// Rank with any date phrase handled: search the query without the phrase and keep items
-    /// dated in its range; if none match, search the original query unfiltered (and say so in
-    /// [`DateFilter::applied`]). When nothing but generic words is left ("summarise last week",
-    /// "what happened yesterday"), list the period's items by date instead
-    /// ([`DateFilter::listed`]). `dates: false` skips date phrases (thread text in drafts).
+    /// Rank with any date phrase handled: search the query without the phrase and keep items dated
+    /// in its range; if none match, search the original query unfiltered (and say so in
+    /// [`DateFilter::applied`]).
     async fn rank(&self, query: &str, limit: usize, opts: SearchOptions) -> Result<Ranking> {
         self.rank_dated(query, limit, opts, true).await
     }
@@ -809,8 +780,7 @@ impl Retriever {
         let keep = pool_len.max(rerank_len);
         let (mut cands, items_meta) = match range {
             // Date filter: by each item's own date (event start, mail date, source modification
-            // time, update time; see `dates::item_date`). Filters on the dates alone (one batched
-            // lookup), then loads only the items that are kept.
+            // time, update time; see `dates::item_date`).
             Some(range) => {
                 let refs: Vec<_> = cands.iter().map(|c| c.item.clone()).collect();
                 let dates = self.store.item_dates(&refs)?;
@@ -912,9 +882,7 @@ impl Retriever {
 
     /// Score the first `n` of `pool` with `reranker` and blend the scores into their relevance
     /// ([`RetrieveConfig::rerank_weight`]); the rest count as scored 0, so they stay behind the
-    /// reranked candidates that the first stage also preferred. Re-sorts `pool` (stable) and
-    /// returns whether reranking was applied. Any reranker error, a bad response or a timeout
-    /// leaves `pool` as it was.
+    /// reranked candidates that the first stage also preferred.
     async fn rerank(
         &self,
         reranker: &dyn Reranker,
@@ -1073,12 +1041,6 @@ impl Retriever {
     }
 
     /// MMR order over `pool` (indices) and the similarity used.
-    ///
-    /// When the query was embedded (`provider` is set) and [`RetrieveConfig::mmr_vectors`] is on,
-    /// passages are compared by their **stored** chunk embeddings, read back from the store, so
-    /// nothing is re-embedded. Only passages stored without a vector (e.g. indexed while no
-    /// embedder was available) are embedded, in one batch with the query's provider. Otherwise,
-    /// or if that fails, MMR uses token-set Jaccard.
     async fn diversify(
         &self,
         pool: &[Ranked],
@@ -1109,14 +1071,8 @@ impl Retriever {
         Ok((mmr_select(&rel, limit, lambda, &sim), Similarity::Lexical))
     }
 
-    /// One vector per pool passage: stored embeddings first, the rest embedded with `p`.
-    /// `None` (lexical MMR) if the missing ones cannot be embedded or the vectors disagree in
-    /// dimension.
-    ///
-    /// Sensitive passages (see [`is_sensitive`]; an item that cannot be checked counts as
-    /// sensitive) are never sent to a `Cloud` embedder, the same rule as ingest's and the
-    /// reranker's: if one of them has no stored vector (ingest leaves sensitive items without one
-    /// when only a cloud embedder is allowed), MMR compares by words instead.
+    /// One vector per pool passage: stored embeddings first, the rest embedded with `p`. Sensitive
+    /// passages never go to a `Cloud` embedder (lexical MMR then).
     async fn pool_vectors(
         &self,
         pool: &[Ranked],
@@ -1198,9 +1154,6 @@ impl Retriever {
     }
 
     /// Fetch primary, neighbouring and secondary chunks for packing.
-    ///
-    /// Neighbours are the chunks at `ord ± 1` of the same item, looked up by position with
-    /// [`Store::neighbours`].
     fn pack_items(
         &self,
         ranked: &[Ranked],
@@ -1265,23 +1218,15 @@ fn iso_date(at: OffsetDateTime) -> String {
     format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
 }
 
-/// Whether an item must stay away from cloud models: its `sensitive` metadata (set by ingest
-/// from PII findings and triage) is anything but an explicit `false`. Items without the flag
-/// (not written by ingest) are treated as sensitive, so the check fails closed.
+/// Whether an item must stay away from cloud models: its `sensitive` metadata (set by ingest from
+/// PII findings and triage) is anything but an explicit `false`: a missing flag fails closed.
 pub fn is_sensitive(metadata: &serde_json::Value) -> bool {
     metadata.get("sensitive") != Some(&serde_json::Value::Bool(false))
 }
 
 /// Whether an item is *confirmed* sensitive: a PII finding (`pii`), a deterministic or connector
-/// rule (`sensitive_rule`), or local triage that ran and said sensitive (`triage.state` "done"
-/// with `sensitive: true`). An item that is sensitive only because triage has not sorted it yet
-/// (pending, unknown, failed) is not; triage skipped because a rule decided counts as the rule. Items flagged `sensitive: true` by
-/// ingest before triage states existed (no `triage` key) count as confirmed. An explicit
-/// `sensitive: false` is never confirmed.
-///
-/// Local views of the user's own data (the Markdown vault, the graph and entity views) hide
-/// confirmed sensitive items only; anything that can leave the device keeps using
-/// [`is_sensitive`], which also counts unsorted items.
+/// rule (`sensitive_rule`), or local triage that ran and said sensitive (`triage.state` "done" with
+/// `sensitive: true`).
 pub fn is_confirmed_sensitive(metadata: &serde_json::Value) -> bool {
     use serde_json::Value;
     if metadata.get("sensitive") != Some(&Value::Bool(true)) {

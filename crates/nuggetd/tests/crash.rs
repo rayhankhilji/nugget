@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nugget_core::capability::Capabilities;
-use nugget_core::ids::{ItemKey, ItemRef, SourceId};
+use nugget_core::ids::{EntityId, ItemKey, ItemRef, SourceId};
 use nugget_core::ipc::{IngestStatus, KnowledgeStatus, SourceInfo, method};
 use nugget_core::paths::Paths;
 use nugget_graph::{ClaimStatus, EntityQuery, GraphStore};
@@ -697,7 +697,7 @@ struct Summary {
     items: BTreeMap<String, (String, usize)>,
     /// (kind, name) of entities with at least one active claim or mention.
     entities: BTreeSet<String>,
-    /// Vault page paths without the id suffix.
+    /// Live vault page paths without the id suffix.
     pages: BTreeSet<String>,
 }
 
@@ -728,15 +728,32 @@ fn summary(store: &Store, source: &SourceId, vault: &Path) -> Summary {
         .filter(|e| e.claims > 0 || e.mentions > 0)
         .map(|e| format!("{:?}/{}", e.kind, e.name))
         .collect();
-    let pages = vault_files(vault)
-        .into_iter()
-        .map(|(rel, _)| rel)
-        .filter(|r| r.ends_with(".md") && !r.starts_with(".nugget/"))
-        .map(|r| match r.rsplit_once(" (") {
+    // Retraction and merge stubs of entities an interrupted history once had (a clean pass never
+    // saw them) are left out, but each must belong to an entity that is no longer live.
+    let mut pages = BTreeSet::new();
+    for (rel, abs) in vault_files(vault) {
+        if !rel.ends_with(".md") || rel.starts_with(".nugget/") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&abs).unwrap();
+        if text.contains("\nstatus: \"retracted\"\n") || text.contains("\nmerged_into: ") {
+            let id = text
+                .lines()
+                .find_map(|l| l.strip_prefix("nugget_id: "))
+                .and_then(|v| serde_json::from_str::<String>(v).ok())
+                .unwrap_or_else(|| panic!("stub {rel} has no nugget_id"));
+            let live = g.get_entity(&EntityId::new(id.clone())).unwrap();
+            assert!(
+                live.is_none_or(|e| e.id.as_str() != id),
+                "stub {rel} for a live entity"
+            );
+            continue;
+        }
+        pages.insert(match rel.rsplit_once(" (") {
             Some((stem, _)) => stem.to_owned(),
-            None => r,
-        })
-        .collect();
+            None => rel,
+        });
+    }
     Summary {
         items,
         entities,

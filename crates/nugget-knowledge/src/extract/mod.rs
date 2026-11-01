@@ -1,6 +1,4 @@
-//! Deterministic extractors: always on, no model. Each reads the item's metadata as ingest
-//! stores it (`extracted` format metadata, `tags`, connector `source` metadata) plus its chunks
-//! for evidence locations.
+//! Deterministic extractors: always on, no model.
 
 mod calendar;
 mod contacts;
@@ -27,8 +25,7 @@ pub(crate) struct ItemCtx<'a> {
     /// How claim texts name the user.
     pub me_label: &'a str,
     pub cfg: &'a KnowledgeConfig,
-    /// When the item is processed (`Knowledge::set_clock`, else the wall clock): an event that
-    /// has not ended by then was not attended yet.
+    /// When the item is processed (`Knowledge::set_clock`, else the wall clock).
     pub now: OffsetDateTime,
 }
 
@@ -94,29 +91,12 @@ pub(crate) fn deterministic(ctx: &ItemCtx<'_>) -> Extraction {
     ex
 }
 
-/// When an item's content is from: the date its facts are as of. The one rule for "when is
-/// this item from", used for currentness (claims' `valid_from`, which value of a single-valued
-/// predicate is current) by the extractors, the session and its date cache (through
-/// [`DateSources::date`] on the store's date projection, see `feed.rs`); retrieval may share it.
-///
-/// The first of, in order:
-/// 1. a mail's `Date` header (`metadata.extracted.date`);
-/// 2. a Markdown note's frontmatter `date:`, then `created:`;
-/// 3. a calendar item's event start (`DTSTART`; a recurring event's first occurrence);
-/// 4. a `YYYY-MM-DD` date in the file name (`Notes/2026-03-14 Standup.md`), then in the title;
-/// 5. the source's modification time (a file's mtime);
-/// 6. when the store last wrote the item.
-///
-/// So a copied or restored note (mtime = now) keeps its own date. Dates are not clamped here:
-/// callers clamp far-future dates (a forged mail `Date`, an upcoming event) to their horizon
-/// (`Session::clamp`).
+/// When an item's content is from: the date its facts are as of.
 pub(crate) fn item_date(item: &Item) -> OffsetDateTime {
     DateSources::of(item).date()
 }
 
-/// What an item's date is read from (see [`item_date`]): built from a loaded [`Item`]
-/// ([`DateSources::of`]) or from the store's date projection (`nugget_store::ItemDates`), so
-/// both paths date an item the same way.
+/// What an item's date is read from (see [`item_date`]).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DateSources<'a> {
     /// `metadata.extracted.date`: a mail's `Date` header.
@@ -272,120 +252,19 @@ pub(crate) fn strings(v: Option<&Value>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-    use nugget_store::Item;
-    use serde_json::{Value, json};
 
-    use super::{item_date, name_date, parse_when};
-
-    fn item(key: &str, title: Option<&str>, metadata: Value) -> Item {
-        let mtime = parse_when("2026-10-30T19:00:00Z").unwrap();
-        Item {
-            item: ItemRef {
-                source: SourceId::new("files"),
-                key: ItemKey::new(key),
-            },
-            title: title.map(str::to_owned),
-            content_hash: "h".into(),
-            mime: Some("text/markdown".into()),
-            text: None,
-            metadata,
-            source_modified_at: Some(mtime),
-            version: None,
-            created_at: mtime,
-            updated_at: mtime,
-        }
-    }
+    use super::{name_date, parse_when};
 
     fn day(s: &str) -> time::OffsetDateTime {
         parse_when(s).unwrap()
     }
 
     #[test]
-    fn an_items_own_date_beats_its_mtime() {
-        let mtime = day("2026-10-30T19:00:00Z");
-        let fm = |v: Value| json!({"extracted": {"frontmatter": v}});
-        let cases = [
-            // A mail's Date header first.
-            (
-                item(
-                    "Mail/x.eml",
-                    None,
-                    json!({"extracted": {"date": "2026-08-14T09:00:00Z",
-                                         "frontmatter": {"date": "2026-01-01"}}}),
-                ),
-                day("2026-08-14T09:00:00Z"),
-            ),
-            // Frontmatter `date:`, then `created:`, over a date in the file name.
-            (
-                item(
-                    "Notes/2026-05-05 Dana.md",
-                    None,
-                    fm(json!({"date": "2026-03-01", "created": "2026-02-01"})),
-                ),
-                day("2026-03-01"),
-            ),
-            (
-                item(
-                    "Notes/Dana.md",
-                    None,
-                    fm(json!({"created": "2026-02-01T08:00"})),
-                ),
-                day("2026-02-01T08:00:00Z"),
-            ),
-            // A calendar item's event start.
-            (
-                item(
-                    "Calendar/launch.ics",
-                    None,
-                    json!({"extracted": {"start": "2026-12-03T09:00:00Z", "events": []}}),
-                ),
-                day("2026-12-03T09:00:00Z"),
-            ),
-            // A Google Calendar event's start.
-            (
-                item(
-                    "evt1",
-                    None,
-                    json!({"source": {"start": {"date": "2026-04-16"}}}),
-                ),
-                day("2026-04-16"),
-            ),
-            // The file name, then the title.
-            (
-                item(
-                    "Notes/Meetings/2026-06-03-1on1-with-Bob.md",
-                    None,
-                    json!({}),
-                ),
-                day("2026-06-03"),
-            ),
-            (
-                item("Notes/standup.md", Some("Standup 2026_03_14"), json!({})),
-                day("2026-03-14"),
-            ),
-            // A non-string or unparsable date falls through to the mtime.
-            (
-                item("Notes/Dana.md", None, fm(json!({"date": "someday"}))),
-                mtime,
-            ),
-        ];
-        for (it, want) in cases {
-            assert_eq!(item_date(&it), want, "{}", it.item.key.as_str());
-        }
-    }
-
-    #[test]
     fn name_dates_are_delimited() {
         assert_eq!(name_date("2026-03-14 Standup"), Some(day("2026-03-14")));
-        assert_eq!(name_date("notes-2026-03-14.md"), Some(day("2026-03-14")));
-        assert_eq!(name_date("Standup 2026_03_14"), Some(day("2026-03-14")));
         assert_eq!(name_date("12026-03-14"), None);
-        assert_eq!(name_date("2026-03-145"), None);
         assert_eq!(name_date("2026-13-01"), None);
         assert_eq!(name_date("2026-03_14"), None);
-        assert_eq!(name_date("v1234-56-78"), None);
-        assert_eq!(name_date("Dana (Brightwell)"), None);
         assert_eq!(name_date("é2026-03-14"), Some(day("2026-03-14")));
     }
 

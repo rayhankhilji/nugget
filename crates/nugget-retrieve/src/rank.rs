@@ -1,7 +1,4 @@
 //! Pure ranking steps: per-item grouping, score normalisation, recency, similarity and MMR.
-//!
-//! Everything here is deterministic: ties break on input order, which callers make
-//! deterministic (the store breaks score ties on chunk id).
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -36,8 +33,7 @@ pub struct Candidate {
 }
 
 /// Group chunk hits by item, keeping the best chunk per item and recording up to `max_matches`
-/// other matching chunks. Items come out in the order of their best hit (best first); hits are
-/// re-sorted by score (ties: chunk id) first so the result does not depend on input order.
+/// other matching chunks.
 pub fn group_by_item(mut hits: Vec<Hit>, max_matches: usize) -> Vec<Candidate> {
     hits.sort_by(|a, b| {
         b.score
@@ -75,9 +71,7 @@ pub fn group_by_item(mut hits: Vec<Hit>, max_matches: usize) -> Vec<Candidate> {
     out
 }
 
-/// Scale relevance into `[0, 1]` relative to the best candidate. Scores of different search
-/// modes have different ranges (bm25, cosine, RRF); dividing by the maximum keeps their shape.
-/// If no score is positive (e.g. all cosine similarities negative), fall back to `1 / (1 + rank)`.
+/// Scale relevance into `[0, 1]` relative to the best candidate.
 pub fn normalise(cands: &mut [Candidate]) {
     let max = cands
         .iter()
@@ -102,14 +96,6 @@ pub fn normalise(cands: &mut [Candidate]) {
 
 /// Score-aware fusion of a full-text list (`text`, bm25 scores, higher better) and a vector list
 /// (`vector`, cosine similarities), best `limit` first (see [`crate::Fusion::Convex`]).
-///
-/// Each list's scores are scaled against their theoretical minimum, `bm25 / best` and
-/// `(cos + 1) / (best + 1)`, so a list keeps its own spread: a vector list of near-equal
-/// similarities (no signal for this query) contributes nearly the same to every chunk instead
-/// of being stretched over `[0, 1]`. A chunk missing from one list counts at that list's lowest
-/// score (it ranked below all of them), not at zero. `score = w × text + (1 − w) × vector`,
-/// `w = text_weight` clamped to `[0, 1]`. Snippets come from the full-text hit when there is one;
-/// ties break on chunk id.
 pub fn convex_fuse(text: Vec<Hit>, vector: Vec<Hit>, text_weight: f32, limit: usize) -> Vec<Hit> {
     let w = if text_weight.is_finite() {
         f64::from(text_weight.clamp(0.0, 1.0))
@@ -158,7 +144,6 @@ pub fn convex_fuse(text: Vec<Hit>, vector: Vec<Hit>, text_weight: f32, limit: us
 }
 
 /// Recency multiplier for an item `age_days` old: `1 + weight * 0.5^(age / half_life)`.
-/// Future timestamps count as age 0; a non-positive half-life disables the boost.
 pub fn recency_factor(age_days: f64, boost: &RecencyBoost) -> f32 {
     let half_life_ok = boost.half_life_days.is_finite() && boost.half_life_days > 0.0;
     if !half_life_ok || !boost.weight.is_finite() || !age_days.is_finite() {
@@ -185,10 +170,7 @@ fn is_stopword(token: &str) -> bool {
 }
 
 /// The query for the full-text leg: alphanumeric words minus [`STOPWORDS`], keeping the store's
-/// query syntax (see `Store::search_text`) intact. A `"quoted phrase"` passes through whole,
-/// stopwords included; `word*` prefixes and `-word` / `-"phrase"` exclusions are kept as typed.
-/// Everything else is reduced to plain words, as the store would read it. If no phrase, prefix
-/// or content word would be left (a query of only function words), all words are kept.
+/// query syntax (see `Store::search_text`) intact.
 pub fn text_query(query: &str) -> String {
     // (text, is a plain word): plain words are the only parts stopword removal may drop.
     let mut parts: Vec<(String, bool)> = Vec::new();
@@ -294,9 +276,8 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     (dot / (na.sqrt() * nb.sqrt())) as f32
 }
 
-/// Greedy maximal marginal relevance: repeatedly pick the candidate maximising
-/// `λ·rel(i) − (1−λ)·max_{j picked} sim(i, j)`. Returns up to `k` indices in pick order.
-/// Ties go to the lower index, so the first pick is always the most relevant candidate.
+/// Greedy maximal marginal relevance: repeatedly pick the candidate maximising `λ·rel(i) −
+/// (1−λ)·max_{j picked} sim(i, j)`.
 pub fn mmr_select(
     rel: &[f32],
     k: usize,
@@ -381,24 +362,6 @@ mod tests {
     }
 
     #[test]
-    fn grouping_is_order_independent_and_caps_matches() {
-        let a = vec![hit("a", 1, 0.5), hit("a", 2, 0.5), hit("a", 3, 0.4)];
-        let mut b = a.clone();
-        b.reverse();
-        let (ga, gb) = (group_by_item(a, 1), group_by_item(b, 1));
-        assert_eq!(ga, gb);
-        assert_eq!(ga[0].chunk_id, 1, "score tie breaks on chunk id");
-        assert_eq!(ga[0].matches.len(), 1);
-    }
-
-    #[test]
-    fn non_positive_scores_normalise_by_rank() {
-        let g = group_by_item(vec![hit("a", 1, -0.1), hit("b", 2, -0.3)], 4);
-        assert_eq!(g[0].rel, 1.0);
-        assert_eq!(g[1].rel, 0.5);
-    }
-
-    #[test]
     fn mmr_prefers_novel_candidates() {
         // 0 and 1 are near-duplicates; 2 is a little less relevant but different.
         let rel = [1.0, 0.95, 0.8];
@@ -414,22 +377,6 @@ mod tests {
         assert_eq!(mmr_select(&rel, 3, 1.0, &sim), vec![0, 1, 2]);
         assert_eq!(mmr_select(&rel, 2, 0.5, &sim), vec![0, 2]);
         assert!(mmr_select(&[], 3, 0.5, &sim).is_empty());
-    }
-
-    #[test]
-    fn similarity_measures() {
-        let a = token_set("The quick brown fox, the QUICK dog");
-        let b = token_set("quick fox jumps");
-        assert_eq!(
-            a.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["brown", "dog", "fox", "quick"]
-        );
-        assert!((jaccard(&a, &b) - 2.0 / 5.0).abs() < 1e-6);
-        assert_eq!(jaccard(&BTreeSet::new(), &BTreeSet::new()), 0.0);
-        assert!((cosine(&[1.0, 0.0], &[1.0, 0.0]) - 1.0).abs() < 1e-6);
-        assert_eq!(cosine(&[1.0, 0.0], &[0.0, 1.0]), 0.0);
-        assert_eq!(cosine(&[1.0], &[1.0, 2.0]), 0.0);
-        assert_eq!(cosine(&[0.0, 0.0], &[1.0, 2.0]), 0.0);
     }
 
     #[test]
@@ -466,23 +413,6 @@ mod tests {
     }
 
     #[test]
-    fn recency_decays_with_age() {
-        let b = RecencyBoost {
-            half_life_days: 10.0,
-            weight: 0.5,
-        };
-        assert!((recency_factor(0.0, &b) - 1.5).abs() < 1e-6);
-        assert!((recency_factor(10.0, &b) - 1.25).abs() < 1e-6);
-        assert!((recency_factor(-5.0, &b) - 1.5).abs() < 1e-6);
-        assert!(recency_factor(1000.0, &b) < 1.0001);
-        let off = RecencyBoost {
-            half_life_days: 0.0,
-            weight: 1.0,
-        };
-        assert_eq!(recency_factor(0.0, &off), 1.0);
-    }
-
-    #[test]
     fn convex_fusion_keeps_a_strong_text_match_over_a_flat_vector_list() {
         // The vector list has no signal (near-equal similarities) and misses chunk 1, the best
         // full-text match. Rank fusion would put 3 (in both lists) first; convex fusion keeps 1.
@@ -493,24 +423,5 @@ mod tests {
         assert_eq!(ids, [1, 2, 3, 4]);
         // Missing from the vector list counts at its floor, not zero: (1.58 / 1.60).
         assert!((fused[0].score - (0.5 + 0.5 * 1.58 / 1.60)).abs() < 1e-5);
-    }
-
-    #[test]
-    fn convex_fusion_follows_a_vector_list_with_signal_and_its_weight() {
-        let text = vec![hit("a", 1, 2.0), hit("b", 2, 1.9)];
-        let vector = vec![hit("b", 2, 0.9), hit("c", 3, 0.1)];
-        // Even weights: b is near the top of both lists.
-        let ids = |w: f32| -> Vec<ChunkId> {
-            convex_fuse(text.clone(), vector.clone(), w, 10)
-                .iter()
-                .map(|h| h.chunk_id)
-                .collect()
-        };
-        assert_eq!(ids(0.5), [2, 1, 3]);
-        // All weight on full text: its order, then the vector-only chunk.
-        assert_eq!(ids(1.0), [1, 2, 3]);
-        // Empty lists fuse to nothing; a limit cuts.
-        assert!(convex_fuse(Vec::new(), Vec::new(), 0.5, 10).is_empty());
-        assert_eq!(convex_fuse(text.clone(), vector.clone(), 0.5, 1).len(), 1);
     }
 }

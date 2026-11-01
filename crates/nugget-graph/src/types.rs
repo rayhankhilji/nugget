@@ -174,9 +174,7 @@ pub enum ClaimStatus {
     Retracted,
     /// Written by the user in the vault; needs no source evidence.
     UserAsserted,
-    /// Rejected by the user. Sticky: re-extracting its sources adds evidence to it but never
-    /// makes it active again, and losing its evidence does not turn it into `Retracted`. Only an
-    /// explicit status change (or a user assertion of the same triple) revives it.
+    /// Rejected by the user.
     Rejected,
 }
 
@@ -238,8 +236,7 @@ impl ClaimStatus {
     }
 }
 
-/// Longest supporting quote kept in [`Evidence::quote`], in characters. Longer quotes are cut
-/// (at a character boundary) by every [`GraphStore`](crate::GraphStore) implementation.
+/// Longest supporting quote kept in [`Evidence::quote`], in characters.
 pub const MAX_QUOTE_CHARS: usize = 300;
 
 /// `q` cut to [`MAX_QUOTE_CHARS`] characters.
@@ -429,18 +426,14 @@ impl EntityDetail {
 }
 
 /// Which items supplied each alias and identifier of an entity
-/// ([`GraphStore::entity_provenance`](crate::GraphStore::entity_provenance)). Every current alias
-/// and identifier is listed, in the entity's order; an empty item list means no item is recorded
-/// for it (added by the user, by a merge or split, before provenance was kept, or its items were
-/// retracted).
+/// ([`GraphStore::entity_provenance`](crate::GraphStore::entity_provenance)).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityProvenance {
     pub aliases: Vec<(String, Vec<ItemRef>)>,
     pub identifiers: Vec<(Identifier, Vec<ItemRef>)>,
 }
 
-/// One write in a [`GraphBatch`]. Each mirrors the [`GraphStore`](crate::GraphStore) method of
-/// the same name and has the same rules.
+/// One write in a [`GraphBatch`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum GraphOp {
@@ -548,9 +541,8 @@ impl BatchResult {
 pub const MERGE_LOG_ATTR: &str = "merge_log";
 
 /// Why entity resolution merged one entity (or occurrence) into another, kept in the surviving
-/// entity's attributes under [`MERGE_LOG_ATTR`] so the vault can show it and the user can split
-/// the two again (`knowledge.split`). Written by `nugget-knowledge`; text fields come from
-/// source content and are untrusted.
+/// entity's attributes under [`MERGE_LOG_ATTR`] so the vault can show it and the user can split the
+/// two again (`knowledge.split`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergeRecord {
     /// The merged-away entity (now a tombstone resolving to the survivor), or `None` when an
@@ -559,8 +551,7 @@ pub struct MergeRecord {
     pub from: Option<EntityId>,
     /// The name the merged entity or occurrence went by.
     pub name: String,
-    /// Machine-readable reasons, e.g. `shared_email`, `trusted_record`, `nickname`, `initial`,
-    /// `email_local_part`, `same_item`, `same_thread`, `same_org`, `same_name`.
+    /// Machine-readable reasons, e.g.
     #[serde(default)]
     pub reasons: Vec<String>,
     /// One human-readable sentence.

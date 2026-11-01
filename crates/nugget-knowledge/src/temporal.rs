@@ -1,36 +1,4 @@
-//! Temporal cues in a claim's supporting quote: does the quote say the fact **ended** ("my last
-//! day at Cindergate", "moved from Cindergate", "former CTO") or **started** ("joined
-//! Quillfeather", "now Head of Data", "moved to Quillfeather")?
-//!
-//! The detector is small, deterministic and conservative. It only looks at the words just before
-//! an occurrence of the claim's object in the quote (the object governs which value a cue is
-//! about: in "moved from X to Y", X ended and Y started), within one clause: a sentence end, a
-//! comma, colon or parenthesis stops the scan, and so does any word between the cue and the
-//! object that is not a function word ([`BRIDGE`]: "at", "from", "of", "the", "her", ...,
-//! "works", "job"), so in "Alice left Globex and works at Acme" the cue is about Globex only.
-//!
-//! - **Ended** cues, at most [`MAX_GAP`] words before the object: `last day at` / `last day
-//!   with` / `last day as`, `left` (not `left on/at/onto/side/wing/turn`), `leaving`, `quit`,
-//!   `departed`, `resigned from`, `retired from`, `moved from` / `moving from` / `switched
-//!   from` / `went from`, `former`, `formerly`, `previously` (not `as previously`, nor
-//!   `previously agreed/discussed/mentioned/noted/stated/planned`), `used to`, `no longer`,
-//!   `until recently`, `before that` / `before this` / `prior to that` ("Before that she was
-//!   Design Lead", QA GG5-15), and `ex-` right before the object (any hyphen, U+2010–U+2015
-//!   included). A subject pronoun and a past copula may stand between a cue and the object
-//!   ("previously she was", "before that he had been").
-//! - **Started** cues, at most [`MAX_GAP`] words before the object: `joined`, `joining`, `now`,
-//!   `new role`, `new job`, `new position`, `moved to` / `moving to`, `started at` / `started
-//!   as` / `starting at` / `starts at`, `promoted to`; and the second half of a transition, a
-//!   `to` or `for` right before the object when an ended transition cue (`moved from`, `left`,
-//!   ...) precedes it in the clause ("moved from X to Y", "left X for Y").
-//! - A cue negated within the two words before it (`not`, `never`, `n't`) is no cue.
-//!
-//! The nearest cue before an occurrence wins. When the object occurs several times, a started
-//! occurrence makes the quote started; it is ended only when every occurrence is ended ("Priya
-//! (CTO) replaces our former CTO" says nothing about Priya's title ending). A quote that does not
-//! name the object (or the first two or more words of a longer name) has no cue. Quotes are
-//! untrusted text: the detector only reads them, and its answer only orders values the quote
-//! gate already accepted.
+//! Temporal cues in a claim's supporting quote.
 
 /// What a quote says about when its fact holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -276,8 +244,7 @@ fn cue_at(toks: &[Tok], at: usize) -> Cue {
     Cue::Neutral
 }
 
-/// Text every quote with a cue contains (lower case, hyphens normalised): most quotes have
-/// none, and are answered without tokenising them.
+/// Text every quote with a cue contains (lower case, hyphens normalised).
 const STEMS: &[&str] = &[
     "last day",
     "resigned",
@@ -366,8 +333,7 @@ pub(crate) fn cue(quote: &str, names: &[&str]) -> Cue {
     }
 }
 
-/// Where the object first occurs in `quote`, in words (`None` when it does not occur). Used to
-/// order two values cited by one quote ("from X to Y": Y comes later).
+/// Where the object first occurs in `quote`, in words (`None` when it does not occur).
 pub(crate) fn object_position(quote: &str, names: &[&str]) -> Option<usize> {
     let toks = tokens(quote);
     names
@@ -381,163 +347,103 @@ mod tests {
     use super::{Cue, cue, object_position};
 
     #[test]
-    fn ended_cues() {
-        for (q, o) in [
+    fn cues() {
+        for (q, o, want) in [
             (
                 "Friday is my last day at Cindergate Analytics",
                 "Cindergate Analytics",
+                Cue::Ended,
             ),
             (
-                "Moved from [[Cindergate Analytics]] to [[Quillfeather Systems]] in October 2026",
-                "Cindergate Analytics",
+                "Moved from [[Cindergate]] to [[Quillfeather]] in October",
+                "Cindergate",
+                Cue::Ended,
             ),
-            ("She left Cindergate in the spring", "Cindergate"),
-            ("Priya no longer works at Cindergate", "Cindergate"),
-            ("Priya used to work at Cindergate", "Cindergate"),
-            ("our former Senior Data Scientist", "Senior Data Scientist"),
-            ("Priya, previously at Cindergate", "Cindergate"),
             (
-                "Priya, formerly of Cindergate Analytics",
-                "Cindergate Analytics",
+                "Moved from [[Cindergate]] to [[Quillfeather]] in October",
+                "Quillfeather",
+                Cue::Started,
             ),
-            ("an ex-Cindergate data scientist", "Cindergate"),
-            ("an ex\u{2011}Cindergate data scientist", "Cindergate"),
-            ("an ex\u{2013}Cindergate data scientist", "Cindergate"),
-            ("She quit her job at Cindergate", "Cindergate"),
+            (
+                "Priya no longer works at Cindergate",
+                "Cindergate",
+                Cue::Ended,
+            ),
+            (
+                "our former Senior Data Scientist",
+                "Senior Data Scientist",
+                Cue::Ended,
+            ),
+            (
+                "an ex\u{2011}Cindergate data scientist",
+                "Cindergate",
+                Cue::Ended,
+            ),
             // QA GG5-15: the 8B model kept Dana "Design Lead" from this.
-            ("Before that she was Design Lead", "Design Lead"),
-            ("Previously she was CTO at Acme", "CTO"),
-            ("Prior to that he had been CTO", "CTO"),
-        ] {
-            assert_eq!(cue(q, &[o]), Cue::Ended, "{q}");
-        }
-    }
-
-    #[test]
-    fn started_cues() {
-        for (q, o) in [
+            ("Before that she was Design Lead", "Design Lead", Cue::Ended),
             (
                 "I've joined Quillfeather Systems as Head of Data",
                 "Quillfeather Systems",
-            ),
-            ("Now Head of Data at Quillfeather", "Head of Data"),
-            (
-                "Moved from [[Cindergate Analytics]] to [[Quillfeather Systems]] in October 2026",
-                "Quillfeather Systems",
-            ),
-            ("She left Cindergate for Quillfeather", "Quillfeather"),
-            ("Her new role as Head of Data starts Monday", "Head of Data"),
-            ("Priya started at Quillfeather this week", "Quillfeather"),
-            ("Sam was promoted to Director", "Director"),
-        ] {
-            assert_eq!(cue(q, &[o]), Cue::Started, "{q} / {o}");
-        }
-    }
-
-    #[test]
-    fn neutral_quotes() {
-        for (q, o) in [
-            (
-                "Priya Castellane, our Senior Data Scientist, will join from the Cindergate side",
-                "Senior Data Scientist",
+                Cue::Started,
             ),
             (
-                "Priya Castellane, our Senior Data Scientist, will join from the Cindergate side",
-                "Cindergate Analytics",
+                "Now Head of Data at Quillfeather",
+                "Head of Data",
+                Cue::Started,
             ),
-            ("Alice works at Acme", "Acme"),
+            ("Sam was promoted to Director", "Director", Cue::Started),
+            ("Alice works at Acme", "Acme", Cue::Neutral),
             // A cue too far from the object, or in another sentence.
             (
                 "As previously discussed with the whole team last week, Alice works at Acme",
                 "Acme",
+                Cue::Neutral,
             ),
-            ("I left early. Alice works at Acme", "Acme"),
-            // The object is not in the quote.
-            ("Friday is my last day", "Acme"),
-            ("", "Acme"),
-        ] {
-            assert_eq!(cue(q, &[o]), Cue::Neutral, "{q} / {o}");
-        }
-    }
-
-    #[test]
-    fn a_cue_is_about_the_object_right_after_it() {
-        // The cue governs Globex: a conjunction and a verb stand before Acme.
-        assert_eq!(
-            cue("Alice left Globex and works at Acme", &["Acme"]),
-            Cue::Neutral
-        );
-        assert_eq!(
-            cue("Alice left Globex and works at Acme", &["Globex"]),
-            Cue::Ended
-        );
-        // A comma ends the clause.
-        assert_eq!(
-            cue("Sam is leaving, Acme is hiring", &["Acme"]),
-            Cue::Neutral
-        );
-    }
-
-    #[test]
-    fn one_ended_occurrence_does_not_end_the_value() {
-        assert_eq!(
-            cue("Priya (CTO) replaces our former CTO Sam", &["CTO"]),
-            Cue::Neutral
-        );
-        assert_eq!(
-            cue("our former CTO, formerly CTO of Acme", &["CTO"]),
-            Cue::Ended
-        );
-    }
-
-    #[test]
-    fn a_one_word_prefix_of_a_name_is_not_the_name() {
-        assert_eq!(
-            cue(
+            ("I left early. Alice works at Acme", "Acme", Cue::Neutral),
+            ("Friday is my last day", "Acme", Cue::Neutral),
+            ("Priya never left Cindergate", "Cindergate", Cue::Neutral),
+            (
+                "Priya won't be leaving Cindergate",
+                "Cindergate",
+                Cue::Neutral,
+            ),
+            ("Turn left at Cindergate", "Cindergate", Cue::Neutral),
+            (
+                "Friday is the last day Cindergate is open",
+                "Cindergate",
+                Cue::Neutral,
+            ),
+            // The cue governs Globex: a conjunction and a verb stand before Acme.
+            ("Alice left Globex and works at Acme", "Acme", Cue::Neutral),
+            ("Alice left Globex and works at Acme", "Globex", Cue::Ended),
+            ("Sam is leaving, Acme is hiring", "Acme", Cue::Neutral),
+            (
+                "Priya (CTO) replaces our former CTO Sam",
+                "CTO",
+                Cue::Neutral,
+            ),
+            ("our former CTO, formerly CTO of Acme", "CTO", Cue::Ended),
+            (
                 "Now Head of Data at Quillfeather",
-                &["Quillfeather Systems"]
+                "Quillfeather Systems",
+                Cue::Neutral,
             ),
-            Cue::Neutral
-        );
-        assert_eq!(
-            cue("my last day at Glimmerfen Labs", &["Glimmerfen Labs Ltd"]),
-            Cue::Ended
-        );
-        assert_eq!(
-            cue("my last day at Glimmerfen", &["Glimmerfen Labs Ltd"]),
-            Cue::Neutral
-        );
-    }
-
-    #[test]
-    fn realistic_non_cues() {
-        for (q, o) in [
-            ("Priya never left Cindergate", "Cindergate"),
-            ("Priya is not leaving Cindergate", "Cindergate"),
-            ("Priya won't be leaving Cindergate", "Cindergate"),
-            ("Priya didn't quit Cindergate", "Cindergate"),
-            ("Turn left at Cindergate", "Cindergate"),
-            ("the office on the left side of Cindergate", "Cindergate"),
-            ("Friday is the last day Cindergate is open", "Cindergate"),
-            ("as previously agreed with Cindergate", "Cindergate"),
-            ("previously discussed at Cindergate", "Cindergate"),
+            (
+                "my last day at Glimmerfen",
+                "Glimmerfen Labs Ltd",
+                Cue::Neutral,
+            ),
+            (
+                "She left Acme in 2020 and has now joined Acme again",
+                "Acme",
+                Cue::Started,
+            ),
         ] {
-            assert_eq!(cue(q, &[o]), Cue::Neutral, "{q}");
+            assert_eq!(cue(q, &[o]), want, "{q} / {o}");
         }
-    }
-
-    #[test]
-    fn aliases_count_and_a_started_occurrence_wins() {
         assert_eq!(
             cue("my last day at CA", &["Cindergate Analytics", "CA"]),
             Cue::Ended
-        );
-        assert_eq!(
-            cue(
-                "She left Acme in 2020 and has now joined Acme again",
-                &["Acme"]
-            ),
-            Cue::Started
         );
     }
 

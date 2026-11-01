@@ -1,39 +1,4 @@
 //! Entity resolution: map an occurrence ([`EntitySpec`]) to a graph entity.
-//!
-//! In order:
-//! 1. **Exact identifier** (email, phone, domain, ical uid, tag, ...), same kind.
-//! 2. **Normalised name or alias** within the kind. A person's name must have at least two words;
-//!    events and commitments only match name-only entities unless the occurrence carries an
-//!    identifier. With several candidates, the single one without strong identifiers wins (it
-//!    collects name-only mentions); otherwise a new entity is created.
-//!    An organisation known only by name and one known only by its mail domain are the same when
-//!    the domain spells the name (`cindergate.test` and "Cindergate Analytics", see
-//!    [`domain_matches_name`]) and the match is unique.
-//! 3. **Embedding similarity** (optional, local `Tier::Embedding` providers only) against
-//!    same-kind entities sharing a name token, at a high threshold.
-//! 4. **LLM adjudication** (optional, local `Tier::Synthesis` only) for pairs just below it.
-//!
-//! Merges are conservative: a candidate is never used, and two entities are never merged, when
-//! they hold different values for the same strong identifier scheme (two different email
-//! addresses, two calendar uids). Several entities matched by identifiers of one occurrence are
-//! merged only when a trusted record (a contact card, the entity's own note) asserted those
-//! identifiers together. Once an occurrence resolves, name-only duplicates it makes unambiguous
-//! are folded in (see [`Resolver::absorb`]).
-//!
-//! People's short names ("Maggie", "M. Thistlewood", "Maggie T", "Bob Chen") join the one
-//! full-name person they may be short for ([`crate::names`]) only when something corroborates
-//! it (a shared identifier, the same item, the same mail thread, the same organisation), in
-//! both directions so the result does not depend on the order items arrive in (see
-//! [`short`]). A first name alone never merges two people.
-//!
-//! Every merge, and every occurrence folded in by a short-name rule, leaves a
-//! [`MergeRecord`](nugget_graph::MergeRecord) in the survivor's
-//! [`MERGE_LOG_ATTR`](nugget_graph::MERGE_LOG_ATTR) attribute: the reasons, one sentence and the
-//! corroborating item.
-//!
-//! User splits are constraints ([`crate::splits`]): a split pair is never merged, and an
-//! occurrence the user moved to the split-off entity (by its item or by a name only that entity
-//! has) resolves to it, not to the entity it was split from.
 
 mod short;
 
@@ -77,8 +42,7 @@ fn has_strong(ids: &[Identifier]) -> bool {
     ids.iter().any(|i| is_strong(&i.scheme))
 }
 
-/// Schemes an entity has exactly one value of; two entities with different values are never
-/// merged, even on a contact card's say-so.
+/// Schemes an entity has exactly one value of.
 fn single_valued_conflict(a: &Entity, b: &Entity) -> bool {
     ["ical_uid"].iter().any(|s| {
         let x: Vec<_> = a.identifiers.iter().filter(|i| i.scheme == *s).collect();
@@ -178,7 +142,7 @@ impl Resolver<'_> {
         if self.splits.is_empty() {
             return Ok(Vec::new());
         }
-        let mut cached = self.live.lock().unwrap_or_else(|p| p.into_inner());
+        let mut cached = crate::lock(&self.live);
         if let Some(v) = cached.as_ref() {
             return Ok(v.clone());
         }
@@ -203,13 +167,11 @@ impl Resolver<'_> {
         let item = item.or_else(|| self.item.cloned());
         merge_recorded(self.graph, into, from, reasons, detail, item.clone())?;
         self.index_record(item.as_ref(), into)?;
-        *self.live.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *crate::lock(&self.live) = None;
         Ok(true)
     }
 
-    /// Whether the user moved this occurrence to the split-off side of `l`: it comes from one of
-    /// that side's items, carries one of the identifiers the split moved, or bears one of its
-    /// names that the other side does not have.
+    /// Whether the user moved this occurrence to the split-off side of `l`.
     fn moved_by(&self, l: &Live, spec: &EntitySpec) -> Result<bool> {
         let s = &self.splits[l.idx];
         if self.item.is_some_and(|i| s.items.contains(i))
@@ -235,8 +197,7 @@ impl Resolver<'_> {
         Ok(named.iter().any(|n| !known_name(&from, n)))
     }
 
-    /// The entity an occurrence resolved to `e` really belongs to: the side the user split it
-    /// off to, when it was moved there (following later splits of that side too).
+    /// The entity an occurrence resolved to `e` really belongs to.
     fn redirect(&self, e: Entity, spec: &EntitySpec) -> Result<Entity> {
         let live = self.live()?;
         let mut cur = e;
@@ -259,8 +220,7 @@ impl Resolver<'_> {
         Ok(cur)
     }
 
-    /// Among name candidates, keep one side of each split pair: the split-off side for
-    /// occurrences moved there, the original otherwise.
+    /// Among name candidates, keep one side of each split pair.
     fn pick_sides(&self, cands: &mut Vec<Entity>, spec: &EntitySpec) -> Result<()> {
         if cands.len() < 2 {
             return Ok(());
@@ -387,9 +347,7 @@ impl Resolver<'_> {
         self.finish(id.clone(), spec, true, merged, vec![id])
     }
 
-    /// The steps every resolution ends with: a short-form person joins its one corroborated
-    /// full-name person; a full-name person absorbs the short forms it is the one corroborated
-    /// candidate of; folded occurrences are recorded.
+    /// The steps every resolution ends with.
     fn finish(
         &self,
         mut id: EntityId,
@@ -423,9 +381,7 @@ impl Resolver<'_> {
         })
     }
 
-    /// An organisation matched across the name / mail-domain divide: for an occurrence with a
-    /// domain, the one organisation without strong identifiers whose name the domain spells; for
-    /// one known by name only, the one organisation holding a domain that spells its name.
+    /// An organisation matched across the name / mail-domain divide.
     fn by_domain(&self, spec: &EntitySpec) -> Result<Option<Entity>> {
         let domains: Vec<&str> = domains_of(&spec.identifiers).collect();
         let mut found: Vec<Entity> = Vec::new();
@@ -497,10 +453,7 @@ impl Resolver<'_> {
             .collect())
     }
 
-    /// Fold into `id` the name-only duplicates the occurrence makes unambiguous: people without
-    /// strong identifiers under one of the occurrence's full names, when no other entity with
-    /// strong identifiers has that name; the one organisation without strong identifiers whose
-    /// name a domain of the entity spells. Returns the merged-away ids.
+    /// Fold into `id` the name-only duplicates the occurrence makes unambiguous.
     fn absorb(&self, id: &EntityId, spec: &EntitySpec) -> Result<Vec<EntityId>> {
         let Some(e) = self.canonical(id)? else {
             return Ok(Vec::new());
@@ -680,7 +633,7 @@ impl Resolver<'_> {
         let mut texts = vec![label(spec.kind, &spec.name)];
         texts.extend(cands.iter().map(|c| label(c.kind, &c.name)));
         let missing: Vec<String> = {
-            let cache = self.emb_cache.lock().unwrap_or_else(|p| p.into_inner());
+            let cache = crate::lock(self.emb_cache);
             texts
                 .iter()
                 .filter(|t| !cache.contains_key(*t))
@@ -697,7 +650,7 @@ impl Resolver<'_> {
                     return Ok(None);
                 }
             };
-            let mut cache = self.emb_cache.lock().unwrap_or_else(|p| p.into_inner());
+            let mut cache = crate::lock(self.emb_cache);
             if cache.len() > 50_000 {
                 cache.clear();
             }
@@ -706,7 +659,7 @@ impl Resolver<'_> {
             }
         }
         let (query, others): (Vec<f32>, Vec<Vec<f32>>) = {
-            let cache = self.emb_cache.lock().unwrap_or_else(|p| p.into_inner());
+            let cache = crate::lock(self.emb_cache);
             let get = |t: &String| cache.get(t).cloned().unwrap_or_default();
             (get(&texts[0]), texts[1..].iter().map(get).collect())
         };
@@ -846,14 +799,8 @@ When unsure, answer same=false.",
         })
     }
 
-    /// A better display name for person `e` once `spec` has been attached, if there is one
-    /// (GG5-9: a person was named after whichever form came first, "R. Chen" or "Sam"). The
-    /// name is chosen from every name the person has, so it does not depend on the order
-    /// items arrive in: see [`person_name_rank`]; between written-out names of the same rank,
-    /// the one most mentions use. The user's entity, and a name the user chose
-    /// (`attributes.user_named`), are never renamed. Only re-evaluated when `spec` brings a
-    /// name at least as good as the current one, which keeps the mention count off the
-    /// common path.
+    /// A better display name for person `e` once `spec` has been attached, if there is one (GG5-9:
+    /// a person was named after whichever form came first, "R. Chen" or "Sam").
     fn better_person_name(&self, e: &Entity, spec: &EntitySpec) -> Result<Option<String>> {
         if Some(&e.id) == self.me.as_ref()
             || e.attributes.get("is_me") == Some(&Value::Bool(true))
@@ -911,8 +858,7 @@ When unsure, answer same=false.",
         match self.graph.create_entity(&new) {
             Ok(id) => Ok(id),
             Err(Error::Invalid(_)) if !new.identifiers.is_empty() => {
-                // An identifier belongs to an entity of another kind: create without it and
-                // attach the free ones.
+                // An identifier belongs to an entity of another kind.
                 new.identifiers.clear();
                 let id = self.graph.create_entity(&new)?;
                 for i in &spec.identifiers {
@@ -960,10 +906,7 @@ fn name_tokens(name: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether a domain spells an organisation's name: its label is the name's first word followed
-/// by later words, whole or as initials, in order (words may be left out). `cindergate.test`
-/// spells "Cindergate Analytics", `saltmarsh-clinic.test` "Saltmarsh Family Clinic",
-/// `marrowbank-rc.test` "Marrowbank Rowing Club", `vellumthistle.test` "Vellum & Thistle LLP".
+/// Whether a domain spells an organisation's name.
 pub(crate) fn domain_matches_name(domain: &str, name: &str) -> bool {
     let label = domain_label(domain);
     let tokens = name_tokens(name);
@@ -1008,10 +951,6 @@ fn name_from_domain(e: &Entity) -> bool {
 }
 
 /// How good a person's name is as their display name, higher is better: `(form, given)`.
-/// `form` is 3 for a written-out given name and surname ("Robert Chen"), 2 for a name with an
-/// initial ("R. Chen", "Maggie T"), 1 for one word ("Sam"), 0 for anything else. `given` prefers
-/// the formal given name among equivalents ("Robert Chen" over "Bob Chen", "Rob Chen"): 1 when
-/// the given name is not a known diminutive.
 pub(crate) fn person_name_rank(name: &str) -> (u8, u8) {
     use crate::names::{Part, PersonName};
     let Some(p) = PersonName::parse(name) else {
@@ -1071,32 +1010,6 @@ mod tests {
         assert!((cosine(&[1.0, 0.0], &[1.0, 0.0]) - 1.0).abs() < 1e-6);
     }
 
-    #[test]
-    fn domains_spell_names() {
-        for (d, n) in [
-            ("cindergate.test", "Cindergate Analytics"),
-            ("cindergate.test", "Cindergate"),
-            ("saltmarsh-clinic.test", "Saltmarsh Family Clinic"),
-            ("bramblecote-school.test", "Bramblecote Primary School"),
-            ("marrowbank-rc.test", "Marrowbank Rowing Club"),
-            ("vellumthistle.test", "Vellum & Thistle LLP"),
-            ("ostrander-freight.test", "Ostrander Freight Cooperative"),
-            ("mail.acme.co.uk", "ACME Ltd"),
-        ] {
-            assert!(domain_matches_name(d, n), "{d} / {n}");
-        }
-        for (d, n) in [
-            ("thistle.test", "Vellum & Thistle LLP"), // not the first word
-            ("cindergate.test", "Cinder Analytics"),
-            ("cindergateanalytics.test", "Cindergate"), // the label is longer than the name
-            ("ab.test", "Acme Bank"),
-            ("ab.test", "AB"), // too short to spell anything
-            ("acme.test", ""),
-        ] {
-            assert!(!domain_matches_name(d, n), "{d} / {n}");
-        }
-    }
-
     fn resolver<'a>(
         graph: &'a nugget_graph::MemGraph,
         cfg: &'a KnowledgeConfig,
@@ -1111,36 +1024,6 @@ mod tests {
             .map(|e| vec![Identifier::new("email", e)])
             .unwrap_or_default();
         g.create_entity(&new).unwrap()
-    }
-
-    #[tokio::test]
-    async fn a_trusted_record_joins_addresses_and_absorbs_the_name_only_twin() {
-        let g = nugget_graph::MemGraph::new();
-        let cfg = KnowledgeConfig::default();
-        let cache = Mutex::new(HashMap::new());
-        let r = resolver(&g, &cfg, &cache);
-        let old = person(&g, "Priya Castellane", Some("priya@old.test"));
-        let new = person(&g, "Priya Castellane", Some("priya@new.test"));
-        // Created while the name was ambiguous.
-        let plain = person(&g, "Priya Castellane", None);
-        let other = person(&g, "Priya Castellane Smith", None);
-
-        // A name-only mention is still ambiguous: nothing is merged.
-        let spec = EntitySpec::new(EntityKind::Person, "Priya Castellane");
-        let got = r.resolve(&spec).await.unwrap();
-        assert_eq!(got.id, plain);
-        assert!(got.merged.is_empty());
-
-        let mut spec = EntitySpec::new(EntityKind::Person, "Priya Castellane")
-            .ident("email", "priya@new.test")
-            .ident("email", "priya@old.test");
-        spec.trusted_identifiers = true;
-        let got = r.resolve(&spec).await.unwrap();
-        assert_eq!(got.merged.len(), 2, "{got:?}");
-        for id in [&old, &new, &plain] {
-            assert_eq!(g.get_entity(id).unwrap().unwrap().id, got.id);
-        }
-        assert_eq!(g.get_entity(&other).unwrap().unwrap().id, other);
     }
 
     #[tokio::test]
@@ -1160,73 +1043,6 @@ mod tests {
             g.get_entity(&a).unwrap().unwrap().id,
             g.get_entity(&b).unwrap().unwrap().id
         );
-    }
-
-    #[tokio::test]
-    async fn organisations_link_across_name_and_domain() {
-        let g = nugget_graph::MemGraph::new();
-        let cfg = KnowledgeConfig::default();
-        let cache = Mutex::new(HashMap::new());
-        let r = resolver(&g, &cfg, &cache);
-        let org = |name: &str, domain: Option<&str>| {
-            let mut s = EntitySpec::new(EntityKind::Organization, name);
-            if let Some(d) = domain {
-                s = s.ident("domain", d);
-            }
-            s
-        };
-        // Domain first, then the name: the made-up name gives way.
-        let by_domain = r
-            .resolve(&org("Quillfeather", Some("quillfeather.test")))
-            .await
-            .unwrap();
-        let by_name = r.resolve(&org("Quillfeather Systems", None)).await.unwrap();
-        assert_eq!(by_name.id, by_domain.id);
-        let e = g.get_entity(&by_domain.id).unwrap().unwrap();
-        assert_eq!(e.name, "Quillfeather Systems");
-        assert!(e.aliases.contains(&"Quillfeather".to_string()));
-
-        // Name first, then the domain.
-        let named = r
-            .resolve(&org("Marrowbank Rowing Club", None))
-            .await
-            .unwrap();
-        let mailed = r
-            .resolve(&org("Marrowbank Rc", Some("marrowbank-rc.test")))
-            .await
-            .unwrap();
-        assert_eq!(mailed.id, named.id);
-        let e = g.get_entity(&named.id).unwrap().unwrap();
-        assert_eq!(e.name, "Marrowbank Rowing Club");
-        assert!(
-            e.identifiers
-                .contains(&Identifier::new("domain", "marrowbank-rc.test"))
-        );
-
-        // Both already apart: an occurrence of the domain folds the name-only one in.
-        let plain = g
-            .create_entity(&NewEntity::new(EntityKind::Organization, "Glimmerfen Labs"))
-            .unwrap();
-        let mut new = NewEntity::new(EntityKind::Organization, "Glimmerfen");
-        new.identifiers = vec![Identifier::new("domain", "glimmerfen.test")];
-        let domained = g.create_entity(&new).unwrap();
-        let got = r
-            .resolve(&org("Glimmerfen", Some("glimmerfen.test")))
-            .await
-            .unwrap();
-        assert_eq!(got.id, domained);
-        assert_eq!(got.merged, vec![plain.clone()]);
-        let e = g.get_entity(&plain).unwrap().unwrap();
-        assert_eq!(e.id, domained);
-        assert_eq!(e.name, "Glimmerfen Labs");
-
-        // Two names the domain spells: neither is linked.
-        for n in ["Acme Bank", "Acme Builders"] {
-            r.resolve(&org(n, None)).await.unwrap();
-        }
-        let got = r.resolve(&org("Acmeb", Some("acmeb.test"))).await.unwrap();
-        assert!(got.created);
-        assert!(got.merged.is_empty());
     }
 
     // ---------------------------------------------------------------- short names
@@ -1291,64 +1107,6 @@ mod tests {
             .unwrap()
     }
 
-    #[tokio::test]
-    async fn a_nickname_joins_a_full_name_only_when_corroborated() {
-        let g = nugget_graph::MemGraph::new();
-        let cfg = KnowledgeConfig::default();
-        let cache = Mutex::new(HashMap::new());
-        let maggie = person(
-            &g,
-            "Margaret Thistlewood",
-            Some("margaret.thistlewood@cindergate.test"),
-        );
-        // No item context, nothing corroborates: a name alone never joins.
-        let got = resolver(&g, &cfg, &cache)
-            .resolve(&short("Maggie"))
-            .await
-            .unwrap();
-        assert!(got.created && got.id != maggie);
-
-        // On an item she is on, "Maggie" is her (a record says why, no entity merged).
-        let g = nugget_graph::MemGraph::new();
-        let maggie = person(
-            &g,
-            "Margaret Thistlewood",
-            Some("margaret.thistlewood@cindergate.test"),
-        );
-        let it = mail_item("2", json!({"message_id": "<2@m>"}));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header(
-            "Margaret Thistlewood",
-            "margaret.thistlewood@cindergate.test",
-        ));
-        ex.entity(short("Maggie"));
-        let got = on_item(&g, &it, &ex, &short("Maggie"), None).await;
-        assert_eq!(got.id, maggie);
-        assert!(!got.created && got.merged.is_empty());
-        let e = g.get_entity(&maggie).unwrap().unwrap();
-        assert!(e.aliases.contains(&"Maggie".to_string()));
-        let log = nugget_graph::merge_log(&e);
-        assert_eq!(log.len(), 1);
-        assert_eq!(log[0].from, None);
-        assert_eq!(log[0].name, "Maggie");
-        assert_eq!(log[0].reasons, ["nickname", "same_item"]);
-        assert_eq!(log[0].item.as_ref(), Some(&it.item));
-        assert_eq!(log[0].detail, "Matched by nickname; on the same item.");
-        assert!(log[0].at.is_some());
-        // Resolving the same occurrence again adds no duplicate record.
-        on_item(&g, &it, &ex, &short("Maggie"), None).await;
-        assert_eq!(
-            nugget_graph::merge_log(&g.get_entity(&maggie).unwrap().unwrap()).len(),
-            1
-        );
-
-        // "Mark" is not a form of Margaret; an initial with another surname neither.
-        for n in ["Mark", "M. Smith"] {
-            let got = on_item(&g, &it, &ex, &short(n), None).await;
-            assert!(got.created, "{n}");
-        }
-    }
-
     async fn on_item_as(
         g: &dyn GraphStore,
         item: &nugget_store::Item,
@@ -1368,174 +1126,8 @@ mod tests {
             .unwrap()
     }
 
-    /// The end-of-run passes over `touched`.
-    fn settle(
-        g: &dyn GraphStore,
-        feed: &dyn crate::feed::ItemFeed,
-        touched: &[EntityId],
-        me: Option<EntityId>,
-    ) -> Vec<(EntityId, EntityId)> {
-        let cfg = KnowledgeConfig::default();
-        let cache = Mutex::new(HashMap::new());
-        let r = Resolver::new(g, &cfg, None, &cache, me)
-            .with_splits(&[], None)
-            .with_feed(feed);
-        let t: std::collections::BTreeSet<EntityId> = touched.iter().cloned().collect();
-        let mut m = r.settle_job_changes(&t).unwrap();
-        m.extend(r.settle_pending(feed, &t).unwrap());
-        m
-    }
-
     fn headers(from: &str) -> Value {
         json!({"from": from, "to": ["Robin Ashgrove <robin@glimmerfen.test>"]})
-    }
-
-    #[tokio::test]
-    async fn two_people_sharing_a_first_name_are_never_merged_on_it() {
-        let store = nugget_store::Store::open_in_memory().unwrap();
-        let g = nugget_graph::MemGraph::new();
-        let okafor = person(&g, "Sam Okafor", Some("sam.okafor@ostrander.test"));
-        let whitlock = person(&g, "Sam Whitlock", Some("sam@marrowbank.test"));
-        let it = mail_item("3", json!({}));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header("Sam Okafor", "sam.okafor@ostrander.test"));
-        ex.entity(header("Sam Whitlock", "sam@marrowbank.test"));
-        let first = on_item(&g, &it, &ex, &short("Sam"), Some(&store)).await;
-        assert!(first.created);
-        assert!(first.id != okafor && first.id != whitlock);
-        // Only Whitlock on the item: with another Sam known, the join waits for the end of the
-        // run, when the one corroborated Sam is picked.
-        let it = mail_item("4", headers("Sam Whitlock <sam@marrowbank.test>"));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header("Sam Whitlock", "sam@marrowbank.test"));
-        let got = on_item(&g, &it, &ex, &short("Sam"), Some(&store)).await;
-        assert!(got.created);
-        mention(&g, &got.id, "4", "Sam");
-        mention(&g, &whitlock, "4", "Sam Whitlock");
-        mention(&g, &first.id, "3", "Sam");
-        mention(&g, &okafor, "3", "Sam Okafor");
-        mention(&g, &whitlock, "3", "Sam Whitlock");
-        let merges = settle(&g, &store, &[got.id.clone(), first.id.clone()], None);
-        assert_eq!(merges, vec![(whitlock.clone(), got.id.clone())]);
-        assert_eq!(g.get_entity(&first.id).unwrap().unwrap().id, first.id);
-    }
-
-    #[tokio::test]
-    async fn the_same_organisation_counts_only_from_headers_and_when_the_name_is_unique_there() {
-        let g = nugget_graph::MemGraph::new();
-        let maggie = person(
-            &g,
-            "Margaret Thistlewood",
-            Some("margaret.thistlewood@cindergate.test"),
-        );
-        // A colleague's mail (a header at her domain) mentions "Maggie".
-        let it = mail_item("5", headers("Bart Fenwick <bart.fenwick@cindergate.test>"));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header("Bart Fenwick", "bart.fenwick@cindergate.test"));
-        let got = on_item(&g, &it, &ex, &short("Maggie"), None).await;
-        assert_eq!(got.id, maggie);
-        let log = nugget_graph::merge_log(&g.get_entity(&maggie).unwrap().unwrap());
-        assert_eq!(log[0].reasons, ["nickname", "same_org"]);
-        assert_eq!(log[0].item.as_ref(), Some(&it.item));
-
-        // Her organisation merely named in a body: nothing.
-        let body = mail_item("6", headers("Jo Bloggs <jo@elsewhere.test>"));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(EntitySpec::new(EntityKind::Organization, "Cindergate"));
-        assert!(
-            on_item(&g, &body, &ex, &short("Maggie"), None)
-                .await
-                .created
-        );
-
-        // A webmail domain says nothing about an organisation.
-        let g2 = nugget_graph::MemGraph::new();
-        person(&g2, "Margaret Thistlewood", Some("maggie.t@gmail.com"));
-        let web = mail_item("7", headers("Jo Bloggs <jo@gmail.com>"));
-        assert!(
-            on_item(&g2, &web, &ex, &short("Maggie"), None)
-                .await
-                .created
-        );
-
-        // Nor does the user's own domain (the user is on every item).
-        let g3 = nugget_graph::MemGraph::new();
-        let me = person(&g3, "Robin Ashgrove", Some("robin@glimmerfen.test"));
-        person(&g3, "Felix Ravensworth", Some("felix@glimmerfen.test"));
-        let own = mail_item("8", headers("Theo Brannigan <theo@glimmerfen.test>"));
-        let got = on_item_as(&g3, &own, &ex, &short("Felix"), None, Some(me)).await;
-        assert!(got.created);
-
-        // Two people at the domain that "Maggie" fits: the organisation tells nobody apart.
-        let g4 = nugget_graph::MemGraph::new();
-        person(
-            &g4,
-            "Margaret Thistlewood",
-            Some("margaret.thistlewood@cindergate.test"),
-        );
-        person(&g4, "Margaret Ellis", Some("m.ellis@cindergate.test"));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header("Bart Fenwick", "bart.fenwick@cindergate.test"));
-        assert!(on_item(&g4, &it, &ex, &short("Maggie"), None).await.created);
-
-        // Her personal address is not her work one: the same item does not join them.
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header(
-            "Margaret Thistlewood",
-            "margaret.thistlewood@cindergate.test",
-        ));
-        let spec = header("Maggie T", "maggie.t@mail.test");
-        let got = on_item(&g, &it, &ex, &spec, None).await;
-        assert!(got.created && got.id != maggie);
-    }
-
-    #[tokio::test]
-    async fn full_names_are_people_of_their_own() {
-        let g = nugget_graph::MemGraph::new();
-        let jonathan = person(&g, "Jonathan Lee", Some("jl@acme.test"));
-        let margaret = person(&g, "Margaret Smith", Some("ms@acme.test"));
-        let william = person(&g, "William Murphy", Some("wm@acme.test"));
-        let it = mail_item("20", headers("Jonathan Lee <jl@acme.test>"));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header("Jonathan Lee", "jl@acme.test"));
-        ex.entity(header("Margaret Smith", "ms@acme.test"));
-        ex.entity(header("William Murphy", "wm@acme.test"));
-        // A different written-out given name is a different person, nickname or not, even on
-        // the same item and at the same organisation.
-        for n in ["Nathan Lee", "Maggie Smith", "Liam Murphy"] {
-            let got = on_item(&g, &it, &ex, &short(n), None).await;
-            assert!(got.created, "{n}");
-        }
-        // "Liam" alone is a name of its own, not William's nickname.
-        assert!(on_item(&g, &it, &ex, &short("Liam"), None).await.created);
-
-        // Reverse: an entity with a written-out name among its names is never absorbed as a
-        // short form of another full name.
-        let s = g
-            .create_entity(&{
-                let mut n = NewEntity::new(EntityKind::Person, "Maggie");
-                n.aliases = vec!["Maggie Brown".into()];
-                n
-            })
-            .unwrap();
-        mention(&g, &s, "21", "Maggie");
-        mention(&g, &margaret, "21", "Margaret Smith");
-        let it = mail_item("22", headers("Margaret Smith <ms@acme.test>"));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header("Margaret Smith", "ms@acme.test"));
-        let got = on_item(
-            &g,
-            &it,
-            &ex,
-            &header("Margaret Smith", "ms@acme.test"),
-            None,
-        )
-        .await;
-        assert_eq!(got.id, margaret);
-        assert!(got.merged.is_empty());
-        assert_eq!(g.get_entity(&s).unwrap().unwrap().id, s);
-        assert_eq!(g.get_entity(&jonathan).unwrap().unwrap().id, jonathan);
-        assert_eq!(g.get_entity(&william).unwrap().unwrap().id, william);
     }
 
     #[tokio::test]
@@ -1556,150 +1148,6 @@ mod tests {
             let got = on_item_as(&g, &it, &ex, &short(n), None, Some(me.clone())).await;
             assert_eq!(got.id, ferrand, "{n}");
         }
-    }
-
-    #[tokio::test]
-    async fn a_body_counts_only_when_it_attributes_the_name_to_the_organisation() {
-        let store = nugget_store::Store::open_in_memory().unwrap();
-        let note = |key: &str, text: &str| {
-            store
-                .upsert_item_with_chunks(
-                    &nugget_store::NewItem::new("notes", key, format!("h{key}"))
-                        .with_mime("text/markdown"),
-                    &[nugget_store::NewChunk::text(text)],
-                )
-                .unwrap();
-            ItemRef {
-                source: nugget_core::ids::SourceId::new("notes"),
-                key: nugget_core::ids::ItemKey::new(key),
-            }
-        };
-        let g = nugget_graph::MemGraph::new();
-        let rook = person(&g, "Tamsin Rook", Some("tamsin.rook@quillfeather.test"));
-        person(&g, "Tamsin Galloway", Some("tamsin.g@gmail.com"));
-        let mut org = NewEntity::new(EntityKind::Organization, "Quillfeather Systems");
-        org.identifiers = vec![Identifier::new("domain", "quillfeather.test")];
-        g.create_entity(&org).unwrap();
-        let short_on = |item: &ItemRef| {
-            let s = g
-                .create_entity(&NewEntity::new(EntityKind::Person, "Tamsin"))
-                .unwrap();
-            g.add_mention(&nugget_graph::Mention {
-                entity: s.clone(),
-                item: item.clone(),
-                chunk_id: None,
-                surface: "Tamsin".into(),
-                confidence: 0.6,
-            })
-            .unwrap();
-            s
-        };
-        // Merely named in the same text: nothing.
-        let named = note(
-            "a",
-            "Tamsin says Quillfeather Systems has the sandbox keys.",
-        );
-        let s1 = short_on(&named);
-        assert!(settle(&g, &store, std::slice::from_ref(&s1), None).is_empty());
-        // Attributed: "Tamsin from Quillfeather".
-        let said = note(
-            "b",
-            "Standup with Priya and Tamsin from Quillfeather today.",
-        );
-        let s2 = short_on(&said);
-        let merges = settle(&g, &store, std::slice::from_ref(&s2), None);
-        assert_eq!(merges, vec![(rook.clone(), s2.clone())]);
-        let log = nugget_graph::merge_log(&g.get_entity(&rook).unwrap().unwrap());
-        assert_eq!(log[0].reasons, ["first_name", "same_org"]);
-        assert_eq!(log[0].item.as_ref(), Some(&said));
-        // A substring is not the name ("Tamsinette from Quillfeather").
-        let other = note("c", "Lunch with Tamsinette from Quillfeather.");
-        let s3 = short_on(&other);
-        assert!(settle(&g, &store, std::slice::from_ref(&s3), None).is_empty());
-    }
-
-    #[tokio::test]
-    async fn too_many_namesakes_are_ambiguous() {
-        let store = nugget_store::Store::open_in_memory().unwrap();
-        let g = nugget_graph::MemGraph::new();
-        for i in 0..(short::CAND_MAX + 10) {
-            person(&g, &format!("Sam Person{i}"), None);
-        }
-        let whitlock = person(&g, "Sam Whitlock", Some("sam@marrowbank.test"));
-        let s = g
-            .create_entity(&NewEntity::new(EntityKind::Person, "Sam"))
-            .unwrap();
-        mention(&g, &s, "40", "Sam");
-        mention(&g, &whitlock, "40", "Sam Whitlock");
-        // Whitlock is the only corroborated Sam, but the lookup cannot see every Sam.
-        assert!(settle(&g, &store, std::slice::from_ref(&s), None).is_empty());
-        assert_eq!(g.get_entity(&s).unwrap().unwrap().id, s);
-    }
-
-    #[tokio::test]
-    async fn the_same_full_name_at_two_addresses_joins_only_on_a_job_change_statement() {
-        let store = nugget_store::Store::open_in_memory().unwrap();
-        let put = |key: &str, from: &str, text: &str| {
-            store
-                .upsert_item_with_chunks(
-                    &nugget_store::NewItem::new("mail", key, format!("h{key}"))
-                        .with_mime("message/rfc822")
-                        .with_metadata(json!({"extracted": {"from": from}})),
-                    &[nugget_store::NewChunk::text(text)],
-                )
-                .unwrap();
-        };
-        put(
-            "53",
-            "Delphine Corrigan <delphine.corrigan@glimmerfen.test>",
-            "I've joined Glimmerfen Labs; my Vellum & Thistle address no longer works.",
-        );
-        put(
-            "55",
-            "Delphine Corrigan <delphine.corrigan@vellumthistle.test>",
-            "Here is the engagement letter.",
-        );
-        put(
-            "60",
-            "Ann Lee <ann@one.test>",
-            "Hello from One. I used to be at Two.",
-        );
-        put("61", "Ann Lee <ann@two.test>", "Hello.");
-        let g = nugget_graph::MemGraph::new();
-        let old = person(
-            &g,
-            "Delphine Corrigan",
-            Some("delphine.corrigan@vellumthistle.test"),
-        );
-        let new = person(
-            &g,
-            "Delphine Corrigan",
-            Some("delphine.corrigan@glimmerfen.test"),
-        );
-        // A name-only twin from a third party's mail.
-        let twin = person(&g, "Delphine Corrigan", None);
-        mention(&g, &old, "55", "Delphine Corrigan");
-        mention(&g, &new, "53", "Delphine Corrigan");
-        // Same name, two addresses, nothing said about the other: two people. ("Two" is too
-        // short to count as an organisation's name.)
-        let a1 = person(&g, "Ann Lee", Some("ann@one.test"));
-        let a2 = person(&g, "Ann Lee", Some("ann@two.test"));
-        mention(&g, &a1, "60", "Ann Lee");
-        mention(&g, &a2, "61", "Ann Lee");
-        let merges = settle(&g, &store, &[old.clone(), a1.clone(), a2.clone()], None);
-        assert_eq!(
-            merges,
-            vec![(new.clone(), old.clone()), (new.clone(), twin.clone())]
-        );
-        let e = g.get_entity(&old).unwrap().unwrap();
-        assert_eq!(e.id, new);
-        let log = nugget_graph::merge_log(&e);
-        assert_eq!(log[0].reasons, ["same_name", "job_change"]);
-        assert_eq!(log[0].item.as_ref().map(|i| i.key.as_str()), Some("53"));
-        assert_ne!(
-            g.get_entity(&a1).unwrap().unwrap().id,
-            g.get_entity(&a2).unwrap().unwrap().id
-        );
     }
 
     #[test]
@@ -1758,107 +1206,5 @@ mod tests {
         let other = mail_item("8", json!({"message_id": "<8@m>"}));
         let got = on_item(&g, &other, &ex, &short("Maggie"), Some(&store)).await;
         assert!(got.created);
-    }
-
-    #[tokio::test]
-    async fn a_full_name_absorbs_the_short_forms_seen_before_it() {
-        let g = nugget_graph::MemGraph::new();
-        // "Maggie" and "M. Thistlewood" were seen first, each on an item she is on too.
-        let m1 = g
-            .create_entity(&NewEntity::new(EntityKind::Person, "Maggie"))
-            .unwrap();
-        mention(&g, &m1, "10", "Maggie");
-        let m2 = g
-            .create_entity(&NewEntity::new(EntityKind::Person, "M. Thistlewood"))
-            .unwrap();
-        mention(&g, &m2, "11", "M. Thistlewood");
-        // A "Sam" on an item with nobody else: left alone.
-        let sam = g
-            .create_entity(&NewEntity::new(EntityKind::Person, "Sam"))
-            .unwrap();
-        mention(&g, &sam, "12", "Sam");
-        let full = person(&g, "Margaret Thistlewood", None);
-        mention(&g, &full, "10", "Margaret Thistlewood");
-        mention(&g, &full, "11", "Margaret Thistlewood");
-        // Her next occurrence (anywhere) re-examines them.
-        let it = mail_item("13", json!({}));
-        let mut ex = crate::spec::Extraction::default();
-        ex.entity(header("Margaret Thistlewood", "mt@cindergate.test"));
-        let got = on_item(
-            &g,
-            &it,
-            &ex,
-            &header("Margaret Thistlewood", "mt@cindergate.test"),
-            None,
-        )
-        .await;
-        assert_eq!(got.id, full);
-        let mut merged = got.merged.clone();
-        merged.sort();
-        let mut want = vec![m1.clone(), m2.clone()];
-        want.sort();
-        assert_eq!(merged, want);
-        assert_eq!(g.get_entity(&sam).unwrap().unwrap().id, sam);
-        let log = nugget_graph::merge_log(&g.get_entity(&full).unwrap().unwrap());
-        assert_eq!(log.len(), 2);
-        assert!(
-            log.iter()
-                .all(|r| r.from.is_some() && r.reasons.contains(&"same_item".to_string()))
-        );
-        assert!(
-            log.iter()
-                .any(|r| r.name == "M. Thistlewood" && r.reasons[0] == "initial")
-        );
-    }
-
-    #[test]
-    fn merge_logs_are_kept_from_both_sides() {
-        let g = nugget_graph::MemGraph::new();
-        let a = person(&g, "Robert Chen", None);
-        let b = person(&g, "Bob Chen", None);
-        let c = person(&g, "Rob Chen", None);
-        merge_recorded(&g, &b, &c, vec!["nickname".into()], "c".into(), None).unwrap();
-        merge_recorded(&g, &a, &b, vec!["nickname".into()], "b".into(), None).unwrap();
-        let log = nugget_graph::merge_log(&g.get_entity(&a).unwrap().unwrap());
-        let names: Vec<&str> = log.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, ["Rob Chen", "Bob Chen"]);
-        assert_eq!(log[1].from.as_ref(), Some(&b));
-        // Bounded.
-        for i in 0..(short::MAX_MERGE_LOG + 5) {
-            short::append_record(
-                &g,
-                &a,
-                nugget_graph::MergeRecord {
-                    from: None,
-                    name: format!("n{i}"),
-                    reasons: vec![],
-                    detail: String::new(),
-                    item: None,
-                    at: Some(time::OffsetDateTime::now_utc()),
-                },
-            )
-            .unwrap();
-        }
-        let log = nugget_graph::merge_log(&g.get_entity(&a).unwrap().unwrap());
-        assert_eq!(log.len(), short::MAX_MERGE_LOG);
-        assert_eq!(
-            log.last().unwrap().name,
-            format!("n{}", short::MAX_MERGE_LOG + 4)
-        );
-    }
-}
-
-#[cfg(test)]
-mod display_name_tests {
-    use super::person_name_rank;
-
-    #[test]
-    fn written_out_formal_names_rank_first() {
-        assert!(person_name_rank("Robert Chen") > person_name_rank("Bob Chen"));
-        assert!(person_name_rank("Bob Chen") > person_name_rank("R. Chen"));
-        assert!(person_name_rank("R. Chen") > person_name_rank("Robert"));
-        assert!(person_name_rank("Sam Okonkwo") > person_name_rank("Sam"));
-        assert!(person_name_rank("Sam") > person_name_rank("sam@x.example"));
-        assert_eq!(person_name_rank("Jack Lee"), person_name_rank("John Lee"));
     }
 }

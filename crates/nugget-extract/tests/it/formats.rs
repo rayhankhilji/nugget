@@ -1,9 +1,7 @@
 //! One test (or more) per supported format, plus limits and routing.
 
 use nugget_core::Error;
-use nugget_extract::{
-    ExtractOptions, OcrModels, Source, detect_mime, extract, extract_with_ocr, is_supported,
-};
+use nugget_extract::{ExtractOptions, OcrModels, Source, detect_mime, extract, extract_with_ocr};
 use serde_json::json;
 
 use crate::common::*;
@@ -438,10 +436,6 @@ fn images_need_ocr_flag_and_models() {
 
 #[test]
 fn routing_and_limits() {
-    assert!(is_supported("text/markdown"));
-    assert!(is_supported("IMAGE/WEBP"));
-    assert!(is_supported("text/x-rust"));
-    assert!(!is_supported("application/octet-stream"));
     for mime in ["application/zip", "application/octet-stream", "video/mp4"] {
         let r = extract(mime, Source::Bytes(b"x"), &ExtractOptions::default());
         assert!(matches!(r, Err(Error::Unsupported(_))), "{mime}: {r:?}");

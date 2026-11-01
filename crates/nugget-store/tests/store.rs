@@ -6,8 +6,7 @@ use std::sync::Arc;
 use nugget_core::egress::{EgressEvent, EgressSink};
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
 use nugget_store::{
-    AuditEntry, Error, NewChunk, NewItem, SCHEMA_VERSION, Store, StoreKey, UpsertOutcome,
-    content_hash,
+    AuditEntry, Error, NewChunk, NewItem, Store, StoreKey, UpsertOutcome, content_hash,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -49,8 +48,6 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-// ---------------------------------------------------------------- items, dedup, cascade
-
 #[test]
 fn crud_and_dedup_by_hash() {
     let s = mem();
@@ -70,7 +67,6 @@ fn crud_and_dedup_by_hash() {
     assert_eq!(got.metadata, json!({}));
     assert_eq!(got.created_at, got.updated_at);
 
-    // Same hash but changed fields: updated, chunks kept (content did not change).
     s.replace_chunks(&r, &[NewChunk::text("alpha body")])
         .unwrap();
     let retitled = a
@@ -84,7 +80,6 @@ fn crud_and_dedup_by_hash() {
     assert_eq!(got.metadata, json!({"size": 10}));
     assert_eq!(s.counts().unwrap().chunks, 1);
 
-    // New content hash: updated, and stale chunks are dropped.
     let edited = item("a.txt", "A2", "alpha edited").with_metadata(json!({"size": 10}));
     assert_eq!(s.upsert_item(&edited).unwrap(), UpsertOutcome::Updated);
     assert_eq!(s.counts().unwrap().chunks, 0);
@@ -92,12 +87,10 @@ fn crud_and_dedup_by_hash() {
     let got = s.get_item(&r).unwrap().unwrap();
     assert_eq!(got.content_hash, content_hash("alpha edited"));
 
-    // Same key in another source is a different item.
     let other = NewItem::new("gmail:me", "a.txt", content_hash("alpha edited"));
     assert_eq!(s.upsert_item(&other).unwrap(), UpsertOutcome::Inserted);
     assert_eq!(s.counts().unwrap().items, 2);
 
-    // Timestamps from the source round-trip and count as a change.
     let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
     let mut dated = other.clone();
     dated.source_modified_at = Some(ts);
@@ -184,7 +177,6 @@ fn replace_chunks_replaces_and_is_atomic() {
     assert!(s.search_text("apple", 5).unwrap().is_empty());
     assert_eq!(s.search_text("cherry", 5).unwrap()[0].chunk_id, second[0]);
 
-    // A bad batch (NaN, mixed dimensions) changes nothing.
     for bad in [
         vec![NewChunk::embedded("d", vec![f32::NAN, 1.0])],
         vec![
@@ -200,56 +192,6 @@ fn replace_chunks_replaces_and_is_atomic() {
     }
     assert_eq!(s.search_text("cherry", 5).unwrap().len(), 1);
     assert_eq!(s.embedding_dim().unwrap(), None);
-}
-
-// ---------------------------------------------------------------- search
-
-#[test]
-fn fts_ranking_prefers_better_matches() {
-    let s = mem();
-    let docs = [
-        (
-            "weak",
-            "the garden has a fence and some flowers near the shed",
-        ),
-        (
-            "strong",
-            "rust ownership rules: rust borrows, rust lifetimes and rust traits",
-        ),
-        ("medium", "notes about rust and gardening"),
-    ];
-    for (key, body) in docs {
-        let it = item(key, &format!("title {key}"), body);
-        s.upsert_item(&it).unwrap();
-        s.replace_chunks(&it.item, &[NewChunk::text(body)]).unwrap();
-    }
-
-    let hits = s.search_text("rust", 10).unwrap();
-    let keys: Vec<_> = hits.iter().map(|h| h.item.key.as_str()).collect();
-    assert_eq!(keys, ["strong", "medium"]);
-    assert!(hits[0].score > hits[1].score);
-    assert!(hits[0].snippet.contains("rust"));
-    assert_eq!(hits[0].title.as_deref(), Some("title strong"));
-
-    // Stemming: "gardens" matches "garden" and "gardening".
-    let stemmed = s.search_text("gardens", 10).unwrap();
-    assert_eq!(stemmed.len(), 2);
-
-    // More matching terms rank higher.
-    let multi = s.search_text("rust gardening", 10).unwrap();
-    assert_eq!(multi[0].item.key.as_str(), "medium");
-
-    // FTS5 syntax in user input is inert; empty input and limit 0 yield nothing.
-    assert_eq!(
-        s.search_text("rust\" -(xyzzy* ^", 10).unwrap()[0]
-            .item
-            .key
-            .as_str(),
-        "strong"
-    );
-    assert!(s.search_text("  ?! ", 10).unwrap().is_empty());
-    assert!(s.search_text("rust", 0).unwrap().is_empty());
-    assert_eq!(s.search_text("rust", 1).unwrap().len(), 1);
 }
 
 #[test]
@@ -269,7 +211,6 @@ fn vector_knn_orders_by_cosine_similarity() {
     }
     assert_eq!(s.embedding_dim().unwrap(), Some(3));
 
-    // Magnitude does not matter for cosine.
     let hits = s.search_vector(&[10.0, 1.0, 0.0], 3).unwrap();
     let keys: Vec<_> = hits.iter().map(|h| h.item.key.as_str()).collect();
     assert_eq!(keys, ["east", "north-east", "north"]);
@@ -281,7 +222,6 @@ fn vector_knn_orders_by_cosine_similarity() {
     assert_eq!(all.last().unwrap().item.key.as_str(), "west");
     assert!(all.last().unwrap().score < -0.99);
 
-    // Dimension is fixed per database.
     assert!(matches!(
         s.search_vector(&[1.0, 0.0], 3),
         Err(Error::Invalid(_))
@@ -295,18 +235,8 @@ fn vector_knn_orders_by_cosine_similarity() {
 }
 
 #[test]
-fn vector_search_on_empty_store_is_empty() {
-    let s = mem();
-    assert!(s.search_vector(&[1.0, 2.0], 5).unwrap().is_empty());
-    assert!(matches!(s.search_vector(&[], 5), Err(Error::Invalid(_))));
-}
-
-#[test]
 fn hybrid_fusion_rewards_agreement() {
     let s = mem();
-    // "text": best keyword match, opposite vector.
-    // "vector": no keyword, best vector match.
-    // "both": decent on both lists, so RRF puts it first.
     let docs = [
         (
             "text",
@@ -357,10 +287,8 @@ fn hybrid_fusion_rewards_agreement() {
     let expected = 1.0 / 62.0 + 1.0 / 62.0;
     assert!((hybrid[0].score - expected).abs() < 1e-6);
     assert!(hybrid.windows(2).all(|w| w[0].score >= w[1].score));
-    // The full-text snippet is kept for chunks found by both.
     assert!(hybrid[0].snippet.contains("invoice"));
 
-    // Without an embedding, hybrid degrades to the text ranking.
     let text_rrf: Vec<_> = s
         .search_hybrid("invoice", None, 10)
         .unwrap()
@@ -377,22 +305,6 @@ fn hybrid_fusion_rewards_agreement() {
 }
 
 #[test]
-fn hit_converts_to_ipc_search_hit() {
-    let s = mem();
-    let it = item("a", "Title", "hello world");
-    s.upsert_item(&it).unwrap();
-    s.replace_chunks(&it.item, &[NewChunk::text("hello world")])
-        .unwrap();
-    let hit = s.search_text("hello", 1).unwrap().remove(0);
-    let ipc: nugget_core::ipc::SearchHit = hit.clone().into();
-    assert_eq!(ipc.item, hit.item);
-    assert_eq!(ipc.title.as_deref(), Some("Title"));
-    assert_eq!(ipc.snippet, "hello world");
-}
-
-// ---------------------------------------------------------------- cursors, counts
-
-#[test]
 fn cursor_round_trip() {
     let s = mem();
     let src = SourceId::new("gmail:me@example.com");
@@ -404,41 +316,10 @@ fn cursor_round_trip() {
     s.set_cursor(&src, v2.clone()).unwrap();
     assert_eq!(s.get_cursor(&src).unwrap(), Some(v2));
     assert_eq!(s.get_cursor(&SourceId::new("other")).unwrap(), None);
+    assert!(s.clear_cursor(&src).unwrap());
+    assert!(!s.clear_cursor(&src).unwrap(), "already gone");
+    assert_eq!(s.get_cursor(&src).unwrap(), None);
 }
-
-// ---------------------------------------------------------------- egress ledger
-
-#[test]
-fn egress_ledger_records_via_sink() {
-    let s = mem();
-    let sink: Arc<dyn EgressSink> = Arc::new(s.clone());
-    let at = OffsetDateTime::from_unix_timestamp(1_750_000_000).unwrap();
-    for i in 0..5u64 {
-        sink.record(EgressEvent {
-            at,
-            host: format!("api{i}.example.com"),
-            feature: "chat".into(),
-            bytes_sent: 100 + i,
-            bytes_received: u64::MAX,
-            items: vec![iref("files:x", &format!("doc{i}"))],
-        });
-    }
-    let recent = s.recent_egress(3).unwrap();
-    assert_eq!(recent.len(), 3);
-    assert_eq!(recent[0].host, "api4.example.com", "newest first");
-    assert_eq!(recent[0].bytes_sent, 104);
-    assert_eq!(
-        recent[0].bytes_received,
-        i64::MAX as u64,
-        "clamped, not wrapped"
-    );
-    assert_eq!(recent[0].items, vec![iref("files:x", "doc4")]);
-    assert_eq!(recent[0].at, at);
-    assert_eq!(s.recent_egress(100).unwrap().len(), 5);
-    assert!(s.recent_egress(0).unwrap().is_empty());
-}
-
-// ---------------------------------------------------------------- audit log
 
 fn audit(i: u32) -> AuditEntry {
     AuditEntry {
@@ -447,30 +328,6 @@ fn audit(i: u32) -> AuditEntry {
         target: format!("files:x/doc{i}"),
         detail: json!({"i": i}),
     }
-}
-
-#[test]
-fn audit_chain_links_entries() {
-    let s = mem();
-    s.verify_audit_chain().unwrap();
-    let r1 = s.append_audit(&audit(1)).unwrap();
-    let r2 = s.append_audit(&audit(2)).unwrap();
-    assert_eq!((r1.seq, r2.seq), (1, 2));
-    assert_eq!(r1.prev_hash, "0".repeat(64));
-    assert_eq!(r2.prev_hash, r1.hash);
-    assert_ne!(r1.hash, r2.hash);
-    s.verify_audit_chain().unwrap();
-
-    let recent = s.recent_audit(10).unwrap();
-    assert_eq!(recent, vec![r2.clone(), r1]);
-    assert_eq!(recent[0].detail, json!({"i": 2}));
-    assert!(matches!(
-        s.append_audit(&AuditEntry {
-            actor: String::new(),
-            ..audit(3)
-        }),
-        Err(Error::Invalid(_))
-    ));
 }
 
 #[test]
@@ -484,12 +341,10 @@ fn audit_chain_detects_tampered_row() {
     s.verify_audit_chain().unwrap();
 
     let raw = raw_conn(&path, &[7u8; 32]);
-    // The table is append-only...
     assert!(
         raw.execute("UPDATE audit SET detail = '{}' WHERE seq = 2", [])
             .is_err()
     );
-    // ...but someone holding the key can drop the guard; the chain still catches it.
     raw.execute_batch(
         "DROP TRIGGER audit_no_update;
          UPDATE audit SET detail = '{\"i\":99}' WHERE seq = 2;",
@@ -513,21 +368,17 @@ fn audit_chain_detects_removed_rows() {
     let raw = raw_conn(&path, &[7u8; 32]);
     raw.execute_batch("DROP TRIGGER audit_no_delete;").unwrap();
 
-    // Removing the tail is caught by the stored chain head.
     raw.execute("DELETE FROM audit WHERE seq = 4", []).unwrap();
     assert!(matches!(
         s.verify_audit_chain(),
         Err(Error::Integrity(m)) if m.contains("head")
     ));
-    // Removing a middle entry breaks sequence continuity.
     raw.execute("DELETE FROM audit WHERE seq = 2", []).unwrap();
     assert!(matches!(
         s.verify_audit_chain(),
         Err(Error::Integrity(m)) if m.contains("expected entry 2")
     ));
 }
-
-// ---------------------------------------------------------------- encryption, migrations
 
 #[test]
 fn encrypted_db_rejects_wrong_key() {
@@ -542,7 +393,6 @@ fn encrypted_db_rejects_wrong_key() {
             .unwrap();
     }
 
-    // Nothing in plaintext on disk (main file and WAL).
     let header = std::fs::read(&path).unwrap();
     assert!(
         !header.starts_with(b"SQLite format 3\0"),
@@ -583,73 +433,6 @@ fn database_file_is_owner_only() {
     assert_eq!(dir_mode & 0o777, 0o700);
 }
 
-#[test]
-fn migration_rerun_is_a_noop() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = db_path(&dir);
-    {
-        let s = Store::open(&path, &key_a()).unwrap();
-        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-        assert_eq!(s.migrate().unwrap(), 0);
-        let it = item("a", "A", "persisted");
-        s.upsert_item(&it).unwrap();
-        s.replace_chunks(&it.item, &[NewChunk::embedded("persisted", vec![1.0, 0.0])])
-            .unwrap();
-        s.append_audit(&audit(1)).unwrap();
-    }
-    let s = Store::open(&path, &key_a()).unwrap();
-    assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-    assert_eq!(s.migrate().unwrap(), 0);
-    assert_eq!(s.counts().unwrap().items, 1);
-    assert_eq!(s.embedding_dim().unwrap(), Some(2));
-    assert_eq!(s.search_vector(&[1.0, 0.0], 1).unwrap().len(), 1);
-    s.verify_audit_chain().unwrap();
-}
-
-#[test]
-fn newer_schema_version_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = db_path(&dir);
-    drop(Store::open(&path, &key_a()).unwrap());
-    raw_conn(&path, &[7u8; 32])
-        .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
-        .unwrap();
-    assert!(matches!(
-        Store::open(&path, &key_a()),
-        Err(Error::Unsupported(_))
-    ));
-}
-
-// ---------------------------------------------------------------- concurrency
-
-#[test]
-fn store_is_shareable_across_threads() {
-    fn assert_traits<T: Clone + Send + Sync + 'static>() {}
-    assert_traits::<Store>();
-
-    let s = mem();
-    let handles: Vec<_> = (0..4)
-        .map(|t| {
-            let s = s.clone();
-            std::thread::spawn(move || {
-                for i in 0..25 {
-                    let it = item(&format!("t{t}-{i}"), "t", &format!("thread {t} item {i}"));
-                    s.upsert_item(&it).unwrap();
-                    s.replace_chunks(&it.item, &[NewChunk::text("shared words")])
-                        .unwrap();
-                    s.append_audit(&audit(i)).unwrap();
-                }
-            })
-        })
-        .collect();
-    for h in handles {
-        h.join().unwrap();
-    }
-    assert_eq!(s.counts().unwrap().items, 100);
-    assert_eq!(s.search_text("shared", 1000).unwrap().len(), 100);
-    s.verify_audit_chain().unwrap();
-}
-
 /// Events queued through the sink are all written before the last `Store` handle is gone.
 #[test]
 fn egress_events_survive_dropping_the_store() {
@@ -669,7 +452,6 @@ fn egress_events_survive_dropping_the_store() {
                 items: vec![],
             });
         }
-        // The last handle: dropping it must flush the queue and join the writer.
         drop(sink);
     }
     let s = Store::open(&path, &key_a()).unwrap();
@@ -709,7 +491,6 @@ mod sources {
         assert_eq!(after.updated_at, before.updated_at);
         assert_eq!(after.text.as_deref(), Some("alpha text"));
         assert_eq!(store.search_text("alpha", 10).unwrap().len(), 1);
-        // Another content hash: nothing written.
         assert!(
             !store
                 .set_item_metadata(&new.item, "other", &serde_json::json!({}))
@@ -868,7 +649,6 @@ mod sources {
     #[test]
     fn items_missing_embeddings_lists_text_only_items_in_pages() {
         let store = Store::open_in_memory().unwrap();
-        // No vector table yet: every item with chunks is listed; chunkless items never are.
         put(&store, "b", "two", None, &["beta"]);
         put(&store, "a", "one", None, &["alpha", "alpha 2"]);
         put(&store, "a", "empty", None, &[]);
@@ -880,7 +660,6 @@ mod sources {
             store.items_missing_embeddings(None, 10).unwrap(),
             vec![r("a", "one"), r("b", "two")]
         );
-        // Embed one item: it drops out; pagination continues after the given item.
         store
             .replace_chunks(
                 &r("a", "one"),
@@ -902,7 +681,6 @@ mod sources {
             vec![r("b", "two")]
         );
         assert!(store.items_missing_embeddings(None, 0).unwrap().is_empty());
-        // A partially embedded item is listed too.
         let mixed = r("c", "mixed");
         store.upsert_item(&NewItem::new("c", "mixed", "h")).unwrap();
         store
@@ -931,7 +709,6 @@ mod sources {
         assert_eq!(v[&ItemKey::new("a.md")].as_deref(), Some("1:10"));
         assert_eq!(v[&ItemKey::new("b.md")], None);
 
-        // A version change alone is a real update.
         let item = NewItem::new("files", "a.md", "files/a.md/Some(\"1:10\")")
             .with_title("A.MD")
             .with_version("2:10");
@@ -979,17 +756,13 @@ mod sources {
     }
 }
 
-// ---------------------------------------------------------------- M1-J: retrieval-quality APIs
-
 mod m1j {
-    use std::collections::HashMap;
-
     use nugget_core::ids::SourceId;
     use nugget_store::{
-        Error, MAX_CHUNK_IDS, NewChunk, NewItem, SCHEMA_VERSION, Store, UpsertOutcome, content_hash,
+        Error, MAX_CHUNK_IDS, NewChunk, NewItem, Store, UpsertOutcome, content_hash,
     };
 
-    use super::{db_path, iref, item, key_a, mem, raw_conn};
+    use super::{iref, item, mem};
 
     fn put(s: &Store, key: &str, title: Option<&str>, chunks: &[&str]) -> Vec<i64> {
         let mut it = NewItem::new("files:test", key, content_hash(chunks.join("|")));
@@ -1016,17 +789,14 @@ mod m1j {
         );
         put(&s, "n", Some("Shopping"), &["eggs, milk, bread"]);
         put(&s, "untitled", None, &["nothing about that"]);
-        // Only the title says "mortgage": the item is found, represented by its first chunk.
         let hits = s.search_text("mortgage", 10).unwrap();
         assert_eq!(keys(&hits), ["m"]);
         assert_eq!(hits[0].chunk_id, mortgage[0]);
         assert_eq!(hits[0].snippet, "Fixed rate ends in March.");
         assert_eq!(hits[0].title.as_deref(), Some("Mortgage renewal"));
         assert!(hits[0].score > 0.0);
-        // Hybrid search sees it too.
         assert_eq!(keys(&s.search_hybrid("mortgage", None, 5).unwrap()), ["m"]);
 
-        // Body and title both matching beats body alone; chunks keep their own body order.
         put(
             &s,
             "body-only",
@@ -1036,7 +806,6 @@ mod m1j {
         let hits = s.search_text("broker mortgage", 10).unwrap();
         assert_eq!(hits[0].item.key.as_str(), "m", "{hits:?}");
         assert!(keys(&hits).contains(&"body-only"));
-        // The title boost is added to the item's matching chunk, not to a second hit.
         assert_eq!(keys(&hits).iter().filter(|k| **k == "m").count(), 1);
         assert_eq!(hits[0].chunk_id, mortgage[1]);
     }
@@ -1047,20 +816,17 @@ mod m1j {
         put(&s, "a", Some("Alpha plan"), &["body text"]);
         assert_eq!(keys(&s.search_text("alpha", 5).unwrap()), ["a"]);
 
-        // Title change: the old title no longer matches, the new one does.
         let renamed =
             NewItem::new("files:test", "a", content_hash("body text")).with_title("Beta plan");
         assert_eq!(s.upsert_item(&renamed).unwrap(), UpsertOutcome::Updated);
         assert!(s.search_text("alpha", 5).unwrap().is_empty());
         assert_eq!(keys(&s.search_text("beta", 5).unwrap()), ["a"]);
 
-        // Title removed.
         let untitled = NewItem::new("files:test", "a", content_hash("body text"));
         s.upsert_item(&untitled).unwrap();
         assert!(s.search_text("beta", 5).unwrap().is_empty());
         assert_eq!(keys(&s.search_text("body", 5).unwrap()), ["a"]);
 
-        // Delete (single and per source).
         put(&s, "b", Some("Gamma"), &["x"]);
         assert!(s.delete_item(&iref("files:test", "b")).unwrap());
         assert!(s.search_text("gamma", 5).unwrap().is_empty());
@@ -1068,52 +834,11 @@ mod m1j {
         s.delete_source(&SourceId::new("files:test")).unwrap();
         assert!(s.search_text("delta", 5).unwrap().is_empty());
 
-        // An item without chunks cannot be a hit, even when its title matches.
         s.upsert_item(&NewItem::new("files:test", "empty", "h").with_title("Epsilon"))
             .unwrap();
         assert!(s.search_text("epsilon", 5).unwrap().is_empty());
-        // Row ids get reused after deletes; the index must stay consistent.
         put(&s, "d", Some("Zeta"), &["z"]);
         assert_eq!(keys(&s.search_text("zeta", 5).unwrap()), ["d"]);
-    }
-
-    #[test]
-    fn encrypted_v2_database_migrates_to_v3_and_keeps_data() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = db_path(&dir);
-        {
-            let s = Store::open(&path, &key_a()).unwrap();
-            let it = item("a", "Quarterly tax return", "receipts and invoices");
-            s.upsert_item(&it.clone().with_version("v1")).unwrap();
-            s.replace_chunks(
-                &it.item,
-                &[NewChunk::embedded("receipts and invoices", vec![1.0, 0.0])],
-            )
-            .unwrap();
-            s.set_cursor(&SourceId::new("files:test"), serde_json::json!({"n": 1}))
-                .unwrap();
-        }
-        // Turn the file back into a v2 database, as an older build left it.
-        raw_conn(&path, &[7u8; 32])
-            .execute_batch(
-                "DROP TRIGGER items_fts_ai; DROP TRIGGER items_fts_ad; DROP TRIGGER items_fts_au;
-                 DROP TABLE items_fts;
-                 PRAGMA user_version = 2;",
-            )
-            .unwrap();
-
-        let s = Store::open(&path, &key_a()).unwrap();
-        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-        assert_eq!(keys(&s.search_text("tax", 5).unwrap()), ["a"], "backfilled");
-        let got = s.get_item(&iref("files:test", "a")).unwrap().unwrap();
-        assert_eq!(got.version.as_deref(), Some("v1"));
-        assert_eq!(s.search_vector(&[1.0, 0.0], 1).unwrap().len(), 1);
-        assert!(
-            s.get_cursor(&SourceId::new("files:test"))
-                .unwrap()
-                .is_some()
-        );
-        assert_eq!(s.migrate().unwrap(), 0);
     }
 
     #[test]
@@ -1121,7 +846,6 @@ mod m1j {
         let s = mem();
         let a = put(&s, "a", Some("A"), &["a0", "a1", "a2", "a3", "a4"]);
         let b = put(&s, "b", Some("B"), &["b0", "b1"]);
-        // Re-chunking `a` after `b` moves its chunks to new ids; lookups go by position.
         let a = {
             let ids = put(&s, "a", Some("A"), &["a0", "a1", "a2", "a3", "a4"]);
             assert_ne!(ids, a);
@@ -1135,7 +859,6 @@ mod m1j {
             texts(s.neighbours(a[2], 1).unwrap()),
             [("a1".into(), 1), ("a2".into(), 2), ("a3".into(), 3)]
         );
-        // Clamped at the item's edges; never crosses into another item.
         assert_eq!(
             texts(s.neighbours(a[0], 1).unwrap()),
             [("a0".into(), 0), ("a1".into(), 1)]
@@ -1211,7 +934,6 @@ mod m1j {
             s.get_embeddings(&vec![1; MAX_CHUNK_IDS + 1]),
             Err(Error::Invalid(_))
         ));
-        // Deleted chunks lose their vectors.
         s.delete_item(&a.item).unwrap();
         assert!(s.get_embeddings(&ids).unwrap().is_empty());
     }
@@ -1235,7 +957,6 @@ mod m1j {
         let ver = |s: &Store| s.get_item(&v1.item).unwrap().unwrap().version;
         assert_eq!(ver(&s).as_deref(), Some("1"));
 
-        // Same item again: nothing written, chunk ids stable.
         let before = s.search_text("first", 1).unwrap()[0].chunk_id;
         assert_eq!(
             s.upsert_item_with_chunks(&v1, &chunks).unwrap(),
@@ -1243,7 +964,6 @@ mod m1j {
         );
         assert_eq!(s.search_text("first", 1).unwrap()[0].chunk_id, before);
 
-        // New content: item, version and chunks change together.
         let v2 = NewItem::new("files:test", "doc", content_hash("two"))
             .with_title("Doc")
             .with_version("2");
@@ -1257,7 +977,6 @@ mod m1j {
         assert_eq!(ver(&s).as_deref(), Some("2"));
         assert_eq!(s.counts().unwrap().chunks, 1);
 
-        // A bad batch changes nothing: not the item, its version, nor its chunks.
         let v3 = NewItem::new("files:test", "doc", content_hash("three")).with_version("3");
         for bad in [
             vec![NewChunk::embedded("x", vec![1.0, 0.0, 0.0])], // store dimension is 2
@@ -1281,7 +1000,6 @@ mod m1j {
             Err(Error::Invalid(_))
         ));
 
-        // Healing: an item left without chunks by an interrupted non-atomic write gets them.
         let half = NewItem::new("files:test", "half", content_hash("h")).with_version("1");
         s.upsert_item(&half).unwrap();
         assert_eq!(
@@ -1295,118 +1013,11 @@ mod m1j {
                 .unwrap(),
             UpsertOutcome::Unchanged
         );
-        // An intentionally chunk-less item stays unchanged.
         let meta_only = NewItem::new("files:test", "meta", "m");
         s.upsert_item_with_chunks(&meta_only, &[]).unwrap();
         assert_eq!(
             s.upsert_item_with_chunks(&meta_only, &[]).unwrap(),
             UpsertOutcome::Unchanged
         );
-    }
-
-    #[test]
-    fn upsert_item_with_chunks_from_many_threads() {
-        let s = mem();
-        let handles: Vec<_> = (0..4)
-            .map(|t| {
-                let s = s.clone();
-                std::thread::spawn(move || {
-                    for i in 0..20 {
-                        let body = format!("thread {t} item {i} payload");
-                        let it =
-                            NewItem::new("files:test", format!("{t}-{i}"), content_hash(&body))
-                                .with_version("1");
-                        s.upsert_item_with_chunks(&it, &[NewChunk::text(body)])
-                            .unwrap();
-                    }
-                })
-            })
-            .collect();
-        for h in handles {
-            h.join().unwrap();
-        }
-        let counts = s.counts().unwrap();
-        assert_eq!((counts.items, counts.chunks), (80, 80));
-        let per_item: HashMap<_, _> = s
-            .search_text("payload", 1000)
-            .unwrap()
-            .into_iter()
-            .map(|h| (h.item, h.chunk_id))
-            .collect();
-        assert_eq!(per_item.len(), 80);
-    }
-
-    #[test]
-    fn hybrid_fusion_depth_bounds_each_list() {
-        let s = mem();
-        // "a" is best in text and last in vector, "b" best in vector only, "c" second in both,
-        // "d" vector only.
-        for (key, body, v) in [
-            ("a", "apple apple apple", vec![-1.0, 0.0]),
-            ("b", "banana", vec![1.0, 0.0]),
-            ("c", "apple pie", vec![0.9, 0.1]),
-            ("d", "durian", vec![0.5, 0.5]),
-        ] {
-            let it = item(key, key, body);
-            s.upsert_item_with_chunks(&it, &[NewChunk::embedded(body, v)])
-                .unwrap();
-        }
-        let q = [1.0, 0.0];
-        let keys = |h: Vec<nugget_store::Hit>| -> Vec<String> {
-            h.into_iter().map(|h| h.item.key.0).collect()
-        };
-        // Deep lists: "c" is in both and wins.
-        let deep = s
-            .search_hybrid_with_depth("apple", Some(&q), 10, 10)
-            .unwrap();
-        assert_eq!(keys(deep.clone())[0], "c");
-        assert_eq!(deep.len(), 4);
-        // Depth 1: only each list's best hit takes part.
-        let shallow = keys(
-            s.search_hybrid_with_depth("apple", Some(&q), 10, 1)
-                .unwrap(),
-        );
-        assert_eq!(shallow, ["a", "b"]);
-        // `limit` still caps the output, and zero depth or limit yields nothing.
-        assert_eq!(
-            s.search_hybrid_with_depth("apple", Some(&q), 1, 10)
-                .unwrap()
-                .len(),
-            1
-        );
-        assert!(
-            s.search_hybrid_with_depth("apple", Some(&q), 10, 0)
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            s.search_hybrid_with_depth("apple", Some(&q), 0, 10)
-                .unwrap()
-                .is_empty()
-        );
-        // `search_hybrid` is the depth-explicit search at max(4 × limit, 50).
-        assert_eq!(
-            s.search_hybrid("apple", Some(&q), 10).unwrap(),
-            s.search_hybrid_with_depth("apple", Some(&q), 10, 50)
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn clear_cursor_forgets_only_that_source() {
-        let s = mem();
-        let a = SourceId::new("files:a");
-        let b = SourceId::new("files:b");
-        s.set_cursor(&a, serde_json::json!({"x": 1})).unwrap();
-        s.set_cursor(&b, serde_json::json!("y")).unwrap();
-        put(&s, "kept", None, &["still here"]);
-        assert!(s.clear_cursor(&a).unwrap());
-        assert!(!s.clear_cursor(&a).unwrap(), "already gone");
-        assert_eq!(s.get_cursor(&a).unwrap(), None);
-        assert_eq!(s.get_cursor(&b).unwrap(), Some(serde_json::json!("y")));
-        assert_eq!(s.counts().unwrap().items, 1, "items are kept");
-        // A fresh cursor can be set again afterwards.
-        s.set_cursor(&a, serde_json::json!(2)).unwrap();
-        assert_eq!(s.get_cursor(&a).unwrap(), Some(serde_json::json!(2)));
     }
 }

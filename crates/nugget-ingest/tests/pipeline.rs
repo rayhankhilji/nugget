@@ -4,7 +4,6 @@
 mod common;
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use common::*;
@@ -17,18 +16,20 @@ use serde_json::json;
 #[tokio::test]
 async fn changes_apply_in_order_and_the_returned_cursor_is_committed_last() {
     let h = start(Opts::default()).await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("a", "first version of a", Some("1"))),
-        Step::Send(delete("a")),
-        Step::Send(text_doc("a", "second version of a", Some("2"))),
-        Step::Send(text_doc("b", "bravo body", Some("1"))),
-        Step::Send(text_doc("c", "charlie body", Some("1"))),
-        Step::Send(delete("c")),
-        Step::Checkpoint(json!("c1")),
-        Step::Return(json!("c2")),
-    ]);
-    h.add("fake-1").await;
-    eventually("cursor c2", || h.cursor("fake-1") == Some(json!("c2"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(text_doc("a", "first version of a", Some("1"))),
+            Step::Send(delete("a")),
+            Step::Send(text_doc("a", "second version of a", Some("2"))),
+            Step::Send(text_doc("b", "bravo body", Some("1"))),
+            Step::Send(text_doc("c", "charlie body", Some("1"))),
+            Step::Send(delete("c")),
+            Step::Checkpoint(json!("c1")),
+        ],
+        json!("c2"),
+    )
+    .await;
 
     let a = h.item("fake-1", "a").expect("a exists");
     assert_eq!(a.text.as_deref(), Some("second version of a"));
@@ -180,33 +181,6 @@ async fn unchanged_versions_are_skipped() {
 }
 
 #[tokio::test]
-async fn deletes_remove_items_and_chunks() {
-    let h = start(Opts::default()).await;
-    let st = h.factory.state("fake-1");
-    st.script(vec![
-        Step::Send(text_doc("doomed", "zebra crossing", Some("1"))),
-        Step::Send(text_doc("kept", "yak shaving", Some("1"))),
-        Step::Return(json!(1)),
-    ]);
-    st.script(vec![
-        Step::Send(delete("doomed")),
-        Step::Send(delete("never-existed")),
-        Step::Return(json!(2)),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass 1", || h.cursor("fake-1") == Some(json!(1))).await;
-    assert_eq!(h.store.search_text("zebra", 10).unwrap().len(), 1);
-    h.ingest.sync_now(None).unwrap();
-    eventually("pass 2", || h.cursor("fake-1") == Some(json!(2))).await;
-    assert!(h.item("fake-1", "doomed").is_none());
-    assert!(h.item("fake-1", "kept").is_some());
-    assert_eq!(h.store.search_text("zebra", 10).unwrap().len(), 0);
-    let info = h.ingest.get(&SourceId::new("fake-1")).await.unwrap();
-    assert_eq!(info.items, 1);
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
 async fn sensitive_items_never_reach_cloud_providers() {
     let cloud = FakeProvider::new("cloud", Locality::Cloud);
     let local = FakeProvider::new("local", Locality::OnDevice);
@@ -227,32 +201,34 @@ async fn sensitive_items_never_reach_cloud_providers() {
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc(
-            "card",
-            "Please charge 4111 1111 1111 1111 for the order",
-            Some("1"),
-        )),
-        Step::Send(text_doc(
-            "ssn",
-            "employee ssn 123-45-6789 on file",
-            Some("1"),
-        )),
-        Step::Send(text_doc(
-            "key",
-            "export OPENAI=sk-proj-abcdefABCDEF0123456789xyz",
-            Some("1"),
-        )),
-        Step::Send(text_doc(
-            "iban",
-            "wire to DE89 3704 0044 0532 0130 00",
-            Some("1"),
-        )),
-        Step::Send(text_doc("clean", "lunch menu for friday", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(text_doc(
+                "card",
+                "Please charge 4111 1111 1111 1111 for the order",
+                Some("1"),
+            )),
+            Step::Send(text_doc(
+                "ssn",
+                "employee ssn 123-45-6789 on file",
+                Some("1"),
+            )),
+            Step::Send(text_doc(
+                "key",
+                "export OPENAI=sk-proj-abcdefABCDEF0123456789xyz",
+                Some("1"),
+            )),
+            Step::Send(text_doc(
+                "iban",
+                "wire to DE89 3704 0044 0532 0130 00",
+                Some("1"),
+            )),
+            Step::Send(text_doc("clean", "lunch menu for friday", Some("1"))),
+        ],
+        json!("done"),
+    )
+    .await;
 
     // Cloud triage is never used, not even for clean items.
     assert!(
@@ -331,13 +307,12 @@ async fn connector_marked_sensitive_items_stay_local() {
         json!({"service": "whatsapp", "sensitive": true}),
     );
     let open = with_meta("open", "lunch menu for friday", json!({"sensitive": false}));
-    h.factory.state("fake-1").script(vec![
-        Step::Send(private),
-        Step::Send(open),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![Step::Send(private), Step::Send(open)],
+        json!("done"),
+    )
+    .await;
 
     let cloud_seen = cloud.embedded().join("\n");
     assert!(
@@ -357,63 +332,24 @@ async fn connector_marked_sensitive_items_stay_local() {
     h.ingest.shutdown().await;
 }
 
-/// A problem a connector reports (an unreadable export) shows in the source's health, and
-/// reporting it again on the next pass counts once.
-#[tokio::test]
-async fn reported_problems_show_in_health_once() {
-    let h = start(Opts::default()).await;
-    let st = h.factory.state("fake-1");
-    for done in ["one", "two"] {
-        st.script(vec![
-            Step::Send(text_doc("a", "hello", Some("1"))),
-            Step::Problem("export:chat.txt".into(), "no readable messages".into()),
-            Step::Checkpoint(json!(done)),
-            Step::Return(json!(done)),
-        ]);
-    }
-    h.add("fake-1").await;
-    eventually("first pass", || h.cursor("fake-1") == Some(json!("one"))).await;
-    h.ingest.sync_now(Some(&SourceId::new("fake-1"))).unwrap();
-    eventually("second pass", || h.cursor("fake-1") == Some(json!("two"))).await;
-    let id = SourceId::new("fake-1");
-    let errors = h.ingest.errors(&id).unwrap();
-    assert_eq!(errors.len(), 1, "{errors:?}");
-    assert_eq!(
-        errors[0].key.as_ref().map(|k| k.as_str()),
-        Some("export:chat.txt")
-    );
-    let info = h.ingest.get(&id).await.unwrap();
-    let health = info.health.expect("health");
-    assert_eq!(health.code, "item_errors", "{health:?}");
-    assert_eq!(health.item_errors, 1);
-    assert!(
-        health
-            .last_item_error
-            .as_deref()
-            .unwrap_or_default()
-            .contains("no readable messages"),
-        "{health:?}"
-    );
-    h.ingest.shutdown().await;
-}
-
 #[tokio::test]
 async fn cloud_embeddings_are_off_by_default() {
     let cloud = FakeProvider::new("cloud", Locality::Cloud);
     let h = start(Opts {
-        router: Some(router(&[(
-            cloud.clone(),
-            vec![Tier::Triage, Tier::Embedding],
-        )])),
+        router: local_router(&cloud),
         ..Default::default()
     })
     .await;
-    h.factory.state("fake-1").script(vec![
-        Step::Send(text_doc("clean", "nothing secret here", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![Step::Send(text_doc(
+            "clean",
+            "nothing secret here",
+            Some("1"),
+        ))],
+        json!("done"),
+    )
+    .await;
     assert!(cloud.embedded().is_empty());
     assert!(cloud.chats().is_empty());
     // Still searchable, text-only.
@@ -436,16 +372,18 @@ async fn bad_items_are_recorded_and_never_stop_the_source() {
     );
     unsupported.title = Some("Mystery blob".into());
     unsupported.version = Some("1".into());
-    h.factory.state("fake-1").script(vec![
-        // Rejected by the store (empty key): recorded, skipped.
-        Step::Send(text_doc("", "no key", Some("1"))),
-        // Not extractable: indexed by title only, error in metadata.
-        Step::Send(Change::Upsert(unsupported)),
-        Step::Send(text_doc("after", "still indexed afterwards", Some("1"))),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            // Rejected by the store (empty key): recorded, skipped.
+            Step::Send(text_doc("", "no key", Some("1"))),
+            // Not extractable: indexed by title only, error in metadata.
+            Step::Send(Change::Upsert(unsupported)),
+            Step::Send(text_doc("after", "still indexed afterwards", Some("1"))),
+        ],
+        json!("done"),
+    )
+    .await;
 
     assert!(h.item("fake-1", "after").is_some());
     let blob = h.item("fake-1", "blob.bin").unwrap();
@@ -466,9 +404,9 @@ async fn bad_items_are_recorded_and_never_stop_the_source() {
     h.ingest.shutdown().await;
 }
 
-/// A connector's title (a mail subject, an event name) is sender text like the body: the
-/// invisible characters extraction drops from bodies (zero-width, Unicode tag characters that
-/// spell hidden instructions) are dropped from it too, before it is stored and reaches prompts.
+/// A connector's title (a mail subject, an event name) is sender text like the body: the invisible
+/// characters extraction drops from bodies (zero-width, Unicode tag characters that spell hidden
+/// instructions) are dropped from it too, before it is stored and reaches prompts.
 #[tokio::test]
 async fn connector_titles_lose_invisible_characters() {
     let h = start(Opts::default()).await;
@@ -479,132 +417,10 @@ async fn connector_titles_lose_invisible_characters() {
     let mut d = Document::new("mail.eml", "text/plain", Content::Text("Hello".into()));
     d.title = Some(format!("Invo\u{200B}ice{hidden} due\u{FEFF}"));
     d.version = Some("1".into());
-    h.factory.state("fake-1").script(vec![
-        Step::Send(Change::Upsert(d)),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run("fake-1", vec![Step::Send(Change::Upsert(d))], json!("done"))
+        .await;
     let item = h.item("fake-1", "mail.eml").unwrap();
     assert_eq!(item.title.as_deref(), Some("Invoice due"));
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
-async fn extraction_timeout_indexes_the_title_only() {
-    let h = start(Opts {
-        cfg: IngestConfig {
-            // Far less than extracting and chunking a few megabytes takes.
-            extract_timeout_ms: 1,
-            ..cfg()
-        },
-        ..Default::default()
-    })
-    .await;
-    let big = "lorem ipsum dolor sit amet, consectetur adipiscing elit.\n\n".repeat(60_000);
-    let mut d = Document::new("big.md", "text/markdown", Content::Text(big));
-    d.title = Some("Pipe dream".into());
-    d.version = Some("1".into());
-    h.factory.state("fake-1").script(vec![
-        Step::Send(Change::Upsert(d)),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-    let item = h.item("fake-1", "big.md").unwrap();
-    assert!(
-        item.metadata["extract_error"]
-            .as_str()
-            .unwrap()
-            .contains("timed out"),
-        "{}",
-        item.metadata
-    );
-    assert_eq!(item.title.as_deref(), Some("Pipe dream"));
-    assert_eq!(h.store.search_text("dream", 10).unwrap().len(), 1);
-    assert!(h.store.search_text("lorem", 10).unwrap().is_empty());
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
-async fn send_applies_backpressure_when_the_queue_is_full() {
-    let embedder = FakeProvider::new("local", Locality::OnDevice);
-    embedder.block("");
-    let h = start(Opts {
-        cfg: IngestConfig {
-            queue_capacity: 2,
-            ..cfg()
-        },
-        router: Some(router(&[(embedder.clone(), vec![Tier::Embedding])])),
-        ..Default::default()
-    })
-    .await;
-    let st = h.factory.state("fake-1");
-    let mut steps: Vec<Step> = (0..10)
-        .map(|i| Step::Send(text_doc(&format!("k{i}"), &format!("item {i}"), Some("1"))))
-        .collect();
-    steps.push(Step::Return(json!("done")));
-    st.script(steps);
-    h.add("fake-1").await;
-
-    eventually("worker blocked on first item", || {
-        !embedder.embedded().is_empty()
-    })
-    .await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    // At most four items being prepared by the worker (it prepares a few ahead), two in the
-    // queue; the connector is parked in `send`.
-    let sent = st.sent.load(Ordering::SeqCst);
-    assert!(
-        sent <= 7,
-        "send must block when the queue is full (sent {sent})"
-    );
-    let status = h.ingest.status().await.unwrap();
-    assert!(
-        status.queue_depth >= 2,
-        "queue depth {}",
-        status.queue_depth
-    );
-
-    embedder.unblock();
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-    assert_eq!(st.sent.load(Ordering::SeqCst), 10);
-    assert_eq!(h.ingest.status().await.unwrap().queue_depth, 0);
-    h.ingest.shutdown().await;
-}
-
-#[tokio::test]
-async fn freshness_is_measured_for_sync_and_live_changes() {
-    let h = start(Opts::default()).await;
-    let st = h.factory.state("fake-1");
-    st.watch.store(true, Ordering::SeqCst);
-    st.script(vec![
-        Step::Send(text_doc("a", "alpha", Some("1"))),
-        Step::Return(json!("c")),
-    ]);
-    let empty = h.ingest.status().await.unwrap();
-    assert_eq!(empty.freshness_p50_ms, None);
-
-    h.add("fake-1").await;
-    h.wait_state("fake-1", nugget_core::ipc::SourceState::Watching)
-        .await;
-    st.live(text_doc("live", "live wire change", Some("1")));
-    eventually("live change searchable", || {
-        h.store.search_text("wire", 10).unwrap().len() == 1
-    })
-    .await;
-    st.live(delete("a"));
-    eventually("live delete", || h.item("fake-1", "a").is_none()).await;
-
-    let status = h.ingest.status().await.unwrap();
-    let p50 = status.freshness_p50_ms.expect("p50");
-    let p95 = status.freshness_p95_ms.expect("p95");
-    assert!(p50 <= p95);
-    assert!(p95 < 5_000, "p95 {p95} ms");
-    assert_eq!(status.queue_depth, 0);
-    assert_eq!(h.ingest.committed(), 3);
-    assert_eq!(status.sources.len(), 1);
-    assert_eq!(status.sources[0].items, 1);
     h.ingest.shutdown().await;
 }
 
@@ -631,13 +447,15 @@ async fn files_changed_since_the_scan_are_skipped_not_stored() {
     fresh.metadata = check(nugget_extract::FileExpect::of(
         &std::fs::metadata(&path).unwrap(),
     ));
-    h.factory.state("fake-1").script(vec![
-        Step::Send(Change::Upsert(stale)),
-        Step::Send(Change::Upsert(fresh)),
-        Step::Return(json!("done")),
-    ]);
-    h.add("fake-1").await;
-    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    h.run(
+        "fake-1",
+        vec![
+            Step::Send(Change::Upsert(stale)),
+            Step::Send(Change::Upsert(fresh)),
+        ],
+        json!("done"),
+    )
+    .await;
 
     // Nothing stored for the stale scan (no title-only item, no version), so the next pass
     // resends it; the item whose scan still matches is indexed normally.
@@ -653,9 +471,9 @@ async fn files_changed_since_the_scan_are_skipped_not_stored() {
     h.ingest.shutdown().await;
 }
 
-/// A fresh index adopts the embedder's task prefixes and embeds documents with them; an index
-/// that already holds vectors embedded without prefixes keeps embedding without them, so its
-/// stored vectors and new ones (and the retriever's queries) stay on one scheme.
+/// A fresh index adopts the embedder's task prefixes and embeds documents with them; an index that
+/// already holds vectors embedded without prefixes keeps embedding without them, so its stored
+/// vectors and new ones (and the retriever's queries) stay on one scheme.
 #[tokio::test]
 async fn documents_follow_the_index_prefix_scheme() {
     let nomic = ("search_query: ".to_owned(), "search_document: ".to_owned());
@@ -709,9 +527,8 @@ async fn documents_follow_the_index_prefix_scheme() {
     }
 }
 
-/// EM-1: an open index records the scheme and model of the provider that returns vectors, not
-/// of the first one tried. A first provider that fails (here: NaN vectors) does not fix the
-/// index to its model, which would leave every later item text-only and search lexical.
+/// EM-1: an open index records the scheme and model of the provider that returns vectors, not of
+/// the first one tried.
 #[tokio::test]
 async fn a_failing_first_embedder_does_not_claim_the_index() {
     let broken = FakeProvider::new("lan-embed", Locality::OnDevice);

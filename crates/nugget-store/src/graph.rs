@@ -1,11 +1,5 @@
-//! The knowledge graph on SQLite: [`SqliteGraph`] implements [`nugget_graph::GraphStore`] over
-//! the schema v4 tables (see `schema.rs`).
-//!
-//! Behaviour follows the `GraphStore` contract and the reference [`nugget_graph::MemGraph`];
-//! deliberate differences are listed on [`SqliteGraph`].
-//!
-//! Every mutation runs in one `IMMEDIATE` transaction on the store's connection, together with
-//! its change-feed entries, so readers never see a half-applied merge or retraction.
+//! The knowledge graph on SQLite: [`SqliteGraph`] implements [`nugget_graph::GraphStore`] over the
+//! schema v4 tables (see `schema.rs`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -25,15 +19,13 @@ use serde_json::Value;
 use time::OffsetDateTime;
 
 use crate::Store;
-use crate::error::{DbExt, format_time, parse_time};
+use crate::error::{ConnExt, DbExt, format_time, parse_time};
 use crate::items::item_ref;
 
-/// Longest `merged_into` chain followed when resolving an id. Merges flatten chains, so real
-/// chains have length one; the bound only guards against a corrupted (cyclic) table.
+/// Longest `merged_into` chain followed when resolving an id.
 pub const MAX_MERGE_DEPTH: usize = 64;
 
 /// Upper bound on the nodes [`GraphStore::neighbourhood`] returns, whatever `limit` asks for.
-/// A traversal cut by this bound reports `truncated`.
 pub const MAX_NEIGHBOURHOOD_NODES: usize = 10_000;
 
 /// Prefix of every entity id.
@@ -49,24 +41,7 @@ const LIVE: &str = "status IN ('active', 'user_asserted', 'rejected')";
 /// by another process, such as the CLI, show up within this).
 const GRAPH_COUNTS_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// The knowledge graph stored in a [`Store`]. Cheap to clone; clones share the store's
-/// connection. Obtain one with [`Store::graph`].
-///
-/// Differences from [`nugget_graph::MemGraph`] (none observable through the conformance suite):
-/// - Entity ids are random (`ent_` + 16 base32 characters, 80 bits) instead of sequential.
-/// - [`GraphStore::add_mention`] keeps one mention per (entity, item, chunk, surface) and keeps
-///   the highest confidence, where `MemGraph` keeps one per exactly equal mention.
-/// - [`GraphStore::neighbourhood`] returns at most [`MAX_NEIGHBOURHOOD_NODES`] nodes (also for
-///   `limit` 0, "unlimited").
-/// - Claim ids are never reused, even for claims folded away (AUTOINCREMENT).
-/// - A claim the user replaced ([`GraphStore::supersede_by_user`]) remembers the content hash
-///   of each item it had evidence from; once an item's content changed, only the quotes it had
-///   then are remembered. `MemGraph` keeps no items, so its items never change.
-///
-/// [`GraphStore::apply_batch`], [`GraphStore::split`] and [`GraphStore::merge`] each run in one
-/// transaction: a failing op rolls the whole call back. A batch of one item's writes is also
-/// much cheaper than the same writes one call at a time (one commit, one change-feed step per
-/// touched entity).
+/// The knowledge graph stored in a [`Store`].
 #[derive(Clone, Debug)]
 pub struct SqliteGraph {
     store: Store,
@@ -193,8 +168,7 @@ fn status_from_str(s: &str) -> Result<ClaimStatus> {
         .ok_or_else(|| Error::Storage(format!("unknown claim status {s:?} in store")))
 }
 
-/// A fresh entity id: `ent_` + 16 lowercase base32 characters (80 random bits). URL-safe and
-/// valid as a file-name stem.
+/// A fresh entity id: `ent_` + 16 lowercase base32 characters (80 random bits).
 fn new_entity_id() -> Result<String> {
     const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
     let mut bytes = [0u8; 10];
@@ -257,8 +231,7 @@ fn validate_claim(new: &NewClaim) -> Result<()> {
 
 // ------------------------------------------------------------------ entity rows
 
-/// Follow `merged_into` from `id`. `None` if the id never existed, ends at a pruned entity (or
-/// the chain is broken).
+/// Follow `merged_into` from `id`.
 fn resolve(conn: &Connection, id: &str) -> Result<Option<String>> {
     let mut stmt = conn
         .prepare_cached("SELECT merged_into, deleted_at IS NOT NULL FROM entities WHERE id = ?1")
@@ -296,19 +269,18 @@ fn entity_name(conn: &Connection, id: &str) -> Result<String> {
 
 /// Insert an alias row unless an identical one exists.
 fn insert_name_row(tx: &Connection, entity: &str, text: &str, is_name: bool) -> Result<()> {
-    tx.prepare_cached(
+    tx.exec(
         "INSERT OR IGNORE INTO entity_aliases (entity_id, alias, alias_norm, alias_lower, is_name)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-    )
-    .db("prepare alias insert")?
-    .execute(params![
-        entity,
-        text,
-        normalize_name(text),
-        text.to_lowercase(),
-        is_name
-    ])
-    .db("insert alias")?;
+        params![
+            entity,
+            text,
+            normalize_name(text),
+            text.to_lowercase(),
+            is_name
+        ],
+        "insert alias",
+    )?;
     Ok(())
 }
 
@@ -331,12 +303,11 @@ fn identifier_owner(conn: &Connection, n: &Identifier) -> Result<Option<String>>
 }
 
 fn insert_identifier(tx: &Connection, entity: &str, n: &Identifier) -> Result<()> {
-    tx.prepare_cached(
+    tx.exec(
         "INSERT OR IGNORE INTO entity_identifiers (entity_id, scheme, value) VALUES (?1, ?2, ?3)",
-    )
-    .db("prepare identifier insert")?
-    .execute(params![entity, n.scheme, n.value])
-    .db("insert identifier")?;
+        params![entity, n.scheme, n.value],
+        "insert identifier",
+    )?;
     Ok(())
 }
 
@@ -362,12 +333,7 @@ fn load_entity(conn: &Connection, id: &str) -> Result<Option<Entity>> {
         return Ok(None);
     };
     let strings = |sql: &str| -> Result<Vec<String>> {
-        let mut stmt = conn.prepare_cached(sql).db("prepare entity detail")?;
-        let rows = stmt
-            .query_map([id], |r| r.get(0))
-            .db("query entity detail")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read entity detail")
+        conn.rows(sql, [id], |r| r.get(0), "read entity detail")
     };
     let aliases = strings(
         "SELECT alias FROM entity_aliases WHERE entity_id = ?1 AND is_name = 0 ORDER BY id",
@@ -378,21 +344,17 @@ fn load_entity(conn: &Connection, id: &str) -> Result<Option<Entity>> {
             .map(EntityId::new)
             .collect();
     let identifiers = {
-        let mut stmt = conn
-            .prepare_cached(
-                "SELECT scheme, value FROM entity_identifiers WHERE entity_id = ?1 ORDER BY id",
-            )
-            .db("prepare identifiers")?;
-        let rows = stmt
-            .query_map([id], |r| {
+        conn.rows(
+            "SELECT scheme, value FROM entity_identifiers WHERE entity_id = ?1 ORDER BY id",
+            [id],
+            |r| {
                 Ok(Identifier::new(
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                 ))
-            })
-            .db("query identifiers")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read identifiers")?
+            },
+            "read identifiers",
+        )?
     };
     Ok(Some(Entity {
         id: EntityId::new(id),
@@ -481,33 +443,29 @@ fn read_evidence(r: &Row<'_>, offset: usize) -> rusqlite::Result<Evidence> {
 }
 
 fn evidence_of(conn: &Connection, claim: ClaimId) -> Result<Vec<Evidence>> {
-    let mut stmt = conn
-        .prepare_cached(
-            "SELECT source, key, chunk_id, quote FROM claim_evidence
+    conn.rows(
+        "SELECT source, key, chunk_id, quote FROM claim_evidence
              WHERE claim_id = ?1 ORDER BY id",
-        )
-        .db("prepare evidence")?;
-    let rows = stmt
-        .query_map([claim], |r| read_evidence(r, 0))
-        .db("query evidence")?;
-    rows.collect::<rusqlite::Result<_>>().db("read evidence")
+        [claim],
+        |r| read_evidence(r, 0),
+        "read evidence",
+    )
 }
 
 fn insert_evidence(tx: &Connection, claim: ClaimId, ev: &Evidence, now: &str) -> Result<()> {
-    tx.prepare_cached(
+    tx.exec(
         "INSERT OR IGNORE INTO claim_evidence (claim_id, source, key, chunk_id, quote, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    )
-    .db("prepare evidence insert")?
-    .execute(params![
-        claim,
-        ev.item.source.as_str(),
-        ev.item.key.as_str(),
-        ev.chunk_id,
-        ev.quote.as_deref().map(clamp_quote),
-        now
-    ])
-    .db("insert evidence")?;
+        params![
+            claim,
+            ev.item.source.as_str(),
+            ev.item.key.as_str(),
+            ev.chunk_id,
+            ev.quote.as_deref().map(clamp_quote),
+            now
+        ],
+        "insert evidence",
+    )?;
     Ok(())
 }
 
@@ -542,10 +500,7 @@ impl ItemScope<'_> {
 }
 
 /// Drop every evidence row, mention and detail-provenance row from the items in `scope`, retract
-/// claims left without evidence (unless user-asserted or rejected) and record the touched
-/// entities. Returns the affected claim
-/// ids in ascending order. Runs inside the caller's transaction (also used by
-/// `Store::delete_item` and `Store::delete_source`).
+/// claims left without evidence (unless user-asserted or rejected) and record the touched entities.
 pub(crate) fn retract_tx(
     tx: &Connection,
     scope: ItemScope<'_>,
@@ -553,22 +508,21 @@ pub(crate) fn retract_tx(
 ) -> Result<Vec<ClaimId>> {
     let (filter, args) = scope.filter();
     let affected: Vec<ClaimId> = {
-        let mut stmt = tx
-            .prepare_cached(&format!(
+        tx.rows(
+            &format!(
                 "SELECT DISTINCT claim_id FROM claim_evidence WHERE {filter} ORDER BY claim_id"
-            ))
-            .db("prepare retract lookup")?;
-        let rows = stmt
-            .query_map(params_from_iter(&args), |r| r.get(0))
-            .db("query retract lookup")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read retract lookup")?
+            ),
+            params_from_iter(&args),
+            |r| r.get(0),
+            "read retract lookup",
+        )?
     };
     if !affected.is_empty() {
-        tx.prepare_cached(&format!("DELETE FROM claim_evidence WHERE {filter}"))
-            .db("prepare evidence delete")?
-            .execute(params_from_iter(&args))
-            .db("delete evidence")?;
+        tx.exec(
+            &format!("DELETE FROM claim_evidence WHERE {filter}"),
+            params_from_iter(&args),
+            "delete evidence",
+        )?;
         let mut update = tx
             .prepare_cached(
                 "UPDATE claims SET
@@ -593,31 +547,23 @@ pub(crate) fn retract_tx(
         }
     }
     let mentioned: Vec<String> = {
-        let mut stmt = tx
-            .prepare_cached(&format!(
-                "DELETE FROM mentions WHERE {filter} RETURNING entity_id"
-            ))
-            .db("prepare mention delete")?;
-        let rows = stmt
-            .query_map(params_from_iter(&args), |r| r.get(0))
-            .db("delete mentions")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read deleted mentions")?
+        tx.rows(
+            &format!("DELETE FROM mentions WHERE {filter} RETURNING entity_id"),
+            params_from_iter(&args),
+            |r| r.get(0),
+            "read deleted mentions",
+        )?
     };
     for e in &mentioned {
         touched.add(e);
     }
     let sourced: Vec<String> = {
-        let mut stmt = tx
-            .prepare_cached(&format!(
-                "DELETE FROM entity_detail_sources WHERE {filter} RETURNING entity_id"
-            ))
-            .db("prepare detail source delete")?;
-        let rows = stmt
-            .query_map(params_from_iter(&args), |r| r.get(0))
-            .db("delete detail sources")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read deleted detail sources")?
+        tx.rows(
+            &format!("DELETE FROM entity_detail_sources WHERE {filter} RETURNING entity_id"),
+            params_from_iter(&args),
+            |r| r.get(0),
+            "read deleted detail sources",
+        )?
     };
     for e in &sourced {
         touched.add(e);
@@ -627,8 +573,7 @@ pub(crate) fn retract_tx(
 
 // ------------------------------------------------------------------ writes (inside a transaction)
 
-/// Insert a new entity. Identifiers held by `allow_owner` move to the new entity (used by
-/// split); any other owner is an error.
+/// Insert a new entity.
 fn create_entity_tx(
     tx: &Connection,
     touched: &mut Touched,
@@ -670,20 +615,19 @@ fn create_entity_tx(
             break candidate;
         }
     };
-    tx.prepare_cached(
+    tx.exec(
         "INSERT INTO entities (id, kind, name, name_lower, attributes, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-    )
-    .db("prepare entity insert")?
-    .execute(params![
-        id,
-        new.kind.as_str(),
-        name,
-        name.to_lowercase(),
-        attributes,
-        touched.now()
-    ])
-    .db("insert entity")?;
+        params![
+            id,
+            new.kind.as_str(),
+            name,
+            name.to_lowercase(),
+            attributes,
+            touched.now()
+        ],
+        "insert entity",
+    )?;
     insert_name_row(tx, &id, name, true)?;
     let name_norm = normalize_name(name);
     for a in &new.aliases {
@@ -691,12 +635,11 @@ fn create_entity_tx(
     }
     for n in &identifiers {
         if moving.contains(n) {
-            tx.prepare_cached(
+            tx.exec(
                 "UPDATE entity_identifiers SET entity_id = ?1 WHERE scheme = ?2 AND value = ?3",
-            )
-            .db("prepare identifier move")?
-            .execute(params![id, n.scheme, n.value])
-            .db("move identifier")?;
+                params![id, n.scheme, n.value],
+                "move identifier",
+            )?;
         } else {
             insert_identifier(tx, &id, n)?;
         }
@@ -805,22 +748,21 @@ fn add_detail_source_tx(
     if value.is_empty() {
         return Ok(());
     }
-    tx.prepare_cached(
+    tx.exec(
         "INSERT OR IGNORE INTO entity_detail_sources
              (entity_id, kind, scheme, value, source, key, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-    )
-    .db("prepare detail source insert")?
-    .execute(params![
-        id,
-        kind,
-        scheme,
-        value,
-        item.source.as_str(),
-        item.key.as_str(),
-        touched.now()
-    ])
-    .db("insert detail source")?;
+        params![
+            id,
+            kind,
+            scheme,
+            value,
+            item.source.as_str(),
+            item.key.as_str(),
+            touched.now()
+        ],
+        "insert detail source",
+    )?;
     touched.add(&id);
     Ok(())
 }
@@ -858,23 +800,22 @@ fn add_claim_tx(tx: &Connection, touched: &mut Touched, new: &NewClaim) -> Resul
     let id = match existing {
         Some((id, confidence)) => {
             let confidence = confidence.max(f64::from(new.confidence));
-            tx.prepare_cached(
+            tx.exec(
                 "UPDATE claims SET confidence = ?2, updated_at = ?3,
                      status = CASE WHEN ?4 THEN ?5 ELSE status END,
                      text = CASE WHEN ?6 THEN ?7 ELSE text END
                  WHERE id = ?1",
-            )
-            .db("prepare claim fold")?
-            .execute(params![
-                id,
-                confidence,
-                touched.now(),
-                new.status.is_user_decision(),
-                status_str(new.status),
-                new.status == ClaimStatus::UserAsserted,
-                new.text
-            ])
-            .db("update claim")?;
+                params![
+                    id,
+                    confidence,
+                    touched.now(),
+                    new.status.is_user_decision(),
+                    status_str(new.status),
+                    new.status == ClaimStatus::UserAsserted,
+                    new.text
+                ],
+                "update claim",
+            )?;
             if new.status == ClaimStatus::UserAsserted {
                 record_assertion(tx, id, touched.now())?;
             }
@@ -888,37 +829,35 @@ fn add_claim_tx(tx: &Connection, touched: &mut Touched, new: &NewClaim) -> Resul
         {
             // Extracted again from the evidence of a claim the user replaced: it stays
             // replaced (see `GraphStore::supersede_by_user`).
-            tx.prepare_cached(
+            tx.exec(
                 "UPDATE claims SET confidence = max(confidence, ?2), updated_at = ?3,
                      status = 'superseded'
                  WHERE id = ?1",
-            )
-            .db("prepare replaced claim update")?
-            .execute(params![id, f64::from(new.confidence), touched.now()])
-            .db("update replaced claim")?;
+                params![id, f64::from(new.confidence), touched.now()],
+                "update replaced claim",
+            )?;
             id
         }
         None => {
-            tx.prepare_cached(
+            tx.exec(
                 "INSERT INTO claims (subject, predicate, object_entity, object_literal,
                                      text, confidence, status, valid_from, valid_to,
                                      created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
-            )
-            .db("prepare claim insert")?
-            .execute(params![
-                subject,
-                new.predicate,
-                object_entity,
-                object_literal,
-                new.text,
-                f64::from(new.confidence),
-                status_str(new.status),
-                valid_from,
-                valid_to,
-                touched.now()
-            ])
-            .db("insert claim")?;
+                params![
+                    subject,
+                    new.predicate,
+                    object_entity,
+                    object_literal,
+                    new.text,
+                    f64::from(new.confidence),
+                    status_str(new.status),
+                    valid_from,
+                    valid_to,
+                    touched.now()
+                ],
+                "insert claim",
+            )?;
             let id = tx.last_insert_rowid();
             if new.status == ClaimStatus::UserAsserted {
                 record_assertion(tx, id, touched.now())?;
@@ -936,13 +875,12 @@ fn add_claim_tx(tx: &Connection, touched: &mut Touched, new: &NewClaim) -> Resul
 
 /// When `claim` was made user-asserted (see `GraphStore::asserted_at`).
 fn record_assertion(tx: &Connection, claim: ClaimId, at: &str) -> Result<()> {
-    tx.prepare_cached(
+    tx.exec(
         "INSERT INTO claim_assertions (claim_id, asserted_at) VALUES (?1, ?2)
          ON CONFLICT (claim_id) DO UPDATE SET asserted_at = excluded.asserted_at",
-    )
-    .db("prepare assertion record")?
-    .execute(params![claim, at])
-    .db("record assertion")?;
+        params![claim, at],
+        "record assertion",
+    )?;
     Ok(())
 }
 
@@ -965,8 +903,7 @@ fn remembered_sql(claim: &str, source: &str, key: &str, quote: &str) -> String {
     )
 }
 
-/// Whether `claim` was replaced by the user and remembers every piece of `evidence`
-/// (non-empty).
+/// Whether `claim` was replaced by the user and remembers every piece of `evidence` (non-empty).
 fn is_replaced_by_user(conn: &Connection, claim: ClaimId, evidence: &[Evidence]) -> Result<bool> {
     if evidence.is_empty() {
         return Ok(false);
@@ -1007,13 +944,14 @@ fn all_evidence_remembered(tx: &Connection, claim: ClaimId) -> Result<bool> {
 
 /// When `claim` (a user's replacement) is not current, what it replaced is free again.
 fn release_if_not_current(tx: &Connection, claim: ClaimId) -> Result<()> {
-    tx.prepare_cached(&format!(
-        "DELETE FROM claim_replacements WHERE replaced_by = ?1
+    tx.exec(
+        &format!(
+            "DELETE FROM claim_replacements WHERE replaced_by = ?1
            AND NOT EXISTS (SELECT 1 FROM claims WHERE id = ?1 AND {ACTIVE})"
-    ))
-    .db("prepare replacement release")?
-    .execute([claim])
-    .db("release replacements")?;
+        ),
+        [claim],
+        "release replacements",
+    )?;
     Ok(())
 }
 
@@ -1037,23 +975,16 @@ fn replaced_twin(
         return Ok(None);
     }
     let candidates: Vec<ClaimId> = {
-        let mut stmt = tx
-            .prepare_cached(
-                "SELECT id FROM claims
+        tx.rows(
+            "SELECT id FROM claims
                  WHERE subject = ?1 AND predicate = ?2 AND object_entity IS ?3
                    AND object_literal IS ?4 AND status IN ('superseded', 'retracted')
                    AND EXISTS (SELECT 1 FROM claim_replacements r WHERE r.claim_id = claims.id)
                  ORDER BY id",
-            )
-            .db("prepare replaced twin")?;
-        let rows = stmt
-            .query_map(
-                params![subject, new.predicate, object_entity, object_literal],
-                |r| r.get(0),
-            )
-            .db("query replaced twin")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read replaced twin")?
+            params![subject, new.predicate, object_entity, object_literal],
+            |r| r.get(0),
+            "read replaced twin",
+        )?
     };
     for id in candidates {
         if is_replaced_by_user(tx, id, &new.evidence)? {
@@ -1064,10 +995,11 @@ fn replaced_twin(
 }
 
 fn forget_user_replaced(tx: &Connection, claim: ClaimId) -> Result<()> {
-    tx.prepare_cached("DELETE FROM claim_replacements WHERE claim_id = ?1")
-        .db("prepare replaced forget")?
-        .execute([claim])
-        .db("forget replaced claim")?;
+    tx.exec(
+        "DELETE FROM claim_replacements WHERE claim_id = ?1",
+        [claim],
+        "forget replaced claim",
+    )?;
     Ok(())
 }
 
@@ -1092,30 +1024,32 @@ fn supersede_by_user_tx(
 ) -> Result<ClaimId> {
     let (subject, object, _) = claim_ends(tx, claim)?;
     forget_user_replaced(tx, claim)?;
-    tx.prepare_cached("UPDATE claims SET status = 'superseded', updated_at = ?2 WHERE id = ?1")
-        .db("prepare replaced status")?
-        .execute(params![claim, touched.now()])
-        .db("supersede claim")?;
+    tx.exec(
+        "UPDATE claims SET status = 'superseded', updated_at = ?2 WHERE id = ?1",
+        params![claim, touched.now()],
+        "supersede claim",
+    )?;
     touch_ends(touched, &subject, object.as_deref());
     let new = add_claim_tx(tx, touched, by)?;
     // Claims `claim` itself replaced are now replaced by the user's newer version.
-    tx.prepare_cached("UPDATE claim_replacements SET replaced_by = ?2 WHERE replaced_by = ?1")
-        .db("prepare replacement chain")?
-        .execute(params![claim, new])
-        .db("chain replacements")?;
-    tx.prepare_cached("INSERT INTO claim_replacements (claim_id, replaced_by) VALUES (?1, ?2)")
-        .db("prepare replacement record")?
-        .execute(params![claim, new])
-        .db("record replacement")?;
-    tx.prepare_cached(
+    tx.exec(
+        "UPDATE claim_replacements SET replaced_by = ?2 WHERE replaced_by = ?1",
+        params![claim, new],
+        "chain replacements",
+    )?;
+    tx.exec(
+        "INSERT INTO claim_replacements (claim_id, replaced_by) VALUES (?1, ?2)",
+        params![claim, new],
+        "record replacement",
+    )?;
+    tx.exec(
         "INSERT OR IGNORE INTO claim_replacement_evidence (claim_id, source, key, quote, item_hash)
          SELECT e.claim_id, e.source, e.key, coalesce(e.quote, ''),
                 (SELECT i.content_hash FROM items i WHERE i.source = e.source AND i.key = e.key)
          FROM claim_evidence e WHERE e.claim_id = ?1",
-    )
-    .db("prepare replaced evidence record")?
-    .execute([claim])
-    .db("record replaced evidence")?;
+        [claim],
+        "record replaced evidence",
+    )?;
     Ok(new)
 }
 
@@ -1144,10 +1078,11 @@ fn add_evidence_tx(
     } else {
         status.as_str()
     };
-    tx.prepare_cached("UPDATE claims SET updated_at = ?2, status = ?3 WHERE id = ?1")
-        .db("prepare evidence claim update")?
-        .execute(params![claim, now, next])
-        .db("update claim")?;
+    tx.exec(
+        "UPDATE claims SET updated_at = ?2, status = ?3 WHERE id = ?1",
+        params![claim, now, next],
+        "update claim",
+    )?;
     touch_ends(touched, &subject, object.as_deref());
     if revived {
         forget_user_replaced(tx, claim)?;
@@ -1176,10 +1111,11 @@ fn set_claim_status_tx(
         }
     }
     let now = touched.now().to_owned();
-    tx.prepare_cached("UPDATE claims SET status = ?2, updated_at = ?3 WHERE id = ?1")
-        .db("prepare claim status")?
-        .execute(params![claim, status_str(status), now])
-        .db("set claim status")?;
+    tx.exec(
+        "UPDATE claims SET status = ?2, updated_at = ?3 WHERE id = ?1",
+        params![claim, status_str(status), now],
+        "set claim status",
+    )?;
     touch_ends(touched, &subject, object.as_deref());
     if status == ClaimStatus::UserAsserted {
         record_assertion(tx, claim, &now)?;
@@ -1212,25 +1148,24 @@ fn update_claim_tx(
     };
     let (set_from, from) = time(patch.valid_from)?;
     let (set_to, to) = time(patch.valid_to)?;
-    tx.prepare_cached(
+    tx.exec(
         "UPDATE claims SET confidence = coalesce(?2, confidence), text = coalesce(?3, text),
              valid_from = CASE WHEN ?4 THEN ?5 ELSE valid_from END,
              valid_to = CASE WHEN ?6 THEN ?7 ELSE valid_to END,
              updated_at = ?8
          WHERE id = ?1",
-    )
-    .db("prepare claim update")?
-    .execute(params![
-        claim,
-        patch.confidence.map(f64::from),
-        patch.text.as_deref().map(str::trim),
-        set_from,
-        from,
-        set_to,
-        to,
-        touched.now()
-    ])
-    .db("update claim")?;
+        params![
+            claim,
+            patch.confidence.map(f64::from),
+            patch.text.as_deref().map(str::trim),
+            set_from,
+            from,
+            set_to,
+            to,
+            touched.now()
+        ],
+        "update claim",
+    )?;
     touch_ends(touched, &subject, object.as_deref());
     Ok(())
 }
@@ -1245,20 +1180,18 @@ fn fold_tx(
     now: &str,
 ) -> Result<ClaimId> {
     let group: Vec<(ClaimId, f64, String)> = {
-        let mut stmt = tx
-            .prepare_cached(&format!(
+        tx.rows(
+            &format!(
                 "SELECT o.id, o.confidence, o.status FROM claims c JOIN claims o
                    ON o.subject = c.subject AND o.predicate = c.predicate
                   AND o.object_entity IS c.object_entity AND o.object_literal IS c.object_literal
                  WHERE c.id = ?1 AND c.{LIVE} AND o.{LIVE}
                  ORDER BY o.status <> 'user_asserted', o.id"
-            ))
-            .db("prepare fold group")?;
-        let rows = stmt
-            .query_map([claim], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .db("query fold group")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read fold group")?
+            ),
+            [claim],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            "read fold group",
+        )?
     };
     if group.len() < 2 {
         return Ok(claim);
@@ -1270,69 +1203,66 @@ fn fold_tx(
         status = status.strongest(status_from_str(st)?);
         confidence = confidence.max(*conf);
         move_evidence(tx, keep, *gone)?;
-        tx.prepare_cached(
+        tx.exec(
             "INSERT INTO claim_assertions (claim_id, asserted_at)
              SELECT ?1, asserted_at FROM claim_assertions WHERE claim_id = ?2
              ON CONFLICT (claim_id) DO UPDATE
                  SET asserted_at = max(asserted_at, excluded.asserted_at)",
-        )
-        .db("prepare assertion move")?
-        .execute(params![keep, gone])
-        .db("move assertion time")?;
-        tx.prepare_cached("UPDATE claim_replacements SET replaced_by = ?1 WHERE replaced_by = ?2")
-            .db("prepare replacement move")?
-            .execute(params![keep, gone])
-            .db("move replacement links")?;
-        tx.prepare_cached("DELETE FROM claims WHERE id = ?1")
-            .db("prepare folded claim delete")?
-            .execute([gone])
-            .db("drop folded claim")?;
+            params![keep, gone],
+            "move assertion time",
+        )?;
+        tx.exec(
+            "UPDATE claim_replacements SET replaced_by = ?1 WHERE replaced_by = ?2",
+            params![keep, gone],
+            "move replacement links",
+        )?;
+        tx.exec(
+            "DELETE FROM claims WHERE id = ?1",
+            [gone],
+            "drop folded claim",
+        )?;
     }
     let status = explicit.unwrap_or(status);
-    tx.prepare_cached(
+    tx.exec(
         "UPDATE claims SET status = ?2, confidence = ?3, updated_at = ?4 WHERE id = ?1",
-    )
-    .db("prepare fold survivor")?
-    .execute(params![keep, status_str(status), confidence, now])
-    .db("update fold survivor")?;
+        params![keep, status_str(status), confidence, now],
+        "update fold survivor",
+    )?;
     forget_user_replaced(tx, keep)?;
     Ok(keep)
 }
 
-/// Copy `gone`'s evidence onto `keep` (duplicates ignored). The rows left behind go with `gone`
-/// when it is deleted (ON DELETE CASCADE).
+/// Copy `gone`'s evidence onto `keep` (duplicates ignored).
 fn move_evidence(tx: &Connection, keep: ClaimId, gone: ClaimId) -> Result<()> {
-    tx.prepare_cached(
+    tx.exec(
         "INSERT OR IGNORE INTO claim_evidence (claim_id, source, key, chunk_id, quote,
                                                created_at)
          SELECT ?1, source, key, chunk_id, quote, created_at
          FROM claim_evidence WHERE claim_id = ?2 ORDER BY id",
-    )
-    .db("prepare evidence move")?
-    .execute(params![keep, gone])
-    .db("move folded evidence")?;
+        params![keep, gone],
+        "move folded evidence",
+    )?;
     Ok(())
 }
 
 fn add_mention_tx(tx: &Connection, touched: &mut Touched, m: &Mention) -> Result<()> {
     let entity = live(tx, &m.entity)?;
-    tx.prepare_cached(
+    tx.exec(
         "INSERT INTO mentions (entity_id, source, key, chunk_id, surface, confidence,
                                created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT DO UPDATE SET confidence = max(confidence, excluded.confidence)",
-    )
-    .db("prepare mention insert")?
-    .execute(params![
-        entity,
-        m.item.source.as_str(),
-        m.item.key.as_str(),
-        m.chunk_id,
-        m.surface,
-        f64::from(m.confidence),
-        touched.now()
-    ])
-    .db("insert mention")?;
+        params![
+            entity,
+            m.item.source.as_str(),
+            m.item.key.as_str(),
+            m.chunk_id,
+            m.surface,
+            f64::from(m.confidence),
+            touched.now()
+        ],
+        "insert mention",
+    )?;
     touched.add(&entity);
     Ok(())
 }
@@ -1383,32 +1313,28 @@ fn split_tx(
     norms.sort();
     norms.dedup();
     for norm in &norms {
-        let n = tx
-            .prepare_cached(
-                "DELETE FROM entity_aliases WHERE entity_id = ?1 AND is_name = 0
+        let n = tx.exec(
+            "DELETE FROM entity_aliases WHERE entity_id = ?1 AND is_name = 0
                  AND alias_norm = ?2",
-            )
-            .db("prepare alias move")?
-            .execute(params![from, norm])
-            .db("move aliases")?;
+            params![from, norm],
+            "move aliases",
+        )?;
         if n > 0 {
-            tx.prepare_cached(
+            tx.exec(
                 "UPDATE OR IGNORE entity_detail_sources SET entity_id = ?2
                  WHERE entity_id = ?1 AND kind = 'alias' AND value = ?3",
-            )
-            .db("prepare alias provenance move")?
-            .execute(params![from, to, norm])
-            .db("move alias provenance")?;
+                params![from, to, norm],
+                "move alias provenance",
+            )?;
         }
     }
     for n in new.identifiers.iter().map(Identifier::normalized) {
-        tx.prepare_cached(
+        tx.exec(
             "UPDATE OR IGNORE entity_detail_sources SET entity_id = ?2
              WHERE entity_id = ?1 AND kind = 'identifier' AND scheme = ?3 AND value = ?4",
-        )
-        .db("prepare identifier provenance move")?
-        .execute(params![from, to, n.scheme, n.value])
-        .db("move identifier provenance")?;
+            params![from, to, n.scheme, n.value],
+            "move identifier provenance",
+        )?;
     }
 
     // Claims.
@@ -1429,28 +1355,23 @@ fn split_tx(
 
     // Mentions follow the items that now support only the new entity.
     let movable: Vec<(String, String)> = {
-        let mut stmt = tx
-            .prepare_cached(
-                "SELECT ev.source, ev.key FROM claim_evidence ev JOIN claims c ON c.id = ev.claim_id
+        tx.rows(
+            "SELECT ev.source, ev.key FROM claim_evidence ev JOIN claims c ON c.id = ev.claim_id
                  WHERE c.subject = ?1 OR c.object_entity = ?1
                  EXCEPT
                  SELECT ev.source, ev.key FROM claim_evidence ev JOIN claims c ON c.id = ev.claim_id
                  WHERE c.subject = ?2 OR c.object_entity = ?2",
-            )
-            .db("prepare movable mentions")?;
-        let rows = stmt
-            .query_map(params![to, from], |r| Ok((r.get(0)?, r.get(1)?)))
-            .db("query movable mentions")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read movable mentions")?
+            params![to, from],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+            "read movable mentions",
+        )?
     };
     for (source, key) in &movable {
-        tx.prepare_cached(
+        tx.exec(
             "UPDATE mentions SET entity_id = ?2 WHERE entity_id = ?1 AND source = ?3 AND key = ?4",
-        )
-        .db("prepare mention move")?
-        .execute(params![from, to, source, key])
-        .db("move mentions")?;
+            params![from, to, source, key],
+            "move mentions",
+        )?;
     }
     for &id in &ids {
         fold_tx(tx, id, None, &now)?;
@@ -1460,14 +1381,12 @@ fn split_tx(
     // under one of its aliases) now resolve to it.
     let own = normalize_name(&entity_name(tx, &from)?);
     let merged: Vec<(String, String)> = {
-        let mut stmt = tx
-            .prepare_cached("SELECT id, name FROM entities WHERE merged_into = ?1 ORDER BY id")
-            .db("prepare merged ids")?;
-        let rows = stmt
-            .query_map([&from], |r| Ok((r.get(0)?, r.get(1)?)))
-            .db("query merged ids")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read merged ids")?
+        tx.rows(
+            "SELECT id, name FROM entities WHERE merged_into = ?1 ORDER BY id",
+            [&from],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+            "read merged ids",
+        )?
     };
     let merged: Vec<(String, String)> = merged
         .into_iter()
@@ -1476,10 +1395,11 @@ fn split_tx(
         .collect();
     let aliases: HashSet<String> = norms.iter().cloned().collect();
     for id in nugget_graph::mem::split_repoint(&merged, &normalize_name(&new.name), &aliases) {
-        tx.prepare_cached("UPDATE entities SET merged_into = ?2 WHERE id = ?1")
-            .db("prepare merged id move")?
-            .execute(params![id, to])
-            .db("re-point merged id")?;
+        tx.exec(
+            "UPDATE entities SET merged_into = ?2 WHERE id = ?1",
+            params![id, to],
+            "re-point merged id",
+        )?;
         touched.add(&id);
     }
     touched.add(&from);
@@ -1502,15 +1422,12 @@ fn prune_tx(
     among: Option<&[EntityId]>,
 ) -> Result<Vec<EntityId>> {
     let orphans: Vec<String> = match among {
-        None => {
-            let mut stmt = tx
-                .prepare(&format!(
-                    "SELECT e.id FROM entities e WHERE {ORPHAN} ORDER BY e.id"
-                ))
-                .db("prepare orphan scan")?;
-            let rows = stmt.query_map([], |r| r.get(0)).db("scan orphans")?;
-            rows.collect::<rusqlite::Result<_>>().db("read orphans")?
-        }
+        None => tx.rows(
+            &format!("SELECT e.id FROM entities e WHERE {ORPHAN} ORDER BY e.id"),
+            [],
+            |r| r.get(0),
+            "read orphans",
+        )?,
         Some(ids) => {
             let mut live_ids: Vec<String> = Vec::new();
             for id in ids {
@@ -1558,15 +1475,13 @@ fn prune_tx(
             "DELETE FROM entity_identifiers WHERE entity_id = ?1",
             "DELETE FROM entity_detail_sources WHERE entity_id = ?1",
         ] {
-            tx.prepare_cached(sql)
-                .db("prepare orphan cleanup")?
-                .execute([id])
-                .db("clean up orphan")?;
+            tx.exec(sql, [id], "clean up orphan")?;
         }
-        tx.prepare_cached("UPDATE entities SET deleted_at = ?2 WHERE id = ?1")
-            .db("prepare orphan tombstone")?
-            .execute(params![id, touched.now()])
-            .db("tombstone orphan")?;
+        tx.exec(
+            "UPDATE entities SET deleted_at = ?2 WHERE id = ?1",
+            params![id, touched.now()],
+            "tombstone orphan",
+        )?;
         touched.add(id);
     }
     Ok(orphans.into_iter().map(EntityId::new).collect())
@@ -1670,22 +1585,16 @@ impl GraphStore for SqliteGraph {
             return Ok(Vec::new());
         }
         self.read(|c| {
-            let mut stmt = c
-                .prepare_cached(
-                    "SELECT DISTINCT a.entity_id
+            c.rows(
+                "SELECT DISTINCT a.entity_id
                      FROM entity_aliases a JOIN entities e ON e.id = a.entity_id
                      WHERE a.alias_norm = ?1 AND e.merged_into IS NULL AND e.deleted_at IS NULL
                        AND (?2 IS NULL OR e.kind = ?2)
                      ORDER BY a.entity_id",
-                )
-                .db("prepare find_by_name")?;
-            let rows = stmt
-                .query_map(params![want, kind.map(EntityKind::as_str)], |r| {
-                    r.get::<_, String>(0).map(EntityId::new)
-                })
-                .db("query find_by_name")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read find_by_name")
+                params![want, kind.map(EntityKind::as_str)],
+                |r| r.get::<_, String>(0).map(EntityId::new),
+                "read find_by_name",
+            )
         })
     }
 
@@ -1782,10 +1691,7 @@ impl GraphStore for SqliteGraph {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<EntitySummary>> {
-        // `entity_stats` (schema v15) holds the counts, kept exact by triggers. Walking its
-        // rank index from the top and joining each row to its entity (CROSS JOIN fixes that
-        // order) reads about `offset + limit` rows plus ties: the name and id tie-breaks are
-        // a partial sort of each (claims, mentions) group.
+        // `entity_stats` (schema v15) holds the counts, kept exact by triggers.
         let mut args: Vec<Box<dyn ToSql>> = Vec::new();
         let mut kind_cond = String::new();
         if !kinds.is_empty() {
@@ -1904,16 +1810,12 @@ impl GraphStore for SqliteGraph {
             };
             let filter = format!("(c.subject = ?1 OR c.object_entity = ?1) {status}");
             let rows: Vec<ClaimRow> = {
-                let mut stmt = c
-                    .prepare_cached(&format!(
-                        "SELECT {CLAIM_COLUMNS} FROM claims c WHERE {filter} ORDER BY c.id"
-                    ))
-                    .db("prepare claims_for")?;
-                let rows = stmt
-                    .query_map([&id], read_claim_row)
-                    .db("query claims_for")?;
-                rows.collect::<rusqlite::Result<_>>()
-                    .db("read claims_for")?
+                c.rows(
+                    &format!("SELECT {CLAIM_COLUMNS} FROM claims c WHERE {filter} ORDER BY c.id"),
+                    [&id],
+                    read_claim_row,
+                    "read claims_for",
+                )?
             };
             let mut evidence: HashMap<ClaimId, Vec<Evidence>> = HashMap::new();
             {
@@ -1950,14 +1852,11 @@ impl GraphStore for SqliteGraph {
             let Some(id) = resolve(c, entity.as_str())? else {
                 return Ok(Vec::new());
             };
-            let mut stmt = c
-                .prepare_cached(
-                    "SELECT source, key, chunk_id, surface, confidence FROM mentions
+            c.rows(
+                "SELECT source, key, chunk_id, surface, confidence FROM mentions
                      WHERE entity_id = ?1 ORDER BY id LIMIT ?2",
-                )
-                .db("prepare mentions_for")?;
-            let rows = stmt
-                .query_map(params![id, sql_limit(limit)], |r| {
+                params![id, sql_limit(limit)],
+                |r| {
                     Ok(Mention {
                         entity: EntityId::new(id.clone()),
                         item: item_ref(r.get(0)?, r.get(1)?),
@@ -1965,10 +1864,9 @@ impl GraphStore for SqliteGraph {
                         surface: r.get(3)?,
                         confidence: r.get::<_, f64>(4)? as f32,
                     })
-                })
-                .db("query mentions_for")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read mentions_for")
+                },
+                "read mentions_for",
+            )
         })
     }
 
@@ -2012,13 +1910,8 @@ impl GraphStore for SqliteGraph {
     }
 
     fn counts(&self) -> Result<GraphCounts> {
-        // `count(*)` over every mention (a million rows at 250k items) decrypts its whole index
-        // on each call: ~100 ms, polled by every open knowledge page. The counts only change when
-        // something is written, so they are cached against the writer connection's
-        // `total_changes()` (rows inserted, updated or deleted through it, triggers included;
-        // every write in this process goes through it), read under the writer lock so no write
-        // lands meanwhile, and recomputed at least every `GRAPH_COUNTS_MAX_AGE` for writes made
-        // by another process.
+        // `count(*)` over every mention (a million rows at 250k items) decrypts its whole index on
+        // each call: ~100 ms, polled by every open knowledge page.
         let db = self.store.db().clone();
         self.read(|c| {
             let changes = c.total_changes();
@@ -2141,8 +2034,8 @@ impl GraphStore for SqliteGraph {
     fn entities_supported_by(&self, source: &SourceId) -> Result<Vec<EntityId>> {
         // One query, driven by the (source, key) indexes on mentions and claim_evidence.
         self.read(|c| {
-            let mut stmt = c
-                .prepare_cached(&format!(
+            c.rows(
+                &format!(
                     "SELECT e.id FROM entities e
                      JOIN (SELECT entity_id AS id FROM mentions WHERE source = ?1
                            UNION
@@ -2156,15 +2049,11 @@ impl GraphStore for SqliteGraph {
                                AND c.object_entity IS NOT NULL) s ON s.id = e.id
                      WHERE e.merged_into IS NULL AND e.deleted_at IS NULL
                      ORDER BY e.id"
-                ))
-                .db("prepare entities_supported_by")?;
-            let rows = stmt
-                .query_map([source.as_str()], |r| {
-                    Ok(EntityId::new(r.get::<_, String>(0)?))
-                })
-                .db("query entities_supported_by")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read entities_supported_by")
+                ),
+                [source.as_str()],
+                |r| Ok(EntityId::new(r.get::<_, String>(0)?)),
+                "read entities_supported_by",
+            )
         })
     }
 
@@ -2201,16 +2090,12 @@ fn merge_tx(
     // name); `from` keeps no name rows, so it drops out of name lookup and search.
     let into_norm = normalize_name(&entity_name(tx, &into)?);
     let names: Vec<String> = {
-        let mut stmt = tx
-            .prepare_cached(
-                "SELECT alias FROM entity_aliases WHERE entity_id = ?1 ORDER BY is_name DESC, id",
-            )
-            .db("prepare merge names")?;
-        let rows = stmt
-            .query_map([&from], |r| r.get(0))
-            .db("query merge names")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read merge names")?
+        tx.rows(
+            "SELECT alias FROM entity_aliases WHERE entity_id = ?1 ORDER BY is_name DESC, id",
+            [&from],
+            |r| r.get(0),
+            "read merge names",
+        )?
     };
     tx.execute("DELETE FROM entity_aliases WHERE entity_id = ?1", [&from])
         .db("drop merged names")?;
@@ -2325,22 +2210,19 @@ fn merge_tx(
     Ok(())
 }
 
-/// Fold live claims of `entity` that share a triple into the oldest one: evidence moves,
-/// confidence is the maximum, and the survivor takes the strongest status
-/// ([`ClaimStatus::strongest`]).
+/// Fold live claims of `entity` that share a triple into the oldest one: evidence moves, confidence
+/// is the maximum, and the survivor takes the strongest status ([`ClaimStatus::strongest`]).
 fn fold_duplicate_claims(tx: &Connection, entity: &str, now: &str) -> Result<()> {
     let ids: Vec<ClaimId> = {
-        let mut stmt = tx
-            .prepare_cached(&format!(
+        tx.rows(
+            &format!(
                 "SELECT id FROM claims WHERE (subject = ?1 OR object_entity = ?1) AND {LIVE}
                  ORDER BY id"
-            ))
-            .db("prepare claim fold")?;
-        let rows = stmt
-            .query_map([entity], |r| r.get(0))
-            .db("query claim fold")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("read claim fold")?
+            ),
+            [entity],
+            |r| r.get(0),
+            "read claim fold",
+        )?
     };
     let mut gone: HashSet<ClaimId> = HashSet::new();
     for id in ids {
@@ -2350,18 +2232,18 @@ fn fold_duplicate_claims(tx: &Connection, entity: &str, now: &str) -> Result<()>
         // Ascending ids: `id` and its twins fold together here; whichever survives, none of
         // them needs another pass.
         let before: Vec<ClaimId> = {
-            let mut stmt = tx
-                .prepare_cached(&format!(
+            tx.rows(
+                &format!(
                     "SELECT o.id FROM claims c JOIN claims o
                        ON o.subject = c.subject AND o.predicate = c.predicate
                       AND o.object_entity IS c.object_entity
                       AND o.object_literal IS c.object_literal
                      WHERE c.id = ?1 AND o.id <> ?1 AND o.{LIVE}"
-                ))
-                .db("prepare fold twins")?;
-            let rows = stmt.query_map([id], |r| r.get(0)).db("query fold twins")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read fold twins")?
+                ),
+                [id],
+                |r| r.get(0),
+                "read fold twins",
+            )?
         };
         if before.is_empty() {
             continue;
@@ -2374,9 +2256,8 @@ fn fold_duplicate_claims(tx: &Connection, entity: &str, now: &str) -> Result<()>
 
 // ------------------------------------------------------------------ neighbourhood
 
-/// Breadth-first over active entity→entity claims, in the same order as `MemGraph`: nodes in
-/// BFS order, each node's claims by id. Once `limit` nodes are seen, further new nodes are
-/// skipped (and `truncated` set), but edges among seen nodes are still collected.
+/// Breadth-first over active entity→entity claims, in the same order as `MemGraph`: nodes in BFS
+/// order, each node's claims by id.
 fn neighbourhood(c: &Connection, center: &EntityId, depth: u32, limit: usize) -> Result<GraphView> {
     let start = live(c, center)?;
     let mut node_stmt = c
@@ -2447,34 +2328,12 @@ fn neighbourhood(c: &Connection, center: &EntityId, depth: u32, limit: usize) ->
 mod tests {
     use super::*;
 
-    #[test]
-    fn entity_ids_are_prefixed_url_safe_and_distinct() {
-        let mut seen = HashSet::new();
-        for _ in 0..1000 {
-            let id = new_entity_id().unwrap();
-            assert_eq!(id.len(), ENTITY_ID_PREFIX.len() + 16);
-            assert!(id.starts_with(ENTITY_ID_PREFIX));
-            assert!(
-                id[ENTITY_ID_PREFIX.len()..]
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b))
-            );
-            assert!(seen.insert(id));
-        }
-    }
-
     /// `entity_stats` against counts recomputed as `list_entities` defines them, for every
     /// entity row (tombstones included), and `top_entities` against the scan-and-sort default.
     fn assert_counts_exact(g: &SqliteGraph, step: &str) {
         let read = |sql: &str| -> Vec<(String, i64, i64)> {
-            g.read(|c| {
-                let mut stmt = c.prepare(sql).db("prepare")?;
-                let rows = stmt
-                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                    .db("query")?;
-                rows.collect::<rusqlite::Result<_>>().db("read")
-            })
-            .unwrap()
+            g.read(|c| c.rows(sql, [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)), "read"))
+                .unwrap()
         };
         let kept = read(
             "SELECT e.id, s.claims, s.mentions FROM entities e
@@ -2565,7 +2424,6 @@ mod tests {
         ] {
             g.add_mention(&mention(e, k, s)).unwrap();
         }
-        // Same mention again: an upsert, not a new row.
         g.add_mention(&mention(&sam, "f1", "Sam")).unwrap();
         assert_counts_exact(&g, "mentioned");
 
@@ -2587,18 +2445,15 @@ mod tests {
         let _ = g
             .add_claim(&claim(&acme2, "about", obj(&topic), &["m2"]))
             .unwrap();
-        // Same triple again: evidence lands in the existing claim.
         g.add_claim(&claim(&sam, "works_at", obj(&acme), &["f2"]))
             .unwrap();
         assert_counts_exact(&g, "claimed");
 
-        // Supersede by the user (status change + a user-asserted claim).
         let mut by = claim(&sam, "likes", lit("coffee"), &[]);
         by.status = ClaimStatus::UserAsserted;
         g.supersede_by_user(likes, &by).unwrap();
         assert_counts_exact(&g, "superseded by user");
 
-        // Status changes: rejected, retracted, back to active (with a fold into a twin).
         g.set_claim_status(knows, ClaimStatus::Rejected).unwrap();
         assert_counts_exact(&g, "rejected");
         g.set_claim_status(knows, ClaimStatus::Active).unwrap();
@@ -2626,13 +2481,11 @@ mod tests {
         .unwrap();
         assert_counts_exact(&g, "updated");
 
-        // Merge: claims (subject and object) and mentions move, duplicate triples fold.
         g.add_claim(&claim(&ana, "works_at", obj(&acme), &["f2"]))
             .unwrap();
         g.merge(&acme, &acme2).unwrap();
         assert_counts_exact(&g, "merged");
 
-        // Split part of Acme off again.
         let acme_claims: Vec<ClaimId> = g
             .claims_for(&acme, false)
             .unwrap()
@@ -2648,7 +2501,6 @@ mod tests {
         split.unwrap();
         assert_counts_exact(&g, "split");
 
-        // Batch: create, mention, claim, status, retract an item, all in one transaction.
         let mut batch = GraphBatch::new();
         batch.ops.push(GraphOp::AddMention {
             mention: mention(&topic, "f3", "Budget"),
@@ -2660,7 +2512,6 @@ mod tests {
         g.apply_batch(&batch).unwrap();
         assert_counts_exact(&g, "batch");
 
-        // Forget an item (store path), then a whole source, then prune orphans.
         store.delete_item(&item("f1")).unwrap();
         assert_counts_exact(&g, "item forgotten");
         g.retract_item(&item("m1")).unwrap();
@@ -2671,7 +2522,6 @@ mod tests {
         assert!(!pruned.is_empty());
         assert_counts_exact(&g, "pruned");
 
-        // Raw writes (as an import or repair would make) are counted too.
         g.write("raw", |tx, _| {
             tx.execute_batch(&format!(
                 "UPDATE mentions SET entity_id = '{ana}' WHERE entity_id = '{topic}';
@@ -2686,141 +2536,5 @@ mod tests {
             .check_consistency()
             .map(|r| assert!(r.ok, "{:?}", r.problems))
             .unwrap();
-    }
-
-    /// `top_entities` against the scan-and-sort default at the 500k-item bench scale: 15k
-    /// entities, 200k claims, 2M mentions (skewed: a few hubs), in an encrypted file store.
-    /// Also times the v15 backfill and the mention trigger's insert overhead. Run with
-    ///
-    /// ```text
-    /// cargo test -p nugget-store --release --lib top_entities_at_scale -- --ignored --nocapture
-    /// ```
-    #[test]
-    #[ignore = "loads 2.2M rows; run in release with --ignored"]
-    fn top_entities_at_scale() {
-        use std::time::Instant;
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(
-            dir.path().join("nugget.db"),
-            &crate::StoreKey::from_bytes([7; 32]),
-        )
-        .unwrap();
-        let g = store.graph();
-        let (entities, claims, mentions) = (15_000i64, 200_000i64, 2_000_000i64);
-        let t = Instant::now();
-        g.write("load", |tx, _| {
-            // Skewed picks: the product of two uniform draws favours low ids (hubs).
-            let pick = format!(
-                "'ent_' || ((abs(random()) % {entities}) * (abs(random()) % {entities})
-                            / {entities})"
-            );
-            tx.execute_batch(&format!(
-                "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n
-                                          WHERE i + 1 < {entities})
-                 INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
-                 SELECT 'ent_' || i,
-                        CASE i % 4 WHEN 0 THEN 'person' WHEN 1 THEN 'organization'
-                                   WHEN 2 THEN 'project' ELSE 'topic' END,
-                        'Name ' || (i * 7919 % 5000), 'name ' || (i * 7919 % 5000),
-                        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
-                 FROM n;
-                 WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n
-                                          WHERE i + 1 < {claims})
-                 INSERT INTO claims (subject, predicate, object_entity, object_literal, text,
-                                     confidence, status, created_at, updated_at)
-                 SELECT {pick}, 'p' || (i % 20),
-                        CASE WHEN i % 10 < 7 THEN {pick} END,
-                        CASE WHEN i % 10 >= 7 THEN 'lit' || i END,
-                        't', 0.9,
-                        CASE i % 10 WHEN 8 THEN 'superseded' WHEN 9 THEN 'retracted'
-                                    WHEN 7 THEN 'user_asserted' ELSE 'active' END,
-                        't', 't'
-                 FROM n;
-                 WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n
-                                          WHERE i + 1 < {mentions})
-                 INSERT INTO mentions (entity_id, source, key, chunk_id, surface, confidence,
-                                       created_at)
-                 SELECT {pick}, 'mail', 'k' || i, NULL, 's', 0.8, 't' FROM n;"
-            ))
-            .db("load")
-        })
-        .unwrap();
-        println!("load (triggers on): {:.1} s", t.elapsed().as_secs_f64());
-
-        let time = |what: &str, runs: u32, f: &dyn Fn() -> Vec<EntitySummary>| {
-            let first = f();
-            let t = Instant::now();
-            for _ in 0..runs {
-                std::hint::black_box(f());
-            }
-            let ms = t.elapsed().as_secs_f64() * 1e3 / f64::from(runs);
-            println!("{what:<48} {ms:>9.3} ms");
-            first
-        };
-        let top = time("top_entities(all kinds, 50, 0)", 50, &|| {
-            g.top_entities(&[], 50, 0).unwrap()
-        });
-        time("top_entities(person, 50, 0)", 50, &|| {
-            g.top_entities(&[EntityKind::Person], 50, 0).unwrap()
-        });
-        time(
-            "top_entities(all kinds, 200, 0) (overview page)",
-            50,
-            &|| g.top_entities(&[], 200, 0).unwrap(),
-        );
-        time("top_entities(all kinds, 50, 5000)", 10, &|| {
-            g.top_entities(&[], 50, 5000).unwrap()
-        });
-        let scan = time("scan + sort (default, list_entities)", 3, &|| {
-            nugget_graph::top_entities_scan(&g, &[], 50, 0).unwrap()
-        });
-        assert_eq!(top, scan);
-
-        let t = Instant::now();
-        g.write("backfill", |tx, _| {
-            tx.execute_batch(crate::schema::ENTITY_STATS).db("backfill")
-        })
-        .unwrap();
-        println!(
-            "v15 migration (backfill): {:.0} ms",
-            t.elapsed().as_secs_f64() * 1e3
-        );
-
-        let insert = |from: i64| {
-            let t = Instant::now();
-            g.write("more", |tx, _| {
-                tx.execute_batch(&format!(
-                    "WITH RECURSIVE n(i) AS (SELECT {from} UNION ALL SELECT i + 1 FROM n
-                                              WHERE i + 1 < {from} + 200000)
-                     INSERT INTO mentions (entity_id, source, key, chunk_id, surface,
-                                           confidence, created_at)
-                     SELECT 'ent_' || (i % {entities}), 'mail', 'k' || i, NULL, 's', 0.8, 't'
-                     FROM n;"
-                ))
-                .db("more")
-            })
-            .unwrap();
-            t.elapsed().as_secs_f64() * 1e3
-        };
-        let with = insert(mentions);
-        g.write("drop", |tx, _| {
-            tx.execute_batch("DROP TRIGGER entity_stats_mentions_ai")
-                .db("drop")
-        })
-        .unwrap();
-        let without = insert(mentions + 200_000);
-        println!(
-            "200k mention inserts: {with:.0} ms with the count trigger, {without:.0} ms without"
-        );
-    }
-
-    #[test]
-    fn status_round_trips() {
-        for s in ClaimStatus::ALL {
-            assert_eq!(status_from_str(status_str(s)).unwrap(), s);
-        }
-        for k in EntityKind::ALL {
-            assert_eq!(kind_from_str(k.as_str()).unwrap(), k);
-        }
     }
 }

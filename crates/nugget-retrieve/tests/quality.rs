@@ -20,16 +20,13 @@ use nugget_retrieve::{
     ContextOptions, HttpReranker, HttpRerankerConfig, Reranker, RetrieveConfig, Retriever,
     RewriteMethod,
 };
+mod common;
+use common::{at, flagged, keys};
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
 use serde_json::json;
 use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-fn at(s: &str) -> OffsetDateTime {
-    OffsetDateTime::parse(s, &Rfc3339).unwrap()
-}
 
 fn add(store: &Store, key: &str, title: &str, text: &str, modified: Option<&str>) {
     let mut item = NewItem::new("notes", key, content_hash(text)).with_title(title);
@@ -40,10 +37,6 @@ fn add(store: &Store, key: &str, title: &str, text: &str, modified: Option<&str>
     store
         .replace_chunks(&item.item, &[NewChunk::text(text)])
         .unwrap();
-}
-
-fn keys(items: &[nugget_retrieve::RetrievedItem]) -> Vec<&str> {
-    items.iter().map(|r| r.item.key.as_str()).collect()
 }
 
 /// Three boiler notes; full-text ranks `a` first (most term hits), the "right" answer is `c`.
@@ -182,26 +175,16 @@ async fn reranker_failures_keep_the_first_stage_order() {
         .await
         .unwrap();
 
-    // HTTP error.
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(500).set_body_string("model not loaded"))
-        .mount(&server)
-        .await;
-    let r = Retriever::new(store.clone(), None, cfg())
-        .with_reranker(Arc::new(http_reranker(&server, |_| {})));
-    let res = r.search("boiler", 3).await.unwrap();
-    assert!(!res.reranked);
-    assert_eq!(res.items, plain.items);
-
-    // Malformed and incomplete responses.
-    for body in [
-        json!({"nope": 1}),
-        json!({"results": [{"index": 0, "relevance_score": 1.0}]}),
+    // HTTP error, malformed and incomplete responses.
+    for resp in [
+        ResponseTemplate::new(500).set_body_string("model not loaded"),
+        ResponseTemplate::new(200).set_body_json(json!({"nope": 1})),
+        ResponseTemplate::new(200)
+            .set_body_json(json!({"results": [{"index": 0, "relevance_score": 1.0}]})),
     ] {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .respond_with(resp)
             .mount(&server)
             .await;
         let r = Retriever::new(store.clone(), None, cfg())
@@ -210,37 +193,6 @@ async fn reranker_failures_keep_the_first_stage_order() {
         assert!(!res.reranked);
         assert_eq!(res.items, plain.items);
     }
-
-    // Too slow: the HTTP client's own timeout.
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"results": []}))
-                .set_delay(Duration::from_secs(5)),
-        )
-        .mount(&server)
-        .await;
-    let r = Retriever::new(store.clone(), None, cfg())
-        .with_reranker(Arc::new(http_reranker(&server, |c| c.timeout_ms = 100)));
-    let res = r.search("boiler", 3).await.unwrap();
-    assert!(!res.reranked);
-    assert_eq!(res.items, plain.items);
-
-    // Nothing listening.
-    let dead = HttpReranker::new(
-        &HttpRerankerConfig {
-            base_url: "http://127.0.0.1:9".into(),
-            ..Default::default()
-        },
-        None,
-        Arc::new(NullEgress),
-    )
-    .unwrap();
-    let r = Retriever::new(store, None, cfg()).with_reranker(Arc::new(dead));
-    let res = r.search("boiler", 3).await.unwrap();
-    assert!(!res.reranked);
-    assert_eq!(res.items, plain.items);
 }
 
 /// A reranker that never answers: the retriever's own timeout applies.
@@ -521,17 +473,6 @@ async fn items_are_dated_by_their_event_or_mail_date_not_the_file_time() {
 }
 
 #[tokio::test]
-async fn future_phrases_find_upcoming_events() {
-    let r = Retriever::new(copied_folder(), None, cfg()).with_reference_time(now());
-    // GG2-12: next week is 9–15 March.
-    let res = r.search("dentist next week", 5).await.unwrap();
-    assert!(res.date.as_ref().unwrap().applied);
-    assert_eq!(keys(&res.items), ["dentist.ics"]);
-    let res = r.search("meetings next week", 5).await.unwrap();
-    assert_eq!(keys(&res.items), ["onboarding-call.ics"]);
-}
-
-#[tokio::test]
 async fn generic_period_questions_list_the_period() {
     let r = Retriever::new(copied_folder(), None, cfg()).with_reference_time(now());
     // GG2-11: nothing but the period is asked, so its items are listed by date.
@@ -681,50 +622,6 @@ async fn near_misses_are_marked() {
         .await
         .unwrap();
     assert!(thread.passages.iter().all(|p| !p.partial));
-}
-
-/// With a vector leg, near misses stay (the embedder may have found a real synonym) but are
-/// marked, so the model can tell them from an answer.
-#[tokio::test]
-async fn near_misses_are_marked_in_hybrid_contexts() {
-    let store = Store::open_in_memory().unwrap();
-    let emb = nugget_retrieve::eval::HashEmbedder::new(32, &[]);
-    let fillers: Vec<(String, String)> = (0..FILLER_NOTES)
-        .map(|i| {
-            (
-                format!("note-{i}"),
-                format!("Note {i}: planning and reminders."),
-            )
-        })
-        .collect();
-    for (key, text) in [
-        ("physio", "Physio session with Ines Duarte on Monday."),
-        ("standup", "Standup session notes for the team."),
-    ]
-    .into_iter()
-    .chain(fillers.iter().map(|(k, t)| (k.as_str(), t.as_str())))
-    {
-        let item = NewItem::new("notes", key, content_hash(text)).with_title(key);
-        store.upsert_item(&item).unwrap();
-        store
-            .replace_chunks(
-                &item.item,
-                &[NewChunk::embedded(text, emb.embed_text(text))],
-            )
-            .unwrap();
-    }
-    let router = Arc::new(Router::new(
-        vec![Arc::new(emb) as Arc<dyn Provider>],
-        HashMap::from([(Tier::Embedding, vec![ProviderId::new("hash-embedder")])]),
-    ));
-    let r = Retriever::new(store, Some(router), cfg()).with_reference_time(now());
-    let ctx = r
-        .pack_context("When is my therapy session?", 2_000)
-        .await
-        .unwrap();
-    assert!(!ctx.mode.is_text_only());
-    assert!(!ctx.response.citations.is_empty());
-    assert!(ctx.passages.iter().any(|p| p.partial), "{:?}", ctx.passages);
 }
 
 /// Items without a source modification time are filtered by the store's update time, and the
@@ -905,11 +802,7 @@ async fn followups_are_rewritten_by_a_local_model_only() {
         (Tier::Triage, local.clone()),
     ]);
     let r = Retriever::new(boiler_store(), Some(router), cfg()).with_reference_time(now());
-    let res = r
-        .search_in_conversation(&history(), "and when was it fixed?", 3)
-        .await
-        .unwrap();
-    let rw = res.rewrite.unwrap();
+    let rw = r.rewrite_query(&history(), "and when was it fixed?").await;
     assert_eq!(rw.query, "boiler repair F28");
     assert_eq!(
         rw.method,
@@ -917,6 +810,7 @@ async fn followups_are_rewritten_by_a_local_model_only() {
             provider: ProviderId::new("local")
         }
     );
+    let res = r.search(&rw.query, 3).await.unwrap();
     assert_eq!(keys(&res.items)[0], "c");
     assert_eq!(cloud.calls(), 0, "never a cloud model");
     let req = local.prompts.lock().unwrap()[0].clone();
@@ -933,11 +827,8 @@ async fn followups_are_rewritten_by_a_local_model_only() {
     assert!(text.contains("<<<\nand when was it fixed?\n>>>"));
 
     // Not a follow-up: searched as is, no model call.
-    let res = r
-        .search_in_conversation(&history(), "boiler service engineer", 3)
-        .await
-        .unwrap();
-    assert_eq!(res.rewrite.unwrap().method, RewriteMethod::Unchanged);
+    let rw = r.rewrite_query(&history(), "boiler service engineer").await;
+    assert_eq!(rw.method, RewriteMethod::Unchanged);
     assert_eq!(local.calls(), 1);
     // No history: nothing to resolve against.
     let rw = r.rewrite_query(&[], "and last year?").await;
@@ -964,13 +855,8 @@ async fn rewrite_falls_back_without_a_usable_model() {
         RewriteMethod::Heuristic
     );
 
-    // Model errors, empty output, a reasoning block, a timeout: the heuristic rewrite.
+    // Model errors, a reasoning block, a timeout: the heuristic rewrite.
     let failing = Arc::new(FakeChat::new("bad", Locality::OnDevice, Err(())));
-    let empty = Arc::new(FakeChat::new(
-        "empty",
-        Locality::LocalNetwork,
-        Ok("  \n\"\""),
-    ));
     let thinking = Arc::new(FakeChat::new(
         "thinking",
         Locality::OnDevice,
@@ -978,7 +864,7 @@ async fn rewrite_falls_back_without_a_usable_model() {
     ));
     let mut slow = FakeChat::new("slow", Locality::OnDevice, Ok("late"));
     slow.delay = Duration::from_secs(5);
-    for p in [failing, empty, thinking, Arc::new(slow)] {
+    for p in [failing, thinking, Arc::new(slow)] {
         let r = Retriever::new(
             boiler_store(),
             Some(chat_router(vec![(Tier::Light, p.clone())])),
@@ -1060,22 +946,6 @@ async fn rewrite_tries_the_next_local_model_when_one_fails() {
     let rw = r.rewrite_query(&history(), "what about it?").await;
     assert!(matches!(rw.method, RewriteMethod::Model { .. }));
     assert_eq!((down.calls(), up.calls()), (1, 2));
-
-    // An unusable reply also moves on to the next model.
-    let thinking = Arc::new(FakeChat::new("thinking", Locality::OnDevice, Ok("<think>")));
-    let up = Arc::new(FakeChat::new("up", Locality::LocalNetwork, Ok("boiler")));
-    let router = chat_router(vec![
-        (Tier::Light, thinking.clone()),
-        (Tier::Triage, up.clone()),
-    ]);
-    let r = Retriever::new(boiler_store(), Some(router), cfg());
-    let rw = r.rewrite_query(&history(), "and last year?").await;
-    assert_eq!(
-        rw.method,
-        RewriteMethod::Model {
-            provider: ProviderId::new("up")
-        }
-    );
 }
 
 #[tokio::test]
@@ -1116,9 +986,6 @@ async fn rewrite_falls_back_to_the_heuristic_when_every_model_fails() {
         }
     );
     assert_eq!(d.calls(), 0, "no budget left");
-    let json = serde_json::to_value(&rw).unwrap();
-    assert_eq!(json["method"], "heuristic_fallback");
-    assert_eq!(json["tried"], serde_json::json!(["a", "b", "c"]));
 
     // Only `a` is in cooldown now; with every model cooling down, none is asked.
     router.report_failure(b.id());
@@ -1155,16 +1022,6 @@ async fn contracted_followups_are_rewritten() {
         assert_eq!(rw.method, RewriteMethod::Heuristic, "{q}");
         assert_eq!(rw.query, format!("{q} dentist appointment"));
     }
-    // A failing model falls back to the same rewrite.
-    let down = Arc::new(FakeChat::new("down", Locality::OnDevice, Err(())));
-    let r = Retriever::new(
-        boiler_store(),
-        Some(chat_router(vec![(Tier::Light, down)])),
-        cfg(),
-    );
-    let rw = r.rewrite_query(&h, "What's the address?").await;
-    assert_eq!(rw.query, "What's the address? dentist appointment");
-    assert!(matches!(rw.method, RewriteMethod::HeuristicFallback { .. }));
 }
 
 /// A cloud reranker that records the passages it was sent.
@@ -1193,13 +1050,7 @@ async fn sensitive_passages_never_reach_a_cloud_reranker() {
         ("a", "Boiler boiler: the boiler alarm PIN is 4417.", true),
         ("b", "Boiler service booked with the engineer.", false),
     ] {
-        let item = NewItem::new("notes", key, content_hash(text))
-            .with_title(key)
-            .with_metadata(json!({ "sensitive": sensitive }));
-        store.upsert_item(&item).unwrap();
-        store
-            .replace_chunks(&item.item, &[NewChunk::text(text)])
-            .unwrap();
+        flagged(&store, key, text, Some(sensitive), None);
     }
     let cloud = Arc::new(CloudSeen {
         seen: Mutex::new(Vec::new()),

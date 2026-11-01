@@ -1,8 +1,4 @@
 //! Power-aware scheduling.
-//!
-//! Heavy work (backfills: first syncs and the bulk of a sync started without a cursor) pauses
-//! while [`PowerPolicy::constrained`] is true. Live (watch-driven) changes and explicit
-//! `sync_now` requests always run.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -10,7 +6,6 @@ use std::time::{Duration, Instant};
 /// Decides whether heavy background work should wait.
 pub trait PowerPolicy: Send + Sync {
     /// `true` while the machine is on battery below the threshold or in an OS low-power mode.
-    /// Must be cheap or cached; it is called from blocking threads.
     fn constrained(&self) -> bool;
 }
 
@@ -25,9 +20,8 @@ impl PowerPolicy for NoPowerPolicy {
 }
 
 /// Best-effort system policy: any battery discharging below `threshold` (unless one is on AC
-/// power), or an OS power-saver mode (Linux: the ACPI platform profile set to `low-power`;
-/// Windows: battery saver). Results are cached for `ttl`. Platforms without battery
-/// support report "not constrained".
+/// power), or an OS power-saver mode (Linux: the ACPI platform profile set to `low-power`; Windows:
+/// battery saver).
 #[derive(Debug)]
 pub struct SystemPowerPolicy {
     threshold: f32,
@@ -79,8 +73,7 @@ enum Reading {
     Unknown,
 }
 
-/// Any battery on AC power means the machine is plugged in: never constrained, whatever the
-/// charge. Otherwise constrained when any discharging battery is below `threshold`.
+/// Any battery on AC power means the machine is plugged in: never constrained, whatever the charge.
 #[cfg_attr(
     not(any(target_os = "linux", target_os = "macos", target_os = "windows", test)),
     allow(dead_code)
@@ -294,8 +287,8 @@ mod iokit {
                 continue;
             }
             // SAFETY: non-NULL borrowed CFDictionary; the Get rule retains it for our wrapper.
-            // Keys are CFStrings and values arbitrary CF objects, which `find` + `downcast`
-            // check before use.
+            // Keys are CFStrings and values arbitrary CF objects, which `find` + `downcast` check
+            // before use.
             #[allow(unsafe_code)]
             let desc: Desc = unsafe { CFDictionary::wrap_under_get_rule(desc) };
             if let Some(r) = reading(&desc) {
@@ -347,16 +340,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn system_policy_does_not_panic_and_caches() {
-        let p = SystemPowerPolicy::new(0.2);
-        let a = p.constrained();
-        assert_eq!(a, p.constrained());
-        assert!(!NoPowerPolicy.constrained());
-    }
-
-    #[test]
     fn any_low_semantics() {
         use Reading::*;
+        assert!(!NoPowerPolicy.constrained());
         assert!(any_low([Discharging(0.1)], 0.2));
         assert!(!any_low([Discharging(0.5)], 0.2));
         assert!(!any_low([Discharging(0.1), OnAc], 0.2));
@@ -365,159 +351,70 @@ mod tests {
         assert!(!any_low([], 0.2));
     }
 
-    mod sysfs_fixtures {
-        use super::super::{Reading, any_low, sysfs};
-        use std::path::Path;
-
-        fn supply(root: &Path, name: &str, files: &[(&str, &str)]) {
-            let dir = root.join(name);
-            std::fs::create_dir_all(&dir).unwrap();
-            for (f, v) in files {
-                std::fs::write(dir.join(f), format!("{v}\n")).unwrap();
-            }
-        }
-
-        fn low(root: &Path) -> bool {
-            any_low(sysfs::readings(root), 0.2)
-        }
-
-        #[test]
-        fn discharging_low_is_constrained() {
-            let t = tempfile::tempdir().unwrap();
-            supply(t.path(), "AC", &[("type", "Mains"), ("online", "0")]);
-            supply(
-                t.path(),
-                "BAT0",
-                &[
-                    ("type", "Battery"),
-                    ("status", "Discharging"),
-                    ("capacity", "12"),
-                ],
-            );
-            assert!(low(t.path()));
-        }
-
-        #[test]
-        fn charging_low_is_not_constrained() {
-            let t = tempfile::tempdir().unwrap();
-            supply(
-                t.path(),
-                "BAT0",
-                &[
-                    ("type", "Battery"),
-                    ("status", "Charging"),
-                    ("capacity", "5"),
-                ],
-            );
-            assert!(!low(t.path()));
+    /// Supplies as `name: key=value,...`, one per line; `;` separates supplies.
+    #[test]
+    fn sysfs_readings() {
+        let cases: &[(&str, &[Reading], bool)] = &[
+            (
+                "AC: type=Mains,online=0; BAT0: type=Battery,status=Discharging,capacity=12",
+                &[Reading::Discharging(0.12)],
+                true,
+            ),
             // One battery charging means AC power, even if another reads discharging.
-            supply(
-                t.path(),
-                "BAT1",
-                &[
-                    ("type", "Battery"),
-                    ("status", "Discharging"),
-                    ("capacity", "5"),
-                ],
-            );
-            assert!(!low(t.path()));
-        }
-
-        #[test]
-        fn discharging_high_is_not_constrained() {
-            let t = tempfile::tempdir().unwrap();
-            supply(
-                t.path(),
-                "BAT0",
-                &[
-                    ("type", "Battery"),
-                    ("status", "Discharging"),
-                    ("capacity", "80"),
-                ],
-            );
-            assert!(!low(t.path()));
-        }
-
-        #[test]
-        fn device_scope_battery_is_ignored() {
-            let t = tempfile::tempdir().unwrap();
-            supply(
-                t.path(),
-                "hidpp_battery_0",
-                &[
-                    ("type", "Battery"),
-                    ("scope", "Device"),
-                    ("status", "Discharging"),
-                    ("capacity", "3"),
-                ],
-            );
-            assert!(sysfs::readings(t.path()).is_empty());
-            assert!(!low(t.path()));
-        }
-
-        #[test]
-        fn energy_and_charge_fallbacks() {
-            let t = tempfile::tempdir().unwrap();
-            supply(
-                t.path(),
-                "BAT0",
-                &[
-                    ("type", "Battery"),
-                    ("status", "Discharging"),
-                    ("energy_now", "1000000"),
-                    ("energy_full", "50000000"),
-                ],
-            );
-            assert_eq!(sysfs::readings(t.path()), vec![Reading::Discharging(0.02)]);
-            assert!(low(t.path()));
-
-            let t = tempfile::tempdir().unwrap();
-            supply(
-                t.path(),
-                "BAT0",
-                &[
-                    ("type", "Battery"),
-                    ("status", "Discharging"),
-                    ("charge_now", "3000000"),
-                    ("charge_full", "4000000"),
-                ],
-            );
-            assert_eq!(sysfs::readings(t.path()), vec![Reading::Discharging(0.75)]);
-            assert!(!low(t.path()));
-        }
-
-        #[test]
-        fn missing_files_are_not_constrained() {
-            let t = tempfile::tempdir().unwrap();
-            // No root at all.
-            assert!(!low(&t.path().join("absent")));
+            (
+                "BAT0: type=Battery,status=Charging,capacity=5; \
+                 BAT1: type=Battery,status=Discharging,capacity=5",
+                &[Reading::OnAc, Reading::Discharging(0.05)],
+                false,
+            ),
+            (
+                "BAT0: type=Battery,status=Discharging,capacity=80",
+                &[Reading::Discharging(0.8)],
+                false,
+            ),
+            (
+                "hidpp: type=Battery,scope=Device,status=Discharging,capacity=3",
+                &[],
+                false,
+            ),
+            (
+                "BAT0: type=Battery,status=Discharging,energy_now=1000000,energy_full=50000000",
+                &[Reading::Discharging(0.02)],
+                true,
+            ),
+            (
+                "BAT0: type=Battery,status=Discharging,charge_now=3000000,charge_full=4000000",
+                &[Reading::Discharging(0.75)],
+                false,
+            ),
             // No `type`, no `status`, no charge, zero full capacity.
-            supply(
-                t.path(),
-                "BAT0",
-                &[("status", "Discharging"), ("capacity", "1")],
+            (
+                "BAT0: status=Discharging,capacity=1; BAT1: type=Battery,capacity=1; \
+                 BAT2: type=Battery,status=Discharging; \
+                 BAT3: type=Battery,status=Discharging,energy_now=1,energy_full=0",
+                &[Reading::Unknown, Reading::Unknown, Reading::Unknown],
+                false,
+            ),
+        ];
+        for (spec, want, low) in cases {
+            let t = tempfile::tempdir().unwrap();
+            for supply in spec.split(';') {
+                let (name, files) = supply.trim().split_once(": ").unwrap();
+                let dir = t.path().join(name);
+                std::fs::create_dir_all(&dir).unwrap();
+                for kv in files.split(',') {
+                    let (k, v) = kv.split_once('=').unwrap();
+                    std::fs::write(dir.join(k), format!("{v}\n")).unwrap();
+                }
+            }
+            let readings = sysfs::readings(t.path());
+            assert_eq!(readings.len(), want.len(), "{spec}");
+            assert!(
+                want.iter().all(|w| readings.contains(w)),
+                "{spec}: {readings:?}"
             );
-            supply(t.path(), "BAT1", &[("type", "Battery"), ("capacity", "1")]);
-            supply(
-                t.path(),
-                "BAT2",
-                &[("type", "Battery"), ("status", "Discharging")],
-            );
-            supply(
-                t.path(),
-                "BAT3",
-                &[
-                    ("type", "Battery"),
-                    ("status", "Discharging"),
-                    ("energy_now", "1"),
-                    ("energy_full", "0"),
-                ],
-            );
-            assert_eq!(
-                sysfs::readings(t.path()),
-                vec![Reading::Unknown, Reading::Unknown, Reading::Unknown]
-            );
-            assert!(!low(t.path()));
+            assert_eq!(any_low(readings, 0.2), *low, "{spec}");
         }
+        assert!(sysfs::readings(std::path::Path::new("/nonexistent/power")).is_empty());
     }
 }

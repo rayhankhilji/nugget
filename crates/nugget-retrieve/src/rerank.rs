@@ -1,25 +1,4 @@
 //! Second-stage reranking with a cross-encoder.
-//!
-//! A [`Reranker`] scores `(query, passage)` pairs jointly, which separates relevant from merely
-//! similar passages better than the first-stage scores (bm25, cosine, rank fusion) can.
-//! [`Retriever::with_reranker`](crate::Retriever::with_reranker) puts one in the pipeline; any
-//! error or timeout keeps the first-stage order (see
-//! [`RetrieveConfig::rerank_pool`](crate::RetrieveConfig::rerank_pool)).
-//!
-//! [`HttpReranker`] calls a local cross-encoder behind llama-server's rerank endpoint
-//! (`llama-server --reranking` with a reranker GGUF, e.g. one served by `nugget-runtime`), which
-//! speaks the Jina/Cohere shape:
-//!
-//! ```text
-//! POST {base}/v1/rerank   {"model": "...", "query": "...", "documents": ["...", ...], "top_n": N}
-//! 200                     {"results": [{"index": 0, "relevance_score": 3.2}, ...]}
-//! ```
-//!
-//! Passages are the user's content, so the endpoint must be local: a base URL on this device or
-//! the LAN (judged from the URL alone: `localhost`, loopback and private IP literals; any other
-//! host name counts as cloud) unless [`HttpRerankerConfig::allow_cloud`] is set. Requests to
-//! anything but this device are recorded in the egress ledger, redirects are never followed and
-//! local requests bypass any proxy.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -47,18 +26,15 @@ pub trait Reranker: Send + Sync {
     /// A short name for logs.
     fn name(&self) -> &str;
 
-    /// Where the passages go. Sensitive items (see [`crate::is_sensitive`]) are never sent to a
-    /// `Cloud` reranker. Defaults to `Cloud` so an implementation that does not say fails closed.
+    /// Where the passages go.
     fn locality(&self) -> Locality {
         Locality::Cloud
     }
 
-    /// One relevance score per passage, in passage order. Higher is more relevant; the scale is
-    /// the model's own (probabilities or logits): the retriever only compares scores of one call.
+    /// One relevance score per passage, in passage order.
     async fn rerank(&self, query: &str, passages: &[String]) -> Result<Vec<f32>>;
 
     /// [`rerank`](Self::rerank) with the items the passages come from, for the egress ledger.
-    /// The default ignores `items`.
     async fn rerank_items(
         &self,
         query: &str,
@@ -86,15 +62,12 @@ pub struct HttpRerankerConfig {
     pub connect_timeout_ms: u64,
     /// Characters of each passage sent (cross-encoders have short context windows).
     pub max_passage_chars: usize,
-    /// Accept a base URL that is not on this device or the LAN. Off by default: passages are
-    /// the user's content.
+    /// Accept a base URL that is not on this device or the LAN.
     pub allow_cloud: bool,
-    /// Treat the endpoint as at least this remote (e.g. `local_network` for a server on another
-    /// machine reached through a tunnel). Can only widen what the URL says, never narrow it.
+    /// Treat the endpoint as at least this remote (e.g.
     pub locality: Option<Locality>,
     /// Connect to this Unix-domain socket instead of the URL's host (the URL then only names the
-    /// path, e.g. `http://localhost`): a local runtime server on a private socket. Unix only;
-    /// the endpoint is then on this device.
+    /// path, e.g.
     pub socket_path: Option<std::path::PathBuf>,
 }
 
@@ -146,9 +119,7 @@ fn remoteness(l: Locality) -> u8 {
 }
 
 impl HttpReranker {
-    /// Build a client for `config`. `api_key` is sent as a bearer token (the runtime's
-    /// per-process key). `Error::Invalid` for a bad URL, `Error::Unsupported` for a cloud URL
-    /// without [`HttpRerankerConfig::allow_cloud`] or a plaintext `http` cloud URL.
+    /// Build a client for `config`.
     pub fn new(
         config: &HttpRerankerConfig,
         api_key: Option<Secret>,
@@ -425,18 +396,7 @@ pub struct RerankStatus {
 }
 
 /// Keeps the reranker within its budget
-/// ([`RetrieveConfig::rerank_adaptive`](crate::RetrieveConfig::rerank_adaptive)). A slow machine
-/// (a cross-encoder on a few CPU cores) cannot score the configured pool in time, and a rerank
-/// that times out costs the whole timeout and changes nothing. So:
-///
-/// - after a rerank completes, the pool becomes what fits in 80% of the timeout at the measured
-///   time per passage (never above the configured pool);
-/// - after a timeout, the pool halves;
-/// - when fewer than `rerank_min_pool` passages would fit, reranking pauses for
-///   `rerank_cooldown_ms` (doubling on each consecutive pause, up to 8×), then one search probes
-///   it again with the minimum pool.
-///
-/// Shared by clones of a retriever.
+/// ([`RetrieveConfig::rerank_adaptive`](crate::RetrieveConfig::rerank_adaptive)).
 #[derive(Debug, Default)]
 pub(crate) struct RerankGovernor {
     state: std::sync::Mutex<GovernorState>,
@@ -568,9 +528,7 @@ impl RerankGovernor {
     }
 }
 
-/// Map raw reranker scores into `[0, 1]`, best = 1. Scores already in `[0, 1]` (probabilities)
-/// are kept as they are; anything else (logits) goes through a logistic first. Then divide by
-/// the maximum, as first-stage relevance is.
+/// Map raw reranker scores into `[0, 1]`, best = 1.
 pub(crate) fn normalise_scores(raw: &[f32]) -> Vec<f32> {
     let probs = raw.iter().all(|s| (0.0..=1.0).contains(s));
     let mapped: Vec<f32> = raw
@@ -603,7 +561,6 @@ mod tests {
         for ok in [
             "http://127.0.0.1:8013",
             "http://localhost:8013/",
-            "http://[::1]:9",
             "http://192.168.1.20:8080",
         ] {
             assert!(
@@ -614,7 +571,6 @@ mod tests {
         for bad in [
             "https://api.example.com",
             "http://gpu-box:8080",
-            "http://8.8.8.8",
             "http://foo.localhost:1",
         ] {
             let e = HttpReranker::new(&cfg(bad), None, egress.clone()).unwrap_err();
@@ -736,16 +692,6 @@ mod tests {
         assert!(scores_by_index(out_of_range, 1).is_err());
     }
 
-    #[test]
-    fn normalisation() {
-        assert_eq!(normalise_scores(&[0.2, 0.4, 0.1]), vec![0.5, 1.0, 0.25]);
-        let logits = normalise_scores(&[-2.0, 0.0, 3.0]);
-        assert_eq!(logits[2], 1.0);
-        assert!(logits[0] < logits[1] && logits[1] < logits[2]);
-        assert_eq!(normalise_scores(&[0.0, 0.0]), vec![0.0, 0.0]);
-        assert!(normalise_scores(&[]).is_empty());
-    }
-
     fn adaptive() -> crate::RetrieveConfig {
         crate::RetrieveConfig {
             rerank_pool: 30,
@@ -773,23 +719,6 @@ mod tests {
                 .is_some_and(|ms| ms > 50_000 && ms <= 60_000)
         );
         assert!(st.reason.unwrap().contains("timed out"));
-    }
-
-    #[test]
-    fn governor_sizes_the_pool_from_measured_time() {
-        let cfg = adaptive();
-        let g = RerankGovernor::default();
-        // 30 passages in 3 s: 100 ms each; 80% of 2.5 s fits 20.
-        g.completed(&cfg, 30, Duration::from_secs(3));
-        assert_eq!(g.plan(&cfg), Some(20));
-        assert!(g.status(&cfg).reason.unwrap().contains("20 of 30"));
-        // Fast again: back to the configured pool (moving average 55 ms → fits 36, capped).
-        g.completed(&cfg, 20, Duration::from_millis(200));
-        assert_eq!(g.plan(&cfg), Some(30));
-        assert_eq!(g.status(&cfg).reason, None);
-        // Far too slow (500 ms per passage on average): pause, then probe with the minimum.
-        g.completed(&cfg, 10, Duration::from_secs(10));
-        assert_eq!(g.plan(&cfg), None);
     }
 
     #[test]

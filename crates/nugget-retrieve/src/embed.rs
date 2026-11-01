@@ -6,14 +6,8 @@ use nugget_core::Error;
 use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_infer::{Provider, Router};
 
-/// Embedding providers eligible for retrieval, in the order to try them, and whether any
-/// provider was left out only because it is a cloud provider and cloud embedding is not allowed.
-///
-/// Order: providers probed with embeddings (healthy before cooling down, each in configured
-/// order, as [`Router::candidates`] returns them), then providers assigned to the `Embedding`
-/// tier that have not been probed yet (being in that tier is the configuration's claim that they
-/// embed; a failure just means text-only search). Providers probed *without* embeddings are
-/// never tried.
+/// Embedding providers eligible for retrieval, in the order to try them, and whether any provider
+/// was left out only because it is a cloud provider and cloud embedding is not allowed.
 pub(crate) fn embedding_candidates(
     router: &Router,
     allow_cloud: bool,
@@ -65,8 +59,7 @@ pub(crate) fn validate_vectors(vectors: &[Vec<f32>], expected: usize) -> Result<
     Ok(())
 }
 
-/// Embed search queries ([`Provider::embed_query`]) with the first provider that succeeds. On
-/// failure returns the last error.
+/// Embed search queries ([`Provider::embed_query`]) with the first provider that succeeds.
 pub(crate) async fn embed_first(
     router: &Router,
     providers: &[Arc<dyn Provider>],

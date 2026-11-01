@@ -40,19 +40,16 @@ use crate::util::cap_error;
 /// Capacity of the event broadcast; slow subscribers miss old events (`RecvError::Lagged`).
 const EVENT_CAPACITY: usize = 1024;
 
-/// How long an interactive authorization ([`Ingest::begin_auth`]) may take before it is
-/// abandoned (its loopback listener closed).
+/// How long an interactive authorization ([`Ingest::begin_auth`]) may take before it is abandoned
+/// (its loopback listener closed).
 pub const AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Adds values that must never be persisted (for example an OAuth client secret read from the
-/// keychain) to a source's settings right before its connector is built. Called with the source
-/// id, its kind and its persisted settings; returns the settings to build with. The result is
-/// only handed to [`nugget_connector::ConnectorFactory::build`], never stored or reported.
+/// keychain) to a source's settings right before its connector is built.
 pub type SettingsResolver =
     Arc<dyn Fn(&SourceId, &str, serde_json::Value) -> Result<serde_json::Value> + Send + Sync>;
 
-/// Something that changed, for UIs. `nuggetd` forwards these as notifications:
-/// [`Progress`](Self::Progress) → `ingest.progress`, the others → `sources.changed`.
+/// Something that changed, for UIs.
 // `SourceChanged` is the common event and is cloned to every subscriber anyway; boxing it would
 // change the public shape for little gain.
 #[allow(clippy::large_enum_variant)]
@@ -83,8 +80,8 @@ struct SourceStatus {
     paused: bool,
     /// The latest scan report from the connector (files sources), if any.
     scan: Option<ScanReport>,
-    /// `scan` came from the current (or most recent) sync pass: cleared when a pass begins,
-    /// set when its report arrives.
+    /// `scan` came from the current (or most recent) sync pass: cleared when a pass begins, set
+    /// when its report arrives.
     scan_fresh: bool,
 }
 
@@ -126,8 +123,7 @@ struct Slot {
     connector: Option<Arc<dyn Connector>>,
     /// Set while `update` / `remove` reconfigure the source: nothing may (re)start it.
     reconfiguring: bool,
-    /// The OAuth flow started by `begin_auth`, if one is running. Cancelled (and awaited) by
-    /// `remove`, `update`, `reload` and a second `begin_auth`.
+    /// The OAuth flow started by `begin_auth`, if one is running.
     auth: Option<AuthTask>,
     /// Cancelled when the source is removed; its connectors' secret writes then fail.
     retired: CancellationToken,
@@ -170,9 +166,9 @@ pub(crate) struct Inner {
     pub shutdown: CancellationToken,
     tracker: TaskTracker,
     weak: Weak<Inner>,
-    /// Held around every store write of items (pipeline upserts and deletes, purges, the
-    /// re-embed job), so the re-embed job can check an item and replace its chunks without a
-    /// concurrent write in between. Only taken on blocking threads.
+    /// Held around every store write of items (pipeline upserts and deletes, purges, the re-embed
+    /// job), so the re-embed job can check an item and replace its chunks without a concurrent
+    /// write in between.
     pub write_lock: Mutex<()>,
     /// Wakes the re-embed job.
     pub reembed: Notify,
@@ -198,9 +194,8 @@ impl Inner {
         let cap = self.cfg.error_ring.max(1);
         let mut slots = lock(&self.slots);
         if let Some(s) = slots.get_mut(id) {
-            // The same item's problem reported again (every pass) refreshes its entry instead
-            // of pushing other errors out of the ring. Pass-level errors (no key) stay one
-            // entry per failed pass: they are the source's failure history.
+            // The same item's problem reported again (every pass) refreshes its entry instead of
+            // pushing other errors out of the ring.
             if key.is_some()
                 && let Some(i) = s
                     .status
@@ -269,8 +264,8 @@ impl Inner {
         }
     }
 
-    /// A live change was indexed: a report claiming the folder had nothing to index is out of
-    /// date (live changes reconcile subtrees only and send no report).
+    /// A live change was indexed: a report claiming the folder had nothing to index is out of date
+    /// (live changes reconcile subtrees only and send no report).
     pub async fn scan_live_change(&self, id: &SourceId) {
         let changed = match lock(&self.slots).get_mut(id) {
             Some(s) if s.status.scan.as_ref().is_some_and(|r| r.found == 0) => {
@@ -466,8 +461,8 @@ impl Inner {
         slot.running = Some(Running { cancel, ctl, join });
     }
 
-    /// [`start_source`](Self::start_source) on a blocking thread: building a connector can read
-    /// the keychain (through the settings resolver) or the file system.
+    /// [`start_source`](Self::start_source) on a blocking thread: building a connector can read the
+    /// keychain (through the settings resolver) or the file system.
     async fn start_sources(&self, ids: Vec<SourceId>) {
         let Ok(me) = self.arc() else { return };
         let started = tokio::task::spawn_blocking(move || {
@@ -496,8 +491,8 @@ impl Inner {
         }
     }
 
-    /// Cancel the source's OAuth flow, if one is running, and wait until it has stopped (so it
-    /// can no longer write credentials).
+    /// Cancel the source's OAuth flow, if one is running, and wait until it has stopped (so it can
+    /// no longer write credentials).
     async fn cancel_auth(&self, id: &SourceId) {
         let task = lock(&self.slots).get_mut(id).and_then(|s| s.auth.take());
         if let Some(t) = task {
@@ -536,8 +531,6 @@ fn info_of(slot: &Slot, counts: Option<&SourceCounts>) -> SourceInfo {
 }
 
 /// Plain-language health from the slot's state, last error and item errors of the last day.
-/// Item errors are counted per item (a bad item re-sent every pass counts once), and the last
-/// message names its item.
 fn health_of(slot: &Slot, items: u64) -> nugget_core::ipc::SourceHealth {
     let since = OffsetDateTime::now_utc() - time::Duration::days(1);
     let mut keys = std::collections::HashSet::new();
@@ -573,8 +566,8 @@ fn health_of(slot: &Slot, items: u64) -> nugget_core::ipc::SourceHealth {
     }
 }
 
-/// Refine an otherwise healthy diagnosis with the latest scan: a folder that cannot be opened,
-/// or a finished scan that found nothing to index while nothing is indexed.
+/// Refine an otherwise healthy diagnosis with the latest scan: a folder that cannot be opened, or a
+/// finished scan that found nothing to index while nothing is indexed.
 fn scan_health(health: SourceHealth, scan: &ScanReport, items: u64) -> SourceHealth {
     use nugget_connector::health::code;
     if !matches!(
@@ -718,21 +711,18 @@ impl IngestBuilder {
     }
 
     /// Settings hook applied each time a connector is built (see [`SettingsResolver`]).
-    /// After the values it adds change, call [`Ingest::reload`] to rebuild the connector.
     pub fn settings_resolver(mut self, resolver: SettingsResolver) -> Self {
         self.settings_resolver = Some(resolver);
         self
     }
 
-    /// Tracker of interactive model requests that background triage yields to. Default: a new
-    /// one with [`IngestConfig::triage_idle_ms`] of grace; get it with [`Ingest::foreground`].
+    /// Tracker of interactive model requests that background triage yields to.
     pub fn foreground(mut self, foreground: Arc<Foreground>) -> Self {
         self.foreground = Some(foreground);
         self
     }
 
     /// Load `<config>/sources.toml` and start a supervisor for every enabled source.
-    /// Must be called inside a Tokio runtime.
     pub async fn start(self) -> Result<Ingest> {
         let file = sources::path(&self.paths.config);
         let f2 = file.clone();
@@ -786,8 +776,8 @@ impl IngestBuilder {
             }
         }
         let ids: Vec<SourceId> = lock(&inner.slots).keys().cloned().collect();
-        // Items the old inline triage stored metadata-only as junk (QA GG2-7) are re-indexed
-        // by their source's next full pass; done before any worker caches stored versions.
+        // Items the old inline triage stored metadata-only as junk (QA GG2-7) are re-indexed by
+        // their source's next full pass; done before any worker caches stored versions.
         {
             let store = inner.store.clone();
             match tokio::task::spawn_blocking(move || store.reset_versions_of_legacy_junk())
@@ -874,9 +864,7 @@ impl Ingest {
         self.inner.registry.kinds()
     }
 
-    /// Add a source (`sources.add`). Settings are validated by the kind's factory and must not
-    /// contain secrets. Without an id, one is generated as `<kind>-<n>`. The source starts
-    /// enabled and syncing immediately.
+    /// Add a source (`sources.add`).
     pub async fn add(&self, spec: SourceSpec) -> Result<SourceInfo> {
         let inner = &self.inner;
         let _g = inner.ops.lock().await;
@@ -936,9 +924,7 @@ impl Ingest {
         Ok(info)
     }
 
-    /// Change name, settings and/or enabled state (`sources.update`). New settings are
-    /// validated, rebuild the connector and reset the cursor so the next pass reconciles
-    /// everything against the new settings.
+    /// Change name, settings and/or enabled state (`sources.update`).
     pub async fn update(&self, update: SourceUpdate) -> Result<SourceInfo> {
         let inner = &self.inner;
         let _g = inner.ops.lock().await;
@@ -1032,9 +1018,6 @@ impl Ingest {
         }
         if settings_changed {
             // Start over so the next pass reconciles everything against the new settings.
-            // Items stay indexed meanwhile: connectors treat `cursor = None` with known items
-            // as a reconciling full pass (see `nugget_connector::Connector::sync`), re-sending
-            // what is still there (cheap: version skip) and deleting what no longer is.
             let store = inner.store.clone();
             let sid = id.clone();
             tokio::task::spawn_blocking(move || store.set_cursor(&sid, serde_json::Value::Null))
@@ -1056,8 +1039,7 @@ impl Ingest {
     }
 
     /// Remove a source (`sources.remove`): stop it, forget it, and delete its keychain entries
-    /// (`oauth:<id>`, `password:<id>` and any other account it wrote). With `purge`, also
-    /// delete everything indexed from it and its cursor.
+    /// (`oauth:<id>`, `password:<id>` and any other account it wrote).
     pub async fn remove(&self, id: &SourceId, purge: bool) -> Result<()> {
         let inner = &self.inner;
         let _g = inner.ops.lock().await;
@@ -1126,8 +1108,6 @@ impl Ingest {
     }
 
     /// Run a sync pass now (`sources.sync`): one source, or every enabled source with `None`.
-    /// Also lifts `NeedsAuth` and error backoff, and lets a power-paused backfill proceed.
-    /// A source that failed to start (bad settings, unknown kind) is retried.
     pub fn sync_now(&self, id: Option<&SourceId>) -> Result<()> {
         let inner = &self.inner;
         let ids: Vec<SourceId> = match id {
@@ -1187,8 +1167,7 @@ impl Ingest {
         })
     }
 
-    /// Progress and source-change events. Each subscriber gets every event from now on (up to
-    /// a buffer of 1024; a lagging subscriber sees `RecvError::Lagged`).
+    /// Progress and source-change events.
     pub fn subscribe(&self) -> broadcast::Receiver<IngestEvent> {
         self.inner.events.subscribe()
     }
@@ -1213,27 +1192,17 @@ impl Ingest {
         self.inner.metrics.committed()
     }
 
-    /// Watch [`committed`](Self::committed): the receiver's `changed()` resolves after each
-    /// commit, so consumers need not poll (or rely on throttled progress events) to notice new
-    /// data.
+    /// Watch [`committed`](Self::committed): the receiver's `changed()` resolves after each commit,
+    /// so consumers need not poll (or rely on throttled progress events) to notice new data.
     pub fn subscribe_committed(&self) -> tokio::sync::watch::Receiver<u64> {
         self.inner.metrics.subscribe_committed()
     }
 
-    /// Start interactive authorization (`sources.auth.begin`). Show `url` to the user. The
-    /// completion is also handled here: on success the source leaves `NeedsAuth`, re-syncs and a
-    /// [`IngestEvent::SourceChanged`] is emitted; awaiting `done` is optional.
-    ///
-    /// The flow belongs to the source: starting another one cancels it, and so do
-    /// [`remove`](Self::remove), [`update`](Self::update) (when settings or the enabled state
-    /// change) and [`reload`](Self::reload), which wait for it to stop before going on. `done`
-    /// then resolves to `Error::Cancelled`. A removed source's connector can no longer write
-    /// credentials, and if a flow still completes for a source that no longer exists, the token
-    /// it wrote is deleted.
+    /// Start interactive authorization (`sources.auth.begin`).
     pub async fn begin_auth(&self, id: &SourceId) -> Result<AuthFlow> {
         let inner = self.inner.clone();
-        // Serialised with add / update / remove / reload, so a flow is never started for a
-        // source that is being removed.
+        // Serialised with add / update / remove / reload, so a flow is never started for a source
+        // that is being removed.
         let _g = inner.ops.lock().await;
         // A second authorization replaces the first.
         inner.cancel_auth(id).await;
@@ -1271,9 +1240,7 @@ impl Ingest {
                 _ = task_cancel.cancelled() => Err(Error::Cancelled),
             };
             if retired.is_cancelled() {
-                // The source was removed meanwhile. Its writes fail from then on, but a token
-                // written just before must not outlive it (or be inherited by a source added
-                // later under the same id).
+                // The source was removed meanwhile.
                 if r.is_ok() && !lock(&inner.slots).contains_key(&id) {
                     let secrets = inner.secrets.clone();
                     let account = nugget_core::secrets::oauth_account(id.as_str());
@@ -1329,8 +1296,7 @@ impl Ingest {
         })
     }
 
-    /// Store a credential for a source in the keychain and re-sync it. `account` must belong to
-    /// the source (`<prefix>:<id>`, e.g. [`nugget_core::secrets::password_account`]).
+    /// Store a credential for a source in the keychain and re-sync it.
     pub async fn set_secret(&self, id: &SourceId, account: &str, value: &str) -> Result<()> {
         let inner = &self.inner;
         if !lock(&inner.slots).contains_key(id) {
@@ -1359,8 +1325,7 @@ impl Ingest {
     }
 
     /// Rebuild a source's connector (re-running the [`SettingsResolver`]) and restart its
-    /// supervisor if it is enabled. Use after credentials the resolver injects have changed.
-    /// The cursor is kept.
+    /// supervisor if it is enabled.
     pub async fn reload(&self, id: &SourceId) -> Result<()> {
         let inner = &self.inner;
         let _g = inner.ops.lock().await;
@@ -1389,22 +1354,18 @@ impl Ingest {
         .await
     }
 
-    /// Look for items indexed without embeddings (for example before an embedder was routable)
-    /// and embed them now, in the background. Cheap to call: it only wakes the re-embed job,
-    /// which also runs at start and every [`IngestConfig::reembed_interval_ms`]. Call it when an
-    /// embedding provider becomes available.
+    /// Look for items indexed without embeddings (for example before an embedder was routable) and
+    /// embed them now, in the background.
     pub fn reembed_now(&self) {
         self.inner.reembed.notify_one();
     }
 
-    /// Interactive model requests in flight, which background triage yields to. The daemon
-    /// marks every on-device chat that is not triage with [`Foreground::begin`].
+    /// Interactive model requests in flight, which background triage yields to.
     pub fn foreground(&self) -> Arc<Foreground> {
         self.inner.foreground.clone()
     }
 
     /// Wake the background triage job (for example when a local triage model became ready).
-    /// Items whose triage failed and whose retry wait has passed are tried again.
     pub fn triage_now(&self) {
         lock(&self.inner.triage).retry_now();
         self.inner.triage_wake.notify_one();
@@ -1420,9 +1381,7 @@ impl Ingest {
         lock(&self.inner.reembed_state).stats.clone()
     }
 
-    /// Stop every supervisor and worker and wait for them. Changes queued but not yet applied
-    /// are dropped (their cursor was never committed, so the next start re-reads them).
-    /// Idempotent.
+    /// Stop every supervisor and worker and wait for them.
     pub async fn shutdown(&self) {
         self.inner.shutdown.cancel();
         self.inner.tracker.close();

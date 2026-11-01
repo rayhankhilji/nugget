@@ -199,8 +199,8 @@ impl Ranges {
 }
 
 /// `text` without what a Markdown renderer never shows: HTML comments (in HTML blocks and inline
-/// HTML, never in code) and comment-style link reference definitions (`[//]: # (...)`,
-/// `[comment]: <> (...)`: a definition whose destination is `#` or empty).
+/// HTML, never in code) and comment-style link reference definitions (`[//]: # (...)`, `[comment]:
+/// <> (...)`: a definition whose destination is `#` or empty).
 fn strip_hidden(text: &str) -> String {
     if !text.contains("<!--") && !text.contains("]:") {
         return text.to_owned();

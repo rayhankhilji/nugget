@@ -27,17 +27,7 @@ use crate::text::{MAX_QUOTE_CHARS, normalize_ws, truncate_chars};
 
 /// Processing failures after which an item is left alone until it changes.
 pub(crate) const MAX_FAILURES: u32 = 3;
-/// Single-valued predicates (see [`crate::KnowledgeConfig::single_valued_predicates`]): one value
-/// at a time is current, earlier ones are superseded history (see `Session::settle`).
-///
-/// - `works_at`, `lives_in`, `reports_to`: a person's employer, home and manager change over
-///   time; only the latest is current.
-/// - `has_title`, and `has_role` (the gold vocabulary's name for it, kept in case an extractor or
-///   configuration writes it; the LLM's `role`, `position`, `job_title`, `works_as`, ... are
-///   mapped to `has_title`): one job title at a time.
-/// - `born_on`, `due_on`: one date; a different one is a correction.
-/// - `located_at` (a calendar event's location) and `held_at` (the LLM's name for it): an event
-///   takes place at one venue; a moved event supersedes the old venue.
+/// Single-valued predicates (see [`crate::KnowledgeConfig::single_valued_predicates`]).
 pub const SINGLE_VALUED: &[&str] = &[
     "works_at",
     "lives_in",
@@ -55,19 +45,13 @@ const EVENT_DATED: &[&str] = &["attended", "organized", "invited_to"];
 /// Single-valued predicates whose start an extractor may know (an event's venue from its
 /// calendar entry): a `valid_from` that is not one of the claim's evidence dates is kept.
 const EXPLICIT_START: &[&str] = &["located_at", "held_at"];
-/// Distinct quotes per claim (the newest by item date, then text) read for temporal cues. Dates
-/// are read from every evidence item; only the quote work is capped, and the choice depends on
-/// the evidence, not on the order it arrived in.
+/// Distinct quotes per claim (the newest by item date, then text) read for temporal cues.
 const CUE_SCAN: usize = 256;
 /// Cached item dates at most (the cache is cleared beyond).
-#[cfg(not(test))]
 const DATE_CACHE: usize = 10_000;
-#[cfg(test)]
-const DATE_CACHE: usize = 4;
 /// Entities migrated per write batch by the backfill.
 const BACKFILL_PAGE: usize = 64;
-/// How far in the future an item's date may be: later dates (a forged mail `Date`) are clamped,
-/// so an item cannot pin a value as current for years.
+/// How far in the future an item's date may be.
 const FUTURE_SLACK: time::Duration = time::Duration::days(1);
 
 /// Item dates (clamped, see [`FUTURE_SLACK`]) for one computation.
@@ -125,10 +109,7 @@ fn failure_retry_due(e: &Entry) -> bool {
     e.failures > 0 && e.failures < MAX_FAILURES
 }
 
-/// Build the work queue (blocking: run off the async runtime). With a change log and a stored
-/// cursor, only items changed or deleted since the cursor are looked at, plus ledger entries due
-/// for a retry when the retry hints say there may be some; otherwise every source is diffed
-/// against the ledger.
+/// Build the work queue (blocking: run off the async runtime).
 pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) -> Result<Plan> {
     let mut state = State::load(feed)?;
     let notes = Notes::load(feed)?;
@@ -157,8 +138,6 @@ pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) 
 }
 
 /// Add the items left deferred ([`State::deferred`]) that the plan does not cover already.
-/// Their ledger entry still describes the version whose (model) facts are in the graph, so
-/// [`Session::process_upsert`] sees them as changed.
 fn plan_deferred(feed: &dyn ItemFeed, p: &mut Plan) -> Result<()> {
     if p.state.deferred.is_empty() {
         return Ok(());
@@ -226,9 +205,7 @@ fn plan_full(
             key: ItemKey::new(k.as_str()),
         }));
         if reset {
-            // An extractor upgrade re-extracts every item: each one's old evidence is retracted
-            // first, so what the old extractor got wrong (duplicates included) is re-resolved by
-            // the new one, and entities left with nothing behind them are pruned.
+            // An extractor upgrade re-extracts every item.
             ledger.clear();
         }
         let mut keys: Vec<(&ItemKey, &Option<String>)> = versions.iter().collect();
@@ -380,8 +357,7 @@ fn aggregate(c: f32, n: usize) -> f32 {
     (1.0 - (1.0 - c).powi(n)).min(MAX_AGGREGATE.max(c))
 }
 
-/// Where a claim written during the current item lives: an op of the pending batch (its id is
-/// known once the batch is applied) or an existing claim.
+/// Where a claim written during the current item lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Queued {
     Op(usize),
@@ -420,8 +396,7 @@ struct ValueGroup {
     /// The user rejected this value.
     rejected: bool,
     /// The user replaced this value in the vault and its sources still say the same
-    /// ([`GraphStore::replaced_by_user`](nugget_graph::GraphStore::replaced_by_user)): it stays
-    /// history and never becomes current again.
+    /// ([`GraphStore::replaced_by_user`](nugget_graph::GraphStore::replaced_by_user)).
     replaced: bool,
     /// Some claim is active or superseded with evidence, or user-asserted.
     live: bool,
@@ -481,8 +456,7 @@ impl ValueGroup {
             _ => {}
         }
         self.live = true;
-        // Every evidence item's date; quotes newest first (then by text), so which ones are read
-        // for cues does not depend on the order evidence was added in.
+        // Every evidence item's date.
         let mut dated: Vec<(OffsetDateTime, Option<&str>)> = c
             .evidence
             .iter()
@@ -856,8 +830,7 @@ impl<'a> Session<'a> {
     }
 
     /// Settle every single-valued pair the last writes and retractions touched (see
-    /// [`Session::settle`]). After a deletion, a pair left without an active value falls back to
-    /// the best remaining superseded value (the freshest sighting that has not ended).
+    /// [`Session::settle`]).
     fn restore_superseded(&mut self) -> Result<()> {
         let pairs = std::mem::take(&mut self.settle_queue);
         for (s, p) in pairs {
@@ -996,8 +969,7 @@ impl<'a> Session<'a> {
         let had_model = w.prev.as_ref().is_some_and(|p| p.llm == LLM_DONE);
         match self.extract_and_apply(&item, prev_llm, had_model).await {
             Ok(None) => {
-                // Keep the earlier facts; the ledger keeps describing the version they are
-                // from, and the next plans pick the item up again.
+                // Keep the earlier facts.
                 self.stats.items_deferred += 1;
                 return Ok(false);
             }
@@ -1036,9 +1008,7 @@ impl<'a> Session<'a> {
         self.state.deferred.retain(|d| d.item != *item);
     }
 
-    /// Keep `item` deferred. `failed`: the model step ran for it and did not finish, which
-    /// counts as an attempt; returns `false` (and forgets the item) once attempts are used up,
-    /// so it is extracted without the model rather than waiting forever.
+    /// Keep `item` deferred.
     fn defer(&mut self, item: &ItemRef, failed: bool) -> bool {
         let max = self.inner.cfg.llm.max_attempts.max(1);
         let pos = match self.state.deferred.iter().position(|d| d.item == *item) {
@@ -1061,8 +1031,7 @@ impl<'a> Session<'a> {
         true
     }
 
-    /// Whether the model is wanted for `item` but cannot run for it now: this run's request
-    /// budget is spent (or zero: power constrained), or the pipeline is stopping.
+    /// Whether the model is wanted for `item` but cannot run for it now.
     fn llm_blocked(&self, item: &Item) -> bool {
         let junk = item.metadata.get("junk") == Some(&Value::Bool(true));
         self.inner.cfg.llm.enabled
@@ -1071,10 +1040,7 @@ impl<'a> Session<'a> {
             && (self.llm_left == 0 || self.inner.stopping())
     }
 
-    /// Retract the item's old evidence, extract again, apply. Returns the LLM status, or
-    /// `None` when the item was left as it is: `had_model` (the graph holds the model's facts
-    /// of an earlier version) and the model could not run for it now, so re-extracting would
-    /// replace those facts with the deterministic extractors' alone.
+    /// Retract the item's old evidence, extract again, apply.
     async fn extract_and_apply(
         &mut self,
         item: &Item,
@@ -1112,14 +1078,12 @@ impl<'a> Session<'a> {
         let llm = self.llm_step(item, &chunks, &mut ex, prev_llm).await;
         let failed = self.stats.llm_failed_requests > failed_before;
         if had_model && self.inner.stopping() && (llm >= LLM_PENDING || failed) {
-            // A request was cut off by shutdown (the runtime stops with the daemon): even a
-            // partial answer would replace the full one. Not counted as an attempt.
+            // A request was cut off by shutdown (the runtime stops with the daemon).
             self.defer(&item.item, false);
             return Ok(None);
         }
         if had_model && llm >= LLM_PENDING && self.defer(&item.item, true) {
-            // No provider, failed requests, or the budget ran out within the item: keep the
-            // earlier model facts for now (bounded by `max_attempts`).
+            // No provider, failed requests, or the budget ran out within the item.
             return Ok(None);
         }
         // Retracted only now, once the model step is known to have run (or not to be wanted).
@@ -1468,8 +1432,7 @@ impl<'a> Session<'a> {
     // ---------------------------------------------------------------- claims
 
     /// Apply the pending batch (one transaction for the item's writes), then re-aggregate the
-    /// confidence of the claims it wrote, date them, and settle the single-valued pairs it
-    /// touched.
+    /// confidence of the claims it wrote, date them, and settle the single-valued pairs it touched.
     pub fn commit(&mut self) -> Result<()> {
         let batch = std::mem::take(&mut self.batch);
         self.queued.clear();
@@ -1497,8 +1460,7 @@ impl<'a> Session<'a> {
         self.restore_superseded()
     }
 
-    /// Drop the pending batch (the item failed). Pairs queued for settling stay queued: the
-    /// item's retraction happened.
+    /// Drop the pending batch (the item failed).
     fn discard(&mut self) {
         self.batch = GraphBatch::new();
         self.queued.clear();
@@ -1514,9 +1476,7 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// Add a claim with its lifecycle: revive a just-retracted twin, date it, queue its
-    /// single-valued pair for settling ([`Session::settle`]), and aggregate confidence over
-    /// evidence. The writes go to the item's batch.
+    /// Add a claim with its lifecycle.
     fn add_claim(
         &mut self,
         mut new: NewClaim,
@@ -1576,10 +1536,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    /// Write a single-valued claim: as evidence of the claim already holding that value (active,
-    /// user-asserted, rejected, superseded, or about to be revived), else as a new active claim.
-    /// Which value is current, and the intervals, are decided after the batch is applied
-    /// ([`Session::settle`]), from all the values' evidence.
+    /// Write a single-valued claim.
     fn add_single_valued(&mut self, new: &NewClaim, revive: Option<ClaimId>) -> Result<Queued> {
         let same = self
             .graph()
@@ -1645,8 +1602,7 @@ impl<'a> Session<'a> {
             .collect())
     }
 
-    /// What a claim's object is called (for temporal cues in quotes): an entity's name and
-    /// aliases, or the literal.
+    /// What a claim's object is called (for temporal cues in quotes).
     fn object_names(&self, object: &ClaimObject) -> Result<Vec<String>> {
         Ok(match object {
             ClaimObject::Literal(l) => vec![l.clone()],
@@ -1657,33 +1613,7 @@ impl<'a> Session<'a> {
         })
     }
 
-    /// Settle one single-valued predicate of one subject from scratch: which value is current,
-    /// which are history, and every interval. A deterministic function of the claims' evidence
-    /// (item dates, clamped to the near future, and quotes), so the order items were processed in
-    /// does not matter.
-    ///
-    /// Claims are grouped by value (object). A value the user rejected takes no part (an active
-    /// twin of it is superseded). For each other value: its *last sighting* is its newest
-    /// evidence date whose quote does not say the fact ended ([`temporal::Cue::Ended`]); it has
-    /// *ended* when its newest ended-quote is at least as recent as that (so "my last day at X"
-    /// ends X, and only a later sighting brings it back).
-    ///
-    /// The current value is a user-asserted one if any (the newest assertion); otherwise the
-    /// value with the latest sighting among those not ended, ties broken by a start cue at that
-    /// date ("joined", "now", "moved to"), then by the latest place in the text (chunk, quote
-    /// position in the chunk, object position in the quote: "from X to Y"), then by the
-    /// object's name. Its claims are active; every other value's active claims are superseded.
-    /// With every value ended, none is current. (A user assertion stays current until the user
-    /// changes it, whatever newer evidence says: a known limit.)
-    ///
-    /// Intervals (of active and superseded claims with evidence): `valid_from` is the earliest
-    /// evidence date (an explicit start of [`EXPLICIT_START`] predicates is kept); an active
-    /// claim has no `valid_to`. A superseded value is valid until the first date another value is
-    /// seen at or after its last sighting; an ended one until its last ended-quote, or that first
-    /// other sighting when earlier; with neither, `valid_to` stays open.
-    ///
-    /// Reads the pair with one `claims_for` (the graph has no subject-and-predicate lookup) and
-    /// re-reads only the claims an activation may have folded.
+    /// Settle one single-valued predicate of one subject from scratch.
     fn settle(&mut self, subject: &EntityId, predicate: &str) -> Result<()> {
         let Some(ent) = self.graph().get_entity(subject)? else {
             return Ok(());
@@ -1871,8 +1801,7 @@ impl<'a> Session<'a> {
         Ok(scored.into_iter().max().map(|(_, _, k)| k))
     }
 
-    /// Where a value's latest affirming evidence is in its text: (chunk, quote offset in the
-    /// chunk, object offset in the quote), the latest of its quotes at its last sighting.
+    /// Where a value's latest affirming evidence is in its text.
     fn position(
         &self,
         g: &mut ValueGroup,
@@ -1920,12 +1849,7 @@ impl<'a> Session<'a> {
     }
 
     /// One-time migration of a graph written before validity intervals (see
-    /// `state::TEMPORAL_VERSION`), without the LLM: claims with evidence but no `valid_from`
-    /// start at their earliest evidence date, and every single-valued pair is settled
-    /// ([`Session::settle`]), which supersedes all but one of several active values and dates
-    /// superseded ones. Entities are visited in id order; the last one done is kept in
-    /// `State::temporal_cursor` and the walk stops at the deadline (after at least one entity),
-    /// so a cut or killed run resumes where it stopped. Idempotent. Returns whether it finished.
+    /// `state::TEMPORAL_VERSION`), without the LLM.
     pub fn backfill_validity(&mut self, deadline: Option<Instant>) -> Result<bool> {
         let mut ids: Vec<EntityId> = self
             .graph()
@@ -2002,10 +1926,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    /// The follow-up patch of a claim the batch wrote: confidence raised to the noisy-OR of its
-    /// distinct evidence items (if higher), and its start lowered to the item's date when that is
-    /// earlier (multi-valued predicates; an explicit start, such as an event's, is kept as given;
-    /// single-valued ones are dated by [`Session::settle`]).
+    /// The follow-up patch of a claim the batch wrote.
     fn follow_up(&self, id: ClaimId, w: &Written) -> Result<Option<ClaimPatch>> {
         let Some(c) = self.graph().get_claim(id)? else {
             return Ok(None);
@@ -2040,8 +1961,7 @@ impl<'a> Session<'a> {
     }
 }
 
-/// A typed note is its entity's own record, written by the user: the identifiers it lists
-/// (several addresses of one person, say) belong together, like a contact card's.
+/// A typed note is its entity's own record, written by the user.
 fn trust_note_identifiers(ex: &mut Extraction) {
     if ex.note_names.is_empty() {
         return;
@@ -2057,9 +1977,7 @@ fn trust_note_identifiers(ex: &mut Extraction) {
 }
 
 impl Session<'_> {
-    /// End of a run: place the short-form people ("Maggie", "Sam") whose corroboration this
-    /// run may have supplied (see `Resolver::settle_pending`), so the graph does not depend on
-    /// the order items were processed in.
+    /// End of a run.
     pub fn settle_short_names(&mut self) -> Result<()> {
         let splits = self.inner.splits()?;
         let resolver = Resolver::new(
@@ -2083,13 +2001,8 @@ impl Session<'_> {
     }
 }
 
-/// A person the model named by a short form only ("Maggie", "M. Thistlewood", "Maggie T") is
-/// the one person on the same item whose name it may be short for ([`crate::names::compatible`]:
-/// first name, nickname, initials), when there is exactly one: the occurrence takes that
-/// person's name and identifiers, so both resolve together, and notes why (a merge record on
-/// the entity). Being on the same item is the corroboration; two candidates (two Sams) fold
-/// nothing. The user (by one of `me_emails`, or by `me_name`) is never a target and blocks the
-/// fold when the short name fits them too: a third party's "Rob" is not the user Robert.
+/// A person the model named by a short form only ("Maggie", "M. Thistlewood", "Maggie T") is the
+/// one person on the same item whose name it may be short for ([`crate::names::compatible`]).
 fn fold_first_names(
     base: &Extraction,
     extra: &mut Extraction,
@@ -2137,18 +2050,8 @@ fn fold_first_names(
             if key == own || cands.iter().any(|(k, _, _)| *k == key) {
                 continue;
             }
-            let mut reasons: Vec<&'static str> = Vec::new();
-            for full in std::iter::once(&c.name).chain(&c.aliases) {
-                for s in &shorts {
-                    if let Some(m) = crate::names::compatible(s, full) {
-                        for r in m.reasons {
-                            if !reasons.contains(&r) {
-                                reasons.push(r);
-                            }
-                        }
-                    }
-                }
-            }
+            let reasons =
+                crate::names::fit_reasons(&shorts, std::iter::once(&c.name).chain(&c.aliases));
             if !reasons.is_empty() {
                 if c.identifiers
                     .iter()
@@ -2186,54 +2089,13 @@ fn fold_first_names(
 
 #[cfg(test)]
 mod tests {
-    use super::{aggregate, fold_first_names, trust_note_identifiers};
+    use super::{fold_first_names, trust_note_identifiers};
     use crate::spec::{EntitySpec, Extraction};
-    use nugget_graph::{EntityKind, Identifier};
+    use nugget_graph::EntityKind;
     use std::collections::HashSet;
 
     fn header(name: &str, email: &str) -> EntitySpec {
         EntitySpec::new(EntityKind::Person, name).ident("email", email)
-    }
-
-    #[test]
-    fn a_first_name_is_the_one_person_on_the_item_it_starts() {
-        let mut base = Extraction::default();
-        base.entity(header("Maggie T", "maggie.t@mail.test"));
-        base.entity(header("Robin Ashgrove", "robin@ashgrove.test"));
-        let mut extra = Extraction::default();
-        extra.entity(EntitySpec::new(EntityKind::Person, "Maggie"));
-        extra.entity(EntitySpec::new(EntityKind::Person, "Unknown"));
-        fold_first_names(&base, &mut extra, &HashSet::new(), None);
-        let m = &extra.entities[0];
-        assert_eq!(m.name, "Maggie T");
-        assert_eq!(m.aliases, vec!["Maggie".to_string()]);
-        assert_eq!(
-            m.identifiers,
-            vec![Identifier::new("email", "maggie.t@mail.test")]
-        );
-        assert_eq!(extra.entities[1].name, "Unknown");
-        // Absorbed, both are one occurrence.
-        base.absorb(extra);
-        assert_eq!(
-            base.entities
-                .iter()
-                .filter(|e| e.name == "Maggie T")
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn a_shared_first_name_stays_apart() {
-        let mut base = Extraction::default();
-        base.entity(header("Sam Okafor", "sam.okafor@ostrander.test"));
-        base.entity(header("Sam Whitlock", "sam@marrowbank.test"));
-        let mut extra = Extraction::default();
-        extra.entity(EntitySpec::new(EntityKind::Person, "Sam"));
-        fold_first_names(&base, &mut extra, &HashSet::new(), None);
-        assert_eq!(extra.entities[0].name, "Sam");
-        assert!(extra.entities[0].identifiers.is_empty());
-        assert!(extra.entities[0].folds.is_empty());
     }
 
     #[test]
@@ -2261,55 +2123,6 @@ mod tests {
     }
 
     #[test]
-    fn nicknames_and_initials_fold_into_the_one_person_on_the_item() {
-        let mut base = Extraction::default();
-        base.entity(header(
-            "Margaret Thistlewood",
-            "margaret.thistlewood@cindergate.test",
-        ));
-        base.entity(header("Mark Ellery", "mark@ellery.test"));
-        let mut extra = Extraction::default();
-        extra.entity(EntitySpec::new(EntityKind::Person, "Maggie"));
-        extra.entity(EntitySpec::new(EntityKind::Person, "M. Thistlewood"));
-        extra.entity(EntitySpec::new(EntityKind::Person, "Maggie T"));
-        // An initial alone fits both Margaret and Mark: not folded.
-        extra.entity(EntitySpec::new(EntityKind::Person, "M."));
-        // "Mark" is not a form of "Margaret".
-        extra.entity(EntitySpec::new(EntityKind::Person, "Marky"));
-        fold_first_names(&base, &mut extra, &HashSet::new(), None);
-        let reasons: Vec<Vec<String>> = extra.entities[..3]
-            .iter()
-            .map(|e| {
-                assert_eq!(e.name, "Margaret Thistlewood");
-                assert_eq!(
-                    e.identifiers,
-                    vec![Identifier::new(
-                        "email",
-                        "margaret.thistlewood@cindergate.test"
-                    )]
-                );
-                assert_eq!(e.folds.len(), 1);
-                e.folds[0].reasons.clone()
-            })
-            .collect();
-        assert_eq!(
-            reasons,
-            [
-                vec!["nickname", "same_item"],
-                vec!["initial", "same_item"],
-                vec!["nickname", "initial", "same_item"],
-            ]
-        );
-        assert_eq!(extra.entities[3].name, "M.");
-        assert_eq!(extra.entities[4].name, "Marky");
-        // The folds travel with the occurrence when it is absorbed into the header's.
-        base.absorb(extra);
-        let m = &base.entities[0];
-        assert_eq!(m.folds.len(), 3);
-        assert!(m.aliases.contains(&"Maggie".to_string()));
-    }
-
-    #[test]
     fn a_typed_notes_own_identifiers_are_trusted() {
         let mut ex = Extraction::default();
         let me = ex
@@ -2326,101 +2139,26 @@ mod tests {
             "only people and organisations"
         );
     }
-
-    #[test]
-    fn noisy_or() {
-        assert!((aggregate(0.5, 1) - 0.5).abs() < 1e-6);
-        assert!((aggregate(0.5, 2) - 0.75).abs() < 1e-6);
-        assert!(aggregate(0.9, 40) <= 0.99);
-        assert!(aggregate(0.995, 3) <= 0.995 + 1e-6);
-    }
 }
 
 #[cfg(test)]
 mod temporal_tests {
-    use std::sync::Arc;
-
     use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-    use nugget_graph::{Claim, ClaimObject, ClaimStatus, Evidence, MemGraph};
-    use nugget_store::{NewChunk, NewItem, Store, content_hash};
+    use nugget_graph::{Claim, ClaimObject, ClaimStatus, Evidence};
     use time::OffsetDateTime;
     use time::format_description::well_known::Rfc3339;
+
+    use super::{CUE_SCAN, Dates, ValueGroup};
 
     fn at(s: &str) -> OffsetDateTime {
         OffsetDateTime::parse(s, &Rfc3339).unwrap()
     }
-
-    use super::{CUE_SCAN, DATE_CACHE, Dates, Session, ValueGroup};
-    use crate::state::{Notes, State};
-    use crate::{Knowledge, KnowledgeConfig};
 
     fn item(key: &str) -> ItemRef {
         ItemRef {
             source: SourceId::new("notes"),
             key: ItemKey::new(key),
         }
-    }
-
-    fn put(store: &Store, key: &str, at: OffsetDateTime) {
-        let it = NewItem::new("notes", key, content_hash(key)).with_modified_at(at);
-        store
-            .upsert_item_with_chunks(&it, &[NewChunk::text("x")])
-            .unwrap();
-    }
-
-    fn knowledge(store: &Store) -> Knowledge {
-        Knowledge::with_feed(
-            Arc::new(store.clone()),
-            Arc::new(MemGraph::new()),
-            None,
-            KnowledgeConfig::default(),
-        )
-    }
-
-    #[test]
-    fn dates_survive_the_cache_being_cleared() {
-        let store = Store::open_in_memory().unwrap();
-        let keys: Vec<String> = (0..DATE_CACHE + 3).map(|i| format!("n{i}")).collect();
-        for (i, k) in keys.iter().enumerate() {
-            put(
-                &store,
-                k,
-                at("2026-01-01T00:00:00Z") + time::Duration::days(i as i64),
-            );
-        }
-        let refs: Vec<ItemRef> = keys.iter().map(|k| item(k)).collect();
-        let k = knowledge(&store);
-        let mut s = Session::new(
-            k.inner_for_tests(),
-            State::default(),
-            Notes::load(&store).unwrap(),
-            Default::default(),
-            0,
-        );
-        // Fill the cache, then ask for all: the misses clear it, the answer keeps everything.
-        assert_eq!(
-            s.dates_of(refs[..DATE_CACHE].iter()).unwrap().len(),
-            DATE_CACHE
-        );
-        let all = s.dates_of(refs.iter()).unwrap();
-        assert_eq!(all.len(), refs.len());
-        assert_eq!(all[&refs[0]], at("2026-01-01T00:00:00Z"));
-    }
-
-    #[test]
-    fn future_dates_are_clamped() {
-        let store = Store::open_in_memory().unwrap();
-        put(&store, "far", at("2099-01-01T00:00:00Z"));
-        let k = knowledge(&store);
-        let mut s = Session::new(
-            k.inner_for_tests(),
-            State::default(),
-            Notes::load(&store).unwrap(),
-            Default::default(),
-            0,
-        );
-        let d = s.item_date(&item("far")).unwrap().unwrap();
-        assert!(d <= OffsetDateTime::now_utc() + time::Duration::days(1));
     }
 
     fn claim(evidence: Vec<Evidence>) -> Claim {

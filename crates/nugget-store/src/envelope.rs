@@ -1,15 +1,5 @@
 //! The store key sealed under a backup passphrase, so a backup can be restored on a machine that
 //! never held the key.
-//!
-//! Format (`v` 1, serde JSON): Argon2id over the passphrase with a random 16-byte salt derives a
-//! 256-bit key that seals the store key with XChaCha20-Poly1305 under a random 24-byte nonce.
-//! The associated data binds the format version, the KDF and its parameters, the salt, the AEAD
-//! and the key id, so editing any of them (for example lowering the KDF cost) makes opening fail.
-//! The KDF parameters are read from the envelope (within bounds checked before the KDF runs),
-//! so it can be opened whatever they were.
-//!
-//! The passphrase is NFC-normalised before key derivation, so the same passphrase typed on
-//! systems that compose accented characters differently opens the envelope.
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
@@ -40,8 +30,7 @@ const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 24;
 const AD_DOMAIN: &str = "nugget-key-envelope";
 
-/// The store key sealed under a passphrase (see the module docs). Serialize it to JSON to store
-/// it; nothing in it is secret without the passphrase.
+/// The store key sealed under a passphrase (see the module docs).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyEnvelope {
     v: u32,
@@ -66,9 +55,8 @@ impl KeyEnvelope {
         Self::seal_with(key, passphrase, DEFAULT_M_KIB, DEFAULT_T, DEFAULT_P)
     }
 
-    /// Seal `key` under `passphrase` with explicit Argon2id parameters: memory `m_kib` KiB
-    /// (8 MiB to 256 MiB), `t` passes (1 to 10), `p` lanes (1 to 16). `Error::Invalid` outside
-    /// those bounds or for parameters Argon2 rejects.
+    /// Seal `key` under `passphrase` with explicit Argon2id parameters: memory `m_kib` KiB (8 MiB
+    /// to 256 MiB), `t` passes (1 to 10), `p` lanes (1 to 16).
     pub fn seal_with(key: &StoreKey, passphrase: &str, m_kib: u32, t: u32, p: u32) -> Result<Self> {
         if m_kib < MIN_M_KIB || t < MIN_T {
             return Err(Error::Invalid(format!(
@@ -80,7 +68,6 @@ impl KeyEnvelope {
     }
 
     /// [`KeyEnvelope::seal_with`] without the minimum cost, so tests can seal in microseconds.
-    /// Never use it for a real envelope.
     #[doc(hidden)]
     pub fn seal_insecure_for_tests(
         key: &StoreKey,
@@ -130,9 +117,7 @@ impl KeyEnvelope {
         Ok(env)
     }
 
-    /// Recover the store key. `Error::Integrity` when the passphrase is wrong or the envelope was
-    /// modified (the two cannot be told apart), `Error::Unsupported` for an unknown format, KDF or
-    /// cipher, `Error::Invalid` for out-of-range parameters.
+    /// Recover the store key.
     pub fn open(&self, passphrase: &str) -> Result<StoreKey> {
         if self.v != VERSION || self.kdf != KDF || self.aead != AEAD {
             return Err(Error::Unsupported(format!(
@@ -268,7 +253,6 @@ mod tests {
                 "m={m} t={t}"
             );
         }
-        // Opening checks the bounds before running the KDF.
         let env = seal(&key, "passphrase");
         for bad in [
             KeyEnvelope {

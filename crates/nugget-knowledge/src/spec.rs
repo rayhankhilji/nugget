@@ -32,11 +32,9 @@ pub(crate) struct EntitySpec {
     pub identifiers: Vec<Identifier>,
     pub attributes: Map<String, Value>,
     pub mentions: Vec<MentionSpec>,
-    /// The name is only a placeholder (an address): never match on it, and replace it once a
-    /// real name is known.
+    /// The name is only a placeholder (an address).
     pub weak_name: bool,
-    /// The identifiers were asserted together by a trusted record (a contact card): entities
-    /// holding them may be merged.
+    /// The identifiers were asserted together by a trusted record (a contact card).
     pub trusted_identifiers: bool,
     /// Other occurrences folded into this one by a short-name rule ("Maggie" into "Maggie T" on
     /// the same item): each becomes a merge record on the entity this one resolves to.
@@ -117,8 +115,7 @@ pub(crate) struct LinkSpec {
     pub confidence: f32,
 }
 
-/// One item's extraction. Entities are de-duplicated as they are added (same identifier, or
-/// same kind and normalised name).
+/// One item's extraction.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Extraction {
     pub entities: Vec<EntitySpec>,

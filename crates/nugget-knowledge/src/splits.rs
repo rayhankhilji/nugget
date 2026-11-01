@@ -1,17 +1,4 @@
 //! User splits, remembered as constraints on entity resolution.
-//!
-//! When the user splits entity A into A and B ([`crate::Knowledge::record_split`]), re-extracting
-//! the sources must not undo it. Each split is kept (under its own state key, `knowledge/splits`,
-//! written only by `record_split`, so a running pipeline never overwrites one) with:
-//! - the pair `(A, B)`: resolution never merges them, whatever ids they end up under (merges are
-//!   followed; a pair the user merged back together, or with a side gone, no longer applies);
-//! - B's names and identifiers at split time;
-//! - the items whose evidence went to B only (the items whose mentions moved).
-//!
-//! An occurrence that resolves to A goes to B instead when it comes from one of B's items,
-//! carries one of the identifiers that went to B, or is called by one of B's names that A no
-//! longer has; when both A and B match an
-//! occurrence by name, the same rule picks one of them.
 
 use nugget_core::Result;
 use nugget_core::ids::{EntityId, ItemRef};

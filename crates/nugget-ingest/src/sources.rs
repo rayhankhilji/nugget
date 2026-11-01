@@ -1,21 +1,6 @@
-//! `<config>/sources.toml`: the persisted list of configured sources.
-//!
-//! ```toml
-//! version = 1
-//!
-//! [[sources]]
-//! id = "files-1"
-//! kind = "files"
-//! name = "Documents"
-//! enabled = true
-//! secret_accounts = []          # keychain account *names* only, never values
-//!
-//! [sources.settings]
-//! roots = ["/home/me/Documents"]
-//! ```
-//!
-//! Written atomically (temp file + fsync + rename) with mode 0600 on Unix. Settings must not
-//! contain secrets: well-known secret field names are rejected.
+//! `<config>/sources.toml`: the persisted list of configured sources (`[[sources]]` entries
+//! with `id`, `kind`, `name`, `enabled`, keychain account *names* and `settings`). Written
+//! atomically with mode 0600 on Unix; settings with well-known secret field names are rejected.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -181,8 +166,7 @@ pub(crate) fn write_atomic(file: &Path, bytes: &[u8]) -> Result<()> {
     result
 }
 
-/// JSON → TOML. Object members that are `null` are dropped (TOML has no null); `null` inside an
-/// array is rejected.
+/// JSON → TOML.
 fn json_to_toml(v: &Value) -> Result<Option<toml::Value>> {
     Ok(Some(match v {
         Value::Null => return Ok(None),
@@ -218,8 +202,7 @@ fn json_to_toml(v: &Value) -> Result<Option<toml::Value>> {
     }))
 }
 
-/// Source ids: 1–64 chars of `[A-Za-z0-9._-]`, starting with an alphanumeric. No `:` so keychain
-/// account names (`password:<id>`) stay unambiguous.
+/// Source ids: 1–64 chars of `[A-Za-z0-9._-]`, starting with an alphanumeric.
 pub(crate) fn validate_id(id: &SourceId) -> Result<()> {
     let s = id.as_str();
     let ok = !s.is_empty()

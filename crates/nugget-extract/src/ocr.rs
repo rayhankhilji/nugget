@@ -1,5 +1,5 @@
-//! Images (PNG, JPEG, WebP): OCR with the pure-Rust `ocrs` engine, only when
-//! `ExtractOptions::ocr` is set and both model files exist. Models are never downloaded.
+//! Images (PNG, JPEG, WebP): OCR with the pure-Rust `ocrs` engine, only when `ExtractOptions::ocr`
+//! is set and both model files exist.
 
 use nugget_core::{Error, Result};
 

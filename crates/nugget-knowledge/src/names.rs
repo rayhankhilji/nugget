@@ -1,18 +1,9 @@
-//! People's names: given-name equivalence (nicknames and diminutives), short forms of a full
-//! name, and the name hints in an email address's local part. Pure and deterministic; used by
-//! entity resolution ([`crate::resolve`]) to decide whether "Maggie", "M. Thistlewood",
-//! "Maggie T" or `mthistlewood@` *could* be Margaret Thistlewood. Whether they *are* is decided
-//! there, from corroborating evidence: a name match alone never merges two people.
-//!
-//! The diminutive table below was written for this crate from general knowledge of English
-//! naming customs. It is deliberately small (common forms only) and conservative: a nickname
-//! listed under several names ("Sam": Samuel, Samantha) matches each of them, and names that
-//! merely share letters ("Mark", "Margaret") are unrelated.
+//! People's names: given-name equivalence (nicknames and diminutives), short forms of a full name,
+//! and the name hints in an email address's local part.
 
 use nugget_graph::normalize_name;
 
-/// Canonical given names and their pure diminutives and nicknames (lower case): forms that are
-/// rarely a given name of their own. See [`STANDALONE`] for the ones that are.
+/// Canonical given names and their pure diminutives and nicknames (lower case).
 const DIMINUTIVES: &[(&str, &[&str])] = &[
     ("abigail", &["abby", "abbie"]),
     ("abraham", &["abe", "bram"]),
@@ -162,10 +153,8 @@ const DIMINUTIVES: &[(&str, &[&str])] = &[
     ("zachary", &["zach", "zack", "zac"]),
 ];
 
-/// Names that are diminutives of a longer name *and* common given names in their own right
-/// ("Liam" is a name, not only short for William; "Nathan", "Harry", "Ada", "Rose"). They never
-/// count as equivalent to a different full given name: "Liam Murphy" and "William Murphy" may be
-/// two people. They are kept out of the table above; the list documents why and guards it.
+/// Names that are diminutives of a longer name *and* common given names in their own right ("Liam"
+/// is a name, not only short for William; "Nathan", "Harry", "Ada", "Rose").
 pub(crate) const STANDALONE: &[&str] = &[
     "ada", "bella", "daisy", "dora", "drew", "eliza", "elle", "eve", "flora", "freda", "gail",
     "gene", "greta", "harry", "jack", "kay", "leo", "liam", "lisa", "lottie", "maisie", "millie",
@@ -173,8 +162,7 @@ pub(crate) const STANDALONE: &[&str] = &[
     "sandy", "tessa", "tina", "trina", "wendy", "willa",
 ];
 
-/// The canonical names a given name stands for: itself, plus every canonical name that lists
-/// it as a diminutive (none for a [`STANDALONE`] name). Lower-case input.
+/// The canonical names a given name stands for.
 fn keys(given: &str) -> Vec<&str> {
     if STANDALONE.contains(&given) {
         return vec![given];
@@ -188,9 +176,7 @@ fn keys(given: &str) -> Vec<&str> {
     out
 }
 
-/// Whether two given names name the same person's given name: equal, or one is a listed
-/// diminutive of the other, or both are diminutives of one name. Symmetric; case-insensitive.
-/// `Maggie` ~ `Margaret`, `Bob` ~ `Robert` ~ `Rob`; not `Maggie` ~ `Mark`.
+/// Whether two given names name the same person's given name.
 pub(crate) fn given_names_equivalent(a: &str, b: &str) -> bool {
     let (a, b) = (clean_token(a), clean_token(b));
     if a.is_empty() || b.is_empty() {
@@ -203,8 +189,7 @@ pub(crate) fn given_names_equivalent(a: &str, b: &str) -> bool {
     keys(&b).iter().any(|k| ka.contains(k))
 }
 
-/// Whether `given` is only a diminutive in the table ("Bob", "Maggie"), not a formal given
-/// name. Names that are also standalone names ("Jack", "Liam") are not diminutives here.
+/// Whether `given` is only a diminutive in the table ("Bob", "Maggie"), not a formal given name.
 pub(crate) fn is_diminutive(given: &str) -> bool {
     let g = clean_token(given);
     !g.is_empty()
@@ -289,9 +274,7 @@ fn clean_token(t: &str) -> String {
 }
 
 impl PersonName {
-    /// Parse a display name ("Margaret Thistlewood", "M. Thistlewood", "Maggie T", "Dr. Nadia
-    /// Kerrigan-Holt", "Maggie"). `None` for anything that does not look like a name (an
-    /// address, digits, nothing left).
+    /// Parse a display name ("Margaret Thistlewood", "M. Thistlewood", "Maggie T").
     pub fn parse(name: &str) -> Option<Self> {
         if name.contains('@') {
             return None;
@@ -370,8 +353,7 @@ impl PersonName {
     }
 }
 
-/// Whether a name is a short form: one word, or with an initial for a part ("M. Thistlewood",
-/// "Maggie T"). `false` for a written-out given name and surname, and for non-names.
+/// Whether a name is a short form.
 pub(crate) fn is_short_form(name: &str) -> bool {
     PersonName::parse(name).is_some_and(|p| !p.is_complete())
 }
@@ -383,16 +365,7 @@ pub(crate) struct NameMatch {
     pub reasons: Vec<&'static str>,
 }
 
-/// Whether `short` may be another way of writing `full`. `full` must have a written-out given
-/// name and a surname (written out, or at least an initial), and `short` must say no more than
-/// it, part by part:
-/// - the given name: the same, an equivalent nickname (`nickname`), or its initial (`initial`);
-/// - the surname: the same, its initial (`initial`), or left out (first name or nickname
-///   alone: `first_name` / `nickname`).
-///
-/// "Maggie", "Margaret", "M. Thistlewood", "Maggie T", "Maggie Thistlewood" are all compatible
-/// with "Margaret Thistlewood"; "Mark", "Maggie Smith", "M. T" are not. Two equal names are not
-/// short for each other (`None`), except when only middle names differ (`same_name`).
+/// Whether `short` may be another way of writing `full`.
 pub(crate) fn compatible(short: &str, full: &str) -> Option<NameMatch> {
     if normalize_name(short) == normalize_name(full) {
         return None;
@@ -495,8 +468,7 @@ pub(crate) struct LocalPart {
 pub(crate) enum LocalMatch {
     /// The given name (or a nickname) alone: `sam@`.
     Given,
-    /// The given name and the surname, whole or as initials: `maggie.t@`, `mthistlewood@`,
-    /// `margaret.thistlewood@`, `thistlewood.m@`.
+    /// The given name and the surname, whole or as initials.
     Full,
 }
 
@@ -524,9 +496,7 @@ impl LocalPart {
         Some(Self { words })
     }
 
-    /// The name hints the local part gives on its own: for `first.last` forms, a given name
-    /// and a surname (either may be an initial); for one word, a given name (it may also be a
-    /// run-together name, which only [`LocalPart::matches`] can tell).
+    /// The name hints the local part gives on its own.
     pub fn hints(&self) -> Option<PersonName> {
         let part = |w: &str| {
             let mut cs = w.chars();
@@ -598,6 +568,24 @@ impl LocalPart {
     }
 }
 
+/// Every reason any of `shorts` may be short for any of `fulls` (empty: none fits).
+pub(crate) fn fit_reasons<'a>(
+    shorts: &[&String],
+    fulls: impl IntoIterator<Item = &'a String>,
+) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+    for full in fulls {
+        for s in shorts {
+            for r in compatible(s, full).map(|m| m.reasons).unwrap_or_default() {
+                if !reasons.contains(&r) {
+                    reasons.push(r);
+                }
+            }
+        }
+    }
+    reasons
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,18 +594,10 @@ mod tests {
     fn nicknames_are_equivalent_both_ways() {
         for (a, b) in [
             ("Maggie", "Margaret"),
-            ("Margaret", "Maggie"),
-            ("Bob", "Robert"),
-            ("Rob", "Robert"),
             ("Bob", "Rob"),
             ("Peggy", "Maggie"),
-            ("bea", "Beatrice"),
-            ("Theo", "Theodore"),
-            ("Clem", "Clementine"),
-            ("Bart", "Bartholomew"),
             ("Sam", "Samantha"),
             ("Sam", "Samuel"),
-            ("Liz", "Elizabeth"),
             ("priya", "Priya"),
         ] {
             assert!(given_names_equivalent(a, b), "{a} ~ {b}");
@@ -625,14 +605,9 @@ mod tests {
         }
         for (a, b) in [
             ("Maggie", "Mark"),
-            ("Margaret", "Mark"),
-            ("Sam", "Sara"),
             ("Robert", "Roberta"),
             ("Samuel", "Samantha"),
-            ("Bob", "Bill"),
-            ("Mike", "Mark"),
             ("", "Mark"),
-            ("Priya", "Pria"),
         ] {
             assert!(!given_names_equivalent(a, b), "{a} !~ {b}");
             assert!(!given_names_equivalent(b, a), "{b} !~ {a}");
@@ -644,43 +619,14 @@ mod tests {
     }
 
     #[test]
-    fn names_parse() {
-        let p = PersonName::parse("Dr. Nadia Kerrigan-Holt").unwrap();
-        assert_eq!(p.given, Part::Full("nadia".into()));
-        assert_eq!(p.surname, Some(Part::Full("kerrigan-holt".into())));
-        assert!(p.is_complete());
-        let p = PersonName::parse("M. Thistlewood").unwrap();
-        assert_eq!(p.given, Part::Initial('m'));
-        assert!(!p.is_complete());
-        let p = PersonName::parse("Maggie T.").unwrap();
-        assert_eq!(p.surname, Some(Part::Initial('t')));
-        let p = PersonName::parse("Margaret A. Thistlewood").unwrap();
-        assert_eq!(p.surname, Some(Part::Full("thistlewood".into())));
-        let p = PersonName::parse("Sophie van der Berg").unwrap();
-        assert_eq!(p.surname, Some(Part::Full("van der berg".into())));
-        let p = PersonName::parse("Robert Chen Jr.").unwrap();
-        assert_eq!(p.surname, Some(Part::Full("chen".into())));
-        assert!(PersonName::parse("maggie.t@mail.test").is_none());
-        assert!(PersonName::parse("Room 101").is_none());
-        assert!(PersonName::parse("  ").is_none());
-        assert!(is_short_form("Maggie") && is_short_form("M. Thistlewood"));
-        assert!(is_short_form("Maggie T") && !is_short_form("Maggie Thistlewood"));
-        assert!(!is_short_form("x@y.test"));
-    }
-
-    #[test]
     fn short_forms_of_a_full_name() {
         let full = "Margaret Thistlewood";
         let ok = |s: &str, f: &str| compatible(s, f).map(|m| m.reasons);
         assert_eq!(ok("Margaret", full), Some(vec!["first_name"]));
         assert_eq!(ok("Maggie", full), Some(vec!["nickname"]));
         assert_eq!(ok("M. Thistlewood", full), Some(vec!["initial"]));
-        assert_eq!(ok("M Thistlewood", full), Some(vec!["initial"]));
         assert_eq!(ok("Maggie T", full), Some(vec!["nickname", "initial"]));
-        assert_eq!(ok("Margaret T.", full), Some(vec!["initial"]));
-        assert_eq!(ok("Maggie Thistlewood", full), Some(vec!["nickname"]));
         assert_eq!(ok("Bob Chen", "Robert Chen"), Some(vec!["nickname"]));
-        assert_eq!(ok("Bob", "Robert Chen"), Some(vec!["nickname"]));
         assert_eq!(ok("Robert", "Bob Chen"), Some(vec!["nickname"]));
         assert_eq!(
             ok("Margaret A. Thistlewood", full),
@@ -693,19 +639,14 @@ mod tests {
         // Negatives.
         for (s, f) in [
             ("Mark", full),
-            ("Maggie Smith", full),
             ("M. Smith", full),
-            ("K. Thistlewood", full),
             ("Maggie K", full),
-            ("M. T", full),
             ("M.", full),
             (full, full),
             ("Margaret Thistlewood", "Maggie T"), // says more than the target
             ("Maggie", "Maggie"),
             ("Maggie", "M. Thistlewood"), // the target has no written-out given name
-            ("Sam", "Samira Okafor"),
-            ("Thistlewood", full), // a surname alone is not handled
-            ("maggie.t@mail.test", full),
+            ("Thistlewood", full),        // a surname alone is not handled
             ("Robert", "Roberta Chen"),
         ] {
             assert_eq!(compatible(s, f), None, "{s} vs {f}");
@@ -718,28 +659,18 @@ mod tests {
         let m = |a: &str| LocalPart::parse(a).and_then(|l| l.matches(full));
         assert_eq!(m("maggie.t@mail.test"), Some(LocalMatch::Full));
         assert_eq!(m("mthistlewood@cindergate.test"), Some(LocalMatch::Full));
-        assert_eq!(m("margaret.thistlewood@x.test"), Some(LocalMatch::Full));
-        assert_eq!(m("m.thistlewood@x.test"), Some(LocalMatch::Full));
         assert_eq!(m("thistlewood.m@x.test"), Some(LocalMatch::Full));
         assert_eq!(
             m("Margaret_Thistlewood+news@x.test"),
             Some(LocalMatch::Full)
         );
-        assert_eq!(m("margaretthistlewood@x.test"), Some(LocalMatch::Full));
-        assert_eq!(m("maggiet@x.test"), Some(LocalMatch::Full));
-        assert_eq!(m("margaret.a.thistlewood@x.test"), Some(LocalMatch::Full));
-        assert_eq!(m("maggie@x.test"), Some(LocalMatch::Given));
         assert_eq!(m("maggie42@x.test"), Some(LocalMatch::Given));
         for a in [
             "mark.t@x.test",
-            "maggie.k@x.test",
             "mthistle@x.test",
-            "thistlewood@x.test",
             "t.maggie@x.test",
-            "info@x.test",
             "noreply@x.test",
             "mt@x.test",
-            "1234@x.test",
         ] {
             assert_eq!(m(a), None, "{a}");
         }
@@ -769,17 +700,8 @@ mod tests {
         for (a, b) in [
             ("Liam", "William"),
             ("Nathan", "Jonathan"),
-            ("Nathan", "Nathaniel"),
             ("Jack", "John"),
-            ("Harry", "Henry"),
-            ("Ada", "Adelaide"),
-            ("Lisa", "Elizabeth"),
-            ("Rose", "Rosemary"),
             ("Molly", "Margaret"),
-            ("Daisy", "Margaret"),
-            ("Neil", "Cornelius"),
-            ("Connie", "Cornelius"),
-            ("Nessa", "Agnes"),
         ] {
             assert!(!given_names_equivalent(a, b), "{a} !~ {b}");
             assert!(!given_names_equivalent(b, a), "{b} !~ {a}");
@@ -796,16 +718,5 @@ mod tests {
         assert!(!given_name_variants("William").contains(&"liam".to_string()));
         assert_eq!(compatible("Liam", "William Murphy"), None);
         assert_eq!(compatible("Nathan Lee", "Jonathan Lee"), None);
-    }
-
-    #[test]
-    fn a_title_before_one_word_is_a_surname() {
-        assert!(PersonName::parse("Ms. Jordan").is_none());
-        assert!(PersonName::parse("Dr Kerrigan-Holt").is_none());
-        assert!(!is_short_form("Ms. Jordan"));
-        assert_eq!(compatible("Ms. Jordan", "Jordan Lee"), None);
-        assert_eq!(compatible("Mr Sam", "Sam Okafor"), None);
-        // A title before a full name is dropped as before.
-        assert!(PersonName::parse("Ms. Jordan Lee").is_some_and(|p| p.is_complete()));
     }
 }

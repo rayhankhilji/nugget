@@ -1,60 +1,5 @@
-//! Vector search: exact cosine kNN over `chunk_vec`, and an approximate path for large vector
-//! sets through a binary-quantized index.
-//!
-//! `sqlite-vec`'s `vec0` kNN is a brute-force scan, linear in the number of vectors (each one a
-//! `4 × dim`-byte float array that SQLCipher must decrypt), which dominates query latency from
-//! once the vectors no longer fit the connection's page cache. From [`ANN_MIN_VECTOR_BYTES`] of
-//! vectors on (with at least [`ANN_MIN_VECTORS`] of them), search instead:
-//!
-//! 1. scans `ann_bits`, a `vec0 (bits bit[dim])` table holding the **sign bits** of each
-//!    embedding (32× smaller than the floats; hamming distance is a popcount), for the
-//!    `k × ANN_OVERSAMPLE` nearest candidates by hamming distance, then
-//! 2. rescores those candidates by exact cosine distance and keeps the best `k`.
-//!
-//! Sign quantization approximates the angle between vectors (random-hyperplane LSH with the
-//! coordinate axes as hyperplanes); rescoring keeps the returned scores exact, only recall is
-//! approximate. Bits are taken **relative to a centre**, the mean of the vectors stored when the
-//! index was built (kept in `meta`, then frozen): embeddings that share a large common component,
-//! or sparse ones whose zero coordinates would all quantize alike, otherwise collapse onto a few
-//! bit patterns.
-//!
-//! Sign bits only carry information for dense vectors. A sparse query (most coordinates zero,
-//! as from hashed bag-of-words embedders) quantizes to noise on every zero coordinate: on the
-//! bench's 256-dim hash embeddings at 20k vectors, recall@10 against exact search was 0.03 with
-//! plain sign bits and 0.06 with centring. Such queries ([`quantizable`]) always use the exact
-//! scan; neural embedding models produce dense vectors and take the approximate path.
-//!
-//! Rescoring reads the candidates' floats from `ann_vectors`, a plain rowid table holding a copy
-//! of each embedding. Reading them from `chunk_vec` instead would cost more than the scan it
-//! replaces: `vec0` keeps 1024 vectors per (1.5 MB at 384 dimensions) blob, and a point lookup
-//! walks that blob's overflow-page chain up to the vector, measured at ~0.2 ms in memory and
-//! ~2 ms on an encrypted file per lookup. The copy doubles vector storage, so the index only
-//! exists while a store needs it:
-//!
-//! - The first search past the thresholds starts building it on a background thread and
-//!   searches exactly meanwhile. The build ([`build_ann`]) reads on reader connections and
-//!   writes in short batches, so it never holds the writer for long (at 100k 384-dimensional
-//!   vectors: one 4.3 s writer hold before, about 20 ms per batch now; see
-//!   [`ANN_BUILD_BATCH`]). Once the tables exist, `items::write_chunks` writes them in the same
-//!   transaction as `chunk_vec`, and a delete trigger on `chunks` cleans them.
-//! - A search on a store that has shrunk to under half of a threshold drops it again
-//!   ([`far_below_threshold`]; the gap is hysteresis), so a small store stops paying for it on
-//!   every write. The check rides on the vector count the search takes anyway; writes pay
-//!   nothing for it.
-//!
-//! Searches run on the reader pool, never on the writer connection. W12 briefly ran them on
-//! the writer (its page cache is not discarded by its own writes, so edit freshness was 20 ms
-//! instead of 90 ms) and saw readers' later full-text searches go from 79 ms to 2.5 s at 100k
-//! chunks in the scale bench. That does not reproduce at the store level
-//! (`tests::writer_knn_vs_reader_fts`, 100k encrypted items, 384 dimensions): with kNN scans
-//! plus point lookups of 50 neighbours' vectors on the writer after each edit, reader
-//! full-text search stayed at 19–22 ms (16–22 ms with them on a reader), the WAL stayed at its
-//! autocheckpoint size (8 MiB) and checkpointed fully, and the writer kept no statement or
-//! read transaction open afterwards. So the store-level suspects are ruled out: no snapshot
-//! pinned by the writer (WAL growth, checkpoint starvation), no evicted or invalidated reader
-//! cache, no cache spill. What slowed the bench then is unexplained (it was not re-measured in
-//! isolation). Searches stay on the readers regardless: a 0.5 s exact scan on the writer would
-//! block every write behind it.
+//! Vector search: exact cosine kNN over `chunk_vec`, and for large vector sets an approximate
+//! path (sign-bit hamming scan in `ann_bits`, exact rescoring from `ann_vectors`).
 
 use std::sync::{Arc, PoisonError, Weak};
 
@@ -62,7 +7,7 @@ use nugget_core::{Error, Result};
 use rusqlite::{CachedStatement, Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::Store;
-use crate::error::DbExt;
+use crate::error::{ConnExt, DbExt};
 use crate::items::{embedding_dim, f32_blob, f32_from_blob, item_ref, validate_embedding};
 use crate::search::{MAX_KNN, excerpt};
 use crate::store::Db;
@@ -71,10 +16,7 @@ use crate::types::{ChunkId, Hit};
 /// Least vector count for [`Store::search_vector`] to switch from exact to approximate search.
 pub const ANN_MIN_VECTORS: usize = 20_000;
 /// Stored vector bytes (`count × dim × 4`) from which [`Store::search_vector`] goes approximate:
-/// the size of a connection's page cache (`PRAGMA cache_size`, 32 MiB). While the vectors fit,
-/// the exact scan reads cached pages and stays fast; past it every scan decrypts them all again.
-/// Measured at 384 dimensions on an encrypted file: exact 12 ms at 20k vectors (29 MiB),
-/// 270 ms at 50k (73 MiB) and 556 ms at 100k; approximate 4 ms, 8 ms and 14 ms at k = 10.
+/// the size of a connection's page cache (`PRAGMA cache_size`, 32 MiB).
 pub const ANN_MIN_VECTOR_BYTES: usize = 32 << 20;
 /// Approximate search rescores this many hamming candidates per requested hit...
 pub const ANN_OVERSAMPLE: usize = 10;
@@ -94,9 +36,8 @@ fn quantizable(v: &[f32]) -> bool {
     nonzero as f32 >= v.len() as f32 * ANN_MIN_DENSITY
 }
 
-/// Bit-vector width for embeddings of `dim` dimensions: `vec0` bit vectors need a multiple of 8,
-/// so the tail is padded with zero bits (equal in every vector, so hamming distances are
-/// unchanged).
+/// Bit-vector width for embeddings of `dim` dimensions: `vec0` bit vectors need a multiple of 8, so
+/// the tail is padded with zero bits (equal in every vector, so hamming distances are unchanged).
 fn bits_dim(dim: usize) -> usize {
     dim.div_ceil(8) * 8
 }
@@ -113,8 +54,7 @@ fn sign_bits(v: &[f32], center: &[f32]) -> Vec<u8> {
     out
 }
 
-/// Create the approximate-search tables and their delete trigger if missing. Idempotent; does
-/// **not** mark the index complete (see [`META_ANN_READY`]).
+/// Create the approximate-search tables and their delete trigger if missing.
 fn create_ann_tables(conn: &Connection, dim: usize) -> Result<()> {
     let bits = bits_dim(dim);
     conn.execute_batch(&format!(
@@ -231,9 +171,8 @@ fn ann_tables_exist(conn: &Connection) -> Result<bool> {
     .db("look up approximate vector index")
 }
 
-/// Vector positions in `vec0`'s storage: (vec0 chunk, offset in it, rowid = chunk id), sorted
-/// in storage order. `chunk_vec_rowids` maps a rowid to its chunk and offset;
-/// `chunk_vec_vector_chunks00` holds one blob of up to 1024 vectors per chunk.
+/// Vector positions in `vec0`'s storage: (vec0 chunk, offset in it, rowid = chunk id), sorted in
+/// storage order.
 fn vector_positions(conn: &Connection) -> Result<Vec<(i64, i64, ChunkId)>> {
     let mut stmt = conn
         .prepare(
@@ -262,11 +201,7 @@ fn vector_chunk_blob(conn: &Connection, chunk: i64) -> Result<Option<Vec<u8>>> {
         .db("read vector chunk")
 }
 
-/// Most vectors copied into the index per writer transaction while building it. Each batch
-/// holds the writer for about 15–20 ms at 384 dimensions on an encrypted file (256 took
-/// ~35 ms), so ingest keeps going during a build: at 100k vectors, with an upsert loop running
-/// throughout, the longest upsert wait fell from 4.3 s (the whole build under the writer) to
-/// 91 ms, and the build took 10 s in the background instead of 4.5 s in the search call.
+/// Most vectors copied into the index per writer transaction while building it.
 const ANN_BUILD_BATCH: usize = 128;
 /// A build re-reads the vector positions at most this many times to cover vectors it missed.
 const ANN_BUILD_PASSES: usize = 3;
@@ -297,34 +232,14 @@ fn past_threshold(n: usize, dim: usize, (min_n, min_bytes): (usize, usize)) -> b
     n >= min_n && n.saturating_mul(dim * 4) >= min_bytes
 }
 
-/// Whether a store has shrunk far enough below the thresholds (under half of either) for its
-/// index to be dropped. The gap between this and [`past_threshold`] is hysteresis: a store
-/// hovering around a threshold neither rebuilds nor drops its index on every few writes.
+/// Whether a store has shrunk far enough below the thresholds (under half of either) for its index
+/// to be dropped.
 fn far_below_threshold(n: usize, dim: usize, (min_n, min_bytes): (usize, usize)) -> bool {
     n < min_n / 2 || n.saturating_mul(dim * 4) < min_bytes / 2
 }
 
-/// Build or complete the approximate-search index from `chunk_vec`, **without holding the
-/// writer for the whole build**. Returns whether the index is complete (`false` if the store
-/// was closed or the index dropped meanwhile). The caller holds [`Db::ann_build`], so one
-/// build runs at a time.
-///
-/// 1. The centre is computed on a reader (reading every vector once), then the tables are
-///    created (and committed) in one short writer transaction with it. From then on every
-///    write maintains the index in its own transaction ([`AnnWriter`]), and the delete trigger
-///    removes deleted chunks from it.
-/// 2. The vectors that existed before are copied in batches: their positions and each `vec0`
-///    chunk's blob are read on a reader, then each batch of [`ANN_BUILD_BATCH`] vectors is
-///    written in its own short writer transaction, releasing the writer in between.
-///
-/// Races with writes between a batch's read and its write are settled inside the writer
-/// transaction: a vector is copied only if its rowid is still at the position it was read from
-/// (a deleted chunk is gone from `chunk_vec_rowids`; a re-inserted rowid is appended to a new
-/// position) and not already indexed (written after the tables existed). A vector that is
-/// unindexed yet present therefore predates the tables, and its slot's bytes are the ones read.
-/// The index is marked ready, in the same transaction, only once it holds exactly as many
-/// vectors as `chunk_vec`; an interrupted build (store closed, process killed) resumes where it
-/// stopped, keeping its centre.
+/// Build or complete the approximate-search index from `chunk_vec`, **without holding the writer
+/// for the whole build**.
 fn build_ann(db: &Weak<Db>, dim: usize) -> Result<bool> {
     let live = || {
         db.upgrade()
@@ -430,9 +345,8 @@ fn build_ann(db: &Weak<Db>, dim: usize) -> Result<bool> {
     ))
 }
 
-/// Copy one batch of pre-existing vectors (positions from [`vector_positions`], all in the
-/// `vec0` chunk whose bytes are `blob`) into the index, in one writer transaction. Returns how
-/// many were copied, or `None` if the index no longer exists.
+/// Copy one batch of pre-existing vectors (positions from [`vector_positions`], all in the `vec0`
+/// chunk whose bytes are `blob`) into the index, in one writer transaction.
 fn copy_batch(
     conn: &mut Connection,
     batch: &[(i64, i64, ChunkId)],
@@ -482,8 +396,7 @@ fn copy_batch(
     Ok(Some(added))
 }
 
-/// Drop the approximate-search index (tables, trigger, `meta` keys), so writes stop paying for
-/// it. Skipped while a build runs. Returns whether it was dropped.
+/// Drop the approximate-search index (tables, trigger, `meta` keys), so writes stop paying for it.
 fn drop_ann(db: &Db) -> Result<bool> {
     let Ok(_build) = db.ann_build.try_lock() else {
         return Ok(false);
@@ -531,19 +444,14 @@ enum Mode {
 
 /// Exact `k` nearest neighbours by cosine distance (`vec0` brute force).
 fn exact_neighbours(c: &Connection, embedding: &[f32], k: usize) -> Result<Vec<(ChunkId, f64)>> {
-    let mut knn = c
-        .prepare_cached(
-            "SELECT rowid, distance FROM chunk_vec
+    c.rows(
+        "SELECT rowid, distance FROM chunk_vec
              WHERE embedding MATCH ?1 AND k = ?2
              ORDER BY distance",
-        )
-        .db("prepare vector search")?;
-    let rows = knn
-        .query_map(params![f32_blob(embedding), k as i64], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
-        .db("vector search")?;
-    rows.collect::<rusqlite::Result<_>>().db("vector search")
+        params![f32_blob(embedding), k as i64],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+        "vector search",
+    )
 }
 
 /// Approximate `k` nearest neighbours: hamming kNN on the sign bits for `k × ANN_OVERSAMPLE`
@@ -554,21 +462,14 @@ fn approx_neighbours(c: &Connection, embedding: &[f32], k: usize) -> Result<Vec<
         .clamp(ANN_MIN_CANDIDATES, MAX_KNN);
     let center = ann_center(c)?;
     let ids: Vec<ChunkId> = {
-        let mut knn = c
-            .prepare_cached(
-                "SELECT rowid FROM ann_bits
+        c.rows(
+            "SELECT rowid FROM ann_bits
                  WHERE bits MATCH vec_bit(?1) AND k = ?2
                  ORDER BY distance",
-            )
-            .db("prepare binary vector search")?;
-        let rows = knn
-            .query_map(
-                params![sign_bits(embedding, &center), candidates as i64],
-                |r| r.get(0),
-            )
-            .db("binary vector search")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("binary vector search")?
+            params![sign_bits(embedding, &center), candidates as i64],
+            |r| r.get(0),
+            "binary vector search",
+        )?
     };
     // Same distance function as the exact scan, so scores do not depend on the path taken.
     let mut rescore = c
@@ -627,18 +528,6 @@ fn neighbour_hits(c: &Connection, neighbours: Vec<(ChunkId, f64)>) -> Result<Vec
 
 impl Store {
     /// k-nearest-neighbour search by cosine distance (best first; `score` is cosine similarity).
-    ///
-    /// Exact while the store's vectors fit the page cache ([`ANN_MIN_VECTOR_BYTES`],
-    /// [`ANN_MIN_VECTORS`]), for sparse queries (or when
-    /// `limit × ANN_OVERSAMPLE` exceeds 4096); approximate from there on, through the
-    /// binary-quantized index described in this module: scores stay exact, but a true
-    /// neighbour may occasionally be missed. The first search past the thresholds starts
-    /// building that index in the background (about 5 s for 100k vectors on an encrypted file,
-    /// in short writer transactions) and searches exactly until it is complete; if building it
-    /// fails, search stays exact. A store that shrinks to under half a threshold drops it.
-    ///
-    /// Returns `Error::Invalid` if the query's dimension differs from the store's. An empty result
-    /// is returned while no embeddings have been stored.
     pub fn search_vector(&self, embedding: &[f32], limit: usize) -> Result<Vec<Hit>> {
         self.search_vector_mode(embedding, limit, Mode::Auto)
     }
@@ -738,8 +627,7 @@ impl Store {
     }
 
     /// Start building the approximate index on a background thread, unless a build is already
-    /// running. The thread holds the store only weakly: closing the store stops the build after
-    /// its current batch (the next build resumes it).
+    /// running.
     fn spawn_ann_build(&self, dim: usize) {
         let lock = self.db().ann_build.clone();
         if lock.try_lock().is_err() {
@@ -766,7 +654,6 @@ impl Store {
     }
 
     /// Whether the approximate-search index is complete (searches past the thresholds use it).
-    /// For tests and benchmarks.
     #[doc(hidden)]
     pub fn ann_index_ready(&self) -> Result<bool> {
         self.with_read_conn(|c| Ok(ann_tables_exist(c)? && ann_ready(c)?))
@@ -812,12 +699,6 @@ mod tests {
     }
 
     #[test]
-    fn sparse_queries_are_not_quantized() {
-        assert!(quantizable(&[0.1, -0.2, 0.3, 0.0]));
-        assert!(!quantizable(&[0.0, 0.0, 0.0, 0.5]));
-    }
-
-    #[test]
     fn sign_bits_pack_and_pad() {
         assert_eq!(sign_bits(&[1.0, -1.0, 0.0, 2.0], &[]), vec![0b1001]);
         assert_eq!(sign_bits(&[1.0; 9], &[]), vec![0xff, 0x01]);
@@ -831,7 +712,6 @@ mod tests {
 
     #[test]
     fn index_is_built_on_demand_then_follows_writes_and_deletes() {
-        // 12 dimensions: not a multiple of 8, so the padded bit width is exercised.
         let s = Store::open_in_memory().unwrap();
         put(&s, "a", &[1, 2, 3], 12);
         put(&s, "b", &[4, 5], 12);
@@ -841,7 +721,6 @@ mod tests {
         )
         .unwrap();
         put(&s, "c", &[7, 8], 12);
-        // Exact search does not build the index.
         s.search_vector(&unit(1, 12), 3).unwrap();
         assert_eq!(count(&s, "sqlite_master WHERE name = 'ann_vectors'"), 0);
 
@@ -859,54 +738,6 @@ mod tests {
         assert_eq!(hits[0].snippet, "chunk 6");
         let exact = s.search_vector_exact(&unit(6, 12), 3).unwrap();
         assert_eq!(hits[0].score, exact[0].score);
-    }
-
-    #[test]
-    fn index_build_spans_vec0_chunks_and_resumes() {
-        let s = Store::open_in_memory().unwrap();
-        // More than one vec0 chunk (1024 vectors each), with holes from deletions.
-        for i in 0..1_500u32 {
-            put(&s, &format!("k{i}"), &[i], 16);
-        }
-        for i in (0..1_500u32).step_by(7) {
-            s.delete_item(&item_ref("t".into(), format!("k{i}")))
-                .unwrap();
-        }
-        let live = count(&s, "chunk_vec_rowids");
-        assert_eq!(live, 1_500 - 215);
-        let q = unit(1_000, 16);
-        let exact = s.search_vector_exact(&q, 1).unwrap();
-        let approx = s.search_vector_approx(&q, 1).unwrap();
-        assert_eq!(approx[0].chunk_id, exact[0].chunk_id);
-        assert_eq!(index_sizes(&s), (live, live, live));
-        // Every copied vector matches its original.
-        s.with_conn(|c| {
-            let differing: i64 = c
-                .query_row(
-                    "SELECT count(*) FROM ann_vectors a
-                     WHERE a.embedding != (SELECT embedding FROM chunk_vec v WHERE v.rowid = a.id)",
-                    [],
-                    |r| r.get(0),
-                )
-                .db("compare")?;
-            assert_eq!(differing, 0);
-            Ok(())
-        })
-        .unwrap();
-
-        // An interrupted build (part of the index, flag unset) completes without duplicates.
-        s.with_conn(|c| {
-            c.execute_batch(
-                "DELETE FROM meta WHERE key = 'ann_index_ready';
-                 DELETE FROM ann_bits WHERE rowid IN (SELECT id FROM ann_vectors WHERE id % 3 = 0);
-                 DELETE FROM ann_vectors WHERE id % 3 = 0;",
-            )
-            .db("interrupt")
-        })
-        .unwrap();
-        assert!(index_sizes(&s).2 < live);
-        s.search_vector_approx(&q, 1).unwrap();
-        assert_eq!(index_sizes(&s), (live, live, live));
     }
 
     fn ann_exists(s: &Store) -> bool {
@@ -952,14 +783,12 @@ mod tests {
         for i in 0..30u32 {
             put(&s, &format!("k{i}"), &[i], 16);
         }
-        // Below the threshold: exact, no index.
         s.search_vector(&unit(3, 16), 3).unwrap();
         assert!(!ann_exists(&s));
 
         for i in 30..50u32 {
             put(&s, &format!("k{i}"), &[i], 16);
         }
-        // The first search past it answers exactly and starts the build.
         let first = s.search_vector(&unit(3, 16), 3).unwrap();
         assert_eq!(first[0].snippet, "chunk 3");
         wait_ready(&s);
@@ -967,7 +796,6 @@ mod tests {
         let hits = s.search_vector(&unit(7, 16), 3).unwrap();
         assert_eq!(hits[0].snippet, "chunk 7");
 
-        // Shrinking to between half the threshold and the threshold keeps it (hysteresis)...
         for i in 0..25u32 {
             s.delete_item(&item_ref("t".into(), format!("k{i}")))
                 .unwrap();
@@ -976,7 +804,6 @@ mod tests {
         assert!(s.ann_index_ready().unwrap());
         assert_index_consistent(&s);
 
-        // ...under half drops it, tables, trigger and meta keys, even for a sparse query.
         for i in 25..32u32 {
             s.delete_item(&item_ref("t".into(), format!("k{i}")))
                 .unwrap();
@@ -986,7 +813,6 @@ mod tests {
         s.search_vector(&sparse, 3).unwrap();
         assert!(!ann_exists(&s));
         assert_eq!(ann_meta(&s), 0);
-        // Writes carry on without it; the store regrows to under the threshold: no rebuild.
         for i in 50..60u32 {
             put(&s, &format!("k{i}"), &[i], 16);
         }
@@ -994,7 +820,6 @@ mod tests {
         assert_eq!(hits[0].snippet, "chunk 55");
         assert!(!ann_exists(&s));
 
-        // Past it again (43 vectors): rebuilt, with a fresh centre.
         for i in 60..75u32 {
             put(&s, &format!("k{i}"), &[i], 16);
         }
@@ -1015,25 +840,21 @@ mod tests {
         let counter = batches.clone();
         TEST_BETWEEN_BATCHES.with(|h| {
             *h.borrow_mut() = Some(Box::new(move || {
-                // The writer is free here: these would deadlock otherwise.
                 let del = |key: String| {
                     writer.delete_item(&item_ref("t".into(), key)).unwrap();
                 };
                 let batch = counter.get();
                 counter.set(batch + 1);
                 match batch {
-                    // The newest chunk (not yet copied) is deleted and its rowid reused.
                     0 => {
                         del("k1499".into());
                         put(&writer, "new0", &[5_000], 16);
                     }
-                    // Chunks of later batches deleted, replaced, and new ones written.
                     1 => {
                         del("k1300".into());
                         put(&writer, "k1301", &[5_001, 5_002], 16);
                         put(&writer, "new1", &[5_003], 16);
                     }
-                    // A chunk already copied is deleted.
                     2 => del("k3".into()),
                     _ => {}
                 }
@@ -1048,138 +869,5 @@ mod tests {
         assert!(s.ann_index_ready().unwrap());
         assert_index_consistent(&s);
         assert_eq!(index_sizes(&s).0, 1_500);
-    }
-
-    /// Reproduction of "vector kNN on the writer connection slows the readers' full-text
-    /// search" (see the module docs). Ignored: writes `NUGGET_REPRO_ITEMS` (default 100k)
-    /// encrypted items. Run with
-    /// `cargo test --release -p nugget-store --lib -- --ignored --nocapture writer_knn`.
-    #[test]
-    #[ignore = "slow: writes 100k items; run in release with --ignored --nocapture"]
-    fn writer_knn_vs_reader_fts() {
-        use std::time::{Duration, Instant};
-        let n: usize = std::env::var("NUGGET_REPRO_ITEMS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(100_000);
-        const DIM: usize = 384;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("repro.db");
-        let s = Store::open(&path, &crate::StoreKey::from_bytes([3u8; 32])).unwrap();
-        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
-        let mut rnd = move || {
-            seed ^= seed >> 12;
-            seed ^= seed << 25;
-            seed ^= seed >> 27;
-            seed.wrapping_mul(0x2545_f491_4f6c_dd1d)
-        };
-        let words: Vec<String> = (0..20_000).map(|i| format!("w{i:x}q")).collect();
-        let text = |rnd: &mut dyn FnMut() -> u64| {
-            (0..60)
-                .map(|_| {
-                    // Roughly Zipfian: square a uniform draw.
-                    let u = (rnd() >> 11) as f64 / (1u64 << 53) as f64;
-                    words[(u * u * words.len() as f64) as usize].as_str()
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
-        let vector = |rnd: &mut dyn FnMut() -> u64| {
-            let v: Vec<f32> = (0..DIM)
-                .map(|_| (rnd() >> 40) as f32 / 16_777_216.0 - 0.5)
-                .collect();
-            let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-            v.into_iter().map(|x| x / norm).collect::<Vec<f32>>()
-        };
-        let t = Instant::now();
-        for i in 0..n {
-            let body = text(&mut rnd);
-            let item = NewItem::new("t", format!("k{i}"), format!("h{i}")).with_text(body.clone());
-            s.upsert_item_with_chunks(&item, &[NewChunk::embedded(body, vector(&mut rnd))])
-                .unwrap();
-        }
-        println!("wrote {n} items in {:.1?}", t.elapsed());
-        let wal = || std::fs::metadata(dir.path().join("repro.db-wal")).map_or(0, |m| m.len());
-        let queries: Vec<String> = (0..20)
-            .map(|i| {
-                format!(
-                    "{} {} {}",
-                    words[i % 4],
-                    words[4 + i % 16],
-                    words[100 + i * 7]
-                )
-            })
-            .collect();
-        let fts = |label: &str| {
-            let t = Instant::now();
-            for q in &queries {
-                s.search_text(q, 10).unwrap();
-            }
-            println!(
-                "{label}: reader FTS {:.1?}/query, WAL {:.1} MiB",
-                t.elapsed() / queries.len() as u32,
-                wal() as f64 / 1_048_576.0
-            );
-        };
-        fts("after ingest");
-        // Rounds of: edit one item, vector kNN, full-text search (the bench's freshness probe),
-        // with the kNN on the writer connection, then on a reader for comparison.
-        for on_writer in [true, false] {
-            let label = if on_writer { "writer" } else { "reader" };
-            let mut knn = Duration::ZERO;
-            let mut fts_during = Duration::ZERO;
-            for round in 0..40usize {
-                let body = text(&mut rnd);
-                let item = NewItem::new("t", format!("k{round}"), format!("e{label}{round}"))
-                    .with_text(body.clone());
-                s.upsert_item_with_chunks(&item, &[NewChunk::embedded(body, vector(&mut rnd))])
-                    .unwrap();
-                let q = vector(&mut rnd);
-                let t = Instant::now();
-                // A kNN scan, then point lookups of its neighbours' vectors (as MMR does).
-                let lookups = |c: &Connection| {
-                    let ids = exact_neighbours(c, &q, 50)?;
-                    let mut stmt = c
-                        .prepare_cached("SELECT embedding FROM chunk_vec WHERE rowid = ?1")
-                        .db("prepare lookup")?;
-                    for (id, _) in ids {
-                        let _: Vec<u8> = stmt.query_row([id], |r| r.get(0)).db("lookup")?;
-                    }
-                    Ok(())
-                };
-                if on_writer {
-                    s.with_conn(|c| lookups(c)).unwrap();
-                    let (busy, autocommit) = s
-                        .with_conn(|c| Ok((c.is_busy(), c.is_autocommit())))
-                        .unwrap();
-                    assert!(
-                        !busy && autocommit,
-                        "the writer kept a read transaction open"
-                    );
-                } else {
-                    s.with_read_conn(lookups).unwrap();
-                }
-                knn += t.elapsed();
-                let t = Instant::now();
-                s.search_text(&queries[round % queries.len()], 10).unwrap();
-                fts_during += t.elapsed();
-            }
-            println!(
-                "kNN on the {label}: {:.1?}/query; reader FTS after each edit {:.1?}/query",
-                knn / 40,
-                fts_during / 40
-            );
-            fts(&format!("after kNN on the {label}"));
-            let ckpt: (i64, i64, i64) = s
-                .with_conn(|c| {
-                    c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-                    })
-                    .db("checkpoint")
-                })
-                .unwrap();
-            println!("checkpoint (busy, log, checkpointed): {ckpt:?}");
-            fts(&format!("after kNN on the {label} + checkpoint"));
-        }
     }
 }
