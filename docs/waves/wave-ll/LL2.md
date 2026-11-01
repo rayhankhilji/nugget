@@ -1,0 +1,20 @@
+You are the **swarm lead** for one work package of Nugget, an open-source, local-first personal AI OS (Rust workspace + Tauri 2 desktop, Apache-2.0) in repo rayhankhilji/nugget. The orchestrator is session session_01CTjRSq7tP1Q1H28H8EZ9EV; it merges every branch.
+
+## How to work
+- Read "How to work" in `docs/waves/wave-cc/CC1.md` (ground rules, daemon features seam, desktop conventions, build hygiene, CI, commits with `git commit -s` and the trailer, no model names elsewhere) and follow it, with the differences below.
+- Your branch is `ll/polish`, created from the checked-out integration branch `claude/inspiring-wozniak-z3gg3n` (the head named in the session's first message, or later). Never push to the integration branch; open no PR. If you need the latest integration branch later, merge it in (never rebase or force-push).
+- **Two layers, small:** at most 2 subagents at a time (the usage budget is shared by about 20 sessions). A build subagent implements a piece; a fresh review subagent that did not write it reviews the diff for correctness, security, privacy and test gaps; you fix what holds up.
+- **Toolchain:** CI runs Rust 1.99.1 — run `rustup update stable` first; clippy `-D warnings` must be clean on it. Run the full workspace tests and `pnpm run e2e` before your final push (visual screenshots may differ in this container; run with `E2E_VISUAL_TOLERANCE=1` and say which screens your change affects so the orchestrator refreshes their baselines from CI).
+- **In flight elsewhere (stay out, or additive changes only, listed in your report):** nugget-draft (EE2, paused), nugget-proactive (BB2, paused), nugget-knowledge extraction (EE1), nugget-ingest triage and sensitivity (HH2), retrieval and embeddings (DD4), release/updater/app lifecycle (EE5).
+- **Quality bar:** every feature works end to end in the real app (daemon IPC + desktop UI + docs), strings in all 9 catalogs plus review lists, accessible (keyboard, screen reader, RTL), with unit, integration and e2e coverage. Privacy: nothing leaves the device unless the user chose a cloud provider; every network call is in the egress ledger; sensitive items are never shown or sent where they shouldn't be. If time runs short, finish fewer pieces completely rather than many partially — the pieces below are in priority order.
+- **Report** when done: one send_message to the orchestrator (branch and head, what was built with evidence, tests, edits outside your ownership, contract changes, known gaps).
+
+- **GitHub Actions is unavailable** (every job fails at start since 2026-11-01 07:58 UTC, an account-level problem). Measure locally in this container; state the machine and its core count with every number. If Actions comes back, use it as before.
+
+## Your package
+**LL2: finish and polish what users touch most (from KK1, GG7, II-wave gaps).** In priority order:
+1. **Chat Retry:** when an answer fails because the local model stopped or crashed (KK1's plain errors), Chat offers Retry in place and a link to Status details (Chat.tsx; EE3 is done with it).
+2. **Right-to-left and locale details from GG7 (docs/qa/GG7.md Mediums/Lows, not proactive ones):** Latin-led Arabic answers and drafts render RTL correctly (dir=auto on generated text), quote headers in localised mail are recognised ("Am … schrieb", "Le … a écrit", Arabic/Japanese forms), sentence splitting knows ؟ and CJK full stops, dates in UI text use the user's locale.
+3. **Accessibility pass over every screen added since wave II** (search filters/timeline/preview, overlay, quick ask, tray settings, messaging forms, KK1/KK2 screens): axe clean in light/dark, keyboard-only paths, screen-reader names, focus return; fix what fails and extend the a11y e2e scenario to cover them.
+4. **Empty, loading and error states** on those screens: none blank, none raw.
+You own: the desktop pages and components for these screens (shared files additively), extraction of quote headers and sentence ends in nugget-extract (coordinate with DD4 if you touch tokenisation).
