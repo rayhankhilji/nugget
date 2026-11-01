@@ -1172,7 +1172,7 @@ async fn run_ask(
             let error = match end {
                 ChatEnd::Failed(e) => {
                     tracing::warn!(stream = %stream_id, error = %e, "ask failed");
-                    e.to_string()
+                    user_message(e)
                 }
                 ChatEnd::Cancelled => {
                     tracing::info!(stream = %stream_id, "ask cancelled");
@@ -1288,6 +1288,12 @@ fn is_fallback_error(e: &Error) -> bool {
     is_provider_failure(e) || matches!(e, Error::Unsupported(_))
 }
 
+/// A streamed error as the user reads it: the message alone, as the plain RPC error sends it
+/// (no internal "provider error:" prefix, MM1-7).
+fn user_message(e: Error) -> String {
+    RpcError::from(e).message
+}
+
 enum ChatEnd {
     Done {
         stop_reason: StopReason,
@@ -1366,7 +1372,7 @@ async fn run_chat(
                 state.router.report_failure(provider.id());
             }
             tracing::warn!(stream = %stream_id, provider = %provider.id(), error = %e, "chat failed");
-            done.error = Some(e.to_string());
+            done.error = Some(user_message(e));
             // What the filter still holds was received: the client gets it before the error.
             let rest = filter
                 .as_mut()
@@ -1699,6 +1705,13 @@ fn client_egress_event(
 mod tests {
     use super::*;
     use nugget_core::ipc::ChatMessage;
+
+    /// MM1-7: a streamed error reads like the plain RPC one, without the internal prefix.
+    #[test]
+    fn streamed_errors_carry_no_internal_prefix() {
+        let e = Error::Provider("The on-device chat model couldn't start.".into());
+        assert_eq!(user_message(e), "The on-device chat model couldn't start.");
+    }
 
     fn msg(role: IpcRole, text: &str) -> ChatMessage {
         ChatMessage {
