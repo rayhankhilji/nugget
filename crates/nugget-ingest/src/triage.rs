@@ -66,9 +66,18 @@ pub(crate) const MAX_ATTEMPTS: u32 = 3;
 /// Items listed per page by the recovery scan.
 const PAGE: usize = 256;
 /// Characters of document text per request before any prefill has been measured.
-const FIRST_REQUEST_CHARS: usize = 800;
-/// Fewest characters per request, whatever the measured rate (a request must carry some text).
-const MIN_REQUEST_CHARS: usize = 300;
+const FIRST_REQUEST_CHARS: usize = 2_000;
+/// Fewest characters of document text per request, whatever the measured rate. Every request
+/// pays the fixed part of the prompt (instructions, schema, chat template) again, so requests of
+/// one or two short items spend most of their time on it (HH2 JJ1-1 run 41269745457: about
+/// 6.5 s per item with the 4B, against about 1 s per item in batches of 8).
+const MIN_REQUEST_CHARS: usize = 1_000;
+/// The fixed part of every request, in characters: the instructions and the chat template.
+/// Counted in the measured prefill rate, so the time to the first token is not charged to the
+/// document text alone (that made a short batch look slow and shrank every later one).
+fn fixed_prompt_chars() -> usize {
+    ai::TRIAGE_SYSTEM.chars().count() + 200
+}
 
 /// How long the job lets a part-filled batch gather more items (a sync writes items quickly).
 const GATHER: Duration = Duration::from_millis(250);
@@ -713,7 +722,8 @@ async fn run_batch(inner: &Arc<Inner>, provider: &dyn Provider) -> BatchOutcome 
 pub(crate) fn request_budget(inner: &Inner) -> usize {
     let cap = inner.cfg.triage_batch_chars.max(MIN_REQUEST_CHARS);
     let chars = match lock(&inner.triage).ms_per_char {
-        Some(rate) if rate > 0.0 => (inner.cfg.triage_request_ms as f64 / rate) as usize,
+        Some(rate) if rate > 0.0 => ((inner.cfg.triage_request_ms as f64 / rate) as usize)
+            .saturating_sub(fixed_prompt_chars()),
         _ => FIRST_REQUEST_CHARS,
     };
     chars.clamp(MIN_REQUEST_CHARS, cap)
@@ -725,7 +735,7 @@ fn record_prefill(inner: &Inner, chars: usize, first_token: Option<Duration>) {
     if chars < 50 {
         return;
     }
-    let sample = t.as_secs_f64() * 1000.0 / chars as f64;
+    let sample = t.as_secs_f64() * 1000.0 / (chars + fixed_prompt_chars()) as f64;
     let mut q = lock(&inner.triage);
     q.ms_per_char = Some(match q.ms_per_char {
         Some(old) => 0.7 * old + 0.3 * sample,
