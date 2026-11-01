@@ -368,6 +368,12 @@ async fn local_prompts_leave_sensitive_items_out_unless_allowed() {
         );
     }
     assert!(user_text(&req).contains("compensation"));
+
+    // QA GG1-16: turning the small-prompt budget off does not let them in.
+    let local = Fake::local("local");
+    let s = setup(&[local.clone()], local_off());
+    let (started, _stream) = s.drafter.begin(ask()).await.unwrap();
+    assert!(!keys(&started).contains(&"salaries"));
 }
 
 #[tokio::test]
@@ -859,7 +865,9 @@ frozen except for customer visits.\n\nKind regards,\nHenrik"
 async fn local_budget_trims_local_prompts_only() {
     // One snippet: the best passage only, and the citations and egress items say so.
     let wide = Fake::local("local");
-    let s = setup(&[wide.clone()], local_off());
+    let mut off = local_off();
+    off.local.include_sensitive = true;
+    let s = setup(&[wide.clone()], off);
     let (all, _st) = s.drafter.begin(ask()).await.unwrap();
     assert!(all.citations.len() >= 2, "{:?}", keys(&all));
     let one = Fake::local("local");

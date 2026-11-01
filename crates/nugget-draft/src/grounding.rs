@@ -163,6 +163,10 @@ impl Corpus {
         }
         c.secrets.sort();
         c.secrets.dedup();
+        // A value the thread or the user's own text states is not a leak (QA GG1-18).
+        let user = std::mem::take(&mut c.user);
+        c.secrets.retain(|s| !user.contains(s.as_str()));
+        c.user = user;
         c.secret_len = c
             .secrets
             .iter()
@@ -199,13 +203,23 @@ impl Corpus {
 /// however a draft spaces or punctuates them. Fullwidth forms ("４１１１") fold to ASCII.
 fn squash(text: &str) -> String {
     text.chars()
-        .map(|c| match c {
-            '\u{ff01}'..='\u{ff5e}' => char::from_u32(c as u32 - 0xfee0).unwrap_or(c),
-            c => c,
-        })
+        .map(fold)
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+/// Fullwidth forms to ASCII, and Arabic-Indic, Eastern Arabic-Indic and Devanagari digits to
+/// ASCII digits (QA GG1-13).
+fn fold(c: char) -> char {
+    let shift = |from: u32, to: u32| char::from_u32(c as u32 - from + to).unwrap_or(c);
+    match c {
+        '\u{ff01}'..='\u{ff5e}' => shift(0xff01, 0x21),
+        '\u{0660}'..='\u{0669}' => shift(0x0660, 0x30),
+        '\u{06f0}'..='\u{06f9}' => shift(0x06f0, 0x30),
+        '\u{0966}'..='\u{096f}' => shift(0x0966, 0x30),
+        c => c,
+    }
 }
 
 /// Characters that separate a key from its value inside one word (`pw=…`, `pin:…`).
@@ -253,7 +267,7 @@ fn secret_tokens(text: &str) -> Vec<String> {
     }
     let mut run = String::new();
     let mut gap = false;
-    for c in text.chars().chain(std::iter::once('.')) {
+    for c in text.chars().map(fold).chain(std::iter::once('.')) {
         if c.is_ascii_digit() {
             run.push(c);
             gap = false;
@@ -2201,6 +2215,31 @@ ravi.menon@northwind.example.com.",
         );
         assert!(!squash(&out).contains("tangerineotter42"), "{out:?}");
         assert_eq!(g.report().secrets_dropped, 1);
+    }
+
+    /// QA GG1-13 and GG1-18: Arabic-Indic digits of a secret are caught; a number the thread
+    /// itself states is no secret.
+    #[test]
+    fn secrets_in_other_digits_are_caught_and_thread_values_are_not_secrets() {
+        let mut g = with_secrets();
+        let out = stream(
+            &mut g,
+            &["The card is ٤١١١ ١١١١ ١١١١ ١١١١. The team has 12 people."],
+        );
+        assert_eq!(out, "The team has 12 people.");
+        assert_eq!(g.report().secrets_dropped, 1);
+        let (mut ctx, _) = henrik();
+        ctx.thread[0].text = "Is the workshop still on for 2026-11-20?".into();
+        let mut c = cite(1, "k70", "Workshop", "2026-10-01");
+        c.sensitive = true;
+        let cr = ContextResponse {
+            text: "[1] Workshop (notes)\nWorkshop on 2026-11-20, door code 48291735.".into(),
+            citations: vec![c],
+            excluded_sensitive: 0,
+        };
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default());
+        let out = stream(&mut g, &["Yes, it is still on for 2026-11-20."]);
+        assert_eq!(out, "Yes, it is still on for 2026-11-20.");
     }
 
     #[test]

@@ -423,6 +423,16 @@ pub fn voice_block(
             ));
         }
     }
+    if s.greetings
+        .iter()
+        .chain(&s.signoffs)
+        .any(|(p, _)| p.contains("_name}"))
+    {
+        out.push_str(
+            "- {first_name} and {my_name} stand for the recipient's first name and the user's \
+name: write the name, or leave it out.\n",
+        );
+    }
     let examples: Vec<&String> = voice
         .exemplars
         .iter()

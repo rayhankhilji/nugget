@@ -1129,7 +1129,9 @@ impl Drafter {
         // The cache key's `cloud` decides the budget too, so each locality gets its own packing.
         let (budget, max_snippets) = self.budget_for(cloud);
         let local = &self.inner.config.local;
-        let exclude_sensitive = cloud || (local.enabled && !local.include_sensitive);
+        // Only `include_sensitive` lets sensitive passages into local prompts; turning the small
+        // budget off does not (QA GG1-16).
+        let exclude_sensitive = cloud || !local.include_sensitive;
         let q = query.to_owned();
         let fut = async move {
             let started = Instant::now();

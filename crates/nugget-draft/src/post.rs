@@ -221,16 +221,11 @@ impl PostProcessor {
         if self.opts.strip_greeting {
             let rest = &raw[head.pos..];
             let line = first_line(rest);
-            let lower = line.to_ascii_lowercase();
-            let complete = last
-                || rest.contains('\n')
-                || rest.len() >= HEAD_WINDOW
-                || line.contains([',', '!', '.']);
-            if !complete && could_be_greeting(&lower) {
-                return None;
-            }
-            if let Some(k) = greeting_len(&lower, rest.contains('\n') || last) {
-                head.pos = skip_ws(raw, head.pos + k);
+            let done = last || rest.contains('\n') || rest.len() >= HEAD_WINDOW;
+            match greeting_len(line, done) {
+                Greeting::NeedMore => return None,
+                Greeting::Len(k) => head.pos = skip_ws(raw, head.pos + k),
+                Greeting::No => {}
             }
         }
         Some(head)
@@ -367,6 +362,44 @@ const GREETINGS: &[&str] = &[
     "hola",
     "bonjour",
     "hallo",
+    // The UI languages (QA GG1-29).
+    "sehr geehrte",
+    "sehr geehrter",
+    "guten tag",
+    "guten morgen",
+    "liebe",
+    "lieber",
+    "moin",
+    "servus",
+    "estimado",
+    "estimada",
+    "estimados",
+    "buenos días",
+    "buenas tardes",
+    "buenas",
+    "querido",
+    "querida",
+    "bonsoir",
+    "cher",
+    "chère",
+    "salut",
+    "olá",
+    "ola",
+    "prezado",
+    "prezada",
+    "bom dia",
+    "boa tarde",
+    "नमस्ते",
+    "मरहबा",
+    "مرحبا",
+    "السلام عليكم",
+    "عزيزي",
+    "عزيزتي",
+    "こんにちは",
+    "お疲れ様です",
+    "お世話になっております",
+    "您好",
+    "你好",
 ];
 
 fn greeting_word(lower: &str) -> Option<&'static str> {
@@ -388,18 +421,62 @@ fn could_be_greeting(lower: &str) -> bool {
     l.is_empty() || greeting_word(l).is_some() || GREETINGS.iter().any(|g| g.starts_with(l))
 }
 
-/// Length of a greeting at the start of this lower-cased text: a whole short line ("Hi Sam,")
-/// or an inline salutation ending at the first comma or exclamation mark ("Hey Sam, thanks").
-fn greeting_len(lower: &str, line_complete: bool) -> Option<usize> {
-    let g = greeting_word(lower)?;
-    let line = first_line(lower);
-    if line_complete && line.len() <= 40 && line.split_whitespace().count() <= 5 {
-        return Some(line.len());
+enum Greeting {
+    No,
+    NeedMore,
+    /// The greeting's length in bytes.
+    Len(usize),
+}
+
+/// Ends a salutation ("Hi Sam," / "Hola, Ana:" / "こんにちは、").
+const SALUTATION_ENDS: [char; 7] = [',', '!', '.', '—', ':', '、', '،'];
+
+/// A greeting at the start of this first line (`done`: the line is complete): the whole short
+/// line ("Hi Sam,"), or an inline salutation ending at its punctuation ("Hey Sam, thanks"). When
+/// the punctuation comes right after the greeting word ("Hola, Ana:"), a short capitalised name
+/// up to the next `,`/`:`/`!` belongs to it too (QA GG1-30).
+fn greeting_len(line: &str, done: bool) -> Greeting {
+    let lower = line.to_ascii_lowercase();
+    let Some(g) = greeting_word(&lower) else {
+        return if !done && could_be_greeting(&lower) {
+            Greeting::NeedMore
+        } else {
+            Greeting::No
+        };
+    };
+    if done && line.len() <= 40 && line.split_whitespace().count() <= 5 {
+        return Greeting::Len(line.len());
     }
     let after = &line[g.len()..];
-    let end = after.find([',', '!', '.', '—'])?;
-    let salutation = &after[..end];
-    (salutation.split_whitespace().count() <= 3 && end <= 30).then(|| g.len() + end + 1)
+    let Some(p1) = after.find(SALUTATION_ENDS) else {
+        return if done || after.len() > 30 {
+            Greeting::No
+        } else {
+            Greeting::NeedMore
+        };
+    };
+    let p1_end = g.len() + p1 + after[p1..].chars().next().map_or(1, char::len_utf8);
+    let salutation = &after[..p1];
+    if !salutation.trim().is_empty() {
+        return if salutation.split_whitespace().count() <= 3 && p1 <= 30 {
+            Greeting::Len(p1_end)
+        } else {
+            Greeting::No
+        };
+    }
+    // "Hola, Ana:": a name after the punctuation.
+    let rest = &line[p1_end..];
+    match rest.find([',', ':', '!']) {
+        Some(p2) => {
+            let name = rest[..p2].trim();
+            let is_name = !name.is_empty()
+                && name.split_whitespace().count() <= 3
+                && name.chars().next().is_some_and(char::is_uppercase);
+            Greeting::Len(if is_name { p1_end + p2 + 1 } else { p1_end })
+        }
+        None if !done && rest.len() <= 30 && !rest.contains('.') => Greeting::NeedMore,
+        None => Greeting::Len(p1_end),
+    }
 }
 
 /// The longest prefix of `body` that is safe to clean and emit now: trailing whitespace, a
@@ -419,6 +496,21 @@ fn safe_end(body: &str) -> usize {
                 .all(|c| c.is_ascii_digit() || c == ',' || c == ' ')
         {
             end = i;
+            continue;
+        }
+        // A partial `{my_name}` placeholder, a complete one at the end (its comma goes with it
+        // when punctuation follows), and a comma that may come before one.
+        if let Some(i) = s.rfind('{')
+            && (s[i + 1..]
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '_')
+                || placeholder_len(&s[i..]) == Some(s.len() - i))
+        {
+            end = i;
+            continue;
+        }
+        if s.ends_with(',') {
+            end -= 1;
             continue;
         }
         let t = s.trim_end_matches(['*', '_', '`', '~']);
@@ -456,6 +548,16 @@ fn citation_len(s: &str) -> Option<usize> {
     None
 }
 
+/// A voice placeholder the model copied (`{first_name}`, `{my_name}`) at `s[..]`: its byte
+/// length (QA GG1-23).
+fn placeholder_len(s: &str) -> Option<usize> {
+    let inner = s.strip_prefix('{')?;
+    let close = inner.find('}')?;
+    let name = &inner[..close];
+    (name.ends_with("name") && name.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+        .then_some(close + 2)
+}
+
 /// Remove citation markers (always) and markdown (in plain-text mode); fold newlines in
 /// single-line fields. Local rewrites only, so a clean of a prefix is a prefix of the clean of
 /// the whole (given [`safe_end`]).
@@ -466,6 +568,16 @@ fn token_clean(s: &str, opts: &PostOptions) -> String {
         let rest = &s[i..];
         if let Some(n) = citation_len(rest) {
             if out.ends_with(' ') {
+                out.pop();
+            }
+            i += n;
+            continue;
+        }
+        if let Some(n) = placeholder_len(rest) {
+            if out.ends_with(' ') {
+                out.pop();
+            }
+            if out.ends_with(',') && rest[n..].starts_with(['!', '.', '?', ',']) {
                 out.pop();
             }
             i += n;
@@ -580,6 +692,41 @@ const SIGNOFFS: &[&str] = &[
     "take care",
     "br",
     "thx",
+    // The UI languages (QA GG1-29).
+    "mit freundlichen grüßen",
+    "freundliche grüße",
+    "viele grüße",
+    "beste grüße",
+    "liebe grüße",
+    "grüße",
+    "gruß",
+    "lg",
+    "vg",
+    "atentamente",
+    "saludos",
+    "un saludo",
+    "cordialmente",
+    "abrazos",
+    "cordialement",
+    "bien à vous",
+    "bien cordialement",
+    "bisous",
+    "amitiés",
+    "atenciosamente",
+    "abraços",
+    "abraço",
+    "obrigado",
+    "obrigada",
+    "धन्यवाद",
+    "सादर",
+    "مع خالص التحية",
+    "تحياتي",
+    "شكرا",
+    "よろしくお願いいたします",
+    "よろしくお願いします",
+    "此致敬礼",
+    "谢谢",
+    "祝好",
     "--",
     "-",
     "—",
@@ -588,7 +735,7 @@ const SIGNOFFS: &[&str] = &[
 /// Whether a line is a bare sign-off ("Best," / "Thanks!" / "--").
 pub(crate) fn is_signoff(line: &str) -> bool {
     let l = line.trim().to_lowercase();
-    let l = l.trim_end_matches([',', '!', '.', ' ']);
+    let l = l.trim_end_matches([',', '!', '.', ' ', '。', '、', '،']);
     !line.trim().is_empty() && (SIGNOFFS.contains(&l) || (line.trim() == "--"))
 }
 
@@ -720,6 +867,7 @@ mod tests {
             "r|```text\nSounds good, thanks!\n```\n|Sounds good, thanks!",
             "p|The launch moved to May 3 [1] and the budget is fixed [2][3].|The launch moved to May 3 and the budget is fixed.",
             "p|See [1, 2].|See.",
+            "p|Thanks, {first_name}!\n\nKind regards, {my_name}|Thanks!\n\nKind regards,",
             "p|Use [draft] mode [x1].|Use [draft] mode [x1].",
             "p|**Yes** — I'll bring the `slides` and ~~cake~~ snacks.|Yes — I'll bring the slides and cake snacks.",
             "p|# Notes\nAll good|Notes\nAll good",
@@ -734,6 +882,12 @@ mod tests {
             "p|Thursday works for me.\n\nBest,\nTanuj|Thursday works for me.\n\nBest,\nTanuj",
             "p|Thursday works for me.\n\nLet me know if you'd like any changes!|Thursday works for me.",
             "b|Sure! Here's a draft:\n\n\"Hi Sam,\n\nThursday [1] works.\n\nBest,\nT\"\n\nLet me know if that works!|Thursday works.",
+            // QA GG1-29 and GG1-30: greetings and sign-offs in other languages, and a name
+            // after the greeting's comma.
+            "g|Sehr geehrte Frau Weber,\n\ndie Lieferung kommt Montag.|die Lieferung kommt Montag.",
+            "g|Hola, Ana:\n\nPide 40 cajas, por favor.|Pide 40 cajas, por favor.",
+            "g|Hi, thanks for the update.|thanks for the update.",
+            "s|Die Lieferung kommt Montag.\n\nMit freundlichen Grüßen\nKlara Brandt|Die Lieferung kommt Montag.",
             // QA JJ1-4: a complete one-line reply is not a preamble.
             "p|Sure, I'll email you the slides tomorrow.|Sure, I'll email you the slides tomorrow.",
             "p|Great, the new version looks good to me!|Great, the new version looks good to me!",
