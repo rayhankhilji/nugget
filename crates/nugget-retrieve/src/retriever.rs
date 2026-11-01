@@ -1251,9 +1251,73 @@ pub fn is_sensitive(metadata: &serde_json::Value) -> bool {
     metadata.get("sensitive") != Some(&serde_json::Value::Bool(false))
 }
 
+/// Whether an item is *confirmed* sensitive: a PII finding (`pii`), a deterministic or connector
+/// rule (`sensitive_rule`), or local triage that ran and said sensitive (`triage.state` "done"
+/// with `sensitive: true`). An item that is sensitive only because triage has not sorted it yet
+/// (pending, unknown, failed, skipped without a rule) is not. Items flagged `sensitive: true` by
+/// ingest before triage states existed (no `triage` key) count as confirmed. An explicit
+/// `sensitive: false` is never confirmed.
+///
+/// Local views of the user's own data (the Markdown vault, the graph and entity views) hide
+/// confirmed sensitive items only; anything that can leave the device keeps using
+/// [`is_sensitive`], which also counts unsorted items.
+pub fn is_confirmed_sensitive(metadata: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    if metadata.get("sensitive") != Some(&Value::Bool(true)) {
+        return false;
+    }
+    let pii = metadata
+        .get("pii")
+        .and_then(Value::as_object)
+        .is_some_and(|p| !p.is_empty());
+    let rule = metadata.get("sensitive_rule").is_some_and(Value::is_string);
+    let triage = metadata.get("triage");
+    let triaged = triage.is_some_and(|t| {
+        t.get("state").and_then(Value::as_str) == Some("done")
+            && t.get("sensitive") == Some(&Value::Bool(true))
+    });
+    pii || rule || triaged || triage.is_none()
+}
+
 /// The item's `url` metadata (set by ingest), if it is a sane single-line string.
 fn item_url(item: &Item) -> Option<String> {
     let url = item.metadata.get("url")?.as_str()?.trim();
     let ok = !url.is_empty() && url.len() <= MAX_URL_LEN && !url.chars().any(char::is_control);
     ok.then(|| url.to_owned())
+}
+
+#[cfg(test)]
+mod confirmed_sensitive_tests {
+    use super::{is_confirmed_sensitive, is_sensitive};
+    use serde_json::json;
+
+    #[test]
+    fn only_confirmed_items_are_confirmed_sensitive() {
+        // Unsorted (no local model, triage pending/unknown/failed): sensitive for the cloud,
+        // not confirmed.
+        for state in ["pending", "unknown", "failed"] {
+            let m = json!({"sensitive": true, "triage": {"state": state}});
+            assert!(is_sensitive(&m) && !is_confirmed_sensitive(&m), "{state}");
+        }
+        // PII, a rule (connector included) or a triage verdict: confirmed.
+        for m in [
+            json!({"sensitive": true, "pii": {"card": 1}, "triage": {"state": "skipped"}}),
+            json!({"sensitive": true, "sensitive_rule": "health", "triage": {"state": "pending"}}),
+            json!({"sensitive": true, "sensitive_rule": "connector"}),
+            json!({"sensitive": true, "triage": {"state": "done", "sensitive": true}}),
+            // Flagged before triage states existed.
+            json!({"sensitive": true}),
+        ] {
+            assert!(is_confirmed_sensitive(&m), "{m}");
+        }
+        // Not sensitive, or no flag at all.
+        for m in [
+            json!({"sensitive": false, "pii": {"card": 1}}),
+            json!({"sensitive": false, "triage": {"state": "done", "sensitive": false}}),
+            json!({}),
+            json!({"sensitive": true, "pii": {}, "triage": {"state": "pending"}}),
+        ] {
+            assert!(!is_confirmed_sensitive(&m), "{m}");
+        }
+    }
 }

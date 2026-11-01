@@ -857,10 +857,10 @@ fn citations_use_store_titles_and_urls() {
     it.title = Some("Quarterly [draft]".into());
     it.metadata = serde_json::json!({"url": "https://mail.example/m?id=1 (x)", "sensitive": false});
     store.upsert_item(&it).unwrap();
-    // Sensitivity unknown: counts as sensitive (`nugget_retrieve::is_sensitive`), so the note is
-    // never cited.
+    // A PII hit is confirmed sensitive (`nugget_retrieve::is_confirmed_sensitive`): never cited.
     let mut note = nugget_store::NewItem::new("files", "notes.md", "h2");
     note.title = Some("Notes".into());
+    note.metadata = serde_json::json!({"sensitive": true, "pii": {"card": 1}});
     store.upsert_item(&note).unwrap();
     let g = Arc::new(MemGraph::new());
     let (sam, ..) = populate(&g);
@@ -877,6 +877,62 @@ fn citations_use_store_titles_and_urls() {
         !t.contains("notes.md") && !t.contains("oat milk please"),
         "{t}"
     );
+}
+
+/// With no local model every item waits for triage (`sensitive: true`, triage pending or
+/// unknown): such unsorted items are shown in the vault like any other. Once triage confirms one
+/// sensitive, it leaves the vault at the next full render.
+#[test]
+fn unsorted_items_are_shown_and_leave_once_triage_confirms_them_sensitive() {
+    let store = nugget_store::Store::open_in_memory().unwrap();
+    let unsorted = |key: &str, hash: &str, state: &str| {
+        let mut it =
+            nugget_store::NewItem::new(if key == "msg-1" { "mail" } else { "files" }, key, hash);
+        it.title = Some(key.into());
+        it.metadata = serde_json::json!({"sensitive": true, "triage": {"state": state}});
+        it
+    };
+    store
+        .upsert_item(&unsorted("msg-1", "h1", "pending"))
+        .unwrap();
+    store
+        .upsert_item(&unsorted("notes.md", "h2", "unknown"))
+        .unwrap();
+    let g = Arc::new(MemGraph::new());
+    let (sam, ..) = populate(&g);
+    let dir = tempfile::tempdir().unwrap();
+    let v = Vault::new(dir.path(), g, Arc::new(store.clone()), config()).unwrap();
+    v.render_all().unwrap();
+    let page = v
+        .page_path(&sam)
+        .unwrap()
+        .expect("unsorted items keep the page");
+    let t = std::fs::read_to_string(&page).unwrap();
+    assert!(
+        t.contains("Sam from Acme here") && t.contains("oat milk please"),
+        "{t}"
+    );
+
+    // Triage runs: both items are sensitive.
+    for (item, hash) in [(("mail", "msg-1"), "h1"), (("files", "notes.md"), "h2")] {
+        let r = nugget_core::ids::ItemRef {
+            source: nugget_core::ids::SourceId::new(item.0),
+            key: nugget_core::ids::ItemKey::new(item.1),
+        };
+        let meta = serde_json::json!({
+            "sensitive": true,
+            "triage": {"state": "done", "sensitive": true, "junk": false}
+        });
+        assert!(store.set_item_metadata(&r, hash, &meta).unwrap());
+    }
+    v.render_all().unwrap();
+    assert_eq!(
+        v.page_path(&sam).unwrap(),
+        None,
+        "the page of a now sensitive-only entity goes"
+    );
+    assert!(!page.exists(), "nothing written on it: deleted");
+    assert_nowhere(v.root(), &["Sam from Acme here", "oat milk please"]);
 }
 
 #[test]

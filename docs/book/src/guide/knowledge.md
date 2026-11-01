@@ -94,8 +94,12 @@ may sync elsewhere.
 
 ### Sensitive items and the vault
 
-For the same reason, nothing from a [sensitive item](privacy.md#sensitive-items) is written to the
-vault (an item whose sensitivity is unknown counts as sensitive):
+For the same reason, nothing from an item confirmed [sensitive](privacy.md#sensitive-items) is
+written to the vault. Confirmed means a card number or similar finding, a sensitivity rule (health,
+money, credentials, a connector that marks its documents sensitive), or local triage that ran and
+said sensitive. Items local triage has not sorted yet (for example while no local model is
+installed) are shown like any other item, as in Search; when triage later confirms one sensitive,
+it leaves the vault at the next render. They still never go to cloud models.
 
 - A fact whose sources are all sensitive is left out: no fact line, no footnote, nothing in
   `README.md`. Facts you wrote yourself have no sources and are always shown.

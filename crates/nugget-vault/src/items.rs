@@ -67,7 +67,7 @@ where
 #[cfg(feature = "store")]
 fn store_source(meta: nugget_store::ItemMeta) -> SourceInfo {
     SourceInfo {
-        sensitive: nugget_retrieve::is_sensitive(&meta.metadata),
+        sensitive: nugget_retrieve::is_confirmed_sensitive(&meta.metadata),
         url: meta
             .metadata
             .get("url")

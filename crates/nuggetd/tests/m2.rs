@@ -665,6 +665,24 @@ async fn sensitive_only_entities_are_marked_hidden_from_the_graph_and_kept_out_o
             .all(|c| c.sensitive),
         "{d:#?}"
     );
+    // No local model here, so the lunch mail is unsorted (triage has not run): sensitive for the
+    // cloud, but shown in the local views like any other item.
+    let lunch_ref = h
+        .entity(&alice.id)
+        .await
+        .claims
+        .iter()
+        .flat_map(|c| c.evidence.iter())
+        .map(|e| e.item.clone())
+        .next()
+        .expect("Alice's facts are cited");
+    let lunch = h.store.get_item(&lunch_ref).unwrap().unwrap();
+    assert!(
+        nugget_retrieve::is_sensitive(&lunch.metadata)
+            && !nugget_retrieve::is_confirmed_sensitive(&lunch.metadata),
+        "{:?}",
+        lunch.metadata
+    );
     let a = h.entity(&alice.id).await;
     assert!(
         !a.sensitive && a.claims.iter().all(|c| !c.sensitive),

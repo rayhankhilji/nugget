@@ -28,8 +28,12 @@ const SCAN_PAGE: usize = 500;
 pub(crate) struct ItemInfo {
     pub title: Option<String>,
     pub url: Option<String>,
-    /// `nugget_retrieve::is_sensitive` of the item; missing items count as sensitive.
+    /// `nugget_retrieve::is_sensitive` of the item (what MCP and cloud paths use: unsorted items
+    /// count); missing items count as sensitive.
     pub sensitive: bool,
+    /// `nugget_retrieve::is_confirmed_sensitive`: what the graph and entity views hide or badge
+    /// (unsorted items are shown); missing items count as sensitive.
+    pub confirmed_sensitive: bool,
     /// Source modification time, else when the item was indexed.
     pub observed_at: Option<time::OffsetDateTime>,
 }
@@ -60,11 +64,13 @@ impl<'a> Lookups<'a> {
             Some(it) => ItemInfo {
                 url: item_url(&it.metadata),
                 sensitive: nugget_retrieve::is_sensitive(&it.metadata),
+                confirmed_sensitive: nugget_retrieve::is_confirmed_sensitive(&it.metadata),
                 observed_at: Some(it.source_modified_at.unwrap_or(it.created_at)),
                 title: it.title,
             },
             None => ItemInfo {
                 sensitive: true,
+                confirmed_sensitive: true,
                 ..Default::default()
             },
         };
@@ -146,15 +152,16 @@ impl<'a> Lookups<'a> {
     }
 }
 
-/// Whether an evidence or mention item is sensitive. [`Lookups`] answers from the store
-/// (`nugget_retrieve::is_sensitive`; a missing item counts as sensitive).
+/// Whether an evidence or mention item is sensitive for the graph and entity views. [`Lookups`]
+/// answers from the store (`nugget_retrieve::is_confirmed_sensitive`: items triage has not
+/// sorted yet are shown; a missing item counts as sensitive).
 pub(crate) trait ItemSensitivity {
     fn item_sensitive(&mut self, item: &ItemRef) -> Result<bool>;
 }
 
 impl ItemSensitivity for Lookups<'_> {
     fn item_sensitive(&mut self, item: &ItemRef) -> Result<bool> {
-        Ok(self.item(item)?.sensitive)
+        Ok(self.item(item)?.confirmed_sensitive)
     }
 }
 
@@ -245,7 +252,7 @@ pub(crate) fn claim_view(lk: &mut Lookups<'_>, c: &Claim) -> Result<ClaimView> {
     let mut sensitive = !c.evidence.is_empty();
     for ev in &c.evidence {
         let info = lk.item(&ev.item)?;
-        sensitive &= info.sensitive;
+        sensitive &= info.confirmed_sensitive;
         evidence.push(EvidenceView {
             item: ev.item.clone(),
             chunk_id: ev.chunk_id,

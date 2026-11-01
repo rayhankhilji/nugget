@@ -62,7 +62,7 @@ mod types;
 pub use config::{Fusion, RecencyBoost, RetrieveConfig};
 pub use dates::{DateQuery, DateRange, parse_date_query};
 pub use rerank::{HttpReranker, HttpRerankerConfig, RerankStatus, Reranker};
-pub use retriever::{Retriever, is_sensitive};
+pub use retriever::{Retriever, is_confirmed_sensitive, is_sensitive};
 pub use rewrite::{QueryRewrite, RewriteMethod};
 pub use types::{
     ChunkMatch, ContextOptions, DateFilter, PackedContext, PackedPassage, RetrievalMode,
