@@ -19,6 +19,83 @@
 //! `sync:<kind>` (token refreshes and downloads included), so every exchange is in the egress
 //! ledger and redirects are never followed. Endpoints are injectable for tests.
 
+/// A Graph-backed kind's factory (endpoints, retry policy, settings parsing) and its connector's
+/// `Debug`. `build` hands the parsed settings and a [`graph::GraphApi`] to `$make`.
+macro_rules! graph_factory {
+    ($factory:ident, $conn:ident, $kind:ident, $display:literal, $settings:ty, $make:expr) => {
+        /// Factory for one Graph-backed connector kind.
+        #[derive(Debug, Clone, Default)]
+        pub struct $factory {
+            endpoints: crate::MicrosoftEndpoints,
+            retry: Option<crate::RetryPolicy>,
+        }
+
+        impl $factory {
+            pub fn new() -> Self {
+                Self::default()
+            }
+
+            pub fn with_endpoints(mut self, endpoints: crate::MicrosoftEndpoints) -> Self {
+                self.endpoints = endpoints;
+                self
+            }
+
+            pub fn with_retry(mut self, retry: crate::RetryPolicy) -> Self {
+                self.retry = Some(retry);
+                self
+            }
+        }
+
+        impl nugget_connector::ConnectorFactory for $factory {
+            fn info(&self) -> nugget_connector::KindInfo {
+                nugget_connector::KindInfo {
+                    kind: $kind,
+                    display_name: $display,
+                    auth: nugget_connector::AuthKind::OAuth,
+                    settings_schema: <$settings>::schema(),
+                }
+            }
+
+            fn validate(&self, settings: &serde_json::Value) -> nugget_core::Result<()> {
+                <$settings>::parse(settings).map(|_| ())
+            }
+
+            fn build(
+                &self,
+                settings: &serde_json::Value,
+                ctx: nugget_connector::ConnectorContext,
+            ) -> nugget_core::Result<std::sync::Arc<dyn nugget_connector::Connector>> {
+                let settings = <$settings>::parse(settings)?;
+                let api = crate::graph::GraphApi::new(
+                    FEATURE,
+                    SCOPES,
+                    &settings.common(),
+                    &self.endpoints,
+                    self.retry,
+                    ctx.clone(),
+                )?;
+                let make: fn(
+                    &Self,
+                    $settings,
+                    crate::graph::GraphApi,
+                    nugget_connector::ConnectorContext,
+                ) -> nugget_core::Result<
+                    std::sync::Arc<dyn nugget_connector::Connector>,
+                > = $make;
+                make(self, settings, api, ctx)
+            }
+        }
+
+        impl std::fmt::Debug for $conn {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($conn))
+                    .field("source", &self.ctx.source)
+                    .finish_non_exhaustive()
+            }
+        }
+    };
+}
+
 mod calendar;
 mod graph;
 pub mod oauth;
@@ -31,6 +108,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nugget_connector::Registry;
+pub use nugget_connector::retry::RetryPolicy;
 
 pub use calendar::{OutlookCalendarConnector, OutlookCalendarFactory};
 pub use onedrive::{OneDriveConnector, OneDriveFactory};
@@ -88,23 +166,11 @@ impl MicrosoftEndpoints {
     }
 }
 
-/// In-pass retries for throttling (429, 503/504 with `Retry-After`) and transient failures.
-/// After `max_retries` the error (`RateLimited` / `Network`) is returned and the ingest
-/// supervisor backs off; progress up to the last checkpoint is kept.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RetryPolicy {
-    pub max_retries: u32,
-    pub base_delay: Duration,
-    pub max_delay: Duration,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            max_retries: 4,
-            base_delay: Duration::from_secs(1),
-            max_delay: Duration::from_secs(120),
-        }
+/// The default in-pass retry policy: Graph's `Retry-After` hints run longer than most services'.
+pub(crate) fn default_retry() -> RetryPolicy {
+    RetryPolicy {
+        max_delay: Duration::from_secs(120),
+        ..RetryPolicy::default()
     }
 }
 

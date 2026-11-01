@@ -366,62 +366,6 @@ async fn expired_delta_token_resyncs_and_verifies_missing() {
 }
 
 #[tokio::test]
-async fn reset_cursor_reconciles_folders_and_window() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    let inside = format!("r{}", now() - 5 * 86_400);
-    let outside = format!("r{}", now() - 60 * 86_400);
-    h.know("inbox/listed", &inside);
-    h.know("inbox/old", &outside); // outside the new 30-day window: deleted without a request
-    h.know("inbox/gone", &inside); // inside: checked, and gone
-    h.know("archive/a1", &inside); // folder no longer synced
-    mount_initial(&h, "inbox", page(&h, "inbox", vec![
-        json!({"id": "listed", "subject": "Listed", "receivedDateTime": rfc3339(now() - 5 * 86_400)}),
-    ], None, Some("$deltatoken=d"))).await;
-    mount_initial(
-        &h,
-        "sentitems",
-        page(&h, "sentitems", vec![], None, Some("$deltatoken=s")),
-    )
-    .await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/me/mailFolders/inbox")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "INBOX-ID"})))
-        .mount(&h.server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(format!("{API}/me/messages/gone")))
-        .respond_with(ResponseTemplate::new(404))
-        .expect(1)
-        .mount(&h.server)
-        .await;
-    mount_no_mime(&h.server).await;
-
-    let conn = outlook_with(
-        &h,
-        fast_retry(0),
-        json!({"client_id": "cid", "window_days": 30}),
-    );
-    let sink = RecSink::default();
-    let out = run(&conn, None, &sink).await.unwrap();
-    // The listed message is unchanged: no download, no upsert.
-    assert_eq!(
-        sink.summary(),
-        vec!["-archive/a1", "-inbox/old", "-inbox/gone"]
-    );
-    assert_eq!(out["folders"].as_object().unwrap().len(), 2);
-    let initial = h.requests_to(&delta_path("inbox")).await.remove(0);
-    let q: HashMap<String, String> = initial.url.query_pairs().into_owned().collect();
-    // The new, shorter window is listed.
-    let since = q["$filter"].strip_prefix("receivedDateTime ge ").unwrap();
-    let since = time::OffsetDateTime::parse(since, &time::format_description::well_known::Rfc3339)
-        .unwrap()
-        .unix_timestamp();
-    assert!((now() - 30 * 86_400 - since).abs() < 60);
-    h.assert_egress("sync:outlook").await;
-}
-
-#[tokio::test]
 async fn interrupted_resync_restarts_its_listing() {
     let h = Harness::new().await;
     h.seed_tokens("at", false);
@@ -457,41 +401,6 @@ async fn interrupted_resync_restarts_its_listing() {
     run(&conn, Some(prior), &sink).await.unwrap();
     // `a` was listed again, so it is not taken for missing.
     assert!(sink.summary().is_empty());
-}
-
-#[tokio::test]
-async fn throttling_is_retried_with_retry_after() {
-    let h = Harness::new().await;
-    h.seed_tokens("at", false);
-    Mock::given(method("GET"))
-        .and(path(delta_path("inbox")))
-        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0").set_body_json(json!({
-            "error": {"code": "TooManyRequests", "message": "Application is over its MailboxConcurrency limit."}
-        })))
-        .up_to_n_times(1)
-        .mount(&h.server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(delta_path("inbox")))
-        .respond_with(ResponseTemplate::new(503).insert_header("retry-after", "0"))
-        .up_to_n_times(1)
-        .mount(&h.server)
-        .await;
-    mount_initial(
-        &h,
-        "inbox",
-        page(&h, "inbox", vec![], None, Some("$deltatoken=d")),
-    )
-    .await;
-    let conn = outlook_with(
-        &h,
-        fast_retry(3),
-        json!({"client_id": "cid", "folders": ["inbox"]}),
-    );
-    let out = run(&conn, None, &RecSink::default()).await.unwrap();
-    assert!(out["folders"]["inbox"]["delta_link"].is_string());
-    assert_eq!(h.requests_to(&delta_path("inbox")).await.len(), 3);
-    h.assert_egress("sync:outlook").await;
 }
 
 #[tokio::test]

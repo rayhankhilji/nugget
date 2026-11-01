@@ -1,7 +1,6 @@
 //! Authenticated, metered, throttling-aware GET requests against Microsoft Graph.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use nugget_connector::http::{MeteredHttp, Response};
 use nugget_connector::{AuthFlow, CancellationToken, ConnectorContext};
@@ -93,7 +92,7 @@ impl GraphApi {
         scopes: &[&str],
         common: &Common,
         endpoints: &MicrosoftEndpoints,
-        retry: RetryPolicy,
+        retry: Option<RetryPolicy>,
         ctx: ConnectorContext,
     ) -> Result<Self> {
         let http = MeteredHttp::new(ctx.egress.clone(), feature)?;
@@ -114,7 +113,7 @@ impl GraphApi {
         Ok(Self {
             http,
             tokens: Arc::new(tokens),
-            retry,
+            retry: retry.unwrap_or_else(crate::default_retry),
             ctx,
             login_hint: common.account_hint.clone().filter(|h| !h.trim().is_empty()),
             base,
@@ -291,10 +290,7 @@ impl GraphApi {
                     ));
                 }
                 Outcome::Retry(e, server) => {
-                    let delay = (attempt < self.retry.max_retries)
-                        .then(|| backoff(&self.retry, attempt, &e))
-                        .flatten();
-                    let Some(delay) = delay else {
+                    let Some(delay) = self.retry.pause(attempt, &e) else {
                         // Out of retries (or asked to wait longer than a pass should).
                         return match e {
                             Error::Network(m) if item && server => Ok(ItemGet::Failed(m)),
@@ -308,10 +304,7 @@ impl GraphApi {
                         "graph: retrying after {e}"
                     );
                     attempt += 1;
-                    tokio::select! {
-                        _ = tokio::time::sleep(delay) => {}
-                        _ = cancel.cancelled() => return Err(Error::Cancelled),
-                    }
+                    nugget_connector::retry::sleep(delay, cancel).await?;
                 }
                 Outcome::Fatal(e) => return Err(e),
             }
@@ -353,31 +346,6 @@ pub(crate) fn status_error(what: &str, resp: &Response) -> Error {
 /// the response's `Date` header so a skewed local clock does not distort it.
 pub(crate) fn retry_after_ms(resp: &Response) -> Option<u64> {
     nugget_connector::retry::retry_after_ms(&resp.headers)
-}
-
-/// The wait before retry number `attempt` (0-based): `base * 2^attempt` capped at `max_delay`,
-/// plus up to 25% jitter, never shorter than a server-requested `Retry-After`. `None` when the
-/// server asks for a longer wait than `max_delay`: the error is returned so the supervisor
-/// waits instead of retrying early.
-pub(crate) fn backoff(retry: &RetryPolicy, attempt: u32, err: &Error) -> Option<Duration> {
-    let hinted = match err {
-        Error::RateLimited {
-            retry_after_ms: Some(ms),
-        } => Duration::from_millis(*ms),
-        _ => Duration::ZERO,
-    };
-    if hinted > retry.max_delay {
-        return None;
-    }
-    let exp = retry
-        .base_delay
-        .saturating_mul(1u32 << attempt.min(16))
-        .min(retry.max_delay);
-    // Up to 25% jitter so parallel sources do not retry in lockstep.
-    let nanos = time::OffsetDateTime::now_utc().nanosecond() as u64;
-    let jitter = exp.as_millis() as u64 / 4;
-    let d = exp + Duration::from_millis(if jitter == 0 { 0 } else { nanos % jitter });
-    Some(d.max(hinted))
 }
 
 /// Graph error codes of a 403 that concern one item (blocked or protected content), not the
