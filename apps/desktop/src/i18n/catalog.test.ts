@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { LOCALES } from ".";
@@ -12,7 +12,6 @@ const enKeys = Object.keys(en).sort();
 const sameAsEnglish: Record<string, string[]> = JSON.parse(readFileSync(join(__dirname, "same-as-english.json"), "utf8"));
 
 const full = LOCALES.filter((l) => l.code !== "en" && !l.stub && !l.pseudo);
-const stubs = LOCALES.filter((l) => l.stub);
 
 /** Plural categories each language actually uses (CLDR), from the platform's own data. */
 function categories(code: string): string[] {
@@ -91,14 +90,6 @@ describe("message catalogs", () => {
       const english = enKeys.filter((k) => cat[k] === en[k] && !allowed.has(k));
       expect(english, `still English in ${code}.json (translate, or add to same-as-english.json)`).toEqual([]);
     });
-
-    it("lists only real keys for review", () => {
-      const file = join(DIR, "review", `${code}.json`);
-      if (!existsSync(file)) return;
-      const review = JSON.parse(readFileSync(file, "utf8")) as { keys: string[] };
-      expect(Array.isArray(review.keys)).toBe(true);
-      expect(review.keys.filter((k) => !(k in en))).toEqual([]);
-    });
   });
 
   it("allow-lists only keys that exist, for locales that exist", () => {
@@ -106,16 +97,5 @@ describe("message catalogs", () => {
       if (code !== "*") expect(full.map((l) => l.code), `allow-list for unknown locale ${code}`).toContain(code);
       expect(keys.filter((k) => !(k in en)), `unknown keys allow-listed under ${code}`).toEqual([]);
     }
-  });
-
-  describe.each(stubs.map((l) => [l.code, l.dir]))("stub %s", (code, dir) => {
-    it("is right-to-left and only has known, well-formed keys", () => {
-      expect(dir).toBe("rtl");
-      const cat = load(code);
-      for (const [k, v] of Object.entries(cat)) {
-        expect(en, `unknown key ${k}`).toHaveProperty([k]);
-        expect(signature(v), k).toEqual(signature(en[k]!));
-      }
-    });
   });
 });

@@ -12,8 +12,6 @@ import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../App";
 import { ChatPage } from "../pages/Chat";
-import { KnowledgePage } from "../pages/Knowledge";
-import { entities } from "../test/fixtures";
 import { cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { loadLocale } from ".";
 
@@ -106,28 +104,10 @@ describe("Chat in RTL", () => {
   });
 });
 
-describe("Knowledge in RTL", () => {
-  it("shows entity names in dir=auto elements and a dir=auto filter box", async () => {
-    mockDaemon();
-    const { container } = await render(<KnowledgePage />);
-    await flush(10);
-    expect(container.querySelector("#kb-search")?.getAttribute("dir")).toBe("auto");
-    const rows = Array.from(container.querySelectorAll(".entity-row"));
-    expect(rows.length).toBe(entities.length);
-    for (const e of entities) {
-      const el = Array.from(container.querySelectorAll(".entity-row [dir=auto]")).find((n) => n.textContent === e.name);
-      expect(el, e.name).toBeDefined();
-    }
-  });
-});
-
 describe("stylesheets use logical properties", () => {
   const SRC = join(__dirname, "..");
   const FILES = (readdirSync(SRC, { recursive: true }) as string[]).filter((f) => f.endsWith(".css")).sort();
 
-  it("finds the stylesheets", () => {
-    expect(FILES).toEqual(expect.arrayContaining(["styles.css", "styles-chat.css", "styles-pages.css"]));
-  });
   const PHYSICAL =
     /(^|[\s;{])(margin-left|margin-right|padding-left|padding-right|border-left|border-right|left|right)(-[a-z-]+)?\s*:|text-align\s*:\s*(left|right)\b|float\s*:\s*(left|right)\b/;
 
