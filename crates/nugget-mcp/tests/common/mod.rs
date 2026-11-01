@@ -1,12 +1,15 @@
 #![allow(dead_code)]
 
+mod fake;
+pub use fake::FakeBackend;
+
 use std::sync::{Arc, Mutex};
 
 use nugget_core::ids::{EntityId, ItemKey, ItemRef, SourceId};
 use nugget_core::ipc::{ClaimObjectView, EntityLink, McpClientInfo, McpScopes};
 use nugget_mcp::{
-    AuditEntry, ClientRegistry, EdgeRecord, EntityRecord, EvidenceRecord, FactRecord, FakeBackend,
-    ItemRecord, MemClientStore, MentionRecord, NeighbourhoodRecord, NodeRecord, Origin, ServerKey,
+    AuditEntry, ClientRegistry, EdgeRecord, EntityRecord, EvidenceRecord, FactRecord, ItemRecord,
+    MemClientStore, MentionRecord, NeighbourhoodRecord, NodeRecord, Origin, ServerKey,
 };
 use time::OffsetDateTime;
 
@@ -333,4 +336,65 @@ pub fn obj(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
         serde_json::Value::Object(o) => o,
         _ => panic!("not an object"),
     }
+}
+
+pub type Client = rmcp::service::RunningService<rmcp::RoleClient, ()>;
+
+/// An SDK client connected over an in-memory byte stream to `server`, serving `info`.
+pub async fn stdio_client_with(
+    server: &nugget_mcp::McpServer,
+    info: McpClientInfo,
+    mode: rmcp::ClientLifecycleMode,
+) -> Client {
+    use rmcp::ClientServiceExt;
+    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    let (r, w) = tokio::io::split(server_io);
+    let s = server.clone();
+    tokio::spawn(async move { s.serve_io(info, nugget_mcp::Transport::Stdio, r, w).await });
+    ().serve_with_lifecycle(client_io, mode)
+        .await
+        .expect("client connects")
+}
+
+pub async fn stdio_client(server: &nugget_mcp::McpServer, info: McpClientInfo) -> Client {
+    stdio_client_with(server, info, rmcp::ClientLifecycleMode::Initialize).await
+}
+
+pub fn tool_call(tool: &str, args: serde_json::Value) -> rmcp::model::CallToolRequestParams {
+    rmcp::model::CallToolRequestParams::new(tool.to_owned()).with_arguments(obj(args))
+}
+
+pub fn text_of(r: &rmcp::model::CallToolResult) -> String {
+    r.content
+        .iter()
+        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn mcp_error(e: rmcp::ServiceError) -> rmcp::ErrorData {
+    match e {
+        rmcp::ServiceError::McpError(e) => e,
+        other => panic!("expected an MCP error, got {other}"),
+    }
+}
+
+/// `(action, target, outcome)` of every audit entry.
+pub fn outcomes(log: &AuditLog) -> Vec<(String, String, String)> {
+    log.entries()
+        .iter()
+        .map(|e| {
+            (
+                e.action.clone(),
+                e.target.clone(),
+                e.detail["outcome"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+pub fn triples(v: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
+    v.iter()
+        .map(|(a, t, o)| (a.to_string(), t.to_string(), o.to_string()))
+        .collect()
 }

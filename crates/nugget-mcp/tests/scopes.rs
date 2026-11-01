@@ -6,7 +6,7 @@ mod common;
 use common::*;
 use nugget_core::ipc::McpScopes;
 use nugget_mcp::audit::Outcome;
-use nugget_mcp::tools::ToolOutput;
+use nugget_mcp::tools::{ToolFailure, ToolOutput};
 use nugget_mcp::{McpServer, Transport};
 use serde_json::{Value, json};
 
@@ -18,6 +18,21 @@ async fn call(s: &McpServer, scopes: McpScopes, tool: &str, args: Value) -> Tool
     s.call_tool(&client(scopes), Transport::Stdio, tool, &obj(args))
         .await
         .unwrap_or_else(|f| panic!("{tool} failed: {}", f.message))
+}
+
+async fn fail(s: &McpServer, scopes: McpScopes, tool: &str, args: Value) -> ToolFailure {
+    s.call_tool(&client(scopes), Transport::Stdio, tool, &obj(args))
+        .await
+        .unwrap_err()
+}
+
+async fn read(
+    s: &McpServer,
+    scopes: McpScopes,
+    uri: &str,
+) -> Result<(String, String), ToolFailure> {
+    s.read_resource(&client(scopes), Transport::Stdio, uri)
+        .await
 }
 
 fn everything(o: &ToolOutput) -> String {
@@ -72,15 +87,13 @@ async fn sources_allow_list_filters_every_tool() {
         assert!(out.items.iter().all(|i| i.source.as_str() == FILES));
         assert!(!everything(&out).contains("2M"));
 
-        let err = s
-            .call_tool(
-                &client(only_files.clone()),
-                Transport::Stdio,
-                "get_item",
-                &obj(json!({"source": MAIL, "key": "m1"})),
-            )
-            .await
-            .unwrap_err();
+        let err = fail(
+            &s,
+            only_files.clone(),
+            "get_item",
+            json!({"source": MAIL, "key": "m1"}),
+        )
+        .await;
         assert_eq!(err.outcome, Outcome::Rejected);
         assert!(err.message.contains("not found"));
 
@@ -168,26 +181,10 @@ async fn entities_seen_only_in_sensitive_items_are_invisible() {
             "vault-only entities are visible with all sources"
         );
 
-        let err = s
-            .call_tool(
-                &client(all_scopes()),
-                Transport::Stdio,
-                "get_entity",
-                &obj(json!({"id": "ent_clinic"})),
-            )
-            .await
-            .unwrap_err();
+        let err = fail(&s, all_scopes(), "get_entity", json!({"id": "ent_clinic"})).await;
         assert!(err.message.contains("not found"));
         // Same answer as for an id that never existed.
-        let err2 = s
-            .call_tool(
-                &client(all_scopes()),
-                Transport::Stdio,
-                "get_entity",
-                &obj(json!({"id": "ent_nope"})),
-            )
-            .await
-            .unwrap_err();
+        let err2 = fail(&s, all_scopes(), "get_entity", json!({"id": "ent_nope"})).await;
         assert_eq!(err.message, err2.message);
 
         let out = call(
@@ -318,15 +315,13 @@ async fn get_item_is_size_capped_and_pages() {
     // A sensitive item reads as not found without include_sensitive.
     for leaky in [false, true] {
         let s = server(leaky);
-        let err = s
-            .call_tool(
-                &client(all_scopes()),
-                Transport::Stdio,
-                "get_item",
-                &obj(json!({"source": MAIL, "key": "m2"})),
-            )
-            .await
-            .unwrap_err();
+        let err = fail(
+            &s,
+            all_scopes(),
+            "get_item",
+            json!({"source": MAIL, "key": "m2"}),
+        )
+        .await;
         assert!(err.message.contains("not found"));
         let ok = call(
             &s,
@@ -355,24 +350,11 @@ async fn tools_allow_list_is_enforced() {
         ("get_entity", json!({"id": "ent_sam"})),
         ("get_context", json!({"query": "apollo"})),
     ] {
-        let err = s
-            .call_tool(
-                &client(only_search.clone()),
-                Transport::Stdio,
-                tool,
-                &obj(args),
-            )
-            .await
-            .unwrap_err();
+        let err = fail(&s, only_search.clone(), tool, args).await;
         assert_eq!(err.outcome, Outcome::Denied, "{tool}");
     }
     // Resources follow the tools they mirror.
-    let err = s
-        .read_resource(
-            &client(only_search.clone()),
-            Transport::Stdio,
-            "nugget://entity/ent_sam",
-        )
+    let err = read(&s, only_search.clone(), "nugget://entity/ent_sam")
         .await
         .unwrap_err();
     assert_eq!(err.outcome, Outcome::Denied);
@@ -382,42 +364,22 @@ async fn tools_allow_list_is_enforced() {
 async fn resources_are_scoped_like_tools() {
     for leaky in [false, true] {
         let s = server(leaky);
-        let (mime, page) = s
-            .read_resource(
-                &client(all_scopes()),
-                Transport::Stdio,
-                "nugget://entity/ent_sam",
-            )
+        let (mime, page) = read(&s, all_scopes(), "nugget://entity/ent_sam")
             .await
             .unwrap();
         assert_eq!(mime, "text/markdown");
         assert!(page.contains("# Sam Lee (person)"));
         assert!(page.contains("leads the Apollo launch"));
         assert!(!page.contains(SECRET));
-        let err = s
-            .read_resource(
-                &client(all_scopes()),
-                Transport::Stdio,
-                "nugget://entity/ent_clinic",
-            )
+        let err = read(&s, all_scopes(), "nugget://entity/ent_clinic")
             .await
             .unwrap_err();
         assert!(err.message.contains("not found"));
-        let err = s
-            .read_resource(
-                &client(all_scopes()),
-                Transport::Stdio,
-                "nugget://item/mail%3Ame/m2",
-            )
+        let err = read(&s, all_scopes(), "nugget://item/mail%3Ame/m2")
             .await
             .unwrap_err();
         assert!(err.message.contains("not found"));
-        let (_, text) = s
-            .read_resource(
-                &client(all_scopes()),
-                Transport::Stdio,
-                "nugget://item/mail%3Ame/m1",
-            )
+        let (_, text) = read(&s, all_scopes(), "nugget://item/mail%3Ame/m1")
             .await
             .unwrap();
         assert!(text.contains("2M"));

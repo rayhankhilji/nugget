@@ -187,15 +187,8 @@ impl Scope {
         (!fact.evidence.is_empty()).then_some(fact)
     }
 
-    /// The scoped entity, or `None` when the client may not see it at all. Without per-detail
-    /// provenance: aliases, identifiers and attributes are shown only when every origin is
-    /// allowed (see [`Scope::entity_with_details`]).
-    pub fn entity(&self, e: EntityRecord) -> Option<ScopedEntity> {
-        self.entity_with_details(e, None)
-    }
-
-    /// Like [`Scope::entity`], keeping each alias and identifier one of whose supplying origins
-    /// the client may see (see the module rules).
+    /// The scoped entity, or `None` when the client may not see it at all. Aliases and
+    /// identifiers are kept per the module rules; attributes only when every origin is allowed.
     pub fn entity_with_details(
         &self,
         mut e: EntityRecord,

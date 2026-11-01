@@ -1,19 +1,11 @@
 //! The [`KnowledgeBackend`] contract: what the MCP server reads, as plain structs.
 //!
-//! `nuggetd` implements it in wave 2 over `nugget-retrieve` (search, context), the graph store
-//! (entities, neighbourhood, change feed) and `nugget-store` (items). [`crate::FakeBackend`] is
-//! the in-memory implementation used by tests.
-//!
-//! **Provenance is part of the contract.** Every record that carries source content says which
-//! item it came from and whether that item is sensitive (`nugget_retrieve::is_sensitive` on the
-//! item's metadata, which fails closed: an item without an explicit `"sensitive": false` counts as
-//! sensitive). Entities, graph nodes and graph edges carry their [`Origin`]s: the distinct
-//! `(source, sensitive)` pairs over all their evidence and mentions. The MCP layer uses these to
-//! enforce each client's scopes on every result, even when the backend already filtered.
-//!
-//! Every query also receives the client's [`ScopeFilter`] so the backend can filter *before*
-//! ranking and limiting (so a scoped client still gets `limit` results). Filtering there is an
-//! optimisation; correctness never depends on it.
+//! **Provenance is part of the contract.** Every record carrying source content names its item
+//! and whether that item is sensitive (`nugget_retrieve::is_sensitive`, which fails closed).
+//! Entities, graph nodes and edges carry their [`Origin`]s: the distinct `(source, sensitive)`
+//! pairs over all their evidence and mentions. The MCP layer enforces each client's scopes on
+//! every result with these, even when the backend already filtered: the [`ScopeFilter`] passed
+//! to every query only lets the backend filter before ranking and limiting.
 
 use async_trait::async_trait;
 use nugget_core::Result;
