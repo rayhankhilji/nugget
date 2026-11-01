@@ -9,6 +9,8 @@ pub mod knowledge;
 pub mod memory;
 pub mod perf;
 pub mod perf_daemon;
+pub mod perf_search;
+pub mod perf_sync;
 pub mod proactive;
 pub mod scale;
 

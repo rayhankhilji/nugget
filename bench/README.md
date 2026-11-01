@@ -2235,7 +2235,7 @@ What changed, by offender:
   recomputed at least every 60 s: on a settled 250k daemon, **~130 ms to 0.2 ms** p50 (the first
   call after a write still pays the count).
 - **Bulk writes.** `Store::upsert_items_with_chunks` writes many items in one transaction (the bench
-  seeds with it: 3,056 items/s at 500k). The ingest pipeline still writes one item per transaction
+  seeds with it: 3,056 items/s at 500k). The ingest pipeline still wrote one item per transaction (batched by LL1, below)
   (its crate's call); daemon ingest stays at ~650 files/s.
 
 Not fixed, measured:
@@ -2243,13 +2243,14 @@ Not fixed, measured:
 - **Knowledge extraction is the long pole:** a first run over 500k items takes an hour (139
   items/s; X5 measured 175 at 100k). Each item is a few SQLite writes; batching across items is
   `nugget-knowledge`'s call.
-- **Search** is 93 ms p50 / 327 ms p95 at 500k (text-only: the bench has no embedding provider).
+- **Search** (fixed by LL1, below) is 93 ms p50 / 327 ms p95 at 500k (text-only: the bench has no embedding provider).
   Full-text ranking over ~600k chunks dominates; within the brief's budget but the next target.
 - **Disk:** 4.2 KB per item for the store and 10.6 KB after extraction (the knowledge graph:
   200k claims, 2M mentions at 500k); 5 GB at 500k.
 - **Idle RSS at 500k is ~1 GB**, of which ~290 MB is the draft voice profile and ~160 MB SQLite page
   caches (writer and 4 readers × 32 MiB); the rest is allocator retention after the startup runs.
-- **The graph overview** (`knowledge.graph`, 67 ms) still scans every entity's counts.
+- **The graph overview** (`knowledge.graph`, 67 ms) still scans every entity's counts (fixed by
+  LL1, below).
 
 **Desktop lists.** Search results (II2's page, 50 at most) stay a plain list; the knowledge entity
 list and the privacy ledger use the shared windowed `VirtualList` (`apps/desktop/src/components/`),
@@ -2257,6 +2258,88 @@ the entity list loading 50 more on scroll (`usePagedList`). The e2e `scale` scen
 (`apps/desktop/e2e/scale.mjs`; the daemon answers a 500,000-entity `knowledge.status` and pages the
 entities) scrolled 2,100 entities at 16.7 ms median / 17.2 ms p95 frames, no long tasks, at most 32
 rows in the DOM; the privacy ledger at 1,000 rows at 17 ms p95, no long tasks, at most 41 rows.
+
+
+### LL1: part two
+
+LL1 took II5's open items. Measured locally (GitHub Actions was down): a 4-vCPU dev container
+(Intel Xeon, 16 GB), release builds, seed 42, before and after run back to back on the same
+machine and the same data.
+
+**Ingest writes in batches.** The per-source pipeline prepared and wrote one item at a time, one
+transaction each. It now prepares up to four items at once (bounded by the shared extraction
+slots; results kept in queue order) and, while more work is queued, writes prepared items
+together, up to 64 per transaction (`upsert_items_with_chunks`). A batch is written as soon as
+the queue runs dry, it is full, its oldest item waited 250 ms, or any other operation (a delete, a
+checkpoint, a new pass, a power pause) comes next, so order is kept and a lone live change is
+written at once; a failed batch is retried item by item, so a bad item fails alone; an item counts
+as applied (freshness, progress, triage) only once committed, and a checkpoint is never stored
+before the writes ahead of it. New `perf --perf-phases sync`: N Markdown files on disk, a files
+source added over them, the clock running until `ingest.status` reports all indexed and the last
+one is searchable (knowledge extraction runs alongside, as in the app):
+
+```sh
+target/release/nugget-bench perf --backend real --perf-phases sync --perf-items 100000 --perf-sizes mail
+```
+
+| 100,000 files | Before (`e0d44e6`) | After |
+|---|---|---|
+| `daemon.sync.items_per_s` | 505 | **1,709** (×3.4) |
+| `daemon.sync.wall_s` | 198 | **58.5** |
+| `daemon.sync.freshness_p50_ms` / `p95_ms` (observed → committed) | 112 / 255 | **80 / 211** |
+| `daemon.sync.live.freshness_p50_ms` (file written → searchable, watcher debounce included) | 598 | 601 |
+
+**Search tail.** An OR query made FTS5 score every row matching any term, and a word in most
+chunks of a big store (in the bench corpus, words in 100k–520k of 590k chunks) meant ranking most
+of the store although such a word adds almost nothing to bm25. Text search now splits a query's
+terms into rare and common ones (at least 1/32 of the rows) on stores of 20k+ rows: rows matching
+a rare term get their exact bm25 as the difference of two cheap queries (`R` gives the rare part
+`r`; `(R) AND (R OR C)` gives `2r + c`, FTS5 seeking in the common lists instead of walking them);
+rows matching only common terms cannot score above `Σ idf · (k1 + 1)`, so when the result's last
+score beats that bound the top `limit` is exact; otherwise the least common common term moves to
+the rare side (twice at most), then the plain query runs. Same for the title index. The ranking is
+unchanged: a store test compares it with the plain query (phrases, prefixes, exclusions), and at
+500k the top 80 matched on 300 of 301 bench queries (one adjacent pair swapped by rounding). New
+`perf --perf-phases search`: the daemon profile's seeded store and queries, `nuggetd` with
+knowledge extraction off, searches timed once the daemon has settled after startup (under 5% CPU
+over 2 s, at least 30 s; searched during the startup work, the numbers measure that contention):
+
+```sh
+NUGGET_BENCH_SEARCH_HOME=/tmp/bench-homes target/release/nugget-bench perf --backend real \
+  --perf-phases search --scale full --perf-items 500000 --perf-sizes mail
+```
+
+| 500,000 items, text-only, 300 queries | Before | After |
+|---|---|---|
+| `daemon.search.latency.p50_us` | 102,618 | **62,622** |
+| `daemon.search.latency.p95_us` | 375,980 | **123,486** |
+| `daemon.search.recall@10` | 0.7076 | 0.7076 |
+| `Store::search_text` (top 80, in process) p50 / p95 | 97 / 339 ms | **61 / 119 ms** |
+
+("Before" here is the branch with the ingest and graph changes but not the search change: the
+`e0d44e6` daemon cannot open the new schema.)
+
+**Graph overview top-N.** Store schema v15 keeps per-entity claim and mention counts
+(`entity_stats`, maintained by triggers with `list_entities`' definition, indexed by rank), and
+`GraphStore::top_entities` (additive, the old scan as its default) answers the overview from the
+index; the overview pages through it with the same source and sensitivity filters, so it no longer
+stops at 5,000 entities read in name order. On a synthetic graph of 15k entities, 200k claims and
+2M mentions: `top_entities(all, 50)` 0.067 ms against 576 ms for the scan and sort; the migration's
+backfill 335 ms; inserting 200k mentions 8.9 s with the triggers, 9.2 s without (noise).
+
+**Paging.** `search.page` and `egress.page` (additive IPC, opaque cursors) let the UI go past its
+limits: the Privacy ledger loads older rows by cursor as its `VirtualList` scrolls, and plain search
+(daemons without `search.faceted`) pages with "Show more". The e2e `scale` scenario scrolled a
+5,000-row ledger by cursor at 16.6 ms median / 17.1 ms p95 frames, no long tasks, at most 41 rows
+in the DOM, and paged 60 search results in 6 pages with the keyboard.
+
+**Not done: proactive still rescans.** The proactive engine (BB2's crate, paused) still reads every
+item on each run, and the daemon runs it after every debounced ingest or knowledge event, so a
+first sync makes it re-read the growing store again and again. The planned fix is an incremental
+corpus over the change feed (`items_changed_since`): parsed items cached by key, only changed items
+re-read, a full reload when the parse configuration changes or the feed cursor goes backwards. That
+cache would keep the parsed corpus between runs, which today lives only during one, at the cost of
+idle memory.
 
 ## Energy
 

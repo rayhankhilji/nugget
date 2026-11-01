@@ -10,11 +10,12 @@ use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
     self, AskRequest, AskRestarted, AskStarted, AuthBegin, ChatCancel, ChatDelta, ChatDone,
-    ChatStarted, ContextRequest, ContextResponse, EgressRecentRequest, EgressRecordRequest,
-    ModelCancelRequest, ModelCancelResponse, ModelFailReason, ModelInfo, ModelInstallRequest,
-    ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo, Role as IpcRole,
-    RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret, SourceSpec,
-    SourceSync, SourceUpdate, StatusResponse, method, notification,
+    ChatStarted, ContextRequest, ContextResponse, EgressPageRequest, EgressRecentRequest,
+    EgressRecordRequest, ModelCancelRequest, ModelCancelResponse, ModelFailReason, ModelInfo,
+    ModelInstallRequest, ModelPhase, ModelProgress, PROTOCOL_VERSION, Page, ProbeRequest,
+    ProviderInfo, Role as IpcRole, RuntimeRole, SearchHit, SearchPageRequest, SearchRequest,
+    SourceRef, SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate, StatusResponse,
+    method, notification,
 };
 use nugget_core::{Error, Result};
 use nugget_infer::{
@@ -33,6 +34,7 @@ use crate::ask::{
 };
 use crate::config::tier_name;
 use crate::daemon::{InFlightGuard, State, blocking, spawn_refresh};
+use crate::paging;
 use crate::sources::{check_duplicate_folders, client_secret_account, reconcile_settings};
 
 /// Longest `daemon.shutdown` reason logged.
@@ -77,12 +79,14 @@ impl Handler for RpcHandler {
             method::CHAT => self.chat(parse_params(params)?, notify).await,
             method::CHAT_CANCEL => self.chat_cancel(parse_params(params)?),
             method::SEARCH => self.search(parse_params(params)?).await,
+            method::SEARCH_PAGE => self.search_page(parse_params(params)?).await,
             method::PROVIDERS_LIST => to_result(self.provider_infos()),
             method::PROVIDERS_PROBE => self.probe(parse_params(params)?).await,
             method::MODELS_LIST => self.models_list().await,
             method::MODELS_INSTALL => self.models_install(parse_params(params)?, notify).await,
             method::MODELS_CANCEL => self.models_cancel(parse_params(params)?),
             method::EGRESS_RECENT => self.egress_recent(parse_params(params)?).await,
+            method::EGRESS_PAGE => self.egress_page(parse_params(params)?).await,
             method::EGRESS_RECORD => self.egress_record(parse_params(params)?).await,
             method::SOURCES_LIST => to_result(self.state.ingest.list().await?),
             method::SOURCES_ADD => self.sources_add(parse_params(params)?).await,
@@ -593,6 +597,47 @@ impl RpcHandler {
         to_result(results.hits())
     }
 
+    /// `search` a page at a time (LL1). Every page ranks the same depth
+    /// ([`paging::MAX_SEARCH_DEPTH`]) and returns its slice: the retriever sizes its candidate
+    /// pools by the depth asked for, so ranking each page only as deep as it reaches would order
+    /// near-ties differently from page to page (repeating some hits and skipping others). Hits
+    /// are converted exactly as `search` converts them (sensitive items included or left out the
+    /// same way); paging stops at that depth.
+    async fn search_page(&self, req: SearchPageRequest) -> Result<Value, RpcError> {
+        let offset = match req.cursor.as_deref() {
+            Some(c) => paging::parse_search_cursor(c, &req.query)?,
+            None => 0,
+        };
+        let limit = req.limit.min(MAX_SEARCH_RESULTS) as usize;
+        if limit == 0 || req.query.trim().is_empty() {
+            return to_result(Page::<SearchHit> {
+                items: Vec::new(),
+                next_cursor: None,
+            });
+        }
+        let depth = (offset + limit).min(paging::MAX_SEARCH_DEPTH);
+        let retriever = self.state.retriever.clone();
+        let query = req.query.clone();
+        let results =
+            on_blocking_thread(
+                async move { retriever.search(&query, paging::MAX_SEARCH_DEPTH).await },
+            )
+            .await?;
+        tracing::debug!(mode = ?results.mode, hits = results.items.len(), offset, "search page");
+        let more = results.items.len() > depth;
+        let items: Vec<SearchHit> = results
+            .items
+            .iter()
+            .take(depth)
+            .skip(offset)
+            .map(SearchHit::from)
+            .collect();
+        to_result(Page {
+            items,
+            next_cursor: more.then(|| paging::search_cursor(&req.query, depth)),
+        })
+    }
+
     async fn retrieve_context(&self, req: ContextRequest) -> Result<Value, RpcError> {
         let budget = req.budget_tokens.min(MAX_CONTEXT_TOKENS);
         if budget == 0 || req.query.trim().is_empty() {
@@ -747,6 +792,36 @@ impl RpcHandler {
         let store = self.state.store.clone();
         let events = blocking(move || store.recent_egress(limit)).await?;
         to_result(events)
+    }
+
+    /// The ledger a page at a time, newest first (LL1): keyset paging on the row id, so rows
+    /// recorded while a client pages never shift the pages after the first.
+    async fn egress_page(&self, req: EgressPageRequest) -> Result<Value, RpcError> {
+        let before = req
+            .cursor
+            .as_deref()
+            .map(paging::parse_egress_cursor)
+            .transpose()?;
+        let limit = req.limit.min(MAX_EGRESS_EVENTS) as usize;
+        if limit == 0 {
+            return to_result(Page::<nugget_core::egress::EgressEvent> {
+                items: Vec::new(),
+                next_cursor: None,
+            });
+        }
+        let store = self.state.store.clone();
+        let mut rows = blocking(move || store.recent_egress_before(before, limit + 1)).await?;
+        let more = rows.len() > limit;
+        rows.truncate(limit);
+        let next_cursor = if more {
+            rows.last().map(|r| paging::egress_cursor(r.id))
+        } else {
+            None
+        };
+        to_result(Page {
+            items: rows.into_iter().map(|r| r.event).collect::<Vec<_>>(),
+            next_cursor,
+        })
     }
 
     /// A request the desktop app made itself (update checks), written to the ledger and

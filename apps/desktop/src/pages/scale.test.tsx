@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EgressEvent, EntitySummaryView } from "../api";
 import { formatNumber, t } from "../i18n";
 import { RESPONSES } from "../test/fixtures";
-import { cleanup, flush, installDomShims, mockDaemon, render } from "../test/render";
+import { cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { KnowledgePage } from "./Knowledge";
 import { PrivacyPage } from "./Privacy";
 
@@ -48,6 +48,70 @@ describe("Privacy ledger at 50,000 rows", () => {
     expect(container.querySelector(".stats")!.textContent).toContain(formatNumber(TOTAL));
     // Rows are not Tab stops: the table's scroll region already is one.
     expect(table.querySelectorAll("tbody tr[tabindex]")).toHaveLength(0);
+  });
+});
+
+describe("Privacy ledger paging (LL1)", () => {
+  const ledger: EgressEvent[] = Array.from({ length: 450 }, (_, i) => ({
+    at: new Date(Date.UTC(2026, 9, 1) - i * 60_000).toISOString(),
+    host: `host${i}.example.com`,
+    feature: "chat",
+    bytes_sent: 10,
+    bytes_received: 20,
+    items: [],
+  }));
+
+  it("loads older pages by cursor and says how many rows are loaded", async () => {
+    const requests: { limit: number; cursor?: string }[] = [];
+    const calls = mockDaemon({
+      egress_page: (args: unknown) => {
+        const r = (args as { request: { limit: number; cursor?: string } }).request;
+        requests.push(r);
+        const from = r.cursor ? Number(r.cursor.slice(2)) : 0;
+        const items = ledger.slice(from, from + r.limit);
+        const next = from + r.limit < ledger.length ? `e1${from + r.limit}` : null;
+        return { items, next_cursor: next };
+      },
+    });
+    const { container } = await render(<PrivacyPage />);
+    await flush();
+    expect(requests).toEqual([{ limit: 200 }]);
+    const table = container.querySelector("table")!;
+    expect(table.getAttribute("aria-rowcount")).toBe("201");
+    const note = () => container.querySelector(".privacy-loaded")!.textContent;
+    expect(note()).toBe(t("privacy.loadedSome", { n: 200 }));
+    const more = () =>
+      Array.from(container.querySelectorAll("button")).find((b) => b.textContent === t("privacy.loadOlder"));
+
+    await click(more());
+    await flush();
+    expect(requests.at(-1)).toEqual({ limit: 200, cursor: "e1200" });
+    expect(table.getAttribute("aria-rowcount")).toBe("401");
+    expect(container.querySelector(".stats")!.textContent).toContain(formatNumber(400));
+    // Announced politely once the page is in.
+    const said = () => Array.from(container.querySelectorAll('[role="status"]'), (e) => e.textContent ?? "").join(" ");
+    expect(said()).toContain(t("privacy.loadedSome", { n: 400 }));
+
+    await click(more());
+    await flush();
+    expect(requests.at(-1)).toEqual({ limit: 200, cursor: "e1400" });
+    expect(table.getAttribute("aria-rowcount")).toBe("451");
+    expect(note()).toBe(t("privacy.loadedAll", { n: 450 }));
+    expect(more()).toBeUndefined();
+    expect(said()).toContain(t("privacy.loadedAll", { n: 450 }));
+    // Every row once, in order.
+    expect(table.querySelector("tbody tr[data-index]")!.textContent).toContain("host0.example.com");
+    expect(calls).not.toContain("egress_recent");
+  });
+
+  it("falls back to egress.recent on a daemon without egress.page", async () => {
+    const calls = mockDaemon({ egress_recent: ledger.slice(0, 50) });
+    const { container } = await render(<PrivacyPage />);
+    await flush();
+    expect(calls).toContain("egress_page");
+    expect(calls).toContain("egress_recent");
+    expect(container.querySelector("table")!.getAttribute("aria-rowcount")).toBe("51");
+    expect(container.querySelector(".privacy-loaded")!.textContent).toBe(t("privacy.loadedAll", { n: 50 }));
   });
 });
 

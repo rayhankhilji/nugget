@@ -22,12 +22,14 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `chat` | [`ChatRequest`] | [`ChatStarted`], then `chat.delta`/`chat.done` notifications |
 /// | `chat.cancel` | [`ChatCancel`] | `null` |
 /// | `search` | [`SearchRequest`] | `Vec<`[`SearchHit`]`>` |
+/// | `search.page` | [`SearchPageRequest`] | [`Page`]`<`[`SearchHit`]`>` |
 /// | `providers.list` | `{}` | `Vec<`[`ProviderInfo`]`>` |
 /// | `providers.probe` | [`ProbeRequest`] | [`Capabilities`] |
 /// | `models.list` | `{}` | `Vec<`[`ModelInfo`]`>` |
 /// | `models.install` | [`ModelInstallRequest`] | `null`, then `models.progress` notifications |
 /// | `models.cancel` | [`ModelCancelRequest`] | [`ModelCancelResponse`] (the install's connection gets a final `failed` progress with reason `cancelled`) |
 /// | `egress.recent` | [`EgressRecentRequest`] | [`EgressRecentResponse`] |
+/// | `egress.page` | [`EgressPageRequest`] | [`Page`]`<`[`EgressEvent`]`>` |
 /// | `egress.record` | [`EgressRecordRequest`] | `null` |
 /// | `sources.list` | `{}` | `Vec<`[`SourceInfo`]`>` |
 /// | `sources.add` | [`SourceSpec`] | [`SourceInfo`] |
@@ -65,6 +67,8 @@ pub mod method {
     pub const CHAT: &str = "chat";
     pub const CHAT_CANCEL: &str = "chat.cancel";
     pub const SEARCH: &str = "search";
+    /// LL1: `search` a page at a time ([`super::SearchPageRequest`] → [`super::Page`]).
+    pub const SEARCH_PAGE: &str = "search.page";
     pub const PROVIDERS_LIST: &str = "providers.list";
     pub const PROVIDERS_PROBE: &str = "providers.probe";
     pub const MODELS_LIST: &str = "models.list";
@@ -72,6 +76,9 @@ pub mod method {
     /// Stop a running `models.install`; staged bytes are kept and the next install resumes.
     pub const MODELS_CANCEL: &str = "models.cancel";
     pub const EGRESS_RECENT: &str = "egress.recent";
+    /// LL1: the ledger a page at a time, newest first ([`super::EgressPageRequest`] →
+    /// [`super::Page`]).
+    pub const EGRESS_PAGE: &str = "egress.page";
     /// A request the desktop app made itself (update checks), for the daemon's ledger.
     pub const EGRESS_RECORD: &str = "egress.record";
     pub const SOURCES_LIST: &str = "sources.list";
@@ -363,6 +370,29 @@ pub struct SearchHit {
     pub url: Option<String>,
 }
 
+/// `search.page`: one page of a `search` ranking. Without `cursor`, the first `limit` hits;
+/// with the `next_cursor` of the previous page (same `query`), the next ones. Every page ranks
+/// the query to the same fixed depth (500 hits, where paging stops) and returns its slice; items
+/// indexed between two pages can still shift the ranking, so clients merge pages by item and
+/// chunk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchPageRequest {
+    pub query: String,
+    pub limit: u32,
+    /// Opaque; only a `next_cursor` the daemon returned for this same query is accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+/// Result of the cursor-paged methods (`search.page`, `egress.page`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    /// Pass back as `cursor` for the next page; `None` at the end.
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+}
+
 // ---- models ----
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -462,6 +492,18 @@ pub struct EgressRecentRequest {
 }
 
 pub type EgressRecentResponse = Vec<EgressEvent>;
+
+/// `egress.page`: ledger rows newest first, `limit` at a time. Without `cursor`, the newest;
+/// with the previous page's `next_cursor`, the rows recorded before that page's last one. Rows
+/// recorded while paging never shift later pages (they are newer than every cursor), so no row is
+/// skipped or listed twice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EgressPageRequest {
+    pub limit: u32,
+    /// Opaque; only a `next_cursor` the daemon returned is accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
 
 /// Ledger features a client may record with `egress.record`: requests the desktop app makes
 /// itself, outside the daemon's network layer. Anything else is refused.
@@ -2353,6 +2395,31 @@ mod tests {
             serde_json::json!({"url": "https://example.com/device", "user_code": "WDJB-MJHT"})
         );
         assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), device);
+    }
+
+    #[test]
+    fn page_requests_take_an_optional_cursor() {
+        let r: SearchPageRequest =
+            serde_json::from_value(serde_json::json!({"query": "q", "limit": 5})).unwrap();
+        assert_eq!(r.cursor, None);
+        // Without a cursor, the params are exactly those of `search`.
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            serde_json::json!({"query": "q", "limit": 5})
+        );
+        let r: EgressPageRequest =
+            serde_json::from_value(serde_json::json!({"limit": 5, "cursor": "abc"})).unwrap();
+        assert_eq!(r.cursor.as_deref(), Some("abc"));
+        let p: Page<u32> = serde_json::from_value(serde_json::json!({"items": [1, 2]})).unwrap();
+        assert_eq!(p.next_cursor, None);
+        assert_eq!(
+            serde_json::to_value(Page {
+                items: vec![1u32],
+                next_cursor: Some("c".into())
+            })
+            .unwrap(),
+            serde_json::json!({"items": [1], "next_cursor": "c"})
+        );
     }
 
     #[test]

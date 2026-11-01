@@ -1776,6 +1776,70 @@ impl GraphStore for SqliteGraph {
         })
     }
 
+    fn top_entities(
+        &self,
+        kinds: &[EntityKind],
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<EntitySummary>> {
+        // `entity_stats` (schema v15) holds the counts, kept exact by triggers. Walking its
+        // rank index from the top and joining each row to its entity (CROSS JOIN fixes that
+        // order) reads about `offset + limit` rows plus ties: the name and id tie-breaks are
+        // a partial sort of each (claims, mentions) group.
+        let mut args: Vec<Box<dyn ToSql>> = Vec::new();
+        let mut kind_cond = String::new();
+        if !kinds.is_empty() {
+            let mut seen = Vec::new();
+            for k in kinds {
+                if !seen.contains(k) {
+                    seen.push(*k);
+                    args.push(Box::new(k.as_str()));
+                }
+            }
+            let marks: Vec<String> = (1..=args.len()).map(|i| format!("?{i}")).collect();
+            kind_cond = format!(" AND e.kind IN ({})", marks.join(", "));
+        }
+        args.push(Box::new(sql_limit(limit)));
+        let lim = args.len();
+        args.push(Box::new(i64::try_from(offset).unwrap_or(i64::MAX)));
+        let off = args.len();
+        let sql = format!(
+            "SELECT e.id, e.kind, e.name, e.updated_at, s.claims, s.mentions
+             FROM entity_stats s CROSS JOIN entities e ON e.id = s.entity_id
+             WHERE e.merged_into IS NULL AND e.deleted_at IS NULL{kind_cond}
+             ORDER BY s.claims DESC, s.mentions DESC, e.name, e.id
+             LIMIT ?{lim} OFFSET ?{off}"
+        );
+        self.read(|c| {
+            let mut stmt = c.prepare_cached(&sql).db("prepare top_entities")?;
+            let rows = stmt
+                .query_map(params_from_iter(args.iter()), |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, i64>(5)?,
+                    ))
+                })
+                .db("query top_entities")?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (id, kind, name, updated_at, claims, mentions) = row.db("read top_entities")?;
+                out.push(EntitySummary {
+                    id: EntityId::new(id),
+                    kind: kind_from_str(&kind)?,
+                    name,
+                    claims: claims.max(0) as u64,
+                    mentions: mentions.max(0) as u64,
+                    updated_at: parse_time(&updated_at)?,
+                });
+            }
+            Ok(out)
+        })
+    }
+
     fn merge(&self, into: &EntityId, from: &EntityId) -> Result<()> {
         self.write("merge", |tx, touched| merge_tx(tx, into, from, touched))
     }
@@ -2397,6 +2461,357 @@ mod tests {
             );
             assert!(seen.insert(id));
         }
+    }
+
+    /// `entity_stats` against counts recomputed as `list_entities` defines them, for every
+    /// entity row (tombstones included), and `top_entities` against the scan-and-sort default.
+    fn assert_counts_exact(g: &SqliteGraph, step: &str) {
+        let read = |sql: &str| -> Vec<(String, i64, i64)> {
+            g.read(|c| {
+                let mut stmt = c.prepare(sql).db("prepare")?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .db("query")?;
+                rows.collect::<rusqlite::Result<_>>().db("read")
+            })
+            .unwrap()
+        };
+        let kept = read(
+            "SELECT e.id, s.claims, s.mentions FROM entities e
+             LEFT JOIN entity_stats s ON s.entity_id = e.id ORDER BY e.id",
+        );
+        let actual = read(&format!(
+            "SELECT e.id,
+                    (SELECT count(*) FROM claims c WHERE c.subject = e.id AND c.{ACTIVE})
+                  + (SELECT count(*) FROM claims c WHERE c.object_entity = e.id
+                        AND c.subject <> e.id AND c.{ACTIVE}),
+                    (SELECT count(*) FROM mentions m WHERE m.entity_id = e.id)
+             FROM entities e ORDER BY e.id"
+        ));
+        assert_eq!(kept, actual, "{step}");
+        let strays = read(
+            "SELECT entity_id, claims, mentions FROM entity_stats
+             WHERE entity_id NOT IN (SELECT id FROM entities)",
+        );
+        assert!(strays.is_empty(), "{step}: {strays:?}");
+        let kind_sets: [&[EntityKind]; 4] = [
+            &[],
+            &[EntityKind::Person],
+            &[EntityKind::Person, EntityKind::Organization],
+            &[EntityKind::Topic],
+        ];
+        for kinds in kind_sets {
+            for (limit, offset) in [(0, 0), (3, 0), (2, 1), (50, 4), (1, 100)] {
+                assert_eq!(
+                    g.top_entities(kinds, limit, offset).unwrap(),
+                    nugget_graph::top_entities_scan(g, kinds, limit, offset).unwrap(),
+                    "{step}: {kinds:?} {limit} {offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn entity_counts_stay_exact_through_every_write_path() {
+        let store = Store::open_in_memory().unwrap();
+        let g = store.graph();
+        let item = |k: &str| ItemRef {
+            source: SourceId::new(if k.starts_with('m') { "mail" } else { "files" }),
+            key: nugget_core::ids::ItemKey::new(k),
+        };
+        let ev = |k: &str| Evidence {
+            item: item(k),
+            chunk_id: Some(1),
+            quote: Some(format!("quote {k}")),
+        };
+        let claim = |s: &EntityId, p: &str, o: ClaimObject, evs: &[&str]| NewClaim {
+            subject: s.clone(),
+            predicate: p.into(),
+            object: o,
+            text: format!("{s} {p}"),
+            confidence: 0.5,
+            status: ClaimStatus::Active,
+            evidence: evs.iter().map(|k| ev(k)).collect(),
+            valid_from: None,
+            valid_to: None,
+        };
+        let mention = |e: &EntityId, k: &str, surface: &str| Mention {
+            entity: e.clone(),
+            item: item(k),
+            chunk_id: Some(1),
+            surface: surface.into(),
+            confidence: 0.7,
+        };
+        let ent = |kind, name: &str| g.create_entity(&NewEntity::new(kind, name)).unwrap();
+        let obj = |e: &EntityId| ClaimObject::Entity(e.clone());
+        let lit = |s: &str| ClaimObject::Literal(s.into());
+
+        let sam = ent(EntityKind::Person, "Sam");
+        let ana = ent(EntityKind::Person, "Ana");
+        let acme = ent(EntityKind::Organization, "Acme");
+        let acme2 = ent(EntityKind::Organization, "ACME Inc");
+        let topic = ent(EntityKind::Topic, "Budget");
+        let _idle = ent(EntityKind::Person, "Idle");
+        assert_counts_exact(&g, "created");
+
+        for (e, k, s) in [
+            (&sam, "f1", "Sam"),
+            (&sam, "m1", "Sam"),
+            (&sam, "m1", "Sammy"),
+            (&ana, "f1", "Ana"),
+            (&acme, "f2", "Acme"),
+            (&acme2, "m2", "ACME"),
+            (&topic, "m2", "budget"),
+        ] {
+            g.add_mention(&mention(e, k, s)).unwrap();
+        }
+        // Same mention again: an upsert, not a new row.
+        g.add_mention(&mention(&sam, "f1", "Sam")).unwrap();
+        assert_counts_exact(&g, "mentioned");
+
+        let works = g
+            .add_claim(&claim(&sam, "works_at", obj(&acme), &["f1"]))
+            .unwrap();
+        let likes = g
+            .add_claim(&claim(&sam, "likes", lit("tea"), &["m1"]))
+            .unwrap();
+        let knows = g
+            .add_claim(&claim(&ana, "knows", obj(&sam), &["f1", "m1"]))
+            .unwrap();
+        let _self_loop = g
+            .add_claim(&claim(&sam, "reports_to", obj(&sam), &["f2"]))
+            .unwrap();
+        let ana_acme = g
+            .add_claim(&claim(&ana, "works_at", obj(&acme2), &["m2"]))
+            .unwrap();
+        let _ = g
+            .add_claim(&claim(&acme2, "about", obj(&topic), &["m2"]))
+            .unwrap();
+        // Same triple again: evidence lands in the existing claim.
+        g.add_claim(&claim(&sam, "works_at", obj(&acme), &["f2"]))
+            .unwrap();
+        assert_counts_exact(&g, "claimed");
+
+        // Supersede by the user (status change + a user-asserted claim).
+        let mut by = claim(&sam, "likes", lit("coffee"), &[]);
+        by.status = ClaimStatus::UserAsserted;
+        g.supersede_by_user(likes, &by).unwrap();
+        assert_counts_exact(&g, "superseded by user");
+
+        // Status changes: rejected, retracted, back to active (with a fold into a twin).
+        g.set_claim_status(knows, ClaimStatus::Rejected).unwrap();
+        assert_counts_exact(&g, "rejected");
+        g.set_claim_status(knows, ClaimStatus::Active).unwrap();
+        g.set_claim_status(works, ClaimStatus::Retracted).unwrap();
+        assert_counts_exact(&g, "retracted");
+        g.add_claim(&claim(&sam, "works_at", obj(&acme), &["m1"]))
+            .unwrap();
+        g.add_evidence(works, &ev("m2")).unwrap();
+        assert_counts_exact(&g, "re-activated and folded");
+        g.update_claim(
+            ana_acme,
+            &ClaimPatch {
+                confidence: Some(0.9),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        g.update_entity(
+            &acme2,
+            &EntityPatch {
+                name: Some("Acme Incorporated".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_counts_exact(&g, "updated");
+
+        // Merge: claims (subject and object) and mentions move, duplicate triples fold.
+        g.add_claim(&claim(&ana, "works_at", obj(&acme), &["f2"]))
+            .unwrap();
+        g.merge(&acme, &acme2).unwrap();
+        assert_counts_exact(&g, "merged");
+
+        // Split part of Acme off again.
+        let acme_claims: Vec<ClaimId> = g
+            .claims_for(&acme, false)
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.predicate == "about")
+            .map(|c| c.id)
+            .collect();
+        let split = g.split(
+            &acme,
+            &acme_claims,
+            &NewEntity::new(EntityKind::Organization, "Acme Labs"),
+        );
+        split.unwrap();
+        assert_counts_exact(&g, "split");
+
+        // Batch: create, mention, claim, status, retract an item, all in one transaction.
+        let mut batch = GraphBatch::new();
+        batch.ops.push(GraphOp::AddMention {
+            mention: mention(&topic, "f3", "Budget"),
+        });
+        batch.ops.push(GraphOp::AddClaim {
+            claim: claim(&topic, "owned_by", obj(&ana), &["f3"]),
+        });
+        batch.ops.push(GraphOp::RetractItem { item: item("f2") });
+        g.apply_batch(&batch).unwrap();
+        assert_counts_exact(&g, "batch");
+
+        // Forget an item (store path), then a whole source, then prune orphans.
+        store.delete_item(&item("f1")).unwrap();
+        assert_counts_exact(&g, "item forgotten");
+        g.retract_item(&item("m1")).unwrap();
+        assert_counts_exact(&g, "item retracted");
+        store.delete_source(&SourceId::new("mail")).unwrap();
+        assert_counts_exact(&g, "source deleted");
+        let pruned = g.prune_orphans(None).unwrap();
+        assert!(!pruned.is_empty());
+        assert_counts_exact(&g, "pruned");
+
+        // Raw writes (as an import or repair would make) are counted too.
+        g.write("raw", |tx, _| {
+            tx.execute_batch(&format!(
+                "UPDATE mentions SET entity_id = '{ana}' WHERE entity_id = '{topic}';
+                 UPDATE claims SET object_entity = subject WHERE object_entity IS NOT NULL;
+                 DELETE FROM claims WHERE id = (SELECT min(id) FROM claims);"
+            ))
+            .db("raw writes")
+        })
+        .unwrap();
+        assert_counts_exact(&g, "raw writes");
+        store
+            .check_consistency()
+            .map(|r| assert!(r.ok, "{:?}", r.problems))
+            .unwrap();
+    }
+
+    /// `top_entities` against the scan-and-sort default at the 500k-item bench scale: 15k
+    /// entities, 200k claims, 2M mentions (skewed: a few hubs), in an encrypted file store.
+    /// Also times the v15 backfill and the mention trigger's insert overhead. Run with
+    ///
+    /// ```text
+    /// cargo test -p nugget-store --release --lib top_entities_at_scale -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "loads 2.2M rows; run in release with --ignored"]
+    fn top_entities_at_scale() {
+        use std::time::Instant;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(
+            dir.path().join("nugget.db"),
+            &crate::StoreKey::from_bytes([7; 32]),
+        )
+        .unwrap();
+        let g = store.graph();
+        let (entities, claims, mentions) = (15_000i64, 200_000i64, 2_000_000i64);
+        let t = Instant::now();
+        g.write("load", |tx, _| {
+            // Skewed picks: the product of two uniform draws favours low ids (hubs).
+            let pick = format!(
+                "'ent_' || ((abs(random()) % {entities}) * (abs(random()) % {entities})
+                            / {entities})"
+            );
+            tx.execute_batch(&format!(
+                "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n
+                                          WHERE i + 1 < {entities})
+                 INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
+                 SELECT 'ent_' || i,
+                        CASE i % 4 WHEN 0 THEN 'person' WHEN 1 THEN 'organization'
+                                   WHEN 2 THEN 'project' ELSE 'topic' END,
+                        'Name ' || (i * 7919 % 5000), 'name ' || (i * 7919 % 5000),
+                        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+                 FROM n;
+                 WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n
+                                          WHERE i + 1 < {claims})
+                 INSERT INTO claims (subject, predicate, object_entity, object_literal, text,
+                                     confidence, status, created_at, updated_at)
+                 SELECT {pick}, 'p' || (i % 20),
+                        CASE WHEN i % 10 < 7 THEN {pick} END,
+                        CASE WHEN i % 10 >= 7 THEN 'lit' || i END,
+                        't', 0.9,
+                        CASE i % 10 WHEN 8 THEN 'superseded' WHEN 9 THEN 'retracted'
+                                    WHEN 7 THEN 'user_asserted' ELSE 'active' END,
+                        't', 't'
+                 FROM n;
+                 WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n
+                                          WHERE i + 1 < {mentions})
+                 INSERT INTO mentions (entity_id, source, key, chunk_id, surface, confidence,
+                                       created_at)
+                 SELECT {pick}, 'mail', 'k' || i, NULL, 's', 0.8, 't' FROM n;"
+            ))
+            .db("load")
+        })
+        .unwrap();
+        println!("load (triggers on): {:.1} s", t.elapsed().as_secs_f64());
+
+        let time = |what: &str, runs: u32, f: &dyn Fn() -> Vec<EntitySummary>| {
+            let first = f();
+            let t = Instant::now();
+            for _ in 0..runs {
+                std::hint::black_box(f());
+            }
+            let ms = t.elapsed().as_secs_f64() * 1e3 / f64::from(runs);
+            println!("{what:<48} {ms:>9.3} ms");
+            first
+        };
+        let top = time("top_entities(all kinds, 50, 0)", 50, &|| {
+            g.top_entities(&[], 50, 0).unwrap()
+        });
+        time("top_entities(person, 50, 0)", 50, &|| {
+            g.top_entities(&[EntityKind::Person], 50, 0).unwrap()
+        });
+        time(
+            "top_entities(all kinds, 200, 0) (overview page)",
+            50,
+            &|| g.top_entities(&[], 200, 0).unwrap(),
+        );
+        time("top_entities(all kinds, 50, 5000)", 10, &|| {
+            g.top_entities(&[], 50, 5000).unwrap()
+        });
+        let scan = time("scan + sort (default, list_entities)", 3, &|| {
+            nugget_graph::top_entities_scan(&g, &[], 50, 0).unwrap()
+        });
+        assert_eq!(top, scan);
+
+        let t = Instant::now();
+        g.write("backfill", |tx, _| {
+            tx.execute_batch(crate::schema::ENTITY_STATS).db("backfill")
+        })
+        .unwrap();
+        println!(
+            "v15 migration (backfill): {:.0} ms",
+            t.elapsed().as_secs_f64() * 1e3
+        );
+
+        let insert = |from: i64| {
+            let t = Instant::now();
+            g.write("more", |tx, _| {
+                tx.execute_batch(&format!(
+                    "WITH RECURSIVE n(i) AS (SELECT {from} UNION ALL SELECT i + 1 FROM n
+                                              WHERE i + 1 < {from} + 200000)
+                     INSERT INTO mentions (entity_id, source, key, chunk_id, surface,
+                                           confidence, created_at)
+                     SELECT 'ent_' || (i % {entities}), 'mail', 'k' || i, NULL, 's', 0.8, 't'
+                     FROM n;"
+                ))
+                .db("more")
+            })
+            .unwrap();
+            t.elapsed().as_secs_f64() * 1e3
+        };
+        let with = insert(mentions);
+        g.write("drop", |tx, _| {
+            tx.execute_batch("DROP TRIGGER entity_stats_mentions_ai")
+                .db("drop")
+        })
+        .unwrap();
+        let without = insert(mentions + 200_000);
+        println!(
+            "200k mention inserts: {with:.0} ms with the count trigger, {without:.0} ms without"
+        );
     }
 
     #[test]

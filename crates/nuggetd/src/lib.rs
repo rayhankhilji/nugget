@@ -22,6 +22,7 @@ mod local;
 pub mod logging;
 pub mod mcp;
 pub mod mcp_bridge;
+mod paging;
 pub mod probes;
 mod rerank;
 pub mod service;

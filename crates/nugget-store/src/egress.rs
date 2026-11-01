@@ -663,9 +663,29 @@ impl Store {
         self.egress_rows(true, limit)
     }
 
+    /// Keyset paging over the ledger (LL1): up to `limit` rows newest first, only those with an
+    /// id below `before` when given (the id of the last row of the previous page). Flushed like
+    /// [`Self::recent_egress`]. Row ids only grow and rows are never deleted, so rows recorded
+    /// between two pages sort above every page already read: following pages neither skip nor
+    /// repeat a row. (A two-phase row keeps its id as its totals change, so a later page never
+    /// shows it again with newer totals.)
+    pub fn recent_egress_before(
+        &self,
+        before: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<EgressRow>> {
+        match before {
+            None => self.egress_rows(false, limit),
+            Some(before) => self.egress_query(
+                "SELECT id, at, host, feature, bytes_sent, bytes_received, items, state
+                 FROM egress WHERE id < ?2 ORDER BY id DESC LIMIT ?1",
+                limit,
+                Some(before),
+            ),
+        }
+    }
+
     fn egress_rows(&self, unfinished: bool, limit: usize) -> Result<Vec<EgressRow>> {
-        self.flush_egress();
-        type Row = (i64, String, String, String, i64, i64, String, String);
         let sql = if unfinished {
             "SELECT id, at, host, feature, bytes_sent, bytes_received, items, state
              FROM egress WHERE state <> 'done' ORDER BY id DESC LIMIT ?1"
@@ -673,22 +693,32 @@ impl Store {
             "SELECT id, at, host, feature, bytes_sent, bytes_received, items, state
              FROM egress ORDER BY id DESC LIMIT ?1"
         };
+        self.egress_query(sql, limit, None)
+    }
+
+    /// Run a ledger query taking `?1` = limit (and `?2` = `before`, when given).
+    fn egress_query(&self, sql: &str, limit: usize, before: Option<i64>) -> Result<Vec<EgressRow>> {
+        self.flush_egress();
+        type Row = (i64, String, String, String, i64, i64, String, String);
         let rows: Vec<Row> = self.with_read_conn(|c| {
             let mut stmt = c.prepare_cached(sql).db("prepare egress query")?;
-            let rows = stmt
-                .query_map([limit_i64(limit)], |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                    ))
-                })
-                .db("read egress")?;
+            let read = |r: &rusqlite::Row<'_>| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                ))
+            };
+            let rows = match before {
+                None => stmt.query_map(params![limit_i64(limit)], read),
+                Some(b) => stmt.query_map(params![limit_i64(limit), b], read),
+            }
+            .db("read egress")?;
             rows.collect::<rusqlite::Result<_>>().db("read egress")
         })?;
         rows.into_iter()
@@ -800,6 +830,51 @@ mod tests {
         let got = s.recent_egress(1000).unwrap();
         let sent: Vec<u64> = got.iter().map(|e| e.bytes_sent).collect();
         assert_eq!(sent, (0..300u64).rev().collect::<Vec<_>>());
+    }
+
+    /// Keyset pages cover the ledger exactly once, newest first, even when rows are recorded
+    /// (queued, not yet written) between two pages.
+    #[test]
+    fn pages_before_an_id_neither_skip_nor_repeat() {
+        let s = Store::open_in_memory().unwrap();
+        let sink: &dyn EgressSink = &s;
+        for i in 0..25 {
+            sink.record(event(i));
+        }
+        let mut seen = Vec::new();
+        let mut before = None;
+        let mut pages = 0;
+        loop {
+            let page = s.recent_egress_before(before, 10).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            pages += 1;
+            // Newer rows arrive mid-paging; they must not show up in later pages.
+            sink.record(event(100 + pages));
+            assert!(page.windows(2).all(|w| w[0].id > w[1].id), "newest first");
+            seen.extend(page.iter().map(|r| r.event.bytes_sent));
+            before = page.last().map(|r| r.id);
+        }
+        assert_eq!(pages, 3);
+        assert_eq!(seen, (0..25u64).rev().collect::<Vec<_>>());
+        // The first page is the same as `recent_egress_rows`.
+        assert_eq!(
+            s.recent_egress_before(None, 5).unwrap(),
+            s.recent_egress_rows(5).unwrap()
+        );
+        // Ids past either end.
+        assert!(s.recent_egress_before(Some(1), 10).unwrap().is_empty());
+        assert!(
+            s.recent_egress_before(Some(i64::MIN), 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            s.recent_egress_before(Some(i64::MAX), 3).unwrap(),
+            s.recent_egress_rows(3).unwrap()
+        );
+        assert!(s.recent_egress_before(None, 0).unwrap().is_empty());
     }
 
     fn states(s: &Store) -> Vec<(EgressState, u64, u64)> {

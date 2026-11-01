@@ -46,6 +46,98 @@ const USER_DECISIONS: &str = r#"
         SELECT id, updated_at FROM claims WHERE status = 'user_asserted';
 "#;
 
+/// Per-entity counts kept exact by triggers, so "most connected entities first"
+/// (`GraphStore::top_entities`, the graph overview) is an index range instead of counting every
+/// entity's claims and mentions. The counts are those of `list_entities`:
+/// - `claims`: active claims (`active`, `user_asserted`) with the entity as subject, plus active
+///   claims with it as `object_entity` and another subject (a self-loop counts once);
+/// - `mentions`: mentions with that `entity_id`.
+///
+/// A table of its own rather than columns on `entities`: every mention written bumps a count,
+/// and a narrow row keyed by entity id is cheaper to rewrite than a wide entity row (attributes
+/// JSON), leaves the entity rows, their indexes and readers that list their columns untouched,
+/// and needs no `ALTER TABLE`. Every entity has a row (insert trigger, backfill here); increments
+/// upsert, so a row also appears for a claim or mention written before its entity (only possible
+/// with foreign keys off). `entity_stats_rank` serves `ORDER BY claims DESC, mentions DESC`;
+/// the name and id tie-breaks are a partial sort. Tombstones (merged or pruned) keep their row
+/// and are filtered by joining `entities`. Counts are maintained by triggers only, so they hold
+/// for every write path (merges, folds, retractions, purges, imports). A future rebuild of
+/// `claims` or `mentions` (drop and rename) drops their triggers and must recreate them.
+pub(crate) const ENTITY_STATS: &str = r#"
+    CREATE TABLE IF NOT EXISTS entity_stats (
+        entity_id TEXT PRIMARY KEY,
+        claims    INTEGER NOT NULL DEFAULT 0,
+        mentions  INTEGER NOT NULL DEFAULT 0
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS entity_stats_rank ON entity_stats (claims DESC, mentions DESC);
+    DELETE FROM entity_stats;
+    INSERT INTO entity_stats (entity_id, claims, mentions)
+        SELECT e.id,
+               (SELECT count(*) FROM claims c
+                WHERE c.subject = e.id AND c.status IN ('active', 'user_asserted'))
+             + (SELECT count(*) FROM claims c
+                WHERE c.object_entity = e.id AND c.subject <> e.id
+                  AND c.status IN ('active', 'user_asserted')),
+               (SELECT count(*) FROM mentions m WHERE m.entity_id = e.id)
+        FROM entities e;
+
+    CREATE TRIGGER IF NOT EXISTS entity_stats_entities_ai AFTER INSERT ON entities BEGIN
+        INSERT OR IGNORE INTO entity_stats (entity_id) VALUES (new.id);
+    END;
+    CREATE TRIGGER IF NOT EXISTS entity_stats_entities_ad AFTER DELETE ON entities BEGIN
+        DELETE FROM entity_stats WHERE entity_id = old.id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS entity_stats_mentions_ai AFTER INSERT ON mentions BEGIN
+        INSERT INTO entity_stats (entity_id, mentions) VALUES (new.entity_id, 1)
+            ON CONFLICT (entity_id) DO UPDATE SET mentions = mentions + 1;
+    END;
+    CREATE TRIGGER IF NOT EXISTS entity_stats_mentions_ad AFTER DELETE ON mentions BEGIN
+        UPDATE entity_stats SET mentions = mentions - 1 WHERE entity_id = old.entity_id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS entity_stats_mentions_au AFTER UPDATE OF entity_id ON mentions
+        WHEN old.entity_id IS NOT new.entity_id BEGIN
+        UPDATE entity_stats SET mentions = mentions - 1 WHERE entity_id = old.entity_id;
+        INSERT INTO entity_stats (entity_id, mentions) VALUES (new.entity_id, 1)
+            ON CONFLICT (entity_id) DO UPDATE SET mentions = mentions + 1;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS entity_stats_claims_ai AFTER INSERT ON claims
+        WHEN new.status IN ('active', 'user_asserted') BEGIN
+        INSERT INTO entity_stats (entity_id, claims) VALUES (new.subject, 1)
+            ON CONFLICT (entity_id) DO UPDATE SET claims = claims + 1;
+        INSERT INTO entity_stats (entity_id, claims)
+            SELECT new.object_entity, 1
+            WHERE new.object_entity IS NOT NULL AND new.object_entity <> new.subject
+            ON CONFLICT (entity_id) DO UPDATE SET claims = claims + 1;
+    END;
+    CREATE TRIGGER IF NOT EXISTS entity_stats_claims_ad AFTER DELETE ON claims
+        WHEN old.status IN ('active', 'user_asserted') BEGIN
+        UPDATE entity_stats SET claims = claims - 1 WHERE entity_id = old.subject;
+        UPDATE entity_stats SET claims = claims - 1
+            WHERE entity_id = old.object_entity AND old.object_entity <> old.subject;
+    END;
+    CREATE TRIGGER IF NOT EXISTS entity_stats_claims_au
+        AFTER UPDATE OF subject, object_entity, status ON claims
+        WHEN (old.status IN ('active', 'user_asserted') OR new.status IN ('active', 'user_asserted'))
+         AND (old.subject IS NOT new.subject OR old.object_entity IS NOT new.object_entity
+              OR old.status IS NOT new.status) BEGIN
+        UPDATE entity_stats SET claims = claims - 1
+            WHERE old.status IN ('active', 'user_asserted') AND entity_id = old.subject;
+        UPDATE entity_stats SET claims = claims - 1
+            WHERE old.status IN ('active', 'user_asserted')
+              AND entity_id = old.object_entity AND old.object_entity <> old.subject;
+        INSERT INTO entity_stats (entity_id, claims)
+            SELECT new.subject, 1 WHERE new.status IN ('active', 'user_asserted')
+            ON CONFLICT (entity_id) DO UPDATE SET claims = claims + 1;
+        INSERT INTO entity_stats (entity_id, claims)
+            SELECT new.object_entity, 1
+            WHERE new.status IN ('active', 'user_asserted')
+              AND new.object_entity IS NOT NULL AND new.object_entity <> new.subject
+            ON CONFLICT (entity_id) DO UPDATE SET claims = claims + 1;
+    END;
+"#;
+
 /// Ordered migrations; `MIGRATIONS[i]` takes the schema from version `i` to `i + 1`.
 const MIGRATIONS: &[&str] = &[
     // v1: items, chunks, FTS5, cursors, egress ledger, audit log.
@@ -606,6 +698,8 @@ const MIGRATIONS: &[&str] = &[
         SELECT id, fts_normalize(title) FROM items
         WHERE title IS NOT NULL AND fts_normalize(title) IS NOT fts_segment(title);
     "#,
+    // v15: per-entity claim and mention counts (see `ENTITY_STATS`).
+    ENTITY_STATS,
 ];
 
 /// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
@@ -1279,6 +1373,91 @@ mod tests {
         ] {
             assert!(names.contains(&t.to_string()), "{t}");
         }
+    }
+
+    /// v15 backfills the per-entity counts (active claims as subject, or as object with another
+    /// subject; mentions) and keeps them from then on, with the rank index serving the order.
+    #[test]
+    fn v13_graph_migrates_to_latest_with_backfilled_entity_counts() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::fts::register_functions(&conn).unwrap();
+        migrate_to(&mut conn, 13);
+        conn.execute_batch(
+            "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
+                 VALUES ('ent_a', 'person', 'Sam', 'sam', 't', 't'),
+                        ('ent_b', 'organization', 'Acme', 'acme', 't', 't'),
+                        ('ent_c', 'person', 'Ana', 'ana', 't', 't');
+             INSERT INTO claims (subject, predicate, object_entity, object_literal, text,
+                                 confidence, status, created_at, updated_at)
+                 VALUES ('ent_a', 'works_at', 'ent_b', NULL, 'x', 1, 'active', 't', 't'),
+                        ('ent_a', 'self', 'ent_a', NULL, 'x', 1, 'user_asserted', 't', 't'),
+                        ('ent_a', 'likes', NULL, 'tea', 'x', 1, 'active', 't', 't'),
+                        ('ent_c', 'knows', 'ent_a', NULL, 'x', 1, 'retracted', 't', 't'),
+                        ('ent_c', 'knows', 'ent_b', NULL, 'x', 1, 'rejected', 't', 't'),
+                        ('ent_c', 'met', 'ent_b', NULL, 'x', 1, 'superseded', 't', 't');
+             INSERT INTO mentions (entity_id, source, key, surface, confidence, created_at)
+                 VALUES ('ent_a', 's', 'k1', 'Sam', 1, 't'), ('ent_a', 's', 'k2', 'Sam', 1, 't'),
+                        ('ent_c', 's', 'k1', 'Ana', 1, 't');",
+        )
+        .unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 13);
+        let stats = |conn: &Connection| -> Vec<(String, i64, i64)> {
+            let mut stmt = conn
+                .prepare("SELECT entity_id, claims, mentions FROM entity_stats ORDER BY entity_id")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let row = |id: &str, c: i64, m: i64| (id.to_owned(), c, m);
+        assert_eq!(
+            stats(&conn),
+            vec![row("ent_a", 3, 2), row("ent_b", 1, 0), row("ent_c", 0, 1)]
+        );
+        // Maintained from now on.
+        conn.execute_batch(
+            "INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
+                 VALUES ('ent_d', 'topic', 'Budget', 'budget', 't', 't');
+             UPDATE claims SET status = 'active' WHERE predicate = 'knows';
+             DELETE FROM mentions WHERE entity_id = 'ent_a' AND key = 'k2';",
+        )
+        .unwrap();
+        assert_eq!(
+            stats(&conn),
+            vec![
+                row("ent_a", 4, 1),
+                row("ent_b", 2, 0),
+                row("ent_c", 2, 1),
+                row("ent_d", 0, 0)
+            ]
+        );
+        // The overview order walks the rank index (no full sort of the table).
+        let plan: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "EXPLAIN QUERY PLAN
+                     SELECT e.id FROM entity_stats s CROSS JOIN entities e ON e.id = s.entity_id
+                     WHERE e.merged_into IS NULL AND e.deleted_at IS NULL
+                     ORDER BY s.claims DESC, s.mentions DESC, e.name, e.id LIMIT 10",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert!(
+            plan.iter().any(|p| p.contains("entity_stats_rank")),
+            "{plan:?}"
+        );
+        // A partial sort for the name and id tie-breaks only ("LAST 2 TERMS" or "RIGHT PART",
+        // depending on the SQLite version), never a sort of the whole order.
+        assert!(
+            plan.iter()
+                .any(|p| p.contains("LAST 2 TERMS OF ORDER BY") || p.contains("RIGHT PART")),
+            "{plan:?}"
+        );
     }
 
     #[test]

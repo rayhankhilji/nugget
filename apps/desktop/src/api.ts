@@ -3082,3 +3082,37 @@ export interface DiskStatus {
 export interface StatusResponse {
   disk?: DiskStatus | null;
 }
+
+// LL1
+// Cursor-paged search and egress ledger (`search.page`, `egress.page`). Cursors are opaque: pass
+// back the `next_cursor` of the previous page; `null` means the end. Older daemons answer
+// "method not found": callers fall back to `search` / `egress.recent` (one page, no cursor).
+
+/** One page of a cursor-paged list. */
+export interface CursorPage<T> {
+  items: T[];
+  /** Pass back as `cursor` for the next page; `null` (or absent) at the end. */
+  next_cursor?: string | null;
+}
+
+export interface SearchPageRequest {
+  query: string;
+  limit: number;
+  /** The previous page's `next_cursor` for this same query (a cursor of another query is refused). */
+  cursor?: string;
+}
+
+export interface EgressPageRequest {
+  limit: number;
+  cursor?: string;
+}
+
+/** `search.page`: the ranking of `search`, a page at a time (500 hits deep at most). */
+export function searchPage(request: SearchPageRequest): Promise<CursorPage<SearchHit>> {
+  return call<CursorPage<SearchHit>>("search_page", { request });
+}
+
+/** `egress.page`: the ledger newest first, a page at a time; rows recorded meanwhile never shift later pages. */
+export function egressPage(request: EgressPageRequest): Promise<CursorPage<EgressEvent>> {
+  return call<CursorPage<EgressEvent>>("egress_page", { request });
+}

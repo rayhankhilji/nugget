@@ -222,6 +222,20 @@ pub trait GraphStore: Send + Sync {
         entities_supported_by_scan(self, source)
     }
 
+    /// Live entities of `kinds` (empty = every kind), most connected first: by `claims`
+    /// descending, then `mentions` descending, then `name` ascending (byte order), then id;
+    /// counts as in [`GraphStore::list_entities`]. Skips `offset` entities, then returns at
+    /// most `limit` (0 = unlimited). `SqliteGraph` reads maintained counts through an index;
+    /// the default scans and sorts every entity ([`top_entities_scan`]).
+    fn top_entities(
+        &self,
+        kinds: &[EntityKind],
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<EntitySummary>> {
+        top_entities_scan(self, kinds, limit, offset)
+    }
+
     /// Apply `batch` in order and return one result per op. `MemGraph` and `SqliteGraph` apply it
     /// atomically (one transaction: all or nothing, one change-feed step per touched entity);
     /// the default applies the ops one by one through the methods above and stops at the first
@@ -256,6 +270,34 @@ pub fn entities_supported_by_scan<G: GraphStore + ?Sized>(
     }
     out.sort();
     Ok(out)
+}
+
+/// [`GraphStore::top_entities`] through `list_entities` (the default): every live entity of
+/// `kinds` is listed, sorted by (claims desc, mentions desc, name, id) and the page cut out.
+pub fn top_entities_scan<G: GraphStore + ?Sized>(
+    g: &G,
+    kinds: &[EntityKind],
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<EntitySummary>> {
+    let kind = (kinds.len() == 1).then(|| kinds[0]);
+    let mut all: Vec<EntitySummary> = g
+        .list_entities(&EntityQuery {
+            kind,
+            ..Default::default()
+        })?
+        .into_iter()
+        .filter(|e| kinds.is_empty() || kinds.contains(&e.kind))
+        .collect();
+    all.sort_by(|a, b| {
+        b.claims
+            .cmp(&a.claims)
+            .then(b.mentions.cmp(&a.mentions))
+            .then(a.name.cmp(&b.name))
+            .then(a.id.cmp(&b.id))
+    });
+    let limit = if limit == 0 { usize::MAX } else { limit };
+    Ok(all.into_iter().skip(offset).take(limit).collect())
 }
 
 /// Apply one op through the single-write methods of `g` (the default `apply_batch`).

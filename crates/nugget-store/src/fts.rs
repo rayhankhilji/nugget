@@ -434,25 +434,53 @@ pub(crate) fn needles(query: &str) -> Vec<String> {
         .collect()
 }
 
-/// The FTS5 `MATCH` expression for user text, or `None` if it has no positive term.
-pub(crate) fn match_expr(query: &str) -> Option<String> {
+/// A query's rendered FTS5 terms: the OR-ed positive ones and the excluded ones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MatchParts {
+    /// Each a self-contained FTS5 expression (a string, a prefix, or an OR of bigrams).
+    pub positive: Vec<String>,
+    pub negative: Vec<String>,
+}
+
+impl MatchParts {
+    /// `terms` OR-ed, minus the excluded terms: the expression for these positive terms.
+    pub(crate) fn expr_of(&self, terms: &[&str]) -> String {
+        self.with_exclusions(terms.join(" OR "))
+    }
+
+    /// `expr` minus the excluded terms.
+    pub(crate) fn with_exclusions(&self, expr: String) -> String {
+        if self.negative.is_empty() {
+            expr
+        } else {
+            format!("({expr}) NOT ({})", self.negative.join(" OR "))
+        }
+    }
+
+    /// The whole query's expression.
+    pub(crate) fn expr(&self) -> String {
+        let all: Vec<&str> = self.positive.iter().map(String::as_str).collect();
+        self.expr_of(&all)
+    }
+}
+
+/// [`match_expr`]'s parts, or `None` if the query has no positive term.
+pub(crate) fn match_parts(query: &str) -> Option<MatchParts> {
     let terms = parse(query);
     let (neg, pos): (Vec<&Term>, Vec<&Term>) = terms.iter().partition(|t| t.exclude);
     if pos.is_empty() {
         return None;
     }
-    let any = |ts: &[&Term]| {
-        ts.iter()
-            .map(|t| render(&t.atom))
-            .collect::<Vec<_>>()
-            .join(" OR ")
-    };
-    let positive = any(&pos);
-    Some(if neg.is_empty() {
-        positive
-    } else {
-        format!("({positive}) NOT ({})", any(&neg))
+    let render_all = |ts: &[&Term]| ts.iter().map(|t| render(&t.atom)).collect::<Vec<_>>();
+    Some(MatchParts {
+        positive: render_all(&pos),
+        negative: render_all(&neg),
     })
+}
+
+/// The FTS5 `MATCH` expression for user text, or `None` if it has no positive term.
+pub(crate) fn match_expr(query: &str) -> Option<String> {
+    match_parts(query).map(|p| p.expr())
 }
 
 /// Shortest query word [`fallback_exprs`] looks up as part of longer words.

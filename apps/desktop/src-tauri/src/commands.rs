@@ -19,6 +19,7 @@ use nugget_core::ipc::{
     CardPreviewRequest, CardView, CardsChanged, CardsList, CardsListRequest, ProactiveLearning,
     ProactiveMetrics, ReminderView, ResetLearningRequest, ResetLearningResult, proactive_method,
 };
+use nugget_core::ipc::{EgressPageRequest, Page, SearchPageRequest};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -159,6 +160,34 @@ pub async fn egress_recent(
         limit: limit.clamp(1, MAX_EGRESS_LIMIT),
     };
     daemon.call(&app, method::EGRESS_RECENT, &req).await
+}
+
+// ---- LL1: cursor-paged search and ledger (the daemon validates cursors) ----
+
+#[tauri::command]
+pub async fn search_page(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: SearchPageRequest,
+) -> Result<Page<SearchHit>> {
+    let request = SearchPageRequest {
+        limit: request.limit.clamp(1, MAX_SEARCH_LIMIT),
+        ..request
+    };
+    daemon.call(&app, method::SEARCH_PAGE, &request).await
+}
+
+#[tauri::command]
+pub async fn egress_page(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: EgressPageRequest,
+) -> Result<Page<EgressEvent>> {
+    let request = EgressPageRequest {
+        limit: request.limit.clamp(1, MAX_EGRESS_LIMIT),
+        ..request
+    };
+    daemon.call(&app, method::EGRESS_PAGE, &request).await
 }
 
 // ---- sources (M1) ----

@@ -188,6 +188,40 @@ describe("faceted search", () => {
   });
 });
 
+describe("plain search paging (LL1)", () => {
+  /** A plain `search` hit (no date, kind or people). */
+  const plainHit = (n: number) => {
+    const { item, chunk_id, title, snippet, score, url } = hit(n);
+    return { item, chunk_id, title, snippet, score, url };
+  };
+
+  it("pages by cursor with search.page when the daemon has no faceted search", async () => {
+    const d = daemon({
+      search_page: (args: Record<string, unknown>) => {
+        const r = req(args) as { cursor?: string };
+        if (!r.cursor) return { items: [plainHit(1), plainHit(2)], next_cursor: "s1.2.tag" };
+        // The ranking shifted between pages and repeats hit 2: it is listed once.
+        return { items: [plainHit(2), plainHit(3)], next_cursor: null };
+      },
+    });
+    await renderApp({ page: "search" });
+    await search("engine");
+    await findByText("Engine note 1");
+    expect(req(d.last("search_page"))).toEqual({ query: "engine", limit: 25 });
+    await click(getByRole("button", { name: t("searchui.showMorePlain", { shown: 2 }) }));
+    await findByText("Engine note 3");
+    expect(req(d.last("search_page"))).toEqual({ query: "engine", limit: 25, cursor: "s1.2.tag" });
+    expect(main().querySelectorAll(".result-select")).toHaveLength(3);
+    // The end: no more button; focus is on the first new result and the count is announced.
+    expect(queryByRole("button", { name: /Show more/ })).toBeNull();
+    expect(document.activeElement?.textContent).toContain("Engine note 3");
+    const said = () => Array.from(document.querySelectorAll('[role="status"]'), (e) => e.textContent ?? "");
+    await waitFor(() => expect(said().some((s) => s.includes(t("searchui.loadedMore", { n: 3 })))).toBe(true));
+    expect(d.count("search")).toBe(0);
+    expect(await violations()).toEqual([]);
+  });
+});
+
 describe("saved and recent searches", () => {
   it("saves a search with a name; it shows on the page, in the sidebar and the palette, and runs", async () => {
     const d = daemon({ search_faceted: faceted([hit(1)]) });
