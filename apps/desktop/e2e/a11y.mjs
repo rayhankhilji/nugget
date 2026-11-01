@@ -1,8 +1,9 @@
 // Accessibility audit (e2e scenario "a11y"): axe-core runs over every page of the PAGES registry
-// and the main dialogs (Add source, Merge and Split entity, a Today card's sources, the command
-// palette, every onboarding step), in the light and the dark theme, on the indexed home the
-// "pages" scenario uses. Fails on serious or critical violations; every violation (any impact) is
-// written to a11y-violations.json. Each page also gets the accessibility-tree checks of
+// and the main dialogs (Add source with its folder and WhatsApp forms, Merge and Split entity, a
+// Today card's sources, the command palette, every onboarding step), Search's filters, preview and
+// timeline, Models' Add a provider, and the quick ask and Double Tap overlay windows, in the light
+// and the dark theme, on the indexed home the "pages" scenario uses. Fails on serious or critical
+// violations; every violation (any impact) is written to a11y-violations.json. Each page also gets the accessibility-tree checks of
 // a11y-tree.mjs (landmarks, headings, names) in the light theme. See e2e/README.md.
 //
 // The app follows the system theme (`prefers-color-scheme` in src/styles.css), so the theme is
@@ -45,6 +46,44 @@ const STATES = {
         await box.fill("Tidewater budget");
         await box.press("Enter");
         await page.locator("ol.results li.result").first().waitFor();
+        // LL2: the filters (II2) show beside the results.
+        await page.locator("#search-filters fieldset").first().waitFor();
+      },
+    ],
+    [
+      // LL2: a filter ticked (the list reruns with it, Clear filters appears).
+      "filtered",
+      async (page) => {
+        await page.locator('#search-filters fieldset[data-facet="kind"] input[type=checkbox]').first().check();
+        await page.locator("#search-filters").getByRole("button", { name: exactName("searchui.clearFilters") }).waitFor();
+        await page.locator("ol.results:not([aria-busy=true]) li.result").first().waitFor();
+      },
+    ],
+    [
+      // LL2: a result's preview open beside the list (search.preview).
+      "preview",
+      async (page) => {
+        await page.locator("ol.results li.result button.result-select").first().click();
+        await page.locator("#search-preview .sr-preview-text").waitFor();
+      },
+    ],
+    [
+      // LL2: a person's timeline (search.timeline), from the filters; Escape goes back.
+      "timeline",
+      async (page) => {
+        await page.locator("#search-filters .sr-facet-tl").first().click();
+        await page.locator("section.sr-timeline h3[id^=timeline-month-]").first().waitFor();
+      },
+    ],
+  ],
+  models: [
+    [
+      // LL2/KK2: "Your providers" with its Add a provider form open.
+      "add-provider",
+      async (page) => {
+        const add = page.locator("details.models-add-provider");
+        await add.locator("summary").click();
+        await add.locator("input, select").first().waitFor();
       },
     ],
   ],
@@ -129,6 +168,24 @@ const STUB_CARD = {
   sensitive: false,
   created_at: "2026-10-24T08:15:00Z",
 };
+
+/** LL2: the overlay's state (what the shell would report after a Double Tap) and its history. */
+const OVERLAY_VIEW = {
+  phase: "done",
+  text: "Thanks Ines, the contract is with Vellum & Thistle LLP for review.",
+  provider: "local-chat",
+  locality: "on_device",
+  citations: 2,
+  excluded_sensitive: 1,
+  can_retry: true,
+  message: null,
+  verified: null,
+  method: null,
+};
+const OVERLAY_HISTORY = [
+  { id: 2, text: "Friday at 10 suits me. I'll bring the draft agenda.", app: "Mail", at: 0 },
+  { id: 1, text: "Sounds good, see you then.", app: "Slack", at: 0 },
+];
 
 /** Wait for finite animations and transitions (fade-ins skew colour contrast mid-way). */
 async function quiet(page) {
@@ -325,6 +382,20 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
             .getByRole("button", { name: exactName("addSource.folder.choose") })
             .waitFor();
           await audit(page, "dialog-add-source-folder", theme, "dialog[open]");
+          // LL2: the messaging form (WhatsApp exports, II-wave), through Back to the kinds.
+          await dialog(page)
+            .getByRole("button", { name: exactName("common.back") })
+            .click();
+          await dialog(page)
+            .getByRole("radio", { name: new RegExp(`^${escapeRe(t("format.sourceKind.whatsapp"))}\\b`) })
+            .check();
+          await dialog(page)
+            .getByRole("button", { name: exactName("common.next") })
+            .click();
+          await dialog(page)
+            .getByRole("button", { name: exactName("addSource.messages.browse") })
+            .waitFor();
+          await audit(page, "dialog-add-source-whatsapp", theme, "dialog[open]");
           await closeDialog(page);
         } finally {
           await page.close();
@@ -406,6 +477,57 @@ export async function a11yScenario({ browser, socket, pages, onboarded }) {
           await dialog(page).getByRole("combobox").fill("se");
           await audit(page, "dialog-palette-filtered", theme, "dialog[open]");
           await closeDialog(page);
+        } finally {
+          await page.close();
+        }
+      });
+
+      // LL2: the quick ask window (its own HTML entry point): empty, then after an ask on the
+      // corpus (an answer, or a plain failure when the home has no AI provider).
+      await check(`a11y ${theme} quick ask window`, async () => {
+        const page = await onboardedCtx.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        try {
+          await page.emulateMedia({ colorScheme: theme });
+          await page.goto(`${bridge.url}quickask.html`);
+          const box = page.getByRole("searchbox", { name: t("quickAsk.inputLabel") });
+          await box.waitFor();
+          await audit(page, "quickask", theme);
+          await box.fill("Tidewater budget");
+          await box.press("Enter");
+          await page.locator(".quickask-answer:not([aria-busy=true]), .quickask [role=alert]").first().waitFor({ timeout: 30_000 });
+          await audit(page, "quickask-answered", theme);
+          const text = (await page.locator("div.quickask-body").textContent()) ?? "";
+          expect(!/undefined|\{"|\bat line\b/.test(text), `quick ask shows raw text: ${text.slice(0, 200)}`);
+          expect(errors.length === 0, `uncaught page errors: ${JSON.stringify(errors)}`);
+        } finally {
+          await page.close();
+        }
+      });
+
+      // LL2: the Double Tap caret overlay (its own HTML entry point) with a finished draft, then
+      // with the previous drafts list open (H). The shell's overlay state is answered here.
+      await check(`a11y ${theme} double tap overlay`, async () => {
+        const page = await onboardedCtx.newPage();
+        try {
+          await page.setViewportSize({ width: 460, height: 320 });
+          await page.emulateMedia({ colorScheme: theme });
+          await page.route("**/invoke", async (route) => {
+            const body = JSON.parse(route.request().postData() ?? "{}");
+            if (body.cmd === "overlay_state") return route.fulfill({ json: { ok: OVERLAY_VIEW } });
+            if (body.cmd === "doubletap_history") {
+              const now = Date.now();
+              return route.fulfill({ json: { ok: OVERLAY_HISTORY.map((h, i) => ({ ...h, at: now - (i + 1) * 300_000 })) } });
+            }
+            return route.fallback();
+          });
+          await page.goto(`${bridge.url}overlay.html`);
+          await page.getByText(OVERLAY_VIEW.text).first().waitFor();
+          await audit(page, "overlay", theme);
+          await page.keyboard.press("h");
+          await page.getByText(OVERLAY_HISTORY[0].text).first().waitFor();
+          await audit(page, "overlay-history", theme);
         } finally {
           await page.close();
         }

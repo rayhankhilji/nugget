@@ -139,7 +139,7 @@ export function baseName(path: string): string {
  * `2026-11-10T13:00+02:00`). Not glued to other digits or letters, so ids and versions are left alone.
  */
 const ISO_IN_TEXT =
-  /(?<![\w.:-])(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?(?![\w:-])/g;
+  /(?<![\w.:-])(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?(?![\w-]|:\d)/g;
 
 /**
  * `text` with its ISO dates and date-times written for the reader's locale: a bare date, or a

@@ -6,6 +6,7 @@
  * unterminated code fence renders as an open code block).
  */
 import { Fragment, useMemo, type MouseEvent, type ReactNode } from "react";
+import { textDir } from "../bidi";
 import { isOpenableUrl } from "../api";
 import { useT } from "../i18n";
 import { CopyButton } from "./CopyButton";
@@ -488,16 +489,45 @@ function CodeBlock({ lang, code, open }: { lang: string; code: string; open: boo
   );
 }
 
+/** The prose of `blocks`, to decide their direction by (code is left out). */
+function blocksText(blocks: Block[]): string {
+  return blocks
+    .map((b) => {
+      switch (b.t) {
+        case "p":
+        case "h":
+          return b.text;
+        case "quote":
+          return blocksText(b.blocks);
+        case "list":
+          return b.items.map(blocksText).join(" ");
+        case "table":
+          return [...b.head, ...b.rows.flat()].join(" ");
+        default:
+          return "";
+      }
+    })
+    .join(" ");
+}
+
+// LL2 (GG7-10): every block gets its own direction, by its majority script, so a pure-Arabic
+// paragraph after a Latin-led one (or a Latin-led Arabic one) is laid out right-to-left.
 function renderBlocks(blocks: Block[], ctx: Ctx, tight = false): ReactNode[] {
   return blocks.map((b, k) => {
     switch (b.t) {
       case "p":
-        return tight ? <Fragment key={k}>{parseInline(b.text, ctx)}</Fragment> : <p key={k}>{parseInline(b.text, ctx)}</p>;
+        return tight ? (
+          <Fragment key={k}>{parseInline(b.text, ctx)}</Fragment>
+        ) : (
+          <p key={k} dir={textDir(b.text)}>
+            {parseInline(b.text, ctx)}
+          </p>
+        );
       case "h": {
         // Replies sit under the page's own headings, so `#` starts at <h3>.
         const Tag = `h${Math.min(6, b.level + 2)}` as "h3";
         return (
-          <Tag key={k} className="md-heading">
+          <Tag key={k} className="md-heading" dir={textDir(b.text)}>
             {parseInline(b.text, ctx)}
           </Tag>
         );
@@ -507,25 +537,37 @@ function renderBlocks(blocks: Block[], ctx: Ctx, tight = false): ReactNode[] {
       case "hr":
         return <hr key={k} />;
       case "quote":
-        return <blockquote key={k}>{renderBlocks(b.blocks, ctx)}</blockquote>;
+        return (
+          <blockquote key={k} dir={textDir(blocksText(b.blocks))}>
+            {renderBlocks(b.blocks, ctx)}
+          </blockquote>
+        );
       case "list": {
-        const items = b.items.map((item, n) => <li key={n}>{renderBlocks(item, ctx, b.tight)}</li>);
+        const items = b.items.map((item, n) => (
+          <li key={n} dir={textDir(blocksText(item))}>
+            {renderBlocks(item, ctx, b.tight)}
+          </li>
+        ));
+        // The list's own direction puts its markers on the side its items read from.
+        const dir = textDir(blocksText([b]));
         return b.ordered ? (
-          <ol key={k} start={b.start === 1 ? undefined : b.start}>
+          <ol key={k} start={b.start === 1 ? undefined : b.start} dir={dir}>
             {items}
           </ol>
         ) : (
-          <ul key={k}>{items}</ul>
+          <ul key={k} dir={dir}>
+            {items}
+          </ul>
         );
       }
       case "table":
         return (
-          <div key={k} className="md-table-wrap" tabIndex={0}>
+          <div key={k} className="md-table-wrap" tabIndex={0} dir={textDir(blocksText([b]))}>
             <table>
               <thead>
                 <tr>
                   {b.head.map((h, n) => (
-                    <th key={n} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
+                    <th key={n} dir={textDir(h)} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
                       {parseInline(h, ctx)}
                     </th>
                   ))}
@@ -535,7 +577,7 @@ function renderBlocks(blocks: Block[], ctx: Ctx, tight = false): ReactNode[] {
                 {b.rows.map((row, r) => (
                   <tr key={r}>
                     {row.map((cell, n) => (
-                      <td key={n} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
+                      <td key={n} dir={textDir(cell)} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
                         {parseInline(cell, ctx)}
                       </td>
                     ))}

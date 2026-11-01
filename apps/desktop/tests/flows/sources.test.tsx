@@ -89,6 +89,26 @@ describe("sources flow", () => {
     await findByRole("heading", { name: "Projects", level: 2 });
   });
 
+  it("keeps focus in the folder list when a folder is removed (LL2)", async () => {
+    daemon();
+    await renderApp({ page: "sources" });
+    await click(getByRole("button", { name: t("sources.add") }));
+    await click(within(getByRole("dialog")).getByRole("button", { name: t("common.next") }));
+    const dialog = getByRole("dialog", { name: t("addSource.addTitle.files") });
+    const path = within(dialog).getByRole("textbox", { name: t("addSource.folder.pathLabel") });
+    for (const p of ["/home/me/A", "/home/me/B"]) {
+      await type(path, p);
+      await press(path, "Enter");
+    }
+    const removeA = within(dialog).getByRole("button", { name: t("addSource.folder.removePath", { path: "/home/me/A" }) });
+    removeA.focus();
+    await click(removeA);
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: t("addSource.folder.removePath", { path: "/home/me/B" }) }));
+    await click(document.activeElement);
+    // The last one gone: back to Choose folder, still inside the dialog.
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: t("addSource.folder.choose") }));
+  });
+
   it("explains the blocked Add folder, then adds a typed path without pressing Add", async () => {
     const added: SourceInfo = { id: "files-2", kind: "files", name: "Projects", enabled: true, state: "syncing", items: 0, chunks: 0, last_sync: null };
     const d = daemon({ sources_add: added });

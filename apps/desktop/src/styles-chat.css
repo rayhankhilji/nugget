@@ -327,3 +327,18 @@ h6.md-heading {
 .chat-check-reason {
   font-weight: 500;
 }
+
+/* LL2: a failed reply's Retry and Status details. */
+.chat-error {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.chat-error p {
+  margin: 0;
+}
+.chat-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}

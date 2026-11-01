@@ -3,7 +3,7 @@ import "./sources.css";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { api, ApiError, type SourceInfo, type SourceSettings } from "../api";
 import { useT } from "../i18n";
-import { Spinner } from "../components/ui";
+import { describeError, Spinner } from "../components/ui";
 
 export function useAutofocus<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -74,7 +74,14 @@ export function FormError({ error }: { error: unknown }) {
   const e = ApiError.from(error);
   return (
     <p className="note note-error" role="alert">
-      {e.isMethodNotFound ? t("common.notAvailableSentence") : e.message}
+      {e.isMethodNotFound
+        ? t("common.notAvailableSentence")
+        : e.isOffline
+          ? t("common.offlineHint")
+          : // LL2: the daemon's own sentence, else a plain one, never a shell's raw text.
+            error instanceof Error && !(error instanceof ApiError) && error.name === "Error"
+            ? e.message
+            : describeError(e, t).headline}
     </p>
   );
 }
@@ -96,12 +103,17 @@ export function Actions({ onBack, busy, submitLabel, blocked }: { onBack: () => 
       <button type="button" className="btn" onClick={onBack} disabled={busy}>
         {t("common.back")}
       </button>
+      {/* LL2: busy is aria-disabled too (a disabled button would drop keyboard focus to the page
+          while saving); the click, also the one Enter in a field makes, is cancelled instead. */}
       <button
         type="submit"
         className="btn btn-primary"
-        disabled={busy}
-        aria-disabled={blocked ? true : undefined}
+        aria-disabled={blocked || busy ? true : undefined}
+        aria-busy={busy || undefined}
         aria-describedby={blocked ? hintId : undefined}
+        onClick={(e) => {
+          if (busy) e.preventDefault();
+        }}
       >
         {busy ? (
           <>

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import axe from "axe-core";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SourceInfo, SourceSpec } from "../api";
@@ -213,5 +214,50 @@ describe("Sources page", () => {
     // Not "press Add": on the Sources page the way back is Sync now.
     expect(steps[4]?.textContent).toBe(t("addSource.imessage.fdaStep5Later").replace(/<\/?b>/g, ""));
     expect(wa.querySelector(".messaging-fda")).toBeNull();
+  });
+});
+
+describe("MessagingForm states (LL2)", () => {
+  it("keeps focus on Add while saving, then says a shell failure plainly with no axe violations", async () => {
+    let fail: (e: unknown) => void = () => {};
+    const requests: unknown[] = [];
+    mockDaemon({
+      pick_folders: ["/Users/me/Exports/WhatsApp"],
+      sources_add: (args: unknown) => {
+        requests.push(args);
+        return new Promise((_, reject) => (fail = reject));
+      },
+    });
+    const { container } = await render(<MessagingForm kind="whatsapp" onBack={noop} onClose={noop} onAdded={noop} />);
+    await click(byText(container, "button", t("addSource.messages.browse")));
+    const add = container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    add.focus();
+    await submit();
+    // Busy: still focused and focusable (aria-disabled), and a second press sends nothing more.
+    expect(add.disabled).toBe(false);
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(add);
+    await submit();
+    expect(requests).toHaveLength(1);
+    await act(async () => fail({ kind: "io", message: "Broken pipe (os error 32)" }));
+    const alert = container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toBe(t("common.error.generic"));
+    expect(document.activeElement).toBe(add);
+    expect(add.getAttribute("aria-disabled")).toBeNull();
+    const r = await axe.run(container, { rules: { "color-contrast": { enabled: false }, region: { enabled: false } } });
+    expect(r.violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it("shows the daemon's own refusal (a duplicate folder) as it is", async () => {
+    mockDaemon({
+      pick_folders: ["/Users/me/Exports/WhatsApp"],
+      sources_add: () => {
+        throw { kind: "rpc", message: "This folder is already a source: WhatsApp.", code: -32602 };
+      },
+    });
+    const { container } = await render(<MessagingForm kind="whatsapp" onBack={noop} onClose={noop} onAdded={noop} />);
+    await click(byText(container, "button", t("addSource.messages.browse")));
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("This folder is already a source: WhatsApp.");
   });
 });

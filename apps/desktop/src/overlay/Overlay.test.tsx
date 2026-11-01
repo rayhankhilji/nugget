@@ -111,7 +111,8 @@ describe("overlay", () => {
     expect(accept().textContent).toMatch(/^Accept/);
     expect(accept().textContent).not.toContain("so far");
     expect(accept().className).toContain("btn-primary");
-    expect(container.querySelector(".overlay-text")?.getAttribute("dir")).toBe("auto");
+    // LL2 (GG7-10): the draft's direction is its majority script's.
+    expect(container.querySelector(".overlay-text")?.getAttribute("dir")).toBe("ltr");
   });
 
   it("tells how to retry after an error, without reading out the status glyph", async () => {
@@ -417,6 +418,15 @@ describe("overlay", () => {
     result = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(result.violations.map((v) => v.id)).toEqual([]);
   });
+  it("has one heading naming the window, for heading navigation (LL2)", async () => {
+    setup(ready);
+    const { container } = await render(<Overlay />);
+    await flush(5);
+    const result = await axe.run(document.documentElement, { runOnly: { type: "rule", values: ["page-has-heading-one"] } });
+    expect(result.violations).toEqual([]);
+    expect(Array.from(container.querySelectorAll("h1")).map((h) => h.textContent)).toEqual(["Double Tap"]);
+  });
+
   it("says when a refinement missed after its second try, with the draft", async () => {
     setup({ ...streaming, phase: "done", can_retry: true, message: "doubletap.overlay.refineMissed" });
     const { container } = await render(<Overlay />);
