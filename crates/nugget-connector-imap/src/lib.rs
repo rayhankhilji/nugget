@@ -74,10 +74,6 @@ const RECONNECT_DELAY: Duration = Duration::from_millis(250);
 /// Passes that try a message the server refuses before it is given up (logged).
 const MAX_FETCH_ATTEMPTS: u32 = 5;
 
-// ---------------------------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------------------------
-
 /// Factory for `imap` sources.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ImapFactory;
@@ -109,10 +105,6 @@ impl ConnectorFactory for ImapFactory {
         )))
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// Cursor
-// ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Cursor {
@@ -172,10 +164,6 @@ fn parse_key(k: &str) -> Option<(&str, u32, u32)> {
 
 /// Known items grouped: mailbox → uidvalidity → uid → version.
 type KnownTree = HashMap<String, HashMap<u32, BTreeMap<u32, Option<String>>>>;
-
-// ---------------------------------------------------------------------------------------------
-// Connector
-// ---------------------------------------------------------------------------------------------
 
 /// One configured IMAP account.
 pub struct ImapConnector {
@@ -387,7 +375,7 @@ impl ImapConnector {
                 if folder == dest {
                     continue;
                 }
-                let Some(sel) = imap.select(folder).await? else {
+                let Some(sel) = imap.open(folder, false).await? else {
                     continue;
                 };
                 if sel.uidvalidity != Some(uv) {
@@ -462,10 +450,8 @@ impl ImapConnector {
                     reconnects += 1;
                     tracing::warn!(folder, error = %e, reconnects, "IMAP session dropped; reconnecting");
                     meter.flush();
-                    tokio::select! {
-                        _ = tokio::time::sleep(RECONNECT_DELAY * reconnects as u32) => {}
-                        _ = cancel.cancelled() => return Err(Error::Cancelled),
-                    }
+                    nugget_connector::retry::sleep(RECONNECT_DELAY * reconnects as u32, cancel)
+                        .await?;
                     run.imap = self.connect(&mut meter, cancel).await?;
                     known = self.known_tree().await?;
                 }
@@ -496,7 +482,7 @@ impl ImapConnector {
         };
         let folder = folder.as_str();
         let sel = imap
-            .examine(folder)
+            .open(folder, true)
             .await?
             .ok_or_else(|| Error::NotFound(format!("mailbox {folder}")))?;
         let uv = sel
@@ -608,10 +594,6 @@ async fn send_delete(sink: &dyn ChangeSink, folder: &str, uv: u32, uid: u32) -> 
         .await
 }
 
-// ---------------------------------------------------------------------------------------------
-// One sync pass over a session
-// ---------------------------------------------------------------------------------------------
-
 struct Run<'a> {
     c: &'a ImapConnector,
     imap: Imap,
@@ -637,7 +619,7 @@ impl Run<'_> {
         cursor: &mut Cursor,
         meter: &mut EgressMeter,
     ) -> Result<()> {
-        let Some(sel) = self.imap.examine(folder).await? else {
+        let Some(sel) = self.imap.open(folder, true).await? else {
             // Missing or inaccessible: keep its items and cursor; retried next pass.
             return Ok(());
         };
@@ -704,7 +686,7 @@ impl Run<'_> {
                             .filter(|u| !gone.contains(u))
                             .collect();
                         for set in conn::uid_sets(&alive, MAX_SET_LEN) {
-                            for m in self.imap.fetch_flags(&set).await? {
+                            for m in self.imap.fetch_meta(&set, false).await? {
                                 if let Some(v) = known.get(&m.uid)
                                     && v.as_deref() != Some(version_of(&m, use_modseq).as_str())
                                 {
@@ -823,7 +805,7 @@ impl Run<'_> {
         let condstore = self.imap.condstore;
         let mut metas: Vec<MessageMeta> = Vec::new();
         for set in conn::uid_sets(uids, MAX_SET_LEN) {
-            metas.extend(self.imap.fetch_meta(&set).await?);
+            metas.extend(self.imap.fetch_meta(&set, true).await?);
         }
         metas.retain(|m| wanted.contains(&m.uid));
         metas.retain(|m| {
@@ -967,10 +949,6 @@ impl ImapConnector {
         doc
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------------------------
 
 /// `modseq:<n>` under CONDSTORE, otherwise a stable hash of the sorted flags.
 fn version_of(m: &MessageMeta, condstore: bool) -> String {
