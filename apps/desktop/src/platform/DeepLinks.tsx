@@ -1,7 +1,8 @@
 /**
  * Acts on `nugget://` links and opened `.nuggetplugin` files, already validated by the shell
  * (`src-tauri/src/deeplink.rs`). Takes the waiting link at mount and on each `nugget:deeplink`
- * event. A page or a search just navigates; opening an item or installing a plugin asks first.
+ * event. A page just navigates and a search is only typed in (Enter runs it); opening an item or
+ * installing a plugin asks first.
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage, platformApi, type DeepLink, type PageId } from "../api";
@@ -38,7 +39,7 @@ export function DeepLinks({ pages, go }: { pages: readonly PageId[]; go: (page: 
           if (pages.includes(link.page)) go(link.page);
           return;
         case "search":
-          requestSearch(link.query);
+          requestSearch(link.query, false);
           go("search");
           return;
         case "item":

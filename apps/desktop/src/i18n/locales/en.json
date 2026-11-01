@@ -2255,5 +2255,15 @@
   "models.fail.kept": "{done} downloaded so far is kept: the next try continues from there.",
   "models.cancel": "Cancel",
   "models.cancelLabel": "Cancel downloading {model}",
-  "models.resume": "Resume download"
+  "models.resume": "Resume download",
+  "models.searchUpgrade.title": "Upgrade search to multilingual",
+  "models.searchUpgrade.body": "Re-indexes in the background.",
+  "models.searchUpgrade.bodyDownload": "Downloads {size}, then re-indexes in the background.",
+  "models.searchUpgrade.upgrade": "Upgrade",
+  "models.searchUpgrade.notNow": "Not now",
+  "models.searchUpgrade.phase.downloading": "Downloading the search model",
+  "models.searchUpgrade.phase.embedding": "Re-indexing",
+  "models.searchUpgrade.keepsWorking": "Search keeps working meanwhile.",
+  "models.searchUpgrade.failed": "The upgrade didn't finish. Search still uses the current index.",
+  "models.searchUpgrade.retry": "Try again"
 }

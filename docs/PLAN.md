@@ -51,7 +51,7 @@ v1 needs every Blocker and High fixed and re-verified by the same QA scenarios o
 - Battery cost in joules not measured (no energy counter on CI runners); needs a physical laptop. Read-ahead costs the shell ~1.5% of a core and ~120 wakeups/s between fields.
 - At 500k items: first extraction ~1 h, 10.6 KB/item on disk, ~1 GB idle RSS. The daemon has not been re-measured after the voice-profile memory cut.
 - Wayland: the global shortcut fires through the portal on KDE Plasma 6 and GNOME 50 in CI; not tried on a physical desktop; Plasma 5.27 and GNOME before 48 untested; GNOME's GTK 4 insert path not run. sway and other desktops without the portal use the tray or a compositor binding to `nugget-desktop --double-tap`.
-- Multilingual: Double Tap perspective and proactive cards outside English wait on paused work; the multilingual embedder awaits signing.
+- Multilingual: Double Tap perspective and proactive cards outside English wait on paused work.
 
 **Decision pending (user):** turn the computer-use harm triage on for local models? It refused 17/17 harmful goals but falsely refused 5% (4B) / 8% (8B) of benign goals, at ~5.5–9 s per task. Recommended: on, run on the 4B, refusal shown as a question with "Do it anyway" (built: `[agent] triage = false`, `triage_override = true`). Evidence: [bench/README.md](../bench/README.md).
 
@@ -91,6 +91,12 @@ Numbers: [bench/README.md](../bench/README.md); QA findings above override bench
 - **Default AI:** asked during onboarding, local recommended; small local models always do triage and embeddings.
 - **Hosted services:** none at v1; a self-hostable E2E relay later.
 - **Team:** one or two humans directing Claude agents.
+- **Triage:** on by default and local only; items nobody has judged count as sensitive (`[ingest] assume_unflagged_safe = false`).
+- **Quick ask:** the global shortcut stays on by default.
+- **`nugget://search`:** fills in Search and waits for Enter; a link never runs a search.
+- **Vault and graph:** show items nobody has judged and hide only confirmed-sensitive ones.
+- **Multilingual search:** existing indexes get a one-time, opt-in offer to re-index with the multilingual embedder (Models page); never automatic.
+- **AppArmor sysctl:** dropped; it was only for a CI job that no longer exists.
 - **Not built, planned:** local-app connectors (Apple Notes, Apple Mail, macOS Calendar and Contacts, Signal, Thunderbird), Logseq, Maildir, CardDAV, MCP servers as sources, a community plugin registry, an OSWorld-style `cua` subset.
 
 ## Risks and open questions

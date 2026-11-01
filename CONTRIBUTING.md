@@ -16,7 +16,7 @@ git commit -s -m "feat(store): add cursor round-trip"
 # adds: Signed-off-by: Ada Lovelace <ada@example.com>   (must match the commit author)
 ```
 
-CI's `DCO sign-off` job checks every commit in a pull request (bots such as Dependabot are exempt).
+CI's DCO step checks every commit in a pull request or push (bots such as Dependabot are exempt).
 To fix a branch: `git rebase --signoff origin/main` and force-push. Contributions are accepted
 under Apache-2.0 (inbound = outbound, section 5 of the license).
 
@@ -78,10 +78,7 @@ cargo run -p nugget-bench -- all --scale smoke --no-write   # --release for numb
 python3 docs/book/check-refs.py                             # the book against the code
 ```
 
-CI: [`ci.yml`](.github/workflows/ci.yml) (fmt, clippy, tests, bench smoke and desktop on all three
-OSes; `cargo deny`; DCO), [`docs.yml`](.github/workflows/docs.yml) (`check-refs.py`, mdBook build
-and links; renaming a config key, CLI flag, IPC method, MCP tool or connector setting must update
-the book), [`release.yml`](.github/workflows/release.yml) ([docs/release.md](docs/release.md)).
+CI: see [CI](#ci) below.
 
 ## Where code lives
 
@@ -110,6 +107,34 @@ feature that fails to start is logged and its methods answer "method not found".
   content at `info` or above.
 - **Errors**: convert to `nugget_core::Error` at public boundaries; never panic on bad input.
 - **Claims need numbers**: performance or quality changes add or update a `nugget-bench` metric.
+
+## CI
+
+- **Every push to `claude/inspiring-wozniak-z3gg3n` or `main`, and every pull request:**
+  [`ci.yml`](.github/workflows/ci.yml) is one Linux job. It runs fmt, cargo-deny, clippy (the
+  workspace, plus `nuggetd` with `fake-runtime`), the workspace tests, the desktop build and
+  vitest, and DCO. [`e2e.yml`](.github/workflows/e2e.yml) runs the real-app end-to-end test. Both
+  skip docs-only changes. [`docs.yml`](.github/workflows/docs.yml) runs `check-refs.py`, the bench
+  tables and the mdBook build with its link check. Renaming a config key, CLI flag, IPC method, MCP
+  tool or connector setting must update the book. A newer push cancels the older run.
+- **Weekly and on demand:** [`ci-weekly.yml`](.github/workflows/ci-weekly.yml) covers macOS and
+  Windows, MSRV and bench smoke. `real-os`, `fuzz`, `crash`, `mcp-compat`, `package-smoke`,
+  `reproducible`, `plugins`, `windows-signing`, `perf` and `evals` also run weekly.
+  [`nightly.yml`](.github/workflows/nightly.yml) runs the benchmarks every night.
+  `release-rehearsal` and [`release.yml`](.github/workflows/release.yml) run on demand
+  ([docs/release.md](docs/release.md)). Before you merge, run the suites that match what you
+  changed:
+
+  ```sh
+  gh workflow run real-os.yml --ref <branch>      # any workflow file, e.g. ci-weekly.yml, fuzz.yml
+  gh workflow run fuzz.yml    --ref <branch> -f seconds=120
+  gh run watch
+  ```
+
+- Only add a workflow that triggers on `push` or `pull_request` if it is fast and covers something
+  `ci.yml` does not. Otherwise use `schedule` and `workflow_dispatch`.
+- If every job fails within seconds with no runner, the job's annotation says why. For example, a
+  billing lock on the account has to be cleared in the account's billing settings.
 
 ## Commits and pull requests
 

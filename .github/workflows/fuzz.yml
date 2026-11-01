@@ -8,27 +8,15 @@ name: Fuzz
 # time; a crash fails the job and its reproducer is uploaded. See fuzz/README.md.
 
 on:
+  # Weekly, Wednesday 04:41 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
   schedule:
-    - cron: "41 4 * * *"
+    - cron: "41 4 * * 3"
   workflow_dispatch:
     inputs:
       seconds:
         description: "Seconds to fuzz each target"
         required: false
         default: "300"
-  pull_request:
-    paths:
-      - "fuzz/**"
-      - "crates/nugget-core/**"
-      - "crates/nugget-extract/**"
-      - "crates/nugget-connector-files/**"
-      - "crates/nugget-ipc/**"
-      - "crates/nugget-models/**"
-      - "crates/nugget-plugin/src/**"
-      - "crates/nugget-plugin/Cargo.toml"
-      - "crates/nugget-draft/src/**"
-      - "crates/nugget-connector-google/src/**"
-      - ".github/workflows/fuzz.yml"
 
 permissions:
   contents: read

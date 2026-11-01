@@ -1,38 +1,37 @@
 # https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# Monthly, one grouped PR per ecosystem at most, to keep the PR and CI noise down. ci.yml, e2e.yml and
+# docs.yml run on each Dependabot PR. Security updates are separate (repository settings) and not
+# limited by this file.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
+      interval: monthly
+    open-pull-requests-limit: 1
     commit-message:
       prefix: "chore(deps)"
     groups:
-      # Patch and minor bumps arrive as one PR; majors stay separate so they get a real review.
-      cargo-minor:
-        update-types: [minor, patch]
+      cargo:
+        patterns: ["*"]
 
   - package-ecosystem: npm
     directory: /apps/desktop
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
+      interval: monthly
+    open-pull-requests-limit: 1
     commit-message:
       prefix: "chore(deps)"
     groups:
-      tauri:
-        patterns: ["@tauri-apps/*"]
-      npm-minor:
-        update-types: [minor, patch]
+      npm:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
+    open-pull-requests-limit: 1
     commit-message:
       prefix: "chore(ci)"
     groups:

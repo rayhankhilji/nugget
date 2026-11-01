@@ -23,9 +23,9 @@ pub const ANN_OVERSAMPLE: usize = 10;
 /// ...but at least this many.
 const ANN_MIN_CANDIDATES: usize = 100;
 /// `meta` flag: the approximate-search index holds every vector of `chunk_vec`.
-const META_ANN_READY: &str = "ann_index_ready";
+pub(crate) const META_ANN_READY: &str = "ann_index_ready";
 /// `meta` key: the quantization centre (hex of little-endian `f32`s), written with the tables.
-const META_ANN_CENTER: &str = "ann_center";
+pub(crate) const META_ANN_CENTER: &str = "ann_center";
 
 /// Least share of non-zero coordinates for a query to take the approximate path.
 const ANN_MIN_DENSITY: f32 = 0.5;

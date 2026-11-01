@@ -7,19 +7,11 @@ name: Real OS
 # app on three OSes, computer use over real UIA and AX, and the notification click path.
 
 on:
+  # Weekly, Tuesday 03:37 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
+  schedule:
+    - cron: "37 3 * * 2"
   workflow_dispatch:
   workflow_call:
-  pull_request:
-    paths:
-      - "crates/nugget-a11y/**"
-      - "crates/nugget-hotkey/**"
-      - "crates/nugget-computer/**"
-      - "apps/desktop/src-tauri/**"
-      - "packaging/**"
-      - "tests/fixtures/native/**"
-      - "bench/src/suites/cua/**"
-      - "apps/desktop/e2e-native/**"
-      - ".github/workflows/real-os.yml"
 
 # Least privilege: every job only reads the repository.
 permissions:

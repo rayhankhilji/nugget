@@ -15,6 +15,7 @@ mod integrity;
 mod item_graph;
 mod items;
 mod key;
+mod reindex;
 mod schema;
 mod search;
 mod sources;
@@ -35,6 +36,7 @@ pub use integrity::{
 };
 pub use item_graph::{EntityLinkRow, ItemMention, ItemMeta};
 pub use key::{KEYCHAIN_ENV, KeySource, StoreKey};
+pub use reindex::ReindexTarget;
 pub use schema::LATEST_VERSION as SCHEMA_VERSION;
 pub use search::TITLE_WEIGHT;
 pub use sources::{MAX_CHUNK_IDS, MAX_NEIGHBOUR_RADIUS};
